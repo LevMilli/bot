@@ -1,0 +1,2 @@
+# bot
+discord sports bot
