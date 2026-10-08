@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-08 r14"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-08 r14.1"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -1569,6 +1569,162 @@ def log_slip_view(author_id: int) -> discord.ui.View:
     return view
 
 
+# ---- "log it" vs "what do you think?" -------------------------------------------------
+
+SLIP_ASK = re.compile(r"\?|\b(what do (?:you|u|y'?all|yall) think|thoughts|rate (?:it|this|my)|rating|opinion|"
+                      r"analy[sz]e|break (?:it |this )?down|breakdown|review|should i|would you|worth it|how(?:'s| is| does) "
+                      r"(?:this|it|my)|any good|chances|honest)\b", re.I)
+
+
+def slip_intent(text: str) -> str:
+    """'ask' when the words with a screenshot are a question about it, otherwise 'log'."""
+    t = re.sub(r"<@[!&]?\d+>", " ", text or "").strip()
+    return "ask" if t and SLIP_ASK.search(t) else "log"
+
+
+def save_slip_draft(guild_id: int, message, slip: dict) -> None:
+    set_setting(guild_id, f"draft:{message.id}", json.dumps({
+        "slip": slip, "poster": message.author.id, "poster_name": message.author.display_name,
+        "url": message.jump_url, "channel_id": message.channel.id, "used": None}))
+
+
+def get_slip_draft(guild_id: int, message_id: int) -> Optional[dict]:
+    raw = get_setting(guild_id, f"draft:{message_id}")
+    return json.loads(raw) if raw else None
+
+
+class SlipDraftButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sd:(?P<act>log|ask):(?P<mid>\d+)"):
+    def __init__(self, act: str, message_id: int):
+        label, style = {"log": ("🧾 Log this slip", discord.ButtonStyle.secondary),
+                        "ask": ("🔍 Break it down", discord.ButtonStyle.primary)}[act]
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"sd:{act}:{message_id}"))
+        self.act, self.message_id = act, message_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["act"], int(match["mid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        d = get_slip_draft(interaction.guild_id, self.message_id)
+        if d is None:
+            await interaction.response.send_message("I don't have that slip anymore. Post the screenshot again.",
+                                                    ephemeral=True)
+            return
+        if self.act == "log":
+            if interaction.user.id != d["poster"]:
+                await interaction.response.send_message("Only whoever posted the slip can log it.", ephemeral=True)
+                return
+            if d.get("used"):
+                await interaction.response.send_message(f"Already logged as pick `#{d['used']}`.", ephemeral=True)
+                return
+            until = cooling_until(interaction.guild_id, interaction.user.id)
+            if until:
+                await interaction.response.send_message(cooloff_message(until), ephemeral=True)
+                return
+            await interaction.response.defer()
+            d["used"] = -1
+            set_setting(interaction.guild_id, f"draft:{self.message_id}", json.dumps(d))
+
+            async def reply(**kw):
+                return await interaction.followup.send(wait=True, **kw)
+            pid = await interaction.client.log_parsed_slip(interaction.guild_id, interaction.user, interaction.channel,
+                                                           d["slip"], d["url"], reply)
+            d["used"] = pid
+            set_setting(interaction.guild_id, f"draft:{self.message_id}", json.dumps(d))
+            return
+        gate = ask_gate(interaction.guild_id, interaction.user.id)
+        if gate:
+            await interaction.response.send_message(gate, ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        text = await slip_review_text(interaction.client, interaction.guild_id, interaction.user, d["slip"],
+                                      "Break this slip down for me.")
+        chunks = split_message(text)
+        for k, chunk in enumerate(chunks):
+            await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none(),
+                                            **({"view": slip_draft_view(self.message_id, review=False)}
+                                               if k == len(chunks) - 1 and not d.get("used") else {}))
+
+
+def slip_draft_view(message_id: int, review: bool = True, log_it: bool = True) -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    if review:
+        v.add_item(SlipDraftButton("ask", message_id))
+    if log_it:
+        v.add_item(SlipDraftButton("log", message_id))
+    return v
+
+
+def ask_gate(guild_id: int, user_id: int) -> Optional[str]:
+    """Shares the @mention question limits. Returns why not, or None and counts the question."""
+    if not ai_enabled():
+        return "Breakdowns need the Claude key: add `ANTHROPIC_API_KEY` on Railway → Variables."
+    wait = bot.ask_cooldowns.get(user_id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
+    if wait > 0:
+        return f"Give me {int(wait) + 1}s before the next question."
+    count_key = f"asks:{datetime.now(TZ).date().isoformat()}"
+    used = int(get_setting(guild_id, count_key) or 0)
+    if used >= ASK_DAILY_LIMIT:
+        return f"That's the server's {ASK_DAILY_LIMIT} questions for today. Back tomorrow."
+    bot.ask_cooldowns[user_id] = time.monotonic()
+    set_setting(guild_id, count_key, str(used + 1))
+    return None
+
+
+REVIEW_RULES = """Someone posted a slip and asked what you think. It is NOT logged as a pick, and may not \
+even be placed. Answer like a sharp friend:
+- One line per leg: ✅ like it, ⚠️ coin flip or a real concern, ❌ don't like it, then the key reason (recent \
+games against that number, minutes/role, matchup, injuries or rest). Search the web for each player's last few \
+games and current injury status.
+- Then "Weakest leg:" and a one-line overall take. It's fine to say pass, or to swap the weakest leg.
+- Use the group's own history (below, or the group_stats tool) when it says something.
+- Never mention odds, prices, payouts math or line movement. Never call anything a lock or guarantee, and \
+never push them to bet more.
+Keep it under 220 words."""
+
+
+async def slip_review_text(client, guild_id: int, asker, slip: dict, question: str) -> str:
+    legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()]
+    lines = [f"Question from {asker.display_name}: {question.strip() or 'What do you think of this slip?'}",
+             f"The slip: {slip.get('platform') or '?'} · {slip.get('description') or ''}"
+             + (f" · {slip.get('sport')}" if slip.get("sport") else "")
+             + (f" · {money(slip['cost'])} to win {money(slip['payout'])}" if slip.get("cost") and slip.get("payout") else "")
+             + ("" if slip.get("placed", True) else " · not placed yet"),
+             "Legs:"] + [f"{k}. {leg}" for k, leg in enumerate(legs, 1)]
+    notes = []
+    key = str(asker.id)
+    for leg in legs[:8]:
+        pr = cached_prop(leg)
+        if not pr:
+            continue
+        mine = run_group_stats(guild_id, key, {"bettor": "me", "player": pr["display"]})
+        grp = run_group_stats(guild_id, key, {"player": pr["display"]})
+        side = run_group_stats(guild_id, key, {"bettor": "me", "stat": STATS[pr["stats"][0]][0], "side": pr["side"]})
+        for label, r in ((f"{asker.display_name}'s legs on {pr['display']}", mine),
+                         (f"the group's legs on {pr['display']}", grp),
+                         (f"{asker.display_name}'s {STATS[pr['stats'][0]][0]} {pr['side']}s", side)):
+            g = (r.get("groups") or [None])[0]
+            if g and g.get("hit", 0) + g.get("miss", 0) >= 3:
+                notes.append(f"- {label}: hit {g['hit']} of {g['hit'] + g['miss']}")
+    if notes:
+        lines += ["", "The group's own history:"] + list(dict.fromkeys(notes))[:12]
+    system = ASK_SYSTEM.format(bot_name=getattr(getattr(client, "user", None), "display_name", "PIMP-BOT"),
+                               today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
+    system += f"\n\nYour voice in this server: {persona_prompt(guild_id)}.\n\n" + REVIEW_RULES
+    ctx = {"guild_id": guild_id, "asker_key": key, "chart": None}
+    token = ASK_DATA.set(ctx)
+    try:
+        answer, sources = await ask_claude(system, "\n".join(lines))
+    except Exception:
+        log.exception("Slip review failed")
+        return "I couldn't break that one down just now. Try again in a minute."
+    finally:
+        ASK_DATA.reset(token)
+    if sources:
+        answer += "\n\n-# Sources: " + " · ".join(f"<{u}>" for u in sources)
+    return (answer or "I came up empty on that one.") + "\n-# Not logged. Tap 🧾 if you play it."
+
+
 # --------------------------------------------------------------------------
 # Claude: reading slips and answering questions (needs ANTHROPIC_API_KEY)
 # --------------------------------------------------------------------------
@@ -1612,7 +1768,10 @@ Less = under), e.g. 'Victor Wembanyama over 23.5 Pts+Rebs+Asts'. Game lines as '
   "cost": number risked (entry fee / stake / cost) or null if not visible,
   "payout": total amount paid back if it wins (or that it did pay), or null if not visible,
   "status": "open" | "win" | "loss" | "push",
-  "returned": amount actually paid out if the slip is already settled, else null
+  "returned": amount actually paid out if the slip is already settled, else null,
+  "placed": true if this entry/bet was actually submitted (an entry or bet ID, "Entry placed", "My Bets"/"My \
+Entries" view, live progress or a result); false if it is still being built (an entry-fee box, "Place Entry", \
+"Submit", "Deposit Funds", "Add to betslip", "Not enough balance", empty pick slots)
 }
 
 Use "open" unless the screenshot clearly shows a final result. Numbers must be plain \
@@ -1758,6 +1917,7 @@ async def read_slip(attachment: discord.Attachment, model: Optional[str] = None)
     slip["returned"] = as_amount(slip.get("returned"))
     if slip.get("status") not in ("open", "win", "loss", "push"):
         slip["status"] = "open"
+    slip["placed"] = slip.get("placed") is not False
     return slip
 
 
@@ -12223,7 +12383,7 @@ class PicksBot(discord.Client):
                                SweatButton, InjuryOffButton, GPButton, CopyButton, CardSweatButton, CardKalshiButton,
                                PPSettleButton, MarketButton, TakeButton, PotdButton, TriviaButton, GuessButton,
                                ClosestButton, SquaresButton, DraftButton, NoteButton, DisputeButton, FixButton,
-                               BoardButton)
+                               BoardButton, SlipDraftButton)
         r14_db()
         try:
             await start_dashboard()
@@ -12573,16 +12733,23 @@ class PicksBot(discord.Client):
             return
         images = image_attachments(message)
         mentioned = self.user is not None and self.mentions_me(message)
+        intent = slip_intent(getattr(message, "content", "")) if images or mentioned else "log"
         if images and (self.is_receipts_channel(message.channel) or mentioned):
-            await self.log_slips(message, images)
+            if intent == "ask":
+                await self.review_slip(message, message, images[0])
+            else:
+                await self.log_slips(message, images)
             return
         if mentioned and not images and getattr(message, "reference", None):
-            # "@PIMP-BOT log this" as a reply to someone's screenshot
+            # "@PIMP-BOT log this" (or "@PIMP-BOT thoughts?") as a reply to someone's screenshot
             ref = message.reference.resolved
             if isinstance(ref, discord.Message) and not ref.author.bot and image_attachments(ref):
-                await self.log_slips(ref, image_attachments(ref))
+                if intent == "ask":
+                    await self.review_slip(message, ref, image_attachments(ref)[0])
+                else:
+                    await self.log_slips(ref, image_attachments(ref))
                 return
-        if images and get_setting(message.guild.id, "receipts_all") == "on":
+        if images and intent == "log" and get_setting(message.guild.id, "receipts_all") == "on":
             await self.log_slips(message, images, quiet=True)
             return
         if self.user is not None and self.is_question(message):
@@ -12726,52 +12893,97 @@ class PicksBot(discord.Client):
                                 mention_author=False)
             return
 
+        if not slip.get("placed", True):
+            if quiet:
+                return
+            save_slip_draft(message.guild.id, message, slip)
+            await message.reply("🤔 This one doesn't look placed yet (it's still on the entry screen), so I didn't log "
+                                "it. Want a breakdown, or is it in?", view=slip_draft_view(message.id), mention_author=False)
+            return
+
+        async def reply(**kw):
+            return await message.reply(mention_author=False, **kw)
+        await self.log_parsed_slip(message.guild.id, message.author, message.channel, slip, message.jump_url, reply)
+
+    async def log_parsed_slip(self, guild_id: int, author, channel, slip: dict, slip_url: str, reply) -> int:
+        """Log a slip Claude already read, post its card (with the live receipt), and do the extras."""
         legs = [str(leg).strip() for leg in (slip.get("legs") or []) if str(leg).strip()]
         payout = slip["payout"] if slip["payout"] is not None else 0.0
         pick_id = insert_pick(
-            guild_id=message.guild.id,
-            bettor_key=str(message.author.id),
-            bettor_name=message.author.display_name,
-            bettor_id=message.author.id,
-            logged_by=message.author.id,
+            guild_id=guild_id,
+            bettor_key=str(author.id),
+            bettor_name=author.display_name,
+            bettor_id=author.id,
+            logged_by=author.id,
             platform=str(slip.get("platform") or "Other")[:40],
             sport=(str(slip["sport"])[:60] if slip.get("sport") else None),
             description=str(slip.get("description") or "Slip")[:200],
             legs="\n".join(legs) or None,
             cost=slip["cost"],
             payout=payout,
-            slip_url=message.jump_url,
+            slip_url=slip_url,
         )
         if slip["status"] != "open":
-            settle_pick(message.guild.id, pick_id, slip["status"], slip["returned"])
+            settle_pick(guild_id, pick_id, slip["status"], slip["returned"])
 
-        p = get_pick(message.guild.id, pick_id)
+        p = get_pick(guild_id, pick_id)
         note = None
         if slip["payout"] is None:
             note = f"I couldn't read the payout. Fix it with `/edit pick_id:{pick_id}`."
         view = settle_view(pick_id) if p["status"] == "open" else None
         SLIP_STATE["last_ok"] = now_iso()
-        logged = voice_line(message.guild.id, "logged", name=message.author.display_name)
+        logged = voice_line(guild_id, "logged", name=author.display_name)
         content = "\n".join(x for x in (logged, note) if x) or None
         embed, extra = pick_embed(p), {}
         try:
-            async with message.channel.typing():
+            async with channel.typing():
                 f = await receipt_file(self, p)
             embed.set_image(url=f"attachment://{f.filename}")
             extra["file"] = f
         except Exception:
             log.warning("Receipt image failed for pick %s", pick_id, exc_info=True)
-        sent = await message.reply(content=content, embed=embed, view=view, mention_author=False, **extra)
+        sent = await reply(content=content, embed=embed, view=view, **extra)
         if getattr(sent, "id", None):
-            remember_pick_msg(message.guild.id, pick_id, message.channel.id, sent.id, receipt="file" in extra)
-        tip = headsup_text(message.guild.id, str(message.author.id), pick_id)
+            remember_pick_msg(guild_id, pick_id, channel.id, sent.id, receipt="file" in extra)
+        tip = headsup_text(guild_id, str(author.id), pick_id)
         if tip:
             try:
-                await message.author.send(tip)
+                await author.send(tip)
             except Exception:
                 pass
-        await voice_say(self, message.guild.id, f"{message.author.display_name} just logged {p['description']}, "
-                                                f"{money(p['cost'])} to win {money(p['payout'])}.")
+        await voice_say(self, guild_id, f"{author.display_name} just logged {p['description']}, "
+                                        f"{money(p['cost'])} to win {money(p['payout'])}.")
+        return pick_id
+
+    async def review_slip(self, message: discord.Message, image_message: discord.Message, attachment):
+        """'What do you think of this?' with a screenshot: read it, break it down, log nothing."""
+        gate = ask_gate(message.guild.id, message.author.id)
+        if gate:
+            await message.reply(gate, mention_author=False)
+            return
+        slip, reason = None, None
+        if (attachment.size or 0) <= MAX_IMAGE_BYTES:
+            async with message.channel.typing():
+                slip, reason = await read_slip_best(attachment)
+        if slip is None or not (slip.get("legs") or slip.get("description")):
+            await message.reply(f"I couldn't read that slip{': ' + reason if reason else ''}. Try a clearer screenshot.",
+                                mention_author=False)
+            return
+        save_slip_draft(message.guild.id, image_message, slip)
+        question = re.sub(r"<@[!&]?\d+>", " ", message.content or "").strip()
+        async with message.channel.typing():
+            text = await slip_review_text(self, message.guild.id, message.author, slip, question)
+        logged = db().execute("SELECT id FROM picks WHERE guild_id = ? AND slip_url = ?",
+                              (message.guild.id, image_message.jump_url)).fetchone()
+        chunks = split_message(text)
+        for k, chunk in enumerate(chunks):
+            extra = {}
+            if k == len(chunks) - 1 and not logged and slip.get("cost") is not None:
+                extra["view"] = slip_draft_view(image_message.id, review=False)
+            if k == 0:
+                await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none(), **extra)
+            else:
+                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none(), **extra)
 
 
 bot = PicksBot()
@@ -13565,7 +13777,8 @@ async def help_cmd(interaction: discord.Interaction):
         "`/player avg` `vs` `splits` `minutes` · `/trend` · `/leaderboard rank_by:Units` or `platform:`"))
     e.add_field(name="Slips", inline=False, value=(
         "Post a slip screenshot in the receipts channel and I'll log it. Anywhere else, @mention me with it "
-        "(or reply `@me log` to one). Admins: `/receipts`; `/admin check` if screenshots aren't logging."))
+        "(or reply `@me log` to one). Ask a question with it (\"@me thoughts?\") for a leg-by-leg breakdown "
+        "that isn't logged. Admins: `/receipts`; `/admin check` if screenshots aren't logging."))
     e.add_field(name="Recaps", inline=False, value=(
         "`/recap` the last 7 days. Weekly recap and open-pick reminders post automatically "
         "once an admin runs `/recapchannel`."))

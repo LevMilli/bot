@@ -220,6 +220,14 @@ questions a day; both limits can be changed (see below).
 Sundays?" It looks the numbers up in the bot's database (never guesses) and attaches a bar chart
 when it compares people or groups.
 
+**Asking about a slip (without logging it).** Post a screenshot with a question, like "@PIMP-BOT what do
+you think of this parlay?", "thoughts?", "should I play this?" or "rate my slip", or reply to someone's
+screenshot that way. The bot gives a leg-by-leg take (form, matchup, injuries, and the group's own history
+on those players), names the weakest leg, and logs nothing. A **🧾 Log this slip** button logs it if you
+end up playing it. A screenshot with no words, or with "log", "locked in" and the like, logs as before.
+Screenshots of a slip that isn't placed yet (still showing the entry fee box, "Deposit Funds" or "Place
+Entry") aren't logged either: the bot offers **🔍 Break it down** or **🧾 Log this slip** instead.
+
 **Live receipts.** When a slip screenshot is logged, the bot's reply includes a clean image of the
 slip. As games go, the image fills in: progress bars on props, scores on game lines, ✓ and ✗ as legs
 finish, and a CASHED or MISSED stamp at the end.
