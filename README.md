@@ -51,7 +51,12 @@ paid, and who's actually up.
 | `/parlay` | Parlay calculator: `-110 +150 -200` (any odds format) gives combined odds, payout and the chance it hits |
 | `/season start`, `/season standings`, `/season list` | Seasons: a fresh leaderboard without deleting anything. `/leaderboard` shows the current season; pick another `period` for the rest |
 | `/achievements` | 13 badges, from First Blood to Big Leg Energy. `/record` shows the ones you've earned |
-| `/card` | A shareable image of someone's profile: avatar, record, net, ROI, streak, best hit, profit line and badges |
+| `/card` | A trading card: overall rating, rarity border (Common → Rare → Epic → Legendary → Mythic), a title that changes with form, six stats and badges. 🔄 Flip shows the scouting report on the back. `style:Profile banner` gives the old wide card |
+| `/board` | Tonight's live board: one image of every open slip with games today, updating as games go. `mode:` auto posts it on game nights |
+| `/show` | The Sunday Show: this week's storylines written up like a broadcast (also posts with the weekly recap) |
+| `/voice join`, `leave`, `say` | The bot joins your voice channel and calls out cashes, one-leg sweats and big wins |
+| `/me roast`, `headsup`, `birthday` | Opt in to roasts of your losses, turn private heads-ups on/off, set a birthday shoutout |
+| `/admin personality`, `reactions`, `show` | The bot's voice (sidekick, hype man, analyst, trash talker, announcer), cash replies on/off, Sunday Show on/off |
 | `/limit` | Set a weekly loss limit; the bot DMs you privately once a week if you pass it |
 | `/survivor start`, `pick`, `standings` | NFL survivor pool: pick one team to win each week, each team only once. A loss, tie or skipped week knocks you out. Graded automatically from the scoreboard |
 | `/remind`, `/reminders` | DM yourself a reminder (`30m`, `2h`, `6pm`, `tomorrow 9am`, up to 30 days out); list or cancel them |
@@ -209,6 +214,34 @@ player have gone. The bot also reads these notes when it answers questions.
 "how has donk played on LAN lately?" It searches the web, uses your player notes, and
 replies in the channel. Each person can ask once every 20 seconds, and the server gets 40
 questions a day; both limits can be changed (see below).
+
+**Your own numbers, by asking.** The same @mention answers questions about the group's own records:
+"how am I doing on NBA props this month?", "who's best at NFL unders?", "what's Levi's record on
+Sundays?" It looks the numbers up in the bot's database (never guesses) and attaches a bar chart
+when it compares people or groups.
+
+**Live receipts.** When a slip screenshot is logged, the bot's reply includes a clean image of the
+slip. As games go, the image fills in: progress bars on props, scores on game lines, ✓ and ✗ as legs
+finish, and a CASHED or MISSED stamp at the end.
+
+**Heads-up from your own history.** When you log a pick, the bot privately tells you if your own
+history says something about it, like "You've hit 2 of 10 Rebounds overs (20%)" or "You've gone
+14-5 on NFL picks". Only you see it (an ephemeral message for `/pick`, a DM for screenshots).
+`/me headsup` turns it off.
+
+**Reactions and roasts.** When a pick cashes, the bot replies to its card with a line in the
+server's voice (written fresh by Claude when the key is set). Losses stay quiet unless that person
+opts in with `/me roast`. 10x wins get the big-win banner instead.
+
+**Milestones.** Besides badges and streaks, the recap channel gets: pick #100/250/500/1000, new
+personal-best wins, trading card upgrades ("Levi's card just upgraded to EPIC"), pickiversaries
+(a year since your first pick) and birthdays set with `/me birthday`.
+
+**Voice.** `/voice join` from inside a voice channel. The bot speaks cashes, one-leg-away sweats, big
+wins, new slips and the Sunday Show headline, and leaves on its own 5 minutes after the channel empties.
+The bot's role needs **Connect** and **Speak** in that channel. Voice uses the included Dockerfile
+(it installs ffmpeg and the audio libraries) and the packages in requirements.txt; `/voice join`
+says exactly what's missing if anything is.
 
 **Logging for someone else.** `/pick` takes an optional `member` (another person in the
 server) or `label` (any name that isn't a Discord account, like a tipster or a model

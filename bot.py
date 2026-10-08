@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-08 r13.3"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-08 r14"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -1835,19 +1835,57 @@ def build_ask_context(guild_id: int, asker_key: str, question: str) -> str:
 
 
 async def ask_claude(system: str, user_text: str, max_searches: int = 5) -> tuple[str, list[str]]:
-    """Returns (answer text, source urls)."""
-    messages = [{"role": "user", "content": user_text}]
+    """Returns (answer text, source urls). When ASK_DATA is set, Claude can also query the group's own records."""
+    ctx = ASK_DATA.get()
+    base = [{"role": "user", "content": user_text}]
+    messages = base
     tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": max_searches}]
+    if ctx is not None:
+        tools.append(DATA_TOOL)
     reply = None
-    for _ in range(4):  # long searches can pause; resume up to a few times
+    pending: list = []
+    seen_blocks: list = []
+    lookups = 0
+    for _ in range(8):  # long searches can pause, and data lookups take a round trip each
         reply = await anthropic_client().messages.create(
             model=ASK_MODEL, max_tokens=1500, system=system, messages=messages, tools=tools)
-        if reply.stop_reason != "pause_turn":
-            break
-        messages = messages[:1] + [{"role": "assistant", "content": reply.content}]
-    text = "".join(b.text for b in reply.content if b.type == "text").strip()
+        seen_blocks.extend(getattr(reply, "content", None) or [])
+        if reply.stop_reason == "pause_turn":
+            pending = pending + list(reply.content)
+            messages = base + [{"role": "assistant", "content": pending}]
+            continue
+        if reply.stop_reason == "tool_use" and ctx is not None:
+            results = []
+            for b in reply.content:
+                if getattr(b, "type", "") == "tool_use" and getattr(b, "name", "") == "group_stats":
+                    args = dict(getattr(b, "input", None) or {})
+                    try:
+                        res = run_group_stats(ctx["guild_id"], ctx["asker_key"], args)
+                    except Exception as exc:
+                        log.exception("group_stats failed")
+                        res = {"error": f"{type(exc).__name__}: {exc}"}
+                    if args.get("chart"):
+                        ch = chart_from_result(res)
+                        if ch:
+                            ctx["chart"] = ch
+                    lookups += 1
+                    if lookups >= 5:
+                        res["note"] = "That's the last lookup; answer now with what you have."
+                    while len(json.dumps(res, default=str)) > 12000 and len(res.get("groups") or []) > 1:
+                        res["groups"] = res["groups"][:-1]
+                    results.append({"type": "tool_result", "tool_use_id": b.id,
+                                    "content": json.dumps(res, default=str)})
+            if not results:
+                break
+            base = base + [{"role": "assistant", "content": pending + list(reply.content)},
+                           {"role": "user", "content": results}]
+            messages, pending = base, []
+            continue
+        break
+    final_blocks = pending if reply.stop_reason == "pause_turn" else pending + list(reply.content)
+    text = "".join(b.text for b in final_blocks if getattr(b, "type", "") == "text").strip()
     sources: list[str] = []
-    for b in reply.content:
+    for b in seen_blocks:
         for c in (getattr(b, "citations", None) or []):
             url = getattr(c, "url", None)
             if url and url not in sources:
@@ -4430,7 +4468,8 @@ async def leg_progress(p) -> list[dict]:
     context_teams = [x["team"] for x in (parse_simple_leg(t) for _, t, _ in items) if x and "team" in x]
     out = []
     for n, text, status in items:
-        entry = {"n": n, "text": text, "status": status, "line": "", "event": None, "path": None, "live": None}
+        entry = {"n": n, "text": text, "status": status, "line": "", "event": None, "path": None, "live": None,
+                 "in_play": False, "num": None, "sub": ""}
         simple = parse_simple_leg(text) if leagues else None
         prop = prop_of(text) if prop_paths else None
         try:
@@ -4443,12 +4482,19 @@ async def leg_progress(p) -> list[dict]:
                     ev, i = found
                     entry["event"] = ev
                     entry["line"] = short_game(ev)
+                    entry["sub"] = entry["line"]
+                    entry["in_play"] = ev.get("state") == "in"
                     now_r = simple_live_result(simple, ev, None if simple["kind"] == "total" else i)
                     entry["live"] = {"hit": "ahead", "miss": "behind"}.get(now_r or "", None)
             elif prop:
                 st = await prop_status(prop, prop_paths, logged)
                 if st:
                     entry["event"], entry["path"] = st["event"], st["path"]
+                    entry["in_play"] = st["state"] == "in"
+                    entry["sub"] = (st["detail"] if st["state"] == "in" and st["detail"] else
+                                    short_game(st["event"]) if st["event"] else st["why"] or "")
+                    if st["value"] is not None:
+                        entry["num"] = {"value": st["value"], "line": st["line"], "side": prop["side"]}
                     if st["value"] is not None:
                         unit = STATS[st["stat_key"]][0]
                         entry["line"] = (f"{st['value']:g} / {st['line']:g} {unit} "
@@ -6058,9 +6104,11 @@ async def one_leg_alerts(client: discord.Client, now: Optional[datetime] = None)
         last = open_legs[0]["text"]
         view = discord.ui.View(timeout=None)
         view.add_item(CardSweatButton(p["id"]))
-        await channel.send(f"🚨 **ONE LEG AWAY.** {p['bettor_name']}'s {clip(p['description'], 60)} (`#{p['id']}`) "
-                           f"has {len(legs) - 1} legs in and needs **{clip(last, 100)}** for **{money(p['payout'])}**. "
-                           "Everybody sweat. 🥵", view=view, allowed_mentions=discord.AllowedMentions.none())
+        text = voice_line(p["guild_id"], "oneleg", name=p["bettor_name"], desc=clip(p["description"], 60), pid=p["id"],
+                          n=len(legs) - 1, leg=clip(last, 100), payout=money(p["payout"]))
+        await channel.send(text, view=view, allowed_mentions=discord.AllowedMentions.none())
+        await voice_say(client, p["guild_id"], f"One leg away! {p['bettor_name']} needs {clip(last, 80)} for "
+                                               f"{money(p['payout'])}.")
 
 
 # ---- reactions on the original slip -------------------------------------------------------
@@ -9713,10 +9761,11 @@ async def big_moments(client: discord.Client, now: Optional[datetime] = None) ->
             continue
         legs = get_legs(p["id"])
         if p["status"] == "win" and p["cost"] and (p["returned"] or 0) >= 10 * p["cost"]:
-            await channel.send(f"🚨🚨🚨 **BIG WIN ALERT** 🚨🚨🚨\n**{p['bettor_name']}** just turned {money(p['cost'])} into "
-                               f"**{money(p['returned'] or 0)}** ({(p['returned'] or 0) / p['cost']:.0f}x) on "
-                               f"{clip(p['description'], 80)}. Somebody get this person a drink. 🍾",
-                               allowed_mentions=discord.AllowedMentions.none())
+            text = voice_line(p["guild_id"], "bigwin", name=p["bettor_name"], cost=money(p["cost"]),
+                              amount=money(p["returned"] or 0), mult=f"{(p['returned'] or 0) / p['cost']:.0f}",
+                              desc=clip(p["description"], 80))
+            await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+            await voice_say(client, p["guild_id"], text.split("\n", 1)[-1])
         elif p["status"] == "loss" and len(legs) >= 4 and sum(1 for x in legs if x["status"] == "miss") == 1:
             miss = next(x for x in legs if x["status"] == "miss")
             await channel.send(_random.choice(ROASTS).format(name=p["bettor_name"], payout=money(p["payout"]),
@@ -10401,6 +10450,1758 @@ def sheets_formula(kind: str = "picks") -> Optional[str]:
     return f'=IMPORTDATA("{base}/api/{kind}.csv?key={key}")'
 
 
+# ==========================================================================
+# r14: art — trading cards, live slip receipts, the live board (Pillow)
+# ==========================================================================
+
+ART_BG, ART_PANEL, ART_PANEL2 = (16, 16, 22), (28, 28, 38), (38, 38, 52)
+ART_TEXT, ART_MUTED, ART_FAINT = (245, 245, 250), (160, 160, 178), (92, 92, 110)
+ART_GREEN, ART_RED, ART_AMBER, ART_BLUE = (52, 211, 153), (248, 113, 113), (251, 191, 36), (96, 165, 250)
+ART_BRAND = (123, 63, 228)
+PLATFORM_COLORS = {"prizepicks": (138, 75, 255), "kalshi": (40, 199, 141), "sportsbook": (59, 130, 246),
+                   "underdog": (250, 204, 21), "draftkings": (83, 211, 55), "fanduel": (20, 147, 255)}
+
+RARITIES = [  # (name, min ovr, gradient stops, accent)
+    ("Common", 0, [(120, 124, 134), (70, 73, 82)], (190, 194, 204)),
+    ("Rare", 65, [(226, 232, 240), (120, 130, 145)], (226, 232, 240)),
+    ("Epic", 75, [(196, 160, 255), (98, 40, 200)], (196, 160, 255)),
+    ("Legendary", 85, [(255, 226, 130), (190, 110, 10)], (255, 214, 102)),
+    ("Mythic", 92, [(255, 92, 170), (255, 200, 60), (70, 220, 170), (80, 150, 255), (190, 90, 255)], (255, 255, 255)),
+]
+_FONT_CACHE: dict = {}
+
+
+def art_font(size: int, bold: bool = False, italic: bool = False):
+    from PIL import ImageFont
+    key = (size, bold, italic)
+    if key in _FONT_CACHE:
+        return _FONT_CACHE[key]
+    name = {(False, False): "DejaVuSans.ttf", (True, False): "DejaVuSans-Bold.ttf",
+            (False, True): "DejaVuSans-Oblique.ttf", (True, True): "DejaVuSans-BoldOblique.ttf"}[(bold, italic)]
+    font = None
+    try:
+        import matplotlib
+        path = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", name)
+        font = ImageFont.truetype(path, size)
+    except Exception:
+        try:
+            font = ImageFont.load_default(size)
+        except Exception:
+            font = ImageFont.load_default()
+    _FONT_CACHE[key] = font
+    return font
+
+
+def _tw(draw, text: str, font) -> int:
+    return int(draw.textlength(text, font=font))
+
+
+def fit_text(draw, text: str, max_w: int, size: int, bold: bool = False, min_size: int = 12, italic: bool = False):
+    """(text, font) shrunk until it fits, then cut with an ellipsis if it still doesn't."""
+    text = str(text)
+    while size > min_size and _tw(draw, text, art_font(size, bold, italic)) > max_w:
+        size -= 1
+    font = art_font(size, bold, italic)
+    if _tw(draw, text, font) > max_w:
+        while text and _tw(draw, text + "…", font) > max_w:
+            text = text[:-1]
+        text = text.rstrip() + "…"
+    return text, font
+
+
+def _grad(size: tuple, stops: list, diagonal: bool = True):
+    """A gradient image through the colour stops."""
+    from PIL import Image
+    w, h = size
+    g = Image.new("RGB", (256, 1))
+    n = len(stops) - 1
+    for x in range(256):
+        t = x / 255 * n
+        i = min(int(t), n - 1)
+        f = t - i
+        a, b = stops[i], stops[i + 1]
+        g.putpixel((x, 0), tuple(int(a[k] + (b[k] - a[k]) * f) for k in range(3)))
+    if not diagonal:
+        return g.resize((w, h))
+    big = g.resize((int((w + h) * 1.0), 8)).resize((int(w + h), int(w + h)))
+    big = big.rotate(-35, resample=Image.BICUBIC)
+    left, top = (big.width - w) // 2, (big.height - h) // 2
+    return big.crop((left, top, left + w, top + h))
+
+
+def _rounded_mask(size: tuple, r: int):
+    from PIL import Image, ImageDraw
+    m = Image.new("L", size, 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), r, fill=255)
+    return m
+
+
+def _avatar(raw: Optional[bytes], size: int, name: str, rounded: int = 0):
+    """The avatar as a square (rounded corners) or circle (rounded=-1); initials if there's no picture."""
+    from PIL import Image, ImageDraw, ImageOps
+    img = None
+    if raw:
+        try:
+            img = ImageOps.fit(Image.open(io.BytesIO(raw)).convert("RGB"), (size, size), Image.LANCZOS)
+        except Exception:
+            img = None
+    if img is None:
+        img = _grad((size, size), [(110, 70, 220), (40, 30, 90)])
+        d = ImageDraw.Draw(img)
+        initials = "".join(w[0] for w in (name or "?").split()[:2]).upper() or "?"
+        f = art_font(int(size * 0.38), True)
+        tw = _tw(d, initials, f)
+        d.text(((size - tw) / 2, size * 0.28), initials, font=f, fill=ART_TEXT)
+    if rounded == -1:
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+    else:
+        mask = _rounded_mask((size, size), rounded)
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.paste(img, (0, 0), mask)
+    return out
+
+
+def rarity_for(ovr: int, settled: int) -> tuple:
+    best = RARITIES[0]
+    for r in RARITIES:
+        if ovr >= r[1] and (r[0] != "Mythic" or settled >= 40):
+            best = r
+    return best
+
+
+def money_short(x) -> str:
+    x = float(x or 0)
+    return f"${x:,.0f}" if abs(x - round(x)) < 0.005 else f"${x:,.2f}"
+
+
+def signed_short(x) -> str:
+    return ("+" if x >= 0 else "-") + money_short(abs(x))
+
+
+def _vgrad(size: tuple, top: tuple, bottom: tuple):
+    return _grad((size[1], size[0]), [top, bottom], diagonal=False).rotate(90, expand=True).transpose(1)
+
+
+def _png(img) -> io.BytesIO:
+    out = io.BytesIO()
+    img.save(out, "PNG", optimize=True)
+    out.seek(0)
+    return out
+
+
+# ---- trading card ---------------------------------------------------------------------------
+
+def render_trading_card(c: dict, avatar: Optional[bytes]) -> io.BytesIO:
+    """c: name, ovr, rarity (tuple), title, sport, stats [(label, value, colour)], badges [str], tagline,
+    serial, season, back (bool), back_rows [(label, value)], back_lines [str]"""
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H = 750, 1050
+    rname, _, stops, accent = c["rarity"]
+    card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    frame = _grad((W, H), stops)
+    card.paste(frame, (0, 0), _rounded_mask((W, H), 44))
+    # inner panel with a soft diagonal sheen
+    iw, ih = W - 44, H - 44
+    inner = _grad((iw, ih), [(30, 30, 42), (14, 14, 20), (24, 22, 34)])
+    sheen = Image.new("L", (iw, ih), 0)
+    sd = ImageDraw.Draw(sheen)
+    for k in range(-ih, iw, 46):
+        sd.line((k, ih, k + ih, 0), fill=10, width=14)
+    inner = Image.composite(Image.new("RGB", (iw, ih), (255, 255, 255)), inner, sheen)
+    card.paste(inner, (22, 22), _rounded_mask((iw, ih), 30))
+    d = ImageDraw.Draw(card)
+
+    if c.get("back"):
+        _card_back(card, d, c, accent)
+    else:
+        # avatar with a glow in the rarity colour
+        av = 350
+        ax, ay = (W - av) // 2, 118
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(glow).rounded_rectangle((ax - 14, ay - 14, ax + av + 14, ay + av + 14), 40, fill=accent + (120,))
+        card.alpha_composite(glow.filter(ImageFilter.GaussianBlur(18)))
+        d = ImageDraw.Draw(card)
+        d.rounded_rectangle((ax - 6, ay - 6, ax + av + 6, ay + av + 6), 34, fill=accent)
+        card.alpha_composite(_avatar(c.get("avatar_raw") or avatar, av, c["name"], 30), (ax, ay))
+        d = ImageDraw.Draw(card)
+        # OVR block, top left
+        d.text((58, 50), str(c["ovr"]), font=art_font(76, True), fill=accent)
+        d.text((62, 136), "OVR", font=art_font(22, True), fill=ART_MUTED)
+        if c.get("sport"):
+            t, f = fit_text(d, c["sport"].upper(), 110, 22, True)
+            d.text((62, 168), t, font=f, fill=ART_TEXT)
+        # rarity ribbon, top right
+        rt = rname.upper()
+        f = art_font(20, True)
+        tw = _tw(d, rt, f)
+        d.rounded_rectangle((W - 64 - tw - 28, 54, W - 64, 92), 19, fill=accent)
+        d.text((W - 64 - tw - 14, 61), rt, font=f, fill=(20, 20, 26))
+        # name plate
+        y = ay + av + 30
+        t, f = fit_text(d, c["name"].upper(), W - 120, 50, True, 26)
+        d.text(((W - _tw(d, t, f)) / 2, y), t, font=f, fill=ART_TEXT)
+        y += 66
+        if c.get("title"):
+            t, f = fit_text(d, c["title"].upper(), W - 160, 26, True)
+            tw = _tw(d, t, f)
+            if rname == "Mythic":   # rainbow lettering
+                mask = Image.new("L", (W, H), 0)
+                ImageDraw.Draw(mask).text(((W - tw) / 2, y), t, font=f, fill=255)
+                card.paste(_grad((W, H), stops[1:] + stops[:1], diagonal=False), (0, 0), mask)
+                d = ImageDraw.Draw(card)
+            else:
+                d.text(((W - tw) / 2, y), t, font=f, fill=accent)
+            d.line(((W - tw) / 2 - 60, y + 16, (W - tw) / 2 - 16, y + 16), fill=accent, width=3)
+            d.line(((W + tw) / 2 + 16, y + 16, (W + tw) / 2 + 60, y + 16), fill=accent, width=3)
+        y += 52
+        # stat grid 3 x 2
+        stats = c["stats"][:6]
+        cw = (W - 120) // 3
+        for i, (label, value, colour) in enumerate(stats):
+            col, row = i % 3, i // 3
+            x0, y0 = 60 + col * cw, y + row * 100
+            d.rounded_rectangle((x0 + 6, y0, x0 + cw - 6, y0 + 88), 18, fill=ART_PANEL)
+            t, f = fit_text(d, value, cw - 30, 34, True, 18)
+            d.text((x0 + (cw - _tw(d, t, f)) / 2, y0 + 10), t, font=f, fill=colour or ART_TEXT)
+            lf = art_font(17, True)
+            d.text((x0 + (cw - _tw(d, label, lf)) / 2, y0 + 56), label, font=lf, fill=ART_MUTED)
+        y += 206
+        line = c.get("tagline") or ""
+        if line:
+            t, f = fit_text(d, f"“{line}”", W - 140, 21, False, 14, italic=True)
+            d.text(((W - _tw(d, t, f)) / 2, y), t, font=f, fill=ART_MUTED)
+            y += 40
+        # badge chips, centred, one row
+        if c.get("badges"):
+            f = art_font(16, True)
+            chips, total = [], 0
+            for b in c["badges"]:
+                bw = _tw(d, b, f) + 24
+                if total + bw + 8 > W - 140:
+                    more = f"+{len(c['badges']) - len(chips)}"
+                    chips.append((more, _tw(d, more, f) + 24))
+                    total += _tw(d, more, f) + 32
+                    break
+                chips.append((b, bw))
+                total += bw + 8
+            x = (W - total + 8) / 2
+            for b, bw in chips:
+                d.rounded_rectangle((x, y, x + bw, y + 30), 15, outline=accent, width=2)
+                d.text((x + 12, y + 5), b, font=f, fill=ART_TEXT)
+                x += bw + 8
+        # footer
+        foot = f"PIMP-BOT  ·  SERIES {c.get('season', '')}  ·  {c.get('serial', '')}"
+        f = art_font(16, True)
+        d.text(((W - _tw(d, foot, f)) / 2, H - 70), foot, font=f, fill=ART_FAINT)
+    if rname == "Mythic":  # faint holo shimmer
+        holo = _grad((W, H), stops).convert("RGBA")
+        holo.putalpha(Image.new("L", (W, H), 22))
+        card.alpha_composite(holo)
+    bg = Image.new("RGB", (W, H), ART_BG)
+    bg.paste(card, (0, 0), card)
+    return _png(bg)
+
+
+def _card_back(card, d, c, accent):
+    W, H = card.size
+    d.text((60, 52), "SCOUTING REPORT", font=art_font(34, True), fill=accent)
+    t, f = fit_text(d, c["name"], W - 120, 26, True)
+    d.text((60, 100), t, font=f, fill=ART_TEXT)
+    y = 160
+    d.rounded_rectangle((52, y - 10, W - 52, y + 46 * max(1, len(c.get("back_rows") or [])) + 16), 22, fill=ART_PANEL)
+    for label, value in (c.get("back_rows") or [])[:8]:
+        lt, lf = fit_text(d, label, 300, 22, True)
+        d.text((80, y + 6), lt, font=lf, fill=ART_MUTED)
+        vt, vf = fit_text(d, value, W - 420, 22, True)
+        d.text((W - 80 - _tw(d, vt, vf), y + 6), vt, font=vf, fill=ART_TEXT)
+        y += 46
+    y += 50
+    for line in (c.get("back_lines") or [])[:9]:
+        t, f = fit_text(d, line, W - 130, 21, False, 14)
+        d.text((64, y), t, font=f, fill=ART_TEXT)
+        y += 38
+    if c.get("badges"):
+        y = max(y + 16, H - 230)
+        d.text((60, y), "BADGES", font=art_font(18, True), fill=ART_MUTED)
+        x, y = 60, y + 34
+        f = art_font(18, True)
+        for b in c["badges"]:
+            bw = _tw(d, b, f) + 28
+            if x + bw > W - 60:
+                x, y = 60, y + 44
+                if y > H - 110:
+                    break
+            d.rounded_rectangle((x, y, x + bw, y + 34), 17, fill=ART_PANEL2)
+            d.text((x + 14, y + 6), b, font=f, fill=ART_TEXT)
+            x += bw + 10
+    foot = f"PIMP-BOT  ·  SERIES {c.get('season', '')}  ·  {c.get('serial', '')}"
+    f = art_font(16, True)
+    d.text(((W - _tw(d, foot, f)) / 2, H - 70), foot, font=f, fill=ART_FAINT)
+
+
+# ---- slip receipt ---------------------------------------------------------------------------
+
+def _status_dot(d, x, y, r, state):
+    colour = {"hit": ART_GREEN, "miss": ART_RED, "push": ART_MUTED, "ahead": ART_GREEN, "behind": ART_RED,
+              "live": ART_BLUE}.get(state, ART_FAINT)
+    filled = state in ("hit", "miss", "push")
+    if filled:
+        d.ellipse((x - r, y - r, x + r, y + r), fill=colour)
+        glyph = {"hit": "✓", "miss": "✗", "push": "–"}[state]
+        f = art_font(int(r * 1.3), True)
+        d.text((x - _tw(d, glyph, f) / 2, y - r * 0.82), glyph, font=f, fill=(16, 16, 22))
+    else:
+        d.ellipse((x - r, y - r, x + r, y + r), outline=colour, width=4)
+        if state in ("ahead", "behind", "live"):
+            d.ellipse((x - r / 2.4, y - r / 2.4, x + r / 2.4, y + r / 2.4), fill=colour)
+
+
+def _bar(d, x, y, w, h, frac, colour, marker: Optional[float] = None):
+    d.rounded_rectangle((x, y, x + w, y + h), h // 2, fill=ART_PANEL2)
+    frac = max(0.0, min(1.0, frac))
+    if frac > 0:
+        d.rounded_rectangle((x, y, x + max(h, int(w * frac)), y + h), h // 2, fill=colour)
+    if marker is not None:
+        mx = x + int(w * max(0.0, min(1.0, marker)))
+        d.line((mx, y - 4, mx, y + h + 4), fill=ART_TEXT, width=2)
+
+
+def leg_visual(e: dict) -> dict:
+    """What a leg looks like right now: state, the number text, and a bar (fraction, colour, marker)."""
+    status = {"win": "hit", "loss": "miss", "void": "push"}.get(e.get("status", "open"), e.get("status", "open"))
+    live = e.get("live")
+    state = status if status != "open" else ({"hit": "hit", "miss": "miss", "ahead": "ahead",
+                                              "behind": "behind"}.get(live or "", "live" if e.get("in_play") else "open"))
+    v = {"state": state, "num": "", "sub": "", "bar": None}
+    n = e.get("num")
+    if n:
+        value, line, side = n["value"], n["line"], n["side"]
+        v["num"] = f"{value:g} / {line:g}"
+        if side == "under":
+            # an under is safe while the bar stays left of the marker
+            cap = max(line * 1.5, value, 1)
+            colour = ART_RED if value > line else (ART_GREEN if state in ("hit", "ahead") else ART_AMBER)
+            v["bar"] = (value / cap, colour, line / cap)
+        else:
+            colour = ART_GREEN if value > line else (ART_AMBER if e.get("in_play") else ART_BLUE)
+            v["bar"] = (value / line if line else 1.0, colour, None)
+    v["sub"] = e.get("sub") or ""
+    return v
+
+
+def render_receipt(r: dict) -> io.BytesIO:
+    """r: name, avatar (bytes), platform, description, cost, payout, pick_id, status, net, legs [entry dicts with
+    text/status/live/num/sub/in_play], updated (str), returned"""
+    from PIL import Image, ImageDraw
+    W = 900
+    legs = r["legs"] or [{"text": r["description"], "status": r["status"]}]
+    row_h = 92
+    H = 196 + row_h * len(legs) + 120
+    img = Image.new("RGB", (W, H), ART_BG)
+    d = ImageDraw.Draw(img)
+    pc = PLATFORM_COLORS.get((r.get("platform") or "").lower(), ART_BRAND)
+    d.rounded_rectangle((16, 16, W - 16, H - 16), 30, fill=(22, 22, 30))
+    head = _vgrad((W - 32, 170), tuple(min(255, int(x * 0.6)) for x in pc), (22, 22, 30))
+    img.paste(head, (16, 16), _rounded_mask((W - 32, 170), 30))
+    img.paste(_avatar(r.get("avatar"), 78, r["name"], -1), (44, 40), _avatar(r.get("avatar"), 78, r["name"], -1))
+    t, f = fit_text(d, r["name"], 470, 34, True)
+    d.text((140, 40), t, font=f, fill=ART_TEXT)
+    sub = f"{r.get('platform') or ''}  ·  pick #{r['pick_id']}"
+    d.text((141, 86), sub, font=art_font(20), fill=ART_MUTED)
+    money_line = f"{money_short(r['cost'])} → {money_short(r['payout'])}"
+    t, f = fit_text(d, money_line, 280, 34, True)
+    d.text((W - 48 - _tw(d, t, f), 40), t, font=f, fill=ART_TEXT)
+    t, f = fit_text(d, r["description"], 330, 20, False)
+    d.text((W - 48 - _tw(d, t, f), 88), t, font=f, fill=ART_MUTED)
+    # counter
+    hits = sum(1 for e in legs if leg_visual(e)["state"] == "hit")
+    misses = sum(1 for e in legs if leg_visual(e)["state"] == "miss")
+    y = 172
+    if len(legs) > 1:
+        chip = f"{hits}/{len(legs)} HIT" + (f"  ·  {misses} DEAD" if misses else "")
+        f = art_font(18, True)
+        d.rounded_rectangle((44, y - 8, 44 + _tw(d, chip, f) + 28, y + 26), 17, fill=ART_PANEL2)
+        d.text((58, y - 3), chip, font=f, fill=ART_RED if misses else (ART_GREEN if hits else ART_TEXT))
+    y += 44
+    for e in legs:
+        v = leg_visual(e)
+        _status_dot(d, 66, y + 26, 18, v["state"])
+        t, f = fit_text(d, e["text"], 480 if v["num"] or v["bar"] else 740, 25, True)
+        d.text((100, y + 10), t, font=f, fill=ART_TEXT if v["state"] != "miss" else ART_MUTED)
+        if v["sub"]:
+            st, sf = fit_text(d, v["sub"], 480, 18, False)
+            d.text((100, y + 46), st, font=sf, fill=ART_MUTED)
+        if v["num"]:
+            nt, nf = fit_text(d, v["num"], 230, 24, True)
+            d.text((W - 50 - _tw(d, nt, nf), y + 6), nt, font=nf, fill=ART_TEXT)
+        if v["bar"]:
+            frac, colour, marker = v["bar"]
+            _bar(d, W - 280, y + 44, 230, 14, frac, colour, marker)
+        d.line((44, y + row_h - 8, W - 44, y + row_h - 8), fill=(36, 36, 48), width=2)
+        y += row_h
+    # footer stamp
+    status = r["status"]
+    if status == "win":
+        stamp, colour = f"CASHED  {signed_short(r.get('net') or 0)}", ART_GREEN
+    elif status == "loss":
+        stamp, colour = "MISSED", ART_RED
+    elif status in ("push", "void"):
+        stamp, colour = status.upper(), ART_MUTED
+    else:
+        stamp, colour = None, None
+    if stamp:
+        f = art_font(40, True)
+        tw = _tw(d, stamp, f)
+        d.rounded_rectangle(((W - tw) / 2 - 30, y + 14, (W + tw) / 2 + 30, y + 78), 18, outline=colour, width=5)
+        d.text(((W - tw) / 2, y + 22), stamp, font=f, fill=colour)
+    else:
+        f = art_font(18, True)
+        live = any(e.get("in_play") for e in legs)
+        msg = (f"LIVE  ·  updated {r.get('updated', '')}" if live else f"Updated {r.get('updated', '')}")
+        d.ellipse((44, y + 34, 58, y + 48), fill=ART_RED if live else ART_FAINT)
+        d.text((70, y + 30), msg, font=f, fill=ART_MUTED)
+    d.text((W - 48 - _tw(d, "PIMP-BOT", art_font(16, True)), y + 32), "PIMP-BOT", font=art_font(16, True), fill=ART_FAINT)
+    return _png(img)
+
+
+# ---- live board ------------------------------------------------------------------------------
+
+def render_board(b: dict) -> io.BytesIO:
+    """b: title, when, slips [{name, avatar, cost, payout, description, legs [entries], status}], totals dict"""
+    from PIL import Image, ImageDraw
+    W = 1000
+    slips = b["slips"][:8]
+    heights = []
+    for s in slips:
+        shown = [e for e in s["legs"] if e.get("in_play") or e.get("num") or e.get("status") != "open"][:4]
+        s["_shown"] = shown
+        heights.append(118 + 46 * len(shown))
+    H = 236 + sum(heights) + 16 * len(slips) + 60
+    img = Image.new("RGB", (W, H), ART_BG)
+    d = ImageDraw.Draw(img)
+    head = _grad((W, 210), [(70, 34, 150), (20, 16, 40), ART_BG])
+    img.paste(head, (0, 0))
+    d.text((40, 34), b.get("title", "TONIGHT'S BOARD"), font=art_font(44, True), fill=ART_TEXT)
+    d.ellipse((42, 108, 58, 124), fill=ART_RED if b.get("live") else ART_FAINT)
+    d.text((70, 102), ("LIVE  ·  " if b.get("live") else "") + b.get("when", ""), font=art_font(22, True),
+           fill=ART_MUTED)
+    tot = b.get("totals") or {}
+    chips = [f"{tot.get('slips', len(slips))} slips", f"{money_short(tot.get('cost', 0))} in",
+             f"{money_short(tot.get('payout', 0))} to win", f"{tot.get('cashing', 0)}/{tot.get('legs', 0)} legs cashing"]
+    x = 40
+    f = art_font(18, True)
+    for chip in chips:
+        cw = _tw(d, chip, f) + 28
+        d.rounded_rectangle((x, 148, x + cw, 180), 16, fill=(40, 34, 64))
+        d.text((x + 14, 153), chip, font=f, fill=ART_TEXT)
+        x += cw + 10
+    y = 226
+    for s, h in zip(slips, heights):
+        d.rounded_rectangle((24, y, W - 24, y + h), 24, fill=(24, 24, 33))
+        av = _avatar(s.get("avatar"), 56, s["name"], -1)
+        img.paste(av, (44, y + 20), av)
+        t, f = fit_text(d, s["name"], 330, 28, True)
+        d.text((114, y + 18), t, font=f, fill=ART_TEXT)
+        t, f = fit_text(d, s["description"], 360, 18, False)
+        d.text((114, y + 54), t, font=f, fill=ART_MUTED)
+        ml = f"{money_short(s['cost'])} → {money_short(s['payout'])}"
+        t, f = fit_text(d, ml, 260, 26, True)
+        d.text((W - 48 - _tw(d, t, f), y + 20), t, font=f, fill=ART_TEXT)
+        # one dot per leg
+        dx = W - 48 - 30 * len(s["legs"][:14])
+        for e in s["legs"][:14]:
+            _status_dot(d, dx + 12, y + 72, 10, leg_visual(e)["state"])
+            dx += 30
+        yy = y + 102
+        for e in s["_shown"]:
+            v = leg_visual(e)
+            _status_dot(d, 60, yy + 14, 11, v["state"])
+            t, f = fit_text(d, e["text"], 470, 20, True)
+            d.text((82, yy + 2), t, font=f, fill=ART_TEXT if v["state"] != "miss" else ART_MUTED)
+            if v["num"]:
+                nt, nf = fit_text(d, v["num"], 160, 20, True)
+                d.text((W - 300 - _tw(d, nt, nf), yy + 2), nt, font=nf, fill=ART_TEXT)
+            if v["bar"]:
+                frac, colour, marker = v["bar"]
+                _bar(d, W - 280, yy + 8, 230, 12, frac, colour, marker)
+            elif v["sub"]:
+                st, sf = fit_text(d, v["sub"], 240, 16, False)
+                d.text((W - 48 - _tw(d, st, sf), yy + 4), st, font=sf, fill=ART_MUTED)
+            yy += 46
+        y += h + 16
+    if len(b["slips"]) > len(slips):
+        d.text((40, y + 6), f"+ {len(b['slips']) - len(slips)} more slips", font=art_font(18, True), fill=ART_MUTED)
+    d.text((W - 40 - _tw(d, "PIMP-BOT", art_font(16, True)), H - 44), "PIMP-BOT", font=art_font(16, True),
+           fill=ART_FAINT)
+    return _png(img)
+
+
+# ==========================================================================
+# r14: personality, reactions, heads-up, milestones, trading cards, data Q&A,
+# live receipts, the live board, the Sunday Show, voice calls
+# ==========================================================================
+
+import contextvars
+
+# ---- personality -------------------------------------------------------------------------------
+
+PERSONAS = {
+    "default": ("Sidekick", "a friendly, upbeat sidekick: warm, quick and a little playful"),
+    "hype": ("Hype man", "a HYPE MAN: huge energy, celebrates everything, a few caps and emojis, but short"),
+    "analyst": ("Analyst", "a dry analyst: calm, numbers-first and understated, at most one dry joke"),
+    "trash": ("Trash talker", "a trash talker: playful ribbing about the bets only (never looks, family, money "
+                              "troubles or anything personal), always in good fun"),
+    "announcer": ("Announcer", "an old-school play-by-play announcer: big broadcast voice and dramatic calls"),
+}
+
+LINES = {  # kind -> persona -> templates; {name} {amount} {mult} {desc} {leg} {payout} {n}
+    "cash": {
+        "default": ["✅ {name} cashed {amount} on {desc}. Love to see it.", "💰 That's a winner for {name}: {amount}."],
+        "hype": ["💸💸 {name} JUST CASHED {amount}!!! {desc} DELIVERED!", "🔥 PAY THE MAN! {name} +{amount}! LET'S GOOO"],
+        "analyst": ["✅ {name}: {desc} graded a win, {amount}. Process confirmed.", "📈 {name} books {amount}. Noted."],
+        "trash": ["😤 Fine. {name} hit {desc} for {amount}. Don't let it go to your head.",
+                  "🙄 {name} cashed {amount}. Even a broken clock, etc."],
+        "announcer": ["🎙️ AND IT'S GOOD! {name} cashes {desc} for {amount}! What a call!",
+                      "🎙️ Ladies and gentlemen, {name} has done it: {amount}!"],
+    },
+    "roast": {
+        "default": ["💀 {name}'s {desc} didn't make it. {leg} had other plans.", "🪦 RIP {name}'s {desc}."],
+        "hype": ["💀💀 NOOO {name}!!! {leg} SAID ABSOLUTELY NOT", "😭 {name} we RIDE AGAIN next time, {leg} was a fraud"],
+        "analyst": ["📉 {name}: {desc} lost. {leg} was the leg that broke it.", "📉 Loss for {name}. Sample size, probably."],
+        "trash": ["🤡 {name} really trusted {leg}. Couldn't be me.", "💀 {name}'s {desc} folded faster than a lawn chair."],
+        "announcer": ["🎙️ Oh, and it's NO GOOD for {name}! {leg} comes up short!",
+                      "🎙️ Heartbreak in the building: {name}'s {desc} goes down."],
+    },
+    "bigwin": {
+        "default": ["🚨🚨🚨 **BIG WIN ALERT** 🚨🚨🚨\n**{name}** just turned {cost} into **{amount}** ({mult}x) on {desc}. "
+                    "Somebody get this person a drink. 🍾"],
+        "hype": ["🚨🚨🚨 **BIG WIN ALERT** 🚨🚨🚨\nSTOP WHAT YOU'RE DOING. **{name}** TURNED {cost} INTO **{amount}** ({mult}x) "
+                 "ON {desc}!!! 🍾🍾🍾"],
+        "analyst": ["🚨 **BIG WIN ALERT**\n**{name}**: {cost} → **{amount}** ({mult}x) on {desc}. A genuine outlier."],
+        "trash": ["🚨🚨🚨 **BIG WIN ALERT** 🚨🚨🚨\n**{name}** turned {cost} into **{amount}** ({mult}x) on {desc}. "
+                  "Dinner's on you. No excuses."],
+        "announcer": ["🚨🚨🚨 **BIG WIN ALERT** 🚨🚨🚨\n🎙️ UNBELIEVABLE! **{name}** turns {cost} into **{amount}** ({mult}x) "
+                      "on {desc}! You will NOT see that again!"],
+    },
+    "oneleg": {
+        "default": ["🚨 **ONE LEG AWAY.** {name}'s {desc} (`#{pid}`) has {n} legs in and needs **{leg}** for **{payout}**. "
+                    "Everybody sweat. 🥵"],
+        "hype": ["🚨🚨 **ONE LEG AWAY!!!** {name}'s {desc} (`#{pid}`) is {n} for {n} and needs **{leg}** for **{payout}**! "
+                 "EVERYBODY IN HERE! 🥵🔥"],
+        "analyst": ["🚨 **ONE LEG AWAY.** {name}'s {desc} (`#{pid}`): {n} legs cleared, **{leg}** remaining for **{payout}**."],
+        "trash": ["🚨 **ONE LEG AWAY.** {name}'s {desc} (`#{pid}`) needs **{leg}** for **{payout}**. "
+                  "Watch {leg} fumble it. 🍿"],
+        "announcer": ["🚨 **ONE LEG AWAY.** 🎙️ It all comes down to this: {name}'s {desc} (`#{pid}`) needs **{leg}** "
+                      "for **{payout}**! Hold your breath, folks! 🥵"],
+    },
+    "logged": {
+        "default": [None], "hype": ["🧾 LOCKED IN! Let's ride! 🔥", "🧾 SLIP RECEIVED. WE ARE SO BACK."],
+        "analyst": ["🧾 Logged."], "trash": ["🧾 Logged. Bold of you.", "🧾 Logged. I've seen worse. Not many, though."],
+        "announcer": ["🧾 🎙️ And {name} steps up to the plate!"],
+    },
+}
+
+
+def persona(guild_id: int) -> str:
+    p = get_setting(guild_id, "persona") or "default"
+    return p if p in PERSONAS else "default"
+
+
+def persona_prompt(guild_id: int) -> str:
+    return PERSONAS[persona(guild_id)][1]
+
+
+def voice_line(guild_id: int, kind: str, **kw) -> Optional[str]:
+    options = LINES[kind].get(persona(guild_id)) or LINES[kind]["default"]
+    choice = _random.choice(options)
+    if choice is None:
+        return None
+    try:
+        return choice.format(**kw)
+    except (KeyError, IndexError):
+        return LINES[kind]["default"][0].format(**kw) if LINES[kind]["default"][0] else None
+
+
+LINE_SYSTEM = """You write ONE short Discord message (max 30 words) reacting to a friend's sports bet result in \
+a group chat of friends who track their picks. Voice: {voice}.
+Rules: talk about the bet only. Never mention odds, prices or line movement. Never encourage betting more, \
+chasing losses or bigger stakes. No hashtags. At most two emojis. Output only the message."""
+
+
+async def persona_reaction(guild_id: int, kind: str, facts: str, fallback: str) -> str:
+    """A fresh line from Claude in the server's voice; the template if Claude isn't set up or is slow."""
+    if not ai_enabled():
+        return fallback
+    try:
+        reply = await asyncio.wait_for(anthropic_client().messages.create(
+            model=CLAUDE_MODEL, max_tokens=120, system=LINE_SYSTEM.format(voice=persona_prompt(guild_id)),
+            messages=[{"role": "user", "content": f"{'Celebrate this win' if kind == 'cash' else 'Roast this loss (they asked to be roasted)'}:\n{facts}"}]),
+            timeout=8)
+        text = "".join(b.text for b in reply.content if getattr(b, "type", "") == "text").strip().strip('"')
+        return clip(text, 300) if text else fallback
+    except Exception:
+        log.warning("Reaction line failed; using a template", exc_info=True)
+        return fallback
+
+
+# ---- where a pick's card lives (so reactions and receipts can reply/edit) --------------------------
+
+def _ensure_r14_tables():
+    db().executescript("""
+        CREATE TABLE IF NOT EXISTS pick_msgs (
+            pick_id    INTEGER PRIMARY KEY,
+            guild_id   INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            receipt    INTEGER NOT NULL DEFAULT 0,
+            sig        TEXT,
+            updated_at TEXT,
+            done       INTEGER NOT NULL DEFAULT 0
+        );
+    """)
+    cols = {r[1] for r in db().execute("PRAGMA table_info(picks)")}
+    if "cheered" not in cols:
+        db().execute("ALTER TABLE picks ADD COLUMN cheered INTEGER")
+    db().commit()
+
+
+_r14_ready = False
+
+
+def r14_db():
+    global _r14_ready
+    if not _r14_ready:
+        _ensure_r14_tables()
+        _r14_ready = True
+    return db()
+
+
+def remember_pick_msg(guild_id: int, pick_id: int, channel_id: int, message_id: int, receipt: bool = False):
+    r14_db().execute("INSERT OR REPLACE INTO pick_msgs (pick_id, guild_id, channel_id, message_id, receipt, updated_at, done) "
+                     "VALUES (?,?,?,?,?,?,0)", (pick_id, guild_id, channel_id, message_id, int(receipt), now_iso()))
+    db().commit()
+
+
+def pick_msg(pick_id: int):
+    return r14_db().execute("SELECT * FROM pick_msgs WHERE pick_id = ?", (pick_id,)).fetchone()
+
+
+# ---- personal reactions when a pick settles ---------------------------------------------------------
+
+async def cheer_settled(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    since = iso(now - timedelta(hours=6))
+    rows = r14_db().execute("SELECT * FROM picks WHERE status IN ('win', 'loss') AND settled_at >= ? AND cheered IS NULL "
+                            "AND (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL) ORDER BY settled_at",
+                            (since,)).fetchall()
+    posted = 0
+    for p in rows:
+        if posted >= 5:   # the rest wait for the next run, so the scheduler never stalls on this
+            break
+        db().execute("UPDATE picks SET cheered = 1 WHERE id = ?", (p["id"],))
+        db().commit()
+        gid = p["guild_id"]
+        if get_setting(gid, "reactions") == "off":
+            continue
+        roast = p["status"] == "loss"
+        if roast and get_setting(gid, f"roast:{p['bettor_key']}") != "on":
+            continue
+        if not roast and p["cost"] and (p["returned"] or 0) >= 10 * p["cost"]:
+            continue   # the big-win banner already covers this one
+        target = pick_msg(p["id"])
+        ids = (target["channel_id"], target["message_id"]) if target else jump_ids(p["slip_url"])
+        channel = client.get_channel(ids[0]) if ids else None
+        if channel is None:
+            continue
+        posted += 1
+        legs = get_legs(p["id"])
+        missed = next((x["text"] for x in legs if x["status"] == "miss"), None)
+        amount = signed(pick_net(p)) if not roast else money(p["cost"])
+        kw = dict(name=p["bettor_name"], amount=amount, desc=clip(p["description"], 60), leg=clip(missed or "it", 50),
+                  payout=money(p["payout"]), mult=f"{(p['returned'] or 0) / p['cost']:.1f}" if p["cost"] else "?",
+                  cost=money(p["cost"]), n=len(legs), pid=p["id"])
+        fallback = voice_line(gid, "roast" if roast else "cash", **kw)
+        streak = current_streak(gid, p["bettor_key"])
+        facts = (f"Bettor: {p['bettor_name']}\nPlay: {p['description']} on {p['platform']}"
+                 + (f" ({p['sport']})" if p["sport"] else "")
+                 + f"\nRisked {money(p['cost'])}, " + (f"won {signed(pick_net(p))}" if not roast else "lost it")
+                 + (f"\nLegs: " + "; ".join(f"{x['text']} ({x['status']})" for x in legs[:8]) if legs else "")
+                 + (f"\nCurrent streak: {streak.lstrip('🔥🧊')}" if streak else ""))
+        line = await persona_reaction(gid, "roast" if roast else "cash", facts, fallback)
+        if channel is not None:
+            try:
+                ref = channel.get_partial_message(ids[1])
+                ref = ref.to_reference(fail_if_not_exists=False) if hasattr(ref, "to_reference") else ref
+                await channel.send(line, reference=ref, mention_author=False,
+                                   allowed_mentions=discord.AllowedMentions.none())
+            except TypeError:
+                await channel.send(line, allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                log.warning("Couldn't post the reaction for pick %s", p["id"])
+        if not roast:
+            await voice_say(client, gid, re.sub(r"[*_`]|<[^>]+>", "", line))
+
+
+# ---- heads-up when logging a pick ---------------------------------------------------------------------
+
+_PROP_CACHE: dict[str, Optional[dict]] = {}
+
+
+def cached_prop(text: str) -> Optional[dict]:
+    if text not in _PROP_CACHE:
+        if len(_PROP_CACHE) > 20000:
+            _PROP_CACHE.clear()
+        try:
+            _PROP_CACHE[text] = prop_of(text)
+        except Exception:
+            _PROP_CACHE[text] = None
+    return _PROP_CACHE[text]
+
+
+def _rate_line(label: str, good: int, bad: int, legs: bool) -> str:
+    pct = good / (good + bad) * 100
+    return (f"hit **{good} of {good + bad}** {label} ({pct:.0f}%)" if legs else
+            f"**{good}-{bad}** on {label} ({pct:.0f}%)")
+
+
+def headsup_lines(guild_id: int, key: str, p) -> list[str]:
+    """Up to two things the bettor's own history says about this kind of pick."""
+    settled = [x for x in db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status IN "
+                                       "('win', 'loss') AND id != ?", (guild_id, key, p["id"]))]
+    legs_hist = db().execute("""SELECT l.text, l.status FROM legs l JOIN picks q ON q.id = l.pick_id
+                                WHERE q.guild_id = ? AND q.bettor_key = ? AND l.status IN ('hit', 'miss')
+                                AND q.id != ?""", (guild_id, key, p["id"])).fetchall()
+    found = []  # (strength, line, bad?)
+    if len(settled) >= 8:
+        base = sum(1 for x in settled if x["status"] == "win") / len(settled)
+        n_legs = len(get_legs(p["id"])) or 1
+        slices = []
+        if p["sport"]:
+            g = sport_group(p["sport"])
+            slices.append((f"{g} picks", [x for x in settled if sport_group(x["sport"]) == g]))
+        slices.append((f"{p['platform']} picks", [x for x in settled if x["platform"] == p["platform"]]))
+        sz = size_group(n_legs)
+        counts = {x["id"]: n for x, n in ((x, len(get_legs(x["id"])) or 1) for x in settled)}
+        slices.append((f"{sz.lower()} slips" if sz != "Single" else "single picks",
+                       [x for x in settled if size_group(counts[x["id"]]) == sz]))
+        day = datetime.now(TZ).strftime("%A")
+        slices.append((f"{day}s", [x for x in settled
+                                   if datetime.fromisoformat(x["created_at"]).astimezone(TZ).strftime("%A") == day]))
+        for label, rows in slices:
+            n = len(rows)
+            if n < 8 or n == len(settled):
+                continue
+            w = sum(1 for x in rows if x["status"] == "win")
+            rate = w / n
+            if abs(rate - base) >= 0.15:
+                found.append((abs(rate - base) * n ** 0.5, _rate_line(label, w, n - w, False), rate < base))
+    if len(legs_hist) >= 10:
+        parsed = [(cached_prop(x["text"]), x["status"]) for x in legs_hist]
+        base = sum(1 for _, s in parsed if s == "hit") / len(parsed)
+        seen = set()
+        for leg in get_legs(p["id"]):
+            pr = cached_prop(leg["text"])
+            if not pr:
+                continue
+            stat = pr["stats"][0]
+            label = f"{STATS[stat][0]} {pr['side']}s"
+            for lab, match in ((label, lambda q: q and q["stats"][0] == stat and q["side"] == pr["side"]),
+                               (f"legs on {pr['display']}", lambda q: q and q["player"] == pr["player"])):
+                if lab in seen:
+                    continue
+                seen.add(lab)
+                rows = [s for q, s in parsed if match(q)]
+                n = len(rows)
+                if n < 6:
+                    continue
+                h = sum(1 for s in rows if s == "hit")
+                rate = h / n
+                if abs(rate - base) >= 0.15:
+                    found.append((abs(rate - base) * n ** 0.5, _rate_line(lab, h, n - h, True), rate < base))
+    found.sort(key=lambda x: -x[0])
+    return [("⚠️ " if bad else "✅ ") + "You've " + line + "." for _, line, bad in found[:2]]
+
+
+def headsup_text(guild_id: int, key: str, pick_id: int) -> Optional[str]:
+    if key.startswith("label:") or get_setting(guild_id, f"headsup:{key}") == "off":
+        return None
+    p = get_pick(guild_id, pick_id)
+    if p is None:
+        return None
+    try:
+        lines = headsup_lines(guild_id, key, p)
+    except Exception:
+        log.exception("Heads-up failed")
+        return None
+    if not lines:
+        return None
+    return ("🧠 **Heads-up from your own history** (only you see this):\n" + "\n".join(lines) +
+            "\n-# Turn these off with `/me headsup`.")
+
+
+# ---- the trading card ----------------------------------------------------------------------------
+
+def card_numbers(guild_id: int, key: str) -> Optional[dict]:
+    stats = compute_stats(guild_id, key)
+    if not stats:
+        return None
+    s = stats[0]
+    settled = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open' "
+                           "ORDER BY settled_at, id", (guild_id, key)).fetchall()
+    lc = leg_counts(guild_id, key)
+    graded = lc["hit"] + lc["miss"]
+    leg_rate = lc["hit"] / graded if graded else None
+    n = s["wins"] + s["losses"]
+    last10 = [p["status"] for p in settled if p["status"] in ("win", "loss")][-10:]
+    wins = [p for p in settled if p["status"] == "win" and p["cost"]]
+    best_mult = max(((p["returned"] or 0) / p["cost"] for p in wins), default=0)
+    avg_legs = (sum(len(get_legs(p["id"])) or 1 for p in settled) / len(settled)) if settled else 0
+    avg_mult = (sum(p["payout"] / p["cost"] for p in settled if p["cost"]) / len(settled)) if settled else 0
+    # rating: legs hit, ROI and recent form, pulled toward 60 until there's a real sample
+    leg_score = max(0.0, min(1.0, ((leg_rate if leg_rate is not None else 0.5) - 0.40) / 0.30))
+    roi_score = max(0.0, min(1.0, (s["roi"] + 50) / 100))
+    form_score = max(0.0, min(1.0, (sum(1 for x in last10 if x == "win") / len(last10)) / 0.6)) if last10 else 0.5
+    raw = 50 + 49 * (0.45 * leg_score + 0.35 * roi_score + 0.20 * form_score)
+    w = n / (n + 15)
+    ovr = int(round(max(40, min(99, 60 + (raw - 60) * w))))
+    wins10 = sum(1 for x in last10 if x == "win")
+    if n < 5:
+        title = "Rookie Card"
+    elif len(last10) >= 6 and wins10 >= 7:
+        title = "On Fire"
+    elif len(last10) >= 6 and wins10 == 0:
+        title = "Ice Cold"
+    elif s["roi"] >= 25 and n >= 20:
+        title = "The Oracle"
+    elif avg_mult >= 10:
+        title = "Longshot Hunter"
+    elif avg_legs >= 4.5:
+        title = "Parlay Merchant"
+    elif leg_rate is not None and leg_rate >= 0.6 and graded >= 30:
+        title = "Prop Sniper"
+    elif s["net"] >= 0:
+        title = "In the Green"
+    else:
+        title = "Still Cooking"
+    groups = breakdown(settled, lambda p: sport_group(p["sport"]))
+    top_sport = groups[0][0] if groups and groups[0][0] != "No sport" else None
+    first = db().execute("SELECT MIN(id) AS m FROM picks WHERE guild_id = ? AND bettor_key = ?", (guild_id, key)).fetchone()["m"]
+    return {"s": s, "settled": settled, "leg_rate": leg_rate, "n": n, "ovr": ovr, "title": title,
+            "rarity": rarity_for(ovr, n), "best_mult": best_mult, "groups": groups, "top_sport": top_sport,
+            "serial": f"#{first:04d}" if first else ""}
+
+
+def card_payload(guild_id: int, key: str, name: str, back: bool = False) -> Optional[dict]:
+    cn = card_numbers(guild_id, key)
+    if cn is None:
+        return None
+    s = cn["s"]
+    green, red = ART_GREEN, ART_RED
+    streak = current_streak(guild_id, key).lstrip("🔥🧊")
+    stats = [("WIN %", f"{s['wins'] / cn['n'] * 100:.0f}%" if cn["n"] else "-", None),
+             ("ROI", f"{s['roi']:+.1f}%", green if s["roi"] >= 0 else red),
+             ("LEGS HIT", f"{cn['leg_rate'] * 100:.0f}%" if cn["leg_rate"] is not None else "-", None),
+             ("NET", signed_short(s["net"]), green if s["net"] >= 0 else red),
+             ("STREAK", streak or "-", green if streak.startswith("W") else red if streak.startswith("L") else None),
+             ("BEST", f"{cn['best_mult']:.0f}x" if cn["best_mult"] else "-", ART_AMBER if cn["best_mult"] >= 5 else None)]
+    got = earned_badges(guild_id, key)
+    tag = " · ".join(x for x in ((get_setting(guild_id, f"cardtitle:{key}") or ""),
+                                 (get_bio(guild_id, int(key)).get("tagline") if key.isdigit() else "") or "") if x)
+    c = {"name": s["name"] or name, "ovr": cn["ovr"], "rarity": cn["rarity"], "title": cn["title"],
+         "sport": cn["top_sport"], "stats": stats, "badges": [n for k, n, _ in BADGES if k in got], "tagline": tag,
+         "serial": cn["serial"], "season": str(datetime.now(TZ).year), "back": back}
+    if back:
+        rows = []
+        for g, v in cn["groups"][:3]:
+            if g == "No sport":
+                continue
+            rows.append((g, f"{v['w']}-{v['l']} · {signed_short(v['net'])}"))
+        plats = breakdown(cn["settled"], lambda p: p["platform"])
+        if plats:
+            rows.append(("Favorite app", plats[0][0]))
+        players: dict[str, int] = {}
+        for x in db().execute("SELECT l.text FROM legs l JOIN picks q ON q.id = l.pick_id WHERE q.guild_id = ? "
+                              "AND q.bettor_key = ?", (guild_id, key)):
+            pr = cached_prop(x["text"])
+            if pr:
+                players[pr["display"]] = players.get(pr["display"], 0) + 1
+        if players:
+            top = max(players.items(), key=lambda kv: kv[1])
+            rows.append(("Most played", f"{top[0]} ({top[1]} legs)"))
+        wins = [p for p in cn["settled"] if p["status"] == "win"]
+        if wins:
+            b = max(wins, key=pick_net)
+            rows.append(("Best hit", f"{signed_short(pick_net(b))} on {clip(b['description'], 26)}"))
+        heart = sum(1 for p in cn["settled"] if p["status"] == "loss"
+                    and sum(1 for x in get_legs(p["id"]) if x["status"] == "miss") == 1 and len(get_legs(p["id"])) >= 3)
+        if heart:
+            rows.append(("Lost by one leg", f"{heart}×"))
+        lines = []
+        parsed = [(cached_prop(x["text"]), x["status"]) for x in db().execute(
+            "SELECT l.text, l.status FROM legs l JOIN picks q ON q.id = l.pick_id WHERE q.guild_id = ? AND "
+            "q.bettor_key = ? AND l.status IN ('hit','miss')", (guild_id, key))]
+        for side in ("over", "under"):
+            xs = [s2 for q, s2 in parsed if q and q["side"] == side]
+            if len(xs) >= 5:
+                lines.append(f"Hits {sum(1 for v in xs if v == 'hit') / len(xs) * 100:.0f}% of {side}s ({len(xs)} legs)")
+        days = breakdown(cn["settled"], lambda p: datetime.fromisoformat(p["created_at"]).astimezone(TZ).strftime("%A"))
+        days = [(d, v) for d, v in days if v["w"] + v["l"] >= 4]
+        if days:
+            best = max(days, key=lambda kv: kv[1]["w"] / (kv[1]["w"] + kv[1]["l"]))
+            worst = min(days, key=lambda kv: kv[1]["w"] / (kv[1]["w"] + kv[1]["l"]))
+            lines.append(f"Best day: {best[0]} ({best[1]['w']}-{best[1]['l']})")
+            if worst[0] != best[0]:
+                lines.append(f"Coldest day: {worst[0]} ({worst[1]['w']}-{worst[1]['l']})")
+        lines.append(f"Card rating {cn['ovr']} · {cn['rarity'][0]} · {cn['n']} settled picks")
+        c["back_rows"], c["back_lines"] = rows, lines
+    return c
+
+
+_AVATAR_CACHE: dict[int, tuple[float, Optional[bytes]]] = {}
+
+
+async def avatar_bytes(user) -> Optional[bytes]:
+    if user is None:
+        return None
+    uid = getattr(user, "id", None)
+    hit = _AVATAR_CACHE.get(uid)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    raw = await fetch_avatar(user)
+    _AVATAR_CACHE[uid] = (time.monotonic() + (6 * 3600 if raw else 600), raw)
+    return raw
+
+
+class CardFlipButton(discord.ui.Button):
+    def __init__(self, key: str, name: str, user, back: bool = False):
+        super().__init__(label="🔄 Front" if back else "🔄 Flip", style=discord.ButtonStyle.secondary)
+        self.key, self.name, self.user, self.back = key, name, user, back
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        self.back = not self.back
+        self.label = "🔄 Front" if self.back else "🔄 Flip"
+        c = card_payload(interaction.guild_id, self.key, self.name, back=self.back)
+        if c is None:
+            return
+        av = await avatar_bytes(self.user)
+        png = await asyncio.to_thread(locked_render, render_trading_card, c, av)
+        await interaction.edit_original_response(attachments=[discord.File(png, filename="card.png")],
+                                                 view=getattr(self, "parent_view", None) or self.view)
+
+
+def CardFlipView(key: str, name: str, user, back: bool = False) -> discord.ui.View:
+    v = discord.ui.View(timeout=1800)
+    b = CardFlipButton(key, name, user, back)
+    v.add_item(b)
+    b.parent_view = v
+    return v
+
+
+# ---- personal milestones -----------------------------------------------------------------------------
+
+PICK_MILESTONES = (100, 250, 500, 1000)
+
+
+async def personal_milestones(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    since = iso(now - timedelta(hours=6))
+    for r in db().execute("SELECT guild_id, value FROM settings WHERE key = 'recap_channel'").fetchall():
+        gid = r["guild_id"]
+        channel = client.get_channel(int(r["value"]))
+        keys = [x["bettor_key"] for x in db().execute("SELECT DISTINCT bettor_key FROM picks WHERE guild_id = ?", (gid,))]
+        first_run = get_setting(gid, "pm_init") is None
+        if first_run:
+            set_setting(gid, "pm_init", now_iso())
+        out = []
+        for key in keys:
+            name_row = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY id DESC "
+                                    "LIMIT 1", (gid, key)).fetchone()
+            who = f"<@{key}>" if key.isdigit() else f"**{name_row['bettor_name']}**"
+            total = db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND bettor_key = ?", (gid, key)).fetchone()["n"]
+            reached = max([m for m in PICK_MILESTONES if total >= m], default=0)
+            prev = int(get_setting(gid, f"pmcount:{key}") or 0)
+            if reached > prev:
+                set_setting(gid, f"pmcount:{key}", str(reached))
+                newest = db().execute("SELECT created_at, import_key FROM picks WHERE guild_id = ? AND bettor_key = ? "
+                                      "ORDER BY id DESC LIMIT 1", (gid, key)).fetchone()
+                fresh = newest and not newest["import_key"] and newest["created_at"] >= since
+                if not first_run and fresh:
+                    s = compute_stats(gid, key)[0]
+                    out.append(f"📒 {who} just logged pick **#{reached}**. Lifetime: {record_line(s)}, {signed(s['net'])}.")
+            wins = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status = 'win'",
+                                (gid, key)).fetchall()
+            if wins:
+                best = max(wins, key=pick_net)
+                prev_pb = get_setting(gid, f"pb:{key}")
+                if prev_pb is None or first_run:
+                    set_setting(gid, f"pb:{key}", f"{pick_net(best):.2f}")
+                elif pick_net(best) > float(prev_pb) + 0.005:
+                    set_setting(gid, f"pb:{key}", f"{pick_net(best):.2f}")
+                    if len(wins) >= 6 and (best["settled_at"] or "") >= since and \
+                            (not best["hidden"] or best["revealed_at"]):
+                        out.append(f"🏆 New personal best for {who}: **{signed(pick_net(best))}** on "
+                                   f"{clip(best['description'], 70)}.")
+            last_settle = db().execute("SELECT MAX(settled_at) AS m FROM picks WHERE guild_id = ? AND bettor_key = ?",
+                                       (gid, key)).fetchone()["m"] or ""
+            changed = last_settle != (get_setting(gid, f"pmseen:{key}") or "")
+            if changed:
+                set_setting(gid, f"pmseen:{key}", last_settle or None)
+            if changed or first_run:
+                cn = card_numbers(gid, key)
+                if cn:
+                    tier = [x[0] for x in RARITIES].index(cn["rarity"][0])
+                    prev_t = get_setting(gid, f"tier:{key}")
+                    if prev_t is None or first_run:
+                        set_setting(gid, f"tier:{key}", str(tier))
+                    elif tier > int(prev_t):
+                        set_setting(gid, f"tier:{key}", str(tier))
+                        out.append(f"🃏 {who}'s card just upgraded to **{cn['rarity'][0].upper()}** (OVR {cn['ovr']}). "
+                                   "`/card` to see it.")
+        # once a day: pickiversaries and birthdays
+        today = local.date().isoformat()
+        if local.hour >= 10 and get_setting(gid, "pm_day") != today:
+            set_setting(gid, "pm_day", today)
+            if not first_run:
+                for key in keys:
+                    first = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY created_at "
+                                         "LIMIT 1", (gid, key)).fetchone()
+                    d0 = datetime.fromisoformat(first["created_at"]).astimezone(TZ).date()
+                    if d0.month == local.month and d0.day == local.day and d0.year < local.year:
+                        yrs = local.year - d0.year
+                        s = compute_stats(gid, key)[0]
+                        who = f"<@{key}>" if key.isdigit() else f"**{first['bettor_name']}**"
+                        out.append(f"📅 Happy pickiversary {who}! {yrs} year{'s' if yrs != 1 else ''} since your first "
+                                   f"pick. Since then: {record_line(s)}, {signed(s['net'])}.")
+                import calendar
+                bday_today = {local.strftime("%m-%d")}
+                if local.strftime("%m-%d") == "02-28" and not calendar.isleap(local.year):
+                    bday_today.add("02-29")
+                for b in db().execute("SELECT key, value FROM settings WHERE guild_id = ? AND key LIKE 'bday:%'", (gid,)):
+                    if b["value"] in bday_today:
+                        uid = b["key"].split(":", 1)[1]
+                        line = f"🎂 Happy birthday <@{uid}>! 🎉"
+                        wins = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status = 'win'",
+                                            (gid, uid)).fetchall()
+                        if wins:
+                            best = max(wins, key=pick_net)
+                            line += f" Still thinking about that {signed(pick_net(best))} on {clip(best['description'], 50)}."
+                        out.append(line)
+        if channel is not None:
+            for line in out:
+                await channel.send(line, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+
+# ---- asking about the group's own data --------------------------------------------------------------
+
+ASK_DATA: contextvars.ContextVar = contextvars.ContextVar("ask_data", default=None)
+
+DATA_TOOL = {
+    "name": "group_stats",
+    "description": ("Look up this Discord group's own logged betting records (their picks and parlay legs). Use it for "
+                    "ANY question about the group's or a member's results, records, profit, hit rates, tendencies, or "
+                    "who is best/worst at something. Every number you state about the group must come from this tool. "
+                    "Pick-level results (W-L, profit) unless you filter or group by stat/side/player, which switches to "
+                    "leg-level hit rates."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "bettor": {"type": "string", "description": "A member's name, or 'me' for the person asking. Omit for everyone."},
+            "sport": {"type": "string", "description": "e.g. NFL, NBA, CS2, Soccer"},
+            "platform": {"type": "string", "description": "e.g. PrizePicks, Kalshi, Sportsbook"},
+            "since_days": {"type": "integer", "description": "Only the last N days (e.g. 30 for 'this month')"},
+            "stat": {"type": "string", "description": "A prop stat like 'rebounds', 'pass yards', 'PRA'"},
+            "side": {"type": "string", "enum": ["over", "under"]},
+            "player": {"type": "string", "description": "A player name, for legs on that player"},
+            "group_by": {"type": "string", "enum": ["none", "bettor", "sport", "platform", "month", "weekday", "stat",
+                                                    "side", "player", "legs"]},
+            "chart": {"type": "boolean", "description": "true to attach a bar chart of the groups"},
+        },
+    },
+}
+
+
+def _find_bettor(guild_id: int, text: str, asker_key: str) -> Optional[tuple[str, str]]:
+    t = (text or "").strip().lower()
+    if t in ("me", "my", "myself", "i", "mine"):
+        row = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY id DESC LIMIT 1",
+                           (guild_id, asker_key)).fetchone()
+        return asker_key, row["bettor_name"] if row else "you"
+    best = None
+    for s in compute_stats(guild_id):
+        n = (s["name"] or "").lower()
+        if n == t:
+            return s["key"], s["name"]
+        if t and (t in n or n in t) and best is None:
+            best = (s["key"], s["name"])
+    return best
+
+
+def run_group_stats(guild_id: int, asker_key: str, args: dict) -> dict:
+    args = {k: v for k, v in (args or {}).items() if v not in (None, "", "none")}
+    group_by = args.get("group_by", "none")
+    leg_level = bool(args.get("stat") or args.get("side") or args.get("player")) or group_by in ("stat", "side", "player")
+    since = iso(datetime.now(timezone.utc) - timedelta(days=int(args["since_days"]))) if args.get("since_days") else None
+    who = None
+    if args.get("bettor"):
+        who = _find_bettor(guild_id, args["bettor"], asker_key)
+        if who is None:
+            names = [s["name"] for s in compute_stats(guild_id)]
+            return {"error": f"No member called {args['bettor']!r}. Members: {', '.join(names[:30])}"}
+    picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND (hidden IS NULL OR hidden = 0 "
+                         "OR revealed_at IS NOT NULL)", (guild_id,)).fetchall()
+
+    def keep(p) -> bool:
+        if who and p["bettor_key"] != who[0]:
+            return False
+        if since and (p["settled_at"] or "") < since:
+            return False
+        if args.get("sport") and args["sport"].lower() not in (sport_group(p["sport"]) + " " + (p["sport"] or "")).lower():
+            return False
+        if args.get("platform") and args["platform"].lower() not in (p["platform"] or "").lower():
+            return False
+        return True
+
+    picks = [p for p in picks if keep(p)]
+    out: dict = {"filters": {k: v for k, v in args.items() if k != "chart"}, "level": "legs" if leg_level else "picks"}
+    if who:
+        out["filters"]["bettor"] = who[1]
+    if not leg_level:
+        def kfn(p):
+            if group_by == "bettor":
+                return p["bettor_name"]
+            if group_by == "sport":
+                return sport_group(p["sport"])
+            if group_by == "platform":
+                return p["platform"]
+            if group_by == "month":
+                return (p["settled_at"] or p["created_at"])[:7]
+            if group_by == "weekday":
+                return datetime.fromisoformat(p["created_at"]).astimezone(TZ).strftime("%A")
+            if group_by == "legs":
+                return size_group(len(get_legs(p["id"])) or 1)
+            return "all"
+        groups = breakdown(picks, kfn)
+        rows = []
+        for g, v in groups:
+            n = v["w"] + v["l"]
+            rows.append({"group": g, "record": f"{v['w']}-{v['l']}" + (f"-{v['p']}" if v["p"] else ""),
+                         "win_pct": round(v["w"] / n * 100, 1) if n else None, "net": round(v["net"], 2),
+                         "staked": round(v["staked"], 2), "roi_pct": round(v["net"] / v["staked"] * 100, 1) if v["staked"] else None})
+        if group_by in ("month",):
+            rows.sort(key=lambda r: r["group"])
+        elif group_by != "none":
+            rows.sort(key=lambda r: -r["net"])
+        out["groups"] = rows[:15]
+        out["chart_metric"] = "net"
+    else:
+        ids = {p["id"]: p for p in picks}
+        legs = [x for x in db().execute("SELECT l.pick_id, l.text, l.status FROM legs l JOIN picks q ON q.id = l.pick_id "
+                                        "WHERE q.guild_id = ? AND l.status IN ('hit', 'miss')", (guild_id,))
+                if x["pick_id"] in ids]
+        want_stats = set(stat_keys_in(args["stat"])) if args.get("stat") else None
+        want_player = norm_name(args["player"]) if args.get("player") else None
+        groups: dict[str, list[int]] = {}
+        for x in legs:
+            pr = cached_prop(x["text"])
+            if (want_stats or args.get("side") or want_player or group_by in ("stat", "side", "player")) and not pr:
+                continue
+            if want_stats and not (set(pr["stats"]) & want_stats):
+                continue
+            if args.get("side") and pr["side"] != args["side"]:
+                continue
+            if want_player and want_player not in pr["player"]:
+                continue
+            p = ids[x["pick_id"]]
+            g = {"bettor": p["bettor_name"], "sport": sport_group(p["sport"]), "platform": p["platform"],
+                 "month": (p["settled_at"] or p["created_at"])[:7],
+                 "weekday": datetime.fromisoformat(p["created_at"]).astimezone(TZ).strftime("%A"),
+                 "stat": STATS[pr["stats"][0]][0] if pr else "?", "side": pr["side"] if pr else "?",
+                 "player": pr["display"] if pr else "?"}.get(group_by, "all")
+            c = groups.setdefault(g, [0, 0])
+            c[0 if x["status"] == "hit" else 1] += 1
+        rows = [{"group": g, "hit": h, "miss": m, "hit_pct": round(h / (h + m) * 100, 1)} for g, (h, m) in groups.items()]
+        rows.sort(key=lambda r: r["group"] if group_by == "month" else -(r["hit"] + r["miss"]))
+        if group_by in ("bettor", "player", "stat") and len(rows) > 1:
+            rows = [r for r in rows if r["hit"] + r["miss"] >= 3] or rows
+            rows.sort(key=lambda r: -r["hit_pct"])
+        out["groups"] = rows[:15]
+        out["chart_metric"] = "hit_pct"
+    if not out["groups"]:
+        out["note"] = "Nothing matches those filters."
+    return out
+
+
+def render_bars(title: str, labels: list[str], values: list[float], pct: bool) -> io.BytesIO:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(9, max(2.6, 0.5 * len(labels) + 1.2)), dpi=110)
+    fig.patch.set_facecolor(CHART_SURFACE)
+    ax.set_facecolor(CHART_SURFACE)
+    ys = list(range(len(labels)))[::-1]
+    colors = [("#3fb97a" if v >= (50 if pct else 0) else "#e66767") for v in values]
+    ax.barh(ys, values, color=colors, height=0.62)
+    ax.set_yticks(ys)
+    ax.set_yticklabels([clip(x, 30) for x in labels], color=CHART_TEXT, fontsize=11)
+    ax.tick_params(axis="x", colors=CHART_MUTED)
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.axvline(50 if pct else 0, color=CHART_MUTED, linewidth=1, alpha=0.6)
+    if pct:
+        ax.set_xlim(0, 112)
+    else:
+        lo, hi = min(values + [0]), max(values + [0])
+        pad = (hi - lo) * 0.18 or 10
+        ax.set_xlim(lo - (pad if lo < 0 else 0), hi + pad)
+    for y, v in zip(ys, values):
+        ax.text(v, y, f" {v:.0f}%" if pct else f" {'+' if v >= 0 else '-'}${abs(v):,.0f}", va="center",
+                ha="left" if v >= 0 else "right", color=CHART_TEXT, fontsize=10)
+    ax.set_title(clip(title, 70), color=CHART_TEXT, fontsize=13, loc="left", fontweight="bold")
+    ax.grid(axis="x", color=CHART_GRID, linewidth=0.6)
+    ax.set_axisbelow(True)
+    fig.tight_layout()
+    out = io.BytesIO()
+    fig.savefig(out, format="png", facecolor=CHART_SURFACE)
+    plt.close(fig)
+    out.seek(0)
+    return out
+
+
+def chart_from_result(res: dict) -> Optional[tuple]:
+    rows = [r for r in res.get("groups") or [] if r.get("group") not in ("all",)]
+    metric = res.get("chart_metric")
+    if len(rows) < 2:
+        return None
+    vals = [r.get("net") if metric == "net" else r.get("hit_pct") for r in rows]
+    if any(v is None for v in vals):
+        return None
+    f = res.get("filters") or {}
+    bits = [f.get("bettor"), f.get("sport"), f.get("platform"), f.get("stat"), f.get("side") and f["side"] + "s",
+            f.get("player"), f"last {f['since_days']} days" if f.get("since_days") else None]
+    title = ("Profit" if metric == "net" else "Legs hit") + " by " + (f.get("group_by") or "group") + \
+            (" · " + " · ".join(b for b in bits if b) if any(bits) else "")
+    labels = [f"{r['group']} ({r['record']})" if metric == "net" else f"{r['group']} ({r['hit']}/{r['hit'] + r['miss']})"
+              for r in rows]
+    return title, labels, [float(v) for v in vals], metric != "net"
+
+
+# ---- live receipts and the live board --------------------------------------------------------------
+
+_PROGRESS_CACHE: dict[int, tuple[float, list]] = {}
+
+
+async def cached_progress(p, ttl: float = 100) -> list[dict]:
+    hit = _PROGRESS_CACHE.get(p["id"])
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    try:
+        entries = await leg_progress(p)
+    except Exception:
+        log.exception("Progress failed for pick %s", p["id"])
+        entries = [{"n": x["idx"], "text": x["text"], "status": x["status"], "live": None, "in_play": False,
+                    "num": None, "sub": "", "event": None} for x in get_legs(p["id"])]
+    _PROGRESS_CACHE[p["id"]] = (time.monotonic() + ttl, entries)
+    if len(_PROGRESS_CACHE) > 500:
+        for k in list(_PROGRESS_CACHE)[:250]:
+            _PROGRESS_CACHE.pop(k, None)
+    return entries
+
+
+def db_entries(p) -> list[dict]:
+    """Leg rows from the database only (no network), for settled picks and fallbacks."""
+    return [{"n": x["idx"], "text": x["text"], "status": x["status"], "live": None, "in_play": False, "num": None,
+             "sub": "", "event": None} for x in get_legs(p["id"])]
+
+
+def receipt_sig(p, entries: list[dict]) -> str:
+    """What's worth re-drawing for: results, who's ahead, stat numbers and scores (not the game clock)."""
+    def score(sub: str) -> str:
+        return (sub or "").split(" · ")[0] if any(ch.isdigit() for ch in (sub or "").split(" · ")[0]) else ""
+    return json.dumps([p["status"], [(e.get("status"), e.get("live"), (e.get("num") or {}).get("value"),
+                                      score(e.get("sub")) if not e.get("num") else "", bool(e.get("in_play")))
+                                     for e in entries]], default=str)
+
+
+def receipt_data(p, entries: list[dict], avatar: Optional[bytes]) -> dict:
+    return {"name": p["bettor_name"], "avatar": avatar, "platform": p["platform"], "description": p["description"],
+            "cost": p["cost"], "payout": p["payout"], "pick_id": p["id"], "status": p["status"], "net": pick_net(p),
+            "legs": entries, "updated": datetime.now(TZ).strftime("%-I:%M %p")}
+
+
+async def receipt_file(client, p, entries: Optional[list] = None) -> discord.File:
+    if entries is None:
+        entries = await cached_progress(p) if p["status"] == "open" else db_entries(p)
+    user = None
+    if p["bettor_id"]:
+        user = client.get_user(p["bettor_id"]) if client is not None and hasattr(client, "get_user") else None
+    av = await avatar_bytes(user) if user is not None else None
+    png = await asyncio.to_thread(locked_render, render_receipt, receipt_data(p, entries, av))
+    return discord.File(png, filename=f"receipt_{p['id']}.png")
+
+
+def receipt_embed(p, filename: str) -> discord.Embed:
+    e = pick_embed(p)
+    e.set_image(url=f"attachment://{filename}")
+    return e
+
+
+async def update_receipts(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    rows = r14_db().execute("SELECT * FROM pick_msgs WHERE receipt = 1 AND done = 0 ORDER BY updated_at LIMIT 12").fetchall()
+    for r in rows:
+        p = get_pick(r["guild_id"], r["pick_id"])
+        if p is None:
+            db().execute("UPDATE pick_msgs SET done = 1 WHERE pick_id = ?", (r["pick_id"],))
+            db().commit()
+            continue
+        stale = datetime.fromisoformat(p["created_at"]) < now - timedelta(days=4)
+        settled = p["status"] != "open"
+        entries = db_entries(p) if settled or stale else await cached_progress(p)
+        sig = receipt_sig(p, entries)
+        done = 1 if settled or stale else 0
+        if sig == r["sig"] and not done:
+            db().execute("UPDATE pick_msgs SET updated_at = ? WHERE pick_id = ?", (now_iso(), r["pick_id"]))
+            db().commit()
+            continue
+        db().execute("UPDATE pick_msgs SET sig = ?, updated_at = ?, done = ? WHERE pick_id = ?",
+                     (sig, now_iso(), done, r["pick_id"]))
+        db().commit()
+        channel = client.get_channel(r["channel_id"])
+        if channel is None:
+            continue
+        try:
+            f = await receipt_file(client, p, entries)
+            await channel.get_partial_message(r["message_id"]).edit(embed=receipt_embed(p, f.filename), attachments=[f])
+        except discord.NotFound:
+            db().execute("UPDATE pick_msgs SET done = 1 WHERE pick_id = ?", (r["pick_id"],))
+            db().commit()
+        except Exception:
+            log.warning("Couldn't update the receipt for pick %s", p["id"], exc_info=True)
+
+
+BOARD_HOURS = 10
+
+
+def board_state(guild_id: int) -> Optional[dict]:
+    raw = get_setting(guild_id, "board")
+    return json.loads(raw) if raw else None
+
+
+async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
+    """(png, live?, signature, count) for the group's open slips with games today, or None if there are none."""
+    cutoff = iso(datetime.now(timezone.utc) - timedelta(days=3))
+    picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND (hidden IS NULL OR hidden = 0) "
+                         "AND created_at >= ? ORDER BY id DESC LIMIT 25", (guild_id, cutoff)).fetchall()
+    today = datetime.now(TZ).date()
+    slips = []
+    for p in picks:
+        entries = await cached_progress(p)
+        relevant = False
+        for e in entries:
+            ev = e.get("event")
+            when = event_time(ev) if ev and ev.get("date") else None
+            if e.get("in_play") or (when and when.astimezone(TZ).date() == today) or \
+                    (e.get("status") != "open" and ev and ev.get("state") == "post"):
+                relevant = True
+        if not relevant:
+            continue
+        user = client.get_user(p["bettor_id"]) if p["bettor_id"] and hasattr(client, "get_user") else None
+        slips.append({"name": p["bettor_name"], "avatar": await avatar_bytes(user) if user else None, "cost": p["cost"],
+                      "payout": p["payout"], "description": p["description"], "legs": entries, "id": p["id"],
+                      "live": any(e.get("in_play") for e in entries)})
+    if not slips:
+        return None
+    slips.sort(key=lambda s: (not s["live"], -sum(1 for e in s["legs"] if leg_visual(e)["state"] in ("hit", "ahead"))))
+    all_legs = [e for s in slips for e in s["legs"]]
+    live = any(s["live"] for s in slips)
+    data = {"title": "TONIGHT'S BOARD", "when": datetime.now(TZ).strftime("%a %b %-d · %-I:%M %p"), "live": live,
+            "slips": slips, "totals": {"slips": len(slips), "cost": sum(s["cost"] for s in slips),
+                                       "payout": sum(s["payout"] for s in slips), "legs": len(all_legs),
+                                       "cashing": sum(1 for e in all_legs if leg_visual(e)["state"] in ("hit", "ahead"))}}
+    sig = json.dumps([[s["id"], receipt_sig({"status": "open"}, s["legs"])] for s in slips])
+    png = await asyncio.to_thread(locked_render, render_board, data)
+    return png, live, sig, len(slips)
+
+
+class BoardButton(discord.ui.DynamicItem[discord.ui.Button], template=r"bd:(?P<act>ref|stop)"):
+    def __init__(self, act: str):
+        label = {"ref": "🔄 Refresh", "stop": "🛑 Stop"}[act]
+        super().__init__(discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, custom_id=f"bd:{act}"))
+        self.act = act
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["act"])
+
+    async def callback(self, interaction: discord.Interaction):
+        st = board_state(interaction.guild_id)
+        current = bool(st) and getattr(interaction.message, "id", None) == st.get("message_id")
+        if not current:
+            await interaction.response.edit_message(view=None)   # an old board: retire its buttons
+            return
+        if self.act == "stop":
+            if interaction.user.id != st.get("by") and not is_mod(interaction.user):
+                await interaction.response.send_message("Only whoever started the board or a mod can stop it.",
+                                                        ephemeral=True)
+                return
+            set_setting(interaction.guild_id, "board", None)
+            await interaction.response.edit_message(view=None)
+            return
+        await interaction.response.defer()
+        snap = await board_snapshot(interaction.client, interaction.guild_id)
+        if snap is None:
+            await interaction.followup.send("No open slips with games today.", ephemeral=True)
+            return
+        png, live, sig, _ = snap
+        if st:
+            st["sig"] = sig
+            set_setting(interaction.guild_id, "board", json.dumps(st))
+        await interaction.edit_original_response(attachments=[discord.File(png, filename="board.png")], view=board_view())
+
+
+def board_view() -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    v.add_item(BoardButton("ref"))
+    v.add_item(BoardButton("stop"))
+    return v
+
+
+async def retire_board(client, guild_id: int) -> None:
+    st = board_state(guild_id)
+    if not st:
+        return
+    set_setting(guild_id, "board", None)
+    channel = client.get_channel(st["channel_id"]) if client is not None else None
+    if channel is not None:
+        try:
+            await channel.get_partial_message(st["message_id"]).edit(view=None)
+        except Exception:
+            pass
+
+
+async def start_board(client, guild_id: int, channel, by: int = 0) -> bool:
+    snap = await board_snapshot(client, guild_id)
+    if snap is None:
+        return False
+    await retire_board(client, guild_id)
+    png, live, sig, _ = snap
+    msg = await channel.send(file=discord.File(png, filename="board.png"), view=board_view())
+    set_setting(guild_id, "board", json.dumps({"channel_id": channel.id, "message_id": msg.id, "started": now_iso(),
+                                               "sig": sig, "by": by}))
+    return True
+
+
+async def update_boards(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    for r in db().execute("SELECT guild_id, value FROM settings WHERE key = 'board' AND value IS NOT NULL").fetchall():
+        gid = r["guild_id"]
+        try:
+            st = json.loads(r["value"])
+            channel = client.get_channel(st["channel_id"])
+            if channel is None:
+                set_setting(gid, "board", None)
+                continue
+            expired = datetime.fromisoformat(st["started"]) < now - timedelta(hours=BOARD_HOURS)
+            snap = None if expired else await board_snapshot(client, gid)
+            msg = channel.get_partial_message(st["message_id"])
+            if snap is None:
+                set_setting(gid, "board", None)
+                await msg.edit(view=None)
+                continue
+            png, live, sig, _ = snap
+            if sig != st.get("sig"):
+                st["sig"] = sig
+                set_setting(gid, "board", json.dumps(st))
+                await msg.edit(attachments=[discord.File(png, filename="board.png")])
+        except discord.NotFound:
+            set_setting(gid, "board", None)
+        except Exception:
+            log.warning("Board update failed for guild %s", gid, exc_info=True)
+    # auto mode: post one when two or more slips have games going and nothing is up yet today
+    today = now.astimezone(TZ).date().isoformat()
+    for r in db().execute("SELECT guild_id FROM settings WHERE key = 'board_auto' AND value = 'on'").fetchall():
+        gid = r["guild_id"]
+        try:
+            if board_state(gid) or get_setting(gid, "board_auto_day") == today:
+                continue
+            channel = await recap_channel_for(client, gid)
+            if channel is None:
+                continue
+            snap = await board_snapshot(client, gid)
+            if snap and snap[1] and snap[3] >= 2:
+                set_setting(gid, "board_auto_day", today)
+                await start_board(client, gid, channel)
+        except Exception:
+            log.warning("Auto board failed for guild %s", gid, exc_info=True)
+
+
+# ---- the Sunday Show -----------------------------------------------------------------------------------
+
+SHOW_SYSTEM = """You are the host of "The Sunday Show", the weekly recap for a Discord group of friends who \
+track their sports picks (PrizePicks, Kalshi, sportsbooks). Voice: {voice}.
+Write the show from the data below, in Discord markdown, 180-300 words, with these bolded segments in order, \
+skipping any with no data: **🎬 Top story**, **🔥 Heating up**, **🧊 Ice cold**, **🎯 Play of the week**, \
+**💔 Bad beat of the week**, **👀 Next week**. Use names exactly as given. Every number must come from the data. \
+Never mention odds, prices or line movement, and never push anyone to bet more, chase losses or raise stakes. \
+Keep teasing about the bets, never personal."""
+
+
+def show_data(guild_id: int, now: Optional[datetime] = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    since = iso(now - timedelta(days=7))
+    week = compute_stats(guild_id, since=since)
+    season = compute_stats(guild_id)
+    picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? AND "
+                         "(hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)", (guild_id, since)).fetchall()
+    wins = [p for p in picks if p["status"] == "win"]
+    best = max(wins, key=pick_net) if wins else None
+    beats = []
+    for p in picks:
+        if p["status"] == "loss":
+            legs = get_legs(p["id"])
+            if len(legs) >= 3 and sum(1 for x in legs if x["status"] == "miss") == 1:
+                beats.append((p, next(x["text"] for x in legs if x["status"] == "miss")))
+    beat = max(beats, key=lambda b: b[0]["payout"]) if beats else None
+    streaks = []
+    for s in season:
+        st = current_streak(guild_id, s["key"]).lstrip("🔥🧊")
+        if st:
+            streaks.append({"name": s["name"], "streak": st})
+    open_n = db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND status = 'open'", (guild_id,)).fetchone()["n"]
+    return {
+        "week": [{"name": s["name"], "record": record_line(s), "net": round(s["net"], 2), "roi_pct": round(s["roi"], 1)}
+                 for s in week],
+        "group_week_net": round(sum(s["net"] for s in week), 2),
+        "season_top3": [{"name": s["name"], "net": round(s["net"], 2), "record": record_line(s)} for s in season[:3]],
+        "play_of_week": {"name": best["bettor_name"], "description": best["description"], "net": round(pick_net(best), 2),
+                         "mult": round((best["returned"] or 0) / best["cost"], 1) if best["cost"] else None,
+                         "pick_id": best["id"]} if best else None,
+        "bad_beat": {"name": beat[0]["bettor_name"], "description": beat[0]["description"], "missed_leg": beat[1],
+                     "would_have_paid": beat[0]["payout"]} if beat else None,
+        "streaks": streaks[:8], "open_picks": open_n,
+    }
+
+
+def show_fallback(d: dict) -> str:
+    parts = []
+    if d["week"]:
+        top = d["week"][0]
+        parts.append(f"**🎬 Top story**\n{top['name']} ran the week at {top['record']}, {signed(top['net'])}. "
+                     f"The group finished {signed(d['group_week_net'])}.")
+        hot = [w for w in d["week"] if w["net"] > 0][:3]
+        if hot:
+            parts.append("**🔥 Heating up**\n" + ", ".join(f"{w['name']} ({signed(w['net'])})" for w in hot))
+        cold = [w for w in d["week"] if w["net"] < 0][-2:]
+        if cold:
+            parts.append("**🧊 Ice cold**\n" + ", ".join(f"{w['name']} ({signed(w['net'])})" for w in cold))
+    if d["play_of_week"]:
+        pw = d["play_of_week"]
+        parts.append(f"**🎯 Play of the week**\n{pw['name']}: {signed(pw['net'])} on {pw['description']}.")
+    if d["bad_beat"]:
+        bb = d["bad_beat"]
+        parts.append(f"**💔 Bad beat of the week**\n{bb['name']} lost {bb['description']} by one leg: {bb['missed_leg']}.")
+    parts.append(f"**👀 Next week**\n{d['open_picks']} picks still riding. See you next Sunday.")
+    return "\n\n".join(parts)
+
+
+async def write_show(guild_id: int, d: dict) -> str:
+    if not ai_enabled() or not d["week"]:
+        return show_fallback(d)
+    try:
+        reply = await asyncio.wait_for(anthropic_client().messages.create(
+            model=ASK_MODEL, max_tokens=1200, system=SHOW_SYSTEM.format(voice=persona_prompt(guild_id)),
+            messages=[{"role": "user", "content": "This week's data:\n" + json.dumps(d, indent=1)}]), timeout=60)
+        text = "".join(b.text for b in reply.content if getattr(b, "type", "") == "text").strip()
+        return text or show_fallback(d)
+    except Exception:
+        log.warning("Sunday Show writing failed; using the template", exc_info=True)
+        return show_fallback(d)
+
+
+def show_embed(text: str, now: Optional[datetime] = None) -> discord.Embed:
+    now = (now or datetime.now(timezone.utc)).astimezone(TZ)
+    e = discord.Embed(title="📺 The Sunday Show", description=clip(text, 4000), color=BRAND)
+    e.set_footer(text=f"Week ending {now:%b %-d} · PIMP-BOT")
+    return e
+
+
+async def post_show(client, guild_id: int, channel, now: Optional[datetime] = None) -> None:
+    d = show_data(guild_id, now)
+    text = await write_show(guild_id, d)
+    e = show_embed(text, now)
+    kwargs = {}
+    if d["play_of_week"]:
+        p = get_pick(guild_id, d["play_of_week"]["pick_id"])
+        if p is not None:
+            f = await receipt_file(client, p, db_entries(p))
+            e.set_image(url=f"attachment://{f.filename}")
+            kwargs["file"] = f
+    await channel.send(embed=e, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+    await voice_say(client, guild_id, "The Sunday Show is up. " + re.sub(r"[*_`#>]|<[^>]+>", "", text.split("\n\n")[0])[:240])
+
+
+# ---- voice ------------------------------------------------------------------------------------------------
+
+VOICE: dict[int, dict] = {}
+GREETINGS = {"default": "PIMP-BOT is in the building. Let's sweat.",
+             "hype": "LET'S GOOO! PIMP-BOT IS IN THE BUILDING! Who's cashing tonight?",
+             "analyst": "PIMP-BOT connected. Monitoring open positions.",
+             "trash": "Alright, I'm here. Try not to embarrass yourselves.",
+             "announcer": "Good evening and welcome to tonight's sweat, brought to you by PIMP-BOT!"}
+VOICE_MAX_HOURS = 8
+
+
+def voice_ready() -> tuple[bool, str]:
+    """Whether this install can talk in voice, and what's missing if not."""
+    try:
+        import nacl  # noqa: F401
+    except Exception:
+        return False, "PyNaCl isn't installed (it comes with `discord.py[voice]` in requirements.txt)"
+    try:
+        import davey  # noqa: F401
+    except Exception:
+        return False, "the `davey` package isn't installed (Discord's encrypted voice needs it)"
+    import shutil
+    if not shutil.which("ffmpeg"):
+        return False, "ffmpeg isn't installed (the included Dockerfile installs it)"
+    try:
+        if not discord.opus.is_loaded():
+            discord.opus._load_default()
+    except Exception:
+        pass
+    try:
+        if not discord.opus.is_loaded():
+            return False, "the opus audio library isn't installed (the included Dockerfile installs libopus0)"
+    except Exception:
+        pass
+    return True, ""
+
+
+def tts_to_file(text: str) -> str:
+    """Speak text into a temp audio file: Google TTS (free), or espeak-ng if that's unavailable.
+    The caller deletes the file's folder."""
+    folder = tempfile.mkdtemp()
+    try:
+        from gtts import gTTS
+        path = os.path.join(folder, "say.mp3")
+        gTTS(text=text, lang="en", tld="us").save(path)
+        return path
+    except Exception:
+        import shutil
+        import subprocess
+        exe = shutil.which("espeak-ng") or shutil.which("espeak")
+        if not exe:
+            import shutil as _sh
+            _sh.rmtree(folder, ignore_errors=True)
+            raise RuntimeError("no text-to-speech available (install gTTS or espeak-ng)")
+        path = os.path.join(folder, "say.wav")
+        subprocess.run([exe, "-s", "165", "-w", path, text], check=True, timeout=30)
+        return path
+
+
+def speakable(text: str) -> str:
+    t = re.sub(r"<a?:\w+:\d+>|<[@#&!]+\d+>|https?://\S+", "", text)
+    t = re.sub(r"[*_`~>|#]", "", t)
+    t = re.sub(r"[\U0001F000-\U0001FAFF☀-➿️]", "", t)
+    t = re.sub(r"\$([\d,]+)(?:\.00\b)?(\.\d\d)?", lambda m: f"{m.group(1)}{m.group(2) or ''} dollars", t)
+    t = t.replace("→", " to ").replace("$", "")
+    return " ".join(t.split())[:300]
+
+
+async def _voice_worker(gid: int):
+    st = VOICE.get(gid)
+    while st is not None:
+        text = await st["queue"].get()
+        vc = st["vc"]
+        for _ in range(10):   # ride out a voice reconnect instead of going silent for good
+            if vc and vc.is_connected():
+                break
+            await asyncio.sleep(3)
+        if not vc or not vc.is_connected():
+            st = VOICE.get(gid)
+            continue
+        path = None
+        try:
+            path = await asyncio.to_thread(tts_to_file, text)
+            done = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            vc.play(discord.FFmpegPCMAudio(path), after=lambda e: loop.call_soon_threadsafe(done.set))
+            try:
+                await asyncio.wait_for(done.wait(), timeout=90)
+            except asyncio.TimeoutError:
+                vc.stop()
+        except Exception:
+            log.warning("Voice line failed", exc_info=True)
+        finally:
+            if path:
+                import shutil
+                shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        st["last"] = time.monotonic()
+        st = VOICE.get(gid)
+
+
+async def voice_join(guild_id: int, channel) -> str:
+    ok, why = voice_ready()
+    if not ok:
+        return f"I can't talk in voice on this install: {why}."
+    st = VOICE.get(guild_id)
+    try:
+        if st and st["vc"].is_connected():
+            await st["vc"].move_to(channel)
+        else:
+            vc = await channel.connect(self_deaf=True)
+            st = {"vc": vc, "queue": asyncio.Queue(), "joined": time.monotonic(), "last": time.monotonic()}
+            VOICE[guild_id] = st
+            st["task"] = asyncio.create_task(_voice_worker(guild_id))
+    except Exception as exc:
+        log.exception("Voice connect failed")
+        return f"I couldn't join voice ({type(exc).__name__}). Check I can Connect and Speak in that channel."
+    return ""
+
+
+async def voice_leave(guild_id: int) -> bool:
+    st = VOICE.pop(guild_id, None)
+    if not st:
+        return False
+    try:
+        if st.get("task"):
+            st["task"].cancel()
+        await st["vc"].disconnect(force=True)
+    except Exception:
+        pass
+    return True
+
+
+async def voice_say(client, guild_id: int, text: str) -> bool:
+    st = VOICE.get(guild_id)
+    if not st or not st["vc"] or not st["vc"].is_connected():
+        return False
+    line = speakable(text)
+    if not line:
+        return False
+    if st.get("task") is None or st["task"].done():
+        st["task"] = asyncio.create_task(_voice_worker(guild_id))
+    if st["queue"].qsize() < 6:
+        st["queue"].put_nowait(line)
+    return True
+
+
+async def voice_idle(client: discord.Client, now: Optional[datetime] = None) -> None:
+    for gid, st in list(VOICE.items()):
+        vc = st["vc"]
+        humans = [m for m in getattr(getattr(vc, "channel", None), "members", []) if not getattr(m, "bot", False)]
+        if humans:
+            st.pop("empty_since", None)
+        else:
+            st.setdefault("empty_since", time.monotonic())
+        if (not vc.is_connected() or time.monotonic() - st.get("empty_since", time.monotonic()) > 300
+                or time.monotonic() - st["joined"] > VOICE_MAX_HOURS * 3600):
+            await voice_leave(gid)
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -10421,7 +12222,9 @@ class PicksBot(discord.Client):
         self.add_dynamic_items(SettleButton, LogSlipButton, FollowButton, ChallengeButton, PickemButton,
                                SweatButton, InjuryOffButton, GPButton, CopyButton, CardSweatButton, CardKalshiButton,
                                PPSettleButton, MarketButton, TakeButton, PotdButton, TriviaButton, GuessButton,
-                               ClosestButton, SquaresButton, DraftButton, NoteButton, DisputeButton, FixButton)
+                               ClosestButton, SquaresButton, DraftButton, NoteButton, DisputeButton, FixButton,
+                               BoardButton)
+        r14_db()
         try:
             await start_dashboard()
         except Exception:
@@ -10697,7 +12500,10 @@ class PicksBot(discord.Client):
                     lambda n: post_rivals(self, n), lambda n: bounty_check(self, n), lambda n: on_this_day(self, n),
                     lambda n: big_moments(self, n), lambda n: favorite_team_alerts(self, n),
                     lambda n: run_game_threads(self, n), lambda n: post_announcements(self, n),
-                    lambda n: lineup_checks(self, n), lambda n: deadline_nudges(self, n)):
+                    lambda n: lineup_checks(self, n), lambda n: deadline_nudges(self, n),
+                    lambda n: cheer_settled(self, n), lambda n: personal_milestones(self, n),
+                    lambda n: update_receipts(self, n), lambda n: update_boards(self, n),
+                    lambda n: voice_idle(self, n)):
             try:
                 await job(now.astimezone(timezone.utc))
             except Exception:
@@ -10719,6 +12525,11 @@ class PicksBot(discord.Client):
                     and get_setting(guild_id, "last_recap") != today):
                 set_setting(guild_id, "last_recap", today)
                 await channel.send(embed=build_recap(guild_id))
+                if get_setting(guild_id, "show") != "off":
+                    try:
+                        await post_show(self, guild_id, channel, now.astimezone(timezone.utc))
+                    except Exception:
+                        log.exception("Sunday Show failed")
                 rivals_results(guild_id, pay=True)
                 roles_line = await assign_hot_roles(self, guild_id)
                 if roles_line:
@@ -10853,6 +12664,12 @@ class PicksBot(discord.Client):
             user_text += "\n\nThe group's own data:\n" + context
         system = ASK_SYSTEM.format(bot_name=self.user.display_name,
                                    today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
+        system += (f"\n\nYour voice in this server: {persona_prompt(message.guild.id)}.\n"
+                   "For questions about the group's own results (records, profit, hit rates, who's best at "
+                   "something, someone's tendencies), use the group_stats tool and only quote its numbers. 'me', "
+                   "'my' and 'I' mean the person asking. Ask for a chart when comparing several groups.")
+        ctx = {"guild_id": message.guild.id, "asker_key": str(message.author.id), "chart": None}
+        token = ASK_DATA.set(ctx)
         try:
             async with message.channel.typing():
                 answer, sources = await ask_claude(system, user_text)
@@ -10861,12 +12678,22 @@ class PicksBot(discord.Client):
             await message.reply("I couldn't get an answer just now. Try again in a minute.",
                                 mention_author=False)
             return
+        finally:
+            ASK_DATA.reset(token)
+        chart_file = None
+        if ctx.get("chart"):
+            try:
+                png = await asyncio.to_thread(locked_render, render_bars, *ctx["chart"])
+                chart_file = discord.File(png, filename="chart.png")
+            except Exception:
+                log.exception("Chart failed")
         if sources:
             answer += "\n\n-# Sources: " + " · ".join(f"<{u}>" for u in sources)
         for i, chunk in enumerate(split_message(answer or "I came up empty on that one.")):
             if i == 0:
+                extra = {"file": chart_file} if chart_file else {}
                 await message.reply(chunk, mention_author=False,
-                                    allowed_mentions=discord.AllowedMentions.none())
+                                    allowed_mentions=discord.AllowedMentions.none(), **extra)
             else:
                 await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
 
@@ -10924,8 +12751,27 @@ class PicksBot(discord.Client):
             note = f"I couldn't read the payout. Fix it with `/edit pick_id:{pick_id}`."
         view = settle_view(pick_id) if p["status"] == "open" else None
         SLIP_STATE["last_ok"] = now_iso()
-        await message.reply(content=note, embed=pick_embed(p), view=view,
-                            mention_author=False)
+        logged = voice_line(message.guild.id, "logged", name=message.author.display_name)
+        content = "\n".join(x for x in (logged, note) if x) or None
+        embed, extra = pick_embed(p), {}
+        try:
+            async with message.channel.typing():
+                f = await receipt_file(self, p)
+            embed.set_image(url=f"attachment://{f.filename}")
+            extra["file"] = f
+        except Exception:
+            log.warning("Receipt image failed for pick %s", pick_id, exc_info=True)
+        sent = await message.reply(content=content, embed=embed, view=view, mention_author=False, **extra)
+        if getattr(sent, "id", None):
+            remember_pick_msg(message.guild.id, pick_id, message.channel.id, sent.id, receipt="file" in extra)
+        tip = headsup_text(message.guild.id, str(message.author.id), pick_id)
+        if tip:
+            try:
+                await message.author.send(tip)
+            except Exception:
+                pass
+        await voice_say(self, message.guild.id, f"{message.author.display_name} just logged {p['description']}, "
+                                                f"{money(p['cost'])} to win {money(p['payout'])}.")
 
 
 bot = PicksBot()
@@ -11010,6 +12856,17 @@ async def pick_cmd(
             f"{datetime.now(TZ):%-I:%M %p}. It's revealed when it settles.")
         return
     await interaction.response.send_message(embed=pick_embed(p), view=settle_view(pick_id))
+    try:
+        msg = await interaction.original_response()
+        remember_pick_msg(interaction.guild_id, pick_id, interaction.channel_id, msg.id)
+    except Exception:
+        pass
+    tip = headsup_text(interaction.guild_id, key, pick_id) if key == str(interaction.user.id) else None
+    if tip:
+        try:
+            await interaction.followup.send(tip, ephemeral=True)
+        except Exception:
+            pass
 
 
 @bot.tree.command(name="leg", description="Grade one leg of a parlay")
@@ -11738,7 +13595,12 @@ async def help_cmd(interaction: discord.Interaction):
     e.add_field(name="Players", inline=False, value=(
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
     e.add_field(name="Questions", inline=False, value=(
-        "@mention me with a question about a player, team or matchup and I'll look it up."))
+        "@mention me about a player, team or matchup, or about the group's own numbers: "
+        "\"how am I doing on NBA props this month?\" · \"who's best at NFL unders?\" (with a chart)"))
+    e.add_field(name="Make it personal", inline=False, value=(
+        "`/card` trading card with rating, rarity and a flip side · `/board` live board of tonight's slips\n"
+        "Slip screenshots get a live receipt that fills in as games go · `/show` the Sunday Show\n"
+        "`/me roast` · `headsup` · `birthday` · `/voice join` calls cashes out loud · admins: `/admin personality`"))
     e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
     await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -12455,17 +14317,28 @@ async def achievements_cmd(interaction: discord.Interaction, member: Optional[di
     await interaction.response.send_message(embed=e)
 
 
-@bot.tree.command(name="card", description="A shareable image of someone's betting profile")
+@bot.tree.command(name="card", description="Your trading card: rating, rarity, title and stats (flip it for the back)")
 @app_commands.guild_only()
-@app_commands.describe(member="Optional: defaults to you", label="Optional: a name that isn't a Discord user")
+@app_commands.describe(member="Optional: defaults to you", label="Optional: a name that isn't a Discord user",
+                       style="Trading card (default) or the wide profile banner")
+@app_commands.choices(style=[app_commands.Choice(name="Trading card", value="card"),
+                             app_commands.Choice(name="Profile banner", value="banner")])
 async def card_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None,
-                   label: Optional[str] = None):
+                   label: Optional[str] = None, style: Optional[app_commands.Choice[str]] = None):
     key, name, _ = resolve_bettor(interaction, member, label)
     stats = compute_stats(interaction.guild_id, key)
     if not stats:
         await interaction.response.send_message(f"No picks logged for {name} yet.", ephemeral=True)
         return
     await interaction.response.defer(thinking=True)
+    if not style or style.value == "card":
+        c = card_payload(interaction.guild_id, key, name)
+        user = None if label else (member or interaction.user)
+        av = await avatar_bytes(user) if user is not None else None
+        png = await asyncio.to_thread(locked_render, render_trading_card, c, av)
+        await interaction.followup.send(file=discord.File(png, filename="card.png"),
+                                        view=CardFlipView(key, name, user))
+        return
     s = stats[0]
     settled = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'",
                            (interaction.guild_id, key)).fetchall()
@@ -12476,7 +14349,7 @@ async def card_cmd(interaction: discord.Interaction, member: Optional[discord.Me
     series = chart_series(interaction.guild_id, 3650, key)
     avatar = None if label else await fetch_avatar(member or interaction.user)
     png = await asyncio.to_thread(
-        render_card, s["name"], s, current_streak(interaction.guild_id, key), best,
+        locked_render, render_card, s["name"], s, current_streak(interaction.guild_id, key), best,
         hit_rate(leg_counts(interaction.guild_id, key)), top_sport,
         [n for k, n, _ in BADGES if k in got], next(iter(series.values()), []), avatar,
         " · ".join(x for x in ((get_setting(interaction.guild_id, f"cardtitle:{key}") or ""),
@@ -14619,6 +16492,180 @@ async def admin_unlock(interaction: discord.Interaction, member: discord.Member)
 
 
 bot.tree.add_command(admin_group)
+
+
+# ---- r14 commands -----------------------------------------------------------------------------
+
+@bot.tree.command(name="board", description="Tonight's live board: every open slip with games today, updating live")
+@app_commands.guild_only()
+@app_commands.choices(mode=[app_commands.Choice(name="Post it here", value="here"),
+                            app_commands.Choice(name="Stop the board", value="stop"),
+                            app_commands.Choice(name="Auto: post it in the recap channel on game nights", value="auto"),
+                            app_commands.Choice(name="Auto off", value="auto_off")])
+async def board_cmd(interaction: discord.Interaction, mode: Optional[app_commands.Choice[str]] = None):
+    m = mode.value if mode else "here"
+    if m in ("auto", "auto_off", "stop"):
+        perms = getattr(interaction.user, "guild_permissions", None)
+        if m != "stop" and not (perms and getattr(perms, "manage_guild", False)):
+            await interaction.response.send_message("Only admins can change auto mode.", ephemeral=True)
+            return
+        if m == "stop":
+            st = board_state(interaction.guild_id)
+            if st and interaction.user.id != st.get("by") and not is_mod(interaction.user):
+                await interaction.response.send_message("Only whoever started the board or a mod can stop it.",
+                                                        ephemeral=True)
+                return
+            await interaction.response.send_message("Board stopped.", ephemeral=True)
+            await retire_board(interaction.client, interaction.guild_id)
+            return
+        set_setting(interaction.guild_id, "board_auto", "on" if m == "auto" else None)
+        await interaction.response.send_message(
+            "📺 Auto board is **on**: when 2+ slips have games going, I'll post the live board in the recap channel."
+            if m == "auto" else "Auto board is **off**.")
+        return
+    await interaction.response.defer(thinking=True)
+    snap = await board_snapshot(interaction.client, interaction.guild_id)
+    if snap is None:
+        await interaction.followup.send("No open slips with games today. Log some and try again.")
+        return
+    png, live, sig, _ = snap
+    await retire_board(interaction.client, interaction.guild_id)
+    msg = await interaction.followup.send(file=discord.File(png, filename="board.png"), view=board_view(), wait=True)
+    set_setting(interaction.guild_id, "board", json.dumps({"channel_id": interaction.channel_id,
+                                                           "message_id": getattr(msg, "id", 0),
+                                                           "started": now_iso(), "sig": sig, "by": interaction.user.id}))
+
+
+@bot.tree.command(name="show", description="The Sunday Show: this week's storylines, written up like a broadcast")
+@app_commands.guild_only()
+async def show_cmd(interaction: discord.Interaction):
+    cached = json.loads(get_setting(interaction.guild_id, "show_cache") or "{}")
+    if cached.get("at") and datetime.fromisoformat(cached["at"]) > datetime.now(timezone.utc) - timedelta(hours=1):
+        await interaction.response.send_message(embed=show_embed(cached["text"]))
+        return
+    await interaction.response.defer(thinking=True)
+    d = show_data(interaction.guild_id)
+    text = await write_show(interaction.guild_id, d)
+    set_setting(interaction.guild_id, "show_cache", json.dumps({"at": now_iso(), "text": text}))
+    e = show_embed(text)
+    kwargs = {}
+    if d["play_of_week"]:
+        p = get_pick(interaction.guild_id, d["play_of_week"]["pick_id"])
+        if p is not None:
+            f = await receipt_file(interaction.client, p, db_entries(p))
+            e.set_image(url=f"attachment://{f.filename}")
+            kwargs["file"] = f
+    await interaction.followup.send(embed=e, **kwargs)
+
+
+voice_group = app_commands.Group(name="voice", description="Have the bot call cashes out loud in a voice channel",
+                                 guild_only=True)
+_say_cooldown: dict[int, float] = {}
+
+
+@voice_group.command(name="join", description="Join your voice channel and call out cashes, one-leg sweats and more")
+async def voice_join_cmd(interaction: discord.Interaction):
+    vs = getattr(interaction.user, "voice", None)
+    if not vs or not getattr(vs, "channel", None):
+        await interaction.response.send_message("Hop in a voice channel first, then run this.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    err = await voice_join(interaction.guild_id, vs.channel)
+    if err:
+        await interaction.followup.send(err)
+        return
+    await voice_say(interaction.client, interaction.guild_id, GREETINGS[persona(interaction.guild_id)])
+    await interaction.followup.send(f"🎙️ In **{vs.channel.name}**. I'll call out cashes, one-leg sweats and big wins. "
+                                    "`/voice leave` to send me away (I also leave when the channel empties).")
+
+
+@voice_group.command(name="leave", description="Leave the voice channel")
+async def voice_leave_cmd(interaction: discord.Interaction):
+    if interaction.guild_id not in VOICE:
+        await interaction.response.send_message("I'm not in voice.", ephemeral=True)
+        return
+    await interaction.response.send_message("👋 Leaving voice.")
+    await voice_leave(interaction.guild_id)
+
+
+@voice_group.command(name="say", description="Make the bot say something in voice")
+async def voice_say_cmd(interaction: discord.Interaction, text: app_commands.Range[str, 1, 200]):
+    if interaction.guild_id not in VOICE:
+        await interaction.response.send_message("I'm not in voice. `/voice join` first.", ephemeral=True)
+        return
+    wait = _say_cooldown.get(interaction.user.id, 0) + 15 - time.monotonic()
+    if wait > 0:
+        await interaction.response.send_message(f"Give it {int(wait) + 1}s.", ephemeral=True)
+        return
+    _say_cooldown[interaction.user.id] = time.monotonic()
+    await voice_say(interaction.client, interaction.guild_id, f"{interaction.user.display_name} says: {text}")
+    await interaction.response.send_message("🗣️ Queued.", ephemeral=True)
+
+
+bot.tree.add_command(voice_group)
+
+
+@me_group.command(name="roast", description="Opt in (or out) of the bot roasting your losses")
+async def me_roast(interaction: discord.Interaction):
+    key = f"roast:{interaction.user.id}"
+    on = get_setting(interaction.guild_id, key) == "on"
+    set_setting(interaction.guild_id, key, None if on else "on")
+    await interaction.response.send_message(
+        "Roasts are **off**. Your losses get a quiet ❌ and nothing more." if on else
+        "🔥 Roast mode **on**. When a pick of yours loses, I'll say something about it. You asked for this.",
+        ephemeral=True)
+
+
+@me_group.command(name="headsup", description="Turn the private heads-up from your own history on or off")
+async def me_headsup(interaction: discord.Interaction):
+    key = f"headsup:{interaction.user.id}"
+    off = get_setting(interaction.guild_id, key) == "off"
+    set_setting(interaction.guild_id, key, None if off else "off")
+    await interaction.response.send_message(
+        "🧠 Heads-ups are **on**: when you log a pick, I'll privately tell you if your history says something about it."
+        if off else "Heads-ups are **off**.", ephemeral=True)
+
+
+@me_group.command(name="birthday", description="Get a birthday shoutout (month and day only; 0 clears it)")
+async def me_birthday(interaction: discord.Interaction, month: app_commands.Range[int, 0, 12],
+                      day: app_commands.Range[int, 0, 31]):
+    key = f"bday:{interaction.user.id}"
+    if not month or not day:
+        set_setting(interaction.guild_id, key, None)
+        await interaction.response.send_message("Birthday cleared.", ephemeral=True)
+        return
+    try:
+        datetime(2024, month, day)
+    except ValueError:
+        await interaction.response.send_message("That's not a real date.", ephemeral=True)
+        return
+    set_setting(interaction.guild_id, key, f"{month:02d}-{day:02d}")
+    await interaction.response.send_message(f"🎂 Saved: {datetime(2024, month, day):%B %-d}. The group gets a shoutout "
+                                            "that morning.", ephemeral=True)
+
+
+@admin_group.command(name="personality", description="Pick the bot's voice: sidekick, hype man, analyst, trash talker, announcer")
+@app_commands.choices(voice=[app_commands.Choice(name=f"{v[0]}", value=k) for k, v in PERSONAS.items()])
+async def admin_personality(interaction: discord.Interaction, voice: app_commands.Choice[str]):
+    set_setting(interaction.guild_id, "persona", None if voice.value == "default" else voice.value)
+    sample = voice_line(interaction.guild_id, "cash", name="Levi", amount="+$425", desc="a 6-pick Power Play", leg="",
+                        payout="$450", mult="18", cost="$25", n=6, pid=1)
+    await interaction.response.send_message(f"🎭 I'm now the **{voice.name}**. Sounds like:\n> {sample}")
+
+
+@admin_group.command(name="reactions", description="Turn the bot's replies to cashed picks on or off")
+async def admin_reactions(interaction: discord.Interaction):
+    off = get_setting(interaction.guild_id, "reactions") == "off"
+    set_setting(interaction.guild_id, "reactions", None if off else "off")
+    await interaction.response.send_message("🎉 Cash reactions are **on**." if off else "Cash reactions are **off**.")
+
+
+@admin_group.command(name="show", description="Post the Sunday Show with the weekly recap (on/off)")
+async def admin_show(interaction: discord.Interaction):
+    off = get_setting(interaction.guild_id, "show") == "off"
+    set_setting(interaction.guild_id, "show", None if off else "off")
+    await interaction.response.send_message("📺 The Sunday Show posts with the weekly recap." if off else
+                                            "The Sunday Show is **off** (`/show` still works any time).")
 
 
 @bot.tree.error
