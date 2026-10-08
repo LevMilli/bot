@@ -35,6 +35,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -51,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-08 r13.2"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-08 r13.3"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -1674,21 +1675,79 @@ def as_amount(value) -> Optional[float]:
         return None
 
 
+VISION_MAX_EDGE = 1568        # Claude shrinks anything bigger than this, so enlarge up to it and no further
+VISION_MAX_PIXELS = 1_150_000
+
+
+def _fit(img, max_edge: int = VISION_MAX_EDGE, max_px: int = VISION_MAX_PIXELS):
+    """Scale up (or down) so the image is as big as Claude will actually look at."""
+    from PIL import Image
+    w, h = img.size
+    scale = min(max_edge / max(w, h), (max_px / (w * h)) ** 0.5)
+    if abs(scale - 1) < 0.05:
+        return img
+    return img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+
+
+def enlarge_slip(raw: bytes) -> list[bytes]:
+    """PNG images to send: the whole slip enlarged, plus zoomed, overlapping slices of tall phone screenshots
+    so small print (lines, stat names, the cost) is big enough to read. Falls back to the original on any error."""
+    from PIL import Image, ImageFilter, ImageOps
+    img = Image.open(io.BytesIO(raw))
+    img.seek(0)                                   # first frame of a GIF
+    img = ImageOps.exif_transpose(img).convert("RGB")
+    out = [_fit(img)]
+    w, h = img.size
+    if h > 1.4 * w:                               # tall screenshot: slice it, each slice a bit taller than wide
+        n = min(4, max(2, math.ceil(h / (w * 0.8))))   # shorter slices = more zoom
+        step = h / n
+        pad = int(step * 0.12)                    # overlap so no row gets cut in half
+        for i in range(n):
+            top, bottom = max(0, int(i * step) - pad), min(h, int((i + 1) * step) + pad)
+            out.append(_fit(img.crop((0, top, w, bottom))))
+    pngs = []
+    for im in out:
+        im = im.filter(ImageFilter.UnsharpMask(radius=1.2, percent=60, threshold=2))
+        buf = io.BytesIO()
+        im.save(buf, "PNG", optimize=True)
+        pngs.append(buf.getvalue())
+    return pngs
+
+
+def sniff_image_type(raw: bytes) -> Optional[str]:
+    """What the bytes really are. Phones and Discord often label a JPEG or WebP as PNG, which Claude rejects."""
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 async def read_slip(attachment: discord.Attachment, model: Optional[str] = None) -> Optional[dict]:
     """Returns the parsed slip, or None if it couldn't be read as one."""
-    media_type = image_type(attachment) or "image/png"
-    data = base64.standard_b64encode(await attachment.read()).decode()
+    raw = await attachment.read()
+    try:
+        pngs = await asyncio.to_thread(enlarge_slip, raw)
+        images = [("image/png", p) for p in pngs]
+    except Exception:
+        log.warning("Couldn't enlarge the slip image; sending it as is", exc_info=True)
+        images = [(sniff_image_type(raw) or image_type(attachment) or "image/png", raw)]
+    content = [{"type": "image", "source": {"type": "base64", "media_type": mt,
+                                            "data": base64.standard_b64encode(b).decode()}} for mt, b in images]
+    prompt = SLIP_PROMPT
+    if len(images) > 1:
+        prompt = (f"These {len(images)} images are ONE screenshot: the first is the whole thing, the rest are "
+                  "enlarged slices of it from top to bottom that overlap a little. Use the slices to read small "
+                  "text, and count each leg only once.\n\n" + SLIP_PROMPT)
+    content.append({"type": "text", "text": prompt})
     reply = await anthropic_client().messages.create(
         model=model or CLAUDE_MODEL,
-        max_tokens=1024,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image",
-                 "source": {"type": "base64", "media_type": media_type, "data": data}},
-                {"type": "text", "text": SLIP_PROMPT},
-            ],
-        }],
+        max_tokens=1500,
+        messages=[{"role": "user", "content": content}],
     )
     text = "".join(block.text for block in reply.content if block.type == "text")
     slip = extract_json(text)
@@ -1718,6 +1777,8 @@ def explain_ai_error(exc: Exception) -> tuple[str, bool]:
         return "Claude is rate-limiting the key right now; try again in a minute", False
     if name in ("APIConnectionError", "APITimeoutError", "InternalServerError") or "overloaded" in text:
         return "Claude was unreachable or overloaded; try again in a minute", True
+    if "media_type" in text or "image" in text and name == "BadRequestError":
+        return "Claude couldn't open that image file. Try a fresh screenshot (PNG or JPG)", True
     if name in ("JSONDecodeError", "ValueError"):
         return "Claude's answer wasn't in the expected format", True
     return f"{name}: {str(exc)[:120]}", True
