@@ -50,6 +50,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
+BOT_VERSION = "2026-10-08 r7"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -2991,14 +2992,20 @@ class PicksBot(discord.Client):
         self.scheduler_task = asyncio.create_task(self.scheduler())
 
     async def on_ready(self):
-        log.info("Logged in as %s | Claude features: %s | receipts channels: %d",
-                 self.user, "on" if ai_enabled() else "off",
+        log.info("Logged in as %s | version %s | Claude features: %s | receipts channels: %d",
+                 self.user, BOT_VERSION, "on" if ai_enabled() else "off",
                  len(self.receipt_channels))
 
     # ---- scheduled posts ---------------------------------------------------
 
     async def scheduler(self):
         await self.wait_until_ready()
+        try:
+            n = await refresh_guides(self)
+            if n:
+                log.info("Refreshed %d posted guide(s) for version %s", n, BOT_VERSION)
+        except Exception:
+            log.exception("Guide refresh failed")
         while not self.is_closed():
             try:
                 await self.run_schedules()
@@ -4056,6 +4063,7 @@ async def help_cmd(interaction: discord.Interaction):
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
     e.add_field(name="Questions", inline=False, value=(
         "@mention me with a question about a player, team or matchup and I'll look it up."))
+    e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 
@@ -4409,13 +4417,14 @@ def guide_embeds() -> list[discord.Embed]:
         "• **Hall of Fame:** big wins get reposted in the hall of fame channel.\n"
         "• **Pings you** about picks open 3+ days.\n"
         "• **Sunday 8 PM:** weekly recap, plus the 🔥 Hot Hand and 🧊 Ice Cold roles.\n"
+        "• **Every morning:** today's games, in the channel an admin picked with `/todaypost`.\n"
         "• **The 1st of each month:** monthly awards."))
     group = discord.Embed(title="🤝 With the group", color=BRAND, description=(
         "👍 **Tail** / 👎 **Fade** buttons on any open pick (not your own). `/tailfade` shows who's worth following.\n"
         "`/challenge @someone` head-to-head bet for bragging rights. `/h2h` shows your record against them.\n"
         "`/lock` your lock of the week. One per week, and you can change it until it's graded. "
         "`/locks` shows this week and the standings.\n"
-        "`/awards` this month's awards so far.\n"
+        "`/awards` this month's awards so far · `/season standings` this season's leaderboard.\n"
         "**Pick'em:** tap a team on each game a mod posts; no money, just bragging rights. "
         "`/pickem mine` and `/pickem standings`.\n"
         "**@PIMP-BOT** plus a question about a player, team or matchup gets a researched answer."))
@@ -4441,19 +4450,60 @@ def guide_embeds() -> list[discord.Embed]:
     return [start, picks, auto, group, numbers, tips]
 
 
+def guide_version() -> str:
+    text = "".join(f"{e.title}{e.description}" for e in guide_embeds())
+    return hashlib.sha1(text.encode()).hexdigest()[:10]
+
+
+async def refresh_guides(client: discord.Client) -> int:
+    """After an update, rewrite every posted guide whose text is out of date. Returns how many changed."""
+    changed = 0
+    current = guide_version()
+    rows = db().execute("SELECT guild_id, key, value FROM settings WHERE key LIKE 'guide_msg:%'").fetchall()
+    for r in rows:
+        if get_setting(r["guild_id"], "guide_version") == current:
+            continue
+        channel = client.get_channel(int(r["key"].split(":", 1)[1]))
+        if channel is None:
+            continue
+        try:
+            msg = await channel.fetch_message(int(r["value"]))
+            await msg.edit(embeds=guide_embeds())
+            changed += 1
+        except Exception:
+            log.info("Couldn't refresh the guide in channel %s", r["key"])
+    for g in {r["guild_id"] for r in rows}:
+        set_setting(g, "guide_version", current)
+    return changed
+
+
 @bot.tree.command(name="guide", description="Post (and pin) the how-to guide in this channel")
 @app_commands.guild_only()
 @app_commands.default_permissions(manage_guild=True)
 async def guide_cmd(interaction: discord.Interaction):
+    # Update the guide already in this channel if there is one.
+    old_id = get_setting(interaction.guild_id, f"guide_msg:{interaction.channel_id}")
+    if old_id:
+        try:
+            old = await interaction.channel.fetch_message(int(old_id))
+            await old.edit(embeds=guide_embeds())
+            set_setting(interaction.guild_id, "guide_version", guide_version())
+            await interaction.response.send_message(
+                "Updated the guide that's already in this channel (scroll up or check the pins).", ephemeral=True)
+            return
+        except (discord.Forbidden, discord.HTTPException, discord.NotFound, AttributeError):
+            pass  # gone or not editable: post a fresh one
     # Posted as the command's reply, which works even where the bot can't send regular messages.
     await interaction.response.send_message(embeds=guide_embeds())
     try:
         msg = await interaction.original_response()
+        set_setting(interaction.guild_id, f"guide_msg:{interaction.channel_id}", str(msg.id))
+        set_setting(interaction.guild_id, "guide_version", guide_version())
         await msg.pin(reason="PIMP-BOT guide")
-        note = "Guide posted and pinned."
+        note = "Guide posted and pinned. It updates itself whenever the bot gets new features."
     except (discord.Forbidden, discord.HTTPException):
         note = ("Guide posted. I couldn't pin it: give me **Manage Messages** in this channel, "
-                "or pin it yourself from the message's ⋯ menu.")
+                "or pin it yourself from the message's ⋯ menu. If an older guide is pinned, unpin it.")
     await interaction.followup.send(note, ephemeral=True)
 
 # ---- pick'em and hall of fame: commands ------------------------------------------
