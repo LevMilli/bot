@@ -3293,8 +3293,6 @@ async def help_cmd(interaction: discord.Interaction):
     e.add_field(name="Your numbers", inline=False, value=(
         "`/stats` record by sport, platform and parlay size · `/chart` profit graph\n"
         "`/odds` convert odds · `/bankroll` units on your picks · `/limit` weekly loss heads-up (private)"))
-    e.add_field(name="Setup (admins)", inline=False, value=(
-        "`/guide` post and pin the how-to in this channel · `/receipts` · `/recapchannel` · `/import`"))
     e.add_field(name="Players", inline=False, value=(
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
     e.add_field(name="Questions", inline=False, value=(
@@ -3624,73 +3622,6 @@ async def limit_cmd(interaction: discord.Interaction, amount: Optional[app_comma
         + (f"{money(left)} before the limit." if left > 0 else "past the limit.")
         + " If you pass it, I'll send you a private DM once that week. Nothing gets blocked.", ephemeral=True)
 
-
-# ---- pinned guide for the bot's channel ------------------------------------------
-
-def guide_embeds() -> list[discord.Embed]:
-    start = discord.Embed(title="🤖 How to use PIMP-BOT", color=BRAND, description=(
-        "Everything happens with **/commands**. Type `/` in any channel and pick one from the list. "
-        "This channel is the place to use them, so the main chat stays clean.\n\n"
-        "**The 30-second version**\n"
-        "1. Log a bet with `/pick`, or post your slip screenshot in the receipts channel.\n"
-        "2. When it's over, tap **Win**, **Loss** or **Push** on the pick card.\n"
-        "3. Check `/record` for your stats and `/leaderboard` for who's up."))
-    picks = discord.Embed(title="📝 Logging and settling picks", color=BRAND, description=(
-        "`/pick` log a bet. **Cost** is what you paid, **payout** is the total you get back if it hits "
-        "(stake included). Put parlay legs in **legs**, separated by `;`, and fill in **sport** "
-        "(NFL, NBA, CS2...).\n"
-        "`/leg` mark one parlay leg as hit, miss or push. When every leg hits, the pick settles as a win; "
-        "when one misses, as a loss.\n"
-        "`/result` settle a pick by number. Use **returned** for cash-outs and partial payouts.\n"
-        "`/grade` look up the result right now.\n"
-        "`/edit` and `/delete` fix mistakes. `/open` shows everything still pending."))
-    auto = discord.Embed(title="⚡ What the bot does on its own", color=BRAND, description=(
-        "• **Reads slips** posted in the receipts channel and logs them for you.\n"
-        "• **Grades picks** still open 48 hours after they're logged and posts the scores it found. "
-        "If it gets one wrong, fix it with `/leg` or `/result`.\n"
-        "• **Pings you** about picks open 3+ days.\n"
-        "• **Sunday 8 PM:** weekly recap, plus the 🔥 Hot Hand and 🧊 Ice Cold roles.\n"
-        "• **The 1st of each month:** monthly awards."))
-    group = discord.Embed(title="🤝 With the group", color=BRAND, description=(
-        "👍 **Tail** / 👎 **Fade** buttons on any open pick (not your own). `/tailfade` shows who's worth following.\n"
-        "`/challenge @someone` head-to-head bet for bragging rights. `/h2h` shows your record against them.\n"
-        "`/lock` your lock of the week. One per week, and you can change it until it's graded. "
-        "`/locks` shows this week and the standings.\n"
-        "`/awards` this month's awards so far.\n"
-        "**@PIMP-BOT** plus a question about a player, team or matchup gets a researched answer."))
-    numbers = discord.Embed(title="📊 Your numbers", color=BRAND, description=(
-        "`/record` your W-L, profit, ROI, streak and leg hit rate\n"
-        "`/stats` your record split by sport, platform and parlay size\n"
-        "`/chart` profit graph, for everyone or just you\n"
-        "`/odds` convert -150, +200, 2.5, 45¢ or 60% into break-even % and payout\n"
-        "`/export` everything as an Excel file\n"
-        "`/bankroll` units on your pick cards · `/limit` private weekly loss heads-up\n"
-        "`/player note` scouting notes on a player · `/player view` notes plus how the group's legs on them went"))
-    tips = discord.Embed(title="💡 Tips", color=0xF1C40F, description=(
-        "• **Always fill in the sport.** It's how the bot finds the right game to grade for free.\n"
-        "• **One leg per item.** Write `Bills ML; Chiefs -3; Over 44.5`, not one long sentence.\n"
-        "• **The pick number** (like `#12`) is on every card. Most commands ask for it.\n"
-        "• **Cashed out early?** The bot can't see that. Use `/result` with the `returned` amount.\n"
-        "• **Bot got a result wrong?** `/leg` or `/result` overrides it.\n"
-        "• **Typing `/` shows every option** with a short description, so you don't need to memorize any of this.\n"
-        "• `/help` brings up the full command list anytime (only you see it)."))
-    tips.set_footer(text="Bet what you can afford to lose. Set a /limit if you want a nudge.")
-    return [start, picks, auto, group, numbers, tips]
-
-
-@bot.tree.command(name="guide", description="Post (and pin) the how-to guide in this channel")
-@app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
-async def guide_cmd(interaction: discord.Interaction):
-    await interaction.response.send_message("Posting the guide…", ephemeral=True)
-    msg = await interaction.channel.send(embeds=guide_embeds())
-    try:
-        await msg.pin(reason="PIMP-BOT guide")
-        note = "Guide posted and pinned."
-    except (discord.Forbidden, discord.HTTPException):
-        note = ("Guide posted. I couldn't pin it: give me **Manage Messages** in this channel, "
-                "or pin it yourself from the message's ⋯ menu.")
-    await interaction.followup.send(note, ephemeral=True)
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction,
