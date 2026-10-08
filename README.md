@@ -36,6 +36,10 @@ paid, and who's actually up.
 | `/awards` | Monthly awards (posts automatically on the 1st) |
 | `/hotroles` | Turn on weekly 🔥 Hot Hand / 🧊 Ice Cold roles (admins; needs Manage Roles) |
 | `/bankroll` | Set your bankroll; pick cards then show the bet in units and flag bets over 5 units (private) |
+| `/pickem start` | Post upcoming games (NFL, ranked college football, NBA, NHL, MLB, Premier League, MLS) with a button per team. Picks lock at kickoff, grade themselves, and the week's winner is announced (mods) |
+| `/pickem mine`, `/pickem standings` | Your picks, and this round's table plus all-time standings |
+| `/halloffame` | Big wins get reposted in this channel automatically: 3+ leg parlays that hit, 5x+ payouts, or $100+ profit (admins) |
+| `/guide` | Post and pin the how-to guide in the current channel (admins) |
 | `/limit` | Set a weekly loss limit; the bot DMs you privately once a week if you pass it |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
@@ -53,6 +57,11 @@ with `/leg` as games finish. When every leg hits, the bot marks the pick a win. 
 misses, it marks it a loss, except on PrizePicks, where flex entries can still pay, so it
 leaves those for you to settle with `/result`. `/record` and the weekly recap show how
 often your legs hit.
+
+**Instant grading.** Every couple of minutes the bot checks open picks from the last 5 days
+against the free scoreboard. As soon as a game goes final, moneyline, spread and total legs
+are graded, and when that settles the pick, it posts the result in the recap channel. Locks
+of the week work the same way.
 
 **Auto-grading.** 48 hours after a pick is logged, any legs still open get looked up and
 graded. Moneylines, spreads and game or team totals for the NFL, college football, NBA,
@@ -177,6 +186,7 @@ Run `/export` now and then to keep your own copy of the picks.
   `ASK_DAILY_LIMIT` (default 40), `ASK_COOLDOWN_SECONDS` (20), `ASK_MODEL`
   (`claude-sonnet-5-5`), `TIMEZONE` (`America/Chicago`), `RECAP_DAY` (`sunday`),
   `RECAP_HOUR` (20), `REMIND_HOUR` (12), `REMIND_AFTER_DAYS` (3),
-  `AUTOGRADE_AFTER_HOURS` (48; 0 turns auto-grading off), `AUTOGRADE_DAILY_LIMIT` (30).
+  `AUTOGRADE_AFTER_HOURS` (48; 0 turns auto-grading off), `AUTOGRADE_DAILY_LIMIT` (30),
+  `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
   `/result` with the `returned` amount instead of the buttons.

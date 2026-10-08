@@ -195,6 +195,36 @@ def db() -> sqlite3.Connection:
                 autograde_tries INTEGER,
                 UNIQUE (guild_id, user_id, week)
             );
+            CREATE TABLE IF NOT EXISTS pickem_rounds (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL,
+                league      TEXT    NOT NULL,
+                label       TEXT    NOT NULL,
+                channel_id  INTEGER,
+                created_by  INTEGER,
+                created_at  TEXT    NOT NULL,
+                finished_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS pickem_games (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                round_id INTEGER NOT NULL,
+                guild_id INTEGER NOT NULL,
+                event_id TEXT    NOT NULL,
+                league   TEXT    NOT NULL,
+                start    TEXT    NOT NULL,
+                away     TEXT    NOT NULL,
+                home     TEXT    NOT NULL,
+                winner   INTEGER,              -- 0 away, 1 home, -1 no result
+                score    TEXT
+            );
+            CREATE TABLE IF NOT EXISTS pickem_picks (
+                game_id    INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                user_name  TEXT    NOT NULL,
+                side       INTEGER NOT NULL,   -- 0 away, 1 home
+                created_at TEXT    NOT NULL,
+                PRIMARY KEY (game_id, user_id)
+            );
             CREATE TABLE IF NOT EXISTS player_notes (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id   INTEGER NOT NULL,
@@ -208,9 +238,13 @@ def db() -> sqlite3.Connection:
         # Upgrades for databases made by the first version of the bot.
         cols = {r[1] for r in _conn.execute("PRAGMA table_info(picks)")}
         for col, kind in (("reminded_at", "TEXT"), ("notes", "TEXT"), ("import_key", "TEXT"),
-                          ("autograde_at", "TEXT"), ("autograde_tries", "INTEGER")):
+                          ("autograde_at", "TEXT"), ("autograde_tries", "INTEGER"),
+                          ("live_checked_at", "TEXT"), ("hof_posted", "TEXT")):
             if col not in cols:
                 _conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {kind}")
+        lock_cols = {r[1] for r in _conn.execute("PRAGMA table_info(locks)")}
+        if "live_checked_at" not in lock_cols:
+            _conn.execute("ALTER TABLE locks ADD COLUMN live_checked_at TEXT")
         for p in _conn.execute(
             """SELECT id, legs FROM picks WHERE legs IS NOT NULL
                AND id NOT IN (SELECT DISTINCT pick_id FROM legs)""").fetchall():
@@ -1442,23 +1476,26 @@ def simplify_events(raw: dict) -> list[dict]:
                           "nickname": norm_team(t.get("name") or "")})
         if len(teams) == 2:
             events.append({"id": str(ev.get("id")), "date": ev.get("date") or "", "teams": teams,
+                           "state": status.get("state") or "pre",
                            "final": bool(status.get("completed")) and status.get("state") == "post"})
     return events
 
 
-async def fetch_scoreboard(path: str, day: datetime) -> list[dict]:
-    key = (path, day.strftime("%Y%m%d"))
+async def fetch_scoreboard(path: str, day: datetime, params: Optional[dict] = None) -> list[dict]:
+    extra = params if params is not None else next((x for _, pth, x in LEAGUES if pth == path), {})
+    key = (path, day.strftime("%Y%m%d"), tuple(sorted(extra.items())))
     hit = _score_cache.get(key)
     if hit and hit[0] > time.monotonic():
         return hit[1]
-    extra = next((x for _, pth, x in LEAGUES if pth == path), {})
     try:
         raw = await _get_json(ESPN.format(path=path), {"dates": key[1], **extra})
         events = simplify_events(raw)
+        # Re-check every 2 minutes while games are on; finished days rarely change.
+        ttl = 120 if any(not e["final"] for e in events) else (6 * 3600 if events else 600)
     except Exception:
-        log.warning("Scoreboard lookup failed for %s %s", *key)
-        events = []
-    _score_cache[key] = (time.monotonic() + 900, events)
+        log.warning("Scoreboard lookup failed for %s %s", path, key[1])
+        events, ttl = [], 300
+    _score_cache[key] = (time.monotonic() + ttl, events)
     return events
 
 
@@ -1697,21 +1734,7 @@ async def autograde(guild_id: int, pick_id: int,
     if not items:
         return p, [], False, False
     by_n, used_ai = await lookup_items(p, items, single, allow_ai)
-    lines, graded = [], False
-    for n, leg_text in items:
-        r = by_n.get(n) or {}
-        result = str(r.get("result", "unknown")).lower()
-        why = clip(str(r.get("why") or "").strip(), 120)
-        label = "" if single else f" `{n}` {clip(leg_text, 70)}:"
-        if result not in ("hit", "miss", "push"):
-            lines.append(f"⏳{label} couldn't confirm" + (f" ({why})" if why else ""))
-            continue
-        graded = True
-        lines.append(f"{LEG_ICON[result]}{label} {why or result}")
-        if single:
-            settle_pick(guild_id, pick_id, {"hit": "win", "miss": "loss", "push": "push"}[result])
-        else:
-            grade_leg(guild_id, pick_id, n, result)
+    lines, graded = apply_results(guild_id, pick_id, items, by_n, single)
     return get_pick(guild_id, pick_id), lines, graded, used_ai
 
 
@@ -2351,6 +2374,274 @@ async def assign_hot_roles(client: discord.Client, guild_id: int) -> Optional[st
                 "and drag my role above them in Server Settings → Roles.")
 
 
+# ==========================================================================
+# Instant grading, weekly pick'em, hall of fame
+# ==========================================================================
+
+LIVE_WINDOW_DAYS = 5          # picks logged within this many days get checked as games finish
+LIVE_RECHECK_MINUTES = 2
+HOF_MIN_PROFIT = env_int("HOF_MIN_PROFIT", 100, 1)
+HOF_MIN_MULTIPLE = env_int("HOF_MIN_MULTIPLE", 5, 2)
+HOF_MIN_LEGS = 3
+
+
+def apply_results(guild_id: int, pick_id: int, items: list[tuple[int, str]], by_n: dict[int, dict],
+                  single: bool, only_graded: bool = False) -> tuple[list[str], bool]:
+    """Apply looked-up results to a pick. Returns (one line per item, whether anything was graded)."""
+    lines, graded = [], False
+    for n, leg_text in items:
+        r = by_n.get(n) or {}
+        result = str(r.get("result", "unknown")).lower()
+        why = clip(str(r.get("why") or "").strip(), 120)
+        label = "" if single else f" `{n}` {clip(leg_text, 70)}:"
+        if result not in ("hit", "miss", "push"):
+            if not only_graded:
+                lines.append(f"⏳{label} couldn't confirm" + (f" ({why})" if why else ""))
+            continue
+        graded = True
+        lines.append(f"{LEG_ICON[result]}{label} {why or result}")
+        if single:
+            settle_pick(guild_id, pick_id, {"hit": "win", "miss": "loss", "push": "push"}[result])
+        else:
+            grade_leg(guild_id, pick_id, n, result)
+    return lines, graded
+
+
+def open_items(p) -> tuple[list[tuple[int, str]], bool]:
+    legs = get_legs(p["id"])
+    if not legs:
+        return [(1, p["description"])], True
+    return [(leg["idx"], leg["text"]) for leg in legs if leg["status"] == "open"], False
+
+
+async def recap_channel_for(client: discord.Client, guild_id: int):
+    channel_id = get_setting(guild_id, "recap_channel")
+    return client.get_channel(int(channel_id)) if channel_id else None
+
+
+async def post_lock_result(client: discord.Client, lock, status: str, why: Optional[str]) -> None:
+    channel = await recap_channel_for(client, lock["guild_id"])
+    if channel is not None:
+        await channel.send(
+            f"🔒 Lock graded: <@{lock['user_id']}> {LOCK_ICON[status]} {clip(lock['text'], 100)}"
+            + (f" · {clip(why, 100)}" if why else "")
+            + f"\n-# Wrong? Fix it with `/lockresult lock_id:{lock['id']}`.",
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+
+# ---- pick'em -----------------------------------------------------------------------
+
+PICKEM_LEAGUES = [  # (choice name, ESPN path, query params, default days of games)
+    ("NFL", "football/nfl", {}, 7),
+    ("College football (ranked)", "football/college-football", {}, 7),
+    ("NBA", "basketball/nba", {}, 1),
+    ("NHL", "hockey/nhl", {}, 1),
+    ("MLB", "baseball/mlb", {}, 1),
+    ("Premier League", "soccer/eng.1", {}, 7),
+    ("MLS", "soccer/usa.1", {}, 7),
+]
+PICKEM_MAX_GAMES = 25
+GAMES_PER_MESSAGE = 5
+
+
+def pickem_league(path: str) -> tuple:
+    return next(x for x in PICKEM_LEAGUES if x[1] == path)
+
+
+def latest_round(guild_id: int):
+    return db().execute("SELECT * FROM pickem_rounds WHERE guild_id = ? ORDER BY id DESC LIMIT 1",
+                        (guild_id,)).fetchone()
+
+
+def round_games(round_id: int) -> list:
+    return db().execute("SELECT * FROM pickem_games WHERE round_id = ? ORDER BY start, id", (round_id,)).fetchall()
+
+
+def game_started(g, now: Optional[datetime] = None) -> bool:
+    return (now or datetime.now(timezone.utc)) >= datetime.fromisoformat(g["start"])
+
+
+def game_line(g, n: int) -> str:
+    when = datetime.fromisoformat(g["start"]).astimezone(TZ).strftime("%a %-I:%M %p")
+    if g["winner"] is None:
+        status = when
+    elif g["winner"] == -1:
+        status = "no result (tie or postponed)"
+    else:
+        status = f"✅ {g['home'] if g['winner'] == 1 else g['away']}" + (f" · {g['score']}" if g["score"] else "")
+    return f"`{n}` {g['away']} @ {g['home']} · {status}"
+
+
+class PickemButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pe:(?P<gid>\d+):(?P<side>[01])"):
+    def __init__(self, game_id: int, side: int, label: str = "", row: int = 0):
+        super().__init__(discord.ui.Button(label=label or str(side), style=discord.ButtonStyle.secondary,
+                                           custom_id=f"pe:{game_id}:{side}", row=row))
+        self.game_id = game_id
+        self.side = side
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["gid"]), int(match["side"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        g = db().execute("SELECT * FROM pickem_games WHERE id = ? AND guild_id = ?",
+                         (self.game_id, interaction.guild_id)).fetchone()
+        if g is None:
+            await interaction.response.send_message("That game isn't in pick'em anymore.", ephemeral=True)
+            return
+        if game_started(g):
+            await interaction.response.send_message("That game has started, so picks are locked.", ephemeral=True)
+            return
+        db().execute("""INSERT OR REPLACE INTO pickem_picks (game_id, user_id, user_name, side, created_at)
+                        VALUES (?,?,?,?,?)""",
+                     (g["id"], interaction.user.id, interaction.user.display_name, self.side, now_iso()))
+        db().commit()
+        mine, other = (g["home"], g["away"]) if self.side == 1 else (g["away"], g["home"])
+        made = db().execute("""SELECT COUNT(*) AS n FROM pickem_picks p JOIN pickem_games g ON g.id = p.game_id
+                               WHERE g.round_id = ? AND p.user_id = ?""", (g["round_id"], interaction.user.id)
+                            ).fetchone()["n"]
+        total = len(round_games(g["round_id"]))
+        await interaction.response.send_message(
+            f"Got it: **{mine}** over {other}. You can change it until kickoff. ({made}/{total} picked)",
+            ephemeral=True)
+
+
+def pickem_view(games: list, first_number: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    for i, g in enumerate(games):
+        view.add_item(PickemButton(g["id"], 0, clip(f"{first_number + i}. {g['away']}", 80), row=i))
+        view.add_item(PickemButton(g["id"], 1, clip(f"@ {g['home']}", 80), row=i))
+    return view
+
+
+def pickem_table(round_id: Optional[int], guild_id: int) -> list[dict]:
+    sql = """SELECT p.user_id, p.user_name, p.side, g.winner FROM pickem_picks p
+             JOIN pickem_games g ON g.id = p.game_id WHERE g.guild_id = ?"""
+    args: list = [guild_id]
+    if round_id is not None:
+        sql += " AND g.round_id = ?"
+        args.append(round_id)
+    out: dict[int, dict] = {}
+    for r in db().execute(sql + " ORDER BY p.created_at", args):
+        s = out.setdefault(r["user_id"], {"name": r["user_name"], "w": 0, "l": 0, "pending": 0})
+        s["name"] = r["user_name"]
+        if r["winner"] is None:
+            s["pending"] += 1
+        elif r["winner"] in (0, 1):
+            s["w" if r["side"] == r["winner"] else "l"] += 1
+    return sorted(out.values(), key=lambda s: (-s["w"], s["l"], s["name"].lower()))
+
+
+def table_lines(table: list[dict], limit: int = 15) -> str:
+    medals = ["🥇", "🥈", "🥉"]
+    return "\n".join(f"{medals[i] if i < 3 else f'`{i + 1}.`'} **{s['name']}** · {s['w']}-{s['l']}"
+                     + (f" · {s['pending']} to go" if s["pending"] else "") for i, s in enumerate(table[:limit]))
+
+
+def round_summary(r) -> discord.Embed:
+    games = round_games(r["id"])
+    table = pickem_table(r["id"], r["guild_id"])
+    done = sum(1 for g in games if g["winner"] is not None)
+    e = discord.Embed(title=f"🏈 Pick'em · {r['label']}", color=BRAND,
+                      description=table_lines(table) or "No picks yet. Tap a team on the game posts.")
+    e.set_footer(text=f"{done}/{len(games)} games final · graded automatically from the scoreboard")
+    return e
+
+
+async def grade_pickem_games(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    games = db().execute("SELECT * FROM pickem_games WHERE winner IS NULL AND start <= ?", (iso(now),)).fetchall()
+    finished_rounds = set()
+    for g in games:
+        day = datetime.fromisoformat(g["start"]).astimezone(TZ)
+        ev = None
+        for offset in (0, -1, 1):  # ESPN files late games under the US Eastern date
+            ev = next((e for e in await fetch_scoreboard(g["league"], day + timedelta(days=offset),
+                                                         pickem_league(g["league"])[2])
+                       if e["id"] == g["event_id"]), None)
+            if ev:
+                break
+        winner = score = None
+        if ev and ev["final"] and all(t["score"] is not None for t in ev["teams"]):
+            home = next(t for t in ev["teams"] if t["home"])
+            away = next(t for t in ev["teams"] if not t["home"])
+            winner = -1 if home["score"] == away["score"] else (1 if home["score"] > away["score"] else 0)
+            score = f"{away['short']} {away['score']:g}, {home['short']} {home['score']:g}"
+        elif now - datetime.fromisoformat(g["start"]) > timedelta(days=3):
+            winner = -1  # postponed or never finished: doesn't count
+        if winner is not None:
+            db().execute("UPDATE pickem_games SET winner = ?, score = ? WHERE id = ?", (winner, score, g["id"]))
+            db().commit()
+            finished_rounds.add(g["round_id"])
+    for rid in finished_rounds:
+        r = db().execute("SELECT * FROM pickem_rounds WHERE id = ?", (rid,)).fetchone()
+        if r["finished_at"] or any(g["winner"] is None for g in round_games(rid)):
+            continue
+        db().execute("UPDATE pickem_rounds SET finished_at = ? WHERE id = ?", (now_iso(), rid))
+        db().commit()
+        channel = client.get_channel(r["channel_id"]) if r["channel_id"] else None
+        channel = channel or await recap_channel_for(client, r["guild_id"])
+        if channel is None:
+            continue
+        table = pickem_table(rid, r["guild_id"])
+        e = round_summary(r)
+        e.title = f"🏁 Pick'em final · {r['label']}"
+        content = None
+        if table and table[0]["w"]:
+            winners = [s["name"] for s in table if (s["w"], s["l"]) == (table[0]["w"], table[0]["l"])]
+            content = f"🏆 **{' & '.join(winners)}** {'wins' if len(winners) == 1 else 'tie for'} the week at {table[0]['w']}-{table[0]['l']}!"
+        await channel.send(content, embed=e, allowed_mentions=discord.AllowedMentions.none())
+
+
+# ---- hall of fame -------------------------------------------------------------------
+
+def hof_qualifies(p) -> Optional[str]:
+    """Why a win belongs in the hall of fame, or None."""
+    net = pick_net(p)
+    legs = get_legs(p["id"])
+    multiple = (p["returned"] or 0) / p["cost"] if p["cost"] else 0
+    if legs and len(legs) >= HOF_MIN_LEGS and all(leg["status"] in ("hit", "push") for leg in legs):
+        return f"hit all {len(legs)} legs"
+    if multiple >= HOF_MIN_MULTIPLE:
+        return f"cashed a {multiple:.1f}x payout"
+    if net >= HOF_MIN_PROFIT:
+        return f"cashed {signed(net)} profit"
+    return None
+
+
+def hof_embed(p, reason: str) -> discord.Embed:
+    e = discord.Embed(title=f"🏆 Hall of Fame · {p['bettor_name']}", description=clip(p["description"], 2000),
+                      color=0xF1C40F)
+    field = legs_field(p["id"])
+    if field:
+        e.add_field(name=field[0], value=field[1], inline=False)
+    e.add_field(name="Paid", value=f"{money(p['returned'] or 0)} on {money(p['cost'])}")
+    e.add_field(name="Net", value=signed(pick_net(p)))
+    if p["cost"]:
+        e.add_field(name="Multiple", value=f"{(p['returned'] or 0) / p['cost']:.1f}x")
+    if p["slip_url"]:
+        e.add_field(name="Slip", value=f"[View]({p['slip_url']})")
+    e.set_footer(text=f"Pick #{p['id']} · {p['platform']}")
+    return e
+
+
+async def post_hall_of_fame(client: discord.Client) -> None:
+    for s in db().execute("SELECT guild_id, value FROM settings WHERE key = 'hof_channel'").fetchall():
+        channel = client.get_channel(int(s["value"]))
+        since = get_setting(s["guild_id"], "hof_since") or "0"
+        rows = db().execute(
+            """SELECT * FROM picks WHERE guild_id = ? AND status = 'win' AND hof_posted IS NULL
+               AND settled_at >= ? ORDER BY settled_at""", (s["guild_id"], since)).fetchall()
+        for p in rows:
+            reason = hof_qualifies(p)
+            db().execute("UPDATE picks SET hof_posted = ? WHERE id = ?", (now_iso() if reason else "skip", p["id"]))
+            db().commit()
+            if reason and channel is not None:
+                mention = f"<@{p['bettor_id']}>" if p["bettor_id"] else f"**{p['bettor_name']}**"
+                await channel.send(f"{mention} {reason}! 🎉", embed=hof_embed(p, reason),
+                                   allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -2366,7 +2657,7 @@ class PicksBot(discord.Client):
 
     async def setup_hook(self):
         self.receipt_channels = receipt_channel_ids()
-        self.add_dynamic_items(SettleButton, LogSlipButton, FollowButton, ChallengeButton)
+        self.add_dynamic_items(SettleButton, LogSlipButton, FollowButton, ChallengeButton, PickemButton)
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild)
@@ -2389,7 +2680,7 @@ class PicksBot(discord.Client):
                 await self.run_schedules()
             except Exception:
                 log.exception("Scheduled post failed")
-            await asyncio.sleep(300)
+            await asyncio.sleep(120)
 
     async def run_autograde(self, now: Optional[datetime] = None, limit: int = 3):
         """Grade picks that are still open AUTOGRADE_AFTER_HOURS after being logged."""
@@ -2495,8 +2786,70 @@ class PicksBot(discord.Client):
             except Exception:
                 log.info("Couldn't DM user %s about their limit", uid)
 
+    async def run_live_grading(self, now: Optional[datetime] = None, limit: int = 40):
+        """Settle picks and locks from the free scoreboard as soon as their games go final."""
+        now = now or datetime.now(timezone.utc)
+        recent = iso(now - timedelta(days=LIVE_WINDOW_DAYS))
+        recheck = iso(now - timedelta(minutes=LIVE_RECHECK_MINUTES))
+        picks = db().execute(
+            """SELECT * FROM picks WHERE status = 'open' AND created_at >= ?
+               AND (live_checked_at IS NULL OR live_checked_at <= ?)
+               ORDER BY live_checked_at IS NOT NULL, live_checked_at LIMIT ?""", (recent, recheck, limit)).fetchall()
+        for p in picks:
+            db().execute("UPDATE picks SET live_checked_at = ? WHERE id = ?", (iso(now), p["id"]))
+            db().commit()
+            items, single = open_items(p)
+            if not items or not leagues_for(p["sport"]) or not any(parse_simple_leg(t) for _, t in items):
+                continue
+            try:
+                found = await free_grade(p, items)
+            except Exception:
+                log.exception("Live check failed for pick %s", p["id"])
+                continue
+            if not found:
+                continue
+            by_n = {n: {"result": r, "why": w} for n, (r, w) in found.items()}
+            lines, _ = apply_results(p["guild_id"], p["id"], [(n, t) for n, t in items if n in by_n], by_n,
+                                     single, only_graded=True)
+            after = get_pick(p["guild_id"], p["id"])
+            flex_hold = (after["status"] == "open" and after["platform"].lower() == "prizepicks"
+                         and any(leg["status"] == "miss" for leg in get_legs(after["id"])))
+            if after["status"] == "open" and not flex_hold:
+                continue  # some legs done, the rest still going: say nothing yet
+            channel = await recap_channel_for(self, after["guild_id"])
+            if channel is not None:
+                mention = f"<@{after['bettor_id']}> " if after["bettor_id"] else ""
+                msg = grading_message(after, lines, False).replace("🤖 Looked up results for", "⚡ Final:", 1)
+                for chunk in split_message(mention + msg):
+                    await channel.send(chunk, allowed_mentions=discord.AllowedMentions(
+                        everyone=False, roles=False, users=True))
+        locks = db().execute(
+            """SELECT * FROM locks WHERE status = 'open' AND created_at >= ?
+               AND (live_checked_at IS NULL OR live_checked_at <= ?) LIMIT ?""", (recent, recheck, limit)).fetchall()
+        for lk in locks:
+            db().execute("UPDATE locks SET live_checked_at = ? WHERE id = ?", (iso(now), lk["id"]))
+            db().commit()
+            if not leagues_for(lk["sport"]) or not parse_simple_leg(lk["text"]):
+                continue
+            like = {"id": -lk["id"], "created_at": lk["created_at"], "sport": lk["sport"], "description": lk["text"]}
+            try:
+                found = await free_grade(like, [(1, lk["text"])], context_legs=[])
+            except Exception:
+                log.exception("Live check failed for lock %s", lk["id"])
+                continue
+            if 1 in found:
+                result, why = found[1]
+                status = {"hit": "win", "miss": "loss", "push": "push"}[result]
+                settle_lock(lk["id"], status, why)
+                await post_lock_result(self, lk, status, why)
+
     async def run_schedules(self, now: Optional[datetime] = None):
         now = now or datetime.now(TZ)
+        for job in (self.run_live_grading, lambda n: grade_pickem_games(self, n), lambda n: post_hall_of_fame(self)):
+            try:
+                await job(now.astimezone(timezone.utc))
+            except Exception:
+                log.exception("Live job failed")
         await self.run_autograde(now.astimezone(timezone.utc))
         await self.run_lock_grading(now.astimezone(timezone.utc))
         await self.check_limits(now)
@@ -3289,7 +3642,9 @@ async def help_cmd(interaction: discord.Interaction):
         "👍/👎 buttons on a pick: tail or fade it · `/tailfade` who's worth following\n"
         "`/challenge` head-to-head bet · `/h2h` your record vs someone\n"
         "`/lock` your lock of the week · `/locks` this week + standings · `/lockresult` fix one\n"
-        "`/awards` monthly awards · `/hotroles` weekly 🔥/🧊 roles (admins)"))
+        "`/awards` monthly awards · `/hotroles` weekly 🔥/🧊 roles (admins)\n"
+        "`/pickem start` weekly pick'em (mods) · `/pickem mine` · `/pickem standings`\n"
+        "`/halloffame` repost big wins in a channel (admins)"))
     e.add_field(name="Your numbers", inline=False, value=(
         "`/stats` record by sport, platform and parlay size · `/chart` profit graph\n"
         "`/odds` convert odds · `/bankroll` units on your picks · `/limit` weekly loss heads-up (private)"))
@@ -3646,8 +4001,10 @@ def guide_embeds() -> list[discord.Embed]:
         "`/edit` and `/delete` fix mistakes. `/open` shows everything still pending."))
     auto = discord.Embed(title="⚡ What the bot does on its own", color=BRAND, description=(
         "• **Reads slips** posted in the receipts channel and logs them for you.\n"
-        "• **Grades picks** still open 48 hours after they're logged and posts the scores it found. "
+        "• **Grades picks the moment games end:** moneylines, spreads and totals settle within minutes "
+        "of the final whistle. Everything else is looked up 48 hours after it's logged. "
         "If it gets one wrong, fix it with `/leg` or `/result`.\n"
+        "• **Hall of Fame:** big wins get reposted in the hall of fame channel.\n"
         "• **Pings you** about picks open 3+ days.\n"
         "• **Sunday 8 PM:** weekly recap, plus the 🔥 Hot Hand and 🧊 Ice Cold roles.\n"
         "• **The 1st of each month:** monthly awards."))
@@ -3657,6 +4014,8 @@ def guide_embeds() -> list[discord.Embed]:
         "`/lock` your lock of the week. One per week, and you can change it until it's graded. "
         "`/locks` shows this week and the standings.\n"
         "`/awards` this month's awards so far.\n"
+        "**Pick'em:** tap a team on each game a mod posts; no money, just bragging rights. "
+        "`/pickem mine` and `/pickem standings`.\n"
         "**@PIMP-BOT** plus a question about a player, team or matchup gets a researched answer."))
     numbers = discord.Embed(title="📊 Your numbers", color=BRAND, description=(
         "`/record` your W-L, profit, ROI, streak and leg hit rate\n"
@@ -3692,6 +4051,122 @@ async def guide_cmd(interaction: discord.Interaction):
         note = ("Guide posted. I couldn't pin it: give me **Manage Messages** in this channel, "
                 "or pin it yourself from the message's ⋯ menu.")
     await interaction.followup.send(note, ephemeral=True)
+
+# ---- pick'em and hall of fame: commands ------------------------------------------
+
+pickem_group = app_commands.Group(name="pickem", description="Weekly pick'em: pick the winners, no money involved",
+                                  guild_only=True)
+
+
+@pickem_group.command(name="start", description="Post the upcoming games for everyone to pick (mods)")
+@app_commands.describe(league="Which league", days="How many days of games (default: a week for football and "
+                                                   "soccer, today for the others)")
+@app_commands.choices(league=[app_commands.Choice(name=n, value=p) for n, p, _, _ in PICKEM_LEAGUES])
+async def pickem_start(interaction: discord.Interaction, league: app_commands.Choice[str],
+                       days: Optional[app_commands.Range[int, 1, 10]] = None):
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if not (is_mod(interaction.user) or (perms and getattr(perms, "manage_guild", False))):
+        await interaction.response.send_message("Only mods can start a pick'em round.", ephemeral=True)
+        return
+    name, path, params, default_days = pickem_league(league.value)
+    days = days or default_days
+    await interaction.response.defer(thinking=True)
+    now = datetime.now(timezone.utc)
+    today = datetime.now(TZ)
+    seen, upcoming = set(), []
+    for offset in range(days):
+        for ev in await fetch_scoreboard(path, today + timedelta(days=offset), params):
+            when = datetime.fromisoformat(ev["date"].replace("Z", "+00:00")) if ev["date"] else None
+            if ev["id"] in seen or not when or when <= now or ev.get("state", "pre") != "pre":
+                continue
+            seen.add(ev["id"])
+            upcoming.append((when, ev))
+    upcoming.sort(key=lambda x: x[0])
+    upcoming = upcoming[:PICKEM_MAX_GAMES]
+    if not upcoming:
+        await interaction.followup.send(f"No upcoming {name} games in the next {days} day{'s' if days > 1 else ''}.")
+        return
+    first, last = upcoming[0][0].astimezone(TZ), upcoming[-1][0].astimezone(TZ)
+    label = f"{name} · {first:%b %-d}" + (f"–{last:%b %-d}" if last.date() != first.date() else "")
+    cur = db().execute("""INSERT INTO pickem_rounds (guild_id, league, label, channel_id, created_by, created_at)
+                          VALUES (?,?,?,?,?,?)""",
+                       (interaction.guild_id, path, label, interaction.channel_id, interaction.user.id, now_iso()))
+    rid = cur.lastrowid
+    for when, ev in upcoming:
+        away = next(t for t in ev["teams"] if not t["home"])
+        home = next(t for t in ev["teams"] if t["home"])
+        db().execute("""INSERT INTO pickem_games (round_id, guild_id, event_id, league, start, away, home)
+                        VALUES (?,?,?,?,?,?,?)""", (rid, interaction.guild_id, ev["id"], path, iso(when),
+                                                    away["short"], home["short"]))
+    db().commit()
+    games = round_games(rid)
+    intro = discord.Embed(title=f"🏈 Pick'em · {label}", color=BRAND, description=(
+        f"{len(games)} games. Tap the team you think wins. You can change a pick until that game starts, "
+        "then it locks. Results grade themselves from the scoreboard.\n"
+        "`/pickem mine` your picks · `/pickem standings` the table"))
+    for start in range(0, len(games), GAMES_PER_MESSAGE):
+        batch = games[start:start + GAMES_PER_MESSAGE]
+        text = "\n".join(game_line(g, start + i + 1) for i, g in enumerate(batch))
+        await interaction.followup.send(text, embed=intro if start == 0 else discord.utils.MISSING,
+                                        view=pickem_view(batch, start + 1))
+
+
+@pickem_group.command(name="mine", description="Your picks for the current pick'em round")
+async def pickem_mine(interaction: discord.Interaction):
+    r = latest_round(interaction.guild_id)
+    if r is None:
+        await interaction.response.send_message("No pick'em round yet. A mod can start one with `/pickem start`.",
+                                                ephemeral=True)
+        return
+    picks = {row["game_id"]: row["side"] for row in db().execute(
+        "SELECT game_id, side FROM pickem_picks WHERE user_id = ?", (interaction.user.id,))}
+    lines = []
+    for n, g in enumerate(round_games(r["id"]), start=1):
+        side = picks.get(g["id"])
+        if side is None:
+            mark = "🔒 missed" if game_started(g) else "➕ not picked yet"
+            lines.append(f"`{n}` {g['away']} @ {g['home']} · {mark}")
+            continue
+        team = g["home"] if side == 1 else g["away"]
+        icon = "⏳" if g["winner"] is None else "➖" if g["winner"] == -1 else ("✅" if g["winner"] == side else "❌")
+        lines.append(f"`{n}` {icon} **{team}** ({g['away']} @ {g['home']})")
+    await interaction.response.send_message(
+        embed=discord.Embed(title=f"Your picks · {r['label']}", description=clip("\n".join(lines), 4000), color=BRAND),
+        ephemeral=True)
+
+
+@pickem_group.command(name="standings", description="This round's pick'em table and the all-time standings")
+async def pickem_standings(interaction: discord.Interaction):
+    r = latest_round(interaction.guild_id)
+    if r is None:
+        await interaction.response.send_message("No pick'em round yet. A mod can start one with `/pickem start`.")
+        return
+    e = round_summary(r)
+    overall = pickem_table(None, interaction.guild_id)
+    rounds = db().execute("SELECT COUNT(*) AS n FROM pickem_rounds WHERE guild_id = ?",
+                          (interaction.guild_id,)).fetchone()["n"]
+    if rounds > 1 and overall:
+        e.add_field(name=f"All-time ({rounds} rounds)", value=clip(table_lines(overall, 10), 1024), inline=False)
+    await interaction.response.send_message(embed=e)
+
+
+bot.tree.add_command(pickem_group)
+
+
+@bot.tree.command(name="halloffame", description="Repost big wins in this channel (turn on or off)")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+async def halloffame_cmd(interaction: discord.Interaction):
+    if get_setting(interaction.guild_id, "hof_channel") == str(interaction.channel_id):
+        set_setting(interaction.guild_id, "hof_channel", None)
+        await interaction.response.send_message("Hall of fame is **off** for this channel.")
+        return
+    set_setting(interaction.guild_id, "hof_channel", str(interaction.channel_id))
+    set_setting(interaction.guild_id, "hof_since", now_iso())
+    await interaction.response.send_message(
+        f"🏆 This is the **Hall of Fame** now. From here on, any win that hits {HOF_MIN_LEGS}+ legs, pays "
+        f"{HOF_MIN_MULTIPLE}x or more, or profits {money(HOF_MIN_PROFIT)}+ gets posted here automatically.")
+
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction,
