@@ -56,6 +56,13 @@ paid, and who's actually up.
 | `/remind`, `/reminders` | DM yourself a reminder (`30m`, `2h`, `6pm`, `tomorrow 9am`, up to 30 days out); list or cancel them |
 | `/backups` | Post a full backup (database plus Excel) in this channel every night (admins; keep the channel private) |
 | `/settings` | Everything set up in this server: channels, features, data size, version (admins, only you see it) |
+| `/sweat` | A live tracker for a pick that edits itself every 2 minutes: each leg's stat against its line with a progress bar, or the game score. Posts when a leg clears or dies. Also the 🥵 button on every pick card |
+| `/trend` | A player's last 5/10/20 games against a line, with a chart. Buttons switch the window and nudge the line, a menu switches the stat. Free ESPN game logs, preseason left out |
+| `/schedule` | When the games on open picks start, grouped by day, with live scores. Mine or everyone's |
+| `/kalshi link`, `/kalshi check` | Link a Kalshi pick to its market (paste the Kalshi link or ticker). It settles itself when Kalshi does, and combo legs tick off as each one settles. Also the 🔗 Kalshi button on Kalshi pick cards |
+| `/groupparlay` | This week's group parlay: everyone adds one leg with a button, legs grade themselves, and whoever busts it gets roasted. A new one posts every Monday in the recap channel |
+| `/copy` | Log your own copy of someone's pick (or tap 📋 Copy on the card). Copies grade along with the original |
+| `/wrapped` | Your season, year or all-time in review, story style: tap through the pages, ending with a shareable image |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
 **Receipts channel.** Run `/receipts` once in the channel where people post slips.
@@ -74,8 +81,13 @@ leaves those for you to settle with `/result`. `/record` and the weekly recap sh
 often your legs hit.
 
 **Instant grading.** Every couple of minutes the bot checks open picks from the last 5 days
-against the free scoreboard. As soon as a game goes final, moneyline, spread and total legs
-are graded, and when that settles the pick, it posts the result in the recap channel. Locks
+against the free scoreboard and box scores. As soon as a game goes final, moneyline, spread,
+total and player-prop legs are graded (an over that's already cleared is marked hit while the
+game is still on). Props cover the NBA, WNBA, NFL, college football and basketball, MLB and NHL:
+points, rebounds, assists, PRA and the other combos, 3s, steals, blocks, fantasy score, passing,
+rushing and receiving yards, receptions, TDs, anytime TD, tackles, hits, runs, RBIs, home runs,
+pitcher strikeouts, outs, shots on goal, saves and more. A player who doesn't play is graded a
+push. and when that settles the pick, it posts the result in the recap channel. Locks
 of the week work the same way.
 
 **Auto-grading.** 48 hours after a pick is logged, any legs still open get looked up and
@@ -98,6 +110,12 @@ and any parlay that missed by one leg. Every day at noon it pings anyone with a 
 
 **Locks of the week** get graded the same way as picks, 48 hours after they're submitted,
 and the results post in the recap channel. The weekly recap shows how the week's locks went.
+
+**Injury alerts.** If a player on someone's open prop shows up on ESPN's injury report as Out,
+Doubtful, Questionable or Day-To-Day, the bot DMs them once (with a button to turn alerts off).
+
+**Preseason.** Picks on preseason games get a ⚠️ Preseason tag. Admins can leave them off the
+leaderboard with the toggle in `/settings`, and `/leaderboard` has a preseason option too.
 
 **Hot Hand roles** need two things in Discord: the bot's role needs the **Manage Roles**
 permission, and it has to sit above the 🔥 Hot Hand and 🧊 Ice Cold roles in Server Settings →
