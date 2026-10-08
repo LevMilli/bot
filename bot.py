@@ -638,6 +638,198 @@ def build_reminders(guild_id: int) -> Optional[str]:
 
 
 # --------------------------------------------------------------------------
+# Excel export: one tab per platform, a Legs tab, and a per-person Summary
+# --------------------------------------------------------------------------
+
+SHEET_GROUPS = ["Kalshi", "PrizePicks", "Other"]   # Sportsbook and Other picks go on "Other"
+LAST_ROW = 5000                                     # formula ranges reach this far down
+
+
+def sheet_for(platform: str) -> str:
+    return platform if platform in ("Kalshi", "PrizePicks") else "Other"
+
+
+def build_workbook(guild_id: int) -> io.BytesIO:
+    from openpyxl import Workbook
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    ARIAL, BOLD = Font(name="Arial", size=10), Font(name="Arial", size=10, bold=True)
+    WHITE_BOLD = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+    HEAD_FILL = PatternFill("solid", fgColor="5B2BB5")
+    NAME_FILL = PatternFill("solid", fgColor="E9DDFF")
+    TOTAL_BORDER = Border(top=Side(style="thin", color="5B2BB5"))
+    MONEY = '$#,##0.00'
+    NET = '$#,##0.00;[Red]-$#,##0.00;"-"'
+    PCT = '0.0%;[Red]-0.0%;"-"'
+
+    def put(ws, row, col, value, font=ARIAL, fmt=None, fill=None, wrap=False, border=None,
+            align=None):
+        c = ws.cell(row=row, column=col, value=value)
+        c.font = font
+        if fmt:
+            c.number_format = fmt
+        if fill:
+            c.fill = fill
+        if border:
+            c.border = border
+        c.alignment = Alignment(vertical="top", wrap_text=wrap, horizontal=align)
+        return c
+
+    picks = db().execute("SELECT * FROM picks WHERE guild_id = ? ORDER BY id", (guild_id,)).fetchall()
+    # One name per person, so every formula matches all of their rows.
+    names: dict[str, str] = {}
+    for p in picks:
+        names[p["bettor_key"]] = p["bettor_name"]
+
+    wb = Workbook()
+    summary = wb.active
+    summary.title = "Summary"
+
+    # ---- one tab per platform ----
+    headers = ["Pick #", "Date", "Bettor", "Sport", "Description", "Legs", "Legs Hit",
+               "Cost", "Max Payout", "Status", "Returned", "Net", "Settled", "Slip"]
+    widths = [8, 13, 14, 10, 34, 46, 9, 10, 11, 9, 10, 10, 13, 10]
+    tabs = {}
+    for name in SHEET_GROUPS:
+        ws = wb.create_sheet(name)
+        tabs[name] = ws
+        for col, (h, w) in enumerate(zip(headers, widths), start=1):
+            put(ws, 1, col, h, WHITE_BOLD, fill=HEAD_FILL, align="center")
+            ws.column_dimensions[get_column_letter(col)].width = w
+        ws.freeze_panes = "A2"
+    next_row = {name: 2 for name in SHEET_GROUPS}
+    for p in picks:
+        ws_name = sheet_for(p["platform"])
+        ws, r = tabs[ws_name], next_row[ws_name]
+        next_row[ws_name] += 1
+        legs = get_legs(p["id"])
+        legs_text = "\n".join(f"{leg['idx']}. {leg['text']}" +
+                               (f" ({leg['status']})" if leg["status"] != "open" else "")
+                               for leg in legs)
+        sport = p["sport"] or ("" if ws_name != "Other" else p["platform"])
+        put(ws, r, 1, p["id"])
+        put(ws, r, 2, datetime.fromisoformat(p["created_at"]).astimezone(TZ).date(), fmt="mmm d, yyyy")
+        put(ws, r, 3, names[p["bettor_key"]])
+        put(ws, r, 4, sport)
+        put(ws, r, 5, p["description"], wrap=True)
+        put(ws, r, 6, legs_text or None, wrap=True)
+        if legs:
+            put(ws, r, 7, f"{sum(1 for leg in legs if leg['status'] == 'hit')}/{len(legs)}")
+        put(ws, r, 8, p["cost"], fmt=MONEY)
+        put(ws, r, 9, p["payout"], fmt=MONEY)
+        put(ws, r, 10, p["status"].capitalize())
+        if p["status"] != "open":
+            put(ws, r, 11, p["returned"] or 0.0, fmt=MONEY)
+            put(ws, r, 13, datetime.fromisoformat(p["settled_at"]).astimezone(TZ).date(), fmt="mmm d, yyyy")
+        put(ws, r, 12, f'=IF(OR(J{r}="Open",J{r}=""),"",K{r}-H{r})', fmt=NET)
+        if p["slip_url"]:
+            c = put(ws, r, 14, "View", Font(name="Arial", size=10, color="1155CC", underline="single"))
+            c.hyperlink = p["slip_url"]
+    for name, ws in tabs.items():
+        last = max(next_row[name] - 1, 2)
+        ws.auto_filter.ref = f"A1:N{last}"
+        for status, color in (("Win", "D9F2E3"), ("Loss", "F9D9D6"), ("Open", "FFF3C4"), ("Push", "EEEEEE"), ("Void", "EEEEEE")):
+            ws.conditional_formatting.add(
+                f"J2:J{LAST_ROW}", FormulaRule(formula=[f'$J2="{status}"'], fill=PatternFill("solid", fgColor=color)))
+
+    # ---- one row per leg ----
+    legs_ws = wb.create_sheet("Legs")
+    for col, (h, w) in enumerate(zip(["Pick #", "Bettor", "Platform", "Leg #", "Leg", "Result"],
+                                     [8, 14, 11, 7, 50, 9]), start=1):
+        put(legs_ws, 1, col, h, WHITE_BOLD, fill=HEAD_FILL)
+        legs_ws.column_dimensions[get_column_letter(col)].width = w
+    legs_ws.freeze_panes = "A2"
+    r = 2
+    for p in picks:
+        for leg in get_legs(p["id"]):
+            for col, v in enumerate([p["id"], names[p["bettor_key"]], sheet_for(p["platform"]),
+                                     leg["idx"], leg["text"], leg["status"].capitalize()], start=1):
+                put(legs_ws, r, col, v)
+            r += 1
+    legs_ws.auto_filter.ref = f"A1:F{max(r - 1, 2)}"
+
+    # ---- summary: whole group, then a section per person ----
+    def rng(sheet: str, col: str) -> str:
+        return f"{sheet}!${col}$2:${col}${LAST_ROW}"
+
+    def crit(sheet: str, name_ref: Optional[str], col: str = "C") -> str:
+        return f",{rng(sheet, col)},{name_ref}" if name_ref else ""
+
+    summary.column_dimensions["A"].width = 16
+    for col in "BCDEFG":
+        summary.column_dimensions[col].width = 9
+    for col in "HIJ":
+        summary.column_dimensions[col].width = 12
+    for col in "KL":
+        summary.column_dimensions[col].width = 10
+    put(summary, 1, 1, "Picks Summary", Font(name="Arial", size=14, bold=True, color="5B2BB5"))
+    put(summary, 2, 1, f"Exported {datetime.now(TZ).strftime('%b %d, %Y %I:%M %p')}. "
+        "These totals are formulas: edit a row on the Kalshi, PrizePicks or Other tab "
+        "and this page updates.", Font(name="Arial", size=9, italic=True, color="666666"))
+
+    cols = ["Platform", "Picks", "Wins", "Losses", "Pushes", "Open", "Open $", "Staked",
+            "Returned", "Net", "ROI", "Leg Hit %"]
+    row = 4
+    people = sorted(names.items(), key=lambda kv: -sum(
+        ((p["returned"] or 0.0) - p["cost"]) for p in picks
+        if p["bettor_key"] == kv[0] and p["status"] != "open"))
+    sections = [("Whole group", None)] + [(n, n) for _, n in people]
+    for title, person in sections:
+        put(summary, row, 1, title, Font(name="Arial", size=11, bold=True), fill=NAME_FILL)
+        for col in range(2, len(cols) + 1):
+            put(summary, row, col, None, fill=NAME_FILL)
+        name_ref = f"$A${row}" if person else None
+        row += 1
+        for col, h in enumerate(cols, start=1):
+            put(summary, row, col, h, WHITE_BOLD, fill=HEAD_FILL, align="left" if col == 1 else "right")
+        row += 1
+        first = row
+        for sheet in SHEET_GROUPS:
+            c = crit(sheet, name_ref)
+            lc = crit("Legs", name_ref, "B") + f",{rng('Legs', 'C')},\"{sheet}\""
+            r = row
+            put(summary, r, 1, sheet)
+            put(summary, r, 2, f'=COUNTIFS({rng(sheet, "A")},">0"{c})')
+            put(summary, r, 3, f'=COUNTIFS({rng(sheet, "J")},"Win"{c})')
+            put(summary, r, 4, f'=COUNTIFS({rng(sheet, "J")},"Loss"{c})')
+            put(summary, r, 5, f'=COUNTIFS({rng(sheet, "J")},"Push"{c})+COUNTIFS({rng(sheet, "J")},"Void"{c})')
+            put(summary, r, 6, f'=COUNTIFS({rng(sheet, "J")},"Open"{c})')
+            put(summary, r, 7, f'=SUMIFS({rng(sheet, "H")},{rng(sheet, "J")},"Open"{c})', fmt=MONEY)
+            put(summary, r, 8, f'=SUMIFS({rng(sheet, "H")},{rng(sheet, "J")},"<>Open"{c})', fmt=MONEY)
+            put(summary, r, 9, f'=SUMIFS({rng(sheet, "K")},{rng(sheet, "J")},"<>Open"{c})', fmt=MONEY)
+            put(summary, r, 10, f"=I{r}-H{r}", fmt=NET)
+            put(summary, r, 11, f"=IF(H{r}=0,0,J{r}/H{r})", fmt=PCT)
+            hits = f'COUNTIFS({rng("Legs", "F")},"Hit"{lc})'
+            misses = f'COUNTIFS({rng("Legs", "F")},"Miss"{lc})'
+            put(summary, r, 12, f"=IF({hits}+{misses}=0,0,{hits}/({hits}+{misses}))", fmt=PCT)
+            row += 1
+        last = row - 1
+        put(summary, row, 1, "Total", BOLD, border=TOTAL_BORDER)
+        for col in range(2, 10):
+            letter = get_column_letter(col)
+            put(summary, row, col, f"=SUM({letter}{first}:{letter}{last})", BOLD,
+                fmt=MONEY if col >= 7 else None, border=TOTAL_BORDER)
+        put(summary, row, 10, f"=I{row}-H{row}", BOLD, fmt=NET, border=TOTAL_BORDER)
+        put(summary, row, 11, f"=IF(H{row}=0,0,J{row}/H{row})", BOLD, fmt=PCT, border=TOTAL_BORDER)
+        lc = crit("Legs", name_ref, "B")
+        hits = f'COUNTIFS({rng("Legs", "F")},"Hit"{lc})'
+        misses = f'COUNTIFS({rng("Legs", "F")},"Miss"{lc})'
+        put(summary, row, 12, f"=IF({hits}+{misses}=0,0,{hits}/({hits}+{misses}))", BOLD, fmt=PCT,
+            border=TOTAL_BORDER)
+        row += 2
+    put(summary, row, 1, "Staked, Returned, Net and ROI count settled picks only. Pushes include "
+        "voids. Open $ is money still riding.", Font(name="Arial", size=9, italic=True, color="666666"))
+    summary.freeze_panes = "A4"
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out
+
+
+# --------------------------------------------------------------------------
 # Buttons (these keep working after the bot restarts)
 # --------------------------------------------------------------------------
 
@@ -1363,14 +1555,31 @@ async def delete_cmd(interaction: discord.Interaction, pick_id: int):
         f"Deleted pick #{pick_id} ({p['bettor_name']}: {clip(p['description'], 80)}).")
 
 
-@bot.tree.command(name="export", description="Download every pick as a CSV")
+EXPORT_FORMATS = [
+    app_commands.Choice(name="Excel (Kalshi, PrizePicks and Summary tabs)", value="xlsx"),
+    app_commands.Choice(name="CSV (one plain list)", value="csv"),
+]
+
+
+@bot.tree.command(name="export", description="Download every pick as a spreadsheet")
 @app_commands.guild_only()
-async def export_cmd(interaction: discord.Interaction):
+@app_commands.describe(format="Excel by default")
+@app_commands.choices(format=EXPORT_FORMATS)
+async def export_cmd(interaction: discord.Interaction,
+                     format: Optional[app_commands.Choice[str]] = None):
     rows = db().execute(
         "SELECT * FROM picks WHERE guild_id = ? ORDER BY id", (interaction.guild_id,)
     ).fetchall()
     if not rows:
         await interaction.response.send_message("No picks to export yet.", ephemeral=True)
+        return
+    stamp = datetime.now(TZ).strftime("%Y-%m-%d")
+    if format is None or format.value == "xlsx":
+        data = build_workbook(interaction.guild_id)
+        people = len({r["bettor_key"] for r in rows})
+        await interaction.response.send_message(
+            f"{len(rows)} picks from {people} {'person' if people == 1 else 'people'}.",
+            file=discord.File(data, filename=f"picks_{stamp}.xlsx"))
         return
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -1391,7 +1600,6 @@ async def export_cmd(interaction: discord.Interaction):
             p["settled_at"] or "", p["slip_url"] or "",
         ])
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig"))  # BOM so Excel reads it right
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     await interaction.response.send_message(
         f"{len(rows)} picks.", file=discord.File(data, filename=f"picks_{stamp}.csv"))
 
@@ -1587,7 +1795,7 @@ async def help_cmd(interaction: discord.Interaction):
     e.add_field(name="Picks", inline=False, value=(
         "`/pick` log a bet · `/leg` grade a parlay leg · `/result` settle it\n"
         "`/open` what's pending · `/record` your stats · `/leaderboard` who's up\n"
-        "`/edit` `/delete` fix mistakes · `/export` download everything as a spreadsheet"))
+        "`/edit` `/delete` fix mistakes · `/export` Excel file with Kalshi, PrizePicks and per-person tabs"))
     e.add_field(name="Slips", inline=False, value=(
         "Post a slip screenshot in the receipts channel and I'll log it. "
         "(Admins: `/receipts` in that channel.)"))

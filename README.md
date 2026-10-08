@@ -14,7 +14,7 @@ paid, and who's actually up.
 | `/record` | One person's W-L, staked, returned, net, ROI and leg hit rate, plus their last 5 results |
 | `/leaderboard` | Everyone ranked by net profit |
 | `/edit`, `/delete` | Fix or remove a pick |
-| `/export` | Download every pick as a CSV that opens in Excel or Google Sheets |
+| `/export` | Download an Excel file: Kalshi, PrizePicks and Other tabs, a Legs tab, and a Summary tab with a section per person (or pick CSV) |
 | `/receipts` | Turn slip logging on or off for the channel you run it in (admins only) |
 | `/recapchannel` | Post the weekly recap and open-pick reminders in this channel (admins only) |
 | `/recap` | The last 7 days: who's up, best hit, worst beat, heartbreaker |
