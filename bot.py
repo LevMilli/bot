@@ -51,7 +51,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-08 r13.1"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-08 r13.2"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -1615,7 +1615,12 @@ Less = under), e.g. 'Victor Wembanyama over 23.5 Pts+Rebs+Asts'. Game lines as '
 }
 
 Use "open" unless the screenshot clearly shows a final result. Numbers must be plain \
-numbers with no currency symbols. Never guess an amount you cannot read."""
+numbers with no currency symbols. Never guess an amount you cannot read.
+
+PrizePicks details: the header reads like "$25 to win $450" (cost 25, payout 450). If a line \
+shows a crossed-out number next to a new number (a discounted or promo line), the leg uses the \
+NEW number, never the crossed-out one. Demon and goblin icons don't change how you write the leg. \
+Up arrow = over, down arrow = under. Keep accents and spelling of player names exactly as shown."""
 
 ASK_SYSTEM = """You are {bot_name}, the assistant in a Discord server where a group of \
 friends track their sports picks (Kalshi, PrizePicks and sportsbooks; NFL, CS2 esports \
@@ -1669,12 +1674,12 @@ def as_amount(value) -> Optional[float]:
         return None
 
 
-async def read_slip(attachment: discord.Attachment) -> Optional[dict]:
+async def read_slip(attachment: discord.Attachment, model: Optional[str] = None) -> Optional[dict]:
     """Returns the parsed slip, or None if it couldn't be read as one."""
     media_type = image_type(attachment) or "image/png"
     data = base64.standard_b64encode(await attachment.read()).decode()
     reply = await anthropic_client().messages.create(
-        model=CLAUDE_MODEL,
+        model=model or CLAUDE_MODEL,
         max_tokens=1024,
         messages=[{
             "role": "user",
@@ -1695,6 +1700,54 @@ async def read_slip(attachment: discord.Attachment) -> Optional[dict]:
     if slip.get("status") not in ("open", "win", "loss", "push"):
         slip["status"] = "open"
     return slip
+
+
+def explain_ai_error(exc: Exception) -> tuple[str, bool]:
+    """(plain-English reason, worth retrying with another model?)"""
+    name = type(exc).__name__
+    text = str(exc).lower()
+    if "credit balance" in text or "billing" in text:
+        return "the Anthropic account is out of credits (console.anthropic.com → Billing)", False
+    if name == "AuthenticationError" or "x-api-key" in text or "authentication" in text:
+        return "the Claude key was rejected. Put a working key in `ANTHROPIC_API_KEY` on Railway → Variables", False
+    if name == "PermissionDeniedError":
+        return "that Claude key isn't allowed to use this model", True
+    if name == "NotFoundError" or "not_found" in text or "model:" in text:
+        return "the model name isn't valid. Remove or fix the `CLAUDE_MODEL` variable on Railway", True
+    if name == "RateLimitError" or "rate limit" in text:
+        return "Claude is rate-limiting the key right now; try again in a minute", False
+    if name in ("APIConnectionError", "APITimeoutError", "InternalServerError") or "overloaded" in text:
+        return "Claude was unreachable or overloaded; try again in a minute", True
+    if name in ("JSONDecodeError", "ValueError"):
+        return "Claude's answer wasn't in the expected format", True
+    return f"{name}: {str(exc)[:120]}", True
+
+
+async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
+    """Read with the fast model; if that fails or misses the amounts, try once more with the stronger one.
+    Returns (slip or None, reason it failed or None)."""
+    reason = None
+    models = [None] + ([ASK_MODEL] if ASK_MODEL and ASK_MODEL != CLAUDE_MODEL else [])
+    for i, model in enumerate(models):
+        try:
+            slip = await (read_slip(attachment) if model is None else read_slip(attachment, model=model))
+        except Exception as exc:
+            log.exception("Could not read slip %s with %s", getattr(attachment, "url", "?"), model or CLAUDE_MODEL)
+            reason, retry = explain_ai_error(exc)
+            SLIP_STATE["last_error"] = (now_iso(), f"Reading with Claude: {type(exc).__name__}: {exc}"[:300])
+            if not retry:
+                return None, reason
+            continue
+        if slip is None:
+            reason = "it didn't look like a bet slip to me"
+            continue
+        if slip.get("cost") is None:
+            reason = "I couldn't make out the amount risked"
+            if i == len(models) - 1:
+                return slip, reason
+            continue
+        return slip, None
+    return None, reason
 
 
 def build_ask_context(guild_id: int, asker_key: str, question: str) -> str:
@@ -3835,8 +3888,8 @@ STATS = {
     "anytime_td": ("Anytime TD", "football", [("rush_td", 1), ("rec_td", 1)],
                    ["anytime touchdown", "anytime td", "anytime touchdown scorer", "td scorer", "to score a td",
                     "scores a touchdown", "rush+rec tds"]),
-    "longest_rec": ("Longest Reception", "football", [("long_rec", 1)], ["longest reception", "longest catch"]),
-    "longest_rush": ("Longest Rush", "football", [("long_rush", 1)], ["longest rush"]),
+    "longest_rec": ("Longest Reception", "football", [("long_rec", 1)], ["longest reception", "longest catch", "longest rec", "long rec", "longest receiving"]),
+    "longest_rush": ("Longest Rush", "football", [("long_rush", 1)], ["longest rush", "long rush"]),
     "tackles": ("Tackles+Ast", "football", [("tackles", 1)],
                 ["tackles+ast", "tackles + assists", "tackles+assists", "total tackles", "tackles"]),
     "sacks": ("Sacks", "football", [("sacks", 1)], ["sacks"]),
@@ -3946,6 +3999,7 @@ def parse_prop_leg(text: str) -> Optional[dict]:
     if line is None or side is None:
         return None
     # The player's name is what's left once the numbers, sides and stat words are gone.
+    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode()   # Quiñones → Quinones
     name = re.sub(r"\b[A-Z]{2,4}\b", lambda mm: " " if mm.group(0).lower() in TEAM_ABBRS else mm.group(0), t).lower()
     for alias, _ in _ALIAS_INDEX:
         name = re.sub(_alias_regex(alias), " ", name)
@@ -7077,13 +7131,10 @@ async def handle_dm_slip(client: discord.Client, message: discord.Message, attac
         await message.reply("Reading slips needs the Claude key, which isn't set up. In the server, use "
                             "`/pick` with `hidden: True` to log it privately.")
         return
-    try:
-        slip = await read_slip(attachment)
-    except Exception:
-        log.exception("DM slip read failed")
-        slip = None
+    slip, reason = await read_slip_best(attachment)
     if slip is None or slip.get("cost") is None:
-        await message.reply("I couldn't read that one. Try a clearer screenshot, or use `/pick hidden:True` in the server.")
+        await message.reply(f"I couldn't read that one{': ' + reason if reason else ''}. Try a clearer screenshot, "
+                            "or use `/pick hidden:True` in the server.")
         return
     legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()]
     pid = insert_pick(guild_id=gid, bettor_key=str(message.author.id), bettor_name=message.author.display_name,
@@ -10766,15 +10817,12 @@ class PicksBot(discord.Client):
             if not quiet:
                 await message.reply(cooloff_message(until), mention_author=False)
             return
-        slip = None
+        slip, reason = None, None
         if ai_enabled() and (attachment.size or 0) <= MAX_IMAGE_BYTES:
-            try:
-                async with message.channel.typing():
-                    slip = await read_slip(attachment)
-            except Exception as exc:
-                log.exception("Could not read slip %s", attachment.url)
-                SLIP_STATE["last_error"] = (now_iso(), f"Reading with Claude: {type(exc).__name__}: {exc}"[:300])
+            async with message.channel.typing():
+                slip, reason = await read_slip_best(attachment)
         elif ai_enabled():
+            reason = f"the image is too big ({(attachment.size or 0) // 1024} KB)"
             SLIP_STATE["last_error"] = (now_iso(), f"Image too big to read ({(attachment.size or 0) // 1024} KB)")
 
         if quiet and (slip is None or slip["cost"] is None):
@@ -10784,7 +10832,8 @@ class PicksBot(discord.Client):
         if slip is None or slip["cost"] is None:
             note = "Got it. Tap below to log this slip."
             if ai_enabled():
-                note = "I couldn't read that one cleanly. Tap below to log it by hand."
+                note = (f"I couldn't read that one: {reason}. Tap below to log it by hand." if reason else
+                        "I couldn't read that one cleanly. Tap below to log it by hand.")
             await message.reply(note, view=log_slip_view(message.author.id),
                                 mention_author=False)
             return
