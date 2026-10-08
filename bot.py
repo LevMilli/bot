@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -87,6 +88,9 @@ RECAP_DAY = DAYS.index(_day) if _day in DAYS else DAYS.index("sunday")
 RECAP_HOUR = env_int("RECAP_HOUR", 20, 0, 23)        # 8 PM
 REMIND_HOUR = env_int("REMIND_HOUR", 12, 0, 23)      # noon
 REMIND_AFTER_DAYS = env_int("REMIND_AFTER_DAYS", 3, 1, 365)
+AUTOGRADE_AFTER_HOURS = env_int("AUTOGRADE_AFTER_HOURS", 48, 0, 24 * 60)   # 0 turns it off
+AUTOGRADE_DAILY_LIMIT = env_int("AUTOGRADE_DAILY_LIMIT", 30)
+AUTOGRADE_MAX_TRIES = 3
 
 # --------------------------------------------------------------------------
 # Database
@@ -165,8 +169,10 @@ def db() -> sqlite3.Connection:
         )
         # Upgrades for databases made by the first version of the bot.
         cols = {r[1] for r in _conn.execute("PRAGMA table_info(picks)")}
-        if "reminded_at" not in cols:
-            _conn.execute("ALTER TABLE picks ADD COLUMN reminded_at TEXT")
+        for col, kind in (("reminded_at", "TEXT"), ("notes", "TEXT"), ("import_key", "TEXT"),
+                          ("autograde_at", "TEXT"), ("autograde_tries", "INTEGER")):
+            if col not in cols:
+                _conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {kind}")
         for p in _conn.execute(
             """SELECT id, legs FROM picks WHERE legs IS NOT NULL
                AND id NOT IN (SELECT DISTINCT pick_id FROM legs)""").fetchall():
@@ -496,6 +502,8 @@ def pick_embed(p: sqlite3.Row) -> discord.Embed:
         e.add_field(name="Net", value=signed((p["returned"] or 0.0) - p["cost"]))
     if p["slip_url"]:
         e.add_field(name="Slip", value=f"[View]({p['slip_url']})")
+    if p["notes"]:
+        e.add_field(name="Notes", value=clip(p["notes"], 300), inline=False)
     if field and p["status"] == "open":
         e.set_footer(text=f"Grade legs with /leg pick_id:{p['id']}")
     return e
@@ -638,6 +646,218 @@ def build_reminders(guild_id: int) -> Optional[str]:
 
 
 # --------------------------------------------------------------------------
+# Importing an existing picks tracker (.xlsx with a Picks Log tab)
+# --------------------------------------------------------------------------
+
+def _num(v) -> Optional[float]:
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(re.sub(r"[,$\s¢%]", "", str(v)))
+    except ValueError:
+        return None
+
+
+def _day(v) -> Optional[datetime]:
+    if isinstance(v, datetime):
+        return v
+    if hasattr(v, "year") and hasattr(v, "month"):  # a date
+        return datetime(v.year, v.month, v.day)
+    m = re.match(r"\s*(\d{4})-(\d{1,2})-(\d{1,2})", str(v or ""))
+    if m:
+        return datetime(int(m[1]), int(m[2]), int(m[3]))
+    m = re.match(r"\s*(\d{1,2})/(\d{1,2})/(\d{2,4})", str(v or ""))
+    if m:
+        year = int(m[3]) + (2000 if int(m[3]) < 100 else 0)
+        return datetime(year, int(m[1]), int(m[2]))
+    return None
+
+
+def _status(v) -> Optional[str]:
+    t = str(v or "").strip().lower()
+    return {"win": "win", "won": "win", "loss": "loss", "lost": "loss", "push": "push",
+            "void": "void", "cancelled": "void", "canceled": "void",
+            "pending": "open", "open": "open"}.get(t)
+
+
+def _leg_status(v) -> str:
+    t = str(v or "").strip().lower()
+    return {"hit": "hit", "won": "hit", "win": "hit", "miss": "miss", "lost": "miss",
+            "loss": "miss", "push": "push", "void": "push"}.get(t, "open")
+
+
+def _header_map(ws, wanted: dict[str, tuple[str, ...]],
+                required: tuple[str, ...]) -> tuple[int, dict[str, int]]:
+    """Find the header row (within the first 5 rows) and map field -> column number."""
+    for r in range(1, 6):
+        cells = {c: str(ws.cell(r, c).value or "").strip().lower() for c in range(1, ws.max_column + 1)}
+        found = {}
+        for field, starts in wanted.items():
+            for c, text in cells.items():
+                if text and any(text.startswith(s) for s in starts) and c not in found.values():
+                    found[field] = c
+                    break
+        if all(f in found for f in required):
+            return r, found
+    return 0, {}
+
+
+def parse_tracker(data: bytes) -> tuple[list[dict], list[str]]:
+    """Read picks from a tracker workbook. Returns (picks, problems)."""
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(data), data_only=True)
+    wanted = {
+        "date": ("date logged", "date placed", "date"), "sport": ("sport",), "platform": ("platform",),
+        "event": ("event / matchup", "event/matchup", "matchup", "event (",), "question": ("market question", "pick", "question"),
+        "side": ("side",), "price": ("entry price", "price"), "stake": ("stake", "cost"),
+        "event_date": ("event date",), "result": ("result", "status"), "payout": ("payout",),
+        "pl": ("p/l", "p&l", "profit"),
+        "notes": ("notes",), "person": ("person", "bettor"),
+    }
+    sheets = sorted(wb.worksheets, key=lambda ws: ws.title.lower() != "picks log")
+    header_row, cols, log_ws = 0, {}, None
+    for ws in sheets:
+        if ws.title.lower() in ("combos", "combo legs", "summary", "legs"):
+            continue
+        header_row, cols = _header_map(ws, wanted, ("stake",))
+        if header_row and ("question" in cols or "event" in cols):
+            log_ws = ws
+            break
+    if log_ws is None:
+        return [], ["I couldn't find a tab with Stake and Market Question (or Event) columns."]
+
+    # Combos and their legs, if the tracker has them.
+    combos: dict[str, dict] = {}
+    if "Combos" in wb.sheetnames:
+        ws = wb["Combos"]
+        hr, cc = _header_map(ws, {"id": ("combo id",), "max": ("max payout",), "status": ("status",),
+                                  "actual": ("actual payout",)}, ("id",))
+        for r in range(hr + 1, ws.max_row + 1) if hr else []:
+            cid = str(ws.cell(r, cc["id"]).value or "").strip().upper()
+            if cid:
+                combos[cid] = {"max": _num(ws.cell(r, cc["max"]).value) if "max" in cc else None,
+                               "status": _status(ws.cell(r, cc["status"]).value) if "status" in cc else None,
+                               "actual": _num(ws.cell(r, cc["actual"]).value) if "actual" in cc else None,
+                               "legs": []}
+    if "Combo Legs" in wb.sheetnames:
+        ws = wb["Combo Legs"]
+        hr, cc = _header_map(ws, {"id": ("combo id",), "text": ("selection",),
+                                  "result": ("leg result", "result")}, ("id", "text"))
+        for r in range(hr + 1, ws.max_row + 1) if hr else []:
+            cid = str(ws.cell(r, cc["id"]).value or "").strip().upper()
+            text = str(ws.cell(r, cc["text"]).value or "").strip()
+            if cid in combos and text:
+                result = ws.cell(r, cc["result"]).value if "result" in cc else None
+                combos[cid]["legs"].append((text, _leg_status(result)))
+
+    def get(r, field):
+        return log_ws.cell(r, cols[field]).value if field in cols else None
+
+    picks, problems = [], []
+    for r in range(header_row + 1, log_ws.max_row + 1):
+        stake = _num(get(r, "stake"))
+        question = str(get(r, "question") or "").strip()
+        event = str(get(r, "event") or "").strip()
+        if stake is None and not question and not event:
+            continue  # empty row
+        if stake is None:
+            problems.append(f"Row {r}: no stake, skipped.")
+            continue
+        combo_id = None
+        m = re.search(r"COMBO-\d+", question.upper())
+        if m and m.group(0) in combos:
+            combo_id = m.group(0)
+        combo = combos.get(combo_id) if combo_id else None
+        status = _status(get(r, "result")) or (combo or {}).get("status") or "open"
+        returned = _num(get(r, "payout"))
+        if returned is None and combo:
+            returned = combo["actual"]
+        price = _num(get(r, "price"))
+        if combo and combo["max"]:
+            payout = combo["max"]
+        elif price and price > 0:
+            payout = round(stake / (price / 100), 2)
+        else:
+            payout = returned if returned is not None else stake
+        pl = _num(get(r, "pl"))
+        if pl is not None and status != "open":
+            returned = round(stake + pl, 2)  # the platform's own profit figure wins over rounding
+        if status == "win" and returned is None:
+            returned = payout
+        if status in ("push", "void") and returned is None:
+            returned = stake
+        if status == "loss" and returned is None:
+            returned = 0.0
+        if returned is not None and returned > payout:
+            payout = returned
+        side = str(get(r, "side") or "").strip()
+        if combo_id:
+            description = question
+        else:
+            description = question or event
+            if event and question and event.lower() not in question.lower():
+                description = f"{event}: {question}"
+            if side:
+                description += f" ({side}" + (f" @ {price:g}¢)" if price else ")")
+        logged = _day(get(r, "date")) or datetime.now()
+        settled = _day(get(r, "event_date")) or logged
+        person = str(get(r, "person") or "").strip()
+        platform = str(get(r, "platform") or "").strip() or "Kalshi"
+        key_src = f"{logged.date()}|{person.lower()}|{stake:.2f}|{description[:120].lower()}"
+        picks.append({
+            "person": person, "platform": platform[:40],
+            "sport": (str(get(r, "sport")).strip()[:60] if get(r, "sport") else None),
+            "description": clip(description, 300), "notes": (str(get(r, "notes")).strip() if get(r, "notes") else None),
+            "cost": stake, "payout": payout, "status": status,
+            "returned": returned if status != "open" else None,
+            "created_at": logged.replace(hour=12, tzinfo=TZ).astimezone(timezone.utc).isoformat(timespec="seconds"),
+            "settled_at": (settled.replace(hour=23, tzinfo=TZ).astimezone(timezone.utc).isoformat(timespec="seconds")
+                           if status != "open" else None),
+            "legs": combo["legs"] if combo else [],
+            "import_key": "tracker:" + hashlib.sha1(key_src.encode()).hexdigest()[:16],
+        })
+    return picks, problems
+
+
+def import_picks(guild_id: int, uploader_id: int, uploader_name: str,
+                 picks: list[dict]) -> tuple[dict[str, int], int]:
+    """Add parsed picks. Returns (added per person, skipped as already imported)."""
+    added: dict[str, int] = {}
+    skipped = 0
+    for p in picks:
+        if db().execute("SELECT 1 FROM picks WHERE guild_id = ? AND import_key = ?",
+                        (guild_id, p["import_key"])).fetchone():
+            skipped += 1
+            continue
+        if p["person"]:
+            claimed = get_setting(guild_id, f"claim:{p['person'].lower()}")
+            if claimed:
+                row = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_key = ? "
+                                   "ORDER BY id DESC LIMIT 1", (guild_id, claimed)).fetchone()
+                key, name, bid = claimed, (row["bettor_name"] if row else p["person"]), int(claimed)
+            else:
+                key, name, bid = f"label:{p['person'].lower()}", p["person"], None
+        else:
+            key, name, bid = str(uploader_id), uploader_name, uploader_id
+        cur = db().execute(
+            """INSERT INTO picks (guild_id, bettor_key, bettor_name, bettor_id, logged_by, platform, sport,
+                                  description, legs, cost, payout, status, returned, created_at, settled_at,
+                                  notes, import_key, reminded_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (guild_id, key, name, bid, uploader_id, p["platform"], p["sport"], p["description"],
+             "\n".join(t for t, _ in p["legs"]) or None, p["cost"], p["payout"], p["status"],
+             p["returned"], p["created_at"], p["settled_at"], p["notes"], p["import_key"],
+             now_iso()))  # imported picks don't trigger "open too long" pings
+        db().executemany("INSERT INTO legs (pick_id, idx, text, status) VALUES (?,?,?,?)",
+                         [(cur.lastrowid, i, t, st) for i, (t, st) in enumerate(p["legs"], start=1)])
+        added[name] = added.get(name, 0) + 1
+    db().commit()
+    return added, skipped
+
+
+# --------------------------------------------------------------------------
 # Excel export: one tab per platform, a Legs tab, and a per-person Summary
 # --------------------------------------------------------------------------
 
@@ -689,8 +909,8 @@ def build_workbook(guild_id: int) -> io.BytesIO:
 
     # ---- one tab per platform ----
     headers = ["Pick #", "Date", "Bettor", "Sport", "Description", "Legs", "Legs Hit",
-               "Cost", "Max Payout", "Status", "Returned", "Net", "Settled", "Slip"]
-    widths = [8, 13, 14, 10, 34, 46, 9, 10, 11, 9, 10, 10, 13, 10]
+               "Cost", "Max Payout", "Status", "Returned", "Net", "Settled", "Slip", "Notes"]
+    widths = [8, 13, 14, 12, 34, 46, 9, 10, 11, 9, 10, 10, 13, 8, 50]
     tabs = {}
     for name in SHEET_GROUPS:
         ws = wb.create_sheet(name)
@@ -727,9 +947,11 @@ def build_workbook(guild_id: int) -> io.BytesIO:
         if p["slip_url"]:
             c = put(ws, r, 14, "View", Font(name="Arial", size=10, color="1155CC", underline="single"))
             c.hyperlink = p["slip_url"]
+        if p["notes"]:
+            put(ws, r, 15, p["notes"], wrap=True)
     for name, ws in tabs.items():
         last = max(next_row[name] - 1, 2)
-        ws.auto_filter.ref = f"A1:N{last}"
+        ws.auto_filter.ref = f"A1:O{last}"
         for status, color in (("Win", "D9F2E3"), ("Loss", "F9D9D6"), ("Open", "FFF3C4"), ("Push", "EEEEEE"), ("Void", "EEEEEE")):
             ws.conditional_formatting.add(
                 f"J2:J{LAST_ROW}", FormulaRule(formula=[f'$J2="{status}"'], fill=PatternFill("solid", fgColor=color)))
@@ -1076,10 +1298,10 @@ def build_ask_context(guild_id: int, asker_key: str, question: str) -> str:
     return "\n\n".join(parts)
 
 
-async def ask_claude(system: str, user_text: str) -> tuple[str, list[str]]:
+async def ask_claude(system: str, user_text: str, max_searches: int = 5) -> tuple[str, list[str]]:
     """Returns (answer text, source urls)."""
     messages = [{"role": "user", "content": user_text}]
-    tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
+    tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": max_searches}]
     reply = None
     for _ in range(4):  # long searches can pause; resume up to a few times
         reply = await anthropic_client().messages.create(
@@ -1095,6 +1317,93 @@ async def ask_claude(system: str, user_text: str) -> tuple[str, list[str]]:
             if url and url not in sources:
                 sources.append(url)
     return text, sources[:3]
+
+
+GRADE_SYSTEM = """You grade sports bets for a group of friends. Search the web for final \
+results and box scores, then decide each item.
+
+- hit: the bettor's side won. miss: it lost. push: landed exactly on the line, or was \
+voided or cancelled (player didn't play, game called off).
+- unknown: the event isn't final yet, or you can't find the stat. Never guess. A wrong \
+grade costs someone money on the scoreboard; unknown just means a person settles it.
+- Prediction markets (Kalshi): "(NO @ 20¢)" means the bettor wins if the question \
+resolves No; "(YES ...)" means it wins on Yes. A leg written as "No - <statement>" wins \
+when the statement is false.
+- Player props: "15+ receiving yards" means 15 or more. "over 249.5" means 250 or more.
+
+Reply with ONLY a JSON object, no other text:
+{"items": [{"n": 1, "result": "hit" | "miss" | "push" | "unknown", "why": "under 12 words, with the stat or score"}]}"""
+
+
+def grade_request(p: sqlite3.Row, items: list[tuple[int, str]], single: bool) -> str:
+    logged = datetime.fromisoformat(p["created_at"]).astimezone(TZ).strftime("%A, %B %d, %Y")
+    lines = [f"Today is {datetime.now(TZ).strftime('%A, %B %d, %Y')}.",
+             f"Bet logged {logged} on {p['platform']}" + (f" ({p['sport']})" if p["sport"] else "") + ".",
+             f"The bet: {p['description']}"]
+    if p["notes"]:
+        lines.append(f"Bettor's notes: {clip(p['notes'], 400)}")
+    if single:
+        lines.append("It has no separate legs, so grade the bet itself as item 1.")
+    lines.append("Items to grade:")
+    lines += [f"{n}. {text}" for n, text in items]
+    return "\n".join(lines)
+
+
+async def autograde(guild_id: int, pick_id: int) -> tuple[Optional[sqlite3.Row], list[str], bool]:
+    """Look up results for a pick's open legs and apply them.
+    Returns (pick, one line per graded item, whether anything was graded)."""
+    p = get_pick(guild_id, pick_id)
+    legs = get_legs(pick_id)
+    single = not legs
+    items = [(1, p["description"])] if single else [(leg["idx"], leg["text"]) for leg in legs
+                                                    if leg["status"] == "open"]
+    tries = (p["autograde_tries"] or 0) + 1
+    db().execute("UPDATE picks SET autograde_at = ?, autograde_tries = ? WHERE id = ?",
+                 (now_iso(), tries, pick_id))
+    db().commit()
+    if not items:
+        return p, [], False
+    text, _ = await ask_claude(GRADE_SYSTEM, grade_request(p, items, single),
+                               max_searches=min(3 + len(items), 10))
+    results = extract_json(text).get("items") or []
+    by_n = {}
+    for r in results:
+        try:
+            by_n[int(r.get("n"))] = r
+        except (TypeError, ValueError):
+            continue
+    lines, graded = [], False
+    for n, leg_text in items:
+        r = by_n.get(n) or {}
+        result = str(r.get("result", "unknown")).lower()
+        why = clip(str(r.get("why") or "").strip(), 120)
+        label = "" if single else f" `{n}` {clip(leg_text, 70)}:"
+        if result not in ("hit", "miss", "push"):
+            lines.append(f"⏳{label} couldn't confirm" + (f" ({why})" if why else ""))
+            continue
+        graded = True
+        lines.append(f"{LEG_ICON[result]}{label} {why or result}")
+        if single:
+            settle_pick(guild_id, pick_id, {"hit": "win", "miss": "loss", "push": "push"}[result])
+        else:
+            grade_leg(guild_id, pick_id, n, result)
+    return get_pick(guild_id, pick_id), lines, graded
+
+
+def grading_message(p: sqlite3.Row, lines: list[str], final_try: bool) -> str:
+    head = f"🤖 Looked up results for pick `#{p['id']}` ({p['bettor_name']}): {clip(p['description'], 80)}"
+    body = "\n".join(lines)
+    if p["status"] != "open":
+        net = (p["returned"] or 0.0) - p["cost"]
+        tail = (f"Result: **{STATUS[p['status']][0]}** ({signed(net)}). Wrong, or cashed out early? "
+                f"Fix it with `/leg` or `/result pick_id:{p['id']}`.")
+    elif final_try:
+        tail = f"I couldn't settle this one. Settle it with `/result pick_id:{p['id']}`."
+    elif p["platform"].lower() == "prizepicks" and any(leg["status"] == "miss" for leg in get_legs(p["id"])):
+        tail = f"Flex entries can still pay, so settle it with `/result pick_id:{p['id']}` and the amount returned."
+    else:
+        tail = "Still open. I'll look again in 12 hours."
+    return f"{head}\n{body}\n{tail}"
 
 
 # --------------------------------------------------------------------------
@@ -1137,8 +1446,45 @@ class PicksBot(discord.Client):
                 log.exception("Scheduled post failed")
             await asyncio.sleep(300)
 
+    async def run_autograde(self, now: Optional[datetime] = None, limit: int = 3):
+        """Grade picks that are still open AUTOGRADE_AFTER_HOURS after being logged."""
+        if not ai_enabled() or not AUTOGRADE_AFTER_HOURS:
+            return
+        now = now or datetime.now(timezone.utc)
+        due = (now - timedelta(hours=AUTOGRADE_AFTER_HOURS)).isoformat(timespec="seconds")
+        retry = (now - timedelta(hours=12)).isoformat(timespec="seconds")
+        rows = db().execute(
+            """SELECT * FROM picks WHERE status = 'open' AND created_at <= ?
+               AND COALESCE(autograde_tries, 0) < ? AND (autograde_at IS NULL OR autograde_at <= ?)
+               AND (NOT EXISTS (SELECT 1 FROM legs l WHERE l.pick_id = picks.id)
+                    OR EXISTS (SELECT 1 FROM legs l WHERE l.pick_id = picks.id AND l.status = 'open'))
+               ORDER BY created_at LIMIT ?""",
+            (due, AUTOGRADE_MAX_TRIES, retry, limit)).fetchall()
+        for p in rows:
+            count_key = f"autogrades:{now.astimezone(TZ).date().isoformat()}"
+            used = int(get_setting(p["guild_id"], count_key) or 0)
+            if used >= AUTOGRADE_DAILY_LIMIT:
+                continue
+            set_setting(p["guild_id"], count_key, str(used + 1))
+            try:
+                pick, lines, graded = await autograde(p["guild_id"], p["id"])
+            except Exception:
+                log.exception("Auto-grading pick %s failed", p["id"])
+                continue
+            final_try = (pick["autograde_tries"] or 0) >= AUTOGRADE_MAX_TRIES
+            if not lines or (not graded and not final_try):
+                continue  # nothing new to say; try again later
+            channel_id = get_setting(p["guild_id"], "recap_channel")
+            channel = self.get_channel(int(channel_id)) if channel_id else None
+            if channel is not None:
+                mention = f"<@{pick['bettor_id']}> " if pick["bettor_id"] else ""
+                for chunk in split_message(mention + grading_message(pick, lines, final_try)):
+                    await channel.send(chunk, allowed_mentions=discord.AllowedMentions(
+                        everyone=False, roles=False, users=True))
+
     async def run_schedules(self, now: Optional[datetime] = None):
         now = now or datetime.now(TZ)
+        await self.run_autograde(now.astimezone(timezone.utc))
         today = now.date().isoformat()
         rows = db().execute("SELECT guild_id, value FROM settings WHERE key = 'recap_channel'").fetchall()
         for row in rows:
@@ -1378,6 +1724,42 @@ async def leg_cmd(interaction: discord.Interaction, pick_id: int, leg: int,
                                             view=view_or_missing(p))
 
 
+@bot.tree.command(name="grade", description="Look up results for a pick's open legs now")
+@app_commands.guild_only()
+@app_commands.describe(pick_id="The pick number")
+async def grade_cmd(interaction: discord.Interaction, pick_id: int):
+    p = get_pick(interaction.guild_id, pick_id)
+    if p is None:
+        await interaction.response.send_message(f"No pick #{pick_id}.", ephemeral=True)
+        return
+    if not can_edit(interaction, p):
+        await interaction.response.send_message(
+            f"Only {p['bettor_name']} or a mod can grade this one.", ephemeral=True)
+        return
+    if p["status"] != "open":
+        await interaction.response.send_message(f"Pick #{pick_id} is already settled.", ephemeral=True)
+        return
+    if not ai_enabled():
+        await interaction.response.send_message(
+            "Looking up results needs an `ANTHROPIC_API_KEY` variable on Railway.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    try:
+        pick, lines, _ = await autograde(interaction.guild_id, pick_id)
+    except Exception:
+        log.exception("Grading pick %s failed", pick_id)
+        await interaction.followup.send("I couldn't look that up just now. Try again in a minute.")
+        return
+    if not lines:
+        await interaction.followup.send(
+            f"Every leg on #{pick_id} is already graded. Settle it with `/result pick_id:{pick_id}`.")
+        return
+    msg = grading_message(pick, lines, final_try=False).replace(
+        "Still open. I'll look again in 12 hours.", "Still open. Try `/grade` again once it's final.")
+    await interaction.followup.send(split_message(msg)[0], embed=pick_embed(pick),
+                                    view=view_or_missing(pick))
+
+
 @bot.tree.command(name="result", description="Settle a pick")
 @app_commands.guild_only()
 @app_commands.describe(
@@ -1585,7 +1967,7 @@ async def export_cmd(interaction: discord.Interaction,
     writer = csv.writer(buf)
     writer.writerow(["Pick #", "Logged (UTC)", "Bettor", "Platform", "Sport", "Description",
                      "Legs", "Legs Hit", "Cost", "Max Payout", "Status", "Returned", "Net",
-                     "Settled (UTC)", "Slip"])
+                     "Settled (UTC)", "Slip", "Notes"])
     for p in rows:
         settled = p["status"] != "open"
         legs = get_legs(p["id"])
@@ -1597,7 +1979,7 @@ async def export_cmd(interaction: discord.Interaction,
             f"{p['cost']:.2f}", f"{p['payout']:.2f}", p["status"],
             f"{p['returned']:.2f}" if settled else "",
             f"{(p['returned'] or 0.0) - p['cost']:.2f}" if settled else "",
-            p["settled_at"] or "", p["slip_url"] or "",
+            p["settled_at"] or "", p["slip_url"] or "", p["notes"] or "",
         ])
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig"))  # BOM so Excel reads it right
     await interaction.response.send_message(
@@ -1645,13 +2027,84 @@ async def recapchannel_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"Got it. I'll post the weekly recap here every **{day} at {recap_time}**, and at "
         f"**{remind_time}** each day I'll ping anyone with picks open {REMIND_AFTER_DAYS}+ days. "
-        "Run `/recap` any time to see this week so far.")
+        + (f"When I look up results for picks still open after {AUTOGRADE_AFTER_HOURS} hours, I'll post them "
+           "here too. " if AUTOGRADE_AFTER_HOURS else "")
+        + "Run `/recap` any time to see this week so far.")
 
 
 @bot.tree.command(name="recap", description="The last 7 days: who's up, best hit, worst beat")
 @app_commands.guild_only()
 async def recap_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=build_recap(interaction.guild_id))
+
+
+# ---- importing an existing tracker -------------------------------------------
+
+async def label_autocomplete(interaction: discord.Interaction, current: str):
+    rows = db().execute(
+        r"""SELECT bettor_name, COUNT(*) AS n FROM picks WHERE guild_id = ? AND bettor_key LIKE 'label:%'
+            AND lower(bettor_name) LIKE ? ESCAPE '\' GROUP BY bettor_key ORDER BY n DESC LIMIT 25""",
+        (interaction.guild_id, like_pattern(current))).fetchall()
+    return [app_commands.Choice(name=f"{r['bettor_name']} ({r['n']} picks)", value=r["bettor_name"])
+            for r in rows]
+
+
+@bot.tree.command(name="import", description="Add picks from an existing tracker spreadsheet (.xlsx)")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.describe(file="Your tracker, e.g. Kalshi_Picks_Tracker.xlsx")
+async def import_cmd(interaction: discord.Interaction, file: discord.Attachment):
+    if not file.filename.lower().endswith(".xlsx") or file.size > 10 * 1024 * 1024:
+        await interaction.response.send_message("Send an .xlsx file under 10 MB.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    try:
+        parsed, problems = parse_tracker(await file.read())
+    except Exception:
+        log.exception("Import failed")
+        await interaction.followup.send("I couldn't read that file. Is it a normal Excel workbook?")
+        return
+    if not parsed:
+        await interaction.followup.send("No picks found. " + " ".join(problems[:3]))
+        return
+    added, skipped = import_picks(interaction.guild_id, interaction.user.id,
+                                  interaction.user.display_name, parsed)
+    total = sum(added.values())
+    lines = [f"Imported **{total}** picks" + (f" ({skipped} were already in, skipped)" if skipped else "") + ":"]
+    lines += [f"• {name}: {n}" for name, n in sorted(added.items(), key=lambda kv: -kv[1])]
+    unclaimed = [n for n in added if db().execute(
+        "SELECT 1 FROM picks WHERE guild_id = ? AND bettor_key = ?",
+        (interaction.guild_id, f"label:{n.lower()}")).fetchone()]
+    if unclaimed:
+        lines.append("\nTo put these on someone's Discord account, they run `/claim name:<their name>` "
+                     "(or a mod adds `member:`). Leave Claudia as a name on its own.")
+    if problems:
+        lines.append("\n" + "\n".join(problems[:5]))
+    await interaction.followup.send("\n".join(lines))
+
+
+@bot.tree.command(name="claim", description="Link picks logged under a name (like imported ones) to a Discord account")
+@app_commands.guild_only()
+@app_commands.describe(name="The name on the picks, e.g. Levi",
+                       member="Optional: who they belong to (defaults to you; mods can pick anyone)")
+@app_commands.autocomplete(name=label_autocomplete)
+async def claim_cmd(interaction: discord.Interaction, name: str, member: Optional[discord.Member] = None):
+    target = member or interaction.user
+    if target.id != interaction.user.id and not is_mod(interaction.user):
+        await interaction.response.send_message("Only mods can claim picks for someone else.", ephemeral=True)
+        return
+    key = f"label:{name.strip().lower()}"
+    n = db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND bettor_key = ?",
+                     (interaction.guild_id, key)).fetchone()["n"]
+    if not n:
+        await interaction.response.send_message(f"No unclaimed picks under the name {name}.", ephemeral=True)
+        return
+    db().execute("UPDATE picks SET bettor_key = ?, bettor_id = ?, bettor_name = ? WHERE guild_id = ? AND bettor_key = ?",
+                 (str(target.id), target.id, target.display_name, interaction.guild_id, key))
+    db().commit()
+    set_setting(interaction.guild_id, f"claim:{name.strip().lower()}", str(target.id))
+    await interaction.response.send_message(
+        f"Moved **{n}** picks from {name} onto {target.display_name}'s record.")
 
 
 # ---- players ----------------------------------------------------------------
@@ -1793,15 +2246,19 @@ bot.tree.add_command(player_group)
 async def help_cmd(interaction: discord.Interaction):
     e = discord.Embed(title="What I can do", color=BRAND)
     e.add_field(name="Picks", inline=False, value=(
-        "`/pick` log a bet · `/leg` grade a parlay leg · `/result` settle it\n"
+        "`/pick` log a bet · `/leg` grade a parlay leg · `/grade` look up results now · `/result` settle it\n"
         "`/open` what's pending · `/record` your stats · `/leaderboard` who's up\n"
-        "`/edit` `/delete` fix mistakes · `/export` Excel file with Kalshi, PrizePicks and per-person tabs"))
+        "`/edit` `/delete` fix mistakes · `/export` Excel file with Kalshi, PrizePicks and per-person tabs\n"
+        "`/import` add picks from an old tracker · `/claim` put imported picks on your account"))
     e.add_field(name="Slips", inline=False, value=(
         "Post a slip screenshot in the receipts channel and I'll log it. "
         "(Admins: `/receipts` in that channel.)"))
     e.add_field(name="Recaps", inline=False, value=(
         "`/recap` the last 7 days. Weekly recap and open-pick reminders post automatically "
         "once an admin runs `/recapchannel`."))
+    e.add_field(name="Auto-grading", inline=False, value=(
+        f"Picks still open {AUTOGRADE_AFTER_HOURS} hours after they're logged get their results looked up "
+        "and settled automatically. The result posts in the recap channel."))
     e.add_field(name="Players", inline=False, value=(
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
     e.add_field(name="Questions", inline=False, value=(

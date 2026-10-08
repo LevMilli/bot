@@ -9,12 +9,15 @@ paid, and who's actually up.
 | --- | --- |
 | `/pick` | Log a pick: platform, one-line description, cost, max payout, optional legs and sport |
 | `/leg` | Grade one leg of a parlay as hit, miss or push |
+| `/grade` | Look up results for a pick's open legs right now |
 | `/result` | Settle a pick as win, loss, push or void (or reopen it). Add `returned` for partial payouts |
 | `/open` | Picks still waiting on a result, with total money at risk |
 | `/record` | One person's W-L, staked, returned, net, ROI and leg hit rate, plus their last 5 results |
 | `/leaderboard` | Everyone ranked by net profit |
 | `/edit`, `/delete` | Fix or remove a pick |
 | `/export` | Download an Excel file: Kalshi, PrizePicks and Other tabs, a Legs tab, and a Summary tab with a section per person (or pick CSV) |
+| `/import` | Add picks from an existing tracker spreadsheet (admins only). Running it twice won't duplicate anything |
+| `/claim` | Move picks logged under a name (like imported ones) onto someone's Discord account |
 | `/receipts` | Turn slip logging on or off for the channel you run it in (admins only) |
 | `/recapchannel` | Post the weekly recap and open-pick reminders in this channel (admins only) |
 | `/recap` | The last 7 days: who's up, best hit, worst beat, heartbreaker |
@@ -36,6 +39,14 @@ with `/leg` as games finish. When every leg hits, the bot marks the pick a win. 
 misses, it marks it a loss, except on PrizePicks, where flex entries can still pay, so it
 leaves those for you to settle with `/result`. `/record` and the weekly recap show how
 often your legs hit.
+
+**Auto-grading.** 48 hours after a pick is logged, any legs still open get looked up on
+the web and graded, and the pick is settled (win if every leg hit, loss if one missed). The
+bot posts what it found, with the score or stat for each leg, in the recap channel and
+tags the bettor. Legs it can't confirm stay open; it tries again every 12 hours, three
+times, then asks a person to settle it. PrizePicks entries with a missed leg are left for
+you, since flex payouts vary. Early cash-outs aren't visible to the bot, so fix those with
+`/result` and the `returned` amount. Needs `ANTHROPIC_API_KEY`; roughly a few cents a pick.
 
 **Weekly recap and reminders.** Run `/recapchannel` in the channel you want them in.
 Every Sunday at 8 PM (Central) the bot posts the week's standings, best hit, worst beat
@@ -137,6 +148,7 @@ Run `/export` now and then to keep your own copy of the picks.
 - **Optional settings** (add as variables on Railway):
   `ASK_DAILY_LIMIT` (default 40), `ASK_COOLDOWN_SECONDS` (20), `ASK_MODEL`
   (`claude-sonnet-5-5`), `TIMEZONE` (`America/Chicago`), `RECAP_DAY` (`sunday`),
-  `RECAP_HOUR` (20), `REMIND_HOUR` (12), `REMIND_AFTER_DAYS` (3).
+  `RECAP_HOUR` (20), `REMIND_HOUR` (12), `REMIND_AFTER_DAYS` (3),
+  `AUTOGRADE_AFTER_HOURS` (48; 0 turns auto-grading off), `AUTOGRADE_DAILY_LIMIT` (30).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
   `/result` with the `returned` amount instead of the buttons.
