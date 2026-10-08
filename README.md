@@ -85,6 +85,16 @@ paid, and who's actually up.
 | `/player splits`, `/player minutes` | Home/away and win/loss splits, and a minutes chart to spot role changes |
 | `/insights autopsy` `risk` `report` `claudia` `rankings` | What kills your parlays, drawdown and stake sizing, a monthly A-F report card image, Claude's picks vs the group, and power rankings (also in the Sunday recap) |
 | `/calc kelly`, `/calc slip` | Kelly bet sizing, and how often each leg on a pick has hit lately |
+| `/play trivia` | A sports trivia question with A-D buttons. First right answer wins coins (one guess each) |
+| `/play guess` | Guess the player from a big stat line. Hints cost coins off the prize |
+| `/play closest` | Everyone enters a final-score guess for a game (hidden until kickoff). Closest wins coins |
+| `/play squares` | A 10x10 football squares board for a game. Grab a random square or pick one; numbers are drawn at kickoff; pays coins each quarter |
+| `/play draft start` `pick` `board` | Snake-draft players (NBA or NFL), tonight only or all week; fantasy points from box scores; winner gets coins |
+| `/pool wintotals` `awards` `bracket` `survivor` | Season-long pools: over/under on win totals (scored from live standings), award picks, a playoff bracket (later rounds worth more), and player survivor (one player a day has to hit a number) |
+| `/futures add`, `/futures list` | Long-term bets with a reminder when they should be settled |
+| `/coins shop`, `/coins level` | Spend coins on a name color, a title on your /card or a brag post. Levels come from coins earned by playing |
+| `/me bio`, `/me alerts` | Favorite teams and a tagline (shown on /card), and on/off switches for your DMs (team finals, injury alerts, game pings) |
+| `/insights jinx` | Whose tails lose the most |
 | `/leaderboard rank_by` / `platform` | Rank by units or ROI, or one platform only. ▲▼ show places moved this week |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
@@ -146,6 +156,13 @@ PrizePicks slip is graded, the bot works out the payout from the standard table 
 play drops the slip to a smaller one) and posts a 💵 button to settle it; payouts change, so check your
 app. `/today` marks teams on the second night of a back-to-back. Near misses are kept for the bad
 beat board and the weekly recap. The leaderboard shows what fading everyone would have made.
+
+**Social extras.** Mondays post weekly rivals (people who finished next to each other last week;
+the winner gets coins). The Sunday recap adds the member of the week and rival results. On the 1st,
+last month's top earner gets the 👑 Top Dog role and the awards include a comeback of the month.
+The first 20x+ win each month claims the 💰 bounty. 10x+ wins get a banner, 4+ leg parlays lost by
+one leg get roasted, and "on this day" posts last year's big hits. Admins can turn game threads on
+in `/settings`: when 3+ picks ride on one game the bot opens a thread and posts who cashed at the end.
 
 **Web dashboard.** In Railway, open the bot's service → **Settings** → **Networking** → **Generate
 Domain**. Railway gives the bot a web address and the bot serves a private dashboard there (live
