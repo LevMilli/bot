@@ -3682,9 +3682,10 @@ def guide_embeds() -> list[discord.Embed]:
 @app_commands.guild_only()
 @app_commands.default_permissions(manage_guild=True)
 async def guide_cmd(interaction: discord.Interaction):
-    await interaction.response.send_message("Posting the guide…", ephemeral=True)
-    msg = await interaction.channel.send(embeds=guide_embeds())
+    # Posted as the command's reply, which works even where the bot can't send regular messages.
+    await interaction.response.send_message(embeds=guide_embeds())
     try:
+        msg = await interaction.original_response()
         await msg.pin(reason="PIMP-BOT guide")
         note = "Guide posted and pinned."
     except (discord.Forbidden, discord.HTTPException):
@@ -3696,7 +3697,13 @@ async def guide_cmd(interaction: discord.Interaction):
 async def on_app_command_error(interaction: discord.Interaction,
                                error: app_commands.AppCommandError):
     log.exception("Command failed", exc_info=error)
-    msg = "Something went wrong running that. Check the bot's logs for details."
+    original = getattr(error, "original", error)
+    if isinstance(original, discord.Forbidden):
+        msg = ("I don't have permission to do that here. Check that my role can **View Channel**, "
+               "**Send Messages**, **Embed Links** and **Attach Files** in this channel "
+               "(Edit Channel → Permissions → add PIMP-BOT).")
+    else:
+        msg = "Something went wrong running that. Check the bot's logs for details."
     if interaction.response.is_done():
         await interaction.followup.send(msg, ephemeral=True)
     else:
