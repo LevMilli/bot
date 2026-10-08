@@ -1319,6 +1319,260 @@ async def ask_claude(system: str, user_text: str, max_searches: int = 5) -> tupl
     return text, sources[:3]
 
 
+# --------------------------------------------------------------------------
+# Free result lookups: ESPN's public scoreboard, for moneylines, spreads and totals.
+# Anything else (player props, halves, esports, tennis) falls through to Claude.
+# --------------------------------------------------------------------------
+
+ESPN = "https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard"
+LEAGUES = [  # (pattern in the pick's sport, ESPN path, extra query params)
+    (r"\bwnba\b", "basketball/wnba", {}),
+    (r"\bnfl\b", "football/nfl", {}),
+    (r"ncaa ?f|college football|\bncaaf\b|\bcfb\b", "football/college-football", {"groups": "80"}),
+    (r"\bnba\b", "basketball/nba", {}),
+    (r"ncaa ?b|college basketball|\bncaab\b|\bcbb\b", "basketball/mens-college-basketball", {"groups": "50"}),
+    (r"\bmlb\b|baseball", "baseball/mlb", {}),
+    (r"\bnhl\b|hockey", "hockey/nhl", {}),
+    (r"\bmls\b", "soccer/usa.1", {}),
+    (r"\bepl\b|premier league", "soccer/eng.1", {}),
+    (r"la ?liga", "soccer/esp.1", {}),
+    (r"serie a", "soccer/ita.1", {}),
+    (r"bundesliga", "soccer/ger.1", {}),
+    (r"ligue 1", "soccer/fra.1", {}),
+    (r"liga ?mx", "soccer/mex.1", {}),
+    (r"champions league|\bucl\b", "soccer/uefa.champions", {}),
+]
+NO_FREE_LOOKUP = r"esports|\bcs2?\b|counter|valorant|league of legends|dota|tennis|\bwta\b|\batp\b|golf|ufc|mma|boxing|f1|nascar|politic|crypto"
+DEFAULT_LEAGUES = ["football/nfl", "basketball/nba", "baseball/mlb", "hockey/nhl", "football/college-football"]
+NOT_SIMPLE = re.compile(
+    r"\b(1h|2h|1q|2q|3q|4q|half|quarters?|innings?|periods?|sets?|maps?|rounds?|first|1st|2nd|3rd|4th|"
+    r"yards?|yds|tds?|touchdowns?|receptions?|rec|rush|rushing|passing|pass|kills|rating|assists?|"
+    r"rebounds?|strikeouts?|hits|shots|corners|cards|sacks|interceptions?|threes|3-pointers|"
+    r"tie|draw|btts|both teams|anytime|scorer|race to|double|triple|exact|correct score|alt)\b", re.I)
+
+_score_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+
+
+def leagues_for(sport: Optional[str]) -> list[str]:
+    text = (sport or "").lower()
+    if re.search(NO_FREE_LOOKUP, text):
+        return []
+    found = [path for pattern, path, _ in LEAGUES if re.search(pattern, text)]
+    return found or DEFAULT_LEAGUES
+
+
+async def _get_json(url: str, params: dict) -> dict:
+    import aiohttp  # comes with discord.py
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10),
+                                     headers={"User-Agent": "PicksBot/1.0"}) as session:
+        async with session.get(url, params=params) as resp:
+            resp.raise_for_status()
+            return await resp.json(content_type=None)
+
+
+def simplify_events(raw: dict) -> list[dict]:
+    """Keep what grading needs from an ESPN scoreboard response."""
+    events = []
+    for ev in raw.get("events") or []:
+        comp = (ev.get("competitions") or [{}])[0]
+        status = (ev.get("status") or comp.get("status") or {}).get("type") or {}
+        teams = []
+        for c in comp.get("competitors") or []:
+            t = c.get("team") or {}
+            try:
+                score = float(c.get("score")) if c.get("score") not in (None, "") else None
+            except (TypeError, ValueError):
+                score = None
+            teams.append({"id": str(t.get("id") or t.get("displayName")), "score": score,
+                          "home": c.get("homeAway") == "home",
+                          "short": t.get("shortDisplayName") or t.get("displayName") or "?",
+                          "aliases": {norm_team(x) for x in (t.get("displayName"), t.get("shortDisplayName"),
+                                      t.get("location"), t.get("abbreviation")) if x},
+                          "nickname": norm_team(t.get("name") or "")})
+        if len(teams) == 2:
+            events.append({"id": str(ev.get("id")), "date": ev.get("date") or "", "teams": teams,
+                           "final": bool(status.get("completed")) and status.get("state") == "post"})
+    return events
+
+
+async def fetch_scoreboard(path: str, day: datetime) -> list[dict]:
+    key = (path, day.strftime("%Y%m%d"))
+    hit = _score_cache.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    extra = next((x for _, pth, x in LEAGUES if pth == path), {})
+    try:
+        raw = await _get_json(ESPN.format(path=path), {"dates": key[1], **extra})
+        events = simplify_events(raw)
+    except Exception:
+        log.warning("Scoreboard lookup failed for %s %s", *key)
+        events = []
+    _score_cache[key] = (time.monotonic() + 900, events)
+    return events
+
+
+def norm_team(text: str) -> str:
+    t = re.sub(r"[.'’]", "", (text or "").lower())
+    t = re.sub(r"\bst\b", "state", t)
+    t = re.sub(r"^the ", "", t)
+    return " ".join(t.split())
+
+
+def team_matches(text: str, team: dict) -> bool:
+    n = norm_team(text)
+    if not n:
+        return False
+    if n in team["aliases"] or n == team["nickname"]:
+        return True
+    return bool(team["nickname"]) and n.endswith(" " + team["nickname"])  # "KC Chiefs", "LA Rams"
+
+
+def parse_simple_leg(text: str) -> Optional[dict]:
+    """Moneyline, spread, game total or team total, or None if it's anything else."""
+    t = text.strip()
+    negate = False
+    m = re.search(r"\((yes|no)\b[^)]*\)\s*$", t, re.I)       # Kalshi "(NO @ 20¢)"
+    if m:
+        negate = m.group(1).lower() == "no"
+    m = re.match(r"^\s*(no|yes)\s*[-–:,]\s*(.+)$", t, re.I)   # "No - Penn St. wins by over 48.5"
+    if m:
+        negate ^= m.group(1).lower() == "no"
+        t = m.group(2)
+    t = re.sub(r"\s*\([^)]*\)", "", t)                          # drop "(vs Clemson)" and similar
+    t = re.sub(r"\s*\([^)]*$", "", t).strip()                    # and a cut-off "(vs B..."
+    if ": " in t:
+        t = t.rsplit(": ", 1)[1]                                   # "IND Colts at KC Chiefs: Will KC Chiefs win?"
+    t = t.rstrip("?! ").strip()
+    if NOT_SIMPLE.search(t):
+        return None
+    num = r"(\d+(?:\.\d+)?)"
+    unit = r"(?:\s+(?:total\s+)?(?:points|pts|runs|goals)(?:\s+scored)?)?"
+    patterns = [
+        (rf"^will (?:the )?(.+?) win$", "ml"),
+        (rf"^(.+?) wins? by (?:over|more than) {num}{unit}$", "margin"),
+        (rf"^(.+?)\s+([+-]{num[1:-1]})(?:\s+spread)?$", "spread"),
+        (r"^(.+?)\s+(?:ml|moneyline|to win|wins|win)$", "ml"),
+        (rf"^(over|under)\s+{num}{unit}$", "total"),
+        (rf"^(.+?)\s+(over|under)\s+{num}{unit}$", "team_total"),
+    ]
+    for pattern, kind in patterns:
+        m = re.match(pattern, t, re.I)
+        if not m:
+            continue
+        g = m.groups()
+        if kind == "ml":
+            return {"kind": kind, "team": g[0], "negate": negate}
+        if kind in ("margin", "spread"):
+            return {"kind": kind, "team": g[0], "line": float(g[1]), "negate": negate}
+        if kind == "total":
+            return {"kind": kind, "side": g[0].lower(), "line": float(g[1]), "negate": negate}
+        return {"kind": kind, "team": g[0], "side": g[1].lower(), "line": float(g[2]), "negate": negate}
+    return None
+
+
+async def find_games(team_text: str, leagues: list[str], start: datetime) -> list[tuple[dict, int]]:
+    """Games in the days around `start` that this team played: [(event, index of the team)]."""
+    matches, team_ids = [], set()
+    for path in leagues:
+        for offset in range(-1, 4):
+            day = (start + timedelta(days=offset)).astimezone(TZ)
+            for ev in await fetch_scoreboard(path, day):
+                for i, team in enumerate(ev["teams"]):
+                    if team_matches(team_text, team):
+                        matches.append((ev, i))
+                        team_ids.add((path, team["id"]))
+    if len(team_ids) != 1:
+        return []  # nobody, or more than one team answers to that name
+    seen, unique = set(), []
+    for ev, i in sorted(matches, key=lambda m: m[0]["date"]):
+        if ev["id"] not in seen:
+            seen.add(ev["id"])
+            unique.append((ev, i))
+    return unique
+
+
+def pick_game(games: list[tuple[dict, int]], logged: datetime) -> Optional[tuple[dict, int]]:
+    """The first game starting no more than 18 hours before the bet was logged."""
+    floor = logged - timedelta(hours=18)
+    for ev, i in games:
+        try:
+            when = datetime.fromisoformat(ev["date"].replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if when >= floor:
+            return ev, i
+    return None
+
+
+def score_line(ev: dict) -> str:
+    away, home = sorted(ev["teams"], key=lambda t: t["home"])
+    return f"{away['short']} {away['score']:g}, {home['short']} {home['score']:g} (final)"
+
+
+def judge(leg: dict, ev: dict, i: Optional[int]) -> Optional[str]:
+    if i is not None:
+        mine, theirs = ev["teams"][i]["score"], ev["teams"][1 - i]["score"]
+    total = sum(t["score"] for t in ev["teams"])
+    kind = leg["kind"]
+    if kind == "ml":
+        result = None if mine == theirs else ("hit" if mine > theirs else "miss")
+    elif kind == "spread":
+        v = mine - theirs + leg["line"]
+        result = "push" if v == 0 else ("hit" if v > 0 else "miss")
+    elif kind == "margin":
+        result = "hit" if mine - theirs > leg["line"] else "miss"
+    else:
+        value = total if kind == "total" else mine
+        if value == leg["line"]:
+            result = "push"
+        else:
+            result = "hit" if (value > leg["line"]) == (leg["side"] == "over") else "miss"
+    if result and leg["negate"] and result != "push":
+        result = "miss" if result == "hit" else "hit"
+    return result
+
+
+async def free_grade(p: sqlite3.Row, items: list[tuple[int, str]]) -> dict[int, tuple[str, str]]:
+    """Grade what the public scoreboard can settle. Returns {item number: (result, why)};
+    items it can't settle are left out."""
+    leagues = leagues_for(p["sport"])
+    if not leagues:
+        return {}
+    logged = datetime.fromisoformat(p["created_at"])
+    parsed = {n: parse_simple_leg(text) for n, text in items}
+    # Teams named anywhere on the pick, so a bare "Over 44.5" can find its game.
+    context_teams = [x["team"] for x in parsed.values() if x and "team" in x]
+    for leg in get_legs(p["id"]):
+        x = parse_simple_leg(leg["text"])
+        if x and "team" in x:
+            context_teams.append(x["team"])
+    out: dict[int, tuple[str, str]] = {}
+    for n, leg in parsed.items():
+        if not leg:
+            continue
+        if leg["kind"] == "total":
+            games = {}
+            for team in set(context_teams):
+                found = pick_game(await find_games(team, leagues, logged), logged)
+                if found:
+                    games[found[0]["id"]] = found
+            if len(games) != 1:
+                continue
+            ev, i = next(iter(games.values()))
+            i = None
+        else:
+            found = pick_game(await find_games(leg["team"], leagues, logged), logged)
+            if not found:
+                continue
+            ev, i = found
+        if not ev["final"] or any(t["score"] is None for t in ev["teams"]):
+            continue
+        result = judge(leg, ev, i)
+        if result:
+            out[n] = (result, score_line(ev))
+    return out
+
+
 GRADE_SYSTEM = """You grade sports bets for a group of friends. Search the web for final \
 results and box scores, then decide each item.
 
@@ -1349,9 +1603,11 @@ def grade_request(p: sqlite3.Row, items: list[tuple[int, str]], single: bool) ->
     return "\n".join(lines)
 
 
-async def autograde(guild_id: int, pick_id: int) -> tuple[Optional[sqlite3.Row], list[str], bool]:
-    """Look up results for a pick's open legs and apply them.
-    Returns (pick, one line per graded item, whether anything was graded)."""
+async def autograde(guild_id: int, pick_id: int,
+                    allow_ai: bool = True) -> tuple[Optional[sqlite3.Row], list[str], bool, bool]:
+    """Look up results for a pick's open legs and apply them: the free scoreboard first,
+    then Claude (if allowed) for whatever's left.
+    Returns (pick, one line per item, whether anything was graded, whether Claude was used)."""
     p = get_pick(guild_id, pick_id)
     legs = get_legs(pick_id)
     single = not legs
@@ -1362,16 +1618,26 @@ async def autograde(guild_id: int, pick_id: int) -> tuple[Optional[sqlite3.Row],
                  (now_iso(), tries, pick_id))
     db().commit()
     if not items:
-        return p, [], False
-    text, _ = await ask_claude(GRADE_SYSTEM, grade_request(p, items, single),
-                               max_searches=min(3 + len(items), 10))
-    results = extract_json(text).get("items") or []
-    by_n = {}
-    for r in results:
-        try:
-            by_n[int(r.get("n"))] = r
-        except (TypeError, ValueError):
-            continue
+        return p, [], False, False
+    by_n: dict[int, dict] = {}
+    try:
+        for n, (result, why) in (await free_grade(p, items)).items():
+            by_n[n] = {"result": result, "why": why}
+    except Exception:
+        log.exception("Free lookup failed for pick %s", pick_id)
+    rest = [(n, t) for n, t in items if n not in by_n]
+    used_ai = False
+    if rest and allow_ai and ai_enabled():
+        used_ai = True
+        text, _ = await ask_claude(GRADE_SYSTEM, grade_request(p, rest, single),
+                                   max_searches=min(3 + len(rest), 10))
+        for r in extract_json(text).get("items") or []:
+            try:
+                n = int(r.get("n"))
+            except (TypeError, ValueError):
+                continue
+            if n in dict(rest):
+                by_n[n] = r
     lines, graded = [], False
     for n, leg_text in items:
         r = by_n.get(n) or {}
@@ -1387,7 +1653,7 @@ async def autograde(guild_id: int, pick_id: int) -> tuple[Optional[sqlite3.Row],
             settle_pick(guild_id, pick_id, {"hit": "win", "miss": "loss", "push": "push"}[result])
         else:
             grade_leg(guild_id, pick_id, n, result)
-    return get_pick(guild_id, pick_id), lines, graded
+    return get_pick(guild_id, pick_id), lines, graded, used_ai
 
 
 def grading_message(p: sqlite3.Row, lines: list[str], final_try: bool) -> str:
@@ -1448,7 +1714,7 @@ class PicksBot(discord.Client):
 
     async def run_autograde(self, now: Optional[datetime] = None, limit: int = 3):
         """Grade picks that are still open AUTOGRADE_AFTER_HOURS after being logged."""
-        if not ai_enabled() or not AUTOGRADE_AFTER_HOURS:
+        if not AUTOGRADE_AFTER_HOURS:
             return
         now = now or datetime.now(timezone.utc)
         due = (now - timedelta(hours=AUTOGRADE_AFTER_HOURS)).isoformat(timespec="seconds")
@@ -1463,14 +1729,14 @@ class PicksBot(discord.Client):
         for p in rows:
             count_key = f"autogrades:{now.astimezone(TZ).date().isoformat()}"
             used = int(get_setting(p["guild_id"], count_key) or 0)
-            if used >= AUTOGRADE_DAILY_LIMIT:
-                continue
-            set_setting(p["guild_id"], count_key, str(used + 1))
             try:
-                pick, lines, graded = await autograde(p["guild_id"], p["id"])
+                pick, lines, graded, used_ai = await autograde(
+                    p["guild_id"], p["id"], allow_ai=used < AUTOGRADE_DAILY_LIMIT)
             except Exception:
                 log.exception("Auto-grading pick %s failed", p["id"])
                 continue
+            if used_ai:  # only paid lookups count toward the daily limit
+                set_setting(p["guild_id"], count_key, str(used + 1))
             final_try = (pick["autograde_tries"] or 0) >= AUTOGRADE_MAX_TRIES
             if not lines or (not graded and not final_try):
                 continue  # nothing new to say; try again later
@@ -1739,13 +2005,9 @@ async def grade_cmd(interaction: discord.Interaction, pick_id: int):
     if p["status"] != "open":
         await interaction.response.send_message(f"Pick #{pick_id} is already settled.", ephemeral=True)
         return
-    if not ai_enabled():
-        await interaction.response.send_message(
-            "Looking up results needs an `ANTHROPIC_API_KEY` variable on Railway.", ephemeral=True)
-        return
     await interaction.response.defer(thinking=True)
     try:
-        pick, lines, _ = await autograde(interaction.guild_id, pick_id)
+        pick, lines, _, _ = await autograde(interaction.guild_id, pick_id)
     except Exception:
         log.exception("Grading pick %s failed", pick_id)
         await interaction.followup.send("I couldn't look that up just now. Try again in a minute.")
@@ -1755,7 +2017,9 @@ async def grade_cmd(interaction: discord.Interaction, pick_id: int):
             f"Every leg on #{pick_id} is already graded. Settle it with `/result pick_id:{pick_id}`.")
         return
     msg = grading_message(pick, lines, final_try=False).replace(
-        "Still open. I'll look again in 12 hours.", "Still open. Try `/grade` again once it's final.")
+        "Still open. I'll look again in 12 hours.", "Still open. Try `/grade` again once it's final."
+        + ("" if ai_enabled() else " (Without an API key I can only look up moneylines, spreads and "
+                                    "totals for major leagues.)"))
     await interaction.followup.send(split_message(msg)[0], embed=pick_embed(pick),
                                     view=view_or_missing(pick))
 
@@ -2258,7 +2522,8 @@ async def help_cmd(interaction: discord.Interaction):
         "once an admin runs `/recapchannel`."))
     e.add_field(name="Auto-grading", inline=False, value=(
         f"Picks still open {AUTOGRADE_AFTER_HOURS} hours after they're logged get their results looked up "
-        "and settled automatically. The result posts in the recap channel."))
+        "and settled automatically: moneylines, spreads and totals from the free ESPN scoreboard, "
+        "everything else with Claude. The result posts in the recap channel."))
     e.add_field(name="Players", inline=False, value=(
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
     e.add_field(name="Questions", inline=False, value=(

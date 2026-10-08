@@ -40,13 +40,18 @@ misses, it marks it a loss, except on PrizePicks, where flex entries can still p
 leaves those for you to settle with `/result`. `/record` and the weekly recap show how
 often your legs hit.
 
-**Auto-grading.** 48 hours after a pick is logged, any legs still open get looked up on
-the web and graded, and the pick is settled (win if every leg hit, loss if one missed). The
+**Auto-grading.** 48 hours after a pick is logged, any legs still open get looked up and
+graded. Moneylines, spreads and game or team totals for the NFL, college football, NBA,
+college basketball, WNBA, MLB, NHL and the big soccer leagues are checked for free against
+ESPN's public scoreboard (unofficial, so it could change without notice). Player props,
+halves, esports, tennis and anything else go to Claude with a web search. The pick is then
+settled, and the pick is settled (win if every leg hit, loss if one missed). The
 bot posts what it found, with the score or stat for each leg, in the recap channel and
 tags the bettor. Legs it can't confirm stay open; it tries again every 12 hours, three
 times, then asks a person to settle it. PrizePicks entries with a missed leg are left for
 you, since flex payouts vary. Early cash-outs aren't visible to the bot, so fix those with
-`/result` and the `returned` amount. Needs `ANTHROPIC_API_KEY`; roughly a few cents a pick.
+`/result` and the `returned` amount. The free scoreboard needs no key; the Claude lookups need
+`ANTHROPIC_API_KEY` and cost roughly a few cents a pick, and only those count toward the daily limit.
 
 **Weekly recap and reminders.** Run `/recapchannel` in the channel you want them in.
 Every Sunday at 8 PM (Central) the bot posts the week's standings, best hit, worst beat
