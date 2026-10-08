@@ -225,6 +225,19 @@ def db() -> sqlite3.Connection:
                 created_at TEXT    NOT NULL,
                 PRIMARY KEY (game_id, user_id)
             );
+            CREATE TABLE IF NOT EXISTS seasons (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id   INTEGER NOT NULL,
+                name       TEXT    NOT NULL,
+                started_at TEXT    NOT NULL,
+                ended_at   TEXT
+            );
+            CREATE TABLE IF NOT EXISTS pings (
+                pick_id  INTEGER NOT NULL,
+                event_id TEXT    NOT NULL,
+                kind     TEXT    NOT NULL,   -- start / half
+                PRIMARY KEY (pick_id, event_id, kind)
+            );
             CREATE TABLE IF NOT EXISTS player_notes (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id   INTEGER NOT NULL,
@@ -380,7 +393,7 @@ def grade_leg(guild_id: int, pick_id: int, idx: int,
 
 
 def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
-                  since: Optional[str] = None) -> list[dict]:
+                  since: Optional[str] = None, until: Optional[str] = None) -> list[dict]:
     """Per-bettor totals, sorted by net profit (best first)."""
     sql = "SELECT * FROM picks WHERE guild_id = ?"
     args: list = [guild_id]
@@ -390,6 +403,9 @@ def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
     if since:
         sql += " AND status != 'open' AND settled_at >= ?"
         args.append(since)
+    if until:
+        sql += " AND status != 'open' AND settled_at < ?"
+        args.append(until)
     sql += " ORDER BY id"
 
     out: dict[str, dict] = {}
@@ -1476,7 +1492,7 @@ def simplify_events(raw: dict) -> list[dict]:
                           "nickname": norm_team(t.get("name") or "")})
         if len(teams) == 2:
             events.append({"id": str(ev.get("id")), "date": ev.get("date") or "", "teams": teams,
-                           "state": status.get("state") or "pre",
+                           "state": status.get("state") or "pre", "status_name": status.get("name") or "",
                            "final": bool(status.get("completed")) and status.get("state") == "post"})
     return events
 
@@ -2523,7 +2539,7 @@ def pickem_table(round_id: Optional[int], guild_id: int) -> list[dict]:
         args.append(round_id)
     out: dict[int, dict] = {}
     for r in db().execute(sql + " ORDER BY p.created_at", args):
-        s = out.setdefault(r["user_id"], {"name": r["user_name"], "w": 0, "l": 0, "pending": 0})
+        s = out.setdefault(r["user_id"], {"id": r["user_id"], "name": r["user_name"], "w": 0, "l": 0, "pending": 0})
         s["name"] = r["user_name"]
         if r["winner"] is None:
             s["pending"] += 1
@@ -2640,6 +2656,314 @@ async def post_hall_of_fame(client: discord.Client) -> None:
                 mention = f"<@{p['bettor_id']}>" if p["bettor_id"] else f"**{p['bettor_name']}**"
                 await channel.send(f"{mention} {reason}! 🎉", embed=hof_embed(p, reason),
                                    allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+
+# ==========================================================================
+# Game-time pings, today's games, parlay calculator, seasons,
+# achievements, profile cards
+# ==========================================================================
+
+LEAGUE_NAMES = {
+    "football/nfl": "NFL", "football/college-football": "College football", "basketball/nba": "NBA",
+    "basketball/wnba": "WNBA", "basketball/mens-college-basketball": "College basketball", "baseball/mlb": "MLB",
+    "hockey/nhl": "NHL", "soccer/usa.1": "MLS", "soccer/eng.1": "Premier League", "soccer/esp.1": "La Liga",
+    "soccer/ita.1": "Serie A", "soccer/ger.1": "Bundesliga", "soccer/fra.1": "Ligue 1", "soccer/mex.1": "Liga MX",
+    "soccer/uefa.champions": "Champions League",
+}
+TODAY_PARAMS = {"football/college-football": {}, "basketball/mens-college-basketball": {}}  # ranked games only
+TODAY_HOUR = env_int("TODAY_HOUR", 10, 0, 23)
+PING_MINUTES = 30
+
+
+# ---- today's games ---------------------------------------------------------------
+
+def event_time(ev) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(ev["date"].replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def today_line(ev) -> str:
+    away = next(t for t in ev["teams"] if not t["home"])
+    home = next(t for t in ev["teams"] if t["home"])
+    if ev["final"] and away["score"] is not None:
+        return f"✅ {away['short']} {away['score']:g}, {home['short']} {home['score']:g} (final)"
+    if ev.get("state") == "in" and away["score"] is not None:
+        return f"🔴 {away['short']} {away['score']:g}, {home['short']} {home['score']:g} (live)"
+    when = event_time(ev)
+    return f"`{when.astimezone(TZ):%-I:%M %p}` {away['short']} @ {home['short']}" if when else \
+        f"{away['short']} @ {home['short']}"
+
+
+async def today_embed(path: str, day: Optional[datetime] = None) -> Optional[discord.Embed]:
+    day = day or datetime.now(TZ)
+    events = await fetch_scoreboard(path, day, TODAY_PARAMS.get(path))
+    local = day.astimezone(TZ).date()
+    events = sorted((e for e in events if (event_time(e) or day).astimezone(TZ).date() == local),
+                    key=lambda e: e["date"])
+    if not events:
+        return None
+    lines = [today_line(e) for e in events]
+    more = len(lines) - 25
+    e = discord.Embed(title=f"{LEAGUE_NAMES.get(path, path)} · {day.astimezone(TZ):%a %b %-d}", color=BRAND,
+                      description=clip("\n".join(lines[:25]) + (f"\n…and {more} more" if more > 0 else ""), 4000))
+    e.set_footer(text="Times are Central")
+    return e
+
+
+def group_leagues(guild_id: int) -> list[str]:
+    """The leagues this group has bet on in the last 30 days (NFL and NBA if none)."""
+    since = iso(datetime.now(timezone.utc) - timedelta(days=30))
+    found: list[str] = []
+    for r in db().execute("SELECT DISTINCT sport FROM picks WHERE guild_id = ? AND created_at >= ? AND sport IS NOT NULL",
+                          (guild_id, since)):
+        text = r["sport"].lower()
+        for pattern, path, _ in LEAGUES:
+            if re.search(pattern, text) and path not in found:
+                found.append(path)
+    return found or ["football/nfl", "basketball/nba"]
+
+
+# ---- parlay calculator -----------------------------------------------------------
+
+def parlay_embed(text: str, stake: float = 10.0) -> discord.Embed:
+    tokens = [t for t in re.split(r"[\s,;]+", text.strip()) if t]
+    if not 2 <= len(tokens) <= 20:
+        raise ValueError("need 2 to 20 legs")
+    legs = [(t, *parse_odds(t)) for t in tokens]
+    prob = 1.0
+    for _, p, _ in legs:
+        prob *= p
+    dec = 1 / prob
+    american = f"+{(dec - 1) * 100:,.0f}" if dec >= 2 else f"{-100 / (dec - 1):.0f}"
+    e = discord.Embed(title=f"{len(legs)}-leg parlay", color=BRAND)
+    e.add_field(name="Combined odds", value=f"{american} · {dec:,.2f} decimal")
+    e.add_field(name="Chance all legs hit", value=f"{prob * 100:.2f}%" if prob >= 0.001 else f"1 in {1 / prob:,.0f}")
+    e.add_field(name=f"On {money(stake)}", value=f"wins {money(stake * (dec - 1))} · returns {money(stake * dec)}")
+    e.add_field(name="Legs", inline=False, value=clip("\n".join(
+        f"`{i}` {t} → {p * 100:.0f}% · {1 / p:.2f}x" for i, (t, p, _) in enumerate(legs, start=1)), 1024))
+    e.set_footer(text="The chance shown uses the odds as given. Each leg's odds include the book's cut, "
+                      "so the true chance is a bit lower.")
+    return e
+
+
+# ---- seasons ---------------------------------------------------------------------
+
+def current_season(guild_id: int):
+    return db().execute("SELECT * FROM seasons WHERE guild_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
+                        (guild_id,)).fetchone()
+
+
+def season_stats(guild_id: int, season) -> list[dict]:
+    return [s for s in compute_stats(guild_id, since=season["started_at"], until=season["ended_at"])
+            if s["wins"] + s["losses"] + s["pushes"] > 0]
+
+
+def season_embed(guild_id: int, season, final: bool = False) -> discord.Embed:
+    stats = season_stats(guild_id, season)
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [f"{medals[i] if i < 3 else f'`{i + 1}.`'} **{s['name']}** · {record_line(s)} · {signed(s['net'])} · "
+             f"ROI {s['roi']:+.1f}%" for i, s in enumerate(stats[:20])]
+    span = f"{local_day(season['started_at'])} – " + (local_day(season["ended_at"]) if season["ended_at"] else "now")
+    e = discord.Embed(title=("🏁 Final: " if final else "Season: ") + season["name"], color=BRAND,
+                      description="\n".join(lines) or "No settled picks this season yet.")
+    e.set_footer(text=span)
+    return e
+
+
+# ---- achievements ------------------------------------------------------------------
+
+BADGES = [  # (key, name, how to earn it)
+    ("first", "First Blood", "Win a pick"),
+    ("parlay", "Parlay Hitter", "Hit a parlay with 2+ legs"),
+    ("bigleg", "Big Leg Energy", "Hit a parlay with 6+ legs"),
+    ("heater", "Heater", "Win 5 picks in a row"),
+    ("century", "Century", "Profit $100+ on one pick"),
+    ("moon", "Moonshot", "Cash a 10x+ payout"),
+    ("green", "Green Month", "Finish a month up with 5+ settled picks"),
+    ("regular", "Regular", "Log 25 picks"),
+    ("grinder", "Grinder", "Log 100 picks"),
+    ("lock", "Lock Master", "Win 3 locks of the week"),
+    ("pickem", "Pick'em Champ", "Win a pick'em round"),
+    ("rival", "Rival", "Win 3 head-to-head challenges"),
+    ("heartbreak", "Heartbreak Kid", "Lose a 4+ leg parlay by a single leg"),
+]
+BADGE_ICONS = {"first": "🩸", "parlay": "🧩", "bigleg": "💎", "heater": "🔥", "century": "💯", "moon": "🚀",
+               "green": "📈", "regular": "🗓️", "grinder": "🏛️", "lock": "🔒", "pickem": "🏈", "rival": "⚔️",
+               "heartbreak": "💔"}
+
+
+def earned_badges(guild_id: int, bettor_key: str) -> set[str]:
+    picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY settled_at, id",
+                         (guild_id, bettor_key)).fetchall()
+    got: set[str] = set()
+    if len(picks) >= 25:
+        got.add("regular")
+    if len(picks) >= 100:
+        got.add("grinder")
+    settled = [p for p in picks if p["status"] != "open"]
+    months: dict[str, list] = {}
+    for p in settled:
+        legs = get_legs(p["id"])
+        if p["status"] == "win":
+            got.add("first")
+            if len(legs) >= 2:
+                got.add("parlay")
+            if len(legs) >= 6:
+                got.add("bigleg")
+            if pick_net(p) >= 100:
+                got.add("century")
+            if p["cost"] and (p["returned"] or 0) / p["cost"] >= 10:
+                got.add("moon")
+        if p["status"] == "loss" and len(legs) >= 4 and sum(1 for leg in legs if leg["status"] == "miss") == 1 \
+                and all(leg["status"] in ("hit", "miss") for leg in legs):
+            got.add("heartbreak")
+        months.setdefault(p["settled_at"][:7], []).append(p)
+    if longest_win_streak([p["status"] for p in settled]) >= 5:
+        got.add("heater")
+    if any(len(ps) >= 5 and sum(pick_net(p) for p in ps) > 0 for ps in months.values()):
+        got.add("green")
+    if not bettor_key.startswith("label:"):
+        uid = int(bettor_key)
+        if db().execute("SELECT COUNT(*) AS n FROM locks WHERE guild_id = ? AND user_id = ? AND status = 'win'",
+                        (guild_id, uid)).fetchone()["n"] >= 3:
+            got.add("lock")
+        if db().execute("SELECT COUNT(*) AS n FROM challenges WHERE guild_id = ? AND status = 'settled' "
+                        "AND winner_id = ?", (guild_id, uid)).fetchone()["n"] >= 3:
+            got.add("rival")
+        for r in db().execute("SELECT id FROM pickem_rounds WHERE guild_id = ? AND finished_at IS NOT NULL",
+                              (guild_id,)):
+            table = pickem_table(r["id"], guild_id)
+            if table and table[0]["w"] and any(
+                    s["id"] == uid for s in table if (s["w"], s["l"]) == (table[0]["w"], table[0]["l"])):
+                got.add("pickem")
+                break
+    return got
+
+
+def badge_line(got: set[str]) -> str:
+    return " ".join(BADGE_ICONS[k] for k, _, _ in BADGES if k in got)
+
+
+# ---- game-time pings -----------------------------------------------------------------
+
+async def games_for_pick(p) -> list[dict]:
+    """The scoreboard games this pick's simple legs are riding on."""
+    leagues = leagues_for(p["sport"])
+    if not leagues:
+        return []
+    items, _ = open_items(p)
+    teams = [x["team"] for x in (parse_simple_leg(t) for _, t in items) if x and "team" in x]
+    logged = datetime.fromisoformat(p["created_at"])
+    found: dict[str, dict] = {}
+    for team in set(teams):
+        hit = pick_game(await find_games(team, leagues, logged), logged)
+        if hit:
+            found[hit[0]["id"]] = hit[0]
+    return list(found.values())
+
+
+# ---- profile card ----------------------------------------------------------------------
+
+def render_card(name: str, s: dict, streak: str, best, rate: Optional[str], top_sport: Optional[str],
+                badges: list[str], series: list, avatar: Optional[bytes]) -> io.BytesIO:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle, FancyBboxPatch
+
+    fig = plt.figure(figsize=(12, 6.3), dpi=100)
+    fig.patch.set_facecolor(CHART_SURFACE)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, 1200)
+    ax.set_ylim(0, 630)
+    ax.axis("off")
+    ax.add_patch(FancyBboxPatch((24, 24), 1152, 582, boxstyle="round,pad=0,rounding_size=28",
+                                facecolor="#222220", edgecolor=CHART_GRID, linewidth=2))
+    ax.add_patch(FancyBboxPatch((60, 592), 1080, 6, boxstyle="round,pad=0,rounding_size=3",
+                                facecolor=CHART_COLORS[0], edgecolor="none"))
+    # avatar or initials
+    cx, cy, r = 130, 495, 70
+    placed = False
+    if avatar:
+        try:
+            import numpy as np
+            from PIL import Image
+            img = Image.open(io.BytesIO(avatar)).convert("RGBA").resize((2 * r, 2 * r))
+            arr = np.asarray(img)
+            im = ax.imshow(arr, extent=(cx - r, cx + r, cy - r, cy + r), zorder=3)
+            im.set_clip_path(Circle((cx, cy), r, transform=ax.transData))
+            placed = True
+        except Exception:
+            placed = False
+    if not placed:
+        ax.add_patch(Circle((cx, cy), r, facecolor=CHART_COLORS[6], zorder=3))
+        initials = "".join(w[0] for w in name.split()[:2]).upper() or "?"
+        ax.text(cx, cy, initials, color=CHART_TEXT, fontsize=40, fontweight="bold", ha="center", va="center", zorder=4)
+    ax.text(230, 520, clip(name, 22), color=CHART_TEXT, fontsize=34, fontweight="bold", va="center")
+    sub = f"{record_line(s)}" + (f"  ·  streak {streak.lstrip('🔥🧊')}" if streak else "") + \
+          (f"  ·  {top_sport}" if top_sport else "")
+    ax.text(232, 465, sub, color=CHART_MUTED, fontsize=16, va="center")
+
+    def stat(x, label, value, color=CHART_TEXT):
+        size = 30 if len(value) <= 8 else 24 if len(value) <= 11 else 19
+        ax.text(x, 360, value, color=color, fontsize=size, fontweight="bold", va="center")
+        ax.text(x, 315, label.upper(), color=CHART_MUTED, fontsize=11, va="center")
+
+    green, red = "#3fb97a", "#e66767"
+    stat(70, "Net", signed(s["net"]), green if s["net"] >= 0 else red)
+    stat(370, "ROI", f"{s['roi']:+.1f}%", green if s["roi"] >= 0 else red)
+    settled = s["wins"] + s["losses"]
+    stat(650, "Win rate", f"{s['wins'] / settled * 100:.0f}%" if settled else "-")
+    stat(880, "Legs hit", rate.split(" ")[0] if rate else "-")
+    if best is not None and pick_net(best) > 0:
+        ax.text(70, 240, "BEST HIT", color=CHART_MUTED, fontsize=11, va="center")
+        ax.text(70, 205, clip(f"{signed(pick_net(best))} on {best['description']}", 52), color=CHART_TEXT,
+                fontsize=16, va="center")
+    if badges:  # wrap onto up to two lines
+        ax.text(70, 145, f"BADGES {len(badges)}/{len(BADGES)}", color=CHART_MUTED, fontsize=11, va="center")
+        rows: list[list[str]] = [[]]
+        for b in badges:
+            if rows[-1] and len("  ·  ".join(rows[-1] + [b])) > 78:
+                rows.append([])
+            rows[-1].append(b)
+        if len(rows) > 2:  # say how many didn't fit instead of dropping them silently
+            hidden = sum(len(r) for r in rows[2:])
+            while rows[1] and len("  ·  ".join(rows[1] + [f"+{hidden + 1} more"])) > 78:
+                rows[1].pop()
+                hidden += 1
+            rows = [rows[0], rows[1] + [f"+{hidden} more"]]
+        for k, row in enumerate(rows[:2]):
+            ax.text(70, 112 - k * 30, "  ·  ".join(row), color=CHART_TEXT, fontsize=14, va="center")
+    ax.text(1150, 50, f"PIMP-BOT · {datetime.now(TZ):%b %-d, %Y}", color=CHART_MUTED, fontsize=10, ha="right",
+            va="center")
+    if len(series) >= 2:  # small profit sparkline, top right
+        spark = fig.add_axes([0.70, 0.64, 0.26, 0.22])
+        spark.set_facecolor("#222220")
+        xs = [p[0] for p in series]
+        ys = [p[1] for p in series]
+        spark.step(xs, ys, where="post", color=CHART_COLORS[0], linewidth=2)
+        spark.axhline(0, color=CHART_MUTED, linewidth=1, alpha=0.5)
+        spark.axis("off")
+        spark.set_title("PROFIT", color=CHART_MUTED, fontsize=10, loc="left")
+    out = io.BytesIO()
+    fig.savefig(out, format="png", facecolor=CHART_SURFACE)
+    plt.close(fig)
+    out.seek(0)
+    return out
+
+
+async def fetch_avatar(user) -> Optional[bytes]:
+    try:
+        url = str(user.display_avatar.replace(size=256, format="png").url)
+        import aiohttp
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with session.get(url) as resp:
+                resp.raise_for_status()
+                return await resp.read()
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -2843,9 +3167,70 @@ class PicksBot(discord.Client):
                 settle_lock(lk["id"], status, why)
                 await post_lock_result(self, lk, status, why)
 
+    async def run_game_pings(self, now: Optional[datetime] = None):
+        """DM people who turned on /pings before their games start and at halftime (one DM per game)."""
+        now = now or datetime.now(timezone.utc)
+        users = [(r["guild_id"], int(r["key"].split(":", 1)[1]))
+                 for r in db().execute("SELECT guild_id, key FROM settings WHERE key LIKE 'pings:%' AND value = 'on'")]
+        recent = iso(now - timedelta(days=LIVE_WINDOW_DAYS))
+        for guild_id, uid in users:
+            picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_id = ? AND status = 'open' "
+                                 "AND created_at >= ? ORDER BY id", (guild_id, uid, recent)).fetchall()
+            due: dict[tuple[str, str], dict] = {}  # (event id, kind) -> {"ev", "picks"}
+            for p in picks:
+                try:
+                    games = await games_for_pick(p)
+                except Exception:
+                    log.exception("Ping lookup failed for pick %s", p["id"])
+                    continue
+                for ev in games:
+                    when = event_time(ev)
+                    if when and ev["state"] == "pre" and timedelta(0) < when - now <= timedelta(minutes=PING_MINUTES):
+                        kind = "start"
+                    elif ev.get("status_name") == "STATUS_HALFTIME" and all(t["score"] is not None for t in ev["teams"]):
+                        kind = "half"
+                    else:
+                        continue
+                    if db().execute("SELECT 1 FROM pings WHERE pick_id = ? AND event_id = ? AND kind = ?",
+                                    (p["id"], ev["id"], kind)).fetchone():
+                        continue
+                    due.setdefault((ev["id"], kind), {"ev": ev, "picks": []})["picks"].append(p)
+            for (event_id, kind), item in due.items():
+                ev, ps = item["ev"], item["picks"]
+                away = next(t for t in ev["teams"] if not t["home"])
+                home = next(t for t in ev["teams"] if t["home"])
+                if kind == "start":
+                    mins = max(1, round((event_time(ev) - now).total_seconds() / 60))
+                    head = f"⏰ {away['short']} @ {home['short']} starts in {mins} min."
+                else:
+                    head = f"🏈 Halftime: {away['short']} {away['score']:g}, {home['short']} {home['score']:g}."
+                riding = "\n".join(f"• Pick `#{p['id']}`: {clip(p['description'], 80)}" for p in ps[:10])
+                db().executemany("INSERT OR IGNORE INTO pings (pick_id, event_id, kind) VALUES (?,?,?)",
+                                 [(p["id"], event_id, kind) for p in ps])
+                db().commit()
+                try:
+                    user = await self.fetch_user(uid)
+                    await user.send(f"{head} Riding on it:\n{riding}")
+                except Exception:
+                    log.info("Couldn't DM user %s a game ping", uid)
+
+    async def post_today(self, now: datetime):
+        for r in db().execute("SELECT guild_id, value FROM settings WHERE key = 'today_channel'").fetchall():
+            today = now.date().isoformat()
+            if now.hour < TODAY_HOUR or get_setting(r["guild_id"], "last_today") == today:
+                continue
+            set_setting(r["guild_id"], "last_today", today)
+            channel = self.get_channel(int(r["value"]))
+            if channel is None:
+                continue
+            embeds = [e for e in [await today_embed(p, now) for p in group_leagues(r["guild_id"])[:10]] if e]
+            if embeds:
+                await channel.send("📅 Today's games", embeds=embeds)
+
     async def run_schedules(self, now: Optional[datetime] = None):
         now = now or datetime.now(TZ)
-        for job in (self.run_live_grading, lambda n: grade_pickem_games(self, n), lambda n: post_hall_of_fame(self)):
+        for job in (self.run_live_grading, lambda n: grade_pickem_games(self, n), lambda n: post_hall_of_fame(self),
+                    self.run_game_pings, lambda n: self.post_today(n.astimezone(TZ))):
             try:
                 await job(now.astimezone(timezone.utc))
             except Exception:
@@ -3212,6 +3597,14 @@ async def record_cmd(interaction: discord.Interaction,
     rate = hit_rate(leg_counts(interaction.guild_id, key))
     if rate:
         e.add_field(name="Legs", value=rate)
+    season = current_season(interaction.guild_id)
+    if season:
+        mine = [x for x in season_stats(interaction.guild_id, season) if x["key"] == key]
+        e.add_field(name=season["name"], value=f"{record_line(mine[0])} · {signed(mine[0]['net'])}" if mine
+                    else "no settled picks yet")
+    got = earned_badges(interaction.guild_id, key)
+    if got:
+        e.add_field(name=f"Badges {len(got)}/{len(BADGES)}", value=badge_line(got) + " · `/achievements`")
     recent = db().execute(
         """SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'
            ORDER BY settled_at DESC, id DESC LIMIT 5""",
@@ -3226,13 +3619,17 @@ async def record_cmd(interaction: discord.Interaction,
     await interaction.response.send_message(embed=e)
 
 
-@bot.tree.command(name="leaderboard", description="Everyone ranked by net profit")
+@bot.tree.command(name="leaderboard", description="Everyone ranked by net profit (this season, if one's running)")
 @app_commands.guild_only()
-async def leaderboard_cmd(interaction: discord.Interaction):
-    stats = [s for s in compute_stats(interaction.guild_id)
+@app_commands.describe(all_time="Show all-time instead of the current season")
+async def leaderboard_cmd(interaction: discord.Interaction, all_time: Optional[bool] = None):
+    season = None if all_time else current_season(interaction.guild_id)
+    stats = [s for s in (season_stats(interaction.guild_id, season) if season else compute_stats(interaction.guild_id))
              if s["wins"] + s["losses"] + s["pushes"] > 0]
     if not stats:
-        await interaction.response.send_message("No settled picks yet.")
+        await interaction.response.send_message(
+            f"No settled picks in {season['name']} yet. Try `/leaderboard all_time:True`." if season
+            else "No settled picks yet.")
         return
     medals = ["🥇", "🥈", "🥉"]
     lines = []
@@ -3241,8 +3638,10 @@ async def leaderboard_cmd(interaction: discord.Interaction):
         streak = current_streak(interaction.guild_id, s["key"])
         lines.append(f"{rank} **{s['name']}** · {record_line(s)} · "
                      f"{signed(s['net'])} · ROI {s['roi']:+.1f}%" + (f" · {streak}" if streak else ""))
-    e = discord.Embed(title="Leaderboard", description="\n".join(lines), color=BRAND)
-    e.set_footer(text="Settled picks only · record is W-L(-Push)")
+    e = discord.Embed(title=f"Leaderboard · {season['name']}" if season else "Leaderboard · all time",
+                      description="\n".join(lines), color=BRAND)
+    e.set_footer(text="Settled picks only · record is W-L(-Push)"
+                      + (" · /leaderboard all_time:True for everything" if season else ""))
     await interaction.response.send_message(embed=e)
 
 
@@ -3644,10 +4043,13 @@ async def help_cmd(interaction: discord.Interaction):
         "`/lock` your lock of the week · `/locks` this week + standings · `/lockresult` fix one\n"
         "`/awards` monthly awards · `/hotroles` weekly 🔥/🧊 roles (admins)\n"
         "`/pickem start` weekly pick'em (mods) · `/pickem mine` · `/pickem standings`\n"
-        "`/halloffame` repost big wins in a channel (admins)"))
+        "`/halloffame` repost big wins in a channel (admins)\n"
+        "`/season start` new season (admins) · `/season standings` · `/season list`"))
     e.add_field(name="Your numbers", inline=False, value=(
         "`/stats` record by sport, platform and parlay size · `/chart` profit graph\n"
-        "`/odds` convert odds · `/bankroll` units on your picks · `/limit` weekly loss heads-up (private)"))
+        "`/odds` convert odds · `/parlay` parlay calculator · `/today` today's games\n"
+        "`/achievements` badges · `/card` shareable profile image · `/pings` game-time DMs\n"
+        "`/bankroll` units on your picks · `/limit` weekly loss heads-up (private)"))
     e.add_field(name="Setup (admins)", inline=False, value=(
         "`/guide` post and pin the how-to in this channel · `/receipts` · `/recapchannel` · `/import`"))
     e.add_field(name="Players", inline=False, value=(
@@ -4021,7 +4423,9 @@ def guide_embeds() -> list[discord.Embed]:
         "`/record` your W-L, profit, ROI, streak and leg hit rate\n"
         "`/stats` your record split by sport, platform and parlay size\n"
         "`/chart` profit graph, for everyone or just you\n"
-        "`/odds` convert -150, +200, 2.5, 45¢ or 60% into break-even % and payout\n"
+        "`/odds` convert -150, +200, 2.5, 45¢ or 60% into break-even % and payout · `/parlay` stack legs\n"
+        "`/today` today's games · `/pings` DM before your games start and at halftime\n"
+        "`/achievements` your badges · `/card` a shareable image of your profile\n"
         "`/export` everything as an Excel file\n"
         "`/bankroll` units on your pick cards · `/limit` private weekly loss heads-up\n"
         "`/player note` scouting notes on a player · `/player view` notes plus how the group's legs on them went"))
@@ -4166,6 +4570,178 @@ async def halloffame_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"🏆 This is the **Hall of Fame** now. From here on, any win that hits {HOF_MIN_LEGS}+ legs, pays "
         f"{HOF_MIN_MULTIPLE}x or more, or profits {money(HOF_MIN_PROFIT)}+ gets posted here automatically.")
+
+
+# ---- pings, today, parlay, seasons, achievements, card: commands ---------------------
+
+@bot.tree.command(name="pings", description="Turn private game-time pings on or off for your open picks")
+@app_commands.guild_only()
+async def pings_cmd(interaction: discord.Interaction):
+    key = f"pings:{interaction.user.id}"
+    on = get_setting(interaction.guild_id, key) == "on"
+    set_setting(interaction.guild_id, key, None if on else "on")
+    await interaction.response.send_message(
+        "Game-time pings are **off**." if on else
+        f"Game-time pings are **on**. I'll DM you {PING_MINUTES} minutes before a game on one of your open picks "
+        "starts, and again at halftime with the score. (Make sure DMs from server members are allowed.)",
+        ephemeral=True)
+
+
+@bot.tree.command(name="today", description="Today's games: start times, live scores and finals")
+@app_commands.describe(league="Optional: one league (default: the leagues your group bets on)")
+@app_commands.choices(league=[app_commands.Choice(name=n, value=p) for p, n in LEAGUE_NAMES.items()][:25])
+async def today_cmd(interaction: discord.Interaction, league: Optional[app_commands.Choice[str]] = None):
+    await interaction.response.defer(thinking=True)
+    paths = [league.value] if league else (group_leagues(interaction.guild_id) if interaction.guild_id
+                                           else ["football/nfl", "basketball/nba"])
+    embeds = [e for e in [await today_embed(p) for p in paths[:10]] if e]
+    if not embeds:
+        await interaction.followup.send("No games today in " + ", ".join(LEAGUE_NAMES.get(p, p) for p in paths) + ".")
+        return
+    await interaction.followup.send(embeds=embeds)
+
+
+@bot.tree.command(name="todaypost", description="Post today's games here every morning (turn on or off)")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+async def todaypost_cmd(interaction: discord.Interaction):
+    if get_setting(interaction.guild_id, "today_channel") == str(interaction.channel_id):
+        set_setting(interaction.guild_id, "today_channel", None)
+        await interaction.response.send_message("Daily games post is **off** for this channel.")
+        return
+    set_setting(interaction.guild_id, "today_channel", str(interaction.channel_id))
+    when = datetime(2000, 1, 1, TODAY_HOUR).strftime("%-I %p")
+    names = ", ".join(LEAGUE_NAMES.get(p, p) for p in group_leagues(interaction.guild_id))
+    await interaction.response.send_message(
+        f"Every morning at **{when}** I'll post today's games here for the leagues your group bets on "
+        f"(right now: {names}).")
+
+
+@bot.tree.command(name="parlay", description="Parlay calculator: combined odds, payout and the chance it hits")
+@app_commands.describe(legs="Odds for each leg, separated by spaces: e.g. -110 +150 -200 or 45¢ 60¢ 1.8",
+                       stake="Optional: stake to show the payout for (default $10)")
+async def parlay_cmd(interaction: discord.Interaction, legs: app_commands.Range[str, 3, 200],
+                     stake: Optional[app_commands.Range[float, 0.01]] = None):
+    try:
+        e = parlay_embed(legs, stake or 10.0)
+    except (ValueError, ZeroDivisionError):
+        await interaction.response.send_message(
+            "Give me 2 to 20 legs separated by spaces, like `-110 +150 -200` or `45¢ 60¢ 1.8`.", ephemeral=True)
+        return
+    await interaction.response.send_message(embed=e)
+
+
+season_group = app_commands.Group(name="season", description="Seasons: fresh leaderboards without deleting anything",
+                                  guild_only=True)
+
+
+@season_group.command(name="start", description="End the current season (if any) and start a new one (admins)")
+@app_commands.describe(name="e.g. 'NFL 2026' or 'Fall'")
+async def season_start(interaction: discord.Interaction, name: app_commands.Range[str, 1, 40]):
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if not (perms and getattr(perms, "manage_guild", False)):
+        await interaction.response.send_message("Only admins can start a season.", ephemeral=True)
+        return
+    old = current_season(interaction.guild_id)
+    embeds = []
+    if old:
+        db().execute("UPDATE seasons SET ended_at = ? WHERE id = ?", (now_iso(), old["id"]))
+        old = db().execute("SELECT * FROM seasons WHERE id = ?", (old["id"],)).fetchone()
+        embeds.append(season_embed(interaction.guild_id, old, final=True))
+    db().execute("INSERT INTO seasons (guild_id, name, started_at) VALUES (?,?,?)",
+                 (interaction.guild_id, name, now_iso()))
+    db().commit()
+    champ = ""
+    if old:
+        stats = season_stats(interaction.guild_id, old)
+        if stats and stats[0]["net"] > 0:
+            champ = f"🏆 **{stats[0]['name']}** wins {old['name']} at {signed(stats[0]['net'])}. "
+    await interaction.response.send_message(
+        f"{champ}🆕 Season **{name}** starts now. `/leaderboard` shows this season; all-time stats stay.",
+        embeds=embeds or discord.utils.MISSING)
+
+
+@season_group.command(name="list", description="Every season and who won it")
+async def season_list(interaction: discord.Interaction):
+    rows = db().execute("SELECT * FROM seasons WHERE guild_id = ? ORDER BY id DESC", (interaction.guild_id,)).fetchall()
+    if not rows:
+        await interaction.response.send_message("No seasons yet. An admin can start one with `/season start`.")
+        return
+    lines = []
+    for r in rows[:20]:
+        stats = season_stats(interaction.guild_id, r)
+        lead = f"{stats[0]['name']} {signed(stats[0]['net'])}" if stats else "no picks"
+        state = "🟢 now" if r["ended_at"] is None else f"🏆 {lead}"
+        lines.append(f"**{r['name']}** · {local_day(r['started_at'])} · {state}"
+                     + (f" (leading: {lead})" if r["ended_at"] is None and stats else ""))
+    await interaction.response.send_message(embed=discord.Embed(title="Seasons", description="\n".join(lines),
+                                                                color=BRAND))
+
+
+async def season_autocomplete(interaction: discord.Interaction, current: str):
+    rows = db().execute("SELECT name FROM seasons WHERE guild_id = ? AND lower(name) LIKE ? ORDER BY id DESC LIMIT 25",
+                        (interaction.guild_id, f"%{current.lower()}%")).fetchall()
+    return [app_commands.Choice(name=r["name"], value=r["name"]) for r in rows]
+
+
+@season_group.command(name="standings", description="A season's leaderboard (default: the current one)")
+@app_commands.describe(name="Optional: which season")
+@app_commands.autocomplete(name=season_autocomplete)
+async def season_standings(interaction: discord.Interaction, name: Optional[str] = None):
+    row = (db().execute("SELECT * FROM seasons WHERE guild_id = ? AND name = ? ORDER BY id DESC LIMIT 1",
+                        (interaction.guild_id, name)).fetchone() if name else current_season(interaction.guild_id))
+    if row is None:
+        await interaction.response.send_message("No season by that name." if name else
+                                                "No season running. An admin can start one with `/season start`.",
+                                                ephemeral=True)
+        return
+    await interaction.response.send_message(embed=season_embed(interaction.guild_id, row, final=bool(row["ended_at"])))
+
+
+bot.tree.add_command(season_group)
+
+
+@bot.tree.command(name="achievements", description="Badges earned (and what's left to unlock)")
+@app_commands.guild_only()
+@app_commands.describe(member="Optional: defaults to you", label="Optional: a name that isn't a Discord user")
+async def achievements_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                           label: Optional[str] = None):
+    key, name, _ = resolve_bettor(interaction, member, label)
+    got = earned_badges(interaction.guild_id, key)
+    have = [f"{BADGE_ICONS[k]} **{n}** · {how}" for k, n, how in BADGES if k in got]
+    todo = [f"▫️ {n} · {how}" for k, n, how in BADGES if k not in got]
+    e = discord.Embed(title=f"{name}'s badges · {len(got)}/{len(BADGES)}", color=BRAND,
+                      description="\n".join(have) or "None yet.")
+    if todo:
+        e.add_field(name="Still to unlock", value=clip("\n".join(todo), 1024), inline=False)
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="card", description="A shareable image of someone's betting profile")
+@app_commands.guild_only()
+@app_commands.describe(member="Optional: defaults to you", label="Optional: a name that isn't a Discord user")
+async def card_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                   label: Optional[str] = None):
+    key, name, _ = resolve_bettor(interaction, member, label)
+    stats = compute_stats(interaction.guild_id, key)
+    if not stats:
+        await interaction.response.send_message(f"No picks logged for {name} yet.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    s = stats[0]
+    settled = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'",
+                           (interaction.guild_id, key)).fetchall()
+    best = max(settled, key=pick_net) if settled else None
+    groups = breakdown(settled, lambda p: sport_group(p["sport"]))
+    top_sport = groups[0][0] if groups and groups[0][0] != "No sport" else None
+    got = earned_badges(interaction.guild_id, key)
+    series = chart_series(interaction.guild_id, 3650, key)
+    avatar = None if label else await fetch_avatar(member or interaction.user)
+    png = await asyncio.to_thread(
+        render_card, s["name"], s, current_streak(interaction.guild_id, key), best,
+        hit_rate(leg_counts(interaction.guild_id, key)), top_sport,
+        [n for k, n, _ in BADGES if k in got], next(iter(series.values()), []), avatar)
+    await interaction.followup.send(file=discord.File(png, filename=f"{re.sub(r'[^A-Za-z0-9]+', '_', s['name'])}_card.png"))
 
 
 @bot.tree.error

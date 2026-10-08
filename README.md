@@ -40,6 +40,13 @@ paid, and who's actually up.
 | `/pickem mine`, `/pickem standings` | Your picks, and this round's table plus all-time standings |
 | `/halloffame` | Big wins get reposted in this channel automatically: 3+ leg parlays that hit, 5x+ payouts, or $100+ profit (admins) |
 | `/guide` | Post and pin the how-to guide in the current channel (admins) |
+| `/pings` | Turn on private DMs 30 minutes before a game on one of your open picks starts, and at halftime with the score (one DM per game) |
+| `/today` | Today's games with start times, live scores and finals, for the leagues your group bets on or one you pick |
+| `/todaypost` | Post today's games in this channel every morning at 10 AM (admins) |
+| `/parlay` | Parlay calculator: `-110 +150 -200` (any odds format) gives combined odds, payout and the chance it hits |
+| `/season start`, `/season standings`, `/season list` | Seasons: a fresh leaderboard without deleting anything. `/leaderboard` shows the current season; add `all_time` for everything |
+| `/achievements` | 13 badges, from First Blood to Big Leg Energy. `/record` shows the ones you've earned |
+| `/card` | A shareable image of someone's profile: avatar, record, net, ROI, streak, best hit, profit line and badges |
 | `/limit` | Set a weekly loss limit; the bot DMs you privately once a week if you pass it |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
@@ -187,6 +194,6 @@ Run `/export` now and then to keep your own copy of the picks.
   (`claude-sonnet-5-5`), `TIMEZONE` (`America/Chicago`), `RECAP_DAY` (`sunday`),
   `RECAP_HOUR` (20), `REMIND_HOUR` (12), `REMIND_AFTER_DAYS` (3),
   `AUTOGRADE_AFTER_HOURS` (48; 0 turns auto-grading off), `AUTOGRADE_DAILY_LIMIT` (30),
-  `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5).
+  `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5), `TODAY_HOUR` (10).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
   `/result` with the `returned` amount instead of the buttons.
