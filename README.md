@@ -23,6 +23,20 @@ paid, and who's actually up.
 | `/recap` | The last 7 days: who's up, best hit, worst beat, heartbreaker |
 | `/player add` `note` `view` `list` `remove` | Scouting notes on players and teams |
 | `/help` | Everything the bot can do |
+| 👍 Tail / 👎 Fade buttons | On every open pick card. The card shows how many people are tailing or fading |
+| `/tailfade` | Who's best to tail or fade, how your own tails and fades went, or one person's record |
+| `/challenge` | Challenge someone head-to-head ("Bills beat the Chiefs", optional stakes). They accept or decline; either of you settles it with a button |
+| `/h2h` | Your head-to-head challenge record against someone |
+| `/lock` | Submit your lock of the week (one per person per week, change it until it's graded) |
+| `/locks` | This week's locks and the all-time lock standings |
+| `/lockresult` | Settle or fix a lock |
+| `/stats` | Your record split by sport, platform and parlay size |
+| `/chart` | A graph of profit over time, for everyone or one person |
+| `/odds` | Convert -150, +200, 2.5, 45¢, 5/2 or 60% into break-even %, other formats and payout |
+| `/awards` | Monthly awards (posts automatically on the 1st) |
+| `/hotroles` | Turn on weekly 🔥 Hot Hand / 🧊 Ice Cold roles (admins; needs Manage Roles) |
+| `/bankroll` | Set your bankroll; pick cards then show the bet in units and flag bets over 5 units (private) |
+| `/limit` | Set a weekly loss limit; the bot DMs you privately once a week if you pass it |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
 **Receipts channel.** Run `/receipts` once in the channel where people post slips.
@@ -57,6 +71,15 @@ you, since flex payouts vary. Early cash-outs aren't visible to the bot, so fix 
 Every Sunday at 8 PM (Central) the bot posts the week's standings, best hit, worst beat
 and any parlay that missed by one leg. Every day at noon it pings anyone with a pick open
 3+ days, once per pick.
+
+**Locks of the week** get graded the same way as picks, 48 hours after they're submitted,
+and the results post in the recap channel. The weekly recap shows how the week's locks went.
+
+**Hot Hand roles** need two things in Discord: the bot's role needs the **Manage Roles**
+permission, and it has to sit above the 🔥 Hot Hand and 🧊 Ice Cold roles in Server Settings →
+Roles (the bot creates them the first time). They're handed out with the Sunday recap.
+
+**Loss-limit DMs** only arrive if the person allows DMs from server members.
 
 **Player tracker.** `/player note` adds a dated note to a player (and adds the player if
 they're new). `/player view` shows the notes plus how the group's legs mentioning that

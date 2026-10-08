@@ -157,6 +157,44 @@ def db() -> sqlite3.Connection:
                 created_at TEXT    NOT NULL,
                 UNIQUE (guild_id, name_key)
             );
+            CREATE TABLE IF NOT EXISTS follows (
+                pick_id    INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                user_name  TEXT,
+                kind       TEXT    NOT NULL,   -- tail / fade
+                created_at TEXT    NOT NULL,
+                PRIMARY KEY (pick_id, user_id)
+            );
+            CREATE TABLE IF NOT EXISTS challenges (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id        INTEGER NOT NULL,
+                challenger_id   INTEGER NOT NULL,
+                challenger_name TEXT    NOT NULL,
+                opponent_id     INTEGER NOT NULL,
+                opponent_name   TEXT    NOT NULL,
+                claim           TEXT    NOT NULL,
+                stakes          TEXT,
+                status          TEXT    NOT NULL DEFAULT 'pending',
+                winner_id       INTEGER,
+                created_at      TEXT    NOT NULL,
+                settled_at      TEXT
+            );
+            CREATE TABLE IF NOT EXISTS locks (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id        INTEGER NOT NULL,
+                user_id         INTEGER NOT NULL,
+                user_name       TEXT    NOT NULL,
+                week            TEXT    NOT NULL,   -- e.g. 2026-W41
+                text            TEXT    NOT NULL,
+                sport           TEXT,
+                status          TEXT    NOT NULL DEFAULT 'open',
+                why             TEXT,
+                created_at      TEXT    NOT NULL,
+                settled_at      TEXT,
+                autograde_at    TEXT,
+                autograde_tries INTEGER,
+                UNIQUE (guild_id, user_id, week)
+            );
             CREATE TABLE IF NOT EXISTS player_notes (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id   INTEGER NOT NULL,
@@ -495,13 +533,19 @@ def pick_embed(p: sqlite3.Row) -> discord.Embed:
     e.add_field(name="Platform", value=p["platform"])
     if p["sport"]:
         e.add_field(name="Sport", value=clip(p["sport"], 100))
-    e.add_field(name="Cost", value=money(p["cost"]))
+    units, warn = units_note(p["guild_id"], p)
+    e.add_field(name="Cost", value=money(p["cost"]) + units)
     e.add_field(name="Max payout", value=money(p["payout"]))
     e.add_field(name="Status", value=label)
     if p["status"] != "open":
         e.add_field(name="Net", value=signed((p["returned"] or 0.0) - p["cost"]))
     if p["slip_url"]:
         e.add_field(name="Slip", value=f"[View]({p['slip_url']})")
+    crowd = follow_counts(p["id"])
+    if crowd["tail"] or crowd["fade"]:
+        e.add_field(name="Crowd", value=f"👍 {crowd['tail']} tailing · 👎 {crowd['fade']} fading")
+    if warn:
+        e.add_field(name="⚠️ Big bet", value=warn, inline=False)
     if p["notes"]:
         e.add_field(name="Notes", value=clip(p["notes"], 300), inline=False)
     if field and p["status"] == "open":
@@ -606,6 +650,11 @@ def build_recap(guild_id: int, days: int = 7) -> discord.Embed:
         rate = hit_rate(c)
         if rate:
             e.add_field(name="Legs", value=rate)
+    week_locks = locks_for_week(guild_id, week_id())
+    if week_locks:
+        e.add_field(name=f"🔒 Locks of the week ({sum(1 for r in week_locks if r['status'] == 'win')}"
+                         f"/{len(week_locks)} hit)", inline=False,
+                    value=clip("\n".join(lock_line(r) for r in week_locks), 1024))
     open_rows = db().execute("SELECT cost FROM picks WHERE guild_id = ? AND status = 'open'",
                              (guild_id,)).fetchall()
     if open_rows:
@@ -1066,7 +1115,7 @@ class SettleButton(discord.ui.DynamicItem[discord.ui.Button],
     def __init__(self, pick_id: int, status: str):
         label, style = self.STYLES[status]
         super().__init__(discord.ui.Button(
-            label=label, style=style, custom_id=f"settle:{pick_id}:{status}"))
+            label=label, style=style, custom_id=f"settle:{pick_id}:{status}", row=0))
         self.pick_id = pick_id
         self.status = status
 
@@ -1092,6 +1141,8 @@ def settle_view(pick_id: int) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
     for status in ("win", "loss", "push"):
         view.add_item(SettleButton(pick_id, status))
+    view.add_item(FollowButton(pick_id, "tail"))
+    view.add_item(FollowButton(pick_id, "fade"))
     return view
 
 
@@ -1532,7 +1583,8 @@ def judge(leg: dict, ev: dict, i: Optional[int]) -> Optional[str]:
     return result
 
 
-async def free_grade(p: sqlite3.Row, items: list[tuple[int, str]]) -> dict[int, tuple[str, str]]:
+async def free_grade(p, items: list[tuple[int, str]],
+                     context_legs: Optional[list[str]] = None) -> dict[int, tuple[str, str]]:
     """Grade what the public scoreboard can settle. Returns {item number: (result, why)};
     items it can't settle are left out."""
     leagues = leagues_for(p["sport"])
@@ -1542,8 +1594,8 @@ async def free_grade(p: sqlite3.Row, items: list[tuple[int, str]]) -> dict[int, 
     parsed = {n: parse_simple_leg(text) for n, text in items}
     # Teams named anywhere on the pick, so a bare "Over 44.5" can find its game.
     context_teams = [x["team"] for x in parsed.values() if x and "team" in x]
-    for leg in get_legs(p["id"]):
-        x = parse_simple_leg(leg["text"])
+    for leg_text in (context_legs if context_legs is not None else [leg["text"] for leg in get_legs(p["id"])]):
+        x = parse_simple_leg(leg_text)
         if x and "team" in x:
             context_teams.append(x["team"])
     out: dict[int, tuple[str, str]] = {}
@@ -1603,6 +1655,31 @@ def grade_request(p: sqlite3.Row, items: list[tuple[int, str]], single: bool) ->
     return "\n".join(lines)
 
 
+async def lookup_items(p, items: list[tuple[int, str]], single: bool, allow_ai: bool,
+                       context_legs: Optional[list[str]] = None) -> tuple[dict[int, dict], bool]:
+    """Free scoreboard first, then Claude for the rest. Returns ({n: {result, why}}, used Claude)."""
+    by_n: dict[int, dict] = {}
+    try:
+        for n, (result, why) in (await free_grade(p, items, context_legs)).items():
+            by_n[n] = {"result": result, "why": why}
+    except Exception:
+        log.exception("Free lookup failed")
+    rest = [(n, t) for n, t in items if n not in by_n]
+    used_ai = False
+    if rest and allow_ai and ai_enabled():
+        used_ai = True
+        text, _ = await ask_claude(GRADE_SYSTEM, grade_request(p, rest, single),
+                                   max_searches=min(3 + len(rest), 10))
+        for r in extract_json(text).get("items") or []:
+            try:
+                n = int(r.get("n"))
+            except (TypeError, ValueError):
+                continue
+            if n in dict(rest):
+                by_n[n] = r
+    return by_n, used_ai
+
+
 async def autograde(guild_id: int, pick_id: int,
                     allow_ai: bool = True) -> tuple[Optional[sqlite3.Row], list[str], bool, bool]:
     """Look up results for a pick's open legs and apply them: the free scoreboard first,
@@ -1619,25 +1696,7 @@ async def autograde(guild_id: int, pick_id: int,
     db().commit()
     if not items:
         return p, [], False, False
-    by_n: dict[int, dict] = {}
-    try:
-        for n, (result, why) in (await free_grade(p, items)).items():
-            by_n[n] = {"result": result, "why": why}
-    except Exception:
-        log.exception("Free lookup failed for pick %s", pick_id)
-    rest = [(n, t) for n, t in items if n not in by_n]
-    used_ai = False
-    if rest and allow_ai and ai_enabled():
-        used_ai = True
-        text, _ = await ask_claude(GRADE_SYSTEM, grade_request(p, rest, single),
-                                   max_searches=min(3 + len(rest), 10))
-        for r in extract_json(text).get("items") or []:
-            try:
-                n = int(r.get("n"))
-            except (TypeError, ValueError):
-                continue
-            if n in dict(rest):
-                by_n[n] = r
+    by_n, used_ai = await lookup_items(p, items, single, allow_ai)
     lines, graded = [], False
     for n, leg_text in items:
         r = by_n.get(n) or {}
@@ -1672,6 +1731,626 @@ def grading_message(p: sqlite3.Row, lines: list[str], final_try: bool) -> str:
     return f"{head}\n{body}\n{tail}"
 
 
+# ==========================================================================
+# Extras: tail/fade, challenges, lock of the week, stats, odds, charts,
+# hot-hand roles, monthly awards, bankroll/units, weekly loss limit
+# ==========================================================================
+
+# ---- small shared helpers ---------------------------------------------------
+
+def week_id(when: Optional[datetime] = None) -> str:
+    d = (when or datetime.now(TZ)).astimezone(TZ).date()
+    y, w, _ = d.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def week_start(when: Optional[datetime] = None) -> datetime:
+    """Monday 00:00 local, as UTC."""
+    d = (when or datetime.now(TZ)).astimezone(TZ)
+    monday = (d - timedelta(days=d.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    return monday.astimezone(timezone.utc)
+
+
+def iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def pick_net(p) -> float:
+    return (p["returned"] or 0.0) - p["cost"]
+
+
+def streak_of(results: list[str]) -> tuple[str, int]:
+    """results newest first ('win'/'loss'/...). Pushes and voids are skipped."""
+    kind, n = "", 0
+    for r in results:
+        if r not in ("win", "loss"):
+            continue
+        if not kind:
+            kind = r
+        if r != kind:
+            break
+        n += 1
+    return ("W" if kind == "win" else "L" if kind == "loss" else ""), n
+
+
+def current_streak(guild_id: int, bettor_key: str) -> str:
+    rows = db().execute(
+        """SELECT status FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'
+           ORDER BY settled_at DESC, id DESC LIMIT 50""", (guild_id, bettor_key)).fetchall()
+    kind, n = streak_of([r["status"] for r in rows])
+    if not kind:
+        return ""
+    return f"{'🔥' if kind == 'W' and n >= 3 else '🧊' if kind == 'L' and n >= 3 else ''}{kind}{n}"
+
+
+def longest_win_streak(statuses_oldest_first: list[str]) -> int:
+    best = run = 0
+    for s in statuses_oldest_first:
+        if s == "win":
+            run += 1
+            best = max(best, run)
+        elif s == "loss":
+            run = 0
+    return best
+
+
+# ---- tail / fade ------------------------------------------------------------
+
+def follow_counts(pick_id: int) -> dict[str, int]:
+    counts = {"tail": 0, "fade": 0}
+    for r in db().execute("SELECT kind, COUNT(*) AS n FROM follows WHERE pick_id = ? GROUP BY kind", (pick_id,)):
+        counts[r["kind"]] = r["n"]
+    return counts
+
+
+def set_follow(pick_id: int, user_id: int, user_name: str, kind: str) -> str:
+    """Toggle. Returns 'added', 'switched' or 'removed'."""
+    row = db().execute("SELECT kind FROM follows WHERE pick_id = ? AND user_id = ?", (pick_id, user_id)).fetchone()
+    if row and row["kind"] == kind:
+        db().execute("DELETE FROM follows WHERE pick_id = ? AND user_id = ?", (pick_id, user_id))
+        outcome = "removed"
+    else:
+        db().execute("INSERT OR REPLACE INTO follows (pick_id, user_id, user_name, kind, created_at) VALUES (?,?,?,?,?)",
+                     (pick_id, user_id, user_name, kind, now_iso()))
+        outcome = "switched" if row else "added"
+    db().commit()
+    return outcome
+
+
+def tail_units(p) -> float:
+    """What tailing a settled pick returned, per unit staked."""
+    return pick_net(p) / p["cost"] if p["cost"] else 0.0
+
+
+def fade_units(p) -> float:
+    """Fading counts as an even-money bet against the pick."""
+    return {"win": -1.0, "loss": 1.0}.get(p["status"], 0.0)
+
+
+def tf_line(rec: dict) -> str:
+    return f"{rec['w']}-{rec['l']}" + (f"-{rec['p']}" if rec["p"] else "") + f" · {rec['u']:+.1f}u"
+
+
+def tailfade_for(guild_id: int, bettor_key: str) -> tuple[dict, dict, int]:
+    """(tail record, fade record, settled count) if you'd followed every one of their picks."""
+    tail = {"w": 0, "l": 0, "p": 0, "u": 0.0}
+    fade = {"w": 0, "l": 0, "p": 0, "u": 0.0}
+    rows = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'",
+                        (guild_id, bettor_key)).fetchall()
+    for p in rows:
+        if p["status"] == "win":
+            tail["w"] += 1; fade["l"] += 1
+        elif p["status"] == "loss":
+            tail["l"] += 1; fade["w"] += 1
+        else:
+            tail["p"] += 1; fade["p"] += 1
+        tail["u"] += tail_units(p)
+        fade["u"] += fade_units(p)
+    return tail, fade, len(rows)
+
+
+def my_follows(guild_id: int, user_id: int) -> tuple[dict, dict]:
+    tails = {"w": 0, "l": 0, "p": 0, "u": 0.0}
+    fades = {"w": 0, "l": 0, "p": 0, "u": 0.0}
+    for r in db().execute(
+            """SELECT f.kind, p.* FROM follows f JOIN picks p ON p.id = f.pick_id
+               WHERE p.guild_id = ? AND f.user_id = ? AND p.status != 'open'""", (guild_id, user_id)):
+        rec = tails if r["kind"] == "tail" else fades
+        won = (r["status"] == "win") if r["kind"] == "tail" else (r["status"] == "loss")
+        lost = (r["status"] == "loss") if r["kind"] == "tail" else (r["status"] == "win")
+        rec["w" if won else "l" if lost else "p"] += 1
+        rec["u"] += tail_units(r) if r["kind"] == "tail" else fade_units(r)
+    return tails, fades
+
+
+class FollowButton(discord.ui.DynamicItem[discord.ui.Button],
+                   template=r"follow:(?P<pick_id>\d+):(?P<kind>tail|fade)"):
+    def __init__(self, pick_id: int, kind: str):
+        label, style = (("👍 Tail", discord.ButtonStyle.primary) if kind == "tail"
+                        else ("👎 Fade", discord.ButtonStyle.secondary))
+        super().__init__(discord.ui.Button(label=label, style=style,
+                                           custom_id=f"follow:{pick_id}:{kind}", row=1))
+        self.pick_id = pick_id
+        self.kind = kind
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["pick_id"]), match["kind"])
+
+    async def callback(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None or p["status"] != "open":
+            await interaction.response.send_message("That pick is already settled.", ephemeral=True)
+            return
+        if interaction.user.id == p["bettor_id"]:
+            await interaction.response.send_message("You can't tail or fade your own pick.", ephemeral=True)
+            return
+        set_follow(self.pick_id, interaction.user.id, interaction.user.display_name, self.kind)
+        await interaction.response.edit_message(embed=pick_embed(p), view=settle_view(self.pick_id))
+
+
+# ---- bankroll & units -------------------------------------------------------
+
+def get_bankroll(guild_id: int, user_id) -> Optional[dict]:
+    raw = get_setting(guild_id, f"bankroll:{user_id}")
+    if not raw:
+        return None
+    b = json.loads(raw)
+    net = db().execute(
+        """SELECT COALESCE(SUM(COALESCE(returned, 0) - cost), 0) AS n FROM picks
+           WHERE guild_id = ? AND bettor_key = ? AND status != 'open' AND settled_at >= ?""",
+        (guild_id, str(user_id), b["since"])).fetchone()["n"]
+    b["net"] = net
+    b["current"] = b["start"] + net
+    b["unit_size"] = max(b["current"], 0) * b["unit_pct"] / 100
+    return b
+
+
+BIG_BET_UNITS = 5
+
+
+def units_note(guild_id: int, p) -> tuple[str, Optional[str]]:
+    """(' · 2.0u' or '', warning or None) for a pick's cost against its bettor's bankroll."""
+    if not p["bettor_id"]:
+        return "", None
+    b = get_bankroll(guild_id, p["bettor_id"])
+    if not b or b["unit_size"] <= 0:
+        return "", None
+    u = p["cost"] / b["unit_size"]
+    warn = None
+    if p["status"] == "open" and u > BIG_BET_UNITS:
+        share = p["cost"] / b["current"] * 100 if b["current"] > 0 else 100
+        warn = (f"This is {u:.1f} units, {share:.0f}% of {p['bettor_name']}'s "
+                f"{money(b['current'])} bankroll.")
+    return f" · {u:.1f}u", warn
+
+
+def weekly_net(guild_id: int, bettor_key: str, when: Optional[datetime] = None) -> float:
+    return db().execute(
+        """SELECT COALESCE(SUM(COALESCE(returned, 0) - cost), 0) AS n FROM picks
+           WHERE guild_id = ? AND bettor_key = ? AND status != 'open' AND settled_at >= ?""",
+        (guild_id, bettor_key, iso(week_start(when)))).fetchone()["n"]
+
+
+# ---- challenges -------------------------------------------------------------
+
+def get_challenge(guild_id: int, cid: int):
+    return db().execute("SELECT * FROM challenges WHERE id = ? AND guild_id = ?", (cid, guild_id)).fetchone()
+
+
+def challenge_embed(c) -> discord.Embed:
+    status = {"pending": "⏳ Waiting for an answer", "accepted": "🤝 On", "declined": "🙅 Declined",
+              "cancelled": "🚫 Cancelled", "settled": "🏁 Settled"}[c["status"]]
+    color = {"pending": 0xF1C40F, "accepted": BRAND, "settled": 0x2ECC71}.get(c["status"], 0x95A5A6)
+    e = discord.Embed(title=f"⚔️ Challenge #{c['id']}: {c['challenger_name']} vs {c['opponent_name']}",
+                      description=f"**{c['challenger_name']}** says: {c['claim']}\n"
+                                  f"**{c['opponent_name']}** takes the other side.", color=color)
+    if c["stakes"]:
+        e.add_field(name="Stakes", value=clip(c["stakes"], 1024))
+    e.add_field(name="Status", value=status)
+    if c["status"] == "settled":
+        if c["winner_id"]:
+            winner = c["challenger_name"] if c["winner_id"] == c["challenger_id"] else c["opponent_name"]
+            e.add_field(name="Winner", value=f"🏆 {winner}")
+        else:
+            e.add_field(name="Winner", value="➖ Push")
+    return e
+
+
+class ChallengeButton(discord.ui.DynamicItem[discord.ui.Button],
+                      template=r"chal:(?P<cid>\d+):(?P<action>accept|decline|cancel|c|o|push)"):
+    def __init__(self, cid: int, action: str, label: str = "", style=discord.ButtonStyle.secondary):
+        super().__init__(discord.ui.Button(label=label or action, style=style, custom_id=f"chal:{cid}:{action}"))
+        self.cid = cid
+        self.action = action
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["cid"]), match["action"])
+
+    async def callback(self, interaction: discord.Interaction):
+        c = get_challenge(interaction.guild_id, self.cid)
+        if c is None:
+            await interaction.response.send_message("That challenge no longer exists.", ephemeral=True)
+            return
+        uid = interaction.user.id
+        a = self.action
+        if a in ("accept", "decline"):
+            if c["status"] != "pending" or uid != c["opponent_id"]:
+                await interaction.response.send_message(
+                    f"Only {c['opponent_name']} can answer this, and only while it's waiting.", ephemeral=True)
+                return
+            db().execute("UPDATE challenges SET status = ? WHERE id = ?",
+                         ("accepted" if a == "accept" else "declined", c["id"]))
+        elif a == "cancel":
+            if c["status"] != "pending" or (uid != c["challenger_id"] and not is_mod(interaction.user)):
+                await interaction.response.send_message("Only the challenger can cancel, before it's accepted.",
+                                                        ephemeral=True)
+                return
+            db().execute("UPDATE challenges SET status = 'cancelled' WHERE id = ?", (c["id"],))
+        else:
+            if c["status"] != "accepted" or (uid not in (c["challenger_id"], c["opponent_id"])
+                                             and not is_mod(interaction.user)):
+                await interaction.response.send_message("Only the two of you (or a mod) can settle this.",
+                                                        ephemeral=True)
+                return
+            winner = {"c": c["challenger_id"], "o": c["opponent_id"], "push": None}[a]
+            db().execute("UPDATE challenges SET status = 'settled', winner_id = ?, settled_at = ? WHERE id = ?",
+                         (winner, now_iso(), c["id"]))
+        db().commit()
+        c = get_challenge(interaction.guild_id, self.cid)
+        await interaction.response.edit_message(embed=challenge_embed(c), view=challenge_view(c))
+
+
+def challenge_view(c):
+    if c["status"] not in ("pending", "accepted"):
+        return None
+    view = discord.ui.View(timeout=None)
+    if c["status"] == "pending":
+        view.add_item(ChallengeButton(c["id"], "accept", "Accept", discord.ButtonStyle.success))
+        view.add_item(ChallengeButton(c["id"], "decline", "Decline", discord.ButtonStyle.danger))
+        view.add_item(ChallengeButton(c["id"], "cancel", "Cancel", discord.ButtonStyle.secondary))
+    else:
+        view.add_item(ChallengeButton(c["id"], "c", clip(f"{c['challenger_name']} won", 80), discord.ButtonStyle.success))
+        view.add_item(ChallengeButton(c["id"], "o", clip(f"{c['opponent_name']} won", 80), discord.ButtonStyle.success))
+        view.add_item(ChallengeButton(c["id"], "push", "Push", discord.ButtonStyle.secondary))
+    return view
+
+
+# ---- lock of the week ---------------------------------------------------------
+
+LOCK_ICON = {"open": "⏳", "win": "✅", "loss": "❌", "push": "➖"}
+
+
+def lock_standings(guild_id: int, since: Optional[str] = None, until: Optional[str] = None) -> list[dict]:
+    sql = "SELECT * FROM locks WHERE guild_id = ? AND status != 'open'"
+    args: list = [guild_id]
+    if since:
+        sql += " AND settled_at >= ?"
+        args.append(since)
+    if until:
+        sql += " AND settled_at < ?"
+        args.append(until)
+    out: dict[int, dict] = {}
+    for r in db().execute(sql + " ORDER BY id", args):
+        s = out.setdefault(r["user_id"], {"id": r["user_id"], "name": r["user_name"], "w": 0, "l": 0, "p": 0})
+        s["name"] = r["user_name"]
+        s["w" if r["status"] == "win" else "l" if r["status"] == "loss" else "p"] += 1
+    for s in out.values():
+        s["pct"] = s["w"] / (s["w"] + s["l"]) if s["w"] + s["l"] else 0.0
+    return sorted(out.values(), key=lambda s: (-s["w"], -s["pct"], s["l"]))
+
+
+def locks_for_week(guild_id: int, week: str) -> list:
+    return db().execute("SELECT * FROM locks WHERE guild_id = ? AND week = ? ORDER BY id", (guild_id, week)).fetchall()
+
+
+def lock_line(r) -> str:
+    return (f"{LOCK_ICON[r['status']]} **{r['user_name']}**: {clip(r['text'], 80)} `#{r['id']}`"
+            + (f" · {clip(r['why'], 50)}" if r["why"] and r["status"] != "open" else ""))
+
+
+def settle_lock(lock_id: int, status: str, why: Optional[str] = None) -> None:
+    db().execute("UPDATE locks SET status = ?, why = ?, settled_at = ? WHERE id = ?",
+                 (status, why, None if status == "open" else now_iso(), lock_id))
+    db().commit()
+
+
+# ---- stats breakdowns ---------------------------------------------------------
+
+SPORT_NAMES = [
+    ("CS2", r"\bcs2?\b|counter-?strike"), ("Esports", r"esports|valorant|league of legends|dota"),
+    ("College FB", r"ncaa ?f|college football|ncaaf|\bcfb\b|ncaa football"), ("NFL", r"\bnfl\b"),
+    ("WNBA", r"\bwnba\b"), ("College BB", r"ncaa ?b|college basketball|ncaab"), ("NBA", r"\bnba\b"),
+    ("MLB", r"\bmlb\b|baseball"), ("NHL", r"\bnhl\b|hockey"),
+    ("Soccer", r"soccer|\bepl\b|premier league|la ?liga|serie a|bundesliga|ligue 1|\bmls\b|champions league|liga ?mx"),
+    ("Tennis", r"tennis|\batp\b|\bwta\b"), ("UFC/MMA", r"\bufc\b|\bmma\b|boxing"), ("Golf", r"golf|\bpga\b"),
+    ("Multi-sport", r"multi"),
+]
+
+
+def sport_group(sport: Optional[str]) -> str:
+    if not sport:
+        return "No sport"
+    t = sport.lower()
+    for name, pattern in SPORT_NAMES:
+        if re.search(pattern, t):
+            return name
+    return clip(re.split(r"\s+-\s+|\(", sport)[0].strip().title() or "Other", 14)
+
+
+def size_group(n_legs: int) -> str:
+    return "Single" if n_legs <= 1 else "2-3 legs" if n_legs <= 3 else "4-5 legs" if n_legs <= 5 else "6+ legs"
+
+
+def breakdown(rows, keyfn) -> list[tuple[str, dict]]:
+    groups: dict[str, dict] = {}
+    for p in rows:
+        g = groups.setdefault(keyfn(p), {"w": 0, "l": 0, "p": 0, "open": 0, "staked": 0.0, "net": 0.0})
+        if p["status"] == "open":
+            g["open"] += 1
+            continue
+        g["w" if p["status"] == "win" else "l" if p["status"] == "loss" else "p"] += 1
+        g["staked"] += p["cost"]
+        g["net"] += pick_net(p)
+    return sorted(groups.items(), key=lambda kv: -(kv[1]["w"] + kv[1]["l"] + kv[1]["p"] + kv[1]["open"]))
+
+
+def breakdown_lines(groups) -> str:
+    lines = []
+    width = max((len(k) for k, _ in groups), default=6)
+    for k, g in groups[:10]:
+        settled = g["w"] + g["l"] + g["p"]
+        rec = f"{g['w']}-{g['l']}" + (f"-{g['p']}" if g["p"] else "")
+        roi = f"{g['net'] / g['staked'] * 100:+.0f}%" if g["staked"] else "-"
+        lines.append(f"`{k:<{width}}` {rec} · {signed(g['net'])} · ROI {roi}" if settled
+                     else f"`{k:<{width}}` {g['open']} open")
+    return clip("\n".join(lines), 1024)
+
+
+# ---- odds converter -------------------------------------------------------------
+
+def parse_odds(text: str) -> tuple[float, str]:
+    """Returns (implied probability 0-1, how it was read). Raises ValueError."""
+    t = text.strip().lower().replace(" ", "")
+    if not t:
+        raise ValueError
+    if "/" in t:
+        a, b = t.split("/", 1)
+        num, den = float(a), float(b)
+        if num <= 0 or den <= 0:
+            raise ValueError
+        return den / (num + den), f"fractional {text.strip()}"
+    if t.endswith("%"):
+        p = float(t[:-1]) / 100
+        kind = "probability"
+    elif t.endswith(("¢", "c")):
+        p = float(t.rstrip("¢c")) / 100
+        kind = "Kalshi price"
+    elif t[0] in "+-":
+        v = float(t)
+        if abs(v) < 100:
+            raise ValueError
+        p = 100 / (v + 100) if v > 0 else -v / (-v + 100)
+        kind = "American odds"
+    else:
+        v = float(t)
+        if 0 < v < 1:
+            p, kind = v, "Kalshi price"
+        elif 1 < v <= 30:
+            p, kind = 1 / v, "decimal odds"
+        elif 30 < v < 100:
+            p, kind = v / 100, "Kalshi price"
+        elif v >= 100:
+            p, kind = 100 / (v + 100), "American odds"
+        else:
+            raise ValueError
+    if not 0 < p < 1:
+        raise ValueError
+    return p, kind
+
+
+def odds_embed(text: str, stake: float = 10.0) -> discord.Embed:
+    p, kind = parse_odds(text)
+    dec = 1 / p
+    american = f"+{(dec - 1) * 100:.0f}" if dec >= 2 else f"{-100 / (dec - 1):.0f}"
+    e = discord.Embed(title=f"Odds: {text.strip()}", description=f"Read as {kind}.", color=BRAND)
+    e.add_field(name="Break-even win %", value=f"{p * 100:.1f}%")
+    e.add_field(name="American", value=american)
+    e.add_field(name="Decimal", value=f"{dec:.2f}")
+    e.add_field(name="Kalshi price", value=f"{p * 100:.0f}¢ per $1 contract")
+    e.add_field(name=f"On {money(stake)}", value=f"wins {money(stake * (dec - 1))} · returns {money(stake * dec)}")
+    e.set_footer(text="Break-even % ignores fees and vig: you need to hit more often than this to profit.")
+    return e
+
+
+# ---- profit chart ---------------------------------------------------------------
+
+CHART_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
+CHART_SURFACE, CHART_TEXT, CHART_MUTED, CHART_GRID = "#1a1a19", "#ffffff", "#c3c2b7", "#383835"
+
+
+def chart_series(guild_id: int, days: int, bettor_key: Optional[str] = None) -> dict[str, list]:
+    """{name: [(settled datetime, cumulative net), ...]} for the window, up to 8 people."""
+    since = iso(datetime.now(timezone.utc) - timedelta(days=days))
+    sql = "SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ?"
+    args: list = [guild_id, since]
+    if bettor_key:
+        sql += " AND bettor_key = ?"
+        args.append(bettor_key)
+    rows = db().execute(sql + " ORDER BY settled_at, id", args).fetchall()
+    by_key: dict[str, list] = {}
+    names: dict[str, str] = {}
+    for p in rows:
+        by_key.setdefault(p["bettor_key"], []).append(p)
+        names[p["bettor_key"]] = p["bettor_name"]
+    # Keep the 8 most active; color follows the person, assigned by first appearance.
+    keys = sorted(by_key, key=lambda k: -len(by_key[k]))[:8]
+    keys = sorted(keys, key=lambda k: by_key[k][0]["settled_at"])
+    out = {}
+    if not keys:
+        return out
+    # Start everyone at $0 just before the first pick in view, not at the edge of the window.
+    first = min(datetime.fromisoformat(by_key[k][0]["settled_at"]) for k in keys)
+    start = first - timedelta(hours=12)
+    for k in keys:
+        total, pts = 0.0, [(start, 0.0)]
+        for p in by_key[k]:
+            total += pick_net(p)
+            pts.append((datetime.fromisoformat(p["settled_at"]), total))
+        out[names[k]] = pts
+    return out
+
+
+def render_chart(series: dict[str, list], title: str) -> io.BytesIO:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
+
+    fig, ax = plt.subplots(figsize=(10, 5.2), dpi=150)
+    fig.patch.set_facecolor(CHART_SURFACE)
+    ax.set_facecolor(CHART_SURFACE)
+    ends = []
+    for i, (name, pts) in enumerate(series.items()):
+        xs = [p[0].astimezone(TZ) for p in pts] + [datetime.now(TZ)]
+        ys = [p[1] for p in pts] + [pts[-1][1]]
+        color = CHART_COLORS[i % len(CHART_COLORS)]
+        ax.step(xs, ys, where="post", color=color, linewidth=2, label=name, solid_capstyle="round")
+        ax.plot([xs[-1]], [ys[-1]], marker="o", markersize=5, color=color,
+                markeredgecolor=CHART_SURFACE, markeredgewidth=2)
+        ends.append((ys[-1], name, color))
+    ax.axhline(0, color=CHART_MUTED, linewidth=1, alpha=0.6)
+    ax.grid(axis="y", color=CHART_GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.tick_params(colors=CHART_MUTED, labelsize=9, length=0)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"-${abs(v):,.0f}" if v < 0 else f"${v:,.0f}"))
+    import matplotlib.dates as mdates
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d", tz=TZ))
+    ax.set_title(title, color=CHART_TEXT, fontsize=13, loc="left",
+                 pad=34 if len(series) > 1 else 14, fontweight="bold")
+    if len(series) > 1:  # legend in its own row between the title and the plot
+        legend = ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), frameon=False, fontsize=9,
+                           labelcolor=CHART_TEXT, ncol=min(8, len(series)), handlelength=1.6,
+                           borderaxespad=0.3)
+        for line in legend.get_lines():
+            line.set_linewidth(3)
+    if len(series) <= 4:  # direct labels at the line ends, nudged apart so they don't collide
+        ymin, ymax = ax.get_ylim()
+        gap = (ymax - ymin) * 0.06
+        placed: list[float] = []
+        for y, name, color in sorted(ends):
+            ly = max([y] + [p + gap for p in placed if abs(p - y) < gap])
+            placed.append(ly)
+            ax.annotate(f"{name} {signed(y)}", xy=(1.0, ly), xycoords=("axes fraction", "data"),
+                        xytext=(6, 0), textcoords="offset points", va="center", fontsize=9, color=CHART_TEXT)
+        fig.subplots_adjust(right=0.80)
+    out = io.BytesIO()
+    fig.savefig(out, format="png", facecolor=CHART_SURFACE, bbox_inches="tight")
+    plt.close(fig)
+    out.seek(0)
+    return out
+
+
+# ---- monthly awards ---------------------------------------------------------------
+
+def month_bounds(year: int, month: int) -> tuple[str, str]:
+    start = datetime(year, month, 1, tzinfo=TZ)
+    end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=TZ)
+    return iso(start), iso(end)
+
+
+def build_awards(guild_id: int, year: int, month: int) -> discord.Embed:
+    start, end = month_bounds(year, month)
+    label = datetime(year, month, 1).strftime("%B %Y")
+    rows = db().execute(
+        """SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? AND settled_at < ?
+           ORDER BY settled_at, id""", (guild_id, start, end)).fetchall()
+    e = discord.Embed(title=f"🏆 {label} awards", color=0xF1C40F)
+    if not rows:
+        e.description = f"No picks were settled in {label}."
+        return e
+    best = max(rows, key=pick_net)
+    if pick_net(best) > 0:
+        e.add_field(name="💰 Biggest hit", inline=False, value=clip(
+            f"**{best['bettor_name']}** {signed(pick_net(best))} on {best['description']} (`#{best['id']}`)", 1024))
+    people: dict[str, dict] = {}
+    for p in rows:
+        s = people.setdefault(p["bettor_key"], {"name": p["bettor_name"], "statuses": [], "staked": 0.0, "net": 0.0,
+                                                "legs": 0})
+        s["statuses"].append(p["status"])
+        s["staked"] += p["cost"]
+        s["net"] += pick_net(p)
+        s["legs"] += sum(1 for leg in get_legs(p["id"]) if leg["status"] == "hit")
+    streaks = sorted(((longest_win_streak(s["statuses"]), s["name"]) for s in people.values()), reverse=True)
+    if streaks and streaks[0][0] >= 2:
+        e.add_field(name="🔥 Longest win streak", value=f"**{streaks[0][1]}**: {streaks[0][0]} straight")
+    eligible = [s for s in people.values() if len(s["statuses"]) >= 3 and s["staked"]]
+    if eligible:
+        top = max(eligible, key=lambda s: s["net"] / s["staked"])
+        e.add_field(name="📈 Best ROI (3+ picks)", value=f"**{top['name']}**: {top['net'] / top['staked'] * 100:+.0f}%")
+    legs = max(people.values(), key=lambda s: s["legs"])
+    if legs["legs"]:
+        e.add_field(name="🎯 Most legs hit", value=f"**{legs['name']}**: {legs['legs']}")
+    worst = min(rows, key=pick_net)
+    if pick_net(worst) < 0:
+        e.add_field(name="🧱 Worst beat", inline=False, value=clip(
+            f"**{worst['bettor_name']}** {signed(pick_net(worst))} on {worst['description']} (`#{worst['id']}`)", 1024))
+    locks = lock_standings(guild_id, since=start, until=end)
+    if locks and locks[0]["w"]:
+        s = locks[0]
+        e.add_field(name="🔒 Lock of the month", value=f"**{s['name']}**: {s['w']}-{s['l']}" + (f"-{s['p']}" if s["p"] else ""))
+    top_net = max(people.values(), key=lambda s: s["net"])
+    e.set_footer(text=f"{len(rows)} picks settled · top earner {top_net['name']} {signed(top_net['net'])}")
+    return e
+
+
+# ---- hot-hand roles ---------------------------------------------------------------
+
+ROLE_SPECS = {"hot": ("🔥 Hot Hand", 0xFF6B35), "cold": ("🧊 Ice Cold", 0x5DADE2)}
+
+
+async def assign_hot_roles(client: discord.Client, guild_id: int) -> Optional[str]:
+    """Give the week's best (and worst) earner their role. Returns a line for the recap."""
+    if get_setting(guild_id, "hotroles") != "on":
+        return None
+    since = iso(datetime.now(timezone.utc) - timedelta(days=7))
+    stats = [s for s in compute_stats(guild_id, since=since) if not s["key"].startswith("label:")]
+    hot = stats[0] if stats and stats[0]["net"] > 0 else None
+    cold = stats[-1] if stats and stats[-1]["net"] < 0 and stats[-1] is not hot else None
+    try:
+        guild = client.get_guild(guild_id) or await client.fetch_guild(guild_id)
+        parts = []
+        for kind, winner in (("hot", hot), ("cold", cold)):
+            name, color = ROLE_SPECS[kind]
+            role_id = get_setting(guild_id, f"{kind}_role_id")
+            role = guild.get_role(int(role_id)) if role_id else None
+            if role is None:
+                role = await guild.create_role(name=name, colour=discord.Colour(color),
+                                               reason="Weekly Hot Hand / Ice Cold roles")
+                set_setting(guild_id, f"{kind}_role_id", str(role.id))
+            prev = get_setting(guild_id, f"{kind}_holder")
+            if prev and (not winner or prev != winner["key"]):
+                try:
+                    member = await guild.fetch_member(int(prev))
+                    await member.remove_roles(role, reason="New week")
+                except discord.NotFound:
+                    pass
+            if winner:
+                member = await guild.fetch_member(int(winner["key"]))
+                await member.add_roles(role, reason="Weekly Hot Hand / Ice Cold roles")
+                set_setting(guild_id, f"{kind}_holder", winner["key"])
+                parts.append(f"{name}: <@{winner['key']}> ({signed(winner['net'])} this week)")
+            else:
+                set_setting(guild_id, f"{kind}_holder", None)
+        return " · ".join(parts) or None
+    except discord.Forbidden:
+        return ("I couldn't hand out the Hot Hand roles. Give me the **Manage Roles** permission "
+                "and drag my role above them in Server Settings → Roles.")
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -1687,7 +2366,7 @@ class PicksBot(discord.Client):
 
     async def setup_hook(self):
         self.receipt_channels = receipt_channel_ids()
-        self.add_dynamic_items(SettleButton, LogSlipButton)
+        self.add_dynamic_items(SettleButton, LogSlipButton, FollowButton, ChallengeButton)
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild)
@@ -1748,9 +2427,79 @@ class PicksBot(discord.Client):
                     await channel.send(chunk, allowed_mentions=discord.AllowedMentions(
                         everyone=False, roles=False, users=True))
 
+    async def run_lock_grading(self, now: Optional[datetime] = None, limit: int = 3):
+        """Grade locks of the week the same way as picks: 48 hours after they're submitted."""
+        if not AUTOGRADE_AFTER_HOURS:
+            return
+        now = now or datetime.now(timezone.utc)
+        due = iso(now - timedelta(hours=AUTOGRADE_AFTER_HOURS))
+        retry = iso(now - timedelta(hours=12))
+        rows = db().execute(
+            """SELECT * FROM locks WHERE status = 'open' AND created_at <= ?
+               AND COALESCE(autograde_tries, 0) < ? AND (autograde_at IS NULL OR autograde_at <= ?)
+               ORDER BY created_at LIMIT ?""", (due, AUTOGRADE_MAX_TRIES, retry, limit)).fetchall()
+        for r in rows:
+            count_key = f"autogrades:{now.astimezone(TZ).date().isoformat()}"
+            used = int(get_setting(r["guild_id"], count_key) or 0)
+            tries = (r["autograde_tries"] or 0) + 1
+            db().execute("UPDATE locks SET autograde_at = ?, autograde_tries = ? WHERE id = ?",
+                         (now_iso(), tries, r["id"]))
+            db().commit()
+            like = {"id": -r["id"], "created_at": r["created_at"], "platform": "a weekly pick contest",
+                    "sport": r["sport"], "description": r["text"], "notes": None}
+            try:
+                by_n, used_ai = await lookup_items(like, [(1, r["text"])], True,
+                                                   used < AUTOGRADE_DAILY_LIMIT, context_legs=[])
+            except Exception:
+                log.exception("Grading lock %s failed", r["id"])
+                continue
+            if used_ai:
+                set_setting(r["guild_id"], count_key, str(used + 1))
+            res = by_n.get(1) or {}
+            result = str(res.get("result", "unknown")).lower()
+            channel_id = get_setting(r["guild_id"], "recap_channel")
+            channel = self.get_channel(int(channel_id)) if channel_id else None
+            if result in ("hit", "miss", "push"):
+                status = {"hit": "win", "miss": "loss", "push": "push"}[result]
+                settle_lock(r["id"], status, clip(str(res.get("why") or ""), 120) or None)
+                if channel is not None:
+                    await channel.send(
+                        f"🔒 Lock graded: <@{r['user_id']}> {LOCK_ICON[status]} {clip(r['text'], 100)}"
+                        + (f" · {clip(str(res.get('why')), 100)}" if res.get("why") else "")
+                        + f"\n-# Wrong? Fix it with `/lockresult lock_id:{r['id']}`.",
+                        allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+            elif tries >= AUTOGRADE_MAX_TRIES and channel is not None:
+                await channel.send(
+                    f"🔒 I couldn't grade <@{r['user_id']}>'s lock: {clip(r['text'], 100)}. "
+                    f"Settle it with `/lockresult lock_id:{r['id']}`.",
+                    allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+    async def check_limits(self, now: Optional[datetime] = None):
+        """Private heads-up to anyone past the weekly loss limit they set, once a week."""
+        now = now or datetime.now(TZ)
+        week = week_id(now)
+        for r in db().execute("SELECT guild_id, key, value FROM settings WHERE key LIKE 'limit:%'").fetchall():
+            uid = r["key"].split(":", 1)[1]
+            if get_setting(r["guild_id"], f"limitwarned:{uid}") == week:
+                continue
+            net = weekly_net(r["guild_id"], uid, now)
+            if net > -float(r["value"]):
+                continue
+            set_setting(r["guild_id"], f"limitwarned:{uid}", week)
+            try:
+                user = await self.fetch_user(int(uid))
+                await user.send(
+                    f"Heads-up: you're {signed(net)} this week (since Monday), past the "
+                    f"{money(float(r['value']))} weekly limit you set. Nothing's been blocked; this is just "
+                    "the reminder you asked for. Change it with `/limit` in the server.")
+            except Exception:
+                log.info("Couldn't DM user %s about their limit", uid)
+
     async def run_schedules(self, now: Optional[datetime] = None):
         now = now or datetime.now(TZ)
         await self.run_autograde(now.astimezone(timezone.utc))
+        await self.run_lock_grading(now.astimezone(timezone.utc))
+        await self.check_limits(now)
         today = now.date().isoformat()
         rows = db().execute("SELECT guild_id, value FROM settings WHERE key = 'recap_channel'").fetchall()
         for row in rows:
@@ -1761,6 +2510,15 @@ class PicksBot(discord.Client):
                     and get_setting(guild_id, "last_recap") != today):
                 set_setting(guild_id, "last_recap", today)
                 await channel.send(embed=build_recap(guild_id))
+                roles_line = await assign_hot_roles(self, guild_id)
+                if roles_line:
+                    await channel.send(roles_line, allowed_mentions=discord.AllowedMentions.none())
+            last_month = (now.replace(day=1) - timedelta(days=1))
+            month_key = last_month.strftime("%Y-%m")
+            if (now.day == 1 and now.hour >= REMIND_HOUR
+                    and get_setting(guild_id, "last_awards") != month_key):
+                set_setting(guild_id, "last_awards", month_key)
+                await channel.send(embed=build_awards(guild_id, last_month.year, last_month.month))
             if now.hour >= REMIND_HOUR and get_setting(guild_id, "last_remind") != today:
                 set_setting(guild_id, "last_remind", today)
                 text = build_reminders(guild_id)
@@ -2090,7 +2848,8 @@ async def record_cmd(interaction: discord.Interaction,
         await interaction.response.send_message(f"No picks logged for {name} yet.")
         return
     s = stats[0]
-    e = discord.Embed(title=f"{s['name']} · {record_line(s)}",
+    streak = current_streak(interaction.guild_id, key)
+    e = discord.Embed(title=f"{s['name']} · {record_line(s)}" + (f" · {streak}" if streak else ""),
                       color=0x2ECC71 if s["net"] >= 0 else 0xE74C3C)
     e.add_field(name="Staked", value=money(s["staked"]))
     e.add_field(name="Returned", value=money(s["returned"]))
@@ -2126,8 +2885,9 @@ async def leaderboard_cmd(interaction: discord.Interaction):
     lines = []
     for i, s in enumerate(stats[:25]):
         rank = medals[i] if i < 3 else f"`{i + 1}.`"
+        streak = current_streak(interaction.guild_id, s["key"])
         lines.append(f"{rank} **{s['name']}** · {record_line(s)} · "
-                     f"{signed(s['net'])} · ROI {s['roi']:+.1f}%")
+                     f"{signed(s['net'])} · ROI {s['roi']:+.1f}%" + (f" · {streak}" if streak else ""))
     e = discord.Embed(title="Leaderboard", description="\n".join(lines), color=BRAND)
     e.set_footer(text="Settled picks only · record is W-L(-Push)")
     await interaction.response.send_message(embed=e)
@@ -2195,6 +2955,7 @@ async def delete_cmd(interaction: discord.Interaction, pick_id: int):
             f"Only {p['bettor_name']} or a mod can delete this one.", ephemeral=True)
         return
     db().execute("DELETE FROM legs WHERE pick_id = ?", (pick_id,))
+    db().execute("DELETE FROM follows WHERE pick_id = ?", (pick_id,))
     db().execute("DELETE FROM picks WHERE id = ?", (pick_id,))
     db().commit()
     await interaction.response.send_message(
@@ -2524,11 +3285,342 @@ async def help_cmd(interaction: discord.Interaction):
         f"Picks still open {AUTOGRADE_AFTER_HOURS} hours after they're logged get their results looked up "
         "and settled automatically: moneylines, spreads and totals from the free ESPN scoreboard, "
         "everything else with Claude. The result posts in the recap channel."))
+    e.add_field(name="With the group", inline=False, value=(
+        "👍/👎 buttons on a pick: tail or fade it · `/tailfade` who's worth following\n"
+        "`/challenge` head-to-head bet · `/h2h` your record vs someone\n"
+        "`/lock` your lock of the week · `/locks` this week + standings · `/lockresult` fix one\n"
+        "`/awards` monthly awards · `/hotroles` weekly 🔥/🧊 roles (admins)"))
+    e.add_field(name="Your numbers", inline=False, value=(
+        "`/stats` record by sport, platform and parlay size · `/chart` profit graph\n"
+        "`/odds` convert odds · `/bankroll` units on your picks · `/limit` weekly loss heads-up (private)"))
     e.add_field(name="Players", inline=False, value=(
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
     e.add_field(name="Questions", inline=False, value=(
         "@mention me with a question about a player, team or matchup and I'll look it up."))
     await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+# ---- extras: commands ----------------------------------------------------------
+
+@bot.tree.command(name="tailfade", description="Who's worth tailing or fading, and how your tails and fades went")
+@app_commands.guild_only()
+@app_commands.describe(member="Optional: one person's tail/fade record", label="Optional: a name that isn't a Discord user")
+async def tailfade_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                       label: Optional[str] = None):
+    gid = interaction.guild_id
+    if member or label:
+        key, name, _ = resolve_bettor(interaction, member, label)
+        tail, fade, n = tailfade_for(gid, key)
+        if not n:
+            await interaction.response.send_message(f"{name} has no settled picks yet.")
+            return
+        e = discord.Embed(title=f"Tail or fade {name}?", color=BRAND)
+        e.add_field(name="👍 Tailing every pick", value=tf_line(tail))
+        e.add_field(name="👎 Fading every pick", value=tf_line(fade))
+        fans = db().execute(
+            """SELECT f.user_name, f.kind, COUNT(*) AS n FROM follows f JOIN picks p ON p.id = f.pick_id
+               WHERE p.guild_id = ? AND p.bettor_key = ? GROUP BY f.user_id, f.kind ORDER BY n DESC LIMIT 6""",
+            (gid, key)).fetchall()
+        if fans:
+            e.add_field(name="Who follows them", inline=False, value="\n".join(
+                f"{'👍' if r['kind'] == 'tail' else '👎'} {r['user_name']} · {r['n']}" for r in fans))
+    else:
+        board = []
+        for s in compute_stats(gid):
+            tail, fade, n = tailfade_for(gid, s["key"])
+            if n >= 3:
+                board.append((s["name"], tail, fade, n))
+        e = discord.Embed(title="Tail or fade", color=BRAND)
+        if board:
+            tails = sorted(board, key=lambda b: -b[1]["u"])[:5]
+            fades = sorted(board, key=lambda b: -b[2]["u"])[:5]
+            e.add_field(name="👍 Best to tail", inline=False,
+                        value="\n".join(f"**{n}** · {tf_line(t)}" for n, t, _, _ in tails))
+            e.add_field(name="👎 Best to fade", inline=False,
+                        value="\n".join(f"**{n}** · {tf_line(f)}" for n, _, f, _ in fades))
+        else:
+            e.description = "Nobody has 3 settled picks yet."
+    mine_t, mine_f = my_follows(gid, interaction.user.id)
+    if mine_t["w"] + mine_t["l"] + mine_t["p"] + mine_f["w"] + mine_f["l"] + mine_f["p"]:
+        e.add_field(name="Your buttons", inline=False,
+                    value=f"👍 Tails {tf_line(mine_t)}\n👎 Fades {tf_line(mine_f)}")
+    e.set_footer(text="Units: the same stake on every pick. A fade counts as an even-money bet against it.")
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="challenge", description="Challenge someone head-to-head for bragging rights")
+@app_commands.guild_only()
+@app_commands.describe(opponent="Who you're challenging", claim="Your side, e.g. 'Bills beat the Chiefs Sunday'",
+                       stakes="Optional: what's riding on it, e.g. 'loser buys wings'")
+async def challenge_cmd(interaction: discord.Interaction, opponent: discord.Member,
+                        claim: app_commands.Range[str, 1, 200],
+                        stakes: Optional[app_commands.Range[str, 1, 100]] = None):
+    if opponent.id == interaction.user.id or getattr(opponent, "bot", False):
+        await interaction.response.send_message("Pick a person other than yourself.", ephemeral=True)
+        return
+    cur = db().execute(
+        """INSERT INTO challenges (guild_id, challenger_id, challenger_name, opponent_id, opponent_name, claim,
+                                   stakes, created_at) VALUES (?,?,?,?,?,?,?,?)""",
+        (interaction.guild_id, interaction.user.id, interaction.user.display_name, opponent.id,
+         opponent.display_name, claim, stakes, now_iso()))
+    db().commit()
+    c = get_challenge(interaction.guild_id, cur.lastrowid)
+    await interaction.response.send_message(
+        f"<@{opponent.id}>, you've been challenged.", embed=challenge_embed(c), view=challenge_view(c),
+        allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+
+@bot.tree.command(name="h2h", description="Your head-to-head challenge record against someone")
+@app_commands.guild_only()
+@app_commands.describe(member="Who to compare against")
+async def h2h_cmd(interaction: discord.Interaction, member: discord.Member):
+    me, them = interaction.user.id, member.id
+    rows = db().execute(
+        """SELECT * FROM challenges WHERE guild_id = ? AND status IN ('accepted', 'settled', 'pending')
+           AND ((challenger_id = ? AND opponent_id = ?) OR (challenger_id = ? AND opponent_id = ?))
+           ORDER BY id DESC""", (interaction.guild_id, me, them, them, me)).fetchall()
+    if not rows:
+        await interaction.response.send_message(
+            f"No challenges between you and {member.display_name} yet. Start one with `/challenge`.")
+        return
+    settled = [r for r in rows if r["status"] == "settled"]
+    mine = sum(1 for r in settled if r["winner_id"] == me)
+    theirs = sum(1 for r in settled if r["winner_id"] == them)
+    pushes = sum(1 for r in settled if r["winner_id"] is None)
+    e = discord.Embed(title=f"{interaction.user.display_name} vs {member.display_name}",
+                      description=f"**{mine}-{theirs}" + (f"-{pushes}" if pushes else "") + "**"
+                      + f" ({interaction.user.display_name} first)", color=BRAND)
+    lines = []
+    for r in rows[:8]:
+        if r["status"] == "settled":
+            icon = "➖" if r["winner_id"] is None else ("✅" if r["winner_id"] == me else "❌")
+        else:
+            icon = "⏳"
+        lines.append(f"{icon} `#{r['id']}` {r['challenger_name']}: {clip(r['claim'], 70)}")
+    e.add_field(name="Recent", value="\n".join(lines), inline=False)
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="lock", description="Submit your lock of the week (one per week, change it until it's graded)")
+@app_commands.guild_only()
+@app_commands.describe(pick="Your most confident pick, e.g. 'Bills ML'", sport="Optional but helps grading: NFL, NBA...")
+async def lock_cmd(interaction: discord.Interaction, pick: app_commands.Range[str, 1, 150],
+                   sport: Optional[app_commands.Range[str, 1, 30]] = None):
+    week = week_id()
+    row = db().execute("SELECT * FROM locks WHERE guild_id = ? AND user_id = ? AND week = ?",
+                       (interaction.guild_id, interaction.user.id, week)).fetchone()
+    if row and row["status"] != "open":
+        await interaction.response.send_message(
+            f"Your lock for {week} is already graded ({LOCK_ICON[row['status']]}). New week starts Monday.",
+            ephemeral=True)
+        return
+    if row:
+        db().execute("""UPDATE locks SET text = ?, sport = ?, user_name = ?, created_at = ?, autograde_at = NULL,
+                        autograde_tries = 0 WHERE id = ?""",
+                     (pick, sport, interaction.user.display_name, now_iso(), row["id"]))
+        verb = "changed"
+    else:
+        db().execute("""INSERT INTO locks (guild_id, user_id, user_name, week, text, sport, created_at)
+                        VALUES (?,?,?,?,?,?,?)""",
+                     (interaction.guild_id, interaction.user.id, interaction.user.display_name, week, pick, sport,
+                      now_iso()))
+        verb = "is in"
+    db().commit()
+    n = len(locks_for_week(interaction.guild_id, week))
+    await interaction.response.send_message(
+        f"🔒 **{interaction.user.display_name}**'s lock of the week {verb}: {pick}"
+        + (f" ({sport})" if sport else "") + f"\n-# {n} lock{'s' if n != 1 else ''} in for {week}. See them with `/locks`.")
+
+
+@bot.tree.command(name="locks", description="This week's locks and the all-time lock standings")
+@app_commands.guild_only()
+async def locks_cmd(interaction: discord.Interaction):
+    week = week_id()
+    rows = locks_for_week(interaction.guild_id, week)
+    e = discord.Embed(title=f"🔒 Locks of the week · {week}", color=BRAND,
+                      description="\n".join(lock_line(r) for r in rows) if rows
+                      else "No locks yet this week. Submit one with `/lock`.")
+    table = lock_standings(interaction.guild_id)
+    if table:
+        medals = ["🥇", "🥈", "🥉"]
+        lines = [f"{medals[i] if i < 3 else f'`{i + 1}.`'} **{s['name']}** · {s['w']}-{s['l']}"
+                 + (f"-{s['p']}" if s["p"] else "") + f" ({s['pct'] * 100:.0f}%)" for i, s in enumerate(table[:15])]
+        e.add_field(name="All-time standings", value="\n".join(lines), inline=False)
+    e.set_footer(text="Locks get graded automatically 48 hours after they're submitted. Fix one with /lockresult.")
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="lockresult", description="Settle or fix a lock of the week")
+@app_commands.guild_only()
+@app_commands.describe(lock_id="The lock number shown in /locks", result="How it finished")
+@app_commands.choices(result=[app_commands.Choice(name=n, value=v) for n, v in
+                              (("Win", "win"), ("Loss", "loss"), ("Push", "push"), ("Not graded yet", "open"))])
+async def lockresult_cmd(interaction: discord.Interaction, lock_id: int, result: app_commands.Choice[str]):
+    row = db().execute("SELECT * FROM locks WHERE id = ? AND guild_id = ?", (lock_id, interaction.guild_id)).fetchone()
+    if row is None:
+        await interaction.response.send_message(f"No lock #{lock_id}.", ephemeral=True)
+        return
+    if interaction.user.id != row["user_id"] and not is_mod(interaction.user):
+        await interaction.response.send_message("Only whoever submitted it or a mod can settle it.", ephemeral=True)
+        return
+    settle_lock(lock_id, result.value)
+    row = db().execute("SELECT * FROM locks WHERE id = ?", (lock_id,)).fetchone()
+    await interaction.response.send_message(lock_line(row))
+
+
+@bot.tree.command(name="stats", description="Your record split by sport, platform and parlay size")
+@app_commands.guild_only()
+@app_commands.describe(member="Optional: defaults to you", label="Optional: a name that isn't a Discord user")
+async def stats_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                    label: Optional[str] = None):
+    key, name, _ = resolve_bettor(interaction, member, label)
+    rows = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ?",
+                        (interaction.guild_id, key)).fetchall()
+    if not rows:
+        await interaction.response.send_message(f"No picks logged for {name} yet.")
+        return
+    leg_counts_by_pick = {r["pick_id"]: r["n"] for r in db().execute(
+        "SELECT pick_id, COUNT(*) AS n FROM legs WHERE pick_id IN (SELECT id FROM picks WHERE guild_id = ? "
+        "AND bettor_key = ?) GROUP BY pick_id", (interaction.guild_id, key))}
+    streak = current_streak(interaction.guild_id, key)
+    e = discord.Embed(title=f"{name}'s breakdown" + (f" · {streak}" if streak else ""), color=BRAND)
+    e.add_field(name="By sport", value=breakdown_lines(breakdown(rows, lambda p: sport_group(p["sport"]))),
+                inline=False)
+    e.add_field(name="By platform", value=breakdown_lines(breakdown(rows, lambda p: p["platform"])), inline=False)
+    e.add_field(name="By parlay size", inline=False, value=breakdown_lines(
+        breakdown(rows, lambda p: size_group(leg_counts_by_pick.get(p["id"], 0)))))
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="odds", description="Convert odds: break-even %, American, decimal, Kalshi price, payout")
+@app_commands.describe(value="e.g. -150, +200, 2.5, 45¢, 5/2 or 60%", stake="Optional: stake to show the payout for")
+async def odds_cmd(interaction: discord.Interaction, value: app_commands.Range[str, 1, 20],
+                   stake: Optional[app_commands.Range[float, 0.01]] = None):
+    try:
+        e = odds_embed(value, stake or 10.0)
+    except (ValueError, ZeroDivisionError):
+        await interaction.response.send_message(
+            "I couldn't read that. Try `-150`, `+200`, `2.5`, `45¢`, `5/2` or `60%`.", ephemeral=True)
+        return
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="chart", description="A graph of profit over time")
+@app_commands.guild_only()
+@app_commands.describe(member="Optional: just one person", label="Optional: a name that isn't a Discord user",
+                       days="How far back (default 90)")
+async def chart_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                    label: Optional[str] = None, days: Optional[app_commands.Range[int, 1, 3650]] = None):
+    days = days or 90
+    key = name = None
+    if member or label:
+        key, name, _ = resolve_bettor(interaction, member, label)
+    series = chart_series(interaction.guild_id, days, key)
+    if not series:
+        await interaction.response.send_message(f"No settled picks in the last {days} days.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    title = f"{name or next(iter(series))}'s profit, last {days} days" if (name or len(series) == 1) \
+        else f"Profit over the last {days} days"
+    png = await asyncio.to_thread(render_chart, series, title)
+    note = "" if len(series) < 8 else "\n-# Showing the 8 most active people."
+    await interaction.followup.send(content=note or None, file=discord.File(png, filename="profit.png"))
+
+
+@bot.tree.command(name="hotroles", description="Turn the weekly 🔥 Hot Hand and 🧊 Ice Cold roles on or off")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+async def hotroles_cmd(interaction: discord.Interaction):
+    on = get_setting(interaction.guild_id, "hotroles") == "on"
+    set_setting(interaction.guild_id, "hotroles", None if on else "on")
+    if on:
+        await interaction.response.send_message("Weekly roles are **off**. Existing roles stay until you delete them.")
+    else:
+        await interaction.response.send_message(
+            "Weekly roles are **on**. With the weekly recap, the week's top earner gets **🔥 Hot Hand** and the "
+            "biggest loser gets **🧊 Ice Cold**. I need the **Manage Roles** permission, and my role has to sit "
+            "above those two in Server Settings → Roles.")
+
+
+@bot.tree.command(name="awards", description="Monthly awards: biggest hit, longest streak, best ROI and more")
+@app_commands.guild_only()
+@app_commands.describe(month="Optional, like 2026-09. Defaults to this month so far")
+async def awards_cmd(interaction: discord.Interaction, month: Optional[str] = None):
+    now = datetime.now(TZ)
+    y, m = now.year, now.month
+    if month:
+        mm = re.match(r"^\s*(\d{4})-(\d{1,2})\s*$", month)
+        if not mm or not 1 <= int(mm[2]) <= 12:
+            await interaction.response.send_message("Use a month like `2026-09`.", ephemeral=True)
+            return
+        y, m = int(mm[1]), int(mm[2])
+    await interaction.response.send_message(embed=build_awards(interaction.guild_id, y, m))
+
+
+@bot.tree.command(name="bankroll", description="Set or check your bankroll; picks then show their size in units")
+@app_commands.guild_only()
+@app_commands.describe(amount="Set your bankroll to this (starts tracking from now)",
+                       unit_percent="Optional: one unit as a % of bankroll (default 1)",
+                       off="Optional: stop tracking your bankroll")
+async def bankroll_cmd(interaction: discord.Interaction, amount: Optional[app_commands.Range[float, 1]] = None,
+                       unit_percent: Optional[app_commands.Range[float, 0.1, 10]] = None,
+                       off: Optional[bool] = None):
+    gid, uid = interaction.guild_id, interaction.user.id
+    if off:
+        set_setting(gid, f"bankroll:{uid}", None)
+        await interaction.response.send_message("Bankroll tracking is off.", ephemeral=True)
+        return
+    if amount is not None:
+        set_setting(gid, f"bankroll:{uid}", json.dumps({"start": amount, "unit_pct": unit_percent or 1.0,
+                                                        "since": now_iso()}))
+    elif unit_percent is not None:
+        b = get_bankroll(gid, uid)
+        if not b:
+            await interaction.response.send_message("Set a bankroll first: `/bankroll amount:500`.", ephemeral=True)
+            return
+        set_setting(gid, f"bankroll:{uid}", json.dumps({"start": b["start"], "unit_pct": unit_percent,
+                                                        "since": b["since"]}))
+    b = get_bankroll(gid, uid)
+    if not b:
+        await interaction.response.send_message("No bankroll set. Start with `/bankroll amount:500`.", ephemeral=True)
+        return
+    open_risk = db().execute("SELECT COALESCE(SUM(cost), 0) AS n FROM picks WHERE guild_id = ? AND bettor_key = ? "
+                             "AND status = 'open'", (gid, str(uid))).fetchone()["n"]
+    e = discord.Embed(title=f"{interaction.user.display_name}'s bankroll", color=BRAND)
+    e.add_field(name="Started at", value=f"{money(b['start'])} on {local_day(b['since'])}")
+    e.add_field(name="Now", value=f"{money(b['current'])} ({signed(b['net'])})")
+    e.add_field(name="1 unit", value=f"{money(b['unit_size'])} ({b['unit_pct']:g}%)")
+    if b["unit_size"] > 0:
+        e.add_field(name="Riding now", value=f"{money(open_risk)} · {open_risk / b['unit_size']:.1f}u")
+    e.add_field(name="This week", value=signed(weekly_net(gid, str(uid))))
+    e.set_footer(text=f"Picks over {BIG_BET_UNITS} units get a heads-up on their card. Only you see this.")
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+@bot.tree.command(name="limit", description="Set a weekly loss limit; I'll DM you privately if you pass it")
+@app_commands.guild_only()
+@app_commands.describe(amount="Your weekly loss limit in dollars", off="Optional: turn the limit off")
+async def limit_cmd(interaction: discord.Interaction, amount: Optional[app_commands.Range[float, 1]] = None,
+                    off: Optional[bool] = None):
+    gid, uid = interaction.guild_id, interaction.user.id
+    if off:
+        set_setting(gid, f"limit:{uid}", None)
+        await interaction.response.send_message("Weekly loss limit is off.", ephemeral=True)
+        return
+    if amount is not None:
+        set_setting(gid, f"limit:{uid}", f"{amount:.2f}")
+    limit = get_setting(gid, f"limit:{uid}")
+    net = weekly_net(gid, str(uid))
+    if not limit:
+        await interaction.response.send_message(
+            f"No limit set. This week (since Monday) you're {signed(net)}. Set one with `/limit amount:100`.",
+            ephemeral=True)
+        return
+    left = float(limit) + net
+    await interaction.response.send_message(
+        f"Weekly loss limit: **{money(float(limit))}**. This week (since Monday) you're **{signed(net)}**, "
+        + (f"{money(left)} before the limit." if left > 0 else "past the limit.")
+        + " If you pass it, I'll send you a private DM once that week. Nothing gets blocked.", ephemeral=True)
 
 
 @bot.tree.error
