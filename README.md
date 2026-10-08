@@ -8,13 +8,19 @@ paid, and who's actually up.
 | Command | What it does |
 | --- | --- |
 | `/pick` | Log a pick: platform, one-line description, cost, max payout, optional legs and sport |
+| `/leg` | Grade one leg of a parlay as hit, miss or push |
 | `/result` | Settle a pick as win, loss, push or void (or reopen it). Add `returned` for partial payouts |
 | `/open` | Picks still waiting on a result, with total money at risk |
-| `/record` | One person's W-L, staked, returned, net and ROI, plus their last 5 results |
+| `/record` | One person's W-L, staked, returned, net, ROI and leg hit rate, plus their last 5 results |
 | `/leaderboard` | Everyone ranked by net profit |
 | `/edit`, `/delete` | Fix or remove a pick |
 | `/export` | Download every pick as a CSV that opens in Excel or Google Sheets |
 | `/receipts` | Turn slip logging on or off for the channel you run it in (admins only) |
+| `/recapchannel` | Post the weekly recap and open-pick reminders in this channel (admins only) |
+| `/recap` | The last 7 days: who's up, best hit, worst beat, heartbreaker |
+| `/player add` `note` `view` `list` `remove` | Scouting notes on players and teams |
+| `/help` | Everything the bot can do |
+| **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
 **Receipts channel.** Run `/receipts` once in the channel where people post slips.
 After that, any screenshot posted there gets logged under whoever posted it:
@@ -24,6 +30,26 @@ After that, any screenshot posted there gets logged under whoever posted it:
 - Without a key, the bot replies with a **Log this slip** button that opens a short form.
 
 Every logged pick gets **Win / Loss / Push** buttons, so settling is one tap.
+
+**Parlay legs.** Legs entered with a pick are numbered on the pick card. Grade each one
+with `/leg` as games finish. When every leg hits, the bot marks the pick a win. When a leg
+misses, it marks it a loss, except on PrizePicks, where flex entries can still pay, so it
+leaves those for you to settle with `/result`. `/record` and the weekly recap show how
+often your legs hit.
+
+**Weekly recap and reminders.** Run `/recapchannel` in the channel you want them in.
+Every Sunday at 8 PM (Central) the bot posts the week's standings, best hit, worst beat
+and any parlay that missed by one leg. Every day at noon it pings anyone with a pick open
+3+ days, once per pick.
+
+**Player tracker.** `/player note` adds a dated note to a player (and adds the player if
+they're new). `/player view` shows the notes plus how the group's legs mentioning that
+player have gone. The bot also reads these notes when it answers questions.
+
+**Ask the bot.** @mention it (or reply to one of its answers) with a question like
+"how has donk played on LAN lately?" It searches the web, uses your player notes, and
+replies in the channel. Each person can ask once every 20 seconds, and the server gets 40
+questions a day; both limits can be changed (see below).
 
 **Logging for someone else.** `/pick` takes an optional `member` (another person in the
 server) or `label` (any name that isn't a Discord account, like a tipster or a model
@@ -59,7 +85,7 @@ Copy `.env.example` to `.env` and fill in:
 - `DISCORD_TOKEN`: the token from step 1.
 - `GUILD_ID`: your server's ID, so the slash commands show up right away. (In Discord:
   Settings > Advanced > Developer Mode on, then right-click your server > Copy Server ID.)
-- `ANTHROPIC_API_KEY`: optional. Only needed for automatic slip reading.
+- `ANTHROPIC_API_KEY`: optional. Needed for automatic slip reading and for questions.
 
 Then start it:
 
@@ -106,5 +132,11 @@ Run `/export` now and then to keep your own copy of the picks.
 - **Slip reading costs a fraction of a cent per screenshot** on the default model, billed
   to your Anthropic account. It can misread a blurry or cropped slip, so glance at what
   it logged; `/edit` fixes anything it got wrong.
+- **Questions cost more than slips**, roughly a few cents each, because the bot runs up to
+  5 web searches and uses a stronger model. The daily limit keeps the total in check.
+- **Optional settings** (add as variables on Railway):
+  `ASK_DAILY_LIMIT` (default 40), `ASK_COOLDOWN_SECONDS` (20), `ASK_MODEL`
+  (`claude-sonnet-5-5`), `TIMEZONE` (`America/Chicago`), `RECAP_DAY` (`sunday`),
+  `RECAP_HOUR` (20), `REMIND_HOUR` (12), `REMIND_AFTER_DAYS` (3).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
   `/result` with the `returned` amount instead of the buttons.
