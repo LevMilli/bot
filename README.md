@@ -63,6 +63,29 @@ paid, and who's actually up.
 | `/groupparlay` | This week's group parlay: everyone adds one leg with a button, legs grade themselves, and whoever busts it gets roasted. A new one posts every Monday in the recap channel |
 | `/copy` | Log your own copy of someone's pick (or tap 📋 Copy on the card). Copies grade along with the original |
 | `/wrapped` | Your season, year or all-time in review, story style: tap through the pages, ending with a shareable image |
+| `/pick ... hidden:True` | Log a pick that stays secret (🔒) until it settles, then gets revealed with a timestamp |
+| DM the bot a slip | Logs it privately as a hidden pick (needs the Claude key) |
+| Right-click → Apps → **Log as pick** / **Copy this pick** | Log any slip screenshot or message, or copy the pick on a card |
+| `/insights tendencies` `luck` `heatmap` `badbeats` `records` | Your habits (over vs under, stat types, best and worst players, days), luck vs the odds you took, a calendar of up and down days, legs that missed by a hair, and the server's record book |
+| `/calc pp` | PrizePicks payouts for every outcome and the hit rate each pick needs. Buttons switch slip size and Power/Flex |
+| `/calc hedge` | How much to hedge to lock profit or get your stake back |
+| `/money deposit` `withdraw` `summary` `tax` `undo` | Private: money in and out of each app, and a yearly summary with an Excel file |
+| `/coins balance` `daily` `top` `give` | PIMP Coins, play money earned by logging and hitting picks, group games, Prop of the Day and hot takes. Daily claims grow with your streak |
+| `/market create` `list` | Yes/no markets on anything, bet with coins. The losing side's coins are split among the winners |
+| `/take add` `list` | Put a hot take on the record. The bot brings it back on the date to grade, and keeps everyone's record |
+| `/potd here` `now` `set` `standings` | Prop of the Day: every morning the bot picks a star playing tonight, sets the line at their recent median, and everyone votes More or Less |
+| `/player avg`, `/player vs` | A player's averages (last 5, last 10, all), and how they've done against one team |
+| `/dashboard` | Link to the live web dashboard |
+| `/sports box` | A player's last game, full stat line |
+| `/sports matchup` | A team's next game: records, venue, kickoff weather for outdoor games, back-to-backs, both injury reports, and which side the group's open picks are on |
+| `/sports weather`, `/sports injuries` | Kickoff forecast (free Open-Meteo data) and a team's injury report |
+| `/sports standings`, `/sports rankings` | Standings with the playoff line (a menu switches conference), and the college AP top 25 with movement |
+| `/sports golf`, `ufc`, `f1`, `cs2` | PGA leaderboard, the UFC card, the F1 weekend, and upcoming CS2 matches from Liquipedia |
+| `/sports consensus` | Which side the group is on for today's games, from open picks |
+| `/player splits`, `/player minutes` | Home/away and win/loss splits, and a minutes chart to spot role changes |
+| `/insights autopsy` `risk` `report` `claudia` `rankings` | What kills your parlays, drawdown and stake sizing, a monthly A-F report card image, Claude's picks vs the group, and power rankings (also in the Sunday recap) |
+| `/calc kelly`, `/calc slip` | Kelly bet sizing, and how often each leg on a pick has hit lately |
+| `/leaderboard rank_by` / `platform` | Rank by units or ROI, or one platform only. ▲▼ show places moved this week |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
 **Receipts channel.** Run `/receipts` once in the channel where people post slips.
@@ -116,6 +139,19 @@ Doubtful, Questionable or Day-To-Day, the bot DMs them once (with a button to tu
 
 **Preseason.** Picks on preseason games get a ⚠️ Preseason tag. Admins can leave them off the
 leaderboard with the toggle in `/settings`, and `/leaderboard` has a preseason option too.
+
+**Automatic extras.** 🚨 *One leg away* posts when a 3+ leg parlay is down to its last leg. Slips
+in the receipts channel get ✅/❌ reactions when they settle (and 🔥 for 5x+). When every leg of a
+PrizePicks slip is graded, the bot works out the payout from the standard table (a player who didn't
+play drops the slip to a smaller one) and posts a 💵 button to settle it; payouts change, so check your
+app. `/today` marks teams on the second night of a back-to-back. Near misses are kept for the bad
+beat board and the weekly recap. The leaderboard shows what fading everyone would have made.
+
+**Web dashboard.** In Railway, open the bot's service → **Settings** → **Networking** → **Generate
+Domain**. Railway gives the bot a web address and the bot serves a private dashboard there (live
+leaderboard, profit chart, open picks, group parlay, coins, record book). Run `/dashboard` for the
+link with its key. Anyone with the link can view it, so keep it in the group. Set `DASHBOARD_KEY` to
+choose your own key.
 
 **Hot Hand roles** need two things in Discord: the bot's role needs the **Manage Roles**
 permission, and it has to sit above the 🔥 Hot Hand and 🧊 Ice Cold roles in Server Settings →
@@ -224,6 +260,7 @@ every night, so even a lost volume costs you at most a day.
   (`claude-sonnet-5-5`), `TIMEZONE` (`America/Chicago`), `RECAP_DAY` (`sunday`),
   `RECAP_HOUR` (20), `REMIND_HOUR` (12), `REMIND_AFTER_DAYS` (3),
   `AUTOGRADE_AFTER_HOURS` (48; 0 turns auto-grading off), `AUTOGRADE_DAILY_LIMIT` (30),
-  `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5), `TODAY_HOUR` (10), `BACKUP_HOUR` (4).
+  `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5), `TODAY_HOUR` (10, also when Prop of the Day posts),
+  `BACKUP_HOUR` (4), `DASHBOARD_KEY` (made up for you if not set).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
   `/result` with the `returned` amount instead of the buttons.
