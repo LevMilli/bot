@@ -38,6 +38,7 @@ import logging
 import os
 import re
 import sqlite3
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -50,7 +51,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-08 r7"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-08 r8"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -239,6 +240,37 @@ def db() -> sqlite3.Connection:
                 kind     TEXT    NOT NULL,   -- start / half
                 PRIMARY KEY (pick_id, event_id, kind)
             );
+            CREATE TABLE IF NOT EXISTS survivor_pools (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id   INTEGER NOT NULL,
+                name       TEXT    NOT NULL,
+                channel_id INTEGER,
+                created_at TEXT    NOT NULL,
+                ended_at   TEXT
+            );
+            CREATE TABLE IF NOT EXISTS survivor_picks (
+                pool_id    INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                user_name  TEXT    NOT NULL,
+                week_key   TEXT    NOT NULL,
+                team       TEXT    NOT NULL,
+                team_id    TEXT    NOT NULL,
+                event_id   TEXT    NOT NULL,
+                start      TEXT    NOT NULL,
+                result     TEXT,
+                created_at TEXT    NOT NULL,
+                PRIMARY KEY (pool_id, user_id, week_key)
+            );
+            CREATE TABLE IF NOT EXISTS reminders (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id   INTEGER,
+                user_id    INTEGER NOT NULL,
+                channel_id INTEGER,
+                text       TEXT    NOT NULL,
+                due_at     TEXT    NOT NULL,
+                created_at TEXT    NOT NULL,
+                sent_at    TEXT
+            );
             CREATE TABLE IF NOT EXISTS player_notes (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id   INTEGER NOT NULL,
@@ -394,7 +426,8 @@ def grade_leg(guild_id: int, pick_id: int, idx: int,
 
 
 def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
-                  since: Optional[str] = None, until: Optional[str] = None) -> list[dict]:
+                  since: Optional[str] = None, until: Optional[str] = None,
+                  sport: Optional[str] = None) -> list[dict]:
     """Per-bettor totals, sorted by net profit (best first)."""
     sql = "SELECT * FROM picks WHERE guild_id = ?"
     args: list = [guild_id]
@@ -411,6 +444,8 @@ def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
 
     out: dict[str, dict] = {}
     for p in db().execute(sql, args):
+        if sport and sport_group(p["sport"]) != sport:
+            continue
         s = out.setdefault(p["bettor_key"], {
             "key": p["bettor_key"], "name": p["bettor_name"],
             "wins": 0, "losses": 0, "pushes": 0, "open": 0,
@@ -1494,7 +1529,9 @@ def simplify_events(raw: dict) -> list[dict]:
         if len(teams) == 2:
             events.append({"id": str(ev.get("id")), "date": ev.get("date") or "", "teams": teams,
                            "state": status.get("state") or "pre", "status_name": status.get("name") or "",
-                           "final": bool(status.get("completed")) and status.get("state") == "post"})
+                           "final": bool(status.get("completed")) and status.get("state") == "post",
+                           "week": (ev.get("week") or {}).get("number"),
+                           "season": (ev.get("season") or {}).get("year")})
     return events
 
 
@@ -2967,6 +3004,366 @@ async def fetch_avatar(user) -> Optional[bytes]:
         return None
 
 
+# ==========================================================================
+# r8: survivor pool, exposure, history/compare/undo, milestones, reminders,
+# backups, settings overview
+# ==========================================================================
+
+BACKUP_HOUR = env_int("BACKUP_HOUR", 4, 0, 23)
+UNDO_MINUTES = 15
+NFL = "football/nfl"
+SPORT_CHOICES = [app_commands.Choice(name=n, value=n) for n, _ in SPORT_NAMES]
+
+
+# ---- survivor pool ---------------------------------------------------------------
+
+def active_pool(guild_id: int):
+    return db().execute("SELECT * FROM survivor_pools WHERE guild_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
+                        (guild_id,)).fetchone()
+
+
+def week_key_of(ev) -> Optional[str]:
+    if ev.get("week") is None:
+        return None
+    return f"{ev.get('season') or ''}-{ev['week']}"
+
+
+async def upcoming_week(now: Optional[datetime] = None) -> tuple[Optional[str], list[dict]]:
+    """The NFL week with the soonest game that hasn't started, and that week's not-started games."""
+    now = now or datetime.now(timezone.utc)
+    events, seen = [], set()
+    days = await asyncio.gather(*(fetch_scoreboard(NFL, now.astimezone(TZ) + timedelta(days=o)) for o in range(8)))
+    for day in days:
+        for ev in day:
+            if ev["id"] not in seen:
+                seen.add(ev["id"])
+                events.append(ev)
+    upcoming = sorted((e for e in events if e.get("state") == "pre" and (event_time(e) or now) > now and week_key_of(e)),
+                      key=lambda e: e["date"])
+    if not upcoming:
+        return None, []
+    wk = week_key_of(upcoming[0])
+    return wk, [e for e in upcoming if week_key_of(e) == wk]
+
+
+def survivor_status(pool) -> dict[int, dict]:
+    """Per entrant: name, picks (oldest first), alive, out_reason."""
+    picks = db().execute("SELECT * FROM survivor_picks WHERE pool_id = ? ORDER BY start", (pool["id"],)).fetchall()
+    if not picks:
+        return {}
+    weeks = []
+    for p in picks:
+        if p["week_key"] not in weeks:
+            weeks.append(p["week_key"])
+    first_week = weeks[0]
+    # A week is done once every pick made for it is graded.
+    done = [w for w in weeks if all(p["result"] for p in picks if p["week_key"] == w)]
+    people: dict[int, dict] = {}
+    for p in picks:
+        s = people.setdefault(p["user_id"], {"name": p["user_name"], "picks": [], "alive": True, "out": None})
+        s["name"] = p["user_name"]
+        s["picks"].append(p)
+    for uid, s in people.items():
+        by_week = {p["week_key"]: p for p in s["picks"]}
+        if first_week not in by_week:
+            s["alive"], s["out"] = False, "joined late"
+            continue
+        for w in weeks:
+            p = by_week.get(w)
+            if p is None and w in done:
+                s["alive"], s["out"] = False, f"no pick in week {w.split('-')[-1]}"
+                break
+            if p is not None and p["result"] == "loss":
+                s["alive"], s["out"] = False, f"{p['team']} lost (week {w.split('-')[-1]})"
+                break
+    return people
+
+
+def survivor_embed(pool) -> discord.Embed:
+    people = survivor_status(pool)
+    alive = [s for s in people.values() if s["alive"]]
+    out = [s for s in people.values() if not s["alive"]]
+    icon = {"win": "✅", "loss": "❌", None: "⏳"}
+    def trail(s):
+        return " ".join(f"{icon[p['result']]}{p['team']}" for p in s["picks"][-6:])
+    e = discord.Embed(title=f"💀 Survivor · {pool['name']}", color=BRAND,
+                      description=f"**{len(alive)} alive** of {len(people)}" if people else
+                      "No picks yet. Everyone picks one team a week with `/survivor pick`.")
+    if alive:
+        e.add_field(name="Still standing", inline=False,
+                    value=clip("\n".join(f"**{s['name']}** · {trail(s)}" for s in alive), 1024))
+    if out:
+        e.add_field(name="Out", inline=False,
+                    value=clip("\n".join(f"~~{s['name']}~~ · {s['out']}" for s in out), 1024))
+    e.set_footer(text="Pick one team to win each week. A team can only be used once. Lose or skip a week and you're out.")
+    return e
+
+
+async def grade_survivor(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    rows = db().execute("SELECT * FROM survivor_picks WHERE result IS NULL AND start <= ?", (iso(now),)).fetchall()
+    for p in rows:
+        day = datetime.fromisoformat(p["start"]).astimezone(TZ)
+        ev = None
+        for offset in (0, -1, 1):
+            ev = next((e for e in await fetch_scoreboard(NFL, day + timedelta(days=offset)) if e["id"] == p["event_id"]), None)
+            if ev:
+                break
+        if not ev or not ev["final"] or any(t["score"] is None for t in ev["teams"]):
+            continue
+        mine = next(t for t in ev["teams"] if t["id"] == p["team_id"])
+        theirs = next(t for t in ev["teams"] if t["id"] != p["team_id"])
+        result = "win" if mine["score"] > theirs["score"] else "loss"   # a tie counts as a loss
+        db().execute("UPDATE survivor_picks SET result = ? WHERE pool_id = ? AND user_id = ? AND week_key = ?",
+                     (result, p["pool_id"], p["user_id"], p["week_key"]))
+        db().commit()
+        if result == "loss":
+            pool = db().execute("SELECT * FROM survivor_pools WHERE id = ?", (p["pool_id"],)).fetchone()
+            channel = client.get_channel(pool["channel_id"]) if pool["channel_id"] else None
+            channel = channel or await recap_channel_for(client, pool["guild_id"])
+            if channel is not None:
+                alive = sum(1 for s in survivor_status(pool).values() if s["alive"])
+                await channel.send(f"💀 <@{p['user_id']}> is out of survivor: the {p['team']} lost "
+                                   f"{mine['score']:g}-{theirs['score']:g}. {alive} left standing.",
+                                   allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+
+# ---- exposure ------------------------------------------------------------------------
+
+async def exposure_embed(guild_id: int) -> discord.Embed:
+    picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' ORDER BY id", (guild_id,)).fetchall()
+    games: dict[str, dict] = {}
+    loose = []
+    for p in picks:
+        try:
+            evs = await games_for_pick(p)
+        except Exception:
+            evs = []
+        if not evs:
+            loose.append(p)
+        for ev in evs:
+            g = games.setdefault(ev["id"], {"ev": ev, "picks": []})
+            g["picks"].append(p)
+    e = discord.Embed(title="💸 What's riding", color=BRAND)
+    if not picks:
+        e.description = "Nothing open right now."
+        return e
+    total = sum(p["cost"] for p in picks)
+    e.description = f"**{len(picks)} open picks · {money(total)} at risk**"
+    for g in sorted(games.values(), key=lambda g: g["ev"]["date"])[:20]:
+        ev = g["ev"]
+        risk = sum(p["cost"] for p in g["picks"])
+        who = ", ".join(sorted({p["bettor_name"] for p in g["picks"]}))
+        e.add_field(name=clip(today_line(ev).replace("`", ""), 256), inline=False,
+                    value=clip(f"{len(g['picks'])} pick{'s' if len(g['picks']) != 1 else ''} · {money(risk)} · {who}\n"
+                               + " ".join(f"`#{p['id']}`" for p in g["picks"][:15]), 1024))
+    if loose:
+        e.add_field(name="Props, esports and other picks", inline=False, value=clip(
+            f"{len(loose)} pick{'s' if len(loose) != 1 else ''} · {money(sum(p['cost'] for p in loose))} · "
+            + ", ".join(sorted({p['bettor_name'] for p in loose})), 1024))
+    e.set_footer(text="A parlay with legs in two games shows under both.")
+    return e
+
+
+# ---- history -------------------------------------------------------------------------
+
+HISTORY_PAGE = 10
+
+
+def history_rows(guild_id: int, key: Optional[str], status: Optional[str], sport: Optional[str]) -> list:
+    sql = "SELECT * FROM picks WHERE guild_id = ?"
+    args: list = [guild_id]
+    if key:
+        sql += " AND bettor_key = ?"
+        args.append(key)
+    if status == "settled":
+        sql += " AND status != 'open'"
+    elif status:
+        sql += " AND status = ?"
+        args.append(status)
+    rows = db().execute(sql + " ORDER BY id DESC", args).fetchall()
+    if sport:
+        rows = [p for p in rows if sport_group(p["sport"]) == sport]
+    return rows
+
+
+def history_embed(rows: list, page: int, title: str) -> discord.Embed:
+    pages = max(1, (len(rows) + HISTORY_PAGE - 1) // HISTORY_PAGE)
+    page = max(0, min(page, pages - 1))
+    chunk = rows[page * HISTORY_PAGE:(page + 1) * HISTORY_PAGE]
+    lines = []
+    for p in chunk:
+        icon = STATUS[p["status"]][0].split()[0]
+        net = f" · {signed(pick_net(p))}" if p["status"] != "open" else f" · {money(p['cost'])} riding"
+        lines.append(f"{icon} `#{p['id']}` {local_day(p['created_at'])} **{p['bettor_name']}** · "
+                     f"{clip(p['description'], 55)}{net}")
+    e = discord.Embed(title=title, color=BRAND, description="\n".join(lines) or "Nothing matches.")
+    e.set_footer(text=f"Page {page + 1}/{pages} · {len(rows)} picks")
+    return e
+
+
+def history_view(owner_id: int, rows: list, title: str, page: int = 0) -> Optional[discord.ui.View]:
+    pages = (len(rows) + HISTORY_PAGE - 1) // HISTORY_PAGE
+    if pages <= 1:
+        return None
+    view = discord.ui.View(timeout=600)
+    state = {"page": page}
+
+    def make(delta: int, label: str):
+        btn = discord.ui.Button(label=label, style=discord.ButtonStyle.secondary)
+
+        async def cb(interaction: discord.Interaction):
+            if interaction.user.id != owner_id:
+                await interaction.response.send_message("Run `/history` yourself to page through.", ephemeral=True)
+                return
+            state["page"] = max(0, min(pages - 1, state["page"] + delta))
+            await interaction.response.edit_message(embed=history_embed(rows, state["page"], title), view=view)
+        btn.callback = cb
+        return btn
+    view.add_item(make(-1, "◀ Newer"))
+    view.add_item(make(1, "Older ▶"))
+    return view
+
+
+# ---- compare -------------------------------------------------------------------------
+
+def profile_numbers(guild_id: int, key: str) -> Optional[dict]:
+    stats = compute_stats(guild_id, key)
+    if not stats:
+        return None
+    s = stats[0]
+    settled = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'",
+                           (guild_id, key)).fetchall()
+    best = max(settled, key=pick_net) if settled else None
+    groups = breakdown(settled, lambda p: sport_group(p["sport"]))
+    return {"s": s, "streak": current_streak(guild_id, key), "legs": hit_rate(leg_counts(guild_id, key)),
+            "best": signed(pick_net(best)) if best is not None and pick_net(best) > 0 else "-",
+            "sport": groups[0][0] if groups else "-", "badges": len(earned_badges(guild_id, key))}
+
+
+# ---- milestones ------------------------------------------------------------------------
+
+async def announce_milestones(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    since = iso(now - timedelta(days=2))
+    for r in db().execute("SELECT guild_id, value FROM settings WHERE key = 'recap_channel'").fetchall():
+        gid = r["guild_id"]
+        channel = client.get_channel(int(r["value"]))
+        first_run = get_setting(gid, "milestones_init") is None
+        if first_run:   # the first time, just record what everyone already has, so nobody gets spammed
+            set_setting(gid, "milestones_init", now_iso())
+            for x in db().execute("SELECT DISTINCT bettor_key FROM picks WHERE guild_id = ?", (gid,)).fetchall():
+                set_setting(gid, f"badges:{x['bettor_key']}", json.dumps(sorted(earned_badges(gid, x["bettor_key"]))))
+            continue
+        keys = [x["bettor_key"] for x in db().execute(
+            "SELECT DISTINCT bettor_key FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ?",
+            (gid, since))]
+        for key in keys:
+            name = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY id DESC "
+                                "LIMIT 1", (gid, key)).fetchone()["bettor_name"]
+            who = f"<@{key}>" if not key.startswith("label:") else f"**{name}**"
+            got = earned_badges(gid, key)
+            prev = set(json.loads(get_setting(gid, f"badges:{key}") or "[]"))
+            set_setting(gid, f"badges:{key}", json.dumps(sorted(got)))
+            new_badges = [b for b in BADGES if b[0] in got and b[0] not in prev]
+            if channel is not None:
+                for k, n, how in new_badges:
+                        await channel.send(f"🎖️ {who} unlocked **{BADGE_ICONS[k]} {n}**: {how.lower()}!",
+                                           allowed_mentions=discord.AllowedMentions(everyone=False, roles=False,
+                                                                                    users=True))
+            last = db().execute("SELECT id FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open' "
+                                "ORDER BY settled_at DESC, id DESC LIMIT 1", (gid, key)).fetchone()
+            rows = db().execute("SELECT status FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open' "
+                                "ORDER BY settled_at DESC, id DESC LIMIT 60", (gid, key)).fetchall()
+            kind, n = streak_of([x["status"] for x in rows])
+            mark = f"{kind}{n}@{last['id']}"
+            if kind == "W" and n in (5, 10, 15, 20) and get_setting(gid, f"streakann:{key}") != mark:
+                set_setting(gid, f"streakann:{key}", mark)
+                if channel is not None and not (n == 5 and any(b[0] == "heater" for b in new_badges)):
+                    await channel.send(f"🔥 {who} has won **{n} straight**!",
+                                       allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+
+# ---- reminders ---------------------------------------------------------------------------
+
+def parse_when(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
+    """'30m', 'in 2 hours', '6pm', '18:30', 'tomorrow 9am', 'tonight 7'. Returns a local datetime or None."""
+    now = (now or datetime.now(TZ)).astimezone(TZ)
+    t = " ".join(text.lower().replace(".", "").split())
+    m = re.fullmatch(r"(?:in\s+)?(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)", t)
+    if m:
+        n, unit = int(m[1]), m[2][0]
+        when = now + {"m": timedelta(minutes=n), "h": timedelta(hours=n), "d": timedelta(days=n)}[unit]
+    else:
+        m = re.fullmatch(r"(today|tomorrow|tonight)?\s*(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", t)
+        if not m or (m[1] is None and m[3] is None and m[4] is None):
+            return None
+        hour, minute = int(m[2]), int(m[3] or 0)
+        if hour > 23 or minute > 59 or (m[4] and not 1 <= hour <= 12):
+            return None
+        if m[4] == "pm" and hour != 12:
+            hour += 12
+        elif m[4] == "am" and hour == 12:
+            hour = 0
+        elif not m[4] and m[1] == "tonight" and hour < 12:
+            hour += 12
+        when = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if m[1] == "tomorrow":
+            when += timedelta(days=1)
+        elif when <= now:
+            when += timedelta(days=1)
+    if not now < when <= now + timedelta(days=30):
+        return None
+    return when
+
+
+async def send_reminders(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    for r in db().execute("SELECT * FROM reminders WHERE sent_at IS NULL AND due_at <= ?", (iso(now),)).fetchall():
+        db().execute("UPDATE reminders SET sent_at = ? WHERE id = ?", (now_iso(), r["id"]))
+        db().commit()
+        text = f"⏰ Reminder: {r['text']}"
+        try:
+            user = await client.fetch_user(r["user_id"])
+            await user.send(text)
+        except Exception:
+            channel = client.get_channel(r["channel_id"]) if r["channel_id"] else None
+            if channel is not None:
+                await channel.send(f"<@{r['user_id']}> {text}",
+                                   allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+
+
+# ---- backups ------------------------------------------------------------------------------
+
+def backup_files(guild_id: int) -> list:
+    """A consistent copy of the database plus an Excel export, as discord.Files."""
+    stamp = datetime.now(TZ).strftime("%Y-%m-%d")
+    folder = tempfile.mkdtemp()
+    path = os.path.join(folder, f"picks_backup_{stamp}.db")
+    dest = sqlite3.connect(path)
+    db().backup(dest)
+    dest.close()
+    files = []
+    if os.path.getsize(path) <= 9 * 1024 * 1024:
+        files.append(discord.File(path, filename=f"picks_backup_{stamp}.db"))
+    files.append(discord.File(build_workbook(guild_id), filename=f"picks_backup_{stamp}.xlsx"))
+    return files
+
+
+async def post_backups(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = (now or datetime.now(TZ)).astimezone(TZ)
+    for r in db().execute("SELECT guild_id, value FROM settings WHERE key = 'backup_channel'").fetchall():
+        today = now.date().isoformat()
+        if now.hour < BACKUP_HOUR or get_setting(r["guild_id"], "last_backup") == today:
+            continue
+        set_setting(r["guild_id"], "last_backup", today)
+        channel = client.get_channel(int(r["value"]))
+        if channel is None:
+            continue
+        n = db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ?", (r["guild_id"],)).fetchone()["n"]
+        await channel.send(f"🗄️ Nightly backup · {n} picks", files=backup_files(r["guild_id"]))
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -3237,7 +3634,9 @@ class PicksBot(discord.Client):
     async def run_schedules(self, now: Optional[datetime] = None):
         now = now or datetime.now(TZ)
         for job in (self.run_live_grading, lambda n: grade_pickem_games(self, n), lambda n: post_hall_of_fame(self),
-                    self.run_game_pings, lambda n: self.post_today(n.astimezone(TZ))):
+                    self.run_game_pings, lambda n: self.post_today(n.astimezone(TZ)),
+                    lambda n: grade_survivor(self, n), lambda n: send_reminders(self, n),
+                    lambda n: post_backups(self, n)):
             try:
                 await job(now.astimezone(timezone.utc))
             except Exception:
@@ -3245,6 +3644,10 @@ class PicksBot(discord.Client):
         await self.run_autograde(now.astimezone(timezone.utc))
         await self.run_lock_grading(now.astimezone(timezone.utc))
         await self.check_limits(now)
+        try:
+            await announce_milestones(self, now.astimezone(timezone.utc))
+        except Exception:
+            log.exception("Milestones failed")
         today = now.date().isoformat()
         rows = db().execute("SELECT guild_id, value FROM settings WHERE key = 'recap_channel'").fetchall()
         for row in rows:
@@ -3626,29 +4029,51 @@ async def record_cmd(interaction: discord.Interaction,
     await interaction.response.send_message(embed=e)
 
 
+LEADERBOARD_PERIODS = [app_commands.Choice(name=n, value=v) for n, v in
+                       (("This season", "season"), ("Last 7 days", "week"), ("This month", "month"),
+                        ("All time", "all"))]
+
+
 @bot.tree.command(name="leaderboard", description="Everyone ranked by net profit (this season, if one's running)")
 @app_commands.guild_only()
-@app_commands.describe(all_time="Show all-time instead of the current season")
-async def leaderboard_cmd(interaction: discord.Interaction, all_time: Optional[bool] = None):
-    season = None if all_time else current_season(interaction.guild_id)
-    stats = [s for s in (season_stats(interaction.guild_id, season) if season else compute_stats(interaction.guild_id))
+@app_commands.describe(period="Optional: season (default), last 7 days, this month or all time",
+                       sport="Optional: one sport only")
+@app_commands.choices(period=LEADERBOARD_PERIODS, sport=SPORT_CHOICES)
+async def leaderboard_cmd(interaction: discord.Interaction, period: Optional[app_commands.Choice[str]] = None,
+                          sport: Optional[app_commands.Choice[str]] = None):
+    gid = interaction.guild_id
+    mode = period.value if period else "season"
+    season = current_season(gid) if mode == "season" else None
+    if mode == "season" and season is None:
+        mode = "all"
+    now = datetime.now(TZ)
+    since = until = None
+    if season:
+        since, until, label = season["started_at"], season["ended_at"], season["name"]
+    elif mode == "week":
+        since, label = iso(now - timedelta(days=7)), "last 7 days"
+    elif mode == "month":
+        since, label = iso(now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)), now.strftime("%B")
+    else:
+        label = "all time"
+    sport_name = sport.value if sport else None
+    stats = [s for s in compute_stats(gid, since=since, until=until, sport=sport_name)
              if s["wins"] + s["losses"] + s["pushes"] > 0]
+    title = f"Leaderboard · {label}" + (f" · {sport_name}" if sport_name else "")
     if not stats:
         await interaction.response.send_message(
-            f"No settled picks in {season['name']} yet. Try `/leaderboard all_time:True`." if season
-            else "No settled picks yet.")
+            f"No settled picks for {label}" + (f" in {sport_name}" if sport_name else "") + " yet."
+            + (" Try `/leaderboard period:All time`." if mode != "all" else ""))
         return
     medals = ["🥇", "🥈", "🥉"]
     lines = []
     for i, s in enumerate(stats[:25]):
         rank = medals[i] if i < 3 else f"`{i + 1}.`"
-        streak = current_streak(interaction.guild_id, s["key"])
+        streak = current_streak(gid, s["key"]) if not sport_name else ""
         lines.append(f"{rank} **{s['name']}** · {record_line(s)} · "
                      f"{signed(s['net'])} · ROI {s['roi']:+.1f}%" + (f" · {streak}" if streak else ""))
-    e = discord.Embed(title=f"Leaderboard · {season['name']}" if season else "Leaderboard · all time",
-                      description="\n".join(lines), color=BRAND)
-    e.set_footer(text="Settled picks only · record is W-L(-Push)"
-                      + (" · /leaderboard all_time:True for everything" if season else ""))
+    e = discord.Embed(title=title, description="\n".join(lines), color=BRAND)
+    e.set_footer(text="Settled picks only · record is W-L(-Push) · pick a period or sport to filter")
     await interaction.response.send_message(embed=e)
 
 
@@ -4031,8 +4456,9 @@ async def help_cmd(interaction: discord.Interaction):
     e = discord.Embed(title="What I can do", color=BRAND)
     e.add_field(name="Picks", inline=False, value=(
         "`/pick` log a bet · `/leg` grade a parlay leg · `/grade` look up results now · `/result` settle it\n"
-        "`/open` what's pending · `/record` your stats · `/leaderboard` who's up\n"
-        "`/edit` `/delete` fix mistakes · `/export` Excel file with Kalshi, PrizePicks and per-person tabs\n"
+        "`/open` what's pending · `/exposure` open picks by game · `/history` look back with filters\n"
+        "`/record` your stats · `/leaderboard` who's up (by week, month, season or sport)\n"
+        "`/edit` `/delete` `/undo` fix mistakes · `/export` Excel file with Kalshi, PrizePicks and per-person tabs\n"
         "`/import` add picks from an old tracker · `/claim` put imported picks on your account"))
     e.add_field(name="Slips", inline=False, value=(
         "Post a slip screenshot in the receipts channel and I'll log it. "
@@ -4051,14 +4477,17 @@ async def help_cmd(interaction: discord.Interaction):
         "`/awards` monthly awards · `/hotroles` weekly 🔥/🧊 roles (admins)\n"
         "`/pickem start` weekly pick'em (mods) · `/pickem mine` · `/pickem standings`\n"
         "`/halloffame` repost big wins in a channel (admins)\n"
-        "`/season start` new season (admins) · `/season standings` · `/season list`"))
+        "`/season start` new season (admins) · `/season standings` · `/season list`\n"
+        "`/survivor start` NFL survivor pool (mods) · `/survivor pick` · `/survivor standings`"))
     e.add_field(name="Your numbers", inline=False, value=(
         "`/stats` record by sport, platform and parlay size · `/chart` profit graph\n"
         "`/odds` convert odds · `/parlay` parlay calculator · `/today` today's games\n"
         "`/achievements` badges · `/card` shareable profile image · `/pings` game-time DMs\n"
-        "`/bankroll` units on your picks · `/limit` weekly loss heads-up (private)"))
+        "`/bankroll` units on your picks · `/limit` weekly loss heads-up (private)\n"
+        "`/compare` two people side by side · `/remind` DM yourself later · `/reminders`"))
     e.add_field(name="Setup (admins)", inline=False, value=(
-        "`/guide` post and pin the how-to in this channel · `/receipts` · `/recapchannel` · `/import`"))
+        "`/guide` post and pin the how-to in this channel · `/receipts` · `/recapchannel` · `/import`\n"
+        "`/backups` nightly backup to this channel · `/settings` everything that's set up"))
     e.add_field(name="Players", inline=False, value=(
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
     e.add_field(name="Questions", inline=False, value=(
@@ -4408,7 +4837,8 @@ def guide_embeds() -> list[discord.Embed]:
         "when one misses, as a loss.\n"
         "`/result` settle a pick by number. Use **returned** for cash-outs and partial payouts.\n"
         "`/grade` look up the result right now.\n"
-        "`/edit` and `/delete` fix mistakes. `/open` shows everything still pending."))
+        "`/edit` and `/delete` fix mistakes, or `/undo` the pick you just logged. `/open` shows everything still "
+        "pending, `/exposure` groups it by game, and `/history` pages back through old picks."))
     auto = discord.Embed(title="⚡ What the bot does on its own", color=BRAND, description=(
         "• **Reads slips** posted in the receipts channel and logs them for you.\n"
         "• **Grades picks the moment games end:** moneylines, spreads and totals settle within minutes "
@@ -4418,7 +4848,9 @@ def guide_embeds() -> list[discord.Embed]:
         "• **Pings you** about picks open 3+ days.\n"
         "• **Sunday 8 PM:** weekly recap, plus the 🔥 Hot Hand and 🧊 Ice Cold roles.\n"
         "• **Every morning:** today's games, in the channel an admin picked with `/todaypost`.\n"
-        "• **The 1st of each month:** monthly awards."))
+        "• **The 1st of each month:** monthly awards.\n"
+        "• **Shouts out** new badges and 5, 10, 15 and 20-win streaks.\n"
+        "• **Nightly backup** of every pick, in the channel an admin picked with `/backups`."))
     group = discord.Embed(title="🤝 With the group", color=BRAND, description=(
         "👍 **Tail** / 👎 **Fade** buttons on any open pick (not your own). `/tailfade` shows who's worth following.\n"
         "`/challenge @someone` head-to-head bet for bragging rights. `/h2h` shows your record against them.\n"
@@ -4427,13 +4859,16 @@ def guide_embeds() -> list[discord.Embed]:
         "`/awards` this month's awards so far · `/season standings` this season's leaderboard.\n"
         "**Pick'em:** tap a team on each game a mod posts; no money, just bragging rights. "
         "`/pickem mine` and `/pickem standings`.\n"
+        "**Survivor:** pick one NFL team a week with `/survivor pick`. Each team once; lose or skip and you're out.\n"
         "**@PIMP-BOT** plus a question about a player, team or matchup gets a researched answer."))
     numbers = discord.Embed(title="📊 Your numbers", color=BRAND, description=(
-        "`/record` your W-L, profit, ROI, streak and leg hit rate\n"
+        "`/record` your W-L, profit, ROI, streak and leg hit rate · `/compare @someone` side by side\n"
+        "`/leaderboard` filter by week, month, season or sport\n"
         "`/stats` your record split by sport, platform and parlay size\n"
         "`/chart` profit graph, for everyone or just you\n"
         "`/odds` convert -150, +200, 2.5, 45¢ or 60% into break-even % and payout · `/parlay` stack legs\n"
         "`/today` today's games · `/pings` DM before your games start and at halftime\n"
+        "`/remind` DM yourself later: `2h`, `6pm`, `tomorrow 9am` · `/reminders` see or cancel\n"
         "`/achievements` your badges · `/card` a shareable image of your profile\n"
         "`/export` everything as an Excel file\n"
         "`/bankroll` units on your pick cards · `/limit` private weekly loss heads-up\n"
@@ -4792,6 +5227,304 @@ async def card_cmd(interaction: discord.Interaction, member: Optional[discord.Me
         hit_rate(leg_counts(interaction.guild_id, key)), top_sport,
         [n for k, n, _ in BADGES if k in got], next(iter(series.values()), []), avatar)
     await interaction.followup.send(file=discord.File(png, filename=f"{re.sub(r'[^A-Za-z0-9]+', '_', s['name'])}_card.png"))
+
+
+# ---- r8 commands ------------------------------------------------------------------------
+
+survivor_group = app_commands.Group(name="survivor", description="NFL survivor pool: pick one team a week to win",
+                                    guild_only=True)
+
+
+@survivor_group.command(name="start", description="Start a survivor pool (mods)")
+@app_commands.describe(name="Optional, e.g. 'Survivor 2026'")
+async def survivor_start(interaction: discord.Interaction, name: Optional[app_commands.Range[str, 1, 40]] = None):
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if not (is_mod(interaction.user) or (perms and getattr(perms, "manage_guild", False))):
+        await interaction.response.send_message("Only mods can start a survivor pool.", ephemeral=True)
+        return
+    old = active_pool(interaction.guild_id)
+    if old:
+        db().execute("UPDATE survivor_pools SET ended_at = ? WHERE id = ?", (now_iso(), old["id"]))
+    name = name or f"Survivor {datetime.now(TZ).year}"
+    db().execute("INSERT INTO survivor_pools (guild_id, name, channel_id, created_at) VALUES (?,?,?,?)",
+                 (interaction.guild_id, name, interaction.channel_id, now_iso()))
+    db().commit()
+    await interaction.response.send_message(
+        f"💀 **{name}** is open!\n"
+        "• Each week, pick **one NFL team to win** with `/survivor pick`.\n"
+        "• You can **never use the same team twice**.\n"
+        "• Change your pick until that game kicks off.\n"
+        "• If your team loses (or ties), or you skip a week, **you're out**. Last one standing wins.\n"
+        "• Everyone has to get in with a pick this first week. `/survivor standings` shows who's left.")
+
+
+async def survivor_team_autocomplete(interaction: discord.Interaction, current: str):
+    pool = active_pool(interaction.guild_id)
+    used = set()
+    if pool:
+        used = {r["team_id"] for r in db().execute(
+            "SELECT team_id FROM survivor_picks WHERE pool_id = ? AND user_id = ? AND result IS NOT NULL",
+            (pool["id"], interaction.user.id))}
+    _, games = await upcoming_week()
+    out = []
+    for ev in games:
+        for t in ev["teams"]:
+            other = next(x for x in ev["teams"] if x is not t)
+            if t["id"] in used or (current and current.lower() not in t["short"].lower()):
+                continue
+            when = event_time(ev).astimezone(TZ)
+            out.append(app_commands.Choice(
+                name=clip(f"{t['short']} ({'vs' if t['home'] else 'at'} {other['short']}, {when:%a %-I:%M %p})", 100),
+                value=t["short"]))
+    return out[:25]
+
+
+@survivor_group.command(name="pick", description="Your survivor pick for this week")
+@app_commands.describe(team="A team playing this week that you haven't used")
+@app_commands.autocomplete(team=survivor_team_autocomplete)
+async def survivor_pick(interaction: discord.Interaction, team: str):
+    pool = active_pool(interaction.guild_id)
+    if pool is None:
+        await interaction.response.send_message("No survivor pool running. A mod can start one with `/survivor start`.",
+                                                ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    me = survivor_status(pool).get(interaction.user.id)
+    if me and not me["alive"]:
+        await interaction.followup.send(f"You're out ({me['out']}). Catch the next pool!", ephemeral=True)
+        return
+    wk, games = await upcoming_week()
+    if not wk:
+        await interaction.followup.send("I can't find any upcoming NFL games right now.", ephemeral=True)
+        return
+    first_week = db().execute("SELECT week_key FROM survivor_picks WHERE pool_id = ? ORDER BY start LIMIT 1",
+                              (pool["id"],)).fetchone()
+    if first_week and first_week["week_key"] != wk and not me:
+        await interaction.followup.send("Entries closed after the first week. Catch the next pool!", ephemeral=True)
+        return
+    choice = None
+    for ev in games:
+        for t in ev["teams"]:
+            if team_matches(team, t):
+                choice = (ev, t)
+    if choice is None:
+        await interaction.followup.send(f"I can't find {team} among this week's games that haven't started. "
+                                        "Pick from the list as you type.", ephemeral=True)
+        return
+    ev, t = choice
+    if db().execute("SELECT 1 FROM survivor_picks WHERE pool_id = ? AND user_id = ? AND team_id = ? AND week_key != ?",
+                    (pool["id"], interaction.user.id, t["id"], wk)).fetchone():
+        await interaction.followup.send(f"You already used the {t['short']}. Every team only once!", ephemeral=True)
+        return
+    existing = db().execute("SELECT * FROM survivor_picks WHERE pool_id = ? AND user_id = ? AND week_key = ?",
+                            (pool["id"], interaction.user.id, wk)).fetchone()
+    if existing and datetime.fromisoformat(existing["start"]) <= datetime.now(timezone.utc):
+        await interaction.followup.send(f"Your pick ({existing['team']}) already kicked off, so it's locked.",
+                                        ephemeral=True)
+        return
+    db().execute("""INSERT OR REPLACE INTO survivor_picks (pool_id, user_id, user_name, week_key, team, team_id, event_id,
+                    start, created_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+                 (pool["id"], interaction.user.id, interaction.user.display_name, wk, t["short"], t["id"], ev["id"],
+                  iso(event_time(ev)), now_iso()))
+    db().commit()
+    other = next(x for x in ev["teams"] if x is not t)
+    await interaction.followup.send(
+        f"💀 Locked in: **{t['short']}** to beat the {other['short']} "
+        f"({event_time(ev).astimezone(TZ):%a %-I:%M %p}). You can change it until kickoff.", ephemeral=True)
+
+
+@survivor_group.command(name="standings", description="Who's still alive in survivor")
+async def survivor_standings(interaction: discord.Interaction):
+    pool = active_pool(interaction.guild_id) or db().execute(
+        "SELECT * FROM survivor_pools WHERE guild_id = ? ORDER BY id DESC LIMIT 1", (interaction.guild_id,)).fetchone()
+    if pool is None:
+        await interaction.response.send_message("No survivor pool yet. A mod can start one with `/survivor start`.")
+        return
+    await interaction.response.send_message(embed=survivor_embed(pool))
+
+
+bot.tree.add_command(survivor_group)
+
+
+@bot.tree.command(name="exposure", description="Every open pick grouped by the game it rides on, with money at risk")
+@app_commands.guild_only()
+async def exposure_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
+    await interaction.followup.send(embed=await exposure_embed(interaction.guild_id))
+
+
+HISTORY_STATUS = [app_commands.Choice(name=n, value=v) for n, v in
+                  (("Open", "open"), ("Settled", "settled"), ("Wins", "win"), ("Losses", "loss"), ("Pushes", "push"))]
+
+
+@bot.tree.command(name="history", description="Look back through picks, with filters")
+@app_commands.guild_only()
+@app_commands.describe(member="Optional: one person", label="Optional: a name that isn't a Discord user",
+                       status="Optional: open, settled, wins...", sport="Optional: one sport")
+@app_commands.choices(status=HISTORY_STATUS, sport=SPORT_CHOICES)
+async def history_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                      label: Optional[str] = None, status: Optional[app_commands.Choice[str]] = None,
+                      sport: Optional[app_commands.Choice[str]] = None):
+    key = name = None
+    if member or label:
+        key, name, _ = resolve_bettor(interaction, member, label)
+    rows = history_rows(interaction.guild_id, key, status.value if status else None, sport.value if sport else None)
+    title = "History" + (f" · {name}" if name else "") + (f" · {status.name}" if status else "") + \
+            (f" · {sport.name}" if sport else "")
+    await interaction.response.send_message(embed=history_embed(rows, 0, title),
+                                            view=history_view(interaction.user.id, rows, title) or discord.utils.MISSING)
+
+
+@bot.tree.command(name="compare", description="Two people side by side")
+@app_commands.guild_only()
+@app_commands.describe(member="Who to compare", other="Optional: compare against them instead of you")
+async def compare_cmd(interaction: discord.Interaction, member: discord.Member, other: Optional[discord.Member] = None):
+    a_user, b_user = other or interaction.user, member
+    a, b = profile_numbers(interaction.guild_id, str(a_user.id)), profile_numbers(interaction.guild_id, str(b_user.id))
+    if not a or not b:
+        missing = a_user.display_name if not a else b_user.display_name
+        await interaction.response.send_message(f"{missing} has no picks logged yet.", ephemeral=True)
+        return
+    rows = [("Record", lambda x: record_line(x["s"]), None),
+            ("Net", lambda x: signed(x["s"]["net"]), lambda x: x["s"]["net"]),
+            ("ROI", lambda x: f"{x['s']['roi']:+.1f}%", lambda x: x["s"]["roi"]),
+            ("Win rate", lambda x: (f"{x['s']['wins'] / (x['s']['wins'] + x['s']['losses']) * 100:.0f}%"
+                                    if x["s"]["wins"] + x["s"]["losses"] else "-"),
+             lambda x: x["s"]["wins"] / (x["s"]["wins"] + x["s"]["losses"]) if x["s"]["wins"] + x["s"]["losses"] else -1),
+            ("Streak", lambda x: x["streak"] or "-", None),
+            ("Legs hit", lambda x: (x["legs"] or "-").split(" (")[0], None),
+            ("Best hit", lambda x: x["best"], None),
+            ("Top sport", lambda x: x["sport"], None),
+            ("Badges", lambda x: f"{x['badges']}/{len(BADGES)}", lambda x: x["badges"])]
+    def col(x, other_x):
+        out = []
+        for _, show, score in rows:
+            mark = " ◀" if score and score(x) > score(other_x) else ""
+            out.append(f"{show(x)}{mark}")
+        return "\n".join(out)
+    e = discord.Embed(title=f"{a_user.display_name} vs {b_user.display_name}", color=BRAND)
+    e.add_field(name="​", value="\n".join(f"**{r[0]}**" for r in rows))
+    e.add_field(name=a_user.display_name, value=col(a, b))
+    e.add_field(name=b_user.display_name, value=col(b, a))
+    h2h = db().execute("""SELECT winner_id FROM challenges WHERE guild_id = ? AND status = 'settled'
+                          AND ((challenger_id = ? AND opponent_id = ?) OR (challenger_id = ? AND opponent_id = ?))""",
+                       (interaction.guild_id, a_user.id, b_user.id, b_user.id, a_user.id)).fetchall()
+    if h2h:
+        aw = sum(1 for r in h2h if r["winner_id"] == a_user.id)
+        bw = sum(1 for r in h2h if r["winner_id"] == b_user.id)
+        e.set_footer(text=f"Head-to-head challenges: {a_user.display_name} {aw}-{bw}")
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="undo", description=f"Delete the last pick you logged (within {UNDO_MINUTES} minutes)")
+@app_commands.guild_only()
+async def undo_cmd(interaction: discord.Interaction):
+    cutoff = iso(datetime.now(timezone.utc) - timedelta(minutes=UNDO_MINUTES))
+    p = db().execute("SELECT * FROM picks WHERE guild_id = ? AND logged_by = ? AND created_at >= ? AND import_key IS NULL "
+                     "ORDER BY id DESC LIMIT 1", (interaction.guild_id, interaction.user.id, cutoff)).fetchone()
+    if p is None:
+        await interaction.response.send_message(
+            f"Nothing you logged in the last {UNDO_MINUTES} minutes. For older picks use `/delete`.", ephemeral=True)
+        return
+    db().execute("DELETE FROM legs WHERE pick_id = ?", (p["id"],))
+    db().execute("DELETE FROM follows WHERE pick_id = ?", (p["id"],))
+    db().execute("DELETE FROM pings WHERE pick_id = ?", (p["id"],))
+    db().execute("DELETE FROM picks WHERE id = ?", (p["id"],))
+    db().commit()
+    await interaction.response.send_message(f"↩️ Undid pick `#{p['id']}`: {clip(p['description'], 80)}.", ephemeral=True)
+
+
+@bot.tree.command(name="remind", description="DM yourself a reminder: 'in 2h', '6pm', 'tomorrow 9am'")
+@app_commands.describe(when="e.g. 30m, 2h, 6pm, 18:30, tomorrow 9am, tonight 7", text="What to remind you about")
+async def remind_cmd(interaction: discord.Interaction, when: app_commands.Range[str, 1, 40],
+                     text: app_commands.Range[str, 1, 200]):
+    due = parse_when(when)
+    if due is None:
+        await interaction.response.send_message(
+            "I couldn't read that time. Try `30m`, `2h`, `6pm`, `18:30`, `tomorrow 9am` (up to 30 days out).",
+            ephemeral=True)
+        return
+    db().execute("INSERT INTO reminders (guild_id, user_id, channel_id, text, due_at, created_at) VALUES (?,?,?,?,?,?)",
+                 (interaction.guild_id, interaction.user.id, interaction.channel_id, text, iso(due), now_iso()))
+    db().commit()
+    await interaction.response.send_message(f"⏰ Got it. I'll DM you **{due:%a %b %-d at %-I:%M %p}** Central: {text}",
+                                            ephemeral=True)
+
+
+@bot.tree.command(name="reminders", description="Your upcoming reminders (and cancel one)")
+@app_commands.describe(cancel="Optional: the reminder number to cancel")
+async def reminders_cmd(interaction: discord.Interaction, cancel: Optional[int] = None):
+    if cancel is not None:
+        n = db().execute("DELETE FROM reminders WHERE id = ? AND user_id = ? AND sent_at IS NULL",
+                         (cancel, interaction.user.id)).rowcount
+        db().commit()
+        await interaction.response.send_message("Cancelled." if n else "No upcoming reminder with that number.",
+                                                ephemeral=True)
+        return
+    rows = db().execute("SELECT * FROM reminders WHERE user_id = ? AND sent_at IS NULL ORDER BY due_at LIMIT 20",
+                        (interaction.user.id,)).fetchall()
+    lines = [f"`{r['id']}` {datetime.fromisoformat(r['due_at']).astimezone(TZ):%a %b %-d %-I:%M %p} · {r['text']}"
+             for r in rows]
+    await interaction.response.send_message("\n".join(lines) or "No upcoming reminders. Set one with `/remind`.",
+                                            ephemeral=True)
+
+
+@bot.tree.command(name="backups", description="Nightly backup of every pick to this channel (turn on or off)")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+async def backups_cmd(interaction: discord.Interaction):
+    if get_setting(interaction.guild_id, "backup_channel") == str(interaction.channel_id):
+        set_setting(interaction.guild_id, "backup_channel", None)
+        await interaction.response.send_message("Nightly backups are **off** for this channel.")
+        return
+    set_setting(interaction.guild_id, "backup_channel", str(interaction.channel_id))
+    when = datetime(2000, 1, 1, BACKUP_HOUR).strftime("%-I %p")
+    await interaction.response.send_message(
+        f"🗄️ Nightly backups are **on** here, every night around {when}. Each one is the full database plus an "
+        "Excel copy. Here's the first one now. Keep this channel private to admins.",
+        files=backup_files(interaction.guild_id))
+
+
+@bot.tree.command(name="settings", description="Everything the bot is set up to do in this server (admins)")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+async def settings_cmd(interaction: discord.Interaction):
+    gid = interaction.guild_id
+    def chan(key):
+        v = get_setting(gid, key)
+        return f"<#{v}>" if v else "not set"
+    receipts = [f"<#{c}>" for c in sorted(bot.receipt_channels)]
+    guides = [f"<#{r['key'].split(':', 1)[1]}>" for r in
+              db().execute("SELECT key FROM settings WHERE guild_id = ? AND key LIKE 'guide_msg:%'", (gid,))]
+    count = lambda sql: db().execute(sql, (gid,)).fetchone()[0]
+    open_n = count("SELECT COUNT(*) FROM picks WHERE guild_id = ? AND status = 'open'")
+    season = current_season(gid)
+    pool = active_pool(gid)
+    e = discord.Embed(title="⚙️ PIMP-BOT settings", color=BRAND)
+    e.add_field(name="Channels", inline=False, value=(
+        f"Receipts: {', '.join(receipts) or 'not set'} (`/receipts`)\n"
+        f"Recaps, reminders, results: {chan('recap_channel')} (`/recapchannel`)\n"
+        f"Hall of fame: {chan('hof_channel')} (`/halloffame`)\n"
+        f"Morning games: {chan('today_channel')} (`/todaypost`)\n"
+        f"Backups: {chan('backup_channel')} (`/backups`)\n"
+        f"Guide: {', '.join(guides) or 'not posted'} (`/guide`)"))
+    e.add_field(name="Features", inline=False, value=(
+        f"Claude (slips, questions, prop grading): {'on' if ai_enabled() else 'off: add ANTHROPIC_API_KEY on Railway'}\n"
+        f"Auto-grading: {'after ' + str(AUTOGRADE_AFTER_HOURS) + 'h' if AUTOGRADE_AFTER_HOURS else 'off'} · "
+        f"paid lookups today: {get_setting(gid, 'autogrades:' + datetime.now(TZ).date().isoformat()) or 0}/{AUTOGRADE_DAILY_LIMIT}\n"
+        f"Hot Hand roles: {'on' if get_setting(gid, 'hotroles') == 'on' else 'off'} (`/hotroles`)\n"
+        f"Season: {season['name'] if season else 'none'} · Survivor: {pool['name'] if pool else 'none'}"))
+    size = os.path.getsize(DB_PATH) / 1024 if os.path.exists(DB_PATH) else 0
+    e.add_field(name="Data", inline=False, value=(
+        f"{count('SELECT COUNT(*) FROM picks WHERE guild_id = ?')} picks "
+        f"({open_n} open) · "
+        f"{count('SELECT COUNT(*) FROM players WHERE guild_id = ?')} players · "
+        f"{count('SELECT COUNT(*) FROM locks WHERE guild_id = ?')} locks · "
+        f"{count('SELECT COUNT(*) FROM pickem_rounds WHERE guild_id = ?')} pick'em rounds\n"
+        f"Database: {size:,.0f} KB at `{DB_PATH}`"
+        + ("" if DB_PATH.startswith("/data") else " ⚠️ not on the /data volume")))
+    e.set_footer(text=f"Version {BOT_VERSION}")
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 
 @bot.tree.error

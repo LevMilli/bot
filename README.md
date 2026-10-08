@@ -13,8 +13,12 @@ paid, and who's actually up.
 | `/result` | Settle a pick as win, loss, push or void (or reopen it). Add `returned` for partial payouts |
 | `/open` | Picks still waiting on a result, with total money at risk |
 | `/record` | One person's W-L, staked, returned, net, ROI and leg hit rate, plus their last 5 results |
-| `/leaderboard` | Everyone ranked by net profit |
+| `/leaderboard` | Everyone ranked by net profit. Filter by `period` (this season, last 7 days, this month, all time) and `sport` |
 | `/edit`, `/delete` | Fix or remove a pick |
+| `/undo` | Delete the last pick you logged, within 15 minutes |
+| `/exposure` | Every open pick grouped by the game it rides on, with money at risk and who's on it |
+| `/history` | Page back through picks, filtered by person, status (open, settled, wins, losses, pushes) and sport |
+| `/compare` | Two people side by side: record, net, ROI, win rate, streak, best hit, top sport, badges |
 | `/export` | Download an Excel file: Kalshi, PrizePicks and Other tabs, a Legs tab, and a Summary tab with a section per person (or pick CSV) |
 | `/import` | Add picks from an existing tracker spreadsheet (admins only). Running it twice won't duplicate anything |
 | `/claim` | Move picks logged under a name (like imported ones) onto someone's Discord account |
@@ -44,10 +48,14 @@ paid, and who's actually up.
 | `/today` | Today's games with start times, live scores and finals, for the leagues your group bets on or one you pick |
 | `/todaypost` | Post today's games in this channel every morning at 10 AM (admins) |
 | `/parlay` | Parlay calculator: `-110 +150 -200` (any odds format) gives combined odds, payout and the chance it hits |
-| `/season start`, `/season standings`, `/season list` | Seasons: a fresh leaderboard without deleting anything. `/leaderboard` shows the current season; add `all_time` for everything |
+| `/season start`, `/season standings`, `/season list` | Seasons: a fresh leaderboard without deleting anything. `/leaderboard` shows the current season; pick another `period` for the rest |
 | `/achievements` | 13 badges, from First Blood to Big Leg Energy. `/record` shows the ones you've earned |
 | `/card` | A shareable image of someone's profile: avatar, record, net, ROI, streak, best hit, profit line and badges |
 | `/limit` | Set a weekly loss limit; the bot DMs you privately once a week if you pass it |
+| `/survivor start`, `pick`, `standings` | NFL survivor pool: pick one team to win each week, each team only once. A loss, tie or skipped week knocks you out. Graded automatically from the scoreboard |
+| `/remind`, `/reminders` | DM yourself a reminder (`30m`, `2h`, `6pm`, `tomorrow 9am`, up to 30 days out); list or cancel them |
+| `/backups` | Post a full backup (database plus Excel) in this channel every night (admins; keep the channel private) |
+| `/settings` | Everything set up in this server: channels, features, data size, version (admins, only you see it) |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
 **Receipts channel.** Run `/receipts` once in the channel where people post slips.
@@ -75,7 +83,7 @@ graded. Moneylines, spreads and game or team totals for the NFL, college footbal
 college basketball, WNBA, MLB, NHL and the big soccer leagues are checked for free against
 ESPN's public scoreboard (unofficial, so it could change without notice). Player props,
 halves, esports, tennis and anything else go to Claude with a web search. The pick is then
-settled, and the pick is settled (win if every leg hit, loss if one missed). The
+settled (win if every leg hit, loss if one missed). The
 bot posts what it found, with the score or stat for each leg, in the recap channel and
 tags the bettor. Legs it can't confirm stay open; it tries again every 12 hours, three
 times, then asks a person to settle it. PrizePicks entries with a missed leg are left for
@@ -94,6 +102,9 @@ and the results post in the recap channel. The weekly recap shows how the week's
 **Hot Hand roles** need two things in Discord: the bot's role needs the **Manage Roles**
 permission, and it has to sit above the 🔥 Hot Hand and 🧊 Ice Cold roles in Server Settings →
 Roles (the bot creates them the first time). They're handed out with the Sunday recap.
+
+**Milestones.** In the recap channel the bot shouts out new badges and 5, 10, 15 and 20-win
+streaks. The first time it runs it just notes what everyone already has, so nobody gets a flood.
 
 **Loss-limit DMs** only arrive if the person allows DMs from server members.
 
@@ -176,7 +187,8 @@ Two hosts that fit:
 - **Fly.io** (fly.io): cheaper, but set up from the command line (`fly launch`, then
   `fly volumes create` and `fly secrets set`).
 
-Run `/export` now and then to keep your own copy of the picks.
+Run `/backups` in a private admin channel and the bot posts a full copy of the database
+every night, so even a lost volume costs you at most a day.
 
 ## Good to know
 
@@ -194,6 +206,6 @@ Run `/export` now and then to keep your own copy of the picks.
   (`claude-sonnet-5-5`), `TIMEZONE` (`America/Chicago`), `RECAP_DAY` (`sunday`),
   `RECAP_HOUR` (20), `REMIND_HOUR` (12), `REMIND_AFTER_DAYS` (3),
   `AUTOGRADE_AFTER_HOURS` (48; 0 turns auto-grading off), `AUTOGRADE_DAILY_LIMIT` (30),
-  `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5), `TODAY_HOUR` (10).
+  `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5), `TODAY_HOUR` (10), `BACKUP_HOUR` (4).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
   `/result` with the `returned` amount instead of the buttons.
