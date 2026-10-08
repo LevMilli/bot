@@ -51,7 +51,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-08 r12"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-08 r13.1"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -77,6 +77,7 @@ CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 ASK_MODEL = env("ASK_MODEL", "claude-sonnet-5-5")
 ASK_DAILY_LIMIT = env_int("ASK_DAILY_LIMIT", 40)
 ASK_COOLDOWN_SECONDS = env_int("ASK_COOLDOWN_SECONDS", 20)
+MEMBERS_INTENT = env("MEMBERS_INTENT", "") in ("1", "true", "yes", "on")
 DB_PATH = env("DB_PATH", "picks.db")
 
 try:
@@ -453,6 +454,13 @@ def db() -> sqlite3.Connection:
             CREATE TABLE IF NOT EXISTS game_threads (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 event_id TEXT NOT NULL, thread_id INTEGER NOT NULL, pick_ids TEXT NOT NULL, created_at TEXT NOT NULL,
                 closed_at TEXT);
+            CREATE TABLE IF NOT EXISTS balances (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL, platform TEXT NOT NULL, amount REAL NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS announcements (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL, text TEXT NOT NULL, due_at TEXT NOT NULL, created_by INTEGER,
+                created_at TEXT NOT NULL, sent_at TEXT);
+            CREATE TABLE IF NOT EXISTS lineup_checks (pick_id INTEGER NOT NULL, idx INTEGER NOT NULL,
+                PRIMARY KEY (pick_id, idx));
             CREATE TABLE IF NOT EXISTS player_notes (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id   INTEGER NOT NULL,
@@ -471,7 +479,8 @@ def db() -> sqlite3.Connection:
                           ("kalshi_side", "TEXT"), ("kalshi_checked_at", "TEXT"), ("copied_from", "INTEGER"),
                           ("preseason", "INTEGER"), ("hidden", "INTEGER"), ("revealed_at", "TEXT"),
                           ("one_leg_at", "TEXT"), ("reacted", "INTEGER"), ("pp_offered", "TEXT"),
-                          ("future_due", "TEXT"), ("future_nudged", "TEXT"), ("celebrated", "INTEGER")):
+                          ("future_due", "TEXT"), ("future_nudged", "TEXT"), ("celebrated", "INTEGER"),
+                          ("confidence", "INTEGER")):
             if col not in cols:
                 _conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {kind}")
         leg_cols = {r[1] for r in _conn.execute("PRAGMA table_info(legs)")}
@@ -754,6 +763,16 @@ LEG_ICON = {"open": "⏳", "hit": "✅", "miss": "❌", "push": "➖"}
 BRAND = 0x7B3FE4
 
 
+import threading
+_RENDER_LOCK = threading.Lock()
+
+
+def locked_render(fn, *args):
+    """pyplot keeps global state, so charts are drawn one at a time."""
+    with _RENDER_LOCK:
+        return fn(*args)
+
+
 def money(x: float) -> str:
     return f"${x:,.2f}"
 
@@ -839,6 +858,8 @@ def pick_embed(p: sqlite3.Row) -> discord.Embed:
         e.add_field(name="🟣 Kalshi", value=f"linked ({(p['kalshi_side'] or 'yes').upper()}), settles itself")
     if p["preseason"]:
         e.add_field(name="⚠️ Preseason", value="Stars may sit or play limited minutes")
+    if p["confidence"] and not (p["hidden"] and p["status"] == "open"):
+        e.add_field(name="Confidence", value=CONF_STARS[p["confidence"]])
     if p["notes"]:
         e.add_field(name="Notes", value=clip(p["notes"], 300), inline=False)
     if field and p["status"] == "open":
@@ -918,7 +939,8 @@ def build_recap(guild_id: int, days: int = 7) -> discord.Embed:
         best = max(rows, key=net)
         if net(best) > 0:
             e.add_field(name="💰 Best hit", inline=False, value=clip(
-                f"**{best['bettor_name']}** {signed(net(best))} on {best['description']} (`#{best['id']}`)", 1024))
+                f"**{best['bettor_name']}** {signed(net(best))} on {best['description']} (`#{best['id']}`)"
+                + (f"\n💭 *{clip(best['notes'], 200)}*" if best["notes"] else ""), 1024))
         worst = min(rows, key=net)
         if net(worst) < 0:
             e.add_field(name="🧱 Worst beat", inline=False, value=clip(
@@ -1439,7 +1461,10 @@ class SettleButton(discord.ui.DynamicItem[discord.ui.Button],
                 f"Only {p['bettor_name']} or a mod can settle this one.", ephemeral=True)
             return
         p = settle_pick(interaction.guild_id, self.pick_id, self.status)
-        await interaction.response.edit_message(content=None, embed=pick_embed(p), view=None)
+        await interaction.response.edit_message(content=None, embed=pick_embed(p), view=settled_view(p["id"]))
+        if str(interaction.user.id) != p["bettor_key"]:
+            await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} settled {p['bettor_name']}'s pick "
+                                                                  f"#{p['id']} as {self.status}")
 
 
 def settle_view(pick_id: int) -> discord.ui.View:
@@ -1453,6 +1478,15 @@ def settle_view(pick_id: int) -> discord.ui.View:
     row = db().execute("SELECT platform, kalshi_ticker FROM picks WHERE id = ?", (pick_id,)).fetchone()
     if row and row["platform"].lower() == "kalshi" and not row["kalshi_ticker"]:
         view.add_item(CardKalshiButton(pick_id))
+    view.add_item(NoteButton(pick_id))
+    view.add_item(DisputeButton(pick_id))
+    return view
+
+
+def settled_view(pick_id: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(NoteButton(pick_id))
+    view.add_item(DisputeButton(pick_id))
     return view
 
 
@@ -1472,6 +1506,10 @@ class SlipModal(discord.ui.Modal, title="Log this slip"):
         self.slip_url = slip_url
 
     async def on_submit(self, interaction: discord.Interaction):
+        until = cooling_until(interaction.guild_id, interaction.user.id)
+        if until:
+            await interaction.response.send_message(cooloff_message(until), ephemeral=True)
+            return
         try:
             cost = parse_money(self.cost.value)
             payout = parse_money(self.payout.value)
@@ -1535,6 +1573,27 @@ def log_slip_view(author_id: int) -> discord.ui.View:
 # --------------------------------------------------------------------------
 
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+IMAGE_EXTS = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}
+SLIP_STATE = {"last_error": None, "last_ok": None}
+
+
+def image_type(attachment) -> Optional[str]:
+    """The image's media type, or None if it isn't a picture Claude can read. Discord sometimes leaves
+    content_type empty (and phones send image/jpg), so fall back to the file name."""
+    ct = (getattr(attachment, "content_type", None) or "").split(";")[0].strip().lower()
+    if ct == "image/jpg":
+        ct = "image/jpeg"
+    if ct in IMAGE_TYPES:
+        return ct
+    name = (getattr(attachment, "filename", None) or getattr(attachment, "url", None) or "").lower().split("?")[0]
+    for ext, t in IMAGE_EXTS.items():
+        if name.endswith(ext):
+            return t
+    return None
+
+
+def image_attachments(message) -> list:
+    return [a for a in (getattr(message, "attachments", None) or []) if image_type(a)]
 MAX_IMAGE_BYTES = 7 * 1024 * 1024  # stays under the API's limit once base64-encoded
 
 SLIP_PROMPT = """This is a screenshot posted in a sports betting group. If it shows a \
@@ -1612,7 +1671,7 @@ def as_amount(value) -> Optional[float]:
 
 async def read_slip(attachment: discord.Attachment) -> Optional[dict]:
     """Returns the parsed slip, or None if it couldn't be read as one."""
-    media_type = (attachment.content_type or "").split(";")[0].strip()
+    media_type = image_type(attachment) or "image/png"
     data = base64.standard_b64encode(await attachment.read()).decode()
     reply = await anthropic_client().messages.create(
         model=CLAUDE_MODEL,
@@ -4004,6 +4063,8 @@ def parse_boxscore(raw: dict) -> dict:
                 stats = a.get("stats") or []
                 if a.get("reason"):
                     rec["reason"] = a["reason"]
+                if "starter" in a and "starter" not in rec:
+                    rec["starter"] = bool(a.get("starter"))
                 if stats and not a.get("didNotPlay"):
                     rec["dnp"] = False
                 vals: dict[str, str] = {}
@@ -4354,7 +4415,7 @@ class SweatButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sw:(?P<p
             return
         await interaction.response.defer()
         entries = await leg_progress(p)
-        await interaction.message.edit(embed=sweat_embed(p, entries), view=sweat_view(p["id"]))
+        await interaction.edit_original_response(embed=sweat_embed(p, entries), view=sweat_view(p["id"]))
 
 
 def sweat_view(pick_id: int) -> discord.ui.View:
@@ -4608,11 +4669,12 @@ class TrendView(discord.ui.View):
         e = trend_embed(self.player["name"], self.player["team"], self.stat_key, self.line, values, self.window)
         view = TrendView(self.owner_id, self.player, self.games, self.stat_key, self.line, self.window)
         files = []
+        await interaction.response.defer()
         if values[:n]:
-            png = await asyncio.to_thread(render_trend, self.player["name"], STATS[self.stat_key][0], self.line, values[:n])
+            png = await asyncio.to_thread(locked_render, render_trend, self.player["name"], STATS[self.stat_key][0], self.line, values[:n])
             files = [discord.File(png, filename="trend.png")]
             e.set_image(url="attachment://trend.png")
-        await interaction.response.edit_message(embed=e, view=view, attachments=files)
+        await interaction.edit_original_response(embed=e, view=view, attachments=files)
 
     def _window_cb(self, w):
         async def cb(interaction):
@@ -4862,8 +4924,11 @@ class KalshiSideView(discord.ui.View):
                 return
             link_kalshi(self.pick_id, self.market["ticker"], side)
             p = get_pick(interaction.guild_id, self.pick_id)
-            await interaction.response.edit_message(content="🔗 Linked. I'll settle it the moment Kalshi does.",
-                                                    embed=await kalshi_embed(p, self.market), view=None)
+            await interaction.response.edit_message(content="🔗 Linked. I'll settle it the moment Kalshi does.", view=None)
+            try:
+                await interaction.edit_original_response(embed=await kalshi_embed(p, self.market))
+            except Exception:
+                log.warning("Couldn't add the Kalshi summary")
         return cb
 
 
@@ -4920,6 +4985,9 @@ class KalshiLinkModal(discord.ui.Modal, title="Link a Kalshi market"):
 
     async def on_submit(self, interaction: discord.Interaction):
         p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None:
+            await interaction.response.send_message("That pick is gone.", ephemeral=True)
+            return
         side = (self.side.value or "").strip().lower()
         await interaction.response.defer(ephemeral=True)
         await kalshi_link_flow(interaction, p, self.ref.value, side if side in ("yes", "no") else None, followup=True)
@@ -5010,7 +5078,7 @@ def gp_embed(r) -> discord.Embed:
             "busted": "💀 Busted.", "hit": "🎉 **IT HIT!** Everybody eats."}[state]
     mult = 1.9091 ** len(legs) if legs else 0
     e = discord.Embed(title=f"🤝 Group Parlay · week of {start:%b %-d}", color=color,
-                      description=head + ("\n\n" + "\n".join(lines) if lines else ""))
+                      description=clip(head + ("\n\n" + "\n".join(lines) if lines else ""), 3800))
     if legs:
         e.add_field(name="Legs", value=f"{sum(1 for x in legs if x['status'] == 'hit')}/{len(legs)} hit")
         e.add_field(name="If it hits", value=f"about {mult:,.1f}x at -110 a leg")
@@ -5058,20 +5126,21 @@ class GPButton(discord.ui.DynamicItem[discord.ui.Button], template=r"gp:(?P<rid>
             await interaction.response.send_message("That week's done. `/groupparlay` opens this week's.", ephemeral=True)
             return
         if self.act == "add":
-            if mine and (mine["status"] != "open" or await gp_leg_started(mine)):
-                await interaction.response.send_message("Your leg's game already started, so it's locked in.", ephemeral=True)
+            if mine and mine["status"] != "open":
+                await interaction.response.send_message("Your leg's already graded, so it's locked in.", ephemeral=True)
                 return
-            await interaction.response.send_modal(GPLegModal(r["id"], mine))
+            await interaction.response.send_modal(GPLegModal(r["id"], mine))   # the kickoff check happens on submit
         elif self.act == "drop":
             if not mine:
                 await interaction.response.send_message("You don't have a leg in this one.", ephemeral=True)
                 return
+            await interaction.response.defer()
             if mine["status"] != "open" or await gp_leg_started(mine):
-                await interaction.response.send_message("Too late, your game started. You're riding it.", ephemeral=True)
+                await interaction.followup.send("Too late, your game started. You're riding it.", ephemeral=True)
                 return
             db().execute("DELETE FROM gp_legs WHERE id = ?", (mine["id"],))
             db().commit()
-            await interaction.response.edit_message(embed=gp_embed(r), view=gp_view(r["id"]))
+            await interaction.edit_original_response(embed=gp_embed(r), view=gp_view(r["id"]))
         elif self.act == "ref":
             await interaction.response.edit_message(embed=gp_embed(r), view=gp_view(r["id"]))
         else:
@@ -5126,6 +5195,16 @@ class GPLegModal(discord.ui.Modal, title="Your leg for the group parlay"):
 
     async def on_submit(self, interaction: discord.Interaction):
         text, sport = self.leg.value.strip(), (self.sport.value or "").strip() or None
+        from_board = interaction.message is not None
+        if from_board:
+            await interaction.response.defer()
+        else:
+            await interaction.response.defer(ephemeral=True)
+        mine = db().execute("SELECT * FROM gp_legs WHERE round_id = ? AND user_id = ?",
+                            (self.round_id, interaction.user.id)).fetchone()
+        if mine and (mine["status"] != "open" or await gp_leg_started(mine)):
+            await interaction.followup.send("Your leg's game already started, so it's locked in.", ephemeral=True)
+            return
         db().execute("""INSERT INTO gp_legs (round_id, user_id, user_name, text, sport, status, created_at, updated_at)
                         VALUES (?,?,?,?,?,'open',?,?)
                         ON CONFLICT(round_id, user_id) DO UPDATE SET text = excluded.text, sport = excluded.sport,
@@ -5133,10 +5212,10 @@ class GPLegModal(discord.ui.Modal, title="Your leg for the group parlay"):
                      (self.round_id, interaction.user.id, interaction.user.display_name, text, sport, now_iso(), now_iso()))
         db().commit()
         r = db().execute("SELECT * FROM gp_rounds WHERE id = ?", (self.round_id,)).fetchone()
-        if interaction.message is not None:
-            await interaction.response.edit_message(embed=gp_embed(r), view=gp_view(r["id"]))
+        if from_board:
+            await interaction.edit_original_response(embed=gp_embed(r), view=gp_view(r["id"]))
         else:
-            await interaction.response.send_message("You're in.", ephemeral=True)
+            await interaction.followup.send("You're in.", ephemeral=True)
 
 
 class GPGradeView(discord.ui.View):
@@ -5165,9 +5244,9 @@ class GPGradeView(discord.ui.View):
             if self.chosen is None:
                 await interaction.response.send_message("Pick a leg first.", ephemeral=True)
                 return
+            await interaction.response.edit_message(content=f"Done: marked {res}.", view=None)
             await set_gp_result(interaction.client, self.chosen, res, "graded by a mod" if res != "open" else None)
             r = db().execute("SELECT * FROM gp_rounds WHERE id = ?", (self.round_id,)).fetchone()
-            await interaction.response.edit_message(content=f"Done: marked {res}.", view=None)
             if self.board is not None:
                 try:
                     await self.board.edit(embed=gp_embed(r), view=gp_view(r["id"]))
@@ -5265,8 +5344,8 @@ class CopyModal(discord.ui.Modal, title="Copy this pick"):
     def __init__(self, src):
         super().__init__()
         self.src_id = src["id"]
-        self.cost.default = f"{src['cost']:g}"
-        self.payout.default = f"{src['payout']:g}"
+        self.cost.default = f"{src['cost']:.2f}"
+        self.payout.default = f"{src['payout']:.2f}"
 
     async def on_submit(self, interaction: discord.Interaction):
         src = get_pick(interaction.guild_id, self.src_id)
@@ -5282,6 +5361,10 @@ class CopyModal(discord.ui.Modal, title="Copy this pick"):
 
 
 async def finish_copy(interaction: discord.Interaction, src, cost: float, payout: float):
+    until = cooling_until(interaction.guild_id, interaction.user.id)
+    if until:
+        await interaction.response.send_message(cooloff_message(until), ephemeral=True)
+        return
     pid = make_copy(src, interaction.user, cost, payout)
     p = get_pick(interaction.guild_id, pid)
     await interaction.response.send_message(
@@ -5454,8 +5537,9 @@ def wrapped_pages(d: dict, label: str) -> list[discord.Embed]:
          0x2ECC71 if green else 0xE74C3C)
     if d["best"] is not None and pick_net(d["best"]) > 0:
         b = d["best"]
-        page("🚀 Biggest hit", f"# {signed(pick_net(b))}\n**{b['description']}**\n{money(b['cost'])} → {money(b['returned'] or 0)} "
-             f"({(b['returned'] or 0) / b['cost']:.1f}x) · {local_day(b['settled_at'] or b['created_at'])}", 0x2ECC71)
+        mult = f" ({(b['returned'] or 0) / b['cost']:.1f}x)" if b["cost"] else ""
+        page("🚀 Biggest hit", f"# {signed(pick_net(b))}\n**{b['description']}**\n{money(b['cost'])} → {money(b['returned'] or 0)}"
+             f"{mult} · {local_day(b['settled_at'] or b['created_at'])}", 0x2ECC71)
     if d["heartbreak"] is not None:
         h = d["heartbreak"]
         miss = next((x["text"] for x in get_legs(h["id"]) if x["status"] == "miss"), "?")
@@ -5602,10 +5686,11 @@ async def schedule_embed(guild_id: int, key: Optional[str], title: str) -> disco
                         for p, n in g["picks"].values())
         by_day.setdefault(day, []).append(f"{today_line(g['ev'])}\n　{clip(who, 200)}")
     for day, lines in list(by_day.items())[:8]:
-        e.add_field(name=day, value=clip("\n".join(lines), 1024), inline=False)
+        if not add_field_capped(e, day, clip("\n".join(lines), 1024)):
+            break
     if loose:
-        e.add_field(name="No game found (props on other sports, futures...)", inline=False,
-                    value=clip(", ".join(f"#{p['id']} {p['bettor_name']}" for p in loose[:30]), 1024))
+        add_field_capped(e, "No game found (props on other sports, futures...)",
+                         clip(", ".join(f"#{p['id']} {p['bettor_name']}" for p in loose[:30]), 1024))
     e.set_footer(text="Times are Central · 🔴 live · ✅ final")
     return e
 
@@ -5631,7 +5716,8 @@ class ScheduleView(discord.ui.View):
             await interaction.response.defer()
             key = self.mine_key if self.mode == "mine" else None
             e = await schedule_embed(self.guild_id, key, "📅 Your games" if key else "📅 Everyone's games")
-            await interaction.message.edit(embed=e, view=ScheduleView(self.owner_id, self.guild_id, self.mine_key, self.mode))
+            await interaction.edit_original_response(embed=e, view=ScheduleView(self.owner_id, self.guild_id, self.mine_key,
+                                                                                 self.mode))
         return cb
 
 
@@ -5677,6 +5763,22 @@ class SettingsView(discord.ui.View):
 # r10: insights, calculators, money tracking, inverse bot, one-leg alerts,
 # slip reactions, PrizePicks settle offers
 # ==========================================================================
+
+def embed_size(e) -> int:
+    n = len(e.title or "") + len(e.description or "")
+    n += sum(len(f.name) + len(f.value) for f in getattr(e, "fields", []))
+    footer = getattr(e, "footer", None)
+    n += len(getattr(footer, "text", None) or (footer if isinstance(footer, str) else "") or "")
+    return n
+
+
+def add_field_capped(e, name: str, value: str, inline: bool = False, budget: int = 5600) -> bool:
+    """Adds a field only if the embed stays under Discord's 6000-character total. Returns whether it fit."""
+    if len(getattr(e, "fields", [])) >= 25 or embed_size(e) + len(name) + len(value) > budget:
+        return False
+    e.add_field(name=name, value=value, inline=inline)
+    return True
+
 
 def shown_desc(p) -> str:
     """A hidden pick's details stay secret until it settles."""
@@ -5795,6 +5897,8 @@ class PPSettleButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pps:(
         status = "win" if amount > p["cost"] else ("push" if amount == p["cost"] else "loss")
         p = settle_pick(interaction.guild_id, self.pick_id, status, amount)
         await interaction.response.edit_message(content=f"💵 Settled at {money(amount)}.", embed=pick_embed(p), view=None)
+        await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} settled PrizePicks pick #{p['id']} at "
+                                                              f"{money(amount)}")
 
 
 async def offer_pp_settlements(client: discord.Client, now: Optional[datetime] = None) -> None:
@@ -5895,7 +5999,8 @@ def inverse_line(picks: list) -> Optional[str]:
     staked = sum(p["cost"] for p in settled)
     w = sum(1 for p in settled if p["status"] == "loss")
     l = len(settled) - w
-    return f"🙃 **Fade-everyone bot** · {w}-{l} · {signed(net)} · ROI {net / staked * 100:+.1f}%"
+    roi = f" · ROI {net / staked * 100:+.1f}%" if staked else ""
+    return f"🙃 **Fade-everyone bot** · {w}-{l} · {signed(net)}{roi}"
 
 
 # ---- insights -------------------------------------------------------------------------------
@@ -6964,6 +7069,10 @@ async def handle_dm_slip(client: discord.Client, message: discord.Message, attac
     if gid is None:
         await message.reply("I don't share a server with you, so I can't log that.")
         return
+    until = cooling_until(gid, message.author.id)
+    if until:
+        await message.reply(cooloff_message(until))
+        return
     if not ai_enabled():
         await message.reply("Reading slips needs the Claude key, which isn't set up. In the server, use "
                             "`/pick` with `hidden: True` to log it privately.")
@@ -7008,7 +7117,7 @@ def pick_from_message(guild_id: int, message) -> Optional[sqlite3.Row]:
 
 async def log_message_as_pick(interaction: discord.Interaction, message: discord.Message):
     images = [a for a in getattr(message, "attachments", []) or []
-              if (a.content_type or "").split(";")[0].strip() in IMAGE_TYPES]
+              if image_type(a)]
     mine = message.author.id == interaction.user.id
     if not images:
         if not mine:
@@ -7269,6 +7378,27 @@ load();setInterval(load,120000);
 </script></body></html>"""
 
 
+def dashboard_csv(guild_id: int, kind: str) -> str:
+    out = io.StringIO()
+    w = csv.writer(out)
+    if kind == "leaderboard":
+        w.writerow(["Name", "Wins", "Losses", "Pushes", "Staked", "Net", "ROI %"])
+        for s in compute_stats(guild_id):
+            w.writerow([s["name"], s["wins"], s["losses"], s["pushes"], round(s["staked"], 2), round(s["net"], 2),
+                        round(s["roi"], 1)])
+    else:
+        w.writerow(["#", "Logged", "Settled", "Who", "Platform", "Sport", "Pick", "Legs", "Cost", "Payout", "Status",
+                    "Returned", "Net"])
+        for p in db().execute("SELECT * FROM picks WHERE guild_id = ? ORDER BY id", (guild_id,)):
+            hide = p["hidden"] and p["status"] == "open"
+            w.writerow([p["id"], local_day(p["created_at"]), local_day(p["settled_at"]) if p["settled_at"] else "",
+                        p["bettor_name"], p["platform"], "" if hide else (p["sport"] or ""), shown_desc(p),
+                        "" if hide else " | ".join(x["text"] for x in get_legs(p["id"])), p["cost"], p["payout"],
+                        p["status"], p["returned"] if p["returned"] is not None else "",
+                        round(pick_net(p), 2) if p["status"] != "open" else ""])
+    return out.getvalue()
+
+
 def dashboard_guild() -> Optional[int]:
     if GUILD_ID:
         return int(GUILD_ID)
@@ -7300,8 +7430,16 @@ async def start_dashboard() -> None:
     async def health(request):
         return web.Response(text="ok")
 
+    async def csv_out(request):
+        if not authed(request):
+            return web.Response(text="bad key", status=403)
+        kind = request.match_info["kind"]
+        gid = int(request.query.get("guild") or dashboard_guild() or 0)
+        return web.Response(text=dashboard_csv(gid, kind), content_type="text/csv")
+
     app = web.Application()
-    app.add_routes([web.get("/", index), web.get("/api/data", data), web.get("/health", health)])
+    app.add_routes([web.get("/", index), web.get("/api/data", data), web.get("/health", health),
+                    web.get("/api/{kind}.csv", csv_out)])
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", int(WEB_PORT)).start()
@@ -7527,8 +7665,8 @@ async def consensus_embed(guild_id: int) -> discord.Embed:
                 continue
             c = consensus_for(guild_id, ev)
             if c and found < 20:
-                found += 1
-                e.add_field(name=clip(today_line(ev).replace("`", ""), 256), value=clip(c, 1024), inline=False)
+                if add_field_capped(e, clip(today_line(ev).replace("`", ""), 256), clip(c, 1024)):
+                    found += 1
     if not found:
         e.description = "Nobody has an open moneyline, spread or total on today's games."
     e.set_footer(text="Built from open picks (hidden picks left out)")
@@ -8615,9 +8753,11 @@ def lock_squares(sid: int) -> None:
 
 async def refresh_squares(interaction, sid: int) -> None:
     sq = db().execute("SELECT * FROM squares WHERE id = ?", (sid,)).fetchone()
-    png = await asyncio.to_thread(render_squares, dict(sq), square_claims(sq["id"]))
-    await interaction.response.edit_message(embed=squares_embed(sq), attachments=[discord.File(png, filename="squares.png")],
-                                            view=squares_view(sid))
+    claims = square_claims(sq["id"])
+    await interaction.response.defer()
+    png = await asyncio.to_thread(locked_render, render_squares, dict(sq), claims)
+    await interaction.edit_original_response(embed=squares_embed(sq), attachments=[discord.File(png, filename="squares.png")],
+                                             view=squares_view(sid))
 
 
 class SquareModal(discord.ui.Modal, title="Pick a square"):
@@ -8680,8 +8820,8 @@ async def run_squares(client: discord.Client, now: Optional[datetime] = None) ->
             done = (period > q) or (q == 4 and ev["final"]) or (ev["final"] and q < 4)
             if not done:
                 continue
-            a = sum((away.get("linescores") or [])[:q]) if q < 4 else away["score"]
-            h = sum((home.get("linescores") or [])[:q]) if q < 4 else home["score"]
+            a = sum(x or 0 for x in (away.get("linescores") or [])[:q]) if q < 4 else away["score"]
+            h = sum(x or 0 for x in (home.get("linescores") or [])[:q]) if q < 4 else home["score"]
             if a is None or h is None:
                 continue
             cell = (rows.index(int(a) % 10), cols.index(int(h) % 10))
@@ -9442,7 +9582,7 @@ async def on_this_day(client: discord.Client, now: Optional[datetime] = None) ->
                     best = p
         channel = client.get_channel(int(r["value"]))
         if best is not None and channel is not None:
-            yrs = today.year - datetime.fromisoformat(best["settled_at"]).astimezone(TZ).year
+            yrs = today.year - datetime.fromisoformat(best["settled_at"] or best["created_at"]).astimezone(TZ).year
             await channel.send(f"📸 **On this day** {yrs} year{'s' if yrs != 1 else ''} ago, {best['bettor_name']} cashed "
                                f"{signed(pick_net(best))} on {clip(best['description'], 80)}.",
                                allowed_mentions=discord.AllowedMentions.none())
@@ -9583,6 +9723,572 @@ async def run_game_threads(client: discord.Client, now: Optional[datetime] = Non
                               allowed_mentions=discord.AllowedMentions.none())
 
 
+# ==========================================================================
+# r13: card buttons (note, confidence, wrong grade), audit log, saved lineups,
+# goals, balances, cool-off, sport roles, welcome DM, my data, Sheets sync,
+# scheduled announcements, status, starting-lineup check, deadline nudges
+# ==========================================================================
+
+STARTED_AT = datetime.now(timezone.utc)
+_last_cycle: dict[str, str] = {}
+
+
+# ---- audit log ----------------------------------------------------------------------------------------
+
+async def audit(client, guild_id: Optional[int], text: str) -> None:
+    if not guild_id:
+        return
+    client = client or bot
+    cid = get_setting(guild_id, "audit_channel")
+    channel = client.get_channel(int(cid)) if cid else None
+    if channel is None:
+        return
+    try:
+        await channel.send(f"📝 {text}", allowed_mentions=discord.AllowedMentions.none())
+    except Exception:
+        log.warning("Audit post failed")
+
+
+def who(interaction) -> str:
+    return f"**{interaction.user.display_name}**"
+
+
+# ---- confidence & notes on pick cards ---------------------------------------------------------------------
+
+CONF_STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐", 4: "⭐⭐⭐⭐", 5: "⭐⭐⭐⭐⭐"}
+
+
+class NoteModal(discord.ui.Modal, title="Your reasoning"):
+    note = discord.ui.TextInput(label="Why you like it", style=discord.TextStyle.paragraph, max_length=500, required=False)
+    confidence = discord.ui.TextInput(label="Confidence 1-5 (optional)", required=False, max_length=1)
+
+    def __init__(self, p):
+        super().__init__()
+        self.pick_id = p["id"]
+        self.note.default = clip(p["notes"], 500) if p["notes"] else None
+        self.confidence.default = str(p["confidence"]) if p["confidence"] else None
+
+    async def on_submit(self, interaction: discord.Interaction):
+        conf = None
+        if self.confidence.value.strip():
+            if self.confidence.value.strip() not in "12345":
+                await interaction.response.send_message("Confidence is 1 to 5.", ephemeral=True)
+                return
+            conf = int(self.confidence.value.strip())
+        db().execute("UPDATE picks SET notes = ?, confidence = ? WHERE id = ?",
+                     (self.note.value.strip() or None, conf, self.pick_id))
+        db().commit()
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if interaction.message is not None and interaction.message.embeds:
+            await interaction.response.edit_message(embed=pick_embed(p), view=view_or_missing(p))
+        else:
+            await interaction.response.send_message("Saved.", embed=pick_embed(p), ephemeral=True)
+
+
+class NoteButton(discord.ui.DynamicItem[discord.ui.Button], template=r"nt:(?P<pid>\d+)"):
+    def __init__(self, pick_id: int):
+        super().__init__(discord.ui.Button(label="📝 Note", style=discord.ButtonStyle.secondary, custom_id=f"nt:{pick_id}", row=2))
+        self.pick_id = pick_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["pid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None or str(interaction.user.id) != p["bettor_key"] and interaction.user.id != p["logged_by"]:
+            await interaction.response.send_message("Only the bettor can add their reasoning.", ephemeral=True)
+            return
+        await interaction.response.send_modal(NoteModal(p))
+
+
+class DisputeButton(discord.ui.DynamicItem[discord.ui.Button], template=r"dp:(?P<pid>\d+)"):
+    def __init__(self, pick_id: int):
+        super().__init__(discord.ui.Button(label="⚠️ Wrong grade?", style=discord.ButtonStyle.secondary,
+                                           custom_id=f"dp:{pick_id}", row=2))
+        self.pick_id = pick_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["pid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None:
+            await interaction.response.send_message("That pick is gone.", ephemeral=True)
+            return
+        await interaction.response.send_modal(DisputeModal(p))
+
+
+class DisputeModal(discord.ui.Modal, title="What's wrong with this grade?"):
+    reason = discord.ui.TextInput(label="Tell the mods", style=discord.TextStyle.paragraph, max_length=400)
+
+    def __init__(self, p):
+        super().__init__()
+        self.pick_id = p["id"]
+
+    async def on_submit(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None:
+            await interaction.response.send_message("That pick is gone.", ephemeral=True)
+            return
+        cid = get_setting(interaction.guild_id, "audit_channel") or get_setting(interaction.guild_id, "recap_channel")
+        channel = interaction.client.get_channel(int(cid)) if cid else None
+        if channel is None:
+            await interaction.response.send_message("There's no mod channel set up, so tell a mod directly.", ephemeral=True)
+            return
+        e = pick_embed(dict(p) | {"hidden": 0})
+        e.title = clip(f"⚠️ Disputed: {e.title}", 256)
+        e.add_field(name=f"From {interaction.user.display_name}", value=clip(self.reason.value, 1024), inline=False)
+        view = discord.ui.View(timeout=None)
+        for st in ("win", "loss", "push"):
+            view.add_item(FixButton(p["id"], st))
+        view.add_item(FixButton(p["id"], "open"))
+        await channel.send(embed=e, view=view)
+        await interaction.response.send_message("Sent to the mods. 👍", ephemeral=True)
+
+
+class FixButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fx:(?P<pid>\d+):(?P<st>win|loss|push|open)"):
+    def __init__(self, pick_id: int, st: str):
+        label = {"win": "Make it a win", "loss": "Make it a loss", "push": "Push", "open": "Reopen"}[st]
+        super().__init__(discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, custom_id=f"fx:{pick_id}:{st}"))
+        self.pick_id, self.st = pick_id, st
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["pid"]), match["st"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not is_mod(interaction.user):
+            await interaction.response.send_message("Mods only.", ephemeral=True)
+            return
+        p = settle_pick(interaction.guild_id, self.pick_id, self.st)
+        if p is None:
+            await interaction.response.send_message("That pick is gone.", ephemeral=True)
+            return
+        await interaction.response.edit_message(content=f"✅ Fixed by {interaction.user.display_name}: now "
+                                                        f"{STATUS[p['status']][0]}.", view=None)
+        await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} fixed a disputed grade: pick #{p['id']} "
+                                                              f"→ {p['status']}")
+
+
+def confidence_embed(guild_id: int, key: str, name: str) -> discord.Embed:
+    rows = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status IN ('win', 'loss') "
+                        "AND confidence IS NOT NULL", (guild_id, key)).fetchall()
+    e = discord.Embed(title=f"⭐ {name}: does confidence mean anything?", color=BRAND)
+    if not rows:
+        e.description = "Rate picks 1-5 with the 📝 Note button on a card (or `confidence` on `/pick`) to see this."
+        return e
+    lines = []
+    for c in range(5, 0, -1):
+        rs = [p for p in rows if p["confidence"] == c]
+        if rs:
+            w = sum(1 for p in rs if p["status"] == "win")
+            net = sum(pick_net(p) for p in rs)
+            lines.append(f"{CONF_STARS[c]} · {w}-{len(rs) - w} · {signed(net)}")
+    e.description = "\n".join(lines)
+    hi = [p for p in rows if p["confidence"] >= 4]
+    lo = [p for p in rows if p["confidence"] <= 2]
+    if hi and lo:
+        hr = sum(1 for p in hi if p["status"] == "win") / len(hi)
+        lr = sum(1 for p in lo if p["status"] == "win") / len(lo)
+        e.set_footer(text="Your gut works. 🎯" if hr > lr + 0.1 else "Your 'locks' hit no more than your fliers. 🤔")
+    return e
+
+
+# ---- saved lineups ----------------------------------------------------------------------------------------
+
+def lineups(guild_id: int, user_id: int) -> dict:
+    raw = get_setting(guild_id, f"lineups:{user_id}")
+    return json.loads(raw) if raw else {}
+
+
+async def lineup_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=n, value=n) for n in lineups(interaction.guild_id, interaction.user.id)
+            if (current or "").lower() in n.lower()][:25]
+
+
+# ---- goals & balances --------------------------------------------------------------------------------------
+
+def goal_line(guild_id: int, key: str) -> Optional[str]:
+    raw = get_setting(guild_id, f"goal:{key}")
+    if not raw or not key.isdigit():
+        return None
+    goal = float(raw)
+    now = datetime.now(TZ)
+    since = iso(now.replace(day=1, hour=0, minute=0, second=0, microsecond=0))
+    stats = compute_stats(guild_id, key, since=since)
+    net = stats[0]["net"] if stats else 0.0
+    pct = max(0.0, min(1.0, net / goal)) if goal > 0 else 0
+    bar = "▰" * int(pct * 10) + "▱" * (10 - int(pct * 10))
+    return f"{bar} {signed(net)} of {money(goal)} this month" + (" 🎉 done!" if net >= goal else "")
+
+
+def render_balances(name: str, rows: list) -> io.BytesIO:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(10, 4.4), dpi=110)
+    fig.patch.set_facecolor(CHART_SURFACE)
+    ax.set_facecolor(CHART_SURFACE)
+    by: dict[str, list] = {}
+    for r in rows:
+        by.setdefault(r["platform"], []).append((datetime.fromisoformat(r["created_at"]).astimezone(TZ), r["amount"]))
+    for k, (plat, pts) in enumerate(sorted(by.items())):
+        xs, ys = zip(*pts)
+        ax.plot(xs, ys, marker="o", color=CHART_COLORS[k % len(CHART_COLORS)], linewidth=2.2, label=plat,
+                markeredgecolor=CHART_SURFACE, markeredgewidth=1.5)
+        ax.annotate(money(ys[-1]), (xs[-1], ys[-1]), textcoords="offset points", xytext=(6, 0), color=CHART_TEXT, fontsize=9,
+                    va="center")
+    ax.tick_params(colors=CHART_MUTED, labelsize=9)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(CHART_GRID)
+    ax.grid(axis="y", color=CHART_GRID, linewidth=0.6)
+    ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
+    import matplotlib.dates as mdates
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %-d"))
+    if len(by) > 1:
+        ax.legend(frameon=False, labelcolor=CHART_TEXT, loc="upper left", ncol=len(by))
+    ax.set_ylim(bottom=0)
+    ax.set_title(f"{name} · app balances", color=CHART_TEXT, loc="left", fontsize=12)
+    fig.tight_layout()
+    out = io.BytesIO()
+    fig.savefig(out, format="png", facecolor=CHART_SURFACE)
+    plt.close(fig)
+    out.seek(0)
+    return out
+
+
+# ---- cool-off -------------------------------------------------------------------------------------------------
+
+def cooling_until(guild_id: Optional[int], user_id: int) -> Optional[datetime]:
+    if not guild_id:
+        return None
+    raw = get_setting(guild_id, f"cooloff:{user_id}")
+    if not raw:
+        return None
+    until = datetime.fromisoformat(raw)
+    return until if until > datetime.now(timezone.utc) else None
+
+
+def cooloff_message(until: datetime) -> str:
+    return (f"🧊 You're on a cool-off until <t:{int(until.timestamp())}:f> (<t:{int(until.timestamp())}:R>). "
+            "No new picks until then; you set this yourself. Your open picks still grade as normal.")
+
+
+class CooloffConfirm(discord.ui.View):
+    def __init__(self, owner_id: int, guild_id: int, hours: int):
+        super().__init__(timeout=300)
+        self.owner_id, self.guild_id, self.hours = owner_id, guild_id, hours
+        b = discord.ui.Button(label=f"Yes, lock me out for {hours // 24 or hours} {'days' if hours >= 48 else 'day' if hours == 24 else 'hours'}",
+                              style=discord.ButtonStyle.danger)
+        b.callback = self._go
+        self.add_item(b)
+
+    async def _go(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This one's not yours.", ephemeral=True)
+            return
+        until = datetime.now(timezone.utc) + timedelta(hours=self.hours)
+        set_setting(self.guild_id, f"cooloff:{self.owner_id}", iso(until))
+        await interaction.response.edit_message(content=cooloff_message(until) + " Proud of you. 🫡", view=None)
+
+
+# ---- sport roles & welcome --------------------------------------------------------------------------------------
+
+SPORT_ROLES = [("🏈 NFL", 0x013369), ("🏀 NBA", 0xC9082A), ("🎓 College", 0x8B4513), ("⚾ MLB", 0x002D72),
+               ("🏒 NHL", 0x111111), ("⚽ Soccer", 0x3A7D44), ("🎮 CS2", 0xDE9B35), ("🟣 Kalshi", 0x7B3FE4),
+               ("🎯 PrizePicks", 0x5A23C8)]
+
+
+class RolePicker(discord.ui.View):
+    def __init__(self, member_id: int, current: set[str]):
+        super().__init__(timeout=600)
+        self.member_id = member_id
+        sel = discord.ui.Select(placeholder="Pick the sports you follow", min_values=0, max_values=len(SPORT_ROLES),
+                                options=[discord.SelectOption(label=n, value=n, default=n in current) for n, _ in SPORT_ROLES])
+        sel.callback = self._cb(sel)
+        self.add_item(sel)
+
+    def _cb(self, sel):
+        async def cb(interaction):
+            guild = interaction.guild
+            member = interaction.user
+            want = set(sel.values)
+            await interaction.response.defer()
+            try:
+                for name, color in SPORT_ROLES:
+                    has = any(r.name == name for r in member.roles)
+                    if name in want and not has:
+                        await member.add_roles(await ensure_role(guild, name, color), reason="Sport roles")
+                    elif name not in want and has:
+                        await member.remove_roles(next(r for r in member.roles if r.name == name), reason="Sport roles")
+            except Exception:
+                await interaction.followup.send("I need **Manage Roles** (with my role above the sport roles).",
+                                                ephemeral=True)
+                return
+            await interaction.edit_original_response(content="✅ Roles updated: " + (", ".join(sorted(want)) or "none"),
+                                                     view=None)
+        return cb
+
+
+WELCOME_TEXT = ("👋 Welcome to the server! I'm PIMP-BOT, the group's pick tracker.\n"
+                "• Post your slip screenshots in the receipts channel and I'll log them.\n"
+                "• `/help` shows everything I do, `/record` your stats, `/leaderboard` who's up.\n"
+                "• `/me roles` to pick the sports you follow, `/me bio` to set up your profile card.\n"
+                "Bet what you can afford to lose. Have fun. 🤝")
+
+
+# ---- my data -----------------------------------------------------------------------------------------------------
+
+def my_data_csv(guild_id: int, user_id: int) -> io.BytesIO:
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["id", "created", "platform", "sport", "description", "legs", "cost", "payout", "status", "returned", "notes"])
+    for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY id", (guild_id, str(user_id))):
+        w.writerow([p["id"], p["created_at"], p["platform"], p["sport"] or "", p["description"],
+                    " | ".join(x["text"] for x in get_legs(p["id"])), p["cost"], p["payout"], p["status"],
+                    p["returned"] if p["returned"] is not None else "", p["notes"] or ""])
+    w.writerow([])
+    w.writerow(["cashflows"])
+    for r in db().execute("SELECT * FROM cashflows WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)):
+        w.writerow([r["created_at"], r["platform"], r["kind"], r["amount"], r["note"] or ""])
+    return io.BytesIO(out.getvalue().encode())
+
+
+def delete_my_data(guild_id: int, user_id: int) -> int:
+    key = str(user_id)
+    ids = [r["id"] for r in db().execute("SELECT id FROM picks WHERE guild_id = ? AND bettor_key = ?", (guild_id, key))]
+    for pid in ids:
+        for t in ("legs", "follows", "pings", "sweats", "injury_alerts"):
+            db().execute(f"DELETE FROM {t} WHERE pick_id = ?", (pid,))
+    db().execute("DELETE FROM picks WHERE guild_id = ? AND bettor_key = ?", (guild_id, key))
+    for t in ("cashflows", "coin_tx"):
+        db().execute(f"DELETE FROM {t} WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+    db().execute("DELETE FROM settings WHERE guild_id = ? AND key LIKE ?", (guild_id, f"%:{user_id}"))
+    db().execute("DELETE FROM follows WHERE user_id = ?", (user_id,))
+    db().commit()
+    return len(ids)
+
+
+class DeleteMine(discord.ui.View):
+    def __init__(self, owner_id: int):
+        super().__init__(timeout=300)
+        self.owner_id = owner_id
+        b = discord.ui.Button(label="Yes, delete everything of mine", style=discord.ButtonStyle.danger)
+        b.callback = self._go
+        self.add_item(b)
+
+    async def _go(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Not yours.", ephemeral=True)
+            return
+        n = delete_my_data(interaction.guild_id, self.owner_id)
+        await interaction.response.edit_message(content=f"🗑️ Done. Deleted {n} picks and your coins, money log and settings. "
+                                                        "Backups older than today may still have them.", view=None)
+        await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} deleted their own data ({n} picks)")
+
+
+# ---- scheduled announcements ------------------------------------------------------------------------------------
+
+class AnnounceModal(discord.ui.Modal, title="Schedule an announcement"):
+    when = discord.ui.TextInput(label="When: 6pm, tomorrow 9am, sat 10am, 2h", max_length=40)
+    text = discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph, max_length=1800)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        due = parse_due(self.when.value)
+        if due is None:
+            await interaction.response.send_message("I couldn't read that time.", ephemeral=True)
+            return
+        db().execute("INSERT INTO announcements (guild_id, channel_id, text, due_at, created_by, created_at) VALUES (?,?,?,?,?,?)",
+                     (interaction.guild_id, interaction.channel_id, self.text.value, iso(due), interaction.user.id, now_iso()))
+        db().commit()
+        await interaction.response.send_message(f"📣 Scheduled for <t:{int(due.timestamp())}:f> in this channel.", ephemeral=True)
+
+
+async def post_announcements(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    for a in db().execute("SELECT * FROM announcements WHERE sent_at IS NULL AND due_at <= ?", (iso(now),)).fetchall():
+        db().execute("UPDATE announcements SET sent_at = ? WHERE id = ?", (now_iso(), a["id"]))
+        db().commit()
+        channel = client.get_channel(a["channel_id"])
+        if channel is not None:
+            await channel.send(f"📣 {a['text']}", allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
+
+
+# ---- starting-lineup check and deadline nudges ------------------------------------------------------------------
+
+async def lineup_checks(client: discord.Client, now: Optional[datetime] = None) -> None:
+    """When a game on someone's prop tips off, DM whether the player started (pings must be on)."""
+    now = now or datetime.now(timezone.utc)
+    users = {(r["guild_id"], int(r["key"].split(":", 1)[1]))
+             for r in db().execute("SELECT guild_id, key FROM settings WHERE key LIKE 'pings:%' AND value = 'on'")}
+    recent = iso(now - timedelta(days=2))
+    for gid, uid in users:
+        for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_id = ? AND status = 'open' AND created_at >= ?",
+                              (gid, uid, recent)).fetchall():
+            paths = [x for x in leagues_for(p["sport"]) if x in PROP_PATHS and FAMILY_OF_PATH[x] == "basketball"]
+            if not paths:
+                continue
+            for leg in get_legs(p["id"]):
+                prop = prop_of(leg["text"]) if leg["status"] == "open" else None
+                if not prop:
+                    continue
+                if db().execute("SELECT 1 FROM lineup_checks WHERE pick_id = ? AND idx = ?", (p["id"], leg["idx"])).fetchone():
+                    continue
+                found = await prop_game(prop, paths, datetime.fromisoformat(p["created_at"]))
+                if not found or found[1].get("state") != "in":
+                    continue
+                box = await fetch_summary(found[0], found[1]["id"])
+                pl = find_in_box(box, norm_name(found[2]["name"])) if box else None
+                if pl is None:
+                    continue
+                starter = None
+                raw_groups = pl["groups"]
+                db().execute("INSERT OR IGNORE INTO lineup_checks (pick_id, idx) VALUES (?,?)", (p["id"], leg["idx"]))
+                db().commit()
+                starter = pl.get("starter")
+                if starter is None:
+                    continue
+                text = (f"✅ **{pl['name']}** is in the starting lineup (pick `#{p['id']}`)." if starter else
+                        f"⚠️ **{pl['name']}** is **not starting** tonight. Heads up on pick `#{p['id']}`: {clip(leg['text'], 80)}")
+                try:
+                    user = await client.fetch_user(uid)
+                    await user.send(text)
+                except Exception:
+                    pass
+
+
+async def deadline_nudges(client: discord.Client, now: Optional[datetime] = None) -> None:
+    """Game day: DM people who usually play but haven't set their lock or survivor pick (Sunday 10 AM, opt-out)."""
+    now = (now or datetime.now(TZ)).astimezone(TZ)
+    if now.weekday() != 6 or now.hour < 10:
+        return
+    day = now.date().isoformat()
+    for r in db().execute("SELECT guild_id FROM settings WHERE key = 'recap_channel'").fetchall():
+        gid = r["guild_id"]
+        if get_setting(gid, "last_nudge") == day:
+            continue
+        set_setting(gid, "last_nudge", day)
+        wk = week_id(now)
+        regulars = {x["user_id"]: x["user_name"] for x in db().execute(
+            "SELECT DISTINCT user_id, user_name FROM locks WHERE guild_id = ? AND created_at >= ?",
+            (gid, iso(now - timedelta(days=35))))}
+        have = {x["user_id"] for x in db().execute("SELECT user_id FROM locks WHERE guild_id = ? AND week = ?", (gid, wk))}
+        missing = {u: n for u, n in regulars.items() if u not in have}
+        pool = active_pool(gid)
+        if pool:
+            wk_key, _ = await upcoming_week(now.astimezone(timezone.utc))
+            alive = {u for u, s in survivor_status(pool).items() if s["alive"]}
+            picked = {x["user_id"] for x in db().execute("SELECT user_id FROM survivor_picks WHERE pool_id = ? AND week_key = ?",
+                                                         (pool["id"], wk_key))} if wk_key else set()
+            for u in alive - picked:
+                missing.setdefault(u, "")
+        for uid in missing:
+            if get_setting(gid, f"nudges:{uid}") == "off":
+                continue
+            bits = []
+            if uid in regulars and uid not in have:
+                bits.append("your 🔒 lock of the week (`/lock`)")
+            if pool and uid in (alive - picked):
+                bits.append("your 💀 survivor pick (`/survivor pick`)")
+            if not bits:
+                continue
+            try:
+                user = await client.fetch_user(uid)
+                await user.send("⏰ Game day reminder: you haven't set " + " or ".join(bits) + " yet.")
+            except Exception:
+                pass
+
+
+# ---- status ---------------------------------------------------------------------------------------------------
+
+async def status_embed(client) -> discord.Embed:
+    e = discord.Embed(title="🩺 PIMP-BOT status", color=0x2ECC71)
+    up = datetime.now(timezone.utc) - STARTED_AT
+    e.add_field(name="Version", value=BOT_VERSION)
+    e.add_field(name="Up for", value=f"{up.days}d {up.seconds // 3600}h {(up.seconds // 60) % 60}m")
+    last = _last_cycle.get("at")
+    e.add_field(name="Last background run", value=f"<t:{int(datetime.fromisoformat(last).timestamp())}:R>" if last else "not yet")
+    checks = []
+    try:
+        await _get_json(ESPN.format(path="basketball/nba"), {"dates": datetime.now(TZ).strftime("%Y%m%d")})
+        checks.append("✅ ESPN")
+    except Exception:
+        checks.append("❌ ESPN")
+    try:
+        await _get_json(f"{KALSHI_API}/markets", {"limit": 1})
+        checks.append("✅ Kalshi")
+    except Exception:
+        checks.append("❌ Kalshi")
+    checks.append("✅ Claude key set" if ai_enabled() else "⚪ Claude off (no key)")
+    checks.append("✅ Dashboard" if dashboard_url() else "⚪ Dashboard off")
+    e.add_field(name="Connections", value=" · ".join(checks), inline=False)
+    size = os.path.getsize(DB_PATH) / 1024 if os.path.exists(DB_PATH) else 0
+    n = db().execute("SELECT COUNT(*) FROM picks").fetchone()[0]
+    e.add_field(name="Data", value=f"{n} picks · {size:,.0f} KB" + ("" if DB_PATH.startswith("/data") else " ⚠️ not on /data"))
+    lat = getattr(client, "latency", None)
+    if lat and lat == lat:
+        e.add_field(name="Discord latency", value=f"{lat * 1000:.0f} ms")
+    return e
+
+
+SLIP_PERMS = [("view_channel", "View Channel"), ("send_messages", "Send Messages"),
+              ("read_message_history", "Read Message History"), ("embed_links", "Embed Links"),
+              ("send_messages_in_threads", "Send Messages in Threads")]
+
+
+def missing_perms(channel, me) -> list[str]:
+    if channel is None or me is None or not hasattr(channel, "permissions_for"):
+        return []
+    try:
+        perms = channel.permissions_for(me)
+    except Exception:
+        return []
+    need = SLIP_PERMS if getattr(channel, "parent_id", None) else SLIP_PERMS[:4]
+    return [label for attr, label in need if not getattr(perms, attr, True)]
+
+
+def slip_check_embed(interaction) -> discord.Embed:
+    b = interaction.client if getattr(interaction, "client", None) is not None else bot
+    ch = getattr(interaction, "channel", None)
+    lines = []
+    here = b.is_receipts_channel(ch) if ch is not None else interaction.channel_id in b.receipt_channels
+    allm = get_setting(interaction.guild_id, "receipts_all") == "on"
+    if here:
+        lines.append("✅ Slip logging is **on** in this channel")
+    elif allm:
+        lines.append("✅ Every-channel mode is on, so slips here get logged (non-slips are skipped quietly)")
+    else:
+        lines.append("❌ Slip logging is **off** here. Run `/receipts` here, or @mention me with a screenshot")
+    missing = missing_perms(ch, getattr(getattr(interaction, "guild", None), "me", None))
+    lines.append(f"❌ I'm missing: **{', '.join(missing)}**" if missing else "✅ My permissions here look fine")
+    lines.append("✅ Claude key set (screenshots are read automatically)" if ai_enabled() else
+                 "⚠️ No Claude key: I'll reply with a **Log this slip** button instead of reading it. Add "
+                 "`ANTHROPIC_API_KEY` on Railway → Variables")
+    lines.append("✅ Message Content intent on (otherwise I wouldn't be running)")
+    err = SLIP_STATE.get("last_error")
+    ok = SLIP_STATE.get("last_ok")
+    if ok:
+        lines.append(f"✅ Last slip logged <t:{int(datetime.fromisoformat(ok).timestamp())}:R>")
+    if err:
+        lines.append(f"⚠️ Last problem <t:{int(datetime.fromisoformat(err[0]).timestamp())}:R>: `{clip(err[1], 250)}`")
+    lines.append(f"Version **{BOT_VERSION}**")
+    e = discord.Embed(title="📸 Slip logging check", description="\n".join(lines), color=0x3498DB)
+    e.set_footer(text="Still nothing? Railway → your service → Deployments → View Logs shows the full error.")
+    return e
+
+
+def sheets_formula(kind: str = "picks") -> Optional[str]:
+    url = dashboard_url()
+    if not url:
+        return None
+    base, key = url.split("/?key=")
+    return f'=IMPORTDATA("{base}/api/{kind}.csv?key={key}")'
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -9591,6 +10297,8 @@ class PicksBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True  # needed to see screenshots and questions
+        if MEMBERS_INTENT:
+            intents.members = True       # only for welcome DMs; also switch it on in the developer portal
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self.receipt_channels: set[int] = set()
@@ -9601,7 +10309,7 @@ class PicksBot(discord.Client):
         self.add_dynamic_items(SettleButton, LogSlipButton, FollowButton, ChallengeButton, PickemButton,
                                SweatButton, InjuryOffButton, GPButton, CopyButton, CardSweatButton, CardKalshiButton,
                                PPSettleButton, MarketButton, TakeButton, PotdButton, TriviaButton, GuessButton,
-                               ClosestButton, SquaresButton, DraftButton)
+                               ClosestButton, SquaresButton, DraftButton, NoteButton, DisputeButton, FixButton)
         try:
             await start_dashboard()
         except Exception:
@@ -9860,6 +10568,7 @@ class PicksBot(discord.Client):
 
     async def run_schedules(self, now: Optional[datetime] = None):
         now = now or datetime.now(TZ)
+        _last_cycle["at"] = now_iso()
         for job in (self.run_live_grading, lambda n: grade_pickem_games(self, n), lambda n: post_hall_of_fame(self),
                     self.run_game_pings, lambda n: self.post_today(n.astimezone(TZ)),
                     lambda n: grade_survivor(self, n), lambda n: send_reminders(self, n),
@@ -9875,7 +10584,8 @@ class PicksBot(discord.Client):
                     lambda n: announce_levels(self, n), lambda n: expire_color_roles(self, n),
                     lambda n: post_rivals(self, n), lambda n: bounty_check(self, n), lambda n: on_this_day(self, n),
                     lambda n: big_moments(self, n), lambda n: favorite_team_alerts(self, n),
-                    lambda n: run_game_threads(self, n)):
+                    lambda n: run_game_threads(self, n), lambda n: post_announcements(self, n),
+                    lambda n: lineup_checks(self, n), lambda n: deadline_nudges(self, n)):
             try:
                 await job(now.astimezone(timezone.utc))
             except Exception:
@@ -9922,26 +10632,66 @@ class PicksBot(discord.Client):
 
     # ---- messages ----------------------------------------------------------
 
+    async def on_member_join(self, member):
+        if member.bot or get_setting(member.guild.id, "welcome") != "on":
+            return
+        try:
+            await member.send(WELCOME_TEXT)
+        except Exception:
+            pass
+
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
         if message.guild is None:
-            dm_images = [a for a in message.attachments
-                         if (a.content_type or "").split(";")[0].strip() in IMAGE_TYPES]
+            dm_images = image_attachments(message)
             if dm_images:
                 await handle_dm_slip(self, message, dm_images[0])
             return
-        images = [a for a in message.attachments
-                  if (a.content_type or "").split(";")[0].strip() in IMAGE_TYPES]
-        if message.channel.id in self.receipt_channels and images:
-            for attachment in images[:4]:
-                await self.handle_slip(message, attachment)
+        images = image_attachments(message)
+        mentioned = self.user is not None and self.mentions_me(message)
+        if images and (self.is_receipts_channel(message.channel) or mentioned):
+            await self.log_slips(message, images)
+            return
+        if mentioned and not images and getattr(message, "reference", None):
+            # "@PIMP-BOT log this" as a reply to someone's screenshot
+            ref = message.reference.resolved
+            if isinstance(ref, discord.Message) and not ref.author.bot and image_attachments(ref):
+                await self.log_slips(ref, image_attachments(ref))
+                return
+        if images and get_setting(message.guild.id, "receipts_all") == "on":
+            await self.log_slips(message, images, quiet=True)
             return
         if self.user is not None and self.is_question(message):
             await self.handle_ask(message)
 
+    def is_receipts_channel(self, channel) -> bool:
+        """The channel itself, or a thread/forum post inside a receipts channel."""
+        return (getattr(channel, "id", None) in self.receipt_channels
+                or getattr(channel, "parent_id", None) in self.receipt_channels)
+
+    def mentions_me(self, message: discord.Message) -> bool:
+        return bool(re.search(rf"<@!?{self.user.id}>", getattr(message, "content", None) or "")
+                    or self.bot_role_ids(message))
+
+    async def log_slips(self, message: discord.Message, images: list, quiet: bool = False):
+        for attachment in images[:4]:
+            try:
+                await self.handle_slip(message, attachment, quiet=quiet)
+            except Exception as exc:
+                log.exception("Slip logging failed in #%s", getattr(message.channel, "name", "?"))
+                SLIP_STATE["last_error"] = (now_iso(), f"{type(exc).__name__}: {exc}"[:300])
+                if quiet:
+                    continue
+                try:
+                    await message.reply(f"⚠️ I couldn't log that slip ({type(exc).__name__}). Use `/pick` for now, "
+                                        "and an admin can run `/admin check` here to see what's wrong.",
+                                        mention_author=False)
+                except Exception:
+                    log.exception("Couldn't even reply about the failed slip (check my permissions here)")
+
     def bot_role_ids(self, message: discord.Message) -> set[int]:
-        return {r.id for r in message.role_mentions
+        return {r.id for r in (getattr(message, "role_mentions", None) or [])
                 if r.is_bot_managed() and r.tags and r.tags.bot_id == self.user.id}
 
     def is_question(self, message: discord.Message) -> bool:
@@ -10008,14 +10758,27 @@ class PicksBot(discord.Client):
             else:
                 await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
 
-    async def handle_slip(self, message: discord.Message, attachment: discord.Attachment):
+    async def handle_slip(self, message: discord.Message, attachment: discord.Attachment, quiet: bool = False):
+        if quiet and not ai_enabled():
+            return
+        until = cooling_until(message.guild.id, message.author.id)
+        if until:
+            if not quiet:
+                await message.reply(cooloff_message(until), mention_author=False)
+            return
         slip = None
-        if ai_enabled() and attachment.size <= MAX_IMAGE_BYTES:
+        if ai_enabled() and (attachment.size or 0) <= MAX_IMAGE_BYTES:
             try:
                 async with message.channel.typing():
                     slip = await read_slip(attachment)
-            except Exception:
+            except Exception as exc:
                 log.exception("Could not read slip %s", attachment.url)
+                SLIP_STATE["last_error"] = (now_iso(), f"Reading with Claude: {type(exc).__name__}: {exc}"[:300])
+        elif ai_enabled():
+            SLIP_STATE["last_error"] = (now_iso(), f"Image too big to read ({(attachment.size or 0) // 1024} KB)")
+
+        if quiet and (slip is None or slip["cost"] is None):
+            return  # every-channel mode: memes and charts aren't slips, stay out of the way
 
         # Couldn't read it (or reading is off): let the poster fill in a short form.
         if slip is None or slip["cost"] is None:
@@ -10050,6 +10813,7 @@ class PicksBot(discord.Client):
         if slip["payout"] is None:
             note = f"I couldn't read the payout. Fix it with `/edit pick_id:{pick_id}`."
         view = settle_view(pick_id) if p["status"] == "open" else None
+        SLIP_STATE["last_ok"] = now_iso()
         await message.reply(content=note, embed=pick_embed(p), view=view,
                             mention_author=False)
 
@@ -10076,7 +10840,7 @@ LEG_RESULTS = [
 
 
 def view_or_missing(p: sqlite3.Row):
-    return settle_view(p["id"]) if p["status"] == "open" else discord.utils.MISSING
+    return settle_view(p["id"]) if p["status"] == "open" else settled_view(p["id"])
 
 
 # ---- pick commands ----------------------------------------------------------
@@ -10093,6 +10857,7 @@ def view_or_missing(p: sqlite3.Row):
     member="Optional: log it for another member (defaults to you)",
     label="Optional: log it under a name that isn't a Discord user",
     hidden="Optional: keep the details secret until it settles (proof you called it, no copycats)",
+    confidence="Optional: how sure you are, 1 to 5 stars",
 )
 @app_commands.choices(platform=PLATFORMS)
 async def pick_cmd(
@@ -10106,7 +10871,12 @@ async def pick_cmd(
     member: Optional[discord.Member] = None,
     label: Optional[app_commands.Range[str, 1, 60]] = None,
     hidden: Optional[bool] = None,
+    confidence: Optional[app_commands.Range[int, 1, 5]] = None,
 ):
+    until = cooling_until(interaction.guild_id, interaction.user.id)
+    if until:
+        await interaction.response.send_message(cooloff_message(until), ephemeral=True)
+        return
     key, name, bettor_id = resolve_bettor(interaction, member, label)
     leg_text = None
     if legs:
@@ -10116,6 +10886,9 @@ async def pick_cmd(
         bettor_id=bettor_id, logged_by=interaction.user.id, platform=platform.value,
         sport=sport, description=description, legs=leg_text, cost=cost, payout=payout,
     )
+    if confidence:
+        db().execute("UPDATE picks SET confidence = ? WHERE id = ?", (int(confidence), pick_id))
+        db().commit()
     p = get_pick(interaction.guild_id, pick_id)
     if hidden:
         db().execute("UPDATE picks SET hidden = 1 WHERE id = ?", (pick_id,))
@@ -10157,6 +10930,8 @@ async def leg_cmd(interaction: discord.Interaction, pick_id: int, leg: int,
     p, note = grade_leg(interaction.guild_id, pick_id, leg, result.value)
     await interaction.response.send_message(content=note or None, embed=pick_embed(p),
                                             view=view_or_missing(p))
+    await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} graded leg {leg} of {p['bettor_name']}'s "
+                                                          f"pick #{pick_id}: {result.value}")
 
 
 @bot.tree.command(name="grade", description="Look up results for a pick's open legs now")
@@ -10217,6 +10992,9 @@ async def result_cmd(
         return
     p = settle_pick(interaction.guild_id, pick_id, outcome.value, returned)
     await interaction.response.send_message(embed=pick_embed(p), view=view_or_missing(p))
+    await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} used /result on {p['bettor_name']}'s pick "
+                                                          f"#{pick_id}: {outcome.value}" + (f", returned {money(returned)}"
+                                                                                            if returned is not None else ""))
 
 
 @bot.tree.command(name="open", description="Picks still waiting on a result")
@@ -10278,6 +11056,9 @@ async def record_cmd(interaction: discord.Interaction,
     got = earned_badges(interaction.guild_id, key)
     if got:
         e.add_field(name=f"Badges {len(got)}/{len(BADGES)}", value=badge_line(got) + " · `/achievements`")
+    gl = goal_line(interaction.guild_id, key)
+    if gl:
+        e.add_field(name="🎯 Monthly goal", value=gl, inline=False)
     recent = db().execute(
         """SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'
            ORDER BY settled_at DESC, id DESC LIMIT 5""",
@@ -10432,6 +11213,8 @@ async def edit_cmd(
     if was_standard and ("cost" in updates or "payout" in updates):
         p = settle_pick(interaction.guild_id, pick_id, p["status"])
     await interaction.response.send_message(embed=pick_embed(p), view=view_or_missing(p))
+    await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} edited pick #{pick_id} "
+                                                          f"({p['bettor_name']}): {', '.join(updates)}")
 
 
 @bot.tree.command(name="delete", description="Remove a pick")
@@ -10452,6 +11235,8 @@ async def delete_cmd(interaction: discord.Interaction, pick_id: int):
     db().commit()
     await interaction.response.send_message(
         f"Deleted pick #{pick_id} ({p['bettor_name']}: {clip(p['description'], 80)}).")
+    await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} deleted pick #{pick_id} ({p['bettor_name']}: "
+                                                          f"{clip(p['description'], 80)}, {money(p['cost'])}, {p['status']})")
 
 
 EXPORT_FORMATS = [
@@ -10506,12 +11291,35 @@ async def export_cmd(interaction: discord.Interaction,
 # ---- channel setup ----------------------------------------------------------
 
 @bot.tree.command(name="receipts",
-                  description="Turn slip logging on or off for this channel")
+                  description="Auto-log slip screenshots: this channel, every channel, or off")
 @app_commands.guild_only()
 @app_commands.default_permissions(manage_guild=True)
-async def receipts_cmd(interaction: discord.Interaction):
+@app_commands.choices(mode=[app_commands.Choice(name="On in this channel", value="on"),
+                            app_commands.Choice(name="Off in this channel", value="off"),
+                            app_commands.Choice(name="Every channel (quietly skips non-slips)", value="all"),
+                            app_commands.Choice(name="Stop every-channel mode", value="all_off"),
+                            app_commands.Choice(name="Show where it's on", value="show")])
+async def receipts_cmd(interaction: discord.Interaction, mode: Optional[app_commands.Choice[str]] = None):
     channel_id = interaction.channel_id
-    if channel_id in bot.receipt_channels:
+    m = mode.value if mode else None
+    if m in ("all", "all_off"):
+        set_setting(interaction.guild_id, "receipts_all", "on" if m == "all" else None)
+        msg = ("📸 Every-channel mode is **on**: any screenshot that's a bet slip gets logged, anywhere in the server. "
+               "Pictures that aren't slips are ignored quietly." if m == "all" else "Every-channel mode is **off**.")
+        if m == "all" and not ai_enabled():
+            msg += " ⚠️ It needs the Claude key (`ANTHROPIC_API_KEY` on Railway) to tell slips from other pictures."
+        await interaction.response.send_message(msg)
+        return
+    if m == "show":
+        rows = db().execute("SELECT channel_id FROM receipt_channels WHERE guild_id = ?", (interaction.guild_id,)).fetchall()
+        where = ", ".join(f"<#{r['channel_id']}>" for r in rows) or "no channels"
+        allm = get_setting(interaction.guild_id, "receipts_all") == "on"
+        await interaction.response.send_message(
+            f"Slip logging is on in: {where}." + (" Every-channel mode is **on** too." if allm else "") +
+            "\nAnywhere else: @mention me with the screenshot (or reply to one with `@me log`).", ephemeral=True)
+        return
+    turn_off = channel_id in bot.receipt_channels if m is None else m == "off"
+    if turn_off:
         db().execute("DELETE FROM receipt_channels WHERE channel_id = ?", (channel_id,))
         bot.receipt_channels.discard(channel_id)
         msg = "Slip logging is **off** for this channel."
@@ -10523,6 +11331,9 @@ async def receipts_cmd(interaction: discord.Interaction):
                if ai_enabled() else
                "I'll reply to each screenshot with a button to log it.")
         msg = f"Slip logging is **on** for this channel. {how}"
+        missing = missing_perms(getattr(interaction, "channel", None), getattr(getattr(interaction, "guild", None), "me", None))
+        if missing:
+            msg += f"\n⚠️ I'm missing **{', '.join(missing)}** here, so I can't reply. Fix my role or channel permissions."
     db().commit()
     await interaction.response.send_message(msg)
 
@@ -10778,13 +11589,16 @@ async def help_cmd(interaction: discord.Interaction):
         "`/potd` Prop of the Day (admins: `/potd here`) · `/insights` · `/calc` · `/money` · `/dashboard` web page"))
     e.add_field(name="Games and pools", inline=False, value=(
         "`/play` trivia · guess · closest · squares · draft (start, pick, board)\n"
-        "`/pool` wintotals · awards · bracket · survivor · `/futures` add, list · `/coins shop` `level` · `/me` bio, alerts"))
+        "`/pool` wintotals · awards · bracket · survivor · `/futures` add, list · `/coins shop` `level`"))
+    e.add_field(name="You", inline=False, value=(
+        "📝 **Note** button on a card: your reasoning + 1-5 confidence · ⚠️ **Wrong grade?** asks the mods\n"
+        "`/me` bio · alerts · roles · goal · balance · lineup (save, use) · cooloff · mydata · `/insights confidence`"))
     e.add_field(name="Sports info", inline=False, value=(
         "`/sports box` `matchup` `weather` `injuries` `standings` `rankings` `golf` `ufc` `f1` `cs2` `consensus`\n"
         "`/player avg` `vs` `splits` `minutes` · `/trend` · `/leaderboard rank_by:Units` or `platform:`"))
     e.add_field(name="Slips", inline=False, value=(
-        "Post a slip screenshot in the receipts channel and I'll log it. "
-        "(Admins: `/receipts` in that channel.)"))
+        "Post a slip screenshot in the receipts channel and I'll log it. Anywhere else, @mention me with it "
+        "(or reply `@me log` to one). Admins: `/receipts`; `/admin check` if screenshots aren't logging."))
     e.add_field(name="Recaps", inline=False, value=(
         "`/recap` the last 7 days. Weekly recap and open-pick reminders post automatically "
         "once an admin runs `/recapchannel`."))
@@ -10809,7 +11623,8 @@ async def help_cmd(interaction: discord.Interaction):
         "`/compare` two people side by side · `/remind` DM yourself later · `/reminders`"))
     e.add_field(name="Setup (admins)", inline=False, value=(
         "`/guide` post and pin the how-to in this channel · `/receipts` · `/recapchannel` · `/import`\n"
-        "`/backups` nightly backup to this channel · `/settings` everything that's set up"))
+        "`/backups` nightly backup to this channel · `/settings` everything that's set up\n"
+        "`/admin` status · audit · announce · sheets · welcome · unlock"))
     e.add_field(name="Players", inline=False, value=(
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
     e.add_field(name="Questions", inline=False, value=(
@@ -11040,7 +11855,7 @@ async def chart_cmd(interaction: discord.Interaction, member: Optional[discord.M
     await interaction.response.defer(thinking=True)
     title = f"{name or next(iter(series))}'s profit, last {days} days" if (name or len(series) == 1) \
         else f"Profit over the last {days} days"
-    png = await asyncio.to_thread(render_chart, series, title)
+    png = await asyncio.to_thread(locked_render, render_chart, series, title)
     note = "" if len(series) < 8 else "\n-# Showing the 8 most active people."
     await interaction.followup.send(content=note or None, file=discord.File(png, filename="profit.png"))
 
@@ -11198,7 +12013,7 @@ def guide_embeds() -> list[discord.Embed]:
         "`/sports` box, matchup, weather, injuries, standings, rankings, golf, UFC, F1, CS2, consensus\n"
         "`/calc` pp, hedge, kelly, slip odds · `/odds` · `/parlay`\n"
         "`/money` deposits, withdrawals and a tax summary (private) · `/bankroll` · `/limit`\n"
-        "`/me bio` and `/me alerts` · `/remind` · `/export` · `/dashboard` web page"))
+        "`/me` bio, alerts, roles, goal, balance, lineup, cooloff, mydata · `/remind` · `/export` · `/dashboard`"))
     tips = discord.Embed(title="💡 Tips", color=0xF1C40F, description=(
         "• **Always fill in the sport.** It's how the bot finds the right game to grade for free.\n"
         "• **One leg per item.** Write `Bills ML; Chiefs -3; Over 44.5 (Bills vs Chiefs)`, not one long sentence. "
@@ -11596,7 +12411,10 @@ async def survivor_team_autocomplete(interaction: discord.Interaction, current: 
         used = {r["team_id"] for r in db().execute(
             "SELECT team_id FROM survivor_picks WHERE pool_id = ? AND user_id = ? AND result IS NOT NULL",
             (pool["id"], interaction.user.id))}
-    _, games = await upcoming_week()
+    try:
+        _, games = await asyncio.wait_for(upcoming_week(), 2.5)
+    except asyncio.TimeoutError:
+        return []
     out = []
     for ev in games:
         for t in ev["teams"]:
@@ -11913,7 +12731,11 @@ async def sweat_cmd(interaction: discord.Interaction, pick_id: Optional[int] = N
 async def trend_player_autocomplete(interaction: discord.Interaction, current: str):
     if len(current or "") < 3:
         return []
-    found = await espn_search_players(norm_name(PLAYER_NICKNAMES.get(norm_name(current), current)), PROP_PATHS)
+    try:
+        found = await asyncio.wait_for(espn_search_players(norm_name(PLAYER_NICKNAMES.get(norm_name(current), current)),
+                                                           PROP_PATHS), 2.5)
+    except asyncio.TimeoutError:
+        return []
     return [app_commands.Choice(name=clip(f"{f['name']} · {f['team'] or LEAGUE_SLUGS[f['path']].upper()}", 100),
                                 value=clip(f"{f['path']}|{f['id']}|{f['name']}|{f['team']}", 100)) for f in found][:25]
 
@@ -11974,7 +12796,7 @@ async def trend_cmd(interaction: discord.Interaction, player: app_commands.Range
         return
     use_line = float(line) if line is not None else default_line([v for _, v in values[:10]])
     e = trend_embed(cand["name"], cand["team"], stat, use_line, values, "10")
-    png = await asyncio.to_thread(render_trend, cand["name"], STATS[stat][0], use_line, values[:10])
+    png = await asyncio.to_thread(locked_render, render_trend, cand["name"], STATS[stat][0], use_line, values[:10])
     e.set_image(url="attachment://trend.png")
     await interaction.followup.send(embed=e, file=discord.File(png, filename="trend.png"),
                                     view=TrendView(interaction.user.id, cand, games, stat, use_line, "10"))
@@ -12085,7 +12907,7 @@ async def wrapped_cmd(interaction: discord.Interaction, member: Optional[discord
         return
     await interaction.response.defer(thinking=True)
     pages = wrapped_pages(d, plabel)
-    card = (await asyncio.to_thread(render_wrapped, d, plabel)).getvalue()
+    card = (await asyncio.to_thread(locked_render, render_wrapped, d, plabel)).getvalue()
     await interaction.followup.send(embed=pages[0], view=WrappedView(interaction.user.id, pages, card))
 
 
@@ -12139,7 +12961,7 @@ async def insights_heatmap(interaction: discord.Interaction, member: Optional[di
         await interaction.response.send_message(f"No settled picks for {name} yet.", ephemeral=True)
         return
     await interaction.response.defer(thinking=True)
-    png = await asyncio.to_thread(render_heatmap, name, daily, weeks or 26)
+    png = await asyncio.to_thread(locked_render, render_heatmap, name, daily, weeks or 26)
     await interaction.followup.send(file=discord.File(png, filename="heatmap.png"))
 
 
@@ -12756,7 +13578,7 @@ async def player_minutes(interaction: discord.Interaction, player: app_commands.
         return
     line = default_line([v for _, v in values[:10]])
     e = trend_embed(cand["name"], cand["team"], "minutes", line, values, "10")
-    png = await asyncio.to_thread(render_trend, cand["name"], "Minutes", line, values[:10])
+    png = await asyncio.to_thread(locked_render, render_trend, cand["name"], "Minutes", line, values[:10])
     e.set_image(url="attachment://trend.png")
     await interaction.followup.send(embed=e, file=discord.File(png, filename="trend.png"),
                                     view=TrendView(interaction.user.id, cand, games, "minutes", line, "10"))
@@ -12795,7 +13617,7 @@ async def insights_report(interaction: discord.Interaction, member: Optional[dis
         await interaction.response.send_message(f"No settled picks for {name} that month.", ephemeral=True)
         return
     await interaction.response.defer(thinking=True)
-    png = await asyncio.to_thread(render_report_card, rc)
+    png = await asyncio.to_thread(locked_render, render_report_card, rc)
     await interaction.followup.send(file=discord.File(png, filename="report_card.png"))
 
 
@@ -12911,7 +13733,7 @@ async def play_squares(interaction: discord.Interaction, team: app_commands.Rang
                                                     f"{away} @ {home}", interaction.channel_id, now_iso()))
     db().commit()
     sq = db().execute("SELECT * FROM squares WHERE id = ?", (cur.lastrowid,)).fetchone()
-    png = await asyncio.to_thread(render_squares, dict(sq), square_claims(sq["id"]))
+    png = await asyncio.to_thread(locked_render, render_squares, dict(sq), square_claims(sq["id"]))
     msg = await interaction.followup.send(embed=squares_embed(sq), file=discord.File(png, filename="squares.png"),
                                           view=squares_view(sq["id"]), wait=True)
     db().execute("UPDATE squares SET message_id = ? WHERE id = ?", (msg.id, sq["id"]))
@@ -12955,7 +13777,10 @@ async def draft_player_autocomplete(interaction: discord.Interaction, current: s
     d = active_draft(interaction.guild_id)
     if not d or len(current or "") < 3:
         return []
-    found = await espn_search_players(norm_name(current), [d["path"]])
+    try:
+        found = await asyncio.wait_for(espn_search_players(norm_name(current), [d["path"]]), 2.5)
+    except asyncio.TimeoutError:
+        return []
     taken = {r["athlete_id"] for r in db().execute("SELECT athlete_id FROM draft_picks WHERE draft_id = ?", (d["id"],))}
     return [app_commands.Choice(name=clip(f"{f['name']} · {f['team']}", 100), value=f"{f['id']}|{f['name']}")
             for f in found if f["id"] not in taken][:25]
@@ -13117,6 +13942,9 @@ async def aw_create(interaction: discord.Interaction, name: app_commands.Range[s
         await interaction.response.send_message("Mods only.", ephemeral=True)
         return
     names = [a.strip() for a in awards.split(",") if a.strip()][:5]
+    if not names:
+        await interaction.response.send_message("List at least one award, like `MVP, ROY`.", ephemeral=True)
+        return
     db().execute("INSERT INTO aw_pools (guild_id, name, awards, created_at) VALUES (?,?,?,?)",
                  (interaction.guild_id, name, json.dumps(names), now_iso()))
     db().commit()
@@ -13343,7 +14171,8 @@ async def ps_pick(interaction: discord.Interaction, player: app_commands.Range[s
         await interaction.followup.send("Today's pick already started. Locked.", ephemeral=True)
         return
     found = pick_game(await find_games(cand["team"], [cand["path"]], datetime.now(timezone.utc)), datetime.now(timezone.utc))
-    if not found or found[0].get("state") != "pre" or event_time(found[0]).astimezone(TZ).date().isoformat() != today:
+    if not found or found[0].get("state") != "pre" or not event_time(found[0]) or \
+            event_time(found[0]).astimezone(TZ).date().isoformat() != today:
         await interaction.followup.send(f"{cand['name']} doesn't have a game later today.", ephemeral=True)
         return
     ev = found[0]
@@ -13378,6 +14207,10 @@ async def futures_add(interaction: discord.Interaction, bet: app_commands.Range[
                       cost: app_commands.Range[float, 0.01], payout: app_commands.Range[float, 0.01],
                       settles: app_commands.Range[str, 2, 40], platform: Optional[app_commands.Choice[str]] = None,
                       sport: Optional[app_commands.Range[str, 1, 60]] = None):
+    until = cooling_until(interaction.guild_id, interaction.user.id)
+    if until:
+        await interaction.response.send_message(cooloff_message(until), ephemeral=True)
+        return
     due = parse_due(settles)
     if due is None:
         await interaction.response.send_message("I couldn't read that date. Try `jan 15`, `2027-02-08` or `3 months`.",
@@ -13440,7 +14273,7 @@ async def me_alerts(interaction: discord.Interaction):
 
 
 ALERT_KEYS = [("teamalerts", "Your teams' finals", "off"), ("injuryalerts", "Injury alerts on your props", "off"),
-              ("pings", "Game-time pings (start and halftime)", "on")]
+              ("pings", "Game-time pings + starting lineups", "on"), ("nudges", "Game-day lock/survivor reminders", "off")]
 
 
 def alert_on(guild_id: int, user_id: int, key: str, off_value: str) -> bool:
@@ -13482,6 +14315,200 @@ bot.tree.add_command(me_group)
 @insights_group.command(name="jinx", description="Whose tails lose the most")
 async def insights_jinx(interaction: discord.Interaction):
     await interaction.response.send_message(embed=jinx_embed(interaction.guild_id))
+
+
+# ---- r13 commands -----------------------------------------------------------------------------
+
+lineup_group = app_commands.Group(name="lineup", description="Saved lineups you play often", parent=me_group)
+
+
+@lineup_group.command(name="save", description="Save one of your picks as a lineup to re-log later")
+@app_commands.autocomplete(pick_id=open_pick_autocomplete)
+async def lineup_save(interaction: discord.Interaction, pick_id: int, name: app_commands.Range[str, 1, 40]):
+    p = get_pick(interaction.guild_id, pick_id)
+    if p is None or p["bettor_key"] != str(interaction.user.id):
+        await interaction.response.send_message("Pick one of your own picks.", ephemeral=True)
+        return
+    saved = lineups(interaction.guild_id, interaction.user.id)
+    if len(saved) >= 25 and name not in saved:
+        await interaction.response.send_message("You've got 25 saved. Delete one first.", ephemeral=True)
+        return
+    saved[name] = {"platform": p["platform"], "sport": p["sport"], "description": p["description"], "legs": p["legs"],
+                   "cost": p["cost"], "payout": p["payout"]}
+    set_setting(interaction.guild_id, f"lineups:{interaction.user.id}", json.dumps(saved))
+    await interaction.response.send_message(f"💾 Saved as **{name}**. `/me lineup use` to play it again.", ephemeral=True)
+
+
+@lineup_group.command(name="use", description="Log a saved lineup as a new pick")
+@app_commands.autocomplete(name=lineup_autocomplete)
+async def lineup_use(interaction: discord.Interaction, name: str, cost: Optional[app_commands.Range[float, 0.01]] = None,
+                     payout: Optional[app_commands.Range[float, 0.01]] = None):
+    until = cooling_until(interaction.guild_id, interaction.user.id)
+    if until:
+        await interaction.response.send_message(cooloff_message(until), ephemeral=True)
+        return
+    lu = lineups(interaction.guild_id, interaction.user.id).get(name)
+    if not lu:
+        await interaction.response.send_message("No saved lineup by that name.", ephemeral=True)
+        return
+    c = float(cost) if cost else lu["cost"]
+    pay = float(payout) if payout else round(lu["payout"] * c / lu["cost"], 2) if lu["cost"] else c
+    pid = insert_pick(guild_id=interaction.guild_id, bettor_key=str(interaction.user.id),
+                      bettor_name=interaction.user.display_name, bettor_id=interaction.user.id, logged_by=interaction.user.id,
+                      platform=lu["platform"], sport=lu["sport"], description=lu["description"], legs=lu["legs"],
+                      cost=c, payout=pay)
+    p = get_pick(interaction.guild_id, pid)
+    await interaction.response.send_message(f"💾 Played **{name}** again.", embed=pick_embed(p), view=settle_view(pid))
+
+
+@lineup_group.command(name="list", description="Your saved lineups")
+async def lineup_list(interaction: discord.Interaction):
+    saved = lineups(interaction.guild_id, interaction.user.id)
+    lines = [f"**{n}** · {x['platform']} · {clip(x['description'], 50)} · {money(x['cost'])} → {money(x['payout'])}"
+             for n, x in saved.items()]
+    await interaction.response.send_message("\n".join(lines) or "Nothing saved. `/me lineup save` one of your picks.",
+                                            ephemeral=True)
+
+
+@lineup_group.command(name="delete", description="Delete a saved lineup")
+@app_commands.autocomplete(name=lineup_autocomplete)
+async def lineup_delete(interaction: discord.Interaction, name: str):
+    saved = lineups(interaction.guild_id, interaction.user.id)
+    if saved.pop(name, None) is None:
+        await interaction.response.send_message("No saved lineup by that name.", ephemeral=True)
+        return
+    set_setting(interaction.guild_id, f"lineups:{interaction.user.id}", json.dumps(saved) if saved else None)
+    await interaction.response.send_message(f"Deleted **{name}**.", ephemeral=True)
+
+
+@me_group.command(name="goal", description="Set a monthly profit goal; /record shows your progress (0 clears it)")
+async def me_goal(interaction: discord.Interaction, amount: app_commands.Range[float, 0.0, 1000000.0]):
+    set_setting(interaction.guild_id, f"goal:{interaction.user.id}", str(float(amount)) if amount else None)
+    line = goal_line(interaction.guild_id, str(interaction.user.id))
+    await interaction.response.send_message(f"🎯 Goal set: {line}" if amount else "Goal cleared.", ephemeral=True)
+
+
+@me_group.command(name="balance", description="Log an app balance and see your balances over time (only you see this)")
+@app_commands.choices(platform=MONEY_PLATFORMS)
+async def me_balance(interaction: discord.Interaction, platform: Optional[app_commands.Choice[str]] = None,
+                     amount: Optional[app_commands.Range[float, 0.0, 10000000.0]] = None):
+    if platform and amount is not None:
+        db().execute("INSERT INTO balances (guild_id, user_id, platform, amount, created_at) VALUES (?,?,?,?,?)",
+                     (interaction.guild_id, interaction.user.id, platform.value, float(amount), now_iso()))
+        db().commit()
+    rows = db().execute("SELECT * FROM balances WHERE guild_id = ? AND user_id = ? ORDER BY created_at",
+                        (interaction.guild_id, interaction.user.id)).fetchall()
+    if not rows:
+        await interaction.response.send_message("Log one with `platform` and `amount`, like your PrizePicks balance today.",
+                                                ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    png = await asyncio.to_thread(locked_render, render_balances, interaction.user.display_name, [dict(r) for r in rows])
+    latest_by = {}
+    for r in rows:
+        latest_by[r["platform"]] = r["amount"]
+    await interaction.followup.send(" · ".join(f"**{k}** {money(v)}" for k, v in latest_by.items()) +
+                                    f" · total **{money(sum(latest_by.values()))}**",
+                                    file=discord.File(png, filename="balances.png"), ephemeral=True)
+
+
+@me_group.command(name="cooloff", description="Take a break: lock yourself out of logging new picks for a while")
+@app_commands.choices(length=[app_commands.Choice(name="24 hours", value=24), app_commands.Choice(name="3 days", value=72),
+                              app_commands.Choice(name="1 week", value=168), app_commands.Choice(name="30 days", value=720)])
+async def me_cooloff(interaction: discord.Interaction, length: app_commands.Choice[int]):
+    until = cooling_until(interaction.guild_id, interaction.user.id)
+    if until:
+        await interaction.response.send_message(cooloff_message(until), ephemeral=True)
+        return
+    await interaction.response.send_message(
+        f"This locks you out of logging new picks for **{length.name}**. You can't undo it yourself (that's the point). "
+        "Sure?", view=CooloffConfirm(interaction.user.id, interaction.guild_id, length.value), ephemeral=True)
+
+
+@me_group.command(name="roles", description="Pick the sports you follow (gets you those roles)")
+async def me_roles(interaction: discord.Interaction):
+    current = {r.name for r in getattr(interaction.user, "roles", [])}
+    await interaction.response.send_message("Which sports do you follow?", view=RolePicker(interaction.user.id, current),
+                                            ephemeral=True)
+
+
+@me_group.command(name="mydata", description="Download everything the bot has on you, or delete it")
+async def me_mydata(interaction: discord.Interaction):
+    f = discord.File(my_data_csv(interaction.guild_id, interaction.user.id), filename="my_pimpbot_data.csv")
+    await interaction.response.send_message(
+        "Here's everything logged under your name. If you want it gone, the button below deletes your picks, coins, "
+        "money log and settings for good (it changes the leaderboard).", file=f, view=DeleteMine(interaction.user.id),
+        ephemeral=True)
+
+
+@insights_group.command(name="confidence", description="Do your 5-star picks actually hit more than your 1-stars?")
+async def insights_confidence(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                              label: Optional[str] = None):
+    key, name, _ = resolve_bettor(interaction, member, label)
+    await interaction.response.send_message(embed=confidence_embed(interaction.guild_id, key, name))
+
+
+admin_group = app_commands.Group(name="admin", description="Server tools for admins", guild_only=True,
+                                 default_permissions=discord.Permissions(manage_guild=True))
+
+
+@admin_group.command(name="status", description="Is everything running? Version, uptime, connections")
+async def admin_status(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    await interaction.followup.send(embed=await status_embed(interaction.client), ephemeral=True)
+
+
+@admin_group.command(name="check", description="Why isn't the bot logging screenshots here? Run this in that channel")
+async def admin_check(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=slip_check_embed(interaction), ephemeral=True)
+
+
+@admin_group.command(name="audit", description="Log edits, deletes, manual settles and disputes in this channel (on/off)")
+async def admin_audit(interaction: discord.Interaction):
+    if get_setting(interaction.guild_id, "audit_channel") == str(interaction.channel_id):
+        set_setting(interaction.guild_id, "audit_channel", None)
+        await interaction.response.send_message("Audit log is **off**.")
+        return
+    set_setting(interaction.guild_id, "audit_channel", str(interaction.channel_id))
+    await interaction.response.send_message("📝 Audit log is **on** here: every edit, delete, manual settle and disputed "
+                                            "grade shows up in this channel. Keep it mods-only.")
+
+
+@admin_group.command(name="welcome", description="DM new members a quick welcome (on/off; needs the Members intent)")
+async def admin_welcome(interaction: discord.Interaction):
+    on = get_setting(interaction.guild_id, "welcome") == "on"
+    set_setting(interaction.guild_id, "welcome", None if on else "on")
+    note = "" if MEMBERS_INTENT else (" ⚠️ For this to work, turn on **Server Members Intent** in the Discord developer "
+                                      "portal (Bot tab) and add the variable `MEMBERS_INTENT=1` on Railway.")
+    await interaction.response.send_message(("Welcome DMs are **off**." if on else "👋 Welcome DMs are **on**.") + note)
+
+
+@admin_group.command(name="announce", description="Schedule a message in this channel")
+async def admin_announce(interaction: discord.Interaction):
+    await interaction.response.send_modal(AnnounceModal())
+
+
+@admin_group.command(name="sheets", description="Live Google Sheets sync: formulas that pull the bot's data")
+async def admin_sheets(interaction: discord.Interaction):
+    f1, f2 = sheets_formula("picks"), sheets_formula("leaderboard")
+    if not f1:
+        await interaction.response.send_message("This uses the dashboard's web address. Turn the dashboard on first "
+                                                "(see `/dashboard`).", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        "Paste one of these into cell A1 of a Google Sheet. It refreshes itself about every hour.\n"
+        f"**Every pick:**\n```{f1}```\n**Leaderboard:**\n```{f2}```\nThe link has the dashboard key in it, so only "
+        "share the sheet with the group.", ephemeral=True)
+
+
+@admin_group.command(name="unlock", description="End someone's cool-off early (only if they set it by mistake)")
+async def admin_unlock(interaction: discord.Interaction, member: discord.Member):
+    set_setting(interaction.guild_id, f"cooloff:{member.id}", None)
+    await interaction.response.send_message(f"Cool-off cleared for {member.display_name}.", ephemeral=True)
+    await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} ended {member.display_name}'s cool-off early")
+
+
+bot.tree.add_command(admin_group)
 
 
 @bot.tree.error

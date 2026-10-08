@@ -22,7 +22,8 @@ paid, and who's actually up.
 | `/export` | Download an Excel file: Kalshi, PrizePicks and Other tabs, a Legs tab, and a Summary tab with a section per person (or pick CSV) |
 | `/import` | Add picks from an existing tracker spreadsheet (admins only). Running it twice won't duplicate anything |
 | `/claim` | Move picks logged under a name (like imported ones) onto someone's Discord account |
-| `/receipts` | Turn slip logging on or off for the channel you run it in (admins only) |
+| `/receipts` | Slip logging: `mode:` on/off in this channel, every channel, or show where it's on (admins only) |
+| `/admin check` | Run it in a channel to see why screenshots aren't being logged there |
 | `/recapchannel` | Post the weekly recap and open-pick reminders in this channel (admins only) |
 | `/recap` | The last 7 days: who's up, best hit, worst beat, heartbreaker |
 | `/player add` `note` `view` `list` `remove` | Scouting notes on players and teams |
@@ -95,6 +96,19 @@ paid, and who's actually up.
 | `/coins shop`, `/coins level` | Spend coins on a name color, a title on your /card or a brag post. Levels come from coins earned by playing |
 | `/me bio`, `/me alerts` | Favorite teams and a tagline (shown on /card), and on/off switches for your DMs (team finals, injury alerts, game pings) |
 | `/insights jinx` | Whose tails lose the most |
+| 📝 **Note** button on pick cards | Add your reasoning and a 1-5 confidence (or use `confidence` on `/pick`). The recap shows the reasoning behind the week's best hit. `/insights confidence` shows whether your 5-stars beat your 1-stars |
+| ⚠️ **Wrong grade?** button | Sends the pick and your reason to the mods (audit channel), with one-tap fix buttons |
+| `/me lineup save` `use` `list` `delete` | Save a pick you play often and re-log it in one command |
+| `/me goal` | A monthly profit goal with a progress bar on `/record` |
+| `/me balance` | Log your app balances now and then and see them on a chart (private) |
+| `/me cooloff` | Lock yourself out of logging new picks for 24 hours, 3 days, a week or 30 days. Only an admin (`/admin unlock`) can end it early |
+| `/me roles` | Pick the sports you follow to get those roles (needs Manage Roles) |
+| `/me mydata` | Download everything the bot has on you as a CSV, with a button to delete it all |
+| `/admin status` | Version, uptime, last background run, and whether ESPN, Kalshi, Claude and the dashboard are reachable |
+| `/admin audit` | Logs every edit, delete, manual settle and disputed grade in the channel you run it in |
+| `/admin announce` | Schedule a message for later in this channel |
+| `/admin sheets` | Formulas that pull every pick (or the leaderboard) into Google Sheets live, through the dashboard |
+| `/admin welcome` | DM new members a short welcome (see below) |
 | `/leaderboard rank_by` / `platform` | Rank by units or ROI, or one platform only. ▲▼ show places moved this week |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
 
@@ -164,6 +178,14 @@ The first 20x+ win each month claims the 💰 bounty. 10x+ wins get a banner, 4+
 one leg get roasted, and "on this day" posts last year's big hits. Admins can turn game threads on
 in `/settings`: when 3+ picks ride on one game the bot opens a thread and posts who cashed at the end.
 
+**Starting lineups and game-day reminders.** With game pings on (`/me alerts`), the bot DMs you at
+tip-off whether the players on your NBA props are starting. On Sunday mornings it reminds regulars who
+haven't set a lock of the week or a survivor pick (you can turn that off in `/me alerts`).
+
+**Welcome DMs** need one extra switch, because Discord treats member lists as private: in the developer
+portal, open your bot's **Bot** tab and turn on **Server Members Intent**, then add the variable
+`MEMBERS_INTENT=1` on Railway. Without both, leave welcome DMs off (everything else works without it).
+
 **Web dashboard.** In Railway, open the bot's service → **Settings** → **Networking** → **Generate
 Domain**. Railway gives the bot a web address and the bot serves a private dashboard there (live
 leaderboard, profit chart, open picks, group parlay, coins, record book). Run `/dashboard` for the
@@ -232,7 +254,18 @@ python bot.py
 
 ### 3. Turn on the receipts channel
 
-In your receipts channel, run `/receipts`. Post a slip to test it.
+In your receipts channel, run `/receipts` (pick **On in this channel**). Post a slip to test it.
+
+**Screenshot posted but nothing happened?** Run `/admin check` in that channel. It tells you:
+- whether logging is on there (running `/receipts` with no option flips it, so running it twice turns it off)
+- which permissions the bot is missing there (it needs View Channel, Send Messages, Read Message History, Embed Links)
+- whether the Claude key is set, and the last error when reading a slip failed
+- which version is live (check it says r13.1 or later)
+
+Other ways to log a screenshot: @mention the bot in the same message as the picture, reply to a
+screenshot with `@PIMP-BOT log`, right-click the message → Apps → **Log as pick**, or `/receipts mode:Every channel`
+to catch slips anywhere (pictures that aren't slips are skipped quietly). Editing an old message
+doesn't count as a new post, so repost the picture.
 
 ## Keep it online without your computer
 
