@@ -52,7 +52,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-09 r18"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-09 r20"   # shown in /help and the startup log, so you can tell which upload is live
+
+
+# Feature modules further down register their background jobs, persistent buttons and help pages here.
+EXTRA_JOBS: list = []      # (name, async fn(client, now_utc)), run every scheduler cycle after the core jobs
+EXTRA_ITEMS: list = []     # discord.ui.DynamicItem classes that must survive restarts
+HELP_EXTRA: list = []      # (section title, text) added to /help
+
+
+def _named_job(name: str, fn, client):
+    """A module's job wrapped for the scheduler, keeping its own name for /admin status."""
+    async def run(now):
+        await fn(client, now)
+    run.__name__ = name
+    return run
 
 
 def env(name: str, default: str) -> str:
@@ -481,7 +495,9 @@ def db() -> sqlite3.Connection:
                           ("preseason", "INTEGER"), ("hidden", "INTEGER"), ("revealed_at", "TEXT"),
                           ("one_leg_at", "TEXT"), ("reacted", "INTEGER"), ("pp_offered", "TEXT"),
                           ("future_due", "TEXT"), ("future_nudged", "TEXT"), ("celebrated", "INTEGER"),
-                          ("confidence", "INTEGER")):
+                          ("confidence", "INTEGER"), ("slate_date", "TEXT"), ("slate_checked_at", "TEXT"),
+                          ("pp_type", "TEXT"), ("auto_at", "TEXT"), ("auto_state", "TEXT"), ("auto_ai_at", "TEXT"),
+                          ("auto_ai_tries", "INTEGER"), ("settled_by", "TEXT"), ("estimated", "INTEGER")):
             if col not in cols:
                 _conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {kind}")
         leg_cols = {r[1] for r in _conn.execute("PRAGMA table_info(legs)")}
@@ -627,7 +643,7 @@ def settle_pick(guild_id: int, pick_id: int, status: str,
         propagate_to_copies(pick_id, None, status)
     if status == "open":
         db().execute(
-            "UPDATE picks SET status='open', returned=NULL, settled_at=NULL WHERE id=?",
+            "UPDATE picks SET status='open', returned=NULL, settled_at=NULL, settled_by=NULL, estimated=NULL WHERE id=?",
             (pick_id,),
         )
     else:
@@ -637,7 +653,7 @@ def settle_pick(guild_id: int, pick_id: int, status: str,
             else:
                 returned = default_return(status, pick["cost"], pick["payout"])
         db().execute(
-            "UPDATE picks SET status=?, returned=?, settled_at=? WHERE id=?",
+            "UPDATE picks SET status=?, returned=?, settled_at=?, settled_by=NULL, estimated=NULL WHERE id=?",
             (status, returned, now_iso(), pick_id),
         )
     db().commit()
@@ -657,40 +673,47 @@ def grade_leg(guild_id: int, pick_id: int, idx: int,
     legs = get_legs(pick_id)
     if pick is None:
         return None, ""
-    standard = pick["status"] in ("win", "loss") and pick["returned"] is not None and \
+    standard = pick["status"] in ("win", "loss", "push") and pick["returned"] is not None and \
         abs(pick["returned"] - default_return(pick["status"], pick["cost"], pick["payout"])) < 0.005
-    if pick["status"] in ("win", "loss") and status != "open" and not standard:
+    auto = (pick["settled_by"] if "settled_by" in pick.keys() else None) == "auto" or \
+        bool(pick["estimated"] if "estimated" in pick.keys() else None)
+    if pick["status"] in ("win", "loss", "push") and status != "open" and not standard and not auto:
         return pick, ("This pick was settled with its own amount, so I left the result alone. "
                       f"Use `/result pick_id:{pick_id}` if it needs changing.")
-    if pick["status"] in ("win", "loss") and status != "open":
+    statuses = [leg["status"] for leg in legs]
+    if pick["status"] in ("win", "loss", "push") and status != "open":
         # a correction after the pick settled: let the legs re-decide it
-        statuses = [leg["status"] for leg in legs]
-        pp = pick["platform"].lower() == "prizepicks"
-        if all(x == "hit" for x in statuses) and pick["status"] != "win":
-            return settle_pick(guild_id, pick_id, "win"), "With that fixed, every leg hit, so it's now a **win**."
-        if pick["status"] == "win" and "miss" in statuses and not pp:
-            return settle_pick(guild_id, pick_id, "loss"), "With that fixed, a leg missed, so it's now a **loss**."
+        d = decide_pick(pick, legs)
+        if d is not None:
+            new_status, ret, note, est = d
+            now_ret = ret if ret is not None else (pick["cost"] if new_status == "win" and not pick["payout"]
+                                                   else default_return(new_status, pick["cost"], pick["payout"]))
+            if new_status != pick["status"] or abs(now_ret - (pick["returned"] or 0)) > 0.005:
+                p2 = settle_pick(guild_id, pick_id, new_status, ret)
+                if est:
+                    mark_estimated(pick_id)
+                if auto:
+                    mark_auto(pick_id)
+                return get_pick(guild_id, pick_id) or p2, (f"With that fixed, it's now a **{new_status}**."
+                                                            + (f" {note}" if est else ""))
+            return pick, ""
         if pick["status"] == "loss" and "miss" not in statuses and "open" in statuses:
             return settle_pick(guild_id, pick_id, "open"), "No legs have missed now, so I reopened it."
         return pick, ""
     if pick["status"] != "open" or status == "open":
         return pick, ""
-    statuses = [leg["status"] for leg in legs]
-    if all(s == "hit" for s in statuses):
-        p2 = settle_pick(guild_id, pick_id, "win")
-        if not pick["payout"]:
-            return p2, ("Every leg hit, so it's a **win** 🎉. The payout's missing, so it counts as break-even until "
-                        f"you add it: `/result pick_id:{pick_id} outcome:Win returned:<amount>`.")
-        return p2, "Every leg hit, so I marked it a **win**."
-    if "miss" in statuses:
-        if pick["platform"].lower() == "prizepicks":
-            return pick, ("A leg missed. Flex entries can still pay out, so settle this one "
-                          f"with `/result pick_id:{pick_id}` once it's final.")
-        return settle_pick(guild_id, pick_id, "loss"), "A leg missed, so I marked it a **loss**."
-    if "open" not in statuses:
-        return pick, ("All legs are graded but one pushed, which usually cuts the payout. "
-                      f"Settle it with `/result pick_id:{pick_id}` and the `returned` amount.")
-    return pick, ""
+    d = decide_pick(pick, legs)
+    if d is None:
+        if "miss" in statuses and entry_kind(pick, len(legs)) == "flex":
+            return pick, ("A leg missed, but this is a Flex entry, so it can still pay. I'll settle it when the "
+                          "rest of the legs finish.")
+        return pick, ""
+    new_status, ret, note, est = d
+    p2 = settle_pick(guild_id, pick_id, new_status, ret)
+    if est:
+        mark_estimated(pick_id)
+        p2 = get_pick(guild_id, pick_id)
+    return p2, note
 
 
 def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
@@ -1967,6 +1990,10 @@ Less = under), e.g. 'Victor Wembanyama over 23.5 Pts+Rebs+Asts'. Game lines as '
   "payout": total amount paid back if it wins (or that it did pay), or null if not visible,
   "status": "open" | "win" | "loss" | "push",
   "returned": amount actually paid out if the slip is already settled, else null,
+  "game_date": "YYYY-MM-DD" date of the earliest game on the slip when it shows game days or times \
+(e.g. "Thu 7:30pm", "Oct 8", "Today"), else null,
+  "entry_type": "power" | "flex" | null (PrizePicks Power Play or Underdog Standard = power; Flex Play or \
+Insured = flex),
   "placed": true if this entry/bet was actually submitted (an entry or bet ID, "Entry placed", "My Bets"/"My \
 Entries" view, live progress or a result); false if it is still being built (an entry-fee box, "Place Entry", \
 "Submit", "Deposit Funds", "Add to betslip", "Not enough balance", empty pick slots)
@@ -1978,7 +2005,11 @@ numbers with no currency symbols. Never guess an amount you cannot read.
 PrizePicks details: the header reads like "$25 to win $450" (cost 25, payout 450). If a line \
 shows a crossed-out number next to a new number (a discounted or promo line), the leg uses the \
 NEW number, never the crossed-out one. Demon and goblin icons don't change how you write the leg. \
-Up arrow = over, down arrow = under. Keep accents and spelling of player names exactly as shown."""
+Up arrow = over, down arrow = under. Keep accents and spelling of player names exactly as shown.
+
+Copy each stat name exactly as the slip shows it ("Punts" is not "Points"; "Faceoffs Won", "Fantasy Score", \
+"Longest Rec"). A two-player combo is written "Player A + Player B over LINE stat (Combo)". If you can't read \
+the individual picks, still return what you can, never a placeholder like "6 Pick Power Play" as a leg."""
 
 ASK_SYSTEM = """You are {bot_name}, the assistant in a Discord server where a group of \
 friends track their sports picks (Kalshi, PrizePicks and sportsbooks; NFL, CS2 esports \
@@ -2100,6 +2131,8 @@ async def read_slip(attachment: discord.Attachment, model: Optional[str] = None)
         prompt = (f"These {len(images)} images are ONE screenshot: the first is the whole thing, the rest are "
                   "enlarged slices of it from top to bottom that overlap a little. Use the slices to read small "
                   "text, and count each leg only once.\n\n" + SLIP_PROMPT)
+    prompt += (f"\n\nToday is {datetime.now(TZ):%A, %B %d, %Y} ({TZ}). Game days shown on a slip are "
+               "within the past week or the coming week.")
     content.append({"type": "text", "text": prompt})
     reply = await anthropic_client().messages.create(
         model=model or CLAUDE_MODEL,
@@ -2458,17 +2491,30 @@ async def find_games(team_text: str, leagues: list[str], start: datetime) -> lis
     return unique
 
 
+class SlateAnchor(datetime):
+    """A search anchor that came from a slip's slate date rather than from when it was logged."""
+
+
 def pick_game(games: list[tuple[dict, int]], logged: datetime) -> Optional[tuple[dict, int]]:
-    """The first game starting no more than 18 hours before the bet was logged."""
+    """The first game starting no more than 18 hours before the bet was logged. When the anchor is a slate date
+    (a multi-day slip read as Friday that also has Thursday-night legs) and this team has nothing coming up in the
+    next 3 days, its game from the day before counts instead."""
     floor = logged - timedelta(hours=18)
+    first, earlier = None, []
     for ev, i in games:
         try:
             when = datetime.fromisoformat(ev["date"].replace("Z", "+00:00"))
         except ValueError:
             continue
         if when >= floor:
-            return ev, i
-    return None
+            first = (ev, i)
+            break
+        if when >= logged - timedelta(hours=42) and ev.get("state") in ("in", "post"):
+            earlier.append((ev, i))
+    if isinstance(logged, SlateAnchor) and earlier:
+        if first is None or event_time(first[0]) is None or event_time(first[0]) > logged + timedelta(hours=72):
+            return earlier[-1]
+    return first
 
 
 def score_line(ev: dict) -> str:
@@ -2504,10 +2550,8 @@ async def free_grade(p, items: list[tuple[int, str]],
     """Grade what the public scoreboard can settle. Returns {item number: (result, why)};
     items it can't settle are left out."""
     leagues = leagues_for(p["sport"])
-    if not leagues:
-        return {}
-    logged = datetime.fromisoformat(p["created_at"])
-    parsed = {n: parse_simple_leg(text) for n, text in items}
+    logged = pick_anchor(p)
+    parsed = {n: (parse_simple_leg(text) if leagues else None) for n, text in items}
     # Teams named anywhere on the pick, so a bare "Over 44.5" can find its game.
     context_teams = [x["team"] for x in parsed.values() if x and "team" in x]
     for leg_text in (context_legs if context_legs is not None else [leg["text"] for leg in get_legs(p["id"])]):
@@ -2570,6 +2614,8 @@ def grade_request(p: sqlite3.Row, items: list[tuple[int, str]], single: bool) ->
     lines = [f"Today is {datetime.now(TZ).strftime('%A, %B %d, %Y')}.",
              f"Bet logged {logged} on {p['platform']}" + (f" ({p['sport']})" if p["sport"] else "") + ".",
              f"The bet: {p['description']}"]
+    if _rg(p, "slate_date"):
+        lines.append(f"The games on this slip were on or after {_rg(p, 'slate_date')} (local date).")
     if p["notes"]:
         lines.append(f"Bettor's notes: {clip(p['notes'], 400)}")
     if single:
@@ -2632,6 +2678,9 @@ def grading_message(p: sqlite3.Row, lines: list[str], final_try: bool) -> str:
         net = (p["returned"] or 0.0) - p["cost"]
         tail = (f"Result: **{STATUS[p['status']][0]}** ({signed(net)}). Wrong, or cashed out early? "
                 f"Fix it with `/leg` or `/result pick_id:{p['id']}`.")
+        if _rg(p, "estimated"):
+            tail += (f"\n-# {money(p['returned'] or 0)} back is an estimate from the payout table (a leg pushed or a "
+                     "Flex partly hit). If the app paid something else, use `/result` with the real amount.")
     elif final_try:
         tail = f"I couldn't settle this one. Settle it with `/result pick_id:{p['id']}`."
     elif p["platform"].lower() == "prizepicks" and any(leg["status"] == "miss" for leg in get_legs(p["id"])):
@@ -4305,6 +4354,8 @@ C = {
     "def_int": (("interceptions",), ("INT",), "interceptions"),
     "fg_made": (("fieldGoalsMade/fieldGoalAttempts",), ("FG",), "kicking"),
     "kick_pts": (("totalKickingPoints",), ("PTS",), "kicking"),
+    "fum_lost": (("fumblesLost",), ("LOST",), "fumbles"),
+    "punts": (("punts",), ("NO",), "punting"),
     # baseball
     "h": (("hits",), ("H",), "batting"),
     "r": (("runs",), ("R",), "batting"),
@@ -4324,6 +4375,7 @@ C = {
     "saves": (("saves",), ("SV",), "goalies"),
     "blocked": (("blockedShots",), ("BS",), None),
     "hits_nhl": (("hits",), ("HT",), None),
+    "fow": (("faceoffsWon", "faceoffWins"), ("FW",), None),
 }
 
 # stat key: (display name, family, [(component, weight)], aliases)
@@ -4385,6 +4437,11 @@ STATS = {
     "sacks": ("Sacks", "football", [("sacks", 1)], ["sacks"]),
     "fg_made": ("FG Made", "football", [("fg_made", 1)], ["field goals made", "fg made"]),
     "kick_pts": ("Kicking Points", "football", [("kick_pts", 1)], ["kicking points"]),
+    "nfl_fantasy": ("Fantasy Score", "football",
+                    [("pass_yds", 0.04), ("pass_td", 4), ("pass_int", -1), ("rush_yds", 0.1), ("rush_td", 6),
+                     ("rec", 1), ("rec_yds", 0.1), ("rec_td", 6), ("fum_lost", -1)],
+                    ["fantasy score", "fantasy points", "fantasy pts", "fantasy"]),
+    "punts": ("Punts", "football", [("punts", 1)], ["punts"]),
     # baseball
     "hits": ("Hits", "baseball", [("h", 1)], ["hits"]),
     "runs": ("Runs", "baseball", [("r", 1)], ["runs scored", "runs"]),
@@ -4408,6 +4465,7 @@ STATS = {
     "saves": ("Goalie Saves", "hockey", [("saves", 1)], ["goalie saves", "saves"]),
     "blocked_shots": ("Blocked Shots", "hockey", [("blocked", 1)], ["blocked shots"]),
     "nhl_hits": ("Hits", "hockey", [("hits_nhl", 1)], ["hits"]),
+    "faceoffs": ("Faceoffs Won", "hockey", [("fow", 1)], ["faceoffs won", "faceoff wins", "faceoffs", "fow"]),
 }
 FAMILY_OF_PATH = {p: p.split("/")[0] for p in LEAGUE_SLUGS}
 # Nicknames people actually type.
@@ -4460,6 +4518,9 @@ def parse_prop_leg(text: str) -> Optional[dict]:
     t = re.sub(r"\s*\([^)]*$", " ", t)
     if ": " in t and not re.search(r"\d", t.split(": ", 1)[0]):
         t = t.replace(": ", " ", 1)
+    combo = parse_combo(t, negate)
+    if combo:
+        return combo
     keys = stat_keys_in(t)
     if not keys:
         return None
@@ -4676,7 +4737,8 @@ def stat_value(groups: dict[str, dict], stat_key: str) -> Optional[tuple[float, 
         total += v * w
         shown.append((comp, v))
     total = round(total, 2)
-    detail = "" if len(parts) == 1 else " (" + ", ".join(f"{v:g} {COMP_SHORT.get(c, c)}" for c, v in shown) + ")"
+    detail = "" if len(parts) == 1 or len(parts) > 6 else \
+        " (" + ", ".join(f"{v:g} {COMP_SHORT.get(c, c)}" for c, v in shown) + ")"
     return total, detail
 
 
@@ -4718,6 +4780,9 @@ async def prop_game(leg: dict, paths: list[str], logged: datetime) -> Optional[t
         found = pick_game(await find_games(c["team"], [c["path"]], logged), logged) if c["team"] else None
         if found:
             games.append((c["path"], found[0], c))
+    if len({g[1]["id"] for g in games}) > 1:
+        best = min(paths.index(g[0]) for g in games)
+        games = [g for g in games if paths.index(g[0]) == best]
     if len({g[1]["id"] for g in games}) != 1:
         return None   # no game, or the name fits players in different games
     return games[0]
@@ -4726,6 +4791,8 @@ async def prop_game(leg: dict, paths: list[str], logged: datetime) -> Optional[t
 async def prop_status(leg: dict, paths: list[str], logged: datetime) -> Optional[dict]:
     """Live or final status of a player prop:
     {result: hit/miss/push/None, value, line, stat, player, detail, state, why, event, path, preseason}"""
+    if leg.get("combo"):
+        return await combo_status(leg, paths, logged)
     found = await prop_game(leg, paths, logged)
     if not found:
         return None
@@ -4781,10 +4848,10 @@ def prop_of(text: str) -> Optional[dict]:
 
 
 async def grade_props(p, items: list[tuple[int, str]], skip: set[int]) -> dict[int, tuple[str, str]]:
-    paths = [x for x in leagues_for(p["sport"]) if x in PROP_PATHS]
+    paths = prop_paths_for(p)
     if not paths:
         return {}
-    logged = datetime.fromisoformat(p["created_at"])
+    logged = pick_anchor(p)
     out: dict[int, tuple[str, str]] = {}
     for n, text in items:
         if n in skip:
@@ -4854,13 +4921,14 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
     items = [(1, p["description"], p["status"] if p["status"] != "open" else "open")] if not legs else \
         [(leg["idx"], leg["text"], leg["status"]) for leg in legs]
     leagues = leagues_for(p["sport"])
-    prop_paths = [x for x in leagues if x in PROP_PATHS]
-    logged = datetime.fromisoformat(p["created_at"])
+    prop_paths = prop_paths_for(p)
+    logged = await pick_anchor_live(p)
     context_teams = [x["team"] for x in (parse_simple_leg(t) for _, t, _ in items) if x and "team" in x]
     out = []
     for n, text, status in items:
         entry = {"n": n, "text": text, "status": status, "line": "", "event": None, "path": None, "live": None,
-                 "in_play": False, "num": None, "sub": ""}
+                 "in_play": False, "num": None, "sub": "", "decided": None, "why": "", "margin": None,
+                 "preseason": False}
         simple = parse_simple_leg(text) if leagues else None
         prop = prop_of(text) if prop_paths else None
         try:
@@ -4877,11 +4945,16 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
                     entry["in_play"] = ev.get("state") == "in"
                     now_r = simple_live_result(simple, ev, None if simple["kind"] == "total" else i)
                     entry["live"] = {"hit": "ahead", "miss": "behind"}.get(now_r or "", None)
+                    entry["preseason"] = ev.get("season_type") == 1
                     if ev.get("final") and all(t["score"] is not None for t in ev["teams"]):
+                        ii = None if simple["kind"] == "total" else i
                         try:
-                            entry["final"] = judge(simple, ev, None if simple["kind"] == "total" else i)
+                            entry["final"] = judge(simple, ev, ii)
                         except Exception:
                             entry["final"] = None
+                        if entry["final"]:
+                            entry["decided"], entry["why"] = entry["final"], score_line(ev)
+                            entry["margin"] = simple_margin(simple, ev, ii)
             elif prop:
                 st = await prop_status(prop, prop_paths, logged)
                 if st:
@@ -4903,8 +4976,16 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
                         entry["line"] = short_game(st["event"])
                     if st["result"] and status == "open":
                         entry["live"] = st["result"]
+                    entry["preseason"] = bool(st["preseason"])
+                    if st["result"]:
+                        entry["decided"] = st["result"]
+                        entry["why"] = st["why"] + ("" if st["state"] == "post" else " (already decided, game still on)")
+                        if st["value"] is not None:
+                            entry["margin"] = bettor_margin(prop, st["value"])
         except Exception:
             log.exception("Progress lookup failed for %r", text)
+        if status == "open" and not entry["event"] and not entry["sub"] and not entry["line"]:
+            entry["sub"] = "✋ Not in the free stats: I'll look it up or ask you once the games are done"
         out.append(entry)
     return out
 
@@ -6404,7 +6485,11 @@ def pp_tables(guild_id: Optional[int]) -> tuple[dict, dict]:
 
 
 def pp_kind(p) -> str:
-    return "flex" if re.search(r"\bflex", (p["description"] or "").lower()) else "power"
+    pid = _rg(p, "id")
+    n = len(get_legs(pid)) if pid else 0
+    q = dict(p)
+    q["platform"] = "PrizePicks"      # only asked about pick'em entries
+    return "flex" if entry_kind(q, n) == "flex" else "power"
 
 
 def pp_multiplier(guild_id: Optional[int], kind: str, n: int, hits: int) -> Optional[float]:
@@ -6506,10 +6591,11 @@ async def one_leg_alerts(client: discord.Client, now: Optional[datetime] = None)
         last = open_legs[0]["text"]
         view = discord.ui.View(timeout=None)
         view.add_item(CardSweatButton(p["id"]))
-        text = voice_line(p["guild_id"], "oneleg", name=p["bettor_name"], desc=clip(p["description"], 60), pid=p["id"],
+        who = call_name(p["guild_id"], p["bettor_key"], p["bettor_name"])
+        text = voice_line(p["guild_id"], "oneleg", name=who, desc=clip(p["description"], 60), pid=p["id"],
                           n=len(legs) - 1, leg=clip(last, 100), payout=money(p["payout"]))
         await channel.send(text, view=view, allowed_mentions=discord.AllowedMentions.none())
-        await voice_say(client, p["guild_id"], f"One leg away! {p['bettor_name']} needs {clip(last, 80)} for "
+        await voice_say(client, p["guild_id"], f"One leg away! {who} needs {clip(last, 80)} for "
                                                f"{money(p['payout'])}.")
 
 
@@ -7661,6 +7747,7 @@ async def handle_dm_slip(client: discord.Client, message: discord.Message, attac
                       sport=(str(slip["sport"])[:60] if slip.get("sport") else None),
                       description=str(slip.get("description") or "Slip")[:200], legs="\n".join(legs) or None,
                       cost=slip["cost"], payout=slip["payout"] or 0.0)
+    apply_slip_meta(pid, slip)
     db().execute("UPDATE picks SET hidden = 1 WHERE id = ?", (pid,))
     db().commit()
     if slip["status"] != "open":
@@ -7724,6 +7811,7 @@ async def log_message_as_pick(interaction: discord.Interaction, message: discord
                       sport=(str(slip["sport"])[:60] if slip.get("sport") else None),
                       description=str(slip.get("description") or "Slip")[:200], legs="\n".join(legs) or None,
                       cost=slip["cost"], payout=slip["payout"] or 0.0, slip_url=message.jump_url)
+    apply_slip_meta(pid, slip)
     if slip["status"] != "open":
         settle_pick(interaction.guild_id, pid, slip["status"], slip["returned"])
     p = get_pick(interaction.guild_id, pid)
@@ -7884,6 +7972,7 @@ def dashboard_data(guild_id: int) -> dict:
     coins = [{"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"])} for u in coins_top(guild_id, 10)]
     rec = records_embed(guild_id).description or ""
     return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": dashboard_people(guild_id),
+            "recent": dashboard_recent(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
             "series": {k: [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in v] for k, v in series.items()},
@@ -10211,7 +10300,8 @@ async def big_moments(client: discord.Client, now: Optional[datetime] = None) ->
             continue
         legs = get_legs(p["id"])
         if p["status"] == "win" and p["cost"] and (p["returned"] or 0) >= 10 * p["cost"]:
-            text = voice_line(p["guild_id"], "bigwin", name=p["bettor_name"], cost=money(p["cost"]),
+            text = voice_line(p["guild_id"], "bigwin", name=call_name(p["guild_id"], p["bettor_key"], p["bettor_name"]),
+                              cost=money(p["cost"]),
                               amount=money(p["returned"] or 0), mult=f"{(p['returned'] or 0) / p['cost']:.0f}",
                               desc=clip(p["description"], 80))
             await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
@@ -10653,7 +10743,8 @@ class RolePicker(discord.ui.View):
 
 WELCOME_TEXT = ("👋 Welcome to the server! I'm PIMP-BOT, the group's pick tracker.\n"
                 "• Post your slip screenshots in the receipts channel and I'll log them.\n"
-                "• `/help` shows everything I do, `/record` your stats, `/leaderboard` who's up.\n"
+                "• New? Run `/start` in the server: a one-minute tour made for you.\n"
+                "• `/inbox` shows anything waiting on you, `/help` everything I do.\n"
                 "• `/me roles` to pick the sports you follow, `/me bio` to set up your profile card.\n"
                 "Bet what you can afford to lose. Have fun. 🤝")
 
@@ -10846,6 +10937,7 @@ async def status_embed(client) -> discord.Embed:
         checks.append("❌ Kalshi")
     checks.append("✅ Claude key set" if ai_enabled() else "⚪ Claude off (no key)")
     e.add_field(name="Background jobs", value=clip(job_health_line(), 1000), inline=False)
+    e.add_field(name="Autopilot", value=clip(autopilot_status_line(None), 1000), inline=False)
     e.add_field(name="Claude calls today", value=f"{claude_calls_today()}" + (f" of {CLAUDE_DAILY_CAP} (extras pause at the cap)"
                                                                              if CLAUDE_DAILY_CAP else ""))
     checks.append("✅ Dashboard" if dashboard_url() else "⚪ Dashboard off")
@@ -11070,7 +11162,7 @@ def render_trading_card(c: dict, avatar: Optional[bytes]) -> io.BytesIO:
     card.paste(frame, (0, 0), _rounded_mask((W, H), 44))
     # inner panel with a soft diagonal sheen
     iw, ih = W - 44, H - 44
-    inner = _grad((iw, ih), [(30, 30, 42), (14, 14, 20), (24, 22, 34)])
+    inner = _grad((iw, ih), brand_card_inner(c.get("theme")))
     sheen = Image.new("L", (iw, ih), 0)
     sd = ImageDraw.Draw(sheen)
     for k in range(-ih, iw, 46):
@@ -11128,7 +11220,7 @@ def render_trading_card(c: dict, avatar: Optional[bytes]) -> io.BytesIO:
         for i, (label, value, colour) in enumerate(stats):
             col, row = i % 3, i // 3
             x0, y0 = 60 + col * cw, y + row * 100
-            d.rounded_rectangle((x0 + 6, y0, x0 + cw - 6, y0 + 88), 18, fill=ART_PANEL)
+            d.rounded_rectangle((x0 + 6, y0, x0 + cw - 6, y0 + 88), 18, fill=brand_card_panel(c.get("theme")))
             t, f = fit_text(d, value, cw - 30, 34, True, 18)
             d.text((x0 + (cw - _tw(d, t, f)) / 2, y0 + 10), t, font=f, fill=colour or ART_TEXT)
             lf = art_font(17, True)
@@ -11159,8 +11251,7 @@ def render_trading_card(c: dict, avatar: Optional[bytes]) -> io.BytesIO:
                 x += bw + 8
         # footer
         foot = f"PIMP-BOT  ·  SERIES {c.get('season', '')}  ·  {c.get('serial', '')}"
-        f = art_font(16, True)
-        d.text(((W - _tw(d, foot, f)) / 2, H - 70), foot, font=f, fill=ART_FAINT)
+        brand_sign(card, W / 2, H - 70, foot, 16, align="center", colour=ART_FAINT)
     if rname == "Mythic":  # faint holo shimmer
         holo = _grad((W, H), stops).convert("RGBA")
         holo.putalpha(Image.new("L", (W, H), 22))
@@ -11203,8 +11294,7 @@ def _card_back(card, d, c, accent):
             d.text((x + 14, y + 6), b, font=f, fill=ART_TEXT)
             x += bw + 10
     foot = f"PIMP-BOT  ·  SERIES {c.get('season', '')}  ·  {c.get('serial', '')}"
-    f = art_font(16, True)
-    d.text(((W - _tw(d, foot, f)) / 2, H - 70), foot, font=f, fill=ART_FAINT)
+    brand_sign(card, W / 2, H - 70, foot, 16, align="center", colour=ART_FAINT)
 
 
 # ---- slip receipt ---------------------------------------------------------------------------
@@ -11269,7 +11359,9 @@ def render_receipt(r: dict) -> io.BytesIO:
     d = ImageDraw.Draw(img)
     pc = PLATFORM_COLORS.get((r.get("platform") or "").lower(), ART_BRAND)
     d.rounded_rectangle((16, 16, W - 16, H - 16), 30, fill=(22, 22, 30))
-    head = _vgrad((W - 32, 170), tuple(min(255, int(x * 0.6)) for x in pc), (22, 22, 30))
+    th = r.get("theme")
+    top = th["stops"][1] if th and th.get("chosen") else tuple(min(255, int(x * 0.6)) for x in pc)
+    head = _vgrad((W - 32, 170), top, (22, 22, 30))
     img.paste(head, (16, 16), _rounded_mask((W - 32, 170), 30))
     img.paste(_avatar(r.get("avatar"), 78, r["name"], -1), (44, 40), _avatar(r.get("avatar"), 78, r["name"], -1))
     t, f = fit_text(d, r["name"], 470, 34, True)
@@ -11328,7 +11420,7 @@ def render_receipt(r: dict) -> io.BytesIO:
         msg = (f"LIVE  ·  updated {r.get('updated', '')}" if live else f"Updated {r.get('updated', '')}")
         d.ellipse((44, y + 34, 58, y + 48), fill=ART_RED if live else ART_FAINT)
         d.text((70, y + 30), msg, font=f, fill=ART_MUTED)
-    d.text((W - 48 - _tw(d, "PIMP-BOT", art_font(16, True)), y + 32), "PIMP-BOT", font=art_font(16, True), fill=ART_FAINT)
+    brand_sign(img, W - 48, y + 32, "PIMP-BOT", 16, variant={"win": "hype", "loss": "cold"}.get(r["status"], "default"))
     return _png(img)
 
 
@@ -11375,6 +11467,13 @@ def render_board(b: dict) -> io.BytesIO:
         ml = f"{money_short(s['cost'])} → {money_short(s['payout'])}"
         t, f = fit_text(d, ml, 260, 26, True)
         d.text((W - 48 - _tw(d, t, f), y + 20), t, font=f, fill=ART_TEXT)
+        if s.get("status") in ("win", "loss", "push"):
+            stamp = {"win": f"CASHED {signed_short(s.get('net', 0))}", "loss": "DEAD", "push": "PUSH"}[s["status"]]
+            colour = {"win": ART_GREEN, "loss": ART_RED, "push": ART_MUTED}[s["status"]]
+            sf = art_font(18, True)
+            sw = _tw(d, stamp, sf) + 24
+            d.rounded_rectangle((114 + 370, y + 22, 114 + 370 + sw, y + 52), 12, outline=colour, width=3)
+            d.text((114 + 382, y + 26), stamp, font=sf, fill=colour)
         # one dot per leg
         dx = W - 48 - 30 * len(s["legs"][:14])
         for e in s["legs"][:14]:
@@ -11399,8 +11498,7 @@ def render_board(b: dict) -> io.BytesIO:
         y += h + 16
     if len(b["slips"]) > len(slips):
         d.text((40, y + 6), f"+ {len(b['slips']) - len(slips)} more slips", font=art_font(18, True), fill=ART_MUTED)
-    d.text((W - 40 - _tw(d, "PIMP-BOT", art_font(16, True)), H - 44), "PIMP-BOT", font=art_font(16, True),
-           fill=ART_FAINT)
+    brand_sign(img, W - 40, H - 44, "PIMP-BOT", 16, variant="hype" if b.get("live") else "default")
     return _png(img)
 
 
@@ -11585,17 +11683,20 @@ async def cheer_settled(client: discord.Client, now: Optional[datetime] = None) 
         legs = get_legs(p["id"])
         missed = next((x["text"] for x in legs if x["status"] == "miss"), None)
         amount = signed(pick_net(p)) if not roast else money(p["cost"])
-        kw = dict(name=p["bettor_name"], amount=amount, desc=clip(p["description"], 60), leg=clip(missed or "it", 50),
+        kw = dict(name=call_name(gid, p["bettor_key"], p["bettor_name"]), amount=amount, desc=clip(p["description"], 60),
+                  leg=clip(missed or "it", 50),
                   payout=money(p["payout"]), mult=f"{(p['returned'] or 0) / p['cost']:.1f}" if p["cost"] else "?",
                   cost=money(p["cost"]), n=len(legs), pid=p["id"])
         fallback = voice_line(gid, "roast" if roast else "cash", **kw)
         streak = current_streak(gid, p["bettor_key"])
-        facts = (f"Bettor: {p['bettor_name']}\nPlay: {p['description']} on {p['platform']}"
+        facts = (f"Bettor: {kw['name']}\nPlay: {p['description']} on {p['platform']}"
                  + (f" ({p['sport']})" if p["sport"] else "")
                  + f"\nRisked {money(p['cost'])}, " + (f"won {signed(pick_net(p))}" if not roast else "lost it")
                  + (f"\nLegs: " + "; ".join(f"{x['text']} ({x['status']})" for x in legs[:8]) if legs else "")
                  + (f"\nCurrent streak: {streak.lstrip('🔥🧊')}" if streak else ""))
-        line = await persona_reaction(gid, "roast" if roast else "cash", facts, fallback)
+        line = (None if roast else hype_line(gid, p, kw)) or \
+            await persona_reaction(gid, "roast" if roast else "cash", facts, fallback)
+        line = with_memory(gid, p, line)
         if channel is not None:
             try:
                 ref = channel.get_partial_message(ids[1])
@@ -11781,7 +11882,8 @@ def card_payload(guild_id: int, key: str, name: str, back: bool = False) -> Opti
                                  (get_bio(guild_id, int(key)).get("tagline") if key.isdigit() else "") or "") if x)
     c = {"name": s["name"] or name, "ovr": cn["ovr"], "rarity": cn["rarity"], "title": cn["title"],
          "sport": cn["top_sport"], "stats": stats, "badges": [n for k, n, _ in BADGES if k in got], "tagline": tag,
-         "serial": cn["serial"], "season": str(datetime.now(TZ).year), "back": back}
+         "serial": cn["serial"], "season": str(datetime.now(TZ).year), "back": back,
+         "theme": theme_for(guild_id, int(key)) if key.isdigit() else None}
     if back:
         rows = []
         for g, v in cn["groups"][:3]:
@@ -12212,7 +12314,8 @@ def receipt_sig(p, entries: list[dict]) -> str:
 def receipt_data(p, entries: list[dict], avatar: Optional[bytes]) -> dict:
     return {"name": p["bettor_name"], "avatar": avatar, "platform": p["platform"], "description": p["description"],
             "cost": p["cost"], "payout": p["payout"], "pick_id": p["id"], "status": p["status"], "net": pick_net(p),
-            "legs": entries, "updated": datetime.now(TZ).strftime("%-I:%M %p")}
+            "legs": entries, "updated": datetime.now(TZ).strftime("%-I:%M %p"),
+            "theme": theme_for(p["guild_id"], p["bettor_id"]) if p["bettor_id"] else None}
 
 
 async def receipt_file(client, p, entries: Optional[list] = None) -> discord.File:
@@ -12283,11 +12386,16 @@ async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
     cutoff = iso(datetime.now(timezone.utc) - timedelta(days=3))
     picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND (hidden IS NULL OR hidden = 0) "
                          "AND created_at >= ? ORDER BY id DESC LIMIT 25", (guild_id, cutoff)).fetchall()
+    # slips that finished in the last few hours stay on the board with their stamp
+    picks = list(picks) + list(db().execute(
+        "SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND (hidden IS NULL OR hidden = 0) AND settled_at >= ? "
+        "AND id IN (SELECT pick_id FROM legs) ORDER BY settled_at DESC LIMIT 8",
+        (guild_id, iso(datetime.now(timezone.utc) - timedelta(hours=BOARD_SETTLED_HOURS)))).fetchall())
     today = datetime.now(TZ).date()
     slips = []
     for p in picks:
-        entries = await cached_progress(p)
-        relevant = False
+        entries = await cached_progress(p) if p["status"] == "open" else db_entries(p)
+        relevant = p["status"] != "open"
         for e in entries:
             ev = e.get("event")
             when = event_time(ev) if ev and ev.get("date") else None
@@ -12299,17 +12407,20 @@ async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
         user = client.get_user(p["bettor_id"]) if p["bettor_id"] and hasattr(client, "get_user") else None
         slips.append({"name": p["bettor_name"], "avatar": await avatar_bytes(user) if user else None, "cost": p["cost"],
                       "payout": p["payout"], "description": p["description"], "legs": entries, "id": p["id"],
-                      "live": any(e.get("in_play") for e in entries)})
+                      "live": any(e.get("in_play") for e in entries) and p["status"] == "open", "status": p["status"],
+                      "net": pick_net(p)})
     if not slips:
         return None
-    slips.sort(key=lambda s: (not s["live"], -sum(1 for e in s["legs"] if leg_visual(e)["state"] in ("hit", "ahead"))))
+    slips.sort(key=lambda s: (s["status"] != "open", not s["live"],
+                              -sum(1 for e in s["legs"] if leg_visual(e)["state"] in ("hit", "ahead"))))
     all_legs = [e for s in slips for e in s["legs"]]
     live = any(s["live"] for s in slips)
     data = {"title": "TONIGHT'S BOARD", "when": datetime.now(TZ).strftime("%a %b %-d · %-I:%M %p"), "live": live,
-            "slips": slips, "totals": {"slips": len(slips), "cost": sum(s["cost"] for s in slips),
-                                       "payout": sum(s["payout"] for s in slips), "legs": len(all_legs),
+            "slips": slips, "totals": {"slips": len(slips), "cost": sum(s["cost"] for s in slips if s["status"] == "open"),
+                                       "payout": sum(s["payout"] for s in slips if s["status"] == "open"),
+                                       "legs": len(all_legs),
                                        "cashing": sum(1 for e in all_legs if leg_visual(e)["state"] in ("hit", "ahead"))}}
-    sig = json.dumps([[s["id"], receipt_sig({"status": "open"}, s["legs"])] for s in slips])
+    sig = json.dumps([[s["id"], receipt_sig({"status": s["status"]}, s["legs"])] for s in slips])
     png = await asyncio.to_thread(locked_render, render_board, data)
     return png, live, sig, len(slips)
 
@@ -12914,7 +13025,7 @@ def render_xray(title: str, data: list[dict], heading: str = "SLIP X-RAY") -> io
         d.text((cx0 - 10 - _tw(d, lt, lf), ly - 9), lt, font=lf, fill=ART_TEXT)
         y += ROW
     d.text((36, H - 40), "Last 10 games, oldest → newest · green = beat the number", font=art_font(15), fill=ART_FAINT)
-    d.text((W - 36 - _tw(d, "PIMP-BOT", art_font(15, True)), H - 40), "PIMP-BOT", font=art_font(15, True), fill=ART_FAINT)
+    brand_sign(img, W - 36, H - 40, "PIMP-BOT", 15, variant="cool")
     return _png(img)
 
 
@@ -13460,7 +13571,7 @@ def render_cashed_poster(title: str, sub: str, receipts: list[io.BytesIO]) -> io
     d.text((42, 104), t, font=f, fill=ART_GREEN)
     for th, (c, y) in zip(thumbs, places):
         img.paste(th, (40 + c * 490, 180 + y))
-    d.text((W - 40 - _tw(d, "PIMP-BOT", art_font(15, True)), H - 34), "PIMP-BOT", font=art_font(15, True), fill=ART_FAINT)
+    brand_sign(img, W - 40, H - 34, "PIMP-BOT", 15, variant="hype")
     return _png(img)
 
 
@@ -13498,7 +13609,7 @@ def render_standings_poster(title: str, sub: str, rows: list[dict]) -> io.BytesI
         roi = f"{r['roi']:+.0f}% ROI"
         d.text((W - 56 - _tw(d, roi, art_font(17, True)), y + 50), roi, font=art_font(17, True), fill=ART_MUTED)
         y += RH
-    d.text((W - 40 - _tw(d, "PIMP-BOT", art_font(15, True)), H - 36), "PIMP-BOT", font=art_font(15, True), fill=ART_FAINT)
+    brand_sign(img, W - 40, H - 36, "PIMP-BOT", 15, variant="crown")
     return _png(img)
 
 
@@ -13593,6 +13704,7 @@ def job_health_line() -> str:
 # kind: "optin" = on only when the value is "on"; "optout" = on unless "off"; "inverted" = on unless the value is "on"
 SERVER_TOGGLES = [
     ("reactions", "Cash reactions", "optout"), ("show", "Sunday Show", "optout"), ("stacks", "Stack alerts", "optout"),
+    ("autopilot", "Autopilot extras (web lookups, re-reads, asks)", "optout"),
     ("previews", "Game-day previews", "optout"), ("quests", "Weekly quests", "optout"),
     ("receipts_all", "Log slips in every channel", "optin"), ("board_auto", "Auto live board", "optin"),
     ("gamethreads", "Game threads", "optin"), ("welcome", "Welcome DMs", "optin"),
@@ -13970,7 +14082,7 @@ async def send_digests(client: discord.Client, now: Optional[datetime] = None) -
         name_row = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_id = ? ORDER BY id DESC LIMIT 1",
                                 (gid, uid)).fetchone()
         try:
-            e = await digest_embed(client, gid, uid, name_row["bettor_name"] if name_row else "there", now)
+            e = await digest_embed(client, gid, uid, call_name(gid, uid, name_row["bettor_name"] if name_row else "there"), now)
             if e is None:
                 continue
             user = client.get_user(uid) if hasattr(client, "get_user") else None
@@ -14037,7 +14149,7 @@ def render_hot(title: str, hot: list, cold: list, best_stat: Optional[tuple], wo
     if bits:
         t, f = fit_text(d, "   ·   ".join(bits), W - 80, 19, True)
         d.text((40, y), t, font=f, fill=ART_MUTED)
-    d.text((W - 40 - _tw(d, "PIMP-BOT", art_font(15, True)), H - 34), "PIMP-BOT", font=art_font(15, True), fill=ART_FAINT)
+    brand_sign(img, W - 40, H - 34, "PIMP-BOT", 15)
     return _png(img)
 
 
@@ -14065,7 +14177,7 @@ def render_preview(title: str, when: str, riders: list[tuple[str, str]], total_c
         y += 54
     foot = f"{len({w for w, _ in riders})} riding · {money_short(total_cost)} on slips with legs in this game"
     d.text((40, H - 46), foot, font=art_font(17, True), fill=ART_MUTED)
-    d.text((W - 40 - _tw(d, "PIMP-BOT", art_font(15, True)), H - 44), "PIMP-BOT", font=art_font(15, True), fill=ART_FAINT)
+    brand_sign(img, W - 40, H - 44, "PIMP-BOT", 15)
     return _png(img)
 
 
@@ -14306,6 +14418,7 @@ img.full{width:100%;border-radius:14px;display:block}canvas{max-height:340px}
 <section class="tab" id="tab-live">
  <div class="card wide"><h2>Tonight's board <span class="muted" id="liveat"></span></h2><div id="board"></div></div>
  <div class="card wide"><h2>Open slips</h2><div class="slips" id="slips"></div></div>
+ <div class="card wide"><h2>Just settled</h2><div class="slips" id="recent"></div></div>
 </section>
 <section class="tab" id="tab-cards"><div class="card wide"><h2>Trading cards · tap to flip</h2><div class="grid" id="cards"></div></div></section>
 <section class="tab" id="tab-posters">
@@ -14339,7 +14452,8 @@ function render(t){
  if(!data)return;
  if(t=='live'){picture(document.getElementById('board'),'board.png','','No slips with games today.');
   document.getElementById('liveat').textContent='· '+new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
-  document.getElementById('slips').innerHTML=data.open.length?data.open.map(p=>`<img loading=lazy src="${img('receipt/'+p.id+'.png')}" alt="#${p.id}">`).join(''):'<div class=empty>Nothing open.</div>'}
+  document.getElementById('slips').innerHTML=data.open.length?data.open.map(p=>`<img loading=lazy src="${img('receipt/'+p.id+'.png')}" alt="#${p.id}">`).join(''):'<div class=empty>Nothing open.</div>';
+  const rec=data.recent||[];document.getElementById('recent').innerHTML=rec.length?rec.map(p=>`<img loading=lazy src="${img('receipt/'+p.id+'.png')}" alt="#${p.id}">`).join(''):'<div class=empty>Nothing settled in the last day.</div>'}
  if(t=='cards'){document.getElementById('cards').innerHTML=data.people.map(p=>`<figure data-k="${esc(p.key)}" data-b="0"><img loading=lazy src="${img('card/'+p.key+'.png')}" alt=""><figcaption>${esc(p.name)} · ${esc(p.record)}</figcaption></figure>`).join('')||'<div class=empty>No cards yet.</div>';
   document.querySelectorAll('#cards figure').forEach(f=>f.onclick=()=>{const b=f.dataset.b=='1'?'0':'1';f.dataset.b=b;f.querySelector('img').src=img('card/'+f.dataset.k+'.png',b=='1'?'&back=1':'')})}
  if(t=='posters'){document.getElementById('p-standings').src=img('standings.png');
@@ -14368,6 +14482,3979 @@ load();setInterval(load,120000);
 </script></body></html>"""
 
 
+# ==========================================================================
+# r19: Autopilot. Slips find their games, grade leg by leg as games go, and close themselves.
+# ==========================================================================
+
+AUTOPILOT_DAYS = 6                 # open picks logged within this many days are tracked
+AUTOPILOT_BATCH = 40               # picks checked per 2-minute cycle
+AUTOPILOT_RECHECK = timedelta(minutes=2)
+AUTO_AI_GAPS_H = [0.5, 3, 6, 12, 24]   # hours to wait before each web lookup of a stuck leg
+BOARD_SETTLED_HOURS = 3            # finished slips stay on the live board this long
+SLATE_RETRY = timedelta(hours=1)
+DFS_PLATFORMS = ("prizepicks", "underdog", "sleeper", "betr", "dabble", "parlayplay", "chalkboard", "boom")
+# Payouts for reduced or partly-hit entries come from the PrizePicks tables (pp_tables, which admins can adjust),
+# scaled to the slip's own max payout (goblins and demons change it) and marked as estimates.
+
+
+def is_dfs(platform: str) -> bool:
+    """PrizePicks, Underdog and the other pick'em apps (by whole word: BetRivers isn't Betr)."""
+    return bool(re.search(r"\b(?:" + "|".join(DFS_PLATFORMS) + r")\b", (platform or "").lower()))
+
+
+def _rg(p, key):
+    """p[key] for a database row or a dict, None when it isn't there."""
+    try:
+        return p[key]
+    except (KeyError, IndexError):
+        return None
+
+
+# ---- which games a slip is on ---------------------------------------------------------------------
+
+def pick_anchor(p) -> datetime:
+    """The time to look for a pick's games from. With a slate date (read off the slip or worked out from the
+    schedule) that's the start of that day; otherwise when it was logged. Callers search from 18 hours before."""
+    sd = _rg(p, "slate_date")
+    if sd:
+        try:
+            d = datetime.strptime(str(sd)[:10], "%Y-%m-%d")
+            a = (d.replace(tzinfo=TZ) + timedelta(hours=17)).astimezone(timezone.utc)
+            return SlateAnchor(a.year, a.month, a.day, a.hour, a.minute, tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.fromisoformat(p["created_at"])
+
+
+async def pick_anchor_live(p) -> datetime:
+    """pick_anchor, working out the slate first for a real pick that doesn't have one yet."""
+    pid = _rg(p, "id")
+    if pid and pid > 0 and not _rg(p, "slate_date") and hasattr(p, "keys") and "slate_checked_at" in p.keys():
+        sd = await ensure_slate(p)
+        if sd:
+            return pick_anchor({"slate_date": sd, "created_at": p["created_at"]})
+    return pick_anchor(p)
+
+
+def prop_paths_for(p) -> list[str]:
+    """Every league player props can be graded in, the pick's own sport first (mixed slips are common)."""
+    mine = [x for x in leagues_for(_rg(p, "sport")) if x in PROP_PATHS]
+    return mine + [x for x in PROP_PATHS if x not in mine]
+
+
+async def leg_games(p, text: str, start: datetime) -> list[dict]:
+    """Every game the team or player in this leg plays in the days around `start` (empty if unclear)."""
+    leagues = leagues_for(_rg(p, "sport"))
+    simple = parse_simple_leg(text) if leagues else None
+    if simple and simple.get("team"):
+        games = [ev for ev, _ in await find_games(simple["team"], leagues, start)]
+        if games or simple["kind"] != "team_total":
+            return games
+    prop = prop_of(text)
+    if not prop:
+        return []
+    first = (prop.get("combo") or [prop])[0]
+    fams = {STATS[k][1] for k in prop["stats"]}
+    paths = [x for x in prop_paths_for(p) if FAMILY_OF_PATH.get(x) in fams]
+    cands = await resolve_player(first["player"], paths)
+    if len(cands) != 1 or not cands[0]["team"]:
+        return []
+    return [ev for ev, _ in await find_games(cands[0]["team"], [cands[0]["path"]], start)]
+
+
+async def infer_slate(p) -> Optional[str]:
+    """The local date of the games this slip is on. Slips often get logged after the games (a Thursday-night
+    slip posted Friday), so each leg votes: its team's last game or its next one."""
+    logged = datetime.fromisoformat(p["created_at"])
+    legs = get_legs(p["id"])
+    texts = [x["text"] for x in legs] or [p["description"]]
+    votes, prev_starts, next_starts = [], [], []
+    for text in texts[:12]:
+        try:
+            games = await leg_games(p, text, logged - timedelta(days=1))
+        except Exception:
+            log.warning("Slate lookup failed for %r", text, exc_info=True)
+            continue
+        starts = sorted({t for t in (event_time(ev) for ev in games) if t})
+        prev = [t for t in starts if logged - timedelta(hours=48) <= t < logged - timedelta(hours=4)]
+        nxt = [t for t in starts if logged - timedelta(hours=4) <= t <= logged + timedelta(hours=72)]
+        if prev and not nxt:
+            votes.append("prev")
+            prev_starts.append(prev[-1])
+        elif nxt and not prev:
+            votes.append("next")
+            next_starts.append(nxt[0])
+        elif prev and nxt:
+            # tonight's game when it's on the day it was logged (a back-to-back); otherwise the game that
+            # started in the 18 hours before logging (a slip posted after the fact); otherwise the next one
+            if nxt[0].astimezone(TZ).date() == logged.astimezone(TZ).date():
+                votes.append("next")
+                next_starts.append(nxt[0])
+            elif prev[-1] >= logged - timedelta(hours=18):
+                votes.append("prev")
+                prev_starts.append(prev[-1])
+            else:
+                votes.append("next")
+                next_starts.append(nxt[0])
+    if not votes:
+        return None
+    chosen = prev_starts if "prev" in votes else next_starts
+    return min(chosen).astimezone(TZ).date().isoformat() if chosen else None
+
+
+_SLATE_BUSY: set = set()
+
+
+async def ensure_slate(p) -> Optional[str]:
+    row = db().execute("SELECT slate_date, slate_checked_at, created_at FROM picks WHERE id = ?", (p["id"],)).fetchone()
+    if row is None:
+        return None
+    if row["slate_date"]:
+        return row["slate_date"]
+    now = datetime.now(timezone.utc)
+    if row["slate_checked_at"] and datetime.fromisoformat(row["slate_checked_at"]) > now - SLATE_RETRY:
+        return None
+    if datetime.fromisoformat(row["created_at"]) < now - timedelta(days=4) or p["id"] in _SLATE_BUSY:
+        return None
+    _SLATE_BUSY.add(p["id"])
+    try:
+        db().execute("UPDATE picks SET slate_checked_at = ? WHERE id = ?", (now_iso(), p["id"]))
+        db().commit()
+        sd = await infer_slate(p)
+        if sd:
+            db().execute("UPDATE picks SET slate_date = ? WHERE id = ? AND slate_date IS NULL", (sd, p["id"]))
+            db().commit()
+        return sd
+    except Exception:
+        log.warning("Couldn't work out the slate for pick %s", p["id"], exc_info=True)
+        return None
+    finally:
+        _SLATE_BUSY.discard(p["id"])
+
+
+def apply_slip_meta(pick_id: int, slip: dict) -> None:
+    """Keep what the slip reader saw that isn't a column of its own: the game date and Power vs Flex."""
+    sets: dict = {}
+    try:
+        d = datetime.strptime(str(slip.get("game_date") or "")[:10], "%Y-%m-%d").date()
+        today = datetime.now(TZ).date()
+        if today - timedelta(days=10) <= d <= today + timedelta(days=14):
+            sets["slate_date"] = d.isoformat()
+    except ValueError:
+        pass
+    et = str(slip.get("entry_type") or "").strip().lower()
+    if et in ("power", "flex"):
+        sets["pp_type"] = et
+    if sets:
+        db().execute(f"UPDATE picks SET {', '.join(k + ' = ?' for k in sets)} WHERE id = ?", (*sets.values(), pick_id))
+        db().commit()
+
+
+# ---- two-player combos ------------------------------------------------------------------------------
+
+_COMBO = re.compile(r"^\s*([^\d+]{3,}?)\s*\+\s*([^\d+]{3,}?)\s+((?:over|under|more|less|higher|lower)\b.*|[ou]\s?\d.*)$",
+                    re.I)
+
+
+def parse_combo(t: str, negate: bool) -> Optional[dict]:
+    """None when this isn't a two-player combo, {} when it is but can't be read, otherwise the combo leg."""
+    m = _COMBO.match(t)
+    if not m:
+        return None
+    a, b, rest = m.groups()
+    if len(a.split()) > 4 or len(b.split()) > 4 or stat_keys_in(a) or stat_keys_in(b):
+        return None       # "Jokic Pts + Rebs over 30.5" is one player's two stats, not a combo
+    pa, pb = parse_prop_leg(f"{a} {rest}"), parse_prop_leg(f"{b} {rest}")
+    if not pa or not pb or pa["stats"] != pb["stats"]:
+        return {}
+    return {"kind": "prop", "player": f"{pa['player']} + {pb['player']}", "display": f"{pa['display']} + {pb['display']}",
+            "stats": pa["stats"], "side": pa["side"], "line": pa["line"], "negate": negate, "combo": [pa, pb]}
+
+
+async def combo_status(leg: dict, paths: list[str], logged: datetime) -> Optional[dict]:
+    parts = []
+    for c in leg["combo"]:
+        st = await prop_status(dict(c, side="over", line=1e9, negate=False), paths, logged)
+        if st is None:
+            return None
+        parts.append(st)
+    first = parts[0]
+    states = [x["state"] for x in parts]
+    state = "in" if "in" in states else ("pre" if "pre" in states else "post")
+    out = dict(first, state=state, line=leg["line"], result=None, value=None, why="",
+               player=" + ".join(x["player"] for x in parts),
+               detail=next((x["detail"] for x in parts if x["state"] == "in"), first["detail"]),
+               preseason=any(x["preseason"] for x in parts))
+    if state == "post" and any(x["result"] == "push" and x["value"] is None for x in parts):
+        out["result"], out["why"] = "push", "; ".join(x["why"] for x in parts if x["why"]) or "a player didn't play"
+        return out
+    if any(x["value"] is None for x in parts):
+        if state == "post":
+            out["why"] = "; ".join(x["why"] for x in parts if x["why"])
+        return out
+    value = round(sum(x["value"] for x in parts), 2)
+    out["value"] = value
+    out["why"] = " + ".join(f"{x['player']} {x['value']:g}" for x in parts) + f" = {value:g} {first['stat']}"
+    over_side = (leg["side"] == "over") != bool(leg.get("negate"))
+    if state == "post":
+        out["result"] = judge_prop(leg, value)
+    elif value > leg["line"]:
+        out["result"] = "hit" if over_side else "miss"
+    return out
+
+
+# ---- one rulebook for settling: Power, Flex, parlays and pushes ---------------------------------------
+
+def entry_kind(p, n: int) -> str:
+    """'power' / 'flex' for pick'em apps, 'parlay' or 'single' for everything else."""
+    plat = (_rg(p, "platform") or "").lower()
+    if not is_dfs(plat):
+        return "parlay" if n > 1 else "single"
+    stored = _rg(p, "pp_type")
+    if stored in ("power", "flex"):
+        return stored
+    text = f"{_rg(p, 'description') or ''} {_rg(p, 'legs') or ''}".lower()
+    if re.search(r"\bflex|\binsur", text):
+        return "flex"
+    if re.search(r"\bpower|\bstandard\b", text):
+        return "power"
+    cost, payout = _rg(p, "cost") or 0, _rg(p, "payout") or 0
+    if n in PP_FLEX and cost > 0 and payout > 0:
+        m = payout / cost
+        power, flex = pp_tables(_rg(p, "guild_id"))
+        # only a multiple that's clearly the Flex table's (within 20%) reads as Flex; boosted or goblin-heavy
+        # entries pay odd multiples, and Power Plays are far more common
+        if n in power and abs(math.log(m / flex[n][n])) < 0.18 and abs(math.log(m / power[n])) > 0.18:
+            return "flex"
+    return "power"
+
+
+def decide_pick(p, legs) -> Optional[tuple[str, Optional[float], str, bool]]:
+    """What the legs say the pick is: (status, amount returned or None for the usual, note, estimated?),
+    or None while it's still undecided."""
+    statuses = [x["status"] for x in legs]
+    n = len(statuses)
+    if not n:
+        return None
+    hits, misses, pushes, opens = (statuses.count(x) for x in ("hit", "miss", "push", "open"))
+    kind = entry_kind(p, n)
+    cost, payout, pid = p["cost"] or 0.0, p["payout"] or 0.0, p["id"]
+    POWER_X, FLEX_X = pp_tables(_rg(p, "guild_id"))
+    all_hit = (f"Every leg hit, so it's a **win** 🎉. The payout's missing, so it counts as break-even until you add it: "
+               f"`/result pick_id:{pid} outcome:Win returned:<amount>`." if not payout else
+               "Every leg hit, so I marked it a **win**.")
+
+    def settled(ret: float, note: str) -> tuple[str, float, str, bool]:
+        ret = round(max(ret, 0.0), 2)
+        st = "win" if ret > cost + 0.005 else ("loss" if ret < cost - 0.005 else "push")
+        return st, ret, note, True
+
+    if kind == "flex":
+        live = n - pushes
+        if live in FLEX_X:
+            if misses > live - min(FLEX_X[live]):
+                return ("loss", None, f"{misses} legs missed, more than a {live}-pick Flex can survive, so it's a **loss**.",
+                        False)
+        elif misses:
+            return "loss", None, "A leg missed, so I marked it a **loss**.", False
+        if opens:
+            return None
+        if hits == n:
+            return "win", None, all_hit, False
+        if live <= 1:
+            return "push", cost, "So many legs were voided that the entry is refunded (**push**).", False
+        base = FLEX_X[n][n] if n in FLEX_X else POWER_X.get(n)
+        if not base or not payout:
+            return None     # can't work out a partial payout without the full one: a person settles it
+        mult = FLEX_X[live].get(hits, 0.0) if live in FLEX_X else (POWER_X[2] if hits == 2 else 0.0)
+        ret = payout * mult / base
+        return settled(ret, f"{hits} of {live} hit on a Flex, so it pays about {money(round(ret, 2))} (estimated from the "
+                            f"standard Flex table; fix it with `/result pick_id:{pid}` if the app paid something else).")
+    if misses:
+        return "loss", None, "A leg missed, so I marked it a **loss**.", False
+    if opens:
+        return None
+    if hits == n:
+        return "win", None, all_hit, False
+    live = n - pushes
+    if live == 0 or (kind == "power" and live <= 1):
+        return "push", cost, "Every leg that counted was voided, so it's a **push** (stake back).", False
+    if not payout:
+        return ("win", None, f"Everything that counted hit ({pushes} pushed), so it's a **win**. The payout's missing, so it "
+                f"counts as break-even until you add it with `/result pick_id:{pid}`.", False)
+    if kind == "power" and live in POWER_X and n in POWER_X:
+        ret = payout * POWER_X[live] / POWER_X[n]
+    else:
+        ret = cost * (payout / cost) ** (live / n) if cost else payout
+    s = "s" if pushes > 1 else ""
+    return settled(ret, f"{pushes} leg{s} pushed, so it pays about {money(round(ret, 2))} instead of {money(payout)} "
+                        f"(estimated; fix it with `/result pick_id:{pid}` if the app paid something else).")
+
+
+def mark_estimated(pick_id: int) -> None:
+    db().execute("UPDATE picks SET estimated = 1 WHERE id = ?", (pick_id,))
+    db().commit()
+
+
+def mark_auto(pick_id: int) -> None:
+    db().execute("UPDATE picks SET settled_by = 'auto' WHERE id = ?", (pick_id,))
+    db().commit()
+
+
+def set_auto_state(pick_id: int, state: Optional[str]) -> None:
+    db().execute("UPDATE picks SET auto_state = ? WHERE id = ?", (state, pick_id))
+    db().commit()
+
+
+# ---- slips that were read wrong get one more read ------------------------------------------------------
+
+def legs_look_broken(p, legs) -> bool:
+    """A '6-pick' slip saved with fewer legs, or a single 'leg' that's really just the slip's title."""
+    if "/channels/" not in (_rg(p, "slip_url") or ""):
+        return False
+    return bool(wanted_legs(p, legs))
+
+
+def wanted_legs(p, legs) -> int:
+    """How many legs the slip should have when what was saved is clearly short of it, else 0."""
+    texts = [p["description"] or ""] + [x["text"] for x in legs[:1]]
+    want = 0
+    for t in texts:
+        m = re.search(r"(\d+)\s*[- ]?\s*(?:pick|leg)", t, re.I)
+        if m and 1 < int(m.group(1)) <= 12:
+            want = max(want, int(m.group(1)))
+    if want and len(legs) < want:
+        return want
+    if len(legs) == 1 and re.match(r"^\s*\d+\s*[- ]?\s*(?:pick|leg)s?\b", legs[0]["text"], re.I):
+        return want or 2
+    return 0
+
+
+async def reread_slip(client, p) -> bool:
+    """Read the original screenshot again with the stronger model. True if it tried (it only ever tries once)."""
+    key = f"reread:{p['id']}"
+    if get_setting(p["guild_id"], key) or not ai_enabled() or not claude_budget_ok():
+        return False
+    set_setting(p["guild_id"], key, now_iso())
+    ids = jump_ids(p["slip_url"])
+    channel = client.get_channel(ids[0]) if ids and hasattr(client, "get_channel") else None
+    if channel is None or not hasattr(channel, "fetch_message"):
+        return True
+    try:
+        msg = await channel.fetch_message(ids[1])
+    except Exception:
+        return True
+    images = image_attachments(msg)
+    if not images:
+        return True
+    slip, _ = await read_slip_best(images[0])
+    legs = [str(x).strip() for x in ((slip or {}).get("legs") or []) if str(x).strip()]
+    want = wanted_legs(p, get_legs(p["id"])) or 2
+    if len(legs) < want or wanted_legs(p, [{"text": x} for x in legs]):
+        try:
+            await audit(client, p["guild_id"], f"🔁 Couldn't re-read the slip for pick #{p['id']} cleanly; "
+                                               f"fix its legs with ✏️ Fix or `/edit pick_id:{p['id']}`.")
+        except Exception:
+            pass
+        return True
+    set_legs_keep(p["id"], "\n".join(legs))
+    db().execute("UPDATE picks SET legs = ? WHERE id = ?", ("\n".join(legs), p["id"]))
+    db().commit()
+    apply_slip_meta(p["id"], slip)
+    _PROGRESS_CACHE.pop(p["id"], None)
+    try:
+        await audit(client, p["guild_id"], f"🔁 Re-read the slip for pick #{p['id']} ({p['bettor_name']}): "
+                                           f"it now has {len(legs)} legs.")
+    except Exception:
+        pass
+    return True
+
+
+# ---- the autopilot ------------------------------------------------------------------------------------
+
+def slate_end(p) -> datetime:
+    """When a leg with no game found has waited long enough for a web lookup."""
+    sd = _rg(p, "slate_date")
+    if sd:
+        try:
+            d = datetime.strptime(str(sd)[:10], "%Y-%m-%d").replace(tzinfo=TZ)
+            return (d + timedelta(days=1, hours=4)).astimezone(timezone.utc)
+        except ValueError:
+            pass
+    return datetime.fromisoformat(p["created_at"]) + timedelta(hours=16)
+
+
+def stuck_legs(p, entries: list[dict], now: datetime) -> tuple[list[dict], Optional[datetime]]:
+    """(legs only a web lookup can settle now, the start of the next game that's still to come or going)."""
+    stuck, pending = [], None
+    for e in entries:
+        if e.get("status") != "open" or e.get("decided"):
+            continue
+        ev = e.get("event")
+        start = event_time(ev) if ev and ev.get("date") else None
+        if ev and (ev.get("state") == "post" or ev.get("final")):
+            stuck.append(e)                # game's over but this leg's stat isn't on the scoreboard
+        elif ev and start and now > start + timedelta(hours=6):
+            stuck.append(e)                # the scoreboard never caught up
+        elif ev:
+            when = start or now
+            pending = when if pending is None else min(pending, when)
+        elif now >= slate_end(p):
+            stuck.append(e)                # no game found (soccer, tennis, odd stats...)
+        else:
+            pending = slate_end(p) if pending is None else min(pending, slate_end(p))
+    return stuck, pending
+
+
+def _state_time(state: Optional[str]) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat((state or "").split(":", 1)[1])
+    except (IndexError, ValueError):
+        return None
+
+
+async def post_auto_result(client, p, lines: list[str]) -> None:
+    """Tell the group a slip just closed on its own (hidden picks are revealed by their own job)."""
+    if p["hidden"] and not p["revealed_at"]:
+        return
+    gid = p["guild_id"]
+    channel = await recap_channel_for(client, gid)
+    if channel is None:
+        target = pick_msg(p["id"])
+        ids = (target["channel_id"], target["message_id"]) if target else jump_ids(p["slip_url"])
+        channel = client.get_channel(ids[0]) if ids else None
+    if channel is None:
+        return
+    mention = f"<@{p['bettor_id']}> " if p["bettor_id"] else ""
+    text = grading_message(p, lines, False).replace("🤖 Looked up results for", "⚡ Final:", 1)
+    chunks = split_message(mention + text)
+    for k, chunk in enumerate(chunks):
+        try:
+            await channel.send(chunk, view=settled_view(p["id"]) if k == len(chunks) - 1 else None,
+                               allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+        except Exception:
+            log.warning("Couldn't post the result for pick %s", p["id"], exc_info=True)
+            return
+
+
+async def needs_you(client, p, stuck: list[dict], reason: str) -> None:
+    """Once per pick: the bot can't settle this alone, so ask the bettor with one-tap buttons."""
+    key = f"needsyou:{p['id']}"
+    if get_setting(p["guild_id"], key):
+        return
+    set_setting(p["guild_id"], key, now_iso())
+    legs = "\n".join(f"⏳ `{e['n']}` {clip(e['text'], 80)}" for e in stuck[:8])
+    text = (f"✋ I can't settle pick `#{p['id']}` ({clip(p['description'], 60)}) on my own: {reason}.\n{legs}\n"
+            "Tap how it ended, or grade the legs with `/leg`.")
+    if p["hidden"]:
+        try:
+            user = client.get_user(p["bettor_id"]) if hasattr(client, "get_user") else None
+            user = user or await client.fetch_user(p["bettor_id"])
+            await user.send(text, view=settle_view(p["id"]))
+        except Exception:
+            pass
+        return
+    channel = await recap_channel_for(client, p["guild_id"])
+    if channel is None:
+        target = pick_msg(p["id"])
+        channel = client.get_channel(target["channel_id"]) if target else None
+    if channel is None:
+        return
+    mention = f"<@{p['bettor_id']}> " if p["bettor_id"] else ""
+    try:
+        await channel.send(mention + text, view=settle_view(p["id"]),
+                           allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+    except Exception:
+        log.warning("Couldn't ask about pick %s", p["id"], exc_info=True)
+
+
+async def autopilot_pick(client, p, now: datetime, allow_ai: bool = True, allow_reread: bool = True,
+                         force_ai: bool = False, extras: bool = True) -> dict:
+    """Check one pick: write down every leg that's decided and settle it when the legs say so. With `extras`
+    (the server's Autopilot switch), also re-read broken slips, look up legs the free scoreboard can't settle
+    once their games are over, and ask the bettor when nothing else works."""
+    out = {"ai": 0, "reread": 0, "settled": False}
+    gid, pid = p["guild_id"], p["id"]
+    legs = get_legs(pid)
+    if extras and p["status"] == "open" and allow_reread and legs_look_broken(p, legs):
+        if await reread_slip(client, p):
+            out["reread"] = 1
+            p, legs = get_pick(gid, pid), get_legs(pid)
+            if p is None:
+                return out
+    try:
+        entries = await leg_progress(p)       # always fresh here; the board and receipts reuse it
+        _PROGRESS_CACHE[pid] = (time.monotonic() + 100, entries)
+    except Exception:
+        log.exception("Progress failed for pick %s", pid)
+        return out
+    cur = get_pick(gid, pid)                  # someone may have settled or edited it while we looked
+    if cur is None or cur["status"] != p["status"]:
+        return out
+    legs_now = get_legs(pid)
+    if [x["text"] for x in legs_now] != [x["text"] for x in legs]:
+        return out                            # legs were edited mid-check: next cycle sees the new ones
+    was_open = cur["status"] == "open"
+    if any(e.get("preseason") for e in entries):
+        mark_preseason(pid)
+    leg_status = {x["idx"]: x["status"] for x in legs_now}
+    decided = [e for e in entries if e.get("decided") in ("hit", "miss", "push")
+               and (leg_status.get(e["n"], "open") if legs_now else cur["status"]) == "open"]
+    lines: list[str] = []
+    if decided:
+        for e in decided:
+            if e.get("margin") is not None:
+                _margins[(pid, e["n"])] = e["margin"]
+        by_n = {e["n"]: {"result": e["decided"], "why": e.get("why") or ""} for e in decided}
+        lines, _ = apply_results(gid, pid, [(e["n"], e["text"]) for e in decided], by_n, not legs_now, only_graded=True)
+        _PROGRESS_CACHE.pop(pid, None)
+    after = get_pick(gid, pid)
+    if after is None:
+        return out
+    if after["status"] != "open":
+        if was_open:
+            mark_auto(pid)
+            set_auto_state(pid, "settled")
+            out["settled"] = True
+            await post_auto_result(client, get_pick(gid, pid), lines)
+        return out
+    leg_status = {x["idx"]: x["status"] for x in get_legs(pid)}
+    fresh = [dict(e, status=leg_status.get(e["n"], e["status"])) for e in entries] if legs_now else entries
+    live = any(e.get("in_play") for e in fresh)
+    if legs_now and all(v != "open" for v in leg_status.values()):
+        d = decide_pick(after, get_legs(pid))      # maybe the payout was filled in since
+        if d is not None:
+            settle_pick(gid, pid, d[0], d[1])
+            if d[3]:
+                mark_estimated(pid)
+            mark_auto(pid)
+            set_auto_state(pid, "settled")
+            out["settled"] = True
+            await post_auto_result(client, get_pick(gid, pid), lines + [d[2]])
+            return out
+        # every leg is graded but the rules can't price it (e.g. a Flex with no payout entered)
+        set_auto_state(pid, "needs:every leg is graded, but I can't work out the payout")
+        if extras:
+            await needs_you(client, after, [], "every leg is graded, but I can't work out what it paid")
+        return out
+    stuck, pending = stuck_legs(after, fresh, now)
+    if live:
+        set_auto_state(pid, "live")
+    if not stuck or not extras:
+        if not live:
+            set_auto_state(pid, f"waiting:{iso(pending)}" if pending else None)
+        return out
+    if pending is not None and pending <= now + timedelta(hours=12) and not force_ai:
+        if not live:
+            set_auto_state(pid, f"waiting:{iso(pending)}")
+        return out          # other games still to come: look everything up together later
+    state = after["auto_state"] or ""
+    first = _state_time(state) if state.startswith(("stuck:", "lookup:")) else None
+    if first is None:
+        first = now
+        set_auto_state(pid, f"stuck:{iso(now)}")
+    tries = after["auto_ai_tries"] or 0
+    if (after["platform"] or "").lower() == "kalshi":
+        set_auto_state(pid, f"lookup:{iso(first)}")
+        return out      # Kalshi markets resolve on Kalshi's schedule; the market lookup and the 48h check handle them
+    if not ai_enabled():
+        # without a Claude key there's no web lookup; the usual 3-day reminder covers it
+        set_auto_state(pid, "needs:these legs aren't on the free scoreboard (no Claude key to look them up)")
+        return out
+    if tries >= len(AUTO_AI_GAPS_H):
+        set_auto_state(pid, "needs:couldn't find the results online")
+        await needs_you(client, after, stuck, "I couldn't find these results online")
+        return out
+    base = datetime.fromisoformat(after["auto_ai_at"]) if after["auto_ai_at"] else first
+    due = base + timedelta(hours=AUTO_AI_GAPS_H[tries])
+    if (now < due and not force_ai) or not allow_ai:
+        set_auto_state(pid, f"lookup:{iso(first)}")
+        return out
+    count_key = f"autogrades:{now.astimezone(TZ).date().isoformat()}"
+    used = int(get_setting(gid, count_key) or 0)
+    if used >= AUTOGRADE_DAILY_LIMIT or not claude_budget_ok(essential=True):
+        set_auto_state(pid, f"lookup:{iso(first)}")
+        return out
+    db().execute("UPDATE picks SET auto_ai_at = ?, auto_ai_tries = ? WHERE id = ?", (iso(now), tries + 1, pid))
+    db().commit()
+    items = [(e["n"], e["text"]) for e in stuck]
+    try:
+        by_n, used_ai = await lookup_items(after, items, not legs_now, True)
+    except Exception:
+        log.exception("Web lookup failed for pick %s", pid)
+        return out
+    if used_ai:
+        set_setting(gid, count_key, str(int(get_setting(gid, count_key) or 0) + 1))
+        out["ai"] = 1
+    cur = get_pick(gid, pid)
+    if cur is None or cur["status"] != "open":
+        return out            # settled by hand while we were looking
+    open_now = {x["idx"] for x in get_legs(pid) if x["status"] == "open"}
+    items = [(n, t) for n, t in items if not legs_now or n in open_now]
+    more, graded = apply_results(gid, pid, items, by_n, not legs_now, only_graded=True)
+    _PROGRESS_CACHE.pop(pid, None)
+    final = get_pick(gid, pid)
+    if final["status"] != "open":
+        mark_auto(pid)
+        set_auto_state(pid, "settled")
+        out["settled"] = True
+        await post_auto_result(client, get_pick(gid, pid), lines + more)
+    else:
+        set_auto_state(pid, f"lookup:{iso(first)}")
+    return out
+
+
+_AUTO_LOCK: Optional[asyncio.Lock] = None
+AUTOPILOT_BUDGET_S = 75        # one cycle never holds up the other scheduled jobs for longer than this
+
+
+async def autopilot(client, now: Optional[datetime] = None, only: Optional[list[int]] = None,
+                    force_ai: bool = False) -> dict:
+    """Every open slip from the last few days, every 2 minutes. `only` checks just those picks right now."""
+    global _AUTO_LOCK
+    if _AUTO_LOCK is None:
+        _AUTO_LOCK = asyncio.Lock()
+    now = now or datetime.now(timezone.utc)
+    totals = {"checked": 0, "settled": 0, "ai": 0}
+    began = time.monotonic()
+    async with _AUTO_LOCK:
+        if only:
+            marks = ",".join("?" * len(only))
+            rows = db().execute(f"SELECT * FROM picks WHERE id IN ({marks}) AND kalshi_ticker IS NULL", list(only)).fetchall()
+        else:
+            since = iso(now - timedelta(days=AUTOPILOT_DAYS))
+            recheck = iso(now - AUTOPILOT_RECHECK)
+            rows = db().execute(
+                """SELECT * FROM picks WHERE status = 'open' AND created_at >= ? AND future_due IS NULL
+                   AND kalshi_ticker IS NULL AND (auto_at IS NULL OR auto_at <= ?)
+                   ORDER BY auto_at IS NOT NULL, auto_at LIMIT 400""", (since, recheck)).fetchall()
+            # slips the autopilot closed early (a Power Play that died) keep getting their other legs graded
+            rows += db().execute(
+                """SELECT * FROM picks WHERE status != 'open' AND settled_by = 'auto' AND settled_at >= ?
+                   AND (auto_at IS NULL OR auto_at <= ?) AND id IN (SELECT pick_id FROM legs WHERE status = 'open')
+                   LIMIT 15""", (iso(now - timedelta(hours=36)), recheck)).fetchall()
+        ai_used = rereads = 0
+        for p in rows:
+            if totals["checked"] >= (len(rows) if only else AUTOPILOT_BATCH):
+                break
+            if not only and time.monotonic() - began > AUTOPILOT_BUDGET_S:
+                break
+            st = p["auto_state"] or ""
+            wake = _state_time(st) if st.startswith("waiting:") else None
+            if (not only and wake and wake - now > timedelta(minutes=45) and p["auto_at"]
+                    and datetime.fromisoformat(p["auto_at"]) > now - timedelta(minutes=30)):
+                continue    # nothing starts for a while: a check every half hour is plenty
+            db().execute("UPDATE picks SET auto_at = ? WHERE id = ?", (iso(now), p["id"]))
+            db().commit()
+            try:
+                res = await autopilot_pick(client, p, now, allow_ai=ai_used < 1, allow_reread=rereads < 2,
+                                           force_ai=force_ai, extras=server_on(p["guild_id"], "autopilot"))
+            except Exception:
+                log.exception("Autopilot failed on pick %s", p["id"])
+                continue
+            totals["checked"] += 1
+            totals["settled"] += int(res["settled"])
+            totals["ai"] += res["ai"]
+            ai_used += res["ai"]
+            rereads += res["reread"]
+    return totals
+
+
+def autopilot_status_line(guild_id: Optional[int]) -> str:
+    where = "guild_id = ? AND " if guild_id else ""
+    args: list = [guild_id] if guild_id else []
+    since = iso(datetime.now(timezone.utc) - timedelta(days=AUTOPILOT_DAYS))
+    tracked = db().execute(f"SELECT COUNT(*) FROM picks WHERE {where}status = 'open' AND created_at >= ?",
+                           args + [since]).fetchone()[0]
+    day = iso(datetime.now(timezone.utc) - timedelta(hours=24))
+    auto = db().execute(f"SELECT COUNT(*) FROM picks WHERE {where}settled_by = 'auto' AND settled_at >= ?",
+                        args + [day]).fetchone()[0]
+    needs = db().execute(f"SELECT COUNT(*) FROM picks WHERE {where}status = 'open' AND auto_state LIKE 'needs:%'",
+                         args).fetchone()[0]
+    off = (" · extras **off here**: finals still grade from the scoreboard (`/admin panel`)"
+           if guild_id and not server_on(guild_id, "autopilot") else "")
+    return (f"{tracked} slips tracked · {auto} settled on their own in the last 24h"
+            + (f" · {needs} need a person" if needs else "") + off)
+
+
+# ---- /tracker -----------------------------------------------------------------------------------------
+
+def _leg_dot(e: dict) -> str:
+    st = e.get("status")
+    if st in ("hit", "miss", "push"):
+        return LEG_ICON[st]
+    if e.get("live") in ("hit", "ahead"):
+        return "🟢"
+    if e.get("live") in ("miss", "behind"):
+        return "🔴"
+    return "⏱️" if e.get("in_play") else "⚪"
+
+
+def tracker_line(p, entries: list[dict]) -> str:
+    state = p["auto_state"] or ""
+    hits = sum(1 for e in entries if e.get("status") == "hit")
+    n = len(entries)
+    if any(e.get("in_play") for e in entries):
+        nums = [e for e in entries if e.get("in_play") and e.get("num")]
+        tail = ""
+        if nums:
+            e = nums[0]
+            tail = f" · {leg_label(e['text'])} {e['num']['value']:g}/{e['num']['line']:g}"
+        return f"🔴 **Live** · {hits}/{n} in{tail}"
+    if state.startswith("needs:"):
+        return f"✋ **Needs you:** {state.split(':', 1)[1]}"
+    if state.startswith(("stuck:", "lookup:")):
+        return "🔎 Games are over; looking up the last leg" + ("s" if n - hits > 1 else "") + " online"
+    if state.startswith("waiting:"):
+        t = _state_time(state)
+        if t and t > datetime.now(timezone.utc):
+            return f"⏳ Next game <t:{int(t.timestamp())}:R> · {hits}/{n} in"
+    starts = [event_time(e["event"]) for e in entries if e.get("event") and e.get("status") == "open"
+              and e["event"].get("state") == "pre"]
+    starts = [t for t in starts if t]
+    if starts:
+        return f"⏳ Next game <t:{int(min(starts).timestamp())}:R> · {hits}/{n} in"
+    if not any(e.get("event") for e in entries):
+        return "🔎 Finding the games" if hits < n else f"{hits}/{n} in"
+    return f"⏳ {hits}/{n} in"
+
+
+async def tracker_embed(guild_id: int, user_id: Optional[int], viewer_id: int) -> discord.Embed:
+    since = iso(datetime.now(timezone.utc) - timedelta(days=AUTOPILOT_DAYS))
+    who = "AND bettor_id = ? " if user_id else ""
+    args = [guild_id, since] + ([user_id] if user_id else [])
+    rows = db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND created_at >= ? {who}"
+                        "ORDER BY id DESC LIMIT 15", args).fetchall()
+    rows = [p for p in rows if not p["hidden"]]      # the tracker posts in the channel: hidden slips stay hidden
+    blocks = []
+    for p in rows:
+        entries = await cached_progress(p)
+        dots = "".join(_leg_dot(e) for e in entries[:12])
+        blocks.append(f"**#{p['id']} {p['bettor_name']}** · {clip(shown_desc(p), 50)} · "
+                      f"{money(p['cost'])} → {money(p['payout'])}\n{dots}  {tracker_line(p, entries)}")
+    day = iso(datetime.now(timezone.utc) - timedelta(hours=24))
+    done = db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? "
+                        f"{'AND bettor_id = ? ' if user_id else ''}AND (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL) "
+                        "ORDER BY settled_at DESC LIMIT 10", [guild_id, day] + ([user_id] if user_id else [])).fetchall()
+    finished = [f"{STATUS[p['status']][0].split()[0]} #{p['id']} {p['bettor_name']} · {clip(shown_desc(p), 40)} · "
+                f"**{signed(pick_net(p))}**" + (" 🤖" if p["settled_by"] == "auto" else "") for p in done]
+    title = "🛰️ Tracker · " + ("your slips" if user_id else "everyone")
+    e = discord.Embed(title=title, color=BRAND,
+                      description=clip("\n\n".join(blocks) or "Nothing open right now. Post a slip and I'll track it.", 4000))
+    if finished:
+        e.add_field(name="Settled in the last 24 hours", value=clip("\n".join(finished), 1024), inline=False)
+    e.set_footer(text=f"{autopilot_status_line(guild_id)}  ·  ✅ hit ❌ miss ➖ push 🟢 cleared/ahead 🔴 behind "
+                      f"⏱️ live ⚪ not started · 🤖 settled by me")
+    return e
+
+
+class TrackerButton(discord.ui.DynamicItem[discord.ui.Button], template=r"tk:(?P<scope>me|all):(?P<act>ref|now)"):
+    def __init__(self, scope: str, act: str):
+        label = {"ref": "🔄 Refresh", "now": "⚡ Check results now"}[act]
+        super().__init__(discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, custom_id=f"tk:{scope}:{act}"))
+        self.scope, self.act = scope, act
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["scope"], match["act"])
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        uid = interaction.user.id if self.scope == "me" else None
+        if self.act == "now":
+            last = _TRACKER_RUNS.get(interaction.guild_id, 0)
+            if time.monotonic() - last > 60:
+                _TRACKER_RUNS[interaction.guild_id] = time.monotonic()
+                since = iso(datetime.now(timezone.utc) - timedelta(days=AUTOPILOT_DAYS))
+                ids = [r["id"] for r in db().execute(
+                    "SELECT id FROM picks WHERE guild_id = ? AND status = 'open' AND created_at >= ?"
+                    + (" AND bettor_id = ?" if uid else "") + " ORDER BY id DESC LIMIT 15",
+                    [interaction.guild_id, since] + ([uid] if uid else []))]
+                for i in ids:
+                    _PROGRESS_CACHE.pop(i, None)
+                if ids:
+                    await autopilot(interaction.client, only=ids)
+        await interaction.edit_original_response(
+            embed=await tracker_embed(interaction.guild_id, uid, interaction.user.id), view=tracker_view(self.scope))
+
+
+_TRACKER_RUNS: dict[int, float] = {}
+
+
+def tracker_view(scope: str) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(TrackerButton(scope, "ref"))
+    view.add_item(TrackerButton(scope, "now"))
+    return view
+
+
+def dashboard_recent(guild_id: int) -> list[dict]:
+    day = iso(datetime.now(timezone.utc) - timedelta(hours=24))
+    return [{"id": p["id"], "who": p["bettor_name"], "status": p["status"], "net": round(pick_net(p), 2)}
+            for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? AND "
+                                  "(hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL) ORDER BY settled_at DESC "
+                                  "LIMIT 12", (guild_id, day))]
+
+
+# ==========================================================================
+# r20 brand: the PIMP-BOT mascot drawn in code, server branding, personal themes,
+# badge emblems + trophy case, profile banner, and the small logo stamp for renders
+# ==========================================================================
+
+# ---- palette helpers ---------------------------------------------------------------------------
+
+BRAND_GOLD = [(255, 241, 184), (245, 197, 66), (201, 138, 18)]
+BRAND_DEFAULT_ACCENT = (106, 43, 217)
+BRAND_PRESETS = {  # /admin brand colour presets
+    "purple": (106, 43, 217), "gold": (206, 150, 24), "green": (22, 150, 96), "blue": (37, 99, 235),
+    "red": (214, 40, 52), "pink": (214, 44, 128), "teal": (14, 140, 130), "orange": (230, 92, 18),
+    "ice": (50, 140, 215), "black": (58, 58, 72),
+}
+BRAND_MOODS = {  # mascot mood: (label, when the bot uses it)
+    "default": ("Classic", "everyday"),
+    "hype": ("Hype", "cashed slips"),
+    "cold": ("Cold", "misses and cold streaks"),
+    "sleep": ("Sleeping", "quiet hours, nothing live"),
+    "crown": ("Crowned", "the season leader"),
+    "cool": ("Shades", "locked in"),
+}
+THEMES = {  # personal palettes: label, header gradient stops, accent, headline text colour
+    "classic": ("Bot Purple", [(150, 92, 255), (92, 36, 200), (34, 12, 84)], (255, 214, 102), (255, 255, 255)),
+    "money": ("Money Green", [(46, 204, 138), (14, 110, 72), (8, 40, 30)], (150, 255, 200), (255, 255, 255)),
+    "ice": ("Ice Cold", [(150, 210, 255), (46, 120, 220), (12, 30, 80)], (200, 236, 255), (255, 255, 255)),
+    "heater": ("Heater", [(255, 170, 60), (230, 70, 30), (90, 14, 40)], (255, 220, 120), (255, 255, 255)),
+    "midnight": ("Midnight", [(70, 86, 180), (30, 34, 96), (8, 10, 28)], (150, 170, 255), (235, 238, 255)),
+    "neon": ("Vegas Neon", [(255, 70, 190), (120, 30, 200), (24, 10, 60)], (90, 245, 255), (255, 255, 255)),
+    "gold": ("Gold Rush", [(255, 226, 130), (196, 132, 20), (70, 40, 6)], (255, 240, 180), (255, 255, 255)),
+    "sunset": ("Sunset", [(255, 176, 110), (230, 80, 120), (70, 30, 100)], (255, 226, 160), (255, 255, 255)),
+    "hardwood": ("Hardwood", [(226, 160, 92), (150, 84, 38), (54, 28, 14)], (255, 214, 160), (255, 255, 255)),
+    "carbon": ("Carbon", [(120, 124, 136), (48, 50, 58), (14, 14, 18)], (240, 240, 245), (255, 255, 255)),
+}
+
+
+def _brand_mix(a, b, t: float) -> tuple:
+    return tuple(int(round(a[k] + (b[k] - a[k]) * t)) for k in range(3))
+
+
+def _brand_hex(c) -> str:
+    return "#{:02X}{:02X}{:02X}".format(*c[:3])
+
+
+def brand_parse_colour(text: Optional[str]) -> Optional[tuple]:
+    """A preset name ('gold') or a hex colour ('#ff66cc', 'f6c', '0xff66cc') as an RGB tuple, else None."""
+    if not text:
+        return None
+    t = text.strip().lower()
+    if t in BRAND_PRESETS:
+        return BRAND_PRESETS[t]
+    t = t.removeprefix("#").removeprefix("0x")
+    if re.fullmatch(r"[0-9a-f]{3}", t):
+        t = "".join(ch * 2 for ch in t)
+    if re.fullmatch(r"[0-9a-f]{6}", t):
+        return tuple(int(t[i:i + 2], 16) for i in (0, 2, 4))
+    return None
+
+
+def _brand_lin(size: tuple, stops: list, angle: float = 90):
+    """Linear gradient through the stops. angle 90 = top to bottom, 0 = left to right, 45 = diagonal."""
+    import numpy as np
+    from PIL import Image
+    W, H = max(1, int(size[0])), max(1, int(size[1]))
+    f = min(1.0, 256 / max(W, H))           # gradients are smooth: compute small, scale up
+    w, h = max(2, round(W * f)), max(2, round(H * f))
+    a = math.radians(angle)
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    proj = xs / (w - 1) * W * math.cos(a) + ys / (h - 1) * H * math.sin(a)
+    lo, hi = proj.min(), proj.max()
+    t = (proj - lo) / ((hi - lo) or 1)
+    img = _brand_ramp(t, stops)
+    return img if img.size == (W, H) else img.resize((W, H), Image.BILINEAR)
+
+
+def _brand_radial(size: tuple, cx: float, cy: float, r: float, stops: list):
+    import numpy as np
+    from PIL import Image
+    W, H = int(size[0]), int(size[1])
+    f = min(1.0, 256 / max(W, H))
+    w, h = max(2, round(W * f)), max(2, round(H * f))
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    t = np.clip(np.sqrt((xs / f - cx) ** 2 + (ys / f - cy) ** 2) / max(r, 1), 0, 1)
+    img = _brand_ramp(t, stops)
+    return img if img.size == (W, H) else img.resize((W, H), Image.BILINEAR)
+
+
+def _brand_ramp(t, stops: list):
+    import numpy as np
+    from PIL import Image
+    pos = np.linspace(0, 1, len(stops))
+    chans = [np.interp(t, pos, [s[k] for s in stops]) for k in range(3)]
+    return Image.fromarray(np.dstack(chans).clip(0, 255).astype("uint8"), "RGB")
+
+
+def _brand_paint(canvas, mask, fill, alpha: int = 255, blur: float = 0, offset: tuple = (0, 0)):
+    """Composite a colour or an image onto an RGBA canvas through an L mask (straight alpha, no dark fringes)."""
+    from PIL import Image, ImageChops, ImageFilter
+    if blur:
+        mask = mask.filter(ImageFilter.GaussianBlur(blur))
+    if alpha < 255:
+        mask = mask.point(lambda v: v * alpha // 255)
+    if offset != (0, 0):
+        m2 = Image.new("L", mask.size, 0)
+        m2.paste(mask, (int(offset[0]), int(offset[1])))
+        mask = m2
+    layer = (fill.convert("RGB") if hasattr(fill, "convert") else Image.new("RGB", canvas.size, tuple(fill[:3]))).copy()
+    if layer.size != canvas.size:
+        layer = layer.resize(canvas.size)
+    layer.putalpha(mask)
+    canvas.alpha_composite(layer)
+
+
+def _brand_mask(size: tuple, draw_fn):
+    from PIL import Image, ImageDraw
+    m = Image.new("L", size, 0)
+    draw_fn(ImageDraw.Draw(m))
+    return m
+
+
+def _brand_sparkle(cx: float, cy: float, r: float, n: int = 48) -> list:
+    """A four-point sparkle (an astroid), like the stars on the app icon."""
+    pts = []
+    for i in range(n):
+        t = 2 * math.pi * i / n
+        c, s = math.cos(t), math.sin(t)
+        pts.append((cx + r * c * c * c, cy + r * s * s * s))
+    return pts
+
+
+# ---- the mascot ------------------------------------------------------------------------------------
+
+_BRAND_LOGO_CACHE: dict = {}
+
+
+def brand_logo(size: int, variant: str = "default", accent=None, plate: bool = True):
+    """The PIMP-BOT robot as an RGBA image. plate=True puts it on the round purple-and-gold badge; False is
+    the bare robot. variant is a mood from BRAND_MOODS. Drawn at 2-4x and downscaled, so it is crisp from 24px up."""
+    from PIL import Image
+    size = max(12, int(size))
+    variant = variant if variant in BRAND_MOODS else "default"
+    accent = tuple(accent[:3]) if accent else BRAND_DEFAULT_ACCENT
+    key = (size, variant, accent, plate)
+    hit = _BRAND_LOGO_CACHE.get(key)
+    if hit is not None:
+        return hit.copy()
+    k = 4 if size <= 96 else 3 if size <= 256 else 2
+    S = min(size * k, 2048)
+    img = _brand_draw_robot(S, variant, accent, plate, tiny=size <= 48)
+    if S != size:
+        img = img.resize((size, size), Image.LANCZOS)
+    if len(_BRAND_LOGO_CACHE) > 96:
+        _BRAND_LOGO_CACHE.clear()
+    _BRAND_LOGO_CACHE[key] = img
+    return img.copy()
+
+
+def _brand_draw_robot(S: int, mood: str, accent: tuple, plate: bool, tiny: bool):
+    """Draw on an S x S canvas using the icon's 512-unit grid."""
+    from PIL import Image
+    C = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    u = S / 512
+    zoom, cy0 = ((1.14, 246) if tiny else (1.0, 256)) if plate else (1.24, 238)
+
+    def X(v):
+        return (v - 256) * zoom * u + S / 2
+
+    def Y(v):
+        return (v - cy0) * zoom * u + S / 2
+
+    def B(x0, y0, x1, y1):
+        return (X(x0), Y(y0), X(x1), Y(y1))
+
+    def R(v):
+        return v * zoom * u
+
+    def P(pts):
+        return [(X(x), Y(y)) for x, y in pts]
+
+    white = (255, 255, 255)
+    if mood == "cold":
+        accent = _brand_mix(accent, (40, 110, 210), 0.55)
+    elif mood == "sleep":
+        accent = _brand_mix(accent, (24, 22, 70), 0.35)
+    gold_img = _brand_lin((S, S), BRAND_GOLD, 45)
+    visor_top, visor_bot = _brand_mix(accent, (0, 0, 0), 0.45), _brand_mix(accent, (0, 0, 0), 0.74)
+    metal_img = _brand_lin((S, S), [white, _brand_mix(accent, white, 0.76)], 90)
+    visor_img = _brand_lin((S, S), [visor_top, visor_bot], 90)
+    eye_stops = [(255, 247, 214), (245, 197, 66)]
+    glow_col = (255, 214, 110)
+    if mood == "cold":
+        eye_stops, glow_col = [(232, 248, 255), (120, 196, 255)], (150, 210, 255)
+    eye_img = _brand_lin((S, S), eye_stops, 90)
+
+    if plate:
+        bg = _brand_radial((S, S), S / 2, S * 0.32, S * 0.8,
+                           [_brand_mix(accent, white, 0.38), accent, _brand_mix(accent, (0, 0, 0), 0.6)])
+        disc = _brand_mask((S, S), lambda d: d.ellipse((0, 0, S - 1, S - 1), fill=255))
+        _brand_paint(C, disc, bg)
+        sheen = _brand_lin((S, S), [(255, 255, 255), (0, 0, 0)], 45).convert("L").point(
+            lambda v: max(0, v - 150) * 56 // 105)
+        from PIL import ImageChops
+        _brand_paint(C, ImageChops.multiply(disc, sheen), white)
+        ring_w = max(2.0, 14 * u if tiny else 5 * u)
+        inset = 16 * u if tiny else 24 * u
+        ring = _brand_mask((S, S), lambda d: d.ellipse((inset, inset, S - inset, S - inset), outline=255,
+                                                       width=int(round(ring_w))))
+        _brand_paint(C, ring, gold_img)
+        if not tiny:
+            ring2 = _brand_mask((S, S), lambda d: d.ellipse((36 * u, 36 * u, S - 36 * u, S - 36 * u), outline=255,
+                                                            width=max(1, int(1.6 * u))))
+            _brand_paint(C, ring2, (255, 233, 166), alpha=90)
+
+    def body(d):  # the silhouette, for the drop shadow
+        d.rounded_rectangle(B(106, 244, 406, 312), R(12), fill=255)
+        d.rounded_rectangle(B(128, 172, 384, 388), R(50), fill=255)
+        if mood != "crown":
+            d.rounded_rectangle(B(249, 120, 263, 180), R(6), fill=255)
+            d.ellipse(B(236, 96, 276, 136), fill=255)
+    _brand_paint(C, _brand_mask((S, S), body), (20, 0, 58), alpha=150, blur=12 * u, offset=(0, 12 * u))
+
+    # antenna or crown
+    if mood == "crown":
+        crown = [(190, 182), (186, 112), (222, 146), (256, 88), (290, 146), (326, 112), (322, 182)]
+        _brand_paint(C, _brand_mask((S, S), lambda d: d.polygon(P(crown), fill=255)), gold_img)
+        _brand_paint(C, _brand_mask((S, S), lambda d: d.rectangle(B(192, 150, 320, 160), fill=255)), (201, 138, 18),
+                     alpha=150)
+        for cx, cy, r, col in ((186, 108, 10, white), (256, 84, 12, white), (326, 108, 10, white),
+                               (256, 166, 10, (230, 40, 80)), (218, 168, 7, (60, 140, 255)),
+                               (294, 168, 7, (40, 200, 120))):
+            _brand_paint(C, _brand_mask((S, S), lambda d, cx=cx, cy=cy, r=r: d.ellipse(B(cx - r, cy - r, cx + r, cy + r),
+                                                                                        fill=255)), col)
+    else:
+        stem = (248, 124, 264, 182) if tiny else (251, 126, 261, 182)
+        _brand_paint(C, _brand_mask((S, S), lambda d: d.rounded_rectangle(B(*stem), R(6), fill=255)), gold_img)
+        ball_r = 22 if tiny else 18
+        ball = _brand_mask((S, S), lambda d: d.ellipse(B(256 - ball_r, 116 - ball_r, 256 + ball_r, 116 + ball_r),
+                                                       fill=255))
+        if mood == "hype":
+            _brand_paint(C, ball, (255, 230, 120), alpha=220, blur=14 * u)
+        _brand_paint(C, ball, _brand_lin((S, S), [(200, 236, 255), (90, 170, 245)], 45) if mood == "cold" else gold_img)
+        if not tiny:
+            _brand_paint(C, _brand_mask((S, S), lambda d: d.ellipse(B(245, 105, 255, 115), fill=255)), white, alpha=210)
+
+    # ears, head, visor
+    for x0 in (106, 372):
+        _brand_paint(C, _brand_mask((S, S), lambda d, x0=x0: d.rounded_rectangle(B(x0, 244, x0 + 34, 312), R(12),
+                                                                                  fill=255)), gold_img)
+    stroke = 12 if tiny else 7
+    _brand_paint(C, _brand_mask((S, S), lambda d: d.rounded_rectangle(B(128, 172, 384, 388), R(50), fill=255)), gold_img)
+    _brand_paint(C, _brand_mask((S, S), lambda d: d.rounded_rectangle(
+        B(128 + stroke, 172 + stroke, 384 - stroke, 388 - stroke), R(50 - stroke), fill=255)), metal_img)
+    _brand_paint(C, _brand_mask((S, S), lambda d: d.rounded_rectangle(B(160, 210, 352, 298), R(30), fill=255)), visor_img)
+
+    # eyes
+    eyes = [(188, 232, 234, 278), (278, 232, 324, 278)]
+    if mood == "hype":
+        m = _brand_mask((S, S), lambda d: [d.polygon(P(_brand_sparkle(cx, 255, 34)), fill=255) for cx in (211, 301)])
+        _brand_paint(C, m, glow_col, alpha=230, blur=9 * u)
+        _brand_paint(C, m, eye_img)
+    elif mood == "sleep":
+        m = _brand_mask((S, S), lambda d: [d.arc(B(x0, 236, x1, 266), 15, 165, fill=255, width=max(2, int(R(9))))
+                                           for x0, _, x1, _ in eyes])
+        _brand_paint(C, m, eye_img)
+    elif mood == "crown":
+        m = _brand_mask((S, S), lambda d: [d.arc(B(x0 + 2, 240, x1 - 2, 284), 200, 340, fill=255,
+                                                 width=max(2, int(R(11)))) for x0, _, x1, _ in eyes])
+        _brand_paint(C, m, glow_col, alpha=200, blur=7 * u)
+        _brand_paint(C, m, eye_img)
+    elif mood == "cool":
+        lenses = _brand_mask((S, S), lambda d: (d.rounded_rectangle(B(176, 226, 248, 278), R(18), fill=255),
+                                                d.rounded_rectangle(B(264, 226, 336, 278), R(18), fill=255),
+                                                d.rectangle(B(244, 236, 268, 246), fill=255)))
+        _brand_paint(C, lenses, _brand_mix(accent, (255, 255, 255), 0.55), blur=0, offset=(0, 0))
+        from PIL import ImageFilter
+        _brand_paint(C, lenses.filter(ImageFilter.MinFilter(max(3, int(R(5)) | 1))),
+                     _brand_lin((S, S), [(52, 52, 66), (6, 6, 12)], 90))
+        if not tiny:
+            glint = _brand_mask((S, S), lambda d: [d.line(P([(x + 16, 266), (x + 34, 236)]), fill=255,
+                                                          width=max(1, int(R(6)))) for x in (180, 268)])
+            _brand_paint(C, glint, white, alpha=150)
+    else:
+        def eye_shape(d):
+            for x0, y0, x1, y1 in eyes:
+                d.rounded_rectangle(B(x0, y0, x1, y1), R(13), fill=255)
+            if mood == "cold":   # droopy lids: lower on the outside
+                d.polygon(P([(180, 226), (240, 226), (240, 246), (180, 262)]), fill=0)
+                d.polygon(P([(272, 226), (332, 226), (332, 262), (272, 246)]), fill=0)
+        m = _brand_mask((S, S), eye_shape)
+        _brand_paint(C, m, glow_col, alpha=190 if not tiny else 120, blur=8 * u)
+        _brand_paint(C, m, eye_img)
+
+    # mouth
+    dark = _brand_mix(accent, (0, 0, 0), 0.7)
+    if mood == "hype":
+        mouth = _brand_mask((S, S), lambda d: d.chord(B(198, 286, 314, 376), 0, 180, fill=255))
+        _brand_paint(C, mouth, visor_img)
+        from PIL import ImageChops
+        tongue = ImageChops.multiply(mouth, _brand_mask((S, S), lambda d: d.ellipse(B(226, 340, 286, 396), fill=255)))
+        _brand_paint(C, tongue, (255, 118, 150))
+        teeth = ImageChops.multiply(mouth, _brand_mask((S, S), lambda d: d.rectangle(B(198, 330, 314, 341), fill=255)))
+        _brand_paint(C, teeth, white)
+    elif mood == "cold":
+        _brand_paint(C, _brand_mask((S, S), lambda d: d.arc(B(214, 330, 298, 380), 205, 335, fill=255,
+                                                            width=max(2, int(R(10))))), dark)
+        if not tiny:   # a nervous sweat drop
+            drop = [(356, 196), (346, 216), (366, 216)]
+            m = _brand_mask((S, S), lambda d: (d.polygon(P(drop), fill=255), d.ellipse(B(344, 208, 368, 232), fill=255)))
+            _brand_paint(C, m, (140, 210, 255))
+            _brand_paint(C, _brand_mask((S, S), lambda d: d.ellipse(B(350, 214, 356, 222), fill=255)), white, alpha=200)
+    elif mood == "sleep":
+        _brand_paint(C, _brand_mask((S, S), lambda d: d.ellipse(B(244, 322, 268, 348), fill=255)), visor_img)
+    elif mood in ("crown", "cool"):
+        span = (206, 300, 306, 352) if mood == "crown" else (214, 304, 304, 350)
+        arc = (20, 160) if mood == "crown" else (10, 120)
+        _brand_paint(C, _brand_mask((S, S), lambda d: d.arc(B(*span), arc[0], arc[1], fill=255,
+                                                            width=max(2, int(R(10))))), dark)
+    else:
+        _brand_paint(C, _brand_mask((S, S), lambda d: d.rounded_rectangle(B(204, 322, 308, 352), R(11), fill=255)),
+                     visor_img)
+        if not tiny:
+            grill = _brand_mask((S, S), lambda d: [d.rounded_rectangle(B(x - 2.5, 329, x + 2.5, 345), R(2.5), fill=255)
+                                                   for x in (230, 256, 282)])
+            _brand_paint(C, grill, _brand_mix(accent, white, 0.78))
+    if not tiny:
+        cheek = (255, 150, 170) if mood in ("hype", "crown") else None
+        for cx in (168, 344):
+            m = _brand_mask((S, S), lambda d, cx=cx: d.ellipse(B(cx - 8, 329, cx + 8, 345), fill=255))
+            _brand_paint(C, m, gold_img)
+            if cheek:
+                _brand_paint(C, _brand_mask((S, S), lambda d, cx=cx: d.ellipse(B(cx - 22, 318, cx + 22, 356), fill=255)),
+                             cheek, alpha=70, blur=8 * u)
+
+    # extras around the robot
+    if mood == "sleep":
+        m = _brand_mask((S, S), lambda d: [d.text((X(x), Y(y)), "Z", font=art_font(max(6, int(R(sz))), True), fill=255)
+                                           for x, y, sz in (((360, 110, 62),) if tiny else
+                                                            ((340, 140, 36), (366, 106, 48), (396, 66, 60)))])
+        _brand_paint(C, m, (40, 20, 90), alpha=120, blur=4 * u, offset=(0, 4 * u))
+        _brand_paint(C, m, white)
+    if plate and not tiny:
+        if mood == "cold":
+            for cx, cy, r in ((404, 132, 24), (112, 392, 16), (122, 144, 10), (404, 382, 9)):
+                m = _brand_mask((S, S), lambda d, cx=cx, cy=cy, r=r: [
+                    d.line(P([(cx - r * math.cos(a), cy - r * math.sin(a)), (cx + r * math.cos(a), cy + r * math.sin(a))]),
+                           fill=255, width=max(1, int(R(r / 5)))) for a in (0, math.pi / 3, 2 * math.pi / 3)])
+                _brand_paint(C, m, (220, 240, 255))
+        elif mood == "sleep":
+            moon = _brand_mask((S, S), lambda d: (d.ellipse(B(96, 116, 150, 170), fill=255),
+                                                  d.ellipse(B(112, 106, 166, 160), fill=0)))
+            _brand_paint(C, moon, (255, 236, 170), alpha=230)
+            for cx, cy, r in ((116, 392, 9), (404, 384, 8)):
+                _brand_paint(C, _brand_mask((S, S), lambda d, cx=cx, cy=cy, r=r: d.polygon(
+                    P(_brand_sparkle(cx, cy, r)), fill=255)), white, alpha=200)
+        else:
+            stars = [(400, 132, 22, (255, 241, 184)), (110, 394, 15, (255, 241, 184)), (120, 140, 9, white),
+                     (404, 380, 8, white)]
+            if mood == "hype":
+                stars = [(400, 128, 30, (255, 241, 184)), (106, 390, 20, (255, 241, 184)), (116, 136, 13, white),
+                         (408, 376, 12, white), (86, 262, 8, white), (430, 262, 9, (255, 241, 184))]
+            m = _brand_mask((S, S), lambda d: [d.polygon(P(_brand_sparkle(x, y, r)), fill=255) for x, y, r, _ in stars])
+            _brand_paint(C, m, (255, 241, 184), alpha=160, blur=5 * u)
+            for x, y, r, col in stars:
+                _brand_paint(C, _brand_mask((S, S), lambda d, x=x, y=y, r=r: d.polygon(P(_brand_sparkle(x, y, r)),
+                                                                                         fill=255)), col)
+    return C
+
+
+def brand_mark(img, xy: tuple, size: int, variant: str = "default", accent=None) -> None:
+    """Stamp the small round logo onto any render (RGB or RGBA), top-left corner at xy."""
+    logo = brand_logo(size, variant, accent)
+    x, y = int(xy[0]), int(xy[1])
+    if img.mode == "RGBA":
+        img.alpha_composite(logo, (x, y))
+    else:
+        img.paste(logo, (x, y), logo)
+
+
+def brand_sign(img, x: float, y: float, text: str = "PIMP-BOT", size: int = 15, align: str = "right",
+               colour=None, variant: str = "default", accent=None) -> None:
+    """The footer signature: mascot mark + text. y is the text top (like d.text); x is the right edge for
+    align='right', the centre for 'center', the left edge for 'left'."""
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(img)
+    f = art_font(size, True)
+    mark = int(size * 1.9)
+    gap = int(size * 0.55)
+    total = mark + gap + _tw(d, text, f)
+    x0 = x - total if align == "right" else x - total / 2 if align == "center" else x
+    top = y + size * 0.62 - mark / 2
+    brand_mark(img, (x0, top), mark, variant, accent)
+    ImageDraw.Draw(img).text((x0 + mark + gap, y), text, font=f, fill=colour or (150, 150, 170))
+
+
+def brand_wordmark(name: str = "PIMP-BOT", height: int = 120, accent=None, tagline: Optional[str] = None,
+                   variant: str = "default"):
+    """Logo + name lettering (gold gradient, soft shadow) + optional tagline, as a tight RGBA image."""
+    from PIL import Image, ImageDraw
+    name = (name or "PIMP-BOT").upper()
+    fs = int(height * 0.5)
+    f = art_font(fs, True)
+    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    track = max(1, fs // 18)
+    widths = [_tw(probe, ch, f) for ch in name]
+    text_w = sum(widths) + track * (len(name) - 1)
+    tf = art_font(max(12, int(height * 0.17)), False, True)
+    tag_w = _tw(probe, tagline, tf) if tagline else 0
+    gap = int(height * 0.18)
+    W = height + gap + max(text_w, tag_w) + 8
+    out = Image.new("RGBA", (W, height), (0, 0, 0, 0))
+    out.alpha_composite(brand_logo(height, variant, accent), (0, 0))
+    tx = height + gap
+    ty = int(height * (0.16 if tagline else 0.24))
+    mask = Image.new("L", out.size, 0)
+    md = ImageDraw.Draw(mask)
+    cx = tx
+    for ch, w in zip(name, widths):
+        md.text((cx, ty), ch, font=f, fill=255)
+        cx += w + track
+    _brand_paint(out, mask, (10, 0, 30), alpha=170, blur=max(1, height / 40), offset=(0, max(1, height // 40)))
+    _brand_paint(out, mask, _brand_lin(out.size, [(255, 250, 230), (255, 214, 102), (214, 150, 30)], 90))
+    if tagline:
+        ImageDraw.Draw(out).text((tx + 2, ty + int(fs * 1.22)), tagline, font=tf, fill=(220, 214, 240))
+    return out
+
+
+# ---- server branding and personal themes ------------------------------------------------------------
+
+def brand_for(guild_id: int) -> dict:
+    """The server's look: accent (RGB), hex, mood, tagline, name, header gradient stops. Read before rendering."""
+    try:
+        raw = json.loads(get_setting(guild_id, "brand") or "{}")
+    except (ValueError, TypeError):
+        raw = {}
+    accent = brand_parse_colour(raw.get("accent")) or BRAND_DEFAULT_ACCENT
+    mood = raw.get("mood") if raw.get("mood") in BRAND_MOODS else "default"
+    return {"accent": accent, "hex": _brand_hex(accent), "mood": mood, "tagline": raw.get("tagline") or "",
+            "name": raw.get("name") or "PIMP-BOT", "custom": bool(raw),
+            "stops": [_brand_mix(accent, (255, 255, 255), 0.2), _brand_mix(accent, (0, 0, 0), 0.45),
+                      _brand_mix(accent, (0, 0, 0), 0.8)]}
+
+
+def brand_save(guild_id: int, **changes) -> dict:
+    """Merge changes into the server brand (None clears a field) and return the new brand."""
+    try:
+        raw = json.loads(get_setting(guild_id, "brand") or "{}")
+    except (ValueError, TypeError):
+        raw = {}
+    for k, v in changes.items():
+        if v is None:
+            raw.pop(k, None)
+        else:
+            raw[k] = v
+    set_setting(guild_id, "brand", json.dumps(raw) if raw else None)
+    return brand_for(guild_id)
+
+
+def _brand_theme(key: str) -> dict:
+    label, stops, accent, text = THEMES[key]
+    return {"key": key, "label": label, "stops": stops, "header": stops, "accent": accent, "text": text,
+            "panel": _brand_mix(stops[-1], ART_BG, 0.55), "chosen": True}
+
+
+def theme_for(guild_id: int, user_id: Optional[int]) -> dict:
+    """A person's palette: key, label, stops/header (gradient), accent, text, panel, chosen (False = server colours).
+    Call it before the render thread; the dict is plain data."""
+    key = get_setting(guild_id, f"theme:{user_id}") if user_id else None
+    if key in THEMES:
+        return _brand_theme(key)
+    b = brand_for(guild_id)
+    return {"key": "server", "label": "Server colours", "stops": b["stops"], "header": b["stops"],
+            "accent": _brand_mix(b["accent"], (255, 255, 255), 0.55), "text": ART_TEXT,
+            "panel": _brand_mix(b["stops"][-1], ART_BG, 0.55), "chosen": False}
+
+
+def brand_card_inner(theme: Optional[dict]) -> list:
+    """Inner-panel gradient for the trading card: the classic dark one, tinted when the owner picked a theme."""
+    base = [(30, 30, 42), (14, 14, 20), (24, 22, 34)]
+    if not theme or not theme.get("chosen"):
+        return base
+    st = theme["stops"]
+    return [_brand_mix(st[0], base[0], 0.72), _brand_mix(st[-1], base[1], 0.6), _brand_mix(st[1], base[2], 0.78)]
+
+
+def brand_card_panel(theme: Optional[dict]) -> tuple:
+    if not theme or not theme.get("chosen"):
+        return ART_PANEL
+    return _brand_mix(theme["stops"][1], ART_PANEL, 0.8)
+
+
+# ---- badge emblems ------------------------------------------------------------------------------------
+
+BRAND_TIERS = {
+    "bronze": [(255, 214, 170), (196, 120, 60), (104, 56, 22)],
+    "silver": [(252, 252, 255), (178, 186, 202), (92, 98, 116)],
+    "gold": [(255, 243, 190), (245, 197, 66), (146, 92, 8)],
+}
+BADGE_ART = {  # key: (frame shape, colour light, colour dark, tier)
+    "first": ("circle", (255, 110, 110), (150, 20, 40), "bronze"),
+    "parlay": ("hex", (180, 130, 255), (80, 30, 170), "bronze"),
+    "bigleg": ("diamond", (120, 230, 255), (20, 100, 190), "gold"),
+    "heater": ("shield", (255, 170, 70), (200, 50, 20), "silver"),
+    "century": ("rosette", (255, 120, 120), (170, 20, 60), "silver"),
+    "moon": ("circle", (110, 130, 255), (30, 20, 110), "gold"),
+    "green": ("hex", (90, 230, 150), (10, 110, 70), "silver"),
+    "regular": ("octagon", (110, 180, 255), (30, 70, 170), "bronze"),
+    "grinder": ("shield", (200, 190, 170), (90, 80, 70), "gold"),
+    "lock": ("octagon", (150, 170, 200), (40, 52, 80), "silver"),
+    "pickem": ("pentagon", (200, 140, 90), (100, 50, 20), "gold"),
+    "rival": ("hex", (255, 120, 90), (140, 20, 30), "silver"),
+    "heartbreak": ("circle", (255, 140, 190), (170, 30, 100), "bronze"),
+    "goodpass": ("shield", (80, 220, 210), (10, 100, 110), "silver"),
+    "sixth": ("rosette", (210, 150, 255), (90, 30, 160), "gold"),
+    "sniper": ("octagon", (120, 230, 120), (20, 100, 40), "gold"),
+}
+_BRAND_TIER_RANK = {"gold": 3, "silver": 2, "bronze": 1}
+
+
+def badge_art(key: str) -> tuple:
+    """(shape, light, dark, tier) for a badge, with a stable made-up look for badges added later."""
+    if key in BADGE_ART:
+        return BADGE_ART[key]
+    shapes = ["circle", "hex", "shield", "octagon", "rosette", "pentagon", "diamond"]
+    h = sum(ord(ch) * (i + 1) for i, ch in enumerate(key))
+    hue = (h % 360) / 360
+    import colorsys
+    light = tuple(int(v * 255) for v in colorsys.hsv_to_rgb(hue, 0.45, 1.0))
+    dark = tuple(int(v * 255) for v in colorsys.hsv_to_rgb(hue, 0.85, 0.55))
+    return shapes[h % len(shapes)], light, dark, ["bronze", "silver", "gold"][h // 7 % 3]
+
+
+def _brand_shape(d, shape: str, box: tuple, fill: int = 255) -> None:
+    x0, y0, x1, y1 = box
+    cx, cy, r = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2
+    if shape == "circle":
+        d.ellipse(box, fill=fill)
+    elif shape in ("hex", "octagon", "pentagon"):
+        n = {"hex": 6, "octagon": 8, "pentagon": 5}[shape]
+        rot = {"hex": 30, "octagon": 22.5, "pentagon": -90}[shape]
+        rr = r if shape != "octagon" else r * 1.02
+        pts = [(cx + rr * math.cos(math.radians(rot + 360 * i / n)), cy + rr * math.sin(math.radians(rot + 360 * i / n)))
+               for i in range(n)]
+        if shape == "pentagon":
+            pts = [(x, y + r * 0.08) for x, y in pts]
+        d.polygon(pts, fill=fill)
+    elif shape == "diamond":
+        d.polygon([(cx, y0), (x1, cy), (cx, y1), (x0, cy)], fill=fill)
+    elif shape == "shield":
+        w, h = x1 - x0, y1 - y0
+        pts = [(x0 + w * 0.08, y0 + h * 0.06), (cx, y0), (x1 - w * 0.08, y0 + h * 0.06)]
+        for i in range(13):  # rounded point at the bottom
+            t = i / 12
+            pts.append((x1 - w * 0.08 - (w * 0.42) * t ** 1.6, y0 + h * 0.06 + (h * 0.94) * math.sin(t * math.pi / 2)))
+        pts = pts[:3] + pts[3:] + [(2 * cx - x, y) for x, y in reversed(pts[3:])]
+        d.polygon(pts, fill=fill)
+    elif shape == "rosette":
+        n, rr = 14, r * 0.86
+        for i in range(n):
+            a = 2 * math.pi * i / n
+            px, py = cx + rr * math.cos(a), cy + rr * math.sin(a)
+            d.ellipse((px - r * 0.17, py - r * 0.17, px + r * 0.17, py + r * 0.17), fill=fill)
+        d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=fill)
+
+
+def _brand_glyph_mask(key: str, S: int):
+    """The badge's symbol as a white-on-black mask on a 100-unit grid (0-fills cut details out)."""
+    from PIL import Image, ImageDraw
+    m = Image.new("L", (S, S), 0)
+    d = ImageDraw.Draw(m)
+    k = S / 100
+
+    def p(pts):
+        return [(x * k, y * k) for x, y in pts]
+
+    def b(x0, y0, x1, y1):
+        return (x0 * k, y0 * k, x1 * k, y1 * k)
+
+    def w(v):
+        return max(1, int(v * k))
+
+    if key == "first":          # blood drop
+        d.ellipse(b(24, 40, 76, 92), fill=255)
+        d.polygon(p([(50, 6), (26.5, 58), (73.5, 58)]), fill=255)
+        d.ellipse(b(34, 60, 44, 78), fill=0)
+    elif key == "parlay":       # chain links
+        d.rounded_rectangle(b(8, 34, 58, 66), 16 * k, outline=255, width=w(10))
+        d.rounded_rectangle(b(42, 34, 92, 66), 16 * k, outline=255, width=w(10))
+        d.rectangle(b(48, 30, 52, 39), fill=0)
+        m = m.rotate(-28, resample=Image.BICUBIC, center=(S / 2, S / 2))
+    elif key == "bigleg":       # cut gem
+        d.polygon(p([(28, 22), (72, 22), (90, 42), (50, 90), (10, 42)]), fill=255)
+        for a, c in (((10, 42), (90, 42)), ((38, 42), (50, 90)), ((62, 42), (50, 90)), ((28, 22), (38, 42)),
+                     ((72, 22), (62, 42)), ((50, 22), (38, 42)), ((50, 22), (62, 42))):
+            d.line(p([a, c]), fill=0, width=w(3.5))
+    elif key == "heater":       # flame
+        d.polygon(p([(50, 4), (60, 22), (74, 36), (84, 56), (80, 76), (66, 90), (50, 95), (34, 90), (20, 76), (16, 58),
+                     (24, 42), (34, 54), (36, 36), (44, 22)]), fill=255)
+        d.polygon(p([(50, 48), (60, 62), (63, 76), (54, 87), (46, 87), (37, 76), (41, 62)]), fill=0)
+    elif key == "century":      # 100 with the underline
+        f = art_font(max(6, int(40 * k)), True)
+        tw = d.textlength("100", font=f)
+        d.text(((S - tw) / 2, 18 * k), "100", font=f, fill=255)
+        d.rounded_rectangle(b(14, 70, 86, 77), 3 * k, fill=255)
+        d.rounded_rectangle(b(22, 83, 78, 89), 3 * k, fill=255)
+    elif key == "moon":         # rocket
+        d.ellipse(b(36, 6, 64, 62), fill=255)
+        d.rounded_rectangle(b(36, 30, 64, 74), 4 * k, fill=255)
+        d.polygon(p([(36, 52), (20, 76), (36, 72)]), fill=255)
+        d.polygon(p([(64, 52), (80, 76), (64, 72)]), fill=255)
+        d.polygon(p([(42, 78), (58, 78), (50, 97)]), fill=255)
+        d.ellipse(b(43, 26, 57, 40), fill=0)
+        d.rectangle(b(36, 74, 64, 78), fill=0)
+        m = m.rotate(-38, resample=Image.BICUBIC, center=(S / 2, S / 2))
+    elif key == "green":        # chart going up
+        d.line(p([(12, 78), (36, 52), (54, 66), (78, 34)]), fill=255, width=w(10), joint="curve")
+        d.polygon(p([(62, 28), (90, 20), (84, 48)]), fill=255)
+        d.rounded_rectangle(b(10, 86, 90, 92), 3 * k, fill=255)
+    elif key == "regular":      # calendar
+        d.rounded_rectangle(b(14, 20, 86, 88), 10 * k, fill=255)
+        d.rectangle(b(22, 40, 78, 80), fill=0)
+        for i in range(3):
+            for j in range(2):
+                d.rounded_rectangle(b(27 + i * 17, 46 + j * 17, 39 + i * 17, 58 + j * 17), 2 * k, fill=255)
+        for x in (32, 62):
+            d.rounded_rectangle(b(x, 8, x + 7, 30), 3 * k, fill=255)
+            d.rectangle(b(x - 3, 22, x + 10, 26), fill=0)
+            d.rounded_rectangle(b(x, 8, x + 7, 22), 3 * k, fill=255)
+    elif key == "grinder":      # pillars
+        d.polygon(p([(10, 34), (50, 10), (90, 34)]), fill=255)
+        d.rectangle(b(14, 36, 86, 43), fill=255)
+        for x in (20, 44, 68):
+            d.rectangle(b(x, 47, x + 12, 77), fill=255)
+        d.rectangle(b(12, 80, 88, 89), fill=255)
+    elif key == "lock":         # padlock
+        d.arc(b(30, 8, 70, 54), 180, 360, fill=255, width=w(9))
+        d.rectangle(b(30, 30, 39, 46), fill=255)
+        d.rectangle(b(61, 30, 70, 46), fill=255)
+        d.rounded_rectangle(b(20, 42, 80, 90), 9 * k, fill=255)
+        d.ellipse(b(43, 54, 57, 68), fill=0)
+        d.rectangle(b(47, 62, 53, 78), fill=0)
+    elif key == "pickem":       # football
+        R_, half = 47.36, 22
+        top = [(x, 50 + (R_ - half) - math.sqrt(max(0, R_ * R_ - (x - 50) ** 2))) for x in range(10, 91, 4)]
+        bot = [(x, 100 - y) for x, y in reversed(top)]
+        d.polygon(p(top + bot), fill=255)
+        d.line(p([(34, 50), (66, 50)]), fill=0, width=w(3.5))
+        for x in (40, 47, 54, 61):
+            d.line(p([(x, 43), (x, 57)]), fill=0, width=w(3))
+        for x in (20, 80):
+            d.line(p([(x, 38), (x, 62)]), fill=0, width=w(3))
+        m = m.rotate(32, resample=Image.BICUBIC, center=(S / 2, S / 2))
+    elif key == "rival":        # crossed swords
+        one = Image.new("L", (S, S), 0)
+        od = ImageDraw.Draw(one)
+        od.polygon(p([(46, 66), (46, 14), (50, 4), (54, 14), (54, 66)]), fill=255)
+        od.rounded_rectangle(b(32, 64, 68, 71), 3 * k, fill=255)
+        od.rectangle(b(46.5, 71, 53.5, 86), fill=255)
+        od.ellipse(b(44, 84, 56, 96), fill=255)
+        from PIL import ImageChops
+        m = ImageChops.lighter(one.rotate(40, resample=Image.BICUBIC, center=(S / 2, S / 2)),
+                               one.rotate(-40, resample=Image.BICUBIC, center=(S / 2, S / 2)))
+    elif key == "heartbreak":   # cracked heart
+        d.ellipse(b(10, 16, 54, 60), fill=255)
+        d.ellipse(b(46, 16, 90, 60), fill=255)
+        d.polygon(p([(13, 48), (87, 48), (50, 90)]), fill=255)
+        d.line(p([(50, 24), (42, 42), (56, 54), (44, 70), (50, 92)]), fill=0, width=w(5), joint="curve")
+    elif key == "goodpass":     # shield with a check
+        _brand_shape(d, "shield", b(16, 8, 84, 92))
+        d.line(p([(32, 50), (45, 63), (69, 37)]), fill=0, width=w(10), joint="curve")
+    elif key == "sixth":        # crystal ball
+        d.ellipse(b(20, 6, 80, 66), fill=255)
+        d.polygon(p([(32, 70), (68, 70), (78, 90), (22, 90)]), fill=255)
+        d.rectangle(b(38, 62, 62, 72), fill=255)
+        d.arc(b(28, 14, 58, 44), 185, 265, fill=0, width=w(5))
+        d.polygon(p(_brand_sparkle(60, 42, 12)), fill=0)
+    elif key == "sniper":       # target
+        d.ellipse(b(10, 10, 90, 90), outline=255, width=w(8))
+        d.ellipse(b(28, 28, 72, 72), outline=255, width=w(8))
+        d.ellipse(b(43, 43, 57, 57), fill=255)
+        for a, c in (((50, 0), (50, 20)), ((50, 80), (50, 100)), ((0, 50), (20, 50)), ((80, 50), (100, 50))):
+            d.line(p([a, c]), fill=255, width=w(6))
+    else:                       # a badge added later: a star with its first letter cut out
+        d.polygon(p(_brand_sparkle(50, 50, 46)), fill=255)
+        f = art_font(max(6, int(30 * k)), True)
+        letter = (key[:1] or "?").upper()
+        tw = d.textlength(letter, font=f)
+        d.ellipse(b(30, 30, 70, 70), fill=255)
+        d.text(((S - tw) / 2, 32 * k), letter, font=f, fill=0)
+    return m
+
+
+_BRAND_EMBLEM_CACHE: dict = {}
+
+
+def badge_emblem(key: str, size: int, locked: bool = False):
+    """A badge's emblem as RGBA: metal tier rim, coloured body, glyph. locked=True gives the grey silhouette."""
+    from PIL import Image, ImageOps
+    ck = (key, size, locked)
+    if ck in _BRAND_EMBLEM_CACHE:
+        return _BRAND_EMBLEM_CACHE[ck].copy()
+    shape, light, dark, tier = badge_art(key)
+    k = 4 if size <= 128 else 2
+    S = size * k
+    C = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    pad = S * 0.06
+    outer = _brand_mask((S, S), lambda d: _brand_shape(d, shape, (pad, pad, S - pad, S - pad)))
+    _brand_paint(C, outer, (0, 0, 0), alpha=110, blur=S * 0.025, offset=(0, S * 0.025))
+    _brand_paint(C, outer, _brand_lin((S, S), BRAND_TIERS[tier], 60))
+    ins = S * (0.135 if shape not in ("diamond", "shield") else 0.15)
+    inner = _brand_mask((S, S), lambda d: _brand_shape(d, shape, (ins, ins * 1.02, S - ins, S - ins)))
+    _brand_paint(C, inner, _brand_lin((S, S), [light, dark], 70))
+    from PIL import ImageChops
+    sheen = _brand_mask((S, S), lambda d: d.ellipse((-S * 0.2, -S * 0.62, S * 1.2, S * 0.5), fill=255))
+    _brand_paint(C, ImageChops.multiply(inner, sheen), (255, 255, 255), alpha=46)
+    g = int(S * (0.5 if shape in ("diamond", "pentagon") else 0.54))
+    glyph = _brand_glyph_mask(key, g)
+    gm = Image.new("L", (S, S), 0)
+    gm.paste(glyph, ((S - g) // 2, int((S - g) / 2 + (S * 0.03 if shape == "pentagon" else 0))))
+    _brand_paint(C, gm, _brand_mix(dark, (0, 0, 0), 0.55), alpha=170, blur=S * 0.012, offset=(0, S * 0.018))
+    _brand_paint(C, gm, _brand_lin((S, S), [(255, 255, 255), (255, 240, 214)], 90))
+    if locked:
+        lum = ImageOps.grayscale(C).point(lambda v: 38 + v * 40 // 255)
+        sil = Image.merge("RGBA", (lum, lum, lum.point(lambda v: v + 8), C.getchannel("A")))
+        C = sil
+    out = C.resize((size, size), Image.LANCZOS)
+    if len(_BRAND_EMBLEM_CACHE) > 200:
+        _BRAND_EMBLEM_CACHE.clear()
+    _BRAND_EMBLEM_CACHE[ck] = out
+    return out.copy()
+
+
+def best_badges(got, n: int = 3) -> list[str]:
+    """The n most impressive earned badges (gold tier first, then rarer by list order)."""
+    order = {k: i for i, (k, _, _) in enumerate(BADGES)}
+    keys = [k for k, _, _ in BADGES if k in got]
+    return sorted(keys, key=lambda k: (-_BRAND_TIER_RANK[badge_art(k)[3]], -order[k]))[:n]
+
+
+# ---- shared pieces for the brand renders ------------------------------------------------------------
+
+def _brand_wrap(d, text: str, font, max_w: int, max_lines: int = 2) -> list[str]:
+    words, lines, cur = (text or "").split(), [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if _tw(d, trial, font) <= max_w or not cur:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        while lines[-1] and _tw(d, lines[-1] + "…", font) > max_w:
+            lines[-1] = lines[-1][:-1]
+        lines[-1] = lines[-1].rstrip() + "…"
+    return lines
+
+
+def _brand_backdrop(W: int, H: int, stops: list, head_h: int, fade: bool = True):
+    """Dark page with a themed header that fades into it, plus a faint diagonal pinstripe."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (W, H), ART_BG + (255,))
+    head = _brand_lin((W, head_h), list(stops), 30).convert("RGBA")
+    fade = _brand_lin((1, head_h), [(255, 255, 255), (255, 255, 255), (0, 0, 0) if fade else (200, 200, 200)],
+                      90).convert("L").resize((W, head_h))
+    head.putalpha(fade)
+    img.alpha_composite(head)
+    stripes = Image.new("L", (W, head_h), 0)
+    sd = ImageDraw.Draw(stripes)
+    for k in range(-head_h, W, 26):
+        sd.line((k, head_h, k + head_h, 0), fill=12, width=8)
+    from PIL import ImageChops
+    layer = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+    sm = Image.new("L", (W, H), 0)
+    sm.paste(ImageChops.multiply(stripes, fade), (0, 0))
+    layer.putalpha(sm)
+    img.alpha_composite(layer)
+    return img
+
+
+def _brand_pill(d, x, y, text: str, font, fill, colour, pad: int = 14, h: Optional[int] = None) -> int:
+    """A rounded label; returns its width."""
+    h = h or int(font.size * 1.7)
+    w = _tw(d, text, font) + pad * 2
+    d.rounded_rectangle((x, y, x + w, y + h), h // 2, fill=fill)
+    d.text((x + pad, y + (h - font.size * 1.16) / 2), text, font=font, fill=colour)
+    return w
+
+
+def _brand_png(img) -> io.BytesIO:
+    """Flatten onto the page colour and encode. Skips optimize=True: these gradient-heavy images encode
+    6x faster for about 5% more bytes."""
+    from PIL import Image
+    bg = Image.new("RGB", img.size, ART_BG)
+    bg.paste(img, (0, 0), img)
+    out = io.BytesIO()
+    bg.save(out, "PNG", compress_level=6)
+    out.seek(0)
+    return out
+
+
+# ---- renders --------------------------------------------------------------------------------------------
+
+def render_brand_logo(b: dict) -> io.BytesIO:
+    """The server's logo sheet: big badge, name lettering, tagline, accent and mascot. b = brand_for(...)."""
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H = 1000, 520
+    img = _brand_backdrop(W, H, b["stops"], H, fade=False)
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((40, 70, 420, 450), fill=b["accent"] + (150,))
+    img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(50)))
+    img.alpha_composite(brand_logo(340, b["mood"], b["accent"]), (60, 90))
+    d = ImageDraw.Draw(img)
+    x = 440
+    name = (b["name"] or "PIMP-BOT").upper()
+    t, f = fit_text(d, name, W - x - 50, 78, True, 30)
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).text((x, 160), t, font=f, fill=255)
+    _brand_paint(img, mask, (8, 0, 24), alpha=170, blur=4, offset=(0, 4))
+    _brand_paint(img, mask, _brand_lin((W, H), [(255, 250, 230), (255, 214, 102), (214, 150, 30)], 90))
+    d = ImageDraw.Draw(img)
+    y = 160 + int(f.size * 1.25)
+    if b.get("tagline"):
+        for line in _brand_wrap(d, b["tagline"], art_font(28, False, True), W - x - 50, 2):
+            d.text((x + 2, y), line, font=art_font(28, False, True), fill=(228, 222, 245))
+            y += 38
+    y = max(y + 26, 330)
+    d.rounded_rectangle((x, y, x + 44, y + 44), 12, fill=b["accent"], outline=(255, 255, 255), width=3)
+    d.text((x + 60, y + 8), b["hex"], font=art_font(24, True), fill=ART_TEXT)
+    label = BRAND_MOODS[b["mood"]][0]
+    _brand_pill(d, x + 60 + _tw(d, b["hex"], art_font(24, True)) + 24, y + 4, f"MASCOT · {label.upper()}",
+                art_font(18, True), (255, 255, 255, 40), ART_TEXT)
+    d.text((x, H - 66), "Set with /admin brand", font=art_font(17, True), fill=(200, 196, 220))
+    return _brand_png(img)
+
+
+def render_brand_moods(accent=None) -> io.BytesIO:
+    """Every mascot mood with when the bot shows it."""
+    from PIL import ImageDraw
+    W, cols, cell = 1000, 3, 300
+    rows = math.ceil(len(BRAND_MOODS) / cols)
+    H = 170 + rows * (cell + 30) + 40
+    acc = tuple(accent) if accent else BRAND_DEFAULT_ACCENT
+    stops = [_brand_mix(acc, (255, 255, 255), 0.2), _brand_mix(acc, (0, 0, 0), 0.45), _brand_mix(acc, (0, 0, 0), 0.8)]
+    img = _brand_backdrop(W, H, stops, 220)
+    d = ImageDraw.Draw(img)
+    d.text((44, 40), "MASCOT MOODS", font=art_font(46, True), fill=ART_TEXT)
+    d.text((46, 104), "The bot's face changes with the night", font=art_font(22, True), fill=(210, 204, 235))
+    x0 = (W - cols * cell - (cols - 1) * 20) // 2
+    for i, (key, (label, when)) in enumerate(BRAND_MOODS.items()):
+        cx, cy = x0 + (i % cols) * (cell + 20), 170 + (i // cols) * (cell + 30)
+        d.rounded_rectangle((cx, cy, cx + cell, cy + cell), 30, fill=(26, 26, 36))
+        img.alpha_composite(brand_logo(190, key, acc), (cx + (cell - 190) // 2, cy + 18))
+        d = ImageDraw.Draw(img)
+        f = art_font(26, True)
+        d.text((cx + (cell - _tw(d, label.upper(), f)) / 2, cy + 220), label.upper(), font=f, fill=ART_TEXT)
+        t, sf = fit_text(d, when, cell - 30, 18, False)
+        d.text((cx + (cell - _tw(d, t, sf)) / 2, cy + 256), t, font=sf, fill=ART_MUTED)
+    brand_sign(img, W - 40, H - 40, "PIMP-BOT", 15, accent=acc)
+    return _brand_png(img)
+
+
+def render_theme_grid(current: Optional[str], name: str, accent=None) -> io.BytesIO:
+    """All personal themes as swatch cards; the person's current one is outlined."""
+    from PIL import Image, ImageDraw
+    W, cw, ch, gap = 1000, 448, 150, 24
+    keys = list(THEMES)
+    rows = math.ceil(len(keys) / 2)
+    H = 176 + rows * (ch + gap) + 50
+    img = _brand_backdrop(W, H, THEMES.get(current, THEMES["classic"])[1], 200)
+    d = ImageDraw.Draw(img)
+    d.text((44, 38), "PICK YOUR COLOURS", font=art_font(44, True), fill=ART_TEXT)
+    t, f = fit_text(d, f"{name} · /me theme to switch · shows on your card and banner", W - 90, 20, True)
+    d.text((46, 100), t, font=f, fill=(220, 214, 240))
+    x0 = (W - 2 * cw - gap) // 2
+    for i, key in enumerate(keys):
+        label, stops, acc, text = THEMES[key]
+        x, y = x0 + (i % 2) * (cw + gap), 168 + (i // 2) * (ch + gap)
+        card = _brand_lin((cw, ch), stops, 25).convert("RGBA")
+        shade = _brand_lin((cw, ch), [(0, 0, 0), (0, 0, 0)], 0).convert("RGBA")
+        shade.putalpha(_brand_lin((cw, ch), [(0, 0, 0), (120, 120, 120)], 90).convert("L"))
+        card.alpha_composite(shade)
+        mask = _rounded_mask((cw, ch), 26)
+        if key == current:
+            d.rounded_rectangle((x - 6, y - 6, x + cw + 6, y + ch + 6), 32, outline=(255, 255, 255), width=4)
+        img.paste(card, (x, y), mask)
+        brand_mark(img, (x + cw - 74, y + 18), 56)
+        d = ImageDraw.Draw(img)
+        d.text((x + 24, y + 20), label.upper(), font=art_font(28, True), fill=text)
+        d.text((x + 24, y + 64), "+$125", font=art_font(30, True), fill=acc)
+        _brand_pill(d, x + 24 + _tw(d, "+$125", art_font(30, True)) + 16, y + 68, "W4", art_font(18, True),
+                    (0, 0, 0, 90), text, pad=12)
+        sw = 22
+        for k, c in enumerate(stops + [acc]):
+            d.ellipse((x + 24 + k * (sw + 8), y + ch - 36, x + 24 + k * (sw + 8) + sw, y + ch - 36 + sw), fill=c,
+                      outline=(255, 255, 255), width=2)
+        if key == current:
+            _brand_pill(d, x + cw - 116, y + ch - 44, "✓ YOURS", art_font(17, True), (255, 255, 255), (20, 20, 30),
+                        pad=12)
+    brand_sign(img, W - 40, H - 40, "PIMP-BOT", 15, accent=accent)
+    return _brand_png(img)
+
+
+def render_trophy_case(t: dict) -> io.BytesIO:
+    """t: name, avatar, theme, got (set of keys), badges [(key, name, how)], mood, accent (brand)."""
+    from PIL import Image, ImageDraw, ImageFilter
+    W, cols, cw, em = 1000, 4, 228, 124
+    items = t["badges"]
+    rows = max(1, math.ceil(len(items) / cols))
+    row_h = 272
+    H = 236 + rows * row_h + 56
+    th = t["theme"]
+    img = _brand_backdrop(W, H, th["stops"], 250)
+    img.alpha_composite(_avatar(t.get("avatar"), 112, t["name"], -1), (40, 40))
+    d = ImageDraw.Draw(img)
+    d.ellipse((36, 36, 156, 156), outline=th["accent"], width=4)
+    tt, f = fit_text(d, f"{t['name'].upper()}'S TROPHY CASE", W - 330, 40, True, 22)
+    d.text((176, 46), tt, font=f, fill=th["text"])
+    n_got = sum(1 for k, _, _ in items if k in t["got"])
+    d.text((178, 102), f"{n_got} of {len(items)} unlocked", font=art_font(22, True), fill=(225, 220, 240))
+    _bar(d, 178, 138, 420, 14, n_got / max(1, len(items)), th["accent"])
+    mood = "hype" if n_got and n_got >= len(items) / 2 else t.get("mood", "default")
+    img.alpha_composite(brand_logo(110, mood, t.get("accent")), (W - 150, 36))
+    d = ImageDraw.Draw(img)
+    x0 = (W - cols * cw) // 2
+    for i, (key, label, how) in enumerate(items):
+        col, row = i % cols, i // cols
+        cx, cy = x0 + col * cw, 236 + row * row_h
+        earned = key in t["got"]
+        if col == 0:   # the shelf for this row
+            sy = cy + em + 22
+            shelf = _brand_lin((cols * cw - 10, 16), [_brand_mix(th["stops"][1], (60, 60, 70), 0.5),
+                                                       _brand_mix(th["stops"][-1], (20, 20, 26), 0.5)], 90)
+            sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(sh).rounded_rectangle((x0 + 10, sy + 10, x0 + cols * cw - 10, sy + 30), 8, fill=(0, 0, 0, 150))
+            img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(8)))
+            img.paste(shelf, (x0 + 5, sy), _rounded_mask(shelf.size, 6))
+            d = ImageDraw.Draw(img)
+            d.line((x0 + 14, sy + 1, x0 + cols * cw - 14, sy + 1), fill=(255, 255, 255, 60), width=2)
+        ex = cx + (cw - em) // 2
+        if earned:
+            glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            light = badge_art(key)[1]
+            ImageDraw.Draw(glow).ellipse((ex + 10, cy + 20, ex + em - 10, cy + em), fill=light + (110,))
+            img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(22)))
+        img.alpha_composite(badge_emblem(key, em, locked=not earned), (ex, cy + 8))
+        d = ImageDraw.Draw(img)
+        ty = cy + em + 50
+        nt, nf = fit_text(d, label, cw - 20, 21, True, 14)
+        d.text((cx + (cw - _tw(d, nt, nf)) / 2, ty), nt, font=nf, fill=ART_TEXT if earned else ART_MUTED)
+        hf = art_font(15)
+        lines = _brand_wrap(d, how, hf, cw - 26, 3)
+        for k, line in enumerate(lines):
+            col_ = (175, 175, 192) if earned else (118, 118, 136)
+            d.text((cx + (cw - _tw(d, line, hf)) / 2, ty + 32 + k * 20), line, font=hf, fill=col_)
+        if not earned:   # a small padlock on the shelf
+            lx, ly = ex + em - 30, cy + em - 18
+            d.ellipse((lx - 4, ly - 4, lx + 30, ly + 30), fill=(30, 30, 40))
+            d.arc((lx + 7, ly + 2, lx + 19, ly + 16), 180, 360, fill=(170, 170, 186), width=3)
+            d.rounded_rectangle((lx + 4, ly + 10, lx + 22, ly + 24), 3, fill=(170, 170, 186))
+    brand_sign(img, W - 40, H - 40, t.get("brand_name") or "PIMP-BOT", 15, accent=t.get("accent"))
+    return _brand_png(img)
+
+
+def render_banner(bn: dict) -> io.BytesIO:
+    """bn: name, avatar, theme, title, tagline, level (lvl, title, xp, lo, hi), season, record, net, roi, streak,
+    top_sport, settled, badges [(key, name)], mood, accent, brand_name."""
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H = 1200, 520
+    th = bn["theme"]
+    st = th["stops"]
+    img = _brand_lin((W, H), st, 20).convert("RGBA")
+    shade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    shade.putalpha(_brand_lin((W, H), [(60, 60, 60), (140, 140, 140), (225, 225, 225)], 0).convert("L"))
+    img.alpha_composite(shade)
+    stripes = Image.new("L", (W, H), 0)
+    sd = ImageDraw.Draw(stripes)
+    for k in range(-H, W, 28):
+        sd.line((k, H, k + H, 0), fill=10, width=9)
+    layer = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+    layer.putalpha(stripes)
+    img.alpha_composite(layer)
+    # avatar column
+    av = 216
+    ax, ay = 58, 58
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((ax - 18, ay - 18, ax + av + 18, ay + av + 18), fill=th["accent"] + (130,))
+    img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(20)))
+    d = ImageDraw.Draw(img)
+    d.ellipse((ax - 8, ay - 8, ax + av + 8, ay + av + 8), fill=th["accent"])
+    img.alpha_composite(_avatar(bn.get("avatar"), av, bn["name"], -1), (ax, ay))
+    d = ImageDraw.Draw(img)
+    lvl, ltitle, xp, lo, hi = bn["level"]
+    lf = art_font(24, True)
+    chip = f"LV {lvl}"
+    cw_ = _tw(d, chip, lf) + 36
+    d.rounded_rectangle((ax + av / 2 - cw_ / 2, ay + av - 16, ax + av / 2 + cw_ / 2, ay + av + 26), 21,
+                        fill=th["accent"], outline=(20, 20, 28), width=4)
+    d.text((ax + av / 2 - _tw(d, chip, lf) / 2, ay + av - 8), chip, font=lf, fill=(20, 20, 28))
+    tf = art_font(20, True)
+    d.text((ax + av / 2 - _tw(d, ltitle.upper(), tf) / 2, ay + av + 40), ltitle.upper(), font=tf, fill=ART_TEXT)
+    _bar(d, ax + 8, ay + av + 74, av - 16, 10, (xp - lo) / max(1, hi - lo), th["accent"])
+    xt = f"{xp}/{hi} XP"
+    xf = art_font(15, True)
+    d.text((ax + av / 2 - _tw(d, xt, xf) / 2, ay + av + 92), xt, font=xf, fill=(205, 205, 222))
+    # name block
+    x = 330
+    brand_sign(img, W - 44, 44, bn.get("brand_name") or "PIMP-BOT", 20, colour=(225, 222, 240),
+               variant=bn.get("mood", "default"), accent=bn.get("accent"))
+    d = ImageDraw.Draw(img)
+    t, f = fit_text(d, bn["name"], W - x - 300, 66, True, 30)
+    mask = Image.new("L", (W, H), 0)
+    ny = 52 + int((66 - f.size) * 0.7)
+    ImageDraw.Draw(mask).text((x, ny), t, font=f, fill=255)
+    _brand_paint(img, mask, (0, 0, 0), alpha=140, blur=4, offset=(0, 4))
+    _brand_paint(img, mask, th["text"])
+    d = ImageDraw.Draw(img)
+    y = ny + int(f.size * 1.22)
+    sub = " · ".join(x_ for x_ in (bn.get("title"), bn.get("top_sport")) if x_)
+    if sub:
+        t2, f2 = fit_text(d, sub.upper(), W - x - 60, 24, True)
+        d.text((x + 2, y), t2, font=f2, fill=th["accent"])
+        y += 36
+    if bn.get("tagline"):
+        t3, f3 = fit_text(d, f"“{bn['tagline']}”", W - x - 60, 22, False, 14, italic=True)
+        d.text((x + 2, y), t3, font=f3, fill=(225, 222, 240))
+    # stat tiles
+    ty = 236
+    season = (bn.get("season") or "ALL-TIME").upper()
+    sf = art_font(16, True)
+    _brand_pill(d, W - 44 - _tw(d, season, sf) - 24, 92, season, sf, (0, 0, 0, 110), (235, 232, 248), pad=12)
+    net = bn["net"]
+    streak = bn.get("streak") or "-"
+    tiles = [("RECORD", bn["record"], ART_TEXT),
+             ("NET", signed_short(net) if bn["settled"] else "-", ART_GREEN if net >= 0 else ART_RED),
+             ("ROI", f"{bn['roi']:+.0f}%" if bn["settled"] else "-", ART_GREEN if bn["roi"] >= 0 else ART_RED),
+             ("STREAK", streak, ART_GREEN if streak.startswith("W") else ART_RED if streak.startswith("L") else ART_TEXT)]
+    gap = 14
+    tw_ = (W - x - 44 - gap * (len(tiles) - 1)) / len(tiles)
+    for i, (label, value, colour) in enumerate(tiles):
+        tx = x + i * (tw_ + gap)
+        tile = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(tile).rounded_rectangle((tx, ty, tx + tw_, ty + 104), 20, fill=(10, 10, 16, 150))
+        img.alpha_composite(tile)
+        d = ImageDraw.Draw(img)
+        vt, vf = fit_text(d, value, int(tw_ - 24), 38, True, 18)
+        d.text((tx + (tw_ - _tw(d, vt, vf)) / 2, ty + 14 + (38 - vf.size) * 0.6), vt, font=vf, fill=colour)
+        lf2 = art_font(16, True)
+        d.text((tx + (tw_ - _tw(d, label, lf2)) / 2, ty + 70), label, font=lf2, fill=(185, 185, 202))
+    # best badges
+    by = 370
+    d.text((x, by), "BEST BADGES", font=art_font(16, True), fill=(205, 205, 222))
+    if bn["badges"]:
+        bx = x
+        for key, label in bn["badges"][:3]:
+            img.alpha_composite(badge_emblem(key, 84), (bx, by + 28))
+            d = ImageDraw.Draw(img)
+            nt, nf = fit_text(d, label, 170, 21, True, 13)
+            d.text((bx + 94, by + 58), nt, font=nf, fill=ART_TEXT)
+            bx += 94 + max(_tw(d, nt, nf), 60) + 34
+    else:
+        d.text((x, by + 46), "None yet. /me badges shows what to chase.", font=art_font(20, True), fill=(205, 205, 222))
+    return _brand_png(img)
+
+
+# ---- data for the renders (DB here, never in the render thread) -------------------------------------
+
+def _brand_season_line(guild_id: int, key: str) -> tuple[Optional[dict], Optional[str], bool]:
+    """(this person's stats for the current season or all-time, season name or None, leads the season)."""
+    season = current_season(guild_id)
+    if season is not None:
+        rows = season_stats(guild_id, season)
+        mine = next((r for r in rows if r["key"] == key), None)
+        leader = bool(rows) and rows[0]["key"] == key and rows[0]["net"] > 0
+        return mine, season["name"], leader
+    rows = compute_stats(guild_id, key)
+    return (rows[0] if rows else None), None, False
+
+
+def brand_mood_for(guild_id: int, key: str, leader: bool = False) -> str:
+    """The mascot mood for a person right now: crowned leader, hype on a heater, cold on a slide, else the server's."""
+    if leader:
+        return "crown"
+    streak = current_streak(guild_id, key).lstrip("🔥🧊")
+    if streak.startswith("W") and streak[1:].isdigit() and int(streak[1:]) >= 3:
+        return "hype"
+    if streak.startswith("L") and streak[1:].isdigit() and int(streak[1:]) >= 3:
+        return "cold"
+    return brand_for(guild_id)["mood"]
+
+
+def banner_data(guild_id: int, user_id: int, name: str, avatar: Optional[bytes]) -> dict:
+    key = str(user_id)
+    b = brand_for(guild_id)
+    s, season, leader = _brand_season_line(guild_id, key)
+    s = s or {"wins": 0, "losses": 0, "pushes": 0, "net": 0.0, "roi": 0.0}
+    settled = s["wins"] + s["losses"] + s["pushes"]
+    rows = db().execute("SELECT sport FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'",
+                        (guild_id, key)).fetchall()
+    sports: dict[str, int] = {}
+    for r in rows:
+        g = sport_group(r["sport"])
+        if g != "No sport":
+            sports[g] = sports.get(g, 0) + 1
+    xp = coins_earned(guild_id, user_id)
+    lvl, ltitle, lo, hi = level_of(xp)
+    got = earned_badges(guild_id, key)
+    names = {k: n for k, n, _ in BADGES}
+    bio = get_bio(guild_id, user_id)
+    return {"name": name, "avatar": avatar, "theme": theme_for(guild_id, user_id),
+            "title": get_setting(guild_id, f"cardtitle:{key}") or "", "tagline": bio.get("tagline") or "",
+            "level": (lvl, ltitle, xp, lo, hi), "season": f"Season · {season}" if season else "All-time",
+            "record": record_line(s), "net": s["net"], "roi": s["roi"], "settled": settled,
+            "streak": current_streak(guild_id, key).lstrip("🔥🧊"),
+            "top_sport": max(sports.items(), key=lambda kv: kv[1])[0] if sports else None,
+            "badges": [(k, names[k]) for k in best_badges(got)], "mood": brand_mood_for(guild_id, key, leader),
+            "accent": b["accent"], "brand_name": b["name"]}
+
+
+def trophy_data(guild_id: int, user_id: int, name: str, avatar: Optional[bytes]) -> dict:
+    b = brand_for(guild_id)
+    return {"name": name, "avatar": avatar, "theme": theme_for(guild_id, user_id),
+            "got": earned_badges(guild_id, str(user_id)), "badges": list(BADGES), "mood": b["mood"],
+            "accent": b["accent"], "brand_name": b["name"]}
+
+
+HELP_EXTRA.append(("🎨 Look & feel", (
+    "`/me theme`: pick your colours (10 palettes) for your card and banner · `/me banner`: your profile banner · "
+    "`/me badges`: your trophy case, locked badges show how to earn them · `/art`: logo, mascot moods, themes, "
+    "banner or trophy case as an image · Admins: `/admin brand` sets the server's accent colour, mascot, "
+    "tagline and the name on images.")))
+
+
+# ==========================================================================
+# r20 ops: /admin setup (wizard), /admin doctor (+ a quiet daily self-check),
+# /inbox (everything waiting on you, + an opt-in daily DM), /start (quick start)
+# ==========================================================================
+
+OPS_PERMS = [("view_channel", "View Channel"), ("send_messages", "Send Messages"), ("embed_links", "Embed Links"),
+             ("attach_files", "Attach Files"), ("read_message_history", "Read Message History"),
+             ("add_reactions", "Add Reactions")]
+OPS_AUDIT_PERMS = OPS_PERMS[:3]
+OPS_TEST_TEXT = "🧪 Test post from `/admin setup`. If you can read this, I can post here. Feel free to delete it."
+OPS_KEY_SWITCHES = [   # (toggle key, what it does in plain words): the switches a new server most often wants to know
+    ("autopilot", "Look up results the scoreboard can't settle, re-read bad screenshots, ask when stuck"),
+    ("receipts_all", "Log slip screenshots posted in any channel, not just receipts channels"),
+    ("reactions", "React to settled slips with 💰 / 💀"),
+    ("previews", "Post a short game-day preview for slips riding on tonight's games"),
+    ("quests", "Weekly skill quests that pay coins"),
+    ("show", "The Sunday Show with the weekly recap"),
+    ("welcome", "DM new members a welcome that points them to /start"),
+    ("selfcheck", "Daily self-check: post new problems to the audit channel"),
+]
+DOCTOR_HOUR = env_int("DOCTOR_HOUR", 10, 0, 23)
+INBOX_DM_HOUR = env_int("INBOX_DM_HOUR", 18, 0, 23)
+INBOX_STALE_DAYS = 3
+INBOX_LIVE_PICKS = 15          # how many recent open slips /inbox checks against the scoreboard
+OPS_ICON = {"ok": "✅", "warn": "⚠️", "bad": "❌"}
+INBOX_KINDS = {   # kind: (icon, short label, what to do next)
+    "needs": ("✋", "The autopilot needs you",
+              "Tap how it ended, or grade the legs one by one with 🎯."),
+    "legs": ("🏁", "Game's over, leg still open",
+             "Tap 🎯 Grade legs and mark the finished ones. I settle the slip as soon as the legs decide it."),
+    "payout": ("💵", "Win with no payout",
+               "Tap 💵 and enter what it paid back (stake included) so your record is right."),
+    "broken": ("🧩", "Legs look wrong",
+               "Tap ✏️ Fix and put one leg per line. Then I can track and grade it."),
+    "draft": ("🧾", "Slip not logged yet",
+              "Tap 🧾 to log it, ✏️ to fix what I read, or 🚫 if you didn't place it."),
+    "stale": ("⏰", f"Open {INBOX_STALE_DAYS}+ days",
+              "Settle it if it's done. Still going (a future, next week's game)? Tap ⏰ Later."),
+}
+SERVER_TOGGLES.append(("selfcheck", "Daily self-check alerts", "optout"))
+PERSONAL_TOGGLES.append(("inboxdm", "Daily inbox DM", "optin"))
+
+_OPS_READY = False
+_DOCTOR_ESPN: dict = {}
+_DOCTOR_CLAUDE: dict = {}
+
+
+def ops_db() -> None:
+    """The inbox's memory: what someone snoozed, and which items were already DM'd."""
+    global _OPS_READY
+    if _OPS_READY:
+        return
+    db().execute("""CREATE TABLE IF NOT EXISTS ops_inbox (
+                        guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, item_key TEXT NOT NULL,
+                        snooze_until TEXT, dm_at TEXT, PRIMARY KEY (guild_id, user_id, item_key))""")
+    db().commit()
+    _OPS_READY = True
+
+
+def ops_is_admin(interaction) -> bool:
+    perms = getattr(interaction.user, "guild_permissions", None)
+    return is_mod(interaction.user) or bool(perms and getattr(perms, "manage_guild", False))
+
+
+def ops_guild(client, guild_id: int, interaction=None):
+    g = getattr(interaction, "guild", None) if interaction is not None else None
+    if g is None and client is not None and hasattr(client, "get_guild"):
+        g = client.get_guild(guild_id)
+    return g
+
+
+def ops_channel(client, guild, channel_id):
+    """A channel by id, from the guild first, then the client's cache. None when it's gone."""
+    try:
+        cid = int(channel_id)
+    except (TypeError, ValueError):
+        return None
+    ch = guild.get_channel(cid) if guild is not None and hasattr(guild, "get_channel") else None
+    if ch is None and client is not None and hasattr(client, "get_channel"):
+        ch = client.get_channel(cid)
+    return ch
+
+
+def ops_missing(channel, me, need=OPS_PERMS) -> Optional[list[str]]:
+    """The permission names the bot lacks in a channel, or None when Discord didn't let us look."""
+    if channel is None or me is None or not hasattr(channel, "permissions_for"):
+        return None
+    try:
+        perms = channel.permissions_for(me)
+    except Exception:
+        return None
+    return [label for attr, label in need if not getattr(perms, attr, True)]
+
+
+def ops_perm_fix(missing: list[str]) -> str:
+    return (f"Channel settings → Permissions → add PIMP-BOT's role → allow **{', '.join(missing)}** "
+            "(and check no channel override turns them off).")
+
+
+def ops_receipt_ids(guild_id: int) -> list[int]:
+    return [r["channel_id"] for r in db().execute(
+        "SELECT channel_id FROM receipt_channels WHERE guild_id = ? ORDER BY channel_id", (guild_id,))]
+
+
+def ops_targets(guild_id: int) -> list[tuple[str, int, list]]:
+    """(role, channel id, permissions it needs) for every channel the bot was told to use here."""
+    out = [("Receipts", cid, OPS_PERMS) for cid in ops_receipt_ids(guild_id)]
+    for role, key, need in (("Recap", "recap_channel", OPS_PERMS), ("Audit", "audit_channel", OPS_AUDIT_PERMS)):
+        v = get_setting(guild_id, key)
+        if v and v.isdigit():
+            out.append((role, int(v), need))
+    return out
+
+
+def ops_where(guild_id: int) -> str:
+    """One line: where each kind of post goes right now."""
+    rec = ops_receipt_ids(guild_id)
+    recap, aud = get_setting(guild_id, "recap_channel"), get_setting(guild_id, "audit_channel")
+    return (f"📸 Receipts: {' '.join(f'<#{c}>' for c in rec) or 'not set'}"
+            + (" (+ every channel)" if server_on(guild_id, "receipts_all") else "")
+            + f"\n📰 Recap: {f'<#{recap}>' if recap else 'not set'}\n📝 Audit: {f'<#{aud}>' if aud else 'not set'}")
+
+
+# ---- /admin doctor ------------------------------------------------------------------------------------
+
+def ops_check(level: str, key: str, text: str, fix: str = "") -> dict:
+    return {"level": level, "key": key, "text": text, "fix": fix}
+
+
+def doctor_channel_checks(client, guild_id: int, guild) -> list[dict]:
+    out = []
+    me = getattr(guild, "me", None)
+    targets = ops_targets(guild_id)
+    roles = {r for r, _, _ in targets}
+    if "Receipts" not in roles and not server_on(guild_id, "receipts_all"):
+        out.append(ops_check("warn", "chan:receipts", "No receipts channel yet, so screenshots only log when someone @mentions me",
+                             "`/admin setup` → Receipts, or run `/receipts` in the channel where slips get posted."))
+    if "Recap" not in roles:
+        out.append(ops_check("warn", "chan:recap", "No recap channel: weekly recaps, reminders and autopilot results have nowhere to go",
+                             "`/admin setup` → Recap, or run `/recapchannel` in that channel."))
+    if "Audit" not in roles:
+        out.append(ops_check("warn", "chan:audit", "No audit channel: edits, deletes and self-check alerts aren't logged",
+                             "`/admin setup` → Audit (keep that channel mods-only)."))
+    for role, cid, need in targets:
+        ch = ops_channel(client, guild, cid)
+        if ch is None:
+            out.append(ops_check("bad", f"gone:{role}:{cid}", f"{role} channel `{cid}` doesn't exist anymore (or I can't see it)",
+                                 f"`/admin setup` → {role} and pick a channel that exists."))
+            continue
+        missing = ops_missing(ch, me, need)
+        if missing is None:
+            out.append(ops_check("warn", f"perm?:{cid}", f"{role} <#{cid}>: Discord didn't let me read my permissions there",
+                                 "`/admin setup` → Test sends a real post there and tells you what's wrong."))
+        elif missing:
+            out.append(ops_check("bad", f"perm:{cid}", f"{role} <#{cid}>: I'm missing **{', '.join(missing)}**",
+                                 ops_perm_fix(missing)))
+        else:
+            out.append(ops_check("ok", f"perm:{cid}", f"{role} <#{cid}>: permissions look right"))
+    if get_setting(guild_id, "hotroles") == "on":
+        gp = getattr(me, "guild_permissions", None)
+        if gp is not None and not getattr(gp, "manage_roles", True):
+            out.append(ops_check("bad", "perm:roles", "Hot Hand / Ice Cold roles are on, but I can't **Manage Roles**",
+                                 "Server Settings → Roles → PIMP-BOT → allow Manage Roles, and drag my role above "
+                                 "the roles I hand out."))
+        elif gp is not None:
+            out.append(ops_check("ok", "perm:roles", "Weekly roles: I can manage roles"))
+    return out
+
+
+async def doctor_espn() -> dict:
+    """One cheap scoreboard call (shared for 10 minutes so the daily check across servers costs one call)."""
+    hit = _DOCTOR_ESPN.get("r")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    try:
+        await asyncio.wait_for(_get_json(ESPN.format(path="football/nfl"), {"dates": datetime.now(TZ).strftime("%Y%m%d")}), 8)
+        r = ops_check("ok", "espn", "ESPN scores are reachable")
+    except Exception as exc:
+        r = ops_check("bad", "espn", f"I can't reach ESPN right now (`{type(exc).__name__}`): live grading is paused",
+                      "Usually ESPN having a moment: it fixes itself. If it lasts a day, check Railway's logs.")
+    _DOCTOR_ESPN["r"] = (time.monotonic() + 600, r)
+    return r
+
+
+async def doctor_claude(deep: bool) -> dict:
+    if not ai_enabled():
+        return ops_check("warn", "claude", "No Claude key: screenshots get a Log button instead of being read, and "
+                                           "results the scoreboard can't settle wait for you",
+                         "Optional. Add `ANTHROPIC_API_KEY` on Railway → Variables if you want slips read automatically.")
+    if not deep:
+        return ops_check("ok", "claude", "Claude key is set (`/admin doctor` tests it for real)")
+    hit = _DOCTOR_CLAUDE.get("r")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    try:
+        await asyncio.wait_for(anthropic_client().messages.create(
+            model=CLAUDE_MODEL, max_tokens=1, messages=[{"role": "user", "content": "ping"}]), 20)
+        r = ops_check("ok", "claude", "Claude key works")
+    except Exception as exc:
+        r = ops_check("bad", "claude", f"The Claude key didn't work (`{clip(type(exc).__name__, 60)}`)",
+                      "Check `ANTHROPIC_API_KEY` on Railway → Variables, and that the Anthropic account has credit.")
+    _DOCTOR_CLAUDE["r"] = (time.monotonic() + 600, r)
+    return r
+
+
+def doctor_db_checks(guild_id: int) -> list[dict]:
+    out = []
+    try:
+        res = db().execute("PRAGMA quick_check").fetchone()[0]
+        out.append(ops_check("ok", "db", "Database is healthy") if res == "ok" else
+                   ops_check("bad", "db", f"The database reports damage: `{clip(str(res), 120)}`",
+                             "Download a backup now (`/export`), then restart the service. Ping the bot's owner."))
+    except Exception as exc:
+        out.append(ops_check("bad", "db", f"I couldn't check the database (`{type(exc).__name__}`)",
+                             "Restart the service on Railway; if it repeats, check the logs."))
+    size = os.path.getsize(DB_PATH) / 1024 / 1024 if os.path.exists(DB_PATH) else 0.0
+    n = {t: db().execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("picks", "legs", "settings")}
+    mine = db().execute("SELECT COUNT(*) FROM picks WHERE guild_id = ?", (guild_id,)).fetchone()[0]
+    out.append(ops_check("ok", "dbsize", f"{size:,.1f} MB · {n['picks']:,} picks ({mine:,} here) · {n['legs']:,} legs · "
+                                         f"{n['settings']:,} settings"))
+    if not os.path.abspath(DB_PATH).startswith("/data"):
+        out.append(ops_check("warn", "db:volume", "The database isn't on the /data volume, so a redeploy could wipe it",
+                             "Railway → your service → add a Volume at `/data`, then set `DB_PATH=/data/picks.db`."))
+    if size > 500:
+        out.append(ops_check("warn", "db:big", "The database is getting big (over 500 MB)",
+                             "It cleans itself nightly; if it keeps growing, ask the bot's owner to look."))
+    return out
+
+
+def doctor_job_checks(now: datetime) -> list[dict]:
+    out = []
+    last = _last_cycle.get("at")
+    if not last:
+        out.append(ops_check("warn", "loop", "The background loop hasn't run yet (normal for 2 minutes after a restart)",
+                             "Wait a couple of minutes and run this again."))
+    else:
+        age = (now - datetime.fromisoformat(last)).total_seconds() / 60
+        out.append(ops_check("ok", "loop", f"Background loop ran {age:.0f} min ago") if age <= 10 else
+                   ops_check("bad", "loop", f"The background loop last ran {age:.0f} min ago (it should run every 2)",
+                             "Restart the service on Railway (Deployments → ⋯ → Restart). If it repeats, check the logs."))
+    bad = [(k, v) for k, v in JOB_HEALTH.items() if v["fails"]]
+    if JOB_HEALTH and not bad:
+        out.append(ops_check("ok", "jobs", f"All {len(JOB_HEALTH)} background jobs healthy"))
+    for k, v in bad[:8]:
+        out.append(ops_check("bad" if v["fails"] >= JOB_ALERT_AFTER else "warn", f"job:{k}",
+                             f"Background job `{k}` failed {v['fails']}× in a row: `{clip(v['last_error'] or '?', 120)}`",
+                             "The rest keeps running. If it doesn't recover by itself, send the owner Railway's logs."))
+    return out
+
+
+async def doctor_checks(client, guild_id: int, guild=None, deep: bool = True,
+                        now: Optional[datetime] = None) -> list[tuple[str, list[dict]]]:
+    """Every check, grouped into sections. `deep` also tests the Claude key with a real (1-token) call."""
+    now = now or datetime.now(timezone.utc)
+    up = now - STARTED_AT
+    general = [ops_check("ok", "version", f"Version **{BOT_VERSION}** · up {up.days}d {up.seconds // 3600}h")]
+    needs = db().execute("SELECT COUNT(*) FROM picks WHERE guild_id = ? AND status = 'open' AND auto_state LIKE 'needs:%'",
+                         (guild_id,)).fetchone()[0]
+    general.append(ops_check("warn", "needs", f"{needs} open slip{'s' if needs != 1 else ''} need a person to settle",
+                             "They're in each owner's `/inbox`; mods see them all with `/inbox scope:Everyone`.")
+                   if needs else ops_check("ok", "needs", "No slips stuck waiting on a person"))
+    if server_on(guild_id, "receipts_all") and not ai_enabled():
+        general.append(ops_check("warn", "cfg:all", "“Log slips in every channel” is on, but it needs the Claude key to "
+                                                   "tell slips from other pictures",
+                                 "Add `ANTHROPIC_API_KEY` on Railway, or switch it off in `/admin setup` → Switches."))
+    if server_on(guild_id, "welcome") and not MEMBERS_INTENT:
+        general.append(ops_check("warn", "cfg:welcome", "Welcome DMs are on, but I can't see people joining",
+                                 "Developer portal → Bot → turn on Server Members Intent, then set `MEMBERS_INTENT=1` "
+                                 "on Railway."))
+    return [("Channels", doctor_channel_checks(client, guild_id, guild)),
+            ("Connections", [await doctor_espn(), await doctor_claude(deep)]),
+            ("Data", doctor_db_checks(guild_id)),
+            ("Background", doctor_job_checks(now)),
+            ("General", general)]
+
+
+def doctor_embed(sections: list[tuple[str, list[dict]]]) -> discord.Embed:
+    flat = [c for _, cs in sections for c in cs]
+    bad = sum(1 for c in flat if c["level"] == "bad")
+    warn = sum(1 for c in flat if c["level"] == "warn")
+    head = ("✅ All good. Nothing to fix." if not bad and not warn else
+            f"{'❌ ' + str(bad) + ' problem' + ('s' if bad != 1 else '') if bad else ''}"
+            f"{' · ' if bad and warn else ''}{'⚠️ ' + str(warn) + ' heads-up' if warn else ''}. Each one says how to fix it.")
+    e = discord.Embed(title="🩺 Doctor", description=head, color=0xE74C3C if bad else 0xF1C40F if warn else 0x2ECC71)
+    for name, cs in sections:
+        lines = []
+        for c in sorted(cs, key=lambda c: {"bad": 0, "warn": 1, "ok": 2}[c["level"]]):
+            lines.append(f"{OPS_ICON[c['level']]} {c['text']}" + (f"\n   ↳ {c['fix']}" if c["fix"] and c["level"] != "ok" else ""))
+        if lines:
+            e.add_field(name=name, value=clip("\n".join(lines), 1024), inline=False)
+    e.set_footer(text="A daily self-check posts any NEW ❌ to the audit channel (and again once it's fixed).")
+    return e
+
+
+async def doctor_daily(client, now: datetime) -> None:
+    """Once a day per server: run the checks quietly; post only problems that are new, and say when they're fixed."""
+    local = now.astimezone(TZ)
+    if local.hour < DOCTOR_HOUR:
+        return
+    day = local.date().isoformat()
+    for g in list(getattr(client, "guilds", None) or []):
+        try:
+            if get_setting(g.id, "doctor_day") == day:
+                continue
+            set_setting(g.id, "doctor_day", day)
+            if not server_on(g.id, "selfcheck"):
+                continue
+            sections = await doctor_checks(client, g.id, g, deep=False, now=now)
+            # failing jobs already alert the audit channel on their own
+            bad = {c["key"]: c for _, cs in sections for c in cs if c["level"] == "bad" and not c["key"].startswith("job:")}
+            prev = json.loads(get_setting(g.id, "doctor_bad") or "{}")
+            new = [c for k, c in bad.items() if k not in prev]
+            fixed = [t for k, t in prev.items() if k not in bad]
+            set_setting(g.id, "doctor_bad", json.dumps({k: c["text"] for k, c in bad.items()}) if bad else None)
+            if not new and not fixed:
+                continue
+            ch = ops_channel(client, g, get_setting(g.id, "audit_channel"))
+            if ch is None:
+                continue
+            lines = [f"❌ **New problem:** {c['text']}\n   ↳ {c['fix']}" for c in new] + [f"✅ **Fixed:** {t}" for t in fixed]
+            text = "🩺 Daily self-check\n" + "\n".join(lines) + "\n-# Full check-up any time: `/admin doctor`"
+            for chunk in split_message(text):
+                await ch.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Daily self-check failed for guild %s", getattr(g, "id", "?"), exc_info=True)
+
+
+EXTRA_JOBS.append(("doctor_daily", doctor_daily))
+
+
+# ---- /admin setup: the wizard -------------------------------------------------------------------------
+
+SETUP_STEPS = ["receipts", "recap", "audit", "switches", "test"]
+
+
+def setup_channel_lines(client, guild, guild_id: int, role: str, ids: list[int], need) -> list[str]:
+    me = getattr(guild, "me", None)
+    lines = []
+    for cid in ids:
+        ch = ops_channel(client, guild, cid)
+        if ch is None:
+            lines.append(f"❌ `{cid}` doesn't exist anymore: pick another one")
+            continue
+        missing = ops_missing(ch, me, need)
+        lines.append(f"✅ <#{cid}>" if not missing else f"❌ <#{cid}>: I'm missing **{', '.join(missing)}**")
+    return lines
+
+
+def setup_embed(client, guild, guild_id: int, step: int, note: str = "") -> discord.Embed:
+    name = SETUP_STEPS[step]
+    e = discord.Embed(title=f"🧭 Setup · step {step + 1} of {len(SETUP_STEPS)}", color=BRAND)
+    if name == "receipts":
+        ids = ops_receipt_ids(guild_id)
+        body = ["**📸 Where do people post their slips?**",
+                "Pick one or more channels below. I read every screenshot there and log it."
+                + ("" if ai_enabled() else " (No Claude key, so I reply with a 🧾 Log button instead.)"),
+                "Your picks replace the current list. Clear the box to turn receipts off."]
+        current = setup_channel_lines(client, guild, guild_id, "Receipts", ids, OPS_PERMS) or ["not set yet"]
+    elif name in ("recap", "audit"):
+        key = f"{name}_channel"
+        v = get_setting(guild_id, key)
+        body = (["**📰 Where should recaps go?**",
+                 "The weekly recap, open-pick reminders and results the autopilot settles get posted here."]
+                if name == "recap" else
+                ["**📝 Where should I keep the audit log?**",
+                 "Edits, deletes, manual settles, disputes and self-check alerts. Keep this channel mods-only."])
+        current = setup_channel_lines(client, guild, guild_id, name.title(), [int(v)] if v and v.isdigit() else [],
+                                      OPS_PERMS if name == "recap" else OPS_AUDIT_PERMS) or ["off"]
+    elif name == "switches":
+        body = ["**🎛️ The main switches**", "Tap one to flip it. Everything else lives in `/admin panel`."]
+        labels = {k: lab for k, lab, _ in SERVER_TOGGLES}
+        current = [f"{'✅' if server_on(guild_id, k) else '⬜'} **{labels[k]}**: {why}"
+                   for k, why in OPS_KEY_SWITCHES if k in labels]
+    else:
+        body = ["**🧪 Test it**", "Tap **Send test posts**: I post a short test message in each channel above and tell "
+                                 "you exactly which permission is missing where."]
+        current = [ops_where(guild_id)]
+    e.description = clip("\n".join(body) + "\n\n**Now:**\n" + "\n".join(current) + (f"\n\n{note}" if note else ""), 4000)
+    e.set_footer(text="Only admins can use this. Next ▶ keeps what's set; nothing is lost by skipping a step.")
+    return e
+
+
+async def setup_test_posts(client, guild, guild_id: int) -> list[str]:
+    """Post a test message in each configured channel. Returns one line per channel."""
+    me = getattr(guild, "me", None)
+    roles: dict[int, list[str]] = {}
+    needs: dict[int, list] = {}
+    for role, cid, need in ops_targets(guild_id):
+        roles.setdefault(cid, []).append(role)
+        if cid not in needs or need is OPS_PERMS:       # a channel used twice needs the stricter set
+            needs[cid] = need
+    if not roles:
+        return ["⚠️ No channels set yet. Go ◀ Back and pick at least a receipts and a recap channel."]
+    lines = []
+    for cid, rs in roles.items():
+        who = " + ".join(rs)
+        ch = ops_channel(client, guild, cid)
+        if ch is None:
+            lines.append(f"❌ {who} `{cid}`: that channel is gone. Pick a new one (◀ Back).")
+            continue
+        missing = ops_missing(ch, me, needs[cid]) or []
+        if any(m in missing for m in ("View Channel", "Send Messages")):
+            lines.append(f"❌ {who} <#{cid}>: I'm missing **{', '.join(missing)}**, so I can't post there.\n   ↳ {ops_perm_fix(missing)}")
+            continue
+        try:
+            await ch.send(OPS_TEST_TEXT, allowed_mentions=discord.AllowedMentions.none())
+        except discord.Forbidden:
+            lines.append(f"❌ {who} <#{cid}>: Discord blocked my post. A channel override is probably denying "
+                         "**Send Messages** or **View Channel** to my role.")
+            continue
+        except Exception as exc:
+            lines.append(f"⚠️ {who} <#{cid}>: the post failed (`{type(exc).__name__}`). Try again in a minute.")
+            continue
+        lines.append(f"✅ {who} <#{cid}>: test posted" + (f", but I'm missing **{', '.join(missing)}**\n   ↳ "
+                                                         f"{ops_perm_fix(missing)}" if missing else ""))
+    return lines
+
+
+def setup_apply(client, guild_id: int, step_name: str, ids: list[int]) -> str:
+    """Save a channel choice from the wizard. Returns a short confirmation."""
+    if step_name == "receipts":
+        old = set(ops_receipt_ids(guild_id))
+        db().execute("DELETE FROM receipt_channels WHERE guild_id = ?", (guild_id,))
+        db().executemany("INSERT OR REPLACE INTO receipt_channels (guild_id, channel_id) VALUES (?, ?)",
+                         [(guild_id, c) for c in ids])
+        db().commit()
+        live = getattr(client, "receipt_channels", None)
+        if isinstance(live, set):
+            live.difference_update(old)
+            live.update(ids)
+        return f"Saved: receipts in {', '.join(f'<#{c}>' for c in ids)}." if ids else "Receipts are off now."
+    key = f"{step_name}_channel"
+    set_setting(guild_id, key, str(ids[0]) if ids else None)
+    return f"Saved: {step_name} posts go to <#{ids[0]}>." if ids else f"{step_name.title()} channel is off now."
+
+
+def setup_channel_select(client, guild, guild_id: int, step_name: str):
+    if step_name == "receipts":
+        current, mx = ops_receipt_ids(guild_id), 10
+    else:
+        v = get_setting(guild_id, f"{step_name}_channel")
+        current, mx = ([int(v)] if v and v.isdigit() else []), 1
+    current = [c for c in current if ops_channel(client, guild, c) is not None][:mx]   # Discord rejects unknown ids
+    kw = dict(channel_types=[discord.ChannelType.text], min_values=0, max_values=mx, row=0,
+              placeholder={"receipts": "Pick the receipts channel(s)", "recap": "Pick the recap channel",
+                           "audit": "Pick the audit channel (mods-only)"}[step_name])
+    try:
+        return discord.ui.ChannelSelect(default_values=[discord.Object(id=c) for c in current], **kw)
+    except TypeError:          # older discord.py without default_values
+        return discord.ui.ChannelSelect(**kw)
+
+
+def setup_view(client, guild, guild_id: int, step: int) -> discord.ui.View:
+    v = discord.ui.View(timeout=1800)
+    name = SETUP_STEPS[step]
+
+    async def render(interaction, to_step: int, note: str = ""):
+        guild = ops_guild(interaction.client, guild_id, interaction)
+        await interaction.response.edit_message(embed=setup_embed(interaction.client, guild, guild_id, to_step, note),
+                                                view=setup_view(interaction.client, guild, guild_id, to_step))
+
+    async def gate(interaction) -> bool:
+        if not ops_is_admin(interaction) or interaction.guild_id != guild_id:
+            await interaction.response.send_message("Only admins can change the setup.", ephemeral=True)
+            return False
+        return True
+
+    if name in ("receipts", "recap", "audit"):
+        sel = setup_channel_select(client, guild, guild_id, name)
+
+        async def picked(interaction):
+            if not await gate(interaction):
+                return
+            guild = ops_guild(interaction.client, guild_id, interaction)
+            ids = []
+            for val in sel.values:
+                ch = ops_channel(interaction.client, guild, getattr(val, "id", val))
+                if ch is not None:
+                    ids.append(ch.id)
+            note = setup_apply(interaction.client, guild_id, name, ids)
+            await audit(interaction.client, guild_id, f"{who(interaction)} changed the {name} channel in /admin setup")
+            await render(interaction, step, "✅ " + note)
+        sel.callback = picked
+        v.add_item(sel)
+        if name != "receipts":
+            off = discord.ui.Button(label="Turn off", style=discord.ButtonStyle.secondary, row=1)
+
+            async def turn_off(interaction):
+                if not await gate(interaction):
+                    return
+                await render(interaction, step, "✅ " + setup_apply(interaction.client, guild_id, name, []))
+            off.callback = turn_off
+            v.add_item(off)
+    elif name == "switches":
+        labels = {k: (lab, kind) for k, lab, kind in SERVER_TOGGLES}
+        for n, (key, _) in enumerate([s for s in OPS_KEY_SWITCHES if s[0] in labels]):
+            lab, kind = labels[key]
+            on = server_on(guild_id, key)
+            b = discord.ui.Button(label=clip(f"{lab}: {'ON' if on else 'OFF'}", 80), row=n // 3,
+                                  style=discord.ButtonStyle.success if on else discord.ButtonStyle.secondary)
+
+            def flip(k=key, kd=kind, lb=lab):
+                async def cb(interaction):
+                    if not await gate(interaction):
+                        return
+                    set_setting(guild_id, k, toggle_flip(get_setting(guild_id, k), kd))
+                    state = "on" if server_on(guild_id, k) else "off"
+                    await audit(interaction.client, guild_id, f"{who(interaction)} switched {lb} {state} in /admin setup")
+                    await render(interaction, step, f"✅ {lb} is **{state}**.")
+                return cb
+            b.callback = flip()
+            v.add_item(b)
+    else:
+        t = discord.ui.Button(label="🧪 Send test posts", style=discord.ButtonStyle.primary, row=0)
+
+        async def test(interaction):
+            if not await gate(interaction):
+                return
+            await interaction.response.defer()
+            guild = ops_guild(interaction.client, guild_id, interaction)
+            lines = await setup_test_posts(interaction.client, guild, guild_id)
+            ok = all(x.startswith("✅") and "missing" not in x for x in lines)
+            note = "**Test results**\n" + "\n".join(lines) + (
+                "\n\n🎉 Everything posted. You're set. `/admin doctor` runs a full check-up any time." if ok else
+                "\n\nFix the ❌ lines, then tap **Send test posts** again.")
+            await interaction.edit_original_response(embed=setup_embed(interaction.client, guild, guild_id, step, note),
+                                                     view=setup_view(interaction.client, guild, guild_id, step))
+        t.callback = test
+        v.add_item(t)
+    nav = []
+    if step > 0:
+        nav.append(("◀ Back", step - 1, discord.ButtonStyle.secondary))
+    nav.append(("Next ▶", step + 1, discord.ButtonStyle.primary) if step < len(SETUP_STEPS) - 1 else
+               ("✅ Done", -1, discord.ButtonStyle.success))
+    for label, to, style in nav:
+        b = discord.ui.Button(label=label, style=style, row=4)
+
+        def go(target=to):
+            async def cb(interaction):
+                if not await gate(interaction):
+                    return
+                if target < 0:
+                    await interaction.response.edit_message(
+                        content=None, view=None, embed=discord.Embed(
+                            title="🧭 Setup saved", color=0x2ECC71,
+                            description=ops_where(guild_id) + "\n\nChange anything later with `/admin setup`, flip "
+                                                              "everything else in `/admin panel`, and run "
+                                                              "`/admin doctor` for a full check-up."))
+                    return
+                await render(interaction, target)
+            return cb
+        b.callback = go()
+        v.add_item(b)
+    return v
+
+
+# ---- /inbox -------------------------------------------------------------------------------------------
+
+def inbox_snoozed(guild_id: int, viewer_id: int, now: datetime) -> set[str]:
+    ops_db()
+    return {r["item_key"] for r in db().execute(
+        "SELECT item_key FROM ops_inbox WHERE guild_id = ? AND user_id = ? AND snooze_until > ?",
+        (guild_id, viewer_id, iso(now)))}
+
+
+def inbox_mark(guild_id: int, user_id: int, key: str, snooze_until: Optional[str] = None, dm_at: Optional[str] = None) -> None:
+    ops_db()
+    db().execute("""INSERT INTO ops_inbox (guild_id, user_id, item_key, snooze_until, dm_at) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (guild_id, user_id, item_key) DO UPDATE SET
+                    snooze_until = COALESCE(excluded.snooze_until, snooze_until), dm_at = COALESCE(excluded.dm_at, dm_at)""",
+                 (guild_id, user_id, key, snooze_until, dm_at))
+    db().commit()
+
+
+def inbox_game_over(e: dict) -> bool:
+    ev = e.get("event") or {}
+    return e.get("status") == "open" and not e.get("decided") and bool(ev) and (ev.get("state") == "post" or bool(ev.get("final")))
+
+
+async def inbox_items(guild_id: int, user_id: Optional[int], viewer_id: int, deep: bool = True,
+                      now: Optional[datetime] = None) -> list[dict]:
+    """Everything waiting on a person (or, with user_id None, on anyone), most urgent first.
+    `deep` checks recent slips against the scoreboard; otherwise only what the autopilot already looked up is used."""
+    now = now or datetime.now(timezone.utc)
+    who_sql = " AND (bettor_id = ? OR (bettor_id IS NULL AND logged_by = ?))" if user_id else ""
+    who_args = [user_id, user_id] if user_id else []
+    skip = inbox_snoozed(guild_id, viewer_id, now)
+    items: list[dict] = []
+    taken: set[int] = set()
+
+    def desc(p) -> str:
+        return p["description"] if user_id else shown_desc(p)
+
+    def add(kind: str, p, line: str, **extra):
+        key = f"{kind}:{p['id']}"
+        if p["id"] in taken or key in skip:
+            return
+        taken.add(p["id"])
+        items.append(dict(key=key, kind=kind, pid=p["id"], owner_id=p["bettor_id"], owner=p["bettor_name"],
+                          title=f"#{p['id']} " + ("" if user_id else f"{p['bettor_name']} · ") + clip(desc(p), 70),
+                          line=line, **extra))
+
+    rows = db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND status = 'open'{who_sql} ORDER BY id DESC LIMIT 200",
+                        [guild_id] + who_args).fetchall()
+    for p in rows:
+        if (p["auto_state"] or "").startswith("needs:"):
+            add("needs", p, "I couldn't settle it alone: " + clip(p["auto_state"].split(":", 1)[1], 120))
+    recent = iso(now - timedelta(days=AUTOPILOT_DAYS))
+    checked = 0
+    for p in rows:
+        if p["id"] in taken or not get_legs(p["id"]):
+            continue
+        if deep and p["created_at"] >= recent and checked < INBOX_LIVE_PICKS:
+            checked += 1
+            entries = await cached_progress(p)
+        else:
+            hit = _PROGRESS_CACHE.get(p["id"])
+            entries = hit[1] if hit else []
+        done = [e for e in entries if inbox_game_over(e)]
+        if done:
+            add("legs", p, f"Game's over but leg {', '.join(str(e['n']) for e in done[:4])} is still open: "
+                           + clip(done[0]["text"], 60), finished=[e["n"] for e in done])
+    since = iso(now - timedelta(days=60))
+    for p in db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND status = 'win' AND payout <= 0 "
+                          f"AND (returned IS NULL OR returned <= cost) AND settled_at >= ?{who_sql} ORDER BY id DESC LIMIT 50",
+                          [guild_id, since] + who_args):
+        add("payout", p, f"Marked a win on {local_day(p['settled_at'])}, but there's no payout, so it counts as break-even")
+    for p in rows:
+        legs = get_legs(p["id"])
+        want = wanted_legs(p, legs)
+        if want:
+            add("broken", p, f"Says {want} legs but I have {len(legs)}" + (f": “{clip(legs[0]['text'], 40)}”" if legs else ""))
+    if user_id:
+        week = iso(now - timedelta(days=7))
+        for r in db().execute("SELECT key, value FROM settings WHERE guild_id = ? AND key LIKE 'draft:%'", (guild_id,)):
+            try:
+                d = json.loads(r["value"] or "{}")
+                mid = int(r["key"].split(":", 1)[1])
+            except (ValueError, IndexError):
+                continue
+            key = f"draft:{mid}"
+            if d.get("poster") != user_id or d.get("used") or (d.get("at") or "") < week or key in skip:
+                continue
+            slip = d.get("slip") or {}
+            what = slip.get("description") or (f"{len(slip.get('legs') or [])} legs" if slip.get("legs") else "a slip")
+            amt = f" · {money(slip['cost'])} → {money(slip.get('payout') or 0)}" if slip.get("cost") else " · no amount yet"
+            items.append(dict(key=key, kind="draft", mid=mid, owner_id=user_id, owner=d.get("poster_name") or "",
+                              title=clip(f"{slip.get('platform') or 'Slip'} · {what}", 80),
+                              line=f"Posted {local_day(d['at'])}{amt}", url=d.get("url")))
+    stale = iso(now - timedelta(days=INBOX_STALE_DAYS))
+    for p in rows:
+        state = p["auto_state"] or ""
+        later = _state_time(state) if state.startswith("waiting:") else None
+        if p["created_at"] > stale or state == "live" or (later and later > now) or \
+                (p["future_due"] and p["future_due"] > iso(now)):
+            continue
+        add("stale", p, f"Open since {local_day(p['created_at'])}")
+    order = list(INBOX_KINDS)
+    items.sort(key=lambda it: order.index(it["kind"]))
+    return items
+
+
+def inbox_embed(items: list[dict], title_name: str, everyone: bool, note: str = "") -> discord.Embed:
+    title = "📥 Everyone's inbox" if everyone else f"📥 {title_name}'s inbox"
+    if not items:
+        e = discord.Embed(title=title, color=0x2ECC71, description=(note + "\n\n" if note else "") +
+                          "✨ All clear. Nothing's waiting on " + ("anyone" if everyone else "you") + ".\n"
+                          "Post a slip to log it, or `/tracker` to watch what's live.")
+        return e
+    counts: dict[str, int] = {}
+    for it in items:
+        counts[it["kind"]] = counts.get(it["kind"], 0) + 1
+    head = f"**{len(items)} thing{'s' if len(items) != 1 else ''}** · " + " · ".join(
+        f"{INBOX_KINDS[k][0]} {n}" for k, n in counts.items())
+    lines = [f"{INBOX_KINDS[it['kind']][0]} **{it['title']}**\n-# {clip(it['line'], 150)}" for it in items[:20]]
+    if len(items) > 20:
+        lines.append(f"…and {len(items) - 20} more. Handle a few and refresh.")
+    e = discord.Embed(title=title, color=BRAND,
+                      description=clip((note + "\n\n" if note else "") + head + "\n\n" + "\n".join(lines), 4000))
+    e.set_footer(text="Pick one below to handle it in a tap. ⏰ Later hides an item for 3 days.")
+    return e
+
+
+async def inbox_page(interaction, scope: str, deep: bool, note: str = "") -> tuple[discord.Embed, discord.ui.View]:
+    gid, uid = interaction.guild_id, interaction.user.id
+    items = await inbox_items(gid, None if scope == "all" else uid, uid, deep=deep)
+    return inbox_embed(items, interaction.user.display_name, scope == "all", note), inbox_view(gid, uid, scope, items)
+
+
+def inbox_view(guild_id: int, viewer_id: int, scope: str, items: list[dict]) -> discord.ui.View:
+    v = discord.ui.View(timeout=1800)
+    if items:
+        sel = discord.ui.Select(placeholder="Handle one…", row=0, options=[
+            discord.SelectOption(label=clip(f"{INBOX_KINDS[it['kind']][0]} {it['title']}", 100), value=it["key"],
+                                 description=clip(it["line"], 100)) for it in items[:25]])
+
+        async def chosen(interaction):
+            if interaction.user.id != viewer_id:
+                await interaction.response.send_message("That's someone else's inbox. Run `/inbox` for yours.", ephemeral=True)
+                return
+            it = next((x for x in items if x["key"] == sel.values[0]), None)
+            await inbox_show_item(interaction, scope, it)
+        sel.callback = chosen
+        v.add_item(sel)
+    b = discord.ui.Button(label="🔄 Refresh", style=discord.ButtonStyle.secondary, row=1)
+
+    async def refresh(interaction):
+        if interaction.user.id != viewer_id:
+            await interaction.response.send_message("Run `/inbox` for yours.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        e, view = await inbox_page(interaction, scope, True)
+        await interaction.edit_original_response(embed=e, view=view)
+    b.callback = refresh
+    v.add_item(b)
+    return v
+
+
+async def inbox_back(interaction, scope: str, note: str = "") -> None:
+    e, view = await inbox_page(interaction, scope, False, note)
+    await interaction.response.edit_message(content=None, embed=e, view=view)
+
+
+def inbox_allowed(interaction, p) -> bool:
+    return p is not None and p["guild_id"] == interaction.guild_id and can_edit(interaction, p)
+
+
+async def inbox_show_item(interaction, scope: str, it: Optional[dict]) -> None:
+    """Swap the inbox message for one item with its action buttons (re-checked against the database)."""
+    gid = interaction.guild_id
+    if it is None:
+        await inbox_back(interaction, scope, "That one's already handled.")
+        return
+    if it["kind"] == "draft":
+        d = get_slip_draft(gid, it["mid"])
+        if d is None or d.get("used") or d.get("poster") != interaction.user.id:
+            await inbox_back(interaction, scope, "That slip was already logged (or isn't yours).")
+            return
+        slip = d.get("slip") or {}
+        legs = "\n".join(f"• {clip(str(x), 90)}" for x in (slip.get("legs") or [])[:12])
+        e = discord.Embed(title=f"🧾 {INBOX_KINDS['draft'][1]}", color=BRAND, description=clip(
+            f"**{it['title']}**\n{it['line']}" + (f"\n[Jump to the screenshot]({d['url']})" if d.get("url") else "")
+            + (f"\n\n{legs}" if legs else "") + f"\n\n{INBOX_KINDS['draft'][2]}", 4000))
+        await interaction.response.edit_message(content=None, embed=e, view=inbox_item_view(gid, interaction.user.id,
+                                                                                            scope, it))
+        return
+    p = get_pick(gid, it["pid"])
+    if not inbox_allowed(interaction, p):
+        await inbox_back(interaction, scope, "That pick is gone, or isn't yours to change.")
+        return
+    if not inbox_still_due(it, p):
+        await inbox_back(interaction, scope, f"Pick #{p['id']} was already taken care of. ✅")
+        return
+    await interaction.response.edit_message(content=None, embed=inbox_item_embed(it, p),
+                                            view=inbox_item_view(gid, interaction.user.id, scope, it, p))
+
+
+def inbox_still_due(it: dict, p) -> bool:
+    """Is this item still a problem? (someone may have handled it from the card or another message)"""
+    if it["kind"] == "payout":
+        return p["status"] == "win" and p["payout"] <= 0 and (p["returned"] is None or p["returned"] <= p["cost"])
+    return p["status"] == "open"
+
+
+def inbox_item_embed(it: dict, p) -> discord.Embed:
+    icon, label, todo = INBOX_KINDS[it["kind"]]
+    e = discord.Embed(title=clip(f"{icon} {label} · #{p['id']}", 256), color=STATUS[p["status"]][1],
+                      description=clip(f"**{p['bettor_name']}** · {p['platform']} · {money(p['cost'])} → "
+                                       f"{money(p['payout'])}\n{p['description']}\n\n{it['line']}\n\n👉 {todo}", 4000))
+    finished = set(it.get("finished") or [])
+    legs = get_legs(p["id"])
+    if legs:
+        e.add_field(name=f"Legs ({len(legs)})", inline=False, value=clip("\n".join(
+            f"{LEG_ICON[x['status']]} `{x['idx']}` {x['text']}" + (" · 🏁 game over" if x["idx"] in finished and
+                                                                   x["status"] == "open" else "") for x in legs), 1024))
+    if p["slip_url"]:
+        e.add_field(name="Slip", value=f"[View]({p['slip_url']})")
+    return e
+
+
+def inbox_item_view(guild_id: int, viewer_id: int, scope: str, it: dict, p=None) -> discord.ui.View:
+    v = discord.ui.View(timeout=1800)
+    kind = it["kind"]
+
+    def mine(interaction) -> bool:
+        return interaction.user.id == viewer_id
+
+    if kind == "draft":
+        v.add_item(SlipDraftButton("log", it["mid"]))
+        v.add_item(SlipDraftButton("edit", it["mid"]))
+        no = discord.ui.Button(label="🚫 I didn't place it", style=discord.ButtonStyle.secondary, row=1)
+
+        async def dismiss(interaction):
+            if not mine(interaction):
+                await interaction.response.send_message("That's someone else's inbox.", ephemeral=True)
+                return
+            inbox_mark(guild_id, viewer_id, it["key"], snooze_until="9999-12-31")
+            await inbox_back(interaction, scope, "🚫 Got it, that slip is off your list.")
+        no.callback = dismiss
+        v.add_item(no)
+    elif kind == "payout":
+        b = discord.ui.Button(label="💵 What did it pay?", style=discord.ButtonStyle.success, row=0)
+
+        async def ask(interaction):
+            q = get_pick(guild_id, it["pid"])
+            if not mine(interaction) or not inbox_allowed(interaction, q):
+                await interaction.response.send_message("Only the bettor, whoever logged it, or a mod can change this.",
+                                                        ephemeral=True)
+                return
+            await interaction.response.send_modal(InboxPayoutModal(it["pid"], scope))
+        b.callback = ask
+        v.add_item(b)
+    else:
+        for status in ("win", "loss", "push"):
+            v.add_item(SettleButton(it["pid"], status))
+        v.add_item(FixPickButton(it["pid"]))
+        if p is not None and any(x["status"] == "open" for x in get_legs(p["id"])):
+            g = discord.ui.Button(label="🎯 Grade legs", style=discord.ButtonStyle.primary, row=1)
+
+            async def grade(interaction):
+                q = get_pick(guild_id, it["pid"])
+                if not mine(interaction) or not inbox_allowed(interaction, q):
+                    await interaction.response.send_message("Only the bettor, whoever logged it, or a mod can grade this.",
+                                                            ephemeral=True)
+                    return
+                await interaction.response.edit_message(embed=inbox_item_embed(it, q),
+                                                        view=leg_grade_view(guild_id, viewer_id, scope, it))
+            g.callback = grade
+            v.add_item(g)
+    if kind != "draft":
+        later = discord.ui.Button(label="⏰ Later", style=discord.ButtonStyle.secondary, row=1)
+
+        async def snooze(interaction):
+            if not mine(interaction):
+                await interaction.response.send_message("That's someone else's inbox.", ephemeral=True)
+                return
+            inbox_mark(guild_id, viewer_id, it["key"], snooze_until=iso(datetime.now(timezone.utc) + timedelta(days=3)))
+            await inbox_back(interaction, scope, "⏰ Hidden for 3 days.")
+        later.callback = snooze
+        v.add_item(later)
+    back = discord.ui.Button(label="◀ Inbox", style=discord.ButtonStyle.secondary, row=1)
+
+    async def go_back(interaction):
+        if not mine(interaction):
+            await interaction.response.send_message("Run `/inbox` for yours.", ephemeral=True)
+            return
+        await inbox_back(interaction, scope)
+    back.callback = go_back
+    v.add_item(back)
+    return v
+
+
+def leg_grade_view(guild_id: int, viewer_id: int, scope: str, it: dict, chosen: Optional[int] = None) -> discord.ui.View:
+    """Pick an open leg, then Hit / Miss / Push: the same as `/leg`, without typing numbers."""
+    v = discord.ui.View(timeout=1800)
+    open_legs = [x for x in get_legs(it["pid"]) if x["status"] == "open"]
+    finished = set(it.get("finished") or [])
+    open_legs.sort(key=lambda x: (x["idx"] not in finished, x["idx"]))
+    if chosen is None or chosen not in {x["idx"] for x in open_legs}:
+        chosen = open_legs[0]["idx"] if open_legs else None
+    if open_legs:
+        sel = discord.ui.Select(placeholder="Which leg?", row=0, options=[
+            discord.SelectOption(label=clip(f"{x['idx']}. {x['text']}", 100), value=str(x["idx"]),
+                                 description="🏁 game over" if x["idx"] in finished else None, default=x["idx"] == chosen)
+            for x in open_legs[:25]])
+
+        async def pick_leg(interaction):
+            if interaction.user.id != viewer_id:
+                await interaction.response.send_message("Run `/inbox` for yours.", ephemeral=True)
+                return
+            await interaction.response.edit_message(view=leg_grade_view(guild_id, viewer_id, scope, it, int(sel.values[0])))
+        sel.callback = pick_leg
+        v.add_item(sel)
+        for res, style in (("hit", discord.ButtonStyle.success), ("miss", discord.ButtonStyle.danger),
+                           ("push", discord.ButtonStyle.secondary)):
+            b = discord.ui.Button(label=f"Leg {chosen}: {res.title()}", style=style, row=1)
+
+            def make(r=res, idx=chosen):
+                async def cb(interaction):
+                    p = get_pick(guild_id, it["pid"])
+                    if interaction.user.id != viewer_id or not inbox_allowed(interaction, p):
+                        await interaction.response.send_message("Only the bettor, whoever logged it, or a mod can grade this.",
+                                                                ephemeral=True)
+                        return
+                    leg = next((x for x in get_legs(p["id"]) if x["idx"] == idx), None)
+                    if p["status"] != "open" or leg is None or leg["status"] != "open":
+                        await inbox_back(interaction, scope, f"Pick #{p['id']} changed meanwhile, so I left it alone.")
+                        return
+                    p, note = grade_leg(guild_id, p["id"], idx, r)
+                    await audit(interaction.client, guild_id, f"{who(interaction)} graded leg {idx} of {p['bettor_name']}'s "
+                                                              f"pick #{p['id']}: {r}")
+                    if p["status"] != "open":
+                        await inbox_back(interaction, scope, f"✅ That settled pick #{p['id']}: **{STATUS[p['status']][0]}** "
+                                                             f"({signed(pick_net(p))})." + (f" {note}" if note else ""))
+                        return
+                    await interaction.response.edit_message(
+                        content=f"Leg {idx}: {LEG_ICON[r]} saved." + (f" {note}" if note else ""),
+                        embed=inbox_item_embed(it, p), view=leg_grade_view(guild_id, viewer_id, scope, it))
+                return cb
+            b.callback = make()
+            v.add_item(b)
+    back = discord.ui.Button(label="◀ Inbox", style=discord.ButtonStyle.secondary, row=2)
+
+    async def go_back(interaction):
+        if interaction.user.id != viewer_id:
+            await interaction.response.send_message("Run `/inbox` for yours.", ephemeral=True)
+            return
+        await inbox_back(interaction, scope)
+    back.callback = go_back
+    v.add_item(back)
+    return v
+
+
+class InboxPayoutModal(discord.ui.Modal, title="What did it pay?"):
+    amount = discord.ui.TextInput(label="Total paid back (stake included)", placeholder="45", max_length=12)
+
+    def __init__(self, pick_id: int, scope: str):
+        super().__init__()
+        self.pick_id, self.scope = pick_id, scope
+
+    async def on_submit(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if not inbox_allowed(interaction, p) or p["status"] != "win":
+            await interaction.response.send_message("That pick changed or isn't yours to edit.", ephemeral=True)
+            return
+        try:
+            amt = parse_money(self.amount.value)
+        except ValueError:
+            await interaction.response.send_message("That needs to be an amount, like 45 or $45.50.", ephemeral=True)
+            return
+        if amt <= 0:
+            await interaction.response.send_message("A win pays back more than 0. If it paid nothing, it was a loss: "
+                                                    "use ⚠️ Wrong grade? on its card.", ephemeral=True)
+            return
+        # fill in the payout without moving the settle date (so it stays in the right week)
+        db().execute("UPDATE picks SET payout = CASE WHEN payout <= 0 THEN ? ELSE payout END, returned = ? WHERE id = ?",
+                     (amt, amt, p["id"]))
+        db().commit()
+        p = get_pick(interaction.guild_id, p["id"])
+        await audit(interaction.client, interaction.guild_id,
+                    f"{who(interaction)} filled in what pick #{p['id']} ({p['bettor_name']}) paid: {money(amt)}")
+        await inbox_back(interaction, self.scope, f"💵 Saved: pick #{p['id']} paid {money(amt)} ({signed(pick_net(p))}).")
+
+
+async def inbox_open(interaction, scope: str = "me") -> None:
+    """Send the inbox as a private message (used by /inbox and the /start button)."""
+    if scope == "all" and not ops_is_admin(interaction):
+        await interaction.response.send_message("Only mods can see everyone's inbox. Here's yours: `/inbox`.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    e, view = await inbox_page(interaction, scope, True)
+    await interaction.followup.send(embed=e, view=view, ephemeral=True)
+
+
+async def inbox_dm_job(client, now: datetime) -> None:
+    """Opt-in: once a day, DM people the inbox items they haven't been told about yet. Never the same item twice."""
+    local = now.astimezone(TZ)
+    if local.hour < INBOX_DM_HOUR:
+        return
+    day = local.date().isoformat()
+    ops_db()
+    if get_setting(0, "ops_inbox_clean") != day:
+        set_setting(0, "ops_inbox_clean", day)
+        db().execute("DELETE FROM ops_inbox WHERE (dm_at IS NULL OR dm_at < ?) AND (snooze_until IS NULL OR snooze_until < ?)",
+                     (iso(now - timedelta(days=60)), iso(now)))
+        db().commit()
+    for r in db().execute("SELECT guild_id, key FROM settings WHERE key LIKE 'inboxdm:%' AND value = 'on'").fetchall():
+        gid = r["guild_id"]
+        try:
+            uid = int(r["key"].split(":", 1)[1])
+            mark = f"inboxdm_day:{uid}"
+            if get_setting(gid, mark) == day or is_quiet(gid, uid, now):
+                continue
+            set_setting(gid, mark, day)
+            told = {x["item_key"] for x in db().execute(
+                "SELECT item_key FROM ops_inbox WHERE guild_id = ? AND user_id = ? AND dm_at IS NOT NULL", (gid, uid))}
+            new = [it for it in await inbox_items(gid, uid, uid, deep=False, now=now) if it["key"] not in told]
+            if not new:
+                continue
+            for it in new:
+                inbox_mark(gid, uid, it["key"], dm_at=iso(now))
+            g = client.get_guild(gid) if hasattr(client, "get_guild") else None
+            lines = [f"{INBOX_KINDS[it['kind']][0]} {it['title']}" for it in new[:10]]
+            if len(new) > 10:
+                lines.append(f"…and {len(new) - 10} more")
+            text = (f"📥 {len(new)} new thing{'s' if len(new) != 1 else ''} waiting on you"
+                    + (f" in **{clip(g.name, 60)}**" if g is not None and getattr(g, "name", None) else "") + ":\n"
+                    + "\n".join(lines) + "\nRun `/inbox` there to handle each in a tap.\n"
+                    "-# Turn these DMs off in `/me settings` → Daily inbox DM.")
+            user = client.get_user(uid) if hasattr(client, "get_user") else None
+            user = user or await client.fetch_user(uid)
+            await user.send(clip(text, 2000), allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Inbox DM failed for %s in guild %s", r["key"], gid, exc_info=True)
+
+
+EXTRA_JOBS.append(("inbox_dms", inbox_dm_job))
+
+
+# ---- /start ---------------------------------------------------------------------------------------------
+
+START_LINES = ("📸 **I log your slips.** Post a screenshot in the receipts channel (or @mention me with it).\n"
+               "🛰️ **I track them live** and grade each leg from the box scores.\n"
+               "🤖 **I settle them myself** when the games end, and only ask you when I can't.\n"
+               "📊 **I keep score:** your record, your trading card, the group leaderboard.\n"
+               "📥 **I tell you what needs you:** one inbox, one tap each.")
+
+
+async def start_embed(guild_id: int, user) -> discord.Embed:
+    uid = user.id
+    s = next(iter(compute_stats(guild_id, str(uid))), None)
+    inbox = await inbox_items(guild_id, uid, uid, deep=False)
+    e = discord.Embed(title=f"👋 Hey {clip(user.display_name, 80)}", color=BRAND, description=START_LINES)
+    if s is None:
+        you = "No slips logged yet."
+        nxt = "Post your first slip screenshot, or tap **🧾 Log a slip** to see the ways to log one."
+    else:
+        you = (f"🟡 {s['open']} open · record **{record_line(s)}** · {signed(s['net'])}"
+               + f"\n📥 Inbox: **{len(inbox)}**" + (" waiting on you" if inbox else " (all clear)"))
+        nxt = ("Tap **📥 My inbox**: " + INBOX_KINDS[inbox[0]["kind"]][1].lower() + " on " + inbox[0]["title"] + "."
+               if inbox else "Tap **🛰️ What's live** to watch your open slips, or log a new one.")
+    e.add_field(name="You", value=clip(you, 1024), inline=False)
+    e.add_field(name="Next", value=clip(nxt, 1024), inline=False)
+    e.set_footer(text="Only you see this. /help has everything else.")
+    return e
+
+
+def start_log_help(guild_id: int) -> str:
+    rec = ops_receipt_ids(guild_id)
+    where = (f"in {', '.join(f'<#{c}>' for c in rec[:5])}" if rec else "in any channel where you @mention me")
+    return ("**Three ways to log a slip:**\n"
+            f"1. 📸 **Screenshot**: post it {where}" + (" (or anywhere: every-channel mode is on)"
+                                                        if server_on(guild_id, "receipts_all") else "") + ". "
+            "I read it and log it" + ("." if ai_enabled() else ": tap 🧾 Log this slip under my reply.") + "\n"
+            "2. ⌨️ **Typed**: `@PIMP-BOT log Tatum o22.5 PRA, Brown o20.5 pts, $10 to win $30`\n"
+            "3. 📝 **Command**: `/pick` and fill in the boxes.\n\n"
+            "Want an opinion first? Add **thoughts?** to the screenshot and nothing gets logged. "
+            "Keep a slip secret until it settles with `/pick hidden:True`.")
+
+
+def start_view(guild_id: int, user_id: int) -> discord.ui.View:
+    v = discord.ui.View(timeout=1800)
+
+    async def guard(interaction) -> bool:
+        if interaction.user.id != user_id:
+            await interaction.response.send_message("Run `/start` for your own.", ephemeral=True)
+            return False
+        return True
+
+    async def log_slip(interaction):
+        if await guard(interaction):
+            await interaction.response.send_message(start_log_help(guild_id), ephemeral=True)
+
+    async def settings(interaction):
+        if await guard(interaction):
+            await interaction.response.send_message(
+                embed=me_settings_embed(guild_id, user_id, interaction.user.display_name),
+                view=me_settings_view(guild_id, user_id), ephemeral=True)
+
+    async def card(interaction):
+        if not await guard(interaction):
+            return
+        key, name = str(user_id), interaction.user.display_name
+        c = card_payload(guild_id, key, name) if compute_stats(guild_id, key) else None
+        if c is None:
+            await interaction.response.send_message("No card yet: log a slip first and it shows up here.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        av = await avatar_bytes(interaction.user)
+        png = await asyncio.to_thread(locked_render, render_trading_card, c, av)
+        await interaction.followup.send(file=discord.File(png, filename="card.png"),
+                                        view=CardFlipView(key, name, interaction.user), ephemeral=True)
+
+    async def live(interaction):
+        if not await guard(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.followup.send(embed=await tracker_embed(guild_id, user_id, user_id), view=tracker_view("me"),
+                                        ephemeral=True)
+
+    async def inbox(interaction):
+        if await guard(interaction):
+            await inbox_open(interaction, "me")
+
+    async def help_(interaction):
+        if await guard(interaction):
+            await help_cmd.callback(interaction)
+
+    for label, style, fn in (("🧾 Log a slip", discord.ButtonStyle.primary, log_slip),
+                             ("📥 My inbox", discord.ButtonStyle.success, inbox),
+                             ("🛰️ What's live", discord.ButtonStyle.secondary, live),
+                             ("🃏 My card", discord.ButtonStyle.secondary, card),
+                             ("⚙️ My settings", discord.ButtonStyle.secondary, settings),
+                             ("❓ Help", discord.ButtonStyle.secondary, help_)):
+        b = discord.ui.Button(label=label, style=style)
+        b.callback = fn
+        v.add_item(b)
+    return v
+
+
+HELP_EXTRA.append(("Start here, inbox, setup", (
+    "`/start` a one-minute tour made for you, with your record and what's next\n"
+    "`/inbox` everything waiting on you (stuck slips, open legs on finished games, wins with no payout, broken "
+    "slips, unlogged screenshots, old picks), one tap each · daily DM: `/me settings` → Daily inbox DM\n"
+    "Admins: `/admin setup` channels and main switches step by step, with test posts · "
+    "`/admin doctor` full check-up with a fix for every problem")))
+
+
+# ==========================================================================
+# r20 personal: what the bot calls you, memory callbacks, /me timeline, /lore, the Monday note
+# ==========================================================================
+
+PERSONAL_TOGGLES.append(("weeklynote", "Monday note DM", "optin"))
+SERVER_TOGGLES.append(("lore", "Lore anniversaries", "optout"))
+
+NICK_MAX, HYPE_MAX, LORE_MAX = 24, 40, 400
+LORE_HOUR = 11            # local hour after which lore anniversaries go out
+LORE_PER_DAY = 20         # lore adds per person per day
+_PERS_LINK = re.compile(r"^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)/?$")
+_PERS_CUSTOM_EMOJI = re.compile(r"^<a?:\w{2,32}:\d{15,22}>$")
+
+
+# ---- what the bot calls you -------------------------------------------------------------------------
+
+def pers_clean(text: Optional[str], limit: int) -> Optional[str]:
+    """User text made safe for a name or a call: no mentions, links, markdown or control characters."""
+    if not text:
+        return None
+    t = unicodedata.normalize("NFKC", str(text))
+    t = "".join(ch for ch in t if ch in "‍️" or unicodedata.category(ch)[0] != "C")
+    t = re.sub(r"<a?:\w+:\d+>|<[@#&!/][^>]*>", " ", t)          # mentions, channels, custom emoji
+    t = re.sub(r"(?i)https?://\S+|discord\.gg/\S+|www\.\S+", " ", t)
+    t = re.sub(r"[@*_~`|>#\[\]()\\<]", "", t)
+    t = " ".join(t.split())
+    return clip(t, limit).strip() or None
+
+
+def pers_key(user_id) -> Optional[str]:
+    """The digits of a Discord user id (or a bettor_key); None for label bettors."""
+    s = str(user_id or "")
+    return s if s.isdigit() else None
+
+
+def call_name(guild_id: int, user_id, fallback: Optional[str]) -> str:
+    """What the bot calls this person in posts, voice and DMs: their /me nickname, else the fallback."""
+    uid = pers_key(user_id)
+    if uid:
+        try:
+            nick = get_setting(guild_id, f"nick:{uid}")
+        except Exception:
+            nick = None
+        if nick:
+            return nick
+    return fallback or "there"
+
+
+def get_hype(guild_id: int, user_id) -> dict:
+    uid = pers_key(user_id)
+    raw = get_setting(guild_id, f"hype:{uid}") if uid else None
+    try:
+        d = json.loads(raw) if raw else {}
+    except ValueError:
+        d = {}
+    return d if isinstance(d, dict) else {}
+
+
+def clean_emoji(raw: Optional[str]) -> Optional[str]:
+    """One server emoji (<:name:id>) or a short unicode emoji; None if it's anything else."""
+    e = (raw or "").strip()
+    if not e:
+        return None
+    if _PERS_CUSTOM_EMOJI.match(e):
+        return e
+    if len(e) <= 8 and not re.search(r"[\w\s<>@#*`~|:\\/]", e):
+        return e
+    return None
+
+
+def hype_line(guild_id: int, p, kw: dict) -> Optional[str]:
+    """The person's own cash call for a win, e.g. '🦁 **BIG LEV IS EATING** Levi cashes +$45 on ...'."""
+    if p["status"] != "win":
+        return None
+    h = get_hype(guild_id, p["bettor_key"])
+    if not h.get("call"):
+        return None
+    return clip(f"{h.get('emoji') or '🔥'} **{h['call']}** {kw.get('name') or p['bettor_name']} cashes "
+                f"{kw.get('amount') or signed(pick_net(p))} on {kw.get('desc') or clip(p['description'], 60)}.", 400)
+
+
+# ---- memory callbacks ----------------------------------------------------------------------------------
+
+def pers_ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+_PERS_STAT_SHORT = {"pra": "PRA", "pr": "P+R", "pa": "P+A", "ra": "R+A", "threes": "threes", "anytime_td": "anytime TD"}
+
+
+def pers_stat_label(key: str) -> str:
+    if key in _PERS_STAT_SHORT:
+        return _PERS_STAT_SHORT[key]
+    label = STATS.get(key, (key,))[0]
+    return label if label.isupper() else label.lower()
+
+
+def pers_last_name(display: str) -> str:
+    parts = [x for x in (display or "").split() if x.lower().strip(".") not in ("jr", "sr", "ii", "iii", "iv")]
+    return parts[-1] if parts else (display or "that player")
+
+
+def _pers_local(ts: Optional[str]) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(ts).astimezone(TZ) if ts else None
+    except ValueError:
+        return None
+
+
+_PUBLIC_SQL = "(q.hidden IS NULL OR q.hidden = 0 OR q.revealed_at IS NOT NULL)"
+
+
+def _pers_history(guild_id: int, p, limit: int = 1500) -> tuple[list, list]:
+    """(earlier settled picks, their graded legs), newest first. Hidden picks never count: callbacks are public."""
+    at = p["settled_at"] or now_iso()
+    args = (guild_id, p["bettor_key"], p["id"], at, at, p["id"])
+    where = (f"q.guild_id = ? AND q.bettor_key = ? AND q.status != 'open' AND q.id != ? AND "
+             f"(q.settled_at < ? OR (q.settled_at = ? AND q.id < ?)) AND {_PUBLIC_SQL}")
+    picks = db().execute(f"SELECT q.* FROM picks q WHERE {where} ORDER BY q.settled_at DESC, q.id DESC LIMIT {int(limit)}",
+                         args).fetchall()
+    legs = db().execute(f"SELECT l.text, l.status, q.id AS pid, q.settled_at FROM legs l JOIN picks q ON q.id = l.pick_id "
+                        f"WHERE {where} AND l.status IN ('hit', 'miss') ORDER BY q.settled_at DESC, q.id DESC, l.idx "
+                        f"LIMIT {int(limit)}", args).fetchall()
+    return picks, legs
+
+
+def _pers_size(p) -> str:
+    mult = (p["returned"] or 0) / p["cost"] if p["cost"] else 0
+    return f"{mult:.0f}x" if mult >= 4 else signed_short(pick_net(p))
+
+
+def _pers_when(dt: datetime, now: datetime) -> str:
+    return f"{dt:%B}" if dt.year == now.year or (now - dt).days < 200 else f"{dt:%B %Y}"
+
+
+def memory_callback(guild_id: int, pick) -> Optional[str]:
+    """One short clause from the bettor's real history for a settled pick ('3rd straight Brunson over to cash'),
+    or None. Wins only, unless the person opted into roasts. Deterministic: the strongest fact wins."""
+    p = get_pick(guild_id, pick) if isinstance(pick, int) else pick
+    if p is None or p["status"] not in ("win", "loss"):
+        return None
+    win = p["status"] == "win"
+    if not win and get_setting(guild_id, f"roast:{p['bettor_key']}") != "on":
+        return None
+    if p["hidden"] and not p["revealed_at"]:
+        return None
+    picks, hist_legs = _pers_history(guild_id, p)
+    here = _pers_local(p["settled_at"]) or datetime.now(TZ)
+    found: list[tuple[float, str]] = []
+
+    # pick streaks: a heater, a snapped skid, a snapped heater
+    kind, n = streak_of([p["status"]] + [x["status"] for x in picks])
+    prev_kind, prev_n = streak_of([x["status"] for x in picks])
+    if win:
+        if kind == "W" and n >= 3:
+            found.append((25 + n * 3, f"that's {n} straight cashes"))
+        if prev_kind == "L" and prev_n >= 3:
+            found.append((55 + prev_n, f"snaps a {prev_n}-pick skid"))
+    elif prev_kind == "W" and prev_n >= 3:
+        found.append((50 + prev_n, f"snaps a {prev_n}-pick heater"))
+
+    # legs: the same player and side again, and stat droughts
+    graded = [(cached_prop(x["text"]), x["status"], x["settled_at"]) for x in hist_legs]
+    graded = [g for g in graded if g[0]]
+    for leg in get_legs(p["id"]):
+        pr = cached_prop(leg["text"])
+        if not pr or leg["status"] not in ("hit", "miss"):
+            continue
+        who, side = pr["player"], pr["side"]
+        run = 0
+        for g, st, _ in graded:
+            if g["player"] == who and g["side"] == side:
+                if st != "hit":
+                    break
+                run += 1
+        last = pers_last_name(pr["display"])
+        if leg["status"] == "hit" and win and run + 1 >= 3:
+            found.append((50 + (run + 1) * 5, f"{pers_ordinal(run + 1)} straight {last} {side} to cash"))
+        if leg["status"] == "miss" and not win and run >= 3:
+            found.append((40 + run, f"first {last} {side} miss after {run} straight hits"))
+        if leg["status"] == "hit" and win:
+            stat = pr["stats"][0]
+            misses, prev_at = 0, None
+            for g, st, at in graded:
+                if g["stats"][0] != stat:
+                    continue
+                if st == "hit":
+                    prev_at = at
+                    break
+                misses += 1
+            then = _pers_local(prev_at)
+            if then is not None and misses >= 2 and (here - then).days >= 14:
+                found.append((40 + min((here - then).days / 7, 15),
+                              f"first {pers_stat_label(stat)} hit since {then:%b %-d}"))
+            elif prev_at is None and misses >= 3:
+                found.append((45, f"first {pers_stat_label(stat)} hit after {misses} misses"))
+
+    if win:
+        net = pick_net(p)
+        wins = [x for x in picks if x["status"] == "win"]
+        if not wins:
+            found.append((80, "first cash on the board"))
+        else:
+            bigger = next((x for x in wins if pick_net(x) > net + 0.005), None)
+            if bigger is None and len(wins) >= 5 and net > max(pick_net(x) for x in wins) + 0.005:
+                found.append((70, "your biggest hit ever"))
+            elif bigger is not None:
+                then = _pers_local(bigger["settled_at"])
+                since = [x for x in wins if (x["settled_at"] or "") > (bigger["settled_at"] or "")]
+                if then and len(since) >= 5 and (here - then).days >= 21:
+                    found.append((60, f"biggest hit since your {_pers_size(bigger)} in {_pers_when(then, here)}"))
+            same = [x for x in picks if x["platform"] == p["platform"]]
+            if same and not any(x["status"] == "win" for x in same):
+                found.append((35, f"first {clip(p['platform'], 20)} cash"))
+        # days in the green, ending today
+        days: dict = {}
+        for x in [p] + list(picks):
+            d = _pers_local(x["settled_at"])
+            if d is not None:
+                days[d.date()] = days.get(d.date(), 0.0) + pick_net(x)
+        streak, day = 0, here.date()
+        while days.get(day, 0) > 0.005:
+            streak += 1
+            day -= timedelta(days=1)
+        if streak >= 3:
+            found.append((30 + streak * 4, f"that's {streak} straight days in the green"))
+    if not found:
+        return None
+    return max(found, key=lambda x: x[0])[1]
+
+
+def with_memory(guild_id: int, p, line: Optional[str]) -> Optional[str]:
+    """The reaction with its memory callback tacked on as one short sentence."""
+    if not line:
+        return line
+    try:
+        clause = memory_callback(guild_id, p)
+    except Exception:
+        log.warning("Memory callback failed for pick %s", p["id"], exc_info=True)
+        clause = None
+    if not clause:
+        return line
+    sentence = clause[0].upper() + clause[1:] + "."
+    return clip(line.rstrip() + " " + sentence, 1900)
+
+
+# ---- /me timeline ----------------------------------------------------------------------------------------
+
+def _pers_add_months(d, months: int):
+    import calendar
+    y, m = divmod(d.month - 1 + months, 12)
+    y, m = d.year + y, m + 1
+    return d.replace(year=y, month=m, day=min(d.day, calendar.monthrange(y, m)[1]))
+
+
+def badge_dates(guild_id: int, key: str, picks: list, legs: dict) -> dict:
+    """When each pick-based badge was first earned, replaying the person's picks in order: {badge key: datetime}."""
+    got = earned_badges(guild_id, key)
+    out: dict = {}
+
+    def mark(k, ts):
+        if k in got and k not in out and ts:
+            when = _pers_local(ts)
+            if when:
+                out[k] = when
+    for i, p in enumerate(sorted(picks, key=lambda x: (x["created_at"], x["id"])), start=1):
+        if i == 25:
+            mark("regular", p["created_at"])
+        if i == 100:
+            mark("grinder", p["created_at"])
+    settled = sorted([p for p in picks if p["status"] != "open" and p["settled_at"]], key=lambda x: (x["settled_at"], x["id"]))
+    win_run = leg_run = 0
+    months: dict = {}
+    for p in settled:
+        lg = legs.get(p["id"], [])
+        at = p["settled_at"]
+        if p["status"] == "win":
+            mark("first", at)
+            if len(lg) >= 2:
+                mark("parlay", at)
+            if len(lg) >= 6:
+                mark("bigleg", at)
+            if pick_net(p) >= 100:
+                mark("century", at)
+            if p["cost"] and (p["returned"] or 0) / p["cost"] >= 10:
+                mark("moon", at)
+            win_run += 1
+            if win_run >= 5:
+                mark("heater", at)
+        elif p["status"] == "loss":
+            win_run = 0
+            if len(lg) >= 4 and sum(1 for x in lg if x["status"] == "miss") == 1 and \
+                    all(x["status"] in ("hit", "miss") for x in lg):
+                mark("heartbreak", at)
+        for x in lg:
+            if x["status"] == "hit":
+                leg_run += 1
+                if leg_run >= 8:
+                    mark("sniper", at)
+            elif x["status"] == "miss":
+                leg_run = 0
+        mo = months.setdefault(at[:7], [0, 0.0])
+        mo[0] += 1
+        mo[1] += pick_net(p)
+        if mo[0] >= 5 and mo[1] > 0:
+            mark("green", at)
+    return out
+
+
+def timeline_data(guild_id: int, key: str, name: str, include_hidden: bool = False,
+                  now: Optional[datetime] = None) -> Optional[dict]:
+    """Everything /me timeline draws, gathered up front (render runs in a thread with no database)."""
+    now = now or datetime.now(timezone.utc)
+    vis = "" if include_hidden else " AND (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)"
+    every = db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ?{vis} ORDER BY id",
+                         (guild_id, key)).fetchall()
+    season = current_season(guild_id)
+    local = now.astimezone(TZ)
+    if season:
+        since, label = season["started_at"], clip(season["name"], 40)
+    else:
+        since, label = iso(local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)), f"{local.year} so far"
+    settled_all = sorted([p for p in every if p["status"] != "open" and p["settled_at"]],
+                         key=lambda x: (x["settled_at"], x["id"]))
+    rows = [p for p in settled_all if p["settled_at"] >= since]
+    if len(rows) < 2:
+        rows, label, since = settled_all, "All time", None
+    if len(rows) < 2:
+        return None
+    legs_all = legs_by_pick(guild_id, key)
+    pts, total = [], 0.0
+    for p in rows:
+        total += pick_net(p)
+        pts.append((datetime.fromisoformat(p["settled_at"]).timestamp(), total))
+    first_t = pts[0][0] - max(3600.0, (pts[-1][0] - pts[0][0]) * 0.02)
+    pts.insert(0, (first_t, 0.0))
+    s = {"wins": sum(p["status"] == "win" for p in rows), "losses": sum(p["status"] == "loss" for p in rows),
+         "pushes": sum(p["status"] not in ("win", "loss") for p in rows)}
+    staked = sum(p["cost"] for p in rows)
+    highlights = []
+    wins = [p for p in rows if p["status"] == "win" and pick_net(p) > 0]
+    best = max(wins, key=pick_net) if wins else None
+    if best:
+        highlights.append({"kind": "best", "t": datetime.fromisoformat(best["settled_at"]).timestamp(),
+                           "title": f"Biggest hit {signed_short(pick_net(best))}",
+                           "sub": clip(best["description"], 34)})
+    run, start, best_run = 0, None, (0, None, None)
+    for i, p in enumerate(rows):
+        if p["status"] == "win":
+            run += 1
+            start = i if run == 1 else start
+            if run > best_run[0]:
+                best_run = (run, start, i)
+        elif p["status"] == "loss":
+            run = 0
+    streak = None
+    if best_run[0] >= 2:
+        a, b = rows[best_run[1]], rows[best_run[2]]
+        streak = {"n": best_run[0], "t0": datetime.fromisoformat(a["settled_at"]).timestamp(),
+                  "t1": datetime.fromisoformat(b["settled_at"]).timestamp()}
+    weeks: dict = {}
+    for p in rows:
+        ws = week_start(datetime.fromisoformat(p["settled_at"]))
+        weeks[ws] = weeks.get(ws, 0.0) + pick_net(p)
+    best_week = None
+    if weeks:
+        ws, wnet = max(weeks.items(), key=lambda kv: kv[1])
+        if wnet > 0:
+            best_week = {"t0": ws.timestamp(), "t1": (ws + timedelta(days=7)).timestamp(), "net": wnet,
+                         "label": f"Week of {ws.astimezone(TZ):%b %-d}"}
+    badges = []
+    for k, when in sorted(badge_dates(guild_id, key, every, legs_all).items(), key=lambda kv: kv[1]):
+        if since is None or iso(when) >= since:
+            badges.append({"t": when.timestamp(), "name": next(n for kk, n, _ in BADGES if kk == k)})
+    return {"name": name, "label": label, "points": pts, "net": total, "s": s,
+            "roi": (total / staked * 100) if staked else 0.0, "highlights": highlights, "streak": streak,
+            "best_week": best_week, "badges": badges, "count": len(rows),
+            "tz_offset": local.utcoffset().total_seconds() if local.utcoffset() else 0.0}
+
+
+def _pers_fmt_axis(v: float) -> str:
+    return ("-" if v < 0 else "") + "$" + (f"{abs(v) / 1000:.1f}k" if abs(v) >= 1000 else f"{abs(v):,.0f}")
+
+
+def render_timeline(d: dict, avatar: Optional[bytes]) -> io.BytesIO:
+    """The season as a picture: cumulative net, the best week shaded, the longest streak lit up,
+    the biggest hit pinned and badges along a rail underneath."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+    W, H = 1400, 820
+    img = Image.new("RGB", (W, H), ART_BG)
+    img.paste(_grad((W, 200), [(58, 30, 120), (24, 18, 44), (14, 30, 52)]), (0, 0))
+    fade = Image.new("L", (W, 200), 0)
+    fd = ImageDraw.Draw(fade)
+    for y in range(200):
+        fd.line((0, y, W, y), fill=int(255 * max(0.0, (y - 110) / 90)))
+    img.paste(Image.new("RGB", (W, 200), ART_BG), (0, 0), fade)
+    d_ = ImageDraw.Draw(img)
+    av = _avatar(avatar, 120, d["name"], -1)
+    ring = Image.new("RGBA", (136, 136), (0, 0, 0, 0))
+    ImageDraw.Draw(ring).ellipse((0, 0, 135, 135), fill=ART_BRAND + (255,))
+    img.paste(ring, (52, 42), ring)
+    img.paste(av, (60, 50), av)
+    t, f = fit_text(d_, d["name"], 620, 54, True, 28)
+    d_.text((214, 50), t, font=f, fill=ART_TEXT)
+    t, f = fit_text(d_, f"{d['label'].upper()}  ·  TIMELINE", 620, 20, True)
+    d_.text((217, 122), t, font=f, fill=(196, 170, 255))
+    rec = f"{d['s']['wins']}-{d['s']['losses']}" + (f"-{d['s']['pushes']}" if d["s"]["pushes"] else "")
+    d_.text((217, 152), f"{rec}  ·  {d['count']} settled  ·  ROI {d['roi']:+.1f}%", font=art_font(20), fill=ART_MUTED)
+    colour = ART_GREEN if d["net"] >= 0 else ART_RED
+    nt = signed_short(d["net"])
+    f = art_font(64, True)
+    d_.text((W - 60 - _tw(d_, nt, f), 50), nt, font=f, fill=colour)
+    f2 = art_font(18, True)
+    d_.text((W - 60 - _tw(d_, "NET", f2), 128), "NET", font=f2, fill=ART_MUTED)
+
+    # chart frame
+    cx0, cy0, cx1, cy1 = 110, 236, W - 60, 620
+    d_.rounded_rectangle((cx0 - 70, cy0 - 30, cx1 + 30, cy1 + 46), 26, fill=(22, 22, 31))
+    pts = d["points"]
+    t0, t1 = pts[0][0], pts[-1][0]
+    if t1 - t0 < 3600:
+        t1 = t0 + 3600
+    vals = [v for _, v in pts]
+    lo, hi = min(vals + [0.0]), max(vals + [0.0])
+    pad = max((hi - lo) * 0.14, 5.0)
+    lo, hi = lo - pad, hi + pad
+
+    def X(t):
+        return cx0 + (t - t0) / (t1 - t0) * (cx1 - cx0)
+
+    def Y(v):
+        return cy1 - (v - lo) / (hi - lo) * (cy1 - cy0)
+
+    # best week band
+    bw = d.get("best_week")
+    if bw:
+        bx0, bx1 = max(cx0, X(bw["t0"])), min(cx1, X(bw["t1"]))
+        if bx1 - bx0 < 14:
+            mid = (bx0 + bx1) / 2
+            bx0, bx1 = max(cx0, mid - 7), min(cx1, mid + 7)
+        band = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(band).rectangle((bx0, cy0, bx1, cy1), fill=ART_BLUE + (34,))
+        img.paste(band, (0, 0), band)
+        d_ = ImageDraw.Draw(img)
+        lab = f"BEST WEEK {signed_short(bw['net'])}"
+        lf = art_font(15, True)
+        lx = min(max(cx0 + 4, (bx0 + bx1) / 2 - _tw(d_, lab, lf) / 2), cx1 - _tw(d_, lab, lf) - 4)
+        d_.text((lx, cy0 - 22), lab, font=lf, fill=ART_BLUE)
+    # grid + axis labels
+    step_raw = (hi - lo) / 4
+    mag = 10 ** max(0, len(str(int(max(step_raw, 1)))) - 1)
+    step = max(1, round(step_raw / mag)) * mag
+    v = (int(lo // step) + 1) * step
+    gf = art_font(15)
+    while v < hi:
+        y = Y(v)
+        d_.line((cx0, y, cx1, y), fill=(40, 40, 54), width=1)
+        lab = _pers_fmt_axis(v)
+        d_.text((cx0 - 14 - _tw(d_, lab, gf), y - 9), lab, font=gf, fill=ART_FAINT)
+        v += step
+    zy = Y(0)
+    d_.line((cx0, zy, cx1, zy), fill=(90, 90, 110), width=2)
+    # month ticks
+    off = d.get("tz_offset", 0.0)
+    span_days = (t1 - t0) / 86400
+    cur = datetime.fromtimestamp(t0 + off, timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    ticks = []
+    if span_days > 50:
+        while cur.timestamp() - off <= t1:
+            ticks.append((cur.timestamp() - off, f"{cur:%b}" if cur.month != 1 else f"{cur:%b %Y}"))
+            cur = _pers_add_months(cur, 1)
+    else:
+        every = 1 if span_days <= 10 else 7
+        cur = datetime.fromtimestamp(t0 + off, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        while cur.timestamp() - off <= t1:
+            ticks.append((cur.timestamp() - off, f"{cur:%b %-d}"))
+            cur += timedelta(days=every)
+    last_x = -999
+    for tt, lab in ticks:
+        x = X(tt)
+        if x < cx0 or x > cx1 or x - last_x < 56:
+            continue
+        last_x = x
+        d_.line((x, cy1, x, cy1 + 6), fill=ART_FAINT, width=2)
+        d_.text((x - _tw(d_, lab, gf) / 2, cy1 + 12), lab, font=gf, fill=ART_MUTED)
+    # area fill: green above zero, red below, fading towards the zero line
+    xy = [(X(t), Y(v)) for t, v in pts]
+    for fill, above in ((ART_GREEN, True), (ART_RED, False)):
+        mask = Image.new("L", (W, H), 0)
+        md = ImageDraw.Draw(mask)
+        md.polygon([(xy[0][0], zy)] + xy + [(xy[-1][0], zy)], fill=70)
+        clipm = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(clipm).rectangle((cx0, cy0, cx1, zy) if above else (cx0, zy, cx1, cy1), fill=255)
+        mask = ImageChops.multiply(mask, clipm)
+        img.paste(Image.new("RGB", (W, H), fill), (0, 0), mask)
+    d_ = ImageDraw.Draw(img)
+    # the line, with a soft glow
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).line(xy, fill=colour_for(d["net"]) + (150,), width=10, joint="curve")
+    img.paste(glow.filter(ImageFilter.GaussianBlur(6)), (0, 0), glow.filter(ImageFilter.GaussianBlur(6)))
+    d_ = ImageDraw.Draw(img)
+    d_.line(xy, fill=ART_TEXT, width=4, joint="curve")
+    # longest streak, lit up in amber
+    st = d.get("streak")
+    if st:
+        seg = [(X(t), Y(v)) for t, v in pts if st["t0"] - 1 <= t <= st["t1"] + 1]
+        if len(seg) >= 2:
+            d_.line(seg, fill=ART_AMBER, width=7, joint="curve")
+        elif seg:
+            d_.ellipse((seg[0][0] - 6, seg[0][1] - 6, seg[0][0] + 6, seg[0][1] + 6), fill=ART_AMBER)
+        if seg:
+            mx, my = seg[len(seg) // 2]
+            lab = f"{st['n']} STRAIGHT"
+            lf = art_font(15, True)
+            lw = _tw(d_, lab, lf) + 20
+            ly = my + 18 if my < (cy0 + cy1) / 2 else my - 44
+            lx = min(max(cx0, mx - lw / 2), cx1 - lw)
+            d_.rounded_rectangle((lx, ly, lx + lw, ly + 26), 13, fill=ART_AMBER)
+            d_.text((lx + 10, ly + 4), lab, font=lf, fill=(30, 22, 4))
+    # a small diamond on the line where each badge was earned
+    for b in d["badges"]:
+        bv = next((v for t, v in reversed(pts) if t <= b["t"] + 1), 0.0)
+        bx_, by_ = X(min(max(b["t"], t0), t1)), Y(bv)
+        d_.polygon([(bx_, by_ - 8), (bx_ + 8, by_), (bx_, by_ + 8), (bx_ - 8, by_)], fill=(196, 170, 255), outline=ART_BG)
+    # biggest hit pin: above the point if there's room, else beside it, never across the line
+    for h in d["highlights"]:
+        vy = next((v for t, v in pts if abs(t - h["t"]) < 1), None)
+        if vy is None:
+            continue
+        px, py = X(h["t"]), Y(vy)
+        tf, sf = art_font(19, True), art_font(15)
+        bw_ = max(_tw(d_, h["title"], tf), _tw(d_, h["sub"], sf)) + 28
+        spots = [(px - bw_ / 2, py - 92), (px + 22, py - 29), (px - 22 - bw_, py - 29), (px - bw_ / 2, py + 34)]
+        best_spot = None
+        for bx, by in spots:
+            bx = min(max(cx0 + 4, bx), cx1 - bw_ - 4)
+            if by < cy0 - 8 or by + 58 > cy1 + 8:
+                continue
+            if not _pers_box_hits_line(xy, bx - 6, by - 6, bx + bw_ + 6, by + 64):
+                best_spot = (bx, by)
+                break
+        bx, by = best_spot or (min(max(cx0 + 4, px - bw_ / 2), cx1 - bw_ - 4), max(cy0, py - 92))
+        ax_, ay_ = min(max(px, bx), bx + bw_), min(max(py, by), by + 58)   # nearest edge of the box
+        d_.line((px, py, ax_, ay_), fill=ART_GREEN, width=2)
+        d_.rounded_rectangle((bx, by, bx + bw_, by + 58), 14, fill=(20, 44, 36), outline=ART_GREEN, width=2)
+        d_.text((bx + 14, by + 7), h["title"], font=tf, fill=ART_GREEN)
+        d_.text((bx + 14, by + 33), h["sub"], font=sf, fill=ART_TEXT)
+        d_.ellipse((px - 9, py - 9, px + 9, py + 9), fill=ART_GREEN, outline=ART_BG, width=3)
+    # end dot
+    ex, ey = xy[-1]
+    d_.ellipse((ex - 8, ey - 8, ex + 8, ey + 8), fill=colour_for(d["net"]), outline=ART_TEXT, width=3)
+
+    # badges: a dated chip row underneath (the diamonds on the line mark where)
+    ry = cy1 + 70
+    d_.text((cx0 - 70, ry), "BADGES EARNED", font=art_font(15, True), fill=ART_MUTED)
+    nf, df = art_font(16, True), art_font(14)
+    x, y, shown = cx0 + 84, ry - 6, 0
+    for b in d["badges"]:
+        when = datetime.fromtimestamp(b["t"] + off, timezone.utc).strftime("%b %-d")
+        w = 16 + 14 + _tw(d_, b["name"], nf) + 8 + _tw(d_, when, df) + 14
+        if x + w > cx1 + 30:
+            x, y = cx0 + 84, y + 40
+            if y > H - 80:
+                break
+        d_.rounded_rectangle((x, y, x + w, y + 30), 15, fill=ART_PANEL2)
+        d_.polygon([(x + 16, y + 9), (x + 22, y + 15), (x + 16, y + 21), (x + 10, y + 15)], fill=(196, 170, 255))
+        d_.text((x + 30, y + 5), b["name"], font=nf, fill=ART_TEXT)
+        d_.text((x + 30 + _tw(d_, b["name"], nf) + 8, y + 7), when, font=df, fill=ART_MUTED)
+        x += w + 10
+        shown += 1
+    if not d["badges"]:
+        d_.text((cx0 + 84, ry), "None in this stretch yet. /achievements shows what's next.", font=art_font(16), fill=ART_FAINT)
+    elif shown < len(d["badges"]):
+        d_.text((x, y + 6), f"+{len(d['badges']) - shown} more", font=df, fill=ART_MUTED)
+    foot = "PIMP-BOT  ·  /me timeline"
+    d_.text((W - 40 - _tw(d_, foot, art_font(15, True)), H - 34), foot, font=art_font(15, True), fill=ART_FAINT)
+    return _png(img)
+
+
+def _pers_box_hits_line(xy: list, x0: float, y0: float, x1: float, y1: float) -> bool:
+    """Whether the polyline passes through the box (checked every few pixels across it)."""
+    for (ax, ay), (bx, by) in zip(xy, xy[1:]):
+        if bx < x0 or ax > x1:
+            continue
+        lo_x, hi_x = max(ax, x0), min(bx, x1)
+        steps = max(1, int((hi_x - lo_x) / 4))
+        for k in range(steps + 1):
+            x = lo_x + (hi_x - lo_x) * k / steps
+            y = ay if bx == ax else ay + (by - ay) * (x - ax) / (bx - ax)
+            if y0 <= y <= y1:
+                return True
+    return False
+
+
+def colour_for(net: float) -> tuple:
+    return ART_GREEN if net >= 0 else ART_RED
+
+
+# ---- /lore -------------------------------------------------------------------------------------------------
+
+_pers_ready = False
+
+
+def pers_db():
+    global _pers_ready
+    if not _pers_ready:
+        db().executescript("""
+            CREATE TABLE IF NOT EXISTS lore (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL,
+                author_id   INTEGER NOT NULL,
+                author_name TEXT    NOT NULL,
+                text        TEXT    NOT NULL,
+                link        TEXT,
+                created_at  TEXT    NOT NULL,
+                removed_at  TEXT,
+                removed_by  INTEGER,
+                ann6_at     TEXT,
+                ann12_at    TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_lore_guild ON lore (guild_id, removed_at);
+        """)
+        db().commit()
+        _pers_ready = True
+    return db()
+
+
+def lore_text(text: Optional[str]) -> Optional[str]:
+    """Lore keeps its words and user mentions (they never ping), but loses @everyone/@here and role pings."""
+    t = "".join(ch for ch in unicodedata.normalize("NFKC", str(text or ""))
+                if ch in "\n‍️" or unicodedata.category(ch)[0] != "C")
+    t = re.sub(r"<@&\d+>", "@role", t)
+    t = re.sub(r"@(everyone|here)", "@​\\1", t)
+    t = re.sub(r"\n{3,}", "\n\n", t).strip()
+    return clip(t, LORE_MAX) or None
+
+
+def lore_link(raw: Optional[str], guild_id: int) -> tuple[Optional[str], Optional[str]]:
+    """(link, error): only a message link from this server."""
+    if not raw or not raw.strip():
+        return None, None
+    m = _PERS_LINK.match(raw.strip())
+    if not m:
+        return None, "That link isn't a Discord message link (right-click a message → Copy Message Link)."
+    if int(m.group(1)) != guild_id:
+        return None, "That message is from a different server."
+    return f"https://discord.com/channels/{m.group(1)}/{m.group(2)}/{m.group(3)}", None
+
+
+def add_lore(guild_id: int, user_id: int, user_name: str, text: str, link: Optional[str],
+             now: Optional[datetime] = None) -> tuple[Optional[int], str]:
+    """(id, message) for a new lore entry, or (None, why not)."""
+    clean = lore_text(text)
+    if not clean or len(clean) < 3:
+        return None, "Give the moment a few words."
+    url, err = lore_link(link, guild_id)
+    if err:
+        return None, err
+    now = now or datetime.now(timezone.utc)
+    today = iso(now.astimezone(TZ).replace(hour=0, minute=0, second=0, microsecond=0))
+    n = pers_db().execute("SELECT COUNT(*) FROM lore WHERE guild_id = ? AND author_id = ? AND created_at >= ?",
+                          (guild_id, user_id, today)).fetchone()[0]
+    if n >= LORE_PER_DAY:
+        return None, "That's plenty of lore for one day. Save the rest for tomorrow."
+    if db().execute("SELECT 1 FROM lore WHERE guild_id = ? AND removed_at IS NULL AND lower(text) = lower(?)",
+                    (guild_id, clean)).fetchone():
+        return None, "That one's already in the lore."
+    cur = db().execute("INSERT INTO lore (guild_id, author_id, author_name, text, link, created_at) VALUES (?,?,?,?,?,?)",
+                       (guild_id, user_id, clip(pers_clean(user_name, 60) or "someone", 60), clean, url, iso(now)))
+    db().commit()
+    return cur.lastrowid, "saved"
+
+
+def get_lore(guild_id: int, lore_id: int):
+    return pers_db().execute("SELECT * FROM lore WHERE guild_id = ? AND id = ? AND removed_at IS NULL",
+                             (guild_id, lore_id)).fetchone()
+
+
+def lore_embed(row, title: Optional[str] = None) -> discord.Embed:
+    when = _pers_local(row["created_at"])
+    e = discord.Embed(title=title or f"📜 Lore #{row['id']}", color=BRAND,
+                      description=clip(f"“{row['text']}”" + (f"\n\n[Jump to the moment]({row['link']})" if row["link"] else ""),
+                                       4000))
+    e.set_footer(text=clip(f"Saved by {row['author_name']}" + (f" · {when:%b %-d, %Y}" if when else ""), 200))
+    return e
+
+
+def lore_due(row, today) -> Optional[tuple[str, str]]:
+    """('ann6_at' | 'ann12_at', label) if this entry's 6-month or 1-year mark is today (or the 2 days after,
+    to ride out downtime) and it hasn't been posted yet."""
+    made = _pers_local(row["created_at"])
+    if made is None:
+        return None
+    for col, months, label in (("ann12_at", 12, "1 year ago"), ("ann6_at", 6, "6 months ago")):
+        due = _pers_add_months(made.date(), months)
+        if row[col] is None and due <= today <= due + timedelta(days=2):
+            return col, label
+    return None
+
+
+async def lore_anniversaries(client, now: datetime) -> None:
+    local = now.astimezone(TZ)
+    if local.hour < LORE_HOUR:
+        return
+    today = local.date()
+    pers_db()
+    for r in db().execute("SELECT guild_id, value FROM settings WHERE key = 'recap_channel'").fetchall():
+        gid = r["guild_id"]
+        try:
+            if get_setting(gid, "lore_day") == today.isoformat():
+                continue
+            set_setting(gid, "lore_day", today.isoformat())
+            channel = await recap_channel_for(client, gid)
+            if channel is None or not server_on(gid, "lore"):
+                continue
+            oldest = iso(now - timedelta(days=372))
+            posted = 0
+            for row in db().execute("SELECT * FROM lore WHERE guild_id = ? AND removed_at IS NULL AND created_at >= ? "
+                                    "ORDER BY id", (gid, oldest)).fetchall():
+                due = lore_due(row, today)
+                if not due or posted >= 3:
+                    continue
+                col, label = due
+                db().execute(f"UPDATE lore SET {col} = ? WHERE id = ?", (now_iso(), row["id"]))
+                if col == "ann12_at" and row["ann6_at"] is None:
+                    db().execute("UPDATE lore SET ann6_at = ? WHERE id = ?", (now_iso(), row["id"]))
+                db().commit()
+                posted += 1
+                await channel.send(f"📜 **From the lore, {label} today.** Remember this one?",
+                                   embed=lore_embed(row), allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Lore anniversaries failed for guild %s", gid, exc_info=True)
+
+
+# ---- the Monday note -----------------------------------------------------------------------------------
+
+_NOTE_RULES = ("Never suggest betting more, bigger, faster or chasing losses. Never mention odds, prices or value. "
+               "Keep every number exactly as given.")
+
+
+def _pers_rate(h: int, t: int) -> str:
+    return f"{h / t * 100:.0f}%" if t else "-"
+
+
+def scouted_legs(guild_id: int, user_id: int, weeks: Optional[list[str]] = None) -> tuple[int, int, int, int]:
+    """(hits, total) on legs whose player the person scouted that week, then (hits, total) on their other legs
+    in those same weeks."""
+    sh = st = oh = ot = 0
+    for r in db().execute("SELECT key, value FROM settings WHERE guild_id = ? AND key LIKE ?",
+                          (guild_id, f"scouted:{user_id}:%")).fetchall():
+        wk = r["key"].rsplit(":", 1)[1]
+        if weeks is not None and wk not in weeks:
+            continue
+        try:
+            players = set(json.loads(r["value"] or "[]"))
+            y, w = wk.split("-W")
+            start = datetime.fromisocalendar(int(y), int(w), 1).replace(tzinfo=TZ).astimezone(timezone.utc)
+        except (ValueError, TypeError):
+            continue
+        for leg in db().execute("""SELECT l.text, l.status FROM legs l JOIN picks p ON p.id = l.pick_id
+                                   WHERE p.guild_id = ? AND p.bettor_key = ? AND l.status IN ('hit', 'miss')
+                                   AND p.created_at >= ? AND p.created_at < ?""",
+                                (guild_id, str(user_id), iso(start), iso(start + timedelta(days=7)))):
+            pr = cached_prop(leg["text"])
+            if not pr:
+                continue
+            if pr["player"] in players:
+                st += 1
+                sh += leg["status"] == "hit"
+            else:
+                ot += 1
+                oh += leg["status"] == "hit"
+    return sh, st, oh, ot
+
+
+def weekly_note_data(guild_id: int, user_id: int, now: Optional[datetime] = None) -> Optional[dict]:
+    """Last week (Monday to Sunday, local) in four lines plus one nudge that's never about betting more."""
+    now = now or datetime.now(timezone.utc)
+    end = week_start(now)
+    start = end - timedelta(days=7)
+    wk = week_id(start + timedelta(days=1))
+    key = str(user_id)
+    settled = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open' AND "
+                           "settled_at >= ? AND settled_at < ? ORDER BY settled_at", (guild_id, key, iso(start), iso(end))).fetchall()
+    made = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND created_at >= ? AND created_at < ?",
+                        (guild_id, key, iso(start), iso(end))).fetchall()
+    r15_db()
+    passes = db().execute("SELECT * FROM ghosts WHERE guild_id = ? AND user_id = ? AND result IN ('hit', 'miss') AND "
+                          "settled_at >= ? AND settled_at < ?", (guild_id, user_id, iso(start), iso(end))).fetchall()
+    scouted = set(json.loads(get_setting(guild_id, f"scouted:{user_id}:{wk}") or "[]"))
+    if not settled and not made and not passes and not scouted:
+        return None
+    w = sum(p["status"] == "win" for p in settled)
+    l = sum(p["status"] == "loss" for p in settled)
+    pu = len(settled) - w - l
+    net = sum(pick_net(p) for p in settled)
+    lines = [f"📒 **Record:** {w}-{l}" + (f" ({pu} push{'es' if pu != 1 else ''})" if pu else "")
+             + ("" if settled else " · nothing settled"),
+             f"💵 **Net:** {signed(net)}"]
+    wins = [p for p in settled if p["status"] == "win"]
+    best = max(wins, key=pick_net) if wins else None
+    lines.append(f"🏆 **Best hit:** {signed(pick_net(best))} on {clip(best['description'], 60)}" if best else
+                 "🏆 **Best hit:** none this week. It happens to everyone.")
+    good = [g for g in passes if g["result"] == "miss"]
+    noted = [p for p in made if (p["notes"] or "").strip()]
+    sh, st, _, _ = scouted_legs(guild_id, user_id, [wk])
+    leg_rows = [x for p in settled for x in get_legs(p["id"]) if x["status"] in ("hit", "miss")]
+    if good:
+        saved = sum(g["cost"] or 0 for g in good)
+        lines.append(f"🛡️ **Good passes:** {len(good)} slip{'s' if len(good) != 1 else ''} you skipped would've missed"
+                     + (f" ({money(saved)} kept)" if saved else ""))
+    elif scouted:
+        lines.append(f"🔎 **Scouting:** {len(scouted)} player{'s' if len(scouted) != 1 else ''} scouted"
+                     + (f", scouted legs went {sh}/{st}" if st else ""))
+    elif noted:
+        lines.append(f"📝 **Notes:** you wrote your reasoning on {len(noted)} of {len(made)} picks")
+    elif leg_rows:
+        h = sum(x["status"] == "hit" for x in leg_rows)
+        lines.append(f"🎯 **Legs:** {h}/{len(leg_rows)} hit ({_pers_rate(h, len(leg_rows))})")
+    else:
+        lines.append("🎯 **Legs:** none graded this week")
+    return {"week": wk, "start": start, "lines": lines[:4], "nudge": weekly_nudge(guild_id, user_id, wk, len(scouted)),
+            "net": net}
+
+
+def weekly_nudge(guild_id: int, user_id: int, wk: str, scouted_now: int) -> str:
+    """One encouraging line about skill (scouting, notes, passes), never about volume."""
+    sh, st, oh, ot = scouted_legs(guild_id, user_id)
+    if st >= 5:
+        rate = _pers_rate(sh, st)
+        if ot >= 5 and sh / st > oh / ot + 0.02:
+            lead = f"You scouted {scouted_now} player{'s' if scouted_now != 1 else ''} before locking last week. " \
+                if scouted_now else ""
+            return f"{lead}Your hit rate on scouted legs is {rate}, vs {_pers_rate(oh, ot)} on the rest. The homework shows."
+        return f"Your scouted legs hit {rate} so far ({st} legs). A quick `/scout` before you lock in keeps that honest."
+    rows = db().execute("SELECT status, notes FROM picks WHERE guild_id = ? AND bettor_key = ? AND status IN ('win', 'loss')",
+                        (guild_id, str(user_id))).fetchall()
+    with_n = [r["status"] for r in rows if (r["notes"] or "").strip()]
+    without = [r["status"] for r in rows if not (r["notes"] or "").strip()]
+    if len(with_n) >= 5 and len(without) >= 5:
+        a = sum(x == "win" for x in with_n) / len(with_n)
+        b = sum(x == "win" for x in without) / len(without)
+        if a > b + 0.02:
+            return f"Picks you wrote a note on win {a * 100:.0f}% of the time, vs {b * 100:.0f}% without. Showing your work pays."
+    pr_ = pass_record(guild_id, user_id)
+    if pr_["good"] >= 2:
+        return (f"Passing is a skill too: {pr_['good']} slips you skipped would've missed"
+                + (f", {money(pr_['saved'])} kept in your pocket." if pr_["saved"] else "."))
+    tips = ["Try `/scout` on a player before you lock anything in. It's free homework.",
+            "When you log something, add a quick 📝 note on why. Future you will thank you.",
+            "`/me timeline` shows your season so far: the highs, the streaks, the badges.",
+            "Taking a day off is a move too. The best in the group do it."]
+    return tips[int(hashlib.sha1(f"{guild_id}:{user_id}:{wk}".encode()).hexdigest(), 16) % len(tips)]
+
+
+async def polish_nudge(text: str) -> str:
+    """Optionally let Claude make the nudge sound more like a friend; the template if anything looks off."""
+    if not ai_enabled() or not claude_budget_ok():
+        return text
+    try:
+        reply = await asyncio.wait_for(anthropic_client().messages.create(
+            model=CLAUDE_MODEL, max_tokens=90,
+            system=("Rewrite this one-line note to a friend so it sounds warm and natural, max 30 words, at most one emoji. "
+                    + _NOTE_RULES + " Output only the line."),
+            messages=[{"role": "user", "content": text}]), timeout=8)
+        out = "".join(b.text for b in reply.content if getattr(b, "type", "") == "text").strip().strip('"')
+    except Exception:
+        log.warning("Nudge polish failed; using the template", exc_info=True)
+        return text
+    if not out or set(re.findall(r"\d+", out)) - set(re.findall(r"\d+", text)) or \
+            re.search(r"(?i)\b(bet more|bigger|chase|odds|value|parlay up|max bet|double)\b", out):
+        return text
+    return clip(pers_clean(out, 240) or text, 240)
+
+
+def weekly_note_embed(d: dict, name: str) -> discord.Embed:
+    e = discord.Embed(title=clip(f"📬 {name}'s week", 256), color=BRAND,
+                      description=clip("\n".join(d["lines"]) + f"\n\n💡 {d['nudge']}", 4000))
+    e.set_footer(text=f"Week of {d['start'].astimezone(TZ):%b %-d} · turn this off in /me settings")
+    return e
+
+
+async def weekly_notes(client, now: datetime) -> None:
+    local = now.astimezone(TZ)
+    if local.weekday() != 0 or local.hour < DIGEST_HOUR:
+        return
+    for r in db().execute("SELECT guild_id, key FROM settings WHERE key LIKE 'weeklynote:%' AND value = 'on'").fetchall():
+        gid = r["guild_id"]
+        try:
+            uid = int(r["key"].split(":", 1)[1])
+            mark = f"wnote_wk:{uid}"
+            wk = week_id(local - timedelta(days=7))
+            if get_setting(gid, mark) == wk or is_quiet(gid, uid, now):
+                continue      # quiet hours just push it later in the day
+            set_setting(gid, mark, wk)
+            d = weekly_note_data(gid, uid, now)
+            if d is None:
+                continue      # a quiet week gets no note: nothing to nag about
+            d["nudge"] = await polish_nudge(d["nudge"])
+            name_row = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_id = ? ORDER BY id DESC "
+                                    "LIMIT 1", (gid, uid)).fetchone()
+            user = client.get_user(uid) if hasattr(client, "get_user") else None
+            user = user or await client.fetch_user(uid)
+            await user.send(embed=weekly_note_embed(d, call_name(gid, uid, name_row["bettor_name"] if name_row else None)))
+        except Exception:
+            log.warning("Weekly note failed for %s in guild %s", r["key"], gid, exc_info=True)
+
+
+EXTRA_JOBS.append(("lore_anniversaries", lore_anniversaries))
+EXTRA_JOBS.append(("weekly_notes", weekly_notes))
+HELP_EXTRA.append(("🫂 Personal", "`/me nickname` what I call you · `/me hype` your own cash call · `/me timeline` your "
+                                 "season as a picture · `/me week` preview your Monday note (turn it on in `/me settings`) · "
+                                 "`/lore add` save a group moment, `/lore random`, `/lore list`. When you cash, I'll "
+                                 "remember the history (\"3rd straight Brunson over\")."))
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -14389,7 +18476,9 @@ class PicksBot(discord.Client):
                                SweatButton, InjuryOffButton, GPButton, CopyButton, CardSweatButton, CardKalshiButton,
                                PPSettleButton, MarketButton, TakeButton, PotdButton, TriviaButton, GuessButton,
                                ClosestButton, SquaresButton, DraftButton, NoteButton, DisputeButton, FixButton,
-                               BoardButton, SlipDraftButton, FixPickButton)
+                               BoardButton, SlipDraftButton, FixPickButton, TrackerButton)
+        if EXTRA_ITEMS:
+            self.add_dynamic_items(*EXTRA_ITEMS)
         r14_db()
         r15_db()
         try:
@@ -14535,10 +18624,8 @@ class PicksBot(discord.Client):
         now = now or datetime.now(timezone.utc)
         recent = iso(now - timedelta(days=LIVE_WINDOW_DAYS))
         recheck = iso(now - timedelta(minutes=LIVE_RECHECK_MINUTES))
-        picks = db().execute(
-            """SELECT * FROM picks WHERE status = 'open' AND created_at >= ? AND future_due IS NULL
-               AND (live_checked_at IS NULL OR live_checked_at <= ?)
-               ORDER BY live_checked_at IS NOT NULL, live_checked_at LIMIT ?""", (recent, recheck, limit)).fetchall()
+        await autopilot(self, now)
+        picks = []
         for p in picks:
             db().execute("UPDATE picks SET live_checked_at = ? WHERE id = ?", (iso(now), p["id"]))
             db().commit()
@@ -14683,7 +18770,8 @@ class PicksBot(discord.Client):
                     lambda n: update_receipts(self, n), lambda n: update_boards(self, n),
                     lambda n: voice_idle(self, n), lambda n: leg_watch(self, n),
                     lambda n: grade_ghosts(self, n), lambda n: nightly_cleanup(self, n),
-                    lambda n: send_digests(self, n), lambda n: game_previews(self, n), lambda n: check_quests(self, n)):
+                    lambda n: send_digests(self, n), lambda n: game_previews(self, n), lambda n: check_quests(self, n),
+                    *[_named_job(name, fn, self) for name, fn in EXTRA_JOBS]):
             name = job_name(job)
             try:
                 await job(now.astimezone(timezone.utc))
@@ -14987,6 +19075,7 @@ class PicksBot(discord.Client):
             payout=payout,
             slip_url=slip_url,
         )
+        apply_slip_meta(pick_id, slip)
         if slip["status"] != "open":
             settle_pick(guild_id, pick_id, slip["status"], slip["returned"])
 
@@ -14996,7 +19085,7 @@ class PicksBot(discord.Client):
             note = f"I couldn't read the payout. Fix it with `/edit pick_id:{pick_id}`."
         view = settle_view(pick_id) if p["status"] == "open" else None
         SLIP_STATE["last_ok"] = now_iso()
-        logged = voice_line(guild_id, "logged", name=author.display_name)
+        logged = voice_line(guild_id, "logged", name=call_name(guild_id, author.id, author.display_name))
         content = "\n".join(x for x in (logged, note) if x) or None
         embed, extra = pick_embed(p), {}
         try:
@@ -15017,7 +19106,7 @@ class PicksBot(discord.Client):
                 await author.send(tip)
             except Exception:
                 pass
-        await voice_say(self, guild_id, f"{author.display_name} just logged {p['description']}, "
+        await voice_say(self, guild_id, f"{call_name(guild_id, author.id, author.display_name)} just logged {p['description']}, "
                                         f"{money(p['cost'])} to win {money(p['payout'])}.")
         try:
             await announce_stacks(self, guild_id, pick_id, channel)
@@ -16007,11 +20096,19 @@ def help_embed() -> discord.Embed:
         "✏️ **Fix** on a card corrects a misread leg, cost or payout (grades on the other legs stay)\n"
         "Type a slip: `@me log <legs>, $10 to win $30` · `@me how's my slip doing?` · `/scout` player card · "
         "`/poster` cashed or standings image"))
+    e.add_field(name="New in r19: Autopilot", inline=False, value=(
+        "Slips grade themselves: every leg is checked as games go and the slip closes on its own (Power, Flex and "
+        "sportsbook rules, pushes included). `/tracker` shows what's live, what's next and anything that needs you.\n"
+        "Admins: `/admin panel` → Autopilot extras switches off the web lookups, re-reads and asks "
+        "(finals still grade from the scoreboard)."))
     e.add_field(name="New in r18", inline=False, value=(
         "`/me settings` every personal switch in one panel · `/me digest` morning DM · `/hot` who the group hits on\n"
         "`/quests` weekly skill quests for coins · 🧲 stack alerts · game-day previews · duplicate-slip guard\n"
         "Admins: `/admin panel` all server switches + the bot's voice · the web dashboard got Live, Cards and Posters tabs"))
     e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
+    for title, text in HELP_EXTRA:
+        if len(e.fields) < 25:
+            e.add_field(name=title, value=clip(text, 1024), inline=False)
     return e
 
 
@@ -19224,7 +23321,8 @@ async def me_settings_cmd(interaction: discord.Interaction):
 @me_group.command(name="digest", description="Preview your morning digest DM (turn it on in /me settings)")
 async def me_digest_cmd(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True, thinking=True)
-    e = await digest_embed(interaction.client, interaction.guild_id, interaction.user.id, interaction.user.display_name)
+    e = await digest_embed(interaction.client, interaction.guild_id, interaction.user.id,
+                           call_name(interaction.guild_id, interaction.user.id, interaction.user.display_name))
     on = personal_on(interaction.guild_id, interaction.user.id, "digest")
     note = ("It's **on**: it arrives each morning around " + hour_label(DIGEST_HOUR) + "." if on else
             "It's **off**. Turn it on in `/me settings` to get this every morning around " + hour_label(DIGEST_HOUR) + ".")
@@ -19265,6 +23363,398 @@ async def quests_cmd(interaction: discord.Interaction, member: Optional[discord.
         await interaction.response.send_message("Quests are switched off here (admins: `/admin panel`).", ephemeral=True)
         return
     await interaction.response.send_message(embed=quests_embed(interaction.guild_id, m.id, m.display_name))
+
+
+# ---- r19 commands ------------------------------------------------------------------------------
+
+@bot.tree.command(name="tracker", description="Every open slip: what's live, what's next, what's settled, what needs you")
+@app_commands.guild_only()
+@app_commands.choices(who=[app_commands.Choice(name="Mine", value="me"), app_commands.Choice(name="Everyone", value="all")])
+async def tracker_cmd(interaction: discord.Interaction, who: Optional[app_commands.Choice[str]] = None):
+    scope = who.value if who else "all"
+    await interaction.response.defer(thinking=True)
+    uid = interaction.user.id if scope == "me" else None
+    await interaction.followup.send(embed=await tracker_embed(interaction.guild_id, uid, interaction.user.id),
+                                    view=tracker_view(scope))
+
+
+# ---- r20 brand commands: /admin brand, /me theme, /me badges, /me banner, /art ------------------------------
+
+def _brand_clean(text: Optional[str], n: int) -> Optional[str]:
+    """One tidy line of user text (no newlines, squeezed spaces), clipped; 'none'/'clear'/'-' mean clear it."""
+    if text is None:
+        return None
+    t = " ".join(str(text).split())
+    return "" if t.lower() in ("none", "clear", "-", "off") else clip(t, n)
+
+
+async def _brand_colour_ac(interaction: discord.Interaction, current: str):
+    cur = (current or "").lower()
+    out = [app_commands.Choice(name=f"{k} ({_brand_hex(v)})", value=k) for k, v in BRAND_PRESETS.items() if cur in k]
+    if brand_parse_colour(current) and current.lower() not in BRAND_PRESETS:
+        out.insert(0, app_commands.Choice(name=f"Custom {_brand_hex(brand_parse_colour(current))}", value=current))
+    return out[:25]
+
+
+async def _brand_send(interaction: discord.Interaction, fn, args: tuple, filename: str, private: bool,
+                      content: Optional[str] = None) -> None:
+    """Render off the event loop (data is already gathered) and send it as a follow-up."""
+    png = await asyncio.to_thread(locked_render, fn, *args)
+    await interaction.followup.send(content, file=discord.File(png, filename=filename), ephemeral=private,
+                                    allowed_mentions=discord.AllowedMentions.none())
+
+
+@admin_group.command(name="brand", description="Server look: accent colour, mascot, tagline and the name on images")
+@app_commands.describe(colour="A preset (purple, gold, green, blue, red, pink, teal, orange, ice, black) or hex #ff66cc",
+                       mascot="The mascot's everyday mood", tagline="A short line under the logo ('none' clears it)",
+                       name="The name printed on images ('none' resets to PIMP-BOT)",
+                       reset="Go back to the default look")
+@app_commands.choices(mascot=[app_commands.Choice(name=v[0], value=k) for k, v in BRAND_MOODS.items()])
+@app_commands.autocomplete(colour=_brand_colour_ac)
+async def admin_brand(interaction: discord.Interaction, colour: Optional[str] = None,
+                      mascot: Optional[app_commands.Choice[str]] = None,
+                      tagline: Optional[app_commands.Range[str, 1, 60]] = None,
+                      name: Optional[app_commands.Range[str, 1, 24]] = None, reset: Optional[bool] = False):
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if not (perms and getattr(perms, "manage_guild", False)):
+        await interaction.response.send_message("Only server admins (Manage Server) can change the bot's look.",
+                                                ephemeral=True)
+        return
+    gid = interaction.guild_id
+    if reset:
+        set_setting(gid, "brand", None)
+    changes: dict = {}
+    if colour is not None:
+        rgb = brand_parse_colour(colour)
+        if rgb is None:
+            await interaction.response.send_message(
+                f"I don't know the colour `{clip(colour, 30)}`. Try a preset like `gold` or a hex like `#ff66cc`.",
+                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            return
+        changes["accent"] = _brand_hex(rgb)
+    if mascot is not None:
+        changes["mood"] = None if mascot.value == "default" else mascot.value
+    t = _brand_clean(tagline, 60)
+    if t is not None:
+        changes["tagline"] = t or None
+    n = _brand_clean(name, 24)
+    if n is not None:
+        changes["name"] = None if not n or n.upper() == "PIMP-BOT" else n
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    b = brand_save(gid, **changes) if changes else brand_for(gid)
+    if reset or changes:
+        await audit(interaction.client, gid, f"🎨 {interaction.user.display_name} changed the bot's look "
+                                             f"({b['hex']}, {BRAND_MOODS[b['mood']][0]} mascot).")
+        head = "🎨 Saved. This is the server's look now:" if not reset or changes else "🎨 Back to the default look."
+    else:
+        head = ("🎨 The server's look right now. Change it with `colour`, `mascot`, `tagline` or `name` "
+                "(for example `/admin brand colour:gold mascot:Crowned`).")
+    await _brand_send(interaction, render_brand_logo, (b,), "brand.png", True, head)
+
+
+@me_group.command(name="theme", description="Pick your colours for your card and banner (leave empty to see them all)")
+@app_commands.describe(theme="Your palette (Server colours = follow the server's look)")
+@app_commands.choices(theme=[app_commands.Choice(name=v[0], value=k) for k, v in THEMES.items()] +
+                      [app_commands.Choice(name="Server colours", value="server")])
+async def me_theme(interaction: discord.Interaction, theme: Optional[app_commands.Choice[str]] = None):
+    gid, uid = interaction.guild_id, interaction.user.id
+    if theme is not None:
+        set_setting(gid, f"theme:{uid}", None if theme.value == "server" else theme.value)
+    current = theme_for(gid, uid)
+    accent = brand_for(gid)["accent"]
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    if theme is None:
+        msg = f"Your colours: **{current['label']}**. Pick one with `/me theme theme:<name>`."
+    else:
+        msg = (f"🎨 You're on **{current['label']}** now. It shows on your `/card` and `/me banner`."
+               if current["chosen"] else "🎨 You're back on the server's colours.")
+    await _brand_send(interaction, render_theme_grid, (current["key"] if current["chosen"] else None,
+                                                       interaction.user.display_name, accent), "themes.png", True, msg)
+
+
+async def _brand_trophies(interaction: discord.Interaction, private: bool) -> None:
+    user = interaction.user
+    av = await avatar_bytes(user)
+    data = trophy_data(interaction.guild_id, user.id, user.display_name, av)
+    left = len(data["badges"]) - sum(1 for k, _, _ in data["badges"] if k in data["got"])
+    msg = None if not private else (f"{left} still to unlock. Each locked one says how to earn it."
+                                    if left else "Every badge unlocked. 🏆")
+    await _brand_send(interaction, render_trophy_case, (data,), "trophies.png", private, msg)
+
+
+async def _brand_banner(interaction: discord.Interaction, private: bool) -> None:
+    user = interaction.user
+    av = await avatar_bytes(user)
+    data = banner_data(interaction.guild_id, user.id, user.display_name, av)
+    msg = None
+    if private:
+        msg = ("Your banner. Change the colours with `/me theme`, the line under your name with `/me bio`."
+               if data["settled"] else "Your banner. Log a pick and it fills in with your record.")
+    await _brand_send(interaction, render_banner, (data,), "banner.png", private, msg)
+
+
+@me_group.command(name="badges", description="Your trophy case: badges earned, and how to unlock the rest")
+@app_commands.describe(share="Post it in the channel instead of just showing you")
+async def me_badges(interaction: discord.Interaction, share: Optional[bool] = False):
+    await interaction.response.defer(ephemeral=not share, thinking=True)
+    await _brand_trophies(interaction, not share)
+
+
+@me_group.command(name="banner", description="Your profile banner: level, record, streak and best badges")
+@app_commands.describe(share="Post it in the channel instead of just showing you")
+async def me_banner(interaction: discord.Interaction, share: Optional[bool] = False):
+    await interaction.response.defer(ephemeral=not share, thinking=True)
+    await _brand_banner(interaction, not share)
+
+
+@bot.tree.command(name="art", description="Bot art: the server logo, mascot moods, themes, your banner or trophy case")
+@app_commands.guild_only()
+@app_commands.describe(what="What to draw", share="Post it in the channel (your banner and trophies are private otherwise)")
+@app_commands.choices(what=[app_commands.Choice(name="Server logo", value="logo"),
+                            app_commands.Choice(name="Mascot moods", value="moods"),
+                            app_commands.Choice(name="Theme previews", value="themes"),
+                            app_commands.Choice(name="My banner", value="banner"),
+                            app_commands.Choice(name="My trophy case", value="trophies")])
+async def art_cmd(interaction: discord.Interaction, what: app_commands.Choice[str], share: Optional[bool] = None):
+    personal = what.value in ("banner", "trophies", "themes")
+    private = not share if share is not None else personal
+    await interaction.response.defer(ephemeral=private, thinking=True)
+    gid = interaction.guild_id
+    b = brand_for(gid)
+    if what.value == "logo":
+        await _brand_send(interaction, render_brand_logo, (b,), "logo.png", private)
+    elif what.value == "moods":
+        await _brand_send(interaction, render_brand_moods, (b["accent"],), "moods.png", private)
+    elif what.value == "themes":
+        cur = theme_for(gid, interaction.user.id)
+        await _brand_send(interaction, render_theme_grid, (cur["key"] if cur["chosen"] else None,
+                                                           interaction.user.display_name, b["accent"]),
+                          "themes.png", private)
+    elif what.value == "banner":
+        await _brand_banner(interaction, private)
+    else:
+        await _brand_trophies(interaction, private)
+
+
+# ---- r20 ops commands: /start, /inbox, /admin setup, /admin doctor -----------------------------------------
+
+@bot.tree.command(name="start", description="New here? A one-minute tour made for you: what I do and what's next")
+@app_commands.guild_only()
+async def start_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=await start_embed(interaction.guild_id, interaction.user),
+                                            view=start_view(interaction.guild_id, interaction.user.id), ephemeral=True)
+
+
+@bot.tree.command(name="inbox", description="Everything waiting on you, one tap each: stuck slips, open legs, missing payouts")
+@app_commands.guild_only()
+@app_commands.describe(scope="Mine (default), or everyone's (mods)")
+@app_commands.choices(scope=[app_commands.Choice(name="Mine", value="me"),
+                             app_commands.Choice(name="Everyone (mods)", value="all")])
+async def inbox_cmd(interaction: discord.Interaction, scope: Optional[app_commands.Choice[str]] = None):
+    await inbox_open(interaction, scope.value if scope else "me")
+
+
+@admin_group.command(name="setup", description="Step-by-step setup: slip, recap and audit channels, main switches, test posts")
+async def admin_setup(interaction: discord.Interaction):
+    if not ops_is_admin(interaction):
+        await interaction.response.send_message("Only admins can run setup.", ephemeral=True)
+        return
+    guild = ops_guild(interaction.client, interaction.guild_id, interaction)
+    await interaction.response.send_message(embed=setup_embed(interaction.client, guild, interaction.guild_id, 0),
+                                            view=setup_view(interaction.client, guild, interaction.guild_id, 0),
+                                            ephemeral=True)
+
+
+@admin_group.command(name="doctor", description="Full check-up: permissions, channels, ESPN, Claude, database, jobs")
+async def admin_doctor(interaction: discord.Interaction):
+    if not ops_is_admin(interaction):
+        await interaction.response.send_message("Only admins can run the doctor.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    guild = ops_guild(interaction.client, interaction.guild_id, interaction)
+    sections = await doctor_checks(interaction.client, interaction.guild_id, guild, deep=True)
+    await interaction.followup.send(embed=doctor_embed(sections), ephemeral=True)
+
+
+# ---- r20 personal commands ---------------------------------------------------------------------------------
+
+@me_group.command(name="nickname", description="What the bot calls you in posts, voice and DMs (leave empty to see or clear)")
+@app_commands.describe(name="Up to 24 characters, e.g. Big Lev. Type 'clear' to go back to your display name",
+                       member="Mods only: clear someone else's nickname")
+async def me_nickname(interaction: discord.Interaction, name: Optional[app_commands.Range[str, 1, 60]] = None,
+                      member: Optional[discord.Member] = None):
+    gid = interaction.guild_id
+    if member is not None and member.id != interaction.user.id:
+        if not is_mod(interaction.user):
+            await interaction.response.send_message("Only mods can change someone else's nickname.", ephemeral=True)
+            return
+        set_setting(gid, f"nick:{member.id}", None)
+        await interaction.response.send_message(f"Cleared **{pers_clean(member.display_name, 60) or 'their'}**'s nickname. "
+                                                "I'll use their display name again.", ephemeral=True)
+        return
+    key = f"nick:{interaction.user.id}"
+    if name is None:
+        cur = get_setting(gid, key)
+        await interaction.response.send_message(
+            f"I call you **{cur}**. Change it with `/me nickname name:...`, or `name:clear` to drop it." if cur else
+            "No nickname yet, so I use your display name. Set one with `/me nickname name:Big Lev`.", ephemeral=True)
+        return
+    if name.strip().lower() in ("clear", "reset", "none", "off"):
+        set_setting(gid, key, None)
+        await interaction.response.send_message("Nickname cleared. Back to your display name.", ephemeral=True)
+        return
+    clean = pers_clean(name, NICK_MAX)
+    if not clean or len(clean) < 2:
+        await interaction.response.send_message("That name is empty once I take out the mentions, links and formatting. "
+                                                "Try plain letters, numbers or an emoji.", ephemeral=True)
+        return
+    set_setting(gid, key, clean)
+    await interaction.response.send_message(f"Got it. From now on you're **{clean}** in my posts, voice and DMs.",
+                                            ephemeral=True)
+
+
+@me_group.command(name="hype", description="Your own cash call, used when you cash (leave empty to see it)")
+@app_commands.describe(call="e.g. BIG LEV IS EATING (up to 40 characters). Type 'clear' to remove it",
+                       emoji="Optional: one emoji or a server emoji to go with it")
+async def me_hype(interaction: discord.Interaction, call: Optional[app_commands.Range[str, 1, 80]] = None,
+                  emoji: Optional[app_commands.Range[str, 1, 64]] = None):
+    gid, uid = interaction.guild_id, interaction.user.id
+    cur = get_hype(gid, uid)
+    if call is None and emoji is None:
+        if cur.get("call"):
+            await interaction.response.send_message(
+                f"Your cash call: {cur.get('emoji') or '🔥'} **{cur['call']}**\nChange it with `/me hype call:...`, "
+                "or `call:clear` to go back to my usual lines.", ephemeral=True)
+        else:
+            await interaction.response.send_message("No cash call yet. Set one, like `/me hype call:BIG LEV IS EATING "
+                                                    "emoji:🦁`, and I'll use it every time you cash.", ephemeral=True)
+        return
+    if call is not None and call.strip().lower() in ("clear", "reset", "none", "off"):
+        set_setting(gid, f"hype:{uid}", None)
+        await interaction.response.send_message("Cash call cleared. I'll go back to my usual lines.", ephemeral=True)
+        return
+    new = dict(cur)
+    if call is not None:
+        clean = pers_clean(call, HYPE_MAX)
+        if not clean or len(clean) < 2:
+            await interaction.response.send_message("That call is empty once I take out the mentions, links and "
+                                                    "formatting. Try plain words.", ephemeral=True)
+            return
+        new["call"] = clean
+    if emoji is not None:
+        e = clean_emoji(emoji)
+        if e is None:
+            await interaction.response.send_message("Use one emoji, like 🦁, or a server emoji.", ephemeral=True)
+            return
+        new["emoji"] = e
+    if not new.get("call"):
+        await interaction.response.send_message("Add the call too, like `/me hype call:BIG LEV IS EATING`.", ephemeral=True)
+        return
+    set_setting(gid, f"hype:{uid}", json.dumps(new))
+    sample = f"{new.get('emoji') or '🔥'} **{new['call']}** {call_name(gid, uid, interaction.user.display_name)} " \
+             "cashes +$45 on a 3-pick Power Play."
+    await interaction.response.send_message(f"Locked in. Next time you cash it looks like this:\n> {sample}",
+                                            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+@me_group.command(name="timeline", description="Your season as a picture: the line, your biggest hit, streaks and badges")
+@app_commands.describe(member="Optional: someone else's timeline",
+                       private="Only you see it (and it includes your hidden picks)")
+async def me_timeline(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                      private: Optional[bool] = False):
+    who = member or interaction.user
+    own = who.id == interaction.user.id
+    include_hidden = bool(private) and own
+    name = call_name(interaction.guild_id, who.id, who.display_name)
+    await interaction.response.defer(thinking=True, ephemeral=bool(private))
+    d = timeline_data(interaction.guild_id, str(who.id), name, include_hidden=include_hidden)
+    if d is None:
+        await interaction.followup.send(
+            ("You need" if own else f"{pers_clean(who.display_name, 60) or 'They'} needs") +
+            " at least two settled picks for a timeline. It fills in as picks settle.", ephemeral=True)
+        return
+    av = await avatar_bytes(who)
+    png = await asyncio.to_thread(locked_render, render_timeline, d, av)
+    await interaction.followup.send(file=discord.File(png, filename="timeline.png"), ephemeral=bool(private))
+
+
+@me_group.command(name="week", description="Preview your Monday note: last week in four lines (turn it on in /me settings)")
+async def me_week(interaction: discord.Interaction):
+    gid, uid = interaction.guild_id, interaction.user.id
+    d = weekly_note_data(gid, uid)
+    on = personal_on(gid, uid, "weeklynote")
+    note = ("It's **on**: it lands in your DMs Monday mornings." if on else
+            "It's **off**. Turn on **Monday note DM** in `/me settings` to get it every Monday morning.")
+    if d is None:
+        await interaction.response.send_message("Nothing from last week to sum up. " + note, ephemeral=True)
+        return
+    await interaction.response.send_message(note, embed=weekly_note_embed(d, call_name(gid, uid, interaction.user.display_name)),
+                                            ephemeral=True)
+
+
+lore_group = app_commands.Group(name="lore", description="The group's saved moments", guild_only=True)
+
+
+@lore_group.command(name="add", description="Save a group moment to the lore (with an optional message link)")
+@app_commands.describe(text="What happened, in your words", link="Optional: a link to the message (Copy Message Link)")
+async def lore_add(interaction: discord.Interaction, text: app_commands.Range[str, 3, 400],
+                   link: Optional[app_commands.Range[str, 10, 200]] = None):
+    lid, msg = add_lore(interaction.guild_id, interaction.user.id, interaction.user.display_name, text, link)
+    if lid is None:
+        await interaction.response.send_message(msg, ephemeral=True)
+        return
+    row = get_lore(interaction.guild_id, lid)
+    await interaction.response.send_message("📜 Added to the lore. I'll bring it back on its 6-month and 1-year marks.",
+                                            embed=lore_embed(row), allowed_mentions=discord.AllowedMentions.none())
+
+
+@lore_group.command(name="random", description="A random moment from the group's lore")
+async def lore_random(interaction: discord.Interaction):
+    rows = pers_db().execute("SELECT * FROM lore WHERE guild_id = ? AND removed_at IS NULL", (interaction.guild_id,)).fetchall()
+    if not rows:
+        await interaction.response.send_message("No lore yet. Start it with `/lore add`.", ephemeral=True)
+        return
+    await interaction.response.send_message(embed=lore_embed(_random.choice(rows)),
+                                            allowed_mentions=discord.AllowedMentions.none())
+
+
+@lore_group.command(name="list", description="Browse the lore, newest first")
+@app_commands.describe(page="Page number (10 per page)")
+async def lore_list(interaction: discord.Interaction, page: Optional[app_commands.Range[int, 1, 500]] = 1):
+    page = page or 1
+    total = pers_db().execute("SELECT COUNT(*) FROM lore WHERE guild_id = ? AND removed_at IS NULL",
+                              (interaction.guild_id,)).fetchone()[0]
+    rows = db().execute("SELECT * FROM lore WHERE guild_id = ? AND removed_at IS NULL ORDER BY id DESC LIMIT 10 OFFSET ?",
+                        (interaction.guild_id, (page - 1) * 10)).fetchall()
+    if not rows:
+        await interaction.response.send_message("No lore yet. Start it with `/lore add`." if not total else
+                                                "No lore on that page.", ephemeral=True)
+        return
+    lines = [f"`#{r['id']}` {clip(r['text'].replace(chr(10), ' '), 120)}" + (f" · [link]({r['link']})" if r["link"] else "")
+             + f" · *{clip(r['author_name'], 30)}*" for r in rows]
+    pages = (total + 9) // 10
+    e = discord.Embed(title=f"📜 The lore · {total} moment{'s' if total != 1 else ''}", color=BRAND,
+                      description=clip("\n".join(lines), 4000))
+    e.set_footer(text=f"Page {page} of {pages} · /lore remove takes one out (mods or whoever saved it)")
+    await interaction.response.send_message(embed=e, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+@lore_group.command(name="remove", description="Take a moment out of the lore (mods, or whoever saved it)")
+@app_commands.describe(lore_id="The number from /lore list")
+async def lore_remove(interaction: discord.Interaction, lore_id: int):
+    row = get_lore(interaction.guild_id, lore_id)
+    if row is None:
+        await interaction.response.send_message(f"No lore #{lore_id} here.", ephemeral=True)
+        return
+    if row["author_id"] != interaction.user.id and not is_mod(interaction.user):
+        await interaction.response.send_message("Only mods, or whoever saved it, can remove that one.", ephemeral=True)
+        return
+    db().execute("UPDATE lore SET removed_at = ?, removed_by = ? WHERE id = ?", (now_iso(), interaction.user.id, lore_id))
+    db().commit()
+    await interaction.response.send_message(f"Removed lore #{lore_id}.", ephemeral=True)
+
+
+bot.tree.add_command(lore_group)
 
 
 @bot.tree.error
