@@ -56,6 +56,7 @@ paid, and who's actually up.
 | `/show` | The Sunday Show: this week's storylines written up like a broadcast (also posts with the weekly recap) |
 | `/voice join`, `leave`, `say` | The bot joins your voice channel and calls out cashes, one-leg sweats and big wins |
 | `/me roast`, `headsup`, `birthday` | Opt in to roasts of your losses, turn private heads-ups on/off, set a birthday shoutout |
+| `/me passes`, `legalerts`, `quiet` | Your ghost-slip pass record, leg-by-leg DMs on/off, hours with no DMs |
 | `/admin personality`, `reactions`, `show` | The bot's voice (sidekick, hype man, analyst, trash talker, announcer), cash replies on/off, Sunday Show on/off |
 | `/limit` | Set a weekly loss limit; the bot DMs you privately once a week if you pass it |
 | `/survivor start`, `pick`, `standings` | NFL survivor pool: pick one team to win each week, each team only once. A loss, tie or skipped week knocks you out. Graded automatically from the scoreboard |
@@ -227,6 +228,23 @@ on those players), names the weakest leg, and logs nothing. A **🧾 Log this sl
 end up playing it. A screenshot with no words, or with "log", "locked in" and the like, logs as before.
 Screenshots of a slip that isn't placed yet (still showing the entry fee box, "Deposit Funds" or "Place
 Entry") aren't logged either: the bot offers **🔍 Break it down** or **🧾 Log this slip** instead.
+
+**Slip X-ray.** Every slip breakdown comes with an image: for each player prop, that player's last 10
+games as bars with the line drawn across (green beat it, red didn't), plus "8/10 over" and the average.
+The same numbers go into the written take. Game lines and players ESPN doesn't log say so instead.
+
+**Ghost slips.** When you ask about your own slip that isn't placed and don't play it, it becomes a 👻
+ghost. When its games finish, the bot replies "good pass, it would've missed" or "you passed on this and
+it would've hit". `/me passes` shows your pass record (good passes, would've-hits, and the money each way),
+and it shows on the back of your `/card`. Logging the slip later, by any route, cancels the ghost.
+
+**Leg-by-leg DMs.** As each leg of your open slips clears ✅ or dies 💀, the bot DMs you, grouped per slip
+("1/2 in"). `/me legalerts` turns them off. While the bot is in voice it also calls those out, plus
+near-misses on overs ("Brown is at 19. Moi needs 2 more.").
+
+**Quiet hours.** `/me quiet start:23 end:8` stops leg alerts, game pings, team finals, lineup and deadline
+DMs between those hours (they're skipped, not saved for later). Reminders you set yourself still arrive.
+`/me quiet` with nothing turns it off.
 
 **Live receipts.** When a slip screenshot is logged, the bot's reply includes a clean image of the
 slip. As games go, the image fills in: progress bars on props, scores on game lines, ✓ and ✗ as legs

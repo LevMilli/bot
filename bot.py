@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-08 r14.1"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-09 r15"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -561,6 +561,11 @@ def insert_pick(
     )
     _write_legs(db(), cur.lastrowid, legs)
     db().commit()
+    if bettor_id:
+        try:
+            clear_matching_ghosts(guild_id, bettor_id, legs)
+        except Exception:
+            log.warning("Couldn't clear ghost slips", exc_info=True)
     return cur.lastrowid
 
 
@@ -1631,19 +1636,23 @@ class SlipDraftButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sd:(
                                                            d["slip"], d["url"], reply)
             d["used"] = pid
             set_setting(interaction.guild_id, f"draft:{self.message_id}", json.dumps(d))
+            drop_ghost(interaction.guild_id, self.message_id)
             return
         gate = ask_gate(interaction.guild_id, interaction.user.id)
         if gate:
             await interaction.response.send_message(gate, ephemeral=True)
             return
         await interaction.response.defer(thinking=True)
-        text = await slip_review_text(interaction.client, interaction.guild_id, interaction.user, d["slip"],
-                                      "Break this slip down for me.")
+        text, xray = await slip_review(interaction.client, interaction.guild_id, interaction.user, d["slip"],
+                                       "Break this slip down for me.")
         chunks = split_message(text)
         for k, chunk in enumerate(chunks):
-            await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none(),
-                                            **({"view": slip_draft_view(self.message_id, review=False)}
-                                               if k == len(chunks) - 1 and not d.get("used") else {}))
+            extra = {}
+            if k == 0 and xray is not None:
+                extra["file"] = xray
+            if k == len(chunks) - 1 and not d.get("used"):
+                extra["view"] = slip_draft_view(self.message_id, review=False)
+            await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none(), **extra)
 
 
 def slip_draft_view(message_id: int, review: bool = True, log_it: bool = True) -> discord.ui.View:
@@ -1683,7 +1692,24 @@ never push them to bet more.
 Keep it under 220 words."""
 
 
-async def slip_review_text(client, guild_id: int, asker, slip: dict, question: str) -> str:
+async def slip_review(client, guild_id: int, asker, slip: dict, question: str) -> tuple[str, Optional[discord.File]]:
+    """The written take plus the X-ray image (None when no leg has a game log)."""
+    try:
+        data = await slip_xray_data(slip)
+    except Exception:
+        log.warning("X-ray data failed", exc_info=True)
+        data = []
+    text = await slip_review_text(client, guild_id, asker, slip, question, xray_notes(data))
+    f = None
+    try:
+        f = await slip_xray_file(slip, data)
+    except Exception:
+        log.warning("X-ray image failed", exc_info=True)
+    return text, f
+
+
+async def slip_review_text(client, guild_id: int, asker, slip: dict, question: str,
+                           extra: Optional[list] = None) -> str:
     legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()]
     lines = [f"Question from {asker.display_name}: {question.strip() or 'What do you think of this slip?'}",
              f"The slip: {slip.get('platform') or '?'} · {slip.get('description') or ''}"
@@ -1706,6 +1732,8 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
             g = (r.get("groups") or [None])[0]
             if g and g.get("hit", 0) + g.get("miss", 0) >= 3:
                 notes.append(f"- {label}: hit {g['hit']} of {g['hit'] + g['miss']}")
+    if extra:
+        lines += ["", "Each player's last games against this number (from ESPN game logs):"] + extra
     if notes:
         lines += ["", "The group's own history:"] + list(dict.fromkeys(notes))[:12]
     system = ASK_SYSTEM.format(bot_name=getattr(getattr(client, "user", None), "display_name", "PIMP-BOT"),
@@ -4616,10 +4644,10 @@ def simple_live_result(leg: dict, ev: dict, i: Optional[int]) -> Optional[str]:
         return None
 
 
-async def leg_progress(p) -> list[dict]:
+async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
     """One entry per leg (or the pick itself when it has no legs):
     {n, text, status, line (what to show), event, path, final}"""
-    legs = get_legs(p["id"])
+    legs = get_legs(p["id"]) if legs is None else legs
     items = [(1, p["description"], p["status"] if p["status"] != "open" else "open")] if not legs else \
         [(leg["idx"], leg["text"], leg["status"]) for leg in legs]
     leagues = leagues_for(p["sport"])
@@ -4646,6 +4674,11 @@ async def leg_progress(p) -> list[dict]:
                     entry["in_play"] = ev.get("state") == "in"
                     now_r = simple_live_result(simple, ev, None if simple["kind"] == "total" else i)
                     entry["live"] = {"hit": "ahead", "miss": "behind"}.get(now_r or "", None)
+                    if ev.get("final") and all(t["score"] is not None for t in ev["teams"]):
+                        try:
+                            entry["final"] = judge(simple, ev, None if simple["kind"] == "total" else i)
+                        except Exception:
+                            entry["final"] = None
             elif prop:
                 st = await prop_status(prop, prop_paths, logged)
                 if st:
@@ -4654,7 +4687,8 @@ async def leg_progress(p) -> list[dict]:
                     entry["sub"] = (st["detail"] if st["state"] == "in" and st["detail"] else
                                     short_game(st["event"]) if st["event"] else st["why"] or "")
                     if st["value"] is not None:
-                        entry["num"] = {"value": st["value"], "line": st["line"], "side": prop["side"]}
+                        side = prop["side"] if not prop.get("negate") else ("under" if prop["side"] == "over" else "over")
+                        entry["num"] = {"value": st["value"], "line": st["line"], "side": side}
                     if st["value"] is not None:
                         unit = STATS[st["stat_key"]][0]
                         entry["line"] = (f"{st['value']:g} / {st['line']:g} {unit} "
@@ -9981,6 +10015,8 @@ async def favorite_team_alerts(client: discord.Client, now: Optional[datetime] =
                     text = (f"{'🎉' if won else '😩'} Your **{mine['short']}** {'beat' if won else 'lost to'} the "
                             f"{theirs['short']} {mine['score']:g}-{theirs['score']:g}.")
                     try:
+                        if is_quiet(r["guild_id"], uid):
+                            raise QuietHours()
                         user = await client.fetch_user(uid)
                         await user.send(text)
                     except Exception:
@@ -10476,6 +10512,8 @@ async def lineup_checks(client: discord.Client, now: Optional[datetime] = None) 
                 text = (f"✅ **{pl['name']}** is in the starting lineup (pick `#{p['id']}`)." if starter else
                         f"⚠️ **{pl['name']}** is **not starting** tonight. Heads up on pick `#{p['id']}`: {clip(leg['text'], 80)}")
                 try:
+                    if is_quiet(gid, uid):
+                        raise QuietHours()
                     user = await client.fetch_user(uid)
                     await user.send(text)
                 except Exception:
@@ -10518,6 +10556,8 @@ async def deadline_nudges(client: discord.Client, now: Optional[datetime] = None
             if not bits:
                 continue
             try:
+                if is_quiet(gid, uid):
+                    raise QuietHours()
                 user = await client.fetch_user(uid)
                 await user.send("⏰ Game day reminder: you haven't set " + " or ".join(bits) + " yet.")
             except Exception:
@@ -11513,6 +11553,11 @@ def card_payload(guild_id: int, key: str, name: str, back: bool = False) -> Opti
             lines.append(f"Best day: {best[0]} ({best[1]['w']}-{best[1]['l']})")
             if worst[0] != best[0]:
                 lines.append(f"Coldest day: {worst[0]} ({worst[1]['w']}-{worst[1]['l']})")
+        lines = lines[:6]
+        if key.isdigit():
+            pr_ = pass_record(guild_id, int(key))
+            if pr_["good"] + pr_["bad"]:
+                lines.append(f"Passes: {pr_['good']} good, {pr_['bad']} would've hit")
         lines.append(f"Card rating {cn['ovr']} · {cn['rarity'][0]} · {cn['n']} settled picks")
         c["back_rows"], c["back_lines"] = rows, lines
     return c
@@ -12362,6 +12407,426 @@ async def voice_idle(client: discord.Client, now: Optional[datetime] = None) -> 
             await voice_leave(gid)
 
 
+# ==========================================================================
+# r15: slip X-ray, ghost slips, leg-by-leg DMs, sweat radio, quiet hours
+# ==========================================================================
+
+# ---- quiet hours -----------------------------------------------------------------------------
+
+class QuietHours(Exception):
+    """Raised inside a DM's try block to skip it quietly."""
+
+
+def quiet_window(guild_id: int, user_id) -> Optional[tuple[int, int]]:
+    raw = get_setting(guild_id, f"quiet:{user_id}") or get_setting(0, f"quiet:{user_id}")
+    if not raw:
+        return None
+    try:
+        a, b = (int(x) for x in raw.split("-"))
+        return a, b
+    except ValueError:
+        return None
+
+
+def is_quiet(guild_id: int, user_id, now: Optional[datetime] = None) -> bool:
+    w = quiet_window(guild_id, user_id)
+    if not w:
+        return False
+    h = (now or datetime.now(TZ)).astimezone(TZ).hour
+    a, b = w
+    return (a <= h < b) if a < b else (h >= a or h < b)
+
+
+def hour_label(h: int) -> str:
+    return datetime(2026, 1, 1, h).strftime("%-I %p").lower()
+
+
+# ---- slip X-ray --------------------------------------------------------------------------------
+
+async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
+    """The player's last 10 games against this leg's number, or why there isn't a chart."""
+    out = {"text": leg_text, "values": [], "line": None, "side": None, "name": None, "stat": None, "why": ""}
+    pr = cached_prop(leg_text)
+    if not pr:
+        out["why"] = "not a player prop"
+        return out
+    side = pr["side"] if not pr.get("negate") else ("under" if pr["side"] == "over" else "over")
+    out.update(line=pr["line"], side=side, name=pr["display"])
+    sport_paths = [p for p in leagues_for(sport) if p in PROP_PATHS] if sport else []
+    cand, stat, ambiguous = None, None, False
+    for key in pr["stats"]:
+        fam = STATS[key][1]
+        paths = [p for p in PROP_PATHS if FAMILY_OF_PATH[p] == fam]
+        narrowed = [p for p in paths if p in sport_paths]
+        cands = await resolve_player(pr["player"], narrowed or paths)
+        if len(cands) == 1:
+            cand, stat = cands[0], key
+            break
+        ambiguous = ambiguous or len(cands) > 1
+    if cand is None:
+        out["why"] = "more than one player by that name" if ambiguous else "no ESPN game log for this player"
+        return out
+    games = await trend_games(cand["path"], cand["id"], need=10)
+    values = trend_values(games, stat)[:10]
+    out.update(name=cand["name"], stat=STATS[stat][0], values=[(g["opp"], g["at"], v) for g, v in values][::-1])
+    if not values:
+        out["why"] = f"no {STATS[stat][0]} in recent games"
+    return out
+
+
+async def slip_xray_data(slip: dict) -> list[dict]:
+    legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()][:8]
+
+    async def one(t):
+        try:
+            return await asyncio.wait_for(xray_leg(t, slip.get("sport")), timeout=20)
+        except Exception:
+            log.warning("X-ray failed for %r", t, exc_info=True)
+            return {"text": t, "values": [], "line": None, "side": None, "name": None, "stat": None,
+                    "why": "couldn't load the game log"}
+    return list(await asyncio.gather(*(one(t) for t in legs)))
+
+
+def xray_hits(x: dict) -> Optional[tuple[int, int]]:
+    if not x["values"] or x["line"] is None:
+        return None
+    vals = [v for _, _, v in x["values"]]
+    good = sum(1 for v in vals if (v > x["line"] if x["side"] == "over" else v < x["line"]))
+    return good, len(vals)
+
+
+def xray_notes(data: list[dict]) -> list[str]:
+    notes = []
+    for x in data:
+        h = xray_hits(x)
+        if h:
+            vals = [v for _, _, v in x["values"]]
+            notes.append(f"- {x['text']}: last {h[1]} games {h[0]}/{h[1]} {x['side']} {x['line']:g} "
+                         f"(avg {sum(vals) / len(vals):.1f}, most recent {', '.join(f'{v:g}' for v in vals[-5:][::-1])})")
+    return notes
+
+
+def render_xray(title: str, data: list[dict]) -> io.BytesIO:
+    from PIL import Image, ImageDraw
+    W, ROW, SHORT = 1000, 190, 96
+    H = 120 + sum(ROW if xray_hits(x) else SHORT for x in data) + 50
+    img = Image.new("RGB", (W, H), ART_BG)
+    d = ImageDraw.Draw(img)
+    img.paste(_grad((W, 110), [(70, 34, 150), (20, 16, 40), ART_BG]), (0, 0))
+    d.text((36, 26), "SLIP X-RAY", font=art_font(40, True), fill=ART_TEXT)
+    t, f = fit_text(d, title, W - 72, 20, False)
+    d.text((38, 76), t, font=f, fill=ART_MUTED)
+    y = 120
+    for x in data:
+        d.rounded_rectangle((20, y, W - 20, y + (ROW if xray_hits(x) else SHORT) - 14), 22, fill=(24, 24, 33))
+        t, f = fit_text(d, x["text"], 330 if xray_hits(x) else 520, 22, True)
+        d.text((44, y + 22), t, font=f, fill=ART_TEXT)
+        h = xray_hits(x)
+        if h is None:
+            wt, wf = fit_text(d, x["why"] or "no data", 500, 17, False)
+            d.text((W - 44 - _tw(d, wt, wf), y + 26), wt, font=wf, fill=ART_MUTED)
+            y += SHORT
+            continue
+        good, n = h
+        rate = good / n
+        colour = ART_GREEN if rate >= 0.6 else ART_AMBER if rate >= 0.4 else ART_RED
+        d.text((44, y + 58), f"{good}/{n}", font=art_font(52, True), fill=colour)
+        vals = [v for _, _, v in x["values"]]
+        d.text((44, y + 122), f"{x['side']} {x['line']:g}  ·  avg {sum(vals) / len(vals):.1f}", font=art_font(18, True),
+               fill=ART_MUTED)
+        # bars
+        cx0, cx1, cy0, cy1 = 440, W - 44, y + 22, y + ROW - 52
+        top = max(vals + [x["line"]]) * 1.15 or 1
+        bw = (cx1 - cx0) / max(len(vals), 1)
+        ly = cy1 - (x["line"] / top) * (cy1 - cy0)
+        for dx in range(int(cx0), int(cx1), 14):
+            d.line((dx, ly, dx + 7, ly), fill=(150, 150, 168), width=2)
+        for k, (opp, at, v) in enumerate(x["values"]):
+            good_game = v > x["line"] if x["side"] == "over" else v < x["line"]
+            bx = cx0 + k * bw + bw * 0.18
+            by = cy1 - (v / top) * (cy1 - cy0)
+            d.rounded_rectangle((bx, min(by, cy1 - 3), bx + bw * 0.64, cy1), 6, fill=ART_GREEN if good_game else ART_RED)
+            vf = art_font(15, True)
+            vt = f"{v:g}"
+            d.text((bx + bw * 0.32 - _tw(d, vt, vf) / 2, min(by, cy1 - 3) - 20), vt, font=vf, fill=ART_TEXT)
+            of = art_font(13)
+            ot = ("@" if at == "@" else "") + opp
+            d.text((bx + bw * 0.32 - _tw(d, ot, of) / 2, cy1 + 6), ot, font=of, fill=ART_MUTED)
+        lt = f"{x['line']:g}"
+        lf = art_font(15, True)
+        d.text((cx0 - 10 - _tw(d, lt, lf), ly - 9), lt, font=lf, fill=ART_TEXT)
+        y += ROW
+    d.text((36, H - 40), "Last 10 games, oldest → newest · green = beat the number", font=art_font(15), fill=ART_FAINT)
+    d.text((W - 36 - _tw(d, "PIMP-BOT", art_font(15, True)), H - 40), "PIMP-BOT", font=art_font(15, True), fill=ART_FAINT)
+    return _png(img)
+
+
+async def slip_xray_file(slip: dict, data: Optional[list] = None) -> Optional[discord.File]:
+    data = data if data is not None else await slip_xray_data(slip)
+    if not any(xray_hits(x) for x in data):
+        return None
+    title = " · ".join(x for x in (slip.get("platform"), slip.get("description")) if x)
+    png = await asyncio.to_thread(locked_render, render_xray, title, data)
+    return discord.File(png, filename="xray.png")
+
+
+# ---- ghost slips -------------------------------------------------------------------------------
+
+def _ensure_r15_tables():
+    db().executescript("""
+        CREATE TABLE IF NOT EXISTS ghosts (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id    INTEGER NOT NULL,
+            user_id     INTEGER NOT NULL,
+            user_name   TEXT,
+            draft_mid   INTEGER NOT NULL,
+            channel_id  INTEGER,
+            reply_mid   INTEGER,
+            sport       TEXT,
+            description TEXT,
+            legs        TEXT NOT NULL,
+            cost        REAL,
+            payout      REAL,
+            created_at  TEXT NOT NULL,
+            checked_at  TEXT,
+            result      TEXT NOT NULL DEFAULT 'open',
+            settled_at  TEXT,
+            UNIQUE (guild_id, draft_mid)
+        );
+        CREATE TABLE IF NOT EXISTS leg_pings (
+            pick_id INTEGER NOT NULL,
+            idx     INTEGER NOT NULL,
+            state   TEXT NOT NULL,
+            PRIMARY KEY (pick_id, idx, state)
+        );
+    """)
+    db().commit()
+
+
+_r15_ready = False
+
+
+def r15_db():
+    global _r15_ready
+    if not _r15_ready:
+        _ensure_r15_tables()
+        _r15_ready = True
+    return db()
+
+
+def add_ghost(guild_id: int, poster_id: int, poster_name: str, draft_mid: int, channel_id: int,
+              reply_mid: Optional[int], slip: dict) -> None:
+    legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()]
+    if not legs:
+        return
+    r15_db().execute("""INSERT OR IGNORE INTO ghosts (guild_id, user_id, user_name, draft_mid, channel_id, reply_mid, sport,
+                        description, legs, cost, payout, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (guild_id, poster_id, poster_name, draft_mid, channel_id, reply_mid, slip.get("sport"),
+                      str(slip.get("description") or "Slip")[:200],
+                      json.dumps([{"idx": k, "text": t, "status": "open"} for k, t in enumerate(legs, 1)]),
+                      slip.get("cost"), slip.get("payout"), now_iso()))
+    db().commit()
+
+
+def clear_matching_ghosts(guild_id: int, user_id: int, legs_text: Optional[str]) -> None:
+    """They played it after all (logged by any route): drop open ghosts sharing at least half their legs."""
+    mine = {norm_name(x) for x in (legs_text or "").splitlines() if x.strip()}
+    if not mine:
+        return
+    for g in r15_db().execute("SELECT id, legs FROM ghosts WHERE guild_id = ? AND user_id = ? AND result = 'open'",
+                              (guild_id, user_id)).fetchall():
+        theirs = {norm_name(x["text"]) for x in json.loads(g["legs"])}
+        if theirs and len(mine & theirs) * 2 >= len(theirs):
+            db().execute("DELETE FROM ghosts WHERE id = ?", (g["id"],))
+    db().commit()
+
+
+def drop_ghost(guild_id: int, draft_mid: int) -> None:
+    r15_db().execute("DELETE FROM ghosts WHERE guild_id = ? AND draft_mid = ? AND result = 'open'", (guild_id, draft_mid))
+    db().commit()
+
+
+def leg_outcome(e: dict) -> Optional[str]:
+    """hit / miss / push once a leg is decided (an over that's cleared counts), else None."""
+    if e.get("status") in ("hit", "miss", "push"):
+        return e["status"]
+    if e.get("live") in ("hit", "miss", "push"):
+        return e["live"]
+    if e.get("final") in ("hit", "miss", "push"):
+        return e["final"]
+    ev = e.get("event") or {}
+    if (ev.get("final") or ev.get("state") == "post") and e.get("live") in ("ahead", "behind"):
+        return "hit" if e["live"] == "ahead" else "miss"
+    return None
+
+
+GHOST_DAYS = 4
+
+
+async def grade_ghosts(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    rows = r15_db().execute("SELECT * FROM ghosts WHERE result = 'open' AND (checked_at IS NULL OR checked_at < ?) "
+                            "ORDER BY checked_at LIMIT 10", (iso(now - timedelta(minutes=8)),)).fetchall()
+    for g in rows:
+        db().execute("UPDATE ghosts SET checked_at = ? WHERE id = ?", (now_iso(), g["id"]))
+        db().commit()
+        if datetime.fromisoformat(g["created_at"]) < now - timedelta(days=GHOST_DAYS):
+            db().execute("UPDATE ghosts SET result = 'expired', settled_at = ? WHERE id = ?", (now_iso(), g["id"]))
+            db().commit()
+            continue
+        legs = json.loads(g["legs"])
+        pseudo = {"id": -g["id"], "sport": g["sport"], "description": g["description"], "status": "open",
+                  "created_at": g["created_at"]}
+        try:
+            entries = await leg_progress(pseudo, legs=legs)
+        except Exception:
+            log.warning("Ghost %s check failed", g["id"], exc_info=True)
+            continue
+        for leg, e in zip(legs, entries):
+            got = leg_outcome(e)
+            if got:
+                leg["status"] = got
+                if e.get("num") and e["num"].get("value") is not None:
+                    leg["value"] = e["num"]["value"]
+        db().execute("UPDATE ghosts SET legs = ? WHERE id = ?", (json.dumps(legs), g["id"]))
+        db().commit()
+        states = [x["status"] for x in legs]
+        if "miss" in states:
+            result = "miss"
+        elif all(s in ("hit", "push") for s in states) and "hit" in states:
+            result = "hit"
+        else:
+            continue
+        db().execute("UPDATE ghosts SET result = ?, settled_at = ? WHERE id = ?", (result, now_iso(), g["id"]))
+        db().commit()
+        await announce_ghost(client, g, legs, result)
+
+
+def ghost_line(g, legs: list, result: str) -> str:
+    who = g["user_name"] or "you"
+    if result == "hit":
+        amt = f" ({signed(g['payout'] - g['cost'])})" if g["cost"] and g["payout"] else ""
+        return (f"👻 **Ghost slip:** {who} passed on {clip(g['description'], 60)}, and it would've **hit**{amt}. 🫠 "
+                f"Every leg came in.")
+    miss = next((x for x in legs if x["status"] == "miss"), None)
+    tail = f" {clip(miss['text'], 70)}" + (f" ({miss['value']:g})" if miss and miss.get("value") is not None else "") + \
+           " sank it." if miss else ""
+    return f"👻 **Ghost slip:** good pass, {who}. {clip(g['description'], 60)} would've **missed**.{tail}"
+
+
+async def announce_ghost(client, g, legs: list, result: str) -> None:
+    line = ghost_line(g, legs, result)
+    channel = client.get_channel(g["channel_id"]) if g["channel_id"] else None
+    if channel is None:
+        return
+    try:
+        if g["reply_mid"]:
+            ref = channel.get_partial_message(g["reply_mid"])
+            ref = ref.to_reference(fail_if_not_exists=False) if hasattr(ref, "to_reference") else ref
+            await channel.send(line, reference=ref, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await channel.send(line, allowed_mentions=discord.AllowedMentions.none())
+    except Exception:
+        log.warning("Couldn't post ghost result %s", g["id"], exc_info=True)
+
+
+def pass_record(guild_id: int, user_id: int) -> dict:
+    rows = r15_db().execute("SELECT * FROM ghosts WHERE guild_id = ? AND user_id = ? AND result IN ('hit', 'miss') "
+                            "ORDER BY settled_at DESC", (guild_id, user_id)).fetchall()
+    good = [r for r in rows if r["result"] == "miss"]
+    bad = [r for r in rows if r["result"] == "hit"]
+    saved = sum(r["cost"] or 0 for r in good)
+    missed = sum((r["payout"] or 0) - (r["cost"] or 0) for r in bad)
+    open_n = r15_db().execute("SELECT COUNT(*) AS n FROM ghosts WHERE guild_id = ? AND user_id = ? AND result = 'open'",
+                              (guild_id, user_id)).fetchone()["n"]
+    return {"good": len(good), "bad": len(bad), "saved": saved, "missed": missed, "open": open_n, "rows": rows[:6]}
+
+
+# ---- leg-by-leg DMs + sweat radio ------------------------------------------------------------------
+
+_LEG_SEEN: dict[int, float] = {}
+
+
+def leg_label(text: str) -> str:
+    pr = cached_prop(text)
+    if pr:
+        return pr["display"].split()[-1] if len(pr["display"].split()) > 1 else pr["display"]
+    return clip(text, 30)
+
+
+async def leg_watch(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    r15_db()
+    init = get_setting(0, "legwatch_init")
+    if init is None:
+        init = now_iso()
+        set_setting(0, "legwatch_init", init)
+    cutoff = iso(now - timedelta(days=3))
+    picks = db().execute("""SELECT * FROM picks WHERE status = 'open' AND created_at >= ? AND bettor_id IS NOT NULL
+                            AND id IN (SELECT pick_id FROM legs) ORDER BY id DESC LIMIT 60""", (cutoff,)).fetchall()
+    spoken: dict[int, int] = {}
+    said: set = set()
+    checked = 0
+    for p in picks:
+        if checked >= 25:
+            break
+        if _LEG_SEEN.get(p["id"], 0) > time.monotonic() - 200:
+            continue
+        _LEG_SEEN[p["id"]] = time.monotonic()
+        checked += 1
+        entries = await cached_progress(p)
+        sent = {(r["idx"], r["state"]) for r in db().execute("SELECT idx, state FROM leg_pings WHERE pick_id = ?", (p["id"],))}
+        # picks that were already open when this feature arrived: record where they stand, don't DM about the past
+        baseline = (0, "seen") not in sent and p["created_at"] <= init
+        db().execute("INSERT OR IGNORE INTO leg_pings (pick_id, idx, state) VALUES (?, 0, 'seen')", (p["id"],))
+        news, voice_lines = [], []
+        for e in entries:
+            out = leg_outcome(e)
+            n = e.get("n")
+            if out in ("hit", "miss") and (n, out) not in sent:
+                db().execute("INSERT OR IGNORE INTO leg_pings (pick_id, idx, state) VALUES (?,?,?)", (p["id"], n, out))
+                val = (e.get("num") or {}).get("value")
+                news.append(("✅" if out == "hit" else "💀") + f" {clip(e['text'], 80)}: "
+                            + ("cleared" if out == "hit" else "dead") + (f" ({val:g})" if val is not None else ""))
+                voice_lines.append(f"{leg_label(e['text'])} clears for {p['bettor_name']}!" if out == "hit" else
+                                   f"Ouch. {leg_label(e['text'])} is dead for {p['bettor_name']}.")
+            num = e.get("num")
+            if (out is None and num and num.get("side") == "over" and e.get("in_play") and num["line"] >= 1.5
+                    and 0 < num["value"] < num["line"] and num["line"] - num["value"] <= max(1.0, num["line"] * 0.15)
+                    and (n, "close") not in sent):
+                db().execute("INSERT OR IGNORE INTO leg_pings (pick_id, idx, state) VALUES (?,?,?)", (p["id"], n, "close"))
+                need = num["line"] - num["value"]
+                voice_lines.append(f"{leg_label(e['text'])} is at {num['value']:g}. {p['bettor_name']} needs "
+                                   f"{math.ceil(need) if need > 0.5 else 1} more.")
+        db().commit()
+        if baseline or (not news and not voice_lines):
+            continue
+        if news and get_setting(p["guild_id"], f"legalerts:{p['bettor_id']}") != "off" \
+                and not is_quiet(p["guild_id"], p["bettor_id"], now):
+            alive = sum(1 for e in entries if leg_outcome(e) != "miss")
+            hits = sum(1 for e in entries if leg_outcome(e) == "hit")
+            tail = (f"\n-# {hits}/{len(entries)} in" + ("" if alive == len(entries) else " · slip's dead") +
+                    " · `/me legalerts` turns these off")
+            try:
+                user = client.get_user(p["bettor_id"]) if hasattr(client, "get_user") else None
+                user = user or await client.fetch_user(p["bettor_id"])
+                for chunk in split_message(f"🎯 **{clip(p['description'], 60)}** (`#{p['id']}`)\n" + "\n".join(news) + tail):
+                    await user.send(chunk)
+            except Exception:
+                log.info("Couldn't DM leg alert for pick %s", p["id"])
+        if voice_lines and not p["hidden"] and p["guild_id"] in VOICE:
+            for line in voice_lines:
+                if spoken.get(p["guild_id"], 0) >= 4:
+                    break
+                if (p["guild_id"], line) in said:
+                    continue
+                said.add((p["guild_id"], line))
+                spoken[p["guild_id"]] = spoken.get(p["guild_id"], 0) + 1
+                await voice_say(client, p["guild_id"], line)
+    if len(_LEG_SEEN) > 2000:
+        _LEG_SEEN.clear()
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -12385,6 +12850,7 @@ class PicksBot(discord.Client):
                                ClosestButton, SquaresButton, DraftButton, NoteButton, DisputeButton, FixButton,
                                BoardButton, SlipDraftButton)
         r14_db()
+        r15_db()
         try:
             await start_dashboard()
         except Exception:
@@ -12623,6 +13089,8 @@ class PicksBot(discord.Client):
                                  [(p["id"], event_id, kind) for p in ps])
                 db().commit()
                 try:
+                    if is_quiet(guild_id, uid):
+                        raise QuietHours()
                     user = await self.fetch_user(uid)
                     await user.send(f"{head} Riding on it:\n{riding}")
                 except Exception:
@@ -12663,7 +13131,8 @@ class PicksBot(discord.Client):
                     lambda n: lineup_checks(self, n), lambda n: deadline_nudges(self, n),
                     lambda n: cheer_settled(self, n), lambda n: personal_milestones(self, n),
                     lambda n: update_receipts(self, n), lambda n: update_boards(self, n),
-                    lambda n: voice_idle(self, n)):
+                    lambda n: voice_idle(self, n), lambda n: leg_watch(self, n),
+                    lambda n: grade_ghosts(self, n)):
             try:
                 await job(now.astimezone(timezone.utc))
             except Exception:
@@ -12897,8 +13366,11 @@ class PicksBot(discord.Client):
             if quiet:
                 return
             save_slip_draft(message.guild.id, message, slip)
-            await message.reply("🤔 This one doesn't look placed yet (it's still on the entry screen), so I didn't log "
-                                "it. Want a breakdown, or is it in?", view=slip_draft_view(message.id), mention_author=False)
+            sent = await message.reply("🤔 This one doesn't look placed yet (it's still on the entry screen), so I didn't "
+                                       "log it. Want a breakdown, or is it in?", view=slip_draft_view(message.id),
+                                       mention_author=False)
+            add_ghost(message.guild.id, message.author.id, message.author.display_name, message.id, message.channel.id,
+                      getattr(sent, "id", None), slip)
             return
 
         async def reply(**kw):
@@ -12946,7 +13418,7 @@ class PicksBot(discord.Client):
         if getattr(sent, "id", None):
             remember_pick_msg(guild_id, pick_id, channel.id, sent.id, receipt="file" in extra)
         tip = headsup_text(guild_id, str(author.id), pick_id)
-        if tip:
+        if tip and not is_quiet(guild_id, author.id):
             try:
                 await author.send(tip)
             except Exception:
@@ -12970,20 +13442,28 @@ class PicksBot(discord.Client):
                                 mention_author=False)
             return
         save_slip_draft(message.guild.id, image_message, slip)
-        question = re.sub(r"<@[!&]?\d+>", " ", message.content or "").strip()
+        question = re.sub(r"<@[!&]?\d+>", " ", getattr(message, "content", "") or "").strip()
         async with message.channel.typing():
-            text = await slip_review_text(self, message.guild.id, message.author, slip, question)
+            text, xray = await slip_review(self, message.guild.id, message.author, slip, question)
         logged = db().execute("SELECT id FROM picks WHERE guild_id = ? AND slip_url = ?",
                               (message.guild.id, image_message.jump_url)).fetchone()
         chunks = split_message(text)
+        first = None
         for k, chunk in enumerate(chunks):
             extra = {}
+            if k == 0 and xray is not None:
+                extra["file"] = xray
             if k == len(chunks) - 1 and not logged and slip.get("cost") is not None:
                 extra["view"] = slip_draft_view(image_message.id, review=False)
             if k == 0:
-                await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none(), **extra)
+                first = await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none(),
+                                            **extra)
             else:
                 await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none(), **extra)
+        # their own slip, still on the entry screen: it becomes a ghost so we can tell them how the pass worked out
+        if not logged and image_message.author.id == message.author.id and slip.get("placed") is False:
+            add_ghost(message.guild.id, message.author.id, message.author.display_name, image_message.id,
+                      message.channel.id, getattr(first, "id", None), slip)
 
 
 bot = PicksBot()
@@ -13813,7 +14293,9 @@ async def help_cmd(interaction: discord.Interaction):
     e.add_field(name="Make it personal", inline=False, value=(
         "`/card` trading card with rating, rarity and a flip side · `/board` live board of tonight's slips\n"
         "Slip screenshots get a live receipt that fills in as games go · `/show` the Sunday Show\n"
-        "`/me roast` · `headsup` · `birthday` · `/voice join` calls cashes out loud · admins: `/admin personality`"))
+        "`/me roast` · `headsup` · `birthday` · `/voice join` calls cashes out loud · admins: `/admin personality`\n"
+        "Ask \"@me thoughts?\" on a slip for a breakdown + **X-ray** chart · passes become 👻 ghost slips (`/me passes`)\n"
+        "Leg-by-leg DMs as legs clear or die (`/me legalerts`) · `/me quiet` sets hours with no DMs"))
     e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
     await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -16879,6 +17361,66 @@ async def admin_show(interaction: discord.Interaction):
     set_setting(interaction.guild_id, "show", None if off else "off")
     await interaction.response.send_message("📺 The Sunday Show posts with the weekly recap." if off else
                                             "The Sunday Show is **off** (`/show` still works any time).")
+
+
+# ---- r15 commands ------------------------------------------------------------------------------
+
+@me_group.command(name="legalerts", description="DMs as each leg of your slips clears or dies (on/off)")
+async def me_legalerts(interaction: discord.Interaction):
+    key = f"legalerts:{interaction.user.id}"
+    off = get_setting(interaction.guild_id, key) == "off"
+    set_setting(interaction.guild_id, key, None if off else "off")
+    await interaction.response.send_message(
+        "🎯 Leg alerts are **on**: I'll DM you as each leg clears ✅ or dies 💀." if off else "Leg alerts are **off**.",
+        ephemeral=True)
+
+
+@me_group.command(name="quiet", description="Hours when the bot won't DM you (e.g. 23 to 8). Leave both empty to turn off")
+@app_commands.describe(start="Hour it starts, 0-23 (23 = 11 PM)", end="Hour it ends, 0-23 (8 = 8 AM)")
+async def me_quiet(interaction: discord.Interaction, start: Optional[app_commands.Range[int, 0, 23]] = None,
+                   end: Optional[app_commands.Range[int, 0, 23]] = None):
+    key = f"quiet:{interaction.user.id}"
+    if start is None and end is None:
+        set_setting(interaction.guild_id, key, None)
+        set_setting(0, key, None)
+        await interaction.response.send_message("🔔 Quiet hours are **off**.", ephemeral=True)
+        return
+    if start is None or end is None or start == end:
+        await interaction.response.send_message("Give both a start and an end hour, and make them different "
+                                                "(like start 23, end 8).", ephemeral=True)
+        return
+    set_setting(interaction.guild_id, key, f"{start}-{end}")
+    set_setting(0, key, f"{start}-{end}")   # applies to DMs from every server we share
+    await interaction.response.send_message(
+        f"🌙 Quiet hours set: **{hour_label(start)} to {hour_label(end)}** ({datetime.now(TZ).tzname()}). No leg alerts, "
+        "game pings, team finals, lineup or deadline DMs then (they're skipped, not saved for later). "
+        "Reminders you set yourself still come through.",
+        ephemeral=True)
+
+
+@me_group.command(name="passes", description="Your ghost slips: slips you asked about but didn't play, and how they did")
+async def me_passes(interaction: discord.Interaction, member: Optional[discord.Member] = None):
+    m = member or interaction.user
+    pr = pass_record(interaction.guild_id, m.id)
+    if not pr["good"] and not pr["bad"] and not pr["open"]:
+        await interaction.response.send_message(
+            f"No ghost slips for {m.display_name} yet. Post a slip with \"@PIMP-BOT thoughts?\" and don't play it; "
+            "I'll tell you how the pass worked out.", ephemeral=True)
+        return
+    e = discord.Embed(title=f"👻 {m.display_name}'s passes", color=BRAND)
+    total = pr["good"] + pr["bad"]
+    e.add_field(name="Good passes", value=f"**{pr['good']}**" + (f" · saved {money(pr['saved'])}" if pr["saved"] else ""))
+    e.add_field(name="Would've hit", value=f"**{pr['bad']}**" + (f" · {money(pr['missed'])} left on the table"
+                                                               if pr["missed"] else ""))
+    if total:
+        e.add_field(name="Pass instinct", value=f"{pr['good'] / total * 100:.0f}% right")
+    if pr["open"]:
+        e.add_field(name="Still riding (in spirit)", value=str(pr["open"]))
+    lines = [("✅ good pass" if r["result"] == "miss" else "🫠 would've hit") + f" · {clip(r['description'], 50)}"
+             for r in pr["rows"]]
+    if lines:
+        e.add_field(name="Recent", value="\n".join(lines), inline=False)
+    await interaction.response.send_message(embed=e)
 
 
 @bot.tree.error
