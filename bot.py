@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-09 r15"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-09 r16"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 def env(name: str, default: str) -> str:
@@ -491,6 +491,13 @@ def db() -> sqlite3.Connection:
         lock_cols = {r[1] for r in _conn.execute("PRAGMA table_info(locks)")}
         if "live_checked_at" not in lock_cols:
             _conn.execute("ALTER TABLE locks ADD COLUMN live_checked_at TEXT")
+        # indexes for the lookups the bot does constantly (safe to run every start)
+        for ddl in ("CREATE INDEX IF NOT EXISTS idx_picks_guild_bettor ON picks (guild_id, bettor_key)",
+                    "CREATE INDEX IF NOT EXISTS idx_picks_guild_status ON picks (guild_id, status)",
+                    "CREATE INDEX IF NOT EXISTS idx_picks_status_settled ON picks (status, settled_at)",
+                    "CREATE INDEX IF NOT EXISTS idx_picks_created ON picks (created_at)",
+                    "CREATE INDEX IF NOT EXISTS idx_picks_bettor_id ON picks (bettor_id)"):
+            _conn.execute(ddl)
         for p in _conn.execute(
             """SELECT id, legs FROM picks WHERE legs IS NOT NULL
                AND id NOT IN (SELECT DISTINCT pick_id FROM legs)""").fetchall():
@@ -534,6 +541,33 @@ def set_legs(pick_id: int, legs_text: Optional[str]) -> None:
 
 def get_legs(pick_id: int) -> list[sqlite3.Row]:
     return db().execute("SELECT * FROM legs WHERE pick_id = ? ORDER BY idx", (pick_id,)).fetchall()
+
+
+def legs_by_pick(guild_id: int, bettor_key: Optional[str] = None) -> dict[int, list]:
+    """Every leg for a guild (or one bettor), grouped by pick, in one query."""
+    sql = "SELECT l.* FROM legs l JOIN picks p ON p.id = l.pick_id WHERE p.guild_id = ?"
+    args: list = [guild_id]
+    if bettor_key:
+        sql += " AND p.bettor_key = ?"
+        args.append(bettor_key)
+    out: dict[int, list] = {}
+    for leg in db().execute(sql + " ORDER BY l.pick_id, l.idx", args):
+        out.setdefault(leg["pick_id"], []).append(leg)
+    return out
+
+
+def set_legs_keep(pick_id: int, legs_text: Optional[str]) -> None:
+    """Rewrite a pick's legs, keeping the grade, margin and note of any leg whose text didn't change."""
+    old = {}
+    for leg in get_legs(pick_id):
+        old.setdefault(" ".join(leg["text"].lower().split()), leg)
+    _write_legs(db(), pick_id, legs_text)
+    for leg in get_legs(pick_id):
+        prev = old.get(" ".join(leg["text"].lower().split()))
+        if prev is not None:
+            db().execute("UPDATE legs SET status = ?, margin = ?, note = ? WHERE id = ?",
+                         (prev["status"], prev["margin"], prev["note"], leg["id"]))
+    db().commit()
 
 
 def insert_pick(
@@ -1473,6 +1507,89 @@ class SettleButton(discord.ui.DynamicItem[discord.ui.Button],
                                                                   f"#{p['id']} as {self.status}")
 
 
+class FixPickModal(discord.ui.Modal, title="Fix this pick"):
+    description = discord.ui.TextInput(label="The play", max_length=200)
+    legs = discord.ui.TextInput(label="Legs (one per line)", style=discord.TextStyle.paragraph, required=False,
+                                max_length=900)
+    cost = discord.ui.TextInput(label="Cost / entry", max_length=12)
+    payout = discord.ui.TextInput(label="Pays if it wins", max_length=12)
+
+    def __init__(self, p):
+        super().__init__()
+        self.pick_id = p["id"]
+        self.description.default = p["description"]
+        self.legs.default = "\n".join(leg["text"] for leg in get_legs(p["id"]))[:900] or None
+        self.cost.default = f"{p['cost']:.2f}"
+        self.payout.default = f"{p['payout']:.2f}"
+
+    async def on_submit(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None or not can_edit(interaction, p):
+            await interaction.response.send_message("That pick is gone, or isn't yours to change.", ephemeral=True)
+            return
+        try:
+            cost, payout = parse_money(self.cost.value), parse_money(self.payout.value)
+        except ValueError:
+            await interaction.response.send_message("Cost and payout need to be amounts, like 25 or $25.50.",
+                                                    ephemeral=True)
+            return
+        if cost <= 0 or payout < 0:
+            await interaction.response.send_message("Cost has to be more than 0.", ephemeral=True)
+            return
+        legs_text = "\n".join(x.strip() for x in (self.legs.value or "").splitlines() if x.strip()) or None
+        before = [leg["text"] for leg in get_legs(p["id"])]
+        db().execute("UPDATE picks SET description = ?, legs = ?, cost = ?, payout = ? WHERE id = ?",
+                     (self.description.value.strip()[:200] or p["description"], legs_text, cost, payout, p["id"]))
+        db().commit()
+        set_legs_keep(p["id"], legs_text)
+        p = get_pick(interaction.guild_id, p["id"])
+        changed = [x for x in (legs_text or "").splitlines() if x not in before]
+        await interaction.response.defer()
+        row = pick_msg(p["id"])
+        try:
+            if row and row["receipt"] and getattr(interaction.message, "id", None) == row["message_id"]:
+                _PROGRESS_CACHE.pop(p["id"], None)
+                f = await receipt_file(interaction.client, p)
+                await interaction.edit_original_response(embed=receipt_embed(p, f.filename), attachments=[f],
+                                                         view=settle_view(p["id"]))
+                db().execute("UPDATE pick_msgs SET sig = NULL, done = 0 WHERE pick_id = ?", (p["id"],))
+                db().commit()
+            else:
+                await interaction.edit_original_response(embed=pick_embed(p), view=settle_view(p["id"]))
+        except Exception:
+            log.warning("Couldn't refresh the card for pick %s", p["id"], exc_info=True)
+        await interaction.followup.send(
+            f"✏️ Fixed pick `#{p['id']}`" + (f": {len(changed)} leg{'s' if len(changed) != 1 else ''} changed" if changed
+                                           else "") + ". Grades on legs you didn't touch were kept.", ephemeral=True)
+        await audit(getattr(interaction, "client", None), interaction.guild_id,
+                    f"{who(interaction)} fixed pick #{p['id']} from its card (legs, cost or payout)")
+
+
+class FixPickButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fx:(?P<pid>\d+)"):
+    def __init__(self, pick_id: int):
+        super().__init__(discord.ui.Button(label="✏️ Fix", style=discord.ButtonStyle.secondary, custom_id=f"fx:{pick_id}"))
+        self.pick_id = pick_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["pid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None:
+            await interaction.response.send_message("That pick no longer exists.", ephemeral=True)
+            return
+        if not can_edit(interaction, p):
+            await interaction.response.send_message("Only the bettor, whoever logged it, or a mod can fix this pick.",
+                                                    ephemeral=True)
+            return
+        if p["status"] != "open":
+            await interaction.response.send_message("It's already settled. Use ⚠️ Wrong grade? or `/edit`.",
+                                                    ephemeral=True)
+            return
+        await interaction.response.send_modal(FixPickModal(p))
+
+
 def settle_view(pick_id: int) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
     for status in ("win", "loss", "push"):
@@ -1484,6 +1601,7 @@ def settle_view(pick_id: int) -> discord.ui.View:
     row = db().execute("SELECT platform, kalshi_ticker FROM picks WHERE id = ?", (pick_id,)).fetchone()
     if row and row["platform"].lower() == "kalshi" and not row["kalshi_ticker"]:
         view.add_item(CardKalshiButton(pick_id))
+    view.add_item(FixPickButton(pick_id))
     view.add_item(NoteButton(pick_id))
     view.add_item(DisputeButton(pick_id))
     return view
@@ -1590,7 +1708,7 @@ def slip_intent(text: str) -> str:
 def save_slip_draft(guild_id: int, message, slip: dict) -> None:
     set_setting(guild_id, f"draft:{message.id}", json.dumps({
         "slip": slip, "poster": message.author.id, "poster_name": message.author.display_name,
-        "url": message.jump_url, "channel_id": message.channel.id, "used": None}))
+        "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso()}))
 
 
 def get_slip_draft(guild_id: int, message_id: int) -> Optional[dict]:
@@ -3509,6 +3627,7 @@ BADGE_ICONS = {"first": "🩸", "parlay": "🧩", "bigleg": "💎", "heater": "�
 def earned_badges(guild_id: int, bettor_key: str) -> set[str]:
     picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY settled_at, id",
                          (guild_id, bettor_key)).fetchall()
+    all_legs = legs_by_pick(guild_id, bettor_key)
     got: set[str] = set()
     if len(picks) >= 25:
         got.add("regular")
@@ -3517,7 +3636,7 @@ def earned_badges(guild_id: int, bettor_key: str) -> set[str]:
     settled = [p for p in picks if p["status"] != "open"]
     months: dict[str, list] = {}
     for p in settled:
-        legs = get_legs(p["id"])
+        legs = all_legs.get(p["id"], [])
         if p["status"] == "win":
             got.add("first")
             if len(legs) >= 2:
@@ -4805,7 +4924,7 @@ async def update_sweats(client: discord.Client, now: Optional[datetime] = None) 
             db().execute("UPDATE sweats SET ended_at = ? WHERE id = ?", (now_iso(), s["id"]))
             db().commit()
             continue
-        entries = await leg_progress(p)
+        entries = await cached_progress(p, ttl=90)
         state = sweat_state(entries)
         old = json.loads(s["state"] or "{}")
         done = p["status"] != "open" or s["created_at"] < cutoff
@@ -10039,7 +10158,7 @@ async def run_game_threads(client: discord.Client, now: Optional[datetime] = Non
                              "AND created_at >= ?", (gid, iso(now - timedelta(days=3)))).fetchall()
         games: dict[str, dict] = {}
         for p in picks:
-            for e in await leg_progress(p):
+            for e in await cached_progress(p):
                 ev = e["event"]
                 if ev:
                     games.setdefault(ev["id"], {"ev": ev, "picks": {}})["picks"][p["id"]] = p
@@ -10590,6 +10709,10 @@ async def status_embed(client) -> discord.Embed:
     size = os.path.getsize(DB_PATH) / 1024 if os.path.exists(DB_PATH) else 0
     n = db().execute("SELECT COUNT(*) FROM picks").fetchone()[0]
     e.add_field(name="Data", value=f"{n} picks · {size:,.0f} KB" + ("" if DB_PATH.startswith("/data") else " ⚠️ not on /data"))
+    last = json.loads(get_setting(0, "cleanup_last") or "{}")
+    if last.get("at"):
+        e.add_field(name="Last cleanup", value=f"<t:{int(datetime.fromisoformat(last['at']).timestamp())}:R> · "
+                                               f"{last.get('removed', 0)} old rows cleared")
     lat = getattr(client, "latency", None)
     if lat and lat == lat:
         e.add_field(name="Discord latency", value=f"{lat * 1000:.0f} ms")
@@ -11367,11 +11490,13 @@ def _rate_line(label: str, good: int, bad: int, legs: bool) -> str:
 
 def headsup_lines(guild_id: int, key: str, p) -> list[str]:
     """Up to two things the bettor's own history says about this kind of pick."""
+    # the most recent history only: it's what "lately" means, and it keeps this quick for heavy bettors
     settled = [x for x in db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status IN "
-                                       "('win', 'loss') AND id != ?", (guild_id, key, p["id"]))]
+                                       "('win', 'loss') AND id != ? ORDER BY id DESC LIMIT 400",
+                                       (guild_id, key, p["id"]))]
     legs_hist = db().execute("""SELECT l.text, l.status FROM legs l JOIN picks q ON q.id = l.pick_id
                                 WHERE q.guild_id = ? AND q.bettor_key = ? AND l.status IN ('hit', 'miss')
-                                AND q.id != ?""", (guild_id, key, p["id"])).fetchall()
+                                AND q.id != ? ORDER BY l.id DESC LIMIT 300""", (guild_id, key, p["id"])).fetchall()
     found = []  # (strength, line, bad?)
     if len(settled) >= 8:
         base = sum(1 for x in settled if x["status"] == "win") / len(settled)
@@ -11382,7 +11507,8 @@ def headsup_lines(guild_id: int, key: str, p) -> list[str]:
             slices.append((f"{g} picks", [x for x in settled if sport_group(x["sport"]) == g]))
         slices.append((f"{p['platform']} picks", [x for x in settled if x["platform"] == p["platform"]]))
         sz = size_group(n_legs)
-        counts = {x["id"]: n for x, n in ((x, len(get_legs(x["id"])) or 1) for x in settled)}
+        all_legs = legs_by_pick(guild_id, key)
+        counts = {x["id"]: len(all_legs.get(x["id"], [])) or 1 for x in settled}
         slices.append((f"{sz.lower()} slips" if sz != "Single" else "single picks",
                        [x for x in settled if size_group(counts[x["id"]]) == sz]))
         day = datetime.now(TZ).strftime("%A")
@@ -11456,7 +11582,8 @@ def card_numbers(guild_id: int, key: str) -> Optional[dict]:
     last10 = [p["status"] for p in settled if p["status"] in ("win", "loss")][-10:]
     wins = [p for p in settled if p["status"] == "win" and p["cost"]]
     best_mult = max(((p["returned"] or 0) / p["cost"] for p in wins), default=0)
-    avg_legs = (sum(len(get_legs(p["id"])) or 1 for p in settled) / len(settled)) if settled else 0
+    all_legs = legs_by_pick(guild_id, key)
+    avg_legs = (sum(len(all_legs.get(p["id"], [])) or 1 for p in settled) / len(settled)) if settled else 0
     avg_mult = (sum(p["payout"] / p["cost"] for p in settled if p["cost"]) / len(settled)) if settled else 0
     # rating: legs hit, ROI and recent form, pulled toward 60 until there's a real sample
     leg_score = max(0.0, min(1.0, ((leg_rate if leg_rate is not None else 0.5) - 0.40) / 0.30))
@@ -11487,7 +11614,7 @@ def card_numbers(guild_id: int, key: str) -> Optional[dict]:
     groups = breakdown(settled, lambda p: sport_group(p["sport"]))
     top_sport = groups[0][0] if groups and groups[0][0] != "No sport" else None
     first = db().execute("SELECT MIN(id) AS m FROM picks WHERE guild_id = ? AND bettor_key = ?", (guild_id, key)).fetchone()["m"]
-    return {"s": s, "settled": settled, "leg_rate": leg_rate, "n": n, "ovr": ovr, "title": title,
+    return {"s": s, "settled": settled, "leg_rate": leg_rate, "n": n, "ovr": ovr, "title": title, "legs": all_legs,
             "rarity": rarity_for(ovr, n), "best_mult": best_mult, "groups": groups, "top_sport": top_sport,
             "serial": f"#{first:04d}" if first else ""}
 
@@ -11534,7 +11661,8 @@ def card_payload(guild_id: int, key: str, name: str, back: bool = False) -> Opti
             b = max(wins, key=pick_net)
             rows.append(("Best hit", f"{signed_short(pick_net(b))} on {clip(b['description'], 26)}"))
         heart = sum(1 for p in cn["settled"] if p["status"] == "loss"
-                    and sum(1 for x in get_legs(p["id"]) if x["status"] == "miss") == 1 and len(get_legs(p["id"])) >= 3)
+                    and sum(1 for x in cn["legs"].get(p["id"], []) if x["status"] == "miss") == 1
+                    and len(cn["legs"].get(p["id"], [])) >= 3)
         if heart:
             rows.append(("Lost by one leg", f"{heart}×"))
         lines = []
@@ -11607,6 +11735,7 @@ def CardFlipView(key: str, name: str, user, back: bool = False) -> discord.ui.Vi
 # ---- personal milestones -----------------------------------------------------------------------------
 
 PICK_MILESTONES = (100, 250, 500, 1000)
+_PM_SNAPSHOT: dict[tuple, tuple] = {}
 
 
 async def personal_milestones(client: discord.Client, now: Optional[datetime] = None) -> None:
@@ -11621,7 +11750,13 @@ async def personal_milestones(client: discord.Client, now: Optional[datetime] = 
         if first_run:
             set_setting(gid, "pm_init", now_iso())
         out = []
+        snap = {r2["bettor_key"]: (r2["n"], r2["m"], r2["s"]) for r2 in db().execute(
+            "SELECT bettor_key, COUNT(*) AS n, MAX(id) AS m, MAX(settled_at) AS s FROM picks WHERE guild_id = ? "
+            "GROUP BY bettor_key", (gid,))}
         for key in keys:
+            if not first_run and _PM_SNAPSHOT.get((gid, key)) == snap.get(key):
+                continue   # nothing new for this bettor since the last run
+            _PM_SNAPSHOT[(gid, key)] = snap.get(key)
             name_row = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY id DESC "
                                     "LIMIT 1", (gid, key)).fetchone()
             who = f"<@{key}>" if key.isdigit() else f"**{name_row['bettor_name']}**"
@@ -12411,6 +12546,70 @@ async def voice_idle(client: discord.Client, now: Optional[datetime] = None) -> 
 # r15: slip X-ray, ghost slips, leg-by-leg DMs, sweat radio, quiet hours
 # ==========================================================================
 
+# ---- nightly cleanup -----------------------------------------------------------------------------
+
+def cleanup_db(now: Optional[datetime] = None, vacuum: bool = False) -> dict:
+    """Drop the bot's own scratch data once it can't matter any more. Never touches picks, legs or money."""
+    now = now or datetime.now(timezone.utc)
+    week, month = iso(now - timedelta(days=7)), iso(now - timedelta(days=30))
+    removed: dict[str, int] = {}
+    # slip drafts (screenshots asked about or not placed) older than a week
+    n = 0
+    for r in db().execute("SELECT guild_id, key, value FROM settings WHERE key LIKE 'draft:%'").fetchall():
+        try:
+            d = json.loads(r["value"] or "{}")
+        except ValueError:
+            d = {}
+        if not d.get("at"):
+            d["at"] = now_iso()     # older drafts had no date: start their clock now
+            db().execute("UPDATE settings SET value = ? WHERE guild_id = ? AND key = ?",
+                         (json.dumps(d), r["guild_id"], r["key"]))
+        elif d["at"] < week:
+            db().execute("DELETE FROM settings WHERE guild_id = ? AND key = ?", (r["guild_id"], r["key"]))
+            n += 1
+    removed["slip drafts"] = n
+    # daily question counters from more than a week ago
+    cutoff_day = (now.astimezone(TZ) - timedelta(days=7)).date().isoformat()
+    removed["old question counters"] = db().execute(
+        "DELETE FROM settings WHERE key LIKE 'asks:%' AND substr(key, 6) < ?", (cutoff_day,)).rowcount
+    r15_db()
+    r14_db()
+    removed["expired ghost slips"] = db().execute(
+        "DELETE FROM ghosts WHERE result = 'expired' AND settled_at < ?", (month,)).rowcount
+    removed["leg alert marks"] = db().execute(
+        "DELETE FROM leg_pings WHERE pick_id IN (SELECT id FROM picks WHERE status != 'open' AND settled_at < ?)",
+        (week,)).rowcount
+    removed["finished receipt trackers"] = db().execute(
+        "DELETE FROM pick_msgs WHERE done = 1 AND updated_at < ?", (month,)).rowcount
+    removed["leg alert marks"] += db().execute(
+        "DELETE FROM leg_pings WHERE pick_id NOT IN (SELECT id FROM picks)").rowcount
+    db().commit()
+    try:
+        db().execute("PRAGMA optimize")
+        if vacuum:
+            db().execute("VACUUM")
+    except Exception:
+        log.warning("Database optimize/vacuum skipped", exc_info=True)
+    total = sum(removed.values())
+    set_setting(0, "cleanup_last", json.dumps({"at": now_iso(), "removed": total,
+                                               "detail": {k: v for k, v in removed.items() if v}}))
+    return removed
+
+
+async def nightly_cleanup(client: discord.Client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    today = local.date().isoformat()
+    if local.hour < (BACKUP_HOUR + 1) % 24 or get_setting(0, "cleanup_day") == today:
+        return
+    set_setting(0, "cleanup_day", today)
+    removed = cleanup_db(now, vacuum=local.weekday() == 6)
+    log.info("Nightly cleanup removed %s", removed)
+    for cache in (_PROP_CACHE, _PROGRESS_CACHE, _AVATAR_CACHE, _LEG_SEEN):
+        if len(cache) > 1000:
+            cache.clear()
+
+
 # ---- quiet hours -----------------------------------------------------------------------------
 
 class QuietHours(Exception):
@@ -12848,7 +13047,7 @@ class PicksBot(discord.Client):
                                SweatButton, InjuryOffButton, GPButton, CopyButton, CardSweatButton, CardKalshiButton,
                                PPSettleButton, MarketButton, TakeButton, PotdButton, TriviaButton, GuessButton,
                                ClosestButton, SquaresButton, DraftButton, NoteButton, DisputeButton, FixButton,
-                               BoardButton, SlipDraftButton)
+                               BoardButton, SlipDraftButton, FixPickButton)
         r14_db()
         r15_db()
         try:
@@ -13132,7 +13331,7 @@ class PicksBot(discord.Client):
                     lambda n: cheer_settled(self, n), lambda n: personal_milestones(self, n),
                     lambda n: update_receipts(self, n), lambda n: update_boards(self, n),
                     lambda n: voice_idle(self, n), lambda n: leg_watch(self, n),
-                    lambda n: grade_ghosts(self, n)):
+                    lambda n: grade_ghosts(self, n), lambda n: nightly_cleanup(self, n)):
             try:
                 await job(now.astimezone(timezone.utc))
             except Exception:
@@ -13867,7 +14066,7 @@ async def edit_cmd(
     db().execute(f"UPDATE picks SET {sets} WHERE id = ?", (*updates.values(), pick_id))
     db().commit()
     if "legs" in updates:
-        set_legs(pick_id, updates["legs"])
+        set_legs_keep(pick_id, updates["legs"])
     p = get_pick(interaction.guild_id, pick_id)
     if was_standard and ("cost" in updates or "payout" in updates):
         p = settle_pick(interaction.guild_id, pick_id, p["status"])
@@ -14295,7 +14494,8 @@ async def help_cmd(interaction: discord.Interaction):
         "Slip screenshots get a live receipt that fills in as games go · `/show` the Sunday Show\n"
         "`/me roast` · `headsup` · `birthday` · `/voice join` calls cashes out loud · admins: `/admin personality`\n"
         "Ask \"@me thoughts?\" on a slip for a breakdown + **X-ray** chart · passes become 👻 ghost slips (`/me passes`)\n"
-        "Leg-by-leg DMs as legs clear or die (`/me legalerts`) · `/me quiet` sets hours with no DMs"))
+        "Leg-by-leg DMs as legs clear or die (`/me legalerts`) · `/me quiet` sets hours with no DMs\n"
+        "✏️ **Fix** on a card corrects a misread leg, cost or payout (grades on the other legs stay)"))
     e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
     await interaction.response.send_message(embed=e, ephemeral=True)
 

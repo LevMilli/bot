@@ -246,6 +246,15 @@ near-misses on overs ("Brown is at 19. Moi needs 2 more.").
 DMs between those hours (they're skipped, not saved for later). Reminders you set yourself still arrive.
 `/me quiet` with nothing turns it off.
 
+**✏️ Fix on a card.** If a screenshot was misread, tap ✏️ Fix on the pick card to correct the legs, cost,
+payout or description in one form. Legs you didn't change keep their grades, and a live receipt redraws itself.
+(`/edit` keeps grades on unchanged legs too.)
+
+**Housekeeping.** Once a night, an hour after the backup, the bot clears its own scratch data: slip drafts
+older than a week, old question counters, expired ghost slips, and leftover alert and receipt markers.
+It never touches picks, legs or money logs. On Sundays it also compacts the database. `/admin status`
+shows when it last ran.
+
 **Live receipts.** When a slip screenshot is logged, the bot's reply includes a clean image of the
 slip. As games go, the image fills in: progress bars on props, scores on game lines, ✓ and ✗ as legs
 finish, and a CASHED or MISSED stamp at the end.
