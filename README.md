@@ -57,6 +57,8 @@ paid, and who's actually up.
 | `/voice join`, `leave`, `say` | The bot joins your voice channel and calls out cashes, one-leg sweats and big wins |
 | `/me roast`, `headsup`, `birthday` | Opt in to roasts of your losses, turn private heads-ups on/off, set a birthday shoutout |
 | `/me passes`, `legalerts`, `quiet` | Your ghost-slip pass record, leg-by-leg DMs on/off, hours with no DMs |
+| `/scout` | Scouting card image for any player: last 10 games across main stats, injury status, the group's history on him |
+| `/poster` | Shareable image: this week's cashed slips, or the standings |
 | `/admin personality`, `reactions`, `show` | The bot's voice (sidekick, hype man, analyst, trash talker, announcer), cash replies on/off, Sunday Show on/off |
 | `/limit` | Set a weekly loss limit; the bot DMs you privately once a week if you pass it |
 | `/survivor start`, `pick`, `standings` | NFL survivor pool: pick one team to win each week, each team only once. A loss, tie or skipped week knocks you out. Graded automatically from the scoreboard |
@@ -254,6 +256,28 @@ payout or description in one form. Legs you didn't change keep their grades, and
 older than a week, old question counters, expired ghost slips, and leftover alert and receipt markers.
 It never touches picks, legs or money logs. On Sundays it also compacts the database. `/admin status`
 shows when it last ran.
+
+**Type a slip instead of screenshotting it.** "@PIMP-BOT log Tatum o22.5 PRA, Brown o20.5 pts, $10 to win
+$30 on PrizePicks" turns into a confirm card with **🧾 Log this slip**, **✏️ Edit** and **🔍 Break it down**.
+Nothing is logged until you tap Log; if the amounts are missing, Log opens the edit form first. Typed legs
+with a question ("@PIMP-BOT thoughts on Tatum o22.5 PRA + Brown o20.5?") get the breakdown and X-ray instead.
+Ordinary questions that happen to contain numbers ("who covers -3.5 tonight?", "what's my record with -110
+favorites?") still go to the normal Q&A.
+
+**"How's my slip doing?"** @mention the bot with that (or "how are my parlays looking") and it replies with
+live receipt images of your newest open slips. Questions about your record ("how are my picks doing this
+season?") still get a stats answer.
+
+**`/scout <player>`.** A scouting card: the player's last 10 games across their main stats as bars against a line
+near their average (or one stat and line you choose), plus injury status, their last game, and how each person
+in the group has done on legs with that player.
+
+**Posters.** `/poster` makes a shareable image: this week's cashed slips as a collage, or the standings (season,
+this week, or last 30 days) with avatars and ▲▼ movement. Both post automatically with the Sunday Show.
+
+**Help menu and job health.** `/help` opens with a short "start here" and a dropdown to jump to any section.
+`/admin status` lists any background job that keeps failing, and the audit channel gets one alert when a job
+fails 5 times in a row (and another when it recovers).
 
 **Live receipts.** When a slip screenshot is logged, the bot's reply includes a clean image of the
 slip. As games go, the image fills in: progress bars on props, scores on game lines, ✓ and ✗ as legs
