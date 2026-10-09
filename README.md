@@ -118,7 +118,30 @@ paid, and who's actually up.
 | `/admin sheets` | Formulas that pull every pick (or the leaderboard) into Google Sheets live, through the dashboard |
 | `/admin welcome` | DM new members a short welcome (see below) |
 | `/leaderboard rank_by` / `platform` | Rank by units or ROI, or one platform only. ▲▼ show places moved this week |
+| `/me settings` | Every personal switch (roasts, heads-ups, leg alerts, digest, DMs, quiet hours, birthday) in one panel of buttons |
+| `/me digest` | A morning DM: your open picks, today's games on them, injury news on your players |
+| `/admin panel` | Every server switch plus the bot's personality in one panel (admins) |
+| `/hot` | The players the group keeps hitting on, and the ones that keep burning you, as one image |
+| `/quests` | This week's skill quests (scout a player, make a good pass, write notes) that pay fun coins. None of them reward betting more |
 | **@mention the bot** | Ask about a player, team or matchup; it searches the web and answers |
+
+**New in r18.**
+
+- **🧲 Stack alerts.** When two or more people end up on the same player prop the same way, the bot
+  says so once ("Moi and Levi are both on Tatum over PRA").
+- **Game-day previews.** About an hour before a game that 2+ people (or 3+ legs) ride on, the recap
+  channel gets one card: who's on what, and the injury news.
+- **Duplicate guard.** Post the same slip twice and the bot asks before logging it again.
+- **Break-even wins.** A slip that wins with no payout entered counts as break-even (not a loss)
+  until you add the payout with `/result returned:`.
+- **New badges:** 🛡️ Iron Will (3 good passes), 🔮 Sixth Sense (70%+ right on 6+ passes), 🎯 Sniper (8 legs in a row).
+- **Dashboard v2.** Overview, Live, Cards and Posters tabs with the same images the bot posts, and it works
+  on a phone. Add `?v=1` to the address for the old page.
+- **Sturdier background jobs.** If a job fails 5 times in a row, the audit channel hears about it, and
+  again when it recovers. `/admin status` shows each job and how many Claude calls ran today.
+- **About 40 fixes** from a full read-through: spreads like +150 read as moneylines, re-grading a leg
+  re-decides the pick, hidden picks stay hidden on the 🥵 button, live receipts retry a failed edit,
+  quiet hours delay the digest instead of skipping it, and more.
 
 **Receipts channel.** Run `/receipts` once in the channel where people post slips.
 After that, any screenshot posted there gets logged under whoever posted it:
@@ -403,6 +426,9 @@ every night, so even a lost volume costs you at most a day.
   `RECAP_HOUR` (20), `REMIND_HOUR` (12), `REMIND_AFTER_DAYS` (3),
   `AUTOGRADE_AFTER_HOURS` (48; 0 turns auto-grading off), `AUTOGRADE_DAILY_LIMIT` (30),
   `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5), `TODAY_HOUR` (10, also when Prop of the Day posts),
-  `BACKUP_HOUR` (4), `DASHBOARD_KEY` (made up for you if not set).
+  `BACKUP_HOUR` (4), `DASHBOARD_KEY` (made up for you if not set),
+  `DIGEST_HOUR` (9, when the morning digest DMs go out), `CLAUDE_DAILY_CAP` (off by default; a number
+  caps the day's Claude calls, and the extras like fresh roast lines and the Sunday Show go back to
+  templates once it's hit, while slip reading keeps working).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
   `/result` with the `returned` amount instead of the buttons.
