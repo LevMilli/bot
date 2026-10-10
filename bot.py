@@ -18904,10 +18904,16 @@ async def dash_live(guild_id: int) -> dict:
                          "AND created_at >= ? ORDER BY id DESC LIMIT ?", (guild_id, since, DASH_TICKER_PICKS)).fetchall()
     if not picks:
         return {"ticker": [], "games": []}
-    try:
-        lists = await asyncio.wait_for(asyncio.gather(*(cached_progress(p) for p in picks)), timeout=8)
-    except Exception:
-        lists = [(_PROGRESS_CACHE.get(p["id"]) or (0, []))[1] for p in picks]
+    # Wait up to 10s, use whatever finished, and let the rest keep running so the next refresh has them.
+    # (Cancelling everything on a cold cache used to leave the Live tab empty while slips were on the board.)
+    tasks = [asyncio.ensure_future(cached_progress(p)) for p in picks]
+    done, _ = await asyncio.wait(tasks, timeout=10)
+    lists = []
+    for p, t in zip(picks, tasks):
+        if t in done and not t.cancelled() and t.exception() is None:
+            lists.append(t.result())
+        else:
+            lists.append((_PROGRESS_CACHE.get(p["id"]) or (0, []))[1])
     ticker, games = [], {}
     today = datetime.now(TZ).date()
     for p, entries in zip(picks, lists):
