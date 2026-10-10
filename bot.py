@@ -86,7 +86,13 @@ def env_int(name: str, default: int, low: int = 0, high: int = 10**6) -> int:
 
 
 TOKEN = env("DISCORD_TOKEN", "")
-GUILD_ID = env("GUILD_ID", "")
+_GUILD_RAW = env("GUILD_ID", "")
+# Pasted IDs sometimes arrive with quotes, spaces or a stray backslash ("1067...\); keep just the digits.
+GUILD_ID = "".join(ch for ch in _GUILD_RAW if ch.isdigit())
+if _GUILD_RAW and (_GUILD_RAW != GUILD_ID or not 15 <= len(GUILD_ID) <= 21):
+    log.warning("GUILD_ID on Railway should be just the server's number (no quotes); read it as %r", GUILD_ID or "nothing")
+    if not 15 <= len(GUILD_ID) <= 21:
+        GUILD_ID = ""
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 ASK_MODEL = env("ASK_MODEL", "claude-sonnet-5-5")
