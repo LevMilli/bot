@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r24"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r25"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -12522,7 +12522,7 @@ async def receipt_file(client, p, entries: Optional[list] = None) -> discord.Fil
         entries = await cached_progress(p) if p["status"] == "open" else db_entries(p)
     user = None
     if p["bettor_id"]:
-        user = client.get_user(p["bettor_id"]) if client is not None and hasattr(client, "get_user") else None
+        user = await known_user(client, p["bettor_id"])
     av = await avatar_bytes(user) if user is not None else None
     png = await asyncio.to_thread(locked_render, render_receipt, receipt_data(p, entries, av))
     return discord.File(png, filename=f"receipt_{p['id']}.png")
@@ -12603,7 +12603,7 @@ async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
                 relevant = True
         if not relevant:
             continue
-        user = client.get_user(p["bettor_id"]) if p["bettor_id"] and hasattr(client, "get_user") else None
+        user = (await known_user(client, p["bettor_id"]) if p["bettor_id"] else None)
         slips.append({"name": p["bettor_name"], "avatar": await avatar_bytes(user) if user else None, "cost": p["cost"],
                       "payout": p["payout"], "description": p["description"], "legs": entries, "id": p["id"],
                       "live": any(e.get("in_play") for e in entries) and p["status"] == "open", "status": p["status"],
@@ -13480,7 +13480,7 @@ async def leg_watch(client: discord.Client, now: Optional[datetime] = None) -> N
             tail = (f"\n-# {hits}/{len(entries)} in" + ("" if alive == len(entries) else " · slip's dead") +
                     " · `/me legalerts` turns these off")
             try:
-                user = client.get_user(p["bettor_id"]) if hasattr(client, "get_user") else None
+                user = await known_user(client, p["bettor_id"])
                 user = user or await client.fetch_user(p["bettor_id"])
                 for chunk in split_message(f"🎯 **{clip(p['description'], 60)}** (`#{p['id']}`)\n" + "\n".join(news) + tail):
                     await user.send(chunk)
@@ -13835,7 +13835,7 @@ async def cashed_poster_file(client, guild_id: int, days: int = 7) -> Optional[d
         return None
     receipts = []
     for p in wins:
-        user = client.get_user(p["bettor_id"]) if p["bettor_id"] and hasattr(client, "get_user") else None
+        user = (await known_user(client, p["bettor_id"]) if p["bettor_id"] else None)
         av = await avatar_bytes(user) if user else None
         receipts.append(await asyncio.to_thread(locked_render, render_receipt, receipt_data(p, db_entries(p), av)))
     total = sum(pick_net(p) for p in wins)
@@ -13855,7 +13855,7 @@ async def standings_poster_file(client, guild_id: int, period: str = "season") -
         return None
     moves = rank_movement(guild_id, [s["key"] for s in stats], since, None) if period == "season" else {}
     top = stats[:12]
-    users = [client.get_user(int(s["key"])) if s["key"].isdigit() and hasattr(client, "get_user") else None for s in top]
+    users = [(await known_user(client, int(s["key"])) if s["key"].isdigit() else None) for s in top]
 
     async def av(u):
         return await avatar_bytes(u) if u else None
@@ -14298,7 +14298,7 @@ async def send_digests(client: discord.Client, now: Optional[datetime] = None) -
             e = await digest_embed(client, gid, uid, call_name(gid, uid, name_row["bettor_name"] if name_row else "there"), now)
             if e is None:
                 continue
-            user = client.get_user(uid) if hasattr(client, "get_user") else None
+            user = await known_user(client, uid)
             user = user or await client.fetch_user(uid)
             await user.send(embed=e)
         except Exception:
@@ -14574,14 +14574,14 @@ async def dashboard_image(kind: str, guild_id: int, arg: str = "", back: bool = 
     elif kind == "card":
         c = card_payload(guild_id, arg, arg, back=back)
         if c is not None:
-            user = bot.get_user(int(arg)) if arg.isdigit() and hasattr(bot, "get_user") else None
+            user = (await known_user(bot, int(arg)) if arg.isdigit() else None)
             av = await avatar_bytes(user) if user else None
             out = (await asyncio.to_thread(locked_render, render_trading_card, c, av)).getvalue()
     elif kind == "receipt":
         p = get_pick(guild_id, int(arg)) if arg.isdigit() else None
         if p is not None and not dash_secret(p):
             entries = await cached_progress(p) if p["status"] == "open" else db_entries(p)
-            user = bot.get_user(p["bettor_id"]) if p["bettor_id"] and hasattr(bot, "get_user") else None
+            user = (await known_user(bot, p["bettor_id"]) if p["bettor_id"] else None)
             av = await avatar_bytes(user) if user else None
             out = (await asyncio.to_thread(locked_render, render_receipt, receipt_data(p, entries, av))).getvalue()
     if out is not None:
@@ -15175,7 +15175,7 @@ async def needs_you(client, p, stuck: list[dict], reason: str) -> None:
             "Tap how it ended, or grade the legs with `/leg`.")
     if p["hidden"]:
         try:
-            user = client.get_user(p["bettor_id"]) if hasattr(client, "get_user") else None
+            user = await known_user(client, p["bettor_id"])
             user = user or await client.fetch_user(p["bettor_id"])
             await user.send(text, view=settle_view(p["id"]))
         except Exception:
@@ -17655,7 +17655,7 @@ async def inbox_dm_job(client, now: datetime) -> None:
                     + (f" in **{clip(g.name, 60)}**" if g is not None and getattr(g, "name", None) else "") + ":\n"
                     + "\n".join(lines) + "\nRun `/inbox` there to handle each in a tap.\n"
                     "-# Turn these DMs off in `/me settings` → Daily inbox DM.")
-            user = client.get_user(uid) if hasattr(client, "get_user") else None
+            user = await known_user(client, uid)
             user = user or await client.fetch_user(uid)
             await user.send(clip(text, 2000), allowed_mentions=discord.AllowedMentions.none())
         except Exception:
@@ -18676,7 +18676,7 @@ async def weekly_notes(client, now: datetime) -> None:
             d["nudge"] = await polish_nudge(d["nudge"])
             name_row = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_id = ? ORDER BY id DESC "
                                     "LIMIT 1", (gid, uid)).fetchone()
-            user = client.get_user(uid) if hasattr(client, "get_user") else None
+            user = await known_user(client, uid)
             user = user or await client.fetch_user(uid)
             await user.send(embed=weekly_note_embed(d, call_name(gid, uid, name_row["bettor_name"] if name_row else None)))
         except Exception:
@@ -21303,6 +21303,7 @@ def render_game_card(c: dict) -> io.BytesIO:
     W = 1000
     rows = sorted(c["rows"], key=lambda r: (LV_ORDER.get(r["state"], 9), r["who"].lower()))
     shown, extra = rows[:LV_CARD_ROWS], max(0, len(rows) - LV_CARD_ROWS)
+    pulse_box = None
     ROW_H, GAP, HEAD = 86, 10, 266
     final = bool(c.get("final"))
     fin_h = 176 if final else 0
@@ -21337,6 +21338,7 @@ def render_game_card(c: dict) -> io.BytesIO:
         x0 = W - 40 - sw
         d.rounded_rectangle((x0, 22, x0 + sw, 56), 17, fill=(70, 18, 24), outline=ART_RED, width=2)
         d.ellipse((x0 + 14, 33, x0 + 26, 45), fill=ART_RED)
+        pulse_box = (x0 + 14, 33, x0 + 26, 45)
         d.text((x0 + 34, 28), "LIVE", font=f, fill=ART_TEXT)
     # teams, scores and the clock
     cy = 134
@@ -21430,7 +21432,9 @@ def render_game_card(c: dict) -> io.BytesIO:
             f"Updated {c.get('updated', '')} · moves when the score or a leg does")
     d.text((40, H - 50), foot, font=art_font(16), fill=ART_MUTED)
     brand_sign(img, W - 40, H - 52, "PIMP-BOT", 16, variant="hype" if c.get("state") == "in" else "default")
-    return _png(img)
+    out = _png(img)
+    out.pulse = [pulse_box] if pulse_box else []
+    return out
 
 
 # ---- game tracker card: data, embed, the job ----------------------------------------------------------------
@@ -21510,7 +21514,7 @@ async def lv_card_data(client, gid: int, ev: dict, path: Optional[str], rows: li
     hc = lv_team_colour(home, avoid=ac)
     avatars = {}
     for uid in {r.get("uid") for r in rows if r.get("uid")}:
-        user = client.get_user(uid) if client is not None and hasattr(client, "get_user") else None
+        user = await known_user(client, uid)
         avatars[uid] = await avatar_bytes(user) if user is not None else None
     cashed, records = lv_cashed(gid, rows) if final else ([], [])
     return {"league": LEAGUE_NAMES.get(path or "", ""), "state": "post" if final else ev.get("state"),
@@ -21543,9 +21547,10 @@ def lv_card_embed(data: dict, ev: dict, path: Optional[str], filename: str) -> d
 async def lv_card_payload(client, gid: int, ev: dict, path: Optional[str], rows: list[dict], final: bool,
                           now: datetime) -> tuple[discord.Embed, discord.File]:
     data = await lv_card_data(client, gid, ev, path, rows, final, now)
-    filename = f"game_{re.sub(r'[^0-9A-Za-z]', '', str(ev.get('id')))[:30] or 'card'}.png"
+    stem = f"game_{re.sub(r'[^0-9A-Za-z]', '', str(ev.get('id')))[:30] or 'card'}"
     png = await asyncio.to_thread(locked_render, render_game_card, data)
-    return lv_card_embed(data, ev, path, filename), discord.File(png, filename=filename)
+    f, filename = await lv2_animated(png, stem)
+    return lv_card_embed(data, ev, path, filename), f
 
 
 async def lv_cards_guild(client, gid: int, channel, games: dict, now: datetime) -> None:
@@ -21984,7 +21989,7 @@ async def lv_countdowns_guild(client, gid: int, snap: list[dict], now: datetime)
         if is_quiet(gid, uid, now):
             continue
         try:
-            user = client.get_user(uid) if hasattr(client, "get_user") else None
+            user = await known_user(client, uid)
             user = user or await client.fetch_user(uid)
             await user.send(lv_countdown_text(p, s["entries"], 5 * round(minutes / 5) if minutes >= 10 else minutes))
         except Exception:
@@ -23003,7 +23008,7 @@ async def power_payload(client, guild_id: int, now: Optional[datetime] = None, a
         raw = None
         if r["uid"] and r["key"] == str(r["uid"]):
             try:
-                user = client.get_user(r["uid"]) if hasattr(client, "get_user") else None
+                user = await known_user(client, r["uid"])
                 raw = await avatar_bytes(user)
             except Exception:
                 raw = None
@@ -23523,7 +23528,7 @@ async def goal_fill_names(client, pr: dict) -> dict:
     for uid, entry in pr["people"].items():
         if entry[0] == "someone":
             try:
-                user = client.get_user(uid) if hasattr(client, "get_user") else None
+                user = await known_user(client, uid)
                 user = user or await client.fetch_user(uid)
                 entry[0] = getattr(user, "display_name", None) or getattr(user, "name", None) or "someone"
             except Exception:
@@ -24249,7 +24254,7 @@ async def lv2_board_data(client, gid: int, scope: str, uid: int, private: bool, 
         return None
     avatars = {}
     for u in list(uids)[:24]:
-        user = client.get_user(u) if client is not None and hasattr(client, "get_user") else None
+        user = await known_user(client, u)
         avatars[u] = await avatar_bytes(user) if user is not None else None
     tonight = [(lv_clock(t), name, n) for t, name, n in lv_tonight(mine, now)]
     more = max(0, len([g for g in lv_games_of(mine).values() if g["ev"].get("state") == "in"]) - len(out))
@@ -24394,7 +24399,9 @@ def render_live_board(b: dict) -> io.BytesIO:
     d.text((40, H - 56), "Bar = now  ·  faded bar = where it's headed at this rate  ·  white tick = the line",
            font=art_font(17), fill=ART_MUTED)
     brand_sign(img, W - 40, H - 58, "PIMP-BOT", 17, variant="hype")
-    return _png(img)
+    out = _png(img)
+    out.pulse = [(44, 48, 68, 72)]
+    return out
 
 
 async def lv2_live_payload(client, gid: int, scope: str, uid: int, private: bool, now: Optional[datetime] = None,
@@ -24425,8 +24432,9 @@ async def lv2_live_payload(client, gid: int, scope: str, uid: int, private: bool
     if data["tonight"]:
         lines.append("⏰ Later: " + " · ".join(f"{t} {name}" for t, name, _ in data["tonight"]))
     embed.description = clip("\n".join(lines), 4000)
-    embed.set_image(url="attachment://live.png")
-    return embed, sig, discord.File(png, filename="live.png")
+    f, name = await lv2_animated(png, "live")
+    embed.set_image(url=f"attachment://{name}")
+    return embed, sig, f
 
 
 # ---- /gamecard: the game tracker card for any game, on demand ------------------------------------------------
@@ -24498,6 +24506,100 @@ HELP_EXTRA.append(("📡 Live, bigger", (
     "`/live` is now a big picture: every game in play, each leg's number, a bar for now, a faded bar for where it's "
     "headed at this rate, and a tick at the line. `/gamecard` pulls up the score card for any game the group is on "
     "(pick it from the list).")))
+
+
+# ---- real Discord pictures on cards, and a pulsing LIVE dot ---------------------------------------------------
+
+_USER_CACHE: dict = {}
+
+
+async def known_user(client, uid):
+    """The Discord user for an id: from the cache, else one API lookup (kept 6 hours). Without the members intent
+    most people aren't cached, which is why cards used to show initials instead of profile pictures."""
+    if client is None or not uid:
+        return None
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return None
+    u = client.get_user(uid) if hasattr(client, "get_user") else None
+    if u is not None:
+        return u
+    hit = _USER_CACHE.get(uid)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    u = None
+    if hasattr(client, "fetch_user"):
+        try:
+            u = await asyncio.wait_for(client.fetch_user(uid), 5)
+        except Exception:
+            u = None
+    _USER_CACHE[uid] = (time.monotonic() + (6 * 3600 if u is not None else 900), u)
+    if len(_USER_CACHE) > 2000:
+        for k in list(_USER_CACHE)[:1000]:
+            _USER_CACHE.pop(k, None)
+    return u
+
+
+LV2_PULSE_FRAMES = 10
+
+
+def lv2_pulse_gif(png: io.BytesIO) -> Optional[io.BytesIO]:
+    """The same picture as an animated GIF whose LIVE dot fades in and out. None when there's no dot to pulse."""
+    from PIL import Image, ImageDraw
+    boxes = getattr(png, "pulse", None)
+    if not boxes:
+        return None
+    png.seek(0)
+    base = Image.open(png).convert("RGB")
+    png.seek(0)
+    red = ART_RED
+    samples = []
+    for (x0, y0, x1, y1) in boxes:
+        samples.append(base.getpixel((max(0, int(x0) - 6), int((y0 + y1) / 2))))
+    levels = [0.25 + 0.75 * (0.5 - 0.5 * math.cos(2 * math.pi * k / LV2_PULSE_FRAMES)) for k in range(LV2_PULSE_FRAMES)]
+    # one palette for every frame: the picture's own colours plus every shade of the fade, so the pulse is smooth
+    fades = []
+    for bg in samples:
+        for t in levels:
+            for c in (_brand_mix(red, bg, 1 - t), _brand_mix(red, bg, 1 - t * 0.35)):
+                if c not in fades:
+                    fades.append(c)
+    fades = fades[:96]
+    room = 256 - len(fades)
+    own = base.quantize(colors=room, method=Image.Quantize.MEDIANCUT).getpalette()[:room * 3]
+    own += [0] * (room * 3 - len(own))
+    pal = Image.new("P", (1, 1))
+    pal.putpalette(own + [v for c in fades for v in c])
+    frames = []
+    for t in levels:
+        f = base.copy()
+        fd = ImageDraw.Draw(f)
+        for (x0, y0, x1, y1), bg in zip(boxes, samples):
+            r = (x1 - x0) / 2
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            glow = r * (1.0 + 0.6 * t)
+            fd.ellipse((cx - glow, cy - glow, cx + glow, cy + glow), fill=_brand_mix(red, bg, 1 - t * 0.35))
+            fd.ellipse((cx - r, cy - r, cx + r, cy + r), fill=_brand_mix(red, bg, 1 - t))
+        frames.append(f.quantize(palette=pal, dither=Image.Dither.NONE))
+    out = io.BytesIO()
+    frames[0].save(out, "GIF", save_all=True, append_images=frames[1:], duration=110, loop=0, optimize=False,
+                   disposal=1)
+    out.seek(0)
+    return out
+
+
+async def lv2_animated(png: io.BytesIO, stem: str):
+    """(file, filename): the pulsing GIF when the picture has a LIVE dot, else the PNG."""
+    try:
+        gif = await asyncio.to_thread(lv2_pulse_gif, png)
+    except Exception:
+        log.warning("Pulsing dot failed; sending the still picture", exc_info=True)
+        gif = None
+    if gif is not None and gif.getbuffer().nbytes < 7 * 1024 * 1024:
+        return discord.File(gif, filename=f"{stem}.gif"), f"{stem}.gif"
+    png.seek(0)
+    return discord.File(png, filename=f"{stem}.png"), f"{stem}.png"
 
 
 # --------------------------------------------------------------------------
