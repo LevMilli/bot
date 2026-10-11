@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r26"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r27"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -23695,8 +23695,9 @@ def free_counts_line() -> str:
     except ValueError:
         counts = {}
     names = {"scan": "free scan", "scan_confirm": "free scan (confirmed by hand)", "gemini": "Gemini (free)",
-             "claude": "Claude"}
-    parts = [f"{counts[k]} {names.get(k, k)}" for k in ("scan", "scan_confirm", "gemini", "claude") if counts.get(k)]
+             "claude": "Claude", "ask_gemini": "questions on Gemini (free)", "ask_claude": "questions on Claude"}
+    parts = [f"{counts[k]} {names.get(k, k)}" for k in ("scan", "scan_confirm", "gemini", "claude", "ask_gemini",
+                                                         "ask_claude") if counts.get(k)]
     on = [names[r] if r != "scan" else "free scan" for r in SLIP_READERS
           if (r == "scan" and TESSERACT) or (r == "gemini" and GEMINI_API_KEY) or (r == "claude" and ai_enabled())]
     return (" · ".join(parts) or "none yet") + "\nReaders on, in order: " + (" → ".join(on) or "none (the form only)")
@@ -24167,6 +24168,66 @@ HELP_EXTRA.append(("🔎 Reading slips for free", (
     "Screenshots are read by a free text scan first. If it's sure, the slip logs like before; if not, you get a "
     "card to check and tap 🧾 **Log this slip** (or ✏️ Edit). A free `GEMINI_API_KEY` on Railway adds a second free reader, "
     "and Claude is only the last resort. `/admin status` shows which reader handled today's slips.")))
+
+
+# ---- questions: Gemini's free tier first (with Google Search), Claude as the backup ---------------------------
+
+ASK_ENGINES = [x.strip().lower() for x in env("ASK_ENGINES", "gemini,claude").split(",") if x.strip()]
+
+
+def ask_enabled() -> bool:
+    """Can the bot answer questions at all (a Gemini or a Claude key)?"""
+    return any((e == "gemini" and GEMINI_API_KEY) or (e == "claude" and ai_enabled()) for e in ASK_ENGINES)
+
+
+async def ask_gemini(system: str, user_text: str) -> tuple[str, list[str]]:
+    """(answer, source links) from Gemini, searching Google for anything current. The key goes in a header."""
+    import aiohttp
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    system = (system + "\n\nYou don't have a group_stats tool here: for the group's own records use only the group "
+              "data included in the message, and say so if it isn't there.")
+    body = {"system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user_text}]}],
+            "tools": [{"google_search": {}}],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000}}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        for attempt in range(2):
+            async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
+                if resp.status == 400 and attempt == 0 and "tools" in body:
+                    body.pop("tools")                  # a model without search: answer from what it knows
+                    continue
+                if resp.status != 200:
+                    raise RuntimeError(f"Gemini HTTP {resp.status}: {(await resp.text())[:200]}")
+                data = await resp.json(content_type=None)
+                break
+    cand = (data.get("candidates") or [{}])[0]
+    text = "".join(p.get("text", "") for p in ((cand.get("content") or {}).get("parts") or [])).strip()
+    sources = []
+    for ch in ((cand.get("groundingMetadata") or {}).get("groundingChunks") or []):
+        uri = ((ch.get("web") or {}).get("uri") or "").strip()
+        if uri.startswith("https://") and uri not in sources:
+            sources.append(uri)
+    return text, sources[:3]
+
+
+async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
+    """Answer with the first engine that works: Gemini (free) then Claude, unless ASK_ENGINES says otherwise."""
+    last: Optional[Exception] = None
+    for engine in ASK_ENGINES:
+        if engine == "gemini" and GEMINI_API_KEY:
+            try:
+                answer, sources = await ask_gemini(system, user_text)
+                if answer:
+                    free_count("ask_gemini")
+                    return answer, sources
+            except Exception as exc:
+                last = exc
+                log.warning("Gemini answer failed: %s", str(exc)[:200])
+        elif engine == "claude" and ai_enabled() and claude_budget_ok(essential=True):
+            answer, sources = await ask_claude(system, user_text)
+            free_count("ask_claude")
+            return answer, sources
+    raise last or RuntimeError("no question engine is set up")
 
 
 # ==========================================================================
@@ -25502,9 +25563,9 @@ class PicksBot(discord.Client):
                 f"`@{self.user.display_name} how has donk played on LAN lately?`",
                 mention_author=False)
             return
-        if not ai_enabled():
-            await message.reply("Questions aren't switched on yet: add an `ANTHROPIC_API_KEY` "
-                                "variable to the bot on Railway.", mention_author=False)
+        if not ask_enabled():
+            await message.reply("Questions aren't switched on yet: add a free `GEMINI_API_KEY` (or an "
+                                "`ANTHROPIC_API_KEY`) variable to the bot on Railway.", mention_author=False)
             return
         wait = self.ask_cooldowns.get(message.author.id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
         if wait > 0:
@@ -25537,7 +25598,7 @@ class PicksBot(discord.Client):
         token = ASK_DATA.set(ctx)
         try:
             async with message.channel.typing():
-                answer, sources = await ask_claude(system, user_text)
+                answer, sources = await ask_any(system, user_text)
         except Exception:
             log.exception("Question failed")
             await message.reply("I couldn't get an answer just now. Try again in a minute.",
@@ -30679,8 +30740,8 @@ async def admin_askchannel(interaction: discord.Interaction, turn_off: bool = Fa
                                                 ephemeral=True)
         return
     set_setting(gid, "ask_channel", str(interaction.channel_id))
-    note = "" if ai_enabled() else ("\n⚠️ Answers need the Claude key (`ANTHROPIC_API_KEY` on Railway). The news feed "
-                                     "works without it.")
+    note = "" if ask_enabled() else ("\n⚠️ Answers need a free `GEMINI_API_KEY` (or an `ANTHROPIC_API_KEY`) on Railway. "
+                                      "The news feed works without one.")
     await interaction.response.send_message(
         "💬 **This is now the ask channel.** Anything typed here is a question for me, no @mention needed. "
         "Screenshots here get a breakdown and are never logged.\n"
