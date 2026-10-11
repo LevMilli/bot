@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r25"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r26"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -2559,6 +2559,7 @@ def simplify_events(raw: dict) -> list[dict]:
             teams.append({"id": str(t.get("id") or t.get("displayName")), "score": score,
                           "name": t.get("displayName") or "", "abbr": t.get("abbreviation") or "",
                           "color": t.get("color") or "", "alt_color": t.get("alternateColor") or "",
+                          "logo": t.get("logo") or ((t.get("logos") or [{}])[0] or {}).get("href") or "",
                           "linescores": [x.get("value") for x in c.get("linescores") or [] if isinstance(x, dict)],
                           "records": {r.get("name") or r.get("type") or "?": r.get("summary") for r in c.get("records") or []
                                       if r.get("summary")},
@@ -21046,7 +21047,7 @@ def lv_cached_event(event_id: str) -> tuple[Optional[str], Optional[dict]]:
 
 def lv_trim_event(ev: dict) -> dict:
     """The bits of an event a card needs, as plain JSON."""
-    teams = [{k: t.get(k) for k in ("abbr", "short", "name", "score", "home", "color", "alt_color")}
+    teams = [{k: t.get(k) for k in ("abbr", "short", "name", "score", "home", "color", "alt_color", "logo")}
              for t in ev.get("teams") or []]
     return {"id": str(ev.get("id")), "date": ev.get("date") or "", "state": ev.get("state") or "pre",
             "final": bool(ev.get("final")), "detail": ev.get("detail") or "", "teams": teams}
@@ -21342,8 +21343,8 @@ def render_game_card(c: dict) -> io.BytesIO:
         d.text((x0 + 34, 28), "LIVE", font=f, fill=ART_TEXT)
     # teams, scores and the clock
     cy = 134
-    _lv_badge(img, 118, cy, 54, lv_abbr(away), ac)
-    _lv_badge(img, W - 118, cy, 54, lv_abbr(home), hc)
+    lv2_crest(img, 118, cy, 56, away, ac, lv2_sport(c.get("league")))
+    lv2_crest(img, W - 118, cy, 56, home, hc, lv2_sport(c.get("league")))
     d = ImageDraw.Draw(img)
     for t, cx in ((away, 118), (home, W - 118)):
         nt, nf = fit_text(d, t.get("short") or "", 210, 20, True)
@@ -21509,7 +21510,8 @@ def lv_cashed(gid: int, rows: list[dict]) -> tuple[list[dict], list[tuple]]:
 async def lv_card_data(client, gid: int, ev: dict, path: Optional[str], rows: list[dict], final: bool,
                        now: datetime) -> dict:
     """Everything render_game_card needs (avatars fetched here, before the render thread)."""
-    away, home = lv_sides(ev)
+    away, home = (dict(t) for t in lv_sides(ev))
+    await lv2_attach_logos(away, home)
     ac = lv_team_colour(away)
     hc = lv_team_colour(home, avoid=ac)
     avatars = {}
@@ -24243,7 +24245,8 @@ async def lv2_board_data(client, gid: int, scope: str, uid: int, private: bool, 
             r["pace"] = lv2_pace(n["value"], n["line"], el, r["text"]) if n and r["state"] not in ("cleared", "dead") else None
             if r.get("uid"):
                 uids.add(r["uid"])
-        away, home = lv_sides(g["ev"])
+        away, home = (dict(t) for t in lv_sides(g["ev"]))
+        await lv2_attach_logos(away, home)
         ac = lv_team_colour(away)
         out.append({"league": LEAGUE_NAMES.get(g["path"] or "", ""), "away": dict(away, colour=ac),
                     "home": dict(home, colour=lv_team_colour(home, avoid=ac)), "status": lv_status_text(g["ev"]),
@@ -24325,8 +24328,9 @@ def render_live_board(b: dict) -> io.BytesIO:
                                      _brand_mix(home["colour"], ART_BG, 0.55)], diagonal=False)
         img.paste(band, (20, y), _rounded_mask((W - 40, 112), 26))
         d = ImageDraw.Draw(img)
-        _lv_badge(img, 84, y + 56, 34, lv_abbr(away), away["colour"])
-        _lv_badge(img, W - 84, y + 56, 34, lv_abbr(home), home["colour"])
+        sport = lv2_sport(g.get("league"))
+        lv2_crest(img, 84, y + 56, 38, away, away["colour"], sport)
+        lv2_crest(img, W - 84, y + 56, 38, home, home["colour"], sport)
         d = ImageDraw.Draw(img)
         sc = lambda t: f"{t['score']:g}" if t.get("score") is not None else "–"
         score = f"{lv_abbr(away)}  {sc(away)}   –   {sc(home)}  {lv_abbr(home)}"
@@ -24600,6 +24604,411 @@ async def lv2_animated(png: io.BytesIO, stem: str):
         return discord.File(gif, filename=f"{stem}.gif"), f"{stem}.gif"
     png.seek(0)
     return discord.File(png, filename=f"{stem}.png"), f"{stem}.png"
+
+
+# ---- team crests: an original emblem per team, from its colours (never a real logo) ----------------------------
+
+_CREST_CACHE: dict = {}
+LV2_SPORT_OF_LEAGUE = {"NFL": "football", "College football": "football", "NBA": "basketball", "WNBA": "basketball",
+                       "College basketball": "basketball", "NHL": "hockey", "MLB": "baseball"}
+
+
+def lv2_sport(league: Optional[str]) -> str:
+    return LV2_SPORT_OF_LEAGUE.get(league or "", "soccer" if league else "other")
+
+
+def _crest_glyph(d, cx: float, cy: float, s: float, sport: str, ink: tuple) -> None:
+    """A small sport mark: a football, basketball, puck, baseball or soccer ball, drawn with plain shapes."""
+    w = max(2, int(s * 0.09))
+    if sport == "football":
+        d.ellipse((cx - s * 0.62, cy - s * 0.36, cx + s * 0.62, cy + s * 0.36), outline=ink, width=w)
+        d.line((cx - s * 0.26, cy, cx + s * 0.26, cy), fill=ink, width=w)
+        for k in (-0.14, 0, 0.14):
+            d.line((cx + s * k, cy - s * 0.1, cx + s * k, cy + s * 0.1), fill=ink, width=max(1, w // 2))
+    elif sport == "basketball":
+        d.ellipse((cx - s * 0.45, cy - s * 0.45, cx + s * 0.45, cy + s * 0.45), outline=ink, width=w)
+        d.line((cx - s * 0.45, cy, cx + s * 0.45, cy), fill=ink, width=w)
+        d.line((cx, cy - s * 0.45, cx, cy + s * 0.45), fill=ink, width=w)
+        d.arc((cx - s * 0.75, cy - s * 0.45, cx - s * 0.05, cy + s * 0.45), -60, 60, fill=ink, width=w)
+        d.arc((cx + s * 0.05, cy - s * 0.45, cx + s * 0.75, cy + s * 0.45), 120, 240, fill=ink, width=w)
+    elif sport == "hockey":
+        d.ellipse((cx - s * 0.55, cy - s * 0.12, cx + s * 0.55, cy + s * 0.3), fill=ink)
+        d.ellipse((cx - s * 0.55, cy - s * 0.3, cx + s * 0.55, cy + s * 0.12), outline=ink, width=w)
+    elif sport == "baseball":
+        d.ellipse((cx - s * 0.45, cy - s * 0.45, cx + s * 0.45, cy + s * 0.45), outline=ink, width=w)
+        d.arc((cx - s * 0.85, cy - s * 0.5, cx - s * 0.12, cy + s * 0.5), -50, 50, fill=ink, width=max(1, w // 2 + 1))
+        d.arc((cx + s * 0.12, cy - s * 0.5, cx + s * 0.85, cy + s * 0.5), 130, 230, fill=ink, width=max(1, w // 2 + 1))
+    elif sport == "soccer":
+        d.ellipse((cx - s * 0.45, cy - s * 0.45, cx + s * 0.45, cy + s * 0.45), outline=ink, width=w)
+        pts = [(cx + s * 0.18 * math.cos(math.radians(a)), cy + s * 0.18 * math.sin(math.radians(a)))
+               for a in range(-90, 270, 72)]
+        d.polygon(pts, fill=ink)
+    else:
+        d.regular_polygon((cx, cy, s * 0.4), 5, fill=ink)
+
+
+def team_crest_img(abbr: str, colour: tuple, alt: Optional[str], sport: str, size: int):
+    """An RGBA emblem for one team: shape and stripe pattern picked from the abbreviation (so every team looks
+    different, and the same every time), in the team's colours, with a sport mark and the abbreviation."""
+    from PIL import Image, ImageDraw, ImageFilter
+    key = (abbr, colour, alt, sport, size)
+    hit = _CREST_CACHE.get(key)
+    if hit is not None:
+        return hit.copy()
+    S = 4
+    n = size * S
+    seed = sum((i + 1) * ord(ch) for i, ch in enumerate(abbr or "?"))
+    shape, pattern = seed % 3, (seed // 3) % 4
+    second = _lv_hex(alt)
+    if second is None or sum(abs(a - b) for a, b in zip(second, colour)) < 110 or _lv_lum(second) < 30:
+        second = _brand_mix(colour, (255, 255, 255), 0.7)
+    m = int(n * 0.06)
+    if shape == 0:      # shield
+        poly = [(m, m), (n - m, m), (n - m, n * 0.55), (n / 2, n - m), (m, n * 0.55)]
+    elif shape == 1:    # hexagon
+        poly = [(n / 2 + (n / 2 - m) * math.cos(math.radians(a)), n / 2 + (n / 2 - m) * math.sin(math.radians(a)))
+                for a in range(-90, 270, 60)]
+    else:               # diamond-cut badge
+        c = n * 0.22
+        poly = [(m + c, m), (n - m - c, m), (n - m, m + c), (n - m, n - m - c), (n - m - c, n - m), (m + c, n - m),
+                (m, n - m - c), (m, m + c)]
+    mask = Image.new("L", (n, n), 0)
+    ImageDraw.Draw(mask).polygon(poly, fill=255)
+    body = _vgrad((n, n), _brand_mix(colour, (255, 255, 255), 0.18), _brand_mix(colour, (0, 0, 0), 0.38)).convert("RGBA")
+    stripe = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(stripe)
+    band = second + (235,)
+    if pattern == 0:    # diagonal sash
+        sd.polygon([(0, n * 0.62), (n * 0.62, 0), (n * 0.86, 0), (0, n * 0.86)], fill=band)
+    elif pattern == 1:  # chevron
+        sd.polygon([(0, n * 0.48), (n / 2, n * 0.72), (n, n * 0.48), (n, n * 0.62), (n / 2, n * 0.86), (0, n * 0.62)], fill=band)
+    elif pattern == 2:  # split halves
+        sd.rectangle((n / 2, 0, n, n), fill=second + (90,))
+        sd.rectangle((n / 2 - n * 0.03, 0, n / 2 + n * 0.03, n), fill=band)
+    else:               # two bands
+        sd.rectangle((0, n * 0.66, n, n * 0.72), fill=band)
+        sd.rectangle((0, n * 0.77, n, n * 0.8), fill=band)
+    body.alpha_composite(stripe)
+    out = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    glow = Image.new("RGBA", (n, n), colour + (0,))
+    gm = mask.filter(ImageFilter.GaussianBlur(n * 0.04)).point(lambda v: int(v * 0.45))
+    glow.putalpha(gm)
+    out.alpha_composite(glow)
+    out.paste(body, (0, 0), mask)
+    od = ImageDraw.Draw(out)
+    od.polygon(poly, outline=(255, 255, 255, 210), width=int(n * 0.035))
+    ink = (255, 255, 255, 235)
+    _crest_glyph(od, n / 2, n * 0.27, n * 0.27, sport, ink)
+    txt = (abbr or "?")[:4]
+    f = art_font(int(n * (0.25 if len(txt) <= 2 else 0.22 if len(txt) == 3 else 0.18)), True)
+    tw = od.textlength(txt, font=f)
+    bb = f.getbbox(txt)
+    ty = n * 0.62 - (bb[1] + bb[3]) / 2
+    od.text((n / 2 - tw / 2 + n * 0.012, ty + n * 0.012), txt, font=f, fill=(0, 0, 0, 120))
+    od.text((n / 2 - tw / 2, ty), txt, font=f, fill=(255, 255, 255, 255))
+    small = out.resize((size, size), Image.LANCZOS)
+    _CREST_CACHE[key] = small
+    if len(_CREST_CACHE) > 300:
+        for k in list(_CREST_CACHE)[:150]:
+            _CREST_CACHE.pop(k, None)
+    return small.copy()
+
+
+def lv2_crest(img, cx: int, cy: int, r: int, team: dict, colour: tuple, sport: str) -> None:
+    """Paste a team's crest centred at (cx, cy), about the size of a radius-r badge."""
+    size = int(r * 2.3)
+    if team.get("logo_bytes"):
+        try:
+            plate = _lv2_logo_plate(team["logo_bytes"], size, colour)
+            img.paste(plate, (int(cx - size / 2), int(cy - size / 2)), plate)
+            return
+        except Exception:
+            pass                               # a broken image: fall back to the crest
+    crest = team_crest_img(lv_abbr(team), colour, team.get("alt_color"), sport, size)
+    img.paste(crest, (int(cx - size / 2), int(cy - size / 2)), crest)
+
+
+# ---- team logos from the scoreboard feed (the crest is only the fallback) --------------------------------------
+
+_LOGO_CACHE: dict = {}
+LV2_LOGO_HOSTS = ("a.espncdn.com", "a1.espncdn.com", "a2.espncdn.com", "a3.espncdn.com", "a4.espncdn.com")
+
+
+async def team_logo_bytes(url: Optional[str]) -> Optional[bytes]:
+    """The team's logo image from ESPN's own scoreboard feed (kept a day). Only ESPN's image host is fetched."""
+    if not url:
+        return None
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    if parts.scheme != "https" or parts.hostname not in LV2_LOGO_HOSTS:
+        return None
+    hit = _LOGO_CACHE.get(url)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    raw = None
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200 and int(resp.headers.get("Content-Length") or 0) <= 1_500_000:
+                    data = await resp.content.read(1_500_001)
+                    raw = data if len(data) <= 1_500_000 else None
+    except Exception:
+        raw = None
+    _LOGO_CACHE[url] = (time.monotonic() + (86400 if raw else 1800), raw)
+    if len(_LOGO_CACHE) > 400:
+        for k in list(_LOGO_CACHE)[:200]:
+            _LOGO_CACHE.pop(k, None)
+    return raw
+
+
+async def lv2_attach_logos(*teams: dict) -> None:
+    """Fetch each team's logo before the render thread (renderers never touch the network)."""
+    for t in teams:
+        if t is not None and not t.get("logo_bytes"):
+            t["logo_bytes"] = await team_logo_bytes(t.get("logo"))
+
+
+def _lv2_logo_plate(raw: bytes, size: int, colour: tuple):
+    """The logo centred on a dark disc with a ring in the team's colour."""
+    from PIL import Image, ImageDraw, ImageFilter
+    logo = Image.open(io.BytesIO(raw))
+    sec_check_image(logo)
+    logo = logo.convert("RGBA")
+    S = 3
+    n = size * S
+    out = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    glow = Image.new("RGBA", (n, n), colour + (0,))
+    gm = Image.new("L", (n, n), 0)
+    ImageDraw.Draw(gm).ellipse((n * 0.04, n * 0.04, n * 0.96, n * 0.96), fill=150)
+    glow.putalpha(gm.filter(ImageFilter.GaussianBlur(n * 0.04)))
+    out.alpha_composite(glow)
+    d = ImageDraw.Draw(out)
+    d.ellipse((n * 0.06, n * 0.06, n * 0.94, n * 0.94), fill=(250, 250, 252, 255), outline=colour + (255,),
+              width=max(2, int(n * 0.04)))
+    box = int(n * 0.66)
+    logo.thumbnail((box, box), Image.LANCZOS)
+    out.alpha_composite(logo, (int((n - logo.width) / 2), int((n - logo.height) / 2)))
+    return out.resize((size, size), Image.LANCZOS)
+
+
+# ==========================================================================
+# r26: the ask channel. Any message there is a question for the bot (no @mention needed), and the bot posts a
+# news feed there: injury-report changes for players on the group's open slips, players coming off the report,
+# and PrizePicks-style reboots when a player doesn't play.
+# ==========================================================================
+
+NEWS_EVERY_MIN = 10           # how often the injury reports are checked per server
+NEWS_MAX_POSTS = 6            # updates posted one by one per check; more than this become one roundup
+NEWS_STATUS_ICON = {"out": "⛔", "doubtful": "🟠", "questionable": "🟡", "day-to-day": "🟡", "suspension": "🚫",
+                    "probable": "🟢", "active": "✅"}
+
+
+def news_db():
+    c = db()
+    c.execute("""CREATE TABLE IF NOT EXISTS news_seen (
+                     guild_id INTEGER NOT NULL, key TEXT NOT NULL, status TEXT, detail TEXT, posted_at TEXT,
+                     PRIMARY KEY (guild_id, key))""")
+    return c
+
+
+def ask_channel_id(guild_id: int) -> Optional[int]:
+    v = get_setting(guild_id, "ask_channel")
+    return int(v) if v and v.isdigit() else None
+
+
+def is_ask_channel(channel) -> bool:
+    """The ask channel itself, or a thread inside it."""
+    gid = getattr(getattr(channel, "guild", None), "id", None)
+    if gid is None:
+        return False
+    cid = ask_channel_id(gid)
+    return bool(cid) and (getattr(channel, "id", None) == cid or getattr(channel, "parent_id", None) == cid)
+
+
+def news_icon(status: str) -> str:
+    s = (status or "").lower()
+    return next((v for k, v in NEWS_STATUS_ICON.items() if s.startswith(k)), "🩹")
+
+
+async def news_watchlist(gid: int, now: datetime) -> dict[str, dict]:
+    """{player key: {name, paths, slips: [(who, pick id, description)]}} for every player on the group's open,
+    public slips (and the players the group tracks with /player)."""
+    since = iso(now - timedelta(days=AUTOPILOT_DAYS))
+    out: dict[str, dict] = {}
+    rows = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND created_at >= ? "
+                        "AND (hidden IS NULL OR hidden = 0) ORDER BY id DESC LIMIT 60", (gid, since)).fetchall()
+    for p in rows:
+        legs = get_legs(p["id"])
+        texts = [x["text"] for x in legs if x["status"] == "open"] or ([] if legs else [p["description"]])
+        paths = prop_paths_for(p)
+        for text in texts:
+            leg = prop_of(text)
+            if not leg:
+                continue
+            for part in leg.get("combo") or [leg]:
+                fams = {STATS[k][1] for k in part["stats"]}
+                ok = [x for x in paths if FAMILY_OF_PATH.get(x) in fams]
+                w = out.setdefault(part["player"], {"name": part.get("display") or part["player"].title(),
+                                                    "paths": [], "slips": []})
+                w["paths"] = list(dict.fromkeys(w["paths"] + ok))
+                tag = (p["bettor_name"], p["id"], p["description"])
+                if tag not in w["slips"]:
+                    w["slips"].append(tag)
+    for r in db().execute("SELECT name, sport FROM players WHERE guild_id = ? LIMIT 60", (gid,)).fetchall():
+        key = norm_name(r["name"])
+        paths = [x for x in leagues_for(r["sport"]) if x in PROP_PATHS] if r["sport"] else []
+        w = out.setdefault(key, {"name": r["name"], "paths": [], "slips": []})
+        w["paths"] = list(dict.fromkeys(w["paths"] + paths)) or list(PROP_PATHS)
+    return out
+
+
+async def news_status(watch: dict) -> dict[str, Optional[dict]]:
+    """{player key: injury entry or None when he isn't on any report}. Players whose name fits more than one
+    listed player are left out (no guessing)."""
+    reports: dict[str, dict] = {}
+    for path in {x for w in watch.values() for x in w["paths"]}:
+        reports[path] = await fetch_injuries(path)
+    out: dict[str, Optional[dict]] = {}
+    for key, w in watch.items():
+        found = []
+        for path in w["paths"]:
+            for k, v in (reports.get(path) or {}).items():
+                sc = name_score(key, k)
+                if sc >= 2:
+                    found.append((sc, dict(v, path=path)))
+        if found:
+            best = max(s for s, _ in found)
+            top = {v["name"]: v for s, v in found if s == best}
+            out[key] = next(iter(top.values())) if len(top) == 1 else None
+            if len(top) > 1:
+                out.pop(key)
+        else:
+            out[key] = None
+    return out
+
+
+def news_slips_line(w: dict) -> str:
+    bits = [f"{clip(who, 24)}'s {clip(desc, 30)} (`#{pid}`)" for who, pid, desc in w["slips"][:4]]
+    more = len(w["slips"]) - 4
+    return ("On: " + ", ".join(bits) + (f" and {more} more" if more > 0 else "")) if bits else "A player you track"
+
+
+async def news_reboots(gid: int, now: datetime) -> list[tuple[str, str]]:
+    """(key, line) for legs that just got voided because the player didn't play."""
+    since = iso(now - timedelta(hours=36))
+    rows = db().execute(
+        """SELECT l.pick_id, l.idx, l.text, l.note, p.bettor_name, p.description, p.platform, p.hidden,
+                  (SELECT COUNT(*) FROM legs l2 WHERE l2.pick_id = l.pick_id) AS n
+           FROM legs l JOIN picks p ON p.id = l.pick_id
+           WHERE p.guild_id = ? AND l.status = 'push' AND l.note LIKE '%didn''t play%'
+             AND COALESCE(p.settled_at, p.created_at) >= ?""", (gid, since)).fetchall()
+    out = []
+    for r in rows:
+        if r["hidden"]:
+            continue
+        dfs = is_dfs(r["platform"] or "")
+        n = r["n"] or 1
+        tail = (f" {clip(r['bettor_name'], 30)}'s {n}-pick drops to a {n - 1}-pick (`#{r['pick_id']}`)." if dfs and n > 2
+                else f" That leg is voided on {clip(r['bettor_name'], 30)}'s {clip(r['description'], 40)} (`#{r['pick_id']}`).")
+        out.append((f"dnp:{r['pick_id']}:{r['idx']}",
+                    f"🔁 **Reboot:** {clip(r['note'], 120)}.{tail}"))
+    return out
+
+
+async def news_job(client, now: Optional[datetime] = None) -> None:
+    """Every 10 minutes per server with an ask channel: post what changed on the injury reports and any reboots."""
+    now = now or datetime.now(timezone.utc)
+    c = news_db()
+    for r in db().execute("SELECT guild_id, value FROM settings WHERE key = 'ask_channel' AND value IS NOT NULL").fetchall():
+        gid = r["guild_id"]
+        try:
+            if not server_on(gid, "newsfeed"):
+                continue
+            last = get_setting(gid, "news_checked")
+            if last and datetime.fromisoformat(last) > now - timedelta(minutes=NEWS_EVERY_MIN):
+                continue
+            set_setting(gid, "news_checked", iso(now))
+            channel = client.get_channel(int(r["value"])) if str(r["value"]).isdigit() else None
+            if channel is None:
+                continue
+            first = c.execute("SELECT 1 FROM news_seen WHERE guild_id = ? LIMIT 1", (gid,)).fetchone() is None
+            watch = await news_watchlist(gid, now)
+            status = await news_status(watch) if watch else {}
+            updates: list[tuple[str, str]] = []
+            for key, inj in status.items():
+                w = watch[key]
+                row = c.execute("SELECT status, detail FROM news_seen WHERE guild_id = ? AND key = ?",
+                                (gid, f"inj:{key}")).fetchone()
+                was = row["status"] if row else None
+                now_st = inj["status"] if inj else None
+                if (was or None) == (now_st or None):
+                    continue
+                c.execute("INSERT OR REPLACE INTO news_seen (guild_id, key, status, detail, posted_at) VALUES (?,?,?,?,?)",
+                          (gid, f"inj:{key}", now_st, (inj or {}).get("comment"), iso(now)))
+                if inj:
+                    head = (f"{news_icon(now_st)} **{clip(inj['name'], 60)}** ({clip(inj.get('team') or '', 40)}) is "
+                            f"**{clip(now_st, 30)}**" + (f" (was {clip(was, 20)})" if was else ""))
+                    body = (f"\n> {clip(inj['comment'], 220)}" if inj.get("comment") else "")
+                    updates.append((key, f"{head}{body}\n-# {news_slips_line(w)}"))
+                elif was and w["slips"]:
+                    updates.append((key, f"✅ **{clip(w['name'], 60)}** is off the injury report (was {clip(was, 20)}).\n"
+                                         f"-# {news_slips_line(w)}"))
+            for key, line in await news_reboots(gid, now):
+                if c.execute("SELECT 1 FROM news_seen WHERE guild_id = ? AND key = ?", (gid, key)).fetchone():
+                    continue
+                c.execute("INSERT INTO news_seen (guild_id, key, status, posted_at) VALUES (?,?,?,?)",
+                          (gid, key, "posted", iso(now)))
+                updates.append((key, line))
+            c.commit()
+            if not updates:
+                continue
+            if first:
+                listed = [u for k, u in updates if not k.startswith("dnp:")]
+                text = ("📰 **Injury watch is on.** I'll post here when anyone on the group's open slips shows up on "
+                        "(or comes off) an injury report, and when a player doesn't play.\n\nOn the reports right now:\n"
+                        + "\n".join(listed[:12]))
+                for chunk in split_message(text):
+                    await channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+                continue
+            if len(updates) > NEWS_MAX_POSTS:
+                text = "📰 **News roundup**\n\n" + "\n\n".join(u for _, u in updates)
+                for chunk in split_message(text):
+                    await channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+            else:
+                for _, u in updates:
+                    await channel.send(clip(u, 1990), allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("News feed failed for guild %s", gid, exc_info=True)
+    # forget old reboot marks
+    c.execute("DELETE FROM news_seen WHERE key LIKE 'dnp:%' AND posted_at < ?", (iso(now - timedelta(days=7)),))
+    c.commit()
+
+
+EXTRA_JOBS.append(("news_feed", news_job))
+SERVER_TOGGLES.append(("newsfeed", "News feed in the ask channel", "optout"))
+HELP_EXTRA.append(("💬 Ask channel", (
+    "Admins: `/admin askchannel` picks a channel where **anything you type is a question for the bot** (no @mention), "
+    "and screenshots get a breakdown instead of being logged. The bot also posts news there: players on the group's "
+    "open slips landing on (or coming off) the injury report, and 🔁 reboots when a player doesn't play.")))
+
+
+async def ask_channel_message(client, message) -> None:
+    """A message in the ask channel: screenshots get a breakdown (never logged), words get an answer."""
+    images = image_attachments(message)
+    if images:
+        await client.review_slip(message, message, images[0])
+        return
+    ref = message.reference.resolved if getattr(message, "reference", None) else None
+    if isinstance(ref, discord.Message) and not ref.author.bot and not client.mentions_me(message):
+        return                                   # people talking to each other in a reply
+    words = text_slip_words(message)
+    if len(words.strip()) < 4:
+        return                                   # "lol", "ok", an emoji
+    if text_route(words) == "status":
+        await client.slip_status(message)
+        return
+    await client.handle_ask(message)
 
 
 # --------------------------------------------------------------------------
@@ -25006,6 +25415,9 @@ class PicksBot(discord.Client):
             dm_images = image_attachments(message)
             if dm_images:
                 await handle_dm_slip(self, message, dm_images[0])
+            return
+        if is_ask_channel(message.channel):
+            await ask_channel_message(self, message)
             return
         images = image_attachments(message)
         mentioned = self.user is not None and self.mentions_me(message)
@@ -30252,6 +30664,33 @@ async def gamecard_cmd(interaction: discord.Interaction, game: Optional[str] = N
         await interaction.followup.send(embed, ephemeral=True)
         return
     await interaction.followup.send(embed=embed, file=f, allowed_mentions=discord.AllowedMentions.none())
+
+
+# ---- r26: /admin askchannel ------------------------------------------------------------------------------------
+
+@admin_group.command(name="askchannel", description="Make a channel where anything typed is a question for the bot (+ news)")
+@app_commands.describe(turn_off="Turn the ask channel off")
+@sec_admin_only
+async def admin_askchannel(interaction: discord.Interaction, turn_off: bool = False):
+    gid = interaction.guild_id
+    if turn_off:
+        set_setting(gid, "ask_channel", None)
+        await interaction.response.send_message("The ask channel is off. @mention me anywhere to ask a question.",
+                                                ephemeral=True)
+        return
+    set_setting(gid, "ask_channel", str(interaction.channel_id))
+    note = "" if ai_enabled() else ("\n⚠️ Answers need the Claude key (`ANTHROPIC_API_KEY` on Railway). The news feed "
+                                     "works without it.")
+    await interaction.response.send_message(
+        "💬 **This is now the ask channel.** Anything typed here is a question for me, no @mention needed. "
+        "Screenshots here get a breakdown and are never logged.\n"
+        "📰 I'll also post news here: players on the group's open slips landing on or coming off the injury report, "
+        "and 🔁 reboots when a player doesn't play. (Switch the news off in `/admin panel`.)" + note,
+        allowed_mentions=discord.AllowedMentions.none())
+    try:
+        await audit(interaction.client, gid, f"{interaction.user.display_name} made <#{interaction.channel_id}> the ask channel")
+    except Exception:
+        pass
 
 
 @bot.tree.error
