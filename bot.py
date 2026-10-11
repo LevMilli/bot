@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r28"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r29"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -11132,6 +11132,7 @@ async def status_embed(client) -> discord.Embed:
     e.add_field(name="Claude calls today", value=f"{claude_calls_today()}" + (f" of {CLAUDE_DAILY_CAP} (extras pause at the cap)"
                                                                              if CLAUDE_DAILY_CAP else ""))
     e.add_field(name="Slips read today", value=clip(free_counts_line(), 1000), inline=False)
+    e.add_field(name="Data feeds", value=clip(data_sources_line(), 1000), inline=False)
     checks.append("✅ Dashboard" if dashboard_url() else "⚪ Dashboard off")
     e.add_field(name="Connections", value=" · ".join(checks), inline=False)
     e.add_field(name="Live data", value=clip(data_health_line(), 1000), inline=False)
@@ -20696,12 +20697,15 @@ async def track_status_in(leg: dict, path: str, ev: dict, cand: dict, stat_key: 
         return track_judge(out, leg, got, cand["name"]) if got else out
     box = await fetch_summary(path, ev["id"])
     if not box:
-        return out
+        return await alt_try(out, leg, path, ev, cand, stat_key)
     out["state"], out["detail"] = box["state"], box["detail"]
     if box.get("season_type") == 1:
         out["preseason"] = True
     pl = find_in_box(box, norm_name(cand["name"])) or find_in_box(box, leg["player"])
     if pl is None:
+        alt = await alt_try(out, leg, path, ev, cand, stat_key)
+        if alt.get("value") is not None or alt.get("result"):
+            return alt
         if box["state"] == "post":
             out["why"] = f"{cand['name']} isn't in the box score"
             if guessed:
@@ -20720,7 +20724,7 @@ async def track_status_in(leg: dict, path: str, ev: dict, cand: dict, stat_key: 
         if core:
             groups = {**groups, **core}
     got = stat_value(groups, stat_key)
-    return track_judge(out, leg, got, pl["name"]) if got else out
+    return track_judge(out, leg, got, pl["name"]) if got else await alt_try(out, leg, path, ev, cand, stat_key)
 
 
 # ---- data-feed health: /admin status line, outage notes ------------------------------------------------------
@@ -24971,6 +24975,13 @@ async def news_status(watch: dict) -> dict[str, Optional[dict]]:
                 out.pop(key)
         else:
             out[key] = None
+        if out.get(key) is None and "football/nfl" in w["paths"] and "sleeper_injury" in globals():
+            try:
+                sl = await sleeper_injury(key)
+            except Exception:
+                sl = None
+            if sl:
+                out[key] = sl
     return out
 
 
@@ -25095,6 +25106,299 @@ async def ask_channel_message(client, message) -> None:
         await client.slip_status(message)
         return
     await client.handle_ask(message)
+
+
+# ==========================================================================
+# r29: more data providers. Official free feeds back up ESPN for live stats (NHL.com, MLB Stats API, Sleeper for
+# the NFL) and fill in stats ESPN's box score doesn't carry (total bases, stolen bases...). Sleeper's injury
+# statuses back up ESPN's NFL injury report in the news feed. No keys needed for any of them.
+# ==========================================================================
+
+NHL_WEB = "https://api-web.nhle.com/v1"
+MLB_API = "https://statsapi.mlb.com/api/v1"
+SLEEPER = "https://api.sleeper.app/v1"
+HEALTH_NAMES.update({"api-web.nhle.com": "NHL.com", "statsapi.mlb.com": "MLB Stats API", "api.sleeper.app": "Sleeper"})
+ALT_SOURCES = {"hockey/nhl": "NHL.com", "baseball/mlb": "MLB Stats API", "football/nfl": "Sleeper"}
+_ALT_CACHE: dict = {}
+
+async def _alt_get(url: str, params: dict, ttl: float) -> Optional[dict]:
+    key = (url, tuple(sorted(params.items())))
+    hit = _ALT_CACHE.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    try:
+        data = await _get_json(url, params)
+    except Exception:
+        log.debug("Backup feed failed: %s", url, exc_info=True)
+        data = None
+    _ALT_CACHE[key] = (time.monotonic() + (ttl if data is not None else 120), data)
+    if len(_ALT_CACHE) > 600:
+        for k in list(_ALT_CACHE)[:300]:
+            _ALT_CACHE.pop(k, None)
+    return data
+
+
+def _alt_live(ev: dict) -> bool:
+    return ev.get("state") == "in"
+
+
+def _alt_nick(t: dict) -> str:
+    """'Celtics' from ESPN's short name (or the last word of the full name)."""
+    return norm_team(t.get("short") or (t.get("name") or "").split(" ")[-1])
+
+
+def _alt_days(ev: dict) -> list[str]:
+    """The game's date in US Eastern time (the leagues' own calendars), and the day before, as YYYY-MM-DD."""
+    t = event_time(ev)
+    if t is None:
+        return []
+    et = t.astimezone(ZoneInfo("America/New_York")).date()
+    return [et.isoformat(), (et - timedelta(days=1)).isoformat()]
+
+
+# ---- NHL.com -------------------------------------------------------------------------------------------------
+
+async def alt_nhl_box(ev: dict) -> Optional[dict]:
+    away, home = lv_sides(ev)
+    want = {_alt_nick(away), _alt_nick(home)}
+    gid = None
+    for day in _alt_days(ev):
+        data = await _alt_get(f"{NHL_WEB}/score/{day}", {}, 120 if _alt_live(ev) else 1800)
+        for g in (data or {}).get("games") or []:
+            names = {norm_team(((g.get(s) or {}).get("name") or {}).get("default") or "") for s in ("awayTeam", "homeTeam")}
+            if want <= names:
+                gid = g.get("id")
+                break
+        if gid:
+            break
+    if not gid:
+        return None
+    box = await _alt_get(f"{NHL_WEB}/gamecenter/{gid}/boxscore", {}, 60 if _alt_live(ev) else 6 * 3600)
+    if not box:
+        return None
+    state = {"OFF": "post", "FINAL": "post", "LIVE": "in", "CRIT": "in"}.get(box.get("gameState"), "pre")
+    players = []
+    for side in ("awayTeam", "homeTeam"):
+        grp = ((box.get("playerByGameStats") or {}).get(side)) or {}
+        for pos in ("forwards", "defense", "goalies"):
+            for p in grp.get(pos) or []:
+                name = ((p.get("name") or {}).get("default")) or ""
+                full = " ".join(x for x in ((p.get("firstName") or {}).get("default"), (p.get("lastName") or {}).get("default"))
+                                if x) or name
+                toi = str(p.get("toi") or "00:00")
+                comps = {"g": p.get("goals"), "a": p.get("assists"), "sog": p.get("sog"), "hits_nhl": p.get("hits"),
+                         "blocked": p.get("blockedShots")} if pos != "goalies" else {"saves": p.get("saves")}
+                players.append({"name": full, "norm": norm_name(full), "dnp": toi in ("00:00", "0:00", ""),
+                                "comps": {k: float(v) for k, v in comps.items() if isinstance(v, (int, float))}})
+    return {"state": state, "players": players}
+
+
+# ---- MLB Stats API -------------------------------------------------------------------------------------------
+
+async def alt_mlb_box(ev: dict) -> Optional[dict]:
+    away, home = lv_sides(ev)
+    want = {norm_team(away.get("name") or ""), norm_team(home.get("name") or "")}
+    pk, state = None, "pre"
+    for day in _alt_days(ev):
+        data = await _alt_get(f"{MLB_API}/schedule", {"sportId": 1, "date": day}, 120 if _alt_live(ev) else 1800)
+        for d in (data or {}).get("dates") or []:
+            for g in d.get("games") or []:
+                t = g.get("teams") or {}
+                names = {norm_team(((t.get(s) or {}).get("team") or {}).get("name") or "") for s in ("away", "home")}
+                if want <= names:
+                    pk = g.get("gamePk")
+                    st = ((g.get("status") or {}).get("abstractGameState") or "").lower()
+                    state = {"final": "post", "live": "in"}.get(st, "pre")
+                    break
+            if pk:
+                break
+        if pk:
+            break
+    if not pk:
+        return None
+    box = await _alt_get(f"{MLB_API}/game/{pk}/boxscore", {}, 60 if state == "in" else 6 * 3600)
+    if not box:
+        return None
+    players = []
+    for side in ("away", "home"):
+        for p in (((box.get("teams") or {}).get(side) or {}).get("players") or {}).values():
+            name = (p.get("person") or {}).get("fullName") or ""
+            bat = (p.get("stats") or {}).get("batting") or {}
+            pit = (p.get("stats") or {}).get("pitching") or {}
+            comps = {}
+            # both the box-score names and the per-game ("c_") names the tracker uses for PrizePicks stats
+            for cs, k in ((("h", "c_h"), "hits"), (("r", "c_r"), "runs"), (("rbi", "c_rbi"), "rbi"),
+                          (("hr", "c_hr"), "homeRuns"), (("bb", "c_bb"), "baseOnBalls"), (("so_bat",), "strikeOuts"),
+                          (("c_tb",), "totalBases"), (("c_sb",), "stolenBases"), (("c_2b",), "doubles"),
+                          (("c_3b",), "triples"), (("c_hbp",), "hitByPitch")):
+                if isinstance(bat.get(k), (int, float)):
+                    for c in cs:
+                        comps[c] = float(bat[k])
+            for cs, k in ((("k", "c_pk"), "strikeOuts"), (("h_allowed",), "hits"), (("er", "c_er"), "earnedRuns"),
+                          (("bb_allowed",), "baseOnBalls"), (("outs", "c_outs"), "outs"),
+                          (("c_pitches",), "numberOfPitches")):
+                if isinstance(pit.get(k), (int, float)):
+                    for c in cs:
+                        comps[c] = float(pit[k])
+            if "c_pitches" not in comps and isinstance(pit.get("pitchesThrown"), (int, float)):
+                comps["c_pitches"] = float(pit["pitchesThrown"])
+            players.append({"name": name, "norm": norm_name(name), "dnp": not bat and not pit, "comps": comps})
+    return {"state": state, "players": players}
+
+
+# ---- Sleeper (NFL) -------------------------------------------------------------------------------------------
+
+_SLEEPER_PLAYERS: dict = {"at": 0.0, "by_id": {}, "by_name": {}}
+
+
+async def sleeper_players() -> dict:
+    """{player id: {name, norm, team, pos, injury, body, notes}} from Sleeper's player list (fetched at most daily,
+    as Sleeper asks)."""
+    if _SLEEPER_PLAYERS["by_id"] and time.monotonic() - _SLEEPER_PLAYERS["at"] < 20 * 3600:
+        return _SLEEPER_PLAYERS["by_id"]
+    if _SLEEPER_PLAYERS["at"] and time.monotonic() - _SLEEPER_PLAYERS["at"] < 600 and not _SLEEPER_PLAYERS["by_id"]:
+        return {}                                  # failed recently: don't hammer it
+    _SLEEPER_PLAYERS["at"] = time.monotonic()
+    try:
+        raw = await _get_json(f"{SLEEPER}/players/nfl", {})
+    except Exception:
+        log.warning("Sleeper player list failed", exc_info=True)
+        return _SLEEPER_PLAYERS["by_id"]
+    by_id, by_name = {}, {}
+    for pid, p in (raw or {}).items():
+        if not isinstance(p, dict) or not p.get("full_name") or p.get("position") in (None, "DEF"):
+            continue
+        rec = {"name": p["full_name"], "norm": norm_name(p["full_name"]), "team": (p.get("team") or "").upper(),
+               "pos": p.get("position") or "", "injury": p.get("injury_status") or "",
+               "body": p.get("injury_body_part") or "", "notes": p.get("injury_notes") or ""}
+        by_id[str(pid)] = rec
+        by_name.setdefault(rec["norm"], []).append(str(pid))
+    _SLEEPER_PLAYERS.update(by_id=by_id, by_name=by_name)
+    return by_id
+
+
+SLEEPER_COMPS = {"pass_yds": "pass_yd", "pass_td": "pass_td", "pass_int": "pass_int", "pass_cmp": "pass_cmp",
+                 "pass_att": "pass_att", "rush_yds": "rush_yd", "rush_att": "rush_att", "rush_td": "rush_td", "rec": "rec",
+                 "rec_yds": "rec_yd", "rec_td": "rec_td", "targets": "rec_tgt", "long_rec": "rec_lng",
+                 "long_rush": "rush_lng", "fum_lost": "fum_lost", "fg_made": "fgm", "sacks": "idp_sack",
+                 "tackles": "idp_tkl", "def_int": "idp_int"}
+SLEEPER_TEAM = {"WSH": "WAS", "JAC": "JAX", "LA": "LAR"}
+
+
+async def alt_nfl_box(ev: dict) -> Optional[dict]:
+    week, season = ev.get("week"), ev.get("season")
+    if not week or not season:
+        return None
+    kind = {1: "pre", 2: "regular", 3: "post"}.get(ev.get("season_type") or 2, "regular")
+    stats = await _alt_get(f"{SLEEPER}/stats/nfl/{kind}/{season}/{week}", {}, 120 if _alt_live(ev) else 3 * 3600)
+    if not stats:
+        return None
+    people = await sleeper_players()
+    teams = {SLEEPER_TEAM.get((t.get("abbr") or "").upper(), (t.get("abbr") or "").upper()) for t in ev.get("teams") or []}
+    players = []
+    for pid, s in stats.items():
+        who = people.get(str(pid))
+        if not who or not isinstance(s, dict) or (teams and who["team"] and who["team"] not in teams):
+            continue
+        comps = {c: float(s[k]) for c, k in SLEEPER_COMPS.items() if isinstance(s.get(k), (int, float))}
+        if s.get("gp"):                       # he played: a stat Sleeper leaves out is a zero
+            for c in ("pass_yds", "pass_td", "pass_int", "rush_yds", "rush_td", "rec", "rec_yds", "rec_td", "fum_lost"):
+                comps.setdefault(c, 0.0)
+        players.append({"name": who["name"], "norm": who["norm"], "dnp": False, "comps": comps})
+    return {"state": ev.get("state") or "pre", "players": players}
+
+
+# ---- the hook: ESPN first, the backup feed when ESPN comes up short -----------------------------------------
+
+ALT_BOX = {"hockey/nhl": alt_nhl_box, "baseball/mlb": alt_mlb_box, "football/nfl": alt_nfl_box}
+
+
+def alt_value(pl: dict, stat_key: str) -> Optional[tuple[float, str]]:
+    _, _, parts, _ = STATS[stat_key]
+    total, shown = 0.0, []
+    for comp, w in parts:
+        v = pl["comps"].get(comp)
+        if v is None:
+            return None
+        total += v * w
+        shown.append((comp, v))
+    detail = "" if len(parts) == 1 or len(parts) > 6 else \
+        " (" + ", ".join(f"{v:g} {COMP_SHORT.get(c, c)}" for c, v in shown) + ")"
+    return round(total, 2), detail
+
+
+async def alt_try(out: dict, leg: dict, path: str, ev: dict, cand: dict, stat_key: str) -> dict:
+    """Fill in a prop from the league's own feed when ESPN's box score didn't have it."""
+    fn = ALT_BOX.get(path)
+    if fn is None or out.get("value") is not None or ev.get("state") == "pre":
+        return out
+    try:
+        box = await fn(ev)
+    except Exception:
+        log.debug("Backup box score failed", exc_info=True)
+        return out
+    if not box or not box["players"]:
+        return out
+    target = norm_name(cand.get("name") or leg["player"])
+    scored = [(name_score(target, p["norm"]), p) for p in box["players"]]
+    best = max((s for s, _ in scored), default=0)
+    top = {p["norm"]: p for s, p in scored if s == best and s >= 2}
+    if len(top) != 1:
+        return out
+    pl = next(iter(top.values()))
+    if box["state"] in ("in", "post"):
+        out["state"] = box["state"] if out["state"] != "post" else "post"
+    src = ALT_SOURCES.get(path, "backup feed")
+    if pl["dnp"]:
+        if out["state"] == "post" and box["state"] == "post":
+            out["result"], out["why"] = "push", f"{pl['name']} didn't play (per {src})"
+        return out
+    got = alt_value(pl, stat_key)
+    if got is None:
+        return out
+    out["source"] = src
+    return track_judge(out, leg, (got[0], got[1] + f" · {src}"), pl["name"])
+
+
+# ---- injuries: Sleeper backs up ESPN's NFL report ----------------------------------------------------------
+
+SLEEPER_INJURY = {"out": "Out", "ir": "Out", "pup": "Out", "sus": "Suspension", "doubtful": "Doubtful",
+                  "questionable": "Questionable", "cov": "Out", "na": None}
+
+
+async def sleeper_injury(player_norm: str) -> Optional[dict]:
+    """An NFL player's injury status from Sleeper ({name, status, comment, team}), when it names one player."""
+    await sleeper_players()
+    ids = _SLEEPER_PLAYERS["by_name"].get(player_norm) or []
+    if len(ids) != 1:
+        return None
+    p = _SLEEPER_PLAYERS["by_id"][ids[0]]
+    st = SLEEPER_INJURY.get((p["injury"] or "").lower().strip(), p["injury"] or None)
+    if not st:
+        return None
+    comment = " · ".join(x for x in (p["body"], p["notes"]) if x)
+    return {"name": p["name"], "status": st, "comment": comment, "team": p["team"], "path": "football/nfl",
+            "source": "Sleeper"}
+
+
+def data_sources_line() -> str:
+    """For /admin status: every feed the bot reads and how it's doing."""
+    now = time.time()
+    parts = []
+    for host, label in HEALTH_NAMES.items():
+        h = DATA_HEALTH.get(host)
+        if not h:
+            parts.append(f"⚪ {label}")
+            continue
+        bad = h.get("streak", 0) >= 3
+        parts.append(f"{'🔴' if bad else '🟢'} {label}")
+    return " · ".join(parts)
+
+
+HELP_EXTRA.append(("📚 Data sources", (
+    "Live stats come from ESPN, backed up by the leagues' own free feeds: NHL.com for hockey, the MLB Stats API for "
+    "baseball and Sleeper for the NFL. When ESPN's box score is missing a player or a stat (like total bases), the "
+    "bot checks those. NFL injury news also checks Sleeper. `/admin status` shows how each feed is doing.")))
 
 
 # --------------------------------------------------------------------------
