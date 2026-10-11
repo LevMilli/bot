@@ -1,9 +1,10 @@
 # Lets a cloud host (Railway, Fly.io, or any server with Docker) run the bot 24/7.
 FROM python:3.12-slim
 
-# ffmpeg + opus play audio in voice channels; espeak-ng is a backup voice if Google TTS is unreachable.
+# ffmpeg + opus play audio in voice channels; espeak-ng is a backup voice if Google TTS is unreachable;
+# tesseract reads slip screenshots for free.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libopus0 espeak-ng \
+    && apt-get install -y --no-install-recommends ffmpeg libopus0 espeak-ng tesseract-ocr tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-10 r22"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r23"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -2288,8 +2288,8 @@ def explain_ai_error(exc: Exception) -> tuple[str, bool]:
     return f"something unexpected went wrong ({name}); try again in a minute", True
 
 
-async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
-    """Read with the fast model; if that fails or misses the amounts, try once more with the stronger one.
+async def read_slip_claude(attachment) -> tuple[Optional[dict], Optional[str]]:
+    """Read with Claude's fast model; if that fails or misses the amounts, try once more with the stronger one.
     Returns (slip or None, reason it failed or None)."""
     reason = None
     models = [None] + ([ASK_MODEL] if ASK_MODEL and ASK_MODEL != CLAUDE_MODEL else [])
@@ -7968,8 +7968,8 @@ async def handle_dm_slip(client: discord.Client, message: discord.Message, attac
     if until:
         await message.reply(cooloff_message(until))
         return
-    if not ai_enabled():
-        await message.reply("Reading slips needs the Claude key, which isn't set up. In the server, use "
+    if not slip_reader_on():
+        await message.reply("Reading slips isn't set up here. In the server, use "
                             "`/pick` with `hidden: True` to log it privately.")
         return
     wait = sec_wait(message.author.id, "slip_read", "slip")
@@ -7977,6 +7977,11 @@ async def handle_dm_slip(client: discord.Client, message: discord.Message, attac
         await message.reply(sec_slow_text(wait))
         return
     slip, reason = await read_slip_best(attachment)
+    if slip is not None and slip.get("_unsure"):
+        await message.reply("I read part of that, but not cleanly enough to log it privately ("
+                            + ", ".join(slip["_unsure"][:3]) + "). Try a clearer screenshot, or use `/pick hidden:True` "
+                            "in the server.")
+        return
     if slip is None or slip.get("cost") is None:
         await message.reply(f"I couldn't read that one{': ' + reason if reason else ''}. Try a clearer screenshot, "
                             "or use `/pick hidden:True` in the server.")
@@ -11125,6 +11130,7 @@ async def status_embed(client) -> discord.Embed:
     e.add_field(name="Autopilot", value=clip(autopilot_status_line(None), 1000), inline=False)
     e.add_field(name="Claude calls today", value=f"{claude_calls_today()}" + (f" of {CLAUDE_DAILY_CAP} (extras pause at the cap)"
                                                                              if CLAUDE_DAILY_CAP else ""))
+    e.add_field(name="Slips read today", value=clip(free_counts_line(), 1000), inline=False)
     checks.append("✅ Dashboard" if dashboard_url() else "⚪ Dashboard off")
     e.add_field(name="Connections", value=" · ".join(checks), inline=False)
     e.add_field(name="Live data", value=clip(data_health_line(), 1000), inline=False)
@@ -23609,6 +23615,551 @@ HELP_EXTRA.append(("🧱 Build, rank, look up, team up", (
     "`/goal start` (mods) a weekly group goal like scouting 25 players · `/goal status` · coins split on success")))
 
 
+# ==========================================================================
+# r23: free slip reading. A text scan (Tesseract, free, runs inside the bot) reads the slip first; a free
+# Gemini key is the second try; Claude is the last resort. A scan that isn't sure shows a confirm card
+# instead of logging blind.
+# ==========================================================================
+
+import shutil
+import subprocess
+import difflib
+
+TESSERACT = shutil.which("tesseract")
+GEMINI_API_KEY = env("GEMINI_API_KEY", "")
+GEMINI_MODEL = env("GEMINI_MODEL", "gemini-flash-latest")
+# Which readers to use, in order. "scan" = the free text scan, "gemini" = Google's free tier, "claude" = Anthropic.
+SLIP_READERS = [x.strip().lower() for x in env("SLIP_READERS", "scan,gemini,claude").split(",") if x.strip()]
+FREE_SCAN_TIMEOUT = 25            # seconds for one Tesseract run
+FREE_READ_COUNTS: dict = {}       # in-memory mirror of today's per-reader counts (the settings table is the truth)
+
+# Stat names as PrizePicks / Underdog print them, longest first so "Pass+Rush Yds" wins over "Rush Yds".
+FREE_STATS = sorted({
+    "Points", "Rebounds", "Assists", "Pts+Rebs+Asts", "Pts+Rebs", "Pts+Asts", "Rebs+Asts", "Blks+Stls", "PRA",
+    "3-PT Made", "3-Pointers Made", "Steals", "Blocked Shots", "Blocks", "Turnovers", "Fantasy Score", "FG Made",
+    "FG Attempted", "Free Throws Made", "Offensive Rebounds", "Defensive Rebounds", "Two Pointers Made",
+    "Pass Yards", "Pass TDs", "Pass Completions", "Pass Attempts", "INT", "Interceptions", "Rush Yards",
+    "Rush Attempts", "Rush TDs", "Receptions", "Rec Yards", "Rec TDs", "Rec Targets", "Targets", "Rush+Rec Yds",
+    "Pass+Rush Yds", "Rush+Rec TDs", "Longest Rec", "Longest Rush", "Longest Completion", "Tackles+Ast", "Sacks",
+    "FG Made", "Kicking Points", "Punts", "Field Goal Yards", "Fantasy Points",
+    "Hits", "Runs", "RBIs", "Hits+Runs+RBIs", "Home Runs", "Total Bases", "Walks", "Singles", "Doubles",
+    "Stolen Bases", "Hitter Strikeouts", "Pitcher Strikeouts", "Strikeouts", "Hits Allowed", "Earned Runs Allowed",
+    "Walks Allowed", "Pitching Outs", "Pitches Thrown",
+    "Goals", "Shots On Goal", "Goalie Saves", "Saves", "Faceoffs Won", "Power Play Points", "Blocked Shots",
+    "Time On Ice", "Goals Allowed",
+    "Shots", "Shots On Target", "Clearances", "Attempted Dribbles", "Passes Attempted", "Tackles", "Crosses",
+    "Fouls", "Goal + Assist", "Shots Assisted",
+    "Kills", "Headshots", "Maps 1-2 Kills", "Aces", "Double Faults", "Total Games", "Fantasy",
+}, key=len, reverse=True)
+_FREE_STAT_RX = [(s, re.compile(r"(?<![A-Za-z])" + r"\s*".join(re.escape(ch) for ch in s.replace(" ", "")) + r"(?![a-z])",
+                                re.I)) for s in FREE_STATS]
+_FREE_NUM = re.compile(r"^\d{1,4}(?:[.,]\d)?$")
+_FREE_MONEY = r"\$\s?([\d,]+(?:\.\d{1,2})?)"
+_FREE_JUNK = {"less", "more", "over", "under", "higher", "lower", "vs", "at", "nba", "nfl", "nhl", "mlb", "wnba",
+              "soccer", "cfb", "cbb", "ncaaf", "ncaab", "pga", "tennis", "mma", "cs2", "lol", "val", "power", "play",
+              "flex", "pick", "picks", "entry", "fee", "to", "win", "payout", "paid", "won", "lost", "live", "final",
+              "copied", "lineup", "early", "balance", "players", "teams", "submit", "demon", "goblin", "taco",
+              "points", "promo", "boosted", "free", "squares", "prizepicks", "underdog", "contest", "of", "mon", "tue",
+              "wed", "thu", "fri", "sat", "sun", "today", "tomorrow", "am", "pm", "lineup"}
+_FREE_NAME_TOKEN = re.compile(r"^(?:[A-ZÀ-Þ][A-Za-zÀ-ÿ'’.\-]*|[A-Z]{2,3})$")
+
+
+def slip_reader_on() -> bool:
+    """Can the bot read screenshots at all (free scan, Gemini or Claude)?"""
+    return any((r == "scan" and TESSERACT) or (r == "gemini" and GEMINI_API_KEY) or (r == "claude" and ai_enabled())
+               for r in SLIP_READERS)
+
+
+def free_count(how: str) -> None:
+    key = f"slipreads:{datetime.now(TZ).date().isoformat()}"
+    try:
+        counts = json.loads(get_setting(0, key) or "{}")
+    except ValueError:
+        counts = {}
+    counts[how] = counts.get(how, 0) + 1
+    set_setting(0, key, json.dumps(counts))
+
+
+def free_counts_line() -> str:
+    try:
+        counts = json.loads(get_setting(0, f"slipreads:{datetime.now(TZ).date().isoformat()}") or "{}")
+    except ValueError:
+        counts = {}
+    names = {"scan": "free scan", "scan_confirm": "free scan (confirmed by hand)", "gemini": "Gemini (free)",
+             "claude": "Claude"}
+    parts = [f"{counts[k]} {names.get(k, k)}" for k in ("scan", "scan_confirm", "gemini", "claude") if counts.get(k)]
+    on = [names[r] if r != "scan" else "free scan" for r in SLIP_READERS
+          if (r == "scan" and TESSERACT) or (r == "gemini" and GEMINI_API_KEY) or (r == "claude" and ai_enabled())]
+    return (" · ".join(parts) or "none yet") + "\nReaders on, in order: " + (" → ".join(on) or "none (the form only)")
+
+
+# ---- the free text scan (pure: runs in a thread, never touches the database) -------------------------
+
+def free_prepare(raw: bytes):
+    """(colour image, OCR-ready greyscale image, scale) with dark mode flipped, upscaled so small print reads."""
+    from PIL import Image, ImageOps, ImageFilter, ImageStat
+    img = Image.open(io.BytesIO(raw))
+    sec_check_image(img)
+    img.seek(0)
+    img = ImageOps.exif_transpose(img).convert("RGB")
+    w, h = img.size
+    scale = max(1.0, min(3.0, 1600 / max(1, w)))
+    if scale > 1.05:
+        img = img.resize((round(w * scale), round(h * scale)), Image.LANCZOS)
+    grey = img.convert("L")
+    if ImageStat.Stat(grey).mean[0] < 128:          # dark mode: Tesseract wants dark text on light
+        grey = ImageOps.invert(grey)
+    grey = ImageOps.autocontrast(grey, cutoff=1).filter(ImageFilter.UnsharpMask(radius=1.5, percent=80, threshold=2))
+    return img, grey, scale
+
+
+def _free_tess(img, psm: int, extra: Optional[list] = None, tsv: bool = True) -> str:
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    args = [TESSERACT, "stdin", "stdout", "--psm", str(psm), "-l", "eng"] + (extra or []) + (["tsv"] if tsv else [])
+    r = subprocess.run(args, input=buf.getvalue(), capture_output=True, timeout=FREE_SCAN_TIMEOUT)
+    return r.stdout.decode("utf-8", "replace")
+
+
+def free_words(grey) -> list[dict]:
+    """Every word Tesseract saw: {text, conf, x, y, w, h, line} with line = a key shared by words on one line."""
+    out = []
+    for row in _free_tess(grey, 4).splitlines()[1:]:
+        f = row.split("\t")
+        if len(f) < 12 or f[0] != "5" or not f[11].strip():
+            continue
+        try:
+            out.append({"text": f[11].strip(), "conf": float(f[10]), "x": int(f[6]), "y": int(f[7]), "w": int(f[8]),
+                        "h": int(f[9]), "line": (int(f[2]), int(f[3]), int(f[4]))})
+        except ValueError:
+            continue
+    return out
+
+
+def free_lines(words: list[dict]) -> list[dict]:
+    """Words grouped into lines, top to bottom: {words, text, y, h, x0, x1}."""
+    groups: dict = {}
+    for wd in words:
+        groups.setdefault(wd["line"], []).append(wd)
+    lines = []
+    for ws in groups.values():
+        ws.sort(key=lambda w: w["x"])
+        lines.append({"words": ws, "text": " ".join(w["text"] for w in ws), "y": min(w["y"] for w in ws),
+                      "h": max(w["h"] for w in ws), "x0": min(w["x"] for w in ws),
+                      "x1": max(w["x"] + w["w"] for w in ws)})
+    lines.sort(key=lambda ln: (ln["y"], ln["x0"]))
+    return lines
+
+
+def free_reocr_number(grey, wd: dict) -> Optional[str]:
+    """Read one number box again, zoomed in, digits only (fixes '495' for '49.5')."""
+    from PIL import Image
+    pad = max(4, wd["h"] // 3)
+    box = (max(0, wd["x"] - pad), max(0, wd["y"] - pad), wd["x"] + wd["w"] + pad, wd["y"] + wd["h"] + pad)
+    crop = grey.crop(box)
+    crop = crop.resize((crop.width * 3, crop.height * 3), Image.LANCZOS)
+    txt = _free_tess(crop, 7, ["-c", "tessedit_char_whitelist=0123456789."], tsv=False).strip()
+    return txt if re.fullmatch(r"\d{1,4}(?:\.\d)?", txt) else None
+
+
+def free_arrow(img, box: tuple) -> Optional[str]:
+    """'over' for an up arrow, 'under' for a down arrow, from where the arrow's head (its widest part) sits."""
+    x0, y0, x1, y1 = (int(v) for v in box)
+    if x1 - x0 < 4 or y1 - y0 < 6:
+        return None
+    crop = img.crop((max(0, x0), max(0, y0), x1, y1)).convert("L")
+    px = crop.load()
+    w, h = crop.size
+    vals = sorted(px[i, j] for i in range(w) for j in range(h))
+    bg = vals[len(vals) // 2]
+    rows = []
+    for j in range(h):
+        rows.append(sum(1 for i in range(w) if abs(px[i, j] - bg) > 60))
+    ink = [j for j, n in enumerate(rows) if n]
+    if len(ink) < 5:
+        return None
+    top, bottom = ink[0], ink[-1]
+    span = bottom - top + 1
+    third = max(1, span // 3)
+    upper = sum(rows[top:top + third])
+    lower = sum(rows[bottom - third + 1:bottom + 1])
+    if upper > lower * 1.25:
+        return "over"
+    if lower > upper * 1.25:
+        return "under"
+    return None
+
+
+def free_green(img, wd: dict) -> float:
+    """How much of a word's button is filled green (the picked More/Less on PrizePicks' builder)."""
+    pad = wd["h"]
+    crop = img.crop((max(0, wd["x"] - pad), max(0, wd["y"] - pad // 2), wd["x"] + wd["w"] + pad,
+                     wd["y"] + wd["h"] + pad // 2))
+    px = list(crop.getdata())
+    green = sum(1 for r, g, b in px if g > 150 and g > r + 50 and g > b + 50)
+    return green / max(1, len(px))
+
+
+def free_green_side(img, top: float, bottom: float) -> Optional[str]:
+    """On the builder screen the picked button is filled green: Less sits left of More."""
+    w = img.width
+    crop = img.crop((int(w * 0.55), max(0, int(top)), w, min(img.height, int(bottom))))
+    pts = [i % crop.width for i, (r, g, b) in enumerate(crop.getdata()) if g > 150 and g > r + 50 and g > b + 50]
+    if len(pts) < 50:
+        return None
+    centre = (sum(pts) / len(pts) + w * 0.55) / w
+    return "over" if centre > 0.78 else "under"
+
+
+def _free_numtext(t: str) -> str:
+    """'«12.5' -> '12.5', '49,5' -> '49.5' (icons and punctuation OCR glues onto a number)."""
+    if re.search(r"[#:$%/x]|\d[a-wyz]", t, re.I):   # jersey numbers, times, money, '37.5x', '6pm'
+        return ""
+    return re.sub(r"^[^\d]+|[^\d]+$", "", t).replace(",", ".")
+
+
+def _free_stat_in(text: str) -> Optional[tuple[str, int]]:
+    """(stat name, where it starts) for the stat printed in this line, if any."""
+    for name, rx in _FREE_STAT_RX:
+        m = rx.search(text)
+        if m:
+            return name, m.start()
+    return None
+
+
+def _free_name(line: dict) -> Optional[str]:
+    """A player's name at the start of a line (skipping OCR noise from photos and icons)."""
+    if re.search(r"vs\b|\d{1,2}:\d{2}|@|\$|#\s?\d", line["text"], re.I) or re.search(
+            r"\b(defender|midfielder|attacker|forward|goalkeeper|guard|center|qb|rb|wr|te|lw|rw|sp|rp)\b", line["text"], re.I):
+        return None                            # a game header, an amount, or a team/position/jersey line
+    toks = [w["text"].strip(",;:|()[]{}©@&*") for w in line["words"]]
+    best: list[str] = []
+    run: list[str] = []
+    for t in toks + [""]:
+        ok = bool(t) and _FREE_NAME_TOKEN.match(t) and t.lower() not in _FREE_JUNK and not any(c.isdigit() for c in t)
+        if ok:
+            run.append(t)
+            continue
+        while run and len(run[-1]) <= 2 and run[-1] not in ("Jr", "Sr", "II", "IV") and len(run) > 1:
+            run.pop()                          # trailing icon noise like "Vv"
+        while len(run) > 2 and len(run[0]) <= 2 and not run[0].isupper():
+            run.pop(0)                         # leading noise like "Ps" (but "OG Anunoby", "AJ Brown" stay)
+        if len(run) >= 2 and sum(len(x) for x in run) > len(" ".join(best).replace(" ", "")):
+            best = run[:]
+        run = []
+    if len(best) < 2 or len(best) > 4:
+        return None
+    if all(x.isupper() for x in best):        # "DAL QB", "TB RB": team and position, not a name
+        return None
+    if _free_stat_in(" ".join(best)):         # "Pass Yards" is a stat, not a person
+        return None
+    return " ".join(best)
+
+
+def free_parse(words: list[dict], img, grey) -> Optional[dict]:
+    """A slip from the scan's words, in the same shape the AI readers return, plus '_unsure' with the reasons
+    when anything didn't read cleanly. None when it doesn't look like a slip at all."""
+    lines = free_lines(words)
+    if not lines:
+        return None
+    full = "\n".join(ln["text"] for ln in lines)
+    low = full.lower()
+    unsure: list[str] = []
+    # platform and entry type
+    platform = None
+    if "prizepicks" in low or re.search(r"\b(power|flex) play\b", low) or re.search(r"\bless\b.*\bmore\b", low):
+        platform = "PrizePicks"
+    elif "underdog" in low or re.search(r"\bhigher\b|\blower\b", low):
+        platform = "Underdog"
+    for book in ("FanDuel", "DraftKings", "BetMGM", "Caesars", "Fanatics", "bet365", "ESPN BET", "Hard Rock",
+                 "BetRivers", "Kalshi", "Sleeper", "Dabble", "Betr", "ParlayPlay"):
+        if book.lower() in low:
+            platform = book
+            break
+    has_flex, has_power = bool(re.search(r"\bflex\b|\binsured\b", low)), bool(re.search(r"\bpower\b|\bstandard\b", low))
+    entry_type = None if has_flex and has_power else ("flex" if has_flex else ("power" if has_power else None))
+    m = re.search(r"(\d{1,2})\s*-?\s*pick", low)
+    want = int(m.group(1)) if m and 2 <= int(m.group(1)) <= 12 else None
+    # amounts: "$25 to win $450" / "Entry fee ... To Win ... $15 $562.50"
+    cost = payout = None
+    m = re.search(_FREE_MONEY + r"\s*to\s*(?:win|pay)\s*" + _FREE_MONEY, full, re.I)
+    if m:
+        cost, payout = as_amount(m.group(1)), as_amount(m.group(2))
+    else:
+        for k, ln in enumerate(lines):
+            if re.search(r"entry\s*fee|wager|stake", ln["text"], re.I):
+                amounts = re.findall(_FREE_MONEY + r"|(?<![\d.])(\d+\.\d{2})(?!\d)",
+                                     " ".join(x["text"] for x in lines[k:k + 3]))
+                vals = [as_amount(a or b) for a, b in amounts]
+                vals = [v for v in vals if v]
+                if len(vals) >= 2:
+                    cost, payout = vals[0], vals[1]
+                elif vals:
+                    cost = vals[0]
+                break
+    if cost is None:
+        unsure.append("the amount risked")
+    if payout is None:
+        unsure.append("the payout")
+    # legs: anchor on each stat name, take the line number before it, the name above it, and the side
+    legs: list[str] = []
+    used_names: set = set()
+    builder = bool(re.search(r"\bless\b", low) and re.search(r"\bmore\b", low))
+    for k, ln in enumerate(lines):
+        st = _free_stat_in(ln["text"])
+        if not st:
+            continue
+        stat, at = st
+        # the number: on this line before the stat, else the line(s) just above
+        cand_lines = [ln] + [lines[j] for j in range(k - 1, max(-1, k - 3), -1)]
+        num_words, src = [], None
+        for cl in cand_lines:
+            ws = [w for w in cl["words"] if _FREE_NUM.match(_free_numtext(w["text"]))]
+            if cl is ln:
+                cut = len(ln["text"][:at])
+                pos, kept = 0, []
+                for w in cl["words"]:
+                    if pos < cut and w in ws:
+                        kept.append(w)
+                    pos += len(w["text"]) + 1
+                ws = kept
+            ws = [w for w in ws if not re.search(r"#\s*$", cl["text"][:cl["text"].find(w["text"])])]
+            if ws:
+                num_words, src = ws, cl
+                break
+        if not num_words:
+            continue
+        wd = max(num_words, key=lambda w: w["x"])            # the new line, never a crossed-out old one
+        txt = _free_numtext(wd["text"])
+        again = free_reocr_number(grey, wd)
+        if again and (("." in again) or "." not in txt):
+            txt = again
+        try:
+            value = float(txt)
+        except ValueError:
+            continue
+        if "." not in txt and value >= 100 and txt.endswith("5") and stat not in ("Pass Yards", "Pass+Rush Yds",
+                                                                                   "Rush+Rec Yds", "Pitches Thrown"):
+            value = value / 10                                # '495' Rec Yards is 49.5
+        # the player: the nearest name at or above the number's line
+        name, name_at = None, None
+        start = lines.index(src)
+        order = [start] + ([start + 1] if start + 1 < len(lines) and lines[start + 1]["y"] - src["y"] < 1.2 * src["h"]
+                           else []) + list(range(start - 1, max(-1, start - 4), -1))
+        for j in order:
+            name = _free_name(lines[j])
+            if name and name not in used_names:
+                name_at = j
+                break
+            name = None
+        if not name:
+            unsure.append(f"a player's name near {value:g} {stat}")
+            continue
+        used_names.add(name)
+        # the side: More/Less words (the green one when both show), else the arrow beside the number
+        side = None
+        lo = min(start, name_at if name_at is not None else start)
+        near = [w for j in range(lo, min(len(lines), k + 2)) for w in lines[j]["words"]]
+        words_low = {w["text"].lower().strip("+-↑↓"): w for w in near}
+        if "more" in words_low and "less" in words_low:
+            gm, gl = free_green(img, words_low["more"]), free_green(img, words_low["less"])
+            side = "over" if gm > gl * 1.5 and gm > 0.08 else ("under" if gl > gm * 1.5 and gl > 0.08 else None)
+        elif not builder:
+            for word, s in (("more", "over"), ("over", "over"), ("higher", "over"), ("less", "under"),
+                            ("under", "under"), ("lower", "under")):
+                if word in words_low:
+                    side = s
+                    break
+        if side is None and builder:
+            top = lines[lo]["y"] - src["h"]
+            bottom = ln["y"] + 2 * ln["h"]
+            side = free_green_side(img, top, bottom)
+        if side is None:
+            left = [w for w in src["words"] if w["x"] + w["w"] <= wd["x"] and w["x"] > wd["x"] - 6 * wd["h"]]
+            nums_left = [w for w in left if _FREE_NUM.match(_free_numtext(w["text"]))]
+            anchor = min(nums_left, key=lambda w: w["x"]) if nums_left else wd
+            glyph = [w for w in left if w not in nums_left and w["x"] + w["w"] <= anchor["x"] + 2
+                     and w["x"] > anchor["x"] - 3 * wd["h"]]
+            if glyph:
+                g = max(glyph, key=lambda w: w["x"])
+                box = (g["x"] - 4, wd["y"] - wd["h"] * 0.4, g["x"] + g["w"] + 4, wd["y"] + wd["h"] * 1.4)
+            else:
+                box = (anchor["x"] - 2.2 * wd["h"], wd["y"] - wd["h"] * 0.4, anchor["x"] - 0.15 * wd["h"],
+                       wd["y"] + wd["h"] * 1.4)
+            side = free_arrow(img, box)
+        if side is None:
+            unsure.append(f"over or under for {name}")
+            side = "over"
+        leg = f"{name} {side} {value:g} {stat}"
+        if leg not in legs:
+            legs.append(leg)
+    if not legs:
+        if platform and (cost or payout):
+            return {"is_slip": True, "platform": platform, "sport": None, "description": "Slip", "legs": [],
+                    "cost": cost, "payout": payout, "status": "open", "returned": None, "game_date": None,
+                    "entry_type": entry_type, "placed": True, "_unsure": ["the picks"], "_how": "scan"}
+        return None
+    if want and len(legs) != want:
+        unsure.append(f"all {want} picks (I found {len(legs)})")
+    if not platform:
+        platform = "PrizePicks" if entry_type else "Other"
+        unsure.append("which app it's from")
+    placed = not re.search(r"\bsubmit\b|place entry|add picks|entry fee", low)
+    n = len(legs)
+    desc = (f"{n}-Pick {'Flex' if entry_type == 'flex' else 'Power'} Play" if platform in ("PrizePicks", "Underdog")
+            else f"{n}-leg slip" if n > 1 else legs[0])
+    sports = [s for s in ("NFL", "NBA", "NHL", "MLB", "WNBA", "SOCCER", "CFB", "CBB") if re.search(rf"\b{s}\b", full)]
+    return {"is_slip": True, "platform": platform, "sport": ", ".join(s.title() if s == "SOCCER" else s for s in sports)
+            or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": "open",
+            "returned": None, "game_date": None, "entry_type": entry_type, "placed": placed,
+            "_unsure": unsure, "_how": "scan"}
+
+
+def free_scan(raw: bytes) -> Optional[dict]:
+    """The whole free scan on one image (sync, for a worker thread)."""
+    img, grey, _ = free_prepare(raw)
+    return free_parse(free_words(grey), img, grey)
+
+
+# ---- names: the scan's spelling checked against ESPN's players ---------------------------------------
+
+async def free_fix_names(slip: dict) -> None:
+    """'Julian Quifiones' -> 'Julián Quiñones' when ESPN has one clear match (best effort, a few seconds)."""
+    fixed = []
+    for leg in slip.get("legs") or []:
+        m = re.match(r"^(.+?) (over|under) ([\d.]+) (.+)$", leg)
+        if not m:
+            fixed.append(leg)
+            continue
+        name = m.group(1)
+        try:
+            raw = await asyncio.wait_for(_get_json(ESPN_SEARCH, {"query": name, "limit": 5, "type": "player"}), 6)
+            items = [it.get("displayName") or "" for it in (raw.get("items") or [])]
+        except Exception:
+            items = []
+        best, score = None, 0.0
+        for it in items:
+            r = difflib.SequenceMatcher(None, norm_name(name), norm_name(it)).ratio()
+            if r > score:
+                best, score = it, r
+        if best and score >= 0.8 and norm_name(best) != norm_name(name):
+            name = best
+        fixed.append(f"{name} {m.group(2)} {m.group(3)} {m.group(4)}")
+    slip["legs"] = fixed
+
+
+# ---- Gemini (Google's free tier) ------------------------------------------------------------------
+
+async def read_slip_gemini(attachment) -> Optional[dict]:
+    """Same job as read_slip, through Gemini. The key goes in a header, never the URL."""
+    import aiohttp
+    raw = await attachment.read()
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise SecImageTooBig(f"{len(raw) // 1024} KB")
+    try:
+        pngs = await asyncio.to_thread(enlarge_slip, raw)
+    except Exception:
+        pngs = [raw]
+    parts = [{"inline_data": {"mime_type": "image/png", "data": base64.standard_b64encode(b).decode()}} for b in pngs[:5]]
+    prompt = SLIP_PROMPT
+    if len(pngs) > 1:
+        prompt = (f"These {len(pngs)} images are ONE screenshot: the first is the whole thing, the rest are enlarged "
+                  "slices of it from top to bottom that overlap a little. Count each leg only once.\n\n" + prompt)
+    prompt += f"\n\nToday is {datetime.now(TZ):%A, %B %d, %Y}."
+    parts.append({"text": prompt})
+    body = {"contents": [{"parts": parts}], "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
+            if resp.status != 200:
+                text = (await resp.text())[:300]
+                raise RuntimeError(f"Gemini HTTP {resp.status}: {text}")
+            data = await resp.json(content_type=None)
+    text = "".join(p.get("text", "") for c in (data.get("candidates") or [])[:1]
+                   for p in ((c.get("content") or {}).get("parts") or []))
+    slip = extract_json(text)
+    if not slip.get("is_slip"):
+        return None
+    slip["cost"] = as_amount(slip.get("cost"))
+    slip["payout"] = as_amount(slip.get("payout"))
+    slip["returned"] = as_amount(slip.get("returned"))
+    if slip.get("status") not in ("open", "win", "loss", "push"):
+        slip["status"] = "open"
+    slip["placed"] = slip.get("placed") is not False
+    return slip
+
+
+# ---- the chain ------------------------------------------------------------------------------------
+
+async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
+    """Free scan first, then Gemini, then Claude. Returns (slip or None, why it failed or None). A slip the scan
+    wasn't sure about comes back with '_unsure' (reasons) when no AI reader could do better: confirm it by hand."""
+    reason, unsure_slip = None, None
+    for reader in SLIP_READERS:
+        if reader == "scan" and TESSERACT:
+            try:
+                raw = await attachment.read()
+                if len(raw) > MAX_IMAGE_BYTES:
+                    raise SecImageTooBig(f"{len(raw) // 1024} KB")
+                slip = await asyncio.to_thread(free_scan, raw)
+            except SecImageTooBig:
+                raise
+            except Exception as exc:
+                log.warning("Free slip scan failed", exc_info=True)
+                SLIP_STATE["last_error"] = (now_iso(), f"Free scan: {type(exc).__name__}: {exc}"[:300])
+                continue
+            if slip is None:
+                reason = reason or "it didn't look like a bet slip to me"
+                continue
+            try:
+                await free_fix_names(slip)
+            except Exception:
+                log.debug("Name check skipped", exc_info=True)
+            if not slip["_unsure"] and slip["legs"]:
+                free_count("scan")
+                slip.pop("_unsure", None)
+                return slip, None
+            unsure_slip = slip
+            continue
+        if reader == "gemini" and GEMINI_API_KEY:
+            try:
+                slip = await read_slip_gemini(attachment)
+            except SecImageTooBig:
+                raise
+            except Exception as exc:
+                log.warning("Gemini slip read failed: %s", str(exc)[:200])
+                SLIP_STATE["last_error"] = (now_iso(), f"Reading with Gemini: {type(exc).__name__}: {str(exc)[:200]}")
+                continue
+            if slip and slip.get("cost") is not None:
+                free_count("gemini")
+                slip["_how"] = "gemini"
+                return slip, None
+            reason = "I couldn't make out the amount risked" if slip else reason
+            continue
+        if reader == "claude" and ai_enabled() and claude_budget_ok(essential=True):
+            slip, why = await read_slip_claude(attachment)
+            if slip is not None and slip.get("cost") is not None:
+                free_count("claude")
+                slip["_how"] = "claude"
+                return slip, None
+            reason = why or reason
+    if unsure_slip is not None:
+        return unsure_slip, None
+    return None, reason
+
+
+def free_unsure_note(slip: dict) -> str:
+    bits = slip.get("_unsure") or []
+    return ("🔎 I read this with the free scan but couldn't be sure about " + ", ".join(bits[:3])
+            + (" and more" if len(bits) > 3 else "") + ". Check it, then tap 🧾 **Log this slip** (or ✏️ **Edit** to fix it).")
+
+
+HELP_EXTRA.append(("🔎 Reading slips for free", (
+    "Screenshots are read by a free text scan first. If it's sure, the slip logs like before; if not, you get a "
+    "card to check and tap 🧾 **Log this slip** (or ✏️ Edit). A free `GEMINI_API_KEY` on Railway adds a second free reader, "
+    "and Claude is only the last resort. `/admin status` shows which reader handled today's slips.")))
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -24158,7 +24709,7 @@ class PicksBot(discord.Client):
                 await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
 
     async def handle_slip(self, message: discord.Message, attachment: discord.Attachment, quiet: bool = False):
-        if quiet and not ai_enabled():
+        if quiet and not slip_reader_on():
             return
         until = cooling_until(message.guild.id, message.author.id)
         if until:
@@ -24166,25 +24717,33 @@ class PicksBot(discord.Client):
                 await sec_private_notice(message, cooloff_message(until))
             return
         slip, reason = None, None
-        wait = sec_wait(message.author.id, "slip_read", "slip") if ai_enabled() else 0
+        wait = sec_wait(message.author.id, "slip_read", "slip") if slip_reader_on() else 0
         if wait:
             if not quiet:
                 await message.reply(sec_slow_text(wait), mention_author=False)
             return
-        if ai_enabled() and (attachment.size or 0) <= MAX_IMAGE_BYTES:
+        if slip_reader_on() and (attachment.size or 0) <= MAX_IMAGE_BYTES:
             async with message.channel.typing():
                 slip, reason = await read_slip_best(attachment)
-        elif ai_enabled():
+        elif slip_reader_on():
             reason = f"the image is too big ({(attachment.size or 0) // 1024} KB)"
             SLIP_STATE["last_error"] = (now_iso(), f"Image too big to read ({(attachment.size or 0) // 1024} KB)")
 
-        if quiet and (slip is None or slip["cost"] is None):
+        if quiet and (slip is None or slip["cost"] is None or slip.get("_unsure")):
             return  # every-channel mode: memes and charts aren't slips, stay out of the way
+
+        # The free scan read it but wasn't sure of everything: show what it read and let the poster confirm.
+        if slip is not None and slip.get("_unsure") and slip.get("legs"):
+            save_slip_draft(message.guild.id, message, slip)
+            free_count("scan_confirm")
+            await message.reply(free_unsure_note(slip), embed=slip_draft_embed(slip),
+                                view=slip_draft_view(message.id, review=ai_enabled(), edit=True), mention_author=False)
+            return
 
         # Couldn't read it (or reading is off): let the poster fill in a short form.
         if slip is None or slip["cost"] is None:
             note = "Got it. Tap below to log this slip."
-            if ai_enabled():
+            if slip_reader_on():
                 note = (f"I couldn't read that one: {reason}. Tap below to log it by hand." if reason else
                         "I couldn't read that one cleanly. Tap below to log it by hand.")
             await message.reply(note, view=log_slip_view(message.author.id),

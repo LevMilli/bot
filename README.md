@@ -143,6 +143,14 @@ paid, and who's actually up.
   re-decides the pick, hidden picks stay hidden on the 🥵 button, live receipts retry a failed edit,
   quiet hours delay the digest instead of skipping it, and more.
 
+**Reading slips for free (r23).** Screenshots are read by a free text scan (Tesseract, installed by the
+Dockerfile) first. When it reads every leg, the amount and the payout cleanly, the slip logs without any AI.
+When it isn't sure, you get a card showing what it read: tap 🧾 **Log this slip** or ✏️ **Edit**. Optional
+second reader: a free Google Gemini key (`GEMINI_API_KEY`, from Google AI Studio, no card needed; on the free
+tier Google may use the images to improve its models). Claude is the last resort. `SLIP_READERS` sets the order
+(default `scan,gemini,claude`); use `scan,gemini` to never spend Claude credits on slips. Breakdowns and
+@mention questions still use Claude. `/admin status` shows which reader handled today's slips.
+
 **Receipts channel.** Run `/receipts` once in the channel where people post slips.
 After that, any screenshot posted there gets logged under whoever posted it:
 
@@ -427,7 +435,8 @@ every night, so even a lost volume costs you at most a day.
   `AUTOGRADE_AFTER_HOURS` (48; 0 turns auto-grading off), `AUTOGRADE_DAILY_LIMIT` (30),
   `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5), `TODAY_HOUR` (10, also when Prop of the Day posts),
   `BACKUP_HOUR` (4), `DASHBOARD_KEY` (made up for you if not set),
-  `DIGEST_HOUR` (9, when the morning digest DMs go out), `CLAUDE_DAILY_CAP` (off by default; a number
+  `GEMINI_API_KEY` (optional free slip reader), `GEMINI_MODEL` (`gemini-flash-latest`), `SLIP_READERS`
+  (`scan,gemini,claude`), `DIGEST_HOUR` (9, when the morning digest DMs go out), `CLAUDE_DAILY_CAP` (off by default; a number
   caps the day's Claude calls, and the extras like fresh roast lines and the Sunday Show go back to
   templates once it's hit, while slip reading keeps working).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
