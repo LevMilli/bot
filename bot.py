@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-10 r21"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-10 r22"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -2439,13 +2439,108 @@ def leagues_for(sport: Optional[str]) -> list[str]:
     return found or DEFAULT_LEAGUES
 
 
+HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+           "Chrome/126.0.0.0 Safari/537.36")
+HTTP_RETRIES = 2              # extra tries after the first, on 429 / 5xx / timeouts / dropped connections
+HTTP_HOST_LIMIT = 6           # requests in flight per host
+_HTTP: dict = {"session": None, "loop": None, "sems": {}}
+DATA_HEALTH: dict[str, dict] = {}   # host -> {ok, fail, streak, status, last_ok, last_fail, fail_since}
+
+
+class HttpStatusError(Exception):
+    """A non-2xx answer. `status` is the HTTP code; `retry_after` is the server's hint in seconds (429/503)."""
+
+    def __init__(self, status: int, url: str, retry_after: Optional[float] = None):
+        super().__init__(f"HTTP {status} for {url.split('?')[0]}")
+        self.status, self.retry_after = status, retry_after
+
+
 async def _get_json(url: str, params: dict) -> dict:
-    import aiohttp  # comes with discord.py
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10),
-                                     headers={"User-Agent": "PicksBot/1.0"}) as session:
-        async with session.get(url, params=params) as resp:
-            resp.raise_for_status()
-            return await resp.json(content_type=None)
+    """GET a JSON document. Every free-data call (ESPN, Kalshi, trivia) goes through here; tests swap it out."""
+    return await _http_get_json(url, params)
+
+
+def _http_session():
+    """The shared aiohttp session, made on first use and again if it was closed or the event loop changed."""
+    loop = asyncio.get_running_loop()
+    sess = _HTTP["session"]
+    if sess is None or getattr(sess, "closed", False) or _HTTP["loop"] is not loop:
+        import aiohttp  # comes with discord.py
+        sess = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=12, connect=5, sock_read=10),
+            headers={"User-Agent": HTTP_UA, "Accept": "application/json, text/plain, */*",
+                     "Accept-Language": "en-US,en;q=0.9"},
+            connector=aiohttp.TCPConnector(limit=40, ttl_dns_cache=300))
+        _HTTP.update(session=sess, loop=loop, sems={})
+    return sess
+
+
+def _http_sem(host: str) -> asyncio.Semaphore:
+    if _HTTP["loop"] is not asyncio.get_running_loop():
+        _HTTP.update(loop=None, sems={})
+    sem = _HTTP["sems"].get(host)
+    if sem is None:
+        sem = _HTTP["sems"][host] = asyncio.Semaphore(HTTP_HOST_LIMIT)
+    return sem
+
+
+def _health_note(host: str, ok: bool, status) -> None:
+    """Count one finished call. `ok` means the host answered (a 404 is an answer); failures are 5xx, 429,
+    timeouts and dropped connections."""
+    h = DATA_HEALTH.setdefault(host, {"ok": 0, "fail": 0, "streak": 0, "status": None, "last_ok": None,
+                                      "last_fail": None, "fail_since": None})
+    now = time.time()
+    h["status"] = status
+    if ok:
+        h.update(ok=h["ok"] + 1, streak=0, last_ok=now, fail_since=None)
+    else:
+        h.update(fail=h["fail"] + 1, streak=h["streak"] + 1, last_fail=now, fail_since=h["fail_since"] or now)
+
+
+def _http_retryable(exc: Exception) -> bool:
+    if isinstance(exc, HttpStatusError):
+        return exc.status == 429 or exc.status >= 500
+    if isinstance(exc, (asyncio.TimeoutError, OSError)):
+        return True
+    name = type(exc).__name__
+    return any(x in name for x in ("ClientConnector", "ServerDisconnected", "ClientOSError", "ClientPayload",
+                                   "ServerTimeout", "ClientConnection"))
+
+
+async def _http_get_json(url: str, params: dict, session=None) -> dict:
+    """The real GET behind _get_json: up to HTTP_RETRIES retries with backoff, HTTP_HOST_LIMIT calls per host at a
+    time, and DATA_HEALTH kept per host. Raises HttpStatusError (or the network error) when it gives up."""
+    from urllib.parse import urlsplit
+    host = urlsplit(url).hostname or "?"
+    last: Optional[Exception] = None
+    for attempt in range(HTTP_RETRIES + 1):
+        if attempt:
+            hint = getattr(last, "retry_after", None)
+            wait = hint if hint is not None and 0 <= hint <= 5 else 0.6 * 2 ** (attempt - 1)
+            await asyncio.sleep(wait + (attempt * 0.137) % 0.3)
+        try:
+            async with _http_sem(host):
+                sess = session or _http_session()
+                async with sess.get(url, params=params) as resp:
+                    status = resp.status
+                    if status >= 400:
+                        ra = None
+                        try:
+                            ra = float((resp.headers or {}).get("Retry-After"))
+                        except (TypeError, ValueError):
+                            pass
+                        raise HttpStatusError(status, url, ra)
+                    data = await resp.json(content_type=None)
+            _health_note(host, True, status)
+            return data
+        except Exception as exc:
+            last = exc
+            if not _http_retryable(exc):
+                if isinstance(exc, HttpStatusError):
+                    _health_note(host, True, exc.status)     # the host answered; the thing just isn't there
+                raise
+    _health_note(host, False, getattr(last, "status", type(last).__name__))
+    raise last
 
 
 def simplify_events(raw: dict) -> list[dict]:
@@ -2462,7 +2557,8 @@ def simplify_events(raw: dict) -> list[dict]:
             except (TypeError, ValueError):
                 score = None
             teams.append({"id": str(t.get("id") or t.get("displayName")), "score": score,
-                          "name": t.get("displayName") or "",
+                          "name": t.get("displayName") or "", "abbr": t.get("abbreviation") or "",
+                          "color": t.get("color") or "", "alt_color": t.get("alternateColor") or "",
                           "linescores": [x.get("value") for x in c.get("linescores") or [] if isinstance(x, dict)],
                           "records": {r.get("name") or r.get("type") or "?": r.get("summary") for r in c.get("records") or []
                                       if r.get("summary")},
@@ -2504,13 +2600,30 @@ async def fetch_scoreboard(path: str, day: datetime, params: Optional[dict] = No
     try:
         raw = await _get_json(ESPN.format(path=path), {"dates": key[1], **extra})
         events = simplify_events(raw)
-        # Re-check every 2 minutes while games are on; finished days rarely change.
-        ttl = 120 if any(not e["final"] for e in events) else (6 * 3600 if events else 600)
+        ttl = scoreboard_ttl(events)
     except Exception:
         log.warning("Scoreboard lookup failed for %s %s", path, key[1])
-        events, ttl = [], 300
+        events, ttl = [], 180
     _score_cache[key] = (time.monotonic() + ttl, events)
     return events
+
+
+def scoreboard_ttl(events: list[dict], now: Optional[datetime] = None) -> int:
+    """Seconds to keep a day's scoreboard: 1 minute while a game is on, 2 when one starts within 2 hours (or
+    should have started), 15 minutes when everything left is later than that, 6 hours once everything is final,
+    10 minutes for a day with no games (a game added late, or a feed that answered empty)."""
+    now = now or datetime.now(timezone.utc)
+    if not events:
+        return 600
+    if any(e.get("state") == "in" for e in events):
+        return 60
+    pending = [e for e in events if not e.get("final")]
+    if not pending:
+        return 6 * 3600
+    starts = [event_time(e) for e in pending]
+    if any(t is None or t <= now + timedelta(hours=2) for t in starts):
+        return 120          # starting soon, or should have started (ESPN can lag a few minutes)
+    return 900
 
 
 def norm_team(text: str) -> str:
@@ -2584,16 +2697,25 @@ def paren_teams(text: str) -> list[str]:
 
 
 async def find_games(team_text: str, leagues: list[str], start: datetime) -> list[tuple[dict, int]]:
-    """Games in the days around `start` that this team played: [(event, index of the team)]."""
+    """Games in the days around `start` that this team played: [(event, index of the team)]. Looks from a day
+    before to three after, and out to TRACK_DAYS_AHEAD days only when that finds nothing from 18 hours before
+    `start` on (a Monday leg on a Thursday slate). A soccer team is the same team in every competition."""
     matches, team_ids = [], set()
-    for path in leagues:
-        for offset in range(-1, 4):
-            day = (start + timedelta(days=offset)).astimezone(TZ)
-            for ev in await fetch_scoreboard(path, day):
-                for i, team in enumerate(ev["teams"]):
-                    if team_matches(team_text, team):
-                        matches.append((ev, i))
-                        team_ids.add((path, team["id"]))
+    floor = start - timedelta(hours=18)
+    for offsets in (range(-1, 4), range(4, TRACK_DAYS_AHEAD + 1)):
+        days = [(start + timedelta(days=o)).astimezone(TZ) for o in offsets]
+        for path in leagues:
+            boards = await asyncio.gather(*(fetch_scoreboard(path, d) for d in days))
+            for evs in boards:
+                for ev in evs:
+                    for i, team in enumerate(ev["teams"]):
+                        if team_matches(team_text, team):
+                            ev.setdefault("path", path)
+                            matches.append((ev, i))
+                            team_ids.add(("soccer" if path.startswith("soccer/") else path, team["id"]))
+        if any((event_time(ev) or floor) >= floor for ev, _ in matches):
+            break
+    track_note_miss(team_text, start, "many" if len(team_ids) > 1 else ("none" if not team_ids else ""))
     if len(team_ids) != 1:
         return []  # nobody, or more than one team answers to that name
     seen, unique = set(), []
@@ -2617,8 +2739,10 @@ def pick_game(games: list[tuple[dict, int]], logged: datetime) -> Optional[tuple
     for ev, i in games:
         try:
             when = datetime.fromisoformat(ev["date"].replace("Z", "+00:00"))
-        except ValueError:
+        except (ValueError, TypeError, AttributeError):
             continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
         if when >= floor:
             first = (ev, i)
             break
@@ -2991,9 +3115,7 @@ def units_note(guild_id: int, p) -> tuple[str, Optional[str]]:
     u = p["cost"] / b["unit_size"]
     warn = None
     if p["status"] == "open" and u > BIG_BET_UNITS:
-        share = p["cost"] / b["current"] * 100 if b["current"] > 0 else 100
-        warn = (f"This is {u:.1f} units, {share:.0f}% of {p['bettor_name']}'s "
-                f"{money(b['current'])} bankroll.")
+        warn = f"This is {u:.1f} units, a big one for {p['bettor_name']}."
     return f" · {u:.1f}u", warn
 
 
@@ -4625,6 +4747,8 @@ def parse_prop_leg(text: str) -> Optional[dict]:
     """'Victor Wembanyama More 23.5 PRA', 'Josh Allen over 249.5 pass yds', 'Bam 10.5+ points',
     'No - Josh Allen 250+ passing yards', 'Christian McCaffrey anytime TD'. None if it isn't a player prop."""
     raw = (text or "").strip()
+    if len(raw) > 300:
+        return None
     t = raw
     negate = False
     m = re.search(r"\((yes|no)\b[^)]*\)\s*$", t, re.I)
@@ -4698,27 +4822,30 @@ TEAM_ABBRS = {"atl", "bos", "bkn", "cha", "chi", "cle", "dal", "den", "det", "gs
 # ---- ESPN lookups ----------------------------------------------------------------------
 
 async def espn_search_players(name: str, paths: list[str]) -> list[dict]:
-    """[{id, name, norm, path, team, team_abbr}] for players matching this name in these leagues."""
+    """[{id, name, norm, path, team, team_abbr, team_id, position, national}] for players matching this name in
+    these leagues. SOCCER_ANY in `paths` lets in soccer players (path 'soccer/<their league>'). A name with just an
+    initial ('r dixon') is looked up by last name, since ESPN's search wants a real first name."""
     key = (name, ",".join(sorted(paths)))
     hit = _player_cache.get(key)
     if hit and hit[0] > time.monotonic():
         return hit[1]
-    out: list[dict] = []
-    try:
-        raw = await _get_json(ESPN_SEARCH, {"query": name, "limit": 10, "type": "player"})
-    except Exception:
-        log.warning("ESPN player search failed for %r", name)
+    items = await track_search_raw(name)
+    if items is None:
         return []
-    slug_to_path = {v: k for k, v in LEAGUE_SLUGS.items()}
-    for it in raw.get("items") or []:
-        path = slug_to_path.get(it.get("defaultLeagueSlug") or "")
-        if path not in paths:
-            continue
-        team = ((it.get("teamRelationships") or [{}])[0].get("core") or {})
-        out.append({"id": str(it.get("id")), "name": it.get("displayName") or "", "norm": norm_name(it.get("displayName")),
-                    "path": path, "team": team.get("displayName") or ((it.get("teamRelationships") or [{}])[0]
-                                                                     .get("displayName") or ""),
-                    "team_abbr": team.get("abbreviation") or ""})
+    out = track_search_items(items, paths)
+    q = name.split()
+    if len(q) >= 2 and len(q[0]) == 1 and len(q[-1]) >= 3 and not any(name_score(name, f["norm"]) for f in out):
+        seen = {(f["id"], f["path"]) for f in out}
+        fams = {TRACK_SPORT_OF.get(track_family(p)) for p in paths} - {None}
+        sports = [None] + (sorted(fams) if len(fams) <= 3 else [])    # a broad lookup (autocomplete) stays at one call
+        for sport in sports:
+            more = await track_search_raw(q[-1], 25, sport)
+            for f in track_search_items(more or [], paths):
+                if (f["id"], f["path"]) not in seen:
+                    seen.add((f["id"], f["path"]))
+                    out.append(f)
+            if any(name_score(name, f["norm"]) for f in out):
+                break
     _player_cache[key] = (time.monotonic() + 6 * 3600, out)
     return out
 
@@ -4754,10 +4881,11 @@ async def fetch_summary(path: str, event_id: str) -> Optional[dict]:
         raw = await _get_json(ESPN_SUMMARY.format(path=path), {"event": event_id})
     except Exception:
         log.warning("ESPN summary failed for %s %s", path, event_id)
+        _summary_cache[key] = (time.monotonic() + 45, None)    # don't hammer a game page that isn't answering
         return None
     box = parse_boxscore(raw)
-    final = box["state"] == "post"
-    _summary_cache[key] = (time.monotonic() + (6 * 3600 if final else 60), box)
+    ttl = {"post": 6 * 3600, "in": 60}.get(box["state"], 120)
+    _summary_cache[key] = (time.monotonic() + ttl, box)
     return box
 
 
@@ -4767,14 +4895,16 @@ def _period_text(status: dict) -> str:
 
 
 def parse_boxscore(raw: dict) -> dict:
-    """{state, detail, season_type, players: [{name, norm, team, dnp, reason, groups: {group: {key: str}}}]}"""
+    """{state, detail, season_type, players: [{name, norm, team, team_id, dnp, reason, groups: {group: {key: str}}}]}
+    Football kickers also get a 'scoring' group with their made field goals' yards (from the scoring plays)."""
     comp = ((raw.get("header") or {}).get("competitions") or [{}])[0]
     status = comp.get("status") or {}
     state = (status.get("type") or {}).get("state") or "pre"
     season_type = ((raw.get("header") or {}).get("season") or {}).get("type")
     players: dict[str, dict] = {}
     for team_block in (raw.get("boxscore") or {}).get("players") or []:
-        abbr = (team_block.get("team") or {}).get("abbreviation") or ""
+        tinfo = team_block.get("team") or {}
+        abbr = tinfo.get("abbreviation") or ""
         for gi, grp in enumerate(team_block.get("statistics") or []):
             gname = (grp.get("name") or grp.get("type") or "main").lower()
             keys = grp.get("keys") or grp.get("names") or []
@@ -4784,6 +4914,7 @@ def parse_boxscore(raw: dict) -> dict:
                 pid = str(ath.get("id") or ath.get("displayName"))
                 rec = players.setdefault(pid, {"id": pid, "name": ath.get("displayName") or "",
                                                "norm": norm_name(ath.get("displayName") or ""), "team": abbr,
+                                               "team_id": str(tinfo.get("id") or ""),
                                                "dnp": True, "reason": "", "groups": {}})
                 stats = a.get("stats") or []
                 if a.get("reason"):
@@ -4799,6 +4930,14 @@ def parse_boxscore(raw: dict) -> dict:
                     if i < len(labels):
                         vals.setdefault("#" + str(labels[i]).upper(), str(v))
                 rec["groups"][gname] = vals
+    fg = track_field_goals(raw)
+    for kicker, yards in fg.items():
+        scored = [(name_score(kicker, pl["norm"]), pl) for pl in players.values()]
+        best = max((sc for sc, _ in scored), default=0)
+        top = [pl for sc, pl in scored if sc == best and sc >= 2]
+        if len(top) == 1:
+            top[0]["groups"]["scoring"] = {"fieldgoalyards": str(sum(yards)), "fieldgoalsmade": str(len(yards)),
+                                           "longfieldgoal": str(max(yards))}
     return {"state": state, "detail": _period_text(status), "season_type": season_type,
             "players": list(players.values())}
 
@@ -4820,8 +4959,8 @@ def _num_from(v: str, second: bool = False) -> Optional[float]:
 def component_value(groups: dict[str, dict], comp: str) -> Optional[float]:
     keys, labels, pref = C[comp]
     if pref and pref not in groups:
-        if pref in ("pitching", "batting", "goalies"):
-            return None          # not a pitcher / hitter / goalie in this game
+        if pref in ("pitching", "batting", "goalies") or pref.startswith("core."):
+            return None          # not a pitcher / hitter / goalie in this game, or the per-game feed isn't loaded
         return 0.0               # football: no line in that group means none of that stat (a WR with 0 carries)
     order = [pref] if pref else list(groups)
     for g in order:
@@ -4889,72 +5028,22 @@ def judge_prop(leg: dict, value: float) -> str:
 
 
 async def prop_game(leg: dict, paths: list[str], logged: datetime) -> Optional[tuple[str, dict, dict]]:
-    """(league path, scoreboard event, player) for the game this prop is on, or None."""
-    fams = {STATS[k][1] for k in leg["stats"]}
-    paths = [p for p in paths if FAMILY_OF_PATH.get(p) in fams]
-    if not paths:
-        return None
-    cands = await resolve_player(leg["player"], paths)
-    games = []
-    for c in cands:
-        found = pick_game(await find_games(c["team"], [c["path"]], logged), logged) if c["team"] else None
-        if found:
-            games.append((c["path"], found[0], c))
-    if len({g[1]["id"] for g in games}) > 1:
-        best = min(paths.index(g[0]) for g in games)
-        games = [g for g in games if paths.index(g[0]) == best]
-    if len({g[1]["id"] for g in games}) != 1:
-        return None   # no game, or the name fits players in different games
-    return games[0]
+    """(league path, scoreboard event, player) for the game this prop is on, or None (the reason is kept for
+    track_reason)."""
+    found = await track_find_prop(leg, paths, logged)
+    return (found["path"], found["ev"], found["cand"]) if found["ok"] else None
 
 
 async def prop_status(leg: dict, paths: list[str], logged: datetime) -> Optional[dict]:
     """Live or final status of a player prop:
-    {result: hit/miss/push/None, value, line, stat, player, detail, state, why, event, path, preseason}"""
+    {result: hit/miss/push/None, value, line, stat, player, team, detail, state, why, event, path, preseason,
+     stat_key, track, track_note}, or None when its game can't be found (track_reason says why)."""
     if leg.get("combo"):
         return await combo_status(leg, paths, logged)
-    found = await prop_game(leg, paths, logged)
-    if not found:
+    found = await track_find_prop(leg, paths, logged)
+    if not found["ok"]:
         return None
-    path, ev, cand = found
-    fam = FAMILY_OF_PATH[path]
-    stat_key = next((k for k in leg["stats"] if STATS[k][1] == fam), None)
-    if stat_key is None:
-        return None
-    out = {"result": None, "value": None, "line": leg["line"], "stat": STATS[stat_key][0], "player": cand["name"],
-           "state": ev.get("state", "pre"), "detail": "", "why": "", "event": ev, "path": path,
-           "preseason": ev.get("season_type") == 1, "stat_key": stat_key}
-    if ev.get("state") == "pre":
-        return out
-    box = await fetch_summary(path, ev["id"])
-    if not box:
-        return out
-    out["state"], out["detail"] = box["state"], box["detail"]
-    if box.get("season_type") == 1:
-        out["preseason"] = True
-    pl = find_in_box(box, norm_name(cand["name"])) or find_in_box(box, leg["player"])
-    if pl is None:
-        if box["state"] == "post":
-            out["why"] = f"{cand['name']} isn't in the box score"
-        return out
-    if pl["dnp"]:
-        if box["state"] == "post":
-            out["result"] = "push"
-            out["why"] = f"{pl['name']} didn't play" + (f" ({pl['reason'].lower()})" if pl["reason"] else "")
-        return out
-    got = stat_value(pl["groups"], stat_key)
-    if got is None:
-        return out
-    value, detail = got
-    out["value"] = value
-    out["why"] = f"{pl['name']} {value:g} {STATS[stat_key][0]}{detail}"
-    if box["state"] == "post":
-        out["result"] = judge_prop(leg, value)
-    elif (leg["side"] == "over") != leg["negate"] and value > leg["line"]:
-        out["result"] = "hit"        # an over that's already cleared can't lose
-    elif (leg["side"] == "under") != leg["negate"] and value > leg["line"]:
-        out["result"] = "miss"       # an under that's already gone over can't win
-    return out
+    return await track_status_in(leg, found["path"], found["ev"], found["cand"], found["stat_key"], found.get("i"))
 
 
 def prop_of(text: str) -> Optional[dict]:
@@ -5036,23 +5125,28 @@ def simple_live_result(leg: dict, ev: dict, i: Optional[int]) -> Optional[str]:
 
 async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
     """One entry per leg (or the pick itself when it has no legs):
-    {n, text, status, line (what to show), event, path, final}"""
+    {n, text, status, line (what to show), event, path, final, track, track_note, track_info}.
+    `track`: 'tracked' (the free data follows it), 'manual' (a stat ESPN doesn't publish), 'unknown' (no player or
+    game found) or 'broken' (not a pick at all); `track_note` says why in plain words."""
     legs = get_legs(p["id"]) if legs is None else legs
     items = [(1, p["description"], p["status"] if p["status"] != "open" else "open")] if not legs else \
         [(leg["idx"], leg["text"], leg["status"]) for leg in legs]
     leagues = leagues_for(p["sport"])
-    prop_paths = prop_paths_for(p)
+    prop_paths = prop_paths_for(p) + [SOCCER_ANY]
     logged = await pick_anchor_live(p)
     context_teams = [x["team"] for x in (parse_simple_leg(t) for _, t, _ in items) if x and "team" in x]
     out = []
     for n, text, status in items:
         entry = {"n": n, "text": text, "status": status, "line": "", "event": None, "path": None, "live": None,
                  "in_play": False, "num": None, "sub": "", "decided": None, "why": "", "margin": None,
-                 "preseason": False}
+                 "preseason": False, "track": "unknown", "track_note": "", "track_info": {}}
         simple = parse_simple_leg(text) if leagues else None
         prop = prop_of(text) if prop_paths else None
         try:
-            found = None
+            found, team = None, None
+            if track_is_title(text):
+                entry["track"], entry["track_note"] = "broken", "This leg is the slip's title, not a pick: tap ✏️ Fix"
+                simple = prop = None
             if simple:
                 team = simple.get("team") or (context_teams[0] if len(set(context_teams)) == 1 else None)
                 found = pick_game(await find_games(team, leagues, logged), logged) if team else None
@@ -5066,6 +5160,9 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
                     now_r = simple_live_result(simple, ev, None if simple["kind"] == "total" else i)
                     entry["live"] = {"hit": "ahead", "miss": "behind"}.get(now_r or "", None)
                     entry["preseason"] = ev.get("season_type") == 1
+                    entry["track"] = "tracked"
+                    entry["track_info"] = {"team": ev["teams"][i]["name"], "game": short_game(ev),
+                                           "start": ev.get("date") or "", "path": ev.get("path") or ""}
                     if ev.get("final") and all(t["score"] is not None for t in ev["teams"]):
                         ii = None if simple["kind"] == "total" else i
                         try:
@@ -5075,11 +5172,19 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
                         if entry["final"]:
                             entry["decided"], entry["why"] = entry["final"], score_line(ev)
                             entry["margin"] = simple_margin(simple, ev, ii)
+                else:
+                    entry["track_note"] = (track_team_note(team, logged) if team else
+                                           "No team named on this leg: add one, like 'Over 44.5 (Bills vs Dolphins)'")
             elif prop:
                 st = await prop_status(prop, prop_paths, logged)
                 if st:
                     entry["event"], entry["path"] = st["event"], st["path"]
                     entry["in_play"] = st["state"] == "in"
+                    entry["track"], entry["track_note"] = st.get("track") or "tracked", st.get("track_note") or ""
+                    entry["track_info"] = {"player": st["player"], "team": st.get("team") or "", "stat": st["stat"],
+                                           "game": short_game(st["event"]) if st["event"] else "",
+                                           "start": (st["event"] or {}).get("date") or "", "path": st["path"],
+                                           "value": st["value"], "line": st["line"]}
                     entry["sub"] = (st["detail"] if st["state"] == "in" and st["detail"] else
                                     short_game(st["event"]) if st["event"] else st["why"] or "")
                     if st["value"] is not None:
@@ -5102,10 +5207,16 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
                         entry["why"] = st["why"] + ("" if st["state"] == "post" else " (already decided, game still on)")
                         if st["value"] is not None:
                             entry["margin"] = bettor_margin(prop, st["value"])
+                else:
+                    entry["track"], entry["track_note"] = track_reason(prop, logged) or \
+                        ("unknown", f"Couldn't find {prop['display']}'s game")
+            elif entry["track"] != "broken":
+                entry["track"], entry["track_note"] = track_unread(p, text)
         except Exception:
             log.exception("Progress lookup failed for %r", text)
+            entry["track"], entry["track_note"] = "unknown", "The lookup hit an error: it tries again next time"
         if status == "open" and not entry["event"] and not entry["sub"] and not entry["line"]:
-            entry["sub"] = "✋ Not in the free stats: I'll look it up or ask you once the games are done"
+            entry["sub"] = track_sub(entry)
         out.append(entry)
     return out
 
@@ -8855,37 +8966,8 @@ def claudia_embed(guild_id: int) -> discord.Embed:
 
 
 def power_rankings(guild_id: int) -> list[str]:
-    now = datetime.now(timezone.utc)
-    week = iso(now - timedelta(days=7))
-    month = iso(now - timedelta(days=30))
-    s7 = {s["key"]: s for s in compute_stats(guild_id, since=week)}
-    s30 = {s["key"]: s for s in compute_stats(guild_id, since=month)}
-    rows = []
-    for k, s in s30.items():
-        if s["wins"] + s["losses"] == 0:
-            continue
-        w = s7.get(k)
-        score = s["roi"] * 0.5 + (w["roi"] if w else 0) * 0.5 + min(10, s["wins"] + s["losses"])
-        rows.append((score, k, s, w))
-    rows.sort(reverse=True, key=lambda r: r[0])
-    lines = []
-    for n, (_, k, s, w) in enumerate(rows[:10], 1):
-        streak = current_streak(guild_id, k)
-        if w and w["net"] > 0 and s["net"] > 0:
-            blurb = "green week, green month. Tail with confidence."
-        elif w and w["net"] > 0:
-            blurb = "turning it around this week."
-        elif w and w["net"] < 0 and s["net"] > 0:
-            blurb = "cooling off after a good month."
-        elif not w:
-            blurb = "quiet this week."
-        else:
-            blurb = "rough stretch. Fade candidate."
-        sports = breakdown([p for p in settled_picks(guild_id, k, month)], lambda p: sport_group(p["sport"]))
-        if sports and sports[0][0] != "No sport":
-            blurb += f" Living on {sports[0][0]}."
-        lines.append(f"**{n}. {s['name']}** · 30d {signed(s['net'])}" + (f" · {streak}" if streak else "") + f": {blurb}")
-    return lines
+    """The weekly recap's power rankings field: the same fair composite as /power (see power_lines)."""
+    return power_lines(guild_id)
 
 
 def rank_movement(guild_id: int, key_order: list[str], since: Optional[str], until_: Optional[str], **kw) -> dict[str, int]:
@@ -11045,6 +11127,7 @@ async def status_embed(client) -> discord.Embed:
                                                                              if CLAUDE_DAILY_CAP else ""))
     checks.append("✅ Dashboard" if dashboard_url() else "⚪ Dashboard off")
     e.add_field(name="Connections", value=" · ".join(checks), inline=False)
+    e.add_field(name="Live data", value=clip(data_health_line(), 1000), inline=False)
     size = os.path.getsize(DB_PATH) / 1024 if os.path.exists(DB_PATH) else 0
     n = db().execute("SELECT COUNT(*) FROM picks").fetchone()[0]
     e.add_field(name="Data", value=f"{n} picks · {size:,.0f} KB" + ("" if DB_PATH.startswith("/data") else " ⚠️ not on /data"))
@@ -14678,12 +14761,11 @@ async def leg_games(p, text: str, start: datetime) -> list[dict]:
     if not prop:
         return []
     first = (prop.get("combo") or [prop])[0]
-    fams = {STATS[k][1] for k in prop["stats"]}
-    paths = [x for x in prop_paths_for(p) if FAMILY_OF_PATH.get(x) in fams]
-    cands = await resolve_player(first["player"], paths)
-    if len(cands) != 1 or not cands[0]["team"]:
+    cands = await track_candidates(first, prop_paths_for(p) + [SOCCER_ANY])
+    if len(cands) != 1 or not cands[0][0]["team"]:
         return []
-    return [ev for ev, _ in await find_games(cands[0]["team"], [cands[0]["path"]], start)]
+    cand = cands[0][0]
+    return [ev for ev, _ in await find_games(cand["team"], track_leagues_for(cand), start)]
 
 
 async def infer_slate(p) -> Optional[str]:
@@ -14799,19 +14881,31 @@ def parse_combo(t: str, negate: bool) -> Optional[dict]:
 
 
 async def combo_status(leg: dict, paths: list[str], logged: datetime) -> Optional[dict]:
-    parts = []
-    for c in leg["combo"]:
-        st = await prop_status(dict(c, side="over", line=1e9, negate=False), paths, logged)
-        if st is None:
-            return None
-        parts.append(st)
+    """Two players' stat added up. A player the search can't find ('B. Anger') is looked for in the other
+    player's game, where combos almost always come from."""
+    raw = [dict(c, side="over", line=1e9, negate=False) for c in leg["combo"]]
+    parts = [await prop_status(c, paths, logged) for c in raw]
+    known = next((x for x in parts if x and x.get("event") and track_family(x["path"]) != "soccer"), None)
+    for k, st in enumerate(parts):
+        if st is None and known is not None:
+            parts[k] = await track_status_in(raw[k], known["path"], known["event"],
+                                             {"name": raw[k]["display"], "team": "", "id": ""},
+                                             known["stat_key"], None, guessed=True)
+    if any(x is None for x in parts):
+        k = next(i for i, x in enumerate(parts) if x is None)
+        why = track_reason(raw[k], logged) or ("unknown", f"Couldn't find {raw[k]['display']}'s game")
+        track_remember(leg, logged, *why)
+        return None
     first = parts[0]
     states = [x["state"] for x in parts]
     state = "in" if "in" in states else ("pre" if "pre" in states else "post")
+    manual = next((x for x in parts if x.get("track") == "manual"), None)
     out = dict(first, state=state, line=leg["line"], result=None, value=None, why="",
                player=" + ".join(x["player"] for x in parts),
+               team=" / ".join(dict.fromkeys(x.get("team") or "" for x in parts if x.get("team"))),
                detail=next((x["detail"] for x in parts if x["state"] == "in"), first["detail"]),
-               preseason=any(x["preseason"] for x in parts))
+               preseason=any(x["preseason"] for x in parts),
+               track="manual" if manual else "tracked", track_note=manual["track_note"] if manual else "")
     if state == "post" and any(x["result"] == "push" and x["value"] is None for x in parts):
         out["result"], out["why"] = "push", "; ".join(x["why"] for x in parts if x["why"]) or "a player didn't play"
         return out
@@ -20163,6 +20257,3358 @@ def sec_forget_user(guild_id: int, user_id: int, pick_ids: list[int]) -> None:
                 pass
 
 
+# ==========================================================================
+# r21 track: the live-tracking data engine. Soccer and per-game stats, position-aware stats, field-goal yards,
+# a reason for every leg that isn't tracked, data-feed health and outage notes, the /track doctor.
+# ==========================================================================
+
+TRACK_DAYS_AHEAD = 6          # how far past the slate a leg's game can be (a Monday leg on a Thursday slate)
+TRACK_DOWN_MIN = 10           # minutes of ESPN failing before the audit channels hear about it
+TRACK_RECHECK_GAP = 20        # seconds between "Re-check now" taps on one slip
+SOCCER_ANY = "soccer/*"       # in a paths list: soccer players may match (their path is 'soccer/<league slug>')
+FAMILY_OF_PATH[SOCCER_ANY] = "soccer"
+# Where a soccer player's games can be: a national-team player's competitions, or a club's cups on top of its league.
+SOCCER_NATIONAL = ["fifa.friendly", "uefa.nations", "fifa.worldq.uefa", "fifa.worldq.conmebol",
+                   "fifa.worldq.concacaf", "concacaf.nations.league"]
+SOCCER_CLUB_EXTRA = ["uefa.champions", "uefa.europa", "uefa.europa.conf"]
+TRACK_SPORT_OF = {"basketball": "basketball", "football": "football", "baseball": "baseball", "hockey": "hockey",
+                  "soccer": "soccer"}
+TRACK_CORE = ("https://sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/events/{eid}/competitions/{eid}"
+              "/competitors/{tid}/roster/{aid}/statistics/0")
+
+
+def track_family(path: Optional[str]) -> Optional[str]:
+    """'basketball', 'football', ... for a league path, including any 'soccer/<slug>'."""
+    if not path:
+        return None
+    return FAMILY_OF_PATH.get(path) or ("soccer" if path.startswith("soccer/") else None)
+
+
+def track_leagues_for(cand: dict) -> list[str]:
+    """The scoreboards to look for this player's team on."""
+    path = cand["path"]
+    if not path.startswith("soccer/"):
+        return [path]
+    extra = SOCCER_NATIONAL if cand.get("national") else SOCCER_CLUB_EXTRA
+    return list(dict.fromkeys([path] + ["soccer/" + x for x in extra]))
+
+
+# ---- more stats: what PrizePicks offers that the free box scores and per-game feed can grade ----------------
+
+C.update({
+    "3pa": (("threePointFieldGoalsMade-threePointFieldGoalsAttempted#2",), ("3PT#2",), None),
+    "fga": (("fieldGoalsMade-fieldGoalsAttempted#2",), ("FG#2",), None),
+    "fg_yds": (("fieldGoalYards",), (), "scoring"),
+    "sacked": (("sacks-sackYardsLost",), ("SACKS",), "passing"),
+    "nhl_ga": (("goalsAgainst",), ("GA",), "goalies"),
+    "manual": ((), (), "core.never"),          # a stat ESPN doesn't publish: never has a value
+})
+# ESPN's per-game player feed (sports.core.api): baseball extras and everything soccer
+for _comp, _name, _grp in (
+        ("c_h", "hits", "batting"), ("c_2b", "doubles", "batting"), ("c_3b", "triples", "batting"),
+        ("c_hr", "homeRuns", "batting"), ("c_r", "runs", "batting"), ("c_rbi", "RBIs", "batting"),
+        ("c_bb", "walks", "batting"), ("c_hbp", "hitByPitch", "batting"), ("c_sb", "stolenBases", "batting"),
+        ("c_tb", "totalBases", "batting"), ("c_win", "wins", "pitching"), ("c_qs", "qualityStarts", "pitching"),
+        ("c_er", "earnedRuns", "pitching"), ("c_pk", "strikeouts", "pitching"), ("c_outs", "thirdInnings", "pitching"),
+        ("c_pitches", "pitches", "pitching"),
+        ("s_g", "totalGoals", "soccer"), ("s_a", "goalAssists", "soccer"), ("s_sh", "totalShots", "soccer"),
+        ("s_sot", "shotsOnTarget", "soccer"), ("s_shast", "shotAssists", "soccer"), ("s_pass", "totalPasses", "soccer"),
+        ("s_clr", "totalClearance", "soccer"), ("s_drib", "totalContest", "soccer"), ("s_dribw", "wonContest", "soccer"),
+        ("s_tkl", "totalTackles", "soccer"), ("s_sv", "saves", "soccer"), ("s_ga", "goalsConceded", "soccer"),
+        ("s_fc", "foulsCommitted", "soccer"), ("s_cross", "totalCrosses", "soccer")):
+    C[_comp] = ((_name,), (), "core." + _grp)
+
+STATS.update({
+    # basketball
+    "threes_att": ("3-PT Attempted", "basketball", [("3pa", 1)],
+                   ["3-pt attempted", "3pt attempted", "3-pointers attempted", "3 pointers attempted",
+                    "three pointers attempted", "3pa"]),
+    "fga": ("FG Attempted", "basketball", [("fga", 1)], ["fg attempted", "field goals attempted", "fga"]),
+    # football
+    "pass_rush_rec_yds": ("Pass+Rush+Rec Yds", "football", [("pass_yds", 1), ("rush_yds", 1), ("rec_yds", 1)],
+                          ["pass+rush+rec yds", "pass+rush+rec yards", "passing+rushing+receiving yards"]),
+    "fg_yds": ("FG Yards", "football", [("fg_yds", 1)], ["field goal yards", "field goal yds", "fg yards", "fg yds"]),
+    "sacked": ("Sacks Taken", "football", [("sacked", 1)], ["sacks taken", "times sacked"]),
+    # baseball (PrizePicks scoring: 1B 3, 2B 5, 3B 8, HR 10, R/RBI/BB/HBP 2, SB 5; W 6, QS 4, ER -3, K 3, out 1)
+    "total_bases": ("Total Bases", "baseball", [("c_tb", 1)], ["total bases"]),
+    "singles": ("Singles", "baseball", [("c_h", 1), ("c_2b", -1), ("c_3b", -1), ("c_hr", -1)], ["singles"]),
+    "doubles": ("Doubles", "baseball", [("c_2b", 1)], ["doubles"]),
+    "stolen_bases": ("Stolen Bases", "baseball", [("c_sb", 1)], ["stolen bases"]),
+    "hitter_fs": ("Hitter Fantasy Score", "baseball",
+                  [("c_h", 3), ("c_2b", 2), ("c_3b", 5), ("c_hr", 7), ("c_r", 2), ("c_rbi", 2), ("c_bb", 2),
+                   ("c_hbp", 2), ("c_sb", 5)], ["hitter fantasy score", "hitter fantasy points", "hitter fs"]),
+    "pitcher_fs": ("Pitcher Fantasy Score", "baseball",
+                   [("c_win", 6), ("c_qs", 4), ("c_er", -3), ("c_pk", 3), ("c_outs", 1)],
+                   ["pitcher fantasy score", "pitcher fantasy points", "pitcher fs"]),
+    "pitches": ("Pitches Thrown", "baseball", [("c_pitches", 1)], ["pitches thrown", "pitch count"]),
+    # hockey
+    "nhl_goals_allowed": ("Goals Allowed", "hockey", [("nhl_ga", 1)], ["goals allowed", "goals against"]),
+    "ppp": ("Power Play Points", "hockey", [("manual", 1)], ["power play points", "pp points", "ppp"]),
+    # soccer (ESPN's per-game feed)
+    "s_goals": ("Goals", "soccer", [("s_g", 1)], ["goals"]),
+    "s_assists": ("Assists", "soccer", [("s_a", 1)], ["assists"]),
+    "s_goal_assist": ("Goal + Assist", "soccer", [("s_g", 1), ("s_a", 1)],
+                      ["goal + assist", "goals + assists", "goal+assist", "goals+assists"]),
+    "s_shots": ("Shots", "soccer", [("s_sh", 1)], ["shots", "total shots"]),
+    "s_sot": ("Shots On Target", "soccer", [("s_sot", 1)], ["shots on target", "shots on goal"]),
+    "s_shots_assisted": ("Shots Assisted", "soccer", [("s_shast", 1)], ["shots assisted", "shot assists", "key passes"]),
+    "s_passes": ("Passes Attempted", "soccer", [("s_pass", 1)], ["passes attempted", "passes", "pass attempts"]),
+    "s_clearances": ("Clearances", "soccer", [("s_clr", 1)], ["clearances"]),
+    "s_dribbles": ("Attempted Dribbles", "soccer", [("s_drib", 1)],
+                   ["attempted dribbles", "dribbles attempted", "dribble attempts", "dribbles"]),
+    "s_dribbles_won": ("Successful Dribbles", "soccer", [("s_dribw", 1)],
+                       ["successful dribbles", "dribbles completed", "completed dribbles"]),
+    "s_tackles": ("Tackles", "soccer", [("s_tkl", 1)], ["tackles", "total tackles"]),
+    "s_saves": ("Goalie Saves", "soccer", [("s_sv", 1)], ["goalie saves", "saves"]),
+    "s_goals_allowed": ("Goals Allowed", "soccer", [("s_ga", 1)], ["goals allowed", "goals conceded", "goals against"]),
+    "s_fouls": ("Fouls", "soccer", [("s_fc", 1)], ["fouls", "fouls committed"]),
+    "s_crosses": ("Crosses", "soccer", [("s_cross", 1)], ["crosses"]),
+    "s_fantasy": ("Fantasy Score", "soccer", [("manual", 1)], ["soccer fantasy score", "soccer fantasy points"]),
+})
+_ALIAS_INDEX[:] = sorted(((alias, key) for key, (_, _, _, aliases) in STATS.items() for alias in aliases),
+                         key=lambda x: -len(x[0]))
+COMP_SHORT.update({"s_g": "G", "s_a": "A", "c_tb": "TB", "c_win": "W", "c_qs": "QS", "c_er": "ER", "c_pk": "K",
+                   "c_outs": "outs", "c_h": "H", "c_2b": "2B", "c_3b": "3B", "c_hr": "HR"})
+# Stats people bet on that no free feed has: the leg is tracked to its game, then graded by hand or looked up.
+TRACK_MANUAL = {"ppp": "Power Play Points isn't in the free stats: grade by hand",
+                "s_fantasy": "Soccer Fantasy Score isn't in the free stats: grade by hand"}
+# The slip says one stat, the player's position says another: (stats as written, player's sport, positions
+# (None = any), what it really is). A punter's "Pts" on PrizePicks is Punts; a kicker's "Points" is Kicking Points.
+TRACK_REMAP = [
+    ({"points", "nhl_points"}, "football", {"P"}, "punts"),
+    ({"points", "nhl_points"}, "football", {"PK", "K"}, "kick_pts"),
+    ({"fantasy", "nfl_fantasy"}, "baseball", {"SP", "RP", "P"}, "pitcher_fs"),
+    ({"fantasy", "nfl_fantasy"}, "baseball", None, "hitter_fs"),
+    ({"fantasy", "nfl_fantasy"}, "soccer", None, "s_fantasy"),
+]
+
+
+def track_stat_for(stats: list[str], family: Optional[str], position: Optional[str]) -> Optional[str]:
+    """The stat key a leg means for a player of this sport and position, or None if it isn't one of theirs."""
+    native = next((k for k in stats if STATS[k][1] == family), None)
+    if native:
+        return native
+    pos = (position or "").upper()
+    for keys, fam, positions, target in TRACK_REMAP:
+        if fam == family and keys & set(stats) and (positions is None or pos in positions):
+            return target
+    return None
+
+
+def track_needs_core(stat_key: str) -> bool:
+    """True when the stat comes from ESPN's per-game feed rather than the box score."""
+    return any((C[c][2] or "").startswith("core.") for c, _ in STATS[stat_key][2])
+
+
+# ---- player search -------------------------------------------------------------------------------------------
+
+_SEARCH_RAW: dict[tuple, tuple[float, list]] = {}
+
+
+async def track_search_raw(query: str, limit: int = 10, sport: Optional[str] = None) -> Optional[list]:
+    """ESPN's player search, one cached call per query (6 hours). None when ESPN didn't answer."""
+    key = (query, limit, sport)
+    hit = _SEARCH_RAW.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    params = {"query": query, "limit": limit, "type": "player"}
+    if sport:
+        params["sport"] = sport
+    try:
+        raw = await _get_json(ESPN_SEARCH, params)
+    except Exception:
+        log.warning("ESPN player search failed for %r", query)
+        return None
+    items = raw.get("items") or []
+    _SEARCH_RAW[key] = (time.monotonic() + 6 * 3600, items)
+    if len(_SEARCH_RAW) > 3000:
+        for k in list(_SEARCH_RAW)[:1500]:
+            _SEARCH_RAW.pop(k, None)
+    return items
+
+
+def track_search_items(items: list, paths: list[str]) -> list[dict]:
+    """Search results that play in one of these leagues (any soccer league when SOCCER_ANY is in `paths`)."""
+    slug_to_path = {v: k for k, v in LEAGUE_SLUGS.items()}
+    soccer_ok = SOCCER_ANY in paths
+    out = []
+    for it in items:
+        slug = str(it.get("defaultLeagueSlug") or "").strip()
+        path = slug_to_path.get(slug) or slug_to_path.get(slug.lower())
+        if path is None and soccer_ok and slug and (it.get("sport") == "soccer" or
+                                                    (not it.get("sport") and "." in slug)):
+            path = "soccer/" + slug.lower()
+        if path is None or (path not in paths and not (soccer_ok and path.startswith("soccer/"))):
+            continue
+        rel = (it.get("teamRelationships") or [{}])[0] or {}
+        core = rel.get("core") or {}
+        out.append({"id": str(it.get("id")), "name": it.get("displayName") or "", "norm": norm_name(it.get("displayName")),
+                    "path": path, "team": core.get("displayName") or rel.get("displayName") or "",
+                    "team_abbr": core.get("abbreviation") or "", "team_id": str(core.get("id") or ""),
+                    "position": str((it.get("position") or {}).get("abbreviation") or ""),
+                    "national": "national team" in str(rel.get("displayName") or "").lower()})
+    return out
+
+
+async def track_candidates(leg: dict, paths: list[str]) -> list[tuple[dict, str]]:
+    """[(player, stat key)] for everyone this leg's name could be, keeping only players the stat fits."""
+    stats = set(leg["stats"])
+    fams = {STATS[k][1] for k in stats} | {fam for keys, fam, _, _ in TRACK_REMAP if keys & stats}
+    use = [x for x in paths if track_family(x) in fams]
+    if "soccer" in fams and SOCCER_ANY not in use and set(PROP_PATHS) <= set(paths):
+        use.append(SOCCER_ANY)        # callers that pass every league mean every sport
+    if not use:
+        return []
+    out = []
+    for cand in await resolve_player(leg["player"], use):
+        k = track_stat_for(leg["stats"], track_family(cand["path"]), cand.get("position"))
+        if k:
+            out.append((cand, k))
+    return out
+
+
+# ---- why a leg isn't tracked: worked out while looking, kept for the receipts and /track -----------------------
+
+_TRACK_REASONS: dict[tuple, tuple[float, str, str]] = {}
+_TRACK_MISS: dict[tuple, str] = {}
+
+
+def _track_key(leg: dict, logged: datetime) -> tuple:
+    return (leg["player"], tuple(leg["stats"]), logged.isoformat()[:13])
+
+
+def track_remember(leg: dict, logged: datetime, track: str, note: str) -> None:
+    _TRACK_REASONS[_track_key(leg, logged)] = (time.monotonic() + 900, track, note)
+    if len(_TRACK_REASONS) > 2000:
+        for k in list(_TRACK_REASONS)[:1000]:
+            _TRACK_REASONS.pop(k, None)
+
+
+def track_reason(leg: dict, logged: datetime) -> Optional[tuple[str, str]]:
+    """(track, note) from the last lookup of this leg, if it's fresh."""
+    hit = _TRACK_REASONS.get(_track_key(leg, logged))
+    return (hit[1], hit[2]) if hit and hit[0] > time.monotonic() else None
+
+
+def track_note_miss(team_text: str, start: datetime, why: str) -> None:
+    key = (norm_team(team_text or ""), start.astimezone(TZ).date())
+    if why:
+        _TRACK_MISS[key] = why
+        if len(_TRACK_MISS) > 2000:
+            for k in list(_TRACK_MISS)[:1000]:
+                _TRACK_MISS.pop(k, None)
+    else:
+        _TRACK_MISS.pop(key, None)
+
+
+def track_window(start: datetime) -> str:
+    """'Oct 8-14' or 'Oct 28-Nov 3': the days a leg's game was looked for."""
+    a = (start - timedelta(days=1)).astimezone(TZ)
+    b = (start + timedelta(days=TRACK_DAYS_AHEAD)).astimezone(TZ)
+    return f"{a:%b} {a.day}-{b.day}" if a.month == b.month else f"{a:%b} {a.day}-{b:%b} {b.day}"
+
+
+def track_team_note(team: str, start: datetime) -> str:
+    if _TRACK_MISS.get((norm_team(team or ""), start.astimezone(TZ).date())) == "many":
+        return f"“{team}” fits more than one team: add the city or the league"
+    return f"No {team} game found {track_window(start)}"
+
+
+_TITLE_RE = re.compile(r"^\s*(?:\d+\s*[- ]?\s*(?:pick|leg|team)s?\b|(?:power|flex)\s+play\b|same\s*game\s*parlay\b)"
+                       r"[\w\s\-+()$.,]*$", re.I)
+
+
+def track_is_title(text: str) -> bool:
+    """'6 Pick Power Play', '3-leg parlay': the slip's heading saved as if it were a leg."""
+    t = text or ""
+    return bool(_TITLE_RE.match(t)) and not stat_keys_in(t) and not re.search(r"\b(over|under|more|less)\b", t, re.I)
+
+
+def track_unread(p, text: str) -> tuple[str, str]:
+    """(track, note) for a leg that isn't a team bet or a player prop the free data knows."""
+    sport = (_rg(p, "sport") or "").strip()
+    if sport and re.search(NO_FREE_LOOKUP, sport.lower()):
+        return "manual", f"{sport} isn't in the free scores: I'll look it up when it's over"
+    if NOT_SIMPLE.search(text or ""):
+        return "manual", "Halves, quarters and other game props aren't in the free scores: grade by hand"
+    return "unknown", "Couldn't read this leg: tap ✏️ Fix and write it like 'Name over 20.5 Points'"
+
+
+def track_sub(entry: dict) -> str:
+    """The line under an open leg that has no game yet."""
+    later = "I'll look it up or ask you once the games are done"
+    if entry.get("track") == "broken":
+        return "🧩 " + entry["track_note"]
+    if entry.get("track") == "unknown" and entry.get("track_note"):
+        return f"🔎 {entry['track_note']} · {later}"
+    return f"✋ Not in the free stats: {later}"
+
+
+async def track_find_prop(leg: dict, paths: list[str], logged: datetime) -> dict:
+    """Which player, game and stat a prop leg is about: {ok: True, path, ev, i, cand, stat_key}, or
+    {ok: False, track, note}. Either way the answer is remembered for track_reason."""
+    def miss(track: str, note: str) -> dict:
+        track_remember(leg, logged, track, note)
+        return {"ok": False, "track": track, "note": note}
+
+    cands = await track_candidates(leg, paths)
+    if not cands:
+        return miss("unknown", f"Couldn't find {leg['display']} on ESPN")
+    order = list(paths) + [SOCCER_ANY]
+    games, idle, homeless = [], [], []
+    for cand, key in cands:
+        if not cand["team"]:
+            homeless.append(cand)
+            continue
+        found = pick_game(await find_games(cand["team"], track_leagues_for(cand), logged), logged)
+        if not found:
+            idle.append(cand)
+            continue
+        ev, i = found
+        rank = order.index(cand["path"]) if cand["path"] in order else order.index(SOCCER_ANY)
+        games.append({"ok": True, "path": ev.get("path") or cand["path"], "ev": ev, "i": i, "cand": cand,
+                      "stat_key": key, "rank": rank})
+    if len({g["ev"]["id"] for g in games}) > 1:
+        best = min(g["rank"] for g in games)
+        games = [g for g in games if g["rank"] == best]
+    if len({g["ev"]["id"] for g in games}) > 1:
+        return miss("unknown", f"More than one {leg['display']} plays soon: add their team to the leg")
+    if not games:
+        if idle:
+            return miss("unknown", track_team_note(idle[0]["team"], logged))
+        return miss("unknown", f"{homeless[0]['name']} isn't on a team on ESPN right now")
+    g = games[0]
+    track_remember(leg, logged, *(("manual", TRACK_MANUAL[g["stat_key"]]) if g["stat_key"] in TRACK_MANUAL
+                                  else ("tracked", "")))
+    return g
+
+
+# ---- per-game stats feed (soccer, baseball extras) and field goals ------------------------------------------
+
+_CORE_CACHE: dict[tuple, tuple[float, Optional[dict]]] = {}
+
+
+async def track_core_stats(path: str, ev: dict, team_id, athlete_id) -> Optional[dict]:
+    """One player's stats for one game from ESPN's stats feed: {'core.batting': {name: value}, ...}; soccer comes
+    as one 'core.soccer' group. Cached like box scores (a minute while live, hours once final)."""
+    if not team_id or not athlete_id or "/" not in path:
+        return None
+    sport, league = path.split("/", 1)
+    key = (path, str(ev["id"]), str(team_id), str(athlete_id))
+    hit = _CORE_CACHE.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    groups: Optional[dict] = None
+    try:
+        raw = await _get_json(TRACK_CORE.format(sport=sport, league=league, eid=ev["id"], tid=team_id, aid=athlete_id), {})
+        groups = {}
+        for cat in (raw.get("splits") or {}).get("categories") or []:
+            g = groups.setdefault("core." + ("soccer" if sport == "soccer" else str(cat.get("name") or "").lower()), {})
+            for st in cat.get("stats") or []:
+                if st.get("name") is not None and st.get("value") is not None:
+                    g.setdefault(str(st["name"]).lower(), str(st["value"]))
+        ttl = 6 * 3600 if ev.get("final") else 60
+    except Exception:
+        log.info("Per-game stats not there for %s %s player %s", path, ev.get("id"), athlete_id)
+        ttl = 90
+    _CORE_CACHE[key] = (time.monotonic() + ttl, groups)
+    if len(_CORE_CACHE) > 3000:
+        for k in list(_CORE_CACHE)[:1500]:
+            _CORE_CACHE.pop(k, None)
+    return groups
+
+
+_FG_SCORING = re.compile(r"^\s*(.+?)\s+(\d{1,2})\s*(?:yd|yard)s?\.?\s+field goal", re.I)
+_FG_PLAY = re.compile(r"([A-Za-z][\w.'\-]*(?:\s[A-Z][\w'\-]+)?)\s+(\d{1,2})\s+yard field goal is good", re.I)
+
+
+def track_field_goals(raw: dict) -> dict[str, list[int]]:
+    """{kicker's normalised name: [yards of each made field goal]} from a football summary's scoring plays
+    ('Brandon Aubrey 45 Yd Field Goal'), or from the drive plays ('B.Aubrey 45 yard field goal is GOOD')."""
+    out: dict[str, list[int]] = {}
+    for sp in raw.get("scoringPlays") or []:
+        kind = ((sp.get("type") or {}).get("abbreviation") or (sp.get("scoringType") or {}).get("abbreviation") or "")
+        m = _FG_SCORING.match(sp.get("text") or "")
+        if m and kind.upper() in ("", "FG"):
+            out.setdefault(norm_name(m.group(1)), []).append(int(m.group(2)))
+    if out:
+        return out
+    drives = raw.get("drives") or {}
+    for drive in list(drives.get("previous") or []) + ([drives["current"]] if drives.get("current") else []):
+        for play in (drive or {}).get("plays") or []:
+            m = _FG_PLAY.search(play.get("text") or "")
+            if m:
+                out.setdefault(norm_name(m.group(1).replace(".", ". ")), []).append(int(m.group(2)))
+    return out
+
+
+# ---- reading a found prop's number ------------------------------------------------------------------------------
+
+def track_judge(out: dict, leg: dict, got: tuple[float, str], name: str) -> dict:
+    value, detail = got
+    out["value"] = value
+    out["why"] = f"{name} {value:g} {STATS[out['stat_key']][0]}{detail}"
+    if out["state"] == "post":
+        out["result"] = judge_prop(leg, value)
+    elif (leg["side"] == "over") != leg["negate"] and value > leg["line"]:
+        out["result"] = "hit"        # an over that's already cleared can't lose
+    elif (leg["side"] == "under") != leg["negate"] and value > leg["line"]:
+        out["result"] = "miss"       # an under that's already gone over can't win
+    return out
+
+
+async def track_status_in(leg: dict, path: str, ev: dict, cand: dict, stat_key: str, i: Optional[int] = None,
+                          guessed: bool = False) -> dict:
+    """Where a prop stands in a game we found: prop_status's dict. `guessed` means the player wasn't found by
+    search and is being looked for in this game's box score (the other half of a combo)."""
+    soccer = track_family(path) == "soccer"
+    out = {"result": None, "value": None, "line": leg["line"], "stat": STATS[stat_key][0], "player": cand["name"],
+           "team": cand.get("team") or "", "state": ev.get("state", "pre"), "detail": "", "why": "", "event": ev,
+           "path": path, "preseason": ev.get("season_type") == 1 and not soccer, "stat_key": stat_key,
+           "track": "tracked", "track_note": ""}
+    if stat_key in TRACK_MANUAL:
+        out["track"], out["track_note"], out["detail"] = "manual", TRACK_MANUAL[stat_key], ev.get("detail") or ""
+        return out
+    if ev.get("state") == "pre":
+        return out
+    if soccer:
+        out["detail"] = ev.get("detail") or ""
+        tid = ev["teams"][i]["id"] if i is not None and i < len(ev.get("teams") or []) else cand.get("team_id")
+        core = await track_core_stats(path, ev, tid, cand.get("id"))
+        final = bool(ev.get("final")) or ev.get("state") == "post"
+        if core is None:
+            if final:
+                out["why"] = f"{cand['name']} isn't in the match stats"
+            return out
+        gen = core.get("core.soccer") or {}
+        if not any((_num_from(gen.get(k)) or 0) > 0 for k in ("appearances", "minutes", "starts", "subins")):
+            if final:
+                out["result"], out["why"] = "push", f"{cand['name']} didn't play"
+            return out
+        got = stat_value(core, stat_key)
+        return track_judge(out, leg, got, cand["name"]) if got else out
+    box = await fetch_summary(path, ev["id"])
+    if not box:
+        return out
+    out["state"], out["detail"] = box["state"], box["detail"]
+    if box.get("season_type") == 1:
+        out["preseason"] = True
+    pl = find_in_box(box, norm_name(cand["name"])) or find_in_box(box, leg["player"])
+    if pl is None:
+        if box["state"] == "post":
+            out["why"] = f"{cand['name']} isn't in the box score"
+            if guessed:
+                out["track"], out["track_note"] = "unknown", f"Couldn't find {cand['name']} in that game's box score"
+        return out
+    if guessed:
+        out["player"], out["team"] = pl["name"], pl.get("team") or ""
+    if pl["dnp"]:
+        if box["state"] == "post":
+            out["result"] = "push"
+            out["why"] = f"{pl['name']} didn't play" + (f" ({pl['reason'].lower()})" if pl["reason"] else "")
+        return out
+    groups = pl["groups"]
+    if track_needs_core(stat_key):
+        core = await track_core_stats(path, ev, pl.get("team_id"), pl["id"])
+        if core:
+            groups = {**groups, **core}
+    got = stat_value(groups, stat_key)
+    return track_judge(out, leg, got, pl["name"]) if got else out
+
+
+# ---- data-feed health: /admin status line, outage notes ------------------------------------------------------
+
+ESPN_SCORES_HOST = "site.api.espn.com"
+HEALTH_NAMES = {"site.api.espn.com": "ESPN scores", "site.web.api.espn.com": "ESPN search",
+                "sports.core.api.espn.com": "ESPN stats", "api.elections.kalshi.com": "Kalshi"}
+TRACK_DOWN_TEXT = "📡 Live data is down: ESPN isn't answering, slips will catch up when it's back."
+TRACK_BACK_TEXT = "📡 Live data is back: ESPN is answering again and slips are catching up now."
+
+
+def espn_down(minutes: float = TRACK_DOWN_MIN, now: Optional[float] = None) -> bool:
+    """True when ESPN's scoreboards have failed every call for at least `minutes`."""
+    h = DATA_HEALTH.get(ESPN_SCORES_HOST)
+    if not h or not h["fail_since"] or h["streak"] < 3:
+        return False
+    return (now or time.time()) - h["fail_since"] >= minutes * 60
+
+
+def _track_ago(ts: Optional[float], now: float) -> str:
+    if not ts:
+        return "never"
+    s = max(0, now - ts)
+    return "just now" if s < 60 else (f"{int(s // 60)} min ago" if s < 3600 else f"{s / 3600:.1f} h ago")
+
+
+def data_health_line(now: Optional[float] = None) -> str:
+    """One line per data feed since the last restart: calls that worked, failed, and when it last answered."""
+    now = now or time.time()
+    if not DATA_HEALTH:
+        return "No live-data calls yet since the restart"
+    lines = []
+    for host, h in sorted(DATA_HEALTH.items(), key=lambda kv: (kv[0] not in HEALTH_NAMES, kv[0])):
+        name = HEALTH_NAMES.get(host, host)
+        if h["streak"]:
+            icon = "❌" if h["streak"] >= 3 else "⚠️"
+            span = now - (h["fail_since"] or now)
+            span = f" for {int(span // 60)} min" if 60 <= span < 3600 else (f" for {span / 3600:.1f} h" if span >= 3600 else "")
+            lines.append(f"{icon} {name}: failing{span} ({h['streak']} in a row, last {h['status']}) · "
+                         f"last answer {_track_ago(h['last_ok'], now)}")
+        else:
+            lines.append(f"✅ {name}: {h['ok']:,} ok · {h['fail']:,} failed · last answer {_track_ago(h['last_ok'], now)}")
+    return "\n".join(lines)
+
+
+def _espn_recovered(now: Optional[float] = None) -> bool:
+    h = DATA_HEALTH.get(ESPN_SCORES_HOST)
+    return bool(h and not h["streak"] and h["last_ok"] and (now or time.time()) - h["last_ok"] < 600)
+
+
+async def track_health_job(client, now: datetime) -> None:
+    """Tell each server's audit channel once when ESPN has been down for TRACK_DOWN_MIN minutes, and once when
+    it's back (follows the server's self-check switch). Nothing to do most cycles: two dictionary reads."""
+    down = espn_down()
+    flagged = get_setting(0, "track_espn_down")
+    if not down and not flagged:
+        return
+    if down and not flagged:
+        set_setting(0, "track_espn_down", iso(now))
+    back = not down and _espn_recovered()
+    if not down and not back:
+        return              # not failing any more, but no good answer yet either: wait
+    for g in list(getattr(client, "guilds", None) or []):
+        try:
+            mark = get_setting(g.id, "track_espn_note")
+            if down and mark != "down":
+                set_setting(g.id, "track_espn_note", "down")
+                if server_on(g.id, "selfcheck"):
+                    await audit(client, g.id, TRACK_DOWN_TEXT)
+            elif back and mark == "down":
+                set_setting(g.id, "track_espn_note", None)
+                if server_on(g.id, "selfcheck"):
+                    await audit(client, g.id, TRACK_BACK_TEXT)
+        except Exception:
+            log.warning("Data outage note failed for guild %s", getattr(g, "id", "?"), exc_info=True)
+    if back:
+        set_setting(0, "track_espn_down", None)
+
+
+EXTRA_JOBS.append(("track_health", track_health_job))
+
+
+# ---- /track: the per-leg doctor --------------------------------------------------------------------------------
+
+TRACK_ICON = {"tracked": "🛰️", "manual": "✋", "unknown": "🔎", "broken": "🧩"}
+TRACK_NEXT = {"manual": "Next: I look it up once the games are done, or grade it with 🎯 Grade legs.",
+              "unknown": "Next: check the name and stat (or add the team) with ✏️ Fix. I keep looking meanwhile.",
+              "broken": "Next: tap ✏️ Fix on the slip and put one leg per line."}
+_TRACK_RECHECKS: dict[int, float] = {}
+
+
+def track_can_view(interaction, p) -> bool:
+    """Anyone can check a slip, except a hidden open one: only its bettor (or whoever logged it) and mods."""
+    secret = p["hidden"] and p["status"] == "open" and not _rg(p, "revealed_at")
+    return not secret or can_edit(interaction, p)
+
+
+def track_doctor_lines(e: dict) -> str:
+    info = e.get("track_info") or {}
+    lines = []
+    if info.get("player"):
+        lines.append(f"👤 **{info['player']}**" + (f" · {info['team']}" if info.get("team") else ""))
+    elif info.get("team"):
+        lines.append(f"👥 **{info['team']}**")
+    ev = e.get("event")
+    if ev:
+        when = event_time(ev)
+        lines.append(f"🏟️ {short_game(ev)}" + (f" · <t:{int(when.timestamp())}:f>" if when and ev.get("state") == "pre"
+                                                else ""))
+    if info.get("stat"):
+        v, line = info.get("value"), info.get("line")
+        lines.append(f"📊 {info['stat']}: " + (f"**{v:g}** (line {line:g})" if v is not None and line is not None else
+                                              f"line {line:g}, no number yet" if line is not None else "no number yet"))
+    if e.get("decided"):
+        lines.append(f"🏁 {e['decided']}: {e.get('why') or ''}".rstrip(": "))
+    if e.get("status") not in (None, "open"):
+        lines.append(f"Graded: {LEG_ICON.get(e['status'], '')} {e['status']}")
+    if e.get("track") != "tracked" or e.get("track_note"):
+        lines.append(f"⚠️ {e.get('track_note') or 'Not found yet'}")
+        if e.get("status") == "open" and e.get("track") in TRACK_NEXT:
+            lines.append(TRACK_NEXT[e["track"]])
+    return "\n".join(lines) or "Nothing found yet."
+
+
+def track_doctor_embed(p, entries: list[dict]) -> discord.Embed:
+    counts = {k: sum(1 for e in entries if e.get("track") == k) for k in TRACK_ICON}
+    words = {"tracked": "tracked", "manual": "by hand", "unknown": "not found yet", "broken": "not a pick"}
+    summary = " · ".join(f"{TRACK_ICON[k]} {n} {words[k]}" for k, n in counts.items() if n)
+    anchor = ""
+    sd = _rg(p, "slate_date")
+    if sd:
+        try:
+            anchor = f"\nSlate: **{datetime.strptime(str(sd)[:10], '%Y-%m-%d'):%a %b %-d}**"
+        except ValueError:
+            pass
+    e = discord.Embed(title=clip(f"🩺 Tracking check · #{p['id']} · {p['bettor_name']}", 256), color=BRAND,
+                      description=clip(f"*{p['description']}*\n{summary}{anchor}", 4000))
+    for x in entries[:24]:
+        icon = LEG_ICON.get(x["status"], "") if x.get("status") != "open" else TRACK_ICON.get(x.get("track"), "⏳")
+        e.add_field(name=clip(f"{icon} {x['n']}. {x['text']}", 256), value=clip(track_doctor_lines(x), 1024),
+                    inline=False)
+    e.set_footer(text="Free ESPN data · 🔄 Re-check clears what I remembered about this slip and looks again")
+    return e
+
+
+def track_forget(p) -> None:
+    """Drop everything cached about this slip's games and players so the next look starts fresh."""
+    pid = p["id"]
+    hit = _PROGRESS_CACHE.pop(pid, None)
+    for e in (hit[1] if hit else []):
+        ev = e.get("event")
+        if not ev:
+            continue
+        for cache in (_summary_cache, _CORE_CACHE):
+            for k in [k for k in cache if str(k[1]) == str(ev["id"])]:
+                cache.pop(k, None)
+        path, when = e.get("path") or ev.get("path"), event_time(ev)
+        if path and when:
+            day = when.astimezone(TZ).strftime("%Y%m%d")
+            for k in [k for k in _score_cache if k[0] == path and k[1] == day]:
+                _score_cache.pop(k, None)
+    names = set()
+    for leg in get_legs(pid) or [{"text": p["description"]}]:
+        prop = prop_of(leg["text"])
+        for part in ((prop.get("combo") or [prop]) if prop else []):
+            names.add(part["player"])
+            names.add(part["player"].split()[-1])
+        if prop:
+            names.add(prop["player"])
+    for cache in (_player_cache, _SEARCH_RAW, _TRACK_REASONS):
+        for k in [k for k in cache if k[0] in names]:
+            cache.pop(k, None)
+    if not _rg(p, "slate_date"):
+        db().execute("UPDATE picks SET slate_checked_at = NULL WHERE id = ?", (pid,))
+        db().commit()
+
+
+class TrackRecheckButton(discord.ui.DynamicItem[discord.ui.Button], template=r"trk:(?P<pid>\d+)"):
+    def __init__(self, pick_id: int):
+        super().__init__(discord.ui.Button(label="🔄 Re-check now", style=discord.ButtonStyle.secondary,
+                                           custom_id=f"trk:{pick_id}"))
+        self.pick_id = pick_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["pid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None:
+            await interaction.response.send_message("That pick no longer exists.", ephemeral=True)
+            return
+        if not track_can_view(interaction, p):
+            await interaction.response.send_message("That slip is hidden until it settles.", ephemeral=True)
+            return
+        wait = TRACK_RECHECK_GAP - (time.monotonic() - _TRACK_RECHECKS.get(p["id"], -1e9))
+        if wait > 0:
+            await interaction.response.send_message(f"Just checked it: try again in {int(wait) + 1}s.", ephemeral=True)
+            return
+        _TRACK_RECHECKS[p["id"]] = time.monotonic()
+        await interaction.response.defer()
+        track_forget(p)
+        p = get_pick(interaction.guild_id, self.pick_id) or p
+        entries = await leg_progress(p)
+        _PROGRESS_CACHE[p["id"]] = (time.monotonic() + 100, entries)
+        await interaction.edit_original_response(embed=track_doctor_embed(p, entries), view=track_doctor_view(p["id"]))
+
+
+def track_doctor_view(pick_id: int) -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    v.add_item(TrackRecheckButton(pick_id))
+    return v
+
+
+EXTRA_ITEMS.append(TrackRecheckButton)
+HELP_EXTRA.append(("🩺 Tracking check", "`/track pick_id` shows, leg by leg, the player, team, game and live number "
+                   "I found, or why I couldn't (a stat ESPN doesn't publish, a name I can't find, a leg that's really "
+                   "the slip's title). 🔄 Re-check looks again from scratch."))
+
+
+# ==========================================================================
+# r21 live layer: game tracker cards, the leg ticker, /live, slip-start countdowns, the final whistle.
+# Everything here reads the autopilot's progress cache (it refreshes open slips every cycle just before
+# these jobs run), so a quiet night costs a few SQL queries and no ESPN calls.
+# ==========================================================================
+
+LV_NIGHT_SPLIT_H = 6          # a "night" runs 6 AM to 6 AM local: a 12:30 AM final belongs to the night before
+LV_EDIT_GAP_S = 110           # a game card edits itself at most once per 2-minute cycle
+LV_CARD_ROWS = 10             # legs drawn on one game card
+LV_CARDS_PER_NIGHT = 12       # game cards per server per night, at most
+LV_NEW_CARDS_PER_CYCLE = 4
+LV_CARD_MAX_HOURS = 10        # a card whose game never shows a final is retired after this long
+LV_SETTLED_HOURS = 8          # slips settled this recently still count toward tonight
+LV_FOLLOW_HOURS = 3           # "Keep updating" on /live lasts this long
+LV_FOLLOWS_PER_GUILD = 3
+LV_LOCK_MINUTES = 30          # slip-start countdown DM: this many minutes before the first game
+LV_WHISTLE_CALM_M = 6         # the final whistle waits for this many quiet minutes after the last game
+LV_TICK_LIMIT = 1900          # one ticker message stays under Discord's 2000 characters
+
+LV_ICON = {"cleared": "✅", "dead": "❌", "push": "➖", "close": "🟡", "live": "⏱️", "ahead": "🟢", "behind": "🔴",
+           "waiting": "⏳", "pending": "⌛"}
+LV_LABEL = {"cleared": "CLEARED", "dead": "DEAD", "push": "PUSH", "close": "CLOSE", "live": "LIVE", "ahead": "AHEAD",
+            "behind": "BEHIND", "waiting": "SOON", "pending": "GRADING"}
+LV_ORDER = {"close": 0, "live": 1, "ahead": 2, "behind": 3, "cleared": 4, "push": 5, "pending": 6, "dead": 7,
+            "waiting": 8}
+LV_SPORT_EMOJI = {"basketball": "🏀", "football": "🏈", "hockey": "🏒", "baseball": "⚾", "soccer": "⚽"}
+LV_FALLBACK_COLOURS = [(123, 63, 228), (59, 130, 246), (16, 185, 129), (245, 158, 11), (236, 72, 153),
+                       (239, 68, 68), (20, 184, 166), (168, 85, 247)]
+_LV_DB_CONN = None
+
+
+def lv_db():
+    """The live layer's tables (made on first use)."""
+    global _LV_DB_CONN
+    c = db()
+    if _LV_DB_CONN is c:
+        return c
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS lv_cards (guild_id INTEGER NOT NULL, event_id TEXT NOT NULL, night TEXT NOT NULL,
+            channel_id INTEGER, message_id INTEGER, sig TEXT, data TEXT, created_at TEXT NOT NULL, updated_at TEXT,
+            locked_at TEXT, PRIMARY KEY (guild_id, event_id));
+        CREATE TABLE IF NOT EXISTS lv_games (guild_id INTEGER NOT NULL, night TEXT NOT NULL, event_id TEXT NOT NULL,
+            state TEXT, start TEXT, title TEXT, pick_ids TEXT, seen_at TEXT, PRIMARY KEY (guild_id, night, event_id));
+        CREATE TABLE IF NOT EXISTS lv_seen (pick_id INTEGER NOT NULL, idx INTEGER NOT NULL, kind TEXT NOT NULL,
+            at TEXT, PRIMARY KEY (pick_id, idx, kind));
+        CREATE TABLE IF NOT EXISTS lv_follow (message_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL, user_id INTEGER NOT NULL, scope TEXT NOT NULL, until TEXT NOT NULL, sig TEXT);
+    """)
+    c.commit()
+    _LV_DB_CONN = c
+    return c
+
+
+# ---- time and small helpers -------------------------------------------------------------------------------
+
+def lv_night(t: datetime) -> str:
+    """The night a moment belongs to (local date, with the day turning over at 6 AM)."""
+    return (t.astimezone(TZ) - timedelta(hours=LV_NIGHT_SPLIT_H)).date().isoformat()
+
+
+def lv_night_bounds(night: str) -> tuple[datetime, datetime]:
+    """(start, end) of a night in UTC."""
+    d = datetime.strptime(night, "%Y-%m-%d").replace(tzinfo=TZ) + timedelta(hours=LV_NIGHT_SPLIT_H)
+    return d.astimezone(timezone.utc), (d + timedelta(days=1)).astimezone(timezone.utc)
+
+
+def lv_clock(t: datetime) -> str:
+    return t.astimezone(TZ).strftime("%-I:%M %p")
+
+
+def lv_public(p) -> bool:
+    """Hidden slips never show anywhere public until they're revealed."""
+    return not p["hidden"] or bool(p["revealed_at"])
+
+
+def lv_who(p) -> str:
+    return call_name(p["guild_id"], p["bettor_key"], p["bettor_name"])
+
+
+def lv_family(path: Optional[str]) -> str:
+    return (path or "").split("/")[0]
+
+
+def lv_rank(ev: Optional[dict]) -> tuple:
+    """Which copy of an event is freshest: later state first, then more points on the board."""
+    if not ev:
+        return (-1, 0)
+    st = {"pre": 0, "in": 1, "post": 2}.get(ev.get("state") or "pre", 0) + (1 if ev.get("final") else 0)
+    return (st, sum(t.get("score") or 0 for t in ev.get("teams") or []))
+
+
+def lv_cached_event(event_id: str) -> tuple[Optional[str], Optional[dict]]:
+    """(league path, freshest copy) of an event from the scoreboard cache. No network."""
+    best: tuple = (None, None)
+    for key, val in list(_score_cache.items()):
+        try:
+            for ev in val[1]:
+                if str(ev.get("id")) == event_id and lv_rank(ev) > lv_rank(best[1]):
+                    best = (key[0], ev)
+        except Exception:
+            continue
+    return best
+
+
+def lv_trim_event(ev: dict) -> dict:
+    """The bits of an event a card needs, as plain JSON."""
+    teams = [{k: t.get(k) for k in ("abbr", "short", "name", "score", "home", "color", "alt_color")}
+             for t in ev.get("teams") or []]
+    return {"id": str(ev.get("id")), "date": ev.get("date") or "", "state": ev.get("state") or "pre",
+            "final": bool(ev.get("final")), "detail": ev.get("detail") or "", "teams": teams}
+
+
+def lv_sides(ev: dict) -> tuple[dict, dict]:
+    teams = ev.get("teams") or [{}, {}]
+    away = next((t for t in teams if not t.get("home")), teams[0])
+    home = next((t for t in teams if t.get("home")), teams[-1])
+    return away, home
+
+
+def lv_abbr(t: dict) -> str:
+    a = (t.get("abbr") or "").strip()
+    if a:
+        return a.upper()[:4]
+    words = (t.get("short") or t.get("name") or "?").split()
+    return ("".join(w[0] for w in words[:3]) if len(words) > 1 else words[0][:3]).upper()
+
+
+def lv_score_line(ev: dict) -> str:
+    """'CLE 88 · BOS 92' (or 'CLE @ BOS' before the game)."""
+    away, home = lv_sides(ev)
+    if away.get("score") is None or (ev.get("state") or "pre") == "pre":
+        return f"{lv_abbr(away)} @ {lv_abbr(home)}"
+    return f"{lv_abbr(away)} {away['score']:g} · {lv_abbr(home)} {home['score']:g}"
+
+
+def lv_status_text(ev: dict) -> str:
+    if ev.get("final") or ev.get("state") == "post":
+        return "Final"
+    if ev.get("state") == "in":
+        return ev.get("detail") or "Live"
+    t = event_time(ev)
+    return lv_clock(t) if t else "Soon"
+
+
+def _lv_hex(h) -> Optional[tuple]:
+    h = str(h or "").strip().lstrip("#")
+    if re.fullmatch(r"[0-9a-fA-F]{6}", h):
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return None
+
+
+def _lv_lum(c: tuple) -> float:
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def lv_team_colour(t: dict, avoid: Optional[tuple] = None) -> tuple:
+    """The team's ESPN colour (or its alternate when the main one is near-black/white or clashes with the other
+    team), else a steady brand colour picked from the name."""
+    cands = [c for c in (_lv_hex(t.get("color")), _lv_hex(t.get("alt_color"))) if c]
+    fallback = LV_FALLBACK_COLOURS[sum(map(ord, t.get("name") or t.get("short") or "?")) % len(LV_FALLBACK_COLOURS)]
+
+    def ok(c):
+        return 45 < _lv_lum(c) < 225 and (avoid is None or sum(abs(a - b) for a, b in zip(c, avoid)) > 90)
+    pick = next((c for c in cands if ok(c)), None)
+    if pick is None:
+        pick = cands[0] if cands else fallback
+        if avoid is not None and sum(abs(a - b) for a, b in zip(pick, avoid)) <= 90:
+            pick = next((c for c in LV_FALLBACK_COLOURS if sum(abs(a - b) for a, b in zip(c, avoid)) > 160), fallback)
+    if _lv_lum(pick) <= 45:
+        pick = _brand_mix(pick, (255, 255, 255), 0.4)
+    elif _lv_lum(pick) >= 225:
+        pick = _brand_mix(pick, (40, 40, 52), 0.35)
+    return pick
+
+
+# ---- the snapshot: every slip that matters tonight, from the cache ------------------------------------------
+
+def lv_cached(pick_id: int) -> Optional[list]:
+    hit = _PROGRESS_CACHE.get(pick_id)
+    return hit[1] if hit else None
+
+
+def lv_live_hint(p, now: datetime) -> bool:
+    """Could this slip have a game on (or starting soon)? From the autopilot's notes and the cache only."""
+    st = p["auto_state"] or ""
+    if st == "live":
+        return True
+    if st.startswith("waiting:"):
+        t = _state_time(st)
+        if t and now - timedelta(hours=8) <= t <= now + timedelta(minutes=LV_LOCK_MINUTES + 10):
+            return True
+    ents = lv_cached(p["id"])
+    return bool(ents and any(e.get("in_play") for e in ents))
+
+
+def lv_with_db_status(p, entries: list[dict]) -> list[dict]:
+    """Entries with each leg's graded status from the database (it can be newer than the cache)."""
+    legs = get_legs(p["id"])
+    if legs:
+        st = {x["idx"]: x["status"] for x in legs}
+        return [dict(e, status=st.get(e.get("n"), e.get("status") or "open")) for e in entries]
+    whole = {"win": "hit", "loss": "miss", "push": "push", "void": "push"}.get(p["status"], "open")
+    return [dict(e, status=whole if whole != "open" else (e.get("status") or "open")) for e in entries]
+
+
+async def lv_snapshot(gid: int, now: datetime, deep: bool = False) -> list[dict]:
+    """[{p, entries, public}] for open slips from the last few days and slips settled in the last few hours.
+    Only slips that look live (or start soon) are refreshed, and the autopilot has normally just done that, so it's
+    a cache hit; `deep` (someone ran /live) also refreshes slips with a game later tonight, up to 20."""
+    since = iso(now - timedelta(days=AUTOPILOT_DAYS))
+    rows = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND created_at >= ? "
+                        "ORDER BY id DESC LIMIT 80", (gid, since)).fetchall()
+    done = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? "
+                        "ORDER BY settled_at DESC LIMIT 40", (gid, iso(now - timedelta(hours=LV_SETTLED_HOURS)))).fetchall()
+    _, night_end = lv_night_bounds(lv_night(now))
+    out, deep_left = [], 20
+    for p in rows:
+        ents = None
+        if lv_live_hint(p, now):
+            ents = await cached_progress(p)
+        elif deep and deep_left > 0 and lv_cached(p["id"]) is None:
+            t = _state_time(p["auto_state"]) if (p["auto_state"] or "").startswith("waiting:") else None
+            if t is None or t <= night_end:
+                deep_left -= 1
+                ents = await cached_progress(p)
+        ents = ents if ents is not None else (lv_cached(p["id"]) or db_entries(p))
+        out.append({"p": p, "entries": lv_with_db_status(p, ents), "public": lv_public(p)})
+    for p in done:
+        ents = lv_cached(p["id"]) or db_entries(p)
+        out.append({"p": p, "entries": lv_with_db_status(p, ents), "public": lv_public(p)})
+    return out
+
+
+def lv_state(e: dict) -> str:
+    """cleared / dead / push / close / ahead / behind / live / waiting for one leg."""
+    out = leg_outcome(e)
+    if out == "hit":
+        return "cleared"
+    if out == "miss":
+        return "dead"
+    if out == "push":
+        return "push"
+    ev = e.get("event") or {}
+    if (ev.get("final") or ev.get("state") == "post") and e.get("status") == "open":
+        return "pending"
+    n = e.get("num")
+    if n and e.get("in_play"):
+        value, line = n["value"], n["line"]
+        near = max(1.0, line * 0.2)
+        if n["side"] == "over" and line >= 1 and value < line and line - value <= near:
+            return "close"
+        if n["side"] == "under" and value <= line and line - value <= near and line >= 1:
+            return "close"
+    if e.get("live") in ("ahead", "behind"):
+        return e["live"]
+    if e.get("in_play") or ev.get("state") == "in":
+        return "live"
+    return "waiting"
+
+
+def lv_games_of(snap: list[dict]) -> dict[str, dict]:
+    """{event id: {id, ev, path, rows: [{s, e}]}} for every game a slip in the snapshot rides on."""
+    games: dict[str, dict] = {}
+    for s in snap:
+        for e in s["entries"]:
+            ev = e.get("event")
+            if not ev or not ev.get("id") or len(ev.get("teams") or []) != 2:
+                continue
+            eid = str(ev["id"])
+            g = games.setdefault(eid, {"id": eid, "ev": ev, "path": e.get("path"), "rows": []})
+            if lv_rank(ev) > lv_rank(g["ev"]):
+                g["ev"] = ev
+            g["path"] = g["path"] or e.get("path")
+            g["rows"].append({"s": s, "e": e})
+    for eid, g in games.items():
+        path, ev = lv_cached_event(eid)
+        if ev is not None and lv_rank(ev) > lv_rank(g["ev"]):
+            g["ev"] = ev
+        g["path"] = g["path"] or path
+    return games
+
+
+def lv_row(s: dict, e: dict) -> dict:
+    """One leg as plain data for a card or a text line."""
+    p = s["p"]
+    v = leg_visual(e)
+    n = e.get("num")
+    return {"pid": p["id"], "n": e.get("n"), "who": lv_who(p), "uid": p["bettor_id"], "text": e.get("text") or "",
+            "state": lv_state(e), "num": {"value": n["value"], "line": n["line"], "side": n["side"]} if n else None,
+            "value_text": v["num"], "bar": list(v["bar"]) if v["bar"] else None, "slip_open": p["status"] == "open"}
+
+
+def lv_card_worthy(g: dict) -> bool:
+    """2+ open group legs on the game, or a public slip of 3+ legs with a leg on it."""
+    rows = [r for r in g["rows"] if r["s"]["public"] and r["s"]["p"]["status"] == "open"]
+    open_legs = {(r["s"]["p"]["id"], r["e"].get("n")) for r in rows if r["e"].get("status") == "open"}
+    return len(open_legs) >= 2 or any(len(r["s"]["entries"]) >= 3 for r in rows)
+
+
+def lv_counts(rows: list[dict]) -> dict:
+    c: dict = {}
+    for r in rows:
+        c[r["state"]] = c.get(r["state"], 0) + 1
+    return c
+
+
+def lv_count_text(rows: list[dict]) -> str:
+    c = lv_counts(rows)
+    bits = [f"{LV_ICON[k]} {c[k]}" for k in ("cleared", "close", "live", "ahead", "behind", "push", "pending", "dead",
+                                            "waiting") if c.get(k)]
+    people = len({r["who"] for r in rows})
+    return (f"{len(rows)} leg{'s' if len(rows) != 1 else ''} from {people} "
+            f"{'person' if people == 1 else 'people'}" + (" · " + " · ".join(bits) if bits else ""))
+
+
+# ---- game tracker card: the image ---------------------------------------------------------------------------
+
+def _lv_chip(d, x, y, text, fg, bg, size=17, h=34, outline=None) -> int:
+    f = art_font(size, True)
+    w = _tw(d, text, f) + 28
+    d.rounded_rectangle((x, y, x + w, y + h), h // 2, fill=bg, outline=outline, width=2 if outline else 0)
+    d.text((x + 14, y + (h - size) / 2 - 2), text, font=f, fill=fg)
+    return w
+
+
+def _lv_colour(state: str) -> tuple:
+    return {"cleared": ART_GREEN, "dead": ART_RED, "close": ART_AMBER, "live": ART_BLUE, "ahead": ART_GREEN,
+            "behind": ART_RED, "push": ART_MUTED, "pending": ART_MUTED}.get(state, ART_FAINT)
+
+
+def _lv_badge(img, cx: int, cy: int, r: int, abbr: str, colour: tuple) -> None:
+    from PIL import Image, ImageDraw, ImageFilter
+    S = 4
+    size = (r * 2 + 24) * S
+    lay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(lay)
+    c = size // 2
+    ld.ellipse((c - r * S - 8 * S, c - r * S - 8 * S, c + r * S + 8 * S, c + r * S + 8 * S),
+               fill=colour + (70,))
+    lay = lay.filter(ImageFilter.GaussianBlur(5 * S))
+    ld = ImageDraw.Draw(lay)
+    hi, lo = _brand_mix(colour, (255, 255, 255), 0.25), _brand_mix(colour, (0, 0, 0), 0.35)
+    disc = _vgrad((r * 2 * S, r * 2 * S), hi, lo).convert("RGBA")
+    m = Image.new("L", disc.size, 0)
+    ImageDraw.Draw(m).ellipse((0, 0, disc.size[0] - 1, disc.size[1] - 1), fill=255)
+    lay.paste(disc, (c - r * S, c - r * S), m)
+    ld.ellipse((c - r * S, c - r * S, c + r * S, c + r * S), outline=(255, 255, 255, 150), width=3 * S)
+    small = lay.resize((size // S, size // S), Image.LANCZOS)
+    img.paste(small, (cx - small.width // 2, cy - small.height // 2), small)
+    d = ImageDraw.Draw(img)
+    t, f = fit_text(d, abbr, int(r * 1.45), int(r * 0.62), True)
+    tw = _tw(d, t, f)
+    asc = f.getbbox(t)
+    d.text((cx - tw / 2, cy - (asc[1] + asc[3]) / 2), t, font=f, fill=(255, 255, 255))
+
+
+def render_game_card(c: dict) -> io.BytesIO:
+    """c: league, away/home {abbr, short, score, colour}, state (pre/in/post), status (clock text), rows [lv_row],
+    avatars {uid: bytes}, final (bool), cashed [{name, net, id}], records [(name, hit, total)], updated (str)."""
+    from PIL import Image, ImageDraw
+    W = 1000
+    rows = sorted(c["rows"], key=lambda r: (LV_ORDER.get(r["state"], 9), r["who"].lower()))
+    shown, extra = rows[:LV_CARD_ROWS], max(0, len(rows) - LV_CARD_ROWS)
+    ROW_H, GAP, HEAD = 86, 10, 266
+    final = bool(c.get("final"))
+    fin_h = 176 if final else 0
+    H = HEAD + 66 + len(shown) * (ROW_H + GAP) + (42 if extra else 0) + fin_h + 84
+    img = Image.new("RGB", (W, H), ART_BG)
+    away, home = c["away"], c["home"]
+    ac, hc = away["colour"], home["colour"]
+    head = _grad((W, HEAD), [_brand_mix(ac, (0, 0, 0), 0.25), _brand_mix(ac, ART_BG, 0.72),
+                             _brand_mix(hc, ART_BG, 0.72), _brand_mix(hc, (0, 0, 0), 0.25)], diagonal=False)
+    img.paste(head, (0, 0))
+    # giant team letters as a watermark, then fade the header into the page
+    over = Image.new("RGBA", (W, HEAD), (0, 0, 0, 0))
+    od = ImageDraw.Draw(over)
+    wf = art_font(170, True)
+    od.text((-14, HEAD - 190), lv_abbr(away), font=wf, fill=(255, 255, 255, 15))
+    od.text((W + 14 - _tw(od, lv_abbr(home), wf), HEAD - 190), lv_abbr(home), font=wf, fill=(255, 255, 255, 15))
+    base = img.convert("RGBA")
+    base.alpha_composite(over, (0, 0))
+    fade = Image.linear_gradient("L").resize((W, 90))
+    base.paste(Image.new("RGBA", (W, 90), ART_BG + (255,)), (0, HEAD - 90), fade)
+    img = base.convert("RGB")
+    d = ImageDraw.Draw(img)
+    # top line: league and the status chip
+    d.text((40, 28), (c.get("league") or "GAME").upper(), font=art_font(20, True), fill=(225, 225, 235))
+    status = c.get("status") or ""
+    if final:
+        sw = _tw(d, "FINAL", art_font(18, True)) + 28
+        _lv_chip(d, W - 40 - sw, 22, "FINAL", (16, 16, 22), ART_TEXT, 18)
+    elif c.get("state") == "in":
+        f = art_font(18, True)
+        sw = _tw(d, "LIVE", f) + 50
+        x0 = W - 40 - sw
+        d.rounded_rectangle((x0, 22, x0 + sw, 56), 17, fill=(70, 18, 24), outline=ART_RED, width=2)
+        d.ellipse((x0 + 14, 33, x0 + 26, 45), fill=ART_RED)
+        d.text((x0 + 34, 28), "LIVE", font=f, fill=ART_TEXT)
+    # teams, scores and the clock
+    cy = 134
+    _lv_badge(img, 118, cy, 54, lv_abbr(away), ac)
+    _lv_badge(img, W - 118, cy, 54, lv_abbr(home), hc)
+    d = ImageDraw.Draw(img)
+    for t, cx in ((away, 118), (home, W - 118)):
+        nt, nf = fit_text(d, t.get("short") or "", 210, 20, True)
+        d.text((cx - _tw(d, nt, nf) / 2, cy + 70), nt, font=nf, fill=(230, 230, 238))
+    a_s, h_s = away.get("score"), home.get("score")
+    played = c.get("state") in ("in", "post") and a_s is not None and h_s is not None
+    sf = art_font(92, True)
+    lead_a = played and a_s > h_s
+    lead_h = played and h_s > a_s
+    a_txt = f"{a_s:g}" if played else "–"
+    h_txt = f"{h_s:g}" if played else "–"
+    dim = (150, 150, 168)
+    d.text((W / 2 - 72 - _tw(d, a_txt, sf), cy - 62), a_txt, font=sf,
+           fill=ART_TEXT if (lead_a or not final) else dim)
+    d.text((W / 2 + 72, cy - 62), h_txt, font=sf, fill=ART_TEXT if (lead_h or not final) else dim)
+    d.line((W / 2, cy - 44, W / 2, cy + 6), fill=(255, 255, 255), width=2)
+    stt, stf = fit_text(d, status, 220, 22, True)
+    stw = _tw(d, stt, stf) + 30
+    d.rounded_rectangle((W / 2 - stw / 2, cy + 30, W / 2 + stw / 2, cy + 66), 18, fill=(12, 12, 18))
+    d.text((W / 2 - stw / 2 + 15, cy + 36), stt, font=stf, fill=ART_AMBER if c.get("state") == "in" else ART_TEXT)
+    # summary chips
+    y = HEAD + 8
+    counts = lv_counts(rows)
+    people = len({r["who"] for r in rows})
+    x = 32
+    x += _lv_chip(d, x, y, f"{len(rows)} legs · {people} {'person' if people == 1 else 'people'}", ART_TEXT,
+                  ART_PANEL2) + 10
+    for k in ("cleared", "close", "live", "ahead", "behind", "dead"):
+        if counts.get(k):
+            col = _lv_colour(k)
+            label = f"{counts[k]} {LV_LABEL[k]}"
+            if x + _tw(d, label, art_font(17, True)) + 28 > W - 32:
+                break
+            x += _lv_chip(d, x, y, label, col, _brand_mix(col, ART_BG, 0.82), outline=col) + 10
+    # one row per leg
+    y = HEAD + 66
+    for r in shown:
+        col = _lv_colour(r["state"])
+        d.rounded_rectangle((24, y, W - 24, y + ROW_H), 22, fill=ART_PANEL)
+        d.rounded_rectangle((24, y, 34, y + ROW_H), 5, fill=col)
+        d.rectangle((29, y, 34, y + ROW_H), fill=ART_PANEL)
+        av = _avatar((c.get("avatars") or {}).get(r.get("uid")), 52, r["who"], -1)
+        img.paste(av, (48, y + 17), av)
+        nt, nf = fit_text(d, r["who"], 440, 18, True)
+        d.text((116, y + 13), nt, font=nf, fill=ART_MUTED)
+        tt, tf = fit_text(d, r["text"], 470 if r.get("bar") else 700, 23, True, min_size=17)
+        d.text((116, y + 40), tt, font=tf, fill=ART_TEXT if r["state"] != "dead" else (170, 170, 186))
+        if r.get("bar"):
+            vt, vf = fit_text(d, r["value_text"], 220, 26, True)
+            d.text((838 - _tw(d, vt, vf), y + 12), vt, font=vf, fill=ART_TEXT)
+            frac, bcol, marker = r["bar"]
+            bcol = {"cleared": ART_GREEN, "dead": ART_RED}.get(r["state"], tuple(bcol))
+            _bar(d, 610, y + 54, 228, 12, frac, bcol, marker)
+        pill = LV_LABEL.get(r["state"], "")
+        pf = art_font(15, True)
+        pw = max(88, _tw(d, pill, pf) + 26)
+        px = W - 40 - pw
+        d.rounded_rectangle((px, y + 27, px + pw, y + 59), 16, fill=_brand_mix(col, ART_BG, 0.78), outline=col,
+                            width=2)
+        d.text((px + (pw - _tw(d, pill, pf)) / 2, y + 34), pill, font=pf, fill=col)
+        y += ROW_H + GAP
+    if extra:
+        d.text((40, y + 4), f"+ {extra} more leg{'s' if extra != 1 else ''} on this game", font=art_font(19, True),
+               fill=ART_MUTED)
+        y += 42
+    if final:
+        d.rounded_rectangle((24, y + 4, W - 24, y + fin_h - 8), 22, fill=(26, 32, 30), outline=(52, 90, 72), width=2)
+        d.text((48, y + 22), "WHO CASHED ON THIS GAME", font=art_font(18, True), fill=ART_GREEN)
+        x = 48
+        cashed = c.get("cashed") or []
+        if cashed:
+            for k in cashed[:5]:
+                w = _lv_chip(d, x, y + 54, f"{k['name']}  {signed_short(k['net'])}", (16, 16, 22), ART_GREEN, 19, 38)
+                x += w + 10
+                if x > W - 200:
+                    break
+        else:
+            d.text((48, y + 60), "No slips cashed off this one (yet).", font=art_font(20, True), fill=ART_MUTED)
+        rec = c.get("records") or []
+        if rec:
+            line = "   ".join(f"{n} {h}/{t}" for n, h, t in rec[:6])
+            lt, lf = fit_text(d, "Legs here:  " + line, W - 100, 19, True)
+            d.text((48, y + 114), lt, font=lf, fill=(205, 215, 210))
+        y += fin_h
+    foot = (f"Locked at the final · {c.get('updated', '')}" if final else
+            f"Updated {c.get('updated', '')} · moves when the score or a leg does")
+    d.text((40, H - 50), foot, font=art_font(16), fill=ART_MUTED)
+    brand_sign(img, W - 40, H - 52, "PIMP-BOT", 16, variant="hype" if c.get("state") == "in" else "default")
+    return _png(img)
+
+
+# ---- game tracker card: data, embed, the job ----------------------------------------------------------------
+
+def lv_refresh_rows(gid: int, rows: list[dict]) -> list[dict]:
+    """Stored rows with each leg's latest graded result from the database (for slips that left the snapshot)."""
+    out, legs_of = [], {}
+    for r in rows:
+        pid = r["pid"]
+        if pid not in legs_of:
+            p = get_pick(gid, pid)
+            if p is None or not lv_public(p):
+                legs_of[pid] = None
+            else:
+                legs = get_legs(pid)
+                whole = {"win": "hit", "loss": "miss", "push": "push", "void": "push"}.get(p["status"], "open")
+                legs_of[pid] = ({x["idx"]: (x["status"], x["note"]) for x in legs} if legs else {1: (whole, None)},
+                                p["status"] == "open")
+        hit = legs_of[pid]
+        if hit is None:
+            continue
+        st, note = hit[0].get(r["n"], ("open", None))
+        r = dict(r, slip_open=hit[1])
+        if st in ("hit", "miss", "push"):
+            r["state"] = {"hit": "cleared", "miss": "dead", "push": "push"}[st]
+            r = lv_final_number(r, st, note)
+        out.append(r)
+    return out
+
+
+def lv_final_number(r: dict, status: str, note: Optional[str]) -> dict:
+    """A graded row's number from the grading note ('Jayson Tatum 31 Points'), so a card locked after the slip left
+    the cache shows the final stat rather than the last one it saw."""
+    n = r.get("num")
+    m = re.search(r"\s(-?\d+(?:\.\d+)?)\s", f" {note or ''} ")
+    if not n or not m:
+        return r
+    n = dict(n, value=float(m.group(1)))
+    v = leg_visual({"status": status, "num": n, "in_play": False})
+    return dict(r, num=n, value_text=v["num"], bar=list(v["bar"]) if v["bar"] else None)
+
+
+def lv_card_rows(gid: int, g: Optional[dict], stored: list[dict]) -> list[dict]:
+    """Fresh rows for the game's public legs, plus stored rows for slips that have since settled."""
+    fresh = [lv_row(r["s"], r["e"]) for r in (g["rows"] if g else []) if r["s"]["public"]]
+    have = {(r["pid"], r["n"]) for r in fresh}
+    return fresh + lv_refresh_rows(gid, [r for r in stored if (r["pid"], r["n"]) not in have])
+
+
+def lv_card_sig(ev: dict, rows: list[dict]) -> str:
+    """What's worth an edit: the score, the game state and every leg's number and result (not the clock)."""
+    return json.dumps([[t.get("score") for t in ev.get("teams") or []], ev.get("state"), bool(ev.get("final")),
+                       sorted([r["pid"], r["n"], r["state"], (r.get("num") or {}).get("value")] for r in rows)],
+                      default=str)
+
+
+def lv_cashed(gid: int, rows: list[dict]) -> tuple[list[dict], list[tuple]]:
+    """(slips on this game that cashed, each person's legs-hit record on this game)."""
+    cashed, seen = [], set()
+    for pid in dict.fromkeys(r["pid"] for r in rows):
+        p = get_pick(gid, pid)
+        if p is not None and p["status"] == "win" and lv_public(p) and pid not in seen:
+            seen.add(pid)
+            cashed.append({"name": lv_who(p), "net": pick_net(p), "id": pid})
+    rec: dict = {}
+    for r in rows:
+        h, t = rec.get(r["who"], (0, 0))
+        rec[r["who"]] = (h + (r["state"] == "cleared"), t + (r["state"] in ("cleared", "dead")))
+    return cashed, [(n, h, t) for n, (h, t) in rec.items() if t]
+
+
+async def lv_card_data(client, gid: int, ev: dict, path: Optional[str], rows: list[dict], final: bool,
+                       now: datetime) -> dict:
+    """Everything render_game_card needs (avatars fetched here, before the render thread)."""
+    away, home = lv_sides(ev)
+    ac = lv_team_colour(away)
+    hc = lv_team_colour(home, avoid=ac)
+    avatars = {}
+    for uid in {r.get("uid") for r in rows if r.get("uid")}:
+        user = client.get_user(uid) if client is not None and hasattr(client, "get_user") else None
+        avatars[uid] = await avatar_bytes(user) if user is not None else None
+    cashed, records = lv_cashed(gid, rows) if final else ([], [])
+    return {"league": LEAGUE_NAMES.get(path or "", ""), "state": "post" if final else ev.get("state"),
+            "status": lv_status_text(dict(ev, final=final or ev.get("final"))), "final": final, "rows": rows,
+            "away": dict(away, colour=ac), "home": dict(home, colour=hc), "avatars": avatars, "cashed": cashed,
+            "records": records, "updated": lv_clock(now)}
+
+
+def lv_card_embed(data: dict, ev: dict, path: Optional[str], filename: str) -> discord.Embed:
+    emoji = LV_SPORT_EMOJI.get(lv_family(path), "🏟️")
+    away, home = lv_sides(ev)
+    title = f"{emoji} {away.get('short') or lv_abbr(away)} @ {home.get('short') or lv_abbr(home)}"
+    if data["final"]:
+        cashed = data["cashed"]
+        lines = [f"🏁 **Final: {lv_score_line(ev)}**",
+                 ("💰 Cashed on this game: " + ", ".join(f"**{clip(k['name'], 40)}** {signed(k['net'])} (`#{k['id']}`)"
+                                                         for k in cashed[:6])) if cashed
+                 else "Nobody's slip cashed off this one (yet).",
+                 f"-# {lv_count_text(data['rows'])} · locked at the final"]
+        colour = 0x34D399 if cashed else BRAND
+    else:
+        lines = [f"🔴 **{lv_score_line(ev)}** · {clip(data['status'], 40)}", lv_count_text(data["rows"]),
+                 "-# Updates itself when the score or a leg moves. `/live` for every game."]
+        colour = 0xF87171
+    e = discord.Embed(title=clip(title, 256), description=clip("\n".join(lines), 4000), color=colour)
+    e.set_image(url=f"attachment://{filename}")
+    return e
+
+
+async def lv_card_payload(client, gid: int, ev: dict, path: Optional[str], rows: list[dict], final: bool,
+                          now: datetime) -> tuple[discord.Embed, discord.File]:
+    data = await lv_card_data(client, gid, ev, path, rows, final, now)
+    filename = f"game_{re.sub(r'[^0-9A-Za-z]', '', str(ev.get('id')))[:30] or 'card'}.png"
+    png = await asyncio.to_thread(locked_render, render_game_card, data)
+    return lv_card_embed(data, ev, path, filename), discord.File(png, filename=filename)
+
+
+async def lv_cards_guild(client, gid: int, channel, games: dict, now: datetime) -> None:
+    """Post a card when a qualifying game tips off, edit it when something moves, lock it at the final."""
+    c = lv_db()
+    night = lv_night(now)
+    rows = {r["event_id"]: r for r in c.execute("SELECT * FROM lv_cards WHERE guild_id = ? AND (locked_at IS NULL "
+                                               "OR night = ?)", (gid, night))}
+    made = sum(1 for r in rows.values() if r["night"] == night)
+    new = 0
+    for eid, g in games.items():
+        if eid in rows or g["ev"].get("state") != "in" or g["ev"].get("final") or not lv_card_worthy(g):
+            continue
+        if made >= LV_CARDS_PER_NIGHT or new >= LV_NEW_CARDS_PER_CYCLE:
+            break
+        card_rows = lv_card_rows(gid, g, [])
+        ev = lv_trim_event(g["ev"])
+        # the mark goes in first: a crash after sending can't post the same card twice
+        c.execute("INSERT OR IGNORE INTO lv_cards (guild_id, event_id, night, channel_id, created_at) VALUES (?,?,?,?,?)",
+                  (gid, eid, night, channel.id, iso(now)))
+        c.commit()
+        made, new = made + 1, new + 1
+        embed, f = await lv_card_payload(client, gid, ev, g["path"], card_rows, False, now)
+        msg = await channel.send(embed=embed, file=f, allowed_mentions=discord.AllowedMentions.none())
+        c.execute("UPDATE lv_cards SET message_id = ?, sig = ?, data = ?, updated_at = ? WHERE guild_id = ? AND event_id = ?",
+                  (msg.id, lv_card_sig(ev, card_rows), json.dumps({"ev": ev, "path": g["path"], "rows": card_rows}),
+                   iso(now), gid, eid))
+        c.commit()
+    fetched: set = set()
+    for eid, r in rows.items():
+        if r["locked_at"] or not r["message_id"]:
+            continue
+        try:
+            await lv_card_update(client, gid, r, games.get(eid), now, fetched)
+        except discord.NotFound:
+            c.execute("UPDATE lv_cards SET locked_at = ? WHERE guild_id = ? AND event_id = ?", (iso(now), gid, eid))
+            c.commit()
+        except Exception:
+            log.warning("Game card %s failed in guild %s", eid, gid, exc_info=True)
+
+
+async def lv_card_update(client, gid: int, r, g: Optional[dict], now: datetime, fetched: set) -> None:
+    c = lv_db()
+    stored = json.loads(r["data"] or "{}")
+    path = (g or {}).get("path") or stored.get("path")
+    ev = g["ev"] if g else None
+    cpath, cev = lv_cached_event(r["event_id"])
+    if cev is not None and lv_rank(cev) > lv_rank(ev):
+        ev, path = cev, path or cpath
+    if (ev is None or not (ev.get("final") or ev.get("state") == "post")) and g is None and path \
+            and r["event_id"] not in fetched:
+        # every slip on this game has settled, so nothing else is watching the scoreboard for it: look once
+        fetched.add(r["event_id"])
+        when = event_time(stored.get("ev") or {"date": ""}) or now
+        for e2 in await fetch_scoreboard(path, when.astimezone(TZ)):
+            if str(e2.get("id")) == r["event_id"] and lv_rank(e2) > lv_rank(ev):
+                ev = e2
+    ev = lv_trim_event(ev) if ev is not None else stored.get("ev")
+    if not ev:
+        return
+    card_rows = lv_card_rows(gid, g, stored.get("rows") or [])
+    final = bool(ev.get("final") or ev.get("state") == "post")
+    too_old = datetime.fromisoformat(r["created_at"]) < now - timedelta(hours=LV_CARD_MAX_HOURS)
+    channel = client.get_channel(r["channel_id"])
+    if final or too_old:
+        c.execute("UPDATE lv_cards SET locked_at = ?, data = ?, updated_at = ? WHERE guild_id = ? AND event_id = ?",
+                  (iso(now), json.dumps({"ev": ev, "path": path, "rows": card_rows}), iso(now), gid, r["event_id"]))
+        c.commit()
+        if channel is None:
+            return
+        embed, f = await lv_card_payload(client, gid, ev, path, card_rows, True, now)
+        await channel.get_partial_message(r["message_id"]).edit(embed=embed, attachments=[f])
+        return
+    sig = lv_card_sig(ev, card_rows)
+    last = datetime.fromisoformat(r["updated_at"]) if r["updated_at"] else None
+    if sig == r["sig"] or (last and (now - last).total_seconds() < LV_EDIT_GAP_S) or channel is None:
+        return
+    c.execute("UPDATE lv_cards SET sig = ?, data = ?, updated_at = ? WHERE guild_id = ? AND event_id = ?",
+              (sig, json.dumps({"ev": ev, "path": path, "rows": card_rows}), iso(now), gid, r["event_id"]))
+    c.commit()
+    embed, f = await lv_card_payload(client, gid, ev, path, card_rows, False, now)
+    await channel.get_partial_message(r["message_id"]).edit(embed=embed, attachments=[f])
+
+
+def lv_record_games(gid: int, games: dict, now: datetime) -> None:
+    """Remember tonight's games that group slips rode on (for the final whistle)."""
+    c = lv_db()
+    night = lv_night(now)
+    for eid, g in games.items():
+        ev = g["ev"]
+        t = event_time(ev)
+        if not t or lv_night(t) != night or ev.get("state") not in ("in", "post"):
+            continue
+        pids = sorted({r["s"]["p"]["id"] for r in g["rows"]})
+        old = c.execute("SELECT pick_ids FROM lv_games WHERE guild_id = ? AND night = ? AND event_id = ?",
+                        (gid, night, eid)).fetchone()
+        if old:
+            pids = sorted(set(pids) | set(json.loads(old["pick_ids"] or "[]")))
+        c.execute("INSERT OR REPLACE INTO lv_games (guild_id, night, event_id, state, start, title, pick_ids, seen_at) "
+                  "VALUES (?,?,?,?,?,?,?,?)", (gid, night, eid, "post" if ev.get("final") else ev.get("state"), iso(t),
+                                               lv_score_line(ev), json.dumps(pids), iso(now)))
+    c.commit()
+
+
+# ---- the leg ticker ------------------------------------------------------------------------------------------
+
+def lv_tick_events(gid: int, snap: list[dict], now: datetime, since: str) -> list[tuple[int, int, str, str]]:
+    """New moments as (pick id, leg, kind, line), compared with what's already been said (lv_seen), so a restart
+    never repeats one. Slips logged before the ticker was switched on are recorded quietly the first time."""
+    c = lv_db()
+    stamp = lv_clock(now)
+    out = []
+    for s in snap:
+        p = s["p"]
+        if not s["public"] or p["hidden"]:
+            continue
+        pid = p["id"]
+        seen = {(x["idx"], x["kind"]) for x in c.execute("SELECT idx, kind FROM lv_seen WHERE pick_id = ?", (pid,))}
+        fresh = (-1, "seen") not in seen
+        quiet = fresh and (p["created_at"] < since and (p["status"] == "open" or (p["settled_at"] or "") < since))
+        if fresh:
+            c.execute("INSERT OR IGNORE INTO lv_seen (pick_id, idx, kind, at) VALUES (?,?,?,?)", (pid, -1, "seen", iso(now)))
+        who = lv_who(p)
+        found = []
+        outs = [leg_outcome(e) for e in s["entries"]]
+        for e, o in zip(s["entries"], outs):
+            if o not in ("hit", "miss") or (e.get("n"), o) in seen:
+                continue
+            val = (e.get("num") or {}).get("value")
+            tail = f" ({val:g})" if val is not None else ""
+            found.append((pid, e.get("n"), o, f"{'✅' if o == 'hit' else '❌'} {stamp} · {who} · "
+                          f"{clip(e.get('text') or '', 70)} {'cleared' if o == 'hit' else 'died'}{tail}"))
+        n = len(s["entries"])
+        left = [e for e, o in zip(s["entries"], outs) if o not in ("hit", "push")]
+        if (p["status"] == "open" and n >= 3 and len(left) == 1 and "miss" not in outs and (0, "oneaway") not in seen):
+            found.append((pid, 0, "oneaway", f"🔥 {stamp} · {who} is one leg away: needs "
+                          f"{clip(left[0].get('text') or '', 60)} for {money(p['payout'])}"))
+        if p["status"] == "win" and (0, "cash") not in seen:
+            found.append((pid, 0, "cash", f"💰 {stamp} · {who} cashed {money(p['returned'] or p['payout'])} "
+                          f"({clip(p['description'], 40)})"))
+        for pid_, idx, kind, line in found:
+            c.execute("INSERT OR IGNORE INTO lv_seen (pick_id, idx, kind, at) VALUES (?,?,?,?)", (pid_, idx, kind, iso(now)))
+        if not quiet:
+            out.extend(found)
+    c.commit()
+    return out
+
+
+def lv_ticker_text(night: str, lines: list[str], part: int) -> str:
+    day = datetime.strptime(night, "%Y-%m-%d").strftime("%a %b %-d")
+    head = f"📟 **Leg ticker** · {day}" + (f" (part {part})" if part > 1 else "")
+    return head + "\n" + "\n".join(lines) + "\n-# Legs clearing, dying and cashing as they happen. `/live` for the full view."
+
+
+async def lv_ticker_post(client, gid: int, channel, lines: list[str], now: datetime) -> None:
+    """Append lines to tonight's ticker message, rolling into a new message before it hits 2000 characters."""
+    night = lv_night(now)
+    try:
+        st = json.loads(get_setting(gid, "lvtick") or "{}")
+    except (TypeError, ValueError):
+        st = {}
+    if st.get("night") != night or st.get("channel_id") != channel.id:
+        st = {"night": night, "channel_id": channel.id, "message_id": None, "lines": [], "part": 1}
+    pending = [clip(x, 300) for x in lines]
+    while pending:
+        before = len(st["lines"])
+        while pending and len(lv_ticker_text(night, st["lines"] + [pending[0]], st["part"])) <= LV_TICK_LIMIT:
+            st["lines"].append(pending.pop(0))
+        if len(st["lines"]) > before:
+            text = lv_ticker_text(night, st["lines"], st["part"])
+            sent = False
+            if st.get("message_id"):
+                try:
+                    await channel.get_partial_message(st["message_id"]).edit(
+                        content=text, allowed_mentions=discord.AllowedMentions.none())
+                    sent = True
+                except discord.NotFound:
+                    sent = False
+            if not sent:
+                msg = await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+                st["message_id"] = msg.id
+            set_setting(gid, "lvtick", json.dumps(st))
+        if pending:
+            st = {"night": night, "channel_id": channel.id, "message_id": None, "lines": [], "part": st["part"] + 1}
+    set_setting(gid, "lvtick", json.dumps(st))
+
+
+async def lv_ticker_guild(client, gid: int, channel, snap: list[dict], now: datetime) -> None:
+    since = get_setting(gid, "lvtick_since")
+    if since is None:
+        since = iso(now)
+        set_setting(gid, "lvtick_since", since)
+    lines = [x[3] for x in lv_tick_events(gid, snap, now, since)]
+    if lines:
+        await lv_ticker_post(client, gid, channel, lines, now)
+
+
+# ---- /live: every leg in play, grouped by game ----------------------------------------------------------------
+
+def _lv_minibar(n: dict) -> str:
+    if not n or n["side"] != "over" or not n["line"]:
+        return ""
+    k = max(0, min(6, int(round(n["value"] / n["line"] * 6))))
+    return f" `{'▰' * k}{'▱' * (6 - k)}`"
+
+
+def lv_leg_line(r: dict, show_who: bool) -> str:
+    n = r.get("num")
+    stat = f" · **{n['value']:g}**/{n['line']:g}{_lv_minibar(n)}" if n else \
+        {"ahead": " · ahead", "behind": " · behind", "waiting": " · not started"}.get(r["state"], "")
+    who = f"{clip(r['who'], 24)} · " if show_who else ""
+    return f"{LV_ICON.get(r['state'], '⏳')} {who}{clip(r['text'], 46)}{stat}"
+
+
+def lv_tonight(snap: list[dict], now: datetime, limit: int = 4) -> list[tuple[datetime, str, int]]:
+    """Games still to start tonight that slips in the snapshot ride on: (start, 'CLE @ BOS', legs)."""
+    _, end = lv_night_bounds(lv_night(now))
+    seen: dict = {}
+    for s in snap:
+        if s["p"]["status"] != "open":
+            continue
+        for e in s["entries"]:
+            ev = e.get("event") or {}
+            t = event_time(ev) if ev.get("date") else None
+            if ev.get("state") == "pre" and t and now < t <= end and e.get("status") == "open":
+                k = str(ev.get("id"))
+                if k in seen:
+                    seen[k] = (seen[k][0], seen[k][1], seen[k][2] + 1)
+                else:
+                    seen[k] = (t, lv_score_line(ev), 1)
+    return sorted(seen.values())[:limit]
+
+
+def lv_visible(s: dict, scope: str, uid: int, private: bool) -> bool:
+    p = s["p"]
+    if scope == "m" and p["bettor_id"] != uid:
+        return False
+    return s["public"] or (private and p["bettor_id"] == uid)
+
+
+def lv_live_body(snap: list[dict], scope: str, uid: int, private: bool, now: datetime) -> tuple[str, str, int]:
+    """(description, signature, games in play) for /live: games in play first, each with its legs, then tonight's tip-offs."""
+    mine = [s for s in snap if lv_visible(s, scope, uid, private)]
+    games = lv_games_of(mine)
+    live = [g for g in games.values() if g["ev"].get("state") == "in" and not g["ev"].get("final")]
+    live.sort(key=lambda g: (event_time(g["ev"]) or now, g["id"]))
+    blocks, sig = [], []
+    for g in live:
+        rows = sorted((lv_row(r["s"], r["e"]) for r in g["rows"] if r["s"]["p"]["status"] == "open"
+                       or r["e"].get("status") != "open"), key=lambda r: (LV_ORDER.get(r["state"], 9), r["who"]))
+        if not rows:
+            continue
+        emoji = LV_SPORT_EMOJI.get(lv_family(g["path"]), "🏟️")
+        head = f"{emoji} **{lv_score_line(g['ev'])}** · {clip(lv_status_text(g['ev']), 30)}"
+        lines = [lv_leg_line(r, scope == "a") for r in rows[:8]]
+        if len(rows) > 8:
+            lines.append(f"-# + {len(rows) - 8} more legs")
+        blocks.append(head + "\n" + "\n".join(lines))
+        sig.append([lv_score_line(g["ev"]), [(r["pid"], r["n"], r["state"], (r.get("num") or {}).get("value"))
+                                             for r in rows]])
+    body, shown = "", 0
+    for b in blocks:
+        if len(body) + len(b) > 3300:
+            break
+        body += ("\n\n" if body else "") + b
+        shown += 1
+    if shown < len(blocks):
+        body += f"\n\n-# + {len(blocks) - shown} more games in play"
+    if not body:
+        body = ("Nothing of yours is in play right now." if scope == "m" else "No group legs are in play right now.")
+    up = lv_tonight(mine, now)
+    if up:
+        body += "\n\n⏰ **Tonight:** " + " · ".join(f"<t:{int(t.timestamp())}:t> {name}" + (f" ({n} legs)" if n > 1 else "")
+                                                for t, name, n in up)
+        sig.append([name for _, name, _ in up])
+    elif not live:
+        body += "\n-# No more games with open legs tonight. `/tracker` has every open slip."
+    return clip(body, 4000), json.dumps(sig, default=str), shown
+
+
+async def lv_live_embed(client, gid: int, scope: str, uid: int, private: bool, now: Optional[datetime] = None,
+                        snap: Optional[list] = None, until: Optional[datetime] = None) -> tuple[discord.Embed, str]:
+    now = now or datetime.now(timezone.utc)
+    snap = snap if snap is not None else await lv_snapshot(gid, now, deep=True)
+    body, sig, live_n = lv_live_body(snap, scope, uid, private, now)
+    if scope == "m":
+        name = next((lv_who(s["p"]) for s in snap if s["p"]["bettor_id"] == uid), "you")
+        title = f"📡 Live now · {clip(name, 60)}" + (" (just you)" if private else "")
+    else:
+        title = "📡 Live now · everyone"
+    e = discord.Embed(title=title, description=body, color=0xF87171 if live_n else BRAND)
+    foot = f"Updated {lv_clock(now)}"
+    if until:
+        foot += f" · updating itself until {lv_clock(until)}"
+    e.set_footer(text=foot + "  ·  ✅ cleared ❌ dead 🟡 close ⏱️ live 🟢 ahead 🔴 behind")
+    return e, sig
+
+
+class LiveButton(discord.ui.DynamicItem[discord.ui.Button],
+                 template=r"lv:(?P<act>ref|prf|keep|stop):(?P<scope>a|m):(?P<uid>\d{1,20})"):
+    """/live buttons: 🔄 refresh (prf = the private view, owner only), ⏱️ keep updating for 3 hours, ⏹ stop."""
+
+    def __init__(self, act: str, scope: str, uid: int):
+        label = {"ref": "🔄 Refresh", "prf": "🔄 Refresh", "keep": "⏱️ Keep updating", "stop": "⏹ Stop updating"}[act]
+        super().__init__(discord.ui.Button(label=label, style=discord.ButtonStyle.secondary,
+                                           custom_id=f"lv:{act}:{scope}:{uid}"))
+        self.act, self.scope, self.uid = act, scope, int(uid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["act"], match["scope"], int(match["uid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        gid = interaction.guild_id
+        mid = getattr(interaction.message, "id", None)
+        if self.act == "prf" and interaction.user.id != self.uid:
+            await interaction.response.send_message("That's someone's private view. `/live who:Mine` shows yours.",
+                                                    ephemeral=True)
+            return
+        if self.act in ("keep", "stop") and interaction.user.id != self.uid and not is_mod(interaction.user):
+            await interaction.response.send_message("Only whoever posted this (or a mod) can change that. "
+                                                    "Tap 🔄 any time.", ephemeral=True)
+            return
+        now = datetime.now(timezone.utc)
+        c = lv_db()
+        if self.act == "stop":
+            c.execute("DELETE FROM lv_follow WHERE message_id = ?", (mid,))
+            c.commit()
+        until = None
+        if self.act == "keep":
+            active = c.execute("SELECT message_id FROM lv_follow WHERE guild_id = ? ORDER BY until", (gid,)).fetchall()
+            for old in active[:max(0, len(active) - LV_FOLLOWS_PER_GUILD + 1)]:
+                c.execute("DELETE FROM lv_follow WHERE message_id = ?", (old["message_id"],))
+            until = now + timedelta(hours=LV_FOLLOW_HOURS)
+            c.execute("INSERT OR REPLACE INTO lv_follow (message_id, guild_id, channel_id, user_id, scope, until) "
+                      "VALUES (?,?,?,?,?,?)", (mid, gid, interaction.channel_id, self.uid, self.scope, iso(until)))
+            c.commit()
+        elif self.act == "ref" and mid is not None:
+            row = c.execute("SELECT until FROM lv_follow WHERE message_id = ?", (mid,)).fetchone()
+            until = datetime.fromisoformat(row["until"]) if row else None
+        await interaction.response.defer()
+        private = self.act == "prf"
+        embed, sig = await lv_live_embed(interaction.client, gid, self.scope, self.uid, private, now, until=until)
+        if until:
+            c.execute("UPDATE lv_follow SET sig = ? WHERE message_id = ?", (sig, mid))
+            c.commit()
+        await interaction.edit_original_response(embed=embed, view=lv_live_view(self.scope, self.uid, private,
+                                                                                 following=until is not None))
+
+
+def lv_live_view(scope: str, uid: int, private: bool, following: bool = False) -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    if private:
+        v.add_item(LiveButton("prf", scope, uid))
+        return v
+    v.add_item(LiveButton("ref", scope, uid))
+    v.add_item(LiveButton("stop" if following else "keep", scope, uid))
+    return v
+
+
+async def lv_follows_guild(client, gid: int, snap: list[dict], now: datetime) -> None:
+    """Re-draw /live posts someone asked to keep updating; stop after 3 hours."""
+    c = lv_db()
+    for r in c.execute("SELECT * FROM lv_follow WHERE guild_id = ? LIMIT 10", (gid,)).fetchall():
+        channel = client.get_channel(r["channel_id"])
+        until = datetime.fromisoformat(r["until"])
+        expired = until <= now
+        if channel is None or expired:
+            c.execute("DELETE FROM lv_follow WHERE message_id = ?", (r["message_id"],))
+            c.commit()
+        if channel is None:
+            continue
+        try:
+            embed, sig = await lv_live_embed(client, gid, r["scope"], r["user_id"], False, now, snap=snap,
+                                             until=None if expired else until)
+            if expired:
+                embed.set_footer(text=f"Stopped updating at {lv_clock(now)} · tap 🔄 for the latest, or ⏱️ to keep "
+                                      "it going")
+            elif sig == r["sig"]:
+                continue
+            else:
+                c.execute("UPDATE lv_follow SET sig = ? WHERE message_id = ?", (sig, r["message_id"]))
+                c.commit()
+            await channel.get_partial_message(r["message_id"]).edit(
+                embed=embed, view=lv_live_view(r["scope"], r["user_id"], False, following=not expired))
+        except discord.NotFound:
+            c.execute("DELETE FROM lv_follow WHERE message_id = ?", (r["message_id"],))
+            c.commit()
+
+
+# ---- slip-start countdowns ---------------------------------------------------------------------------------
+
+def lv_first_start(entries: list[dict]) -> Optional[datetime]:
+    """When the slip's first game starts, or None once any of its games has started (or none are known)."""
+    starts = []
+    for e in entries:
+        ev = e.get("event") or {}
+        if not ev:
+            continue
+        if ev.get("state") != "pre":
+            return None
+        t = event_time(ev) if ev.get("date") else None
+        if t:
+            starts.append(t)
+    return min(starts) if starts else None
+
+
+def lv_countdown_text(p, entries: list[dict], minutes: int) -> str:
+    names = list(dict.fromkeys(leg_label(e.get("text") or "") for e in entries if e.get("text")))
+    what = f"{len(entries)}-pick" if len(entries) > 1 else clip(p["description"], 40)
+    shown = ", ".join(clip(n, 30) for n in names[:5]) + (f" +{len(names) - 5} more" if len(names) > 5 else "")
+    return (f"⏰ Your {what} starts in {minutes} min: {shown}.\n"
+            f"-# I'll track it live (`/live who:Mine` any time). Turn these off in `/me settings`.")
+
+
+async def lv_countdowns_guild(client, gid: int, snap: list[dict], now: datetime) -> None:
+    """One DM per slip, about 30 minutes before its first game, for people who switched it on."""
+    c = lv_db()
+    for s in snap:
+        p = s["p"]
+        uid = p["bettor_id"]
+        if p["status"] != "open" or not uid or not personal_on(gid, uid, "lockalerts"):
+            continue
+        if c.execute("SELECT 1 FROM lv_seen WHERE pick_id = ? AND idx = 0 AND kind = 'lock'", (p["id"],)).fetchone():
+            continue
+        start = lv_first_start(s["entries"])
+        if start is None:
+            continue
+        minutes = int(round((start - now).total_seconds() / 60))
+        if not 1 <= minutes <= LV_LOCK_MINUTES + 4:
+            continue
+        c.execute("INSERT OR IGNORE INTO lv_seen (pick_id, idx, kind, at) VALUES (?,?,?,?)", (p["id"], 0, "lock", iso(now)))
+        c.commit()
+        if is_quiet(gid, uid, now):
+            continue
+        try:
+            user = client.get_user(uid) if hasattr(client, "get_user") else None
+            user = user or await client.fetch_user(uid)
+            await user.send(lv_countdown_text(p, s["entries"], 5 * round(minutes / 5) if minutes >= 10 else minutes))
+        except Exception:
+            log.info("Couldn't DM a slip countdown for pick %s", p["id"])
+
+
+# ---- the final whistle -----------------------------------------------------------------------------------------
+
+def lv_games_left(snap: list[dict], now: datetime) -> bool:
+    """Is any open leg still in play, or riding on a game that starts before the night is out?"""
+    _, end = lv_night_bounds(lv_night(now))
+    for s in snap:
+        p = s["p"]
+        if p["status"] != "open":
+            continue
+        st = p["auto_state"] or ""
+        if st == "live":
+            return True
+        if st.startswith("waiting:"):
+            t = _state_time(st)
+            if t and now - timedelta(hours=1) <= t <= end and any(e.get("event") for e in s["entries"]):
+                return True
+        for e in s["entries"]:
+            ev = e.get("event") or {}
+            if e.get("status") != "open" or not ev:
+                continue
+            if ev.get("state") == "in" and not ev.get("final"):
+                return True
+            t = event_time(ev) if ev.get("date") else None
+            if ev.get("state") == "pre" and t and now - timedelta(hours=1) <= t <= end:
+                return True
+    return False
+
+
+def lv_best_leg(gid: int, pids: list[int]) -> Optional[str]:
+    """Tonight's best leg: the cleared leg that beat its number by the most (relative to the number)."""
+    if not pids:
+        return None
+    marks = ",".join("?" * len(pids))
+    best, score = None, -1.0
+    for r in db().execute(f"SELECT l.pick_id, l.idx, l.text, l.margin, l.note FROM legs l JOIN picks p ON p.id = l.pick_id "
+                          f"WHERE l.pick_id IN ({marks}) AND l.status = 'hit' AND l.margin IS NOT NULL AND l.margin > 0 "
+                          f"AND p.guild_id = ? AND (p.hidden IS NULL OR p.hidden = 0 OR p.revealed_at IS NOT NULL)",
+                          list(pids) + [gid]):
+        pr = cached_prop(r["text"])
+        line = abs(pr["line"]) if pr and pr.get("line") is not None else 1.0
+        rel = r["margin"] / max(1.0, line)
+        if rel > score:
+            best, score = r, rel
+    if best is None:
+        return None
+    p = get_pick(gid, best["pick_id"])
+    if p is None:
+        return None
+    note = re.sub(r"\s*\(already decided.*?\)", "", best["note"] or "").strip()
+    return (f"**{clip(lv_who(p), 40)}** · {clip(best['text'], 80)}" + (f" → {clip(note, 60)}" if note else "")
+            + f" · cleared by **{best['margin']:g}** (`#{p['id']}`)")
+
+
+def lv_whistle_embed(gid: int, night: str, now: datetime) -> Optional[discord.Embed]:
+    start, _ = lv_night_bounds(night)
+    c = lv_db()
+    games = c.execute("SELECT * FROM lv_games WHERE guild_id = ? AND night = ?", (gid, night)).fetchall()
+    pids = sorted({i for g in games for i in json.loads(g["pick_ids"] or "[]")})
+    closed = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? "
+                          "ORDER BY settled_at", (gid, iso(start))).fetchall()
+    closed = [p for p in closed if lv_public(p)]
+    day = datetime.strptime(night, "%Y-%m-%d").strftime("%a %b %-d")
+    e = discord.Embed(title=f"🏁 Final whistle · {day}", color=BRAND,
+                      description=f"That's the last game with group legs tonight ({len(games)} game"
+                                  f"{'s' if len(games) != 1 else ''} tracked). Here's how it went.")
+    if closed:
+        lines = [f"{STATUS[p['status']][0].split()[0]} **{clip(lv_who(p), 30)}** · {clip(p['description'], 40)} · "
+                 f"**{signed(pick_net(p))}** (`#{p['id']}`)" for p in closed[:12]]
+        if len(closed) > 12:
+            lines.append(f"+ {len(closed) - 12} more")
+        won = sum(1 for p in closed if p["status"] == "win")
+        lost = sum(1 for p in closed if p["status"] == "loss")
+        e.add_field(name=f"Closed tonight · {won} cashed, {lost} missed · {signed(sum(pick_net(p) for p in closed))}",
+                    value=clip("\n".join(lines), 1024), inline=False)
+    else:
+        e.add_field(name="Closed tonight", value="No slips closed yet: the rest grade as their results come in.",
+                    inline=False)
+    since = iso(now - timedelta(days=AUTOPILOT_DAYS))
+    needs = [p for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND created_at >= ? "
+                                     "AND (auto_state LIKE 'needs:%' OR auto_state LIKE 'stuck:%' OR auto_state LIKE "
+                                     "'lookup:%') ORDER BY id", (gid, since)).fetchall() if lv_public(p)]
+    if needs:
+        lines = [f"✋ **{clip(lv_who(p), 30)}** · {clip(p['description'], 40)} (`#{p['id']}`)" for p in needs[:6]]
+        if len(needs) > 6:
+            lines.append(f"+ {len(needs) - 6} more")
+        e.add_field(name="Still needs a person", value=clip("\n".join(lines) + "\nTap `/inbox` to sort them out.", 1024),
+                    inline=False)
+    best = lv_best_leg(gid, sorted(set(pids) | {p["id"] for p in closed}))
+    if best:
+        e.add_field(name="🌟 Night's best leg", value=clip(best, 1024), inline=False)
+    e.set_footer(text="Every slip is in /tracker · turn this recap off in /admin panel")
+    return e
+
+
+async def lv_whistle_guild(client, gid: int, channel, snap: list[dict], now: datetime) -> None:
+    """Once per night: when the last game with group legs is over (and it's stayed quiet a few minutes)."""
+    night = lv_night(now)
+    if get_setting(gid, f"lvfw:{night}"):
+        return
+    c = lv_db()
+    if not c.execute("SELECT 1 FROM lv_games WHERE guild_id = ? AND night = ?", (gid, night)).fetchone():
+        return
+    if lv_games_left(snap, now):
+        set_setting(gid, "lvfw_calm", None)
+        return
+    calm = get_setting(gid, "lvfw_calm") or ""
+    if not calm.startswith(night + "|"):
+        set_setting(gid, "lvfw_calm", f"{night}|{iso(now)}")
+        return
+    if now - datetime.fromisoformat(calm.split("|", 1)[1]) < timedelta(minutes=LV_WHISTLE_CALM_M):
+        return
+    set_setting(gid, f"lvfw:{night}", iso(now))       # marked before sending: never twice in a night
+    set_setting(gid, "lvfw_calm", None)
+    embed = lv_whistle_embed(gid, night, now)
+    if embed is not None:
+        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+
+# ---- the job ---------------------------------------------------------------------------------------------------
+
+def lv_quiet(gid: int, now: datetime, whistle: bool) -> bool:
+    """True when this guild has nothing for the live layer to do this cycle (one or two cheap queries, no network)."""
+    if lv_db().execute("SELECT 1 FROM lv_cards WHERE guild_id = ? AND locked_at IS NULL LIMIT 1", (gid,)).fetchone():
+        return False
+    night = lv_night(now)
+    if whistle and not get_setting(gid, f"lvfw:{night}") and lv_db().execute(
+            "SELECT 1 FROM lv_games WHERE guild_id = ? AND night = ? LIMIT 1", (gid, night)).fetchone():
+        return False
+    since = iso(now - timedelta(days=AUTOPILOT_DAYS))
+    for p in db().execute("SELECT id, auto_state FROM picks WHERE guild_id = ? AND status = 'open' AND created_at >= ?",
+                          (gid, since)):
+        if lv_live_hint(p, now):
+            return False
+    return True
+
+
+def lv_guilds(now: datetime) -> list[int]:
+    lv_db()
+    since = iso(now - timedelta(days=AUTOPILOT_DAYS))
+    recent = iso(now - timedelta(hours=LV_SETTLED_HOURS))
+    rows = db().execute("SELECT DISTINCT guild_id FROM picks WHERE (status = 'open' AND created_at >= ?) OR settled_at >= ? "
+                        "UNION SELECT guild_id FROM lv_follow UNION SELECT guild_id FROM lv_cards WHERE locked_at IS NULL",
+                        (since, recent)).fetchall()
+    return [r[0] for r in rows]
+
+
+async def live_layer_job(client, now: Optional[datetime] = None) -> None:
+    """Every 2 minutes: game cards, the ticker, /live follows, countdowns and the final whistle, one guild at a time."""
+    now = now or datetime.now(timezone.utc)
+    for gid in lv_guilds(now):
+        try:
+            cards, tick, whistle = (server_on(gid, "gametracker"), server_on(gid, "ticker"),
+                                    server_on(gid, "finalwhistle"))
+            follows = lv_db().execute("SELECT 1 FROM lv_follow WHERE guild_id = ? LIMIT 1", (gid,)).fetchone()
+            counts = db().execute("SELECT 1 FROM settings WHERE guild_id = ? AND key LIKE 'lockalerts:%' AND value = 'on' "
+                                  "LIMIT 1", (gid,)).fetchone()
+            if not (cards or tick or whistle or follows or counts):
+                continue
+            if not (tick or follows) and lv_quiet(gid, now, whistle):
+                continue        # nothing live, no cards to finish, no whistle due: no snapshot at all
+            snap = await lv_snapshot(gid, now)
+            channel = await recap_channel_for(client, gid) if (cards or tick or whistle) else None
+            games = lv_games_of([s for s in snap if s["public"]])
+            lv_record_games(gid, games, now)
+            steps = []
+            if channel is not None and cards:
+                steps.append(("cards", lambda: lv_cards_guild(client, gid, channel, games, now)))
+            if channel is not None and tick:
+                steps.append(("ticker", lambda: lv_ticker_guild(client, gid, channel, snap, now)))
+            if follows:
+                steps.append(("follows", lambda: lv_follows_guild(client, gid, snap, now)))
+            if counts:
+                steps.append(("countdowns", lambda: lv_countdowns_guild(client, gid, snap, now)))
+            if channel is not None and whistle:
+                steps.append(("whistle", lambda: lv_whistle_guild(client, gid, channel, snap, now)))
+            for name, step in steps:
+                try:
+                    await step()
+                except Exception:
+                    log.warning("Live layer %s failed in guild %s", name, gid, exc_info=True)
+        except Exception:
+            log.warning("Live layer failed in guild %s", gid, exc_info=True)
+
+
+EXTRA_JOBS.append(("live_layer", live_layer_job))
+EXTRA_ITEMS.append(LiveButton)
+SERVER_TOGGLES.append(("gametracker", "Game tracker cards", "optout"))
+SERVER_TOGGLES.append(("ticker", "Leg ticker", "optin"))
+SERVER_TOGGLES.append(("finalwhistle", "Final whistle recap", "optout"))
+PERSONAL_TOGGLES.append(("lockalerts", "Slip start countdown DM", "optin"))
+HELP_EXTRA.append(("📡 Live", (
+    "`/live` every leg in play right now, grouped by game, plus tonight's tip-offs: 🔄 refreshes, ⏱️ keeps it updating "
+    "for 3 hours · `/live who:Mine` just yours, only you see it (hidden slips included)\n"
+    "**Game cards**: when 2+ group legs ride on a game, the recap channel gets one card at tip-off that updates itself "
+    "and locks at the final with who cashed · **Leg ticker** (off by default): one running list a night of legs "
+    "clearing, dying and cashing · **Final whistle**: a wrap-up after the night's last game. Switch any of them in "
+    "`/admin panel`.\n**Slip start countdown** (`/me settings`): a DM 30 minutes before your slip's first game.")))
+
+
+# ==========================================================================
+# r21 features: /build slip builder, weekly power rankings, /legs leg library, /goal group goals
+# ==========================================================================
+
+SERVER_TOGGLES.append(("powerrank", "Weekly power rankings", "optout"))
+
+# ---- shared tables ----------------------------------------------------------------------------------
+
+_feat_ready = False
+
+
+def feat_db():
+    """Lazily create the group-goal table; returns the shared connection."""
+    global _feat_ready
+    if not _feat_ready:
+        db().executescript("""
+            CREATE TABLE IF NOT EXISTS feat_goals (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id   INTEGER NOT NULL,
+                week       TEXT    NOT NULL,
+                kind       TEXT    NOT NULL,
+                target     INTEGER NOT NULL,
+                pot        INTEGER NOT NULL,
+                status     TEXT    NOT NULL DEFAULT 'active',   -- active / won / missed / stopped
+                channel_id INTEGER,
+                created_by INTEGER,
+                created_at TEXT    NOT NULL,
+                marks      TEXT    NOT NULL DEFAULT '[]',
+                result     TEXT,
+                ended_at   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_feat_goals_guild ON feat_goals (guild_id, status);
+        """)
+        db().commit()
+        _feat_ready = True
+    return db()
+
+
+# ==========================================================================
+# 1. /build: log a slip without a screenshot
+# ==========================================================================
+
+BUILD_MAX_LEGS = 8
+BUILD_PLATFORMS = ["PrizePicks", "Underdog", "Kalshi", "DraftKings", "FanDuel", "Sportsbook", "Other"]
+# (label shown, sport text saved on the pick, stat family or None when there's no stat list)
+BUILD_SPORTS = [("NBA", "NBA", "basketball"), ("WNBA", "WNBA", "basketball"), ("NFL", "NFL", "football"),
+                ("College football", "NCAAF", "football"), ("College basketball", "NCAAB", "basketball"),
+                ("MLB", "MLB", "baseball"), ("NHL", "NHL", "hockey"), ("Something else", "Other", None)]
+_BUILD_WORDS: dict[str, str] = {}
+
+
+def build_stat_keys(family: Optional[str]) -> list[str]:
+    """The stats offered for a sport family: the common ones first, at most 25 (a Discord select's limit)."""
+    if not family:
+        return []
+    keys = [k for k in MAIN_STATS.get(family, []) if k in STATS and STATS[k][1] == family and k != "minutes"]
+    keys += [k for k, v in STATS.items() if v[1] == family and k not in keys and k != "minutes"]
+    return (keys + (["minutes"] if family == "basketball" and "minutes" in STATS else []))[:25]
+
+
+def build_stat_word(key: str) -> str:
+    """How to write this stat in a leg so the bot's own leg reader (autopilot, /legs, stacks) reads it back."""
+    if key in _BUILD_WORDS:
+        return _BUILD_WORDS[key]
+    label, _, _, aliases = STATS[key]
+    word = label
+    for cand in [label] + list(aliases):
+        pr = prop_of(f"Sample Person over 10.5 {cand}")
+        if pr and key in (pr.get("stats") or []) and pr["player"] == "sample person":
+            word = cand
+            break
+    _BUILD_WORDS[key] = word
+    return word
+
+
+def build_leg_text(player: str, side: str, line: float, stat_key: str) -> str:
+    return f"{player} {'over' if side == 'over' else 'under'} {line:g} {build_stat_word(stat_key)}"
+
+
+def build_parse_line(text: str) -> Optional[float]:
+    """'24.5', 'o24.5', '24.5+' -> 24.5; None when it isn't a sensible line."""
+    m = re.search(r"\d+(?:\.\d+)?", (text or "").replace(",", "."))
+    if not m:
+        return None
+    v = float(m.group(0))
+    return v if 0 <= v <= 2000 else None
+
+
+def build_description(sess: dict) -> str:
+    n = len(sess["legs"])
+    if sess.get("platform") == "PrizePicks" and n >= 2:
+        return f"{n}-pick {'Flex' if sess.get('entry') == 'flex' else 'Power'} Play"
+    return "Single" if n == 1 else f"{n}-leg parlay"
+
+
+def build_slip(sess: dict) -> dict:
+    """The builder's state in the same shape the slip reader produces, so logging goes down the usual path."""
+    sport = sess.get("sport") if sess.get("sport") != "Other" else None
+    slip = {"is_slip": True, "platform": sess.get("platform") or "Other", "sport": sport,
+            "description": build_description(sess), "legs": [x["text"] for x in sess["legs"]],
+            "cost": sess.get("cost"), "payout": sess.get("payout"), "returned": None, "status": "open", "placed": True}
+    if sess.get("platform") == "PrizePicks" and sess.get("entry") in ("power", "flex"):
+        slip["entry_type"] = sess["entry"]
+    return slip
+
+
+def build_new_session(user_id: int, guild_id: int, name: str) -> dict:
+    return {"uid": user_id, "guild_id": guild_id, "name": name, "step": "platform", "platform": None, "sport": None,
+            "family": None, "legs": [], "pending": None, "last_stat": None, "cost": None, "payout": None,
+            "entry": None, "dup": None, "dup_ok": False, "used": None, "note": ""}
+
+
+async def build_check_player(name: str, sport: Optional[str]) -> dict:
+    """Look the player up on ESPN. Never raises and never blocks for long: a slow or failed lookup just keeps
+    the name as typed. {'name', 'team', 'state': 'ok' | 'unknown' | 'offline'}"""
+    typed = " ".join((name or "").split())
+    shown = typed.title() if typed.islower() else typed
+    out = {"name": shown, "team": "", "state": "offline"}
+    paths = [p for p in leagues_for(sport) if p in PROP_PATHS] or list(PROP_PATHS)
+    q = norm_name(typed)
+    q = PLAYER_NICKNAMES.get(q, q)
+    try:
+        found = await asyncio.wait_for(resolve_player(q, paths), timeout=4)
+    except Exception:
+        return out
+    if not found:
+        out["state"] = "unknown"
+        return out
+    best = found[0]
+    out.update(name=best["name"] or shown, team=best.get("team_abbr") or "", state="ok")
+    return out
+
+
+def build_embed(sess: dict) -> discord.Embed:
+    """The live preview: everything on the slip so far, plus what to do next."""
+    e = discord.Embed(title="🧱 Slip builder", color=BRAND)
+    lines = []
+    for k, leg in enumerate(sess["legs"], 1):
+        mark = {"ok": "✅", "unknown": "⚠️"}.get(leg.get("check"), "▫️")
+        lines.append(f"`{k}` {mark} {clip(leg['text'], 120)}")
+    p = sess.get("pending")
+    if p:
+        stat = STATS[p["stat"]][0] if p.get("stat") else "pick the stat"
+        chk = {"checking": " · checking ESPN…", "ok": f" · ✅ found{' (' + p['team'] + ')' if p.get('team') else ''}",
+               "unknown": " · ⚠️ not found on ESPN, kept as typed", "offline": ""}.get(p.get("check"), "")
+        lines.append(f"`{len(sess['legs']) + 1}` ✏️ **{clip(p['player'], 60)}** · {p['line']:g} · {stat}{chk}")
+    step = sess["step"]
+    nxt = {"platform": "**Step 1:** pick where you're playing it.",
+           "sport": "**Step 2:** pick the sport.",
+           "ready": "Looks good? Tap **✅ Log it**" + (", or **🔍 Just ask** for a breakdown first." if ai_enabled() else ".")}
+    if step == "legs":
+        if p and not p.get("stat"):
+            hint = "Pick the stat, then tap **Over** or **Under**."
+        elif p:
+            hint = "Tap **Over** or **Under** to add it."
+        elif not sess["legs"]:
+            hint = "**Step 3:** tap **➕ Add a leg**. Type the player and the line, then pick the stat and the side."
+        elif len(sess["legs"]) >= BUILD_MAX_LEGS:
+            hint = f"That's the max ({BUILD_MAX_LEGS} legs). Tap **💵 Amounts** to finish."
+        else:
+            hint = "Add another leg, or tap **💵 Amounts** when you're done."
+    else:
+        hint = nxt.get(step, "")
+    e.description = clip("\n".join(lines) + ("\n\n" if lines else "") + hint, 4000)
+    e.add_field(name="Platform", value=sess.get("platform") or "-")
+    e.add_field(name="Sport", value=sess.get("sport") or "-")
+    if sess["legs"]:
+        e.add_field(name="Play", value=build_description(sess))
+    if sess.get("cost"):
+        e.add_field(name="Riding", value=f"{money(sess['cost'])} → " +
+                    (money(sess["payout"]) if sess.get("payout") else "payout not set"))
+    if sess.get("dup"):
+        e.add_field(name="👀 Heads up", inline=False,
+                    value=f"This matches pick `#{sess['dup']}` you already logged. Tap ✅ Log it twice to log it anyway.")
+    if sess.get("note"):
+        e.add_field(name="Note", value=clip(sess["note"], 1024), inline=False)
+    e.set_footer(text=f"{len(sess['legs'])} of {BUILD_MAX_LEGS} legs · nothing is logged until you tap ✅ Log it")
+    return e
+
+
+def _build_owner_ok(interaction, sess: dict) -> bool:
+    return interaction.user.id == sess["uid"] and interaction.guild_id == sess["guild_id"]
+
+
+async def _build_refresh(interaction, sess: dict) -> None:
+    await interaction.response.edit_message(embed=build_embed(sess), view=build_view(sess))
+
+
+def _build_button(label: str, style, row: int, fn, sess: dict, disabled: bool = False):
+    b = discord.ui.Button(label=label, style=style, row=row)
+    if disabled:
+        b.disabled = True
+
+    async def cb(interaction):
+        if not _build_owner_ok(interaction, sess):
+            await interaction.response.send_message("This builder belongs to someone else. Start your own with `/build`.",
+                                                    ephemeral=True)
+            return
+        if sess.get("used") is not None:
+            used = sess["used"]
+            await interaction.response.send_message(
+                f"Already logged as pick `#{used}`." if used > 0 else "Hang on, still logging that one." if used < 0
+                else "This builder was cancelled. `/build` starts a fresh one.", ephemeral=True)
+            return
+        await fn(interaction, sess)
+    b.callback = cb
+    return b
+
+
+def _build_select(placeholder: str, options: list, row: int, fn, sess: dict):
+    s = discord.ui.Select(placeholder=placeholder, options=options, row=row)
+
+    async def cb(interaction):
+        if not _build_owner_ok(interaction, sess):
+            await interaction.response.send_message("This builder belongs to someone else. Start your own with `/build`.",
+                                                    ephemeral=True)
+            return
+        await fn(interaction, sess, s.values[0])
+    s.callback = cb
+    return s
+
+
+async def _build_pick_platform(interaction, sess, value):
+    if value in BUILD_PLATFORMS:
+        sess["platform"] = value
+        sess["step"] = "sport"
+    await _build_refresh(interaction, sess)
+
+
+async def _build_pick_sport(interaction, sess, value):
+    for label, text, fam in BUILD_SPORTS:
+        if text == value:
+            sess.update(sport=text, family=fam, step="legs")
+    await _build_refresh(interaction, sess)
+
+
+async def _build_pick_stat(interaction, sess, value):
+    if sess.get("pending") and value in STATS:
+        sess["pending"]["stat"] = value
+        sess["last_stat"] = value
+    await _build_refresh(interaction, sess)
+
+
+class BuildLegModal(discord.ui.Modal, title="Add a leg"):
+    player = discord.ui.TextInput(label="Player", placeholder="e.g. Jalen Brunson", max_length=60)
+    line = discord.ui.TextInput(label="Line", placeholder="e.g. 24.5", max_length=10)
+
+    def __init__(self, sess: dict):
+        super().__init__()
+        self.sess = sess
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await build_leg_submit(interaction, self.sess, self.player.value, self.line.value)
+
+
+async def build_leg_submit(interaction, sess: dict, player: str, line_text: str) -> None:
+    """Modal answer: keep the leg as 'pending', show it right away, then confirm the player on ESPN."""
+    if not _build_owner_ok(interaction, sess):
+        await interaction.response.send_message("That builder isn't yours.", ephemeral=True)
+        return
+    name = pers_clean(player, 60) or ""
+    line = build_parse_line(line_text)
+    if len(name) < 2 or line is None:
+        await interaction.response.send_message("I need a player name and a line like `24.5`. Tap ➕ Add a leg again.",
+                                                ephemeral=True)
+        return
+    if len(sess["legs"]) >= BUILD_MAX_LEGS:
+        await interaction.response.send_message(f"Slips max out at {BUILD_MAX_LEGS} legs here.", ephemeral=True)
+        return
+    stat = sess.get("last_stat") if sess.get("last_stat") in build_stat_keys(sess.get("family")) else None
+    sess["pending"] = {"player": name.title() if name.islower() else name, "line": line, "stat": stat,
+                       "check": "checking", "team": ""}
+    pend = sess["pending"]
+    await interaction.response.edit_message(embed=build_embed(sess), view=build_view(sess))
+    found = await build_check_player(name, sess.get("sport"))
+    if sess.get("pending") is not pend:
+        return          # they moved on while ESPN was thinking
+    pend.update(player=found["name"], check=found["state"], team=found["team"])
+    try:
+        await interaction.edit_original_response(embed=build_embed(sess), view=build_view(sess))
+    except Exception:
+        log.warning("Couldn't refresh the slip builder after the player check", exc_info=True)
+
+
+class BuildTypeModal(discord.ui.Modal, title="Type a leg"):
+    leg = discord.ui.TextInput(label="The leg, any bet", placeholder="e.g. Bills -3.5, Over 44.5, Chiefs ML",
+                               max_length=120)
+
+    def __init__(self, sess: dict):
+        super().__init__()
+        self.sess = sess
+
+    async def on_submit(self, interaction: discord.Interaction):
+        sess = self.sess
+        if not _build_owner_ok(interaction, sess):
+            await interaction.response.send_message("That builder isn't yours.", ephemeral=True)
+            return
+        text = pers_clean(self.leg.value, 120)
+        if not text or len(text) < 3:
+            await interaction.response.send_message("That leg came out empty. Try again with words, like `Bills -3.5`.",
+                                                    ephemeral=True)
+            return
+        if len(sess["legs"]) >= BUILD_MAX_LEGS:
+            await interaction.response.send_message(f"Slips max out at {BUILD_MAX_LEGS} legs here.", ephemeral=True)
+            return
+        sess["legs"].append({"text": text, "check": None})
+        sess["dup"], sess["dup_ok"] = None, False
+        await _build_refresh(interaction, sess)
+
+
+class BuildAmountModal(discord.ui.Modal, title="Amounts"):
+    cost = discord.ui.TextInput(label="Entry / cost", placeholder="e.g. 10", max_length=12)
+    payout = discord.ui.TextInput(label="Pays if it wins (optional)", placeholder="e.g. 30", max_length=12,
+                                  required=False)
+
+    def __init__(self, sess: dict):
+        super().__init__()
+        self.sess = sess
+        if sess.get("cost"):
+            self.cost.default = f"{sess['cost']:g}"
+        if sess.get("payout"):
+            self.payout.default = f"{sess['payout']:g}"
+        self.entry = None
+        if sess.get("platform") == "PrizePicks" and len(sess["legs"]) >= 2:
+            self.entry = discord.ui.TextInput(label="Power or Flex", default=(sess.get("entry") or "power").title(),
+                                              max_length=5, required=False)
+            self.add_item(self.entry)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        sess = self.sess
+        if not _build_owner_ok(interaction, sess):
+            await interaction.response.send_message("That builder isn't yours.", ephemeral=True)
+            return
+        try:
+            cost = parse_money(self.cost.value)
+            payout = parse_money(self.payout.value) if (self.payout.value or "").strip() else None
+        except ValueError:
+            await interaction.response.send_message("Amounts need to be numbers, like `10` or `$10`.", ephemeral=True)
+            return
+        if not 0 < cost <= 100000 or (payout is not None and payout > 10000000):
+            await interaction.response.send_message("The cost has to be more than 0 (and a real amount).", ephemeral=True)
+            return
+        sess.update(cost=cost, payout=payout or None, step="ready")
+        if self.entry is not None:
+            sess["entry"] = "flex" if "flex" in (self.entry.value or "").lower() else "power"
+        dup = find_duplicate(sess["guild_id"], sess["uid"], build_slip(sess))
+        sess["dup"], sess["dup_ok"] = (dup["id"] if dup else None), False
+        await _build_refresh(interaction, sess)
+
+
+async def _build_add(interaction, sess):
+    if len(sess["legs"]) >= BUILD_MAX_LEGS:
+        await interaction.response.send_message(f"Slips max out at {BUILD_MAX_LEGS} legs here.", ephemeral=True)
+        return
+    await interaction.response.send_modal(BuildLegModal(sess))
+
+
+async def _build_type(interaction, sess):
+    if len(sess["legs"]) >= BUILD_MAX_LEGS:
+        await interaction.response.send_message(f"Slips max out at {BUILD_MAX_LEGS} legs here.", ephemeral=True)
+        return
+    await interaction.response.send_modal(BuildTypeModal(sess))
+
+
+async def _build_undo(interaction, sess):
+    if sess.get("pending"):
+        sess["pending"] = None
+    elif sess["legs"]:
+        sess["legs"].pop()
+    sess["dup"], sess["dup_ok"] = None, False
+    if sess["step"] == "ready":
+        sess["step"] = "legs"
+    await _build_refresh(interaction, sess)
+
+
+async def _build_side(interaction, sess, side: str):
+    p = sess.get("pending")
+    if not p:
+        await _build_refresh(interaction, sess)
+        return
+    if not p.get("stat"):
+        await interaction.response.send_message("Pick the stat first (the menu above the buttons).", ephemeral=True)
+        return
+    sess["legs"].append({"text": build_leg_text(p["player"], side, p["line"], p["stat"]), "check": p.get("check"),
+                         "player": p["player"], "stat": p["stat"], "side": side, "line": p["line"]})
+    sess["pending"] = None
+    sess["dup"], sess["dup_ok"] = None, False
+    await _build_refresh(interaction, sess)
+
+
+async def _build_over(interaction, sess):
+    await _build_side(interaction, sess, "over")
+
+
+async def _build_under(interaction, sess):
+    await _build_side(interaction, sess, "under")
+
+
+async def _build_amounts(interaction, sess):
+    if not sess["legs"]:
+        await interaction.response.send_message("Add at least one leg first.", ephemeral=True)
+        return
+    sess["pending"] = None
+    await interaction.response.send_modal(BuildAmountModal(sess))
+
+
+async def _build_back(interaction, sess):
+    sess["step"] = "legs"
+    await _build_refresh(interaction, sess)
+
+
+async def _build_cancel(interaction, sess):
+    sess["used"] = 0
+    await interaction.response.edit_message(embed=discord.Embed(
+        title="🧱 Slip builder", color=BRAND, description="Tossed it. Nothing was logged. `/build` starts a fresh one."),
+        view=None)
+
+
+async def _build_log(interaction, sess):
+    """'Log it': the same path as a typed or screenshot slip (receipt card, autopilot, stacks, heads-up)."""
+    until = cooling_until(interaction.guild_id, interaction.user.id)
+    if until:
+        await interaction.response.send_message(cooloff_message(until), ephemeral=True)
+        return
+    slip = build_slip(sess)
+    if not sess.get("dup_ok"):
+        dup = find_duplicate(interaction.guild_id, interaction.user.id, slip)
+        if dup:
+            sess["dup"], sess["dup_ok"] = dup["id"], True
+            await interaction.response.send_message(
+                f"👀 This matches pick `#{dup['id']}` you already logged. Tap ✅ Log it again if it's a second slip.",
+                ephemeral=True)
+            return
+    sess["used"] = -1
+    await interaction.response.defer()
+
+    async def reply(**kw):
+        return await interaction.followup.send(wait=True, **kw)
+    try:
+        pid = await interaction.client.log_parsed_slip(interaction.guild_id, interaction.user, interaction.channel,
+                                                       slip, None, reply)
+    except Exception:
+        log.exception("Logging a built slip failed")
+        sess["used"] = None
+        await interaction.followup.send("⚠️ Something went wrong logging that. Tap ✅ Log it again.", ephemeral=True)
+        return
+    sess["used"] = pid
+    try:
+        await interaction.edit_original_response(embed=discord.Embed(
+            title="🧱 Slip builder", color=BRAND,
+            description=f"✅ Logged as pick `#{pid}`. The card is in the channel and it'll grade itself as games go.\n"
+                        f"Add a 📝 note on the card if you want your reasoning on the record."), view=None)
+    except Exception:
+        pass
+
+
+async def _build_ask(interaction, sess):
+    """'Just ask': the usual slip breakdown, nothing logged. Skipping it afterwards counts as a pass."""
+    gate = ask_gate(interaction.guild_id, interaction.user.id)
+    if gate:
+        await interaction.response.send_message(gate, ephemeral=True)
+        return
+    slip = dict(build_slip(sess), placed=False)
+    await interaction.response.defer()
+    text, xray = await slip_review(interaction.client, interaction.guild_id, interaction.user, slip,
+                                   "What do you think of this slip before I play it?")
+    first = None
+    chunks = split_message(text)
+    for k, chunk in enumerate(chunks):
+        extra = {"file": xray} if k == 0 and xray is not None else {}
+        msg = await interaction.followup.send(chunk, wait=True, allowed_mentions=discord.AllowedMentions.none(), **extra)
+        first = first or msg
+    if first is not None and getattr(first, "id", None) and \
+            find_duplicate(interaction.guild_id, interaction.user.id, dict(slip, cost=None)) is None:
+        try:
+            add_ghost(interaction.guild_id, interaction.user.id, interaction.user.display_name, first.id,
+                      interaction.channel_id, first.id, slip)
+        except Exception:
+            log.warning("Couldn't track the builder pass", exc_info=True)
+
+
+def build_view(sess: dict) -> discord.ui.View:
+    """The buttons for where the builder is now."""
+    v = discord.ui.View(timeout=1800)
+    S = discord.ButtonStyle
+    step = sess["step"]
+    if step == "platform":
+        v.add_item(_build_select("Where are you playing it?", [discord.SelectOption(label=x, value=x)
+                                                              for x in BUILD_PLATFORMS], 0, _build_pick_platform, sess))
+    elif step == "sport":
+        v.add_item(_build_select("Which sport?", [discord.SelectOption(label=lab, value=text)
+                                                 for lab, text, _ in BUILD_SPORTS], 0, _build_pick_sport, sess))
+    elif step == "legs" and sess.get("pending"):
+        p = sess["pending"]
+        keys = build_stat_keys(sess.get("family"))
+        if keys:
+            v.add_item(_build_select("Pick the stat", [discord.SelectOption(label=STATS[k][0], value=k,
+                                                                            default=k == p.get("stat")) for k in keys],
+                                     0, _build_pick_stat, sess))
+        v.add_item(_build_button("⬆️ Over / More", S.success, 1, _build_over, sess))
+        v.add_item(_build_button("⬇️ Under / Less", S.danger, 1, _build_under, sess))
+        v.add_item(_build_button("✖ Drop this leg", S.secondary, 1, _build_undo, sess))
+    elif step == "legs":
+        full = len(sess["legs"]) >= BUILD_MAX_LEGS
+        if sess.get("family"):
+            v.add_item(_build_button("➕ Add a leg", S.primary, 0, _build_add, sess, disabled=full))
+        v.add_item(_build_button("✍️ Type a leg" if sess.get("family") else "➕ Add a leg",
+                                 S.secondary if sess.get("family") else S.primary, 0, _build_type, sess, disabled=full))
+        if sess["legs"]:
+            v.add_item(_build_button("↩️ Undo last", S.secondary, 0, _build_undo, sess))
+            v.add_item(_build_button("💵 Amounts", S.success, 1, _build_amounts, sess))
+        v.add_item(_build_button("✖ Cancel", S.secondary, 1, _build_cancel, sess))
+    elif step == "ready":
+        v.add_item(_build_button("✅ Log it", S.success, 0, _build_log, sess))
+        if ai_enabled():
+            v.add_item(_build_button("🔍 Just ask", S.primary, 0, _build_ask, sess))
+        v.add_item(_build_button("✏️ Change legs", S.secondary, 0, _build_back, sess))
+        v.add_item(_build_button("💵 Amounts", S.secondary, 1, _build_amounts, sess))
+        v.add_item(_build_button("✖ Cancel", S.secondary, 1, _build_cancel, sess))
+    return v
+
+
+# ==========================================================================
+# 2. Weekly power rankings
+# ==========================================================================
+
+POWER_DAYS = 28
+POWER_MIN_PICKS = 3
+POWER_WEIGHTS = (("roi", 0.30), ("units", 0.20), ("legs", 0.20), ("steady", 0.15), ("skill", 0.15))
+POWER_FORMULA = ("Score = 30% ROI + 20% units won + 20% leg hit rate + 15% green days + 15% skill (good passes, "
+                 "scouting, notes). Last 4 weeks, 3+ settled picks. Profit is counted in your own usual stake, so "
+                 "bigger bets don't help, and small samples are pulled toward average.")
+
+
+def _power_clamp(x: float) -> float:
+    return max(0.0, min(100.0, x))
+
+
+def power_table(guild_id: int, end: Optional[datetime] = None, days: int = POWER_DAYS) -> list[dict]:
+    """Everyone with 3+ settled picks in the window, ranked by the composite. Each row: key, uid, name, score,
+    parts {roi, units, legs, steady, skill} (0-100), and the raw numbers behind them."""
+    end = end or datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    s, e = iso(start), iso(end)
+    picks = db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status IN ('win', 'loss', 'push')
+                            AND settled_at >= ? AND settled_at < ? ORDER BY settled_at""", (guild_id, s, e)).fetchall()
+    people: dict[str, dict] = {}
+    for p in picks:
+        r = people.setdefault(p["bettor_key"], {"key": p["bettor_key"], "uid": p["bettor_id"], "name": p["bettor_name"],
+                                                "picks": [], "days": {}, "hits": 0, "misses": 0})
+        r["picks"].append(p)
+        r["name"] = p["bettor_name"]
+        r["uid"] = r["uid"] or p["bettor_id"]
+        day = datetime.fromisoformat(p["settled_at"]).astimezone(TZ).date()
+        r["days"][day] = r["days"].get(day, 0.0) + pick_net(p)
+    rows = [r for r in people.values() if len(r["picks"]) >= POWER_MIN_PICKS]
+    if not rows:
+        return []
+    ids = [p["id"] for r in rows for p in r["picks"]]
+    owner = {p["id"]: r for r in rows for p in r["picks"]}
+    for k in range(0, len(ids), 500):
+        chunk = ids[k:k + 500]
+        for leg in db().execute(f"SELECT pick_id, status FROM legs WHERE status IN ('hit', 'miss') AND pick_id IN "
+                                f"({','.join('?' * len(chunk))})", chunk):
+            owner[leg["pick_id"]]["hits" if leg["status"] == "hit" else "misses"] += 1
+    r15_db()
+    weeks = sorted({week_id(start + timedelta(days=d)) for d in range(days + 1)})
+    for r in rows:
+        stakes = sorted(p["cost"] or 0 for p in r["picks"])
+        r["unit"] = max(1.0, stakes[len(stakes) // 2])
+        r["net"] = sum(pick_net(p) for p in r["picks"])
+        r["staked"] = sum(p["cost"] or 0 for p in r["picks"])
+        r["record"] = (sum(p["status"] == "win" for p in r["picks"]), sum(p["status"] == "loss" for p in r["picks"]))
+        r["green"] = sum(v > 0.005 for v in r["days"].values())
+        r["active_days"] = len(r["days"])
+        r["passes"] = r["scouted"] = r["notes"] = 0
+        uid = r["uid"]
+        if uid and r["key"] == str(uid):
+            r["passes"] = db().execute("SELECT COUNT(*) FROM ghosts WHERE guild_id = ? AND user_id = ? AND result = 'miss' "
+                                       "AND settled_at >= ? AND settled_at < ?", (guild_id, uid, s, e)).fetchone()[0]
+            for wk in weeks:
+                try:
+                    r["scouted"] += len(json.loads(get_setting(guild_id, f"scouted:{uid}:{wk}") or "[]"))
+                except ValueError:
+                    pass
+            r["notes"] = db().execute("""SELECT COUNT(*) FROM picks WHERE guild_id = ? AND bettor_id = ? AND created_at >= ?
+                                         AND created_at < ? AND TRIM(COALESCE(notes, '')) != ''""",
+                                      (guild_id, uid, s, e)).fetchone()[0]
+            r["notes"] += db().execute("""SELECT COUNT(*) FROM player_notes n JOIN players pl ON pl.id = n.player_id
+                                          WHERE pl.guild_id = ? AND n.author_id = ? AND n.created_at >= ? AND n.created_at < ?""",
+                                       (guild_id, uid, s, e)).fetchone()[0]
+        r["skill_pts"] = 3 * r["passes"] + r["scouted"] + 2 * r["notes"]
+    units = sorted(r["net"] / r["unit"] for r in rows)
+    top_skill = max(r["skill_pts"] for r in rows)
+    for r in rows:
+        r["units"] = r["net"] / r["unit"]
+        roi = r["net"] / (r["staked"] + 3 * r["unit"])           # three phantom break-even picks: small samples shrink
+        below = sum(u < r["units"] - 1e-9 for u in units)
+        same = sum(abs(u - r["units"]) <= 1e-9 for u in units)
+        legs_t = r["hits"] + r["misses"]
+        parts = {"roi": 50 + 50 * math.tanh(roi),
+                 "units": 50.0 if len(rows) == 1 else (below + (same - 1) / 2) / (len(rows) - 1) * 100,
+                 "legs": _power_clamp(((r["hits"] + 2) / (legs_t + 4) - 0.3) / 0.4 * 100),
+                 "steady": (r["green"] + 1) / (r["active_days"] + 2) * 100,
+                 "skill": 50.0 if not top_skill else r["skill_pts"] / top_skill * 100}
+        r["parts"] = parts
+        r["roi_pct"] = r["net"] / r["staked"] * 100 if r["staked"] else 0.0
+        r["leg_rate"] = r["hits"] / legs_t if legs_t else None
+        r["score"] = round(sum(parts[k] * w for k, w in POWER_WEIGHTS), 1)
+        r["name"] = call_name(guild_id, r["uid"], r["name"]) if r["uid"] and r["key"] == str(r["uid"]) else r["name"]
+        del r["picks"], r["days"]
+    rows.sort(key=lambda r: (-r["score"], -r["parts"]["roi"], r["name"].lower()))
+    for n, r in enumerate(rows, 1):
+        r["rank"] = n
+    return rows
+
+
+def power_ranked(guild_id: int, now: Optional[datetime] = None) -> list[dict]:
+    """This week's table with movement vs a week ago (move: +2 = up two places, None = new)."""
+    now = now or datetime.now(timezone.utc)
+    rows = power_table(guild_id, now)
+    before = {r["key"]: r["rank"] for r in power_table(guild_id, now - timedelta(days=7))}
+    for r in rows:
+        r["move"] = before[r["key"]] - r["rank"] if r["key"] in before else None
+    return rows
+
+
+_POWER_TOP = ["Top of the mountain.", "Sitting on the throne.", "Number one, and earned it."]
+_POWER_PART_LINES = {
+    "roi": ["Making every dollar work: {roi} ROI.", "Efficient: {roi} ROI over four weeks.",
+            "Small stakes or big, the ROI says {roi}."],
+    "units": ["Up {units} units over the last four weeks.", "{units} units banked. Quietly cooking."],
+    "legs": ["Legs are landing: {legs} hit.", "Reading the board right: {legs} of legs hit."],
+    "steady": ["Green on {green} of {days} days. Steady hands.", "Consistency king: {green} green days out of {days}."],
+    "skill": ["The homework shows: {skill}.", "Doing the work before locking in: {skill}."],
+}
+_POWER_UP = ["Up {n} this week.", "Climbed {n} spot{s}. Watch out."]
+_POWER_DOWN = ["Slid {n} spot{s}. One scouting session flips it.", "Down {n}, still in the mix."]
+_POWER_NEW = ["New on the board.", "Fresh face on the board."]
+_POWER_LOW = ["Quiet stretch. A scout before the next one never hurts.", "Building back. Days off count too.",
+              "Room to climb. Notes and scouting move this number."]
+
+
+def _power_skill_text(r: dict) -> str:
+    bits = []
+    if r["passes"]:
+        bits.append(f"{r['passes']} good pass{'es' if r['passes'] != 1 else ''}")
+    if r["scouted"]:
+        bits.append(f"{r['scouted']} scouted")
+    if r["notes"]:
+        bits.append(f"{r['notes']} note{'s' if r['notes'] != 1 else ''}")
+    return ", ".join(bits)
+
+
+def power_blurb(r: dict, salt: str = "") -> str:
+    """One friendly line from the person's best part and their movement. Never mean, never about betting more."""
+    def pick(options):
+        return options[int(hashlib.sha1(f"{salt}:{r['key']}".encode()).hexdigest(), 16) % len(options)]
+    facts = {"roi": f"{r['roi_pct']:+.0f}%", "units": f"{r['units']:+.1f}",
+             "legs": f"{r['leg_rate'] * 100:.0f}%" if r.get("leg_rate") is not None else "",
+             "green": r["green"], "days": r["active_days"], "skill": _power_skill_text(r)}
+    move = r.get("move")
+    usable = [k for k in ("roi", "units", "legs", "steady", "skill") if
+              (k != "legs" or facts["legs"]) and (k != "skill" or facts["skill"]) and
+              (k not in ("roi", "units") or r["net"] > 0) and (k != "steady" or r["green"] >= 2)]
+    best = max(usable, key=lambda k: r["parts"][k]) if usable else None
+    head = ""
+    if r["rank"] == 1:
+        head = pick(_POWER_TOP)
+    elif move is None:
+        head = pick(_POWER_NEW)
+    elif move >= 2:
+        head = pick(_POWER_UP).format(n=move, s="s" if move != 1 else "")
+    elif move <= -2:
+        head = pick(_POWER_DOWN).format(n=-move, s="s" if move != -1 else "")
+    body = pick(_POWER_PART_LINES[best]).format(**facts) if best and r["parts"][best] >= 55 else ""
+    if not body and not head:
+        return pick(_POWER_LOW)
+    if head and body and len(head) + len(body) > 72:
+        return body
+    return " ".join(x for x in (head, body) if x)
+
+
+async def power_ai_blurbs(rows: list[dict], blurbs: list[str]) -> list[str]:
+    """Optionally let Claude punch the lines up. Any line that adds numbers or crosses the rules keeps its template."""
+    if not rows or not ai_enabled() or not claude_budget_ok():
+        return blurbs
+    facts = [{"rank": r["rank"], "name": r["name"], "line": b} for r, b in zip(rows, blurbs)]
+    try:
+        reply = await asyncio.wait_for(anthropic_client().messages.create(
+            model=CLAUDE_MODEL, max_tokens=900,
+            system=("You write one-line power-ranking blurbs for a Discord group of friends. Rewrite each line so it "
+                    "sounds fun and personal, max 72 characters, no emoji, never mean. " + _NOTE_RULES +
+                    " Reply with ONLY a JSON object {\"lines\": [one string per input, same order]}."),
+            messages=[{"role": "user", "content": json.dumps(facts)}]), timeout=15)
+        data = extract_json("".join(b.text for b in reply.content if getattr(b, "type", "") == "text"))
+        new = data.get("lines") if isinstance(data, dict) else None
+    except Exception:
+        log.warning("Power ranking blurbs: Claude failed, using templates", exc_info=True)
+        return blurbs
+    if not isinstance(new, list) or len(new) != len(blurbs):
+        return blurbs
+    out = []
+    for old, line in zip(blurbs, new):
+        line = pers_clean(str(line), 80) if line else None
+        bad = not line or set(re.findall(r"\d+", line)) - set(re.findall(r"\d+", old)) or \
+            re.search(r"(?i)\b(bet more|bigger|chase|odds|value|price|max bet|double down|fade|lock)\b", line)
+        out.append(old if bad else line)
+    return out
+
+
+def render_power(d: dict) -> io.BytesIO:
+    """d: title, sub, accent (rgb), stops, rows [{rank, move, name, avatar, score, stats, blurb}], formula."""
+    from PIL import Image, ImageDraw
+    W, ROW, TOP = 1000, 96, 196
+    rows = d["rows"]
+    foot_font = art_font(15)
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    words, foot_lines, cur = d["formula"].split(), [], ""
+    for w in words:
+        if _tw(probe, (cur + " " + w).strip(), foot_font) > W - 80:
+            foot_lines.append(cur)
+            cur = w
+        else:
+            cur = (cur + " " + w).strip()
+    foot_lines.append(cur)
+    H = TOP + len(rows) * ROW + 30 + len(foot_lines) * 22 + 56
+    img = Image.new("RGB", (W, H), ART_BG)
+    img.paste(_grad((W, 172), d["stops"]), (0, 0))
+    dr = ImageDraw.Draw(img)
+    dr.text((44, 30), "POWER RANKINGS", font=art_font(50, True), fill=ART_TEXT)
+    t, f = fit_text(dr, d["sub"], W - 120, 22, True)
+    dr.text((46, 102), t, font=f, fill=(230, 230, 240))
+    brand_mark(img, (W - 128, 32), 88)
+    medal = {1: (255, 214, 102), 2: (214, 220, 232), 3: (222, 160, 110)}
+    accent = d["accent"]
+    y = TOP
+    for r in rows:
+        dr.rounded_rectangle((24, y, W - 24, y + ROW - 12), 18, fill=ART_PANEL if r["rank"] > 3 else ART_PANEL2)
+        if r["rank"] <= 3:
+            dr.rounded_rectangle((24, y, 32, y + ROW - 12), 4, fill=medal[r["rank"]])
+        rf = art_font(40 if r["rank"] < 10 else 34, True)
+        rt = str(r["rank"])
+        dr.text((86 - _tw(dr, rt, rf) / 2, y + 8), rt, font=rf, fill=medal.get(r["rank"], ART_TEXT))
+        mv = r.get("move")
+        if mv is None:
+            mt, mc = "NEW", ART_BLUE
+        elif mv > 0:
+            mt, mc = f"▲{mv}", ART_GREEN
+        elif mv < 0:
+            mt, mc = f"▼{-mv}", ART_RED
+        else:
+            mt, mc = "–", ART_FAINT
+        mf = art_font(15, True)
+        dr.text((86 - _tw(dr, mt, mf) / 2, y + 56), mt, font=mf, fill=mc)
+        av = _avatar(r.get("avatar"), 60, r["name"], rounded=-1)
+        img.paste(av, (128, y + 12), av)
+        nt, nf = fit_text(dr, r["name"], 420, 25, True)
+        dr.text((206, y + 12), nt, font=nf, fill=ART_TEXT)
+        bt, bf = fit_text(dr, r["blurb"], 500, 17, False, min_size=13)
+        dr.text((206, y + 48), bt, font=bf, fill=ART_MUTED)
+        sx = W - 270
+        sf = art_font(34, True)
+        st = f"{r['score']:.0f}"
+        dr.text((W - 52 - _tw(dr, st, sf), y + 6), st, font=sf, fill=accent if r["rank"] > 3 else medal[r["rank"]])
+        _bar(dr, sx, y + 22, 150, 10, r["score"] / 100, accent)
+        stt, stf = fit_text(dr, r["stats"], 222, 15, False, min_size=11)
+        dr.text((W - 52 - _tw(dr, stt, stf), y + 52), stt, font=stf, fill=ART_MUTED)
+        y += ROW
+    y += 18
+    for line in foot_lines:
+        dr.text((40, y), line, font=foot_font, fill=ART_FAINT)
+        y += 22
+    brand_sign(img, W - 40, H - 40, d.get("brand") or "PIMP-BOT", 15)
+    return _png(img)
+
+
+def power_stats_line(r: dict) -> str:
+    bits = [f"ROI {r['roi_pct']:+.0f}%"]
+    if r.get("leg_rate") is not None:
+        bits.append(f"legs {r['leg_rate'] * 100:.0f}%")
+    bits.append(f"{r['units']:+.1f}u")
+    return " · ".join(bits)
+
+
+def power_lines(guild_id: int, limit: int = 10) -> list[str]:
+    """Text version (the weekly recap embed and anywhere an image doesn't fit)."""
+    rows = power_ranked(guild_id)[:limit]
+    out = []
+    for r in rows:
+        mv = r["move"]
+        arrow = "🆕" if mv is None else f"▲{mv}" if mv > 0 else f"▼{-mv}" if mv < 0 else "–"
+        out.append(f"**{r['rank']}. {r['name']}** {arrow} · {r['score']:.0f} pts · {power_stats_line(r)}: "
+                   f"{power_blurb(r, week_id())}")
+    return out
+
+
+async def power_payload(client, guild_id: int, now: Optional[datetime] = None, ai: bool = False,
+                        limit: int = 12) -> Optional[tuple[str, discord.File, list]]:
+    """(content, image, rows) for the power rankings, or None when fewer than 2 people qualify."""
+    now = now or datetime.now(timezone.utc)
+    rows = power_ranked(guild_id, now)[:limit]
+    if len(rows) < 2:
+        return None
+    wk = week_id(now)
+    blurbs = [power_blurb(r, wk) for r in rows]
+    if ai:
+        blurbs = await power_ai_blurbs(rows, blurbs)
+    out_rows = []
+    for r, b in zip(rows, blurbs):
+        raw = None
+        if r["uid"] and r["key"] == str(r["uid"]):
+            try:
+                user = client.get_user(r["uid"]) if hasattr(client, "get_user") else None
+                raw = await avatar_bytes(user)
+            except Exception:
+                raw = None
+        out_rows.append({"rank": r["rank"], "move": r["move"], "name": r["name"], "avatar": raw, "score": r["score"],
+                         "stats": power_stats_line(r), "blurb": b})
+    b = brand_for(guild_id)
+    local = now.astimezone(TZ)
+    data = {"title": "POWER RANKINGS", "sub": f"Week of {week_start(now).astimezone(TZ):%b %-d} · last 4 weeks · "
+                                              f"{len(rows)} ranked",
+            "accent": _brand_mix(b["accent"], (255, 255, 255), 0.35), "stops": b["stops"], "rows": out_rows,
+            "formula": POWER_FORMULA, "brand": b["name"]}
+    buf = await asyncio.to_thread(locked_render, render_power, data)
+    top = rows[0]
+    climber = max((r for r in rows if r["move"]), key=lambda r: r["move"], default=None)
+    content = f"📊 **Power rankings** · {local:%b %-d}: **{top['name']}** holds the top spot."
+    if climber and climber["move"] >= 2:
+        content += f" Biggest climb: **{climber['name']}** ▲{climber['move']}."
+    return content, discord.File(buf, filename="power_rankings.png"), rows
+
+
+def power_me_text(rows: list[dict], key: str) -> str:
+    r = next((x for x in rows if x["key"] == key), None)
+    if r is None:
+        return (f"You're not ranked yet: it takes {POWER_MIN_PICKS} settled picks in the last 4 weeks. "
+                "Scouting, notes and good passes all count once you're on the board.")
+    p = r["parts"]
+    w = dict(POWER_WEIGHTS)
+    best = max(p, key=lambda k: p[k] * w[k])
+    weak = min(p, key=lambda k: p[k])
+    names = {"roi": "ROI", "units": "Units won", "legs": "Leg hit rate", "steady": "Green days", "skill": "Skill"}
+    tips = {"roi": "Smaller, sharper slips lift ROI more than volume does.",
+            "units": "Units are profit divided by your usual stake, so bigger bets don't move it.",
+            "legs": "`/legs` shows which players and stats you actually hit. Lean on those.",
+            "steady": "Fewer red days beats more green ones. Days off count as neutral.",
+            "skill": "`/scout` before you lock in, add 📝 notes, and passing on a slip you asked about all count."}
+    lines = [f"**#{r['rank']} · {r['score']:.0f} pts**"]
+    for k, wt in POWER_WEIGHTS:
+        lines.append(f"`{names[k]:<12}` {p[k]:5.0f}/100 × {int(wt * 100)}%")
+    lines.append(f"\nRecord {r['record'][0]}-{r['record'][1]} · ROI {r['roi_pct']:+.0f}% · {r['units']:+.1f} units"
+                 + (f" · legs {r['hits']}/{r['hits'] + r['misses']}" if r["hits"] + r["misses"] else "")
+                 + (f" · {_power_skill_text(r)}" if _power_skill_text(r) else ""))
+    lines.append(f"💪 Best part: **{names[best]}**. 🔧 Room to grow: **{names[weak]}**. {tips[weak]}")
+    return "\n".join(lines)
+
+
+async def feat_power_job(client, now: datetime) -> None:
+    """Recap day, once the weekly recap is out: post the power rankings image (once a week, server switch)."""
+    local = now.astimezone(TZ)
+    if local.weekday() != RECAP_DAY or local.hour < RECAP_HOUR:
+        return
+    wk = week_id(local)
+    for row in db().execute("SELECT guild_id, value FROM settings WHERE key = 'recap_channel'").fetchall():
+        gid = row["guild_id"]
+        try:
+            if not server_on(gid, "powerrank") or get_setting(gid, "powerrank_wk") == wk:
+                continue
+            if get_setting(gid, "last_recap") != local.date().isoformat():
+                continue      # wait for the recap so the rankings land right under it
+            channel = client.get_channel(int(row["value"]))
+            if channel is None:
+                continue
+            set_setting(gid, "powerrank_wk", wk)
+            got = await power_payload(client, gid, now, ai=True)
+            if got is None:
+                continue
+            content, f, _ = got
+            await channel.send(content + "\n-# `/power` any time · admins can switch this off in `/admin panel`",
+                               file=f, allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Power rankings failed for guild %s", gid, exc_info=True)
+
+
+async def feat_power_respond(interaction) -> None:
+    """/power (and /insights rankings): the image, plus a button that explains your own score privately."""
+    await interaction.response.defer()
+    got = await power_payload(interaction.client, interaction.guild_id)
+    if got is None:
+        await interaction.followup.send(f"Not enough to rank yet: it takes 2+ people with {POWER_MIN_PICKS} settled "
+                                        "picks in the last 4 weeks.")
+        return
+    content, f, rows = got
+    v = discord.ui.View(timeout=1800)
+    b = discord.ui.Button(label="🔍 My score", style=discord.ButtonStyle.secondary)
+
+    async def mine(i):
+        e = discord.Embed(title="🔍 Your power score", color=BRAND,
+                          description=clip(power_me_text(rows, str(i.user.id)), 4000))
+        e.set_footer(text=clip(POWER_FORMULA, 2048))
+        await i.response.send_message(embed=e, ephemeral=True)
+    b.callback = mine
+    v.add_item(b)
+    await interaction.followup.send(content, file=f, view=v, allowed_mentions=discord.AllowedMentions.none())
+
+
+# ==========================================================================
+# 3. /legs: the leg library
+# ==========================================================================
+
+_LEGSLIB_PLAYERS: dict[int, tuple[float, list]] = {}
+
+
+def legslib_rows(guild_id: int) -> list[dict]:
+    """Every leg the group has played (hidden picks only once revealed), newest first, with its parsed prop."""
+    out = []
+    for r in db().execute("""SELECT l.text, l.status, l.margin, l.pick_id, l.idx, p.bettor_key, p.bettor_name, p.bettor_id,
+                                    p.created_at, p.settled_at, p.sport
+                             FROM legs l JOIN picks p ON p.id = l.pick_id
+                             WHERE p.guild_id = ? AND (p.hidden IS NULL OR p.hidden = 0 OR p.status != 'open')
+                             ORDER BY p.created_at DESC, l.pick_id DESC, l.idx""", (guild_id,)):
+        d = dict(r)
+        d["prop"] = cached_prop(r["text"])
+        out.append(d)
+    return out
+
+
+def legslib_players(guild_id: int) -> list[tuple[str, int]]:
+    """(player, legs played) for autocomplete, most played first. Cached for 5 minutes."""
+    hit = _LEGSLIB_PLAYERS.get(guild_id)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    counts: dict[str, list] = {}
+    for r in legslib_rows(guild_id):
+        pr = r["prop"]
+        if pr:
+            c = counts.setdefault(pr["player"], [pr["display"], 0])
+            c[1] += 1
+    out = sorted(((d, n) for d, n in counts.values()), key=lambda x: (-x[1], x[0]))
+    _LEGSLIB_PLAYERS[guild_id] = (time.monotonic() + 300, out)
+    return out
+
+
+def legslib_actual(r: dict) -> Optional[float]:
+    """The real stat number, worked back from the stored margin (None when we don't have one)."""
+    pr = r.get("prop")
+    if r.get("margin") is None or not pr or pr.get("combo") or pr.get("line") is None:
+        return None
+    m = -r["margin"] if pr.get("negate") else r["margin"]
+    return pr["line"] + m if pr["side"] == "over" else pr["line"] - m
+
+
+def legslib_search(guild_id: int, player: Optional[str] = None, stat: Optional[str] = None,
+               person: Optional[str] = None, result: Optional[str] = None) -> list[dict]:
+    """Filter the library. player matches the parsed player (or the leg text for team bets), stat is a STATS key,
+    person a bettor_key, result hit / miss / push / open."""
+    q = norm_name(player or "")
+    q = PLAYER_NICKNAMES.get(q, q)
+    out = []
+    for r in legslib_rows(guild_id):
+        pr = r["prop"]
+        if q:
+            if pr:
+                if q != pr["player"] and q not in pr["player"] and not all(t in pr["player"].split() for t in q.split()):
+                    continue
+            elif q not in norm_name(r["text"]):
+                continue
+        if stat and (not pr or stat not in (pr.get("stats") or [])):
+            continue
+        if person and r["bettor_key"] != person:
+            continue
+        if result and r["status"] != result:
+            continue
+        out.append(r)
+    return out
+
+
+def legslib_summary(rows: list[dict]) -> dict:
+    h = sum(r["status"] == "hit" for r in rows)
+    m = sum(r["status"] == "miss" for r in rows)
+    pu = sum(r["status"] == "push" for r in rows)
+    op = sum(r["status"] == "open" for r in rows)
+    sides: dict[str, list] = {}
+    people: dict[str, list] = {}
+    for r in rows:
+        if r["status"] not in ("hit", "miss"):
+            continue
+        k = 0 if r["status"] == "hit" else 1
+        if r["prop"]:
+            side = r["prop"]["side"] if not r["prop"].get("negate") else ("under" if r["prop"]["side"] == "over" else "over")
+            sides.setdefault(side, [0, 0])[k] += 1
+        people.setdefault(r["bettor_name"], [0, 0])[k] += 1
+    margins = [r["margin"] for r in rows if r.get("margin") is not None and r["status"] in ("hit", "miss")]
+    return {"hit": h, "miss": m, "push": pu, "open": op, "rate": h / (h + m) if h + m else None, "sides": sides,
+            "people": sorted(people.items(), key=lambda x: (-(x[1][0] + x[1][1]), x[0]))[:6],
+            "avg_margin": sum(margins) / len(margins) if margins else None}
+
+
+def legslib_date(r: dict) -> datetime:
+    return datetime.fromisoformat(r["settled_at"] or r["created_at"]).astimezone(TZ)
+
+
+def render_legslib(d: dict) -> io.BytesIO:
+    """d: title, sub, items oldest→newest [{status, line, actual, date, who}], rate, accent.
+    A hit/miss strip on top; underneath, line vs actual for every leg we have the real number for."""
+    from PIL import Image, ImageDraw
+    items = d["items"]
+    W = 1000
+    nums = [x for x in items if x.get("actual") is not None and x.get("line") is not None]
+    H = 290 + (300 if nums else 0)
+    img = Image.new("RGB", (W, H), ART_BG)
+    img.paste(_grad((W, 120), d["stops"]), (0, 0))
+    dr = ImageDraw.Draw(img)
+    t, f = fit_text(dr, d["title"], W - 300, 36, True)
+    dr.text((36, 22), t, font=f, fill=ART_TEXT)
+    t, f = fit_text(dr, d["sub"], W - 300, 19, False)
+    dr.text((38, 74), t, font=f, fill=(228, 228, 238))
+    if d.get("rate") is not None:
+        rt = f"{d['rate'] * 100:.0f}%"
+        rf = art_font(54, True)
+        dr.text((W - 40 - _tw(dr, rt, rf), 18), rt, font=rf, fill=ART_TEXT)
+        lf = art_font(15, True)
+        dr.text((W - 40 - _tw(dr, "HIT RATE", lf), 84), "HIT RATE", font=lf, fill=(228, 228, 238))
+    n = max(1, len(items))
+    gap = 6
+    size = min(56, (W - 72 - gap * (n - 1)) // n)
+    x = (W - (n * size + (n - 1) * gap)) / 2
+    y = 146
+    colours = {"hit": ART_GREEN, "miss": ART_RED, "push": ART_MUTED, "open": ART_PANEL2}
+    gf = art_font(int(size * 0.5), True)
+    df = art_font(12)
+    for it in items:
+        c = colours.get(it["status"], ART_PANEL2)
+        dr.rounded_rectangle((x, y, x + size, y + size), max(4, size // 5), fill=c)
+        g = {"hit": "✓", "miss": "✗", "push": "–", "open": "·"}.get(it["status"], "·")
+        dr.text((x + (size - _tw(dr, g, gf)) / 2, y + size * 0.2), g, font=gf,
+                fill=(16, 16, 22) if it["status"] != "open" else ART_MUTED)
+        if size >= 34:
+            lab = it["date"]
+            dr.text((x + (size - _tw(dr, lab, df)) / 2, y + size + 6), lab, font=df, fill=ART_FAINT)
+        x += size + gap
+    if not items:
+        dr.text((40, y + 10), "No legs match that yet.", font=art_font(20), fill=ART_MUTED)
+    if nums:
+        top = 262
+        lines_seen = {it["line"] for it in nums}
+        head = "LINE vs ACTUAL" + (f"  ·  line {nums[0]['line']:g}" if len(lines_seen) == 1 else "")
+        dr.text((40, top), head, font=art_font(17, True), fill=ART_MUTED)
+        lo = min(min(it["line"], it["actual"]) for it in nums)
+        hi = max(max(it["line"], it["actual"]) for it in nums)
+        pad = max(1.0, (hi - lo) * 0.15)
+        lo, hi = max(0.0, lo - pad), hi + pad
+        y0, y1 = top + 36, top + 250
+        sy = lambda v: y1 - (v - lo) / (hi - lo) * (y1 - y0)
+        k = len(nums)
+        step = (W - 120) / max(1, k)
+        lf = art_font(13, True)
+        for j, it in enumerate(nums):
+            cx = 80 + step * (j + 0.5)
+            ly, ay = sy(it["line"]), sy(it["actual"])
+            c = colours.get(it["status"], ART_MUTED)
+            bw = max(6, min(26, step * 0.45))
+            dr.rounded_rectangle((cx - bw / 2, min(ly, ay), cx + bw / 2, max(ly, ay) + 1), 3, fill=c)
+            dr.line((cx - bw, ly, cx + bw, ly), fill=ART_TEXT, width=3)
+            if step >= 34:
+                v = f"{it['actual']:g}"
+                dr.text((cx - _tw(dr, v, lf) / 2, (ay - 20) if ay <= ly else (ay + 4)), v, font=lf, fill=c)
+        dr.line((60, y1 + 10, W - 40, y1 + 10), fill=ART_PANEL2, width=2)
+        kf = art_font(14)
+        dr.text((60, y1 + 18), "white tick = the line · bar = how far the real number landed from it",
+                font=kf, fill=ART_FAINT)
+    brand_sign(img, W - 36, H - 34, d.get("brand") or "PIMP-BOT", 14)
+    return _png(img)
+
+
+def legslib_embed(guild_id: int, rows: list[dict], label: str) -> discord.Embed:
+    s = legslib_summary(rows)
+    e = discord.Embed(title=clip(f"📚 Leg library · {label}", 256), color=BRAND)
+    graded = s["hit"] + s["miss"]
+    if not rows:
+        e.description = ("No legs match that yet. Try just a player, or leave the filters empty to see what the group "
+                         "plays most.")
+        return e
+    head = (f"**{s['hit']}-{s['miss']}" + (f"-{s['push']}" if s["push"] else "") + "**" +
+            (f" · **{s['rate'] * 100:.0f}%** hit" if graded else " · nothing graded yet") +
+            (f" · {s['open']} still open" if s["open"] else ""))
+    if s["avg_margin"] is not None:
+        head += f"\nOn average they landed **{abs(s['avg_margin']):.1f}** {'past' if s['avg_margin'] >= 0 else 'short of'} the line."
+    lines = []
+    for r in rows[:10]:
+        icon = {"hit": "✅", "miss": "❌", "push": "➖"}.get(r["status"], "⏳")
+        extra = ""
+        act = legslib_actual(r)
+        if act is not None:
+            extra = f" → {act:g}"
+        lines.append(f"{icon} `{legslib_date(r):%b %-d}` {clip(r['text'], 70)}{extra} · {clip(r['bettor_name'], 24)}")
+    e.description = clip(head + "\n\n**Last 10**\n" + "\n".join(lines), 4000)
+    if s["people"]:
+        e.add_field(name="Who plays it", value=clip("\n".join(f"{clip(n, 24)} {h}-{m}" for n, (h, m) in s["people"]), 1024))
+    if s["sides"]:
+        e.add_field(name="By side", value=clip("\n".join(f"{side.title()}s {h}-{m}" for side, (h, m)
+                                                         in sorted(s["sides"].items())), 1024))
+    e.set_footer(text=f"{len(rows)} legs found · filter by player, stat, person or result")
+    return e
+
+
+def legslib_overview(guild_id: int) -> discord.Embed:
+    """No filters: what the group plays most and how it's gone."""
+    rows = legslib_rows(guild_id)
+    s = legslib_summary(rows)
+    e = discord.Embed(title="📚 Leg library", color=BRAND)
+    if not rows:
+        e.description = "No legs logged yet. Log a slip (screenshot, typed, or `/build`) and it shows up here."
+        return e
+    players: dict[str, list] = {}
+    stats: dict[str, list] = {}
+    for r in rows:
+        if r["status"] not in ("hit", "miss") or not r["prop"]:
+            continue
+        k = 0 if r["status"] == "hit" else 1
+        players.setdefault(r["prop"]["display"], [0, 0])[k] += 1
+        stats.setdefault(STATS[r["prop"]["stats"][0]][0], [0, 0])[k] += 1
+    graded = s["hit"] + s["miss"]
+    e.description = (f"The group has played **{len(rows)}** legs: **{s['hit']}-{s['miss']}**"
+                     + (f" ({s['rate'] * 100:.0f}% hit)" if graded else "") +
+                     ".\nSearch with `/legs player:` (it autocompletes), `stat:`, `member:` or `result:`.")
+    top = sorted(players.items(), key=lambda x: (-(x[1][0] + x[1][1]), x[0]))[:8]
+    if top:
+        e.add_field(name="Most played", value=clip("\n".join(f"{clip(n, 28)} · {h}-{m}" for n, (h, m) in top), 1024))
+    ts = sorted(stats.items(), key=lambda x: (-(x[1][0] + x[1][1]), x[0]))[:8]
+    if ts:
+        e.add_field(name="By stat", value=clip("\n".join(f"{n} · {h}-{m}" for n, (h, m) in ts), 1024))
+    return e
+
+
+def legslib_chart_data(guild_id: int, rows: list[dict], title: str, sub: str) -> dict:
+    items = []
+    for r in list(reversed(rows[:20])):
+        pr = r["prop"]
+        items.append({"status": r["status"], "line": pr["line"] if pr and not pr.get("combo") else None,
+                      "actual": legslib_actual(r), "date": f"{legslib_date(r):%-m/%-d}"})
+    s = legslib_summary(rows)
+    b = brand_for(guild_id)
+    return {"title": title, "sub": sub, "items": items, "rate": s["rate"], "stops": b["stops"], "brand": b["name"]}
+
+
+# ==========================================================================
+# 4. /goal: weekly group goals (skill, never volume)
+# ==========================================================================
+
+GOAL_KINDS = {  # kind: (title template, unit word, default target, min, max, how it counts, same for the image)
+    "scout": ("Scout {n} players", "players scouted", 25, 3, 300,
+              "Each person's scouted players count (`/scout`, or 🔍 a slip before playing it).",
+              "Counts every player each person scouts: /scout, or a slip breakdown before playing it."),
+    "notes": ("Write {n} notes", "notes written", 15, 3, 300,
+              "📝 reasoning on a logged pick, or a `/player note`.",
+              "Counts reasoning notes on logged picks and /player notes."),
+    "passes": ("Make {n} good passes", "good passes", 5, 1, 100,
+               "A slip someone asked about, didn't play, and that would have missed.",
+               "A good pass: a slip someone asked about, didn't play, and that would have missed."),
+    "legs": ("Hit {n}% of legs as a group", "% of legs hit", 60, 40, 80,
+             "Every graded leg settled this week counts. Needs 10+ graded legs to pay.",
+             "Every graded leg settled this week counts. Needs 10+ graded legs to pay."),
+}
+GOAL_MIN_LEGS = 10
+GOAL_DEFAULT_POT = 250
+
+
+def goal_week_for(now: Optional[datetime] = None) -> str:
+    """The week a new goal runs: this one, or next week if it's already Sunday evening."""
+    local = (now or datetime.now(TZ)).astimezone(TZ)
+    return week_id(local + timedelta(days=1) if local.weekday() == 6 and local.hour >= 18 else local)
+
+
+def goal_title(g) -> str:
+    return GOAL_KINDS[g["kind"]][0].format(n=g["target"])
+
+
+def goal_window(week: str) -> tuple[str, str]:
+    y, w = week.split("-W")
+    start = datetime.fromisocalendar(int(y), int(w), 1).replace(tzinfo=TZ).astimezone(timezone.utc)
+    return iso(start), iso(start + timedelta(days=7))
+
+
+def goal_ends(g) -> datetime:
+    """The last minute of the goal's week, local time."""
+    return datetime.fromisoformat(goal_window(g["week"])[1]).astimezone(TZ) - timedelta(minutes=1)
+
+
+def active_goal(guild_id: int):
+    return feat_db().execute("SELECT * FROM feat_goals WHERE guild_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1",
+                             (guild_id,)).fetchone()
+
+
+def goal_progress(g) -> dict:
+    """{value, target, frac (0-1), done, people {uid: (name, count)}, text}"""
+    gid, kind, target = g["guild_id"], g["kind"], g["target"]
+    s, e = goal_window(g["week"])
+    people: dict[int, list] = {}
+
+    def bump(uid, name, n=1):
+        if uid:
+            p = people.setdefault(int(uid), [name or "someone", 0])
+            p[1] += n
+            if name:
+                p[0] = name
+    names = {r["bettor_id"]: r["bettor_name"] for r in db().execute(
+        "SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND bettor_id IS NOT NULL GROUP BY bettor_id",
+        (gid,))}
+    if kind == "scout":
+        for r in db().execute("SELECT key, value FROM settings WHERE guild_id = ? AND key LIKE ?",
+                              (gid, f"scouted:%:{g['week']}")).fetchall():
+            try:
+                uid = int(r["key"].split(":")[1])
+                n = len(json.loads(r["value"] or "[]"))
+            except (ValueError, IndexError):
+                continue
+            if n:
+                bump(uid, names.get(uid), n)
+        value = sum(c for _, c in people.values())
+    elif kind == "notes":
+        for r in db().execute("""SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND created_at >= ? AND created_at < ?
+                                 AND TRIM(COALESCE(notes, '')) != '' AND bettor_id IS NOT NULL""", (gid, s, e)):
+            bump(r["bettor_id"], r["bettor_name"])
+        for r in db().execute("""SELECT n.author_id, n.author_name FROM player_notes n JOIN players pl ON pl.id = n.player_id
+                                 WHERE pl.guild_id = ? AND n.created_at >= ? AND n.created_at < ?""", (gid, s, e)):
+            bump(r["author_id"], r["author_name"])
+        value = sum(c for _, c in people.values())
+    elif kind == "passes":
+        r15_db()
+        for r in db().execute("""SELECT user_id, user_name FROM ghosts WHERE guild_id = ? AND result = 'miss'
+                                 AND settled_at >= ? AND settled_at < ?""", (gid, s, e)):
+            bump(r["user_id"], r["user_name"])
+        value = sum(c for _, c in people.values())
+    else:
+        h = m = 0
+        for r in db().execute("""SELECT l.status, p.bettor_id, p.bettor_name FROM legs l JOIN picks p ON p.id = l.pick_id
+                                 WHERE p.guild_id = ? AND l.status IN ('hit', 'miss') AND p.settled_at >= ? AND p.settled_at < ?""",
+                              (gid, s, e)):
+            h += r["status"] == "hit"
+            m += r["status"] == "miss"
+            bump(r["bettor_id"], r["bettor_name"])
+        rate = h / (h + m) * 100 if h + m else 0.0
+        out = {"value": round(rate), "target": target, "frac": min(1.0, rate / target) if target else 0.0,
+               "graded": h + m, "hits": h, "done": False, "people": people,
+               "text": f"{rate:.0f}% of {h + m} legs hit (goal {target}%)" if h + m else "no legs graded yet"}
+        out["enough"] = h + m >= GOAL_MIN_LEGS
+        return out
+    unit = GOAL_KINDS[kind][1]
+    return {"value": value, "target": target, "frac": min(1.0, value / target) if target else 0.0,
+            "done": value >= target, "people": people, "text": f"{value} of {target} {unit}"}
+
+
+def goal_shares(g, pr: dict) -> dict[int, int]:
+    """The pot split evenly between everyone who chipped in (at least 1 coin each)."""
+    ids = sorted(uid for uid, (_, c) in pr["people"].items() if c > 0)
+    if not ids or g["pot"] <= 0:
+        return {}
+    each = max(1, g["pot"] // len(ids))
+    return {uid: each for uid in ids}
+
+
+def render_goal(d: dict) -> io.BytesIO:
+    """d: title, sub, frac, big, small, status ('active'|'won'|'missed'), people [(name, count)], stops, accent."""
+    from PIL import Image, ImageDraw
+    W, H = 1000, 400
+    img = Image.new("RGB", (W, H), ART_BG)
+    img.paste(_grad((W, 130), d["stops"]), (0, 0))
+    dr = ImageDraw.Draw(img)
+    tag = {"won": "GOAL HIT", "missed": "FELL SHORT", "stopped": "CALLED OFF"}.get(d["status"], "GROUP GOAL")
+    dr.text((38, 20), tag, font=art_font(17, True), fill=(235, 235, 245))
+    t, f = fit_text(dr, d["title"].upper(), W - 200, 40, True)
+    dr.text((36, 46), t, font=f, fill=ART_TEXT)
+    brand_mark(img, (W - 116, 22), 84)
+    t, f = fit_text(dr, d["sub"], W - 80, 18)
+    dr.text((38, 146), t, font=f, fill=ART_MUTED)
+    colour = ART_GREEN if d["status"] == "won" or d["frac"] >= 1 else ART_RED if d["status"] == "missed" else d["accent"]
+    x0, y0, bw, bh = 38, 190, W - 76, 46
+    dr.rounded_rectangle((x0, y0, x0 + bw, y0 + bh), bh // 2, fill=ART_PANEL2)
+    fr = max(0.0, min(1.0, d["frac"]))
+    if fr > 0:
+        dr.rounded_rectangle((x0, y0, x0 + max(bh, int(bw * fr)), y0 + bh), bh // 2, fill=colour)
+    for q in (0.25, 0.5, 0.75):
+        qx = x0 + int(bw * q)
+        dr.line((qx, y0 + 8, qx, y0 + bh - 8), fill=ART_BG if fr > q else ART_FAINT, width=2)
+    pf = art_font(22, True)
+    pt = f"{fr * 100:.0f}%"
+    px = x0 + max(bh, int(bw * fr)) - _tw(dr, pt, pf) - 16
+    if px < x0 + 14:
+        px = x0 + max(bh, int(bw * fr)) + 12
+    dr.text((px, y0 + 10), pt, font=pf, fill=(16, 16, 22) if px < x0 + bw * fr else ART_TEXT)
+    dr.text((38, 252), d["big"], font=art_font(30, True), fill=ART_TEXT)
+    t, f = fit_text(dr, d["small"], W - 80, 17)
+    dr.text((40, 292), t, font=f, fill=ART_MUTED)
+    x, y = 38, 330
+    cf = art_font(16, True)
+    for name, n in d["people"][:7]:
+        label = f"{clip(name, 16)} · {n}"
+        w = _tw(dr, label, cf) + 28
+        if x + w > W - 220:
+            break
+        dr.rounded_rectangle((x, y, x + w, y + 34), 17, fill=ART_PANEL)
+        dr.text((x + 14, y + 7), label, font=cf, fill=ART_TEXT)
+        x += w + 10
+    brand_sign(img, W - 36, H - 32, d.get("brand") or "PIMP-BOT", 14)
+    return _png(img)
+
+
+def goal_card_data(g, pr: dict, status: Optional[str] = None) -> dict:
+    status = status or g["status"]
+    b = brand_for(g["guild_id"])
+    s = goal_window(g["week"])[0]
+    ends = goal_ends(g)
+    if status == "active":
+        sub = f"Runs {datetime.fromisoformat(s).astimezone(TZ):%b %-d} to {ends:%b %-d} · {g['pot']} coins split between " \
+              f"everyone who chips in"
+    elif status == "won":
+        sub = f"Week of {datetime.fromisoformat(s).astimezone(TZ):%b %-d} · {g['pot']} coins paid out"
+    else:
+        sub = f"Week of {datetime.fromisoformat(s).astimezone(TZ):%b %-d} · new week, new goal"
+    people = sorted(((n, c) for n, c in pr["people"].values() if c > 0), key=lambda x: (-x[1], x[0]))
+    return {"title": goal_title(g), "sub": sub, "frac": pr["frac"], "status": status, "big": pr["text"],
+            "small": GOAL_KINDS[g["kind"]][6], "people": people, "stops": b["stops"],
+            "accent": _brand_mix(b["accent"], (255, 255, 255), 0.35), "brand": b["name"]}
+
+
+async def goal_fill_names(client, pr: dict) -> dict:
+    """Swap 'someone' for a real display name when the person has no picks to take it from."""
+    for uid, entry in pr["people"].items():
+        if entry[0] == "someone":
+            try:
+                user = client.get_user(uid) if hasattr(client, "get_user") else None
+                user = user or await client.fetch_user(uid)
+                entry[0] = getattr(user, "display_name", None) or getattr(user, "name", None) or "someone"
+            except Exception:
+                pass
+    return pr
+
+
+async def goal_file(g, pr: dict, status: Optional[str] = None) -> discord.File:
+    buf = await asyncio.to_thread(locked_render, render_goal, goal_card_data(g, pr, status))
+    return discord.File(buf, filename="group_goal.png")
+
+
+def _goal_mark(g, mark: str) -> bool:
+    """Record a post as sent before sending it. False if it already was."""
+    marks = json.loads(g["marks"] or "[]")
+    if mark in marks:
+        return False
+    marks.append(mark)
+    feat_db().execute("UPDATE feat_goals SET marks = ? WHERE id = ?", (json.dumps(marks), g["id"]))
+    db().commit()
+    return True
+
+
+def goal_finish(g, pr: dict, status: str) -> dict[int, int]:
+    """Close the goal (once) and pay the pot on success. Returns who got what."""
+    cur = feat_db().execute("UPDATE feat_goals SET status = ?, result = ?, ended_at = ? WHERE id = ? AND status = 'active'",
+                            (status, json.dumps({"value": pr["value"], "text": pr["text"]}), now_iso(), g["id"]))
+    db().commit()
+    if cur.rowcount == 0 or status != "won":
+        return {}
+    shares = goal_shares(g, pr)
+    for uid, n in shares.items():
+        award(g["guild_id"], uid, n, f"Group goal: {goal_title(g)}", f"goal:{g['id']}:{uid}")
+    return shares
+
+
+def goal_result_text(g, pr: dict, status: str, shares: dict[int, int]) -> str:
+    if status == "won":
+        names = [pr["people"][u][0] for u in shares]
+        each = next(iter(shares.values()), 0)
+        return (f"🎉 **Group goal hit: {goal_title(g)}** ({pr['text']}). "
+                + (f"{COIN}{each} each to {', '.join(clip(n, 24) for n in names[:12])}"
+                   + (f" and {len(names) - 12} more" if len(names) > 12 else "") + "." if shares else "")
+                + " Mods can set next week's with `/goal start`.")
+    if g["kind"] == "legs" and not pr.get("enough", True):
+        return (f"🎯 **{goal_title(g)}** didn't count this week: only {pr.get('graded', 0)} graded legs "
+                f"(it needs {GOAL_MIN_LEGS}). No coins, no shame. `/goal start` sets a new one.")
+    return f"📉 **{goal_title(g)}** fell short: {pr['text']}. Close one. Mods can set a new goal with `/goal start`."
+
+
+async def feat_goal_job(client, now: datetime) -> None:
+    """Group goals: pay out the moment a count goal is reached, post a halfway update and one with the weekly
+    recap, and close the goal when its week ends. Every post is marked before it's sent."""
+    local = now.astimezone(TZ)
+    wk_now = week_id(local)
+    for g in feat_db().execute("SELECT * FROM feat_goals WHERE status = 'active'").fetchall():
+        try:
+            pr = await goal_fill_names(client, goal_progress(g))
+            channel = client.get_channel(g["channel_id"]) if g["channel_id"] else None
+            channel = channel or await recap_channel_for(client, g["guild_id"])
+            over = wk_now > g["week"]
+            if pr["done"] or over:
+                status = "won" if pr["done"] or (g["kind"] == "legs" and pr.get("enough") and
+                                                 pr["value"] >= g["target"]) else "missed"
+                shares = goal_finish(g, pr, status)
+                if channel is not None:
+                    await channel.send(goal_result_text(g, pr, status, shares), file=await goal_file(g, pr, status),
+                                       allowed_mentions=discord.AllowedMentions.none())
+                continue
+            if channel is None:
+                continue
+            if g["kind"] != "legs" and pr["frac"] >= 0.5 and _goal_mark(g, "half"):
+                await channel.send(f"🚧 Halfway there on **{goal_title(g)}**: {pr['text']}. Keep it up.",
+                                   file=await goal_file(g, pr), allowed_mentions=discord.AllowedMentions.none())
+            elif (local.weekday() == RECAP_DAY and local.hour >= RECAP_HOUR and
+                  get_setting(g["guild_id"], "last_recap") == local.date().isoformat() and _goal_mark(g, "recap")):
+                await channel.send(f"📈 Where the group goal stands: **{goal_title(g)}** · {pr['text']}.",
+                                   file=await goal_file(g, pr), allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Group goal %s failed", g["id"], exc_info=True)
+
+
+EXTRA_JOBS.append(("power_rankings", feat_power_job))
+EXTRA_JOBS.append(("group_goals", feat_goal_job))
+HELP_EXTRA.append(("🧱 Build, rank, look up, team up", (
+    "`/build` log a slip without a screenshot: platform, sport, legs one by one (stats per sport, Over/Under "
+    "buttons), amounts, then ✅ Log it, or 🔍 Just ask for a breakdown first\n"
+    "`/power` weekly power rankings (ROI, units, leg hit rate, green days and skill, never volume), posted with "
+    "the Sunday recap · 🔍 My score explains yours\n"
+    "`/legs` every leg the group has played: by player, stat, person or result, with hit rate and a chart\n"
+    "`/goal start` (mods) a weekly group goal like scouting 25 players · `/goal status` · coins split on success")))
+
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -23901,9 +27347,7 @@ async def insights_claudia(interaction: discord.Interaction):
 
 @insights_group.command(name="rankings", description="Power rankings: who's hot over the last week and month")
 async def insights_rankings(interaction: discord.Interaction):
-    lines = power_rankings(interaction.guild_id)
-    await interaction.response.send_message(embed=discord.Embed(
-        title="📊 Power rankings", color=BRAND, description="\n".join(lines) or "Not enough recent picks."))
+    await feat_power_respond(interaction)
 
 
 @calc_group.command(name="kelly", description="How much of your bankroll a bet is worth, given your chance it hits")
@@ -25571,6 +29015,221 @@ async def lore_remove(interaction: discord.Interaction, lore_id: int):
 
 
 bot.tree.add_command(lore_group)
+
+
+@bot.tree.command(name="track", description="Is a slip tracking? Leg by leg: player, game, stat, live number, or why not")
+@app_commands.describe(pick_id="The pick number (the # on the slip)")
+async def track_cmd(interaction: discord.Interaction, pick_id: int):
+    if not interaction.guild_id:
+        await interaction.response.send_message("Use this in a server.", ephemeral=True)
+        return
+    p = get_pick(interaction.guild_id, pick_id)
+    if p is None:
+        await interaction.response.send_message(f"No pick #{pick_id} here. `/open` lists the open ones.", ephemeral=True)
+        return
+    if not track_can_view(interaction, p):
+        await interaction.response.send_message("That slip is hidden until it settles: only its bettor and mods can "
+                                                "check it.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    entries = await leg_progress(p)
+    _PROGRESS_CACHE[p["id"]] = (time.monotonic() + 100, entries)
+    await interaction.followup.send(embed=track_doctor_embed(p, entries), view=track_doctor_view(p["id"]),
+                                    ephemeral=True)
+
+
+# ---- r21 live: /live ----------------------------------------------------------------------------------------
+
+@bot.tree.command(name="live", description="Every leg in play right now, grouped by game, with tonight's tip-offs")
+@app_commands.guild_only()
+@app_commands.describe(who="Everyone's legs (posted here), or just yours (only you see it, hidden slips included)",
+                       share="With Mine: post it in the channel instead (hidden slips left out)")
+@app_commands.choices(who=[app_commands.Choice(name="Everyone", value="all"),
+                           app_commands.Choice(name="Mine", value="mine")])
+async def live_cmd(interaction: discord.Interaction, who: Optional[app_commands.Choice[str]] = None,
+                   share: bool = False):
+    mine = bool(who and who.value == "mine")
+    private = mine and not share
+    scope = "m" if mine else "a"
+    await interaction.response.defer(thinking=True, ephemeral=private)
+    embed, _ = await lv_live_embed(interaction.client, interaction.guild_id, scope, interaction.user.id, private)
+    await interaction.followup.send(embed=embed, view=lv_live_view(scope, interaction.user.id, private),
+                                    ephemeral=private, allowed_mentions=discord.AllowedMentions.none())
+
+
+# ---- r21 features: /build, /power, /legs, /goal -----------------------------------------------------------
+
+@bot.tree.command(name="build", description="Build a slip leg by leg and log it (no screenshot needed)")
+@app_commands.guild_only()
+async def build_cmd(interaction: discord.Interaction):
+    sess = build_new_session(interaction.user.id, interaction.guild_id, interaction.user.display_name)
+    until = cooling_until(interaction.guild_id, interaction.user.id)
+    if until:
+        sess["note"] = "You're on a cool-off, so you can build and ask, but logging waits until it ends."
+    await interaction.response.send_message(embed=build_embed(sess), view=build_view(sess), ephemeral=True)
+
+
+@bot.tree.command(name="power", description="Weekly power rankings: ROI, legs, consistency and skill (never volume)")
+@app_commands.guild_only()
+async def power_cmd(interaction: discord.Interaction):
+    await feat_power_respond(interaction)
+
+
+async def legs_player_autocomplete(interaction: discord.Interaction, current: str):
+    cur = norm_name(current or "")
+    out = []
+    for name, n in legslib_players(interaction.guild_id):
+        if not cur or cur in norm_name(name):
+            out.append(app_commands.Choice(name=clip(f"{name} ({n} leg{'s' if n != 1 else ''})", 100), value=name[:100]))
+        if len(out) >= 25:
+            break
+    return out
+
+
+async def legs_stat_autocomplete(interaction: discord.Interaction, current: str):
+    cur = (current or "").lower()
+    fams = {"basketball": "NBA/WNBA/college", "football": "NFL/college", "baseball": "MLB", "hockey": "NHL"}
+    out = []
+    for k, (label, fam, _, aliases) in STATS.items():
+        if not cur or cur in label.lower() or any(cur in a for a in aliases):
+            out.append(app_commands.Choice(name=f"{label} ({fams.get(fam, fam)})", value=k))
+        if len(out) >= 25:
+            break
+    return out
+
+
+LEG_RESULT_CHOICES = [app_commands.Choice(name=n, value=v) for n, v in
+                      (("Hit", "hit"), ("Miss", "miss"), ("Push", "push"), ("Still open", "open"))]
+
+
+@bot.tree.command(name="legs", description="Every leg the group has played: search by player, stat, person or result")
+@app_commands.guild_only()
+@app_commands.describe(player="A player (or a team, for team bets)", stat="A stat, like Points or Pass Yards",
+                       member="Only this person's legs", result="Only hits, misses, pushes or open legs")
+@app_commands.autocomplete(player=legs_player_autocomplete, stat=legs_stat_autocomplete)
+@app_commands.choices(result=LEG_RESULT_CHOICES)
+async def legs_cmd(interaction: discord.Interaction, player: Optional[app_commands.Range[str, 2, 100]] = None,
+                   stat: Optional[str] = None, member: Optional[discord.Member] = None,
+                   result: Optional[app_commands.Choice[str]] = None):
+    await interaction.response.defer()
+    if stat and stat not in STATS:
+        stat = (stat_keys_in(stat) or [None])[0]
+    if not (player or stat or member or result):
+        await interaction.followup.send(embed=legslib_overview(interaction.guild_id))
+        return
+    person = str(member.id) if member else None
+    rows = legslib_search(interaction.guild_id, player, stat, person, result.value if result else None)
+    bits = []
+    if player:
+        bits.append(rows[0]["prop"]["display"] if rows and rows[0]["prop"] and not rows[0]["prop"].get("combo")
+                    and player.lower() in rows[0]["prop"]["display"].lower() else player)
+    if stat:
+        bits.append(STATS[stat][0])
+    if member:
+        bits.append(f"{member.display_name}'s legs")
+    if result:
+        bits.append(result.name.lower())
+    label = " · ".join(bits)
+    e = legslib_embed(interaction.guild_id, rows, label)
+    if not rows:
+        await interaction.followup.send(embed=e)
+        return
+    s = legslib_summary(rows)
+    sub = f"{s['hit']}-{s['miss']}" + (f"-{s['push']}" if s["push"] else "") + f" · last {min(20, len(rows))} shown"
+    data = legslib_chart_data(interaction.guild_id, rows, label, sub)
+    buf = await asyncio.to_thread(locked_render, render_legslib, data)
+    f = discord.File(buf, filename="legs.png")
+    e.set_image(url="attachment://legs.png")
+    await interaction.followup.send(embed=e, file=f, allowed_mentions=discord.AllowedMentions.none())
+
+
+goal_group = app_commands.Group(name="goal", description="Weekly group goals: skill challenges everyone works on together",
+                                guild_only=True)
+GOAL_CHOICES = [app_commands.Choice(name=n, value=v) for n, v in
+                (("Scout players", "scout"), ("Write notes", "notes"), ("Make good passes", "passes"),
+                 ("Hit a % of legs as a group", "legs"))]
+
+
+@goal_group.command(name="start", description="Start this week's group goal (mods): coins split when the group gets there")
+@app_commands.describe(kind="What the group works on", target="How many (or the hit % for legs)",
+                       coins="Coins split between everyone who chips in (default 250)")
+@app_commands.choices(kind=GOAL_CHOICES)
+async def goal_start(interaction: discord.Interaction, kind: app_commands.Choice[str],
+                     target: Optional[app_commands.Range[int, 1, 500]] = None,
+                     coins: Optional[app_commands.Range[int, 0, 5000]] = None):
+    if not is_mod(interaction.user):
+        await interaction.response.send_message("Only mods can start a group goal. Ask one!", ephemeral=True)
+        return
+    cur = active_goal(interaction.guild_id)
+    if cur:
+        await interaction.response.send_message(f"There's already a goal running: **{goal_title(cur)}**. "
+                                                "`/goal stop` ends it first.", ephemeral=True)
+        return
+    _, _, default, lo, hi, _, _ = GOAL_KINDS[kind.value]
+    n = target if target is not None else default
+    if not lo <= n <= hi:
+        await interaction.response.send_message(f"For that goal, pick a target between {lo} and {hi}.", ephemeral=True)
+        return
+    pot = coins if coins is not None else GOAL_DEFAULT_POT
+    await interaction.response.defer()
+    ch = await recap_channel_for(interaction.client, interaction.guild_id)
+    channel_id = ch.id if ch is not None else interaction.channel_id
+    cur_ = feat_db().execute("""INSERT INTO feat_goals (guild_id, week, kind, target, pot, channel_id, created_by, created_at)
+                                VALUES (?,?,?,?,?,?,?,?)""",
+                             (interaction.guild_id, goal_week_for(), kind.value, n, pot, channel_id, interaction.user.id, now_iso()))
+    db().commit()
+    g = feat_db().execute("SELECT * FROM feat_goals WHERE id = ?", (cur_.lastrowid,)).fetchone()
+    pr = await goal_fill_names(interaction.client, goal_progress(g))
+    await audit(interaction.client, interaction.guild_id,
+                f"{interaction.user.display_name} started the group goal: {goal_title(g)} ({pot} coins)")
+    text = (f"🎯 **New group goal: {goal_title(g)}** by {goal_ends(g):%A %b %-d}. {GOAL_KINDS[g['kind']][5]}\n"
+            f"Hit it and {COIN}{pot} gets split between everyone who chipped in. `/goal status` any time.")
+    await interaction.followup.send(text, file=await goal_file(g, pr), allowed_mentions=discord.AllowedMentions.none())
+    if ch is not None and ch.id != interaction.channel_id:
+        try:
+            await ch.send(text, file=await goal_file(g, pr), allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Couldn't post the new goal in the recap channel", exc_info=True)
+
+
+@goal_group.command(name="status", description="How the group is doing on this week's goal")
+async def goal_status(interaction: discord.Interaction):
+    g = active_goal(interaction.guild_id)
+    if g is None:
+        last = feat_db().execute("SELECT * FROM feat_goals WHERE guild_id = ? ORDER BY id DESC LIMIT 1",
+                                 (interaction.guild_id,)).fetchone()
+        tail = ""
+        if last is not None:
+            how = {"won": "hit it 🎉", "missed": "fell short", "stopped": "called off"}.get(last["status"], last["status"])
+            tail = f" Last one: **{goal_title(last)}** ({how})."
+        await interaction.response.send_message("No group goal running right now." + tail +
+                                                " Mods can start one with `/goal start`.", ephemeral=True)
+        return
+    await interaction.response.defer()
+    pr = await goal_fill_names(interaction.client, goal_progress(g))
+    mine = pr["people"].get(interaction.user.id)
+    you = f" You've chipped in **{mine[1]}**." if mine and g["kind"] != "legs" else \
+        "" if mine else " You haven't chipped in yet: " + GOAL_KINDS[g["kind"]][5]
+    await interaction.followup.send(f"🎯 **{goal_title(g)}** · {pr['text']}.{you}", file=await goal_file(g, pr),
+                                    allowed_mentions=discord.AllowedMentions.none())
+
+
+@goal_group.command(name="stop", description="Call off this week's group goal (mods, no coins paid)")
+async def goal_stop(interaction: discord.Interaction):
+    if not is_mod(interaction.user):
+        await interaction.response.send_message("Only mods can call off a group goal.", ephemeral=True)
+        return
+    g = active_goal(interaction.guild_id)
+    if g is None:
+        await interaction.response.send_message("There's no group goal running.", ephemeral=True)
+        return
+    goal_finish(g, goal_progress(g), "stopped")
+    await audit(interaction.client, interaction.guild_id, f"{interaction.user.display_name} called off the group goal: "
+                                                          f"{goal_title(g)}")
+    await interaction.response.send_message(f"Called off **{goal_title(g)}**. No coins paid. `/goal start` sets a new one.")
+
+
+bot.tree.add_command(goal_group)
 
 
 @bot.tree.error
