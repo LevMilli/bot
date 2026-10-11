@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r23"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r24"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -21888,12 +21888,13 @@ class LiveButton(discord.ui.DynamicItem[discord.ui.Button],
             until = datetime.fromisoformat(row["until"]) if row else None
         await interaction.response.defer()
         private = self.act == "prf"
-        embed, sig = await lv_live_embed(interaction.client, gid, self.scope, self.uid, private, now, until=until)
+        embed, sig, pic = await lv2_live_payload(interaction.client, gid, self.scope, self.uid, private, now, until=until)
         if until:
             c.execute("UPDATE lv_follow SET sig = ? WHERE message_id = ?", (sig, mid))
             c.commit()
-        await interaction.edit_original_response(embed=embed, view=lv_live_view(self.scope, self.uid, private,
-                                                                                 following=until is not None))
+        await interaction.edit_original_response(embed=embed, attachments=[pic] if pic is not None else [],
+                                                 view=lv_live_view(self.scope, self.uid, private,
+                                                                   following=until is not None))
 
 
 def lv_live_view(scope: str, uid: int, private: bool, following: bool = False) -> discord.ui.View:
@@ -21919,8 +21920,8 @@ async def lv_follows_guild(client, gid: int, snap: list[dict], now: datetime) ->
         if channel is None:
             continue
         try:
-            embed, sig = await lv_live_embed(client, gid, r["scope"], r["user_id"], False, now, snap=snap,
-                                             until=None if expired else until)
+            embed, sig, pic = await lv2_live_payload(client, gid, r["scope"], r["user_id"], False, now, snap=snap,
+                                                     until=None if expired else until)
             if expired:
                 embed.set_footer(text=f"Stopped updating at {lv_clock(now)} · tap 🔄 for the latest, or ⏱️ to keep "
                                       "it going")
@@ -21930,7 +21931,8 @@ async def lv_follows_guild(client, gid: int, snap: list[dict], now: datetime) ->
                 c.execute("UPDATE lv_follow SET sig = ? WHERE message_id = ?", (sig, r["message_id"]))
                 c.commit()
             await channel.get_partial_message(r["message_id"]).edit(
-                embed=embed, view=lv_live_view(r["scope"], r["user_id"], False, following=not expired))
+                embed=embed, attachments=[pic] if pic is not None else [],
+                view=lv_live_view(r["scope"], r["user_id"], False, following=not expired))
         except discord.NotFound:
             c.execute("DELETE FROM lv_follow WHERE message_id = ?", (r["message_id"],))
             c.commit()
@@ -24158,6 +24160,344 @@ HELP_EXTRA.append(("🔎 Reading slips for free", (
     "Screenshots are read by a free text scan first. If it's sure, the slip logs like before; if not, you get a "
     "card to check and tap 🧾 **Log this slip** (or ✏️ Edit). A free `GEMINI_API_KEY` on Railway adds a second free reader, "
     "and Claude is only the last resort. `/admin status` shows which reader handled today's slips.")))
+
+
+# ==========================================================================
+# r24: /live as a big, easy-to-read picture with a pace graph per leg, and /gamecard on demand.
+# ==========================================================================
+
+LV2_GAMES = 4                 # games drawn on one /live picture
+LV2_ROWS = 7                  # legs drawn per game
+# (periods, minutes per period) for working out how much of a game is gone
+LV2_CLOCK = {"basketball/nba": (4, 12), "basketball/wnba": (4, 10), "basketball/mens-college-basketball": (2, 20),
+             "football/nfl": (4, 15), "football/college-football": (4, 15), "hockey/nhl": (3, 20)}
+
+
+def lv2_elapsed(ev: dict, path: Optional[str]) -> Optional[float]:
+    """How much of the game has been played (0-1), from the period and clock; None when it can't tell."""
+    if not ev or ev.get("state") != "in":
+        return 1.0 if ev and (ev.get("final") or ev.get("state") == "post") else None
+    detail = (ev.get("detail") or "").lower()
+    fam = (path or "").split("/")[0]
+    if fam == "soccer":
+        m = re.search(r"(\d{1,3})(?:\+\d+)?'", detail)
+        return min(1.0, int(m.group(1)) / 90) if m else (0.5 if "half" in detail else None)
+    if fam == "baseball":
+        m = re.search(r"(top|bot|bottom|mid|middle|end)\w*\s+(\d{1,2})", detail)
+        if not m:
+            return None
+        inning = int(m.group(2))
+        half = {"top": 0.0, "mid": 0.5, "middle": 0.5, "bot": 0.5, "bottom": 0.5, "end": 1.0}[m.group(1)]
+        return max(0.0, min(1.0, (inning - 1 + half) / 9))
+    spec = LV2_CLOCK.get(path or "")
+    if not spec:
+        return None
+    periods, mins = spec
+    if "half" in detail and "end" not in detail:
+        return 0.5
+    period = int(ev.get("period") or 0)
+    if not period:
+        m = re.search(r"\b[qp](\d)\b|(\d)(?:st|nd|rd|th)\b", detail)
+        period = int(m.group(1) or m.group(2)) if m else 0
+    if not period:
+        return None
+    if period > periods or "ot" in detail.split():
+        return 1.0
+    m = re.search(r"(\d{1,2}):(\d{2})", detail)
+    left = (int(m.group(1)) + int(m.group(2)) / 60) if m else (0.0 if "end" in detail else mins / 2)
+    return max(0.0, min(1.0, ((period - 1) * mins + (mins - min(left, mins))) / (periods * mins)))
+
+
+def lv2_pace(value: float, line: float, elapsed: Optional[float], text: str) -> Optional[float]:
+    """Where this stat is headed if it keeps this rate (None early in a game, or for 'longest' stats)."""
+    if elapsed is None or elapsed < 0.12 or elapsed >= 0.999 or re.search(r"longest|first|anytime", text, re.I):
+        return None
+    return round(value / elapsed, 1)
+
+
+def lv2_game_rows(g: dict, show_open_only: bool = True) -> list[dict]:
+    rows = [lv_row(r["s"], r["e"]) for r in g["rows"]
+            if r["s"]["p"]["status"] == "open" or r["e"].get("status") != "open" or not show_open_only]
+    return sorted(rows, key=lambda r: (LV_ORDER.get(r["state"], 9), r["who"].lower()))
+
+
+async def lv2_board_data(client, gid: int, scope: str, uid: int, private: bool, now: datetime,
+                         snap: list[dict]) -> Optional[dict]:
+    """Everything the /live picture needs (avatars fetched here, before the render thread). None if nothing is live."""
+    mine = [s for s in snap if lv_visible(s, scope, uid, private)]
+    games = [g for g in lv_games_of(mine).values() if g["ev"].get("state") == "in" and not g["ev"].get("final")]
+    games.sort(key=lambda g: (event_time(g["ev"]) or now, g["id"]))
+    out, uids = [], set()
+    for g in games:
+        rows = lv2_game_rows(g)
+        if not rows:
+            continue
+        el = lv2_elapsed(g["ev"], g["path"])
+        for r in rows:
+            n = r.get("num")
+            r["pace"] = lv2_pace(n["value"], n["line"], el, r["text"]) if n and r["state"] not in ("cleared", "dead") else None
+            if r.get("uid"):
+                uids.add(r["uid"])
+        away, home = lv_sides(g["ev"])
+        ac = lv_team_colour(away)
+        out.append({"league": LEAGUE_NAMES.get(g["path"] or "", ""), "away": dict(away, colour=ac),
+                    "home": dict(home, colour=lv_team_colour(home, avoid=ac)), "status": lv_status_text(g["ev"]),
+                    "elapsed": el, "rows": rows})
+        if len(out) >= LV2_GAMES:
+            break
+    if not out:
+        return None
+    avatars = {}
+    for u in list(uids)[:24]:
+        user = client.get_user(u) if client is not None and hasattr(client, "get_user") else None
+        avatars[u] = await avatar_bytes(user) if user is not None else None
+    tonight = [(lv_clock(t), name, n) for t, name, n in lv_tonight(mine, now)]
+    more = max(0, len([g for g in lv_games_of(mine).values() if g["ev"].get("state") == "in"]) - len(out))
+    return {"title": "LIVE NOW", "who": "everyone" if scope == "a" else "just you" if private else "mine",
+            "updated": lv_clock(now), "games": out, "tonight": tonight, "avatars": avatars, "more_games": more}
+
+
+def _lv2_pace_bar(d, x: int, y: int, w: int, h: int, value: float, line: float, pace: Optional[float], side: str,
+                  state: str) -> None:
+    """The graph: a filled bar for now, a ghost bar for where it's headed, and a white tick at the line."""
+    top = max(line * 1.5, value, pace or 0, 1)
+    sx = lambda v: x + w * min(1.0, max(0.0, v / top))
+    d.rounded_rectangle((x, y, x + w, y + h), h // 2, fill=(44, 44, 58))
+    good = (value > line) if side == "over" else (value <= line)
+    col = {"cleared": ART_GREEN, "dead": ART_RED, "close": ART_AMBER}.get(state) or (ART_GREEN if good and side == "over"
+                                                                                     else ART_BLUE)
+    if side == "under":
+        col = ART_RED if value > line else (ART_AMBER if state == "close" else ART_GREEN)
+    if pace is not None and pace > value:
+        on = (pace > line) if side == "over" else (pace <= line)
+        ghost = _brand_mix(ART_GREEN if on else ART_RED, (44, 44, 58), 0.55)
+        d.rounded_rectangle((x, y, sx(pace), y + h), h // 2, fill=ghost)
+    if value > 0:
+        d.rounded_rectangle((x, y, max(x + h, sx(value)), y + h), h // 2, fill=col)
+    lx = sx(line)
+    d.rectangle((lx - 2, y - 7, lx + 2, y + h + 7), fill=(255, 255, 255))
+
+
+def render_live_board(b: dict) -> io.BytesIO:
+    """b: title, who, updated, games [{league, away, home, status, elapsed, rows}], tonight [(time, name, n)], avatars."""
+    from PIL import Image, ImageDraw
+    W = 1100
+    HEAD, GHEAD, ROW, GAP = 150, 132, 112, 12
+    games = b["games"]
+    heights = []
+    for g in games:
+        n = min(len(g["rows"]), LV2_ROWS)
+        heights.append(GHEAD + n * (ROW + GAP) + (40 if len(g["rows"]) > LV2_ROWS else 0) + 26)
+    H = HEAD + sum(heights) + (86 if b.get("tonight") else 0) + (40 if b.get("more_games") else 0) + 96
+    img = Image.new("RGB", (W, H), ART_BG)
+    top = _grad((W, HEAD), [(150, 40, 60), (60, 20, 70), ART_BG], diagonal=False)
+    img.paste(top, (0, 0))
+    fade = Image.linear_gradient("L").resize((W, 50))
+    img.paste(Image.new("RGB", (W, 50), ART_BG), (0, HEAD - 50), fade)
+    d = ImageDraw.Draw(img)
+    d.ellipse((44, 48, 68, 72), fill=ART_RED)
+    d.text((84, 34), b.get("title", "LIVE NOW"), font=art_font(50, True), fill=ART_TEXT)
+    sub = f"{b.get('who', 'everyone').upper()}  ·  UPDATED {b.get('updated', '')}"
+    d.text((86, 98), sub, font=art_font(22, True), fill=(230, 210, 220))
+    legend = [("NOW", ART_GREEN), ("ON PACE", _brand_mix(ART_GREEN, (44, 44, 58), 0.55)), ("LINE", (255, 255, 255))]
+    lx = W - 40
+    for label, col in reversed(legend):
+        f = art_font(17, True)
+        tw = _tw(d, label, f)
+        lx -= tw
+        d.text((lx, 102), label, font=f, fill=(225, 225, 235))
+        lx -= 30
+        if label == "LINE":
+            d.rectangle((lx + 10, 98, lx + 14, 126), fill=col)
+        else:
+            d.rounded_rectangle((lx, 104, lx + 22, 118), 7, fill=col)
+        lx -= 22
+    y = HEAD
+    for g, gh in zip(games, heights):
+        away, home = g["away"], g["home"]
+        d.rounded_rectangle((20, y, W - 20, y + gh - 14), 26, fill=(24, 24, 33))
+        band = _grad((W - 40, 112), [_brand_mix(away["colour"], ART_BG, 0.55), (30, 30, 42),
+                                     _brand_mix(home["colour"], ART_BG, 0.55)], diagonal=False)
+        img.paste(band, (20, y), _rounded_mask((W - 40, 112), 26))
+        d = ImageDraw.Draw(img)
+        _lv_badge(img, 84, y + 56, 34, lv_abbr(away), away["colour"])
+        _lv_badge(img, W - 84, y + 56, 34, lv_abbr(home), home["colour"])
+        d = ImageDraw.Draw(img)
+        sc = lambda t: f"{t['score']:g}" if t.get("score") is not None else "–"
+        score = f"{lv_abbr(away)}  {sc(away)}   –   {sc(home)}  {lv_abbr(home)}"
+        st, sf = fit_text(d, score, 640, 44, True)
+        d.text((W / 2 - _tw(d, st, sf) / 2, y + 14), st, font=sf, fill=ART_TEXT)
+        status = (g.get("league") + "  ·  " if g.get("league") else "") + (g.get("status") or "")
+        tt, tf = fit_text(d, status, 520, 22, True)
+        d.text((W / 2 - _tw(d, tt, tf) / 2, y + 70), tt, font=tf, fill=ART_AMBER)
+        el = g.get("elapsed")
+        if el is not None:
+            gx0, gx1 = 150, W - 150
+            d.rounded_rectangle((gx0, y + 102, gx1, y + 108), 3, fill=(52, 52, 66))
+            d.rounded_rectangle((gx0, y + 102, gx0 + (gx1 - gx0) * el, y + 108), 3, fill=ART_AMBER)
+        ry = y + GHEAD
+        for r in g["rows"][:LV2_ROWS]:
+            col = _lv_colour(r["state"])
+            d.rounded_rectangle((36, ry, W - 36, ry + ROW), 20, fill=ART_PANEL)
+            d.rounded_rectangle((36, ry, 46, ry + ROW), 5, fill=col)
+            d.rectangle((41, ry, 46, ry + ROW), fill=ART_PANEL)
+            av = _avatar((b.get("avatars") or {}).get(r.get("uid")), 60, r["who"], -1)
+            img.paste(av, (60, ry + 26), av)
+            d = ImageDraw.Draw(img)
+            nt, nf = fit_text(d, r["who"], 300, 20, True)
+            d.text((136, ry + 12), nt, font=nf, fill=ART_MUTED)
+            lt, lf = fit_text(d, r["text"], 560, 28, True, min_size=19)
+            d.text((136, ry + 38), lt, font=lf, fill=ART_TEXT if r["state"] != "dead" else (170, 170, 186))
+            pill = LV_LABEL.get(r["state"], "WAITING")
+            pf = art_font(17, True)
+            pw = max(104, _tw(d, pill, pf) + 30)
+            px = W - 52 - pw
+            d.rounded_rectangle((px, ry + 14, px + pw, ry + 48), 17, fill=_brand_mix(col, ART_BG, 0.78), outline=col,
+                                width=2)
+            d.text((px + (pw - _tw(d, pill, pf)) / 2, ry + 21), pill, font=pf, fill=col)
+            n = r.get("num")
+            if n:
+                vt = f"{n['value']:g} / {n['line']:g}"
+                vf = art_font(34, True)
+                d.text((px - 24 - _tw(d, vt, vf), ry + 10), vt, font=vf, fill=ART_TEXT)
+                _lv2_pace_bar(d, 136, ry + 82, 580, 14, n["value"], n["line"], r.get("pace"), n["side"], r["state"])
+                if r.get("pace") is not None:
+                    need = n["line"] - n["value"]
+                    on = (r["pace"] > n["line"]) if n["side"] == "over" else (r["pace"] <= n["line"])
+                    note = f"on pace for {r['pace']:g}" + (f" · needs {need:g} more" if n["side"] == "over" and need > 0 else "")
+                    nt2, nf2 = fit_text(d, note, W - 52 - 736, 19, True, min_size=14)
+                    d.text((736, ry + 76), nt2, font=nf2, fill=ART_GREEN if on else ART_RED)
+                elif n["side"] == "over" and n["line"] > n["value"]:
+                    d.text((736, ry + 76), f"needs {n['line'] - n['value']:g} more", font=art_font(19, True),
+                           fill=ART_MUTED)
+            else:
+                d.text((136, ry + 80), {"ahead": "winning right now", "behind": "losing right now"}.get(r["state"], ""),
+                       font=art_font(19, True), fill=col)
+            ry += ROW + GAP
+        if len(g["rows"]) > LV2_ROWS:
+            d.text((60, ry), f"+ {len(g['rows']) - LV2_ROWS} more legs on this game  (/gamecard)", font=art_font(19, True),
+                   fill=ART_MUTED)
+        y += gh
+    if b.get("more_games"):
+        d.text((40, y), f"+ {b['more_games']} more games in play: tap 🔄 or use /gamecard", font=art_font(20, True),
+               fill=ART_MUTED)
+        y += 40
+    if b.get("tonight"):
+        d.text((40, y + 6), "LATER TONIGHT", font=art_font(18, True), fill=ART_MUTED)
+        x = 40
+        for t, name, n in b["tonight"]:
+            label = f"{t}  {name}" + (f"  ({n})" if n > 1 else "")
+            if x + _tw(d, label, art_font(20, True)) + 30 > W - 40:
+                break
+            x += _lv_chip(d, x, y + 36, label, ART_TEXT, ART_PANEL2, 20, 40) + 10
+        y += 86
+    d.text((40, H - 56), "Bar = now  ·  faded bar = where it's headed at this rate  ·  white tick = the line",
+           font=art_font(17), fill=ART_MUTED)
+    brand_sign(img, W - 40, H - 58, "PIMP-BOT", 17, variant="hype")
+    return _png(img)
+
+
+async def lv2_live_payload(client, gid: int, scope: str, uid: int, private: bool, now: Optional[datetime] = None,
+                           snap: Optional[list] = None, until: Optional[datetime] = None):
+    """(embed, signature, picture or None) for /live: the picture when something is in play, text otherwise."""
+    now = now or datetime.now(timezone.utc)
+    snap = snap if snap is not None else await lv_snapshot(gid, now, deep=True)
+    embed, sig = await lv_live_embed(client, gid, scope, uid, private, now, snap=snap, until=until)
+    try:
+        data = await lv2_board_data(client, gid, scope, uid, private, now, snap)
+    except Exception:
+        log.warning("Live board data failed", exc_info=True)
+        data = None
+    if data is None:
+        return embed, sig, None
+    try:
+        png = await asyncio.to_thread(locked_render, render_live_board, data)
+    except Exception:
+        log.warning("Live board render failed", exc_info=True)
+        return embed, sig, None
+    lines = []
+    for g in data["games"]:
+        c = lv_counts(g["rows"])
+        bits = " · ".join(f"{LV_ICON[k]} {c[k]}" for k in ("cleared", "close", "live", "ahead", "behind", "dead") if c.get(k))
+        sc = lambda t: f" {t['score']:g}" if t.get("score") is not None else ""
+        lines.append(f"**{lv_abbr(g['away'])}{sc(g['away'])} · {lv_abbr(g['home'])}{sc(g['home'])}** · {clip(g['status'], 24)} · "
+                     f"{len(g['rows'])} leg{'s' if len(g['rows']) != 1 else ''}" + (f" · {bits}" if bits else ""))
+    if data["tonight"]:
+        lines.append("⏰ Later: " + " · ".join(f"{t} {name}" for t, name, _ in data["tonight"]))
+    embed.description = clip("\n".join(lines), 4000)
+    embed.set_image(url="attachment://live.png")
+    return embed, sig, discord.File(png, filename="live.png")
+
+
+# ---- /gamecard: the game tracker card for any game, on demand ------------------------------------------------
+
+def lv2_card_games(gid: int, snap: list[dict], now: datetime, uid: int) -> list[dict]:
+    """Games the group has legs on: live first, then later today, then tonight's finals."""
+    vis = [s for s in snap if s["public"]]         # the card is posted in the channel: hidden slips stay out
+    games = list(lv_games_of(vis).values())
+    start_of = lambda g: event_time(g["ev"]) or now
+    _, end = lv_night_bounds(lv_night(now))
+    keep = [g for g in games if g["ev"].get("state") == "in"
+            or (g["ev"].get("state") == "pre" and start_of(g) <= end + timedelta(hours=12))
+            or ((g["ev"].get("final") or g["ev"].get("state") == "post") and start_of(g) >= now - timedelta(hours=14))]
+    order = {"in": 0, "pre": 1, "post": 2}
+    keep.sort(key=lambda g: (order.get("post" if g["ev"].get("final") else g["ev"].get("state"), 3), start_of(g)))
+    return keep
+
+
+def lv2_game_label(g: dict) -> str:
+    ev = g["ev"]
+    n = len(g["rows"])
+    state = "Final" if (ev.get("final") or ev.get("state") == "post") else (
+        "LIVE " + (ev.get("detail") or "") if ev.get("state") == "in" else lv_status_text(ev))
+    return clip(f"{lv_score_line(ev)} · {state} · {n} leg{'s' if n != 1 else ''}", 100)
+
+
+async def gamecard_autocomplete(interaction: discord.Interaction, current: str) -> list:
+    try:
+        now = datetime.now(timezone.utc)
+        snap = await asyncio.wait_for(lv_snapshot(interaction.guild_id, now), 2.5)
+        games = lv2_card_games(interaction.guild_id, snap, now, interaction.user.id)
+    except Exception:
+        return []
+    cur = (current or "").lower()
+    out = []
+    for g in games:
+        label = lv2_game_label(g)
+        if cur and cur not in label.lower():
+            continue
+        out.append(app_commands.Choice(name=label, value=str(g["id"])[:100]))
+    return out[:25]
+
+
+async def gamecard_payload(client, gid: int, uid: int, game: Optional[str], now: Optional[datetime] = None):
+    """(embed, file) for one game's card, or (message, None) when there's no such game."""
+    now = now or datetime.now(timezone.utc)
+    snap = await lv_snapshot(gid, now, deep=True)
+    games = lv2_card_games(gid, snap, now, uid)
+    if not games:
+        return ("No games with the group's legs on them right now or later today. Log a slip and its games show up "
+                "here."), None
+    g = None
+    if game:
+        g = next((x for x in games if str(x["id"]) == str(game)), None)
+        if g is None:
+            q = game.lower()
+            g = next((x for x in games if q in lv2_game_label(x).lower()), None)
+        if g is None:
+            return "I couldn't find that game. Start typing a team and pick it from the list.", None
+    else:
+        g = games[0]                         # the live game first, else the next one up
+    rows = lv2_game_rows(g)
+    final = bool(g["ev"].get("final") or g["ev"].get("state") == "post")
+    embed, f = await lv_card_payload(client, gid, g["ev"], g["path"], rows, final, now)
+    return embed, f
+
+
+HELP_EXTRA.append(("📡 Live, bigger", (
+    "`/live` is now a big picture: every game in play, each leg's number, a bar for now, a faded bar for where it's "
+    "headed at this rate, and a tick at the line. `/gamecard` pulls up the score card for any game the group is on "
+    "(pick it from the list).")))
 
 
 # --------------------------------------------------------------------------
@@ -29611,9 +29951,10 @@ async def live_cmd(interaction: discord.Interaction, who: Optional[app_commands.
     private = mine and not share
     scope = "m" if mine else "a"
     await interaction.response.defer(thinking=True, ephemeral=private)
-    embed, _ = await lv_live_embed(interaction.client, interaction.guild_id, scope, interaction.user.id, private)
+    embed, _, pic = await lv2_live_payload(interaction.client, interaction.guild_id, scope, interaction.user.id, private)
+    extra = {"file": pic} if pic is not None else {}
     await interaction.followup.send(embed=embed, view=lv_live_view(scope, interaction.user.id, private),
-                                    ephemeral=private, allowed_mentions=discord.AllowedMentions.none())
+                                    ephemeral=private, allowed_mentions=discord.AllowedMentions.none(), **extra)
 
 
 # ---- r21 features: /build, /power, /legs, /goal -----------------------------------------------------------
@@ -29789,6 +30130,26 @@ async def goal_stop(interaction: discord.Interaction):
 
 
 bot.tree.add_command(goal_group)
+
+
+# ---- r24: /gamecard ------------------------------------------------------------------------------------------
+
+@bot.tree.command(name="gamecard", description="The live score card for any game the group has legs on")
+@app_commands.guild_only()
+@app_commands.describe(game="Pick a game (live games first). Leave empty for the game that's on right now")
+@app_commands.autocomplete(game=gamecard_autocomplete)
+async def gamecard_cmd(interaction: discord.Interaction, game: Optional[str] = None):
+    await interaction.response.defer(thinking=True)
+    try:
+        embed, f = await gamecard_payload(interaction.client, interaction.guild_id, interaction.user.id, game)
+    except Exception:
+        log.exception("Game card failed")
+        await interaction.followup.send("I couldn't draw that card just now. Try again in a minute.", ephemeral=True)
+        return
+    if f is None:
+        await interaction.followup.send(embed, ephemeral=True)
+        return
+    await interaction.followup.send(embed=embed, file=f, allowed_mentions=discord.AllowedMentions.none())
 
 
 @bot.tree.error
