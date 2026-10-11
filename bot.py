@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r27"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r28"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -1962,8 +1962,8 @@ def slip_draft_view(message_id: int, review: bool = True, log_it: bool = True, e
 
 def ask_gate(guild_id: int, user_id: int) -> Optional[str]:
     """Shares the @mention question limits. Returns why not, or None and counts the question."""
-    if not ai_enabled():
-        return "Breakdowns need the Claude key: add `ANTHROPIC_API_KEY` on Railway → Variables."
+    if not ask_enabled():
+        return "Breakdowns need a free `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) on Railway → Variables."
     wait = bot.ask_cooldowns.get(user_id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
     if wait > 0:
         return f"Give me {int(wait) + 1}s before the next question."
@@ -2042,7 +2042,7 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
     ctx = {"guild_id": guild_id, "asker_key": key, "chart": None}
     token = ASK_DATA.set(ctx)
     try:
-        answer, sources = await ask_claude(system, "\n".join(lines))
+        answer, sources = await ask_any(system, "\n".join(lines))
     except Exception:
         log.exception("Slip review failed")
         return "I couldn't break that one down just now. Try again in a minute."
@@ -24210,23 +24210,48 @@ async def ask_gemini(system: str, user_text: str) -> tuple[str, list[str]]:
     return text, sources[:3]
 
 
+_NO_ANSWER = re.compile(r"\b(i (?:couldn'?t|could not|can'?t|cannot|wasn'?t able to|was unable to|don'?t have|do not have)"
+                        r" (?:find|access|confirm|verify|browse|search|look up|get|provide|give)|unable to (?:find|access|"
+                        r"confirm|verify)|no (?:recent |current |reliable )?(?:information|info|results|data) (?:on|about|for|"
+                        r"available)|my knowledge cutoff|as of my last (?:update|training))", re.I)
+
+
+def ask_unanswered(answer: str) -> bool:
+    """Did the answer duck the question (empty, a few words, or 'I couldn't find...')?"""
+    a = (answer or "").strip()
+    return len(a) < 20 or bool(_NO_ANSWER.search(a[:400]))
+
+
 async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
-    """Answer with the first engine that works: Gemini (free) then Claude, unless ASK_ENGINES says otherwise."""
+    """Answer with Gemini (free) first. Claude is the fail-safe: it only runs when Gemini errors out or comes back
+    without a real answer (and a Claude key is set). ASK_ENGINES can change the order."""
     last: Optional[Exception] = None
+    fallback: Optional[tuple[str, list[str]]] = None
     for engine in ASK_ENGINES:
         if engine == "gemini" and GEMINI_API_KEY:
             try:
                 answer, sources = await ask_gemini(system, user_text)
-                if answer:
+                if answer and not ask_unanswered(answer):
                     free_count("ask_gemini")
                     return answer, sources
+                if answer:
+                    fallback = (answer, sources)       # keep it in case nothing better comes
             except Exception as exc:
                 last = exc
                 log.warning("Gemini answer failed: %s", str(exc)[:200])
         elif engine == "claude" and ai_enabled() and claude_budget_ok(essential=True):
-            answer, sources = await ask_claude(system, user_text)
-            free_count("ask_claude")
-            return answer, sources
+            try:
+                answer, sources = await ask_claude(system, user_text)
+            except Exception as exc:
+                last = exc
+                log.warning("Claude answer failed: %s", str(exc)[:200])
+                continue
+            if answer:
+                free_count("ask_claude")
+                return answer, sources
+    if fallback is not None:
+        free_count("ask_gemini")
+        return fallback
     raise last or RuntimeError("no question engine is set up")
 
 
