@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-12 r31.1"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-12 r31.2"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -23797,7 +23797,8 @@ FREE_STATS = sorted({
     "FG Made", "Kicking Points", "Punts", "Field Goal Yards", "Fantasy Points",
     "Hits", "Runs", "RBIs", "Hits+Runs+RBIs", "Home Runs", "Total Bases", "Walks", "Singles", "Doubles",
     "Stolen Bases", "Hitter Strikeouts", "Pitcher Strikeouts", "Strikeouts", "Hits Allowed", "Earned Runs Allowed",
-    "Walks Allowed", "Pitching Outs", "Pitches Thrown",
+    "Walks Allowed", "Pitching Outs", "Pitches Thrown", "Hitter FS", "Hitter Fantasy Score", "Pitcher FS",
+    "Pitcher Fantasy Score", "Ks", "Pitcher Ks", "Hits+Runs+RBIs", "H+R+RBI", "Hitter Strikeouts",
     "Goals", "Shots On Goal", "Goalie Saves", "Saves", "Faceoffs Won", "Power Play Points", "Blocked Shots",
     "Time On Ice", "Goals Allowed",
     "Shots", "Shots On Target", "Clearances", "Attempted Dribbles", "Passes Attempted", "Tackles", "Crosses",
@@ -23987,12 +23988,14 @@ def _free_stat_in(text: str) -> Optional[tuple[str, int]]:
     return None
 
 
-def _free_name(line: dict) -> Optional[str]:
+def _free_name(line: dict, max_x: Optional[float] = None) -> Optional[str]:
     """A player's name at the start of a line (skipping OCR noise from photos and icons)."""
-    if re.search(r"vs\b|\d{1,2}:\d{2}|@|\$|#\s?\d", line["text"], re.I) or re.search(
+    text = " ".join(t for t in line["text"].split() if not ("@" in t and free_pill_num(t)))
+    if re.search(r"vs\b|\d{1,2}:\d{2}|@|\$|#\s?\d", text, re.I) or re.search(
             r"\b(defender|midfielder|attacker|forward|goalkeeper|guard|center|qb|rb|wr|te|lw|rw|sp|rp)\b", line["text"], re.I):
         return None                            # a game header, an amount, or a team/position/jersey line
-    toks = [w["text"].strip(",;:|()[]{}©@&*") for w in line["words"]]
+    toks = [w["text"].strip(",;:|()[]{}©@&*") for w in line["words"] if not ("@" in w["text"] and free_pill_num(w["text"]))
+            and (max_x is None or w["x"] < max_x)]
     best: list[str] = []
     run: list[str] = []
     for t in toks + [""]:
@@ -24004,6 +24007,8 @@ def _free_name(line: dict) -> Optional[str]:
             run.pop()                          # trailing icon noise like "Vv"
         while len(run) > 2 and len(run[0]) <= 2 and not run[0].isupper():
             run.pop(0)                         # leading noise like "Ps" (but "OG Anunoby", "AJ Brown" stay)
+        while len(run) > 2 and len(run[0]) == 1:
+            run.pop(0)                         # a lone letter from the photo: "A Shohei Ohtani"
         if len(run) >= 4 and len(run[0]) <= 3 and not run[0].isupper() and run[-1] in ("Jr", "Sr", "II", "III", "IV"):
             run.pop(0)                         # "Aan James Cook III": the scrap before a full name with a suffix
         if len(run) >= 2 and sum(len(x) for x in run) > len(" ".join(best).replace(" ", "")):
@@ -24016,6 +24021,20 @@ def _free_name(line: dict) -> Optional[str]:
     if _free_stat_in(" ".join(best)):         # "Pass Yards" is a stat, not a person
         return None
     return " ".join(best)
+
+
+_FREE_PILL = re.compile(r"^[^\w]*[vVtTrRlI1↑↓]?([0-9oOsS]{1,2}(?:[.,][0-9oOsS])?)$")
+
+
+def free_pill_num(text: str) -> Optional[str]:
+    """A number from the pick's box with the over/under arrow glued on: '@r15' -> '15', '@vos' -> '05'."""
+    t = _free_numtext(text)
+    if t:
+        return t
+    m = _FREE_PILL.match(text or "")
+    if not m or not re.search(r"[sS5]", m.group(1)):
+        return None
+    return m.group(1).translate(str.maketrans("oOsS,", "0055."))
 
 
 def free_parse(words: list[dict], img, grey) -> Optional[dict]:
@@ -24073,12 +24092,47 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         if not st:
             continue
         stat, at = st
+        # where the stat sits: on cards with the line in a box on the right, only numbers in that box count
+        pos, stat_x = 0, None
+        for w in ln["words"]:
+            if pos >= at - 1 and stat_x is None:
+                stat_x = w["x"]
+            pos += len(w["text"]) + 1
+        right = stat_x is not None and stat_x > 0.55 * img.width
         # the number: on this line before the stat, else the line(s) just above
         cand_lines = [ln] + [lines[j] for j in range(k - 1, max(-1, k - 3), -1)]
         num_words, src = [], None
         whole = None                                          # a bare whole number, used only if no decimal is near
-        for cl in cand_lines:
+        hn = num_hs[len(num_hs) // 2] if num_hs else 25
+        if right:
+            for cl in cand_lines[1:]:
+                box_ws = [w for w in cl["words"] if w["x"] > 0.55 * img.width]
+                if not box_ws:
+                    continue
+                rw = max(box_ws, key=lambda w: w["x"] + w["w"])
+                clean = _free_numtext(rw["text"])
+                if "." in clean or len(re.sub(r"\D", "", clean)) > 2:
+                    break                                     # a clean number: the usual path reads it
+                rr, cy = rw["x"] + rw["w"], rw["y"] + rw["h"] / 2
+                fake = {"x": int(rr - 1.8 * hn), "y": int(cy - 0.6 * hn), "w": int(1.8 * hn), "h": int(1.2 * hn),
+                        "text": rw["text"], "conf": 100, "_glued": True}
+                got = free_reocr_number(grey, fake)
+                if got and "." in got:
+                    fake["_num"] = got
+                    num_words, src = [fake], cl
+                break
+        for cl in ([] if num_words else cand_lines):
             ws = [w for w in cl["words"] if _FREE_NUM.match(_free_numtext(w["text"]))]
+            if right:
+                ws = []
+                for w in cl["words"]:
+                    if w["x"] < 0.55 * img.width:
+                        continue                              # avatar and jersey scraps on the left
+                    pn = free_pill_num(w["text"])
+                    if pn and _FREE_NUM.match(pn):
+                        w["_num"] = pn
+                        w["_glued"] = not _free_numtext(w["text"])
+                        ws.append(w)
             if cl is ln:
                 cut = len(ln["text"][:at])
                 pos, kept = 0, []
@@ -24088,7 +24142,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                     pos += len(w["text"]) + 1
                 ws = kept
             ws = [w for w in ws if not re.search(r"#\s*$", cl["text"][:cl["text"].find(w["text"])])]
-            dec = [w for w in ws if re.search(r"[.,]\d$", _free_numtext(w["text"]))]
+            dec = [w for w in ws if re.search(r"[.,]\d$", w.get("_num") or _free_numtext(w["text"]))]
             if dec:
                 num_words, src = dec, cl
                 break
@@ -24099,7 +24153,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         if not num_words:
             continue
         wd = max(num_words, key=lambda w: w["x"])            # the new line, never a crossed-out old one
-        txt = _free_numtext(wd["text"])
+        txt = wd.get("_num") or _free_numtext(wd["text"])
         again = free_reocr_number(grey, wd)
         if again and (("." in again) or "." not in txt):
             txt = again
@@ -24107,6 +24161,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             value = float(txt)
         except ValueError:
             continue
+        if platform == "PrizePicks" and right and re.fullmatch(r"\d5", txt):
+            value = value / 10                                # the dot lost next to the arrow: '25' is 2.5
         if "." not in txt and value >= 100 and txt.endswith("5") and stat not in ("Pass Yards", "Pass+Rush Yds",
                                                                                    "Rush+Rec Yds", "Pitches Thrown"):
             value = value / 10                                # '495' Rec Yards is 49.5
@@ -24116,7 +24172,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         order = [start] + ([start + 1] if start + 1 < len(lines) and lines[start + 1]["y"] - src["y"] < 1.2 * src["h"]
                            else []) + list(range(start - 1, max(-1, start - 4), -1))
         for j in order:
-            name = _free_name(lines[j])
+            name = _free_name(lines[j], 0.55 * img.width if right else None)
             if name and j not in used_lines:
                 name_at = j
                 break
@@ -24157,6 +24213,12 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                 box = (anchor["x"] - 2.2 * wd["h"], wd["y"] - wd["h"] * 0.4, anchor["x"] - 0.15 * wd["h"],
                        wd["y"] + wd["h"] * 1.4)
             side = free_arrow(img, box)
+        if side is None and right and wd.get("_glued"):
+            # the arrow glued into the number's word: find it just left of the digits, from the box's right edge
+            digits = len(f"{value:g}") + (0 if "." in f"{value:g}" else 1)
+            rr, cy = wd["x"] + wd["w"], wd["y"] + wd["h"] / 2
+            nw = digits * 0.6 * hn
+            side = free_arrow(img, (rr - nw - 1.9 * hn, cy - 0.9 * hn, rr - nw - 0.15 * hn, cy + 0.9 * hn))
         if side is None:
             unsure.append(f"over or under for {name}")
             side = "over"
@@ -24180,7 +24242,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         platform = "PrizePicks" if entry_type else "Other"
         unsure.append("which app it's from")
     placed = not re.search(r"\bsubmit\b|place entry|add picks|entry fee", low)
-    n = len(legs)
+    n = want or len(legs)
     desc = (f"{n}-Pick {'Flex' if entry_type == 'flex' else 'Power'} Play" if platform in ("PrizePicks", "Underdog")
             else f"{n}-leg slip" if n > 1 else legs[0])
     sports = [s for s in ("NFL", "NBA", "NHL", "MLB", "WNBA", "SOCCER", "CFB", "CBB") if re.search(rf"\b{s}\b", full)]
@@ -29279,6 +29341,9 @@ class PicksBot(discord.Client):
         question = re.sub(r"<@[!&]?\d+>", " ", getattr(message, "content", "") or "").strip()
         async with message.channel.typing():
             text, xray = await slip_review(self, message.guild.id, message.author, slip, question)
+        if slip.get("_unsure"):
+            text = (f"⚠️ I wasn't sure about {', '.join(clip(u, 60) for u in slip['_unsure'][:3])} on this screenshot, "
+                    "so double-check the legs below.\n\n" + text)
         logged = db().execute("SELECT id FROM picks WHERE guild_id = ? AND slip_url = ?",
                               (message.guild.id, image_message.jump_url)).fetchone()
         chunks = split_message(text)
