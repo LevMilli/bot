@@ -436,8 +436,19 @@ every night, so even a lost volume costs you at most a day.
   `HOF_MIN_PROFIT` (100), `HOF_MIN_MULTIPLE` (5), `TODAY_HOUR` (10, also when Prop of the Day posts),
   `BACKUP_HOUR` (4), `DASHBOARD_KEY` (made up for you if not set),
   `GEMINI_API_KEY` (optional free slip reader), `GEMINI_MODEL` (`gemini-flash-latest`), `SLIP_READERS`
-  (`scan,gemini,claude`), `DIGEST_HOUR` (9, when the morning digest DMs go out), `CLAUDE_DAILY_CAP` (off by default; a number
+  (`scan,gemini,claude`), `GROQ_API_KEY` (optional, free at console.groq.com: about 1,000 answers a day), `GROQ_MODEL` (`openai/gpt-oss-120b`), `ASK_ENGINES` (`groq,gemini,claude`: free engines first, Claude only as the backup), `DIGEST_HOUR` (9, when the morning digest DMs go out), `CLAUDE_DAILY_CAP` (off by default; a number
   caps the day's Claude calls, and the extras like fresh roast lines and the Sunday Show go back to
   templates once it's hit, while slip reading keeps working).
 - **Partial payouts** (a flex play that pays reduced, or a cash-out): use
   `/result` with the `returned` amount instead of the buttons.
+
+
+## r31: breakdowns that always work, for free
+
+- **The numbers breakdown** needs no AI key. When you ask about a slip, the bot writes a leg-by-leg take straight
+  from ESPN game logs and the injury report: hits out of the last 10, average vs. the line, last 5, last game, who's
+  listed, and the weakest leg. Every number is real. It is what you get when no AI key is set or the free AIs are
+  used up for the day.
+- **Groq** (free key from console.groq.com, no card) is now the first AI writer, then Gemini, then Claude.
+  Breakdowns hand the AI the ESPN numbers instead of having it search the web, which saves the free daily limits.
+- When the AI write-up is off, the message says why (limit used up, key refused, service busy).

@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-12 r30.3"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-12 r31"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -1964,8 +1964,6 @@ def slip_draft_view(message_id: int, review: bool = True, log_it: bool = True, e
 
 def ask_gate(guild_id: int, user_id: int) -> Optional[str]:
     """Shares the @mention question limits. Returns why not, or None and counts the question."""
-    if not ask_enabled():
-        return "Breakdowns need a free `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) on Railway → Variables."
     wait = bot.ask_cooldowns.get(user_id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
     if wait > 0:
         return f"Give me {int(wait) + 1}s before the next question."
@@ -1981,13 +1979,96 @@ def ask_gate(guild_id: int, user_id: int) -> Optional[str]:
 REVIEW_RULES = """Someone posted a slip and asked what you think. It is NOT logged as a pick, and may not \
 even be placed. Answer like a sharp friend:
 - One line per leg: ✅ like it, ⚠️ coin flip or a real concern, ❌ don't like it, then the key reason (recent \
-games against that number, minutes/role, matchup, injuries or rest). Search the web for each player's last few \
-games and current injury status.
+games against that number, minutes/role, matchup, injuries or rest). Base it on the game logs and injury report \
+included below; never invent a stat.
 - Then "Weakest leg:" and a one-line overall take. It's fine to say pass, or to swap the weakest leg.
 - Use the group's own history (below, or the group_stats tool) when it says something.
 - Never mention odds, prices, payouts math or line movement. Never call anything a lock or guarantee, and \
 never push them to bet more.
 Keep it under 220 words."""
+
+
+NB_BAD_STATUS = ("out", "doubtful", "suspension", "injured reserve", "ir")
+
+
+def nb_leg(x: dict, inj: Optional[dict]) -> tuple[str, Optional[float]]:
+    """(one line for this leg, a score for picking the weakest leg; None when there are no numbers)."""
+    label = clip(x.get("text") or "?", 80)
+    st = ((inj or {}).get("status") or "").strip()
+    stl = st.lower()
+    tag = f" · 🩹 listed **{clip(st, 24)}**" if st else ""
+    h = xray_hits(x)
+    if not h:
+        return f"⚪ **{label}**: no game log to check ({x.get('why') or 'not found'}){tag}", None
+    good, n = h
+    vals = [v for _, _, v in x["values"]]                       # oldest → newest
+    beat = (lambda v: v > x["line"]) if x["side"] == "over" else (lambda v: v < x["line"])
+    last5 = vals[-5:]
+    good5 = sum(1 for v in last5 if beat(v))
+    avg = sum(vals) / n
+    diff = avg - x["line"]
+    edge = diff if x["side"] == "over" else -diff
+    rate = good / n
+    if stl.startswith(NB_BAD_STATUS):
+        icon = "❌"
+    elif edge > 0 and ((rate >= 0.7 and good5 >= 3) or (rate >= 0.6 and good5 >= 4)):
+        icon = "✅"
+    elif rate <= 0.4 or (len(last5) >= 4 and good5 <= 1):
+        icon = "❌"
+    else:
+        icon = "⚠️"
+    if icon == "✅" and stl.startswith(("questionable", "day-to-day", "game-time")):
+        icon = "⚠️"
+    near = f"{abs(diff):.1f} {'above' if diff >= 0 else 'below'} the line" if abs(diff) >= 0.05 else "right on the line"
+    text = (f"{icon} **{label}**: {good}/{n} {x['side']} · avg {avg:.1f} ({near}) · {good5} of the last "
+            f"{len(last5)} · last game {vals[-1]:g}{tag}")
+    score = rate + 0.04 * good5 + (-1.0 if stl.startswith(NB_BAD_STATUS) else 0.0) + \
+        (-0.15 if stl.startswith("questionable") else 0.0)
+    return text, score
+
+
+def numbers_breakdown(data: list, injuries: Optional[dict] = None, notes: Optional[list] = None) -> str:
+    """A leg-by-leg breakdown written straight from ESPN game logs and the injury report: free, unlimited, and every
+    number in it is real. Used when no AI is set up or the AI is out of free uses."""
+    injuries = injuries or {}
+    rows, scored = [], []
+    for x in data:
+        line, score = nb_leg(x, injuries.get(x.get("name") or ""))
+        rows.append(line)
+        if score is not None:
+            scored.append((score, x))
+    if not rows:
+        return "📊 I couldn't find game logs for this slip's legs, so there are no numbers to break down."
+    out = ["📊 **The numbers** (each player's last games against this line)", *rows]
+    if len(scored) >= 2:
+        _, weak = min(scored, key=lambda t: t[0])
+        h = xray_hits(weak)
+        out.append(f"\n**Weakest leg:** {clip(weak['text'], 80)} ({h[0]}/{h[1]})")
+    if scored:
+        solid = sum(1 for sc, x in scored if (xray_hits(x)[0] / xray_hits(x)[1]) >= 0.6)
+        out.append(f"{solid} of {len(scored)} legs with a game log cleared their number in at least 6 of 10 recent games.")
+    missing = len(rows) - len(scored)
+    if missing:
+        out.append(f"{missing} leg{'s' if missing != 1 else ''} had no game log to check.")
+    if notes:
+        out.append("\n**Your group's history:**\n" + "\n".join(notes[:4]))
+    out.append("-# Straight from ESPN game logs and injury reports. Past games aren't a promise.")
+    return "\n".join(out)
+
+
+async def xray_injuries(data: list) -> dict:
+    """{player name: injury entry} for the X-ray's players who are on an injury report."""
+    watch = {}
+    for x in data or []:
+        if x.get("name") and x.get("path") and x.get("path") in PROP_PATHS:
+            watch[norm_name(x["name"])] = {"name": x["name"], "paths": [x["path"]], "slips": []}
+    if not watch:
+        return {}
+    try:
+        st = await asyncio.wait_for(news_status(watch), timeout=15)
+    except Exception:
+        return {}
+    return {w["name"]: st[k] for k, w in watch.items() if st.get(k)}
 
 
 async def slip_review(client, guild_id: int, asker, slip: dict, question: str) -> tuple[str, Optional[discord.File]]:
@@ -1997,7 +2078,12 @@ async def slip_review(client, guild_id: int, asker, slip: dict, question: str) -
     except Exception:
         log.warning("X-ray data failed", exc_info=True)
         data = []
-    text = await slip_review_text(client, guild_id, asker, slip, question, xray_notes(data))
+    try:
+        inj = await xray_injuries(data)
+    except Exception:
+        log.warning("Injury check for the breakdown failed", exc_info=True)
+        inj = {}
+    text = await slip_review_text(client, guild_id, asker, slip, question, xray_notes(data), data=data, injuries=inj)
     try:
         note_scouted(guild_id, asker.id, [x["name"] for x in data if x.get("values")])
     except Exception:
@@ -2011,7 +2097,8 @@ async def slip_review(client, guild_id: int, asker, slip: dict, question: str) -
 
 
 async def slip_review_text(client, guild_id: int, asker, slip: dict, question: str,
-                           extra: Optional[list] = None) -> str:
+                           extra: Optional[list] = None, data: Optional[list] = None,
+                           injuries: Optional[dict] = None) -> str:
     legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()]
     lines = [f"Question from {asker.display_name}: {question.strip() or 'What do you think of this slip?'}",
              f"The slip: {slip.get('platform') or '?'} · {slip.get('description') or ''}"
@@ -2036,20 +2123,30 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
                 notes.append(f"- {label}: hit {g['hit']} of {g['hit'] + g['miss']}")
     if extra:
         lines += ["", "Each player's last games against this number (from ESPN game logs):"] + extra
+    if injuries:
+        lines += ["", "Injury report right now:"] + [
+            f"- {n}: {v.get('status')}" + (f" ({clip(v['comment'], 140)})" if v.get("comment") else "")
+            for n, v in injuries.items()]
     if notes:
         lines += ["", "The group's own history:"] + list(dict.fromkeys(notes))[:12]
+    group_notes = list(dict.fromkeys(notes))
+    if not ask_enabled():
+        return numbers_breakdown(data or [], injuries, group_notes) + "\n-# Not logged. Tap 🧾 if you play it."
     system = ASK_SYSTEM.format(bot_name=getattr(getattr(client, "user", None), "display_name", "PIMP-BOT"),
                                today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
     system += f"\n\nYour voice in this server: {persona_prompt(guild_id)}.\n\n" + REVIEW_RULES
+    system += ("\n\nYou can't search the web for this one: base every leg only on the game logs, injury report and "
+               "group history in the message. If a leg has no numbers there, say so instead of guessing.")
     ctx = {"guild_id": guild_id, "asker_key": key, "chart": None}
     token = ASK_DATA.set(ctx)
     try:
-        answer, sources = await ask_any(system, "\n".join(lines))
+        answer, sources = await ask_any(system, "\n".join(lines), search=False)
     except Exception as exc:
         log.warning("Slip review failed: %s", str(exc)[:200])
         why = ASK_LAST_ERROR.get("text") or ask_error_hint(exc)
-        return (f"I couldn't write a breakdown just now ({why}). The X-ray below still has each player's last "
-                "10 games against the number.")
+        return (numbers_breakdown(data or [], injuries, group_notes)
+                + f"\n-# The AI write-up is off right now ({clip(why, 220)}), so these are the straight numbers. "
+                  "Not logged. Tap 🧾 if you play it.")
     finally:
         ASK_DATA.reset(token)
     if sources:
@@ -5025,12 +5122,17 @@ def stat_value(groups: dict[str, dict], stat_key: str) -> Optional[tuple[float, 
     """(value, breakdown) or None when the box score doesn't have it."""
     _, _, parts, _ = STATS[stat_key]
     total, shown = 0.0, []
+    football = STATS[stat_key][1] == "football"
     for comp, w in parts:
         v = component_value(groups, comp)
+        if v is None and football and len(parts) > 1:
+            v = 0.0              # e.g. Anytime TD for a QB: rush TDs count, the missing rec TD column is none
         if v is None:
             return None
         total += v * w
         shown.append((comp, v))
+    if football and len(parts) > 1 and not any(component_value(groups, c) is not None for c, _ in parts):
+        return None              # none of the columns at all: not his stat
     total = round(total, 2)
     detail = "" if len(parts) == 1 or len(parts) > 6 else \
         " (" + ", ".join(f"{v:g} {COMP_SHORT.get(c, c)}" for c, v in shown) + ")"
@@ -13036,7 +13138,8 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
         return out
     games = await trend_games(cand["path"], cand["id"], need=10)
     values = trend_values(games, stat)[:10]
-    out.update(name=cand["name"], stat=STATS[stat][0], values=[(g["opp"], g["at"], v) for g, v in values][::-1])
+    out.update(name=cand["name"], stat=STATS[stat][0], values=[(g["opp"], g["at"], v) for g, v in values][::-1],
+               path=cand["path"])
     if not values:
         out["why"] = f"no {STATS[stat][0]} in recent games"
     return out
@@ -23635,6 +23738,10 @@ import difflib
 
 TESSERACT = shutil.which("tesseract")
 GEMINI_API_KEY = env("GEMINI_API_KEY", "")
+GROQ_API_KEY = env("GROQ_API_KEY", "")                       # free at console.groq.com
+GROQ_MODEL = env("GROQ_MODEL", "openai/gpt-oss-120b")        # can search the web (Groq's browser_search tool)
+GROQ_FALLBACK_MODELS = ("openai/gpt-oss-20b", "qwen/qwen3.8-27b")
+GROQ_SEARCH_OK = ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "openai/gpt-oss-safeguard-20b")
 GEMINI_MODEL = env("GEMINI_MODEL", "gemini-flash-latest")
 # Which readers to use, in order. "scan" = the free text scan, "gemini" = Google's free tier, "claude" = Anthropic.
 SLIP_READERS = [x.strip().lower() for x in env("SLIP_READERS", "scan,gemini,claude").split(",") if x.strip()]
@@ -23694,9 +23801,10 @@ def free_counts_line() -> str:
     except ValueError:
         counts = {}
     names = {"scan": "free scan", "scan_confirm": "free scan (confirmed by hand)", "gemini": "Gemini (free)",
-             "claude": "Claude", "ask_gemini": "questions on Gemini (free)", "ask_claude": "questions on Claude"}
-    parts = [f"{counts[k]} {names.get(k, k)}" for k in ("scan", "scan_confirm", "gemini", "claude", "ask_gemini",
-                                                         "ask_claude") if counts.get(k)]
+             "claude": "Claude", "ask_gemini": "questions on Gemini (free)", "ask_claude": "questions on Claude",
+             "ask_groq": "questions on Groq (free)"}
+    parts = [f"{counts[k]} {names.get(k, k)}" for k in ("scan", "scan_confirm", "gemini", "claude", "ask_groq",
+                                                         "ask_gemini", "ask_claude") if counts.get(k)]
     on = [names[r] if r != "scan" else "free scan" for r in SLIP_READERS
           if (r == "scan" and TESSERACT) or (r == "gemini" and GEMINI_API_KEY) or (r == "claude" and ai_enabled())]
     return (" · ".join(parts) or "none yet") + "\nReaders on, in order: " + (" → ".join(on) or "none (the form only)")
@@ -24187,7 +24295,7 @@ HELP_EXTRA.append(("🔎 Reading slips for free", (
 
 # ---- questions: Gemini's free tier first (with Google Search), Claude as the backup ---------------------------
 
-ASK_ENGINES = [x.strip().lower() for x in env("ASK_ENGINES", "gemini,claude").split(",") if x.strip()]
+ASK_ENGINES = [x.strip().lower() for x in env("ASK_ENGINES", "groq,gemini,claude").split(",") if x.strip()]
 
 
 GEMINI_FALLBACK_MODELS = ("gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash")
@@ -24225,7 +24333,7 @@ def ask_error_hint(exc: Optional[BaseException]) -> str:
 def ask_error_snip(t: str) -> str:
     """A short piece of an error to show in Discord, with anything key-like blanked out."""
     t = re.sub(r"(AIza[\w-]{10,}|sk-[\w-]{10,}|key=[^&\s]+)", "[key]", str(t or ""))
-    t = re.sub(r"^Gemini HTTP \d{3}:\s*", "", t)
+    t = re.sub(r"^(?:Gemini|Groq) HTTP \d{3}:\s*", "", t)
     m = re.search(r"['\"]message['\"]\s*:\s*['\"]([^'\"]{4,})", t)
     return clip(" ".join((m.group(1) if m else t).split()), 90) or type(t).__name__
 
@@ -24244,10 +24352,81 @@ def claude_error_hint(exc: Optional[BaseException]) -> str:
 
 def ask_enabled() -> bool:
     """Can the bot answer questions at all (a Gemini or a Claude key)?"""
-    return any((e == "gemini" and GEMINI_API_KEY) or (e == "claude" and ai_enabled()) for e in ASK_ENGINES)
+    return any((e == "groq" and GROQ_API_KEY) or (e == "gemini" and GEMINI_API_KEY) or (e == "claude" and ai_enabled())
+               for e in ASK_ENGINES)
 
 
-async def ask_gemini(system: str, user_text: str) -> tuple[str, list[str]]:
+def groq_models(search: bool) -> list[tuple[str, bool]]:
+    """[(model, search the web?)]: the main model first, then the fallbacks."""
+    return [(m, search and m in GROQ_SEARCH_OK) for m in dict.fromkeys([GROQ_MODEL, *GROQ_FALLBACK_MODELS])]
+
+
+async def ask_groq(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
+    """(answer, source links) from Groq's free tier. A model that's busy or out of free uses hands off to the next."""
+    import aiohttp
+    errors = []
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=150)) as session:
+        for model, web in groq_models(search):
+            body = {"model": model, "temperature": 0.4, "max_completion_tokens": 4096,
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user_text}]}
+            if model.startswith("openai/gpt-oss"):
+                body["reasoning_effort"] = "low"
+            if web:
+                body.update(tools=[{"type": "browser_search"}], tool_choice="auto")
+            data, tried_plain = None, False
+            while True:
+                try:
+                    async with session.post("https://api.groq.com/openai/v1/chat/completions", json=body,
+                                            headers={"Authorization": f"Bearer {GROQ_API_KEY}"}) as resp:
+                        if resp.status == 400 and "tools" in body and not tried_plain:
+                            body = {k: v for k, v in body.items() if k not in ("tools", "tool_choice")}
+                            tried_plain = True                          # search not allowed here: answer without it
+                            continue
+                        if resp.status != 200:
+                            err = f"Groq HTTP {resp.status}: {(await resp.text())[:200]}"
+                            if resp.status in (401, 403):
+                                raise RuntimeError(err)                 # a bad key fails on every model
+                            errors.append(err)
+                            break
+                        data = await resp.json(content_type=None)
+                        break
+                except RuntimeError:
+                    raise
+                except Exception as exc:
+                    errors.append(f"Groq timed out or dropped ({type(exc).__name__})")
+                    break
+            if data is None:
+                continue
+            msg = ((data.get("choices") or [{}])[0].get("message") or {})
+            text = re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S)
+            text = re.sub(r"【[^】]{0,40}】", "", text).strip()               # browser_search citation marks
+            if text:
+                sources = []
+                for tool in msg.get("executed_tools") or []:
+                    for r in ((tool.get("search_results") or {}).get("results") or []):
+                        u = str(r.get("url") or "").strip()
+                        if u.startswith("https://") and u not in sources:
+                            sources.append(u)
+                return text, sources[:3]
+            errors.append(f"Groq came back empty on {model}")
+    log.warning("Groq tried %s: %s", ", ".join(m for m, _ in groq_models(search)), " | ".join(errors)[:600])
+    raise RuntimeError(" | ".join(errors) or "Groq came back empty")
+
+
+def groq_error_hint(exc: Optional[BaseException]) -> str:
+    t = str(exc or "")
+    if "429" in t:
+        return "Groq's free limit is used up for now"
+    if "401" in t or "403" in t:
+        return "the Groq key on Railway was refused"
+    if "timed out" in t:
+        return "Groq took too long"
+    if re.search(r"HTTP 5\d\d", t):
+        return "Groq is busy; try again in a minute"
+    return "Groq didn't answer: " + ask_error_snip(t)
+
+
+async def ask_gemini(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
     """(answer, source links) from Gemini, searching Google for anything current. The key goes in a header."""
     import aiohttp
     system = (system + "\n\nYou don't have a group_stats tool here: for the group's own records use only the group "
@@ -24256,6 +24435,8 @@ async def ask_gemini(system: str, user_text: str) -> tuple[str, list[str]]:
             "contents": [{"role": "user", "parts": [{"text": user_text}]}],
             "tools": [{"google_search": {}}],
             "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192}}
+    if not search:
+        body.pop("tools")                                      # the numbers are in the message: save the search quota
     data, text, errors = None, "", []
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=150)) as session:
         for model in gemini_models():
@@ -24324,7 +24505,7 @@ def ask_unanswered(answer: str) -> bool:
     return len(a) < 20 or bool(m and (m.start() < 120 or len(a) < 200))   # a late hedge in a real answer is fine
 
 
-async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
+async def ask_any(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
     """Answer with Gemini (free) first. Claude is the fail-safe: it only runs when Gemini errors out or comes back
     without a real answer (and a Claude key is set). ASK_ENGINES can change the order."""
     last: Optional[Exception] = None
@@ -24332,9 +24513,21 @@ async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
     why: list[str] = []
     ASK_LAST_ERROR["text"] = None
     for engine in ASK_ENGINES:
-        if engine == "gemini" and GEMINI_API_KEY:
+        if engine == "groq" and GROQ_API_KEY:
             try:
-                answer, sources = await ask_gemini(system, user_text)
+                answer, sources = await ask_groq(system, user_text, search)
+                if answer and not ask_unanswered(answer):
+                    free_count("ask_groq")
+                    return answer, sources
+                if answer and fallback is None:
+                    fallback = (answer, sources)
+            except Exception as exc:
+                last = exc
+                why.append(groq_error_hint(exc))
+                log.warning("Groq answer failed: %s", str(exc)[:300])
+        elif engine == "gemini" and GEMINI_API_KEY:
+            try:
+                answer, sources = await ask_gemini(system, user_text, search=search)
                 if answer and not ask_unanswered(answer):
                     free_count("ask_gemini")
                     return answer, sources
@@ -28758,8 +28951,8 @@ class PicksBot(discord.Client):
                 mention_author=False)
             return
         if not ask_enabled():
-            await message.reply("Questions aren't switched on yet: add a free `GEMINI_API_KEY` (or an "
-                                "`ANTHROPIC_API_KEY`) variable to the bot on Railway.", mention_author=False)
+            await message.reply("Questions aren't switched on yet: add a free `GROQ_API_KEY` (console.groq.com) or "
+                                "`GEMINI_API_KEY` (or an `ANTHROPIC_API_KEY`) variable to the bot on Railway.", mention_author=False)
             return
         wait = self.ask_cooldowns.get(message.author.id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
         if wait > 0:
@@ -33935,8 +34128,8 @@ async def admin_askchannel(interaction: discord.Interaction, turn_off: bool = Fa
                                                 ephemeral=True)
         return
     set_setting(gid, "ask_channel", str(interaction.channel_id))
-    note = "" if ask_enabled() else ("\n⚠️ Answers need a free `GEMINI_API_KEY` (or an `ANTHROPIC_API_KEY`) on Railway. "
-                                      "The news feed works without one.")
+    note = "" if ask_enabled() else ("\n⚠️ Answers need a free `GROQ_API_KEY` or `GEMINI_API_KEY` on Railway. "
+                                      "The news feed and slip breakdowns work without one.")
     await interaction.response.send_message(
         "💬 **This is now the ask channel.** Anything typed here is a question for me, no @mention needed. "
         "Screenshots here get a breakdown and are never logged.\n"
