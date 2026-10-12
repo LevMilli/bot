@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r30"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r30.1"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -2045,9 +2045,11 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
     token = ASK_DATA.set(ctx)
     try:
         answer, sources = await ask_any(system, "\n".join(lines))
-    except Exception:
-        log.exception("Slip review failed")
-        return "I couldn't break that one down just now. Try again in a minute."
+    except Exception as exc:
+        log.warning("Slip review failed: %s", str(exc)[:200])
+        why = ASK_LAST_ERROR.get("text") or ask_error_hint(exc)
+        return (f"I couldn't write a breakdown just now ({why}). The X-ray below still has each player's last "
+                "10 games against the number.")
     finally:
         ASK_DATA.reset(token)
     if sources:
@@ -13020,7 +13022,7 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
         fam = STATS[key][1]
         paths = [p for p in PROP_PATHS if FAMILY_OF_PATH[p] == fam]
         narrowed = [p for p in paths if p in sport_paths]
-        cands = await resolve_player(pr["player"], narrowed or paths)
+        cands = fit_position(await resolve_player(pr["player"], narrowed or paths), key)
         if len(cands) == 1:
             cand, stat = cands[0], key
             break
@@ -20559,6 +20561,28 @@ def track_search_items(items: list, paths: list[str]) -> list[dict]:
     return out
 
 
+STAT_POSITIONS = {
+    "pass": {"QB"}, "rush": {"RB", "QB", "WR", "FB"}, "rec": {"WR", "TE", "RB", "FB"}, "target": {"WR", "TE", "RB"},
+    "kick": {"K", "PK"}, "fg": {"K", "PK"}, "punt": {"P"},
+    "tackle": {"LB", "ILB", "OLB", "MLB", "DE", "DT", "NT", "CB", "S", "FS", "SS", "DB", "EDGE", "DL"},
+    "sack": {"LB", "ILB", "OLB", "DE", "DT", "NT", "EDGE", "DL"},
+    "pitch": {"SP", "RP", "P"}, "save": {"G"},
+}
+
+
+def fit_position(cands: list, stat_key: str) -> list:
+    """When a name fits more than one player, keep the ones whose position fits the stat (if any do)."""
+    if len(cands) < 2:
+        return cands
+    k = stat_key.lower()
+    want = next((v for frag, v in STAT_POSITIONS.items() if frag in k), None)
+    if not want:
+        return cands
+    pos = lambda c: (c.get("position") or c.get("pos") or "").upper()
+    kept = [c for c in cands if pos(c) in want]
+    return kept or cands
+
+
 async def track_candidates(leg: dict, paths: list[str]) -> list[tuple[dict, str]]:
     """[(player, stat key)] for everyone this leg's name could be, keeping only players the stat fits."""
     stats = set(leg["stats"])
@@ -20569,7 +20593,7 @@ async def track_candidates(leg: dict, paths: list[str]) -> list[tuple[dict, str]
     if not use:
         return []
     out = []
-    for cand in await resolve_player(leg["player"], use):
+    for cand in fit_position(await resolve_player(leg["player"], use), leg["stats"][0]):
         k = track_stat_for(leg["stats"], track_family(cand["path"]), cand.get("position"))
         if k:
             out.append((cand, k))
@@ -23620,7 +23644,7 @@ FREE_STATS = sorted({
     "FG Attempted", "Free Throws Made", "Offensive Rebounds", "Defensive Rebounds", "Two Pointers Made",
     "Pass Yards", "Pass TDs", "Pass Completions", "Pass Attempts", "INT", "Interceptions", "Rush Yards",
     "Rush Attempts", "Rush TDs", "Receptions", "Rec Yards", "Rec TDs", "Rec Targets", "Targets", "Rush+Rec Yds",
-    "Pass+Rush Yds", "Rush+Rec TDs", "Longest Rec", "Longest Rush", "Longest Completion", "Tackles+Ast", "Sacks",
+    "Pass+Rush Yds", "Rush+Rec TDs", "Anytime TDs", "Anytime TD", "Anytime Touchdowns", "Longest Rec", "Longest Rush", "Longest Completion", "Tackles+Ast", "Sacks",
     "FG Made", "Kicking Points", "Punts", "Field Goal Yards", "Fantasy Points",
     "Hits", "Runs", "RBIs", "Hits+Runs+RBIs", "Home Runs", "Total Bases", "Walks", "Singles", "Doubles",
     "Stolen Bases", "Hitter Strikeouts", "Pitcher Strikeouts", "Strikeouts", "Hits Allowed", "Earned Runs Allowed",
@@ -23830,6 +23854,8 @@ def _free_name(line: dict) -> Optional[str]:
             run.pop()                          # trailing icon noise like "Vv"
         while len(run) > 2 and len(run[0]) <= 2 and not run[0].isupper():
             run.pop(0)                         # leading noise like "Ps" (but "OG Anunoby", "AJ Brown" stay)
+        if len(run) >= 4 and len(run[0]) <= 3 and not run[0].isupper() and run[-1] in ("Jr", "Sr", "II", "III", "IV"):
+            run.pop(0)                         # "Aan James Cook III": the scrap before a full name with a suffix
         if len(run) >= 2 and sum(len(x) for x in run) > len(" ".join(best).replace(" ", "")):
             best = run[:]
         run = []
@@ -23889,7 +23915,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         unsure.append("the payout")
     # legs: anchor on each stat name, take the line number before it, the name above it, and the side
     legs: list[str] = []
-    used_names: set = set()
+    used_lines: set = set()       # a name line belongs to one leg; the same player can be on two lines
     num_hs = sorted(w["h"] for w in words if _FREE_NUM.match(_free_numtext(w["text"])))
     builder = bool(re.search(r"\bless\b", low) and re.search(r"\bmore\b", low))
     for k, ln in enumerate(lines):
@@ -23935,14 +23961,14 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                            else []) + list(range(start - 1, max(-1, start - 4), -1))
         for j in order:
             name = _free_name(lines[j])
-            if name and name not in used_names:
+            if name and j not in used_lines:
                 name_at = j
                 break
             name = None
         if not name:
             unsure.append(f"a player's name near {value:g} {stat}")
             continue
-        used_names.add(name)
+        used_lines.add(name_at)
         # the side: More/Less words (the green one when both show), else the arrow beside the number
         side = None
         lo = min(start, name_at if name_at is not None else start)
@@ -23980,7 +24006,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             side = "over"
         if num_hs and wd["h"] > 1.35 * num_hs[len(num_hs) // 2] and wd.get("conf", 100) < 60:
             unsure.append(f"the line for {name}")           # an arrow glued onto the number
-        leg = f"{name} {side} {value:g} {stat}"
+        leg = f"{name} {side} {value:g} {'Anytime TD' if stat.lower().startswith('anytime') else stat}"
         if leg not in legs:
             legs.append(leg)
     if not legs:
@@ -24160,6 +24186,31 @@ HELP_EXTRA.append(("🔎 Reading slips for free", (
 ASK_ENGINES = [x.strip().lower() for x in env("ASK_ENGINES", "gemini,claude").split(",") if x.strip()]
 
 
+GEMINI_FALLBACK_MODELS = ("gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash")
+
+
+def gemini_models() -> list[str]:
+    """The configured model first, then stable names, so a renamed model doesn't break answers."""
+    return list(dict.fromkeys([GEMINI_MODEL, *GEMINI_FALLBACK_MODELS]))
+
+
+ASK_LAST_ERROR: dict = {"text": None}
+
+
+def ask_error_hint(exc: Optional[BaseException]) -> str:
+    """A short, safe reason for a failed answer (never the key)."""
+    t = str(exc or "")
+    if "429" in t or "quota" in t.lower() or "exhausted" in t.lower():
+        return "Gemini's free limit is used up for now"
+    if "401" in t or "403" in t or "API key" in t:
+        return "the Gemini key on Railway was refused"
+    if "none of the model names" in t:
+        return "Gemini doesn't recognise the model name (GEMINI_MODEL)"
+    if "no question engine" in t:
+        return "no AI key is set on Railway"
+    return "the AI service didn't answer"
+
+
 def ask_enabled() -> bool:
     """Can the bot answer questions at all (a Gemini or a Claude key)?"""
     return any((e == "gemini" and GEMINI_API_KEY) or (e == "claude" and ai_enabled()) for e in ASK_ENGINES)
@@ -24168,23 +24219,33 @@ def ask_enabled() -> bool:
 async def ask_gemini(system: str, user_text: str) -> tuple[str, list[str]]:
     """(answer, source links) from Gemini, searching Google for anything current. The key goes in a header."""
     import aiohttp
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     system = (system + "\n\nYou don't have a group_stats tool here: for the group's own records use only the group "
               "data included in the message, and say so if it isn't there.")
     body = {"system_instruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user_text}]}],
             "tools": [{"google_search": {}}],
             "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000}}
+    data = None
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
-        for attempt in range(2):
-            async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
-                if resp.status == 400 and attempt == 0 and "tools" in body:
-                    body.pop("tools")                  # a model without search: answer from what it knows
-                    continue
-                if resp.status != 200:
-                    raise RuntimeError(f"Gemini HTTP {resp.status}: {(await resp.text())[:200]}")
-                data = await resp.json(content_type=None)
+        for model in gemini_models():
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            tried_plain = False
+            while True:
+                async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
+                    if resp.status == 400 and not tried_plain and "tools" in body:
+                        body = {k: v for k, v in body.items() if k != "tools"}   # no search on this model
+                        tried_plain = True
+                        continue
+                    if resp.status == 404:
+                        break                                                   # unknown model: try the next
+                    if resp.status != 200:
+                        raise RuntimeError(f"Gemini HTTP {resp.status}: {(await resp.text())[:200]}")
+                    data = await resp.json(content_type=None)
+                    break
+            if data is not None:
                 break
+    if data is None:
+        raise RuntimeError("Gemini: none of the model names worked (check GEMINI_MODEL)")
     cand = (data.get("candidates") or [{}])[0]
     text = "".join(p.get("text", "") for p in ((cand.get("content") or {}).get("parts") or [])).strip()
     sources = []
@@ -24242,6 +24303,7 @@ async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
     if fallback is not None:
         free_count("ask_gemini")
         return fallback
+    ASK_LAST_ERROR["text"] = ask_error_hint(last or RuntimeError("no question engine is set up"))
     raise last or RuntimeError("no question engine is set up")
 
 
