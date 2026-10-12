@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-12 r31.2"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-12 r31.4"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -777,9 +777,11 @@ def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
 
 
 def leg_counts(guild_id: int, bettor_key: Optional[str] = None,
-               text_like: Optional[str] = None) -> dict[str, int]:
+               text_like: Optional[str] = None, public: bool = False) -> dict[str, int]:
     sql = """SELECT l.status, COUNT(*) AS n FROM legs l JOIN picks p ON p.id = l.pick_id
              WHERE p.guild_id = ?"""
+    if public:          # someone else is looking: a hidden slip's legs stay out until it's revealed
+        sql += " AND (p.hidden IS NULL OR p.hidden = 0 OR p.revealed_at IS NOT NULL)"
     args: list = [guild_id]
     if bettor_key:
         sql += " AND p.bettor_key = ?"
@@ -1984,8 +1986,17 @@ included below; never invent a stat.
 - Then "Weakest leg:" and a one-line overall take. It's fine to say pass, or to swap the weakest leg.
 - Use the group's own history (below, or the group_stats tool) when it says something.
 - Never mention odds, prices, payouts math, hedging or line movement. Never call anything a lock, a sure \
-thing, guaranteed or free money. Past games are a trend, not a promise. If a line looks misread, say so. Never \
-never push them to bet more.
+thing, safe, guaranteed or free money. Past games are a trend, not a promise. If a line looks misread, say so. \
+Never push them to bet more.
+- Only name an opponent, team, competition or game that is written in the message. If the message doesn't say who \
+a player faces, don't name anyone. Never make up an average, a recent game or a season number.
+- A leg with no game log gets ⚠️ at most, never ✅: say there are no numbers to check.
+- Don't suggest a specific replacement player or prop.
+- If some legs couldn't be read, don't call any leg "the only leg" and don't judge the whole slip as if it were \
+complete.
+- If you mention their own track record, read it straight: a low hit rate on a kind of leg is a caution, not a \
+reason to trust it.
+- If the slip is already settled, say what happened and what the numbers showed; don't tell them to change it.
 Keep it under 220 words."""
 
 
@@ -2115,6 +2126,22 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
              + (f" · {money(slip['cost'])} to win {money(slip['payout'])}" if slip.get("cost") and slip.get("payout") else "")
              + ("" if slip.get("placed", True) else " · not placed yet"),
              "Legs:"] + [f"{k}. {leg}" for k, leg in enumerate(legs, 1)]
+    if slip.get("status") in ("win", "loss", "push"):
+        lines.insert(2, f"This slip is already settled: {slip['status']}.")
+    want = slip.get("_want")
+    if want and want > len(legs):
+        lines.append(f"Only {len(legs)} of the {want} picks on this slip could be read; the rest are missing here.")
+    games = slip.get("_games") or {}
+    if games:
+        lines += ["", "Games on the slip:"] + [f"- {clip(v, 60)}" for v in dict.fromkeys(games.values())]
+    blind = [x["text"] for x in (data or []) if not xray_hits(x)]
+    per = [x["text"] for x in (data or []) if x.get("period")]
+    if per:
+        lines += ["", "Part-of-the-game lines (the game logs are full games, so there are NO numbers for these; "
+                      "don't compare them to full-game stats):"] + [f"- {t}" for t in per]
+    if blind:
+        lines += ["", "No game log for these legs (give them ⚠️ at most and say there are no numbers):"] + \
+            [f"- {t}" for t in blind if t not in per]
     notes = []
     key = str(asker.id)
     for leg in legs[:8]:
@@ -2158,7 +2185,7 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
                   "Not logged. Tap 🧾 if you play it.")
     finally:
         ASK_DATA.reset(token)
-    answer = review_scrub(answer)
+    answer = review_align_icons(review_scrub(answer), data or [], injuries or {})
     if sources:
         answer += "\n\n-# Sources: " + " · ".join(f"<{u}>" for u in sources)
     return (answer or "I came up empty on that one.") + "\n-# Not logged. Tap 🧾 if you play it."
@@ -2168,10 +2195,54 @@ _SURE_TALK = re.compile(r"\b(?:essentially |basically |practically |pretty much 
                         r"lock|lead[- ]pipe lock|guarantee[ds]?|free money|can'?t[- ]miss|easy money|no[- ]brainer)\b", re.I)
 
 
+_SAFE_TALK = re.compile(r"\b(?:feels?|looks?|seems?|is|it's|that's|a|the)\s+(?:pretty |very |super |fairly )?"
+                        r"safe(?:st)?(?:\s+(?:bet|pick|leg|play|choice|option))?\b", re.I)
+
+
 def review_scrub(text: str) -> str:
     """Takes 'sure thing' talk out of an AI write-up: past games are a trend, not a promise."""
     text = _SURE_TALK.sub("a strong recent trend", text or "")
-    return re.sub(r";?\s*consider (?:swapping or )?hedging[^.\n]*", "", text)
+    text = _SAFE_TALK.sub("has the better trend", text)
+    text = re.sub(r"[,;]?\s*(?:so|and|or|but)?\s*(?:you (?:might|could|may|should) )?consider (?:swapping or )?"
+                  r"hedg(?:e|ing)[^.\n]*", "", text, flags=re.I)
+    return re.sub(r",\s*(?:so|and|but|or)\s*(?=[.!\n]|$)", "", text)
+
+
+_ICON_RX = re.compile(r"^(\s*(?:[-*•]\s*)?)(✅|⚠️|❌|❓)")
+
+
+def review_align_icons(text: str, data: list, injuries: dict) -> str:
+    """The AI's ✅/⚠️/❌ for each leg follows the game logs: a leg with no numbers is never ✅, and a leg with numbers
+    gets the same mark the straight-numbers breakdown would give it."""
+    if not data:
+        return text
+    marks = []
+    for x in data:
+        name = x.get("name") or (cached_prop(x.get("text") or "") or {}).get("display") or ""
+        last = norm_name(name).split()[-1:] if name else []
+        if not last:
+            continue
+        line_txt, score = nb_leg(x, injuries.get(x.get("name") or ""))
+        marks.append((last[0], f"{x['line']:g}" if x.get("line") is not None else "",
+                      line_txt[:2].strip() if score is not None else None))
+    out = []
+    for ln in text.split("\n"):
+        m = _ICON_RX.match(ln)
+        if m:
+            low = norm_name(ln[:140])
+            hits = [mk for mk in marks if re.search(rf"\b{re.escape(mk[0])}\b", low)]
+            if len(hits) > 1:
+                hits = [mk for mk in hits if mk[1] and re.search(rf"(?<![\d.]){re.escape(mk[1])}(?![\d])", ln[:160])]
+            if len(hits) == 1:
+                want = hits[0][2]
+                icon = m.group(2)
+                if want is None and icon == "✅":
+                    icon = "⚠️"
+                elif want in ("✅", "⚠️", "❌", "❓"):
+                    icon = want
+                ln = m.group(1) + icon + ln[m.end():]
+        out.append(ln)
+    return "\n".join(out)
 
 
 # --------------------------------------------------------------------------
@@ -4775,19 +4846,22 @@ STATS = {
     "pass_td": ("Pass TDs", "football", [("pass_td", 1)],
                 ["passing touchdowns", "passing tds", "pass tds", "pass td", "passing td"]),
     "pass_cmp": ("Pass Completions", "football", [("pass_cmp", 1)],
-                 ["pass completions", "passing completions", "completions"]),
-    "pass_att": ("Pass Attempts", "football", [("pass_att", 1)], ["pass attempts", "passing attempts"]),
+                 ["pass completions", "passing completions", "completions", "pass comps", "pass comp", "pass cmp"]),
+    "pass_att": ("Pass Attempts", "football", [("pass_att", 1)], ["pass attempts", "passing attempts", "pass atts",
+                                                                     "pass att", "passing atts"]),
     "pass_int": ("INTs Thrown", "football", [("pass_int", 1)],
                  ["interceptions thrown", "ints thrown", "int thrown", "pass interceptions"]),
     "rush_yds": ("Rush Yards", "football", [("rush_yds", 1)],
                  ["rushing yards", "rush yards", "rush yds", "rushing yds", "rush yd"]),
-    "rush_att": ("Rush Attempts", "football", [("rush_att", 1)], ["rush attempts", "rushing attempts", "carries"]),
+    "rush_att": ("Rush Attempts", "football", [("rush_att", 1)], ["rush attempts", "rushing attempts", "carries",
+                                                                     "rush atts", "rush att", "rushing atts"]),
     "rush_td": ("Rush TDs", "football", [("rush_td", 1)], ["rushing touchdowns", "rushing tds", "rush tds", "rush td"]),
     "rec": ("Receptions", "football", [("rec", 1)], ["receptions", "catches", "recs"]),
     "rec_yds": ("Receiving Yards", "football", [("rec_yds", 1)],
                 ["receiving yards", "rec yards", "rec yds", "receiving yds", "rec yd"]),
     "rec_td": ("Receiving TDs", "football", [("rec_td", 1)], ["receiving touchdowns", "receiving tds", "rec tds"]),
-    "targets": ("Targets", "football", [("targets", 1)], ["targets"]),
+    "targets": ("Targets", "football", [("targets", 1)], ["rec targets", "receiving targets", "rec tgts", "targets",
+                                                             "tgts"]),
     "rush_rec_yds": ("Rush+Rec Yds", "football", [("rush_yds", 1), ("rec_yds", 1)],
                      ["rush+rec yds", "rush+rec yards", "rushing+receiving yards", "rush + rec yds", "scrimmage yards"]),
     "pass_rush_yds": ("Pass+Rush Yds", "football", [("pass_yds", 1), ("rush_yds", 1)],
@@ -4911,6 +4985,10 @@ def parse_prop_leg_uncached(text: str) -> Optional[dict]:
     if m:
         negate ^= m.group(1).lower() == "no"
         t = m.group(2)
+    if leg_period(t):
+        return None          # a quarter / half / period line: the free box scores are full games only
+    tm = re.search(r"\(([A-Z]{2,4})\)", t)
+    team = tm.group(1).lower() if tm and tm.group(1).lower() in TEAM_ABBRS else None
     t = re.sub(r"\s*\([^)]*\)", " ", t)
     t = re.sub(r"\s*\([^)]*$", " ", t)
     if ": " in t and not re.search(r"\d", t.split(": ", 1)[0]):
@@ -4961,8 +5039,44 @@ def parse_prop_leg_uncached(text: str) -> Optional[dict]:
         return None
     nn = norm_name(name)
     nn = PLAYER_NICKNAMES.get(nn, nn)
-    return {"kind": "prop", "player": nn, "display": name.title() if name.islower() else name, "stats": keys,
-            "side": side, "line": line, "negate": negate}
+    out = {"kind": "prop", "player": nn, "display": name.title() if name.islower() else name, "stats": keys,
+           "side": side, "line": line, "negate": negate}
+    if team:
+        out["team"] = team
+    return out
+
+
+_PERIOD_RX = re.compile(
+    r"(?<![A-Za-z0-9])(?:\(?\s*(?:[1-4]\s?Q|[12]\s?H|[1-3]\s?P)\s*\)?|1st\s*(?:half|quarter|qtr|period|5\s*inn\w*)|"
+    r"2nd\s*(?:half|quarter|qtr|period)|3rd\s*(?:quarter|qtr|period)|4th\s*(?:quarter|qtr)|first\s*(?:half|quarter|"
+    r"period|5\s*innings?)|second\s*half|f5)(?![A-Za-z0-9])", re.I)
+PERIOD_NAMES = {"1Q": "1st-quarter", "2Q": "2nd-quarter", "3Q": "3rd-quarter", "4Q": "4th-quarter", "1H": "1st-half",
+                "2H": "2nd-half", "1P": "1st-period", "2P": "2nd-period", "3P": "3rd-period", "F5": "first-5-innings"}
+
+
+def leg_period(text: str) -> Optional[str]:
+    """'4Q' for 'Drake London over 15.5 Rec Yards (4Q)', '1H' for '1st Half'...: a line for part of the game only."""
+    m = _PERIOD_RX.search(text or "")
+    if not m:
+        return None
+    raw = re.sub(r"[\s()]", "", m.group(0)).upper()
+    if re.fullmatch(r"[1-4]Q|[12]H|[1-3]P|F5", raw):
+        return raw
+    low = raw.lower()
+    if "half" in low:
+        return "1H" if low.startswith(("1st", "first")) else "2H"
+    if "inn" in low:
+        return "F5"
+    n = {"1st": "1", "first": "1", "2nd": "2", "second": "2", "3rd": "3", "4th": "4"}.get(re.match(r"[a-z0-9]+?(?=quarter|qtr|period|$)|1st|2nd|3rd|4th|first|second", low).group(0), "1")
+    return n + ("P" if "period" in low else "Q")
+
+
+def fit_team(cands: list, team: Optional[str]) -> list:
+    """Two players with one name (Sebastian Aho, CAR and NYI): keep the one on the team the slip shows."""
+    if len(cands) < 2 or not team:
+        return cands
+    kept = [c for c in cands if (c.get("team_abbr") or c.get("team") or "").lower() == team.lower()]
+    return kept or cands
 
 
 TEAM_ABBRS = {"atl", "bos", "bkn", "cha", "chi", "cle", "dal", "den", "det", "gsw", "hou", "ind", "lac", "lal", "mem",
@@ -5583,7 +5697,10 @@ async def trend_games(path: str, athlete_id: str, need: int = 20) -> list[dict]:
 
 def trend_values(games: list[dict], stat_key: str) -> list[tuple[dict, float]]:
     out = []
+    passing = STATS[stat_key][1] == "football" and all(C[c][2] == "passing" for c, _ in STATS[stat_key][2])
     for g in games:
+        if passing and component_value(g["groups"], "pass_att") == 0:
+            continue             # a backup QB's game with no throws isn't a 0-yard game against his line
         got = stat_value(g["groups"], stat_key)
         if got is not None:
             out.append((g, got[0]))
@@ -13133,13 +13250,19 @@ def hour_label(h: int) -> str:
 
 # ---- slip X-ray --------------------------------------------------------------------------------
 
-async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
+async def xray_leg(leg_text: str, sport: Optional[str] = None, team: Optional[str] = None) -> dict:
     """The player's last 10 games against this leg's number, or why there isn't a chart."""
     out = {"text": leg_text, "values": [], "line": None, "side": None, "name": None, "stat": None, "why": ""}
+    per = leg_period(leg_text)
+    if per:
+        out["period"] = per
+        out["why"] = f"{PERIOD_NAMES.get(per, per)} line: game logs are full games only"
+        return out
     pr = cached_prop(leg_text)
     if not pr:
         out["why"] = "not a player prop"
         return out
+    team = team or pr.get("team")
     side = pr["side"] if not pr.get("negate") else ("under" if pr["side"] == "over" else "over")
     out.update(line=pr["line"], side=side, name=pr["display"])
     sport_paths = [p for p in leagues_for(sport) if p in PROP_PATHS] if sport else []
@@ -13148,7 +13271,7 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
         fam = STATS[key][1]
         paths = [p for p in PROP_PATHS if FAMILY_OF_PATH[p] == fam]
         narrowed = [p for p in paths if p in sport_paths]
-        cands = fit_position(await resolve_player(pr["player"], narrowed or paths), key)
+        cands = fit_team(fit_position(await resolve_player(pr["player"], narrowed or paths), key), team)
         if len(cands) == 1:
             cand, stat = cands[0], key
             break
@@ -13167,10 +13290,15 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
 
 async def slip_xray_data(slip: dict) -> list[dict]:
     legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()][:8]
+    teams = slip.get("_teams") or {}
+
+    def team_of(t):
+        pr = cached_prop(t)
+        return teams.get(pr["player"]) if pr else None
 
     async def one(t):
         try:
-            return await asyncio.wait_for(xray_leg(t, slip.get("sport")), timeout=20)
+            return await asyncio.wait_for(xray_leg(t, slip.get("sport"), team_of(t)), timeout=20)
         except Exception:
             log.warning("X-ray failed for %r", t, exc_info=True)
             return {"text": t, "values": [], "line": None, "side": None, "name": None, "stat": None,
@@ -20084,7 +20212,8 @@ def sec_same_guild(row, interaction) -> bool:
 def sec_redact(text) -> str:
     """Error text with the bot's keys blanked out, for anything shown in Discord."""
     out = str(text or "")
-    secrets_ = [TOKEN, ANTHROPIC_API_KEY, env("DASHBOARD_KEY", "")]
+    secrets_ = [TOKEN, ANTHROPIC_API_KEY, env("DASHBOARD_KEY", ""), globals().get("GEMINI_API_KEY") or "",
+                globals().get("GROQ_API_KEY") or ""]
     try:
         secrets_.append(get_setting(0, "dashboard_key") or "")
     except Exception:
@@ -20737,7 +20866,7 @@ async def track_candidates(leg: dict, paths: list[str]) -> list[tuple[dict, str]
     if not use:
         return []
     out = []
-    for cand in fit_position(await resolve_player(leg["player"], use), leg["stats"][0]):
+    for cand in fit_team(fit_position(await resolve_player(leg["player"], use), leg["stats"][0]), leg.get("team")):
         k = track_stat_for(leg["stats"], track_family(cand["path"]), cand.get("position"))
         if k:
             out.append((cand, k))
@@ -23804,7 +23933,21 @@ FREE_STATS = sorted({
     "Shots", "Shots On Target", "Clearances", "Attempted Dribbles", "Passes Attempted", "Tackles", "Crosses",
     "Fouls", "Goal + Assist", "Shots Assisted",
     "Kills", "Headshots", "Maps 1-2 Kills", "Aces", "Double Faults", "Total Games", "Fantasy",
+    "Pass Comp", "Pass Comps", "Pass Atts", "Pass Att", "Rush Atts", "Rush Att", "Rec Yds", "Pass Yds", "Rush Yds",
+    "Rec Tgts", "Receiving Yards", "Passing Yards", "Rushing Yards", "Maps 1-3 Kills", "Maps 1-2 Headshots",
+    "Maps 1-3 Headshots", "Map 1 Kills", "Map 1 Headshots", "Assists",
 }, key=len, reverse=True)
+FREE_ESPORTS_STATS = {"Kills", "Headshots", "Maps 1-2 Kills", "Maps 1-3 Kills", "Maps 1-2 Headshots",
+                      "Maps 1-3 Headshots", "Map 1 Kills", "Map 1 Headshots"}
+# Stats whose lines can reach 100+; any other stat over 100 is a misread (a "693.5 Pitcher Strikeouts").
+FREE_BIG_STATS = {"Pass Yards", "Pass Yds", "Passing Yards", "Rush Yards", "Rush Yds", "Rushing Yards", "Rec Yards",
+                  "Rec Yds", "Receiving Yards", "Rush+Rec Yds", "Pass+Rush Yds", "Pitches Thrown", "Field Goal Yards",
+                  "Passes Attempted", "Fantasy Score", "Fantasy Points", "Fantasy", "Pts+Rebs+Asts", "PRA",
+                  "Hitter Fantasy Score", "Pitcher Fantasy Score", "Time On Ice"}
+FREE_SPORT_FAMILY = {"NFL": "football", "CFB": "football", "NCAAF": "football", "NBA": "basketball",
+                     "WNBA": "basketball", "CBB": "basketball", "NCAAB": "basketball", "NHL": "hockey",
+                     "MLB": "baseball", "SOCCER": "soccer"}
+_FREE_TEAM_TOKEN = re.compile(r"(?<![A-Za-z])([A-Z]{2,3})(?![A-Za-z])")
 _FREE_STAT_RX = [(s, re.compile(r"(?<![A-Za-z])" + r"\s*".join(re.escape(ch) for ch in s.replace(" ", "")) + r"(?![a-z])",
                                 re.I)) for s in FREE_STATS]
 _FREE_NUM = re.compile(r"^\d{1,4}(?:[.,]\d)?$")
@@ -23988,9 +24131,11 @@ def _free_stat_in(text: str) -> Optional[tuple[str, int]]:
     return None
 
 
-def _free_name(line: dict, max_x: Optional[float] = None) -> Optional[str]:
-    """A player's name at the start of a line (skipping OCR noise from photos and icons)."""
-    text = " ".join(t for t in line["text"].split() if not ("@" in t and free_pill_num(t)))
+def _free_name(line: dict, max_x: Optional[float] = None, single: bool = False) -> Optional[str]:
+    """A player's name at the start of a line (skipping OCR noise from photos and icons). `single` lets in a one-word
+    gamer tag ('Aegis'), for esports stats."""
+    text = " ".join(t for t in line["text"].split() if not ("@" in t and (free_pill_num(t)
+                                                                           or not re.search(r"@\s?[A-Z]{2,4}", t))))
     if re.search(r"vs\b|\d{1,2}:\d{2}|@|\$|#\s?\d", text, re.I) or re.search(
             r"\b(defender|midfielder|attacker|forward|goalkeeper|guard|center|qb|rb|wr|te|lw|rw|sp|rp)\b", line["text"], re.I):
         return None                            # a game header, an amount, or a team/position/jersey line
@@ -24014,6 +24159,12 @@ def _free_name(line: dict, max_x: Optional[float] = None) -> Optional[str]:
         if len(run) >= 2 and sum(len(x) for x in run) > len(" ".join(best).replace(" ", "")):
             best = run[:]
         run = []
+    if single and len(best) <= 1:
+        if re.search(r"vs|final|\d{1,2}:\d{2}", line["text"], re.I):
+            return None                        # the game header ("LGDvsJDG Final"), not a gamer tag
+        tags = [t for t in toks if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.\-]{2,15}", t) and t.lower() not in _FREE_JUNK
+                and not t.isupper() and not _free_stat_in(t)]
+        return tags[0] if tags else None
     if len(best) < 2 or len(best) > 4:
         return None
     if all(x.isupper() for x in best):        # "DAL QB", "TB RB": team and position, not a name
@@ -24063,9 +24214,12 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     want = int(m.group(1)) if m and 2 <= int(m.group(1)) <= 12 else None
     # amounts: "$25 to win $450" / "Entry fee ... To Win ... $15 $562.50"
     cost = payout = None
-    m = re.search(_FREE_MONEY + r"\s*to\s*(?:win|pay)\s*" + _FREE_MONEY, full, re.I)
+    status, returned = "open", None
+    m = re.search(_FREE_MONEY + r"\s*(to\s*(?:win|pay)|for|paid|won)\s*" + _FREE_MONEY, full, re.I)
     if m:
-        cost, payout = as_amount(m.group(1)), as_amount(m.group(2))
+        cost, payout = as_amount(m.group(1)), as_amount(m.group(3))
+        if m.group(2).lower() in ("paid", "won") and payout:
+            status, returned = "win", payout
     else:
         for k, ln in enumerate(lines):
             if re.search(r"entry\s*fee|wager|stake", ln["text"], re.I):
@@ -24082,6 +24236,22 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         unsure.append("the amount risked")
     if payout is None:
         unsure.append("the payout")
+    if status == "open":
+        for ln in lines[:8]:                                   # the result badge next to the header
+            toks = [w["text"].strip(".,:;!()") for w in ln["words"]]
+            if "Loss" in toks or "LOSS" in toks or "Lost" in toks:
+                status, returned = "loss", 0.0
+                break
+            if any(t in ("Win", "WIN", "Won") and (i == 0 or toks[i - 1].lower() != "to") for i, t in enumerate(toks)):
+                status = "win"
+                break
+    slip_fams = {FREE_SPORT_FAMILY[x] for x in re.findall(r"\b(NFL|CFB|NCAAF|NBA|WNBA|CBB|NCAAB|NHL|MLB|SOCCER)\b", full)}
+    if re.search(r"\b(LoL|CS2|VAL|DOTA|COD)\b", full):
+        slip_fams.add("esports")
+    teams: dict = {}
+    games: dict = {}
+    headers = [ln for ln in lines if re.search(r"vs", ln["text"], re.I) and not _free_stat_in(ln["text"])
+               and re.search(r"\b(?:Final|NFL|NBA|NHL|MLB|WNBA|SOCCER|CFB|CBB|LoL|CS2|VAL)\b|\d", ln["text"])]
     # legs: anchor on each stat name, take the line number before it, the name above it, and the side
     legs: list[str] = []
     used_lines: set = set()       # a name line belongs to one leg; the same player can be on two lines
@@ -24131,7 +24301,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                     pn = free_pill_num(w["text"])
                     if pn and _FREE_NUM.match(pn):
                         w["_num"] = pn
-                        w["_glued"] = not _free_numtext(w["text"])
+                        w["_glued"] = not _free_numtext(w["text"]) or not w["text"][:1].isdigit()   # "a5": arrow + 5
                         ws.append(w)
             if cl is ln:
                 cut = len(ln["text"][:at])
@@ -24152,6 +24322,9 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             num_words, src = whole
         if not num_words:
             continue
+        fams = {STATS[x][1] for x in stat_keys_in(stat)} if stat not in FREE_ESPORTS_STATS else {"esports"}
+        if slip_fams and fams and not (fams & slip_fams) and "fantasy" not in stat.lower():
+            continue                                          # a baseball stat read off a hockey slip: noise
         wd = max(num_words, key=lambda w: w["x"])            # the new line, never a crossed-out old one
         txt = wd.get("_num") or _free_numtext(wd["text"])
         again = free_reocr_number(grey, wd)
@@ -24166,21 +24339,29 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         if "." not in txt and value >= 100 and txt.endswith("5") and stat not in ("Pass Yards", "Pass+Rush Yds",
                                                                                    "Rush+Rec Yds", "Pitches Thrown"):
             value = value / 10                                # '495' Rec Yards is 49.5
+        if value >= 100 and stat not in FREE_BIG_STATS:
+            continue                                          # no line is that high: a misread scrap, not a leg
         # the player: the nearest name at or above the number's line
         name, name_at = None, None
         start = lines.index(src)
         order = [start] + ([start + 1] if start + 1 < len(lines) and lines[start + 1]["y"] - src["y"] < 1.2 * src["h"]
                            else []) + list(range(start - 1, max(-1, start - 4), -1))
+        esport = stat in FREE_ESPORTS_STATS
         for j in order:
-            name = _free_name(lines[j], 0.55 * img.width if right else None)
+            name = _free_name(lines[j], 0.55 * img.width if right else None, single=esport)
             if name and j not in used_lines:
                 name_at = j
                 break
             name = None
+        if not name and right:
+            name = free_name_reread(grey, src["y"] - 2.2 * src["h"], ln["y"] + 1.6 * ln["h"], esport)
+            if name and any(leg.startswith(name + " ") and f" {value:g} {stat}" in leg for leg in legs):
+                name = None
         if not name:
             unsure.append(f"a player's name near {value:g} {stat}")
             continue
-        used_lines.add(name_at)
+        if name_at is not None:
+            used_lines.add(name_at)
         # the side: More/Less words (the green one when both show), else the arrow beside the number
         side = None
         lo = min(start, name_at if name_at is not None else start)
@@ -24228,6 +24409,21 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             unsure.append(f"the line for {name}")
             value = 0.5
         leg = f"{name} {side} {value:g} {'Anytime TD' if stat.lower().startswith('anytime') else stat}"
+        per = leg_period(ln["text"][at:])
+        if per:
+            leg += f" ({per})"                                # "Rec Yards (4Q)": a 4th-quarter line, not the game
+        for tl in (ln, lines[k + 1] if k + 1 < len(lines) else None):
+            hit = None
+            if tl is not None and re.search(r"[•·«+\-]|\b(?:QB|RB|WR|TE|C|LW|RW|D|G|SP|RP|PG|SG|SF|PF)\b", tl["text"]):
+                hit = next((t for t in _FREE_TEAM_TOKEN.findall(tl["text"][:at] if tl is ln else tl["text"])
+                            if t.lower() in TEAM_ABBRS), None)
+            if hit:
+                teams.setdefault(norm_name(name), hit)
+                break
+        head = [h for h in headers if h["y"] < src["y"]]
+        if head:
+            games.setdefault(norm_name(name), re.sub(r"^(?:NFL|NBA|NHL|MLB|WNBA|SOCCER|CFB|CBB|LoL|CS2)\)?\s*", "",
+                                                     head[-1]["text"]).strip())
         if leg not in legs:
             legs.append(leg)
     if not legs:
@@ -24237,7 +24433,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                     "entry_type": entry_type, "placed": True, "_unsure": ["the picks"], "_how": "scan"}
         return None
     if want and len(legs) != want:
-        unsure.append(f"all {want} picks (I found {len(legs)})")
+        unsure.insert(0, f"all {want} picks (I found {len(legs)})")
     if not platform:
         platform = "PrizePicks" if entry_type else "Other"
         unsure.append("which app it's from")
@@ -24247,9 +24443,35 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             else f"{n}-leg slip" if n > 1 else legs[0])
     sports = [s for s in ("NFL", "NBA", "NHL", "MLB", "WNBA", "SOCCER", "CFB", "CBB") if re.search(rf"\b{s}\b", full)]
     return {"is_slip": True, "platform": platform, "sport": ", ".join(s.title() if s == "SOCCER" else s for s in sports)
-            or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": "open",
-            "returned": None, "game_date": None, "entry_type": entry_type, "placed": placed,
-            "_unsure": unsure, "_how": "scan"}
+            or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": status,
+            "returned": returned, "game_date": None, "entry_type": entry_type, "placed": placed,
+            "_unsure": unsure, "_how": "scan", "_teams": teams, "_games": games, "_want": want}
+
+
+def free_name_reread(grey, top: float, bottom: float, single: bool = False) -> Optional[str]:
+    """Tesseract sometimes skips a name next to a dark jersey: read that strip of the card again, zoomed in."""
+    from PIL import Image
+    W = grey.width
+    box = (int(0.18 * W), max(0, int(top)), int(0.62 * W), min(grey.height, int(bottom)))
+    if box[3] - box[1] < 20:
+        return None
+    crop = grey.crop(box)
+    crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
+    words = []
+    for row in _free_tess(crop, 6).splitlines()[1:]:
+        f = row.split("\t")
+        if len(f) < 12 or f[0] != "5" or not f[11].strip():
+            continue
+        try:
+            words.append({"text": f[11].strip(), "conf": float(f[10]), "x": int(f[6]), "y": int(f[7]),
+                          "w": int(f[8]), "h": int(f[9]), "line": (int(f[2]), int(f[3]), int(f[4]))})
+        except ValueError:
+            continue
+    for ln in free_lines(words):
+        name = _free_name(ln, None, single=single)
+        if name:
+            return name
+    return None
 
 
 def free_scan(raw: bytes) -> Optional[dict]:
@@ -24284,8 +24506,19 @@ async def free_fix_names(slip: dict) -> None:
             r = difflib.SequenceMatcher(None, norm_name(name), norm_name(it)).ratio()
             if r > score:
                 best, score = it, r
+        parts = name.split()
+        if score < 0.8 and len(parts) >= 3 and len(parts[0]) <= 4:
+            rest = " ".join(parts[1:])
+            for it in await found(rest):
+                r = difflib.SequenceMatcher(None, norm_name(rest), norm_name(it)).ratio()
+                if r >= 0.9 and r > score:
+                    best, score = it, r
         if best and score >= 0.8 and norm_name(best) != norm_name(name):
+            old = norm_name(name)
             name = best
+            for k in ("_teams", "_games"):
+                if old in (slip.get(k) or {}):
+                    slip[k][norm_name(best)] = slip[k].pop(old)
         fixed.append(f"{name} {m.group(2)} {m.group(3)} {m.group(4)}")
     slip["legs"] = fixed
 
@@ -29342,8 +29575,9 @@ class PicksBot(discord.Client):
         async with message.channel.typing():
             text, xray = await slip_review(self, message.guild.id, message.author, slip, question)
         if slip.get("_unsure"):
-            text = (f"⚠️ I wasn't sure about {', '.join(clip(u, 60) for u in slip['_unsure'][:3])} on this screenshot, "
-                    "so double-check the legs below.\n\n" + text)
+            text = (f"⚠️ I wasn't sure about {', '.join(clip(u, 60) for u in slip['_unsure'][:3])}"
+                    + (f" (and {len(slip['_unsure']) - 3} more)" if len(slip["_unsure"]) > 3 else "")
+                    + " on this screenshot, so double-check the legs below.\n\n" + text)
         logged = db().execute("SELECT id FROM picks WHERE guild_id = ? AND slip_url = ?",
                               (message.guild.id, image_message.jump_url)).fetchone()
         chunks = split_message(text)
@@ -29608,7 +29842,8 @@ async def record_cmd(interaction: discord.Interaction,
     e.add_field(name="Net", value=signed(s["net"]))
     e.add_field(name="ROI", value=f"{s['roi']:+.1f}%")
     e.add_field(name="Open", value=f"{s['open']} ({money(s['open_risk'])} at risk)")
-    rate = hit_rate(leg_counts(interaction.guild_id, key))
+    own = key == str(interaction.user.id)
+    rate = hit_rate(leg_counts(interaction.guild_id, key, public=not own))
     if rate:
         e.add_field(name="Legs", value=rate)
     season = current_season(interaction.guild_id)
@@ -29623,8 +29858,9 @@ async def record_cmd(interaction: discord.Interaction,
     if gl:
         e.add_field(name="🎯 Monthly goal", value=gl, inline=False)
     recent = db().execute(
-        """SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'
-           ORDER BY settled_at DESC, id DESC LIMIT 5""",
+        """SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open'"""
+        + ("" if own else " AND (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)")
+        + " ORDER BY settled_at DESC, id DESC LIMIT 5",
         (interaction.guild_id, key)).fetchall()
     if recent:
         lines = [
