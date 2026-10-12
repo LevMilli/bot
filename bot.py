@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r29"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-11 r30"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -539,9 +539,11 @@ def get_setting(guild_id: int, key: str) -> Optional[str]:
 
 
 def set_setting(guild_id: int, key: str, value: Optional[str]) -> None:
+    row = db().execute("SELECT value FROM settings WHERE guild_id = ? AND key = ?", (guild_id, key)).fetchone()
     if value is None:
-        db().execute("DELETE FROM settings WHERE guild_id = ? AND key = ?", (guild_id, key))
-    else:
+        if row is not None:
+            db().execute("DELETE FROM settings WHERE guild_id = ? AND key = ?", (guild_id, key))
+    elif row is None or row["value"] != value:      # the same value again: nothing to write
         db().execute("INSERT OR REPLACE INTO settings (guild_id, key, value) VALUES (?, ?, ?)",
                      (guild_id, key, value))
     db().commit()
@@ -4735,16 +4737,43 @@ def _alias_regex(alias: str) -> str:
     return r"(?<![a-z0-9])" + r"\s*(?:\+|and|\s)\s*".join(parts) + r"(?![a-z0-9])"
 
 
+_ALIAS_RX: dict = {}
+
+
+def _alias_rx(alias: str):
+    """The compiled pattern for one stat alias (kept: there are more aliases than re's own cache holds)."""
+    rx = _ALIAS_RX.get(alias)
+    if rx is None:
+        rx = _ALIAS_RX[alias] = re.compile(_alias_regex(alias))
+    return rx
+
+
 def stat_keys_in(text: str) -> list[str]:
     """Every stat this text could mean, most specific alias first (e.g. 'points' is NBA and NHL)."""
     t = text.lower()
     for alias, _ in _ALIAS_INDEX:
-        if re.search(_alias_regex(alias), t):
+        if _alias_rx(alias).search(t):
             return [k for a, k in _ALIAS_INDEX if a == alias]
     return []
 
 
+_PROP_PARSE_CACHE: dict = {}
+_PROP_MISS = object()
+
+
 def parse_prop_leg(text: str) -> Optional[dict]:
+    """parse_prop_leg_uncached, remembered per text (callers get their own copy, so editing it is safe)."""
+    key = text or ""
+    hit = _PROP_PARSE_CACHE.get(key, _PROP_MISS)
+    if hit is _PROP_MISS:
+        hit = parse_prop_leg_uncached(text)
+        if len(_PROP_PARSE_CACHE) > 5000:
+            _PROP_PARSE_CACHE.clear()
+        _PROP_PARSE_CACHE[key] = hit
+    return json.loads(json.dumps(hit)) if hit else hit
+
+
+def parse_prop_leg_uncached(text: str) -> Optional[dict]:
     """'Victor Wembanyama More 23.5 PRA', 'Josh Allen over 249.5 pass yds', 'Bam 10.5+ points',
     'No - Josh Allen 250+ passing yards', 'Christian McCaffrey anytime TD'. None if it isn't a player prop."""
     raw = (text or "").strip()
@@ -4798,7 +4827,7 @@ def parse_prop_leg(text: str) -> Optional[dict]:
     t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode()   # Quiñones → Quinones
     name = re.sub(r"\b[A-Z]{2,4}\b", lambda mm: " " if mm.group(0).lower() in TEAM_ABBRS else mm.group(0), t).lower()
     for alias, _ in _ALIAS_INDEX:
-        name = re.sub(_alias_regex(alias), " ", name)
+        name = _alias_rx(alias).sub(" ", name)
     name = re.sub(r"\b[ou]\s?(?=\d)", " ", name)
     name = re.sub(r"\d+(?:\.\d+)?\s*\+?", " ", name)
     name = re.sub(r"\b(over|more|higher|under|less|fewer|lower|than|at least|or more|to|record|score|scores|"
@@ -5140,7 +5169,8 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
     for n, text, status in items:
         entry = {"n": n, "text": text, "status": status, "line": "", "event": None, "path": None, "live": None,
                  "in_play": False, "num": None, "sub": "", "decided": None, "why": "", "margin": None,
-                 "preseason": False, "track": "unknown", "track_note": "", "track_info": {}}
+                 "preseason": False, "track": "unknown", "track_note": "", "track_info": {},
+                 "athlete_id": None, "athletes": [], "league": None}
         simple = parse_simple_leg(text) if leagues else None
         prop = prop_of(text) if prop_paths else None
         try:
@@ -5180,6 +5210,9 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
                 st = await prop_status(prop, prop_paths, logged)
                 if st:
                     entry["event"], entry["path"] = st["event"], st["path"]
+                    entry["athletes"] = [a for a in (st.get("athletes") or [st.get("athlete_id")]) if a]
+                    entry["athlete_id"] = entry["athletes"][0] if entry["athletes"] else None
+                    entry["league"] = (st["path"] or "").split("/")[-1] or None
                     entry["in_play"] = st["state"] == "in"
                     entry["track"], entry["track_note"] = st.get("track") or "tracked", st.get("track_note") or ""
                     entry["track_info"] = {"player": st["player"], "team": st.get("team") or "", "stat": st["stat"],
@@ -5597,16 +5630,26 @@ async def fetch_injuries(path: str) -> dict[str, dict]:
     except Exception:
         log.warning("Injury report failed for %s", path)
         return out
+    if not isinstance(raw, dict):
+        log.warning("Injury report for %s wasn't readable", path)
+        return out
     for team in raw.get("injuries") or []:
+        if not isinstance(team, dict):
+            continue
         for inj in team.get("injuries") or []:
+            if not isinstance(inj, dict):
+                continue
             ath = inj.get("athlete") or {}
             status = inj.get("status")
             if isinstance(status, dict):
                 status = status.get("name") or status.get("type")
             name = ath.get("displayName") or ""
             if name and status:
+                prev = out.get(norm_name(name))
                 out[norm_name(name)] = {"name": name, "status": str(status), "team": team.get("displayName") or "",
                                         "comment": inj.get("shortComment") or ""}
+                if prev and prev["team"] != out[norm_name(name)]["team"]:
+                    out[norm_name(name)]["ambiguous"] = True      # two players, one name
     _injury_cache[path] = (time.monotonic() + 900, out)
     return out
 
@@ -7362,6 +7405,9 @@ def ensure_wallet(guild_id: int, user_id: int) -> None:
 def award(guild_id: int, user_id: int, delta: int, reason: str, ref: Optional[str]) -> bool:
     """Add (or take) coins once per ref. Returns whether anything changed."""
     ensure_wallet(guild_id, user_id)
+    if ref is not None and db().execute("SELECT 1 FROM coin_tx WHERE ref = ?", (ref,)).fetchone():
+        db().commit()
+        return False                                   # already paid (and no write: this runs every cycle)
     cur = db().execute("""INSERT OR IGNORE INTO coin_tx (guild_id, user_id, delta, reason, ref, created_at)
                           VALUES (?,?,?,?,?,?)""", (guild_id, user_id, delta, reason, ref, now_iso()))
     db().commit()
@@ -8222,7 +8268,7 @@ def dashboard_data(guild_id: int) -> dict:
     for p in db().execute("SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND bettor_id IS NOT NULL", (guild_id,)):
         names[p["bettor_id"]] = p["bettor_name"]
     coins = [{"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"])} for u in coins_top(guild_id, 10)]
-    rec = records_embed(guild_id).description or ""
+    rec = dash30_safe_records(guild_id, records_embed(guild_id).description or "")
     return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": dashboard_people(guild_id),
             "settled24": dashboard_recent(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
@@ -10486,7 +10532,8 @@ async def big_moments(client: discord.Client, now: Optional[datetime] = None) ->
                               cost=money(p["cost"]),
                               amount=money(p["returned"] or 0), mult=f"{(p['returned'] or 0) / p['cost']:.0f}",
                               desc=clip(p["description"], 80))
-            await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+            art = await design_bigwin_file(client, p)
+            await channel.send(text, allowed_mentions=discord.AllowedMentions.none(), **({"file": art} if art else {}))
             await voice_say(client, p["guild_id"], text.split("\n", 1)[-1])
         elif p["status"] == "loss" and len(legs) >= 4 and sum(1 for x in legs if x["status"] == "miss") == 1 \
                 and get_setting(p["guild_id"], f"roast:{p['bettor_key']}") == "on":
@@ -11355,11 +11402,11 @@ def render_trading_card(c: dict, avatar: Optional[bytes]) -> io.BytesIO:
     W, H = 750, 1050
     rname, _, stops, accent = c["rarity"]
     card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    frame = _grad((W, H), stops)
+    frame = _brand_lin((W, H), stops, 35)
     card.paste(frame, (0, 0), _rounded_mask((W, H), 44))
     # inner panel with a soft diagonal sheen
     iw, ih = W - 44, H - 44
-    inner = _grad((iw, ih), brand_card_inner(c.get("theme")))
+    inner = design_card_art(_brand_lin((iw, ih), brand_card_inner(c.get("theme")), 35), c)
     sheen = Image.new("L", (iw, ih), 0)
     sd = ImageDraw.Draw(sheen)
     for k in range(-ih, iw, 46):
@@ -11450,12 +11497,12 @@ def render_trading_card(c: dict, avatar: Optional[bytes]) -> io.BytesIO:
         foot = f"PIMP-BOT  ·  SERIES {c.get('season', '')}  ·  {c.get('serial', '')}"
         brand_sign(card, W / 2, H - 70, foot, 16, align="center", colour=ART_FAINT)
     if rname == "Mythic":  # faint holo shimmer
-        holo = _grad((W, H), stops).convert("RGBA")
+        holo = _brand_lin((W, H), stops, 35).convert("RGBA")
         holo.putalpha(Image.new("L", (W, H), 22))
         card.alpha_composite(holo)
     bg = Image.new("RGB", (W, H), ART_BG)
     bg.paste(card, (0, 0), card)
-    return _png(bg)
+    return _design_png(bg)
 
 
 def _card_back(card, d, c, accent):
@@ -11496,21 +11543,6 @@ def _card_back(card, d, c, accent):
 
 # ---- slip receipt ---------------------------------------------------------------------------
 
-def _status_dot(d, x, y, r, state):
-    colour = {"hit": ART_GREEN, "miss": ART_RED, "push": ART_MUTED, "ahead": ART_GREEN, "behind": ART_RED,
-              "live": ART_BLUE}.get(state, ART_FAINT)
-    filled = state in ("hit", "miss", "push")
-    if filled:
-        d.ellipse((x - r, y - r, x + r, y + r), fill=colour)
-        glyph = {"hit": "✓", "miss": "✗", "push": "–"}[state]
-        f = art_font(int(r * 1.3), True)
-        d.text((x - _tw(d, glyph, f) / 2, y - r * 0.82), glyph, font=f, fill=(16, 16, 22))
-    else:
-        d.ellipse((x - r, y - r, x + r, y + r), outline=colour, width=4)
-        if state in ("ahead", "behind", "live"):
-            d.ellipse((x - r / 2.4, y - r / 2.4, x + r / 2.4, y + r / 2.4), fill=colour)
-
-
 def _bar(d, x, y, w, h, frac, colour, marker: Optional[float] = None):
     d.rounded_rectangle((x, y, x + w, y + h), h // 2, fill=ART_PANEL2)
     frac = max(0.0, min(1.0, frac))
@@ -11541,163 +11573,11 @@ def leg_visual(e: dict) -> dict:
             colour = ART_GREEN if value > line else (ART_AMBER if e.get("in_play") else ART_BLUE)
             v["bar"] = (value / line if line else 1.0, colour, None)
     v["sub"] = e.get("sub") or ""
+    v["needs"] = state == "open" and v["sub"].startswith("✋")
     return v
 
 
-def render_receipt(r: dict) -> io.BytesIO:
-    """r: name, avatar (bytes), platform, description, cost, payout, pick_id, status, net, legs [entry dicts with
-    text/status/live/num/sub/in_play], updated (str), returned"""
-    from PIL import Image, ImageDraw
-    W = 900
-    legs = r["legs"] or [{"text": r["description"], "status": r["status"]}]
-    row_h = 92
-    H = 196 + row_h * len(legs) + 120
-    img = Image.new("RGB", (W, H), ART_BG)
-    d = ImageDraw.Draw(img)
-    pc = PLATFORM_COLORS.get((r.get("platform") or "").lower(), ART_BRAND)
-    d.rounded_rectangle((16, 16, W - 16, H - 16), 30, fill=(22, 22, 30))
-    th = r.get("theme")
-    top = th["stops"][1] if th and th.get("chosen") else tuple(min(255, int(x * 0.6)) for x in pc)
-    head = _vgrad((W - 32, 170), top, (22, 22, 30))
-    img.paste(head, (16, 16), _rounded_mask((W - 32, 170), 30))
-    img.paste(_avatar(r.get("avatar"), 78, r["name"], -1), (44, 40), _avatar(r.get("avatar"), 78, r["name"], -1))
-    t, f = fit_text(d, r["name"], 470, 34, True)
-    d.text((140, 40), t, font=f, fill=ART_TEXT)
-    sub = f"{r.get('platform') or ''}  ·  pick #{r['pick_id']}"
-    d.text((141, 86), sub, font=art_font(20), fill=ART_MUTED)
-    money_line = f"{money_short(r['cost'])} → {money_short(r['payout'])}"
-    t, f = fit_text(d, money_line, 280, 34, True)
-    d.text((W - 48 - _tw(d, t, f), 40), t, font=f, fill=ART_TEXT)
-    t, f = fit_text(d, r["description"], 330, 20, False)
-    d.text((W - 48 - _tw(d, t, f), 88), t, font=f, fill=ART_MUTED)
-    # counter
-    hits = sum(1 for e in legs if leg_visual(e)["state"] == "hit")
-    misses = sum(1 for e in legs if leg_visual(e)["state"] == "miss")
-    y = 172
-    if len(legs) > 1:
-        chip = f"{hits}/{len(legs)} HIT" + (f"  ·  {misses} DEAD" if misses else "")
-        f = art_font(18, True)
-        d.rounded_rectangle((44, y - 8, 44 + _tw(d, chip, f) + 28, y + 26), 17, fill=ART_PANEL2)
-        d.text((58, y - 3), chip, font=f, fill=ART_RED if misses else (ART_GREEN if hits else ART_TEXT))
-    y += 44
-    for e in legs:
-        v = leg_visual(e)
-        _status_dot(d, 66, y + 26, 18, v["state"])
-        t, f = fit_text(d, e["text"], 480 if v["num"] or v["bar"] else 740, 25, True)
-        d.text((100, y + 10), t, font=f, fill=ART_TEXT if v["state"] != "miss" else ART_MUTED)
-        if v["sub"]:
-            st, sf = fit_text(d, v["sub"], 480, 18, False)
-            d.text((100, y + 46), st, font=sf, fill=ART_MUTED)
-        if v["num"]:
-            nt, nf = fit_text(d, v["num"], 230, 24, True)
-            d.text((W - 50 - _tw(d, nt, nf), y + 6), nt, font=nf, fill=ART_TEXT)
-        if v["bar"]:
-            frac, colour, marker = v["bar"]
-            _bar(d, W - 280, y + 44, 230, 14, frac, colour, marker)
-        d.line((44, y + row_h - 8, W - 44, y + row_h - 8), fill=(36, 36, 48), width=2)
-        y += row_h
-    # footer stamp
-    status = r["status"]
-    if status == "win":
-        stamp, colour = f"CASHED  {signed_short(r.get('net') or 0)}", ART_GREEN
-    elif status == "loss":
-        stamp, colour = "MISSED", ART_RED
-    elif status in ("push", "void"):
-        stamp, colour = status.upper(), ART_MUTED
-    else:
-        stamp, colour = None, None
-    if stamp:
-        f = art_font(40, True)
-        tw = _tw(d, stamp, f)
-        d.rounded_rectangle(((W - tw) / 2 - 30, y + 14, (W + tw) / 2 + 30, y + 78), 18, outline=colour, width=5)
-        d.text(((W - tw) / 2, y + 22), stamp, font=f, fill=colour)
-    else:
-        f = art_font(18, True)
-        live = any(e.get("in_play") for e in legs)
-        msg = (f"LIVE  ·  updated {r.get('updated', '')}" if live else f"Updated {r.get('updated', '')}")
-        d.ellipse((44, y + 34, 58, y + 48), fill=ART_RED if live else ART_FAINT)
-        d.text((70, y + 30), msg, font=f, fill=ART_MUTED)
-    brand_sign(img, W - 48, y + 32, "PIMP-BOT", 16, variant={"win": "hype", "loss": "cold"}.get(r["status"], "default"))
-    return _png(img)
-
-
 # ---- live board ------------------------------------------------------------------------------
-
-def render_board(b: dict) -> io.BytesIO:
-    """b: title, when, slips [{name, avatar, cost, payout, description, legs [entries], status}], totals dict"""
-    from PIL import Image, ImageDraw
-    W = 1000
-    slips = b["slips"][:8]
-    heights = []
-    for s in slips:
-        shown = [e for e in s["legs"] if e.get("in_play") or e.get("num") or e.get("status") != "open"][:4]
-        s["_shown"] = shown
-        heights.append(118 + 46 * len(shown))
-    H = 236 + sum(heights) + 16 * len(slips) + 60
-    img = Image.new("RGB", (W, H), ART_BG)
-    d = ImageDraw.Draw(img)
-    head = _grad((W, 210), [(70, 34, 150), (20, 16, 40), ART_BG])
-    img.paste(head, (0, 0))
-    d.text((40, 34), b.get("title", "TONIGHT'S BOARD"), font=art_font(44, True), fill=ART_TEXT)
-    d.ellipse((42, 108, 58, 124), fill=ART_RED if b.get("live") else ART_FAINT)
-    d.text((70, 102), ("LIVE  ·  " if b.get("live") else "") + b.get("when", ""), font=art_font(22, True),
-           fill=ART_MUTED)
-    tot = b.get("totals") or {}
-    chips = [f"{tot.get('slips', len(slips))} slips", f"{money_short(tot.get('cost', 0))} in",
-             f"{money_short(tot.get('payout', 0))} to win", f"{tot.get('cashing', 0)}/{tot.get('legs', 0)} legs cashing"]
-    x = 40
-    f = art_font(18, True)
-    for chip in chips:
-        cw = _tw(d, chip, f) + 28
-        d.rounded_rectangle((x, 148, x + cw, 180), 16, fill=(40, 34, 64))
-        d.text((x + 14, 153), chip, font=f, fill=ART_TEXT)
-        x += cw + 10
-    y = 226
-    for s, h in zip(slips, heights):
-        d.rounded_rectangle((24, y, W - 24, y + h), 24, fill=(24, 24, 33))
-        av = _avatar(s.get("avatar"), 56, s["name"], -1)
-        img.paste(av, (44, y + 20), av)
-        t, f = fit_text(d, s["name"], 330, 28, True)
-        d.text((114, y + 18), t, font=f, fill=ART_TEXT)
-        t, f = fit_text(d, s["description"], 360, 18, False)
-        d.text((114, y + 54), t, font=f, fill=ART_MUTED)
-        ml = f"{money_short(s['cost'])} → {money_short(s['payout'])}"
-        t, f = fit_text(d, ml, 260, 26, True)
-        d.text((W - 48 - _tw(d, t, f), y + 20), t, font=f, fill=ART_TEXT)
-        if s.get("status") in ("win", "loss", "push"):
-            stamp = {"win": f"CASHED {signed_short(s.get('net', 0))}", "loss": "DEAD", "push": "PUSH"}[s["status"]]
-            colour = {"win": ART_GREEN, "loss": ART_RED, "push": ART_MUTED}[s["status"]]
-            sf = art_font(18, True)
-            sw = _tw(d, stamp, sf) + 24
-            d.rounded_rectangle((114 + 370, y + 22, 114 + 370 + sw, y + 52), 12, outline=colour, width=3)
-            d.text((114 + 382, y + 26), stamp, font=sf, fill=colour)
-        # one dot per leg
-        dx = W - 48 - 30 * len(s["legs"][:14])
-        for e in s["legs"][:14]:
-            _status_dot(d, dx + 12, y + 72, 10, leg_visual(e)["state"])
-            dx += 30
-        yy = y + 102
-        for e in s["_shown"]:
-            v = leg_visual(e)
-            _status_dot(d, 60, yy + 14, 11, v["state"])
-            t, f = fit_text(d, e["text"], 470, 20, True)
-            d.text((82, yy + 2), t, font=f, fill=ART_TEXT if v["state"] != "miss" else ART_MUTED)
-            if v["num"]:
-                nt, nf = fit_text(d, v["num"], 160, 20, True)
-                d.text((W - 300 - _tw(d, nt, nf), yy + 2), nt, font=nf, fill=ART_TEXT)
-            if v["bar"]:
-                frac, colour, marker = v["bar"]
-                _bar(d, W - 280, yy + 8, 230, 12, frac, colour, marker)
-            elif v["sub"]:
-                st, sf = fit_text(d, v["sub"], 240, 16, False)
-                d.text((W - 48 - _tw(d, st, sf), yy + 4), st, font=sf, fill=ART_MUTED)
-            yy += 46
-        y += h + 16
-    if len(b["slips"]) > len(slips):
-        d.text((40, y + 6), f"+ {len(b['slips']) - len(slips)} more slips", font=art_font(18, True), fill=ART_MUTED)
-    brand_sign(img, W - 40, H - 44, "PIMP-BOT", 16, variant="hype" if b.get("live") else "default")
-    return _png(img)
-
 
 # ==========================================================================
 # r14: personality, reactions, heads-up, milestones, trading cards, data Q&A,
@@ -12513,10 +12393,14 @@ def receipt_sig(p, entries: list[dict]) -> str:
 
 
 def receipt_data(p, entries: list[dict], avatar: Optional[bytes]) -> dict:
+    design_remember(p, entries)
+    entries = design_enrich(p, entries)
     return {"name": p["bettor_name"], "avatar": avatar, "platform": p["platform"], "description": p["description"],
             "cost": p["cost"], "payout": p["payout"], "pick_id": p["id"], "status": p["status"], "net": pick_net(p),
             "legs": entries, "updated": datetime.now(TZ).strftime("%-I:%M %p"),
-            "theme": theme_for(p["guild_id"], p["bettor_id"]) if p["bettor_id"] else None}
+            "theme": theme_for(p["guild_id"], p["bettor_id"]) if p["bettor_id"] else None,
+            "sport": p["sport"], "returned": p["returned"], "entry": entry_kind(p, max(1, len(entries))),
+            "logged": design_when(p["created_at"]), "art": design_art(entries)}
 
 
 async def receipt_file(client, p, entries: Optional[list] = None) -> discord.File:
@@ -12526,6 +12410,7 @@ async def receipt_file(client, p, entries: Optional[list] = None) -> discord.Fil
     if p["bettor_id"]:
         user = await known_user(client, p["bettor_id"])
     av = await avatar_bytes(user) if user is not None else None
+    await design_fetch_art(design_enrich(p, entries))         # headshots and logos, before the render thread
     png = await asyncio.to_thread(locked_render, render_receipt, receipt_data(p, entries, av))
     return discord.File(png, filename=f"receipt_{p['id']}.png")
 
@@ -12596,6 +12481,7 @@ async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
     slips = []
     for p in picks:
         entries = await cached_progress(p) if p["status"] == "open" else db_entries(p)
+        design_remember(p, entries)
         relevant = p["status"] != "open"
         for e in entries:
             ev = e.get("event")
@@ -12609,7 +12495,7 @@ async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
         slips.append({"name": p["bettor_name"], "avatar": await avatar_bytes(user) if user else None, "cost": p["cost"],
                       "payout": p["payout"], "description": p["description"], "legs": entries, "id": p["id"],
                       "live": any(e.get("in_play") for e in entries) and p["status"] == "open", "status": p["status"],
-                      "net": pick_net(p)})
+                      "net": pick_net(p), "sport": p["sport"], "show": design_enrich(p, entries)})
     if not slips:
         return None
     slips.sort(key=lambda s: (s["status"] != "open", not s["live"],
@@ -12622,7 +12508,12 @@ async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
                                        "legs": len(all_legs),
                                        "cashing": sum(1 for e in all_legs if leg_visual(e)["state"] in ("hit", "ahead"))}}
     sig = json.dumps([[s["id"], receipt_sig({"status": s["status"]}, s["legs"])] for s in slips])
+    memo = _DESIGN_BOARD_MEMO.get(guild_id)
+    if memo and memo[0] == sig and memo[2] > time.monotonic():
+        return io.BytesIO(memo[1]), live, sig, len(slips)
+    data["art"] = await design_fetch_art([e for s in slips for e in s["show"]])
     png = await asyncio.to_thread(locked_render, render_board, data)
+    _DESIGN_BOARD_MEMO[guild_id] = (sig, png.getvalue(), time.monotonic() + DESIGN_BOARD_MEMO_S)
     return png, live, sig, len(slips)
 
 
@@ -13177,19 +13068,19 @@ def xray_notes(data: list[dict]) -> list[str]:
     return notes
 
 
-def render_xray(title: str, data: list[dict], heading: str = "SLIP X-RAY") -> io.BytesIO:
+def render_xray(title: str, data: list[dict], heading: str = "SLIP X-RAY",
+                sport: Optional[str] = None) -> io.BytesIO:
     from PIL import Image, ImageDraw
     W, ROW, SHORT = 1000, 190, 96
     H = 120 + sum(ROW if xray_hits(x) else SHORT for x in data) + 50
-    img = Image.new("RGB", (W, H), ART_BG)
-    d = ImageDraw.Draw(img)
-    img.paste(_grad((W, 110), [(70, 34, 150), (20, 16, 40), ART_BG]), (0, 0))
+    img, d = _design_card(W, H, design_sport_key(sport, *(x.get("stat") or x.get("text") for x in data)),
+                          (70, 34, 150), head=150, margin=0, radius=0)
     d.text((36, 26), heading, font=art_font(40, True), fill=ART_TEXT)
     t, f = fit_text(d, title, W - 72, 20, False)
     d.text((38, 76), t, font=f, fill=ART_MUTED)
     y = 120
     for x in data:
-        d.rounded_rectangle((20, y, W - 20, y + (ROW if xray_hits(x) else SHORT) - 14), 22, fill=(24, 24, 33))
+        d.rounded_rectangle((20, y, W - 20, y + (ROW if xray_hits(x) else SHORT) - 14), 22, fill=(12, 12, 18, 190), outline=(255, 255, 255, 22))
         t, f = fit_text(d, x["text"], 330 if xray_hits(x) else 520, 22, True)
         d.text((44, y + 22), t, font=f, fill=ART_TEXT)
         h = xray_hits(x)
@@ -13229,7 +13120,7 @@ def render_xray(title: str, data: list[dict], heading: str = "SLIP X-RAY") -> io
         y += ROW
     d.text((36, H - 40), "Last 10 games, oldest → newest · green = beat the number", font=art_font(15), fill=ART_FAINT)
     brand_sign(img, W - 36, H - 40, "PIMP-BOT", 15, variant="cool")
-    return _png(img)
+    return _design_png(img)
 
 
 async def slip_xray_file(slip: dict, data: Optional[list] = None) -> Optional[discord.File]:
@@ -13237,7 +13128,7 @@ async def slip_xray_file(slip: dict, data: Optional[list] = None) -> Optional[di
     if not any(xray_hits(x) for x in data):
         return None
     title = " · ".join(x for x in (slip.get("platform"), slip.get("description")) if x)
-    png = await asyncio.to_thread(locked_render, render_xray, title, data)
+    png = await asyncio.to_thread(locked_render, render_xray, title, data, "SLIP X-RAY", slip.get("sport"))
     return discord.File(png, filename="xray.png")
 
 
@@ -13777,17 +13668,17 @@ def render_cashed_poster(title: str, sub: str, receipts: list[io.BytesIO]) -> io
         places.append((c, col_h[c]))
         col_h[c] += t.height + 20
     H = 190 + max(col_h or [0]) + 40
-    img = Image.new("RGB", (W, H), ART_BG)
-    img.paste(_grad((W, 180), [(20, 120, 80), (14, 40, 30), ART_BG]), (0, 0))
-    d = ImageDraw.Draw(img)
+    img, d = _design_card(W, H, "stadium", (20, 120, 80), (90, 230, 160), head=200, margin=0, radius=0)
     t, f = fit_text(d, title, W - 80, 46, True)
     d.text((40, 36), t, font=f, fill=ART_TEXT)
     t, f = fit_text(d, sub, W - 80, 22, True)
     d.text((42, 104), t, font=f, fill=ART_GREEN)
     for th, (c, y) in zip(thumbs, places):
+        d.rounded_rectangle((34 + c * 490, 174 + y, 46 + c * 490 + th.width, 186 + y + th.height), 34,
+                            fill=(0, 0, 0, 110))
         img.paste(th, (40 + c * 490, 180 + y))
     brand_sign(img, W - 40, H - 34, "PIMP-BOT", 15, variant="hype")
-    return _png(img)
+    return _design_png(img)
 
 
 def render_standings_poster(title: str, sub: str, rows: list[dict]) -> io.BytesIO:
@@ -13796,16 +13687,15 @@ def render_standings_poster(title: str, sub: str, rows: list[dict]) -> io.BytesI
     W, RH = 900, 92
     rows = rows[:12]
     H = 210 + RH * len(rows) + 50
-    img = Image.new("RGB", (W, H), ART_BG)
-    img.paste(_grad((W, 190), [(150, 110, 20), (40, 30, 10), ART_BG]), (0, 0))
-    d = ImageDraw.Draw(img)
+    img, d = _design_card(W, H, "stadium", (150, 110, 20), (255, 214, 102), head=210, margin=0, radius=0)
     t, f = fit_text(d, title, W - 80, 46, True)
     d.text((40, 36), t, font=f, fill=ART_TEXT)
     d.text((42, 104), sub, font=art_font(22, True), fill=ART_MUTED)
     medal = {1: (255, 214, 102), 2: (210, 216, 226), 3: (214, 150, 90)}
     y = 205
     for r in rows:
-        d.rounded_rectangle((24, y, W - 24, y + RH - 12), 20, fill=(26, 26, 36) if r["rank"] > 3 else (34, 32, 44))
+        d.rounded_rectangle((24, y, W - 24, y + RH - 12), 20, fill=(12, 12, 18, 190) if r["rank"] > 3 else (40, 34, 20, 206),
+                            outline=(255, 255, 255, 22) if r["rank"] > 3 else medal[r["rank"]] + (120,))
         rc = medal.get(r["rank"], ART_MUTED)
         rt = str(r["rank"])
         d.text((70 - _tw(d, rt, art_font(32, True)) / 2, y + 18), rt, font=art_font(32, True), fill=rc)
@@ -13825,7 +13715,7 @@ def render_standings_poster(title: str, sub: str, rows: list[dict]) -> io.BytesI
         d.text((W - 56 - _tw(d, roi, art_font(17, True)), y + 50), roi, font=art_font(17, True), fill=ART_MUTED)
         y += RH
     brand_sign(img, W - 40, H - 36, "PIMP-BOT", 15, variant="crown")
-    return _png(img)
+    return _design_png(img)
 
 
 async def cashed_poster_file(client, guild_id: int, days: int = 7) -> Optional[discord.File]:
@@ -14081,12 +13971,17 @@ def is_admin(interaction) -> bool:
     return bool(perms and getattr(perms, "manage_guild", False))
 
 
-def admin_panel_view(guild_id: int) -> discord.ui.View:
+PANEL_PER_PAGE = 15          # 3 rows of switches; row 4 is the page buttons, row 5 the voice menu (Discord's limit)
+
+
+def admin_panel_view(guild_id: int, page: int = 0) -> discord.ui.View:
     v = discord.ui.View(timeout=900)
-    for key, label, kind in SERVER_TOGGLES:
+    pages = max(1, -(-len(SERVER_TOGGLES) // PANEL_PER_PAGE))
+    page = max(0, min(page, pages - 1))
+    for n, (key, label, kind) in enumerate(SERVER_TOGGLES[page * PANEL_PER_PAGE:(page + 1) * PANEL_PER_PAGE]):
         on = server_on(guild_id, key)
         b = discord.ui.Button(label=clip(f"{label}: {'ON' if on else 'OFF'}", 80),
-                              style=discord.ButtonStyle.success if on else discord.ButtonStyle.secondary)
+                              style=discord.ButtonStyle.success if on else discord.ButtonStyle.secondary, row=n // 5)
 
         def make(k=key, kd=kind):
             async def cb(interaction):
@@ -14094,11 +13989,32 @@ def admin_panel_view(guild_id: int) -> discord.ui.View:
                     await interaction.response.send_message("Admins only.", ephemeral=True)
                     return
                 set_setting(guild_id, k, toggle_flip(get_setting(guild_id, k), kd))
-                await interaction.response.edit_message(embed=admin_panel_embed(guild_id), view=admin_panel_view(guild_id))
+                await interaction.response.edit_message(embed=admin_panel_embed(guild_id),
+                                                        view=admin_panel_view(guild_id, page))
             return cb
         b.callback = make()
         v.add_item(b)
-    v.add_item(PersonaSelect(guild_id))
+    if pages > 1:
+        for label, to in (("◀ More switches", page - 1), (f"Page {page + 1} of {pages}", None), ("More switches ▶", page + 1)):
+            nb = discord.ui.Button(label=label, style=discord.ButtonStyle.primary, row=3)
+            nb.disabled = to is None or not 0 <= to < pages
+            if to is not None:
+                def turn(t=to):
+                    async def cb(interaction):
+                        if not is_admin(interaction):
+                            await interaction.response.send_message("Admins only.", ephemeral=True)
+                            return
+                        await interaction.response.edit_message(embed=admin_panel_embed(guild_id),
+                                                                view=admin_panel_view(guild_id, t))
+                    return cb
+                nb.callback = turn()
+            v.add_item(nb)
+    sel = PersonaSelect(guild_id)
+    try:
+        sel.row = 4
+    except Exception:
+        pass
+    v.add_item(sel)
     return v
 
 
@@ -14335,9 +14251,7 @@ def render_hot(title: str, hot: list, cold: list, best_stat: Optional[tuple], wo
     W = 1000
     n = max(len(hot), len(cold), 1)
     H = 200 + n * 62 + 140
-    img = Image.new("RGB", (W, H), ART_BG)
-    img.paste(_grad((W, 180), [(160, 60, 20), (40, 18, 30), (20, 30, 70)]), (0, 0))
-    d = ImageDraw.Draw(img)
+    img, d = _design_card(W, H, "stadium", (160, 60, 20), (255, 150, 90), head=200, margin=0, radius=0)
     d.text((40, 34), "HOT & COLD", font=art_font(46, True), fill=ART_TEXT)
     d.text((42, 104), title, font=art_font(22, True), fill=ART_MUTED)
     for col, (label, rows, colour) in enumerate((("🔥 HITTING", hot, ART_GREEN), ("🧊 MISSING", cold, ART_RED))):
@@ -14346,7 +14260,7 @@ def render_hot(title: str, hot: list, cold: list, best_stat: Optional[tuple], wo
         y = 236
         for name, h, m in rows:
             rate = h / (h + m)
-            d.rounded_rectangle((x0, y, x0 + 470, y + 52), 14, fill=(26, 26, 36))
+            d.rounded_rectangle((x0, y, x0 + 470, y + 52), 14, fill=(12, 12, 18, 190), outline=colour + (70,))
             t, f = fit_text(d, name, 230, 21, True)
             d.text((x0 + 16, y + 13), t, font=f, fill=ART_TEXT)
             _bar(d, x0 + 260, y + 21, 110, 12, rate, colour)
@@ -14365,36 +14279,10 @@ def render_hot(title: str, hot: list, cold: list, best_stat: Optional[tuple], wo
         t, f = fit_text(d, "   ·   ".join(bits), W - 80, 19, True)
         d.text((40, y), t, font=f, fill=ART_MUTED)
     brand_sign(img, W - 40, H - 34, "PIMP-BOT", 15)
-    return _png(img)
+    return _design_png(img)
 
 
 # ---- game-day previews: who's riding what, an hour before -------------------------------------------------------
-
-def render_preview(title: str, when: str, riders: list[tuple[str, str]], total_cost: float) -> io.BytesIO:
-    from PIL import Image, ImageDraw
-    W = 900
-    riders = riders[:12]
-    H = 190 + 54 * len(riders) + 70
-    img = Image.new("RGB", (W, H), ART_BG)
-    img.paste(_grad((W, 170), [(20, 70, 150), (14, 20, 40), ART_BG]), (0, 0))
-    d = ImageDraw.Draw(img)
-    d.text((40, 28), "GAME DAY", font=art_font(22, True), fill=ART_MUTED)
-    t, f = fit_text(d, title, W - 80, 44, True)
-    d.text((40, 58), t, font=f, fill=ART_TEXT)
-    d.text((42, 120), when, font=art_font(20, True), fill=(140, 180, 255))
-    y = 186
-    for who, leg in riders:
-        d.rounded_rectangle((24, y, W - 24, y + 44), 12, fill=(26, 26, 36))
-        t, f = fit_text(d, who, 180, 20, True)
-        d.text((44, y + 10), t, font=f, fill=ART_TEXT)
-        t, f = fit_text(d, leg, W - 300, 19, False)
-        d.text((240, y + 11), t, font=f, fill=ART_MUTED)
-        y += 54
-    foot = f"{len({w for w, _ in riders})} riding · {money_short(total_cost)} on slips with legs in this game"
-    d.text((40, H - 46), foot, font=art_font(17, True), fill=ART_MUTED)
-    brand_sign(img, W - 40, H - 44, "PIMP-BOT", 15)
-    return _png(img)
-
 
 async def game_previews(client: discord.Client, now: Optional[datetime] = None) -> None:
     now = now or datetime.now(timezone.utc)
@@ -14913,7 +14801,8 @@ async def combo_status(leg: dict, paths: list[str], logged: datetime) -> Optiona
                team=" / ".join(dict.fromkeys(x.get("team") or "" for x in parts if x.get("team"))),
                detail=next((x["detail"] for x in parts if x["state"] == "in"), first["detail"]),
                preseason=any(x["preseason"] for x in parts),
-               track="manual" if manual else "tracked", track_note=manual["track_note"] if manual else "")
+               track="manual" if manual else "tracked", track_note=manual["track_note"] if manual else "",
+               athletes=[x.get("athlete_id") or "" for x in parts])
     if state == "post" and any(x["result"] == "push" and x["value"] is None for x in parts):
         out["result"], out["why"] = "push", "; ".join(x["why"] for x in parts if x["why"]) or "a player didn't play"
         return out
@@ -15031,8 +14920,9 @@ def mark_auto(pick_id: int) -> None:
 
 
 def set_auto_state(pick_id: int, state: Optional[str]) -> None:
-    db().execute("UPDATE picks SET auto_state = ? WHERE id = ?", (state, pick_id))
-    db().commit()
+    if db().execute("UPDATE picks SET auto_state = ? WHERE id = ? AND auto_state IS NOT ?",
+                    (state, pick_id, state)).rowcount:
+        db().commit()
 
 
 # ---- slips that were read wrong get one more read ------------------------------------------------------
@@ -15374,7 +15264,6 @@ async def autopilot(client, now: Optional[datetime] = None, only: Optional[list[
                     and datetime.fromisoformat(p["auto_at"]) > now - timedelta(minutes=30)):
                 continue    # nothing starts for a while: a check every half hour is plenty
             db().execute("UPDATE picks SET auto_at = ? WHERE id = ?", (iso(now), p["id"]))
-            db().commit()
             try:
                 res = await autopilot_pick(client, p, now, allow_ai=ai_used < 1, allow_reread=rereads < 2,
                                            force_ai=force_ai, extras=server_on(p["guild_id"], "autopilot"))
@@ -15386,6 +15275,7 @@ async def autopilot(client, now: Optional[datetime] = None, only: Optional[list[
             totals["ai"] += res["ai"]
             ai_used += res["ai"]
             rereads += res["reread"]
+        db().commit()
     return totals
 
 
@@ -19253,7 +19143,7 @@ def dash_app(web):
     app.add_routes([web.get("/", dash_index), web.get("/api/data", dash_api_data), web.get("/health", dash_health),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
-                    web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
+                    *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
                     web.get("/img/{kind}/{arg}.png", dash_image), web.get("/favicon.ico", dash_favicon),
                     web.get("/favicon.svg", dash_favicon), web.get("/logout", dash_logout),
                     web.get("/{tail:.*}", dash_not_found)])
@@ -19496,6 +19386,113 @@ footer a{color:var(--faint)}
  .kpi .v{font-size:22px}footer{padding:0 12px calc(90px + env(safe-area-inset-bottom))}
 }
 @media (max-width:640px){.game{width:40vw;min-width:148px}}
+/* r30: live games, game pages, news, bot health, mini scoreboard */
+button.game{text-align:left;cursor:pointer;color:inherit;transition:transform .18s,border-color .18s}
+button.game:hover{transform:translateY(-2px);border-color:#7B3FE477}
+.lgrid{grid-column:span 12;display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));align-items:start}
+.gcard{background:var(--card);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);overflow:hidden;min-width:0;
+ display:flex;flex-direction:column}
+.gcard.in{border-color:#e11d4840}
+.gtop,.gpage{--ca:#7B3FE4;--ch:#7B3FE4;display:block;width:100%;border:0;text-align:left;color:var(--text);padding:12px 16px 0;
+ background:var(--card2);background:linear-gradient(105deg,color-mix(in srgb,var(--ca) 26%,var(--card2)) 0%,var(--card2) 44%,
+ var(--card2) 56%,color-mix(in srgb,var(--ch) 26%,var(--card2)) 100%)}
+button.gtop{cursor:pointer}button.gtop:hover .open{text-decoration:underline}
+.gmeta{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:.08em;color:var(--muted);min-height:22px}
+.gmeta .open{font-weight:700;letter-spacing:0;font-size:12.5px;color:var(--brand2);margin-left:auto}
+.pill2{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:99px;background:var(--card);
+ border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.pill2.live{background:#e11d48;border-color:#e11d48;color:#fff}
+.pill2.live i{width:6px;height:6px;border-radius:50%;background:#fff;animation:pulse 1.4s infinite}
+.sb{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:10px;padding:12px 0 14px}
+.st2{display:flex;align-items:center;gap:10px;min-width:0;opacity:.78}.st2.r{flex-direction:row-reverse;text-align:right}
+.st2.lead,.sb.pre .st2{opacity:1}
+.tn2{display:flex;flex-direction:column;min-width:0;line-height:1.15}.tn2 b{font-size:17px;font-weight:850;letter-spacing:.02em}
+.tn2 span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tlogo{--c:#7B3FE4;flex:none;width:42px;height:42px;border-radius:50%;background:#fff;display:grid;place-items:center;
+ overflow:hidden;box-shadow:0 0 0 2px var(--c),0 6px 16px -8px var(--c)}
+.tlogo img{width:74%;height:74%;object-fit:contain}
+.tlogo.fb{background:var(--c);color:#fff;font-size:12px;font-weight:900}
+.mid{text-align:center;min-width:64px}
+.scr{display:flex;align-items:baseline;justify-content:center;gap:8px;font-size:30px;font-weight:850;line-height:1.05;
+ font-variant-numeric:tabular-nums;letter-spacing:-.02em;color:var(--muted)}
+.scr .lead{color:var(--text)}.scr i{font-style:normal;font-size:16px;color:var(--faint);font-weight:700}
+.clk{font-size:12px;font-weight:750;color:var(--muted);margin-top:3px;white-space:nowrap}
+.gcard.in .clk,.gpage.in .clk{color:var(--live)}
+.prog{height:4px;margin:0 -16px;background:color-mix(in srgb,var(--text) 10%,transparent)}
+.prog i{display:block;height:100%;background:linear-gradient(90deg,var(--ca),var(--ch));transition:width .6s}
+.prog i.unk{opacity:.35}
+.sb.big{padding:16px 0 18px}.sb.big .tn2 b{font-size:22px}.sb.big .scr{font-size:44px}.sb.big .tlogo{width:58px;height:58px}
+.lrows{display:flex;flex-direction:column;padding:2px 16px}
+.lrow{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:2px 10px;align-items:center;padding:11px 0;border:0;
+ border-top:1px solid var(--line);background:none;text-align:left;width:100%;color:inherit}
+.lrows>.lrow:first-child{border-top:0}
+button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
+.lrow .av{width:32px;height:32px;border-radius:10px;font-size:13px}
+.lm{min-width:0}.lw{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lt{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lv{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.lv b{font-size:19px;font-weight:850}
+.lv span{font-size:12px;margin-left:4px}
+.lp{grid-column:2/-1;min-width:0}
+.pace{position:relative;height:9px;border-radius:99px;background:var(--line);margin-top:7px}
+.pace i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;transition:width .5s}
+.pace .gh{opacity:.3}
+.pace .ln{width:3px;margin-left:-1.5px;top:-4px;bottom:-4px;border-radius:2px;background:var(--text)}
+.lcap{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;font-size:12.5px;color:var(--muted);min-height:20px}
+.sc{flex:none;font-size:10.5px;font-weight:850;letter-spacing:.07em;padding:2px 8px;border-radius:99px;background:var(--card2);
+ border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.sc.up{background:#34d3991f;border-color:#34d39955;color:var(--up)}.sc.down{background:#fb71851f;border-color:#fb718555;color:var(--down)}
+.sc.warn{background:#fbbf241f;border-color:#fbbf2466;color:var(--live)}.sc.info{background:#7B3FE41f;border-color:#7B3FE466;color:var(--brand2)}
+.sc.orange{background:#f973161f;border-color:#f9731666;color:#ea580c}
+.sc.pulse{animation:pulse 1.8s infinite}
+.gfoot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--line);
+ font-size:12.5px;color:var(--muted);margin-top:auto}
+.empty.sm{padding:18px 12px}
+.glist{display:flex;flex-direction:column}
+.gline{display:grid;grid-template-columns:70px auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 6px;border:0;
+ border-top:1px solid var(--line);background:none;text-align:left;cursor:pointer;color:inherit;border-radius:12px;width:100%}
+.glist>.gline:first-child{border-top-color:transparent}.gline:hover{background:var(--card2)}
+.gline .gt{font-size:12px;font-weight:750;color:var(--muted);white-space:nowrap}.gline .tms{display:flex;align-items:center;gap:7px;font-weight:750;white-space:nowrap}
+.gline .tlogo{width:26px;height:26px;box-shadow:0 0 0 1.5px var(--c)}.gline .tlogo.fb{font-size:8px}
+.gline .gw2{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gpage{border-radius:20px;margin:0 50px 16px 0;overflow:hidden;border:1px solid var(--line)}
+.gpage .prog{margin:0 -18px}.gpage{padding:14px 18px 0}
+.news{display:flex;flex-direction:column}
+.nrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:13px 4px;border-top:1px solid var(--line)}
+.news>.nrow:first-child{border-top:0}
+.nh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.nh b{font-size:15px}
+.nd{margin-top:5px;color:var(--muted);font-size:13.5px;overflow-wrap:anywhere}
+.nslips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.nslips .chip{cursor:pointer}.nslips .chip:hover{color:var(--brand2)}
+.nt{font-size:12px;white-space:nowrap;color:var(--faint)}
+.hgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}
+.hbox{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:12px 14px;min-width:0}
+.hbox h3{margin:0 0 8px;font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.feed,.kv{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 0;
+ border-top:1px solid var(--line);font-size:13.5px}
+.kv{grid-template-columns:minmax(0,1fr) auto}.hbox h3+.feed,.hbox h3+.kv{border-top:0}
+.feed span,.kv span{color:var(--muted);font-size:12.5px;text-align:right}
+.kv span.up{color:var(--up);font-weight:700}.kv span.down{color:var(--down);font-weight:700}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--faint)}.dot.ok{background:var(--up);box-shadow:0 0 0 3px #34d39926}
+.dot.down{background:var(--down);box-shadow:0 0 0 3px #fb718533}.dot.shaky{background:var(--live)}
+.hb{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;font-size:13.5px;margin-bottom:9px}
+.hb .bar{grid-column:1/-1;margin:0}.hb .bar i{background:var(--brand2)}.hb.zero{color:var(--faint)}
+.mini{display:none}
+@media (max-width:640px){
+ .mini.on{display:flex;position:sticky;top:0;z-index:14;gap:8px;overflow-x:auto;align-items:center;padding:8px 12px;
+  background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line);
+  scrollbar-width:none}
+ .mini::-webkit-scrollbar{display:none}
+ .mini .ml{flex:none;display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:850;letter-spacing:.1em;color:#fff;
+  background:#e11d48;border-radius:99px;padding:4px 9px}
+ .mini .ml i{width:6px;height:6px;border-radius:50%;background:#fff;animation:pulse 1.4s infinite}
+ .mini .mg{flex:none;display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--line);border-radius:11px;
+  padding:5px 9px;font-size:12.5px;cursor:pointer;color:inherit;font-variant-numeric:tabular-nums}
+ .mini .mc{color:var(--live);font-weight:750;font-size:11.5px;margin-left:2px}
+ body.minion .ticker{display:none}
+ .lgrid{gap:12px}.lrows{padding:2px 14px}.gtop{padding:12px 14px 0}.prog,.gpage .prog{margin:0 -14px}.gfoot{padding:10px 14px}
+ .scr{font-size:26px}.tlogo{width:38px;height:38px}.tn2 b{font-size:16px}.tn2 span{display:none}
+ .gpage{margin:0 46px 14px 0;padding:12px 14px 0}.sb.big .scr{font-size:32px}.sb.big .tn2 b{font-size:18px}.sb.big .tlogo{width:46px;height:46px}
+ .gline{grid-template-columns:62px auto minmax(0,1fr);gap:10px}.gline .arr{display:none}
+}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.tk .rail{overflow-x:auto}}
 </style></head><body>
 <header>
@@ -19509,15 +19506,18 @@ footer a{color:var(--faint)}
  <nav class="tabs" id="nav" aria-label="Sections">
   <button type="button" data-t="overview" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Overview</span></button>
   <button type="button" data-t="live"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></svg><span>Live</span></button>
+  <button type="button" data-t="news"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13v15a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2zM17 8h3v11a2 2 0 0 1-2 2M8 8h5M8 12h5M8 16h3"/></svg><span>News</span></button>
   <button type="button" data-t="people"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg><span>People</span></button>
   <button type="button" data-t="posters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg><span>Posters</span></button>
   <button type="button" data-t="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg><span>More</span></button>
  </nav>
 </header>
 <div class="ticker" id="ticker"></div>
+<div class="mini" id="mini" role="list" aria-label="Live scores"></div>
 <main>
  <section class="tab on" id="tab-overview"></section>
  <section class="tab" id="tab-live"></section>
+ <section class="tab" id="tab-news"></section>
  <section class="tab" id="tab-people"></section>
  <section class="tab" id="tab-posters"></section>
  <section class="tab" id="tab-more"></section>
@@ -19639,7 +19639,7 @@ function tickerLeg(t){return h('button',{class:'leg',type:'button',onclick:()=>g
 function gameTile(g){const live=g.state==='in';const sc=v=>v==null?'':String(+v);
  const tm=(t,o)=>h('div',{class:'tm'+(g.state!=='pre'&&t.score!=null&&o.score!=null&&t.score>o.score?' lead':'')},
   h('span',{class:'tn',text:t.name}),h('span',{class:'sc',text:sc(t.score)}));
- return h('div',{class:'game '+g.state},h('div',{class:'gh'},live?h('span',{class:'gs live'},h('i'),'LIVE')
+ return h(g.id?'button':'div',{class:'game '+g.state,type:g.id?'button':null,onclick:g.id?()=>go('#/g/'+g.id):null},h('div',{class:'gh'},live?h('span',{class:'gs live'},h('i'),'LIVE')
    :h('span',{class:'gs',text:g.state==='post'?'FINAL':'TODAY'}),h('span',{class:'gc',text:g.state==='post'?'':g.clock})),
   tm(g.away,g.home),tm(g.home,g.away),h('div',{class:'gw',text:g.legs+(g.legs===1?' leg · ':' legs · ')+g.who.join(', ')}))}
 function gamesStrip(games){return h('div',{class:'games',role:'list','aria-label':'Games the group has legs on'},games.map(gameTile))}
@@ -19665,13 +19665,13 @@ function renderOverview(el,d){
   card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}
 const wide=b=>{b.classList.add('wide');return b};
 function renderLive(el,d){
- const settled=d.settled24||[];
+ const L=S.live,settled=d.settled24||[],later=L?[...L.later,...L.finals]:[];
+ const next=L&&L.later.length?'Next up: '+L.later[0].away.abbr+' @ '+L.later[0].home.abbr+' at '+startTime(L.later[0])+'.':'';
  put(el,
-  card('Games we’re on','',d.games.length?gamesCount(d):null,d.games.length?gamesStrip(d.games)
-   :empty('No games today','When the group has legs on a game, the score shows up here.')),
-  card('Legs in play','',d.ticker.length?String(d.ticker.length):null,d.ticker.length?h('div',{class:'legs'},d.ticker.map(tickerLeg))
-   :empty('No legs in play right now','When games tip off, every live leg shows up here.')),
-  card('Tonight’s board','',null,wide(imgBox('board.png','','No games on the board','Slips with games today show up here.','The live board'))),
+  !L?h('div',{class:'lgrid'},[0,1].map(skelGame)):L.games.length?h('div',{class:'lgrid'},L.games.map(gameCard))
+   :card('In play','',null,empty('Nothing in play right now',(next?next+' ':'')+'When a game the group is on tips off, it shows up here with every leg.')),
+  later.length?card('Later today & finals','',String(later.length),h('div',{class:'glist'},later.map(gameLine))):null,
+  L&&L.games.length?card('The /live picture','',L.updated?'Updated '+L.updated:null,wide(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
   card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
   card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(p=>slipRow({id:p.id,who:p.who,status:p.status,net:p.net,what:'Slip #'+p.id,when:'settled today'})))
    :empty('Nothing settled in the last day','Fresh results land here.')))}
@@ -19694,14 +19694,15 @@ function renderMore(el,d){
   card('Group parlay','s4',null,d.groupparlay.length?h('ul',{class:'clean'},d.groupparlay.map(l=>h('li',null,h('span',null,icons[l.status]||'⏳'),h('span',null,h('b',{text:l.who}),': ',l.leg))))
    :empty('No legs this week yet','Add yours in Discord.')),
   card('Record book','s4',null,d.records.length?h('ul',{class:'clean'},d.records.map(x=>h('li',{text:x}))):empty('The record book is empty','Big days get written down here.')),
+  healthCard(),
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
   card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,'. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed.')))}
-const TABS={overview:renderOverview,live:renderLive,people:renderPeople,posters:renderPosters,more:renderMore};
+const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};
 function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}
 function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}
  document.querySelectorAll('#nav button').forEach(b=>{b.classList.toggle('on',b.dataset.t===t);b.setAttribute('aria-current',b.dataset.t===t?'page':'false')});
- document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id==='tab-'+t));render();if(innerWidth<=640)scrollTo({top:0})}
+ document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id==='tab-'+t));render();if(innerWidth<=640)scrollTo({top:0});fresh(t)}
 function renderTicker(d){const el=$('#ticker');if(!d.ticker.length){el.classList.remove('on');put(el,);return}
  const items=()=>d.ticker.map(t=>h('button',{class:'it',type:'button',onclick:()=>go('#/s/'+t.id)},
   h('span',{class:t.live==='hit'||t.live==='ahead'?'up':t.live==='miss'||t.live==='behind'?'down':'faint'},'●'),h('b',{text:t.who}),
@@ -19716,7 +19717,7 @@ function renderMeta(d){const m=$('#meta');put(m,d.season?h('span',{class:'pill s
 
 async function load(){const seq=++S.seq;const d=await api('/api/data'+qs());if(!d||seq!==S.seq)return;
  for(const k of ['open','recent','alltime','leaderboard','people','coins','groupparlay','records','needs','ticker','games'])d[k]=d[k]||[];
- S.data=d;S.loadedAt=Date.now();renderMeta(d);renderTicker(d);render()}
+ S.data=d;S.loadedAt=Date.now();renderMeta(d);renderTicker(d);renderMini();render()}
 function skeletonAll(){for(const id of Object.keys(TABS)){const el=$('#tab-'+id);
  put(el,...[0,1,2,3].map(()=>h('div',{class:'card kpi'},h('div',{class:'skl',style:'height:12px;width:60%'}),h('div',{class:'skl',style:'height:26px;width:80%;margin-top:8px'}))),
   card(sk(),'',null,h('div',{class:'skl',style:'height:220px'})),card(sk(),'s7',null,skel(5)),card(sk(),'s5',null,skel(5)))}}
@@ -19767,8 +19768,107 @@ async function openSlip(id){openSheet();const s=await api('/api/slip/'+id+'.json
     s.legs.length?h('div',{class:'legs'},s.legs.map(l=>h('div',{class:'leg'},legDot(l),h('div',{style:'min-width:0'},h('div',{class:'t',text:l.text}),
      l.sub?h('div',{class:'s',text:l.sub}):null,legBar(l),l.note?h('div',{class:'note'},h('span',{class:'ni','aria-hidden':'true'},'\u{1F4DD}'),h('span',{text:l.note})):null),l.value!=null?h('span',{class:'v',text:l.value+' / '+l.line}):h('span',{class:'v faint',text:l.status==='open'?'':l.status.toUpperCase()}))))
     :empty('No legs listed','This slip was logged as one bet.')))))}
-function route(){const m=location.hash.match(/^#\/(p|s)\/(\d{1,20})$/);if(!m){closeSheet();return}
- if(m[1]==='p')openPerson(m[2]);else openSlip(m[2])}
+function route(){const m=location.hash.match(/^#\/(p|s|g)\/([A-Za-z0-9]{1,24})$/);if(!m){closeSheet();return}
+ if(m[1]==='g')openGame(m[2]);else if(/^\d{1,20}$/.test(m[2])){if(m[1]==='p')openPerson(m[2]);else openSlip(m[2])}else closeSheet()}
+
+/* ---------- r30: live games, game pages, news, bot health ---------- */
+const HEX=/^#[0-9a-f]{6}$/i,col=c=>HEX.test(c||'')?c:'#7B3FE4';
+const nfmt=v=>v==null||isNaN(+v)?'':String(Math.round(+v*10)/10);
+const LV_TONE={cleared:'up',dead:'down',close:'warn',live:'info',ahead:'up',behind:'down'};
+function startTime(g){const t=Date.parse(g.start);return isNaN(t)?(g.status||'Soon'):new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+function teamLogo(t){const box=h('span',{class:'tlogo',style:'--c:'+col(t.color)});
+ const fb=()=>{box.classList.add('fb');put(box,h('b',{text:(t.abbr||'?').slice(0,4)}))};
+ if(t.logo&&/^\/img\/logo\/[A-Za-z0-9]{1,24}\/[ah]\.png$/.test(t.logo)){const i=h('img',{alt:'',decoding:'async'});i.onerror=fb;i.src=t.logo+qs();box.append(i)}
+ else fb();return box}
+function statusPill(g){return g.state==='in'?h('span',{class:'pill2 live'},h('i'),'LIVE')
+ :h('span',{class:'pill2',text:g.state==='post'?'FINAL':'LATER'})}
+function scoreboard(g,big){const lead=(a,b)=>g.state!=='pre'&&a.score!=null&&b.score!=null&&a.score>b.score;
+ const side=(t,o,r)=>h('div',{class:'st2'+(r?' r':'')+(lead(t,o)?' lead':'')},teamLogo(t),h('div',{class:'tn2'},h('b',{text:t.abbr}),h('span',{text:t.name})));
+ const scr=g.state==='pre'?h('div',{class:'scr'},h('i',null,'@'))
+  :h('div',{class:'scr'},h('span',{class:lead(g.away,g.home)?'lead':'',text:nfmt(g.away.score)||'0'}),h('i',null,'–'),h('span',{class:lead(g.home,g.away)?'lead':'',text:nfmt(g.home.score)||'0'}));
+ return h('div',{class:'sb '+g.state+(big?' big':'')},side(g.away,g.home),
+  h('div',{class:'mid'},scr,h('div',{class:'clk',text:g.state==='in'?g.status:g.state==='post'?'Final':startTime(g)})),side(g.home,g.away,true))}
+function progress(g){if(g.state==='pre')return null;const p=g.state==='post'?1:g.elapsed;
+ return h('div',{class:'prog',title:p==null?'In progress':Math.round(p*100)+'% played'},h('i',{class:p==null?'unk':null,style:'width:'+(p==null?100:Math.max(2,p*100))+'%'}))}
+function paceBar(r){if(r.value==null||!r.line)return null;
+ const top=Math.max(r.line*1.5,r.value,r.pace||0,1),x=v=>Math.max(0,Math.min(100,v/top*100)),under=r.side==='under';
+ const c=r.state==='cleared'?'var(--up)':r.state==='dead'?'var(--down)':r.state==='close'?'var(--live)':under?(r.value>r.line?'var(--down)':'var(--up)'):(r.value>r.line?'var(--up)':'var(--brand2)');
+ const kids=[];if(r.pace!=null&&r.pace>r.value){const on=under?r.pace<=r.line:r.pace>r.line;
+  kids.push(h('i',{class:'gh',style:'width:'+x(r.pace)+'%;background:'+(on?'var(--up)':'var(--down)')}))}
+ if(r.value>0)kids.push(h('i',{class:'nw',style:'width:'+Math.max(3,x(r.value))+'%;background:'+c}));
+ kids.push(h('i',{class:'ln',style:'left:'+x(r.line)+'%'}));
+ return h('div',{class:'pace',role:'img','aria-label':nfmt(r.value)+' of '+nfmt(r.line)+(r.pace!=null?', on pace for '+nfmt(r.pace):'')},kids)}
+function paceText(r){if(r.state==='cleared')return h('span',{class:'up'},'Cleared the line');if(r.state==='dead')return h('span',{class:'down'},'Missed');
+ if(r.pace!=null){const on=r.side==='under'?r.pace<=r.line:r.pace>r.line;return h('span',null,'On pace for ',h('b',{class:on?'up':'down',text:nfmt(r.pace)}))}
+ if(r.value!=null&&r.line&&r.side!=='under'&&r.value<r.line)return h('span',{text:nfmt(r.line-r.value)+' to go'});
+ if(r.state==='waiting')return h('span',{class:'faint',text:'Not started'});return h('span')}
+function legRow(r){return h('button',{class:'lrow',type:'button',onclick:()=>go('#/s/'+r.pid)},avatar(r.who),
+ h('div',{class:'lm'},h('div',{class:'lw'},h('b',{text:r.who}),h('span',{class:'faint',text:' · '}),h('span',{text:r.label||r.text})),h('div',{class:'lt',text:r.text})),
+ h('div',{class:'lv'},r.value!=null?h('b',{text:nfmt(r.value)}):null,r.line!=null?h('span',{class:'faint',text:(r.side==='under'?'under ':'of ')+nfmt(r.line)}):null),
+ h('div',{class:'lp'},paceBar(r),h('div',{class:'lcap'},paceText(r),h('span',{class:'sc '+(LV_TONE[r.state]||'')+(r.state==='close'?' pulse':''),text:r.chip||'SOON'}))))}
+function legsWord(n){return n+(n===1?' leg':' legs')}
+function gameCard(g){const rows=g.rows||[],c=g.counts||{};
+ const tally=[c.cleared?c.cleared+' cleared':'',c.dead?c.dead+' dead':''].filter(Boolean).join(' · ');
+ return h('article',{class:'gcard '+g.state},
+  h('button',{class:'gtop',type:'button',style:'--ca:'+col(g.away.color)+';--ch:'+col(g.home.color),onclick:()=>go('#/g/'+g.id),'aria-label':'Open the game page: '+g.away.abbr+' at '+g.home.abbr},
+   h('div',{class:'gmeta'},statusPill(g),g.league?h('span',{text:g.league.toUpperCase()}):null,h('span',{class:'open',text:'Game card →'})),scoreboard(g),progress(g)),
+  rows.length?h('div',{class:'lrows'},rows.map(legRow)):h('div',{class:'empty sm'},h('span',{text:'No open legs left on this one.'})),
+  h('div',{class:'gfoot'},h('span',{text:legsWord(rows.length+(g.more||0))+' · '+g.people+(g.people===1?' person':' people')}),tally?h('span',{text:tally}):null))}
+function gameLine(g){const sc=t=>g.state==='pre'||t.score==null?'':' '+nfmt(t.score);const names=[...new Set(g.rows.map(r=>r.who))];
+ return h('button',{class:'gline',type:'button',onclick:()=>go('#/g/'+g.id)},h('span',{class:'gt',text:g.state==='post'?'Final':startTime(g)}),
+  h('span',{class:'tms'},teamLogo(g.away),h('span',{text:g.away.abbr+sc(g.away)}),h('span',{class:'faint',text:g.state==='pre'?'@':'–'}),h('span',{text:g.home.abbr+sc(g.home)}),teamLogo(g.home)),
+  h('span',{class:'gw2',text:legsWord(g.rows.length)+(names.length?' · '+names.slice(0,3).join(', '):'')}),h('span',{class:'faint arr',text:'→'}))}
+function skelGame(){return h('div',{class:'gcard'},h('div',{class:'gtop',style:'padding-bottom:14px'},h('div',{class:'skl',style:'height:14px;width:35%'}),
+ h('div',{class:'skl',style:'height:50px;margin-top:14px'})),h('div',{class:'lrows'},skel(3)))}
+async function loadLive(){const d=await api('/api/live.json'+qs());if(!d)return;for(const k of ['games','later','finals'])d[k]=d[k]||[];
+ S.live=d;S.liveAt=Date.now();renderMini();if(S.tab==='live')render()}
+function renderMini(){const el=$('#mini');let src=[];
+ if(S.live&&Date.now()-S.liveAt<120000)src=S.live.games.map(g=>({id:g.id,a:g.away.abbr,as:g.away.score,b:g.home.abbr,bs:g.home.score,c:g.status}));
+ else if(S.data)src=S.data.games.filter(g=>g.state==='in').map(g=>({id:g.id,a:g.away.name,as:g.away.score,b:g.home.name,bs:g.home.score,c:g.clock}));
+ document.body.classList.toggle('minion',src.length>0);el.classList.toggle('on',src.length>0);
+ put(el,src.length?h('span',{class:'ml'},h('i'),'LIVE'):null,src.map(g=>h('button',{class:'mg',type:'button',role:'listitem',onclick:()=>go('#/g/'+g.id)},
+  h('b',{text:g.a}),h('span',{text:nfmt(g.as)}),h('span',{class:'faint',text:'·'}),h('b',{text:g.b}),h('span',{text:nfmt(g.bs)}),h('span',{class:'mc',text:g.c}))))}
+async function openGame(id,quiet){if(!quiet)openSheet();const g=await api('/api/game/'+id+'.json'+qs());if(location.hash!=='#/g/'+id)return;
+ if(!g){if(!quiet)sheetError('Couldn’t find that game');return}
+ const scroll=$('#sheet').scrollTop;
+ put($('#sheet-body'),
+  h('div',{class:'gpage '+g.state,style:'--ca:'+col(g.away.color)+';--ch:'+col(g.home.color)},h('div',{class:'gmeta'},statusPill(g),g.league?h('span',{text:g.league.toUpperCase()}):null),scoreboard(g,true),progress(g)),
+  h('div',{class:'pgrid'},h('div',null,imgBox('game/'+g.id+'.png','','No game card yet','It shows up once the game has legs on it.',g.away.abbr+' at '+g.home.abbr+' game card')),
+   h('div',null,card('Legs on this game','',String(g.rows.length+(g.more||0)),g.rows.length?h('div',{class:'lrows',style:'padding:0'},g.rows.map(legRow)):empty('No legs on this game','')))));
+ if(quiet)$('#sheet').scrollTop=scroll}
+const NEWS_TONE={out:'down',suspension:'down',doubtful:'orange',questionable:'warn','day-to-day':'warn',probable:'up',active:'up',off:'up',reboot:'info'};
+function ago(iso){const t=Date.parse(iso);if(isNaN(t))return '';const s=Math.max(0,(Date.now()-t)/1000);
+ return s<60?'just now':s<3600?Math.floor(s/60)+'m ago':s<86400?Math.floor(s/3600)+'h ago':Math.floor(s/86400)+'d ago'}
+async function loadNews(){const d=await api('/api/news.json'+qs());if(!d)return;d.items=d.items||[];S.news=d;S.newsAt=Date.now();if(S.tab==='news')render()}
+function newsRow(n){const chip=n.kind==='reboot'?'REBOOT':n.kind==='off'?'BACK':String(n.status||'').toUpperCase();
+ const what=n.kind==='injury'?'is '+String(n.status||'').toLowerCase():n.kind==='off'?'is off the injury report':'didn’t play';
+ return h('div',{class:'nrow'},h('div',{style:'min-width:0'},h('div',{class:'nh'},h('span',{class:'sc '+(NEWS_TONE[n.chip]||''),text:chip}),h('b',{text:n.player}),h('span',{class:'muted',text:what})),
+  n.detail?h('div',{class:'nd',text:n.detail}):null,
+  n.slips&&n.slips.length?h('div',{class:'nslips'},n.slips.map(x=>h('button',{class:'chip',type:'button',onclick:()=>go('#/s/'+x.id)},x.who+' · #'+x.id))):null),
+  h('span',{class:'nt',text:ago(n.when)}))}
+function renderNews(el,d){const N=S.news;
+ put(el,card('Injury & reboot news','',N&&N.items.length?String(N.items.length):null,
+  !N?h('div',null,skel(5)):N.items.length?h('div',{class:'news'},N.items.map(newsRow))
+  :empty(N.on?'No news yet':'The news feed is off',N.on?'When a player on the group’s slips lands on (or comes off) an injury report, it shows up here.':'An admin can switch it on with /admin askchannel in Discord.')),
+  card('How it works','',null,h('p',{class:'muted',style:'margin:0'},'The bot checks the injury reports every 10 minutes for players on the group’s open slips, and posts changes in the ask channel. ',
+   h('b',null,'Reboot'),' means a player didn’t play and that leg was voided. Hidden slips never show up here.')))}
+async function loadHealth(){const d=await api('/api/health.json'+qs());if(!d)return;S.health=d;S.healthAt=Date.now();if(S.tab==='more')render()}
+function healthCard(){const H=S.health;
+ if(!H)return card('Bot health','',null,h('div',{class:'hgrid'},[0,1,2,3].map(()=>h('div',{class:'hbox'},skel(3)))));
+ const kv=(k,v,c)=>h('div',{class:'kv'},h('b',{text:k}),h('span',{class:c||'',text:v}));
+ const bars=rows=>{const max=Math.max(1,...rows.map(r=>r.n));return rows.map(r=>h('div',{class:'hb'+(r.n?'':' zero')},h('span',{text:r.name}),h('b',{text:String(r.n)}),
+  h('div',{class:'bar'},h('i',{style:'width:'+(r.n/max*100)+'%'}))))};
+ const feedTxt=f=>f.state==='idle'?'not used yet':f.state==='down'?'not answering'+(f.code?' ('+f.code+')':''):(f.last_ok?'answered '+f.last_ok:'')+(f.fail?' · '+f.fail+' missed':'');
+ const fail=H.jobs.failing;
+ return card('Bot health','',h('span',{class:'faint',text:H.version}),h('div',{class:'hgrid'},
+  h('div',{class:'hbox'},h('h3',null,'Data feeds'),H.feeds.map(f=>h('div',{class:'feed'},h('i',{class:'dot '+f.state}),h('b',{text:f.name}),h('span',{text:feedTxt(f)})))),
+  h('div',{class:'hbox'},h('h3',null,'Slips read today'),bars(H.reads),h('p',{class:'hint',text:'Readers on, in order: '+(H.readers_on.join(' → ')||'none (the form only)')})),
+  h('div',{class:'hbox'},h('h3',null,'Questions today'),bars(H.questions),h('p',{class:'hint',text:'Claude calls today: '+H.claude_today})),
+  h('div',{class:'hbox'},h('h3',null,'Background'),kv('Last cycle',H.cycle.ago||'not yet',H.cycle.ok?'up':'down'),
+   kv('Jobs',fail.length?fail.length+' failing':(H.jobs.total?'all '+H.jobs.total+' healthy':'not run yet'),fail.length?'down':'up'),
+   fail.slice(0,4).map(j=>kv(j.name,'failed ×'+j.fails,'down')),kv('Up for',H.uptime),kv('Version',H.version))))}
+function fresh(t){if(t==='live'&&(!S.live||Date.now()-S.liveAt>20000))loadLive();
+ if(t==='news'&&(!S.news||Date.now()-S.newsAt>300000))loadNews();if(t==='more'&&(!S.health||Date.now()-S.healthAt>60000))loadHealth()}
 
 /* ---------- theme + wiring ---------- */
 function setTheme(t){if(t)document.documentElement.dataset.theme=t;else delete document.documentElement.dataset.theme}
@@ -19782,6 +19882,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sheet').classLi
 addEventListener('popstate',route);
 let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(S.data&&S.tab==='overview')render()},250)});
 setInterval(()=>{if(document.visibilityState==='visible')load()},60000);
+setInterval(()=>{if(document.visibilityState!=='visible')return;if(S.tab==='live')loadLive();if(/^#\/g\//.test(location.hash))openGame(location.hash.slice(3),true)},20000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-S.loadedAt>60000)load()});
 try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}
 skeletonAll();show(S.tab);load();route();
@@ -20673,7 +20774,7 @@ async def track_status_in(leg: dict, path: str, ev: dict, cand: dict, stat_key: 
     out = {"result": None, "value": None, "line": leg["line"], "stat": STATS[stat_key][0], "player": cand["name"],
            "team": cand.get("team") or "", "state": ev.get("state", "pre"), "detail": "", "why": "", "event": ev,
            "path": path, "preseason": ev.get("season_type") == 1 and not soccer, "stat_key": stat_key,
-           "track": "tracked", "track_note": ""}
+           "track": "tracked", "track_note": "", "athlete_id": str(cand.get("id") or "")}
     if stat_key in TRACK_MANUAL:
         out["track"], out["track_note"], out["detail"] = "manual", TRACK_MANUAL[stat_key], ev.get("detail") or ""
         return out
@@ -20713,6 +20814,8 @@ async def track_status_in(leg: dict, path: str, ev: dict, cand: dict, stat_key: 
         return out
     if guessed:
         out["player"], out["team"] = pl["name"], pl.get("team") or ""
+    if str(pl.get("id") or "").isdigit():
+        out["athlete_id"] = str(pl["id"])
     if pl["dnp"]:
         if box["state"] == "post":
             out["result"] = "push"
@@ -21234,7 +21337,9 @@ def lv_row(s: dict, e: dict) -> dict:
     n = e.get("num")
     return {"pid": p["id"], "n": e.get("n"), "who": lv_who(p), "uid": p["bettor_id"], "text": e.get("text") or "",
             "state": lv_state(e), "num": {"value": n["value"], "line": n["line"], "side": n["side"]} if n else None,
-            "value_text": v["num"], "bar": list(v["bar"]) if v["bar"] else None, "slip_open": p["status"] == "open"}
+            "value_text": v["num"], "bar": list(v["bar"]) if v["bar"] else None, "slip_open": p["status"] == "open",
+            "head": design_head_key(e), "head2": design_head_key(e, 1),
+            "player_team": (e.get("track_info") or {}).get("team") or ""}
 
 
 def lv_card_worthy(g: dict) -> bool:
@@ -21299,147 +21404,6 @@ def _lv_badge(img, cx: int, cy: int, r: int, abbr: str, colour: tuple) -> None:
     tw = _tw(d, t, f)
     asc = f.getbbox(t)
     d.text((cx - tw / 2, cy - (asc[1] + asc[3]) / 2), t, font=f, fill=(255, 255, 255))
-
-
-def render_game_card(c: dict) -> io.BytesIO:
-    """c: league, away/home {abbr, short, score, colour}, state (pre/in/post), status (clock text), rows [lv_row],
-    avatars {uid: bytes}, final (bool), cashed [{name, net, id}], records [(name, hit, total)], updated (str)."""
-    from PIL import Image, ImageDraw
-    W = 1000
-    rows = sorted(c["rows"], key=lambda r: (LV_ORDER.get(r["state"], 9), r["who"].lower()))
-    shown, extra = rows[:LV_CARD_ROWS], max(0, len(rows) - LV_CARD_ROWS)
-    pulse_box = None
-    ROW_H, GAP, HEAD = 86, 10, 266
-    final = bool(c.get("final"))
-    fin_h = 176 if final else 0
-    H = HEAD + 66 + len(shown) * (ROW_H + GAP) + (42 if extra else 0) + fin_h + 84
-    img = Image.new("RGB", (W, H), ART_BG)
-    away, home = c["away"], c["home"]
-    ac, hc = away["colour"], home["colour"]
-    head = _grad((W, HEAD), [_brand_mix(ac, (0, 0, 0), 0.25), _brand_mix(ac, ART_BG, 0.72),
-                             _brand_mix(hc, ART_BG, 0.72), _brand_mix(hc, (0, 0, 0), 0.25)], diagonal=False)
-    img.paste(head, (0, 0))
-    # giant team letters as a watermark, then fade the header into the page
-    over = Image.new("RGBA", (W, HEAD), (0, 0, 0, 0))
-    od = ImageDraw.Draw(over)
-    wf = art_font(170, True)
-    od.text((-14, HEAD - 190), lv_abbr(away), font=wf, fill=(255, 255, 255, 15))
-    od.text((W + 14 - _tw(od, lv_abbr(home), wf), HEAD - 190), lv_abbr(home), font=wf, fill=(255, 255, 255, 15))
-    base = img.convert("RGBA")
-    base.alpha_composite(over, (0, 0))
-    fade = Image.linear_gradient("L").resize((W, 90))
-    base.paste(Image.new("RGBA", (W, 90), ART_BG + (255,)), (0, HEAD - 90), fade)
-    img = base.convert("RGB")
-    d = ImageDraw.Draw(img)
-    # top line: league and the status chip
-    d.text((40, 28), (c.get("league") or "GAME").upper(), font=art_font(20, True), fill=(225, 225, 235))
-    status = c.get("status") or ""
-    if final:
-        sw = _tw(d, "FINAL", art_font(18, True)) + 28
-        _lv_chip(d, W - 40 - sw, 22, "FINAL", (16, 16, 22), ART_TEXT, 18)
-    elif c.get("state") == "in":
-        f = art_font(18, True)
-        sw = _tw(d, "LIVE", f) + 50
-        x0 = W - 40 - sw
-        d.rounded_rectangle((x0, 22, x0 + sw, 56), 17, fill=(70, 18, 24), outline=ART_RED, width=2)
-        d.ellipse((x0 + 14, 33, x0 + 26, 45), fill=ART_RED)
-        pulse_box = (x0 + 14, 33, x0 + 26, 45)
-        d.text((x0 + 34, 28), "LIVE", font=f, fill=ART_TEXT)
-    # teams, scores and the clock
-    cy = 134
-    lv2_crest(img, 118, cy, 56, away, ac, lv2_sport(c.get("league")))
-    lv2_crest(img, W - 118, cy, 56, home, hc, lv2_sport(c.get("league")))
-    d = ImageDraw.Draw(img)
-    for t, cx in ((away, 118), (home, W - 118)):
-        nt, nf = fit_text(d, t.get("short") or "", 210, 20, True)
-        d.text((cx - _tw(d, nt, nf) / 2, cy + 70), nt, font=nf, fill=(230, 230, 238))
-    a_s, h_s = away.get("score"), home.get("score")
-    played = c.get("state") in ("in", "post") and a_s is not None and h_s is not None
-    sf = art_font(92, True)
-    lead_a = played and a_s > h_s
-    lead_h = played and h_s > a_s
-    a_txt = f"{a_s:g}" if played else "–"
-    h_txt = f"{h_s:g}" if played else "–"
-    dim = (150, 150, 168)
-    d.text((W / 2 - 72 - _tw(d, a_txt, sf), cy - 62), a_txt, font=sf,
-           fill=ART_TEXT if (lead_a or not final) else dim)
-    d.text((W / 2 + 72, cy - 62), h_txt, font=sf, fill=ART_TEXT if (lead_h or not final) else dim)
-    d.line((W / 2, cy - 44, W / 2, cy + 6), fill=(255, 255, 255), width=2)
-    stt, stf = fit_text(d, status, 220, 22, True)
-    stw = _tw(d, stt, stf) + 30
-    d.rounded_rectangle((W / 2 - stw / 2, cy + 30, W / 2 + stw / 2, cy + 66), 18, fill=(12, 12, 18))
-    d.text((W / 2 - stw / 2 + 15, cy + 36), stt, font=stf, fill=ART_AMBER if c.get("state") == "in" else ART_TEXT)
-    # summary chips
-    y = HEAD + 8
-    counts = lv_counts(rows)
-    people = len({r["who"] for r in rows})
-    x = 32
-    x += _lv_chip(d, x, y, f"{len(rows)} legs · {people} {'person' if people == 1 else 'people'}", ART_TEXT,
-                  ART_PANEL2) + 10
-    for k in ("cleared", "close", "live", "ahead", "behind", "dead"):
-        if counts.get(k):
-            col = _lv_colour(k)
-            label = f"{counts[k]} {LV_LABEL[k]}"
-            if x + _tw(d, label, art_font(17, True)) + 28 > W - 32:
-                break
-            x += _lv_chip(d, x, y, label, col, _brand_mix(col, ART_BG, 0.82), outline=col) + 10
-    # one row per leg
-    y = HEAD + 66
-    for r in shown:
-        col = _lv_colour(r["state"])
-        d.rounded_rectangle((24, y, W - 24, y + ROW_H), 22, fill=ART_PANEL)
-        d.rounded_rectangle((24, y, 34, y + ROW_H), 5, fill=col)
-        d.rectangle((29, y, 34, y + ROW_H), fill=ART_PANEL)
-        av = _avatar((c.get("avatars") or {}).get(r.get("uid")), 52, r["who"], -1)
-        img.paste(av, (48, y + 17), av)
-        nt, nf = fit_text(d, r["who"], 440, 18, True)
-        d.text((116, y + 13), nt, font=nf, fill=ART_MUTED)
-        tt, tf = fit_text(d, r["text"], 470 if r.get("bar") else 700, 23, True, min_size=17)
-        d.text((116, y + 40), tt, font=tf, fill=ART_TEXT if r["state"] != "dead" else (170, 170, 186))
-        if r.get("bar"):
-            vt, vf = fit_text(d, r["value_text"], 220, 26, True)
-            d.text((838 - _tw(d, vt, vf), y + 12), vt, font=vf, fill=ART_TEXT)
-            frac, bcol, marker = r["bar"]
-            bcol = {"cleared": ART_GREEN, "dead": ART_RED}.get(r["state"], tuple(bcol))
-            _bar(d, 610, y + 54, 228, 12, frac, bcol, marker)
-        pill = LV_LABEL.get(r["state"], "")
-        pf = art_font(15, True)
-        pw = max(88, _tw(d, pill, pf) + 26)
-        px = W - 40 - pw
-        d.rounded_rectangle((px, y + 27, px + pw, y + 59), 16, fill=_brand_mix(col, ART_BG, 0.78), outline=col,
-                            width=2)
-        d.text((px + (pw - _tw(d, pill, pf)) / 2, y + 34), pill, font=pf, fill=col)
-        y += ROW_H + GAP
-    if extra:
-        d.text((40, y + 4), f"+ {extra} more leg{'s' if extra != 1 else ''} on this game", font=art_font(19, True),
-               fill=ART_MUTED)
-        y += 42
-    if final:
-        d.rounded_rectangle((24, y + 4, W - 24, y + fin_h - 8), 22, fill=(26, 32, 30), outline=(52, 90, 72), width=2)
-        d.text((48, y + 22), "WHO CASHED ON THIS GAME", font=art_font(18, True), fill=ART_GREEN)
-        x = 48
-        cashed = c.get("cashed") or []
-        if cashed:
-            for k in cashed[:5]:
-                w = _lv_chip(d, x, y + 54, f"{k['name']}  {signed_short(k['net'])}", (16, 16, 22), ART_GREEN, 19, 38)
-                x += w + 10
-                if x > W - 200:
-                    break
-        else:
-            d.text((48, y + 60), "No slips cashed off this one (yet).", font=art_font(20, True), fill=ART_MUTED)
-        rec = c.get("records") or []
-        if rec:
-            line = "   ".join(f"{n} {h}/{t}" for n, h, t in rec[:6])
-            lt, lf = fit_text(d, "Legs here:  " + line, W - 100, 19, True)
-            d.text((48, y + 114), lt, font=lf, fill=(205, 215, 210))
-        y += fin_h
-    foot = (f"Locked at the final · {c.get('updated', '')}" if final else
-            f"Updated {c.get('updated', '')} · moves when the score or a leg does")
-    d.text((40, H - 50), foot, font=art_font(16), fill=ART_MUTED)
-    brand_sign(img, W - 40, H - 52, "PIMP-BOT", 16, variant="hype" if c.get("state") == "in" else "default")
-    out = _png(img)
-    out.pulse = [pulse_box] if pulse_box else []
-    return out
 
 
 # ---- game tracker card: data, embed, the job ----------------------------------------------------------------
@@ -21526,7 +21490,7 @@ async def lv_card_data(client, gid: int, ev: dict, path: Optional[str], rows: li
     return {"league": LEAGUE_NAMES.get(path or "", ""), "state": "post" if final else ev.get("state"),
             "status": lv_status_text(dict(ev, final=final or ev.get("final"))), "final": final, "rows": rows,
             "away": dict(away, colour=ac), "home": dict(home, colour=hc), "avatars": avatars, "cashed": cashed,
-            "records": records, "updated": lv_clock(now)}
+            "records": records, "updated": lv_clock(now), "heads": await design_rows_heads(rows)}
 
 
 def lv_card_embed(data: dict, ev: dict, path: Optional[str], filename: str) -> discord.Embed:
@@ -21651,10 +21615,13 @@ def lv_record_games(gid: int, games: dict, now: datetime) -> None:
         if not t or lv_night(t) != night or ev.get("state") not in ("in", "post"):
             continue
         pids = sorted({r["s"]["p"]["id"] for r in g["rows"]})
-        old = c.execute("SELECT pick_ids FROM lv_games WHERE guild_id = ? AND night = ? AND event_id = ?",
+        old = c.execute("SELECT * FROM lv_games WHERE guild_id = ? AND night = ? AND event_id = ?",
                         (gid, night, eid)).fetchone()
         if old:
             pids = sorted(set(pids) | set(json.loads(old["pick_ids"] or "[]")))
+            if (old["state"], old["start"], old["title"], old["pick_ids"]) == (
+                    "post" if ev.get("final") else ev.get("state"), iso(t), lv_score_line(ev), json.dumps(pids)):
+                continue                       # nothing new about this game
         c.execute("INSERT OR REPLACE INTO lv_games (guild_id, night, event_id, state, start, title, pick_ids, seen_at) "
                   "VALUES (?,?,?,?,?,?,?,?)", (gid, night, eid, "post" if ev.get("final") else ev.get("state"), iso(t),
                                                lv_score_line(ev), json.dumps(pids), iso(now)))
@@ -23674,7 +23641,7 @@ _FREE_JUNK = {"less", "more", "over", "under", "higher", "lower", "vs", "at", "n
               "copied", "lineup", "early", "balance", "players", "teams", "submit", "demon", "goblin", "taco",
               "points", "promo", "boosted", "free", "squares", "prizepicks", "underdog", "contest", "of", "mon", "tue",
               "wed", "thu", "fri", "sat", "sun", "today", "tomorrow", "am", "pm", "lineup"}
-_FREE_NAME_TOKEN = re.compile(r"^(?:[A-ZÀ-Þ][A-Za-zÀ-ÿ'’.\-]*|[A-Z]{2,3})$")
+_FREE_NAME_TOKEN = re.compile(r"^(?:[A-ZÀ-ÞĀ-ž][A-Za-zÀ-ÿĀ-ž'’.\-]*|[A-Z]{2,3})$")
 
 
 def slip_reader_on() -> bool:
@@ -23779,9 +23746,10 @@ def free_reocr_number(grey, wd: dict) -> Optional[str]:
 def free_arrow(img, box: tuple) -> Optional[str]:
     """'over' for an up arrow, 'under' for a down arrow, from where the arrow's head (its widest part) sits."""
     x0, y0, x1, y1 = (int(v) for v in box)
+    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(img.width, x1), min(img.height, y1)
     if x1 - x0 < 4 or y1 - y0 < 6:
         return None
-    crop = img.crop((max(0, x0), max(0, y0), x1, y1)).convert("L")
+    crop = img.crop((x0, y0, x1, y1)).convert("L")
     px = crop.load()
     w, h = crop.size
     vals = sorted(px[i, j] for i in range(w) for j in range(h))
@@ -23829,7 +23797,11 @@ def _free_numtext(t: str) -> str:
     """'«12.5' -> '12.5', '49,5' -> '49.5' (icons and punctuation OCR glues onto a number)."""
     if re.search(r"[#:$%/x]|\d[a-wyz]", t, re.I):   # jersey numbers, times, money, '37.5x', '6pm'
         return ""
-    return re.sub(r"^[^\d]+|[^\d]+$", "", t).replace(",", ".")
+    core = re.sub(r"^[^\d]+|[^\d]+$", "", t).replace(",", ".")
+    lead = re.match(r"^[^\d]*", t).group(0)
+    if lead[-1:] in (".", ",") and lead[-2:-1] in ("", "O", "o", "D", "Q"):
+        core = "0." + core                     # "O.5" / ".5" is 0.5
+    return core
 
 
 def _free_stat_in(text: str) -> Optional[tuple[str, int]]:
@@ -23918,6 +23890,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     # legs: anchor on each stat name, take the line number before it, the name above it, and the side
     legs: list[str] = []
     used_names: set = set()
+    num_hs = sorted(w["h"] for w in words if _FREE_NUM.match(_free_numtext(w["text"])))
     builder = bool(re.search(r"\bless\b", low) and re.search(r"\bmore\b", low))
     for k, ln in enumerate(lines):
         st = _free_stat_in(ln["text"])
@@ -23990,7 +23963,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             side = free_green_side(img, top, bottom)
         if side is None:
             left = [w for w in src["words"] if w["x"] + w["w"] <= wd["x"] and w["x"] > wd["x"] - 6 * wd["h"]]
-            nums_left = [w for w in left if _FREE_NUM.match(_free_numtext(w["text"]))]
+            nums_left = [w for w in left if _FREE_NUM.match(_free_numtext(w["text"]))
+                         and len(_free_numtext(w["text"])) > 1]      # a lone "4"/"1" is the arrow, misread
             anchor = min(nums_left, key=lambda w: w["x"]) if nums_left else wd
             glyph = [w for w in left if w not in nums_left and w["x"] + w["w"] <= anchor["x"] + 2
                      and w["x"] > anchor["x"] - 3 * wd["h"]]
@@ -24004,6 +23978,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         if side is None:
             unsure.append(f"over or under for {name}")
             side = "over"
+        if num_hs and wd["h"] > 1.35 * num_hs[len(num_hs) // 2] and wd.get("conf", 100) < 60:
+            unsure.append(f"the line for {name}")           # an arrow glued onto the number
         leg = f"{name} {side} {value:g} {stat}"
         if leg not in legs:
             legs.append(leg)
@@ -24039,18 +24015,23 @@ def free_scan(raw: bytes) -> Optional[dict]:
 
 async def free_fix_names(slip: dict) -> None:
     """'Julian Quifiones' -> 'Julián Quiñones' when ESPN has one clear match (best effort, a few seconds)."""
+    async def found(name: str) -> list:
+        try:
+            raw = await asyncio.wait_for(_get_json(ESPN_SEARCH, {"query": name, "limit": 5, "type": "player"}), 6)
+            return [it.get("displayName") or "" for it in (raw.get("items") or []) if isinstance(it, dict)]
+        except Exception:
+            return []
+    legs = slip.get("legs") or []
+    shapes = [re.match(r"^(.+?) (over|under) ([\d.]+) (.+)$", leg) for leg in legs]
+    names = list(dict.fromkeys(m.group(1) for m in shapes if m))
+    looked = dict(zip(names, await asyncio.gather(*(found(n) for n in names))))
     fixed = []
-    for leg in slip.get("legs") or []:
-        m = re.match(r"^(.+?) (over|under) ([\d.]+) (.+)$", leg)
+    for leg, m in zip(legs, shapes):
         if not m:
             fixed.append(leg)
             continue
         name = m.group(1)
-        try:
-            raw = await asyncio.wait_for(_get_json(ESPN_SEARCH, {"query": name, "limit": 5, "type": "player"}), 6)
-            items = [it.get("displayName") or "" for it in (raw.get("items") or [])]
-        except Exception:
-            items = []
+        items = looked.get(name) or []
         best, score = None, 0.0
         for it in items:
             r = difflib.SequenceMatcher(None, norm_name(name), norm_name(it)).ratio()
@@ -24217,13 +24198,18 @@ async def ask_gemini(system: str, user_text: str) -> tuple[str, list[str]]:
 _NO_ANSWER = re.compile(r"\b(i (?:couldn'?t|could not|can'?t|cannot|wasn'?t able to|was unable to|don'?t have|do not have)"
                         r" (?:find|access|confirm|verify|browse|search|look up|get|provide|give)|unable to (?:find|access|"
                         r"confirm|verify)|no (?:recent |current |reliable )?(?:information|info|results|data) (?:on|about|for|"
-                        r"available)|my knowledge cutoff|as of my last (?:update|training))", re.I)
+                        r"available)|my knowledge cutoff|as of my last (?:update|training)"
+                        r"|i(?:'m| am) (?:not able|unable) to (?:find|access|confirm|verify|browse|search|look up|get)"
+                        r"|(?:don'?t|do not) have (?:real[- ]time|live|current|up[- ]to[- ]date|recent) (?:access|data|info|"
+                        r"information|stats|results)|couldn'?t locate|there (?:is|was|are) no (?:recent |current |reliable )?"
+                        r"(?:information|info|data|news|reports?)\b)", re.I)
 
 
 def ask_unanswered(answer: str) -> bool:
     """Did the answer duck the question (empty, a few words, or 'I couldn't find...')?"""
     a = (answer or "").strip()
-    return len(a) < 20 or bool(_NO_ANSWER.search(a[:400]))
+    m = _NO_ANSWER.search(a[:400])
+    return len(a) < 20 or bool(m and (m.start() < 120 or len(a) < 200))   # a late hedge in a real answer is fine
 
 
 async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
@@ -24278,9 +24264,13 @@ def lv2_elapsed(ev: dict, path: Optional[str]) -> Optional[float]:
     fam = (path or "").split("/")[0]
     if fam == "soccer":
         m = re.search(r"(\d{1,3})(?:\+\d+)?'", detail)
-        return min(1.0, int(m.group(1)) / 90) if m else (0.5 if "half" in detail else None)
+        if m:
+            return min(1.0, int(m.group(1)) / 90)
+        if re.search(r"\b(ft|aet|full[- ]?time|pens?)\b", detail):
+            return 1.0
+        return 0.5 if re.search(r"\bht\b|half", detail) else None
     if fam == "baseball":
-        m = re.search(r"(top|bot|bottom|mid|middle|end)\w*\s+(\d{1,2})", detail)
+        m = re.search(r"(top|bot|bottom|mid|middle|end)\w*\s+(?:of\s+)?(\d{1,2})", detail)
         if not m:
             return None
         inning = int(m.group(2))
@@ -24290,8 +24280,10 @@ def lv2_elapsed(ev: dict, path: Optional[str]) -> Optional[float]:
     if not spec:
         return None
     periods, mins = spec
-    if "half" in detail and "end" not in detail:
+    if "halftime" in detail or detail.strip() in ("half", "ht"):
         return 0.5
+    if re.search(r"\b\d?ot\b", detail) and not ev.get("period"):
+        return 1.0                             # "OT", "2OT" without a period number
     period = int(ev.get("period") or 0)
     if not period:
         m = re.search(r"\b[qp](\d)\b|(\d)(?:st|nd|rd|th)\b", detail)
@@ -24301,7 +24293,8 @@ def lv2_elapsed(ev: dict, path: Optional[str]) -> Optional[float]:
     if period > periods or "ot" in detail.split():
         return 1.0
     m = re.search(r"(\d{1,2}):(\d{2})", detail)
-    left = (int(m.group(1)) + int(m.group(2)) / 60) if m else (0.0 if "end" in detail else mins / 2)
+    left = (int(m.group(1)) + int(m.group(2)) / 60) if m else (
+        0.0 if ("end" in detail or "intermission" in detail) else mins / 2)
     return max(0.0, min(1.0, ((period - 1) * mins + (mins - min(left, mins))) / (periods * mins)))
 
 
@@ -24349,10 +24342,12 @@ async def lv2_board_data(client, gid: int, scope: str, uid: int, private: bool, 
     for u in list(uids)[:24]:
         user = await known_user(client, u)
         avatars[u] = await avatar_bytes(user) if user is not None else None
+    heads = await design_rows_heads([r for g in out for r in g["rows"]])
     tonight = [(lv_clock(t), name, n) for t, name, n in lv_tonight(mine, now)]
     more = max(0, len([g for g in lv_games_of(mine).values() if g["ev"].get("state") == "in"]) - len(out))
     return {"title": "LIVE NOW", "who": "everyone" if scope == "a" else "just you" if private else "mine",
-            "updated": lv_clock(now), "games": out, "tonight": tonight, "avatars": avatars, "more_games": more}
+            "updated": lv_clock(now), "games": out, "tonight": tonight, "avatars": avatars, "more_games": more,
+            "heads": heads}
 
 
 def _lv2_pace_bar(d, x: int, y: int, w: int, h: int, value: float, line: float, pace: Optional[float], side: str,
@@ -24374,128 +24369,6 @@ def _lv2_pace_bar(d, x: int, y: int, w: int, h: int, value: float, line: float, 
         d.rounded_rectangle((x, y, max(x + h, sx(value)), y + h), h // 2, fill=col)
     lx = sx(line)
     d.rectangle((lx - 2, y - 7, lx + 2, y + h + 7), fill=(255, 255, 255))
-
-
-def render_live_board(b: dict) -> io.BytesIO:
-    """b: title, who, updated, games [{league, away, home, status, elapsed, rows}], tonight [(time, name, n)], avatars."""
-    from PIL import Image, ImageDraw
-    W = 1100
-    HEAD, GHEAD, ROW, GAP = 150, 132, 112, 12
-    games = b["games"]
-    heights = []
-    for g in games:
-        n = min(len(g["rows"]), LV2_ROWS)
-        heights.append(GHEAD + n * (ROW + GAP) + (40 if len(g["rows"]) > LV2_ROWS else 0) + 26)
-    H = HEAD + sum(heights) + (86 if b.get("tonight") else 0) + (40 if b.get("more_games") else 0) + 96
-    img = Image.new("RGB", (W, H), ART_BG)
-    top = _grad((W, HEAD), [(150, 40, 60), (60, 20, 70), ART_BG], diagonal=False)
-    img.paste(top, (0, 0))
-    fade = Image.linear_gradient("L").resize((W, 50))
-    img.paste(Image.new("RGB", (W, 50), ART_BG), (0, HEAD - 50), fade)
-    d = ImageDraw.Draw(img)
-    d.ellipse((44, 48, 68, 72), fill=ART_RED)
-    d.text((84, 34), b.get("title", "LIVE NOW"), font=art_font(50, True), fill=ART_TEXT)
-    sub = f"{b.get('who', 'everyone').upper()}  ·  UPDATED {b.get('updated', '')}"
-    d.text((86, 98), sub, font=art_font(22, True), fill=(230, 210, 220))
-    legend = [("NOW", ART_GREEN), ("ON PACE", _brand_mix(ART_GREEN, (44, 44, 58), 0.55)), ("LINE", (255, 255, 255))]
-    lx = W - 40
-    for label, col in reversed(legend):
-        f = art_font(17, True)
-        tw = _tw(d, label, f)
-        lx -= tw
-        d.text((lx, 102), label, font=f, fill=(225, 225, 235))
-        lx -= 30
-        if label == "LINE":
-            d.rectangle((lx + 10, 98, lx + 14, 126), fill=col)
-        else:
-            d.rounded_rectangle((lx, 104, lx + 22, 118), 7, fill=col)
-        lx -= 22
-    y = HEAD
-    for g, gh in zip(games, heights):
-        away, home = g["away"], g["home"]
-        d.rounded_rectangle((20, y, W - 20, y + gh - 14), 26, fill=(24, 24, 33))
-        band = _grad((W - 40, 112), [_brand_mix(away["colour"], ART_BG, 0.55), (30, 30, 42),
-                                     _brand_mix(home["colour"], ART_BG, 0.55)], diagonal=False)
-        img.paste(band, (20, y), _rounded_mask((W - 40, 112), 26))
-        d = ImageDraw.Draw(img)
-        sport = lv2_sport(g.get("league"))
-        lv2_crest(img, 84, y + 56, 38, away, away["colour"], sport)
-        lv2_crest(img, W - 84, y + 56, 38, home, home["colour"], sport)
-        d = ImageDraw.Draw(img)
-        sc = lambda t: f"{t['score']:g}" if t.get("score") is not None else "–"
-        score = f"{lv_abbr(away)}  {sc(away)}   –   {sc(home)}  {lv_abbr(home)}"
-        st, sf = fit_text(d, score, 640, 44, True)
-        d.text((W / 2 - _tw(d, st, sf) / 2, y + 14), st, font=sf, fill=ART_TEXT)
-        status = (g.get("league") + "  ·  " if g.get("league") else "") + (g.get("status") or "")
-        tt, tf = fit_text(d, status, 520, 22, True)
-        d.text((W / 2 - _tw(d, tt, tf) / 2, y + 70), tt, font=tf, fill=ART_AMBER)
-        el = g.get("elapsed")
-        if el is not None:
-            gx0, gx1 = 150, W - 150
-            d.rounded_rectangle((gx0, y + 102, gx1, y + 108), 3, fill=(52, 52, 66))
-            d.rounded_rectangle((gx0, y + 102, gx0 + (gx1 - gx0) * el, y + 108), 3, fill=ART_AMBER)
-        ry = y + GHEAD
-        for r in g["rows"][:LV2_ROWS]:
-            col = _lv_colour(r["state"])
-            d.rounded_rectangle((36, ry, W - 36, ry + ROW), 20, fill=ART_PANEL)
-            d.rounded_rectangle((36, ry, 46, ry + ROW), 5, fill=col)
-            d.rectangle((41, ry, 46, ry + ROW), fill=ART_PANEL)
-            av = _avatar((b.get("avatars") or {}).get(r.get("uid")), 60, r["who"], -1)
-            img.paste(av, (60, ry + 26), av)
-            d = ImageDraw.Draw(img)
-            nt, nf = fit_text(d, r["who"], 300, 20, True)
-            d.text((136, ry + 12), nt, font=nf, fill=ART_MUTED)
-            lt, lf = fit_text(d, r["text"], 560, 28, True, min_size=19)
-            d.text((136, ry + 38), lt, font=lf, fill=ART_TEXT if r["state"] != "dead" else (170, 170, 186))
-            pill = LV_LABEL.get(r["state"], "WAITING")
-            pf = art_font(17, True)
-            pw = max(104, _tw(d, pill, pf) + 30)
-            px = W - 52 - pw
-            d.rounded_rectangle((px, ry + 14, px + pw, ry + 48), 17, fill=_brand_mix(col, ART_BG, 0.78), outline=col,
-                                width=2)
-            d.text((px + (pw - _tw(d, pill, pf)) / 2, ry + 21), pill, font=pf, fill=col)
-            n = r.get("num")
-            if n:
-                vt = f"{n['value']:g} / {n['line']:g}"
-                vf = art_font(34, True)
-                d.text((px - 24 - _tw(d, vt, vf), ry + 10), vt, font=vf, fill=ART_TEXT)
-                _lv2_pace_bar(d, 136, ry + 82, 580, 14, n["value"], n["line"], r.get("pace"), n["side"], r["state"])
-                if r.get("pace") is not None:
-                    need = n["line"] - n["value"]
-                    on = (r["pace"] > n["line"]) if n["side"] == "over" else (r["pace"] <= n["line"])
-                    note = f"on pace for {r['pace']:g}" + (f" · needs {need:g} more" if n["side"] == "over" and need > 0 else "")
-                    nt2, nf2 = fit_text(d, note, W - 52 - 736, 19, True, min_size=14)
-                    d.text((736, ry + 76), nt2, font=nf2, fill=ART_GREEN if on else ART_RED)
-                elif n["side"] == "over" and n["line"] > n["value"]:
-                    d.text((736, ry + 76), f"needs {n['line'] - n['value']:g} more", font=art_font(19, True),
-                           fill=ART_MUTED)
-            else:
-                d.text((136, ry + 80), {"ahead": "winning right now", "behind": "losing right now"}.get(r["state"], ""),
-                       font=art_font(19, True), fill=col)
-            ry += ROW + GAP
-        if len(g["rows"]) > LV2_ROWS:
-            d.text((60, ry), f"+ {len(g['rows']) - LV2_ROWS} more legs on this game  (/gamecard)", font=art_font(19, True),
-                   fill=ART_MUTED)
-        y += gh
-    if b.get("more_games"):
-        d.text((40, y), f"+ {b['more_games']} more games in play: tap 🔄 or use /gamecard", font=art_font(20, True),
-               fill=ART_MUTED)
-        y += 40
-    if b.get("tonight"):
-        d.text((40, y + 6), "LATER TONIGHT", font=art_font(18, True), fill=ART_MUTED)
-        x = 40
-        for t, name, n in b["tonight"]:
-            label = f"{t}  {name}" + (f"  ({n})" if n > 1 else "")
-            if x + _tw(d, label, art_font(20, True)) + 30 > W - 40:
-                break
-            x += _lv_chip(d, x, y + 36, label, ART_TEXT, ART_PANEL2, 20, 40) + 10
-        y += 86
-    d.text((40, H - 56), "Bar = now  ·  faded bar = where it's headed at this rate  ·  white tick = the line",
-           font=art_font(17), fill=ART_MUTED)
-    brand_sign(img, W - 40, H - 58, "PIMP-BOT", 17, variant="hype")
-    out = _png(img)
-    out.pulse = [(44, 48, 68, 72)]
-    return out
 
 
 async def lv2_live_payload(client, gid: int, scope: str, uid: int, private: bool, now: Optional[datetime] = None,
@@ -24841,8 +24714,13 @@ async def team_logo_bytes(url: Optional[str]) -> Optional[bytes]:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
             async with session.get(url) as resp:
                 if resp.status == 200 and int(resp.headers.get("Content-Length") or 0) <= 1_500_000:
-                    data = await resp.content.read(1_500_001)
-                    raw = data if len(data) <= 1_500_000 else None
+                    data = b""
+                    while len(data) <= 1_500_000:
+                        chunk = await resp.content.read(65536)
+                        if not chunk:
+                            break
+                        data += chunk
+                    raw = data if 0 < len(data) <= 1_500_000 else None
     except Exception:
         raw = None
     _LOGO_CACHE[url] = (time.monotonic() + (86400 if raw else 1800), raw)
@@ -24957,8 +24835,11 @@ async def news_status(watch: dict) -> dict[str, Optional[dict]]:
     """{player key: injury entry or None when he isn't on any report}. Players whose name fits more than one
     listed player are left out (no guessing)."""
     reports: dict[str, dict] = {}
+    failed: set = set()
     for path in {x for w in watch.values() for x in w["paths"]}:
         reports[path] = await fetch_injuries(path)
+        if path not in _injury_cache:          # a good fetch is always cached: this one failed
+            failed.add(path)
     out: dict[str, Optional[dict]] = {}
     for key, w in watch.items():
         found = []
@@ -24967,9 +24848,13 @@ async def news_status(watch: dict) -> dict[str, Optional[dict]]:
                 sc = name_score(key, k)
                 if sc >= 2:
                     found.append((sc, dict(v, path=path)))
+        if not found and failed.intersection(w["paths"]):
+            continue                           # his report didn't load: no news either way
         if found:
             best = max(s for s, _ in found)
-            top = {v["name"]: v for s, v in found if s == best}
+            top = {(v["name"], v.get("team") or ""): v for s, v in found if s == best}
+            if any(v.get("ambiguous") for v in top.values()):
+                top[("", "")] = {}                 # the report itself lists two players by this name
             out[key] = next(iter(top.values())) if len(top) == 1 else None
             if len(top) > 1:
                 out.pop(key)
@@ -25039,8 +24924,8 @@ async def news_job(client, now: Optional[datetime] = None) -> None:
                                 (gid, f"inj:{key}")).fetchone()
                 was = row["status"] if row else None
                 now_st = inj["status"] if inj else None
-                if (was or None) == (now_st or None):
-                    continue
+                if (was or "").lower() == (now_st or "").lower():
+                    continue                       # same status ("Out" vs "OUT" from the backup feed is no news)
                 c.execute("INSERT OR REPLACE INTO news_seen (guild_id, key, status, detail, posted_at) VALUES (?,?,?,?,?)",
                           (gid, f"inj:{key}", now_st, (inj or {}).get("comment"), iso(now)))
                 if inj:
@@ -25147,6 +25032,25 @@ def _alt_nick(t: dict) -> str:
     return norm_team(t.get("short") or (t.get("name") or "").split(" ")[-1])
 
 
+def _alt_pick(cands: list, ev: dict):
+    """The candidate (start time or None, value) closest to ESPN's start; None when even the best is 6h+ off."""
+    if not cands:
+        return None
+    t = event_time(ev)
+    timed = [(abs((c - t).total_seconds()), v) for c, v in cands if c is not None and t is not None]
+    if timed:
+        gap, v = min(timed, key=lambda x: x[0])
+        return v if gap <= 6 * 3600 else None
+    return cands[0][1]
+
+
+def _alt_when(text) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(str(text).replace("Z", "+00:00")) if text else None
+    except ValueError:
+        return None
+
+
 def _alt_days(ev: dict) -> list[str]:
     """The game's date in US Eastern time (the leagues' own calendars), and the day before, as YYYY-MM-DD."""
     t = event_time(ev)
@@ -25158,17 +25062,25 @@ def _alt_days(ev: dict) -> list[str]:
 
 # ---- NHL.com -------------------------------------------------------------------------------------------------
 
+ALT_NHL_ABBR = {"NJ": "NJD", "TB": "TBL", "LA": "LAK", "SJ": "SJS", "UTAH": "UTA", "MON": "MTL", "WAS": "WSH"}
+
+
 async def alt_nhl_box(ev: dict) -> Optional[dict]:
     away, home = lv_sides(ev)
     want = {_alt_nick(away), _alt_nick(home)}
+    want_ab = {ALT_NHL_ABBR.get((t.get("abbr") or "").upper(), (t.get("abbr") or "").upper()) for t in (away, home)}
     gid = None
     for day in _alt_days(ev):
         data = await _alt_get(f"{NHL_WEB}/score/{day}", {}, 120 if _alt_live(ev) else 1800)
+        cands = []
         for g in (data or {}).get("games") or []:
+            if not isinstance(g, dict):
+                continue
             names = {norm_team(((g.get(s) or {}).get("name") or {}).get("default") or "") for s in ("awayTeam", "homeTeam")}
-            if want <= names:
-                gid = g.get("id")
-                break
+            abbrs = {str((g.get(s) or {}).get("abbrev") or "").upper() for s in ("awayTeam", "homeTeam")}
+            if want <= names or ("" not in want_ab and want_ab <= abbrs):
+                cands.append((_alt_when(g.get("startTimeUTC")), g.get("id")))
+        gid = _alt_pick(cands, ev)
         if gid:
             break
     if not gid:
@@ -25201,18 +25113,18 @@ async def alt_mlb_box(ev: dict) -> Optional[dict]:
     pk, state = None, "pre"
     for day in _alt_days(ev):
         data = await _alt_get(f"{MLB_API}/schedule", {"sportId": 1, "date": day}, 120 if _alt_live(ev) else 1800)
+        cands = []
         for d in (data or {}).get("dates") or []:
             for g in d.get("games") or []:
                 t = g.get("teams") or {}
                 names = {norm_team(((t.get(s) or {}).get("team") or {}).get("name") or "") for s in ("away", "home")}
-                if want <= names:
-                    pk = g.get("gamePk")
-                    st = ((g.get("status") or {}).get("abstractGameState") or "").lower()
-                    state = {"final": "post", "live": "in"}.get(st, "pre")
-                    break
-            if pk:
-                break
-        if pk:
+                if want <= names and g.get("gamePk"):
+                    cands.append((_alt_when(g.get("gameDate")), g))
+        g = _alt_pick(cands, ev)           # a doubleheader lists both games: the one at ESPN's start time
+        if g:
+            pk = g.get("gamePk")
+            st = ((g.get("status") or {}).get("abstractGameState") or "").lower()
+            state = {"final": "post", "live": "in"}.get(st, "pre")
             break
     if not pk:
         return None
@@ -25265,7 +25177,10 @@ async def sleeper_players() -> dict:
         log.warning("Sleeper player list failed", exc_info=True)
         return _SLEEPER_PLAYERS["by_id"]
     by_id, by_name = {}, {}
-    for pid, p in (raw or {}).items():
+    if not isinstance(raw, dict):
+        log.warning("Sleeper player list wasn't readable")
+        return _SLEEPER_PLAYERS["by_id"]
+    for pid, p in raw.items():
         if not isinstance(p, dict) or not p.get("full_name") or p.get("position") in (None, "DEF"):
             continue
         rec = {"name": p["full_name"], "norm": norm_name(p["full_name"]), "team": (p.get("team") or "").upper(),
@@ -25291,7 +25206,7 @@ async def alt_nfl_box(ev: dict) -> Optional[dict]:
         return None
     kind = {1: "pre", 2: "regular", 3: "post"}.get(ev.get("season_type") or 2, "regular")
     stats = await _alt_get(f"{SLEEPER}/stats/nfl/{kind}/{season}/{week}", {}, 120 if _alt_live(ev) else 3 * 3600)
-    if not stats:
+    if not stats or not isinstance(stats, dict):
         return None
     people = await sleeper_players()
     teams = {SLEEPER_TEAM.get((t.get("abbr") or "").upper(), (t.get("abbr") or "").upper()) for t in ev.get("teams") or []}
@@ -25342,10 +25257,10 @@ async def alt_try(out: dict, leg: dict, path: str, ev: dict, cand: dict, stat_ke
     target = norm_name(cand.get("name") or leg["player"])
     scored = [(name_score(target, p["norm"]), p) for p in box["players"]]
     best = max((s for s, _ in scored), default=0)
-    top = {p["norm"]: p for s, p in scored if s == best and s >= 2}
+    top = [p for s, p in scored if s == best and s >= 2]
     if len(top) != 1:
-        return out
-    pl = next(iter(top.values()))
+        return out                             # nobody, or two players it could be: no guessing
+    pl = top[0]
     if box["state"] in ("in", "post"):
         out["state"] = box["state"] if out["state"] != "post" else "post"
     src = ALT_SOURCES.get(path, "backup feed")
@@ -25399,6 +25314,2836 @@ HELP_EXTRA.append(("📚 Data sources", (
     "Live stats come from ESPN, backed up by the leagues' own free feeds: NHL.com for hockey, the MLB Stats API for "
     "baseball and Sleeper for the NFL. When ESPN's box score is missing a player or a stat (like total bases), the "
     "bot checks those. NFL injury news also checks Sleeper. `/admin status` shows how each feed is doing.")))
+
+
+# ==========================================================================
+# r30 design: sport backdrops, richer receipts and live rows, glossy dots, the big-win GIF
+# ==========================================================================
+
+SERVER_TOGGLES.append(("cashgifs", "Big-win celebration GIFs", "optout"))
+
+DESIGN_SPORT_WORDS = [  # (sport key, pattern) checked in order against paths, league names and the pick's sport
+    ("basketball", r"basketball|\bnba\b|\bwnba\b|ncaa ?b|\bncaab\b|\bcbb\b|college bb|hoops"),
+    ("football", r"football|\bnfl\b|ncaa ?f|\bncaaf\b|\bcfb\b|college fb"),
+    ("hockey", r"hockey|\bnhl\b"),
+    ("baseball", r"baseball|\bmlb\b"),
+    ("soccer", r"soccer|\bmls\b|\bepl\b|premier league|la ?liga|serie a|bundesliga|ligue 1|liga ?mx|champions league|"
+               r"\bucl\b|uefa|\b[a-z]{3}\.\d\b"),
+]
+DESIGN_STAT_WORDS = [  # a prop's stat, when nothing else says which sport a leg is
+    ("basketball", r"\b(points?|rebounds?|assists?|pra|pts\s*\+|threes|3-?pt|3-pointers?|blocks?|steals?)\b"),
+    ("football", r"\b(passing|rushing|receiving|rush|rec yards|receptions?|touchdowns?|anytime td|tds?|sacks?|"
+                 r"interceptions?|completions?|yds)\b"),
+    ("baseball", r"\b(strikeouts?|total bases|home runs?|hrs?|rbis?|hits allowed|earned runs|pitcher|stolen bases?)\b"),
+    ("hockey", r"\b(shots on goal|sog|power ?play|goalie saves|saves)\b"),
+]
+DESIGN_SPORT_LABEL = {"basketball": "HOOPS", "football": "FOOTBALL", "hockey": "HOCKEY", "baseball": "BASEBALL",
+                      "soccer": "SOCCER", "stadium": "GAME NIGHT"}
+DESIGN_WAITING = {"basketball": "WAITING ON TIP-OFF", "football": "WAITING ON KICKOFF", "soccer": "WAITING ON KICKOFF",
+                  "hockey": "WAITING ON PUCK DROP", "baseball": "WAITING ON FIRST PITCH", "stadium": "WAITING ON GAMES"}
+
+
+def design_sport_key(*hints) -> str:
+    """The backdrop family for any mix of hints (ESPN path, league name, the pick's sport, leg text):
+    basketball, football, hockey, baseball, soccer, or stadium when nothing matches."""
+    for h in hints:
+        t = str(h or "").lower()
+        if not t:
+            continue
+        if t in DESIGN_SPORT_LABEL:
+            return t
+        for key, pat in DESIGN_SPORT_WORDS:
+            if re.search(pat, t):
+                return key
+    for h in hints:
+        t = str(h or "").lower()
+        for key, pat in DESIGN_STAT_WORDS:
+            if t and re.search(pat, t):
+                return key
+    return "stadium"
+
+
+def design_leg_sport(e: dict, slip_sport: Optional[str] = None) -> str:
+    """One leg's sport: its ESPN path, its game's path, the slip's sport, then the stat words in its text."""
+    ev = e.get("event") or {}
+    return design_sport_key(e.get("path"), ev.get("path"), ev.get("league"), slip_sport, e.get("text"))
+
+
+def design_main_sport(legs: list, slip_sport: Optional[str] = None) -> str:
+    """The sport most legs are in; 'stadium' for a true mix with no majority."""
+    counts: dict = {}
+    for e in legs or []:
+        k = design_leg_sport(e, slip_sport)
+        if k != "stadium":
+            counts[k] = counts.get(k, 0) + 1
+    if not counts:
+        return design_sport_key(slip_sport)
+    best, n = max(counts.items(), key=lambda kv: kv[1])
+    return best if len(counts) == 1 or n * 2 > sum(counts.values()) else "stadium"
+
+
+def _design_png(img) -> io.BytesIO:
+    """Encode an RGB or RGBA render. Skips optimize=True, which takes 0.5 s+ on the textured backdrops."""
+    from PIL import Image
+    if img.mode != "RGB":
+        bg = Image.new("RGB", img.size, ART_BG)
+        bg.paste(img, (0, 0), img.convert("RGBA"))
+        img = bg
+    out = io.BytesIO()
+    img.save(out, "PNG", compress_level=6)
+    out.seek(0)
+    return out
+
+
+# ---- procedural sport backdrops ------------------------------------------------------------------------
+
+_DESIGN_BG_CACHE: dict = {}
+DESIGN_BG_PALETTE = {  # base top, base bottom, line colour, line strength, paint colour
+    "basketball": ((58, 38, 26), (26, 17, 14), (238, 226, 210), 0.20, (232, 120, 40)),
+    "football": ((20, 54, 34), (9, 22, 15), (236, 244, 236), 0.20, (40, 120, 70)),
+    "hockey": ((40, 52, 66), (14, 18, 26), (220, 232, 245), 0.16, (90, 150, 230)),
+    "baseball": ((20, 50, 30), (9, 20, 14), (236, 240, 230), 0.20, (120, 74, 44)),
+    "soccer": ((18, 52, 34), (8, 21, 15), (236, 244, 236), 0.19, (40, 120, 70)),
+    "stadium": ((22, 26, 52), (8, 10, 16), (230, 250, 236), 0.07, (60, 150, 90)),
+}
+_DESIGN_LINE_INKS = {  # line layers: (colour, strength, blur: px, or a negative fraction of the width)
+    "lines": ((255, 255, 255), 0.2, 0.8), "red": ((235, 70, 70), 0.26, 0.8), "blue": ((80, 140, 245), 0.26, 0.8),
+    "chalk": ((240, 240, 230), 0.12, 0.6), "lamp": ((255, 248, 226), 0.85, 1.2),
+    "glow": ((255, 236, 190), 0.45, -0.035), "beam": ((255, 244, 214), 0.07, -0.04),
+    "bokeh": ((255, 220, 170), 0.2, -0.004), "boards": ((250, 214, 120), 0.14, 0.8),
+}
+
+
+def sport_backdrop(sport: Optional[str], size: tuple, accent=None):
+    """A dark, low-contrast, vignetted playing surface (court, field, rink, diamond, pitch, or stadium lights)
+    drawn in Pillow, as an RGB image of `size`. White text stays readable anywhere on it. Cached."""
+    from PIL import Image
+    key_sport = design_sport_key(sport)
+    W, H = max(8, int(size[0])), max(8, int(size[1]))
+    acc = tuple(int(x) for x in accent[:3]) if accent else None
+    # heights snap to a 4% ladder so slips with different leg counts share one drawing (the stretch is invisible)
+    Hq = H if H < 160 else int(round(1.04 ** round(math.log(H) / math.log(1.04))))
+    key = (key_sport, W, Hq, acc)
+    hit = _DESIGN_BG_CACHE.get(key)
+    if hit is None:
+        hit = _design_backdrop(key_sport, W, Hq, acc)
+        if len(_DESIGN_BG_CACHE) >= 48:
+            _DESIGN_BG_CACHE.pop(next(iter(_DESIGN_BG_CACHE)))
+        _DESIGN_BG_CACHE[key] = hit
+    return hit.copy() if Hq == H else hit.resize((W, H), Image.BILINEAR)
+
+
+def _design_field_map(w: int, h: int, fn):
+    """A smooth float map evaluated on a small grid (light falloff, vignette); the caller scales it up."""
+    import numpy as np
+    f = min(1.0, 160 / max(w, h))
+    sw, sh = max(2, round(w * f)), max(2, round(h * f))
+    ys, xs = np.mgrid[0:sh, 0:sw].astype(np.float32)
+    return fn(xs / (sw - 1), ys / (sh - 1), w / max(h, 1))
+
+
+def _design_noise(w: int, h: int, cells: tuple, seed: int):
+    """Smooth value noise in 0..1 at (h, w); cells = (columns, rows) of random control points."""
+    import numpy as np
+    from PIL import Image
+    rng = np.random.default_rng(seed)
+    small = (rng.random((max(2, cells[1]), max(2, cells[0]))) * 255).astype("uint8")
+    return np.asarray(Image.fromarray(small, "L").resize((w, h), Image.BICUBIC), dtype=np.float32) / 255
+
+
+def _design_soft(mask, blur: float):
+    """Blur a mask; wide blurs run at half size (4x cheaper, and nobody can tell on a glow)."""
+    from PIL import Image, ImageFilter
+    if blur <= 3:
+        return mask.filter(ImageFilter.GaussianBlur(blur))
+    W, H = mask.size
+    small = mask.resize((max(1, W // 2), max(1, H // 2)), Image.BILINEAR).filter(ImageFilter.GaussianBlur(blur / 2))
+    return small.resize((W, H), Image.BILINEAR)
+
+
+def _design_backdrop(sport: str, W: int, H: int, accent):
+    """Surface texture at half size in numpy, crisp line art at full size, then light falloff and vignette."""
+    import numpy as np
+    from PIL import Image, ImageChops, ImageDraw
+    top, bottom, line_c, line_a, paint_c = DESIGN_BG_PALETTE[sport]
+    if accent:
+        paint_c = _brand_mix(paint_c, accent, 0.55)
+    seed = (W * 7919 + H * 104729 + sum(map(ord, sport)) * 31) % (2 ** 31)
+    rnd = _random.Random(seed)
+    tw, th = max(4, W // 2), max(4, H // 2)
+    t = np.linspace(0, 1, th, dtype=np.float32)[:, None, None]
+    base = np.asarray(top, np.float32) * (1 - t) + np.asarray(bottom, np.float32) * t
+    base = np.broadcast_to(base, (th, tw, 3)).copy()
+    layers: dict = {}
+
+    def layer(name: str):
+        if name not in layers:
+            layers[name] = Image.new("L", (W, H), 0)
+        return ImageDraw.Draw(layers[name])
+
+    lw = max(2, round(W / 330))
+    tex = _DESIGN_SURFACES[sport](layer, W, H, lw, rnd, seed, tw, th)
+    if tex is not None:
+        base *= tex[:, :, None]
+    paint = layers.pop("paint", None)
+    if paint is not None:
+        a = np.asarray(paint.resize((tw, th), Image.BILINEAR), np.float32)[:, :, None] / 255 * 0.16
+        base = base * (1 - a) + np.asarray(paint_c, np.float32) * a
+    boost = 1.42                                 # the brightest the overhead light gets
+    img = Image.fromarray(np.clip(base * boost, 0, 255).astype("uint8"), "RGB").resize((W, H), Image.BILINEAR)
+    for name, im in layers.items():
+        colour, strength, blur = _DESIGN_LINE_INKS.get(name, (line_c, line_a, 0.8))
+        if name == "lines":
+            colour, strength = line_c, line_a
+        if accent and name in ("lines", "glow", "beam"):
+            colour = _brand_mix(colour, accent, 0.25)
+        m = _design_soft(im, blur if blur >= 0.5 else max(1.0, W * -blur))
+        if name == "beam":                      # light beams fade out as they fall
+            m = ImageChops.multiply(m, Image.linear_gradient("L").resize((W, H)).point(lambda v: 255 - v))
+        img.paste(tuple(int(c * boost) if name not in ("lamp", "glow") else c for c in colour),
+                  mask=m.point(lambda v, k=strength: int(v * k)))
+
+    def light(x, y, aspect):
+        dx, dy = (x - 0.5) * aspect, y + 0.05
+        return (1 + (boost - 1) * np.exp(-(dx * dx / 0.20 + dy * dy / 0.22))) / boost
+
+    def vignette(x, y, aspect):
+        r = np.sqrt(((x - 0.5) * 2) ** 2 * 0.9 + ((y - 0.45) * 2) ** 2)
+        return 1 - 0.55 * np.clip(r - 0.55, 0, 1) ** 1.4
+
+    lm = _design_field_map(W, H, light) * _design_field_map(W, H, vignette)
+    lmap = Image.fromarray(np.clip(lm * 255, 0, 255).astype("uint8"), "L").resize((W, H), Image.BILINEAR)
+    img = ImageChops.multiply(img, Image.merge("RGB", (lmap, lmap, lmap)))
+    # keep it dark enough for white text: cap the brightest part of the surface
+    probe = np.asarray(img.resize((max(2, W // 6), max(2, H // 6)), Image.BILINEAR), np.float32)
+    peak = float(np.percentile(probe @ np.asarray([0.2126, 0.7152, 0.0722], np.float32), 99.5))
+    cap = 74.0 if sport != "stadium" else 92.0
+    if peak > cap:
+        img = img.point(lambda v, k=cap / peak: int(v * k))
+    return img
+
+
+def _design_basketball(layer, W, H, lw, rnd, seed, tw, th):
+    import numpy as np
+    s = W * 1.12 / 50                           # px per foot; the court is a little wider than the image
+    cx, yb = W / 2, H - max(10, H * 0.025)      # basket end at the bottom
+    L, P = layer("lines"), layer("paint")
+    P.rectangle((cx - 8 * s, yb - 19 * s, cx + 8 * s, yb), fill=255)
+    L.rectangle((cx - 8 * s, yb - 19 * s, cx + 8 * s, yb), outline=255, width=lw)
+    L.ellipse((cx - 6 * s, yb - 25 * s, cx + 6 * s, yb - 13 * s), outline=255, width=lw)
+    bx, by = cx, yb - 5.25 * s
+    r3 = 23.75 * s
+    ang = math.degrees(math.asin(min(1.0, 22 / 23.75)))
+    L.arc((bx - r3, by - r3, bx + r3, by + r3), 270 - ang, 270 + ang, fill=255, width=lw)
+    edge = by - math.cos(math.radians(ang)) * r3
+    for sx in (-22, 22):
+        L.line((cx + sx * s, yb, cx + sx * s, edge), fill=255, width=lw)
+    L.arc((bx - 4 * s, by - 4 * s, bx + 4 * s, by + 4 * s), 180, 360, fill=255, width=lw)
+    L.line((cx - 3 * s, yb - 4 * s, cx + 3 * s, yb - 4 * s), fill=255, width=lw + 1)
+    L.ellipse((bx - 0.9 * s, by - 0.9 * s, bx + 0.9 * s, by + 0.9 * s), outline=255, width=lw)
+    for k in (7, 8, 11, 14):                    # lane space marks
+        for sx in (-1, 1):
+            L.line((cx + sx * 8 * s, yb - k * s, cx + sx * 8.9 * s, yb - k * s), fill=255, width=lw)
+    mid = yb - 47 * s
+    L.line((0, mid, W, mid), fill=255, width=lw)
+    L.ellipse((cx - 6 * s, mid - 6 * s, cx + 6 * s, mid + 6 * s), outline=255, width=lw)
+    L.ellipse((cx - 2 * s, mid - 2 * s, cx + 2 * s, mid + 2 * s), outline=255, width=lw)
+    P.ellipse((cx - 6 * s, mid - 6 * s, cx + 6 * s, mid + 6 * s), fill=110)
+    L.line((cx - 25 * s, yb, cx + 25 * s, yb), fill=255, width=lw)
+    for sx in (-25, 25):
+        L.line((cx + sx * s, 0, cx + sx * s, yb), fill=255, width=lw)
+    # maple: planks of slightly different tone with a long, faint grain
+    plank = max(6, tw // 30)
+    cols = tw // plank + 2
+    tone = np.repeat(np.asarray([0.93 + 0.14 * rnd.random() for _ in range(cols)], np.float32), plank)[:tw]
+    tone[::plank] *= 0.86
+    grain = _design_noise(tw, th, (tw // 4, max(3, th // 90)), seed)
+    return tone[None, :] * (0.95 + 0.1 * grain)
+
+
+def _design_football(layer, W, H, lw, rnd, seed, tw, th):
+    import numpy as np
+    from PIL import Image, ImageDraw
+    s = W * 1.18 / 53.3                         # px per yard
+    cx = W / 2
+    goal = H * 0.16 if H > 600 else H * 0.1
+    L, P = layer("lines"), layer("paint")
+    P.rectangle((0, goal - 10 * s, W, goal), fill=255)
+    for k in range(-30, 30):                    # end zone diagonals
+        x0 = k * 2.2 * s
+        L.line((x0, goal, x0 + 10 * s, goal - 10 * s), fill=110, width=max(1, lw - 1))
+    L.line((0, goal - 10 * s, W, goal - 10 * s), fill=255, width=lw + 1)
+    L.line((0, goal, W, goal), fill=255, width=lw + 2)
+    hx = 3.08 * s
+    yard = 1
+    while goal + yard * s < H + s:
+        y = goal + yard * s
+        if yard % 5 == 0:
+            L.line((0, y, W, y), fill=255, width=lw)
+        else:
+            for x in (cx - hx, cx + hx):
+                L.line((x - 0.35 * s, y, x + 0.35 * s, y), fill=255, width=lw)
+            for x in (cx - 26.6 * s + 0.4 * s, cx + 26.6 * s - 1.1 * s):
+                L.line((x, y, x + 0.7 * s, y), fill=255, width=lw)
+        if yard % 10 == 0 and yard <= 50:
+            f = art_font(max(14, int(1.9 * s)), True)
+            tile = Image.new("L", (int(f.size * 1.6), int(f.size * 1.3)), 0)
+            ImageDraw.Draw(tile).text((2, 0), str(yard), font=f, fill=255)
+            for x, rot in ((cx - 16 * s, 90), (cx + 16 * s, 270)):
+                tt = tile.rotate(rot, expand=True)
+                L._image.paste(255, (int(x - tt.width / 2), int(y - tt.height / 2)), tt)
+        yard += 1
+    f = th / H
+    bands = ((np.arange(th, dtype=np.float32) - goal * f) // (5 * s * f)).astype(int) % 2
+    stripe = np.where(bands == 0, 1.06, 0.94).astype(np.float32)
+    stripe[: int(max(0, goal * f))] = 1.0
+    grass = _design_noise(tw, th, (max(3, tw // 20), max(3, th // 20)), seed)
+    return stripe[:, None] * (0.93 + 0.14 * grass)
+
+
+def _design_hockey(layer, W, H, lw, rnd, seed, tw, th):
+    s = W * 1.1 / 85                            # px per foot
+    cx, ye = W / 2, H - max(8, H * 0.02)        # end boards at the bottom
+    L, R, Bl, P, Bd = layer("lines"), layer("red"), layer("blue"), layer("paint"), layer("boards")
+    rad = 28 * s
+    L.rounded_rectangle((cx - 42.5 * s, ye - 200 * s, cx + 42.5 * s, ye), rad, outline=255, width=lw + 1)
+    # the dasher boards: a kick plate just outside the ice
+    Bd.rounded_rectangle((cx - 43.6 * s, ye - 201 * s, cx + 43.6 * s, ye + 1.1 * s), rad + s, outline=255,
+                         width=max(2, int(s * 0.9)))
+    gl = ye - 11 * s
+    R.line((cx - 40 * s, gl, cx + 40 * s, gl), fill=255, width=lw)
+    P.pieslice((cx - 6 * s, gl - 6 * s, cx + 6 * s, gl + 6 * s), 180, 360, fill=255)
+    R.arc((cx - 6 * s, gl - 6 * s, cx + 6 * s, gl + 6 * s), 180, 360, fill=255, width=lw)
+    R.rectangle((cx - 3 * s, gl, cx + 3 * s, gl + 4 * s), outline=255, width=lw)
+    for sx in (-22, 22):
+        fx, fy = cx + sx * s, ye - 31 * s
+        R.ellipse((fx - 15 * s, fy - 15 * s, fx + 15 * s, fy + 15 * s), outline=255, width=lw)
+        R.ellipse((fx - s, fy - s, fx + s, fy + s), fill=255)
+        for hx in (-1, 1):
+            for vy in (-1, 1):
+                R.line((fx + hx * 2.5 * s, fy + vy * 15 * s, fx + hx * 2.5 * s, fy + vy * 17 * s), fill=255, width=lw)
+                R.line((fx + hx * 2 * s, fy + vy * 0.9 * s, fx + hx * 6 * s, fy + vy * 0.9 * s), fill=255,
+                       width=max(1, lw - 1))
+        for nx in (-22, 22):
+            R.ellipse((cx + nx * s - s, ye - 80 * s - s, cx + nx * s + s, ye - 80 * s + s), fill=255)
+    blue_y = ye - 75 * s
+    Bl.rectangle((cx - 42.5 * s, blue_y - 0.5 * s, cx + 42.5 * s, blue_y + 0.5 * s), fill=255)
+    red_y = ye - 100 * s
+    R.rectangle((cx - 42.5 * s, red_y - 0.5 * s, cx + 42.5 * s, red_y + 0.5 * s), fill=255)
+    Bl.ellipse((cx - 15 * s, red_y - 15 * s, cx + 15 * s, red_y + 15 * s), outline=255, width=lw)
+    Bl.ellipse((cx - 0.6 * s, red_y - 0.6 * s, cx + 0.6 * s, red_y + 0.6 * s), fill=255)
+    C = layer("chalk")                          # skate scratches
+    for _ in range(int(W * H / 9000)):
+        x, y, r = rnd.random() * W, rnd.random() * H, 30 + rnd.random() * 220
+        a0 = rnd.random() * 360
+        C.arc((x - r, y - r, x + r, y + r), a0, a0 + 8 + rnd.random() * 26, fill=60 + rnd.randrange(80), width=1)
+    frost = _design_noise(tw, th, (max(3, tw // 45), max(3, th // 45)), seed)
+    return 0.92 + 0.16 * frost
+
+
+def _design_baseball(layer, W, H, lw, rnd, seed, tw, th):
+    import numpy as np
+    s = W * 0.8 / 127.3                         # px per foot: first to third base spans most of the width
+    hx, hy = W / 2, H - max(16, H * 0.06)       # home plate near the bottom
+    L, P = layer("lines"), layer("paint")
+    d = 90 * s / math.sqrt(2)
+    first, second, third = (hx + d, hy - d), (hx, hy - 2 * d), (hx - d, hy - d)
+    mx, my = hx, hy - 60.5 * s
+    r = 95 * s
+    P.pieslice((mx - r, my - r, mx + r, my + r), 180 + 45 - 2, 360 - 45 + 2, fill=255)
+    P.polygon([(hx, hy + 13 * s), (hx + 26 * s, hy - 13 * s), (hx, hy - 39 * s), (hx - 26 * s, hy - 13 * s)], fill=255)
+    inset = 6 * s
+    P.polygon([(hx, hy - inset * 1.4), (first[0] - inset, first[1]), (second[0], second[1] + inset),
+               (third[0] + inset, third[1])], fill=0)
+    P.ellipse((mx - 9 * s, my - 9 * s, mx + 9 * s, my + 9 * s), fill=255)
+    for (x, y) in (first, second, third):
+        L.rectangle((x - 1.3 * s, y - 1.3 * s, x + 1.3 * s, y + 1.3 * s), fill=255)
+    L.polygon([(hx - 1.4 * s, hy - 1.4 * s), (hx + 1.4 * s, hy - 1.4 * s), (hx + 1.4 * s, hy),
+               (hx, hy + 1.4 * s), (hx - 1.4 * s, hy)], fill=255)
+    far = max(W, H) * 2
+    for sx in (-1, 1):
+        L.line((hx, hy, hx + sx * far, hy - far), fill=255, width=lw)
+    L.line((first, second, third), fill=150, width=max(1, lw - 1))
+    L.rectangle((mx - 1 * s, my - 0.25 * s, mx + 1 * s, my + 0.25 * s), fill=255)
+    for rr, wdt in ((315, lw * 4), (330, lw + 1)):   # warning track and the outfield wall
+        R_ = rr * s
+        L.arc((hx - R_, hy - R_, hx + R_, hy + R_), 225, 315, fill=120 if wdt > lw else 255, width=int(wdt))
+    for bx in (hx - 13 * s, hx + 13 * s):        # batter's boxes
+        L.rectangle((bx - 2 * s, hy - 3 * s, bx + 2 * s, hy + 3 * s), outline=200, width=max(1, lw - 1))
+    # mowed checkerboard on the grass
+    f = tw / W
+    ys, xs = np.mgrid[0:th, 0:tw].astype(np.float32) / f
+    u, v = (xs - hx + (hy - ys)) / (30 * s), (hx - xs + (hy - ys)) / (30 * s)
+    check = ((np.floor(u) + np.floor(v)) % 2).astype(np.float32)
+    grass = _design_noise(tw, th, (max(3, tw // 25), max(3, th // 25)), seed)
+    return (0.95 + 0.09 * check) * (0.94 + 0.12 * grass)
+
+
+def _design_soccer(layer, W, H, lw, rnd, seed, tw, th):
+    import numpy as np
+    s = W * 1.12 / 68                           # px per metre
+    cx, gl = W / 2, H - max(12, H * 0.03)       # goal line at the bottom
+    L = layer("lines")
+    L.rectangle((cx - 34 * s, gl - 120 * s, cx + 34 * s, gl), outline=255, width=lw)
+    L.rectangle((cx - 20.15 * s, gl - 16.5 * s, cx + 20.15 * s, gl), outline=255, width=lw)
+    L.rectangle((cx - 9.16 * s, gl - 5.5 * s, cx + 9.16 * s, gl), outline=255, width=lw)
+    L.rectangle((cx - 3.66 * s, gl, cx + 3.66 * s, gl + 2 * s), outline=255, width=lw)
+    ps = gl - 11 * s
+    L.ellipse((cx - 0.4 * s, ps - 0.4 * s, cx + 0.4 * s, ps + 0.4 * s), fill=255)
+    r = 9.15 * s
+    a = math.degrees(math.acos(5.5 / 9.15))     # the D: the arc outside the penalty area
+    L.arc((cx - r, ps - r, cx + r, ps + r), 270 - a, 270 + a, fill=255, width=lw)
+    for sx in (-34, 34):
+        L.arc((cx + sx * s - s, gl - s, cx + sx * s + s, gl + s), 180 if sx > 0 else 270, 270 if sx > 0 else 360,
+              fill=255, width=lw)
+    half = gl - 52.5 * s
+    if half > -r:
+        L.line((0, half, W, half), fill=255, width=lw)
+        L.ellipse((cx - r, half - r, cx + r, half + r), outline=255, width=lw)
+        L.ellipse((cx - 0.4 * s, half - 0.4 * s, cx + 0.4 * s, half + 0.4 * s), fill=255)
+    f = th / H
+    bands = ((gl - np.arange(th, dtype=np.float32) / f) // (5.5 * s)).astype(int) % 2
+    stripe = np.where(bands == 0, 1.07, 0.93).astype(np.float32)
+    grass = _design_noise(tw, th, (max(3, tw // 20), max(3, th // 20)), seed)
+    return stripe[:, None] * (0.94 + 0.12 * grass)
+
+
+def _design_stadium(layer, W, H, lw, rnd, seed, tw, th):
+    import numpy as np
+    G, Bk, Bm, Lp = layer("glow"), layer("bokeh"), layer("beam"), layer("lamp")
+    u = W / 1000
+    towers = [(W * 0.12, H * 0.07), (W * 0.88, H * 0.07)] + ([(W * 0.5, H * 0.03)] if W > H * 1.3 else [])
+    for tx, ty in towers:
+        for i in range(3):
+            for j in range(4):
+                x, y = tx + (j - 1.5) * 16 * u, ty + i * 14 * u
+                G.ellipse((x - 14 * u, y - 11 * u, x + 14 * u, y + 11 * u), fill=255)
+                Lp.ellipse((x - 5 * u, y - 4 * u, x + 5 * u, y + 4 * u), fill=255)
+        Bm.polygon([(tx - 30 * u, ty), (tx + 30 * u, ty), (W * 0.5 + (tx - W / 2) * 0.1 + 200 * u, H * 0.95),
+                    (W * 0.5 + (tx - W / 2) * 0.1 - 200 * u, H * 0.95)], fill=255)
+    for _ in range(int(140 * W / 1000)):        # the crowd's camera flashes, out of focus
+        x = rnd.random() * W
+        y = H * (0.22 + 0.16 * rnd.random())
+        r = (2 + rnd.random() * 7) * u
+        Bk.ellipse((x - r, y - r, x + r, y + r), fill=80 + rnd.randrange(150))
+    # the field far below the lights, in perspective
+    L, P = layer("lines"), layer("paint")
+    hy = H * 0.62
+    P.polygon([(W * 0.3, hy), (W * 0.7, hy), (W * 1.25, H), (W * -0.25, H)], fill=255)
+    for k in range(-6, 7):
+        L.line((W / 2 + k * W * 0.033, hy, W / 2 + k * W * 0.125, H), fill=150, width=max(1, lw - 1))
+    for j in range(1, 8):
+        y = hy + (H - hy) * (j / 8) ** 1.6
+        half = W * 0.2 + (W * 0.75 - W * 0.2) * (y - hy) / (H - hy)
+        L.line((W / 2 - half, y, W / 2 + half, y), fill=110, width=max(1, lw - 1))
+    ys = np.arange(th, dtype=np.float32) / max(1, th - 1)
+    horizon = 1 + 0.25 * np.exp(-((ys - 0.42) ** 2) / 0.004) + 0.35 * np.clip(ys - 0.75, 0, 1)
+    return np.broadcast_to(horizon[:, None], (th, tw)).astype(np.float32)
+
+
+_DESIGN_SURFACES = {"basketball": _design_basketball, "football": _design_football, "hockey": _design_hockey,
+                    "baseball": _design_baseball, "soccer": _design_soccer, "stadium": _design_stadium}
+
+
+# ---- small art: sport glyphs, glossy status dots, team chips, the LIVE badge, the progress ring ------------
+
+_DESIGN_SPRITES: dict = {}
+
+
+def _design_sprite(key: tuple, draw_fn):
+    """Cache small RGBA drawings (glyphs, dots, badges) by key."""
+    hit = _DESIGN_SPRITES.get(key)
+    if hit is None:
+        hit = draw_fn()
+        if len(_DESIGN_SPRITES) > 400:
+            _DESIGN_SPRITES.clear()
+        _DESIGN_SPRITES[key] = hit
+    return hit
+
+
+def _design_put(img, sprite, x: float, y: float) -> None:
+    """Paste an RGBA sprite at (x, y) on an RGB or RGBA image."""
+    if img.mode == "RGBA":
+        img.alpha_composite(sprite, (int(x), int(y)))
+    else:
+        img.paste(sprite, (int(x), int(y)), sprite)
+
+
+def _design_disc(S: int, cx: float, cy: float, r: float, stops: list):
+    """An RGBA ball shaded with a light from the top left."""
+    from PIL import Image
+    shade = _brand_radial((S, S), cx - r * 0.35, cy - r * 0.4, r * 1.45, stops).convert("RGBA")
+    mask = _brand_mask((S, S), lambda d: d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=255))
+    out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    out.paste(shade, (0, 0), mask)
+    return out
+
+
+def design_glyph(sport: Optional[str], size: int):
+    """A tiny drawn ball for a sport (basketball, football, puck, baseball, soccer ball, or a gold star), RGBA."""
+    key_sport = design_sport_key(sport)
+    size = max(10, int(size))
+    return _design_sprite(("glyph", key_sport, size), lambda: _design_draw_glyph(key_sport, size))
+
+
+def _design_draw_glyph(sport: str, size: int):
+    from PIL import Image, ImageDraw
+    k = 4
+    S = size * k
+    c = S / 2
+    r = S * 0.44
+    w = max(2, int(S * 0.045))
+    if sport == "basketball":
+        img = _design_disc(S, c, c, r, [(255, 170, 90), (232, 110, 30), (150, 60, 14)])
+        d = ImageDraw.Draw(img)
+        ink = (40, 20, 10, 255)
+        d.line((c, c - r, c, c + r), fill=ink, width=w)
+        d.line((c - r, c, c + r, c), fill=ink, width=w)
+        d.arc((c - r * 1.55, c - r, c - r * 0.25, c + r), -60, 60, fill=ink, width=w)
+        d.arc((c + r * 0.25, c - r, c + r * 1.55, c + r), 120, 240, fill=ink, width=w)
+        d.ellipse((c - r, c - r, c + r, c + r), outline=ink, width=w)
+    elif sport == "football":
+        img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        ball = _design_disc(S, c, c, r, [(190, 110, 60), (140, 70, 30), (80, 36, 14)])
+        m = _brand_mask((S, S), lambda d: d.ellipse((c - r, c - r * 0.6, c + r, c + r * 0.6), fill=255))
+        img.paste(ball, (0, 0), m)
+        d = ImageDraw.Draw(img)
+        white = (250, 246, 236, 255)
+        for sx in (-1, 1):
+            d.line((c + sx * r * 0.62, c - r * 0.4, c + sx * r * 0.62, c + r * 0.4), fill=white, width=w)
+        d.line((c - r * 0.3, c, c + r * 0.3, c), fill=white, width=w)
+        for i in range(-2, 3):
+            x = c + i * r * 0.13
+            d.line((x, c - r * 0.12, x, c + r * 0.12), fill=white, width=max(2, w - 1))
+        d.ellipse((c - r, c - r * 0.6, c + r, c + r * 0.6), outline=(60, 26, 8, 255), width=w)
+        img = img.rotate(32, resample=Image.BICUBIC)
+    elif sport == "hockey":
+        img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        top, h = c - r * 0.45, r * 0.5
+        d.ellipse((c - r, top + h - r * 0.42, c + r, top + h + r * 0.42), fill=(10, 10, 14, 255))
+        d.rectangle((c - r, top, c + r, top + h), fill=(18, 18, 24, 255))
+        d.ellipse((c - r, top - r * 0.42, c + r, top + r * 0.42), fill=(92, 96, 112, 255))
+        d.ellipse((c - r * 0.7, top - r * 0.3, c + r * 0.2, top + r * 0.05), fill=(150, 154, 172, 255))
+        d.ellipse((c - r, top - r * 0.42, c + r, top + r * 0.42), outline=(200, 204, 220, 255), width=max(2, w // 2))
+        d.line((c - r, top + h * 0.5, c + r, top + h * 0.5), fill=(120, 124, 140, 255), width=max(2, w // 2))
+    elif sport == "baseball":
+        img = _design_disc(S, c, c, r, [(255, 255, 255), (238, 232, 220), (170, 160, 150)])
+        d = ImageDraw.Draw(img)
+        red = (220, 40, 50, 255)
+        for sx in (-1, 1):
+            ccx, base = c + sx * r * 0.95, 0 if sx < 0 else 180
+            d.arc((ccx - r * 0.85, c - r * 0.85, ccx + r * 0.85, c + r * 0.85), base - 55, base + 55, fill=red, width=w)
+            for t in range(-2, 3):
+                a = math.radians(base + t * 21)
+                px, py = ccx + math.cos(a) * r * 0.85, c + math.sin(a) * r * 0.85
+                dx, dy = math.cos(a) * r * 0.13, math.sin(a) * r * 0.13
+                d.line((px - dx - dy * 0.6, py - dy + dx * 0.6, px + dx - dy * 0.6, py + dy + dx * 0.6), fill=red,
+                       width=max(2, w // 2))
+        d.ellipse((c - r, c - r, c + r, c + r), outline=(120, 110, 100, 255), width=max(2, w // 2))
+    elif sport == "soccer":
+        img = _design_disc(S, c, c, r, [(255, 255, 255), (232, 234, 240), (150, 154, 166)])
+        d = ImageDraw.Draw(img)
+        ink = (24, 24, 30, 255)
+
+        def pent(x, y, rr, rot):
+            return [(x + rr * math.cos(math.radians(rot + 72 * i)), y + rr * math.sin(math.radians(rot + 72 * i)))
+                    for i in range(5)]
+        d.polygon(pent(c, c, r * 0.32, -90), fill=ink)
+        for i in range(5):
+            a = math.radians(-90 + 72 * i)
+            x, y = c + math.cos(a) * r * 0.98, c + math.sin(a) * r * 0.98
+            d.polygon(pent(x, y, r * 0.3, -90 + 72 * i + 36), fill=ink)
+            d.line((c + math.cos(a) * r * 0.32, c + math.sin(a) * r * 0.32, c + math.cos(a) * r * 0.7,
+                    c + math.sin(a) * r * 0.7), fill=ink, width=w)
+        img.putalpha(_brand_mask((S, S), lambda dd: dd.ellipse((c - r, c - r, c + r, c + r), fill=255)))
+        ImageDraw.Draw(img).ellipse((c - r, c - r, c + r, c + r), outline=(90, 94, 110, 255), width=max(2, w // 2))
+    else:
+        img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        star = _brand_lin((S, S), [(255, 240, 180), (245, 190, 60), (180, 110, 10)], 90).convert("RGBA")
+        pts = []
+        for i in range(10):
+            a = math.radians(-90 + 36 * i)
+            rr = r if i % 2 == 0 else r * 0.45
+            pts.append((c + rr * math.cos(a), c + rr * math.sin(a) + r * 0.06))
+        img.paste(star, (0, 0), _brand_mask((S, S), lambda d: d.polygon(pts, fill=255)))
+    return img.resize((size, size), Image.LANCZOS)
+
+
+DESIGN_STATE_COLOURS = {"hit": ART_GREEN, "miss": ART_RED, "push": ART_MUTED, "ahead": ART_GREEN, "behind": ART_RED,
+                        "live": ART_BLUE, "needs": ART_AMBER, "close": ART_AMBER, "open": ART_FAINT,
+                        "pending": ART_MUTED, "waiting": ART_FAINT}
+DESIGN_LV_DOT = {"cleared": "hit", "dead": "miss", "push": "push", "close": "close", "live": "live", "ahead": "ahead",
+                 "behind": "behind", "pending": "pending", "waiting": "open"}
+
+
+def _status_dot(d, x, y, r, state):
+    """A glossy status dot centred on (x, y): a filled ball with a mark once settled (or needing you), a glass
+    ring with a glowing pip while live. d is the image, or an ImageDraw on it (the old call style)."""
+    img = d if hasattr(d, "paste") else d._image
+    sprite = _design_sprite(("dot", state, int(r)), lambda: _design_draw_dot(state, int(r)))
+    pad = sprite.width // 2
+    _design_put(img, sprite, x - pad, y - pad)
+
+
+def _design_draw_dot(state: str, r: int):
+    from PIL import Image, ImageChops, ImageDraw
+    k = 4
+    R = r * k
+    S = int(R * 2.8)
+    c = S / 2
+    colour = DESIGN_STATE_COLOURS.get(state, ART_FAINT)
+    out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    shadow = _brand_mask((S, S), lambda d: d.ellipse((c - R, c - R + R * 0.18, c + R, c + R + R * 0.18), fill=255))
+    _brand_paint(out, shadow, (0, 0, 0), alpha=150, blur=R * 0.18)
+    filled = state in ("hit", "miss", "push", "needs")
+    if filled:
+        out.alpha_composite(_design_disc(S, c, c, R, [_brand_mix(colour, (255, 255, 255), 0.35), colour,
+                                                      _brand_mix(colour, (0, 0, 0), 0.45)]))
+    else:
+        out.alpha_composite(_design_disc(S, c, c, R, [(58, 58, 74), (30, 30, 40), (16, 16, 22)]))
+        ring = _brand_mask((S, S), lambda d: d.ellipse((c - R, c - R, c + R, c + R), outline=255, width=int(R * 0.2)))
+        _brand_paint(out, ring, colour if state not in ("open", "waiting") else (110, 110, 130))
+        if state in ("ahead", "behind", "live", "close"):
+            pip = _brand_mask((S, S), lambda d: d.ellipse((c - R * 0.42, c - R * 0.42, c + R * 0.42, c + R * 0.42),
+                                                          fill=255))
+            _brand_paint(out, pip, colour, alpha=200, blur=R * 0.25)
+            _brand_paint(out, pip, _brand_mix(colour, (255, 255, 255), 0.3))
+        elif state == "pending":                # grading: an hourglass
+            hg = _brand_mask((S, S), lambda d: d.polygon(
+                [(c - R * 0.36, c - R * 0.46), (c + R * 0.36, c - R * 0.46), (c, c), (c + R * 0.36, c + R * 0.46),
+                 (c - R * 0.36, c + R * 0.46), (c, c)], fill=255))
+            _brand_paint(out, hg, colour)
+    # glossy highlight across the top
+    hl = _brand_mask((S, S), lambda d: d.ellipse((c - R * 0.66, c - R * 0.9, c + R * 0.66, c - R * 0.05), fill=255))
+    fade = Image.linear_gradient("L").resize((S, S)).point(lambda v: 255 - v)
+    hl = ImageChops.multiply(hl, fade.transform((S, S), Image.AFFINE, (1, 0, 0, 0, 1.6, -(c - R * 0.9) * 1.6)))
+    _brand_paint(out, hl, (255, 255, 255), alpha=120 if filled else 60)
+    if filled:
+        w = max(3, int(R * 0.26))
+        m = Image.new("L", (S, S), 0)
+        d = ImageDraw.Draw(m)
+        if state == "hit":
+            pts = [(c - R * 0.45, c + R * 0.02), (c - R * 0.12, c + R * 0.35), (c + R * 0.48, c - R * 0.33)]
+            d.line(pts, fill=255, width=w, joint="curve")
+            for p in (pts[0], pts[-1]):
+                d.ellipse((p[0] - w / 2, p[1] - w / 2, p[0] + w / 2, p[1] + w / 2), fill=255)
+        elif state == "miss":
+            for a, b in (((-0.36, -0.36), (0.36, 0.36)), ((-0.36, 0.36), (0.36, -0.36))):
+                d.line((c + a[0] * R, c + a[1] * R, c + b[0] * R, c + b[1] * R), fill=255, width=w)
+                for p in (a, b):
+                    d.ellipse((c + p[0] * R - w / 2, c + p[1] * R - w / 2, c + p[0] * R + w / 2, c + p[1] * R + w / 2),
+                              fill=255)
+        elif state == "push":
+            d.rounded_rectangle((c - R * 0.42, c - w / 2, c + R * 0.42, c + w / 2), w // 2, fill=255)
+        else:  # needs you: an exclamation mark
+            d.rounded_rectangle((c - w / 2, c - R * 0.55, c + w / 2, c + R * 0.15), w // 2, fill=255)
+            d.ellipse((c - w * 0.6, c + R * 0.3, c + w * 0.6, c + R * 0.3 + w * 1.2), fill=255)
+        _brand_paint(out, m, (16, 16, 22))
+    return out.resize((S // k, S // k), Image.LANCZOS)
+
+
+def _design_norm(text) -> str:
+    return " ".join(re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower()).split())
+
+
+def design_team_of(text: str, teams: list) -> Optional[dict]:
+    """The team a moneyline/spread/team-total leg backs (from the game's two teams), else None."""
+    simple = parse_simple_leg(text or "")
+    want = _design_norm((simple or {}).get("team"))
+    if not want:
+        return None
+    hits = []
+    for t in teams:
+        names = {_design_norm(t.get(k)) for k in ("abbr", "short", "name", "nickname")} | \
+                {_design_norm(a) for a in (t.get("aliases") or ())}
+        names.discard("")
+        if want in names or any(want.endswith(" " + n) or n.endswith(" " + want) for n in names if len(n) > 2):
+            hits.append(t)
+    return hits[0] if len(hits) == 1 else None
+
+
+def design_leg_teams(e: dict) -> list:
+    """The teams a leg is about: the side a moneyline/spread backs, else both teams of its game (away first)."""
+    teams = (e.get("event") or {}).get("teams") or []
+    if len(teams) != 2:
+        return []
+    mine = design_team_of(e.get("text") or "", teams)
+    return [mine] if mine else sorted(teams, key=lambda t: t.get("home", False))
+
+
+def design_team_colours(teams: list) -> list:
+    """Display colours for one or two teams (the second kept apart from the first)."""
+    out = []
+    for t in teams[:2]:
+        out.append(lv_team_colour(t, avoid=out[0] if out else None))
+    return out
+
+
+def design_team_chip(img, x: float, y: float, teams: list, h: int = 26) -> int:
+    """'▌BOS @ ▌NY' with each team's colour bar, on a faint pill. Returns the width drawn (0 if no teams)."""
+    from PIL import ImageDraw
+    if not teams:
+        return 0
+    d = ImageDraw.Draw(img, "RGBA")
+    f = art_font(int(h * 0.58), True)
+    af = art_font(int(h * 0.5), True)
+    parts = list(zip([lv_abbr(t) for t in teams[:2]], design_team_colours(teams)))
+    widths = [_tw(d, a, f) for a, _ in parts]
+    at_w = _tw(d, "@", af) + 12 if len(parts) == 2 else 0
+    total = 10 + sum(w + 16 for w in widths) + at_w + 4
+    d.rounded_rectangle((x, y, x + total, y + h), h // 2, fill=(255, 255, 255, 20), outline=(255, 255, 255, 34))
+    cx = x + 10
+    for i, ((abbr, col), w) in enumerate(zip(parts, widths)):
+        d.rounded_rectangle((cx, y + 5, cx + 5, y + h - 5), 2, fill=col + (255,))
+        d.text((cx + 10, y + (h - f.size) / 2 - 1), abbr, font=f, fill=ART_TEXT)
+        cx += w + 16
+        if i == 0 and len(parts) == 2:
+            d.text((cx + 1, y + (h - af.size) / 2), "@", font=af, fill=ART_MUTED)
+            cx += at_w
+    return int(total)
+
+
+def design_live_badge(img, x: float, y: float, h: int = 30, align: str = "left") -> int:
+    """A red LIVE pill with a dot and rings around it. Returns its width."""
+    sprite = _design_sprite(("live", int(h)), lambda: _design_draw_live(int(h)))
+    pad = int(h * 0.4)
+    x0 = int(x - (sprite.width - 2 * pad) if align == "right" else x) - pad
+    _design_put(img, sprite, x0, int(y) - pad)
+    return sprite.width - 2 * pad
+
+
+def _design_draw_live(h: int):
+    from PIL import Image, ImageDraw
+    k = 3
+    H = h * k
+    f = art_font(int(h * 0.56) * k, True)
+    tw = _tw(ImageDraw.Draw(Image.new("L", (1, 1))), "LIVE", f)
+    W = int(H * 0.5 + H * 0.62 + tw + H * 0.42)
+    pad = int(h * 0.4) * k
+    S = (W + 2 * pad, H + 2 * pad)
+    out = Image.new("RGBA", S, (0, 0, 0, 0))
+    pill = _brand_mask(S, lambda d: d.rounded_rectangle((pad, pad, pad + W, pad + H), H // 2, fill=255))
+    _brand_paint(out, pill, (255, 40, 70), alpha=110, blur=H * 0.28)
+    _brand_paint(out, pill, _brand_lin(S, [(255, 92, 100), (226, 32, 58), (170, 16, 40)], 90))
+    gloss = _brand_mask(S, lambda d: d.rounded_rectangle((pad + H * 0.2, pad + H * 0.08, pad + W - H * 0.2,
+                                                           pad + H * 0.45), H // 4, fill=255))
+    _brand_paint(out, gloss, (255, 255, 255), alpha=46, blur=H * 0.05)
+    cx, cy = pad + H * 0.5, pad + H / 2
+    d = ImageDraw.Draw(out)
+    for rr, a in ((0.36, 60), (0.27, 110)):
+        d.ellipse((cx - H * rr, cy - H * rr, cx + H * rr, cy + H * rr), outline=(255, 255, 255, a), width=max(2, k))
+    d.ellipse((cx - H * 0.15, cy - H * 0.15, cx + H * 0.15, cy + H * 0.15), fill=(255, 255, 255, 255))
+    d.text((pad + H, cy - f.size * 0.62), "LIVE", font=f, fill=(255, 255, 255, 255))
+    return out.resize((S[0] // k, S[1] // k), Image.LANCZOS)
+
+
+def design_ring(img, x: float, y: float, size: int, states: list, label: Optional[str] = None,
+                sub: Optional[str] = None) -> None:
+    """A segmented progress ring (one arc per leg, coloured by state) with a big count in the middle."""
+    from PIL import Image, ImageDraw
+    k = 3
+    S = size * k
+    ring = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(ring)
+    w = int(S * 0.1)
+    box = (w / 2 + 2, w / 2 + 2, S - w / 2 - 2, S - w / 2 - 2)
+    n = max(1, len(states))
+    gap = 6 if n > 1 else 0
+    d.ellipse((2, 2, S - 2, S - 2), fill=(10, 10, 16, 210))
+    d.arc(box, 0, 360, fill=(44, 44, 58, 255), width=w)
+    for i, st in enumerate(states or ["open"]):
+        a0 = -90 + 360 * i / n + gap / 2
+        a1 = -90 + 360 * (i + 1) / n - gap / 2
+        col = DESIGN_STATE_COLOURS.get(st, ART_FAINT)
+        if st in ("ahead", "behind", "live", "close"):
+            col = _brand_mix(col, (30, 30, 40), 0.45)         # live legs: a dimmer arc than settled ones
+        elif st in ("open", "waiting", "pending"):
+            col = (62, 62, 80)
+        d.arc(box, a0, a1, fill=col + (255,), width=w)
+    _design_put(img, ring.resize((size, size), Image.LANCZOS), x, y)
+    dd = ImageDraw.Draw(img)
+    if label:
+        t, f = fit_text(dd, label, size * 0.62, int(size * 0.3), True, 10)
+        dd.text((x + (size - _tw(dd, t, f)) / 2, y + size * (0.26 if sub else 0.33)), t, font=f, fill=ART_TEXT)
+    if sub:
+        f = art_font(max(9, int(size * 0.13)), True)
+        dd.text((x + (size - _tw(dd, sub, f)) / 2, y + size * 0.6), sub, font=f, fill=ART_MUTED)
+
+
+def design_wash(img, box: tuple, colours: list, radius: int, strength: int = 70, reach: float = 0.45) -> None:
+    """A team-colour glow from the left edge of a row panel (top-to-bottom blend for two teams)."""
+    from PIL import Image, ImageChops
+    x0, y0, x1, y1 = (int(v) for v in box)
+    w, h = max(2, x1 - x0), max(2, y1 - y0)
+    if not colours:
+        return
+    tint = _brand_lin((w, h), colours if len(colours) > 1 else colours * 2, 90)
+    ramp = Image.linear_gradient("L").rotate(-90, expand=True).resize((w, h))     # 255 at the left, 0 at the right
+    alpha = ramp.point(lambda v: int(strength * max(0.0, (v / 255 - (1 - reach)) / reach) ** 1.6))
+    alpha = ImageChops.multiply(alpha, _rounded_mask((w, h), radius))
+    img.paste(tint, (x0, y0), alpha)
+
+
+def design_split_ring(img, cx: float, cy: float, r: float, colours: list, width: int = 4) -> None:
+    """A ring around an avatar in a team's colour, or half and half for a whole game."""
+    from PIL import Image, ImageDraw
+    k = 3
+    S = int((r + width) * 2 * k) + 4
+    lay = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    c = S / 2
+    rr = (r + width / 2) * k
+    box = (c - rr, c - rr, c + rr, c + rr)
+    cols = colours or [(110, 110, 130)]
+    if len(cols) == 1:
+        d.ellipse(box, outline=cols[0] + (255,), width=width * k)
+    else:
+        d.arc(box, 90, 270, fill=cols[0] + (255,), width=width * k)
+        d.arc(box, -90, 90, fill=cols[1] + (255,), width=width * k)
+    small = lay.resize((S // k, S // k), Image.LANCZOS)
+    _design_put(img, small, cx - small.width / 2, cy - small.height / 2)
+
+
+# ---- the shared canvas -------------------------------------------------------------------------------
+
+def _design_card(W: int, H: int, sport: str, top_colour: tuple, accent=None, head: int = 190, margin: int = 16,
+                 radius: int = 30):
+    """Page colour, a rounded card with the sport backdrop and a coloured header wash fading into it, and a
+    faint rim. Returns (RGB image, RGBA-blending ImageDraw)."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (W, H), ART_BG)
+    cw, ch = W - 2 * margin, H - 2 * margin
+    card = sport_backdrop(sport, (cw, ch), accent)
+    wash = _brand_lin((cw, head), [top_colour, _brand_mix(top_colour, (0, 0, 0), 0.5)], 90)
+    card.paste(wash, (0, 0), Image.linear_gradient("L").resize((cw, head)).point(lambda v: int((255 - v) * 0.86)))
+    img.paste(card, (margin, margin), _rounded_mask((cw, ch), radius) if radius else None)
+    d = ImageDraw.Draw(img, "RGBA")
+    if margin:
+        d.rounded_rectangle((margin, margin, W - margin - 1, H - margin - 1), radius, outline=(255, 255, 255, 26),
+                            width=2)
+        d.line((margin + radius, margin + 1, W - margin - radius, margin + 1), fill=(255, 255, 255, 40), width=1)
+    return img, d
+
+
+def design_panel(img, sport: str, box: tuple, radius: int, top: Optional[list] = None, band: int = 112) -> None:
+    """A rounded panel showing its own sport backdrop, with an optional colour band (left to right) across the
+    top that fades into the field."""
+    from PIL import Image
+    x0, y0, x1, y1 = (int(v) for v in box)
+    w, h = x1 - x0, y1 - y0
+    bg = sport_backdrop(sport, (w, h))
+    if top:
+        band = min(band, h)
+        tint = _brand_lin((w, band), top, 0)
+        bg.paste(tint, (0, 0), Image.linear_gradient("L").resize((w, band)).point(lambda v: int((255 - v) * 0.78)))
+    img.paste(bg, (x0, y0), _rounded_mask((w, h), radius))
+
+
+def _design_needs(v: dict) -> bool:
+    return bool(v.get("needs")) or (str(v.get("sub") or "").startswith("✋") and v.get("state") == "open")
+
+
+def _design_sub_text(sub: str) -> str:
+    """Leg detail without the leading hand emoji the fonts can't draw."""
+    sub = str(sub or "")
+    return ("Needs you · " + sub[1:].strip()) if sub.startswith("✋") else sub
+
+
+# ---- player headshots and team logos: fetched (and cached) before the render thread --------------------------
+
+# ESPN serves headshots at https://a.espncdn.com/i/headshots/{league}/players/full/{id}.png
+DESIGN_HEAD_LEAGUES = {"nba": "nba", "wnba": "wnba", "nfl": "nfl", "mlb": "mlb", "nhl": "nhl",
+                       "college-football": "college-football", "mens-college-basketball": "mens-college-basketball",
+                       "womens-college-basketball": "womens-college-basketball"}
+DESIGN_IMG_MAX = 1_200_000          # bytes; ESPN's full headshots are ~100-300 KB
+DESIGN_IMG_TTL, DESIGN_IMG_FAIL_TTL = 86400, 600
+DESIGN_FETCH_BUDGET = 6.0           # seconds for one batch of misses; whatever's late shows initials this time
+_DESIGN_IMG_CACHE: dict = {}        # url -> (expires (monotonic), bytes or None)
+_DESIGN_IMG_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"RIFF")
+
+
+def design_head_league(league_or_path: Optional[str]) -> Optional[str]:
+    """ESPN's headshot folder for a league slug or path ('basketball/nba' -> 'nba', any soccer -> 'soccer')."""
+    t = str(league_or_path or "").lower().strip("/")
+    if not t:
+        return None
+    if t.startswith("soccer/") or re.fullmatch(r"[a-z]{3}\.\d+|usa\.\d+|uefa\.\w+|fifa\.\w+", t):
+        return "soccer"
+    return DESIGN_HEAD_LEAGUES.get(t.split("/")[-1])
+
+
+def design_head_key(e: dict, which: int = 0) -> Optional[str]:
+    """'nba:4065648' for a prop leg whose player the tracker found (which=1: a combo's second player), else None."""
+    ids = [str(a) for a in (e.get("athletes") or []) if a] or ([str(e["athlete_id"])] if e.get("athlete_id") else [])
+    if which >= len(ids) or not ids[which].isdigit():
+        return None
+    league = design_head_league(e.get("league") or e.get("path") or (e.get("event") or {}).get("path"))
+    return f"{league}:{ids[which]}" if league else None
+
+
+def design_headshot_url(key: Optional[str]) -> Optional[str]:
+    if not key or ":" not in key:
+        return None
+    league, aid = key.split(":", 1)
+    if league not in set(DESIGN_HEAD_LEAGUES.values()) | {"soccer"} or not aid.isdigit() or len(aid) > 12:
+        return None
+    return f"https://a.espncdn.com/i/headshots/{league}/players/full/{aid}.png"
+
+
+def _design_img_ok(url: Optional[str]) -> bool:
+    """Only https images on ESPN's CDN hosts are ever fetched."""
+    if not url or len(url) > 400:
+        return False
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    return parts.scheme == "https" and parts.hostname in LV2_LOGO_HOSTS and not parts.username and parts.port is None
+
+
+def design_cached_image(url: Optional[str]) -> Optional[bytes]:
+    """An image already in the cache (never fetches): what renderers and sync code can use."""
+    hit = _DESIGN_IMG_CACHE.get(url or "")
+    return hit[1] if hit and hit[0] > time.monotonic() else None
+
+
+async def _design_get_image(session, url: str) -> Optional[bytes]:
+    try:
+        async with session.get(url, allow_redirects=False) as resp:
+            if resp.status != 200 or int(resp.headers.get("Content-Length") or 0) > DESIGN_IMG_MAX:
+                return None
+            if not (resp.headers.get("Content-Type") or "image/").lower().startswith("image/"):
+                return None
+            raw = await resp.content.read(DESIGN_IMG_MAX + 1)
+    except Exception:
+        return None
+    if len(raw) > DESIGN_IMG_MAX or not raw.startswith(_DESIGN_IMG_MAGIC):
+        return None
+    return raw
+
+
+async def design_fetch_images(urls) -> dict:
+    """{url: bytes or None} for ESPN CDN images, from a day-long cache; misses are fetched together within a short
+    budget, and failures are remembered for 10 minutes so a missing headshot isn't asked for every loop."""
+    now = time.monotonic()
+    out, todo = {}, []
+    for u in dict.fromkeys(u for u in urls if u):
+        hit = _DESIGN_IMG_CACHE.get(u)
+        if hit and hit[0] > now:
+            out[u] = hit[1]
+        elif _design_img_ok(u):
+            todo.append(u)
+        else:
+            out[u] = None
+    if todo:
+        got: dict = {}
+        try:
+            import aiohttp
+            sem = asyncio.Semaphore(6)
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=DESIGN_FETCH_BUDGET)) as session:
+                async def one(u):
+                    async with sem:
+                        got[u] = await _design_get_image(session, u)
+                await asyncio.wait_for(asyncio.gather(*(one(u) for u in todo[:40])), DESIGN_FETCH_BUDGET + 1)
+        except Exception:
+            pass                                   # no aiohttp, a timeout or a network error: initials this time
+        now = time.monotonic()
+        for u in todo:
+            raw = got.get(u)
+            _DESIGN_IMG_CACHE[u] = (now + (DESIGN_IMG_TTL if raw else DESIGN_IMG_FAIL_TTL), raw)
+            out[u] = raw
+        if len(_DESIGN_IMG_CACHE) > 600:
+            for k in list(_DESIGN_IMG_CACHE)[:300]:
+                _DESIGN_IMG_CACHE.pop(k, None)
+    return out
+
+
+def _design_art_urls(entries) -> list:
+    urls = []
+    for e in entries or []:
+        for w in (0, 1):
+            urls.append(design_headshot_url(design_head_key(e, w)))
+        for t in (e.get("event") or {}).get("teams") or []:
+            urls.append(t.get("logo"))
+    return [u for u in urls if u]
+
+
+def design_art(entries) -> dict:
+    """{"heads": {key: bytes}, "logos": {url: bytes}} for these legs from the cache only (no network)."""
+    heads, logos = {}, {}
+    for e in entries or []:
+        for w in (0, 1):
+            k = design_head_key(e, w)
+            raw = design_cached_image(design_headshot_url(k))
+            if raw:
+                heads[k] = raw
+        for t in (e.get("event") or {}).get("teams") or []:
+            raw = t.get("logo_bytes") or design_cached_image(t.get("logo"))
+            if raw:
+                logos[t.get("logo") or lv_abbr(t)] = raw
+    return {"heads": heads, "logos": logos}
+
+
+async def design_fetch_art(entries) -> dict:
+    """Warm the cache for these legs' headshots and team logos, then design_art(entries). Call it before the
+    render thread; with everything cached it's only dictionary lookups."""
+    await design_fetch_images(_design_art_urls(entries))
+    return design_art(entries)
+
+
+async def design_rows_heads(rows) -> dict:
+    """{head key: bytes} for /live and game-card rows (lv_row dicts with a 'head' key)."""
+    keys = [k for r in rows or [] for k in (r.get("head"), r.get("head2")) if k]
+    got = await design_fetch_images([design_headshot_url(k) for k in keys])
+    return {k: got.get(design_headshot_url(k)) for k in keys if got.get(design_headshot_url(k))}
+
+
+def design_team_logo(art: Optional[dict], t: Optional[dict]) -> Optional[bytes]:
+    if not t:
+        return None
+    return t.get("logo_bytes") or ((art or {}).get("logos") or {}).get(t.get("logo") or lv_abbr(t))
+
+
+def design_player_team(e: dict) -> Optional[dict]:
+    """The prop player's own team among the game's two (from the tracker's team name), else None."""
+    teams = (e.get("event") or {}).get("teams") or []
+    want = _design_norm((e.get("track_info") or {}).get("team") or e.get("athlete_team"))
+    if not want or len(teams) != 2:
+        return None
+    for t in teams:
+        names = {_design_norm(t.get(k)) for k in ("name", "short", "abbr")} | \
+                {_design_norm(a) for a in (t.get("aliases") or ())}
+        names.discard("")
+        if want in names or any(n and (want.endswith(" " + n) or n.endswith(" " + want)) for n in names):
+            return t
+    return None
+
+
+# ---- remembering each leg's player and teams, so settled receipts keep their art after the cache is gone -------
+
+_DESIGN_ART_SEEN: dict = {}
+_DESIGN_DB_READY: list = []
+
+
+def design_db():
+    c = db()
+    if _DESIGN_DB_READY == [id(c)]:
+        return c
+    c.execute("""CREATE TABLE IF NOT EXISTS design_leg_art (
+                     pick_id INTEGER NOT NULL, idx INTEGER NOT NULL, guild_id INTEGER, athletes TEXT, league TEXT,
+                     path TEXT, teams TEXT, team TEXT, track TEXT, num TEXT, updated_at TEXT,
+                     PRIMARY KEY (pick_id, idx))""")
+    _DESIGN_DB_READY[:] = [id(c)]
+    return c
+
+
+def _design_slim_team(t: dict) -> dict:
+    return {k: t.get(k) for k in ("id", "name", "short", "abbr", "color", "alt_color", "logo", "home", "nickname")} | \
+        {"aliases": sorted(t.get("aliases") or [])}
+
+
+def design_remember(p, entries) -> None:
+    """Store each leg's player id, league, teams, tracking kind and latest number (only when something changed)."""
+    rows = []
+    for e in entries or []:
+        ev = e.get("event") or {}
+        teams = ev.get("teams") or []
+        ath = [str(a) for a in (e.get("athletes") or ([e["athlete_id"]] if e.get("athlete_id") else [])) if a]
+        if not ath and len(teams) != 2 and e.get("track") != "manual":
+            continue
+        rec = (json.dumps(ath), e.get("league") or "", e.get("path") or ev.get("path") or "",
+               json.dumps([_design_slim_team(t) for t in teams], sort_keys=True) if len(teams) == 2 else "",
+               (e.get("track_info") or {}).get("team") or "", e.get("track") or "",
+               json.dumps(e["num"], sort_keys=True) if e.get("num") else "")
+        key = (p["id"], e.get("n"))
+        if _DESIGN_ART_SEEN.get(key) == rec:
+            continue
+        _DESIGN_ART_SEEN[key] = rec
+        rows.append((p["id"], e.get("n"), p["guild_id"], *rec, now_iso()))
+    if not rows:
+        return
+    if len(_DESIGN_ART_SEEN) > 4000:
+        _DESIGN_ART_SEEN.clear()
+    try:
+        design_db().executemany("""INSERT INTO design_leg_art (pick_id, idx, guild_id, athletes, league, path, teams,
+                                       team, track, num, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                   ON CONFLICT (pick_id, idx) DO UPDATE SET athletes = excluded.athletes,
+                                       league = excluded.league, path = excluded.path, teams = excluded.teams,
+                                       team = excluded.team, track = excluded.track, num = excluded.num,
+                                       updated_at = excluded.updated_at""",
+                                rows)
+        db().commit()
+    except sqlite3.Error:
+        log.warning("Couldn't remember leg art for pick %s", p["id"], exc_info=True)
+
+
+def design_enrich(p, entries) -> list:
+    """Copies of the legs with what design_remember stored filled in where the entry lacks it (settled slips come
+    from the database with no game attached)."""
+    entries = list(entries or [])
+    if not entries:
+        return entries
+    try:
+        stored = {r["idx"]: r for r in design_db().execute("SELECT * FROM design_leg_art WHERE pick_id = ?",
+                                                           (p["id"],)).fetchall()}
+    except sqlite3.Error:
+        return entries
+    if not stored:
+        return entries
+    out = []
+    for e in entries:
+        r = stored.get(e.get("n"))
+        if r is None:
+            out.append(e)
+            continue
+        e = dict(e)
+        if not e.get("athlete_id") and not e.get("athletes"):
+            ath = json.loads(r["athletes"] or "[]")
+            e["athletes"], e["athlete_id"] = ath, (ath[0] if ath else None)
+        if not e.get("league"):
+            e["league"] = r["league"] or None
+        if not e.get("path") and r["path"]:
+            e["path"] = r["path"]
+        if not e.get("event") and r["teams"]:
+            teams = [dict(t, aliases=set(t.get("aliases") or []), score=None) for t in json.loads(r["teams"])]
+            done = e.get("status") not in (None, "open")
+            e["event"] = {"teams": teams, "path": r["path"], "state": "post" if done else "pre", "final": done,
+                          "detail": "Final" if done else ""}
+        if r["team"] and not (e.get("track_info") or {}).get("team"):
+            e["track_info"] = dict(e.get("track_info") or {}, team=r["team"])
+        if not e.get("track") and r["track"]:
+            e["track"] = r["track"]
+        if not e.get("num") and r["num"]:                 # the last number seen: the final stat on a settled slip
+            e["num"] = json.loads(r["num"])
+        out.append(e)
+    return out
+
+
+# ---- round headshots, logo badges, the hand ------------------------------------------------------------------
+
+def _design_hash(raw: bytes) -> str:
+    return hashlib.md5(raw).hexdigest()[:16]
+
+
+def design_head_disc(raw: Optional[bytes], size: int, ring: Optional[tuple] = None, name: str = "",
+                     tint: Optional[tuple] = None, plain: bool = False):
+    """A round player headshot on a team-tinted disc with a coloured ring, RGBA, cached. With no picture: the
+    player's initials on the tinted disc (a silhouette if there's no name either)."""
+    size = int(size)
+    tint = tuple(tint or (60, 60, 80))[:3]
+    ring = tuple(ring)[:3] if ring else None
+    key = ("head", _design_hash(raw) if raw else "", size, ring, tint, "" if raw else name[:30], plain)
+    return _design_sprite(key, lambda: _design_draw_head(raw, size, ring, name, tint, plain))
+
+
+def _design_draw_head(raw, size, ring, name, tint, plain=False):
+    from PIL import Image, ImageDraw, ImageOps
+    k = 3
+    S = size * k
+    out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    rw = max(2, int(S * 0.055)) if ring else 0
+    inner = S - 2 * rw
+    disc = _brand_radial((inner, inner), inner * 0.5, inner * 0.28, inner * 0.9,
+                         [_brand_mix(tint, (255, 255, 255), 0.18), _brand_mix(tint, (0, 0, 0), 0.25),
+                          _brand_mix(tint, (0, 0, 0), 0.62)]).convert("RGBA")
+    face = None
+    if raw:
+        try:
+            pic = Image.open(io.BytesIO(raw))
+            sec_check_image(pic)
+            pic = pic.convert("RGBA")
+            w, h = pic.size
+            side = int(min(w, h * 1.0) * 0.86)            # ESPN's frame is wide: keep the head and shoulders
+            left = max(0, (w - side) // 2)
+            face = pic.crop((left, 0, left + side, side)).resize((inner, inner), Image.LANCZOS)
+        except Exception:
+            face = None
+    if face is not None:
+        disc.alpha_composite(face)
+    else:
+        lay = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+        d = ImageDraw.Draw(lay)
+        initials = "".join(w[0] for w in re.sub(r"[^A-Za-z ]", " ", name or "").split()[:2]).upper()
+        if initials and not plain:
+            f = art_font(int(inner * 0.36), True)
+            d.text(((inner - _tw(d, initials, f)) / 2, inner * 0.27), initials, font=f, fill=(255, 255, 255, 235))
+        elif not plain:                                   # a plain silhouette
+            c = inner / 2
+            d.ellipse((c - inner * 0.17, inner * 0.2, c + inner * 0.17, inner * 0.54), fill=(255, 255, 255, 110))
+            d.ellipse((c - inner * 0.34, inner * 0.6, c + inner * 0.34, inner * 1.2), fill=(255, 255, 255, 110))
+        disc.alpha_composite(lay)
+    gloss = _brand_mask((inner, inner), lambda d: d.ellipse((inner * 0.12, inner * 0.02, inner * 0.88, inner * 0.42),
+                                                            fill=255))
+    _brand_paint(disc, gloss, (255, 255, 255), alpha=16 if face is not None else 26, blur=inner * 0.04)
+    mask = Image.new("L", (inner, inner), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, inner - 1, inner - 1), fill=255)
+    if ring:
+        d = ImageDraw.Draw(out)
+        d.ellipse((0, 0, S - 1, S - 1), fill=ring + (255,))
+        d.ellipse((rw * 0.55, rw * 0.55, S - 1 - rw * 0.55, S - 1 - rw * 0.55), fill=(14, 14, 20, 255))
+    out.paste(disc, (rw, rw), mask)
+    return out.resize((size, size), Image.LANCZOS)
+
+
+def design_logo_badge(raw: Optional[bytes], size: int, team: Optional[dict] = None):
+    """A team's logo on a small white disc ringed in its colour (the abbreviation on its colour without a logo)."""
+    size = int(size)
+    col = lv_team_colour(team) if team else (90, 90, 110)
+    key = ("logo", _design_hash(raw) if raw else lv_abbr(team or {}), size, col)
+    return _design_sprite(key, lambda: _design_draw_logo(raw, size, col, team))
+
+
+def _design_draw_logo(raw, size, col, team):
+    from PIL import Image, ImageDraw
+    if raw:
+        try:
+            return _lv2_logo_plate(raw, size, col)
+        except Exception:
+            pass
+    k = 3
+    S = size * k
+    out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(out)
+    d.ellipse((S * 0.04, S * 0.04, S * 0.96, S * 0.96), fill=_brand_mix(col, (0, 0, 0), 0.15) + (255,),
+              outline=_brand_mix(col, (255, 255, 255), 0.45) + (255,), width=max(2, int(S * 0.05)))
+    ab = lv_abbr(team or {})[:4] or "?"
+    t, f = fit_text(d, ab, S * 0.74, int(S * (0.36 if len(ab) <= 3 else 0.3)), True, 6)
+    d.text(((S - _tw(d, t, f)) / 2, S / 2 - f.size * 0.62), t, font=f, fill=(255, 255, 255, 255))
+    return out.resize((size, size), Image.LANCZOS)
+
+
+def design_hand(size: int, colour: tuple = None):
+    """A small raised hand (graded by hand / needs you); the fonts can't draw the emoji."""
+    colour = tuple(colour or ART_AMBER)
+    return _design_sprite(("hand", int(size), colour), lambda: _design_draw_hand(int(size), colour))
+
+
+def _design_draw_hand(size: int, colour: tuple):
+    from PIL import Image
+    k = 4
+    S = size * k
+
+    def shape(d):
+        u = S / 20
+        for i, (x, top) in enumerate(((5.2, 3.2), (8.4, 1.6), (11.6, 2.0), (14.6, 4.0))):
+            d.rounded_rectangle((x * u, top * u, (x + 2.7) * u, 12 * u), int(1.35 * u), fill=255)
+        d.rounded_rectangle((5.2 * u, 9 * u, 17.3 * u, 18.6 * u), int(4 * u), fill=255)
+        d.polygon([(5.6 * u, 15 * u), (1.4 * u, 9.4 * u), (2.8 * u, 7.8 * u), (7 * u, 11.4 * u)], fill=255)
+        d.ellipse((0.9 * u, 7.4 * u, 3.6 * u, 10.1 * u), fill=255)
+
+    out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    _brand_paint(out, _brand_mask((S, S), shape), _brand_lin((S, S), [_brand_mix(colour, (255, 255, 255), 0.35),
+                                                                      colour], 90))
+    return out.resize((size, size), Image.LANCZOS)
+
+
+# ---- slip receipt v2 ---------------------------------------------------------------------------------------
+# 720 px wide so it stays readable when Discord shrinks it to a phone's ~400 px: nothing smaller than 18 px.
+
+DESIGN_RW = 720
+DESIGN_ENTRY_LABEL = {"power": "POWER PLAY", "flex": "FLEX PLAY", "parlay": "PARLAY", "single": "STRAIGHT"}
+DESIGN_STATE_WORD = {"hit": "HIT", "miss": "MISSED", "push": "PUSH", "ahead": "WINNING", "behind": "LOSING",
+                     "live": "LIVE", "close": "CLOSE", "needs": "NEEDS YOU", "open": "SOON", "pending": "GRADING"}
+
+
+def design_when(iso_text: Optional[str]) -> str:
+    """'Sat Oct 10 · 7:02 PM' in the server's time zone, or '' if it can't be read."""
+    try:
+        dt = datetime.fromisoformat(str(iso_text))
+    except (TypeError, ValueError):
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TZ).strftime("%a %b %-d · %-I:%M %p")
+
+
+def _design_wrap(d, text: str, font, max_w: float, max_lines: int = 2) -> list:
+    """Greedy word wrap; the last line gets an ellipsis if the text doesn't fit."""
+    words, lines, cur = str(text or "").split(), [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if _tw(d, trial, font) <= max_w or not cur:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        last = lines[-1]
+        while last and _tw(d, last + "…", font) > max_w:
+            last = last[:-1]
+        lines[-1] = last.rstrip() + "…"
+    return lines
+
+
+def design_num(x) -> str:
+    """A stat for a picture: 29, 26.5, 0.333, 12.4K, 1.2M (never 1.23457e+06)."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return "?"
+    if not math.isfinite(x):
+        return "?"
+    for cut, suffix in ((1e9, "B"), (1e6, "M"), (1e4, "K")):
+        if abs(x) >= cut:
+            return f"{x / cut:.1f}".rstrip("0").rstrip(".") + suffix
+    return f"{round(x, 3):,.3f}".rstrip("0").rstrip(".") if x != int(x) else f"{int(x):,}"
+
+
+def design_clean(text) -> str:
+    """Text without the emoji and pictographs DejaVu can't draw (they'd show as boxes)."""
+    out = "".join(ch for ch in str(text or "") if ord(ch) < 0x2190 or 0x2190 <= ord(ch) <= 0x25FF
+                  or unicodedata.category(ch)[0] in "LN")
+    return " ".join(out.replace("\ufe0f", "").split())
+
+
+def design_leg_parts(e: dict) -> Optional[dict]:
+    """A player prop split for display: {player, side, line, stat}, or None for anything else."""
+    text = e.get("text") or ""
+    ti = e.get("track_info") or {}
+    if not (e.get("athlete_id") or e.get("athletes") or ti.get("player") or e.get("num")):
+        return None
+    try:
+        prop = prop_of(text)
+    except Exception:
+        prop = None
+    if not prop:
+        return None
+    stat = ti.get("stat") or ""
+    if not stat:
+        st = STATS.get((prop.get("stats") or [""])[0])
+        stat = st[0] if st else ""
+    player = ti.get("player") or prop.get("display") or ""
+    side = prop.get("side") or "over"
+    if prop.get("negate"):
+        side = "under" if side == "over" else "over"
+    line = prop.get("line")
+    if re.search(r"anytime|first|1st", stat, re.I):
+        return {"player": player, "side": "", "line": None, "stat": stat}
+    return {"player": player, "side": side, "line": line, "stat": stat}
+
+
+def design_clock(e: dict) -> tuple:
+    """(text, kind) for a leg's game chip: kind 'live' (red dot + clock), 'final', 'pre' (start time), or '' ."""
+    ev = e.get("event") or {}
+    if ev.get("final") or ev.get("state") == "post":
+        return ("FINAL" if not str(ev.get("detail") or "").lower().startswith("final/") else ev["detail"].upper(),
+                "final")
+    if ev.get("state") == "in" or e.get("in_play"):
+        txt = ev.get("detail") or ""
+        if not txt:
+            bits = str(e.get("sub") or "").split(" · ")
+            txt = bits[-1] if bits else ""
+        return (clip(txt, 18) or "LIVE", "live")
+    if ev.get("date"):
+        try:
+            when = datetime.fromisoformat(str(ev["date"]).replace("Z", "+00:00")).astimezone(TZ)
+            today = datetime.now(TZ).date()
+            fmt = "%-I:%M %p" if when.date() == today else "%a %-I:%M %p"
+            return (when.strftime(fmt).upper(), "pre")
+        except ValueError:
+            pass
+    return ("", "")
+
+
+def _design_chip(img, d, x: float, y: float, text: str, fg=ART_TEXT, bg=(12, 12, 18, 210), outline=(255, 255, 255, 36),
+                 size: int = 18, h: int = 32, dot: Optional[tuple] = None, icon=None) -> int:
+    """A rounded label with an optional leading dot or icon sprite. Returns its width."""
+    f = art_font(size, True)
+    lead = (h * 0.5 if dot else 0) + (icon.width + 6 if icon is not None else 0)
+    w = _tw(d, text, f) + 26 + lead
+    d.rounded_rectangle((x, y, x + w, y + h), h // 2, fill=bg, outline=outline, width=2 if outline else 0)
+    tx = x + 13
+    if dot:
+        r = h * 0.15
+        d.ellipse((tx - 1, y + h / 2 - r * 1.9, tx - 1 + r * 3.8, y + h / 2 + r * 1.9), fill=dot + (70,))
+        d.ellipse((tx + r * 0.9, y + h / 2 - r, tx + r * 2.9, y + h / 2 + r), fill=dot + (255,))
+        tx += h * 0.66
+    if icon is not None:
+        _design_put(img, icon, tx - 3, y + (h - icon.height) / 2)
+        tx += icon.width + 6
+    d.text((tx, y + (h - size) / 2 - 2), text, font=f, fill=fg)
+    return int(w)
+
+
+def _design_rc_state(e: dict, v: dict) -> str:
+    """The receipt's state word for a leg: hit/miss/push, needs, close/ahead/behind/live, pending, open."""
+    if _design_needs(v):
+        return "needs"
+    if v["state"] in ("hit", "miss", "push"):
+        return v["state"]
+    lv = lv_state(e)
+    return {"cleared": "hit", "dead": "miss", "waiting": "open"}.get(lv, lv)
+
+
+def _design_rc_height(e: dict) -> int:
+    parts = design_leg_parts(e)
+    if parts and e.get("num"):
+        return 162
+    return 132 if parts or _design_needs(leg_visual(e)) else 122
+
+
+def render_receipt(r: dict) -> io.BytesIO:
+    """r: name, avatar (bytes), platform, description, cost, payout, pick_id, status, net, legs [leg_progress
+    entries], updated (str), returned, theme, sport, entry (power/flex/parlay/single), logged (str),
+    art {heads: {key: bytes}, logos: {url: bytes}}. Phone-first: 720 px wide."""
+    from PIL import Image, ImageDraw
+    W = DESIGN_RW
+    legs = r["legs"] or [{"text": r["description"], "status": r["status"]}]
+    heights = [_design_rc_height(e) for e in legs]
+    TOP, FOOT = 262, 148
+    H = TOP + sum(heights) + FOOT
+    sport = design_main_sport(legs, r.get("sport"))
+    plat_key = (r.get("platform") or "").lower()
+    pc = PLATFORM_COLORS.get(plat_key, ART_BRAND)
+    th = r.get("theme")
+    top = th["stops"][1] if th and th.get("chosen") else tuple(min(255, int(x * 0.66)) for x in pc)
+    img, d = _design_card(W, H, sport, top, head=250, margin=12, radius=30)
+    vis = [leg_visual(e) for e in legs]
+    states = [_design_rc_state(e, v) for e, v in zip(legs, vis)]
+    hits, misses = states.count("hit"), states.count("miss")
+    status = r["status"]
+    live = status == "open" and any(e.get("in_play") for e in legs)
+    # platform pill, entry type, pick number
+    x, y = 36, 34
+    plat = (r.get("platform") or "Slip").upper()
+    x += _design_chip(img, d, x, y, plat, ART_TEXT, _brand_mix(pc, (0, 0, 0), 0.25) + (235,),
+                      _brand_mix(pc, (255, 255, 255), 0.35) + (255,), 19, 36, dot=_brand_mix(pc, (255, 255, 255), 0.6)) + 10
+    n_legs = len(r["legs"] or [])
+    entry = DESIGN_ENTRY_LABEL.get(r.get("entry") or "", "")
+    if not entry and n_legs > 1:
+        entry = "FLEX PLAY" if re.search(r"\bflex", r.get("description") or "", re.I) else (
+            "POWER PLAY" if is_dfs(plat_key) else "PARLAY")
+    if entry:
+        x += _design_chip(img, d, x, y, entry, ART_TEXT, (10, 10, 16, 150), (255, 255, 255, 60), 17, 36) + 10
+    pid = f"#{r['pick_id']}"
+    d.text((W - 36 - _tw(d, pid, art_font(20, True)), y + 7), pid, font=art_font(20, True), fill=(214, 214, 230))
+    # the money and the multiple, the ring on the right
+    ring = 132
+    design_ring(img, W - 36 - ring, 86, ring, states, f"{hits}/{len(legs)}", "HIT")
+    money_line = f"{money_short(r['cost'])} → {money_short(r['payout'])}"
+    t, f = fit_text(d, money_line, W - 36 - ring - 24 - 36, 54, True, 30)
+    d.text((38, 98), t, font=f, fill=(0, 0, 0, 120))
+    d.text((36, 95), t, font=f, fill=ART_TEXT)
+    mult = (r["payout"] / r["cost"]) if r.get("cost") else 0
+    bits = []
+    if mult >= 1.05:
+        bits.append(f"{mult:.1f}x".replace(".0x", "x"))
+    if n_legs > 1:
+        bits.append(f"{n_legs} legs")
+    label = sport_group(r.get("sport")).upper() if r.get("sport") else DESIGN_SPORT_LABEL[sport]
+    if sport == "stadium" and len({design_leg_sport(e, r.get("sport")) for e in legs} - {"stadium"}) > 1:
+        label = "MULTI-SPORT"
+    gx = 36
+    if sport != "stadium":
+        g = design_glyph(sport, 26)
+        img.paste(g, (gx, 166), g)
+        gx += 34
+    meta = "  ·  ".join([label] + bits)
+    t, f = fit_text(d, meta, W - 36 - ring - 24 - gx, 21, True, 16)
+    d.text((gx, 168), t, font=f, fill=(222, 222, 236))
+    # status line under the money
+    y = 206
+    if live:
+        bw = design_live_badge(img, 38, y, 32)
+        cashing = states.count("ahead") + states.count("hit")
+        word = f"{cashing} of {len(legs)} cashing right now" if len(legs) > 1 else "in play"
+        t, f = fit_text(d, word, W - 36 - ring - 70 - bw, 20, True, 16)
+        d.text((38 + bw + 14, y + 5), t, font=f, fill=(226, 226, 238))
+    elif status == "open":
+        starts = [design_clock(e) for e in legs]
+        nxt = next((tx for tx, kind in starts if kind == "pre"), "")
+        word = DESIGN_WAITING[sport] + (f" · {nxt}" if nxt else "")
+        t, f = fit_text(d, word, W - 72 - ring, 20, True, 15)
+        d.text((38, y + 5), t, font=f, fill=(206, 206, 222))
+    else:
+        word = {"win": "SETTLED · CASHED", "loss": "SETTLED · MISSED", "push": "SETTLED · PUSH",
+                "void": "SETTLED · VOID"}.get(status, "SETTLED")
+        d.text((38, y + 5), word, font=art_font(20, True), fill=(206, 206, 222))
+    # the ticket tear
+    ty = 252
+    for cx in (12, W - 12):
+        d.ellipse((cx - 14, ty - 14, cx + 14, ty + 14), fill=ART_BG)
+    for dx in range(40, W - 40, 18):
+        d.line((dx, ty, dx + 9, ty), fill=(255, 255, 255, 40), width=2)
+    # legs
+    art = r.get("art") or {}
+    y = TOP
+    for e, v, st, h in zip(legs, vis, states, heights):
+        _design_rc_row(img, d, e, v, st, y, h, W, r.get("sport"), art)
+        y += h
+    # footer: who, when they logged it, when it last moved
+    fy = H - FOOT
+    d.line((36, fy + 4, W - 36, fy + 4), fill=(255, 255, 255, 24), width=1)
+    av = _avatar(r.get("avatar"), 66, r["name"], -1)
+    d.ellipse((34, fy + 24, 106, fy + 96), fill=pc + (255,))
+    img.paste(av, (37, fy + 27), av)
+    t, f = fit_text(d, design_clean(r["name"]) or "Somebody", W - 340, 28, True, 18)
+    d.text((122, fy + 26), t, font=f, fill=ART_TEXT)
+    when = []
+    if r.get("logged"):
+        when.append(f"logged {r['logged']}")
+    if status == "open" and r.get("updated"):
+        when.append(f"updated {r['updated']}")
+    if when:
+        t, f = fit_text(d, "  ·  ".join(when), W - 160, 18, True, 13)
+        d.text((122, fy + 66), t, font=f, fill=(184, 184, 204))
+    brand_sign(img, W - 36, fy + 30, "PIMP-BOT", 16, variant={"win": "hype", "loss": "cold"}.get(status, "default"))
+    # settled: the big stamp across the legs
+    stamp = {"win": ("CASHED", signed_short(r.get("net") or 0), ART_GREEN), "loss": ("MISSED", "", ART_RED),
+             "push": ("PUSH", "money back", (200, 200, 214)), "void": ("VOID", "money back", (200, 200, 214))}.get(status)
+    if stamp:
+        legs_h = sum(heights)
+        design_stamp(img, W / 2, TOP + min(legs_h, 520) / 2, stamp[0], stamp[1], stamp[2],
+                     seed=int(r.get("pick_id") or 0), scale=max(0.62, min(1.0, legs_h / 400)))
+    return _design_png(img)
+
+
+def _design_rc_row(img, d, e: dict, v: dict, state: str, y: int, h: int, W: int, slip_sport, art: dict) -> None:
+    """One leg: headshot (or team logo, or sport ball), the player and stat, the live number with its pace bar,
+    and chips for the game clock, the matchup and anything needing a hand."""
+    needs = state == "needs"
+    accent = DESIGN_STATE_COLOURS.get(state, ART_FAINT)
+    box = (24, y, W - 24, y + h - 12)
+    d.rounded_rectangle(box, 22, fill=(46, 34, 8, 214) if needs else (12, 12, 18, 186))
+    teams = design_leg_teams(e)
+    ev = e.get("event") or {}
+    parts = design_leg_parts(e)
+    mine = design_player_team(e) if parts else (teams[0] if len(teams) == 1 else None)
+    glow = [lv_team_colour(mine)] if mine else design_team_colours(teams)
+    if glow and not needs:
+        design_wash(img, box, glow, 22, 70 if state != "miss" else 30, 0.5)
+    d.rounded_rectangle(box, 22, outline=accent + (150,) if needs else (255, 255, 255, 24), width=2 if needs else 1)
+    if state not in ("open",):
+        d.rounded_rectangle((24, y + 18, 31, y + h - 30), 3, fill=accent + (235,))
+    dead = state == "miss"
+    # the picture: headshot, the backed team's logo, both logos, or the sport ball
+    pic, px, py = 92, 42, y + 16
+    ring = accent if state not in ("open", "pending") else _brand_mix(glow[0] if glow else ART_FAINT, ART_TEXT, 0.15)
+    tint = glow[0] if glow else (70, 60, 110)
+    heads = (art or {}).get("heads") or {}
+    k1, k2 = design_head_key(e, 0), design_head_key(e, 1)
+    if parts:
+        if k2:                                                    # a combo: two players, overlapping
+            s2 = design_head_disc(heads.get(k2), 64, ring, parts["player"].split("+")[-1].strip(), tint)
+            _design_put(img, s2, px + 30, py + 30)
+            s1 = design_head_disc(heads.get(k1), 64, ring, parts["player"].split("+")[0].strip(), tint)
+            _design_put(img, s1, px - 2, py - 2)
+        else:
+            _design_put(img, design_head_disc(heads.get(k1), pic, ring, parts["player"], tint), px, py)
+        if mine:
+            b = design_logo_badge(design_team_logo(art, mine), 44, mine)
+            _design_put(img, b, px + pic - 36, py + pic - 36)
+    elif len(teams) == 1:
+        _design_put(img, design_logo_badge(design_team_logo(art, teams[0]), pic, teams[0]), px, py)
+    elif len(teams) == 2:
+        a, hm = teams
+        _design_put(img, design_logo_badge(design_team_logo(art, a), 64, a), px - 4, py - 2)
+        _design_put(img, design_logo_badge(design_team_logo(art, hm), 64, hm), px + 32, py + 30)
+    else:
+        leg_sport = design_leg_sport(e, slip_sport)
+        disc = design_head_disc(None, pic, ring, "", tint, plain=True)
+        _design_put(img, disc, px, py)
+        g = design_glyph(leg_sport, 44)
+        _design_put(img, g, px + (pic - 44) / 2, py + (pic - 44) / 2)
+    if state in ("hit", "miss", "push", "needs"):
+        _status_dot(img, px + 8, py + 8, 14, state)
+    x0 = px + pic + 22
+    right = W - 44
+    num = e.get("num")
+    # the live number, top right
+    vw = 0
+    if num:
+        val = design_num(num["value"])
+        good = (num["value"] > num["line"]) if num["side"] == "over" else (num["value"] <= num["line"])
+        vcol = {"hit": ART_GREEN, "miss": ART_RED, "close": ART_AMBER, "ahead": ART_GREEN,
+                "behind": ART_RED}.get(state, ART_GREEN if good and num["side"] == "over" else ART_TEXT)
+        vf = art_font(44, True)
+        vw = _tw(d, val, vf)
+        d.text((right - vw + 2, y + 9), val, font=vf, fill=(0, 0, 0, 130))
+        d.text((right - vw, y + 7), val, font=vf, fill=vcol)
+        vw += 16
+    elif state in DESIGN_STATE_WORD and state not in ("open", "needs"):
+        word = DESIGN_STATE_WORD[state]
+        col = DESIGN_STATE_COLOURS.get(state, ART_MUTED)
+        pf = art_font(17, True)
+        pw = _tw(d, word, pf) + 28
+        d.rounded_rectangle((right - pw, y + 16, right, y + 48), 16, fill=_brand_mix(col, ART_BG, 0.78) + (240,),
+                            outline=col, width=2)
+        d.text((right - pw + 14, y + 22), word, font=pf, fill=col)
+        vw = pw + 14
+    # the title and the stat line
+    title = design_clean(parts["player"] if parts else e.get("text")) or "Leg"
+    t, f = fit_text(d, title, right - x0 - vw, 29, True, 19)
+    tcol = ART_TEXT if not dead else (176, 176, 192)
+    d.text((x0, y + 14), t, font=f, fill=tcol)
+    if dead:
+        d.line((x0, y + 31, x0 + _tw(d, t, f), y + 31), fill=ART_RED + (180,), width=3)
+    ly = y + 54
+    if parts:
+        lx = x0
+        sf = art_font(20, True)
+        if parts["side"]:
+            up = parts["side"] == "over"
+            arrow = "▲" if up else "▼"
+            d.text((lx, ly), arrow, font=art_font(17, True), fill=(ART_GREEN if up else ART_BLUE))
+            lx += 22
+            side_txt = f"{parts['side'].upper()} {design_num(parts['line'])}" if parts["line"] is not None else parts["side"].upper()
+            d.text((lx, ly - 1), side_txt, font=sf, fill=ART_TEXT)
+            lx += _tw(d, side_txt, sf) + 12
+        st, stf = fit_text(d, (parts["stat"] or "").upper(), right - lx - (0 if num else vw), 20, True, 14)
+        d.text((lx, ly - 1), st, font=stf, fill=(196, 196, 214))
+        stat_end, stat_y = lx + _tw(d, st, stf), ly - 1
+        ly += 34
+    elif len(ev.get("teams") or []) == 2 and all(t.get("score") is not None for t in ev["teams"]) \
+            and ev.get("state") in ("in", "post"):
+        a, hm = sorted(ev["teams"], key=lambda t: t.get("home", False))
+        sc = f"{lv_abbr(a)} {a['score']:g}  –  {hm['score']:g} {lv_abbr(hm)}"
+        d.text((x0, ly - 1), sc, font=art_font(21, True), fill=(226, 226, 238))
+        ly += 34
+    elif len(teams) == 2 or (len(teams) == 1 and ev.get("teams")):
+        both = sorted(ev.get("teams") or teams, key=lambda t: t.get("home", False))
+        if len(both) == 2:
+            mu = f"{both[0].get('short') or lv_abbr(both[0])} @ {both[1].get('short') or lv_abbr(both[1])}"
+            t2, f2 = fit_text(d, mu, right - x0 - vw, 20, True, 14)
+            d.text((x0, ly - 1), t2, font=f2, fill=(206, 206, 222))
+            ly += 34
+    # the pace bar
+    if num:
+        lvst = {"hit": "cleared", "miss": "dead"}.get(state, lv_state(e))
+        el = lv2_elapsed(ev, e.get("path") or ev.get("path")) if ev else None
+        pace = lv2_pace(num["value"], num["line"], el, e.get("text") or "") if state not in ("hit", "miss", "push") \
+            and e.get("in_play") else None
+        _lv2_pace_bar(d, x0, ly + 6, right - x0, 14, num["value"], num["line"], pace, num["side"], lvst)
+        ly += 32
+        if pace is not None:
+            need = num["line"] - num["value"]
+            on = (pace > num["line"]) if num["side"] == "over" else (pace <= num["line"])
+            note = f"on pace for {design_num(pace)}" + (f" · needs {design_num(need)}" if num["side"] == "over" and need > 0
+                                                         else "")
+            nf = art_font(18, True)
+            if parts and right - _tw(d, note, nf) > stat_end + 16:      # beside the stat, under the big number
+                d.text((right - _tw(d, note, nf), stat_y + 1), note, font=nf, fill=ART_GREEN if on else ART_RED)
+            else:
+                d.text((right - _tw(d, note, nf), ly + 6), note, font=nf, fill=ART_GREEN if on else ART_RED)
+                right -= _tw(d, note, nf) + 12
+    # chips: game clock, by hand / needs you, detail
+    cx, cy = x0, ly + 2
+    if needs:
+        hand = design_hand(20, ART_AMBER)
+        cx += _design_chip(img, d, cx, cy, "NEEDS YOU", (30, 20, 0), ART_AMBER + (255,), None, 17, 32, icon=hand) + 10
+        sub = _design_sub_text(v["sub"]).split(" · ", 1)[-1]
+        lines = _design_wrap(d, sub, art_font(18, True), right - cx, 1)
+        if lines:
+            d.text((cx, cy + 5), lines[0], font=art_font(18, True), fill=(250, 214, 140))
+        return
+    clock, kind = design_clock(e)
+    if state in ("hit", "miss", "push") and (e.get("track") == "manual" or "by hand" in str(e.get("sub") or "").lower()):
+        cx += _design_chip(img, d, cx, cy, "BY HAND", ART_AMBER, (40, 30, 8, 220), ART_AMBER + (150,), 17, 32,
+                           icon=design_hand(20, ART_AMBER)) + 10
+    if kind == "live":
+        cx += _design_chip(img, d, cx, cy, clock, ART_TEXT, (60, 14, 22, 230), ART_RED + (200,), 17, 32,
+                           dot=(255, 70, 90)) + 10
+    elif kind == "final":
+        cx += _design_chip(img, d, cx, cy, clock, (200, 200, 214), (12, 12, 18, 210), (255, 255, 255, 40), 17, 32) + 10
+    elif kind == "pre":
+        cx += _design_chip(img, d, cx, cy, clock, (170, 200, 255), (12, 16, 30, 220), (96, 140, 230, 150), 17, 32) + 10
+    if parts and len(teams) == 2 and cx < right - 120:
+        a, hm = sorted(ev.get("teams") or teams, key=lambda t: t.get("home", False))
+        if ev.get("state") in ("in", "post") and a.get("score") is not None and hm.get("score") is not None:
+            mu = f"{lv_abbr(a)} {a['score']:g} – {hm['score']:g} {lv_abbr(hm)}"
+        else:
+            mu = f"{lv_abbr(a)} @ {lv_abbr(hm)}"
+        t2, f2 = fit_text(d, mu, right - cx, 18, True, 14)
+        d.text((cx + 2, cy + 5), t2, font=f2, fill=(196, 196, 214))
+    elif not kind and not e.get("event") and v["sub"]:
+        t2, f2 = fit_text(d, _design_sub_text(v["sub"]), right - cx, 18, True, 14)
+        d.text((cx, cy + 5), t2, font=f2, fill=(190, 190, 208))
+
+
+def design_stamp(img, cx: float, cy: float, word: str, sub: str, colour: tuple, seed: int = 0,
+                 scale: float = 1.0) -> None:
+    """A big tilted rubber stamp (double border, worn ink) centred on (cx, cy)."""
+    from PIL import Image
+    key = ("stamp", word, sub, tuple(colour), seed % 7)
+    sprite = _design_sprite(key, lambda: _design_draw_stamp(word, sub, tuple(colour), seed))
+    if scale < 0.98:
+        sprite = sprite.resize((int(sprite.width * scale), int(sprite.height * scale)), Image.LANCZOS)
+    _design_put(img, sprite, cx - sprite.width / 2, cy - sprite.height / 2)
+
+
+def _design_draw_stamp(word: str, sub: str, colour: tuple, seed: int):
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+    f = art_font(88, True)
+    sf = art_font(40, True)
+    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    tw = _tw(probe, word, f)
+    sw = _tw(probe, sub, sf) if sub else 0
+    w = max(tw, sw) + 96
+    h = 150 + (54 if sub else 0)
+    mask = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(mask)
+    d.rounded_rectangle((4, 4, w - 5, h - 5), 26, outline=255, width=9)
+    d.rounded_rectangle((20, 20, w - 21, h - 21), 16, outline=255, width=3)
+    d.text(((w - tw) / 2, 30), word, font=f, fill=255)
+    if sub:
+        d.line((w * 0.2, 138, w * 0.8, 138), fill=255, width=3)
+        d.text(((w - sw) / 2, 146), sub, font=sf, fill=255)
+    rnd = _random.Random(seed)                        # worn ink: knock out small specks
+    wear = Image.new("L", (w, h), 255)
+    wd = ImageDraw.Draw(wear)
+    for _ in range(int(w * h / 260)):
+        x, y = rnd.uniform(0, w), rnd.uniform(0, h)
+        rr = rnd.uniform(0.6, 2.4)
+        wd.ellipse((x - rr, y - rr, x + rr, y + rr), fill=rnd.choice((0, 60, 120)))
+    mask = ImageChops.multiply(mask, wear.filter(ImageFilter.GaussianBlur(0.6)))
+    pad = 30
+    out = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
+    big = Image.new("L", out.size, 0)
+    big.paste(mask, (pad, pad))
+    _brand_paint(out, big, (0, 0, 0), alpha=70, blur=6, offset=(0, 3))
+    _brand_paint(out, big, colour, alpha=178)
+    return out.rotate(9 if seed % 2 else -9, resample=Image.BICUBIC, expand=True)
+
+
+# ---- the group board --------------------------------------------------------------------------------
+
+_DESIGN_BOARD_MEMO: dict = {}       # guild -> (signature, png bytes, expires): the 2-minute job skips unchanged boards
+DESIGN_BOARD_MEMO_S = 240
+DESIGN_BOARD_ROW = 62
+
+def render_board(b: dict) -> io.BytesIO:
+    """b: title, when, live, slips [{name, avatar, cost, payout, description, legs [entries], status, net,
+    live, sport}], totals dict"""
+    from PIL import ImageDraw
+    W = 1000
+    slips = b["slips"][:8]
+    heights = []
+    for s in slips:
+        legs = s.get("show") or s["legs"]
+        shown = [e for e in legs if e.get("in_play") or e.get("num") or e.get("status") != "open"][:4] or legs[:3]
+        s["_shown"] = shown
+        heights.append(122 + DESIGN_BOARD_ROW * len(shown))
+    H = 246 + sum(heights) + 16 * len(slips) + 70
+    sport = design_main_sport([e for s in slips for e in s["legs"]], None)
+    img, d = _design_card(W, H, sport, (70, 34, 150), head=230, margin=0, radius=0)
+    d.text((40, 34), b.get("title", "TONIGHT'S BOARD"), font=art_font(44, True), fill=ART_TEXT)
+    if b.get("live"):
+        bw = design_live_badge(img, 42, 100, 30)
+        d.text((42 + bw + 14, 102), b.get("when", ""), font=art_font(22, True), fill=(210, 210, 226))
+    else:
+        d.text((42, 102), b.get("when", ""), font=art_font(22, True), fill=(190, 190, 208))
+    tot = b.get("totals") or {}
+    chips = [f"{tot.get('slips', len(slips))} slips", f"{money_short(tot.get('cost', 0))} in",
+             f"{money_short(tot.get('payout', 0))} to win", f"{tot.get('cashing', 0)}/{tot.get('legs', 0)} legs cashing"]
+    x = 40
+    f = art_font(18, True)
+    for chip in chips:
+        cw = _tw(d, chip, f) + 28
+        d.rounded_rectangle((x, 152, x + cw, 186), 17, fill=(12, 12, 20, 200), outline=(255, 255, 255, 30))
+        d.text((x + 14, 158), chip, font=f, fill=ART_TEXT)
+        x += cw + 10
+    y = 236
+    for s, h in zip(slips, heights):
+        _design_board_slip(img, d, s, y, h, W, b.get("art") or {})
+        y += h + 16
+    if len(b["slips"]) > len(slips):
+        d.text((40, y + 6), f"+ {len(b['slips']) - len(slips)} more slips", font=art_font(18, True), fill=ART_MUTED)
+    brand_sign(img, W - 40, H - 48, "PIMP-BOT", 16, variant="hype" if b.get("live") else "default")
+    return _design_png(img)
+
+
+def _design_board_slip(img, d, s: dict, y: int, h: int, W: int, art: dict) -> None:
+    settled = s.get("status") in ("win", "loss", "push")
+    edge = {"win": ART_GREEN, "loss": ART_RED}.get(s.get("status"), (255, 255, 255))
+    d.rounded_rectangle((24, y, W - 24, y + h), 24, fill=(12, 12, 18, 184),
+                        outline=edge + ((130,) if settled and s.get("status") != "push" else (24,)), width=2)
+    av = _avatar(s.get("avatar"), 58, s["name"], -1)
+    img.paste(av, (44, y + 20), av)
+    t, f = fit_text(d, design_clean(s["name"]) or "Somebody", 330, 28, True)
+    d.text((116, y + 18), t, font=f, fill=ART_TEXT)
+    slip_sport = design_main_sport(s["legs"], s.get("sport"))
+    gx = 116
+    if slip_sport != "stadium":
+        g = design_glyph(slip_sport, 20)
+        img.paste(g, (gx, y + 56), g)
+        gx += 28
+    t, f = fit_text(d, design_clean(s["description"]), 330, 18, False)
+    d.text((gx, y + 56), t, font=f, fill=(186, 186, 204))
+    ml = f"{money_short(s['cost'])} → {money_short(s['payout'])}"
+    t, f = fit_text(d, ml, 260, 26, True)
+    d.text((W - 48 - _tw(d, t, f), y + 18), t, font=f, fill=ART_TEXT)
+    if settled:
+        stamp = {"win": f"CASHED {signed_short(s.get('net', 0))}", "loss": "DEAD", "push": "PUSH"}[s["status"]]
+        colour = {"win": ART_GREEN, "loss": ART_RED, "push": ART_MUTED}[s["status"]]
+        sf = art_font(18, True)
+        sw = _tw(d, stamp, sf) + 24
+        d.rounded_rectangle((484, y + 22, 484 + sw, y + 52), 12, fill=colour + (40,), outline=colour, width=3)
+        d.text((496, y + 26), stamp, font=sf, fill=colour)
+    elif s.get("live"):
+        design_live_badge(img, 484, y + 24, 24)
+    dots = s["legs"][:14]
+    dx = W - 48 - 30 * len(dots)
+    for e in dots:
+        v = leg_visual(e)
+        _status_dot(img, dx + 12, y + 74, 10, "needs" if _design_needs(v) else v["state"])
+        dx += 30
+    yy = y + 104
+    heads = art.get("heads") or {}
+    for e in s["_shown"]:
+        v = leg_visual(e)
+        state = "needs" if _design_needs(v) else v["state"]
+        _status_dot(img, 58, yy + 26, 12, state)
+        teams = design_leg_teams(e)
+        parts = design_leg_parts(e)
+        mine = design_player_team(e) if parts else (teams[0] if len(teams) == 1 else None)
+        tint = lv_team_colour(mine) if mine else (design_team_colours(teams) or [(70, 60, 110)])[0]
+        ring = DESIGN_STATE_COLOURS.get(state, ART_FAINT) if state not in ("open", "live") else tint
+        px = 80
+        if parts:                                        # the player's face, his team's logo on the corner
+            _design_put(img, design_head_disc(heads.get(design_head_key(e)), 50, ring, parts["player"], tint), px, yy)
+            if mine:
+                _design_put(img, design_logo_badge(design_team_logo(art, mine), 24, mine), px + 32, yy + 30)
+        elif len(teams) == 1:
+            _design_put(img, design_logo_badge(design_team_logo(art, teams[0]), 50, teams[0]), px, yy)
+        elif len(teams) == 2:
+            _design_put(img, design_logo_badge(design_team_logo(art, teams[0]), 36, teams[0]), px - 2, yy - 1)
+            _design_put(img, design_logo_badge(design_team_logo(art, teams[1]), 36, teams[1]), px + 16, yy + 15)
+        else:
+            _design_put(img, design_head_disc(None, 50, ring, "", tint), px, yy)
+            g = design_glyph(design_leg_sport(e, s.get("sport")), 26)
+            _design_put(img, g, px + 12, yy + 12)
+        lx = 146
+        bar_x = W - 300
+        t, f = fit_text(d, design_clean(e["text"]) or "Leg", (bar_x - 130 if v["num"] else W - 360) - lx, 23, True, 16)
+        d.text((lx, yy + 4), t, font=f, fill=ART_TEXT if v["state"] != "miss" else (170, 170, 186))
+        if v["state"] == "miss":
+            d.line((lx, yy + 18, lx + _tw(d, t, f), yy + 18), fill=ART_RED + (160,), width=2)
+        clock, kind = design_clock(e)
+        sub_col = {"live": (255, 120, 130), "pre": (160, 190, 255)}.get(kind, (176, 176, 196))
+        if kind == "live":
+            d.ellipse((lx, yy + 37, lx + 9, yy + 46), fill=(255, 70, 90))
+        ct = clock if kind else _design_sub_text(v["sub"])
+        if state == "needs":
+            ct, sub_col = "Needs you: " + _design_sub_text(v["sub"]).split(" · ", 1)[-1], ART_AMBER
+        if ct:
+            st, sf = fit_text(d, ct, (bar_x - 130 if v["num"] else W - 360) - lx, 17, True, 13)
+            d.text((lx + (14 if kind == "live" else 0), yy + 32), st, font=sf, fill=sub_col)
+        if v["num"]:
+            nt, nf = fit_text(d, v["num"], 140, 23, True)
+            d.text((bar_x - 16 - _tw(d, nt, nf), yy + 12), nt, font=nf, fill=ART_TEXT)
+            n = e["num"]
+            ev = e.get("event") or {}
+            pace = None
+            if e.get("in_play") and state not in ("hit", "miss", "push"):
+                pace = lv2_pace(n["value"], n["line"], lv2_elapsed(ev, e.get("path") or ev.get("path")), e["text"])
+            lvst = {"hit": "cleared", "miss": "dead"}.get(state) or lv_state(e)
+            _lv2_pace_bar(d, bar_x, yy + 19, W - 48 - bar_x, 13, n["value"], n["line"], pace, n["side"], lvst)
+        elif state in DESIGN_STATE_WORD and state not in ("open",):
+            word = DESIGN_STATE_WORD[state]
+            col = DESIGN_STATE_COLOURS.get(state, ART_MUTED)
+            pf = art_font(16, True)
+            pw = _tw(d, word, pf) + 26
+            d.rounded_rectangle((W - 48 - pw, yy + 10, W - 48, yy + 40), 15, fill=_brand_mix(col, ART_BG, 0.8) + (235,),
+                                outline=col, width=2)
+            d.text((W - 48 - pw + 13, yy + 15), word, font=pf, fill=col)
+        yy += DESIGN_BOARD_ROW
+
+
+# ---- trading card art, game-day preview ---------------------------------------------------------------
+
+def design_card_art(inner, c: dict):
+    """Lay the owner's main sport into the trading card's inner panel: strong behind the portrait, fading
+    under the stats on the front; a faint wash on the back. Lines take the rarity colour."""
+    from PIL import Image
+    iw, ih = inner.size
+    art = sport_backdrop(design_sport_key(c.get("sport")), (iw, ih), c["rarity"][3])
+    if c.get("back"):
+        mask = Image.new("L", (iw, ih), 110)
+    else:
+        art = art.transpose(Image.FLIP_TOP_BOTTOM)    # the hoop, end zone or goal sits behind the portrait
+        mask = Image.linear_gradient("L").resize((iw, ih)).point(lambda v: int(245 - (v / 255) ** 0.8 * 150))
+    return Image.composite(art, inner.convert("RGB"), mask)
+
+
+def render_preview(title: str, when: str, riders: list[tuple[str, str]], total_cost: float,
+                   sport: Optional[str] = None, teams: Optional[list] = None) -> io.BytesIO:
+    """Who's riding what in one game, an hour before. sport: a path or league (else read from the legs);
+    teams: the game's two team dicts, for the matchup tiles."""
+    W = 900
+    riders = riders[:12]
+    H = 214 + 56 * len(riders) + 76
+    key = design_sport_key(sport, *(leg for _, leg in riders))
+    teams = sorted(teams or [], key=lambda t: t.get("home", False))[:2]
+    cols = design_team_colours(teams) if len(teams) == 2 else []
+    top = _brand_mix(cols[1], (0, 0, 0), 0.35) if cols else (20, 70, 150)
+    img, d = _design_card(W, H, key, top, head=210, margin=0, radius=0)
+    g = design_glyph(key, 26)
+    img.paste(g, (40, 26), g)
+    d.text((76, 28), "GAME DAY", font=art_font(22, True), fill=(215, 215, 230))
+    right = W - 40
+    if cols:
+        for i, (t, col) in enumerate(zip(reversed(teams), reversed(cols))):
+            x1 = right - i * 132
+            x0 = x1 - 96
+            d.rounded_rectangle((x0, 34, x1, 130), 22, fill=_brand_mix(col, (0, 0, 0), 0.25) + (235,),
+                                outline=_brand_mix(col, (255, 255, 255), 0.4) + (200,), width=3)
+            ab, f = fit_text(d, lv_abbr(t), 80, 30, True)
+            d.text(((x0 + x1 - _tw(d, ab, f)) / 2, 64), ab, font=f, fill=ART_TEXT)
+            if i == 0:
+                d.text((x0 - 26, 68), "@", font=art_font(24, True), fill=ART_MUTED)
+        right -= 280
+    t, f = fit_text(d, title, right - 40, 44, True)
+    d.text((40, 62), t, font=f, fill=ART_TEXT)
+    d.text((42, 126), when, font=art_font(20, True), fill=(160, 196, 255))
+    y = 206
+    for who, leg in riders:
+        d.rounded_rectangle((24, y, W - 24, y + 46), 14, fill=(12, 12, 18, 184), outline=(255, 255, 255, 22))
+        t, f = fit_text(d, who, 180, 20, True)
+        d.text((44, y + 11), t, font=f, fill=ART_TEXT)
+        t, f = fit_text(d, leg, W - 300, 19, False)
+        d.text((240, y + 12), t, font=f, fill=(200, 200, 216))
+        y += 56
+    foot = f"{len({w for w, _ in riders})} riding · {money_short(total_cost)} on slips with legs in this game"
+    d.text((40, H - 50), foot, font=art_font(17, True), fill=(176, 176, 196))
+    brand_sign(img, W - 40, H - 48, "PIMP-BOT", 15)
+    return _design_png(img)
+
+
+# ---- /live picture and game tracker cards, on their sport's surface ---------------------------------------
+
+def _design_row_teams(text: str, away: dict, home: dict) -> list:
+    """Colours for a live row: the backed team's, else both teams' (away, home)."""
+    mine = design_team_of(text, [away, home])
+    if mine is not None:
+        return [mine.get("colour") or lv_team_colour(mine)]
+    return [away.get("colour") or lv_team_colour(away), home.get("colour") or lv_team_colour(home)]
+
+
+def design_rider(img, x: int, y: int, size: int, r: dict, avatars: dict, heads: dict, away: dict, home: dict) -> None:
+    """The picture at the start of a /live or game-card row: the player's headshot ringed in his team's colour with
+    the bettor's Discord avatar on its corner; for team legs, the bettor's avatar in the team colours."""
+    state = DESIGN_LV_DOT.get(r["state"], "open")
+    key = r.get("head")
+    team = None
+    if key or r.get("player_team"):
+        want = _design_norm(r.get("player_team"))
+        for t in (away, home):
+            names = {_design_norm(t.get(k)) for k in ("name", "short", "abbr")} | {_design_norm(a) for a in t.get("aliases") or ()}
+            if want and (want in names or any(n and want.endswith(" " + n) for n in names)):
+                team = t
+    if key:
+        col = (team or {}).get("colour") or (lv_team_colour(team) if team else _design_row_teams(r["text"], away, home)[0])
+        player = re.split(r"\s+(?:over|under|o|u)\s*\d|\s+\d", r.get("text") or "", maxsplit=1)[0]
+        _design_put(img, design_head_disc((heads or {}).get(key), size, col, player, col), x, y)
+        b = int(size * 0.46)
+        bx, by = x + size - b + 6, y + size - b + 4
+        av = _avatar((avatars or {}).get(r.get("uid")), b, r["who"], -1)
+        ring = _design_sprite(("ridring", b), lambda: _design_ring_sprite(b + 6, (14, 14, 20)))
+        _design_put(img, ring, bx - 3, by - 3)
+        _design_put(img, av, bx, by)
+        _status_dot(img, x + size * 0.12, y + size * 0.12, max(8, size // 7), state)
+    else:
+        av = _avatar((avatars or {}).get(r.get("uid")), size - 8, r["who"], -1)
+        _design_put(img, av, x + 4, y + 4)
+        design_split_ring(img, x + size / 2, y + size / 2, size / 2 - 3, _design_row_teams(r["text"], away, home), 4)
+        backed = design_team_of(r.get("text") or "", [away, home])
+        if backed is not None:                            # the team it backs, on the corner
+            b = int(size * 0.44)
+            _design_put(img, design_logo_badge(backed.get("logo_bytes"), b, backed), x + size - b + 6, y + size - b + 4)
+            _status_dot(img, x + size * 0.12, y + size * 0.12, max(8, size // 7), state)
+        else:
+            _status_dot(img, x + size * 0.84, y + size * 0.84, max(8, size // 7), state)
+
+
+def _design_ring_sprite(size: int, colour: tuple):
+    from PIL import Image, ImageDraw
+    k = 3
+    out = Image.new("RGBA", (size * k, size * k), (0, 0, 0, 0))
+    ImageDraw.Draw(out).ellipse((0, 0, size * k - 1, size * k - 1), fill=colour + (255,))
+    return out.resize((size, size), Image.LANCZOS)
+
+
+def render_live_board(b: dict) -> io.BytesIO:
+    """b: title, who, updated, games [{league, away, home, status, elapsed, rows}], tonight [(time, name, n)], avatars.
+    Every game sits on its own sport's surface; rows are glass with the team's colour on the avatar ring."""
+    from PIL import Image, ImageDraw
+    W = 1100
+    HEAD, GHEAD, ROW, GAP = 150, 132, 112, 12
+    games = b["games"]
+    heights = []
+    for g in games:
+        n = min(len(g["rows"]), LV2_ROWS)
+        heights.append(GHEAD + n * (ROW + GAP) + (40 if len(g["rows"]) > LV2_ROWS else 0) + 26)
+    H = HEAD + sum(heights) + (86 if b.get("tonight") else 0) + (40 if b.get("more_games") else 0) + 96
+    img = Image.new("RGB", (W, H), ART_BG)
+    # header: stadium lights under a red-to-purple wash, fading into the page
+    lights = sport_backdrop("stadium", (W, HEAD + 120))
+    lights.paste(_brand_lin((W, HEAD + 120), [(150, 40, 60), (60, 20, 70), ART_BG], 0), (0, 0),
+                 Image.new("L", (W, HEAD + 120), 150))
+    img.paste(lights, (0, 0), Image.linear_gradient("L").resize((W, HEAD + 120)).point(lambda v: 255 - v))
+    d = ImageDraw.Draw(img, "RGBA")
+    d.ellipse((38, 42, 74, 78), fill=ART_RED + (60,))
+    d.ellipse((44, 48, 68, 72), fill=ART_RED)
+    d.text((84, 34), b.get("title", "LIVE NOW"), font=art_font(50, True), fill=ART_TEXT)
+    sub = f"{b.get('who', 'everyone').upper()}  ·  UPDATED {b.get('updated', '')}"
+    d.text((86, 98), sub, font=art_font(22, True), fill=(235, 216, 226))
+    legend = [("NOW", ART_GREEN), ("ON PACE", _brand_mix(ART_GREEN, (44, 44, 58), 0.55)), ("LINE", (255, 255, 255))]
+    lx = W - 40
+    for label, col in reversed(legend):
+        f = art_font(17, True)
+        lx -= _tw(d, label, f)
+        d.text((lx, 102), label, font=f, fill=(230, 230, 240))
+        lx -= 30
+        if label == "LINE":
+            d.rectangle((lx + 10, 98, lx + 14, 126), fill=col)
+        else:
+            d.rounded_rectangle((lx, 104, lx + 22, 118), 7, fill=col)
+        lx -= 22
+    y = HEAD
+    for g, gh in zip(games, heights):
+        _design_live_game(img, b, g, y, gh, W, GHEAD, ROW, GAP)
+        y += gh
+    d = ImageDraw.Draw(img, "RGBA")
+    if b.get("more_games"):
+        d.text((40, y), f"+ {b['more_games']} more games in play: tap Refresh or use /gamecard", font=art_font(20, True),
+               fill=ART_MUTED)
+        y += 40
+    if b.get("tonight"):
+        d.text((40, y + 6), "LATER TONIGHT", font=art_font(18, True), fill=ART_MUTED)
+        x = 40
+        for t, name, n in b["tonight"]:
+            label = f"{t}  {name}" + (f"  ({n})" if n > 1 else "")
+            if x + _tw(d, label, art_font(20, True)) + 30 > W - 40:
+                break
+            x += _lv_chip(d, x, y + 36, label, ART_TEXT, ART_PANEL2, 20, 40) + 10
+        y += 86
+    d.text((40, H - 56), "Bar = now  ·  faded bar = where it's headed at this rate  ·  white tick = the line",
+           font=art_font(17), fill=ART_MUTED)
+    brand_sign(img, W - 40, H - 58, "PIMP-BOT", 17, variant="hype")
+    out = _design_png(img)
+    out.pulse = [(44, 48, 68, 72)]
+    return out
+
+
+def _design_live_game(img, b: dict, g: dict, y: int, gh: int, W: int, GHEAD: int, ROW: int, GAP: int) -> None:
+    from PIL import ImageDraw
+    away, home = g["away"], g["home"]
+    sport = design_sport_key(g.get("league"))
+    design_panel(img, sport, (20, y, W - 20, y + gh - 14), 26,
+                 [_brand_mix(away["colour"], ART_BG, 0.35), (24, 24, 34), _brand_mix(home["colour"], ART_BG, 0.35)])
+    d = ImageDraw.Draw(img, "RGBA")
+    d.rounded_rectangle((20, y, W - 20, y + gh - 14), 26, outline=(255, 255, 255, 26), width=2)
+    crest_sport = lv2_sport(g.get("league"))
+    lv2_crest(img, 84, y + 56, 38, away, away["colour"], crest_sport)
+    lv2_crest(img, W - 84, y + 56, 38, home, home["colour"], crest_sport)
+    d = ImageDraw.Draw(img, "RGBA")
+    sc = lambda t: f"{t['score']:g}" if t.get("score") is not None else "–"
+    score = f"{lv_abbr(away)}  {sc(away)}   –   {sc(home)}  {lv_abbr(home)}"
+    st, sf = fit_text(d, score, 640, 44, True)
+    d.text((W / 2 - _tw(d, st, sf) / 2 + 2, y + 16), st, font=sf, fill=(0, 0, 0, 120))
+    d.text((W / 2 - _tw(d, st, sf) / 2, y + 14), st, font=sf, fill=ART_TEXT)
+    status = (g.get("league") + "  ·  " if g.get("league") else "") + (g.get("status") or "")
+    tt, tf = fit_text(d, status, 520, 22, True)
+    tw_ = _tw(d, tt, tf)
+    gl = design_glyph(sport, 22)
+    gx = W / 2 - (tw_ + 30) / 2
+    if sport != "stadium":
+        img.paste(gl, (int(gx), y + 70), gl)
+    d.text((gx + 30, y + 70), tt, font=tf, fill=ART_AMBER)
+    el = g.get("elapsed")
+    if el is not None:
+        gx0, gx1 = 150, W - 150
+        d.rounded_rectangle((gx0, y + 102, gx1, y + 108), 3, fill=(52, 52, 66, 230))
+        d.rounded_rectangle((gx0, y + 102, gx0 + (gx1 - gx0) * el, y + 108), 3, fill=ART_AMBER)
+        d.ellipse((gx0 + (gx1 - gx0) * el - 6, y + 99, gx0 + (gx1 - gx0) * el + 6, y + 111), fill=(255, 236, 170))
+    ry = y + GHEAD
+    for r in g["rows"][:LV2_ROWS]:
+        _design_live_row(img, d, b, r, away, home, sport, ry, W, ROW)
+        ry += ROW + GAP
+    if len(g["rows"]) > LV2_ROWS:
+        d.text((60, ry), f"+ {len(g['rows']) - LV2_ROWS} more legs on this game  (/gamecard)", font=art_font(19, True),
+               fill=ART_MUTED)
+
+
+def _design_live_row(img, d, b: dict, r: dict, away: dict, home: dict, sport: str, ry: int, W: int, ROW: int) -> None:
+    col = _lv_colour(r["state"])
+    d.rounded_rectangle((36, ry, W - 36, ry + ROW), 20, fill=(14, 14, 20, 214), outline=(255, 255, 255, 20))
+    d.rounded_rectangle((36, ry, 46, ry + ROW), 5, fill=col)
+    d.rectangle((41, ry, 46, ry + ROW), fill=(14, 14, 20, 255))
+    design_rider(img, 56, ry + 16, 80, r, b.get("avatars"), b.get("heads"), away, home)
+    X = 156
+    nx = X
+    if sport != "stadium":
+        gl = design_glyph(sport, 20)
+        img.paste(gl, (nx, ry + 13), gl)
+        nx += 26
+    nt, nf = fit_text(d, r["who"], 300, 20, True)
+    d.text((nx, ry + 12), nt, font=nf, fill=(190, 190, 208))
+    lt, lf = fit_text(d, r["text"], 540, 28, True, min_size=19)
+    d.text((X, ry + 38), lt, font=lf, fill=ART_TEXT if r["state"] != "dead" else (170, 170, 186))
+    if r["state"] == "dead":
+        d.line((X, ry + 56, X + _tw(d, lt, lf), ry + 56), fill=ART_RED + (150,), width=2)
+    pill = LV_LABEL.get(r["state"], "WAITING")
+    pf = art_font(17, True)
+    pw = max(104, _tw(d, pill, pf) + 30)
+    px = W - 52 - pw
+    d.rounded_rectangle((px, ry + 14, px + pw, ry + 48), 17, fill=_brand_mix(col, ART_BG, 0.78), outline=col, width=2)
+    d.text((px + (pw - _tw(d, pill, pf)) / 2, ry + 21), pill, font=pf, fill=col)
+    n = r.get("num")
+    if n:
+        vt = f"{design_num(n['value'])} / {design_num(n['line'])}"
+        vf = art_font(34, True)
+        d.text((px - 24 - _tw(d, vt, vf), ry + 10), vt, font=vf, fill=ART_TEXT)
+        _lv2_pace_bar(d, X, ry + 82, 716 - X, 14, n["value"], n["line"], r.get("pace"), n["side"], r["state"])
+        if r.get("pace") is not None:
+            need = n["line"] - n["value"]
+            on = (r["pace"] > n["line"]) if n["side"] == "over" else (r["pace"] <= n["line"])
+            note = f"on pace for {design_num(r['pace'])}" + (f" · needs {design_num(need)} more"
+                                                               if n["side"] == "over" and need > 0 else "")
+            nt2, nf2 = fit_text(d, note, W - 52 - 736, 19, True, min_size=14)
+            d.text((736, ry + 76), nt2, font=nf2, fill=ART_GREEN if on else ART_RED)
+        elif n["side"] == "over" and n["line"] > n["value"]:
+            d.text((736, ry + 76), f"needs {n['line'] - n['value']:g} more", font=art_font(19, True), fill=ART_MUTED)
+    else:
+        d.text((X, ry + 80), {"ahead": "winning right now", "behind": "losing right now"}.get(r["state"], ""),
+               font=art_font(19, True), fill=col)
+
+
+def render_game_card(c: dict) -> io.BytesIO:
+    """c: league, away/home {abbr, short, score, colour}, state (pre/in/post), status (clock text), rows [lv_row],
+    avatars {uid: bytes}, final (bool), cashed [{name, net, id}], records [(name, hit, total)], updated (str).
+    The game's own field under team-colour lights, glass rows with team rings."""
+    from PIL import Image, ImageDraw
+    W = 1000
+    rows = sorted(c["rows"], key=lambda r: (LV_ORDER.get(r["state"], 9), r["who"].lower()))
+    shown, extra = rows[:LV_CARD_ROWS], max(0, len(rows) - LV_CARD_ROWS)
+    pulse_box = None
+    ROW_H, GAP, HEAD = 86, 10, 266
+    final = bool(c.get("final"))
+    fin_h = 176 if final else 0
+    H = HEAD + 66 + len(shown) * (ROW_H + GAP) + (42 if extra else 0) + fin_h + 84
+    away, home = c["away"], c["home"]
+    ac, hc = away["colour"], home["colour"]
+    sport = design_sport_key(c.get("league"))
+    img = sport_backdrop(sport, (W, H))
+    head = _brand_lin((W, HEAD + 40), [_brand_mix(ac, (0, 0, 0), 0.25), _brand_mix(ac, ART_BG, 0.72),
+                                       _brand_mix(hc, ART_BG, 0.72), _brand_mix(hc, (0, 0, 0), 0.25)], 0)
+    img.paste(head, (0, 0), Image.linear_gradient("L").resize((W, HEAD + 40)).point(
+        lambda v: int(240 * (1 - (v / 255) ** 2.2))))
+    over = Image.new("RGBA", (W, HEAD), (0, 0, 0, 0))     # giant team letters as a watermark
+    od = ImageDraw.Draw(over)
+    wf = art_font(170, True)
+    od.text((-14, HEAD - 190), lv_abbr(away), font=wf, fill=(255, 255, 255, 15))
+    od.text((W + 14 - _tw(od, lv_abbr(home), wf), HEAD - 190), lv_abbr(home), font=wf, fill=(255, 255, 255, 15))
+    img.paste(over, (0, 0), over)
+    d = ImageDraw.Draw(img, "RGBA")
+    gl = design_glyph(sport, 24)
+    lx = 40
+    if sport != "stadium":
+        img.paste(gl, (40, 27), gl)
+        lx = 72
+    d.text((lx, 28), (c.get("league") or "GAME").upper(), font=art_font(20, True), fill=(228, 228, 238))
+    if final:
+        sw = _tw(d, "FINAL", art_font(18, True)) + 28
+        _lv_chip(d, W - 40 - sw, 22, "FINAL", (16, 16, 22), ART_TEXT, 18)
+    elif c.get("state") == "in":
+        f = art_font(18, True)
+        sw = _tw(d, "LIVE", f) + 50
+        x0 = W - 40 - sw
+        d.rounded_rectangle((x0, 22, x0 + sw, 56), 17, fill=(70, 18, 24), outline=ART_RED, width=2)
+        d.ellipse((x0 + 14, 33, x0 + 26, 45), fill=ART_RED)
+        pulse_box = (x0 + 14, 33, x0 + 26, 45)
+        d.text((x0 + 34, 28), "LIVE", font=f, fill=ART_TEXT)
+    cy = 134
+    lv2_crest(img, 118, cy, 56, away, ac, lv2_sport(c.get("league")))
+    lv2_crest(img, W - 118, cy, 56, home, hc, lv2_sport(c.get("league")))
+    d = ImageDraw.Draw(img, "RGBA")
+    for t, cx in ((away, 118), (home, W - 118)):
+        nt, nf = fit_text(d, t.get("short") or "", 210, 20, True)
+        d.text((cx - _tw(d, nt, nf) / 2, cy + 70), nt, font=nf, fill=(232, 232, 240))
+    a_s, h_s = away.get("score"), home.get("score")
+    played = c.get("state") in ("in", "post") and a_s is not None and h_s is not None
+    sf = art_font(92, True)
+    a_txt = f"{a_s:g}" if played else "–"
+    h_txt = f"{h_s:g}" if played else "–"
+    dim = (150, 150, 168)
+    for txt, x, lead in ((a_txt, W / 2 - 72 - _tw(d, a_txt, sf), played and a_s > h_s),
+                         (h_txt, W / 2 + 72, played and h_s > a_s)):
+        d.text((x + 3, cy - 58), txt, font=sf, fill=(0, 0, 0, 110))
+        d.text((x, cy - 62), txt, font=sf, fill=ART_TEXT if (lead or not final) else dim)
+    d.line((W / 2, cy - 44, W / 2, cy + 6), fill=(255, 255, 255), width=2)
+    stt, stf = fit_text(d, c.get("status") or "", 220, 22, True)
+    stw = _tw(d, stt, stf) + 30
+    d.rounded_rectangle((W / 2 - stw / 2, cy + 30, W / 2 + stw / 2, cy + 66), 18, fill=(12, 12, 18, 230),
+                        outline=(255, 255, 255, 30))
+    d.text((W / 2 - stw / 2 + 15, cy + 36), stt, font=stf, fill=ART_AMBER if c.get("state") == "in" else ART_TEXT)
+    # summary chips
+    y = HEAD + 8
+    counts = lv_counts(rows)
+    people = len({r["who"] for r in rows})
+    x = 32
+    x += _lv_chip(d, x, y, f"{len(rows)} legs · {people} {'person' if people == 1 else 'people'}", ART_TEXT,
+                  (30, 30, 42, 230), outline=(255, 255, 255, 30)) + 10
+    for k in ("cleared", "close", "live", "ahead", "behind", "dead"):
+        if counts.get(k):
+            col = _lv_colour(k)
+            label = f"{counts[k]} {LV_LABEL[k]}"
+            if x + _tw(d, label, art_font(17, True)) + 28 > W - 32:
+                break
+            x += _lv_chip(d, x, y, label, col, _brand_mix(col, ART_BG, 0.82), outline=col) + 10
+    y = HEAD + 66
+    for r in shown:
+        _design_card_row(img, d, c, r, away, home, y, W, ROW_H)
+        y += ROW_H + GAP
+    if extra:
+        d.text((40, y + 4), f"+ {extra} more leg{'s' if extra != 1 else ''} on this game", font=art_font(19, True),
+               fill=ART_MUTED)
+        y += 42
+    if final:
+        d.rounded_rectangle((24, y + 4, W - 24, y + fin_h - 8), 22, fill=(18, 30, 26, 226), outline=(52, 120, 92),
+                            width=2)
+        d.text((48, y + 22), "WHO CASHED ON THIS GAME", font=art_font(18, True), fill=ART_GREEN)
+        x = 48
+        cashed = c.get("cashed") or []
+        if cashed:
+            for k in cashed[:5]:
+                x += _lv_chip(d, x, y + 54, f"{k['name']}  {signed_short(k['net'])}", (16, 16, 22), ART_GREEN, 19, 38) + 10
+                if x > W - 200:
+                    break
+        else:
+            d.text((48, y + 60), "No slips cashed off this one (yet).", font=art_font(20, True), fill=ART_MUTED)
+        rec = c.get("records") or []
+        if rec:
+            line = "   ".join(f"{n} {h}/{t}" for n, h, t in rec[:6])
+            lt, lf = fit_text(d, "Legs here:  " + line, W - 100, 19, True)
+            d.text((48, y + 114), lt, font=lf, fill=(205, 215, 210))
+        y += fin_h
+    foot = (f"Locked at the final · {c.get('updated', '')}" if final else
+            f"Updated {c.get('updated', '')} · moves when the score or a leg does")
+    d.text((40, H - 50), foot, font=art_font(16), fill=(176, 176, 196))
+    brand_sign(img, W - 40, H - 52, "PIMP-BOT", 16, variant="hype" if c.get("state") == "in" else "default")
+    out = _design_png(img)
+    out.pulse = [pulse_box] if pulse_box else []
+    return out
+
+
+def _design_card_row(img, d, c: dict, r: dict, away: dict, home: dict, y: int, W: int, ROW_H: int) -> None:
+    col = _lv_colour(r["state"])
+    d.rounded_rectangle((24, y, W - 24, y + ROW_H), 22, fill=(14, 14, 20, 214), outline=(255, 255, 255, 20))
+    d.rounded_rectangle((24, y, 34, y + ROW_H), 5, fill=col)
+    d.rectangle((29, y, 34, y + ROW_H), fill=(14, 14, 20, 255))
+    design_rider(img, 42, y + 9, 68, r, c.get("avatars"), c.get("heads"), away, home)
+    X = 130
+    nt, nf = fit_text(d, r["who"], 440, 18, True)
+    d.text((X, y + 13), nt, font=nf, fill=(190, 190, 208))
+    tt, tf = fit_text(d, r["text"], 466 if r.get("bar") else 680, 23, True, min_size=17)
+    d.text((X, y + 40), tt, font=tf, fill=ART_TEXT if r["state"] != "dead" else (170, 170, 186))
+    if r["state"] == "dead":
+        d.line((X, y + 54, X + _tw(d, tt, tf), y + 54), fill=ART_RED + (150,), width=2)
+    if r.get("bar"):
+        vt, vf = fit_text(d, r["value_text"], 220, 26, True)
+        d.text((838 - _tw(d, vt, vf), y + 12), vt, font=vf, fill=ART_TEXT)
+        frac, bcol, marker = r["bar"]
+        bcol = {"cleared": ART_GREEN, "dead": ART_RED}.get(r["state"], tuple(bcol))
+        _bar(d, 610, y + 54, 228, 12, frac, bcol, marker)
+    pill = LV_LABEL.get(r["state"], "")
+    pf = art_font(15, True)
+    pw = max(88, _tw(d, pill, pf) + 26)
+    px = W - 40 - pw
+    d.rounded_rectangle((px, y + 27, px + pw, y + 59), 16, fill=_brand_mix(col, ART_BG, 0.78), outline=col, width=2)
+    d.text((px + (pw - _tw(d, pill, pf)) / 2, y + 34), pill, font=pf, fill=col)
+
+
+# ---- big-win celebration GIF ----------------------------------------------------------------------------
+
+DESIGN_CONFETTI = [(255, 214, 102), (52, 211, 153), (96, 165, 250), (248, 113, 113), (196, 160, 255), (255, 255, 255),
+                   (255, 150, 60)]
+DESIGN_GIF_MAX = 1_500_000
+
+
+def _design_ease_back(t: float) -> float:
+    """0 to 1 with a little overshoot (the pop-in)."""
+    t = max(0.0, min(1.0, t))
+    k = 1.9
+    return 1 + (k + 1) * (t - 1) ** 3 + k * (t - 1) ** 2
+
+
+def _design_bounce(t: float) -> float:
+    """0 to 1 like a ball dropped onto the floor."""
+    t = max(0.0, min(1.0, t))
+    n, dd = 7.5625, 2.75
+    if t < 1 / dd:
+        return n * t * t
+    if t < 2 / dd:
+        t -= 1.5 / dd
+        return n * t * t + 0.75
+    if t < 2.5 / dd:
+        t -= 2.25 / dd
+        return n * t * t + 0.9375
+    t -= 2.625 / dd
+    return n * t * t + 0.984375
+
+
+def _design_gold_text(text: str, size: int):
+    """Gold-gradient lettering with a dark drop shadow, as a tight RGBA image."""
+    from PIL import Image, ImageDraw
+    f = art_font(size, True)
+    w, h = _tw(ImageDraw.Draw(Image.new("L", (1, 1))), text, f) + size // 2, int(size * 1.35)
+    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    mask = _brand_mask((w, h), lambda d: d.text((size // 4, size // 12), text, font=f, fill=255))
+    _brand_paint(out, mask, (20, 8, 0), alpha=200, blur=size / 14, offset=(0, size / 16))
+    _brand_paint(out, mask, _brand_lin((w, h), [(255, 250, 225), (255, 214, 102), (210, 140, 20)], 90))
+    return out
+
+
+def render_cash_gif(c: dict) -> io.BytesIO:
+    """A 2-second looping GIF for a big cash: the hype mascot drops in, confetti falls, CASHED pops and the
+    winnings count up. c: name, avatar (bytes), net, cost, returned, sport, accent. Under 1.5 MB."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+    W, H, N = 600, 336, 22
+    net = float(c.get("net") or 0)
+    rnd = _random.Random(int(abs(net) * 100) + len(c.get("name") or ""))
+    sport = design_sport_key(c.get("sport"))
+    accent = tuple(c.get("accent") or BRAND_DEFAULT_ACCENT)
+    mx, my = 140, 178
+    stage = ImageChops.add(sport_backdrop(sport, (W, H), (255, 214, 102)),
+                           _brand_radial((W, H), mx, my, W * 0.55, [(120, 80, 26), (40, 24, 8), (0, 0, 0)])).convert("RGBA")
+    rays = Image.new("L", (W, H), 0)           # a still sunburst: moving rays would redraw every pixel every frame
+    rd = ImageDraw.Draw(rays)
+    for k in range(16):
+        a0 = math.radians(k * 22.5 + 4)
+        rd.polygon([(mx, my), (mx + math.cos(a0) * W * 1.4, my + math.sin(a0) * W * 1.4),
+                    (mx + math.cos(a0 + 0.17) * W * 1.4, my + math.sin(a0 + 0.17) * W * 1.4)], fill=255)
+    _brand_paint(stage, rays, (255, 214, 102), alpha=24)
+    edge = _brand_mask((W, H), lambda d: d.rectangle((3, 3, W - 4, H - 4), outline=255, width=3))
+    _brand_paint(stage, edge, (255, 206, 90), alpha=150, blur=4)
+    brand_sign(stage, W - 14, H - 26, "PIMP-BOT", 12, variant="hype", accent=accent)
+    mascot = brand_logo(156, "hype", accent)
+    shadow = _brand_mask((176, 50), lambda d: d.ellipse((28, 16, 148, 34), fill=255)).filter(ImageFilter.GaussianBlur(6))
+    cashed = _design_gold_text("CASHED", 52)
+    name = clip(str(c.get("name") or "Somebody"), 22)
+    line = f"{money_short(c.get('cost') or 0)} → {money_short(c.get('returned') or 0)}"
+    mult = (float(c.get("returned") or 0) / float(c["cost"])) if c.get("cost") else 0
+    if mult >= 2:
+        line += f"  ·  {mult:.0f}x"
+    av = _avatar(c.get("avatar"), 42, name, -1)
+    glyph = design_glyph(sport, 26)
+    parts = [[rnd.random() * W, -rnd.random() * H * 1.2, 2.5 + rnd.random() * 4.5, rnd.uniform(-1.2, 1.2),
+              rnd.random() * 6.28, rnd.uniform(-0.5, 0.5), rnd.choice(DESIGN_CONFETTI), 3 + rnd.random() * 4]
+             for _ in range(72)]
+    sparks = [(rnd.uniform(270, W - 30), rnd.uniform(30, 120), rnd.uniform(5, 10), rnd.randrange(N)) for _ in range(5)]
+    frames = []
+    tx = 282
+    for fi in range(N):
+        fr = stage.copy()
+        drop = _design_bounce(fi / 8)                       # the mascot drops in and bounces, then bobs
+        y = int(my - 78 - (1 - drop) * 240 + (math.sin(fi * 0.7) * 4 if fi > 8 else 0))
+        fr.paste((0, 0, 0, 255), (mx - 88, my + 52), shadow.point(lambda v, k=drop: int(v * 0.6 * k)))
+        fr.alpha_composite(mascot, (mx - 78, y))
+        d = ImageDraw.Draw(fr)
+        if fi >= 3:
+            sc = _design_ease_back((fi - 3) / 6)
+            if sc > 0.05:
+                cw, ch = max(1, int(cashed.width * sc)), max(1, int(cashed.height * sc))
+                fr.alpha_composite(cashed.resize((cw, ch), Image.BILINEAR),
+                                   (int(tx + cashed.width / 2 - cw / 2), int(66 + cashed.height / 2 - ch / 2)))
+        if fi >= 6:
+            shown = net * min(1.0, 1 - (1 - (fi - 5) / 8) ** 3)
+            _, f = fit_text(d, signed_short(net), W - tx - 20, 62, True, 28)      # one size for the whole count
+            t = signed_short(round(shown) if fi < 13 else net)
+            box = Image.new("RGBA", (W - tx + 20, 104), (0, 0, 0, 0))
+            _brand_paint(box, _brand_mask(box.size, lambda dd: dd.text((26, 20), t, font=f, fill=255)), ART_GREEN,
+                         alpha=150, blur=10)
+            fr.alpha_composite(box, (tx - 20, 114))
+            d = ImageDraw.Draw(fr)
+            d.text((tx + 6, 134), t, font=f, fill=(230, 255, 240))
+        if fi >= 10:
+            a = min(255, (fi - 9) * 70)
+            fade = av if a >= 255 else Image.blend(Image.new("RGBA", av.size, (0, 0, 0, 0)), av, a / 255)
+            fr.alpha_composite(fade, (tx + 8, 230))
+            t, f = fit_text(d, name, W - tx - 110, 22, True, 14)
+            d.text((tx + 60, 229), t, font=f, fill=(255, 255, 255, a))
+            t, f = fit_text(d, line, W - tx - 80, 17, True, 12)
+            d.text((tx + 60, 256), t, font=f, fill=(206, 206, 224, a))
+            if sport != "stadium" and a >= 255:
+                fr.alpha_composite(glyph, (W - 46, 229))
+        for sx, sy, sr, phase in sparks:                    # twinkles around the money
+            k = (fi - phase) % N
+            if k < 4:
+                rr = sr * (1 - abs(k - 1.5) / 2)
+                d.polygon(_brand_sparkle(sx, sy, rr, 16), fill=(255, 246, 214))
+        for p in parts:
+            x = p[0] + math.sin(fi * 0.5 + p[4]) * 6
+            yy = p[1] + p[2] * fi * 3.2 + (60 if fi > 0 else 0)
+            ang = p[4] + p[5] * fi * 3
+            sz = p[7]
+            if -10 < yy < H + 10:
+                ca, sa = math.cos(ang), math.sin(ang)
+                d.polygon([(x + ca * dx - sa * dy, yy + sa * dx + ca * dy) for dx, dy in
+                           ((-sz, -sz * 0.45), (sz, -sz * 0.45), (sz, sz * 0.45), (-sz, sz * 0.45))], fill=p[6] + (255,))
+        frames.append(fr.convert("RGB"))
+    # one shared palette from the busiest frames keeps colours steady and the file small
+    strip = Image.new("RGB", (W, H * 3))
+    for k, fi in enumerate((7, 13, N - 1)):
+        strip.paste(frames[fi], (0, H * k))
+    out = None
+    for colours in (168, 112, 64):
+        pal = strip.quantize(colors=colours, method=Image.Quantize.MEDIANCUT)
+        q = [fr.quantize(palette=pal, dither=Image.Dither.NONE) for fr in frames]
+        out = io.BytesIO()
+        q[0].save(out, "GIF", save_all=True, append_images=q[1:], duration=[75] * (N - 1) + [700], loop=0,
+                  disposal=1, optimize=False)
+        if out.tell() <= DESIGN_GIF_MAX:
+            break
+    out.seek(0)
+    return out
+
+
+async def design_bigwin_file(client, p) -> Optional[discord.File]:
+    """The celebration GIF for a big cash (server toggle `cashgifs`), or the static receipt if the GIF can't be
+    drawn, or None when the toggle is off. Everything from the database is read before the render thread."""
+    if not server_on(p["guild_id"], "cashgifs"):
+        return None
+    user = await known_user(client, p["bettor_id"]) if p["bettor_id"] else None
+    av = await avatar_bytes(user) if user is not None else None
+    data = {"name": call_name(p["guild_id"], p["bettor_key"], p["bettor_name"]), "avatar": av, "net": pick_net(p),
+            "cost": p["cost"], "returned": p["returned"] or 0, "sport": p["sport"],
+            "accent": brand_for(p["guild_id"])["accent"]}
+    try:
+        gif = await asyncio.to_thread(locked_render, render_cash_gif, data)
+        if gif.getbuffer().nbytes <= 7 * 1024 * 1024:
+            return discord.File(gif, filename="cashed.gif")
+    except Exception:
+        log.warning("Cash GIF failed for pick %s; sending the receipt", p["id"], exc_info=True)
+    try:
+        return await receipt_file(client, p, db_entries(p))
+    except Exception:
+        log.warning("Receipt fallback failed for pick %s", p["id"], exc_info=True)
+        return None
+
+
+# ==========================================================================
+# r30: the dashboard catches up with the bot. A Live tab with the same picture as /live (team logos, score, clock,
+# game progress, each leg's pace bar and status), game pages with the /gamecard picture, the news feed, and a bot
+# health panel. Same rules as the rest of the dashboard: cookie login, CSP, rate limits, hidden slips never shown.
+# ==========================================================================
+
+DASH30_TTL = 15.0                 # seconds the live/news/health JSON is reused between viewers
+DASH30_IMG_TTL = 60.0             # rendered pictures (/live, game cards)
+DASH30_RENDER_RATE = (40, 60.0)   # pictures one IP may have rendered per window (they cost CPU)
+DASH30_LOGO_PX = 160              # logos are re-drawn as small PNGs at most this big
+DASH30_ROWS = 30                  # legs per game in the JSON
+DASH30_HOSTS = {"generativelanguage.googleapis.com": "Gemini", "api.anthropic.com": "Claude"}
+_DASH30_CACHE: dict = {}
+_DASH30_LOGO_URLS: dict = {}      # event id -> {"a": url, "h": url}, filled when the live data is built
+_DASH30_LOGOS: dict = {}          # logo url -> (expires, png bytes or None)
+_DASH30_EID = re.compile(r"[A-Za-z0-9]{1,24}")
+
+
+def _dash30_cached(key, ttl: float = DASH30_TTL):
+    hit = _DASH30_CACHE.get(key)
+    return hit[1] if hit and hit[0] > time.monotonic() else None
+
+
+def _dash30_keep(key, value, ttl: float = DASH30_TTL):
+    _DASH30_CACHE[key] = (time.monotonic() + ttl, value)
+    if len(_DASH30_CACHE) > 300:
+        now = time.monotonic()
+        for k, (exp, _) in list(_DASH30_CACHE.items()):
+            if exp <= now:
+                _DASH30_CACHE.pop(k, None)
+    return value
+
+
+def _dash30_hex(c: tuple) -> str:
+    return "#%02x%02x%02x" % tuple(int(x) for x in c[:3])
+
+
+def _dash30_num(x):
+    """A stat as a plain JSON number (no NaN/inf), or None."""
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return None
+    return round(f, 2) if math.isfinite(f) else None
+
+
+# ---- the live data (public slips only, same source as /live and /gamecard) -----------------------------------
+
+def dash30_row(r: dict) -> dict:
+    """One leg for the web: who, the leg, the number, the line, where it's headed, and its state. No money."""
+    n = r.get("num") or {}
+    return {"pid": r["pid"], "n": r.get("n"), "who": clip(r.get("who") or "", 40), "text": clip(r.get("text") or "", 120),
+            "label": clip(leg_label(r.get("text") or ""), 40), "state": r.get("state") or "waiting",
+            "chip": LV_LABEL.get(r.get("state") or "", "SOON"), "value": _dash30_num(n.get("value")),
+            "line": _dash30_num(n.get("line")), "side": n.get("side") if n.get("side") in ("over", "under") else None,
+            "pace": _dash30_num(r.get("pace")), "slip_open": bool(r.get("slip_open"))}
+
+
+def dash30_game(g: dict) -> dict:
+    """A game the group is on, for the web: teams (logo, colour, score), status, how much is played, and its legs."""
+    ev = g["ev"]
+    final = bool(ev.get("final") or ev.get("state") == "post")
+    state = "post" if final else (ev.get("state") if ev.get("state") in ("pre", "in") else "pre")
+    el = lv2_elapsed(ev, g["path"]) if state != "pre" else None
+    rows = lv2_game_rows(g)
+    for r in rows:
+        n = r.get("num")
+        r["pace"] = (lv2_pace(n["value"], n["line"], el, r["text"])
+                     if n and state == "in" and r["state"] not in ("cleared", "dead") else None)
+    away, home = lv_sides(ev)
+    ac = lv_team_colour(away)
+    hc = lv_team_colour(home, avoid=ac)
+    eid = clip(str(g["id"]), 24)
+    urls = {}
+
+    def side(t: dict, colour: tuple, key: str) -> dict:
+        if t.get("logo"):
+            urls[key] = t["logo"]
+        return {"abbr": clip(lv_abbr(t), 4), "name": clip(t.get("short") or t.get("name") or lv_abbr(t), 24),
+                "score": None if state == "pre" else _dash30_num(t.get("score")), "color": _dash30_hex(colour),
+                "logo": f"/img/logo/{eid}/{key}.png" if t.get("logo") and _DASH30_EID.fullmatch(eid) else None}
+    out_rows = [dash30_row(r) for r in rows[:DASH30_ROWS]]
+    when = event_time(ev)
+    out = {"id": eid, "league": LEAGUE_NAMES.get(g["path"] or "", ""), "state": state,
+           "status": clip(lv_status_text(dict(ev, final=final)), 30), "elapsed": _dash30_num(el),
+           "start": when.isoformat() if when else "", "away": side(away, ac, "a"), "home": side(home, hc, "h"),
+           "rows": out_rows, "more": max(0, len(rows) - DASH30_ROWS), "people": len({r["who"] for r in out_rows}),
+           "counts": lv_counts(rows)}
+    if urls:
+        _DASH30_LOGO_URLS[eid] = urls
+        if len(_DASH30_LOGO_URLS) > 500:
+            for k in list(_DASH30_LOGO_URLS)[:250]:
+                _DASH30_LOGO_URLS.pop(k, None)
+    return out
+
+
+async def dash30_games(gid: int, now: datetime) -> list[dict]:
+    """The games the group's public slips ride on (live first, then later today, then tonight's finals)."""
+    snap = await lv_snapshot(gid, now)
+    return lv2_card_games(gid, snap, now, 0)
+
+
+async def dash30_live(gid: int) -> dict:
+    """The Live tab: games in play with every leg, the ones later today, and tonight's finals."""
+    hit = _dash30_cached(("live", gid))
+    if hit is not None:
+        return hit
+    now = datetime.now(timezone.utc)
+    games = [dash30_game(g) for g in await dash30_games(gid, now)]
+    by = {"in": [], "pre": [], "post": []}
+    for g in games:
+        by[g["state"]].append(g)
+    for g in by["pre"] + by["post"]:
+        g["rows"] = g["rows"][:12]
+    return _dash30_keep(("live", gid), {"games": by["in"][:12], "later": by["pre"][:12], "finals": by["post"][:12],
+                                        "updated": datetime.now(TZ).strftime("%-I:%M %p")})
+
+
+async def dash30_one_game(gid: int, eid: str):
+    """(game JSON, the game as lv2_card_games has it) or (None, None)."""
+    now = datetime.now(timezone.utc)
+    g = next((x for x in await dash30_games(gid, now) if str(x["id"]) == eid), None)
+    return (dash30_game(g), g) if g is not None else (None, None)
+
+
+# ---- the news feed (what the ask channel has posted), newest first --------------------------------------------
+
+def _dash30_players(gid: int, hidden: bool) -> dict[str, dict]:
+    """{player key: {name, slips: [(who, pick id)]}} for the recent slips that are still secret (hidden=True: open, or settled but
+    not revealed yet), or for the open public ones."""
+    since = iso(datetime.now(timezone.utc) - timedelta(days=AUTOPILOT_DAYS))
+    cond = ("hidden = 1 AND (status = 'open' OR revealed_at IS NULL)" if hidden
+            else "status = 'open' AND (hidden IS NULL OR hidden = 0)")
+    out: dict = {}
+    for p in db().execute(f"SELECT id, bettor_name, description FROM picks WHERE guild_id = ? AND created_at >= ? "
+                          f"AND {cond} ORDER BY id DESC LIMIT 80", (gid, since)).fetchall():
+        legs = get_legs(p["id"])
+        for text in ([x["text"] for x in legs] or [p["description"]]):
+            leg = prop_of(text or "")
+            for part in ((leg or {}).get("combo") or ([leg] if leg else [])):
+                w = out.setdefault(part["player"], {"name": part.get("display") or part["player"].title(), "slips": []})
+                if (p["bettor_name"], p["id"]) not in w["slips"]:
+                    w["slips"].append((p["bettor_name"], p["id"]))
+    return out
+
+
+def _dash30_chip(status: Optional[str]) -> str:
+    s = (status or "").lower()
+    for k in ("out", "doubtful", "questionable", "day-to-day", "suspension", "probable", "active"):
+        if s.startswith(k):
+            return k
+    return "other"
+
+
+def dash30_news(gid: int) -> list[dict]:
+    """The news feed's injury and reboot items, newest first. A player who's only on hidden slips never shows,
+    and reboots on hidden slips stay out (like the feed itself)."""
+    hit = _dash30_cached(("news", gid))
+    if hit is not None:
+        return hit
+    c = news_db()
+    public = _dash30_players(gid, hidden=False)
+    secret = _dash30_players(gid, hidden=True)
+    out = []
+    for r in c.execute("SELECT key, status, detail, posted_at FROM news_seen WHERE guild_id = ? AND posted_at IS NOT NULL "
+                       "ORDER BY posted_at DESC LIMIT 80", (gid,)).fetchall():
+        key = r["key"] or ""
+        if key.startswith("inj:"):
+            player = key[4:]
+            if player in secret and player not in public:
+                continue
+            st = r["status"]
+            w = public.get(player) or {"name": player.title(), "slips": []}
+            out.append({"kind": "injury" if st else "off", "player": clip(w["name"], 60),
+                        "status": clip(st or "Off the report", 30), "chip": _dash30_chip(st) if st else "off",
+                        "detail": clip(r["detail"] or "", 240) if st else "",
+                        "slips": [{"id": pid, "who": clip(who, 30)} for who, pid in w["slips"][:4]],
+                        "when": r["posted_at"]})
+        elif key.startswith("dnp:"):
+            m = re.fullmatch(r"dnp:(\d{1,10}):(\d{1,3})", key)
+            p = get_pick(gid, int(m.group(1))) if m else None
+            if p is None or p["hidden"]:
+                continue
+            leg = db().execute("SELECT text, note FROM legs WHERE pick_id = ? AND idx = ?",
+                               (p["id"], int(m.group(2)))).fetchone()
+            prop = prop_of(leg["text"]) if leg else None
+            name = (prop or {}).get("display") or (leg_label(leg["text"]) if leg else "A leg")
+            out.append({"kind": "reboot", "player": clip(name, 60),
+                        "status": "Reboot", "chip": "reboot",
+                        "detail": clip((leg["note"] if leg and leg["note"] else "Didn't play") + ". The leg is voided.", 240),
+                        "slips": [{"id": p["id"], "who": clip(p["bettor_name"], 30)}], "when": r["posted_at"]})
+        if len(out) >= 40:
+            break
+    return _dash30_keep(("news", gid), out)
+
+
+# ---- bot health: no keys, no error text, no paths -------------------------------------------------------------
+
+def _dash30_ago(ts: Optional[float], now: float) -> Optional[str]:
+    return None if not ts else _track_ago(ts, now)
+
+
+def dash30_health() -> dict:
+    """Data feeds, today's slip reads and questions, the scheduler, the version. Safe to show anyone signed in."""
+    now = time.time()
+    feeds = []
+    hosts = list(HEALTH_NAMES) + sorted(h for h in DATA_HEALTH if h not in HEALTH_NAMES)
+    for host in hosts[:20]:
+        h = DATA_HEALTH.get(host)
+        name = clip(HEALTH_NAMES.get(host) or DASH30_HOSTS.get(host) or host, 40)
+        if not h:
+            feeds.append({"name": name, "state": "idle", "ok": 0, "fail": 0, "last_ok": None, "code": None})
+            continue
+        state = "down" if h.get("streak", 0) >= 3 else ("shaky" if h.get("streak", 0) else "ok")
+        code = h.get("status")
+        feeds.append({"name": name, "state": state, "ok": int(h.get("ok") or 0), "fail": int(h.get("fail") or 0),
+                      "last_ok": _dash30_ago(h.get("last_ok"), now), "code": code if isinstance(code, int) else None})
+    try:
+        counts = json.loads(get_setting(0, f"slipreads:{datetime.now(TZ).date().isoformat()}") or "{}")
+    except ValueError:
+        counts = {}
+    counts = counts if isinstance(counts, dict) else {}
+    num = lambda k: int(counts.get(k) or 0) if str(counts.get(k) or 0).isdigit() else 0
+    reads = [{"name": n, "n": num(k)} for k, n in (("scan", "Free scan"), ("scan_confirm", "Free scan, fixed by hand"),
+                                                    ("gemini", "Gemini (free)"), ("claude", "Claude"))]
+    questions = [{"name": n, "n": num(k)} for k, n in (("ask_gemini", "Gemini (free)"), ("ask_claude", "Claude"))]
+    on = [{"scan": "Free scan", "gemini": "Gemini", "claude": "Claude"}[r] for r in SLIP_READERS
+          if (r == "scan" and TESSERACT) or (r == "gemini" and GEMINI_API_KEY) or (r == "claude" and ai_enabled())]
+    last = _last_cycle.get("at")
+    try:
+        last_ts = datetime.fromisoformat(last).timestamp() if last else None
+    except ValueError:
+        last_ts = None
+    up = datetime.now(timezone.utc) - STARTED_AT
+    failing = [{"name": clip(k, 40), "fails": int(v.get("fails") or 0)} for k, v in JOB_HEALTH.items() if v.get("fails")]
+    try:
+        claude_n = int(claude_calls_today())
+    except Exception:
+        claude_n = 0
+    return {"version": BOT_VERSION, "uptime": f"{up.days}d {up.seconds // 3600}h {(up.seconds // 60) % 60}m",
+            "cycle": {"ago": _dash30_ago(last_ts, now), "ok": bool(last_ts and now - last_ts < 600)},
+            "jobs": {"total": len(JOB_HEALTH), "failing": failing[:8]}, "feeds": feeds, "reads": reads,
+            "questions": questions, "readers_on": on, "claude_today": claude_n}
+
+
+# ---- pictures --------------------------------------------------------------------------------------------------
+
+def _dash30_logo_png(raw: bytes) -> Optional[bytes]:
+    """Re-draw a logo as a small PNG (so whatever ESPN sent, the browser only ever gets a clean PNG)."""
+    from PIL import Image
+    try:
+        img = Image.open(io.BytesIO(raw))
+        sec_check_image(img)
+        img = img.convert("RGBA")
+        img.thumbnail((DASH30_LOGO_PX, DASH30_LOGO_PX), Image.LANCZOS)
+        return _png(img).getvalue()
+    except Exception:
+        return None
+
+
+async def dash30_logo_bytes(eid: str, side: str) -> Optional[bytes]:
+    """A team's logo for a game the group is on, through team_logo_bytes (ESPN's image hosts only)."""
+    url = (_DASH30_LOGO_URLS.get(eid) or {}).get(side)
+    if not url:
+        _, ev = lv_cached_event(eid)
+        if ev:
+            away, home = lv_sides(ev)
+            url = (away if side == "a" else home).get("logo")
+    if not url:
+        return None
+    hit = _DASH30_LOGOS.get(url)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    raw = await team_logo_bytes(url)
+    png = await asyncio.to_thread(_dash30_logo_png, raw) if raw else None
+    _DASH30_LOGOS[url] = (time.monotonic() + (86400 if png else 900), png)
+    if len(_DASH30_LOGOS) > 300:
+        for k in list(_DASH30_LOGOS)[:150]:
+            _DASH30_LOGOS.pop(k, None)
+    return png
+
+
+async def dash30_live_png(gid: int) -> Optional[bytes]:
+    """The /live picture for everyone's public slips (a still PNG), or None when nothing is in play."""
+    hit = _dash30_cached(("livepng", gid))
+    if hit is not None:
+        return hit or None
+    now = datetime.now(timezone.utc)
+    snap = await lv_snapshot(gid, now)
+    data = await lv2_board_data(bot, gid, "a", 0, False, now, snap)
+    out = (await asyncio.to_thread(locked_render, render_live_board, data)).getvalue() if data else b""
+    return _dash30_keep(("livepng", gid), out, DASH30_IMG_TTL) or None
+
+
+async def dash30_game_png(gid: int, eid: str) -> Optional[bytes]:
+    """The game card (as /gamecard draws it) for one game the group's public slips ride on."""
+    hit = _dash30_cached(("gamepng", gid, eid))
+    if hit is not None:
+        return hit or None
+    now = datetime.now(timezone.utc)
+    _, g = await dash30_one_game(gid, eid)
+    out = b""
+    if g is not None:
+        final = bool(g["ev"].get("final") or g["ev"].get("state") == "post")
+        data = await lv_card_data(bot, gid, lv_trim_event(g["ev"]), g["path"], lv2_game_rows(g), final, now)
+        out = (await asyncio.to_thread(locked_render, render_game_card, data)).getvalue()
+    return _dash30_keep(("gamepng", gid, eid), out, DASH30_IMG_TTL) or None
+
+
+# ---- the handlers (every one goes through dash_guard via dash_app, and dash_gate for the login) ----------------
+
+def _dash30_png(web, png: Optional[bytes], age: int = 60):
+    if not png:
+        return web.Response(text="nothing to show", status=404, content_type="text/plain")
+    return web.Response(body=png, content_type="image/png", headers={"Cache-Control": f"private, max-age={age}"})
+
+
+def _dash30_render_ok(request) -> bool:
+    return dash_rate(dash_client_ip(request), "render", *DASH30_RENDER_RATE)
+
+
+async def dash30_api_live(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    return web.json_response(await dash30_live(prm["guild"]))
+
+
+async def dash30_api_game(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    eid = request.match_info.get("eid", "")
+    d = (await dash30_one_game(prm["guild"], eid))[0] if _DASH30_EID.fullmatch(eid) else None
+    return web.json_response(d) if d else dash_error(web, request, 404)
+
+
+async def dash30_api_news(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    gid = prm["guild"]
+    return web.json_response({"items": dash30_news(gid), "on": bool(ask_channel_id(gid)) and server_on(gid, "newsfeed")})
+
+
+async def dash30_api_health(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    return web.json_response(dash30_health())
+
+
+async def dash30_live_img(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    if not _dash30_render_ok(request):
+        return dash_error(web, request, 429)
+    try:
+        png = await dash30_live_png(prm["guild"])
+    except Exception:
+        log.exception("Dashboard live picture failed")
+        png = None
+    return _dash30_png(web, png)
+
+
+async def dash30_game_img(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    eid = request.match_info.get("eid", "")
+    if not _DASH30_EID.fullmatch(eid):
+        return dash_error(web, request, 404)
+    if not _dash30_render_ok(request):
+        return dash_error(web, request, 429)
+    try:
+        png = await dash30_game_png(prm["guild"], eid)
+    except Exception:
+        log.exception("Dashboard game card failed")
+        png = None
+    return _dash30_png(web, png)
+
+
+async def dash30_logo(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    eid, side = request.match_info.get("eid", ""), request.match_info.get("side", "")
+    if not _DASH30_EID.fullmatch(eid) or side not in ("a", "h"):
+        return dash_error(web, request, 404)
+    return _dash30_png(web, await dash30_logo_bytes(eid, side), 86400)
+
+
+def dash30_routes(web) -> list:
+    """The r30 routes; dash_app puts them ahead of the generic /img/{kind}.png ones."""
+    return [web.get("/api/live.json", dash30_api_live), web.get(r"/api/game/{eid:[A-Za-z0-9]+}.json", dash30_api_game),
+            web.get("/api/news.json", dash30_api_news), web.get("/api/health.json", dash30_api_health),
+            web.get("/img/live.png", dash30_live_img), web.get(r"/img/game/{eid:[A-Za-z0-9]+}.png", dash30_game_img),
+            web.get(r"/img/logo/{eid:[A-Za-z0-9]+}/{side:[ah]}.png", dash30_logo)]
+
+
+def dash30_safe_records(guild_id: int, text: str) -> str:
+    """The record book for the web: a hidden slip that hasn't been revealed yet shows as 'Hidden pick', never its
+    description (records_embed names the biggest hit and worst beat by description)."""
+    for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND hidden = 1 AND (status = 'open' OR revealed_at IS NULL)",
+                          (guild_id,)).fetchall():
+        desc = clip(p["description"] or "", 50)
+        if desc and dash_secret(p):
+            text = text.replace(desc, "Hidden pick")
+    return text
 
 
 # --------------------------------------------------------------------------
@@ -30339,7 +33084,8 @@ async def scout_cmd(interaction: discord.Interaction, player: app_commands.Range
         e.add_field(name="The group on him", inline=False, value=clip(" · ".join(
             f"{r['group']} {r['hit']}/{r['hit'] + r['miss']}" for r in grp["groups"][:6]), 1000))
     e.set_footer(text="Lines on the chart sit just above each recent average unless you give one.")
-    png = await asyncio.to_thread(locked_render, render_xray, f"{cand['name']} · last 10 games", rows, "SCOUTING REPORT")
+    png = await asyncio.to_thread(locked_render, render_xray, f"{cand['name']} · last 10 games", rows, "SCOUTING REPORT",
+                                  cand.get("path"))
     e.set_image(url="attachment://scout.png")
     await interaction.followup.send(embed=e, file=discord.File(png, filename="scout.png"))
 
