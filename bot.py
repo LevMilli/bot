@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-12 r31.5"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-12 r31.6"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -19416,7 +19416,7 @@ def dash_app(web):
     app = web.Application(middlewares=[guard], client_max_size=64 * 1024)
     app.add_routes([web.get("/", dash_index), web.get("/api/data", dash_api_data), web.get("/health", dash_health), web.get("/status", dash_status),
                     web.get("/staff", staff_page), web.get("/api/staff.json", staff_api),
-                    web.get("/staff/logout", staff_logout),
+                    web.get("/staff/logout", staff_logout), web.get("/api/staff/me", staff_me),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -19643,6 +19643,21 @@ tr:first-child td{border-top:0}td.n{text-align:right;font-variant-numeric:tabula
 .money3{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.money3 .card{flex:1;min-width:90px}
 .banner{border:1px solid #f0b42966;background:#f0b42914;color:var(--text);border-radius:14px;padding:10px 12px;font-size:13.5px;margin-bottom:16px}
 footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:var(--faint);font-size:12.5px;display:flex;gap:12px;flex-wrap:wrap}
+.adminbox{max-width:1180px;margin:0 auto 18px;padding:0 20px}
+.adminbox .in{background:var(--card);border:1px dashed #7B3FE466;border-radius:18px;padding:14px 16px}
+.adminbox h2{margin:0 0 10px;font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--brand2);font-weight:800;
+ display:flex;align-items:center;gap:8px}
+.adminbox h2 .astate{margin-left:auto;font-size:11.5px;letter-spacing:0;text-transform:none;font-weight:650;color:var(--faint);
+ white-space:nowrap;flex:none;width:auto;height:auto;padding:0;background:none;border:0}
+.adminbox h2 .astate.on{color:var(--up)}
+.alinks{list-style:none;margin:0;padding:0;display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.alinks a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:var(--card2);
+ border:1px solid var(--line);color:var(--text);text-decoration:none;min-width:0}
+.alinks a:hover{border-color:var(--brand);background:#7B3FE41a}.alinks .ic{font-size:18px;width:24px;text-align:center;flex:none}
+.alinks span{min-width:0}.alinks b{display:block;font-size:14px;font-weight:700}
+.alinks i{display:block;font-style:normal;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.adminbox .anote{margin:10px 0 0;font-size:12.5px;color:var(--faint)}
+@media (max-width:640px){.adminbox{padding:0 12px}}
 footer a{color:var(--faint)}
 @media (max-width:900px){.s4,.s5,.s6,.s7,.s8{grid-column:span 12}.kpi{grid-column:span 6}.pgrid{grid-template-columns:1fr}}
 @media (max-width:640px){
@@ -19798,6 +19813,13 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
  <section class="tab" id="tab-posters"></section>
  <section class="tab" id="tab-more"></section>
 </main>
+<aside class="adminbox" aria-label="Admin only"><div class="in">
+ <h2>🔒 Admin only <span class="astate" id="astate">admins and mods</span></h2>
+ <ul class="alinks" id="alinks">
+  <li><a href="/staff"><span class="ic">🛠️</span><span><b>Server Dashboard</b><i>Bot health, outages and tools</i></span></a></li>
+ </ul>
+ <p class="anote" id="anote">Admins and mods: run <b>/dashboard section:Admin health</b> in Discord once to unlock these.</p>
+</div></aside>
 <footer><span id="ver"></span><a href="/?v=2">Classic view</a><a href="/logout">Sign out</a></footer>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Details"><div class="panel" id="panel">
  <button class="iconbtn x" id="close" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
@@ -20161,6 +20183,8 @@ setInterval(()=>{if(document.visibilityState==='visible')load()},60000);
 setInterval(()=>{if(document.visibilityState!=='visible')return;if(S.tab==='live')loadLive();if(/^#\/g\//.test(location.hash))openGame(location.hash.slice(3),true)},20000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-S.loadedAt>60000)load()});
 try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}
+fetch('/api/staff/me',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{if(!d||!d.staff)return;
+ const st=$('#astate');st.textContent='✓ signed in';st.classList.add('on');$('#anote').textContent='You\'re signed in as staff on this browser.'}).catch(()=>{});
 skeletonAll();show(S.tab);load();route();
 </script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG).replace(
     "{{COURT_D}}", dash_court("#ffffff", 0.05)).replace("{{COURT_L}}", dash_court("#7B3FE4", 0.09))
@@ -28931,6 +28955,11 @@ def outage_prev_state() -> dict:
 
 
 async def outage_heartbeat(client) -> None:
+    try:
+        if not get_setting(0, "uptime_since"):
+            set_setting(0, "uptime_since", get_setting(0, "hb_at") or now_iso())
+    except Exception:
+        pass
     while not client.is_closed():
         try:
             set_setting(0, "hb_at", now_iso())
@@ -28991,7 +29020,7 @@ async def outage_comeback(client, prev: dict, now: Optional[datetime] = None) ->
         rows = json.loads(get_setting(0, "outage_log") or "[]")
     except ValueError:
         rows = []
-    rows = (rows if isinstance(rows, list) else [])[-19:] + [{"from": iso(last), "to": iso(now), "dur": outage_dur(gap),
+    rows = (rows if isinstance(rows, list) else [])[-59:] + [{"from": iso(last), "to": iso(now), "dur": outage_dur(gap),
                                                                "why": clip(why, 200)}]
     set_setting(0, "outage_log", json.dumps(rows))
     for g in list(getattr(client, "guilds", None) or []):
@@ -29200,8 +29229,122 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
                      "on_volume": str(DB_PATH).startswith("/data"), "picks": int(counts["n"] or 0),
                      "open": int(counts["o"] or 0)},
         "viewer": staff_viewer(uid),
+        "uptime_pct": staff_uptime(log_rows),
+        "needs": dash_needs(guild_id),
+        "stale_open": int(db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND status = 'open' AND "
+                                       "created_at < ?", (guild_id, iso(now - timedelta(days=4)))).fetchone()["n"] or 0),
+        "deploy": staff_deploy(),
+        "links": staff_links(guild_id),
     }
 
+
+
+def staff_uptime(rows: list, now: Optional[datetime] = None) -> dict:
+    """Percent of the time the bot was up over the last 7 and 30 days (counting from when tracking began)."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        since = datetime.fromisoformat(get_setting(0, "uptime_since") or "")
+    except ValueError:
+        since = None
+    out: dict = {"since": iso(since) if since else None}
+    spans = []
+    for r in rows if isinstance(rows, list) else []:
+        try:
+            spans.append((datetime.fromisoformat(r["from"]), datetime.fromisoformat(r["to"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    for label, days in (("d7", 7), ("d30", 30)):
+        start = now - timedelta(days=days)
+        if since and since > start:
+            start = since
+        total = (now - start).total_seconds()
+        if total < 600:
+            out[label] = None
+            continue
+        down = sum(max(0.0, (min(b, now) - max(a, start)).total_seconds()) for a, b in spans)
+        out[label] = round(max(0.0, 100 * (1 - down / total)), 3)
+    week = [(a, b) for a, b in spans if b >= now - timedelta(days=7)]
+    out["count7"] = len(week)
+    out["longest7"] = outage_dur(max((b - a).total_seconds() for a, b in week)) if week else None
+    return out
+
+
+def staff_deploy() -> dict:
+    """The commit Railway is running, when Railway says (it sets these for GitHub deploys)."""
+    owner, name = os.environ.get("RAILWAY_GIT_REPO_OWNER", ""), os.environ.get("RAILWAY_GIT_REPO_NAME", "")
+    sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")
+    ok = lambda x: bool(re.fullmatch(r"[A-Za-z0-9_.\-]{1,100}", x))
+    repo = f"https://github.com/{owner}/{name}" if ok(owner) and ok(name) else None
+    good_sha = bool(re.fullmatch(r"[0-9a-f]{7,40}", sha))
+    return {"repo_url": repo, "commit": sha[:7] if good_sha else None,
+            "commit_url": f"{repo}/commit/{sha}" if repo and good_sha else None}
+
+
+STAFF_LINK_GROUPS = ["PIMP-BOT", "Discord", "Hosting & code", "AI usage", "Scouting", "Team"]
+
+
+def staff_link_ok(url: str) -> Optional[str]:
+    """A plain https:// link, or None."""
+    from urllib.parse import urlsplit
+    u = (url or "").strip()
+    if not u or len(u) > 300 or any(c.isspace() or c in "\"'<>\\" for c in u):
+        return None
+    try:
+        parts = urlsplit(u)
+    except ValueError:
+        return None
+    if parts.scheme != "https" or not parts.netloc or "@" in parts.netloc:
+        return None
+    return u
+
+
+def staff_custom_links(guild_id: int) -> list:
+    try:
+        rows = json.loads(get_setting(guild_id, "staff_links") or "[]")
+    except ValueError:
+        rows = []
+    return [r for r in rows if isinstance(r, dict) and staff_link_ok(r.get("url"))][:40]
+
+
+def staff_links(guild_id: int) -> list:
+    """The toolbox: built-in links, Discord jump links to the bot's channels, and the team's own (/links add)."""
+    chan = lambda cid: f"https://discord.com/channels/{int(guild_id)}/{int(cid)}"
+    groups = {g: [] for g in STAFF_LINK_GROUPS}
+    groups["PIMP-BOT"] += [{"icon": "📊", "name": "Group dashboard", "url": "/", "note": "what members see"},
+                           {"icon": "🩺", "name": "Status check", "url": "/status", "note": "for an uptime monitor"}]
+    for key, icon, name in (("outage_admin_channel", "🛠️", "Admin alert channel"),
+                            ("outage_members_channel", "📣", "Member alert channel"),
+                            ("audit_channel", "📝", "Audit log channel"), ("recap_channel", "🏁", "Recap channel"),
+                            ("ask_channel", "💬", "Ask channel")):
+        cid = get_setting(guild_id, key)
+        if cid and str(cid).isdigit():
+            groups["Discord"].append({"icon": icon, "name": name, "url": chan(cid)})
+    groups["Discord"].append({"icon": "🤖", "name": "Discord developer portal",
+                              "url": "https://discord.com/developers/applications", "note": "bot token, intents"})
+    pid, sid = os.environ.get("RAILWAY_PROJECT_ID", ""), os.environ.get("RAILWAY_SERVICE_ID", "")
+    idok = lambda x: bool(re.fullmatch(r"[0-9a-f\-]{8,64}", x))
+    railway = f"https://railway.com/project/{pid}/service/{sid}" if idok(pid) and idok(sid) else "https://railway.com/dashboard"
+    groups["Hosting & code"].append({"icon": "🚂", "name": "Railway", "url": railway, "note": "logs, deploys, variables"})
+    dep = staff_deploy()
+    if dep["repo_url"]:
+        groups["Hosting & code"].append({"icon": "🐙", "name": "GitHub repo", "url": dep["repo_url"],
+                                         "note": "upload bot.py here"})
+    groups["Hosting & code"].append({"icon": "⏱️", "name": "UptimeRobot", "url": "https://dashboard.uptimerobot.com",
+                                     "note": "alerts while the bot is down"})
+    groups["AI usage"] += [{"icon": "⚡", "name": "Groq console", "url": "https://console.groq.com", "note": "free AI"},
+                           {"icon": "✨", "name": "Google AI Studio", "url": "https://aistudio.google.com",
+                            "note": "Gemini free tier"},
+                           {"icon": "🧠", "name": "Anthropic console", "url": "https://console.anthropic.com",
+                            "note": "Claude usage (paid)"}]
+    groups["Scouting"] += [{"icon": "🏈", "name": "ESPN", "url": "https://www.espn.com"},
+                           {"icon": "🎯", "name": "HLTV", "url": "https://www.hltv.org", "note": "CS2 teams and players"},
+                           {"icon": "🟣", "name": "PrizePicks", "url": "https://app.prizepicks.com"},
+                           {"icon": "📈", "name": "Kalshi", "url": "https://kalshi.com"}]
+    for r in staff_custom_links(guild_id):
+        g = r.get("group") if r.get("group") in groups else "Team"
+        groups[g].append({"icon": clip(r.get("icon") or "🔗", 4), "name": clip(r.get("name") or "Link", 40),
+                          "url": r["url"], "note": clip(r.get("note") or "", 60)})
+    return [{"name": g, "items": items} for g, items in groups.items() if items]
 
 def staff_viewer(uid: Optional[int]) -> str:
     try:
@@ -29240,6 +29383,11 @@ async def staff_api(request):
     return web.json_response(staff_data(st["guild"], st["uid"]))
 
 
+async def staff_me(request):
+    from aiohttp import web
+    return web.json_response({"staff": staff_from_request(request) is not None})
+
+
 async def staff_logout(request):
     from aiohttp import web
     resp = web.Response(status=303, headers={"Location": "/staff"})
@@ -29247,59 +29395,138 @@ async def staff_logout(request):
     return resp
 
 
-STAFF_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>PIMP-BOT · Staff health</title>
-<link rel="icon" href='""" + DASH_FAVICON + """'>
+STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#1a0f33"><title>PIMP-BOT Staff</title><link rel="icon" href="{{FAVICON}}">
 <style>
-:root{--bg:#0e0b16;--card:#17121f;--card2:#1f1830;--line:#2c2340;--text:#f1ecfa;--muted:#a69bbd;--ok:#3fb97a;
---warn:#e8b33f;--bad:#e66767;--brand:#8b5cf6}
-@media (prefers-color-scheme: light){:root{--bg:#f6f3fb;--card:#fff;--card2:#f1ecfa;--line:#e2d9f1;--text:#1d1530;
---muted:#6b5f82;--ok:#1f8f57;--warn:#a87a12;--bad:#c23b3b;--brand:#6d3fd6}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
-font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-header{display:flex;align-items:center;gap:12px;padding:16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-header h1{font-size:18px;margin:0}header .who{color:var(--muted);font-size:13px;margin-left:auto}
-header a{color:var(--muted);font-size:13px}
-main{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;min-width:0}
-.card h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
-.big{font-size:22px;font-weight:700}.row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;
-border-top:1px solid var(--line);font-size:14px}.row:first-of-type{border-top:0}.row span:last-child{text-align:right;
-color:var(--muted);overflow-wrap:anywhere}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;
-margin-right:7px;background:var(--muted)}.ok{background:var(--ok)}.warn{background:var(--warn)}.bad{background:var(--bad)}
-.err{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--bad);overflow-wrap:anywhere;margin-top:4px}
-.wide{grid-column:1/-1}.muted{color:var(--muted);font-size:13px}#banner{grid-column:1/-1;border-radius:14px;
-padding:14px 16px;font-weight:600}
+:root{--bg:#0d0a14;--card:#17121f;--card2:#1f1829;--line:#2a2238;--text:#f4f1fb;--muted:#a59cbc;--faint:#6f6688;
+ --brand:#7B3FE4;--brand2:#a27bff;--gold:#f0b429;--up:#34d399;--warn:#fbbf24;--down:#fb7185;
+ --head:linear-gradient(180deg,#2a1457 0%,#160d2b 70%,#0d0a14 100%);--shadow:0 1px 0 #ffffff08 inset,0 10px 30px -12px #00000099;
+ --tile:#211933;--tileh:#2b2042}
+@media (prefers-color-scheme:light){:root{--bg:#f6f3fc;--card:#fff;--card2:#f6f2fd;--line:#e7dff4;--text:#1d1530;
+ --muted:#5d5475;--faint:#9a91b0;--brand2:#6a32d6;--gold:#b7791f;--up:#059669;--warn:#c27c0e;--down:#e11d48;
+ --head:linear-gradient(180deg,#e9defe 0%,#f3eefc 70%,#f6f3fc 100%);--shadow:0 1px 2px #1d153010,0 8px 24px -14px #3b1d8a40;
+ --tile:#f3edfd;--tileh:#e9defe}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ min-height:100vh;overflow-x:hidden}
+a{color:var(--brand2)}
+header{background:var(--head);position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+header:before{content:"";position:absolute;inset:-60% -8% auto auto;width:520px;height:520px;border-radius:50%;
+ background:radial-gradient(closest-side,#7B3FE455,transparent);pointer-events:none}
+.top{max-width:1180px;margin:auto;padding:18px 16px 16px;display:flex;align-items:center;gap:14px;position:relative;flex-wrap:wrap}
+.logo{width:56px;height:56px;flex:none;filter:drop-shadow(0 6px 14px #7B3FE466);animation:bob 5s ease-in-out infinite}
+.logo svg{width:100%;height:100%}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+.brand{min-width:0;flex:1}.brand h1{margin:0;font-size:23px;font-weight:850;letter-spacing:.06em;line-height:1.1}
+.brand h1 b{color:var(--gold)}.meta{font-size:13px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:650;padding:3px 10px;border-radius:99px;
+ background:var(--card2);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.pill.v{color:var(--brand2);border-color:#7B3FE455;background:#7B3FE41a}
+.out{font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);padding:6px 12px;border-radius:99px;
+ background:var(--card2)}.out:hover{color:var(--text);border-color:var(--brand)}
+main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-width:0;box-shadow:var(--shadow)}
+.card h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--brand2);margin:0 0 10px;font-weight:800}
+.wide{grid-column:1/-1}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:14px}
+.row:first-of-type{border-top:0}.row>span:first-child{min-width:0}.row>span:last-child{text-align:right;color:var(--muted);overflow-wrap:anywhere}
+.muted{color:var(--muted);font-size:13px}.err{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--down);overflow-wrap:anywhere;margin:2px 0 6px}
+.num{font-variant-numeric:tabular-nums}
+/* status lights: green breathes, yellow blinks, red holds */
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:-1px;background:var(--faint);flex:none}
+.dot.ok{background:var(--up);animation:calm 3.2s ease-in-out infinite}
+.dot.warn{background:var(--warn);animation:blink .9s linear infinite}
+.dot.bad{background:var(--down);box-shadow:0 0 0 3px #fb718533,0 0 10px #fb718599}
+@keyframes calm{0%,100%{opacity:1;box-shadow:0 0 0 0 #34d39966}50%{opacity:.5;box-shadow:0 0 0 5px #34d39900}}
+@keyframes blink{0%,45%{opacity:1;box-shadow:0 0 8px 2px #fbbf24aa}55%,100%{opacity:.18;box-shadow:none}}
+@media (prefers-reduced-motion:reduce){.dot,.logo{animation:none!important}}
+#banner{grid-column:1/-1;border-radius:16px;padding:16px 18px;font-weight:700;font-size:17px;display:flex;align-items:center;gap:6px;
+ border:1px solid var(--line);background:var(--card)}
+#banner .dot{width:16px;height:16px;margin-right:10px}
+#banner small{margin-left:auto;font-weight:500;font-size:13px;color:var(--muted)}
+.big{font-size:30px;font-weight:850;letter-spacing:-.01em;line-height:1}.big small{font-size:14px;font-weight:600;color:var(--muted)}
+.stats{display:flex;gap:18px;flex-wrap:wrap;margin:4px 0 10px}
+.need{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.need:first-of-type{border-top:0}.need .ic{width:22px;text-align:center;flex:none}
+.tools{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.tools h3{margin:0 0 8px;font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.tile{display:flex;align-items:center;gap:10px;padding:9px 11px;margin-bottom:7px;border-radius:12px;background:var(--tile);
+ border:1px solid var(--line);color:var(--text);text-decoration:none;min-width:0}
+.tile:hover{background:var(--tileh);border-color:var(--brand)}.tile .ic{font-size:17px;width:22px;text-align:center;flex:none}
+.tile b{font-weight:650;font-size:14px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile i{font-style:normal;font-size:12px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile span{min-width:0}
+.steps{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.step{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 12px;min-width:0}
+.step b{display:block;font-size:13px;margin-bottom:6px}.step code{display:block;font:12.5px/1.4 ui-monospace,Menlo,monospace;
+ color:var(--brand2);overflow-wrap:anywhere;margin-bottom:8px}
+.copy{font:inherit;font-size:12px;font-weight:650;padding:4px 10px;border-radius:99px;border:1px solid var(--line);background:var(--card);
+ color:var(--muted);cursor:pointer}.copy:hover{color:var(--text);border-color:var(--brand)}
+footer{max-width:1180px;margin:0 auto;padding:4px 16px 28px;color:var(--faint);font-size:12px}
 </style></head><body>
-<header><h1>🛠️ PIMP-BOT · Staff health</h1><span class="who" id="who"></span><a href="/staff/logout">Sign out</a></header>
-<main id="m"><div class="card wide muted">Loading…</div></main>
+<header><div class="top"><div class="logo" aria-hidden="true">{{LOGO}}</div>
+<div class="brand"><h1>PIMP-BOT <b>STAFF</b></h1><div class="meta"><span class="pill v" id="ver">…</span>
+<span class="pill" id="who"></span><span class="pill" id="upd">loading…</span></div></div>
+<a class="out" href="/staff/logout">Sign out</a></div></header>
+<main id="m"><section class="card wide muted">Loading…</section></main>
+<footer>Admins and mods only. This page refreshes every 30 seconds. Links open in a new tab.</footer>
 <script>
 const $=s=>document.querySelector(s);
 const esc=t=>String(t==null?'':t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ago=iso=>{if(!iso)return'never';const s=(Date.now()-Date.parse(iso))/1000;if(isNaN(s))return'?';
-if(s<90)return Math.round(s)+'s ago';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' hr ago';
-return Math.round(s/86400)+' days ago'};
-const when=iso=>iso?new Date(iso).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
-const dot=c=>'<i class="dot '+c+'"></i>';
+ if(s<90)return Math.max(0,Math.round(s))+'s ago';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' hr ago';
+ return Math.round(s/86400)+' days ago'};
+const when=iso=>iso?new Date(iso).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+const dot=c=>'<i class="dot '+(c||'')+'"></i>';
 const row=(a,b)=>'<div class="row"><span>'+a+'</span><span>'+b+'</span></div>';
 const card=(t,body,cls)=>'<section class="card '+(cls||'')+'"><h2>'+esc(t)+'</h2>'+body+'</section>';
+const safeUrl=u=>/^(https:\/\/[^\s"'<>]+|\/[A-Za-z0-9_\-\/.?=&]*)$/.test(u||'')?u:null;
+let loadedAt=0;
+function needs(d){
+ const n=[], st=d.status;
+ if(!st.ok)n.push(['🔴','<b>The bot isn\'t healthy:</b> '+esc(st.why)]);
+ if(d.outage.open)n.push(['📣','<b>Open member alert:</b> '+esc(d.outage.open.problem)+' · '+ago(d.outage.open.since)
+   +(d.outage.open.eta?' · ETA '+esc(d.outage.open.eta):'')+'. Close it with <code>/outage resolved</code> when it\'s fixed.']);
+ if(!d.database.on_volume)n.push(['💾','<b>The database isn\'t on a volume.</b> The next redeploy wipes every pick. In Railway, attach a volume at <code>/data</code>.']);
+ (d.jobs||[]).filter(j=>j.fails).forEach(j=>n.push(['⚙️','<b>'+esc(j.name)+'</b> failed '+j.fails+'× in a row<div class="err">'+esc(j.error)+'</div>']));
+ (d.feeds||[]).filter(f=>f.state==='down').forEach(f=>n.push(['📡','<b>'+esc(f.name)+'</b> is down'+(f.last_ok?' (last worked '+esc(f.last_ok)+')':'')]));
+ if(!d.outage.channels.admin||!d.outage.channels.members)n.push(['🛠️','<b>Pick the alert channels</b> with <code>/outage channels</code> so outages reach people.']);
+ if(d.needs&&d.needs.length)n.push(['🧾','<b>'+d.needs.length+(d.needs.length>1?' slips need':' slip needs')+' a person:</b> '
+   +d.needs.slice(0,6).map(x=>esc(x.who)+(x.id?' #'+x.id:'')+' ('+esc(x.why.toLowerCase())+')').join(', ')+(d.needs.length>6?'…':'')]);
+ if(d.stale_open)n.push(['⏳','<b>'+d.stale_open+' slip'+(d.stale_open>1?'s have':' has')+' been open 4+ days.</b> Worth a look in <code>/inbox</code>.']);
+ if(d.errors.slip&&d.errors.slip_at&&Date.now()-Date.parse(d.errors.slip_at)<3*3600e3)n.push(['🔎','<b>Slip reading had an error</b> '+ago(d.errors.slip_at)+'<div class="err">'+esc(d.errors.slip)+'</div>']);
+ return n;
+}
 function render(d){
- $('#who').textContent=d.viewer?('Signed in as '+d.viewer):'';
- const st=d.status, h=[];
- const good=st.ok, bad=(d.jobs||[]).filter(j=>j.fails).length, down=(d.feeds||[]).filter(f=>f.state==='down').length;
- const col=!good?'var(--bad)':(bad||down||d.outage.open)?'var(--warn)':'var(--ok)';
- const msg=!good?('🔴 Not healthy: '+esc(st.why)):d.outage.open?('🟠 Open member alert: '+esc(d.outage.open.problem))
-   :(bad||down)?('🟡 Running, with '+(bad?bad+' failing job'+(bad>1?'s':''):'')+(bad&&down?' and ':'')+(down?down+' feed'+(down>1?'s':'')+' down':''))
-   :'🟢 Everything looks healthy';
- h.push('<div id="banner" style="background:color-mix(in srgb,'+col+' 18%,transparent);border:1px solid '+col+'">'+msg+'</div>');
- h.push(card('Bot',row('Version',esc(d.version.split(' ').pop()))+row('Up for',esc(d.uptime)+' · since '+esc(when(d.up_since)))
-  +row('Discord',dot(good?'ok':'bad')+(good?'connected':esc(st.why)))+row('Heartbeat',st.heartbeat_age==null?'none':st.heartbeat_age+'s ago')
-  +row('Ping to Discord',st.latency_ms==null?'?':st.latency_ms+' ms')+row('Scheduler',dot(st.cycle.ok?'ok':'bad')+esc(st.cycle.ago||'not run'))
-  +row('Memory',st.memory_mb==null?'?':st.memory_mb+' MB')));
+ loadedAt=Date.now();
+ $('#ver').textContent=d.version.split(' ').pop();
+ $('#who').textContent=d.viewer?('Signed in as '+d.viewer):'Staff';
+ document.title=(d.status.ok?'':'⚠ ')+'PIMP-BOT Staff';
+ const st=d.status, list=needs(d), bad=!st.ok, warn=!bad&&list.length>0;
+ const h=[];
+ h.push('<div id="banner" role="status">'+dot(bad?'bad':warn?'warn':'ok')
+  +(bad?'Not healthy: '+esc(st.why):warn?list.length+' thing'+(list.length>1?'s':'')+' to look at':'Everything looks healthy')
+  +'<small>up '+esc(d.uptime)+'</small></div>');
+ h.push(card('Needs attention',list.length?list.map(x=>'<div class="need"><span class="ic">'+x[0]+'</span><span>'+x[1]+'</span></div>').join('')
+  :'<div class="muted">'+dot('ok')+'Nothing needs you right now.</div>','wide'));
+ h.push(card('Bot',row('Version',esc(d.version.split(' ').pop())+(d.deploy&&d.deploy.commit?' · <a href="'+esc(safeUrl(d.deploy.commit_url)||'#')+'" target="_blank" rel="noopener noreferrer">'+esc(d.deploy.commit)+'</a>':''))
+  +row('Up for',esc(d.uptime)+' · since '+esc(when(d.up_since)))
+  +row('Discord',dot(st.ok?'ok':'bad')+(st.ok?'connected':esc(st.why)))
+  +row('Heartbeat',dot(st.heartbeat_age!=null&&st.heartbeat_age<120?'ok':'bad')+(st.heartbeat_age==null?'none':st.heartbeat_age+'s ago'))
+  +row('Ping to Discord',dot(st.latency_ms==null?'':st.latency_ms<300?'ok':st.latency_ms<1000?'warn':'bad')+(st.latency_ms==null?'?':st.latency_ms+' ms'))
+  +row('Scheduler',dot(st.cycle.ok?'ok':'bad')+esc(st.cycle.ago||'not run yet'))
+  +row('Memory',dot(st.memory_mb==null?'':st.memory_mb<700?'ok':st.memory_mb<1500?'warn':'bad')+(st.memory_mb==null?'?':st.memory_mb+' MB'))));
+ const u=d.uptime_pct||{};
+ const pct=v=>v==null?'–':(v>=99.995?'100':v.toFixed(v>=99.9?2:1))+'%';
+ h.push(card('Uptime','<div class="stats"><div><div class="big num">'+pct(u.d7)+'</div><div class="muted">last 7 days</div></div>'
+  +'<div><div class="big num">'+pct(u.d30)+'</div><div class="muted">last 30 days</div></div></div>'
+  +row('Outages in 7 days',u.count7==null?'–':u.count7)+row('Longest in 7 days',esc(u.longest7||'none'))
+  +(u.since?'<div class="muted">Counting since '+esc(when(u.since))+'.</div>':'')));
  const o=d.outage, oc=o.channels;
- let ob=row('Admin alerts',esc(oc.admin||'not set'))+row('Member alerts',esc(oc.members||'not set'));
- ob+=o.open?row('Open alert',dot('warn')+esc(o.open.problem)+' · '+ago(o.open.since)+(o.open.eta?' · ETA '+esc(o.open.eta):''))
-   :row('Open alert','none');
+ let ob=row('Admin alerts',oc.admin?esc(oc.admin):dot('warn')+'not set')+row('Member alerts',oc.members?esc(oc.members):dot('warn')+'not set');
+ ob+=o.open?row('Open alert',dot('warn')+esc(o.open.problem)+' · '+ago(o.open.since)):row('Open alert','none');
  ob+=o.last?row('Last outage',esc(when(o.last.from))+' → '+esc(when(o.last.to))):row('Last outage','none recorded');
  if(o.last&&o.last.why)ob+='<div class="muted">'+esc(o.last.why)+'</div>';
  h.push(card('Outages',ob));
@@ -29312,19 +29539,33 @@ function render(d){
  if(d.errors.ai)eb+='<div class="muted">Last AI error</div><div class="err">'+esc(d.errors.ai)+'</div>';
  h.push(card('Slip reading & AI',eb));
  const reads=(d.reads||[]).concat(d.questions||[]).filter(r=>r.n);
- h.push(card('Today',reads.length?reads.map(r=>row(esc(r.name),r.n)).join(''):'<div class="muted">No slip reads or questions yet today.</div>'));
+ h.push(card('Today',reads.length?reads.map(r=>row(esc(r.name),'<span class="num">'+r.n+'</span>')).join(''):'<div class="muted">No slip reads or questions yet today.</div>'));
  h.push(card('Data feeds',(d.feeds||[]).map(f=>row(dot(f.state==='ok'?'ok':f.state==='down'?'bad':f.state==='shaky'?'warn':'')+esc(f.name),
   esc(f.state)+(f.last_ok?' · ok '+esc(f.last_ok):'')+(f.fail?' · '+f.fail+' fails':''))).join('')||'<div class="muted">No lookups yet.</div>'));
  const jobs=d.jobs||[], failing=jobs.filter(j=>j.fails);
- h.push(card('Background jobs ('+jobs.length+')',(failing.length?failing.map(j=>row(dot('bad')+esc(j.name),'failed '+j.fails+'× in a row')
-  +'<div class="err">'+esc(j.error)+'</div>').join(''):'<div class="muted">'+dot('ok')+'All '+jobs.length+' jobs healthy.</div>'),'wide'));
+ h.push(card('Background jobs ('+jobs.length+')',failing.length?failing.map(j=>row(dot('bad')+esc(j.name),'failed '+j.fails+'× in a row')
+  +'<div class="err">'+esc(j.error)+'</div>').join(''):'<div class="muted">'+dot('ok')+'All '+jobs.length+' jobs healthy.</div>'));
+ const groups=(d.links||[]).filter(g=>g.items&&g.items.length);
+ if(groups.length)h.push(card('Toolbox','<div class="tools">'+groups.map(g=>'<div><h3>'+esc(g.name)+'</h3>'+g.items.map(l=>{
+   const href=safeUrl(l.url);if(!href)return'';const ext=href.startsWith('https://');
+   return '<a class="tile" href="'+esc(href)+'"'+(ext?' target="_blank" rel="noopener noreferrer"':'')+'><span class="ic">'+esc(l.icon||'🔗')
+    +'</span><span><b>'+esc(l.name)+'</b><i>'+esc(l.note||(ext?href.replace(/^https:\/\//,'').split('/')[0]:'this site'))+'</i></span></a>'}).join('')+'</div>').join('')
+   +'</div><div class="muted" style="margin-top:6px">Add your own with <code>/links add</code> in Discord.</div>','wide'));
+ const steps=[['1 · Tell members','/outage alert problem:'],['2 · Team is on it','/outage update eta:30m note:'],
+  ['3 · All clear','/outage resolved note:'],['Check everything','/outage status']];
+ h.push(card('Outage playbook','<div class="steps">'+steps.map(s=>'<div class="step"><b>'+esc(s[0])+'</b><code>'+esc(s[1])
+  +'</code><button class="copy" type="button" data-copy="'+esc(s[1])+'">Copy</button></div>').join('')+'</div>','wide'));
  if((o.log||[]).length)h.push(card('Restarts & outages',o.log.map(x=>row(esc(when(x.to)),'down '+esc(x.dur)+' · '+esc(x.why))).join(''),'wide'));
  $('#m').innerHTML=h.join('');
 }
+document.addEventListener('click',e=>{const b=e.target.closest('[data-copy]');if(!b)return;
+ const t=b.getAttribute('data-copy');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{b.textContent='Copied';
+ setTimeout(()=>b.textContent='Copy',1500)}).catch(()=>{b.textContent='Copy failed'})});
+setInterval(()=>{if(loadedAt)$('#upd').textContent='updated '+ago(new Date(loadedAt).toISOString())},5000);
 async function load(){try{const r=await fetch('/api/staff.json',{credentials:'same-origin'});
- if(r.status===403){location.reload();return}render(await r.json())}catch(e){}}
+ if(r.status===403){location.reload();return}render(await r.json());$('#upd').textContent='updated just now'}catch(e){$('#upd').textContent='offline? retrying…'}}
 load();setInterval(load,30000);
-</script></body></html>"""
+</script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
 
 HELP_EXTRA.append(("🚨 Outage alerts", (
     "`/outage channels` picks where admin alerts and member alerts go (and a role to ping). When the bot shuts down, "
@@ -35283,6 +35524,64 @@ async def outage_test(interaction: discord.Interaction):
 
 
 bot.tree.add_command(outage_group)
+
+# ---- /links: the staff page's toolbox -------------------------------------------------------------
+
+links_group = app_commands.Group(name="links", description="Team links on the admin health page (admins and mods)",
+                                 guild_only=True, default_permissions=discord.Permissions(manage_messages=True))
+LINK_GROUP_CHOICES = [app_commands.Choice(name=g, value=g) for g in STAFF_LINK_GROUPS if g != "PIMP-BOT"]
+
+
+@links_group.command(name="add", description="Add a link to the admin health page's toolbox")
+@app_commands.describe(name="What to call it", url="The https:// address", section="Where it goes (default Team)",
+                       note="Optional: a few words under the name", icon="Optional: one emoji")
+@app_commands.choices(section=LINK_GROUP_CHOICES)
+@sec_staff_only
+async def links_add(interaction: discord.Interaction, name: app_commands.Range[str, 1, 40],
+                    url: app_commands.Range[str, 1, 300], section: Optional[app_commands.Choice[str]] = None,
+                    note: Optional[app_commands.Range[str, 1, 60]] = None,
+                    icon: Optional[app_commands.Range[str, 1, 4]] = None):
+    good = staff_link_ok(url)
+    if not good:
+        await interaction.response.send_message("That needs to be a plain `https://` address.", ephemeral=True)
+        return
+    rows = [r for r in staff_custom_links(interaction.guild_id) if (r.get("name") or "").lower() != name.lower()]
+    if len(rows) >= 40:
+        await interaction.response.send_message("The toolbox is full (40 links). Remove one with `/links remove`.",
+                                                ephemeral=True)
+        return
+    rows.append({"name": clip(name, 40), "url": good, "group": section.value if section else "Team",
+                 "note": clip(note or "", 60), "icon": clip(icon or "🔗", 4)})
+    set_setting(interaction.guild_id, "staff_links", json.dumps(rows))
+    await audit(interaction.client, interaction.guild_id, f"{who(interaction)} added **{clip(name, 40)}** to the staff toolbox.")
+    await interaction.response.send_message(f"Added **{clip(name, 40)}** to the toolbox on the admin health page.",
+                                            ephemeral=True)
+
+
+@links_group.command(name="remove", description="Take a link off the admin health page's toolbox")
+@app_commands.describe(name="The link's name, as you added it")
+@sec_staff_only
+async def links_remove(interaction: discord.Interaction, name: app_commands.Range[str, 1, 40]):
+    rows = staff_custom_links(interaction.guild_id)
+    keep = [r for r in rows if (r.get("name") or "").lower() != name.lower()]
+    if len(keep) == len(rows):
+        await interaction.response.send_message("No team link by that name. `/links list` shows them.", ephemeral=True)
+        return
+    set_setting(interaction.guild_id, "staff_links", json.dumps(keep))
+    await interaction.response.send_message(f"Removed **{clip(name, 40)}**.", ephemeral=True)
+
+
+@links_group.command(name="list", description="The team's own links on the admin health page")
+@sec_staff_only
+async def links_list(interaction: discord.Interaction):
+    rows = staff_custom_links(interaction.guild_id)
+    text = "\n".join(f"{clip(r.get('icon') or '🔗', 4)} **{clip(r.get('name') or '', 40)}** · {r.get('group') or 'Team'} · "
+                     f"<{r['url']}>" for r in rows) or "No team links yet. Add one with `/links add`."
+    await interaction.response.send_message(clip(text, 1900), ephemeral=True)
+
+
+bot.tree.add_command(links_group)
+
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction,
