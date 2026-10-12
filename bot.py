@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-12 r30.2"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-12 r30.3"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -20566,7 +20566,7 @@ def track_search_items(items: list, paths: list[str]) -> list[dict]:
 
 
 STAT_POSITIONS = {
-    "pass": {"QB"}, "rush": {"RB", "QB", "WR", "FB"}, "rec": {"WR", "TE", "RB", "FB"}, "target": {"WR", "TE", "RB"},
+    "anytime": {"QB", "RB", "WR", "TE", "FB"}, "pass": {"QB"}, "rush": {"RB", "QB", "WR", "FB"}, "rec": {"WR", "TE", "RB", "FB"}, "target": {"WR", "TE", "RB"},
     "kick": {"K", "PK"}, "fg": {"K", "PK"}, "punt": {"P"},
     "tackle": {"LB", "ILB", "OLB", "MLB", "DE", "DT", "NT", "CB", "S", "FS", "SS", "DB", "EDGE", "DL"},
     "sack": {"LB", "ILB", "OLB", "DE", "DT", "NT", "EDGE", "DL"},
@@ -24219,7 +24219,27 @@ def ask_error_hint(exc: Optional[BaseException]) -> str:
     if "came back empty" in t:
         return "Gemini came back with no text"
     code = re.search(r"HTTP (\d{3})", t)
-    return f"the AI service didn't answer (error {code.group(1)})" if code else "the AI service didn't answer"
+    return f"error {code.group(1)}: {ask_error_snip(t)}" if code else f"didn't answer: {ask_error_snip(t)}"
+
+
+def ask_error_snip(t: str) -> str:
+    """A short piece of an error to show in Discord, with anything key-like blanked out."""
+    t = re.sub(r"(AIza[\w-]{10,}|sk-[\w-]{10,}|key=[^&\s]+)", "[key]", str(t or ""))
+    t = re.sub(r"^Gemini HTTP \d{3}:\s*", "", t)
+    m = re.search(r"['\"]message['\"]\s*:\s*['\"]([^'\"]{4,})", t)
+    return clip(" ".join((m.group(1) if m else t).split()), 90) or type(t).__name__
+
+
+def claude_error_hint(exc: Optional[BaseException]) -> str:
+    t = str(exc or "")
+    low = t.lower()
+    if "credit balance" in low or "billing" in low:
+        return "the Claude account is out of credits"
+    if "authentication" in low or "401" in t or "invalid x-api-key" in low:
+        return "the Claude key on Railway was refused"
+    if "overloaded" in low or "529" in t or "rate_limit" in low or "429" in t:
+        return "Claude is busy; try again in a minute"
+    return f"didn't answer: {ask_error_snip(t)}"
 
 
 def ask_enabled() -> bool:
@@ -24309,6 +24329,8 @@ async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
     without a real answer (and a Claude key is set). ASK_ENGINES can change the order."""
     last: Optional[Exception] = None
     fallback: Optional[tuple[str, list[str]]] = None
+    why: list[str] = []
+    ASK_LAST_ERROR["text"] = None
     for engine in ASK_ENGINES:
         if engine == "gemini" and GEMINI_API_KEY:
             try:
@@ -24318,15 +24340,20 @@ async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
                     return answer, sources
                 if answer:
                     fallback = (answer, sources)       # keep it in case nothing better comes
+                else:
+                    why.append("Gemini: it blocked or skipped the request")
             except Exception as exc:
                 last = exc
-                log.warning("Gemini answer failed: %s", str(exc)[:200])
+                h = ask_error_hint(exc)
+                why.append(h if "Gemini" in h else "Gemini: " + h)
+                log.warning("Gemini answer failed: %s", str(exc)[:300])
         elif engine == "claude" and ai_enabled() and claude_budget_ok(essential=True):
             try:
                 answer, sources = await ask_claude(system, user_text)
             except Exception as exc:
                 last = exc
-                log.warning("Claude answer failed: %s", str(exc)[:200])
+                why.append("Claude backup: " + claude_error_hint(exc))
+                log.warning("Claude answer failed: %s", str(exc)[:300])
                 continue
             if answer:
                 free_count("ask_claude")
@@ -24334,7 +24361,7 @@ async def ask_any(system: str, user_text: str) -> tuple[str, list[str]]:
     if fallback is not None:
         free_count("ask_gemini")
         return fallback
-    ASK_LAST_ERROR["text"] = ask_error_hint(last or RuntimeError("no question engine is set up"))
+    ASK_LAST_ERROR["text"] = "; ".join(why) if why else ask_error_hint(last or RuntimeError("no question engine is set up"))
     raise last or RuntimeError("no question engine is set up")
 
 
