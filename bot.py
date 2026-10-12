@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-12 r31"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-12 r31.1"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -1983,7 +1983,8 @@ games against that number, minutes/role, matchup, injuries or rest). Base it on 
 included below; never invent a stat.
 - Then "Weakest leg:" and a one-line overall take. It's fine to say pass, or to swap the weakest leg.
 - Use the group's own history (below, or the group_stats tool) when it says something.
-- Never mention odds, prices, payouts math or line movement. Never call anything a lock or guarantee, and \
+- Never mention odds, prices, payouts math, hedging or line movement. Never call anything a lock, a sure \
+thing, guaranteed or free money. Past games are a trend, not a promise. If a line looks misread, say so. Never \
 never push them to bet more.
 Keep it under 220 words."""
 
@@ -2000,6 +2001,10 @@ def nb_leg(x: dict, inj: Optional[dict]) -> tuple[str, Optional[float]]:
     h = xray_hits(x)
     if not h:
         return f"⚪ **{label}**: no game log to check ({x.get('why') or 'not found'}){tag}", None
+    if line_suspect(x):
+        vals = [v for _, _, v in x["values"]]
+        return (f"❓ **{label}**: the line looks misread from the screenshot (he averages {sum(vals) / len(vals):.1f}). "
+                f"Check the number on your slip.{tag}"), None
     good, n = h
     vals = [v for _, _, v in x["values"]]                       # oldest → newest
     beat = (lambda v: v > x["line"]) if x["side"] == "over" else (lambda v: v < x["line"])
@@ -2047,9 +2052,13 @@ def numbers_breakdown(data: list, injuries: Optional[dict] = None, notes: Option
     if scored:
         solid = sum(1 for sc, x in scored if (xray_hits(x)[0] / xray_hits(x)[1]) >= 0.6)
         out.append(f"{solid} of {len(scored)} legs with a game log cleared their number in at least 6 of 10 recent games.")
-    missing = len(rows) - len(scored)
+    missing = sum(1 for x in data if not xray_hits(x))
     if missing:
         out.append(f"{missing} leg{'s' if missing != 1 else ''} had no game log to check.")
+    odd = sum(1 for x in data if xray_hits(x) and line_suspect(x))
+    if odd:
+        out.append(f"{odd} line{'s look' if odd != 1 else ' looks'} misread from the screenshot. Type the slip out "
+                   "(like `Player Name over 0.5 Anytime TD`) and I'll check it again.")
     if notes:
         out.append("\n**Your group's history:**\n" + "\n".join(notes[:4]))
     out.append("-# Straight from ESPN game logs and injury reports. Past games aren't a promise.")
@@ -2149,9 +2158,20 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
                   "Not logged. Tap 🧾 if you play it.")
     finally:
         ASK_DATA.reset(token)
+    answer = review_scrub(answer)
     if sources:
         answer += "\n\n-# Sources: " + " · ".join(f"<{u}>" for u in sources)
     return (answer or "I came up empty on that one.") + "\n-# Not logged. Tap 🧾 if you play it."
+
+
+_SURE_TALK = re.compile(r"\b(?:essentially |basically |practically |pretty much |almost )?(?:a )?(?:sure[- ]thing|"
+                        r"lock|lead[- ]pipe lock|guarantee[ds]?|free money|can'?t[- ]miss|easy money|no[- ]brainer)\b", re.I)
+
+
+def review_scrub(text: str) -> str:
+    """Takes 'sure thing' talk out of an AI write-up: past games are a trend, not a promise."""
+    text = _SURE_TALK.sub("a strong recent trend", text or "")
+    return re.sub(r";?\s*consider (?:swapping or )?hedging[^.\n]*", "", text)
 
 
 # --------------------------------------------------------------------------
@@ -13166,10 +13186,27 @@ def xray_hits(x: dict) -> Optional[tuple[int, int]]:
     return good, len(vals)
 
 
+def line_suspect(x: dict) -> bool:
+    """True when the line can't be what was on the slip: far below or above everything the player does."""
+    vals = [v for _, _, v in (x.get("values") or [])]
+    line = x.get("line")
+    if not vals or line is None or line <= 0 or len(vals) < 3:
+        return False
+    avg, top = sum(vals) / len(vals), max(vals)
+    if line > 3 * top + 1:
+        return True                                     # Kyren "over 23" TDs when he's never had more than 2
+    return line >= 1 and avg >= 8 * line and min(vals) > line and avg >= 15   # 4.6 against 90-yard games
+
+
 def xray_notes(data: list[dict]) -> list[str]:
     notes = []
     for x in data:
         h = xray_hits(x)
+        if h and line_suspect(x):
+            vals = [v for _, _, v in x["values"]]
+            notes.append(f"- {x['text']}: THIS LINE LOOKS MISREAD from the screenshot (avg {sum(vals) / len(vals):.1f} "
+                         f"against a line of {x['line']:g}). Say the line looks wrong and to check the slip; don't rate it.")
+            continue
         if h:
             vals = [v for _, _, v in x["values"]]
             notes.append(f"- {x['text']}: last {h[1]} games {h[0]}/{h[1]} {x['side']} {x['line']:g} "
@@ -23754,6 +23791,7 @@ FREE_STATS = sorted({
     "3-PT Made", "3-Pointers Made", "Steals", "Blocked Shots", "Blocks", "Turnovers", "Fantasy Score", "FG Made",
     "FG Attempted", "Free Throws Made", "Offensive Rebounds", "Defensive Rebounds", "Two Pointers Made",
     "Pass Yards", "Pass TDs", "Pass Completions", "Pass Attempts", "INT", "Interceptions", "Rush Yards",
+    "Rush Yards Per Carry", "Rush Yds Per Carry", "Yards Per Carry", "Rush Yds/Carry",
     "Rush Attempts", "Rush TDs", "Receptions", "Rec Yards", "Rec TDs", "Rec Targets", "Targets", "Rush+Rec Yds",
     "Pass+Rush Yds", "Rush+Rec TDs", "Anytime TDs", "Anytime TD", "Anytime Touchdowns", "Longest Rec", "Longest Rush", "Longest Completion", "Tackles+Ast", "Sacks",
     "FG Made", "Kicking Points", "Punts", "Field Goal Yards", "Fantasy Points",
@@ -24038,6 +24076,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         # the number: on this line before the stat, else the line(s) just above
         cand_lines = [ln] + [lines[j] for j in range(k - 1, max(-1, k - 3), -1)]
         num_words, src = [], None
+        whole = None                                          # a bare whole number, used only if no decimal is near
         for cl in cand_lines:
             ws = [w for w in cl["words"] if _FREE_NUM.match(_free_numtext(w["text"]))]
             if cl is ln:
@@ -24049,9 +24088,14 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                     pos += len(w["text"]) + 1
                 ws = kept
             ws = [w for w in ws if not re.search(r"#\s*$", cl["text"][:cl["text"].find(w["text"])])]
-            if ws:
-                num_words, src = ws, cl
+            dec = [w for w in ws if re.search(r"[.,]\d$", _free_numtext(w["text"]))]
+            if dec:
+                num_words, src = dec, cl
                 break
+            if ws and whole is None:
+                whole = (ws, cl)
+        if not num_words and whole:
+            num_words, src = whole
         if not num_words:
             continue
         wd = max(num_words, key=lambda w: w["x"])            # the new line, never a crossed-out old one
@@ -24118,6 +24162,9 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             side = "over"
         if num_hs and wd["h"] > 1.35 * num_hs[len(num_hs) // 2] and wd.get("conf", 100) < 60:
             unsure.append(f"the line for {name}")           # an arrow glued onto the number
+        if stat.lower().startswith("anytime") and value > 1.5:
+            unsure.append(f"the line for {name}")
+            value = 0.5
         leg = f"{name} {side} {value:g} {'Anytime TD' if stat.lower().startswith('anytime') else stat}"
         if leg not in legs:
             legs.append(leg)
