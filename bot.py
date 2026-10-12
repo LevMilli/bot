@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-11 r30.1"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-12 r30.2"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -4590,6 +4590,7 @@ C = {
     "rush_yds": (("rushingYards",), (), "rushing"),
     "rush_att": (("rushingAttempts",), ("CAR",), "rushing"),
     "rush_td": (("rushingTouchdowns",), (), "rushing"),
+    "rush_avg": (("yardsPerRushAttempt",), ("AVG",), "rushing"),
     "rec": (("receptions",), ("REC",), "receiving"),
     "rec_yds": (("receivingYards",), (), "receiving"),
     "rec_td": (("receivingTouchdowns",), (), "receiving"),
@@ -4676,9 +4677,12 @@ STATS = {
                       ["pass+rush yds", "pass+rush yards", "passing+rushing yards"]),
     "anytime_td": ("Anytime TD", "football", [("rush_td", 1), ("rec_td", 1)],
                    ["anytime touchdown", "anytime td", "anytime touchdown scorer", "td scorer", "to score a td",
-                    "scores a touchdown", "rush+rec tds"]),
+                    "scores a touchdown", "rush+rec tds", "anytime tds", "anytime touchdowns", "anytime td scorer"]),
     "longest_rec": ("Longest Reception", "football", [("long_rec", 1)], ["longest reception", "longest catch", "longest rec", "long rec", "longest receiving"]),
     "longest_rush": ("Longest Rush", "football", [("long_rush", 1)], ["longest rush", "long rush"]),
+    "rush_ypc": ("Rush Yds/Carry", "football", [("rush_avg", 1)],
+                 ["rush yards per carry", "rushing yards per carry", "yards per carry", "rush yds per carry",
+                  "rush yds/carry", "ypc"]),
     "tackles": ("Tackles+Ast", "football", [("tackles", 1)],
                 ["tackles+ast", "tackles + assists", "tackles+assists", "total tackles", "tackles"]),
     "sacks": ("Sacks", "football", [("sacks", 1)], ["sacks"]),
@@ -24208,7 +24212,14 @@ def ask_error_hint(exc: Optional[BaseException]) -> str:
         return "Gemini doesn't recognise the model name (GEMINI_MODEL)"
     if "no question engine" in t:
         return "no AI key is set on Railway"
-    return "the AI service didn't answer"
+    if "timed out" in t.lower():
+        return "Gemini took too long to answer"
+    if re.search(r"HTTP 5\d\d", t):
+        return "Gemini is overloaded on Google's side; try again in a minute"
+    if "came back empty" in t:
+        return "Gemini came back with no text"
+    code = re.search(r"HTTP (\d{3})", t)
+    return f"the AI service didn't answer (error {code.group(1)})" if code else "the AI service didn't answer"
 
 
 def ask_enabled() -> bool:
@@ -24224,30 +24235,50 @@ async def ask_gemini(system: str, user_text: str) -> tuple[str, list[str]]:
     body = {"system_instruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user_text}]}],
             "tools": [{"google_search": {}}],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000}}
-    data = None
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192}}
+    data, text, errors = None, "", []
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=150)) as session:
         for model in gemini_models():
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            tried_plain = False
+            mbody, tried_plain, data = body, False, None
             while True:
-                async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
-                    if resp.status == 400 and not tried_plain and "tools" in body:
-                        body = {k: v for k, v in body.items() if k != "tools"}   # no search on this model
-                        tried_plain = True
-                        continue
-                    if resp.status == 404:
-                        break                                                   # unknown model: try the next
-                    if resp.status != 200:
-                        raise RuntimeError(f"Gemini HTTP {resp.status}: {(await resp.text())[:200]}")
-                    data = await resp.json(content_type=None)
+                try:
+                    async with session.post(url, json=mbody, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
+                        if resp.status == 400 and not tried_plain and "tools" in mbody:
+                            mbody = {k: v for k, v in mbody.items() if k != "tools"}   # no search on this model
+                            tried_plain = True
+                            continue
+                        if resp.status == 404:
+                            errors.append(f"{model} not found")
+                            break                                               # unknown model: try the next
+                        if resp.status != 200:
+                            err = f"Gemini HTTP {resp.status}: {(await resp.text())[:200]}"
+                            if resp.status in (401, 403) or "API key" in err:
+                                raise RuntimeError(err)                         # a bad key fails on every model
+                            errors.append(err)
+                            break                                               # busy / limit hit: next model
+                        data = await resp.json(content_type=None)
+                        break
+                except RuntimeError:
+                    raise
+                except Exception as exc:                                        # timeout, connection dropped
+                    errors.append(f"Gemini timed out or dropped ({type(exc).__name__})")
                     break
-            if data is not None:
+            if data is None:
+                continue
+            if not data.get("candidates") and (data.get("promptFeedback") or {}).get("blockReason"):
+                return "", []                                                   # blocked: the fallback decides
+            cand = (data.get("candidates") or [{}])[0]
+            text = "".join(p.get("text", "") for p in ((cand.get("content") or {}).get("parts") or [])
+                           if not p.get("thought")).strip()
+            if text:
                 break
-    if data is None:
-        raise RuntimeError("Gemini: none of the model names worked (check GEMINI_MODEL)")
-    cand = (data.get("candidates") or [{}])[0]
-    text = "".join(p.get("text", "") for p in ((cand.get("content") or {}).get("parts") or [])).strip()
+            errors.append(f"Gemini came back empty on {model} ({cand.get('finishReason') or 'no reason given'})")
+    if not text:
+        if errors and all(e.endswith("not found") for e in errors):
+            raise RuntimeError("Gemini: none of the model names worked (check GEMINI_MODEL)")
+        log.warning("Gemini tried %s: %s", ", ".join(gemini_models()), " | ".join(errors)[:600])
+        raise RuntimeError(" | ".join(e for e in errors if not e.endswith("not found")) or "Gemini came back empty")
     sources = []
     for ch in ((cand.get("groundingMetadata") or {}).get("groundingChunks") or []):
         uri = ((ch.get("web") or {}).get("uri") or "").strip()
