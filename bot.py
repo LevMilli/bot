@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-12 r31.4"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-12 r31.5"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -19088,7 +19088,7 @@ def dash_html(web, html: str):
 async def dash_guard(request, handler):
     """Wraps every request: rate limit, no stack traces out, security headers on whatever goes back."""
     from aiohttp import web
-    if request.path != "/health" and not dash_rate(dash_client_ip(request), "all", *DASH_RATE):
+    if request.path not in ("/health", "/status") and not dash_rate(dash_client_ip(request), "all", *DASH_RATE):
         return dash_secure(dash_error(web, request, 429))
     try:
         resp = await handler(request)
@@ -19414,7 +19414,9 @@ def dash_app(web):
         return await dash_guard(request, handler)
 
     app = web.Application(middlewares=[guard], client_max_size=64 * 1024)
-    app.add_routes([web.get("/", dash_index), web.get("/api/data", dash_api_data), web.get("/health", dash_health),
+    app.add_routes([web.get("/", dash_index), web.get("/api/data", dash_api_data), web.get("/health", dash_health), web.get("/status", dash_status),
+                    web.get("/staff", staff_page), web.get("/api/staff.json", staff_api),
+                    web.get("/staff/logout", staff_logout),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -28801,6 +28803,536 @@ def dash30_safe_records(guild_id: int, text: str) -> str:
     return text
 
 
+
+# ==========================================================================
+# r31.5: outage alerts (admin + member channels, heartbeat, comeback report, /outage)
+# ==========================================================================
+
+def _outage_env_int(name: str, default: int) -> int:
+    try:
+        return int(env(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+OUTAGE_ADMIN_MIN = _outage_env_int("OUTAGE_ADMIN_MINUTES", 3)     # shorter gaps are a normal restart
+OUTAGE_MEMBER_MIN = 10                                             # default before members get a back-online note
+OUTAGE_SORRY = "Sorry for the trouble, and thanks for hanging in there."
+OUTAGE_RED, OUTAGE_AMBER, OUTAGE_GREEN = 0xE74C3C, 0xF1C40F, 0x2ECC71
+OUTAGE_PROBLEMS = [("down", "PIMP-BOT is offline or not responding"), ("slow", "PIMP-BOT is slow or glitchy"),
+                   ("slips", "Reading slip screenshots is down"), ("live", "Live tracking and grading are down"),
+                   ("ai", "AI breakdowns are down"), ("maint", "Planned maintenance")]
+OUTAGE_PROBLEM_NAMES = dict(OUTAGE_PROBLEMS)
+SERVER_TOGGLES.append(("outage_restarts", "Restart notices in the admin alert channel", "optout"))
+
+
+def outage_channel(client, guild_id: int, kind: str):
+    """The admin or member alert channel (admin falls back to the audit channel)."""
+    cid = get_setting(guild_id, f"outage_{kind}_channel")
+    if kind == "admin" and not cid:
+        cid = get_setting(guild_id, "audit_channel")
+    try:
+        return client.get_channel(int(cid)) if cid else None
+    except (TypeError, ValueError):
+        return None
+
+
+def outage_ts(dt: datetime, style: str = "t") -> str:
+    """A Discord timestamp: everyone sees it in their own time zone."""
+    return f"<t:{int(dt.timestamp())}:{style}>"
+
+
+def outage_dur(seconds: float) -> str:
+    m = int(round(max(0.0, seconds) / 60))
+    if m < 1:
+        return "under a minute"
+    if m < 60:
+        return f"{m} min"
+    h, m = divmod(m, 60)
+    if h < 24:
+        return f"{h} hr {m} min" if m else f"{h} hr"
+    d, h = divmod(h, 24)
+    return f"{d} day{'s' if d != 1 else ''} {h} hr"
+
+
+def outage_get(guild_id: int) -> Optional[dict]:
+    try:
+        raw = get_setting(guild_id, "outage_incident")
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def outage_put(guild_id: int, inc: Optional[dict]) -> None:
+    set_setting(guild_id, "outage_incident", json.dumps(inc) if inc else None)
+
+
+def outage_apology(text: Optional[str]) -> str:
+    t = (text or "").strip()
+    if t.lower() in ("none", "no", "-", "skip", "off"):
+        return ""
+    return clip(t, 300) if t else OUTAGE_SORRY
+
+
+def outage_eta(text: Optional[str], now: Optional[datetime] = None) -> tuple[str, Optional[str]]:
+    """('<t:..:t> (<t:..:R>)', iso) for '30m' / '2:30pm' / 'tomorrow 9am'; free text like 'later tonight' as is."""
+    t = (text or "").strip()
+    if not t:
+        return "", None
+    when = parse_when(t, now)
+    if when:
+        return f"{outage_ts(when, 't')} ({outage_ts(when, 'R')})", iso(when)
+    return clip(t, 80), None
+
+
+def outage_embed(title: str, lines: list, color: int) -> "discord.Embed":
+    return discord.Embed(title=clip(title, 256), description=clip("\n".join(x for x in lines if x), 4000), color=color)
+
+
+async def outage_send(client, guild_id: int, kind: str, text: Optional[str] = None, embed=None, ping: bool = False,
+                      reply_to: Optional[int] = None):
+    """Post in the admin or member alert channel. Member posts can ping the alert role; nothing else pings."""
+    ch = outage_channel(client, guild_id, kind)
+    if ch is None:
+        return None
+    content = text or ""
+    mentions = discord.AllowedMentions.none()
+    rid = get_setting(guild_id, "outage_role") if ping and kind == "members" else None
+    if rid:
+        content = f"<@&{rid}> {content}".strip()
+        mentions = discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(id=int(rid))])
+    kw = {"allowed_mentions": mentions}
+    if embed is not None:
+        kw["embed"] = embed
+    if reply_to:
+        try:
+            return await ch.send(content or None, reference=ch.get_partial_message(int(reply_to)), **kw)
+        except Exception:
+            pass                       # the first alert was deleted: post it on its own
+    return await ch.send(content or None, **kw)
+
+
+async def outage_admin_alert(client, guild_id: int, text: str) -> None:
+    """Job failures and the like also go to the admin alert channel, when it isn't the audit channel."""
+    cid = get_setting(guild_id, "outage_admin_channel")
+    if not cid or cid == get_setting(guild_id, "audit_channel"):
+        return
+    try:
+        await outage_send(client, guild_id, "admin", clip(f"⚠️ {text}", 1900))
+    except Exception:
+        log.warning("Admin alert post failed")
+
+
+# ---- heartbeat, shutdown, comeback --------------------------------------------------------------
+
+def outage_prev_state() -> dict:
+    """What the last run left behind (read before this run's heartbeat overwrites it)."""
+    return {k: get_setting(0, k) for k in ("hb_at", "hb_version", "stop_reason", "stop_at", "last_fatal")}
+
+
+async def outage_heartbeat(client) -> None:
+    while not client.is_closed():
+        try:
+            set_setting(0, "hb_at", now_iso())
+            set_setting(0, "hb_version", BOT_VERSION)
+        except Exception:
+            log.warning("Heartbeat write failed")
+        await asyncio.sleep(60)
+
+
+def outage_reason(prev: dict) -> tuple[str, bool]:
+    """(why it was down, planned?)."""
+    bits, planned = [], False
+    if prev.get("stop_reason") == "sigterm":
+        bits.append("Railway shut it down (a redeploy, a restart or a settings change).")
+        planned = True
+    elif prev.get("last_fatal"):
+        bits.append(f"It crashed: `{clip(sec_redact(prev['last_fatal']), 180)}`")
+    else:
+        bits.append("It stopped without warning (a crash, running out of memory, or Railway restarting the server).")
+    if prev.get("hb_version") and prev["hb_version"] != BOT_VERSION:
+        bits.append(f"New version live: {prev['hb_version'].split()[-1]} → {BOT_VERSION.split()[-1]}.")
+    return " ".join(bits), planned
+
+
+async def outage_going_down(client) -> None:
+    """Railway sent SIGTERM: mark it, tell the admins, then close cleanly."""
+    try:
+        set_setting(0, "stop_reason", "sigterm")
+        set_setting(0, "stop_at", now_iso())
+        set_setting(0, "hb_at", now_iso())
+        for g in list(getattr(client, "guilds", None) or []):
+            if not server_on(g.id, "outage_restarts"):
+                continue
+            try:
+                await asyncio.wait_for(outage_send(
+                    client, g.id, "admin", "🟠 **Shutting down** (a Railway redeploy or restart). I'm normally back "
+                    "within a couple of minutes, and I'll post here when I am."), 4)
+            except Exception:
+                pass
+    finally:
+        await client.close()
+
+
+async def outage_comeback(client, prev: dict, now: Optional[datetime] = None) -> None:
+    """Back after a gap: tell the admins how long and why, and the members too when it was long enough."""
+    now = now or datetime.now(timezone.utc)
+    for k in ("stop_reason", "stop_at", "last_fatal"):
+        set_setting(0, k, None)
+    try:
+        last = datetime.fromisoformat(prev.get("hb_at") or "")
+    except ValueError:
+        return                                      # the first run ever: nothing to report
+    gap = (now - last).total_seconds()
+    why, planned = outage_reason(prev)
+    if gap >= OUTAGE_ADMIN_MIN * 60:
+        set_setting(0, "outage_last", json.dumps({"from": iso(last), "to": iso(now), "why": why}))
+    try:
+        rows = json.loads(get_setting(0, "outage_log") or "[]")
+    except ValueError:
+        rows = []
+    rows = (rows if isinstance(rows, list) else [])[-19:] + [{"from": iso(last), "to": iso(now), "dur": outage_dur(gap),
+                                                               "why": clip(why, 200)}]
+    set_setting(0, "outage_log", json.dumps(rows))
+    for g in list(getattr(client, "guilds", None) or []):
+        try:
+            await outage_comeback_guild(client, g.id, last, now, gap, why, planned)
+        except Exception:
+            log.warning("Comeback notice failed for guild %s", g.id, exc_info=True)
+
+
+async def outage_comeback_guild(client, gid: int, last: datetime, now: datetime, gap: float, why: str,
+                                planned: bool) -> None:
+    span = f"{outage_ts(last)} → {outage_ts(now)}"
+    if gap < OUTAGE_ADMIN_MIN * 60:
+        if server_on(gid, "outage_restarts"):
+            await outage_send(client, gid, "admin", f"🔄 **Back after a restart** ({outage_dur(gap)}). {why}")
+        return
+    inc = outage_get(gid)
+    member_min = int(get_setting(gid, "outage_after") or OUTAGE_MEMBER_MIN)
+    auto = get_setting(gid, "outage_auto_members") != "off"
+    told = None
+    if inc:
+        told = "Members: there's an open alert for them, so I didn't post. Close it with `/outage resolved`."
+    elif not auto:
+        told = "Members: back-online notes are off (`/outage channels auto_members:True` turns them on)."
+    elif gap < member_min * 60:
+        told = f"Members: not told (it was under {member_min} min)."
+    elif outage_channel(client, gid, "members") is None:
+        told = "Members: no member alert channel yet (`/outage channels members:#channel`)."
+    else:
+        e = outage_embed("🟢 PIMP-BOT is back online", [
+            f"It was offline from {span} ({outage_dur(gap)}).",
+            "Anything posted while it was down wasn't seen, so re-post any slips you want logged.",
+            OUTAGE_SORRY], OUTAGE_GREEN)
+        await outage_send(client, gid, "members", embed=e)
+        told = "Members: posted a back-online note."
+    await outage_send(client, gid, "admin", embed=outage_embed(
+        "🟢 Back online", [f"Offline **{outage_dur(gap)}** ({span})", f"**Why:** {why}",
+                          f"**Version:** {BOT_VERSION.split()[-1]}", told], OUTAGE_GREEN if planned else OUTAGE_AMBER))
+
+
+async def outage_reconnected(client, down_at: Optional[datetime], now: Optional[datetime] = None) -> None:
+    """The Discord connection dropped and came back while the bot kept running."""
+    if not down_at:
+        return
+    now = now or datetime.now(timezone.utc)
+    gap = (now - down_at).total_seconds()
+    if gap < OUTAGE_ADMIN_MIN * 60:
+        return
+    for g in list(getattr(client, "guilds", None) or []):
+        try:
+            await outage_send(client, g.id, "admin", f"🟡 **Lost the connection to Discord** for {outage_dur(gap)} "
+                              f"({outage_ts(down_at)} → {outage_ts(now)}). Back now; nothing to do.")
+        except Exception:
+            pass
+
+
+async def outage_eta_job(client, now: Optional[datetime] = None) -> None:
+    """The ETA given to members has passed and the alert is still open: nudge the admins once."""
+    now = now or datetime.now(timezone.utc)
+    for g in list(getattr(client, "guilds", None) or []):
+        try:
+            inc = outage_get(g.id)
+            if not inc or inc.get("eta_nudged") or not inc.get("eta_at"):
+                continue
+            if datetime.fromisoformat(inc["eta_at"]) > now:
+                continue
+            inc["eta_nudged"] = True
+            outage_put(g.id, inc)
+            await outage_send(client, g.id, "admin", "⏰ The fix time you gave members has passed and their alert is "
+                              "still open. Post a new ETA with `/outage update`, or `/outage resolved` if it's fixed.")
+        except Exception:
+            log.warning("Outage ETA check failed for guild %s", getattr(g, "id", "?"))
+
+
+EXTRA_JOBS.append(("outage_eta", outage_eta_job))
+
+
+def outage_status_ok(client) -> tuple[bool, str]:
+    """For /status on the dashboard: connected to Discord and the heartbeat is fresh."""
+    try:
+        ready = bool(client.is_ready()) and not client.is_closed()
+    except Exception:
+        ready = False
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(get_setting(0, "hb_at") or "")).total_seconds()
+    except ValueError:
+        age = 1e9
+    if not ready:
+        return False, "not connected to Discord"
+    if age > 180:
+        return False, "heartbeat is stale"
+    return True, "ok"
+
+
+async def dash_status(request):
+    from aiohttp import web
+    ok, why = outage_status_ok(bot)
+    return web.Response(text=why, status=200 if ok else 503, content_type="text/plain")
+
+
+
+# ---- r31.5: the staff health page (admins and mods only) -------------------------------------------
+
+STAFF_COOKIE = "pb_staff"
+STAFF_LINK_HOURS = 12
+
+
+def staff_secret() -> bytes:
+    """Signs staff links. Changing DASHBOARD_KEY, or '/dashboard section:Sign every admin out', ends them all."""
+    return (dashboard_key() + "|staff|" + (get_setting(0, "staff_epoch") or "0")).encode()
+
+
+def staff_token(user_id: int, guild_id: int, hours: int = STAFF_LINK_HOURS, now: Optional[float] = None) -> str:
+    exp = int((now or time.time()) + hours * 3600)
+    base = f"{int(user_id)}.{int(guild_id)}.{exp}"
+    sig = hmac.new(staff_secret(), base.encode(), hashlib.sha256).hexdigest()[:40]
+    return f"{base}.{sig}"
+
+
+def staff_check(token: Optional[str], now: Optional[float] = None) -> Optional[dict]:
+    """{uid, guild, exp} for a good, unexpired staff token; None otherwise."""
+    t = (token or "").strip()
+    if not t or len(t) > 120 or not re.fullmatch(r"\d{1,20}\.\d{1,20}\.\d{1,12}\.[0-9a-f]{40}", t):
+        return None
+    uid, gid, exp, sig = t.split(".")
+    want = hmac.new(staff_secret(), f"{uid}.{gid}.{exp}".encode(), hashlib.sha256).hexdigest()[:40]
+    if not hmac.compare_digest(sig.encode(), want.encode()):
+        return None
+    if int(exp) < (now or time.time()):
+        return None
+    return {"uid": int(uid), "guild": int(gid), "exp": int(exp)}
+
+
+def staff_url(user_id: int, guild_id: int) -> Optional[str]:
+    if not PUBLIC_DOMAIN:
+        return None
+    return f"https://{PUBLIC_DOMAIN}/staff?t={staff_token(user_id, guild_id)}"
+
+
+def staff_from_request(request) -> Optional[dict]:
+    return staff_check(request.cookies.get(STAFF_COOKIE))
+
+
+def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
+    """Everything an admin needs to see whether the bot is healthy. Never keys, never pick details."""
+    base = dash30_health()
+    now = datetime.now(timezone.utc)
+    ok, why = outage_status_ok(bot)
+    try:
+        hb_age = int((now - datetime.fromisoformat(get_setting(0, "hb_at") or "")).total_seconds())
+    except ValueError:
+        hb_age = None
+    try:
+        latency = round(float(bot.latency) * 1000)
+        latency = latency if 0 <= latency < 60000 else None
+    except Exception:
+        latency = None
+    jobs = []
+    for name, h in sorted(JOB_HEALTH.items(), key=lambda kv: (-(kv[1].get("fails") or 0), kv[0])):
+        jobs.append({"name": clip(name, 40), "fails": int(h.get("fails") or 0),
+                     "error": clip(sec_redact(h.get("last_error") or ""), 160) if h.get("fails") else "",
+                     "ok_at": h.get("ok_at")})
+    inc = outage_get(guild_id)
+    try:
+        last = json.loads(get_setting(0, "outage_last") or "null")
+    except ValueError:
+        last = None
+    try:
+        log_rows = json.loads(get_setting(0, "outage_log") or "[]")
+    except ValueError:
+        log_rows = []
+    try:
+        size = os.path.getsize(DB_PATH)
+    except OSError:
+        size = None
+    counts = db().execute("SELECT COUNT(*) AS n, SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS o "
+                          "FROM picks WHERE guild_id = ?", (guild_id,)).fetchone()
+    try:
+        import resource
+        mem = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)     # Linux reports KB
+    except Exception:
+        mem = None
+    slip_err = SLIP_STATE.get("last_error")
+    def chan(kind):
+        ch = outage_channel(bot, guild_id, kind)
+        return ("#" + clip(getattr(ch, "name", "") or str(ch.id), 40)) if ch is not None else None
+    engines = [{"name": n, "on": bool(on)} for n, on in (
+        ("Free scan (Tesseract)", TESSERACT), ("Groq (free)", globals().get("GROQ_API_KEY")),
+        ("Gemini (free)", GEMINI_API_KEY), ("Claude (paid)", ai_enabled()))]
+    return {
+        "version": BOT_VERSION, "uptime": base["uptime"], "up_since": iso(STARTED_AT),
+        "status": {"ok": ok, "why": why, "heartbeat_age": hb_age, "latency_ms": latency, "memory_mb": mem,
+                   "cycle": base["cycle"]},
+        "outage": {"open": ({"problem": OUTAGE_PROBLEM_NAMES.get(inc.get("problem"), "?"), "since": inc.get("started_at"),
+                             "by": clip(inc.get("by") or "", 40), "updates": int(inc.get("updates") or 0),
+                             "eta": clip(inc.get("eta") or "", 60)} if inc else None),
+                   "last": last, "log": log_rows[-10:][::-1],
+                   "channels": {"admin": chan("admin"), "members": chan("members")}},
+        "jobs": jobs, "feeds": base["feeds"], "reads": base["reads"], "questions": base["questions"],
+        "engines": engines, "claude_today": base["claude_today"],
+        "claude_cap": CLAUDE_DAILY_CAP or None,
+        "errors": {"slip": clip(sec_redact(slip_err[1]), 200) if slip_err else None,
+                   "slip_at": slip_err[0] if slip_err else None,
+                   "ai": clip(sec_redact(ASK_LAST_ERROR.get("text") or ""), 200) or None},
+        "database": {"size_mb": round(size / 1048576, 1) if size is not None else None,
+                     "on_volume": str(DB_PATH).startswith("/data"), "picks": int(counts["n"] or 0),
+                     "open": int(counts["o"] or 0)},
+        "viewer": staff_viewer(uid),
+    }
+
+
+def staff_viewer(uid: Optional[int]) -> str:
+    try:
+        user = bot.get_user(int(uid)) if uid else None
+    except Exception:
+        user = None
+    return clip(getattr(user, "display_name", "") or getattr(user, "name", "") or "", 40)
+
+
+async def staff_page(request):
+    from aiohttp import web
+    tok = request.query.get("t")
+    if tok is not None:
+        st = staff_check(tok)
+        if st is None:
+            dash_rate(dash_client_ip(request), "bad", *DASH_BAD_KEYS)
+            return dash_page(web, 403, "That link has expired",
+                             "Staff links last 12 hours. Run /dashboard section:Admin health in Discord for a new one.")
+        resp = web.Response(status=303, headers={"Location": "/staff"})     # take the token out of the address bar
+        resp.set_cookie(STAFF_COOKIE, tok, max_age=max(60, st["exp"] - int(time.time())), path="/", httponly=True,
+                        secure=True, samesite="Strict")
+        return resp
+    if staff_from_request(request) is None:
+        if not dash_rate(dash_client_ip(request), "bad", *DASH_BAD_KEYS, count=False):
+            return dash_error(web, request, 429)
+        return dash_page(web, 403, "Admins and mods only",
+                         "Run /dashboard section:Admin health in Discord to get your own sign-in link.")
+    return dash_html(web, STAFF_HTML)
+
+
+async def staff_api(request):
+    from aiohttp import web
+    st = staff_from_request(request)
+    if st is None:
+        return dash_error(web, request, 403)
+    return web.json_response(staff_data(st["guild"], st["uid"]))
+
+
+async def staff_logout(request):
+    from aiohttp import web
+    resp = web.Response(status=303, headers={"Location": "/staff"})
+    resp.del_cookie(STAFF_COOKIE, path="/")
+    return resp
+
+
+STAFF_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>PIMP-BOT · Staff health</title>
+<link rel="icon" href='""" + DASH_FAVICON + """'>
+<style>
+:root{--bg:#0e0b16;--card:#17121f;--card2:#1f1830;--line:#2c2340;--text:#f1ecfa;--muted:#a69bbd;--ok:#3fb97a;
+--warn:#e8b33f;--bad:#e66767;--brand:#8b5cf6}
+@media (prefers-color-scheme: light){:root{--bg:#f6f3fb;--card:#fff;--card2:#f1ecfa;--line:#e2d9f1;--text:#1d1530;
+--muted:#6b5f82;--ok:#1f8f57;--warn:#a87a12;--bad:#c23b3b;--brand:#6d3fd6}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header h1{font-size:18px;margin:0}header .who{color:var(--muted);font-size:13px;margin-left:auto}
+header a{color:var(--muted);font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;min-width:0}
+.card h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.big{font-size:22px;font-weight:700}.row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;
+border-top:1px solid var(--line);font-size:14px}.row:first-of-type{border-top:0}.row span:last-child{text-align:right;
+color:var(--muted);overflow-wrap:anywhere}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;
+margin-right:7px;background:var(--muted)}.ok{background:var(--ok)}.warn{background:var(--warn)}.bad{background:var(--bad)}
+.err{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--bad);overflow-wrap:anywhere;margin-top:4px}
+.wide{grid-column:1/-1}.muted{color:var(--muted);font-size:13px}#banner{grid-column:1/-1;border-radius:14px;
+padding:14px 16px;font-weight:600}
+</style></head><body>
+<header><h1>🛠️ PIMP-BOT · Staff health</h1><span class="who" id="who"></span><a href="/staff/logout">Sign out</a></header>
+<main id="m"><div class="card wide muted">Loading…</div></main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=t=>String(t==null?'':t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ago=iso=>{if(!iso)return'never';const s=(Date.now()-Date.parse(iso))/1000;if(isNaN(s))return'?';
+if(s<90)return Math.round(s)+'s ago';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' hr ago';
+return Math.round(s/86400)+' days ago'};
+const when=iso=>iso?new Date(iso).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+const dot=c=>'<i class="dot '+c+'"></i>';
+const row=(a,b)=>'<div class="row"><span>'+a+'</span><span>'+b+'</span></div>';
+const card=(t,body,cls)=>'<section class="card '+(cls||'')+'"><h2>'+esc(t)+'</h2>'+body+'</section>';
+function render(d){
+ $('#who').textContent=d.viewer?('Signed in as '+d.viewer):'';
+ const st=d.status, h=[];
+ const good=st.ok, bad=(d.jobs||[]).filter(j=>j.fails).length, down=(d.feeds||[]).filter(f=>f.state==='down').length;
+ const col=!good?'var(--bad)':(bad||down||d.outage.open)?'var(--warn)':'var(--ok)';
+ const msg=!good?('🔴 Not healthy: '+esc(st.why)):d.outage.open?('🟠 Open member alert: '+esc(d.outage.open.problem))
+   :(bad||down)?('🟡 Running, with '+(bad?bad+' failing job'+(bad>1?'s':''):'')+(bad&&down?' and ':'')+(down?down+' feed'+(down>1?'s':'')+' down':''))
+   :'🟢 Everything looks healthy';
+ h.push('<div id="banner" style="background:color-mix(in srgb,'+col+' 18%,transparent);border:1px solid '+col+'">'+msg+'</div>');
+ h.push(card('Bot',row('Version',esc(d.version.split(' ').pop()))+row('Up for',esc(d.uptime)+' · since '+esc(when(d.up_since)))
+  +row('Discord',dot(good?'ok':'bad')+(good?'connected':esc(st.why)))+row('Heartbeat',st.heartbeat_age==null?'none':st.heartbeat_age+'s ago')
+  +row('Ping to Discord',st.latency_ms==null?'?':st.latency_ms+' ms')+row('Scheduler',dot(st.cycle.ok?'ok':'bad')+esc(st.cycle.ago||'not run'))
+  +row('Memory',st.memory_mb==null?'?':st.memory_mb+' MB')));
+ const o=d.outage, oc=o.channels;
+ let ob=row('Admin alerts',esc(oc.admin||'not set'))+row('Member alerts',esc(oc.members||'not set'));
+ ob+=o.open?row('Open alert',dot('warn')+esc(o.open.problem)+' · '+ago(o.open.since)+(o.open.eta?' · ETA '+esc(o.open.eta):''))
+   :row('Open alert','none');
+ ob+=o.last?row('Last outage',esc(when(o.last.from))+' → '+esc(when(o.last.to))):row('Last outage','none recorded');
+ if(o.last&&o.last.why)ob+='<div class="muted">'+esc(o.last.why)+'</div>';
+ h.push(card('Outages',ob));
+ const db=d.database;
+ h.push(card('Database',row('Saved on a volume',dot(db.on_volume?'ok':'bad')+(db.on_volume?'yes (/data)':'NO: a redeploy wipes it'))
+  +row('Size',db.size_mb==null?'?':db.size_mb+' MB')+row('Picks',db.picks+' ('+db.open+' open)')));
+ let eb=(d.engines||[]).map(e=>row(esc(e.name),dot(e.on?'ok':'')+(e.on?'on':'off'))).join('');
+ eb+=row('Claude calls today',d.claude_today+(d.claude_cap?' / '+d.claude_cap:''));
+ if(d.errors.slip)eb+='<div class="muted">Last slip-read error '+esc(ago(d.errors.slip_at))+'</div><div class="err">'+esc(d.errors.slip)+'</div>';
+ if(d.errors.ai)eb+='<div class="muted">Last AI error</div><div class="err">'+esc(d.errors.ai)+'</div>';
+ h.push(card('Slip reading & AI',eb));
+ const reads=(d.reads||[]).concat(d.questions||[]).filter(r=>r.n);
+ h.push(card('Today',reads.length?reads.map(r=>row(esc(r.name),r.n)).join(''):'<div class="muted">No slip reads or questions yet today.</div>'));
+ h.push(card('Data feeds',(d.feeds||[]).map(f=>row(dot(f.state==='ok'?'ok':f.state==='down'?'bad':f.state==='shaky'?'warn':'')+esc(f.name),
+  esc(f.state)+(f.last_ok?' · ok '+esc(f.last_ok):'')+(f.fail?' · '+f.fail+' fails':''))).join('')||'<div class="muted">No lookups yet.</div>'));
+ const jobs=d.jobs||[], failing=jobs.filter(j=>j.fails);
+ h.push(card('Background jobs ('+jobs.length+')',(failing.length?failing.map(j=>row(dot('bad')+esc(j.name),'failed '+j.fails+'× in a row')
+  +'<div class="err">'+esc(j.error)+'</div>').join(''):'<div class="muted">'+dot('ok')+'All '+jobs.length+' jobs healthy.</div>'),'wide'));
+ if((o.log||[]).length)h.push(card('Restarts & outages',o.log.map(x=>row(esc(when(x.to)),'down '+esc(x.dur)+' · '+esc(x.why))).join(''),'wide'));
+ $('#m').innerHTML=h.join('');
+}
+async function load(){try{const r=await fetch('/api/staff.json',{credentials:'same-origin'});
+ if(r.status===403){location.reload();return}render(await r.json())}catch(e){}}
+load();setInterval(load,30000);
+</script></body></html>"""
+
+HELP_EXTRA.append(("🚨 Outage alerts", (
+    "`/outage channels` picks where admin alerts and member alerts go (and a role to ping). When the bot shuts down, "
+    "comes back, loses Discord or a background job keeps failing, admins hear about it. After a long outage members "
+    "get a back-online note. For a problem you're handling: `/outage alert` tells members, `/outage update` says the "
+    "team is on it with an ETA, a note and an apology, `/outage resolved` gives the all-clear. `/outage status` "
+    "shows it all. Admins only.")))
+
 # --------------------------------------------------------------------------
 # The bot
 # --------------------------------------------------------------------------
@@ -28816,9 +29348,23 @@ class PicksBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.receipt_channels: set[int] = set()
         self.ask_cooldowns: dict[int, float] = {}
+        self._outage_prev: Optional[dict] = None
+        self._outage_checked = False
+        self._dc_at: Optional[datetime] = None
 
     async def setup_hook(self):
         self.receipt_channels = receipt_channel_ids()
+        try:
+            self._outage_prev = outage_prev_state()          # read before this run's heartbeat overwrites it
+            self.heartbeat_task = asyncio.create_task(outage_heartbeat(self))
+        except Exception:
+            log.exception("Heartbeat didn't start")
+        try:
+            import signal
+            asyncio.get_running_loop().add_signal_handler(
+                signal.SIGTERM, lambda: asyncio.ensure_future(outage_going_down(self)))
+        except Exception:
+            log.info("No SIGTERM handler on this platform")
         self.add_dynamic_items(SettleButton, LogSlipButton, FollowButton, ChallengeButton, PickemButton,
                                SweatButton, InjuryOffButton, GPButton, CopyButton, CardSweatButton, CardKalshiButton,
                                PPSettleButton, MarketButton, TakeButton, PotdButton, TriviaButton, GuessButton,
@@ -28844,6 +29390,23 @@ class PicksBot(discord.Client):
         log.info("Logged in as %s | version %s | Claude features: %s | receipts channels: %d",
                  self.user, BOT_VERSION, "on" if ai_enabled() else "off",
                  len(self.receipt_channels))
+        if not self._outage_checked:
+            self._outage_checked = True
+            try:
+                await outage_comeback(self, self._outage_prev or {})
+            except Exception:
+                log.exception("Comeback notice failed")
+        else:
+            down, self._dc_at = self._dc_at, None
+            await outage_reconnected(self, down)
+
+    async def on_disconnect(self):
+        if self._dc_at is None:
+            self._dc_at = datetime.now(timezone.utc)
+
+    async def on_resumed(self):
+        down, self._dc_at = self._dc_at, None
+        await outage_reconnected(self, down)
 
     # ---- scheduled posts ---------------------------------------------------
 
@@ -29090,6 +29653,7 @@ class PicksBot(discord.Client):
         for g in getattr(self, "guilds", None) or []:
             try:
                 await audit(self, g.id, alert)
+                await outage_admin_alert(self, g.id, alert)
             except Exception:
                 pass
 
@@ -29130,6 +29694,7 @@ class PicksBot(discord.Client):
                 for g in self.guilds if hasattr(self, "guilds") else []:
                     try:
                         await audit(self, g.id, alert)
+                        await outage_admin_alert(self, g.id, alert)
                     except Exception:
                         pass
         for name, step in (("run_autograde", lambda: self.run_autograde(now.astimezone(timezone.utc))),
@@ -32265,9 +32830,38 @@ async def player_vs(interaction: discord.Interaction, player: app_commands.Range
     await interaction.followup.send(embed=vs_embed(cand, games, opponent))
 
 
+DASH_SECTIONS = [app_commands.Choice(name="Everyone's dashboard", value="main"),
+                 app_commands.Choice(name="Admin health (admins and mods)", value="staff"),
+                 app_commands.Choice(name="Sign every admin out of admin health", value="revoke")]
+
+
 @bot.tree.command(name="dashboard", description="Link to the live web dashboard (only you see it)")
 @app_commands.guild_only()
-async def dashboard_cmd(interaction: discord.Interaction):
+@app_commands.describe(section="Optional: the admin health page (admins and mods only)")
+@app_commands.choices(section=DASH_SECTIONS)
+async def dashboard_cmd(interaction: discord.Interaction, section: Optional[app_commands.Choice[str]] = None):
+    if section is not None and section.value in ("staff", "revoke"):
+        if not sec_staff(interaction.user):
+            await interaction.response.send_message("The admin health page is for admins and mods.", ephemeral=True)
+            return
+        if section.value == "revoke":
+            set_setting(0, "staff_epoch", str(int(get_setting(0, "staff_epoch") or 0) + 1))
+            await audit(interaction.client, interaction.guild_id,
+                        f"{who(interaction)} signed every admin out of the health page.")
+            await interaction.response.send_message("Done: every admin health link and sign-in has stopped working. "
+                                                    "Run this with **Admin health** for a fresh link.", ephemeral=True)
+            return
+        surl = staff_url(interaction.user.id, interaction.guild_id)
+        if not surl:
+            await interaction.response.send_message(
+                "The dashboard isn't switched on yet. In Railway: open the bot's service → **Settings** → "
+                "**Networking** → **Generate Domain**. Then run this again.", ephemeral=True)
+            return
+        await audit(interaction.client, interaction.guild_id, f"{who(interaction)} opened the admin health page.")
+        await interaction.response.send_message(
+            f"🛠️ Admin health: {surl}\nThis link is yours: don't share it. It signs you in for "
+            f"{STAFF_LINK_HOURS} hours.", ephemeral=True)
+        return
     url = dashboard_url()
     if url:
         await interaction.response.send_message(f"📊 Live dashboard: {url}\nOpen it once and your browser stays signed in. "
@@ -34490,6 +35084,206 @@ async def admin_askchannel(interaction: discord.Interaction, turn_off: bool = Fa
         pass
 
 
+
+# ---- /outage ------------------------------------------------------------------------------------
+
+outage_group = app_commands.Group(name="outage", description="Outage alerts: admin heads-ups and member updates",
+                                  guild_only=True, default_permissions=discord.Permissions(manage_guild=True))
+OUTAGE_CHOICES = [app_commands.Choice(name=label, value=key) for key, label in OUTAGE_PROBLEMS]
+
+
+@outage_group.command(name="channels", description="Where admin and member outage alerts go, and who gets pinged")
+@app_commands.describe(admin="Channel for admin alerts (shutdowns, restarts, errors)",
+                       members="Channel for member alerts (bot down, fix updates, all clear)",
+                       ping="Optional: a role to ping on member alerts", no_ping="True to stop pinging a role",
+                       auto_members="Post a back-online note to members after a long outage (default on)",
+                       after_minutes="How long an outage has to be before members get that note (default 10)")
+@sec_admin_only
+async def outage_channels(interaction: discord.Interaction, admin: Optional[discord.TextChannel] = None,
+                          members: Optional[discord.TextChannel] = None, ping: Optional[discord.Role] = None,
+                          no_ping: Optional[bool] = None, auto_members: Optional[bool] = None,
+                          after_minutes: Optional[app_commands.Range[int, 3, 240]] = None):
+    gid = interaction.guild_id
+    if admin is not None:
+        set_setting(gid, "outage_admin_channel", str(admin.id))
+    if members is not None:
+        set_setting(gid, "outage_members_channel", str(members.id))
+    if ping is not None:
+        set_setting(gid, "outage_role", str(ping.id))
+    if no_ping:
+        set_setting(gid, "outage_role", None)
+    if auto_members is not None:
+        set_setting(gid, "outage_auto_members", None if auto_members else "off")
+    if after_minutes is not None:
+        set_setting(gid, "outage_after", str(after_minutes))
+    problems = []
+    for kind, ch, text in (("admin", admin, "🛠️ Admin outage alerts will post here."),
+                           ("members", members, "📣 Bot status updates will post here.")):
+        if ch is None:
+            continue
+        try:
+            await outage_send(interaction.client, gid, kind, text)
+        except Exception:
+            problems.append(f"I can't post in <#{ch.id}>: give me Send Messages and Embed Links there.")
+    await interaction.response.send_message("\n".join([outage_settings_text(interaction.client, gid)] + problems),
+                                            ephemeral=True)
+
+
+def outage_settings_text(client, gid: int) -> str:
+    def where(kind):
+        ch = outage_channel(client, gid, kind)
+        return f"<#{ch.id}>" if ch is not None else "not set"
+    rid = get_setting(gid, "outage_role")
+    after = get_setting(gid, "outage_after") or OUTAGE_MEMBER_MIN
+    auto = get_setting(gid, "outage_auto_members") != "off"
+    return (f"**Admin alerts:** {where('admin')}" + ("" if get_setting(gid, "outage_admin_channel") else
+                                                    " (the audit channel until you pick one)")
+            + f"\n**Member alerts:** {where('members')}\n**Ping on member alerts:** {f'<@&{rid}>' if rid else 'nobody'}"
+            + f"\n**Back-online note to members:** {'on, after ' + str(after) + ' min down' if auto else 'off'}"
+            + f"\n**Restart notices to admins:** {'on' if server_on(gid, 'outage_restarts') else 'off'} "
+              "(`/admin panel`)")
+
+
+@outage_group.command(name="alert", description="Tell members the bot is having problems (first alert)")
+@app_commands.describe(problem="What's wrong", details="Optional: a line about what people will notice",
+                       ping="Ping the alert role (default yes)")
+@app_commands.choices(problem=OUTAGE_CHOICES)
+@sec_admin_only
+async def outage_alert(interaction: discord.Interaction, problem: app_commands.Choice[str],
+                       details: Optional[app_commands.Range[str, 1, 300]] = None, ping: Optional[bool] = True):
+    gid = interaction.guild_id
+    cur = outage_get(gid)
+    if cur:
+        await interaction.response.send_message(
+            f"There's already an open alert ({OUTAGE_PROBLEM_NAMES.get(cur.get('problem'), 'a problem')}). "
+            "Use `/outage update` for news or `/outage resolved` to close it.", ephemeral=True)
+        return
+    if outage_channel(interaction.client, gid, "members") is None:
+        await interaction.response.send_message("Pick a member alert channel first: `/outage channels members:#channel`.",
+                                                ephemeral=True)
+        return
+    title = "🛠️ Heads up: planned maintenance" if problem.value == "maint" else f"🔴 Heads up: {problem.name}"
+    e = outage_embed(title, [clip(details, 300) if details else "",
+                             "We'll post updates here as soon as we know more."], OUTAGE_RED)
+    msg = await outage_send(interaction.client, gid, "members", embed=e, ping=bool(ping))
+    outage_put(gid, {"problem": problem.value, "details": details or "", "started_at": now_iso(),
+                     "by": interaction.user.display_name, "msg_id": getattr(msg, "id", None), "updates": 0})
+    await outage_send(interaction.client, gid, "admin",
+                      f"🔴 {who(interaction)} posted a member alert: **{problem.name}**. Next: `/outage update` "
+                      "with an ETA, then `/outage resolved` when it's fixed.")
+    await interaction.response.send_message("Posted. Members can see it now.", ephemeral=True)
+
+
+@outage_group.command(name="update", description="Tell members the team is on it: ETA, a note and an apology")
+@app_commands.describe(eta="When it should be fixed: 30m, 2h, 2:30pm, tomorrow 9am, or words like 'later tonight'",
+                       note="Optional: anything else members should know",
+                       apology="Optional: your own apology line ('none' leaves it out)",
+                       ping="Ping the alert role (default no)")
+@sec_admin_only
+async def outage_update(interaction: discord.Interaction, eta: Optional[app_commands.Range[str, 1, 60]] = None,
+                        note: Optional[app_commands.Range[str, 1, 400]] = None,
+                        apology: Optional[app_commands.Range[str, 1, 300]] = None, ping: Optional[bool] = False):
+    gid = interaction.guild_id
+    inc = outage_get(gid)
+    if not inc:
+        await interaction.response.send_message("There's no open alert. Start one with `/outage alert`.", ephemeral=True)
+        return
+    shown, eta_at = outage_eta(eta)
+    first = not inc.get("updates")
+    e = outage_embed("🛠️ The team is aware and working on it" if first else "🛠️ Update",
+                     [f"**Expected fix:** {shown}" if shown else "", f"**Note:** {clip(note, 400)}" if note else "",
+                      outage_apology(apology)], OUTAGE_AMBER)
+    await outage_send(interaction.client, gid, "members", embed=e, ping=bool(ping), reply_to=inc.get("msg_id"))
+    inc["updates"] = (inc.get("updates") or 0) + 1
+    if eta:
+        inc.update(eta=eta, eta_at=eta_at, eta_nudged=False)
+    outage_put(gid, inc)
+    await outage_send(interaction.client, gid, "admin", f"🛠️ {who(interaction)} posted an update"
+                      + (f" · ETA {shown}" if shown else "") + (" · I'll remind you here if it passes." if eta_at else ""))
+    await interaction.response.send_message("Update posted.", ephemeral=True)
+
+
+@outage_group.command(name="resolved", description="All clear: tell members it's fixed (closes the alert)")
+@app_commands.describe(note="Optional: what happened or what to do now (like 're-post slips from the last hour')",
+                       apology="Optional: your own apology line ('none' leaves it out)",
+                       ping="Ping the alert role (default no)")
+@sec_admin_only
+async def outage_resolved(interaction: discord.Interaction, note: Optional[app_commands.Range[str, 1, 400]] = None,
+                          apology: Optional[app_commands.Range[str, 1, 300]] = None, ping: Optional[bool] = False):
+    gid = interaction.guild_id
+    inc = outage_get(gid)
+    if not inc:
+        await interaction.response.send_message("There's no open alert to close.", ephemeral=True)
+        return
+    try:
+        took = outage_dur((datetime.now(timezone.utc) - datetime.fromisoformat(inc["started_at"])).total_seconds())
+    except (KeyError, ValueError):
+        took = None
+    e = outage_embed("🟢 Fixed: PIMP-BOT is back to normal",
+                     [("Sorted out in under a minute." if took == "under a minute" else f"Sorted out after about {took}.") if took else "", clip(note, 400) if note else "",
+                      outage_apology(apology)], OUTAGE_GREEN)
+    await outage_send(interaction.client, gid, "members", embed=e, ping=bool(ping), reply_to=inc.get("msg_id"))
+    outage_put(gid, None)
+    set_setting(gid, "outage_closed", json.dumps({"problem": inc.get("problem"), "from": inc.get("started_at"),
+                                                  "to": now_iso(), "by": interaction.user.display_name}))
+    await outage_send(interaction.client, gid, "admin", f"🟢 {who(interaction)} closed the alert"
+                      + (f" after {took}" if took else "") + ".")
+    await interaction.response.send_message("All clear posted. The alert is closed.", ephemeral=True)
+
+
+@outage_group.command(name="status", description="Alert channels, any open alert, the last outage and the heartbeat")
+@sec_admin_only
+async def outage_status(interaction: discord.Interaction):
+    gid = interaction.guild_id
+    lines = [outage_settings_text(interaction.client, gid), ""]
+    inc = outage_get(gid)
+    if inc:
+        try:
+            since = outage_ts(datetime.fromisoformat(inc["started_at"]), "R")
+        except (KeyError, ValueError):
+            since = "a while ago"
+        lines.append(f"🔴 **Open alert:** {OUTAGE_PROBLEM_NAMES.get(inc.get('problem'), '?')}, posted {since} by "
+                     f"{clip(inc.get('by') or '?', 40)} · {inc.get('updates') or 0} update(s)"
+                     + (f" · ETA {inc['eta']}" if inc.get("eta") else ""))
+    else:
+        lines.append("✅ No open alert.")
+    try:
+        last = json.loads(get_setting(0, "outage_last") or "null")
+    except ValueError:
+        last = None
+    if last:
+        a, b = datetime.fromisoformat(last["from"]), datetime.fromisoformat(last["to"])
+        lines.append(f"**Last time it was down:** {outage_ts(a, 'f')} for {outage_dur((b - a).total_seconds())}. "
+                     f"{clip(last.get('why') or '', 200)}")
+    ok, why = outage_status_ok(interaction.client)
+    lines.append(f"**Right now:** {'🟢 connected, heartbeat fresh' if ok else '🔴 ' + why} · up since "
+                 f"{outage_ts(STARTED_AT, 'R')} · {BOT_VERSION.split()[-1]}")
+    await interaction.response.send_message(clip("\n".join(lines), 1900), ephemeral=True)
+
+
+@outage_group.command(name="test", description="Post a test in the admin channel and preview the member alerts")
+@sec_admin_only
+async def outage_test(interaction: discord.Interaction):
+    gid = interaction.guild_id
+    try:
+        sent_admin = await outage_send(interaction.client, gid, "admin",
+                                       f"🧪 Test from {who(interaction)}: admin outage alerts land here.")
+    except Exception:
+        sent_admin = None
+    preview = ("**What members would see:**\n"
+               "1️⃣ `/outage alert` → 🔴 **Heads up: PIMP-BOT is offline or not responding** · We'll post updates here.\n"
+               "2️⃣ `/outage update eta:30m note:...` → 🛠️ **The team is aware and working on it** · Expected fix: "
+               "(their local time, with a countdown) · Note · " + OUTAGE_SORRY + "\n"
+               "3️⃣ `/outage resolved` → 🟢 **Fixed: PIMP-BOT is back to normal** · Sorted out after about 25 min · "
+               + OUTAGE_SORRY + "\n"
+               "Automatic: after a long outage, 🟢 **PIMP-BOT is back online** with the times it was down.")
+    head = "✅ Test posted in the admin channel." if sent_admin else \
+        "⚠️ No admin alert channel I can post in. Set one with `/outage channels admin:#channel`."
+    await interaction.response.send_message(head + "\n\n" + preview, ephemeral=True)
+
+
+bot.tree.add_command(outage_group)
+
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction,
                                error: app_commands.AppCommandError):
@@ -34515,4 +35309,12 @@ if __name__ == "__main__":
         raise SystemExit("DISCORD_TOKEN is missing. Add it as a variable on Railway "
                          "(or in .env when running locally).")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    bot.run(TOKEN, log_handler=None)
+    try:
+        bot.run(TOKEN, log_handler=None)
+    except BaseException as exc:
+        if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            try:
+                set_setting(0, "last_fatal", sec_redact(f"{type(exc).__name__}: {exc}")[:300])
+            except Exception:
+                pass
+        raise
