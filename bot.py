@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r40.2"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r41"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -4614,10 +4614,41 @@ BADGES = [  # (key, name, how to earn it)
     ("goodpass", "Iron Will", "Make 3 good passes (ghost slips that would've missed)"),
     ("sixth", "Sixth Sense", "Be right on 70%+ of 6 or more passes"),
     ("sniper", "Sniper", "Hit 8 legs in a row"),
+    ("sharp", "Sharp Eye", "Hit 60%+ of legs over 50+ graded legs"),
+    ("surgeon", "Surgeon", "Hit 65%+ of legs over 100+ graded legs"),
+    ("triple", "Triple Threat", "Win slips in 3 different sports"),
+    ("globe", "Globetrotter", "Win slips in 5 different sports"),
+    ("apps", "App Hopper", "Win on 3 different apps"),
+    ("comeback", "Comeback Kid", "Win right after losing 3 in a row"),
+    ("ironmonth", "Back to Back", "Two green months in a row (5+ slips each)"),
+    ("quarter", "Green Quarter", "Three green months in a row"),
+    ("bounce", "Bounce Back", "A green month right after a red one"),
+    ("longshot", "Long Shot", "Cash a 20x+ payout"),
+    ("jackpot", "Jackpot", "Cash a 50x+ payout"),
+    ("grand", "Grand Slam", "Profit $500+ on one slip"),
+    ("clean4", "Clean Sheet", "Win a 4+ leg slip with every leg hit"),
+    ("bigboard", "Big Board", "Hit an 8+ leg slip"),
+    ("perfectweek", "Perfect Week", "3+ slips settled in a week, all wins"),
+    ("nailbiter", "Nail Biter", "A leg that cleared by half a point or less"),
+    ("icevein", "Ice in the Veins", "Three legs that cleared by half a point or less"),
+    ("deadeye", "Deadeye", "Hit 12 legs in a row"),
+    ("hothand", "Hot Hand", "Win 3 slips in a row, each with 3+ legs"),
+    ("roi", "ROI King", "20%+ ROI over 20+ settled slips"),
+    ("steady", "Steady Hand", "30+ settled slips, never more than 3 losses in a row"),
+    ("hidden", "Hidden Gem", "Win a hidden pick"),
+    ("kalshi", "Market Maker", "$50+ profit on Kalshi"),
+    ("dfs", "DFS Pro", "5 wins on PrizePicks or Underdog"),
+    ("book", "Book Worm", "5 wins at a sportsbook"),
+    ("under", "Under Taker", "Hit 10 unders"),
+    ("over", "Overachiever", "Hit 25 overs"),
+    ("sotd", "Fan Favorite", "Win Slip of the Day"),
+    ("weekly", "Contest Champ", "Win a weekly contest"),
+    ("squad", "Squad Goals", "Your squad tops a week"),
 ]
 BADGE_ICONS = {"first": "🩸", "parlay": "🧩", "bigleg": "💎", "heater": "🔥", "century": "💯", "moon": "🚀",
                "green": "📈", "regular": "🗓️", "grinder": "🏛️", "lock": "🔒", "pickem": "🏈", "rival": "⚔️",
-               "heartbreak": "💔", "goodpass": "🛡️", "sixth": "🔮", "sniper": "🎯"}
+               "heartbreak": "💔", "goodpass": "🛡️", "sixth": "🔮", "sniper": "🎯",
+               "sharp": "👁️", "surgeon": "🩺", "triple": "🔱", "globe": "🌎", "apps": "📱", "comeback": "🔄", "ironmonth": "📆", "quarter": "🌿", "bounce": "🏀", "longshot": "🎯", "jackpot": "🎰", "grand": "⚾", "clean4": "🧼", "bigboard": "🧱", "perfectweek": "✨", "nailbiter": "😬", "icevein": "🧊", "deadeye": "🏹", "hothand": "🖐️", "roi": "👑", "steady": "⚓", "hidden": "💠", "kalshi": "📊", "dfs": "🃏", "book": "📚", "under": "⬇️", "over": "⬆️", "sotd": "🏆", "weekly": "🥇", "squad": "🤝"}
 
 
 def earned_badges(guild_id: int, bettor_key: str) -> set[str]:
@@ -4685,6 +4716,10 @@ def earned_badges(guild_id: int, bettor_key: str) -> set[str]:
                     s["id"] == uid for s in table if (s["w"], s["l"]) == (table[0]["w"], table[0]["l"])):
                 got.add("pickem")
                 break
+    try:
+        got |= r41_badges(guild_id, bettor_key, settled, all_legs)
+    except Exception:
+        log.warning("r41 badges failed", exc_info=True)
     return got
 
 
@@ -9119,6 +9154,7 @@ def dashboard_data(guild_id: int) -> dict:
     return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": _people,
             "badges": {p["key"]: p["badge"] for p in _people if p.get("badge")}, "breakdown": dash33_breakdown(guild_id),
             "filters": dash39_filters(guild_id), "bg_default": dash_bg_default(guild_id),
+            "contest": contest_boards(guild_id), "hof": dash41_hof(guild_id), "champs": dash41_champs(guild_id),
             "settled24": dashboard_recent(guild_id), "badbeats": dash35_badbeats(guild_id), "sotd": sotd_latest(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
@@ -16956,6 +16992,36 @@ BADGE_ART = {  # key: (frame shape, colour light, colour dark, tier)
     "goodpass": ("shield", (80, 220, 210), (10, 100, 110), "silver"),
     "sixth": ("rosette", (210, 150, 255), (90, 30, 160), "gold"),
     "sniper": ("octagon", (120, 230, 120), (20, 100, 40), "gold"),
+    "sharp": ("circle", (255, 165, 127), (127, 51, 19), "silver"),
+    "surgeon": ("octagon", (128, 127, 255), (20, 19, 127), "gold"),
+    "triple": ("diamond", (163, 255, 127), (49, 127, 19), "bronze"),
+    "globe": ("shield", (255, 127, 200), (127, 19, 81), "gold"),
+    "apps": ("pentagon", (127, 238, 255), (19, 113, 127), "bronze"),
+    "comeback": ("hex", (255, 234, 127), (127, 110, 19), "silver"),
+    "ironmonth": ("rosette", (197, 127, 255), (78, 19, 127), "silver"),
+    "quarter": ("circle", (127, 255, 160), (19, 127, 47), "gold"),
+    "bounce": ("octagon", (255, 127, 131), (127, 19, 22), "silver"),
+    "longshot": ("diamond", (127, 169, 255), (19, 54, 127), "silver"),
+    "jackpot": ("shield", (206, 255, 127), (86, 127, 19), "gold"),
+    "grand": ("pentagon", (255, 127, 243), (127, 19, 117), "gold"),
+    "clean4": ("hex", (127, 255, 229), (19, 127, 105), "silver"),
+    "bigboard": ("rosette", (255, 192, 127), (127, 74, 19), "gold"),
+    "perfectweek": ("circle", (154, 127, 255), (42, 19, 127), "silver"),
+    "nailbiter": ("octagon", (137, 255, 127), (27, 127, 19), "bronze"),
+    "icevein": ("diamond", (255, 127, 174), (127, 19, 59), "gold"),
+    "deadeye": ("shield", (127, 211, 255), (19, 90, 127), "gold"),
+    "hothand": ("pentagon", (248, 255, 127), (122, 127, 19), "silver"),
+    "roi": ("hex", (223, 127, 255), (101, 19, 127), "gold"),
+    "steady": ("rosette", (127, 255, 186), (19, 127, 69), "gold"),
+    "hidden": ("circle", (255, 149, 127), (127, 37, 19), "bronze"),
+    "kalshi": ("octagon", (127, 142, 255), (19, 32, 127), "silver"),
+    "dfs": ("diamond", (179, 255, 127), (63, 127, 19), "bronze"),
+    "book": ("shield", (255, 127, 217), (127, 19, 95), "bronze"),
+    "under": ("pentagon", (127, 254, 255), (19, 126, 127), "bronze"),
+    "over": ("hex", (255, 218, 127), (127, 96, 19), "silver"),
+    "sotd": ("rosette", (181, 127, 255), (64, 19, 127), "silver"),
+    "weekly": ("circle", (127, 255, 144), (19, 127, 33), "gold"),
+    "squad": ("octagon", (255, 127, 148), (127, 19, 36), "silver"),
 }
 _BRAND_TIER_RANK = {"gold": 3, "silver": 2, "bronze": 1}
 
@@ -17125,8 +17191,9 @@ def _brand_glyph_mask(key: str, S: int):
             d.line(p([a, c]), fill=255, width=w(6))
     else:                       # a badge added later: a star with its first letter cut out
         d.polygon(p(_brand_sparkle(50, 50, 46)), fill=255)
-        f = art_font(max(6, int(30 * k)), True)
-        letter = (key[:1] or "?").upper()
+        nm = next((n for kk, n, _ in BADGES if kk == key), key)
+        letter = "".join(w[:1] for w in re.findall(r"[A-Za-z0-9]+", nm) if w.lower() not in ("the", "in", "of", "to", "a"))[:2].upper() or "?"
+        f = art_font(max(6, int((30 if len(letter) == 1 else 22) * k)), True)
         tw = d.textlength(letter, font=f)
         d.ellipse(b(30, 30, 70, 70), fill=255)
         d.text(((S - tw) / 2, 32 * k), letter, font=f, fill=0)
@@ -21180,6 +21247,11 @@ function renderOverview(el,d){
   card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')),
   d.sotd?card('🏆 Slip of the Day','s5',d.sotd.open?'voting':null,d.sotd.open?h('p',{class:'hint'},'Voting is open on '+d.sotd.slips+' slips ('+d.sotd.votes+' vote'+(d.sotd.votes===1?'':'s')+' so far). Vote in Discord; it closes at midnight.')
    :h('div',{class:'rows'},slipRow({id:d.sotd.id,who:'👑 '+d.sotd.who,what:d.sotd.what,status:d.sotd.status,when:d.sotd.votes+' vote'+(d.sotd.votes===1?'':'s')+' · '+d.sotd.day,net:null,cost:d.sotd.cost}))):null,
+  d.contest&&(d.contest.legs.length||d.contest.roi.length)?card('🏆 This week’s contest','s6','skill only',
+   h('div',{class:'rows'},h('div',{class:'muted',style:'margin:-4px 0 6px',text:'🎯 Leg hit rate ('+d.contest.min_legs+'+ legs)'}),
+    d.contest.legs.slice(0,5).map((x,i)=>h('div',{class:'row slip'},h('span',{class:'chip',text:['🥇','🥈','🥉'][i]||String(i+1)}),h('div',{style:'min-width:0'},h('div',{class:'nm',text:x.name}),h('div',{class:'sub',text:x.hit+'/'+x.legs+' legs'})),h('span',{class:'net up',text:x.rate+'%'}))),
+    h('div',{class:'muted',style:'margin:10px 0 6px',text:'📈 ROI ('+d.contest.min_slips+'+ slips)'}),
+    d.contest.roi.slice(0,5).map((x,i)=>h('div',{class:'row slip'},h('span',{class:'chip',text:['🥇','🥈','🥉'][i]||String(i+1)}),h('div',{style:'min-width:0'},h('div',{class:'nm',text:x.name}),h('div',{class:'sub',text:x.slips+' slips'})),h('span',{class:'net '+(x.roi>=0?'up':'down'),text:(x.roi>0?'+':'')+x.roi+'%'}))))):null,
   card('💀 Bad beat board',d.sotd?'s7':'s6',(d.badbeats||[]).length?'30 days':null,(d.badbeats||[]).length?h('div',{class:'rows'},d.badbeats.map(b=>h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+b.id)},
    h('span',{class:'chip',text:'−'+nfmt(b.by)}),h('div',{style:'min-width:0'},h('div',{class:'nm'},b.who),h('div',{class:'sub'},b.leg)),h('span',{class:'net faint',text:cash(b.payout)})))):
    empty('No heartbreakers','Legs that miss by half a point or less land here.')))}
@@ -21223,7 +21295,10 @@ function renderLive(el,d){
   card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(p=>slipRow({id:p.id,who:p.who,status:p.status,net:p.net,what:'Slip #'+p.id,when:'settled today'})))
    :empty('Nothing settled in the last day','Fresh results land here.')))}
 function renderPeople(el,d){
- put(el,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>
+ const hof=(d.hof||[]),ch=(d.champs||[]);
+ put(el,hof.length||ch.length?card('🏛️ Hall of Fame','',null,h('div',{class:'rows'},hof.map(x=>slipRow({id:x.id,who:'🏆 '+x.who,what:x.what+' · '+x.why,status:'win',when:x.when,net:x.net}))),
+   ch.length?h('div',{class:'muted',style:'margin:12px 0 6px',text:'🥇 Weekly contest champs'}):null,
+   ch.length?h('div',{class:'chips2'},ch.map(c=>h('span',{class:'chip',text:c.week+' · '+c.name+' ('+(c.kind==='legs'?c.value+'% legs':(c.value>0?'+':'')+c.value+'% ROI')+')'}))):null):null,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>
   h('button',{class:'tile',type:'button',onclick:()=>go('#/p/'+p.key)},imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
    h('div',{class:'cap'},h('b',{text:p.name}),h('span',{class:tone(p.net)},money(p.net))),badge(p.key)?h('div',{class:'cap',style:'padding-top:2px'},badge(p.key)):null,h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))))
   :empty('No one on the board yet','Once someone settles a slip, their card shows up here.')))}
@@ -40253,6 +40328,595 @@ async def slip_pnl(interaction: discord.Interaction):
 
 
 bot.tree.add_command(slip_group)
+
+
+# ==========================================================================
+# r41: community & contests
+# ==========================================================================
+
+def _r41_months_green(settled: list) -> list:
+    """[(YYYY-MM, net, slips)] in order."""
+    m: dict = {}
+    for p in settled:
+        k = (p["settled_at"] or "")[:7]
+        if k:
+            x = m.setdefault(k, [0.0, 0])
+            x[0] += pick_net(p)
+            x[1] += 1
+    return [(k, v[0], v[1]) for k, v in sorted(m.items())]
+
+
+def _r41_next_month(k: str) -> str:
+    y, mo = int(k[:4]), int(k[5:7])
+    return f"{y + (mo == 12)}-{mo % 12 + 1:02d}"
+
+
+def r41_badges(guild_id: int, key: str, settled: list, all_legs: dict) -> set:
+    got: set = set()
+    wins = [p for p in settled if p["status"] == "win"]
+    graded = [l for p in settled for l in all_legs.get(p["id"], []) if l["status"] in ("hit", "miss")]
+    hits = sum(1 for l in graded if l["status"] == "hit")
+    if len(graded) >= 50 and hits / len(graded) >= 0.60:
+        got.add("sharp")
+    if len(graded) >= 100 and hits / len(graded) >= 0.65:
+        got.add("surgeon")
+    sports = {sport_group(p["sport"]) for p in wins if p["sport"]}
+    if len(sports) >= 3:
+        got.add("triple")
+    if len(sports) >= 5:
+        got.add("globe")
+    if len({(p["platform"] or "").lower() for p in wins if p["platform"]}) >= 3:
+        got.add("apps")
+    streak = 0
+    for p in settled:
+        if p["status"] == "loss":
+            streak += 1
+        elif p["status"] == "win":
+            if streak >= 3:
+                got.add("comeback")
+            streak = 0
+    months = _r41_months_green(settled)
+    green = [k for k, net, n in months if n >= 5 and net > 0]
+    gs = set(green)
+    for k in green:
+        if _r41_next_month(k) in gs:
+            got.add("ironmonth")
+            if _r41_next_month(_r41_next_month(k)) in gs:
+                got.add("quarter")
+    for (k1, net1, n1), (k2, net2, n2) in zip(months, months[1:]):
+        if n1 >= 5 and net1 < 0 and n2 >= 5 and net2 > 0 and _r41_next_month(k1) == k2:
+            got.add("bounce")
+    for p in wins:
+        mult = (p["returned"] or 0) / p["cost"] if p["cost"] else 0
+        legs = all_legs.get(p["id"], [])
+        if mult >= 20:
+            got.add("longshot")
+        if mult >= 50:
+            got.add("jackpot")
+        if pick_net(p) >= 500:
+            got.add("grand")
+        if len(legs) >= 4 and all(l["status"] == "hit" for l in legs):
+            got.add("clean4")
+        if len(legs) >= 8:
+            got.add("bigboard")
+        if p["hidden"]:
+            got.add("hidden")
+    weeks: dict = {}
+    for p in settled:
+        try:
+            weeks.setdefault(week_id(datetime.fromisoformat(p["settled_at"])), []).append(p["status"])
+        except (TypeError, ValueError):
+            pass
+    if any(len(v) >= 3 and all(x == "win" for x in v) for v in weeks.values()):
+        got.add("perfectweek")
+    close = [l for l in graded if l["status"] == "hit" and _rg(l, "margin") is not None and 0 < l["margin"] <= 0.5]
+    if close:
+        got.add("nailbiter")
+    if len(close) >= 3:
+        got.add("icevein")
+    run = best = 0
+    for p in settled:
+        for l in all_legs.get(p["id"], []):
+            if l["status"] == "hit":
+                run += 1
+                best = max(best, run)
+            elif l["status"] == "miss":
+                run = 0
+    if best >= 12:
+        got.add("deadeye")
+    run = 0
+    for p in settled:
+        if p["status"] == "win" and len(all_legs.get(p["id"], [])) >= 3:
+            run += 1
+            if run >= 3:
+                got.add("hothand")
+        elif p["status"] in ("win", "loss"):
+            run = 0
+    staked = sum(p["cost"] or 0 for p in settled)
+    if len(settled) >= 20 and staked and sum(pick_net(p) for p in settled) / staked >= 0.20:
+        got.add("roi")
+    if len(settled) >= 30:
+        worst = cur = 0
+        for p in settled:
+            cur = cur + 1 if p["status"] == "loss" else 0 if p["status"] == "win" else cur
+            worst = max(worst, cur)
+        if worst <= 3:
+            got.add("steady")
+    if sum(pick_net(p) for p in settled if (p["platform"] or "").lower() == "kalshi") >= 50:
+        got.add("kalshi")
+    if sum(1 for p in wins if (p["platform"] or "").lower() in ("prizepicks", "underdog")) >= 5:
+        got.add("dfs")
+    if sum(1 for p in wins if (p["platform"] or "").lower() in ("sportsbook", "draftkings", "fanduel", "betmgm", "caesars")) >= 5:
+        got.add("book")
+    hit_legs = [l for l in graded if l["status"] == "hit"]
+    if sum(1 for l in hit_legs if re.search(r"\bunder\b|\bu\s?\d", l["text"] or "", re.I)) >= 10:
+        got.add("under")
+    if sum(1 for l in hit_legs if re.search(r"\bover\b|\bo\s?\d|\d\+", l["text"] or "", re.I)) >= 25:
+        got.add("over")
+    try:
+        sotd_db()
+        for r in db().execute("SELECT winner FROM sotd WHERE guild_id = ? AND winner IS NOT NULL AND winner != ''", (guild_id,)):
+            ids = [int(x) for x in r["winner"].split(",") if x.isdigit()]
+            if ids and db().execute(f"SELECT 1 FROM picks WHERE bettor_key = ? AND id IN ({','.join('?' * len(ids))})",
+                                    [key] + ids).fetchone():
+                got.add("sotd")
+                break
+    except Exception:
+        pass
+    try:
+        contest_db()
+        if db().execute("SELECT 1 FROM contest_wins WHERE guild_id = ? AND bettor_key = ? AND place = 1", (guild_id, key)).fetchone():
+            got.add("weekly")
+        if key.isdigit() and db().execute("""SELECT 1 FROM squad_wins w JOIN squad_members m ON m.squad_id = w.squad_id
+                                             WHERE w.guild_id = ? AND m.user_id = ?""", (guild_id, int(key))).fetchone():
+            got.add("squad")
+    except Exception:
+        pass
+    return got
+
+
+# ---- weekly contests: skill, not volume (leg hit rate and ROI, with minimums) --------------------------------
+
+CONTEST_MIN_LEGS = 8
+CONTEST_MIN_SLIPS = 3
+CONTEST_COINS = (50, 30, 20)
+SQUAD_MIN_LEGS = 10
+
+
+def contest_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS contest_wins (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+                    week TEXT, kind TEXT, place INTEGER, bettor_key TEXT, name TEXT, value REAL, created_at TEXT)""")
+    db().execute("""CREATE TABLE IF NOT EXISTS squads (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, name TEXT,
+                    created_by INTEGER, created_at TEXT)""")
+    db().execute("""CREATE TABLE IF NOT EXISTS squad_members (squad_id INTEGER, guild_id INTEGER, user_id INTEGER, name TEXT,
+                    joined_at TEXT, PRIMARY KEY (guild_id, user_id))""")
+    db().execute("""CREATE TABLE IF NOT EXISTS squad_wins (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+                    squad_id INTEGER, week TEXT, rate REAL, created_at TEXT)""")
+
+
+def _contest_rows(guild_id: int, start: datetime, end: datetime) -> list:
+    rows = db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? AND settled_at < ?
+                           AND bettor_key NOT LIKE 'label:%'""", (guild_id, iso(start), iso(end))).fetchall()
+    return [p for p in rows if not dash_secret(p)]
+
+
+def contest_boards(guild_id: int, start: Optional[datetime] = None) -> dict:
+    """This week's (or the week starting `start`) two boards: leg hit rate and ROI."""
+    start = start or week_start()
+    end = start + timedelta(days=7)
+    per: dict = {}
+    for p in _contest_rows(guild_id, start, end):
+        x = per.setdefault(p["bettor_key"], {"key": p["bettor_key"], "name": p["bettor_name"], "hit": 0, "legs": 0,
+                                             "slips": 0, "staked": 0.0, "net": 0.0})
+        x["slips"] += 1
+        x["staked"] += p["cost"] or 0
+        x["net"] += pick_net(p)
+        for l in get_legs(p["id"]) or []:
+            if l["status"] in ("hit", "miss"):
+                x["legs"] += 1
+                x["hit"] += l["status"] == "hit"
+    legs = sorted([dict(x, rate=x["hit"] / x["legs"]) for x in per.values() if x["legs"] >= CONTEST_MIN_LEGS],
+                  key=lambda x: (-x["rate"], -x["legs"], x["name"]))
+    roi = sorted([dict(x, roi=x["net"] / x["staked"]) for x in per.values() if x["slips"] >= CONTEST_MIN_SLIPS and x["staked"] > 0],
+                 key=lambda x: (-x["roi"], x["name"]))
+    return {"week": week_id(start.astimezone(TZ)), "start": iso(start), "end": iso(end),
+            "legs": [{"key": x["key"], "name": clip(x["name"] or "?", 40), "hit": x["hit"], "legs": x["legs"],
+                      "rate": round(x["rate"] * 100, 1)} for x in legs[:10]],
+            "roi": [{"key": x["key"], "name": clip(x["name"] or "?", 40), "slips": x["slips"],
+                     "roi": round(x["roi"] * 100, 1)} for x in roi[:10]],
+            "min_legs": CONTEST_MIN_LEGS, "min_slips": CONTEST_MIN_SLIPS}
+
+
+def squad_of(guild_id: int, user_id: int):
+    contest_db()
+    return db().execute("""SELECT s.* FROM squads s JOIN squad_members m ON m.squad_id = s.id
+                           WHERE m.guild_id = ? AND m.user_id = ?""", (guild_id, user_id)).fetchone()
+
+
+def squad_board(guild_id: int, start: Optional[datetime] = None) -> list:
+    contest_db()
+    start = start or week_start()
+    rows = _contest_rows(guild_id, start, start + timedelta(days=7))
+    out = []
+    for sq in db().execute("SELECT * FROM squads WHERE guild_id = ?", (guild_id,)).fetchall():
+        members = db().execute("SELECT * FROM squad_members WHERE squad_id = ?", (sq["id"],)).fetchall()
+        keys = {str(m["user_id"]) for m in members}
+        hit = legs = 0
+        for p in rows:
+            if p["bettor_key"] in keys:
+                for l in get_legs(p["id"]) or []:
+                    if l["status"] in ("hit", "miss"):
+                        legs += 1
+                        hit += l["status"] == "hit"
+        wins = db().execute("SELECT COUNT(*) AS n FROM squad_wins WHERE squad_id = ?", (sq["id"],)).fetchone()["n"]
+        out.append({"id": sq["id"], "name": sq["name"], "members": [m["name"] for m in members], "hit": hit, "legs": legs,
+                    "rate": round(hit / legs * 100, 1) if legs else None, "weeks_won": wins})
+    return sorted(out, key=lambda x: (x["legs"] < SQUAD_MIN_LEGS, -(x["rate"] or 0), x["name"]))
+
+
+def contest_embed(guild_id: int, b: dict, final: bool = False) -> "discord.Embed":
+    title = ("🏁 Weekly contest results" if final else "🏆 This week's contest") + f" · {b['week']}"
+    e = discord.Embed(title=title, color=0xF0B429 if final else BRAND,
+                      description="Two boards, both about skill: how often your legs hit, and your return on what you put in. "
+                                  f"You need {b['min_legs']}+ graded legs or {b['min_slips']}+ settled slips to show up.")
+    medal = ["🥇", "🥈", "🥉"]
+    e.add_field(name="🎯 Leg hit rate", inline=False, value="\n".join(
+        f"{medal[i] if i < 3 else f'`{i + 1}`'} **{x['name']}** · {x['rate']:g}% ({x['hit']}/{x['legs']})" for i, x in enumerate(b["legs"][:8]))
+        or "Nobody has enough graded legs yet.")
+    e.add_field(name="📈 ROI", inline=False, value="\n".join(
+        f"{medal[i] if i < 3 else f'`{i + 1}`'} **{x['name']}** · {x['roi']:+g}% on {x['slips']} slip{'s' if x['slips'] != 1 else ''}"
+        for i, x in enumerate(b["roi"][:8])) or "Nobody has enough settled slips yet.")
+    sq = [x for x in squad_board(guild_id, datetime.fromisoformat(b["start"])) if x["legs"] >= SQUAD_MIN_LEGS][:3]
+    if sq:
+        e.add_field(name="🤝 Squads", inline=False, value="\n".join(
+            f"{medal[i]} **{clip(x['name'], 30)}** · {x['rate']:g}% ({x['hit']}/{x['legs']})" for i, x in enumerate(sq)))
+    e.set_footer(text=("Top 3 on each board earn 🪙 50 / 30 / 20 · " if final else "Closes Monday morning · Top 3 earn coins · ")
+                 + "Bigger bets don't help here")
+    return e
+
+
+CONTEST_HOUR = env_int("CONTEST_HOUR", 10, 0, 23)
+SERVER_TOGGLES.append(("contests", "Weekly contest results (Mondays)", "optout"))
+
+
+async def contest_job(client, now: Optional[datetime] = None) -> None:
+    """Monday morning: close last week's contest, pay the top 3 on each board, crown a squad, post the results."""
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    if local.weekday() != 0 or local.hour < CONTEST_HOUR:
+        return
+    contest_db()
+    last_start = week_start(local) - timedelta(days=7)
+    week = week_id(last_start.astimezone(TZ))
+    for g in list(getattr(client, "guilds", []) or []):
+        gid = g.id
+        if get_setting(gid, "contest_last") == week:
+            continue
+        set_setting(gid, "contest_last", week)
+        b = contest_boards(gid, last_start)
+        for kind, rows, field in (("legs", b["legs"], "rate"), ("roi", b["roi"], "roi")):
+            for place, x in enumerate(rows[:3], 1):
+                db().execute("INSERT INTO contest_wins (guild_id, week, kind, place, bettor_key, name, value, created_at) "
+                             "VALUES (?,?,?,?,?,?,?,?)", (gid, week, kind, place, x["key"], x["name"], x[field], now_iso()))
+                if x["key"].isdigit():
+                    award(gid, int(x["key"]), CONTEST_COINS[place - 1], f"Weekly contest #{place} ({'legs' if kind == 'legs' else 'ROI'})",
+                          f"contest:{gid}:{week}:{kind}:{place}")
+        sq = [x for x in squad_board(gid, last_start) if x["legs"] >= SQUAD_MIN_LEGS]
+        if sq:
+            top = sq[0]
+            db().execute("INSERT INTO squad_wins (guild_id, squad_id, week, rate, created_at) VALUES (?,?,?,?,?)",
+                         (gid, top["id"], week, top["rate"], now_iso()))
+            for m in db().execute("SELECT user_id FROM squad_members WHERE squad_id = ?", (top["id"],)):
+                award(gid, m["user_id"], 20, "Squad of the week", f"squad:{gid}:{week}:{m['user_id']}")
+        db().commit()
+        if not server_on(gid, "contests") or not (b["legs"] or b["roi"]):
+            continue
+        ch = await recap_channel_for(client, gid)
+        if ch is None:
+            cid = get_setting(gid, "today_channel")
+            ch = client.get_channel(int(cid)) if cid and str(cid).isdigit() else None
+        if ch is not None:
+            try:
+                await ch.send(embed=contest_embed(gid, b, final=True), allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                log.warning("Contest post failed", exc_info=True)
+        activity_add(gid, "slips", f"🏁 Weekly contest {week} closed")
+
+
+EXTRA_JOBS.append(("contests", contest_job))
+
+
+@play_group.command(name="contest", description="This week's skill contest: leg hit rate and ROI (no volume prizes)")
+@sec_rate("lookup")
+async def play_contest(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=contest_embed(interaction.guild_id, contest_boards(interaction.guild_id)))
+
+
+# ---- squads: teams of up to 3 --------------------------------------------------------------------------------
+
+SQUAD_MAX = 3
+squad_group = app_commands.Group(name="squad", description="Squads: teams of 3 that compete each week", guild_only=True)
+
+
+async def squad_name_autocomplete(interaction: discord.Interaction, current: str):
+    contest_db()
+    rows = db().execute("SELECT name FROM squads WHERE guild_id = ? AND lower(name) LIKE ? ORDER BY name LIMIT 25",
+                        (interaction.guild_id, f"%{(current or '').lower()}%")).fetchall()
+    return [app_commands.Choice(name=r["name"], value=r["name"]) for r in rows]
+
+
+@squad_group.command(name="create", description="Start a squad (you're in it); up to 3 people")
+@app_commands.describe(name="Your squad's name")
+async def squad_create(interaction: discord.Interaction, name: app_commands.Range[str, 2, 30]):
+    contest_db()
+    gid = interaction.guild_id
+    if squad_of(gid, interaction.user.id):
+        await interaction.response.send_message("You're already in a squad. `/squad leave` first.", ephemeral=True)
+        return
+    clean = re.sub(r"[^\w &'!.-]", "", name).strip()[:30]
+    if len(clean) < 2 or db().execute("SELECT 1 FROM squads WHERE guild_id = ? AND lower(name) = ?", (gid, clean.lower())).fetchone():
+        await interaction.response.send_message("Pick a different name (that one's taken or empty).", ephemeral=True)
+        return
+    c = db().execute("INSERT INTO squads (guild_id, name, created_by, created_at) VALUES (?,?,?,?)", (gid, clean, interaction.user.id, now_iso()))
+    db().execute("INSERT INTO squad_members (squad_id, guild_id, user_id, name, joined_at) VALUES (?,?,?,?,?)",
+                 (c.lastrowid, gid, interaction.user.id, clip(interaction.user.display_name, 40), now_iso()))
+    db().commit()
+    await interaction.response.send_message(f"🤝 **{clean}** is on the board. Two more can join with `/squad join name:{clean}`.")
+
+
+@squad_group.command(name="join", description="Join a squad that has room")
+@app_commands.describe(name="The squad")
+@app_commands.autocomplete(name=squad_name_autocomplete)
+async def squad_join(interaction: discord.Interaction, name: str):
+    contest_db()
+    gid = interaction.guild_id
+    if squad_of(gid, interaction.user.id):
+        await interaction.response.send_message("You're already in a squad. `/squad leave` first.", ephemeral=True)
+        return
+    sq = db().execute("SELECT * FROM squads WHERE guild_id = ? AND lower(name) = ?", (gid, name.lower().strip())).fetchone()
+    if sq is None:
+        await interaction.response.send_message("No squad with that name.", ephemeral=True)
+        return
+    n = db().execute("SELECT COUNT(*) AS n FROM squad_members WHERE squad_id = ?", (sq["id"],)).fetchone()["n"]
+    if n >= SQUAD_MAX:
+        await interaction.response.send_message(f"**{sq['name']}** is full ({SQUAD_MAX}).", ephemeral=True)
+        return
+    db().execute("INSERT INTO squad_members (squad_id, guild_id, user_id, name, joined_at) VALUES (?,?,?,?,?)",
+                 (sq["id"], gid, interaction.user.id, clip(interaction.user.display_name, 40), now_iso()))
+    db().commit()
+    await interaction.response.send_message(f"🤝 {clip(interaction.user.display_name, 40)} joined **{sq['name']}**.")
+
+
+@squad_group.command(name="leave", description="Leave your squad (an empty squad is removed)")
+async def squad_leave(interaction: discord.Interaction):
+    contest_db()
+    gid = interaction.guild_id
+    sq = squad_of(gid, interaction.user.id)
+    if sq is None:
+        await interaction.response.send_message("You're not in a squad.", ephemeral=True)
+        return
+    db().execute("DELETE FROM squad_members WHERE guild_id = ? AND user_id = ?", (gid, interaction.user.id))
+    if not db().execute("SELECT 1 FROM squad_members WHERE squad_id = ?", (sq["id"],)).fetchone():
+        db().execute("DELETE FROM squads WHERE id = ?", (sq["id"],))
+    db().commit()
+    await interaction.response.send_message(f"You left **{sq['name']}**.", ephemeral=True)
+
+
+@squad_group.command(name="board", description="This week's squads by combined leg hit rate")
+async def squad_board_cmd(interaction: discord.Interaction):
+    rows = squad_board(interaction.guild_id)
+    e = discord.Embed(title="🤝 Squads · this week", color=BRAND)
+    e.description = "\n".join(
+        f"**{clip(x['name'], 30)}** · " + (f"{x['rate']:g}% ({x['hit']}/{x['legs']})" if x["legs"] else "no graded legs yet")
+        + (" · *needs " + str(SQUAD_MIN_LEGS) + "+ legs*" if 0 < x["legs"] < SQUAD_MIN_LEGS else "")
+        + f"\n-# {', '.join(x['members'])}" + (f" · {x['weeks_won']} week{'s' if x['weeks_won'] != 1 else ''} won" if x["weeks_won"] else "")
+        for x in rows[:15]) or "No squads yet. `/squad create` starts one."
+    e.set_footer(text=f"Combined leg hit rate, {SQUAD_MIN_LEGS}+ graded legs to qualify · winners get 🪙 20 each on Monday")
+    await interaction.response.send_message(embed=e)
+
+
+bot.tree.add_command(squad_group)
+
+
+# ---- Slip of the Day starts by itself (opt-in) -----------------------------------------------------------------
+
+SOTD_HOUR = env_int("SOTD_HOUR", 18, 0, 23)
+SERVER_TOGGLES.append(("sotdauto", "Slip of the Day vote starts by itself (evening)", "optin"))
+
+
+async def sotd_start(client, gid: int, channel, by: int = 0):
+    """Open today's ballot in a channel; None if there's already one or fewer than 2 slips."""
+    sotd_db()
+    today = datetime.now(TZ).date().isoformat()
+    if db().execute("SELECT 1 FROM sotd WHERE guild_id = ? AND day = ?", (gid, today)).fetchone():
+        return None
+    picks = sotd_candidates(gid)
+    if len(picks) < 2:
+        return None
+    c = db().execute("INSERT INTO sotd (guild_id, day, channel_id, picks, created_by, created_at) VALUES (?,?,?,?,?,?)",
+                     (gid, today, channel.id, json.dumps([p["id"] for p in picks]), by, now_iso()))
+    db().commit()
+    row = db().execute("SELECT * FROM sotd WHERE id = ?", (c.lastrowid,)).fetchone()
+    msg = await channel.send(embed=sotd_embed(row), view=sotd_view(row))
+    db().execute("UPDATE sotd SET message_id = ? WHERE id = ?", (getattr(msg, "id", None), row["id"]))
+    db().commit()
+    return row
+
+
+async def sotd_auto_job(client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    if now.astimezone(TZ).hour < SOTD_HOUR:
+        return
+    for g in list(getattr(client, "guilds", []) or []):
+        if not server_on(g.id, "sotdauto"):
+            continue
+        cid = get_setting(g.id, "today_channel")
+        ch = client.get_channel(int(cid)) if cid and str(cid).isdigit() else None
+        if ch is not None:
+            try:
+                if await sotd_start(client, g.id, ch):
+                    activity_add(g.id, "slips", "🏆 Slip of the Day vote started by itself")
+            except Exception:
+                log.warning("Auto Slip of the Day failed", exc_info=True)
+
+
+EXTRA_JOBS.append(("sotdauto", sotd_auto_job))
+
+
+# ---- Bad Beat of the Week: vote on last week's most painful near miss ------------------------------------------
+
+SERVER_TOGGLES.append(("badbeatweek", "Bad Beat of the Week vote (Mondays)", "optout"))
+
+
+def bbw_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS bbw (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, week TEXT,
+                    channel_id INTEGER, message_id INTEGER, items TEXT, created_at TEXT, closed_at TEXT, winner INTEGER)""")
+    db().execute("""CREATE TABLE IF NOT EXISTS bbw_votes (bbw_id INTEGER, user_id INTEGER, pick_id INTEGER, at TEXT,
+                    PRIMARY KEY (bbw_id, user_id))""")
+
+
+def bbw_candidates(guild_id: int, start: datetime, end: datetime) -> list:
+    rows = db().execute("""SELECT l.text, l.margin, p.id AS pid, p.bettor_name, p.payout, p.hidden, p.revealed_at, p.status
+                           FROM legs l JOIN picks p ON p.id = l.pick_id
+                           WHERE p.guild_id = ? AND l.status = 'miss' AND l.margin IS NOT NULL AND l.margin < 0 AND l.margin >= -1
+                           AND p.status = 'loss' AND p.settled_at >= ? AND p.settled_at < ?
+                           ORDER BY l.margin DESC, p.payout DESC""", (guild_id, iso(start), iso(end))).fetchall()
+    out, seen = [], set()
+    for r in rows:
+        if r["pid"] in seen or (r["hidden"] and not r["revealed_at"]):
+            continue
+        seen.add(r["pid"])
+        out.append({"pid": r["pid"], "who": r["bettor_name"], "leg": clip(r["text"], 80), "by": abs(r["margin"]), "payout": r["payout"]})
+    return out[:3]
+
+
+def bbw_embed(row) -> "discord.Embed":
+    items = json.loads(row["items"] or "[]")
+    tally = {r["pick_id"]: r["n"] for r in db().execute(
+        "SELECT pick_id, COUNT(*) AS n FROM bbw_votes WHERE bbw_id = ? GROUP BY pick_id", (row["id"],))}
+    closed = bool(row["closed_at"])
+    e = discord.Embed(title="💔 Bad Beat of the Week" + ("" if closed else " · vote"), color=0xE66767)
+    e.description = "\n".join(
+        f"{'👑' if closed and row['winner'] == x['pid'] else f'**{i}.**'} **{clip(x['who'], 30)}** · {x['leg']} · missed by "
+        f"**{x['by']:g}** ({money(x['payout'])} slip) · {tally.get(x['pid'], 0)} vote{'s' if tally.get(x['pid'], 0) != 1 else ''}"
+        for i, x in enumerate(items, 1))
+    e.set_footer(text="Voting closed" if closed else "Which one hurt the most? One vote each · closes in a day")
+    return e
+
+
+class BbwButton(discord.ui.DynamicItem[discord.ui.Button], template=r"bbw:(?P<bid>\d+):(?P<pid>\d+):(?P<n>\d)"):
+    def __init__(self, bid: int, pid: int, n: int):
+        super().__init__(discord.ui.Button(label=f"💔 {n}", style=discord.ButtonStyle.secondary, custom_id=f"bbw:{bid}:{pid}:{n}"))
+        self.bid, self.pid, self.n = bid, pid, n
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["bid"]), int(match["pid"]), int(match["n"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        bbw_db()
+        row = db().execute("SELECT * FROM bbw WHERE id = ?", (self.bid,)).fetchone()
+        if row is None or not sec_same_guild(row, interaction) or row["closed_at"]:
+            await interaction.response.send_message("Voting's closed on that one.", ephemeral=True)
+            return
+        if self.pid not in [x["pid"] for x in json.loads(row["items"] or "[]")]:
+            await interaction.response.send_message("That one isn't on the ballot.", ephemeral=True)
+            return
+        db().execute("INSERT OR REPLACE INTO bbw_votes (bbw_id, user_id, pick_id, at) VALUES (?,?,?,?)",
+                     (row["id"], interaction.user.id, self.pid, now_iso()))
+        db().commit()
+        await interaction.response.edit_message(embed=bbw_embed(row), view=bbw_view(row))
+
+
+def bbw_view(row) -> "discord.ui.View":
+    v = discord.ui.View(timeout=None)
+    for i, x in enumerate(json.loads(row["items"] or "[]"), 1):
+        v.add_item(BbwButton(row["id"], x["pid"], i))
+    return v
+
+
+EXTRA_ITEMS.append(BbwButton)
+
+
+async def bbw_job(client, now: Optional[datetime] = None) -> None:
+    """Mondays: open a vote on last week's three closest misses; a day later, close it and name the winner."""
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    bbw_db()
+    for row in db().execute("SELECT * FROM bbw WHERE closed_at IS NULL AND created_at < ?", (iso(now - timedelta(hours=24)),)).fetchall():
+        tally = {r["pick_id"]: r["n"] for r in db().execute(
+            "SELECT pick_id, COUNT(*) AS n FROM bbw_votes WHERE bbw_id = ? GROUP BY pick_id", (row["id"],))}
+        items = json.loads(row["items"] or "[]")
+        win = max(items, key=lambda x: (tally.get(x["pid"], 0), x["payout"] or 0)) if items else None
+        db().execute("UPDATE bbw SET closed_at = ?, winner = ? WHERE id = ?", (now_iso(), win["pid"] if win else None, row["id"]))
+        db().commit()
+        row = db().execute("SELECT * FROM bbw WHERE id = ?", (row["id"],)).fetchone()
+        ch = client.get_channel(row["channel_id"]) if row["channel_id"] else None
+        if ch is not None and win:
+            try:
+                await ch.send(f"💔 **Bad Beat of the Week:** {clip(win['who'], 30)}'s {win['leg']}, missed by {win['by']:g}. "
+                              "Brutal. Better luck this week.", allowed_mentions=discord.AllowedMentions.none())
+                if row["message_id"]:
+                    await ch.get_partial_message(row["message_id"]).edit(embed=bbw_embed(row), view=None)
+            except Exception:
+                pass
+    if local.weekday() != 0 or local.hour < CONTEST_HOUR:
+        return
+    last_start = week_start(local) - timedelta(days=7)
+    week = week_id(last_start.astimezone(TZ))
+    for g in list(getattr(client, "guilds", []) or []):
+        gid = g.id
+        if not server_on(gid, "badbeatweek") or db().execute("SELECT 1 FROM bbw WHERE guild_id = ? AND week = ?", (gid, week)).fetchone():
+            continue
+        items = bbw_candidates(gid, last_start, last_start + timedelta(days=7))
+        if len(items) < 2:
+            db().execute("INSERT INTO bbw (guild_id, week, items, created_at, closed_at) VALUES (?,?,?,?,?)",
+                         (gid, week, "[]", now_iso(), now_iso()))
+            db().commit()
+            continue
+        ch = await recap_channel_for(client, gid)
+        if ch is None:
+            cid = get_setting(gid, "today_channel")
+            ch = client.get_channel(int(cid)) if cid and str(cid).isdigit() else None
+        if ch is None:
+            continue
+        c = db().execute("INSERT INTO bbw (guild_id, week, channel_id, items, created_at) VALUES (?,?,?,?,?)",
+                         (gid, week, ch.id, json.dumps(items), iso(now)))
+        db().commit()
+        row = db().execute("SELECT * FROM bbw WHERE id = ?", (c.lastrowid,)).fetchone()
+        try:
+            msg = await ch.send(embed=bbw_embed(row), view=bbw_view(row), allowed_mentions=discord.AllowedMentions.none())
+            db().execute("UPDATE bbw SET message_id = ? WHERE id = ?", (msg.id, row["id"]))
+            db().commit()
+        except Exception:
+            log.warning("Bad beat vote post failed", exc_info=True)
+
+
+EXTRA_JOBS.append(("badbeatweek", bbw_job))
+
+
+# ---- Hall of Fame on the dashboard -------------------------------------------------------------------------------
+
+def dash41_hof(guild_id: int, limit: int = 10) -> list:
+    out = []
+    for p in db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND status = 'win' AND {_DASH_VISIBLE} "
+                          "ORDER BY (COALESCE(returned, 0) - cost) DESC LIMIT 120", (guild_id,)):
+        if dash_secret(p):
+            continue
+        why = hof_qualifies(p)
+        if why:
+            out.append({"id": p["id"], "who": p["bettor_name"], "what": clip(shown_desc(p), 90), "why": why,
+                        "net": round(pick_net(p), 2), "when": local_day(p["settled_at"] or p["created_at"])})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def dash41_champs(guild_id: int) -> list:
+    contest_db()
+    return [{"week": r["week"], "kind": r["kind"], "name": r["name"], "value": r["value"]} for r in db().execute(
+        "SELECT * FROM contest_wins WHERE guild_id = ? AND place = 1 ORDER BY id DESC LIMIT 8", (guild_id,))]
+
 
 HELP_EXTRA.append(("🧾 Slip tools", (
     "`/slip check` risk, links between legs, Flex or Power · `/slip vote` Slip of the Day · "
