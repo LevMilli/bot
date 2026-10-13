@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r35"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r37"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -100,7 +100,7 @@ ASK_DAILY_LIMIT = env_int("ASK_DAILY_LIMIT", 1000)
 # The bot's owner(s), by Discord user id, comma separated. Set on Railway only: nothing in Discord can change it.
 OWNER_IDS = {int(x) for x in env("OWNER_IDS", "").replace(" ", "").split(",") if x.isdigit()}
 CREATOR_ID = int(env("CREATOR_ID", "") or 0) if env("CREATOR_ID", "").isdigit() else 0
-# The bot's developer(s): full control, /owner included. Set on Railway only.
+# The bot's developer(s): full control, /developer included. Set on Railway only.
 DEVELOPER_IDS = {int(x) for x in env("DEVELOPER_IDS", "").replace(" ", "").split(",") if x.isdigit()}
 DEVELOPER_TITLE_DEFAULT = "Lead Developer"
 
@@ -1017,7 +1017,7 @@ def developer_title() -> str:
 
 
 def server_owner_ids() -> set:
-    """Owners the developer added with /owner addowner."""
+    """Owners the developer added with /developer addowner."""
     try:
         return {int(x) for x in json.loads(get_setting(0, "server_owners") or "[]")}
     except (ValueError, TypeError):
@@ -1025,7 +1025,7 @@ def server_owner_ids() -> set:
 
 
 def owner_id_ok(uid, guild_id: Optional[int] = None) -> bool:
-    """The developer or an owner: OWNER_IDS, added with /owner addowner, or the Discord server's owner."""
+    """The developer or an owner: OWNER_IDS, added with /developer addowner, or the Discord server's owner."""
     try:
         uid = int(uid)
     except (TypeError, ValueError):
@@ -2055,7 +2055,7 @@ def slip_draft_view(message_id: int, review: bool = True, log_it: bool = True, e
 
 
 def ask_limit(guild_id: int) -> int:
-    """Questions per server per day: the owner's /owner asklimit, else ASK_DAILY_LIMIT (default 1,000)."""
+    """Questions per server per day: the owner's /developer asklimit, else ASK_DAILY_LIMIT (default 1,000)."""
     try:
         v = int(get_setting(guild_id, "ask_limit") or 0)
     except (TypeError, ValueError):
@@ -2087,7 +2087,7 @@ ASK_TIERS = [("New", 0, 5), ("Regular", 5, 10), ("Active", 15, 20), ("Core", 40,
 
 
 def ask_tiers(guild_id: int) -> list:
-    """The tiers with the owner's numbers (/owner quota)."""
+    """The tiers with the owner's numbers (/developer quota)."""
     try:
         over = json.loads(get_setting(guild_id, "ask_tiers") or "{}")
     except ValueError:
@@ -2797,6 +2797,7 @@ LEAGUES = [  # (pattern in the pick's sport, ESPN path, extra query params)
     (r"\bnfl\b", "football/nfl", {}),
     (r"ncaa ?f|college football|\bncaaf\b|\bcfb\b", "football/college-football", {"groups": "80"}),
     (r"\bnba\b", "basketball/nba", {}),
+    (r"ncaa ?w|women'?s college basketball|\bncaaw\b|\bwcbb\b|\bwbb\b", "basketball/womens-college-basketball", {"groups": "50"}),
     (r"ncaa ?b|college basketball|\bncaab\b|\bcbb\b", "basketball/mens-college-basketball", {"groups": "50"}),
     (r"\bmlb\b|baseball", "baseball/mlb", {}),
     (r"\bnhl\b|hockey", "hockey/nhl", {}),
@@ -2808,6 +2809,17 @@ LEAGUES = [  # (pattern in the pick's sport, ESPN path, extra query params)
     (r"ligue 1", "soccer/fra.1", {}),
     (r"liga ?mx", "soccer/mex.1", {}),
     (r"champions league|\bucl\b", "soccer/uefa.champions", {}),
+    (r"europa league|\buel\b", "soccer/uefa.europa", {}),
+    (r"conference league|\buecl\b", "soccer/uefa.europa.conf", {}),
+    (r"\bnwsl\b", "soccer/usa.nwsl", {}),
+    (r"\befl\b|english championship", "soccer/eng.2", {}),
+    (r"fa cup", "soccer/eng.fa", {}),
+    (r"eredivisie", "soccer/ned.1", {}),
+    (r"liga portugal|primeira liga", "soccer/por.1", {}),
+    (r"scottish|\bspfl\b", "soccer/sco.1", {}),
+    (r"brasileir|serie a brazil|brazil", "soccer/bra.1", {}),
+    (r"saudi|\bspl\b", "soccer/ksa.1", {}),
+    (r"college hockey|ncaa hockey", "hockey/mens-college-hockey", {}),
 ]
 NO_FREE_LOOKUP = r"esports|\bcs2?\b|counter|valorant|league of legends|dota|tennis|\bwta\b|\batp\b|golf|ufc|mma|boxing|f1|nascar|politic|crypto"
 DEFAULT_LEAGUES = ["football/nfl", "basketball/nba", "baseball/mlb", "hockey/nhl", "football/college-football"]
@@ -3187,10 +3199,237 @@ def judge(leg: dict, ev: dict, i: Optional[int]) -> Optional[str]:
     return result
 
 
+
+# ---- one-on-one and field sports (UFC, tennis, golf, F1): free grading from ESPN's scoreboards ---------------
+
+SOLO_SPORTS = [(r"\bufc\b|\bmma\b|fight", ["mma/ufc"]), (r"\bwta\b", ["tennis/wta"]), (r"\batp\b", ["tennis/atp"]),
+               (r"tennis", ["tennis/atp", "tennis/wta"]), (r"\blpga\b", ["golf/lpga"]), (r"golf|\bpga\b", ["golf/pga"]),
+               (r"\bf1\b|formula", ["racing/f1"])]
+_SOLO_CACHE: dict = {}
+
+
+def solo_paths(sport: Optional[str]) -> list:
+    t = (sport or "").lower()
+    for pat, paths in SOLO_SPORTS:
+        if re.search(pat, t):
+            return paths
+    return []
+
+
+async def solo_board(path: str, day: datetime) -> list:
+    """Raw ESPN scoreboard events for one day (kept 10 minutes; 6 hours once everything is final)."""
+    key = (path, day.strftime("%Y%m%d"))
+    hit = _SOLO_CACHE.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    try:
+        raw = await _get_json(ESPN.format(path=path), {"dates": key[1]})
+        evs = raw.get("events") or []
+    except Exception:
+        log.warning("Solo scoreboard failed for %s %s", path, key[1])
+        evs = []
+    done = evs and all(((e.get("status") or {}).get("type") or {}).get("completed") for e in evs)
+    _SOLO_CACHE[key] = (time.monotonic() + (21600 if done else 600), evs)
+    if len(_SOLO_CACHE) > 300:
+        for k in list(_SOLO_CACHE)[:150]:
+            _SOLO_CACHE.pop(k, None)
+    return evs
+
+
+def solo_matches(path: str, evs: list) -> list:
+    """[{kind, done, detail, people: [{name, norm, winner, order, score, sets: [games...], status}]}] per match,
+    fight, tournament or race."""
+    out = []
+    for ev in evs:
+        comps = []
+        if path.startswith("tennis/"):
+            for g in ev.get("groupings") or []:
+                comps += g.get("competitions") or []
+        else:
+            comps = ev.get("competitions") or []
+        for c in comps:
+            kind = ((c.get("type") or {}).get("abbreviation") or "").lower()
+            if path == "racing/f1" and kind and kind not in ("race",):
+                continue
+            st = (c.get("status") or ev.get("status") or {}).get("type") or {}
+            people = []
+            for x in c.get("competitors") or []:
+                a = x.get("athlete") or {}
+                name = a.get("displayName") or a.get("fullName") or ""
+                if not name:
+                    continue
+                pos = ((x.get("status") or {}).get("position") or {}).get("displayName") or ""
+                people.append({"name": name, "norm": norm_name(name), "winner": bool(x.get("winner")),
+                               "order": x.get("order"), "score": x.get("score"), "pos": str(pos),
+                               "sets": [l.get("value") for l in x.get("linescores") or [] if isinstance(l, dict)]})
+            if people:
+                out.append({"path": path, "done": bool(st.get("completed")) or st.get("state") == "post",
+                            "detail": str(st.get("detail") or st.get("description") or ""), "people": people,
+                            "name": ev.get("name") or "", "date": c.get("date") or ev.get("date") or ""})
+    return out
+
+
+def solo_find(text: str, matches: list) -> list:
+    """[(match, person, where in the text)] for every athlete the leg names (full name, or a last name of 3+
+    letters that only one athlete in that match has)."""
+    t = " " + norm_name(text) + " "
+    out = []
+    for m in matches:
+        lasts = {}
+        for pp in m["people"]:
+            lasts.setdefault(pp["norm"].split()[-1] if pp["norm"] else "", []).append(pp)
+        for pp in m["people"]:
+            i = t.find(" " + pp["norm"] + " ")
+            if i < 0:
+                last = pp["norm"].split()[-1] if pp["norm"] else ""
+                if len(last) >= 3 and len(lasts.get(last, [])) == 1:
+                    i = t.find(" " + last + " ")
+            if i >= 0:
+                out.append((m, pp, i))
+    return out
+
+
+def _golf_pos(pp) -> Optional[int]:
+    m = re.search(r"\d+", pp.get("pos") or "")
+    if m:
+        return int(m.group())
+    try:
+        return int(pp.get("order"))
+    except (TypeError, ValueError):
+        return None
+
+
+def solo_judge(text: str, path: str, found: list) -> Optional[tuple]:
+    """(hit|miss|push, why) for one leg, or None when it can't be told from the scoreboard."""
+    if not found:
+        return None
+    low = text.lower()
+    m, me, _ = sorted(found, key=lambda f: f[2])[0]          # the first athlete named is the pick
+    if not m["done"]:
+        return None
+    if re.search(r"\bret(ired)?\b|walkover|\bw/o\b|withdr|\bwd\b|\bdq\b|no contest|cancel", m["detail"], re.I):
+        return None                                           # books differ: a person settles these
+    others = [p for p in m["people"] if p is not me]
+    if path.startswith("golf/"):
+        pos = _golf_pos(me)
+        if re.search(r"make (the )?cut", low):
+            cut = bool(re.search(r"\b(cut|mc|wd|dq)\b", (me.get("pos") or "").lower()))
+            return ("miss" if cut else "hit", f"{me['name']}: {me.get('pos') or 'made the cut'}")
+        if pos is None:
+            return None
+        top = re.search(r"top ?(\d+)", low)
+        n = int(top.group(1)) if top else (1 if re.search(r"\bto win\b|\bwinner\b|outright", low) else None)
+        if n is None:
+            return None
+        tied = sum(1 for p in m["people"] if _golf_pos(p) == pos) > 1
+        if pos <= n and not (tied and pos + sum(1 for p in m["people"] if _golf_pos(p) == pos) - 1 > n):
+            return ("hit", f"{me['name']} finished {me.get('pos') or pos}")
+        if pos > n:
+            return ("miss", f"{me['name']} finished {me.get('pos') or pos}")
+        return None                                           # a tie across the line: dead-heat rules, a person settles it
+    if path == "racing/f1":
+        try:
+            pos = int(me["order"])
+        except (TypeError, ValueError):
+            return None
+        if len(found) >= 2 and re.search(r"\bvs\.?\b|\bover\b|\bbeat|\bahead|h2h|head to head", low):
+            rival = sorted(found, key=lambda f: f[2])[1][1]
+            try:
+                rp = int(rival["order"])
+            except (TypeError, ValueError):
+                return None
+            return ("hit" if pos < rp else "miss", f"{me['name']} P{pos}, {rival['name']} P{rp}")
+        top = re.search(r"top ?(\d+)", low)
+        n = int(top.group(1)) if top else 3 if "podium" in low else 1 if re.search(r"\bwin|\bwinner\b", low) else None
+        if n is None:
+            return None
+        return ("hit" if pos <= n else "miss", f"{me['name']} finished P{pos}")
+    # head-to-head: a fight or a tennis match
+    if len(m["people"]) != 2:
+        return None
+    opp = others[0] if others else None
+    if path.startswith("tennis/") and opp is not None:
+        sets_me = sum(1 for a, b in zip(me["sets"], opp["sets"]) if (a or 0) > (b or 0))
+        sets_op = sum(1 for a, b in zip(me["sets"], opp["sets"]) if (b or 0) > (a or 0))
+        score = " ".join(f"{int(a or 0)}-{int(b or 0)}" for a, b in zip(me["sets"], opp["sets"]))
+        why = f"{me['name']} {'d.' if me['winner'] else 'lost to'} {opp['name']} {score}".strip()
+        tot = re.search(r"\b(over|under|o|u)\s*(\d+(?:\.\d+)?)\s*(total\s*)?games\b", low)
+        if tot:
+            games = sum(int(x or 0) for x in me["sets"] + opp["sets"])
+            line = float(tot.group(2))
+            if games == line:
+                return ("push", why)
+            over = games > line
+            return ("hit" if over == tot.group(1).startswith("o") else "miss", f"{why} ({games} games)")
+        hcp = re.search(r"([+-]\d+(?:\.\d+)?)\s*(sets?|games?)\b", low)
+        if hcp:
+            line = float(hcp.group(1))
+            if hcp.group(2).startswith("set"):
+                diff = sets_me - sets_op
+            else:
+                diff = sum(int(x or 0) for x in me["sets"]) - sum(int(x or 0) for x in opp["sets"])
+            val = diff + line
+            return ("push", why) if val == 0 else (("hit" if val > 0 else "miss"), why)
+        if re.search(r"win a set|to win a set", low):
+            return ("hit" if sets_me >= 1 else "miss", why)
+        if re.search(r"\bgames?\b|\bsets?\b|\baces?\b|double fault|tiebreak", low):
+            return None
+        return ("hit" if me["winner"] else "miss", why)
+    if path == "mma/ufc" and opp is not None:
+        why = f"{me['name']} {'beat' if me['winner'] else 'lost to'} {opp['name']}" + (f" ({m['detail']})" if m["detail"] else "")
+        if re.search(r"\bby\b|\bko\b|tko|\bsub|decision|\bdec\b|distance|round|\br\d\b|inside|method|draw", low):
+            return None                                       # method and round props: a person settles these
+        if not me["winner"] and not opp["winner"]:
+            return None                                       # a draw or no contest
+        return ("hit" if me["winner"] else "miss", why)
+    return None
+
+
+async def solo_grade(p, items: list, paths: list) -> dict:
+    """{item number: (result, why)} for legs on UFC, tennis, golf and F1 slips that the scoreboard can settle."""
+    start = pick_anchor(p).astimezone(TZ)
+    days = [start + timedelta(days=k) for k in range(-1, 5)]
+    matches = []
+    for path in paths:
+        for d in days:
+            matches += solo_matches(path, await solo_board(path, d))
+    out = {}
+    for n, text in items:
+        found = solo_find(text, matches)
+        if not found:
+            continue
+        # one event only: the first-named athlete's latest finished match in the window
+        first = sorted(found, key=lambda f: f[2])[0][1]["norm"]
+        mine = [f for f in found if f[1]["norm"] == first]
+        done = [f for f in mine if f[0]["done"]]
+        if paths[0].startswith("tennis/"):        # a player can have several matches: the first one after the slip
+            cut = iso(pick_anchor(p) - timedelta(hours=3))
+            later = sorted([f for f in mine if (f[0]["date"] or "") >= cut[:16]], key=lambda f: f[0]["date"] or "")
+            pick_from = later[:1]
+        else:
+            pick_from = done[-1:] if done else mine[-1:]
+        if not pick_from:
+            continue
+        m = pick_from[0][0]
+        res = solo_judge(text, m["path"], [f for f in found if f[0] is m])
+        if res and re.search(r"\(\s*no\b|\bno\s*@|^\s*no\s*[-:]", text, re.I) and res[0] in ("hit", "miss"):
+            res = ("miss" if res[0] == "hit" else "hit", res[1] + " (you took NO)")    # Kalshi: betting it won't happen
+        if res:
+            out[n] = res
+    return out
+
+
 async def free_grade(p, items: list[tuple[int, str]],
                      context_legs: Optional[list[str]] = None) -> dict[int, tuple[str, str]]:
     """Grade what the public scoreboard can settle. Returns {item number: (result, why)};
     items it can't settle are left out."""
+    solo = solo_paths(p["sport"])
+    if solo:
+        try:
+            return await solo_grade(p, items, solo)
+        except Exception:
+            log.warning("Solo grading failed", exc_info=True)
+            return {}
     leagues = leagues_for(p["sport"])
     logged = pick_anchor(p)
     parsed = {n: (parse_simple_leg(text) if leagues else None) for n, text in items}
@@ -4243,6 +4482,9 @@ LEAGUE_NAMES = {
     "hockey/nhl": "NHL", "soccer/usa.1": "MLS", "soccer/eng.1": "Premier League", "soccer/esp.1": "La Liga",
     "soccer/ita.1": "Serie A", "soccer/ger.1": "Bundesliga", "soccer/fra.1": "Ligue 1", "soccer/mex.1": "Liga MX",
     "soccer/uefa.champions": "Champions League",
+    "basketball/womens-college-basketball": "Women's college basketball", "soccer/uefa.europa": "Europa League",
+    "soccer/usa.nwsl": "NWSL", "soccer/eng.2": "EFL Championship", "soccer/ned.1": "Eredivisie",
+    "soccer/por.1": "Liga Portugal", "hockey/mens-college-hockey": "College hockey",
 }
 TODAY_PARAMS = {"football/college-football": {}, "basketball/mens-college-basketball": {}}  # ranked games only
 TODAY_HOUR = env_int("TODAY_HOUR", 10, 0, 23)
@@ -4958,7 +5200,8 @@ ESPN_GAMELOG = "https://site.web.api.espn.com/apis/common/v3/sports/{path}/athle
 ESPN_INJURIES = "https://site.api.espn.com/apis/site/v2/sports/{path}/injuries"
 LEAGUE_SLUGS = {"basketball/nba": "nba", "basketball/wnba": "wnba", "football/nfl": "nfl",
                 "football/college-football": "college-football", "baseball/mlb": "mlb", "hockey/nhl": "nhl",
-                "basketball/mens-college-basketball": "mens-college-basketball"}
+                "basketball/mens-college-basketball": "mens-college-basketball",
+                "basketball/womens-college-basketball": "womens-college-basketball"}
 PROP_PATHS = list(LEAGUE_SLUGS)
 _summary_cache: dict[tuple[str, str], tuple[float, Optional[dict]]] = {}
 _player_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
@@ -15018,7 +15261,8 @@ def people_badge(guild_id: int, key: str) -> Optional[dict]:
             return {"t": "MOD", "k": "mod"}
     custom = member_badges(guild_id).get(str(uid))
     if custom:
-        return {"t": clip(custom["t"], 20), "k": "vip" if custom.get("k") == "vip" else "custom"}
+        k = custom.get("k")
+        return {"t": clip(custom["t"], 20), "k": k if k in ("vip", "mod") else "custom"}
     return None
 
 
@@ -15058,7 +15302,12 @@ def dash33_breakdown(guild_id: int) -> dict:
 _DASH33_SCORES: dict = {}
 DASH33_LEAGUE_URL = {"football/nfl": "nfl", "basketball/nba": "nba", "baseball/mlb": "mlb", "hockey/nhl": "nhl",
                      "football/college-football": "college-football", "basketball/wnba": "wnba",
-                     "basketball/mens-college-basketball": "mens-college-basketball"}
+                     "basketball/mens-college-basketball": "mens-college-basketball",
+                     "basketball/womens-college-basketball": "womens-college-basketball"}
+DASH37_LEAGUES = ["football/nfl", "basketball/nba", "baseball/mlb", "hockey/nhl", "football/college-football",
+                  "basketball/mens-college-basketball", "basketball/womens-college-basketball", "basketball/wnba",
+                  "soccer/usa.1", "soccer/eng.1", "soccer/uefa.champions"]
+DASH37_SOCCER_URL = "https://www.espn.com/soccer/match/_/gameId/{id}"
 
 
 async def dash33_scores(guild_id: int) -> dict:
@@ -15069,7 +15318,7 @@ async def dash33_scores(guild_id: int) -> dict:
     else:
         games = []
         today = datetime.now(TZ)
-        for path in DEFAULT_LEAGUES:
+        for path in DASH37_LEAGUES:
             try:
                 evs = await fetch_scoreboard(path, today)
             except Exception:
@@ -15080,7 +15329,9 @@ async def dash33_scores(guild_id: int) -> dict:
                     continue
                 slug = DASH33_LEAGUE_URL.get(path)
                 tile.update(league=LEAGUE_NAMES.get(path, path).split(" ")[0][:12], path=path,
-                            url=f"https://www.espn.com/{slug}/game/_/gameId/{tile['id']}" if slug and tile["id"].isdigit() else None,
+                            url=(f"https://www.espn.com/{slug}/game/_/gameId/{tile['id']}" if slug and tile["id"].isdigit()
+                                 else DASH37_SOCCER_URL.format(id=tile["id"]) if path.startswith("soccer/") and tile["id"].isdigit()
+                                 else None),
                             away_abbr=clip(next((t.get("abbr") for t in ev["teams"] if not t["home"]), "") or "", 6),
                             home_abbr=clip(next((t.get("abbr") for t in ev["teams"] if t["home"]), "") or "", 6),
                             odds=clip(((ev.get("odds") or {}).get("details") or ""), 20))
@@ -19831,7 +20082,7 @@ header{background:var(--head);position:relative;overflow:hidden;isolation:isolat
 .bdg.developer{background:linear-gradient(135deg,#f0b429,#ff7ac6 55%,#a27bff);color:#1a0f33;box-shadow:0 0 10px #f0b42955}
 .bdg.owner{background:linear-gradient(135deg,#f0b429,#c9952a);color:#1a0f33}
 .bdg.admin{background:#7B3FE433;color:var(--brand2);border:1px solid #7B3FE466}
-.bdg.mod{background:linear-gradient(135deg,#7B3FE4,#5a2bc0);color:#fff}
+.bdg.mod{background:linear-gradient(135deg,#1c0a42,#3b1784 55%,#5b26c9);color:#e9dcff;border:1px solid #8a5cff77;box-shadow:0 0 10px #3b178499,inset 0 0 0 1px #ffffff14;letter-spacing:.04em}.bdg.mod::before{content:'🛡 '}
 .bdg.vip{background:linear-gradient(135deg,#ffe08a,#f0b429);color:#3a2600}.bdg.custom{background:#a27bff26;color:var(--brand2);border:1px solid #a27bff55}
 .bsheet h3{margin:14px 0 8px;font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
 .brow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
@@ -29973,6 +30224,7 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
         "can_switch": staff_can_switch(uid, guild_id) if uid else False,
         "usage": staff_usage(guild_id),
         "announcements": staff_announcements(guild_id),
+        "tickets": staff_tickets(guild_id),
     }
 
 
@@ -30915,7 +31167,7 @@ button.pill:focus-visible,.out:focus-visible,.copy:focus-visible{outline:2px sol
  border-radius:50%;background:var(--up);border:3px solid var(--card)}
 .person b{display:block;font-size:14.5px}.person i{display:block;font-style:normal;font-size:12px;color:var(--muted)}
 .badge{margin-left:auto;font-size:11px;font-weight:750;padding:3px 9px;border-radius:99px;white-space:nowrap}
-.badge.admin{background:#f0b42926;color:var(--gold);border:1px solid #f0b42955}.badge.mod{background:#7B3FE426;color:var(--brand2);border:1px solid #7B3FE455}
+.badge.admin{background:#f0b42926;color:var(--gold);border:1px solid #f0b42955}.badge.mod{background:linear-gradient(135deg,#1c0a42,#3b1784 55%,#5b26c9);color:#e9dcff;border:1px solid #8a5cff77;box-shadow:0 0 10px #3b178499}
 .badge.staff{background:var(--card2);color:var(--muted);border:1px solid var(--line)}
 .badge.developer{background:linear-gradient(135deg,#f0b429,#ff7ac6 55%,#a27bff);color:#1a0f33;border:0;box-shadow:0 0 12px #f0b42966}
 .badge.owner{background:linear-gradient(135deg,#f0b429,#c9952a);color:#1a0f33;border:0}
@@ -30993,7 +31245,7 @@ footer{max-width:1180px;margin:0 auto;padding:4px 16px 28px;color:var(--faint);f
 .ubars i{display:block;width:100%;min-height:2px;border-radius:6px 6px 2px 2px;background:linear-gradient(180deg,var(--accent,#a970ff),#6b3fd1)}
 .ubars b{font-size:11px;font-weight:600}.ubars span{font-size:11px;opacity:.7}
 .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;border:1px solid currentColor;opacity:.85;margin-left:4px}
-.tag.vip{color:#ffd166}.tag.custom{color:#7cc4ff}.tag.warn{color:var(--warn,#f5b942)}.tag.ban{color:var(--down,#ff6b6b)}
+.tag.vip{color:#ffd166}.tag.mod{color:#e9dcff;background:linear-gradient(135deg,#1c0a42,#5b26c9);border-color:#8a5cff}.tag.custom{color:#7cc4ff}.tag.warn{color:var(--warn,#f5b942)}.tag.ban{color:var(--down,#ff6b6b)}
 </style></head><body>
 <div class="grain" aria-hidden="true"></div>
 <header><div class="art" aria-hidden="true"></div><div class="sweep" aria-hidden="true"></div><div class="top"><a class="logo" href="/" title="Back to the dashboard" aria-label="Back to the dashboard">{{LOGO}}</a>
@@ -31029,7 +31281,7 @@ function needs(d){
  if(!d.outage.channels.admin||!d.outage.channels.members)n.push(['🛠️','<b>Pick the alert channels</b> with <code>/outage channels</code> so outages reach people.']);
  if(d.needs&&d.needs.length)n.push(['🧾','<b>'+d.needs.length+(d.needs.length>1?' slips need':' slip needs')+' a person:</b> '
    +d.needs.slice(0,6).map(x=>esc(x.who)+(x.id?' #'+x.id:'')+' ('+esc(x.why.toLowerCase())+')').join(', ')+(d.needs.length>6?'…':'')]);
- if(d.owner&&d.owner.lockdown)n.push(['🔒','<b>Locked down:</b> staff tools are owners only. <code>/owner lockdown on:False</code> ends it.']);
+ if(d.owner&&d.owner.lockdown)n.push(['🔒','<b>Locked down:</b> staff tools are owners only. <code>/developer lockdown on:False</code> ends it.']);
  if(d.owner&&!d.owner.set)n.push(['🛡️','<b>Lock in your control.</b> Add <code>DEVELOPER_IDS</code> (your Discord user ID) in Railway so nobody else can take over the failsafe.']);
  const live=(d.pool||[]).filter(e=>e.on&&e.in_pool&&e.engine!=='claude');
  if(live.length&&live.every(e=>e.cooling))n.push(['🤖','<b>Every free AI service is used up for now.</b> Questions fall back to Claude (if set) or the numbers-only breakdown.']);
@@ -31037,6 +31289,9 @@ function needs(d){
  if(d.scans&&d.scans.week&&d.scans.week.failed>=3)n.push(['📸','<b>'+d.scans.week.failed+' screenshots failed to read this week.</b> See the scan log below.']);
  if(d.stale_open)n.push(['⏳','<b>'+d.stale_open+' slip'+(d.stale_open>1?'s have':' has')+' been open 4+ days.</b> Worth a look in <code>/inbox</code>.']);
  if(d.errors.slip&&d.errors.slip_at&&Date.now()-Date.parse(d.errors.slip_at)<3*3600e3)n.push(['🔎','<b>Slip reading had an error</b> '+ago(d.errors.slip_at)+'<div class="err">'+esc(d.errors.slip)+'</div>']);
+ const tk=d.tickets||{open:[]};
+ if(!tk.channel)n.push(['🎫','<b>Turn on tickets:</b> <code>/staff tickets channel</code> sends everything here to a staff channel with fix and close buttons.']);
+ else if(tk.open.length)n.push(['🎫','<b>'+tk.open.length+' open ticket'+(tk.open.length>1?'s':'')+'</b> in '+esc(tk.channel)+'. See the Tickets card.']);
  const bh=((d.blacklist||{}).hits||[]).filter(x=>x.at&&Date.now()-Date.parse(x.at)<864e5);
  if(bh.length)n.push(['🚫','<b>'+bh.length+' blacklist hit'+(bh.length>1?'s':'')+' today:</b> '+bh.slice(0,4).map(x=>esc(x.who||'someone')+' · '+esc(x.entry)).join(', ')+(bh.length>4?'…':'')+'. See the Blacklist card.']);
  return n;
@@ -31100,7 +31355,13 @@ function render(d){
  h.push(card('Questions per person',al.tiers.map(t=>row(esc(t.name)+' <span class="muted">activity '+t.from+'+</span>',t.per_day<0?'unlimited':t.per_day+' a day')).join('')
   +row('Mods and owners','unlimited')
   +(al.top.length?'<div class="muted" style="margin:8px 0 2px">Most questions today</div>'+al.top.map(x=>row(esc(x.name),'<span class="num">'+x.n+'</span>'+(x.per_day==null?'':' of '+(x.per_day<0?'∞':x.per_day))+' · '+esc(x.tier))).join(''):'')
-  +'<div class="muted" style="margin-top:6px">Change them with <code>/owner quota</code>.</div>'));
+  +'<div class="muted" style="margin-top:6px">Change them with <code>/developer quota</code>.</div>'));
+ const tko=(d.tickets||{}).open||[], tki={needs:'🧾',payout:'💵',stale:'⏳',scan:'📸',blacklist:'🚫',system:'⚙️'};
+ h.push(card('Tickets',(d.tickets&&d.tickets.channel?row('Channel',esc(d.tickets.channel))+row('Closed this week','<span class="num">'+d.tickets.closed_week+'</span>'):'')
+  +(tko.length?tko.map(t=>row((tki[t.kind]||'🎫')+' <b>#'+t.id+'</b> '+esc(t.title)+(t.status==='claimed'?'<span class="tag">🙋 '+esc(t.who||'')+'</span>':''),
+    t.link&&safeUrl(t.link)?'<a href="'+esc(t.link)+'" target="_blank" rel="noopener noreferrer">open</a>':esc(ago(t.at)))).join('')
+   :'<div class="muted">'+dot('ok')+(d.tickets&&d.tickets.channel?'No open tickets.':'Tickets are off.')+'</div>')
+  +'<div class="muted" style="margin-top:6px"><code>/staff tickets channel</code> picks the channel. Each ticket has buttons to grade the slip, add a payout, claim it, or close it.</div>','span2'));
  const bl=d.blacklist||{entries:[],hits:[]};
  h.push(card('Blacklist',(bl.entries.length?bl.entries.map(e=>row(esc(e.name)+' <span class="muted">'+esc(e.kind)+'</span>',
    (e.alert==='both'?'staff + slip reply':'staff alert'))).join('')
@@ -31120,10 +31381,10 @@ function render(d){
    :'<div class="muted">'+dot('ok')+'Nothing logged. Warnings, timeouts and bans show up here.</div>')
   +'<div class="muted" style="margin-top:6px"><code>/staff warn</code> logs a warning; <code>/staff modlog</code> shows one person\'s history.</div>'));
  const bd=d.badges||[];
- h.push(card('Roles & badges',row('⚡ Developer · 👑 Owner · MOD','automatic')
-  +(bd.length?bd.map(b=>row(esc(b.name||('member '+b.id)),'<span class="tag '+(b.k==='vip'?'vip':'custom')+'">'+esc(b.t)+'</span>')).join('')
+ h.push(card('Roles & badges',row('⚡ Developer · 👑 Owner · 🛡 MOD','auto')+'<div class="muted">Discord mods get MOD by themselves. Hand MOD, VIP or your own badge to anyone below.</div>'
+  +(bd.length?bd.map(b=>row(esc(b.name||('member '+b.id)),'<span class="tag '+(b.k==='vip'?'vip':b.k==='mod'?'mod':'custom')+'">'+esc(b.t)+'</span>')).join('')
    :'<div class="muted">No VIP or custom badges handed out yet.</div>')
-  +'<div class="muted" style="margin-top:6px"><code>/staff badge give</code> and <code>/staff badge remove</code>. Badges show on the dashboard next to names.</div>'));
+  +'<div class="muted" style="margin-top:6px"><code>/staff badge give</code> (VIP, MOD or your own words) and <code>/staff badge remove</code>. Badges show on the dashboard next to names.</div>'));
  const tg=d.toggles||[];
  h.push(card('Feature switches',tg.map(x=>'<button type="button" class="sw'+(x.on?' on':'')+'" data-tg="'+esc(x.key)+'"'+(d.can_switch?'':' disabled')
    +' aria-pressed="'+(x.on?'true':'false')+'"><span>'+esc(x.label)+'</span><span class="knob"></span></button>').join('')
@@ -31152,10 +31413,10 @@ function render(d){
  const steps=[['1 · Tell members','/outage alert problem:'],['2 · Team is on it','/outage update eta:30m note:'],
   ['3 · All clear','/outage resolved note:'],['Check everything','/outage status']];
  const cats=[['🧾 Slips & picks',[['/pick','Log a slip by hand'],['/track pick_id:','Leg by leg: what the bot is following'],['/inbox','Slips that need a person'],['/result pick_id: outcome:','Settle a slip yourself'],['/calc slip pick_id:','How each leg has hit lately']]],
-  ['🧰 Staff tools',[['/staff blacklist add name:','Flag a player, team or situation'],['/staff blacklist list','Everything on the list'],['/staff announce','Write, preview, post or schedule'],['/staff warn member: reason:','Log a warning (DM optional)'],['/staff modlog member:','One person\'s history'],['/staff badge give member: text:','VIP or custom badge']]],
+  ['🧰 Staff tools',[['/staff tickets channel channel:','Turn on tickets (fix + close buttons)'],['/staff tickets list','Open tickets with links'],['/staff blacklist add name:','Flag a player, team or situation'],['/staff blacklist list','Everything on the list'],['/staff announce','Write, preview, post or schedule'],['/staff warn member: reason:','Log a warning (DM optional)'],['/staff modlog member:','One person\'s history'],['/staff badge give member: text:','VIP or custom badge']]],
   ['👥 Staff & access',[['/dashboard section:Admin health','Your own 12-hour link to this page'],['/links add name: url:','Add to the toolbox'],['/admin panel','Every server switch in one place'],['/admin check','Why isn\'t a channel logging slips?']]],
   ['⚙️ Server setup',[['/outage channels','Admin + member alert channels, ping role'],['/admin setup','Channels and features, step by step'],['/admin status','Version, uptime, connections'],['/backups','Nightly backup to a channel']]],
-  ['🛡️ Developer only',[['/owner status','You, the owners, lockdown, removed people'],['/owner addowner member:','Make someone an owner'],['/owner lockdown on:True','Staff tools: you and the owners only'],['/owner remove member:','Take one person\'s staff access'],['/owner newkey','Swap the dashboard key'],['/owner asklimit per_day:','Daily question limit'],['/owner quota','Questions per person (tiers or one person)'],['/owner title text:','Your badge title']]]];
+  ['🛡️ Developer only',[['/developer status','You, the owners, lockdown, removed people'],['/developer addowner member:','Make someone an owner'],['/developer lockdown on:True','Staff tools: you and the owners only'],['/developer remove member:','Take one person\'s staff access'],['/developer newkey','Swap the dashboard key'],['/developer asklimit per_day:','Daily question limit'],['/developer quota','Questions per person (tiers or one person)'],['/developer title text:','Your badge title']]]];
  h.push(card('Playbook','<div class="steps">'+steps.map(s=>'<div class="step"><b>'+esc(s[0])+'</b><code>'+esc(s[1])
   +'</code><button class="copy" type="button" data-copy="'+esc(s[1])+'">Copy</button></div>').join('')+'</div>'
   +'<div class="tools" style="margin-top:6px">'+cats.map(c=>'<div class="cat"><h3>'+esc(c[0])+'</h3>'+c[1].map(x=>'<div class="cmd"><span><code>'+esc(x[0])+'</code><i>'+esc(x[1])
@@ -31173,8 +31434,8 @@ async function openStaff(){const sh=$('#sheet');sh.classList.add('on');$('#sheet
   if(d.everyone)b+='<div class="warnbox">⚠️ Everyone in the server can see '+esc(d.channel)+'. Make it private so it\'s really staff-only.</div>';
   if((d.roles||[]).length)b+='<div class="muted">Roles with access</div><div class="chips">'+d.roles.map(r=>'<span class="chip" style="'+(r.color?'color:'+esc(r.color):'')+'">'
    +esc(r.name)+(r.count!=null?' · '+r.count:'')+'</span>').join('')+'</div>';
-  if(d.lockdown)b+='<div class="warnbox">🔒 Locked down: only owners can use staff tools right now (<code>/owner lockdown on:False</code> to undo).</div>';
-  const lab={Developer:'⚡ '+(d.dev_title||'Lead Developer'),Owner:'👑 Owner',Admin:'Admin',Mod:'MOD',Staff:'Staff'};
+  if(d.lockdown)b+='<div class="warnbox">🔒 Locked down: only owners can use staff tools right now (<code>/developer lockdown on:False</code> to undo).</div>';
+  const lab={Developer:'⚡ '+(d.dev_title||'Lead Developer'),Owner:'👑 Owner',Admin:'Admin',Mod:'🛡 MOD',Staff:'Staff'};
   b+=(d.people||[]).map(p=>{const id=/^\d{5,22}$/.test(p.id||'')?p.id:null;
    const ring=p.color?'--ring:'+esc(p.color)+';':'';
    const pic=id?'<img class="av avimg" src="/staff/avatar/'+id+'.png" alt="" loading="lazy" style="'+ring+'" data-n="'+esc(initials(p.name))+'" data-c="'+esc(p.color||'')+'">'
@@ -34983,6 +35244,32 @@ async def sports_f1(interaction: discord.Interaction):
     await interaction.followup.send(embed=await f1_embed())
 
 
+async def tennis_embed(path: str) -> "discord.Embed":
+    title = "🎾 ATP" if path.endswith("atp") else "🎾 WTA"
+    evs = await solo_board(path, datetime.now(TZ))
+    ms = solo_matches(path, evs)
+    if not ms:
+        return discord.Embed(title=title, description="No matches today.", color=BRAND)
+    lines = []
+    for m in ms[:25]:
+        a, b = (m["people"] + [None, None])[:2]
+        if not a or not b:
+            continue
+        score = " ".join(f"{int(x or 0)}-{int(y or 0)}" for x, y in zip(a["sets"], b["sets"]))
+        lines.append(f"{'🏆 ' if a['winner'] else ''}**{a['name']}** vs {'🏆 ' if b['winner'] else ''}**{b['name']}**"
+                     + (f" · {score}" if score else "") + (f" · {clip(m['detail'], 20)}" if m["detail"] and not m["done"] else ""))
+    return discord.Embed(title=f"{title} · {clip(ms[0]['name'], 80)}", color=BRAND, description=clip("\n".join(lines) or "No matches today.", 4000))
+
+
+@sports_group.command(name="tennis", description="Today's ATP or WTA matches and scores")
+@app_commands.choices(tour=[app_commands.Choice(name="ATP (men)", value="tennis/atp"),
+                            app_commands.Choice(name="WTA (women)", value="tennis/wta")])
+@sec_rate("lookup")
+async def sports_tennis(interaction: discord.Interaction, tour: Optional[app_commands.Choice[str]] = None):
+    await interaction.response.defer(thinking=True)
+    await interaction.followup.send(embed=await tennis_embed(tour.value if tour else "tennis/atp"))
+
+
 @sports_group.command(name="cs2", description="Upcoming CS2 matches (from Liquipedia)")
 @app_commands.describe(search="Optional: a team or tournament")
 @sec_rate("lookup")
@@ -37220,9 +37507,9 @@ async def outage_test(interaction: discord.Interaction):
 
 bot.tree.add_command(outage_group)
 
-# ---- /owner: the failsafe (owners only; OWNER_IDS on Railway decides who that is) -------------------------
+# ---- /developer: the failsafe (owners only; OWNER_IDS on Railway decides who that is) -------------------------
 
-owner_group = app_commands.Group(name="owner", description="The developer's failsafe: lock down, owners, access, keys",
+owner_group = app_commands.Group(name="developer", description="The developer's failsafe: lock down, owners, access, keys",
                                  guild_only=True, default_permissions=discord.Permissions(administrator=True))
 
 
@@ -37233,7 +37520,7 @@ def owner_only(fn):
             await sec_reply(interaction, f"That's for the bot's {developer_title()} only.")
             try:
                 await audit(interaction.client, interaction.guild_id,
-                            f"🚫 {who(interaction)} tried a developer-only command (`/owner {getattr(fn, '__name__', '?')[6:]}`).")
+                            f"🚫 {who(interaction)} tried a developer-only command (`/developer {getattr(fn, '__name__', '?')[6:]}`).")
             except Exception:
                 pass
             return
@@ -37263,7 +37550,7 @@ async def owner_status(interaction: discord.Interaction):
              f"**Lockdown:** {'🔒 ON: staff tools are you and the owners only' if owner_lockdown() else 'off'}",
              f"**Removed from staff:** {', '.join(f'<@{u}>' for u in blocked) if blocked else 'nobody'}",
              f"**Questions today:** {ask_used(interaction.guild_id):,} of {ask_limit(interaction.guild_id):,}",
-             f"**Dashboard key:** {'set on Railway (change DASHBOARD_KEY there to swap it)' if env('DASHBOARD_KEY', '') else 'made by the bot (`/owner newkey` swaps it)'}"]
+             f"**Dashboard key:** {'set on Railway (change DASHBOARD_KEY there to swap it)' if env('DASHBOARD_KEY', '') else 'made by the bot (`/developer newkey` swaps it)'}"]
     await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
@@ -37290,7 +37577,7 @@ async def owner_remove(interaction: discord.Interaction, member: discord.Member)
     set_setting(0, "owner_blocked", json.dumps(sorted(ids)))
     await owner_note(interaction, f"{who(interaction)} removed **{clip(member.display_name, 40)}**'s staff access.")
     await interaction.response.send_message(f"Done: {clip(member.display_name, 40)} can't use staff tools or the staff "
-                                            "page anymore, whatever their Discord roles say. `/owner restore` undoes it.",
+                                            "page anymore, whatever their Discord roles say. `/developer restore` undoes it.",
                                             ephemeral=True)
 
 
@@ -37380,7 +37667,7 @@ async def owner_quota(interaction: discord.Interaction, tier: Optional[app_comma
         a = ask_allowance(gid, member.id, member)
         lines.append(f"**{clip(member.display_name, 40)}:** {a['tier']} · "
                      f"{'unlimited' if a['per_day'] < 0 else a['per_day']} a day · used {a['used']} today · {a['why']}")
-    lines.append(f"**Server cap:** {ask_limit(gid):,} a day (`/owner asklimit`)")
+    lines.append(f"**Server cap:** {ask_limit(gid):,} a day (`/developer asklimit`)")
     await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
@@ -37393,7 +37680,7 @@ async def owner_addowner(interaction: discord.Interaction, member: discord.Membe
     await owner_note(interaction, f"{who(interaction)} made **{clip(member.display_name, 40)}** an owner.")
     await interaction.response.send_message(
         f"Done: {clip(member.display_name, 40)} is an owner. They get every staff tool, unlimited questions and the Owner "
-        "badge. `/owner` stays yours.", ephemeral=True)
+        "badge. `/developer` stays yours.", ephemeral=True)
 
 
 @owner_group.command(name="removeowner", description="Take someone's owner status away (they keep their normal roles)")
@@ -37406,7 +37693,7 @@ async def owner_removeowner(interaction: discord.Interaction, member: discord.Me
     if int(member.id) in OWNER_IDS:
         extra = " They're also in `OWNER_IDS` on Railway; take them out there too."
     elif getattr(getattr(interaction, "guild", None) or bot.get_guild(interaction.guild_id), "owner_id", None) == member.id:
-        extra = " They own the Discord server, so they still count as an owner; `/owner remove` takes their staff access."
+        extra = " They own the Discord server, so they still count as an owner; `/developer remove` takes their staff access."
     await owner_note(interaction, f"{who(interaction)} removed **{clip(member.display_name, 40)}** as an owner.")
     await interaction.response.send_message(f"Removed {clip(member.display_name, 40)} as an owner.{extra}", ephemeral=True)
 
@@ -37613,7 +37900,9 @@ async def staff_modlog(interaction: discord.Interaction, member: Optional[discor
 
 @badge_group.command(name="give", description="Give someone a badge on the dashboards (VIP or your own words)")
 @app_commands.describe(member="Who", text="The badge, like VIP or Sharp", style="VIP (gold) or custom (purple)")
-@app_commands.choices(style=[app_commands.Choice(name="VIP", value="vip"), app_commands.Choice(name="Custom", value="custom")])
+@app_commands.choices(style=[app_commands.Choice(name="VIP (gold)", value="vip"),
+                             app_commands.Choice(name="MOD (dark purple)", value="mod"),
+                             app_commands.Choice(name="Custom (purple)", value="custom")])
 @sec_staff_only
 async def badge_give(interaction: discord.Interaction, member: discord.Member, text: app_commands.Range[str, 2, 20],
                      style: Optional[app_commands.Choice[str]] = None):
@@ -37621,7 +37910,7 @@ async def badge_give(interaction: discord.Interaction, member: discord.Member, t
         await interaction.response.send_message("Badges are for owners and admins to hand out.", ephemeral=True)
         return
     rows = member_badges(interaction.guild_id)
-    clean = re.sub(r"[^\w &+.'!-]", "", text).strip()[:20] or "VIP"
+    clean = re.sub(r"[^\w &+.'!-]", "", text).strip()[:20] or ("MOD" if style and style.value == "mod" else "VIP")
     rows[str(member.id)] = {"t": clean, "k": style.value if style else "vip", "name": clip(member.display_name, 40),
                             "by": clip(interaction.user.display_name, 40)}
     set_setting(interaction.guild_id, "member_badges", json.dumps(rows))
@@ -37643,6 +37932,351 @@ async def badge_remove(interaction: discord.Interaction, member: discord.Member)
     set_setting(interaction.guild_id, "member_badges", json.dumps(rows))
     await audit(interaction.client, interaction.guild_id, f"{who(interaction)} removed {clip(member.display_name, 40)}'s badge.")
     await interaction.response.send_message("Removed.", ephemeral=True)
+
+
+
+# ---- tickets: everything that needs attention, posted to a staff channel with buttons to fix and close it -----
+
+TICKET_ICON = {"needs": "🧾", "payout": "💵", "stale": "⏳", "scan": "📸", "blacklist": "🚫", "system": "⚙️"}
+TICKET_COLOR = {"open": 0xF5B942, "claimed": 0x5B8DEF, "closed": 0x3FB97A}
+
+
+def tickets_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, key TEXT,
+                    kind TEXT, title TEXT, detail TEXT, pick_id INTEGER, jump TEXT, hidden INTEGER DEFAULT 0,
+                    channel_id INTEGER, message_id INTEGER, status TEXT DEFAULT 'open', claimed_by TEXT,
+                    opened_at TEXT, closed_at TEXT, closed_by TEXT, note TEXT)""")
+    db().execute("CREATE INDEX IF NOT EXISTS tickets_key ON tickets (guild_id, key, status)")
+
+
+def ticket_channel(client, guild_id: int):
+    cid = get_setting(guild_id, "ticket_channel")
+    try:
+        return client.get_channel(int(cid)) if cid else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ticket_pick(p, kind: str, title: str, why: str = "") -> dict:
+    secret = sec_secret(p)
+    if secret:
+        return {"key": f"{kind}:{p['id']}", "kind": kind, "title": title.replace(f"Slip #{p['id']}", "A hidden slip"),
+                "detail": f"From **{clip(p['bettor_name'] or 'someone', 40)}**. It's hidden, so only they can see it: "
+                          "ask them to finish it with `/result`.", "pick_id": p["id"], "jump": None, "hidden": 1}
+    legs = [l for l in get_legs(p["id"]) or []]
+    open_legs = [f"{LEG_ICON.get(l['status'], '•')} {clip(l['text'], 70)}" for l in legs][:8]
+    detail = (f"**{clip(p['bettor_name'] or 'someone', 40)}** · {clip(p['description'] or '', 80)} · "
+              f"{money(p['cost'] or 0)} → {money(p['payout'] or 0)}" + (f" · {p['platform']}" if p["platform"] else ""))
+    if why:
+        detail += f"\n**Why:** {clip(why, 200)}"
+    if open_legs:
+        detail += "\n" + "\n".join(open_legs)
+    jump = p["slip_url"] if (p["slip_url"] or "").startswith("https://discord.com/channels/") else None
+    return {"key": f"{kind}:{p['id']}", "kind": kind, "title": title, "detail": detail, "pick_id": p["id"],
+            "jump": jump, "hidden": 0}
+
+
+def ticket_items(guild_id: int, now: Optional[datetime] = None) -> list:
+    """Everything that needs a person right now, one item per thing (the same list the staff page shows)."""
+    now = now or datetime.now(timezone.utc)
+    out, seen = [], set()
+    since60 = iso(now - timedelta(days=60))
+    for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND auto_state LIKE 'needs:%'
+                             AND created_at >= ? ORDER BY id LIMIT 25""", (guild_id, since60)):
+        why = (p["auto_state"] or "")[6:].replace("_", " ").strip()
+        out.append(_ticket_pick(p, "needs", f"Slip #{p['id']} can't grade itself", why))
+        seen.add(p["id"])
+    for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'win' AND COALESCE(payout, 0) <= 0
+                             AND COALESCE(returned, 0) <= cost AND settled_at >= ? ORDER BY id LIMIT 15""",
+                          (guild_id, since60)):
+        out.append(_ticket_pick(p, "payout", f"Slip #{p['id']} won, but the payout is missing"))
+        seen.add(p["id"])
+    for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND created_at < ?
+                             ORDER BY id LIMIT 15""", (guild_id, iso(now - timedelta(days=4)))):
+        if p["id"] not in seen:
+            out.append(_ticket_pick(p, "stale", f"Slip #{p['id']} has been open 4+ days"))
+    try:
+        scan_log_db()
+        for r in db().execute("""SELECT * FROM scan_log WHERE guild_id = ? AND result = 'failed' AND at >= ?
+                                 ORDER BY id DESC LIMIT 10""", (guild_id, iso(now - timedelta(hours=48)))):
+            try:
+                why = ", ".join(json.loads(r["reasons"] or "[]"))
+            except ValueError:
+                why = ""
+            jump = r["jump"] if (r["jump"] or "").startswith("https://discord.com/channels/") else None
+            out.append({"key": f"scan:{r['id']}", "kind": "scan", "title": "A screenshot didn't read",
+                        "detail": f"Posted by **{clip(r['user_name'] or 'someone', 40)}**." + (f"\n**Why:** {clip(why, 200)}" if why else "")
+                                  + "\nOpen it, then log it by hand with `/pick` or ask them to repost a clearer shot.",
+                        "pick_id": None, "jump": jump, "hidden": 0})
+    except Exception:
+        pass
+    try:
+        bl_db()
+        for r in db().execute("SELECT * FROM blacklist_hits WHERE guild_id = ? AND at >= ? ORDER BY id DESC LIMIT 10",
+                              (guild_id, iso(now - timedelta(hours=48)))):
+            p = db().execute("SELECT * FROM picks WHERE id = ?", (r["pick_id"],)).fetchone()
+            hidden = bool(r["hidden"]) or (p is not None and sec_secret(p))
+            jump = None if hidden or p is None else (p["slip_url"] if (p["slip_url"] or "").startswith("https://discord.com/") else None)
+            out.append({"key": f"blacklist:{r['id']}", "kind": "blacklist",
+                        "title": f"Blacklist: {clip(r['entry'], 60)}" + (f" on slip #{r['pick_id']}" if not hidden else " on a hidden slip"),
+                        "detail": f"**{clip(r['who'] or 'someone', 40)}**" + ("" if hidden else f" · {clip(r['leg'] or '', 100)}"),
+                        "pick_id": None, "jump": jump, "hidden": int(hidden)})
+    except Exception:
+        pass
+    sysitems = []
+    if not str(DB_PATH).startswith("/data"):
+        sysitems.append(("volume", "The database isn't on a volume",
+                         "The next redeploy wipes every pick. In Railway, attach a volume at `/data`."))
+    if outage_channel(bot, guild_id, "admin") is None or outage_channel(bot, guild_id, "members") is None:
+        sysitems.append(("channels", "Alert channels aren't set", "Pick them with `/outage channels` so outages reach people."))
+    if not DEVELOPER_IDS:
+        sysitems.append(("devids", "Lock in the developer", "Add `DEVELOPER_IDS` (your Discord user ID) in Railway Variables."))
+    for name, h in JOB_HEALTH.items():
+        if int(h.get("fails") or 0) >= 3:
+            sysitems.append((f"job:{name}", f"Background job '{clip(name, 40)}' keeps failing",
+                             f"Failed {h.get('fails')} times in a row.\n`{clip(sec_redact(h.get('last_error') or ''), 300)}`"))
+    try:
+        for f in dash30_health().get("feeds") or []:
+            if f.get("state") == "down":
+                sysitems.append((f"feed:{f.get('name')}", f"Data feed down: {clip(f.get('name') or '?', 40)}",
+                                 "Lookups from it are failing" + (f" (last worked {f.get('last_ok')})" if f.get("last_ok") else "") + "."))
+    except Exception:
+        pass
+    for k, title, detail in sysitems:
+        out.append({"key": f"system:{k}", "kind": "system", "title": title, "detail": detail, "pick_id": None,
+                    "jump": None, "hidden": 0})
+    return out
+
+
+def ticket_embed(t) -> "discord.Embed":
+    st = t["status"] or "open"
+    e = discord.Embed(title=clip(f"{TICKET_ICON.get(t['kind'], '🎫')} Ticket #{t['id']} · {t['title']}", 256),
+                      description=clip(t["detail"] or "", 4000), color=TICKET_COLOR.get(st, 0xF5B942))
+    if st == "closed":
+        state = f"✅ Closed by {clip(t['closed_by'] or 'someone', 40)}" + (f": {clip(t['note'], 200)}" if t["note"] else "")
+    elif st == "claimed":
+        state = f"🙋 {clip(t['claimed_by'] or 'Someone', 40)} is on it"
+    else:
+        state = "🟠 Open: tap a button below to fix it"
+    e.add_field(name="Status", value=state, inline=False)
+    e.set_footer(text=f"Opened {local_day(t['opened_at'])}" + (" · fix the slip, and the ticket closes itself" if t["pick_id"] and st != "closed" else ""))
+    return e
+
+
+class TicketButton(discord.ui.DynamicItem[discord.ui.Button],
+                   template=r"tk:(?P<tid>\d+):(?P<act>win|loss|push|void|payout|claim|close|reopen)"):
+    LABELS = {"win": ("✅ Won", "success"), "loss": ("❌ Lost", "danger"), "push": ("➖ Push", "secondary"),
+              "void": ("🚫 Void", "secondary"), "payout": ("💵 Add payout", "success"), "claim": ("🙋 I'm on it", "primary"),
+              "close": ("✔️ Close", "secondary"), "reopen": ("↩️ Reopen", "secondary")}
+
+    def __init__(self, tid: int, act: str):
+        label, style = self.LABELS[act]
+        super().__init__(discord.ui.Button(label=label, style=getattr(discord.ButtonStyle, style),
+                                           custom_id=f"tk:{tid}:{act}"))
+        self.tid, self.act = tid, act
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["tid"]), match["act"])
+
+    async def callback(self, interaction: discord.Interaction):
+        tickets_db()
+        t = db().execute("SELECT * FROM tickets WHERE id = ?", (self.tid,)).fetchone()
+        if t is None or not sec_same_guild(t, interaction):
+            await interaction.response.send_message("That ticket is gone.", ephemeral=True)
+            return
+        if not sec_staff(interaction.user):
+            await interaction.response.send_message("Tickets are for staff.", ephemeral=True)
+            return
+        name = clip(interaction.user.display_name, 40)
+        if self.act == "reopen":
+            db().execute("UPDATE tickets SET status = 'open', closed_at = NULL, closed_by = NULL, note = NULL WHERE id = ?", (t["id"],))
+        elif self.act == "claim":
+            db().execute("UPDATE tickets SET status = 'claimed', claimed_by = ? WHERE id = ?", (name, t["id"]))
+        elif self.act == "close":
+            ticket_close(t["id"], name, "Closed by hand.")
+        elif self.act == "payout":
+            await interaction.response.send_modal(TicketPayoutModal(t["id"]))
+            return
+        else:
+            p = get_pick(t["guild_id"], t["pick_id"]) if t["pick_id"] else None
+            if p is None or t["hidden"]:
+                await interaction.response.send_message("I can't grade that one from here.", ephemeral=True)
+                return
+            if p["status"] != "open":
+                ticket_close(t["id"], "the bot", f"Already settled ({p['status']}).")
+            else:
+                p = settle_pick(t["guild_id"], p["id"], self.act, None)
+                ticket_close(t["id"], name, f"Graded {self.act}.")
+                await audit(interaction.client, t["guild_id"], f"{who(interaction)} graded slip #{p['id']} **{self.act}** from ticket #{t['id']}.")
+        db().commit()
+        t = db().execute("SELECT * FROM tickets WHERE id = ?", (t["id"],)).fetchone()
+        await interaction.response.edit_message(embed=ticket_embed(t), view=ticket_view(t))
+
+
+class TicketPayoutModal(discord.ui.Modal, title="Add the payout"):
+    amount = discord.ui.TextInput(label="What it paid back, in dollars", placeholder="e.g. 45.50", max_length=12)
+
+    def __init__(self, tid: int):
+        super().__init__()
+        self.tid = tid
+
+    async def on_submit(self, interaction: discord.Interaction):
+        t = db().execute("SELECT * FROM tickets WHERE id = ?", (self.tid,)).fetchone()
+        try:
+            amt = float(str(self.amount.value).replace("$", "").replace(",", "").strip())
+            assert 0 < amt < 10_000_000
+        except Exception:
+            await interaction.response.send_message("That isn't an amount. Try `45.50`.", ephemeral=True)
+            return
+        if t is None or not sec_same_guild(t, interaction) or not sec_staff(interaction.user) or not t["pick_id"]:
+            await interaction.response.send_message("Can't do that here.", ephemeral=True)
+            return
+        settle_pick(t["guild_id"], t["pick_id"], "win", amt)
+        ticket_close(t["id"], clip(interaction.user.display_name, 40), f"Payout set to {money(amt)}.")
+        await audit(interaction.client, t["guild_id"], f"{who(interaction)} set slip #{t['pick_id']}'s payout to {money(amt)} from ticket #{t['id']}.")
+        t = db().execute("SELECT * FROM tickets WHERE id = ?", (t["id"],)).fetchone()
+        await interaction.response.edit_message(embed=ticket_embed(t), view=ticket_view(t))
+
+
+def ticket_close(tid: int, by: str, note: str = "") -> None:
+    db().execute("UPDATE tickets SET status = 'closed', closed_at = ?, closed_by = ?, note = ? WHERE id = ?",
+                 (now_iso(), clip(by, 40), clip(note, 300), tid))
+    db().commit()
+
+
+def ticket_view(t) -> "discord.ui.View":
+    v = discord.ui.View(timeout=None)
+    if t["status"] == "closed":
+        v.add_item(TicketButton(t["id"], "reopen"))
+    else:
+        if t["kind"] in ("needs", "stale") and t["pick_id"] and not t["hidden"]:
+            for act in ("win", "loss", "push", "void"):
+                v.add_item(TicketButton(t["id"], act))
+        if t["kind"] == "payout" and t["pick_id"] and not t["hidden"]:
+            v.add_item(TicketButton(t["id"], "payout"))
+        if t["status"] != "claimed":
+            v.add_item(TicketButton(t["id"], "claim"))
+        v.add_item(TicketButton(t["id"], "close"))
+    if t["jump"]:
+        v.add_item(discord.ui.Button(label="Open in Discord" if t["kind"] != "scan" else "Open the screenshot", url=t["jump"]))
+    return v
+
+
+EXTRA_ITEMS.append(TicketButton)
+
+
+async def tickets_job(client, now: Optional[datetime] = None) -> None:
+    """Open a ticket for each new thing that needs attention, and close tickets whose problem went away."""
+    tickets_db()
+    for g in list(getattr(client, "guilds", []) or []):
+        gid = g.id
+        ch = ticket_channel(client, gid)
+        if ch is None:
+            continue
+        items = ticket_items(gid, now)
+        keys = {i["key"] for i in items}
+        live = db().execute("SELECT * FROM tickets WHERE guild_id = ? AND status != 'closed'", (gid,)).fetchall()
+        live_keys = {t["key"] for t in live}
+        for t in live:                                    # fixed elsewhere (graded with /result, feed back up...)
+            if t["key"] not in keys:
+                ticket_close(t["id"], "the bot", "Auto-closed after 2 days." if t["kind"] in ("scan", "blacklist")
+                             else "Fixed: it doesn't need attention anymore.")
+                await ticket_refresh(client, t["id"])
+        recent = {r["key"] for r in db().execute("""SELECT key FROM tickets WHERE guild_id = ? AND status = 'closed'
+                                                    AND closed_by != 'the bot' AND (closed_at >= ? OR
+                                                    (key LIKE 'stale:%' AND closed_at >= ?))""",
+                                                 (gid, iso((now or datetime.now(timezone.utc)) - timedelta(days=3)),
+                                                  iso((now or datetime.now(timezone.utc)) - timedelta(days=30))))}
+        new = [i for i in items if i["key"] not in live_keys and i["key"] not in recent][:8]
+        role = get_setting(gid, "ticket_role")
+        for i, it in enumerate(new):
+            c = db().execute("""INSERT INTO tickets (guild_id, key, kind, title, detail, pick_id, jump, hidden, channel_id,
+                                status, opened_at) VALUES (?,?,?,?,?,?,?,?,?, 'open', ?)""",
+                             (gid, it["key"], it["kind"], it["title"], it["detail"], it["pick_id"], it["jump"],
+                              it["hidden"], ch.id, now_iso()))
+            db().commit()
+            t = db().execute("SELECT * FROM tickets WHERE id = ?", (c.lastrowid,)).fetchone()
+            try:
+                ping = f"<@&{role}>" if role and i == 0 else None
+                msg = await ch.send(ping, embed=ticket_embed(t), view=ticket_view(t),
+                                    allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
+                                                                             roles=[discord.Object(id=int(role))]) if ping
+                                    else discord.AllowedMentions.none())
+                db().execute("UPDATE tickets SET message_id = ? WHERE id = ?", (msg.id, t["id"]))
+                db().commit()
+            except Exception:
+                log.warning("Ticket post failed", exc_info=True)
+        if new:
+            activity_add(gid, "staff", f"🎫 {len(new)} new ticket{'s' if len(new) != 1 else ''} opened")
+
+
+async def ticket_refresh(client, tid: int) -> None:
+    t = db().execute("SELECT * FROM tickets WHERE id = ?", (tid,)).fetchone()
+    if t is None or not t["message_id"]:
+        return
+    ch = client.get_channel(t["channel_id"])
+    if ch is None:
+        return
+    try:
+        await ch.get_partial_message(t["message_id"]).edit(embed=ticket_embed(t), view=ticket_view(t))
+    except Exception:
+        pass
+
+
+EXTRA_JOBS.append(("tickets", tickets_job))
+
+
+def staff_tickets(guild_id: int) -> dict:
+    try:
+        tickets_db()
+        rows = db().execute("SELECT * FROM tickets WHERE guild_id = ? AND status != 'closed' ORDER BY id DESC LIMIT 20",
+                            (guild_id,)).fetchall()
+        week = db().execute("SELECT COUNT(*) AS n FROM tickets WHERE guild_id = ? AND status = 'closed' AND closed_at >= ?",
+                            (guild_id, iso(datetime.now(timezone.utc) - timedelta(days=7)))).fetchone()["n"]
+    except Exception:
+        rows, week = [], 0
+    ch = ticket_channel(bot, guild_id)
+    return {"channel": ("#" + clip(getattr(ch, "name", "") or str(ch.id), 40)) if ch is not None else None,
+            "open": [{"id": t["id"], "kind": t["kind"], "title": t["title"], "status": t["status"], "who": t["claimed_by"],
+                      "at": t["opened_at"],
+                      "link": f"https://discord.com/channels/{guild_id}/{t['channel_id']}/{t['message_id']}" if t["message_id"] else None}
+                     for t in rows],
+            "closed_week": int(week or 0)}
+
+
+tickets_group = app_commands.Group(name="tickets", description="Needs-attention tickets for the staff", parent=staff_group)
+
+
+@tickets_group.command(name="channel", description="Where tickets go (everything that needs a person)")
+@app_commands.describe(channel="A staff-only channel", ping="Optional: a role to ping when new tickets open")
+@sec_staff_only
+async def tickets_channel(interaction: discord.Interaction, channel: discord.TextChannel, ping: Optional[discord.Role] = None):
+    if not (is_owner(interaction.user) or is_admin(interaction)):
+        await interaction.response.send_message("Owners and admins pick the ticket channel.", ephemeral=True)
+        return
+    set_setting(interaction.guild_id, "ticket_channel", str(channel.id))
+    set_setting(interaction.guild_id, "ticket_role", str(ping.id) if ping else None)
+    await audit(interaction.client, interaction.guild_id, f"{who(interaction)} sent tickets to #{getattr(channel, 'name', channel.id)}.")
+    await interaction.response.send_message(
+        f"🎫 Tickets go to <#{channel.id}>" + (f" and ping <@&{ping.id}>" if ping else "") + ". Anything that needs a person "
+        "shows up there within 2 minutes, with buttons to fix it and close it. Fixed things close themselves.",
+        ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+    try:
+        await tickets_job(interaction.client)
+    except Exception:
+        log.warning("First ticket run failed", exc_info=True)
+
+
+@tickets_group.command(name="list", description="Open tickets, with links")
+@sec_staff_only
+async def tickets_list(interaction: discord.Interaction):
+    d = staff_tickets(interaction.guild_id)
+    lines = [f"{TICKET_ICON.get(t['kind'], '🎫')} **#{t['id']}** {clip(t['title'], 70)}" + (f" · 🙋 {t['who']}" if t["status"] == "claimed" else "")
+             + (f" · [open]({t['link']})" if t["link"] else "") for t in d["open"]]
+    head = (f"Tickets go to {d['channel']}." if d["channel"] else "No ticket channel yet: `/staff tickets channel`.")
+    await interaction.response.send_message(clip(head + "\n" + ("\n".join(lines) or "✅ No open tickets.")
+                                                 + f"\n{d['closed_week']} closed this week.", 1900), ephemeral=True)
 
 
 bot.tree.add_command(staff_group)
