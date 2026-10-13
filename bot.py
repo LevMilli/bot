@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-12 r31.6"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r32"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -96,7 +96,10 @@ if _GUILD_RAW and (_GUILD_RAW != GUILD_ID or not 15 <= len(GUILD_ID) <= 21):
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 ASK_MODEL = env("ASK_MODEL", "claude-sonnet-5-5")
-ASK_DAILY_LIMIT = env_int("ASK_DAILY_LIMIT", 40)
+ASK_DAILY_LIMIT = env_int("ASK_DAILY_LIMIT", 1000)
+# The bot's owner(s), by Discord user id, comma separated. Set on Railway only: nothing in Discord can change it.
+OWNER_IDS = {int(x) for x in env("OWNER_IDS", "").replace(" ", "").split(",") if x.isdigit()}
+CREATOR_ID = int(env("CREATOR_ID", "") or 0) if env("CREATOR_ID", "").isdigit() else (min(OWNER_IDS) if OWNER_IDS else 0)
 ASK_COOLDOWN_SECONDS = env_int("ASK_COOLDOWN_SECONDS", 20)
 MEMBERS_INTENT = env("MEMBERS_INTENT", "") in ("1", "true", "yes", "on")
 DB_PATH = env("DB_PATH", "picks.db")
@@ -986,7 +989,53 @@ def resolve_bettor(interaction: discord.Interaction,
     return str(m.id), m.display_name, m.id
 
 
+def owner_id_ok(uid, guild_id: Optional[int] = None) -> bool:
+    """An owner: in OWNER_IDS, or (only when OWNER_IDS isn't set) the Discord server's owner."""
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return False
+    if OWNER_IDS:
+        return uid in OWNER_IDS
+    g = None
+    try:
+        g = bot.get_guild(int(guild_id)) if guild_id else None
+    except Exception:
+        g = None
+    return bool(g is not None and getattr(g, "owner_id", None) == uid)
+
+
+def is_owner(user) -> bool:
+    gid = getattr(getattr(user, "guild", None), "id", None)
+    if not OWNER_IDS and gid is not None and getattr(getattr(user, "guild", None), "owner_id", None) == getattr(user, "id", None):
+        return True
+    return owner_id_ok(getattr(user, "id", None), gid)
+
+
+def owner_blocked_ids() -> set:
+    try:
+        return {int(x) for x in json.loads(get_setting(0, "owner_blocked") or "[]")}
+    except (ValueError, TypeError):
+        return set()
+
+
+def owner_lockdown() -> bool:
+    return get_setting(0, "owner_lockdown") == "on"
+
+
+def owner_gate(user) -> Optional[bool]:
+    """True: an owner, always allowed. False: removed by the owner, or the bot is locked down. None: the usual rules."""
+    if is_owner(user):
+        return True
+    if getattr(user, "id", None) in owner_blocked_ids() or owner_lockdown():
+        return False
+    return None
+
+
 def is_mod(user) -> bool:
+    g = owner_gate(user)
+    if g is not None:
+        return g
     perms = getattr(user, "guild_permissions", None)
     return bool(perms and perms.manage_messages)
 
@@ -1964,6 +2013,30 @@ def slip_draft_view(message_id: int, review: bool = True, log_it: bool = True, e
     return v
 
 
+def ask_limit(guild_id: int) -> int:
+    """Questions per server per day: the owner's /owner asklimit, else ASK_DAILY_LIMIT (default 1,000)."""
+    try:
+        v = int(get_setting(guild_id, "ask_limit") or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return v if v > 0 else ASK_DAILY_LIMIT
+
+
+def ask_used(guild_id: int) -> int:
+    try:
+        return int(get_setting(guild_id, f"asks:{datetime.now(TZ).date().isoformat()}") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def ask_refund(guild_id: int) -> None:
+    """Give a question back (the screenshot had nothing the AI could look at)."""
+    key = f"asks:{datetime.now(TZ).date().isoformat()}"
+    used = ask_used(guild_id)
+    if used > 0:
+        set_setting(guild_id, key, str(used - 1))
+
+
 def ask_gate(guild_id: int, user_id: int) -> Optional[str]:
     """Shares the @mention question limits. Returns why not, or None and counts the question."""
     wait = bot.ask_cooldowns.get(user_id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
@@ -1971,8 +2044,8 @@ def ask_gate(guild_id: int, user_id: int) -> Optional[str]:
         return f"Give me {int(wait) + 1}s before the next question."
     count_key = f"asks:{datetime.now(TZ).date().isoformat()}"
     used = int(get_setting(guild_id, count_key) or 0)
-    if used >= ASK_DAILY_LIMIT:
-        return f"That's the server's {ASK_DAILY_LIMIT} questions for today. Back tomorrow."
+    if used >= ask_limit(guild_id):
+        return f"That's the server's {ask_limit(guild_id):,} questions for today. Back tomorrow."
     bot.ask_cooldowns[user_id] = time.monotonic()
     set_setting(guild_id, count_key, str(used + 1))
     return None
@@ -10916,9 +10989,25 @@ _last_cycle: dict[str, str] = {}
 
 # ---- audit log ----------------------------------------------------------------------------------------
 
+def activity_add(guild_id: int, kind: str, text: str) -> None:
+    """One line of server history for the staff page (plain text, names only)."""
+    try:
+        db().execute("""CREATE TABLE IF NOT EXISTS activity_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+                        at TEXT, kind TEXT, text TEXT)""")
+        plain = re.sub(r"<@!?(\d+)>", "someone", re.sub(r"[*_`~|]", "", text or ""))
+        db().execute("INSERT INTO activity_log (guild_id, at, kind, text) VALUES (?,?,?,?)",
+                     (guild_id, now_iso(), kind, clip(plain, 240)))
+        db().execute("DELETE FROM activity_log WHERE id IN (SELECT id FROM activity_log WHERE guild_id = ? "
+                     "ORDER BY id DESC LIMIT -1 OFFSET 400)", (guild_id,))
+        db().commit()
+    except Exception:
+        log.warning("Activity log write failed", exc_info=True)
+
+
 async def audit(client, guild_id: Optional[int], text: str) -> None:
     if not guild_id:
         return
+    activity_add(guild_id, "staff", text)
     client = client or bot
     cid = get_setting(guild_id, "audit_channel")
     channel = client.get_channel(int(cid)) if cid else None
@@ -14241,6 +14330,9 @@ class PersonaSelect(discord.ui.Select):
 
 
 def is_admin(interaction) -> bool:
+    g = owner_gate(interaction.user)
+    if g is not None:
+        return g
     perms = getattr(interaction.user, "guild_permissions", None)
     return bool(perms and getattr(perms, "manage_guild", False))
 
@@ -19417,6 +19509,7 @@ def dash_app(web):
     app.add_routes([web.get("/", dash_index), web.get("/api/data", dash_api_data), web.get("/health", dash_health), web.get("/status", dash_status),
                     web.get("/staff", staff_page), web.get("/api/staff.json", staff_api),
                     web.get("/staff/logout", staff_logout), web.get("/api/staff/me", staff_me),
+                    web.get("/api/staff/people.json", staff_people_api),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -20254,6 +20347,9 @@ def sec_redact(text) -> str:
 # default_permissions only sets who sees a command by default; a server can change that in Integrations.
 
 def sec_staff(user) -> bool:
+    g = owner_gate(user)
+    if g is not None:
+        return g
     perms = getattr(user, "guild_permissions", None)
     return bool(perms and (getattr(perms, "manage_guild", False) or getattr(perms, "manage_messages", False)))
 
@@ -24278,6 +24374,9 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     games: dict = {}
     headers = [ln for ln in lines if re.search(r"vs", ln["text"], re.I) and not _free_stat_in(ln["text"])
                and re.search(r"\b(?:Final|NFL|NBA|NHL|MLB|WNBA|SOCCER|CFB|CBB|LoL|CS2|VAL)\b|\d", ln["text"])]
+    extra = free_missing_stats(lines, grey, img)
+    if extra:                                   # a box's stat name Tesseract skipped ("Ks" under "3.5"), read again
+        lines = sorted(lines + extra, key=lambda ln: (ln["y"], ln["x0"]))
     # legs: anchor on each stat name, take the line number before it, the name above it, and the side
     legs: list[str] = []
     used_lines: set = set()       # a name line belongs to one leg; the same player can be on two lines
@@ -24297,6 +24396,10 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         right = stat_x is not None and stat_x > 0.55 * img.width
         # the number: on this line before the stat, else the line(s) just above
         cand_lines = [ln] + [lines[j] for j in range(k - 1, max(-1, k - 3), -1)]
+        if right:      # share cards: the number can sit a row or two above the name and team lines
+            for j in range(k - 1, max(-1, k - 6), -1):
+                if 0 <= ln["y"] - lines[j]["y"] <= 3.5 * max(ln["h"], 20) and lines[j] not in cand_lines:
+                    cand_lines.append(lines[j])
         num_words, src = [], None
         whole = None                                          # a bare whole number, used only if no decimal is near
         hn = num_hs[len(num_hs) // 2] if num_hs else 25
@@ -24499,6 +24602,104 @@ def free_name_reread(grey, top: float, bottom: float, single: bool = False) -> O
             return name
     return None
 
+
+def free_missing_stats(lines: list, grey, img) -> list:
+    """Share cards print the stat in small type under the number box. When a box's number has no stat line under it,
+    read just that spot again, bigger, and hand back the stat as its own line."""
+    from PIL import Image
+    W = img.width
+    stat_lines = [ln for ln in lines if _free_stat_in(ln["text"])]
+    out = []
+    for ln in lines:
+        right = [w for w in ln["words"] if w["x"] > 0.6 * W]
+        if not right or _free_stat_in(ln["text"]):
+            continue
+        rw = max(right, key=lambda w: w["x"] + w["w"])
+        t = rw["text"]
+        if not re.search(r"\d", t) or re.search(r"[:$%]|am$|pm$|20\d\d", t, re.I):
+            continue
+        h = max(ln["h"], 20)
+        if any(0 < s2["y"] - ln["y"] <= 3.5 * h for s2 in stat_lines):
+            continue
+        box = (int(0.6 * W), int(ln["y"] + 0.7 * h), W, min(grey.height, int(ln["y"] + 3.0 * h)))
+        if box[3] - box[1] < 12:
+            continue
+        crop = grey.crop(box)
+        crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
+        txt = " ".join(_free_tess(crop, 7, tsv=False).split())
+        st = _free_stat_in(txt)
+        if not st:
+            continue
+        name = st[0]
+        out.append({"words": [{"text": name, "conf": 80, "x": box[0] + 40, "y": int(ln["y"] + 1.3 * h), "w": 20 * len(name),
+                               "h": h, "line": ("reread", ln["y"])}], "text": name, "y": int(ln["y"] + 1.3 * h), "h": h,
+                    "x0": box[0] + 40, "x1": box[0] + 40 + 20 * len(name)})
+    return out
+
+
+
+# ---- r32: the scan log (what every screenshot read gave, for the staff page) -------------------------------
+
+def scan_log_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS scan_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+                    at TEXT, kind TEXT, result TEXT, reader TEXT, legs INTEGER, want INTEGER, reasons TEXT, jump TEXT,
+                    user_name TEXT, file_name TEXT)""")
+    db().execute("CREATE INDEX IF NOT EXISTS scan_log_g ON scan_log (guild_id, at)")
+
+
+def scan_log_add(guild_id: int, message, attachment, slip: Optional[dict], reason: Optional[str], kind: str) -> None:
+    """One row per screenshot read: ok / unsure / failed, which reader, how many legs, why. Never the image itself."""
+    try:
+        scan_log_db()
+        legs = len((slip or {}).get("legs") or [])
+        unsure = list((slip or {}).get("_unsure") or [])
+        result = "failed" if not slip or not legs else ("unsure" if unsure else "ok")
+        why = unsure[:4] if unsure else ([reason] if reason and result == "failed" else [])
+        db().execute("INSERT INTO scan_log (guild_id, at, kind, result, reader, legs, want, reasons, jump, user_name, file_name) "
+                     "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     (guild_id, now_iso(), kind, result, clip(str((slip or {}).get("_how") or ""), 20), legs,
+                      (slip or {}).get("_want"), json.dumps([clip(str(x), 120) for x in why]),
+                      clip(str(getattr(message, "jump_url", "") or ""), 200),
+                      clip(getattr(getattr(message, "author", None), "display_name", "") or "", 40),
+                      clip(getattr(attachment, "filename", "") or "", 80)))
+        db().execute("DELETE FROM scan_log WHERE id IN (SELECT id FROM scan_log WHERE guild_id = ? ORDER BY id DESC "
+                     "LIMIT -1 OFFSET 500)", (guild_id,))
+        db().commit()
+    except Exception:
+        log.warning("Scan log write failed", exc_info=True)
+
+
+def scan_log_rows(guild_id: int, limit: int = 40) -> list:
+    try:
+        scan_log_db()
+        rows = db().execute("SELECT * FROM scan_log WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+                            (guild_id, limit)).fetchall()
+    except Exception:
+        return []
+    out = []
+    for r in rows:
+        try:
+            why = json.loads(r["reasons"] or "[]")
+        except ValueError:
+            why = []
+        out.append({"at": r["at"], "kind": r["kind"], "result": r["result"], "reader": r["reader"], "legs": r["legs"],
+                    "want": r["want"], "why": why, "jump": r["jump"] if (r["jump"] or "").startswith("https://discord.com/")
+                    else None, "who": r["user_name"]})
+    return out
+
+
+def scan_log_stats(guild_id: int, days: int = 7) -> dict:
+    try:
+        scan_log_db()
+        since = iso(datetime.now(timezone.utc) - timedelta(days=days))
+        rows = db().execute("SELECT result, COUNT(*) AS n FROM scan_log WHERE guild_id = ? AND at >= ? GROUP BY result",
+                            (guild_id, since)).fetchall()
+    except Exception:
+        return {"ok": 0, "unsure": 0, "failed": 0}
+    out = {"ok": 0, "unsure": 0, "failed": 0}
+    for r in rows:
+        out[r["result"]] = int(r["n"])
+    return out
 
 def free_scan(raw: bytes) -> Optional[dict]:
     """The whole free scan on one image (sync, for a worker thread)."""
@@ -29151,6 +29352,8 @@ def staff_check(token: Optional[str], now: Optional[float] = None) -> Optional[d
         return None
     if int(exp) < (now or time.time()):
         return None
+    if not owner_id_ok(uid, int(gid)) and (int(uid) in owner_blocked_ids() or owner_lockdown()):
+        return None                       # removed by the owner, or locked down to owners only
     return {"uid": int(uid), "guild": int(gid), "exp": int(exp)}
 
 
@@ -29235,9 +29438,60 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
                                        "created_at < ?", (guild_id, iso(now - timedelta(days=4)))).fetchone()["n"] or 0),
         "deploy": staff_deploy(),
         "links": staff_links(guild_id),
+        "history": staff_history(guild_id),
+        "scans": {"week": scan_log_stats(guild_id), "recent": [r for r in scan_log_rows(guild_id, 30)
+                                                               if r["result"] != "ok"][:8]},
+        "asks": {"used": ask_used(guild_id), "limit": ask_limit(guild_id)},
+        "owner": {"lockdown": owner_lockdown(), "removed": len(owner_blocked_ids()), "set": bool(OWNER_IDS)},
     }
 
 
+
+
+def staff_history(guild_id: int, limit: int = 60) -> list:
+    """The server's recent history, newest first: staff actions, slips logged and settled, screenshot reads, restarts.
+    Names only; hidden slips stay 'a hidden slip' until they're revealed; never amounts."""
+    out = []
+    try:
+        db().execute("""CREATE TABLE IF NOT EXISTS activity_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+                        at TEXT, kind TEXT, text TEXT)""")
+        for r in db().execute("SELECT at, kind, text FROM activity_log WHERE guild_id = ? ORDER BY id DESC LIMIT 40",
+                              (guild_id,)):
+            out.append({"at": r["at"], "kind": r["kind"] or "staff", "icon": "🛡️" if (r["text"] or "").startswith("🛡") else "📝",
+                        "text": re.sub(r"^[^\w]+", "", r["text"] or "")})
+    except Exception:
+        pass
+    since = iso(datetime.now(timezone.utc) - timedelta(days=3))
+    try:
+        for p in db().execute("SELECT id, bettor_name, status, hidden, revealed_at, description, created_at, settled_at "
+                              "FROM picks WHERE guild_id = ? AND (created_at >= ? OR settled_at >= ?) ORDER BY id DESC LIMIT 40",
+                              (guild_id, since, since)):
+            secret = bool(p["hidden"]) and (p["status"] == "open" or not p["revealed_at"])
+            what = "a hidden slip" if secret else clip(p["description"] or "a slip", 50)
+            if p["created_at"] and p["created_at"] >= since:
+                out.append({"at": p["created_at"], "kind": "slips", "icon": "🧾",
+                            "text": f"{clip(p['bettor_name'], 30)} logged {what}" + ("" if secret else f" (#{p['id']})")})
+            if p["status"] != "open" and p["settled_at"] and p["settled_at"] >= since:
+                word = {"win": "cashed", "loss": "lost", "push": "pushed", "void": "voided"}.get(p["status"], p["status"])
+                out.append({"at": p["settled_at"], "kind": "slips", "icon": {"win": "✅", "loss": "❌"}.get(p["status"], "➖"),
+                            "text": f"{clip(p['bettor_name'], 30)} {word} {what}" + ("" if secret else f" (#{p['id']})")})
+    except Exception:
+        pass
+    for r in scan_log_rows(guild_id, 25):
+        icon = {"ok": "📸", "unsure": "🔎", "failed": "⚠️"}.get(r["result"], "📸")
+        say = {"ok": f"read {r['legs']} leg{'s' if r['legs'] != 1 else ''}", "unsure": f"read {r['legs']} leg(s), not sure of everything",
+               "failed": "couldn't read the picks"}.get(r["result"], "")
+        out.append({"at": r["at"], "kind": "scans", "icon": icon,
+                    "text": f"Screenshot from {clip(r['who'] or 'someone', 30)}: {say}", "jump": r["jump"]})
+    try:
+        for r in (json.loads(get_setting(0, "outage_log") or "[]") or [])[-10:]:
+            out.append({"at": r.get("to"), "kind": "system", "icon": "🔄",
+                        "text": f"Back online after {r.get('dur') or '?'} down"})
+    except (ValueError, TypeError):
+        pass
+    out = [x for x in out if x.get("at")]
+    out.sort(key=lambda x: x["at"], reverse=True)
+    return out[:limit]
 
 def staff_uptime(rows: list, now: Optional[datetime] = None) -> dict:
     """Percent of the time the bot was up over the last 7 and 30 days (counting from when tracking began)."""
@@ -29264,8 +29518,11 @@ def staff_uptime(rows: list, now: Optional[datetime] = None) -> dict:
         down = sum(max(0.0, (min(b, now) - max(a, start)).total_seconds()) for a, b in spans)
         out[label] = round(max(0.0, 100 * (1 - down / total)), 3)
     week = [(a, b) for a, b in spans if b >= now - timedelta(days=7)]
-    out["count7"] = len(week)
-    out["longest7"] = outage_dur(max((b - a).total_seconds() for a, b in week)) if week else None
+    real = [(a, b) for a, b in week if (b - a).total_seconds() >= OUTAGE_ADMIN_MIN * 60]
+    out["count7"] = len(real)
+    out["restarts7"] = len(week) - len(real)
+    out["longest7"] = outage_dur(max((b - a).total_seconds() for a, b in real)) if real else None
+    out["min"] = OUTAGE_ADMIN_MIN
     return out
 
 
@@ -29346,12 +29603,113 @@ def staff_links(guild_id: int) -> list:
                           "url": r["url"], "note": clip(r.get("note") or "", 60)})
     return [{"name": g, "items": items} for g, items in groups.items() if items]
 
+def staff_seen_rows() -> list:
+    try:
+        rows = json.loads(get_setting(0, "staff_seen") or "[]")
+    except ValueError:
+        rows = []
+    return [r for r in rows if isinstance(r, dict) and str(r.get("uid", "")).isdigit()] if isinstance(rows, list) else []
+
+
+def staff_note_seen(uid: int, name: str, guild_id: int) -> None:
+    rows = [r for r in staff_seen_rows() if int(r["uid"]) != int(uid)]
+    rows.append({"uid": str(int(uid)), "name": clip(name or "", 40), "guild": str(int(guild_id)), "at": now_iso()})
+    set_setting(0, "staff_seen", json.dumps(rows[-40:]))
+
+
 def staff_viewer(uid: Optional[int]) -> str:
     try:
         user = bot.get_user(int(uid)) if uid else None
     except Exception:
         user = None
-    return clip(getattr(user, "display_name", "") or getattr(user, "name", "") or "", 40)
+    name = getattr(user, "display_name", "") or getattr(user, "name", "")
+    if not name and uid:
+        name = next((r.get("name") for r in staff_seen_rows() if int(r["uid"]) == int(uid)), "")
+    return clip(name or "", 40)
+
+
+def _staff_level(member) -> str:
+    uid = getattr(member, "id", None)
+    if CREATOR_ID and uid == CREATOR_ID:
+        return "Creator"
+    gid = getattr(getattr(member, "guild", None), "id", None)
+    if (OWNER_IDS and uid in OWNER_IDS) or (getattr(getattr(member, "guild", None), "owner_id", None) == uid):
+        return "Owner"
+    perms = getattr(member, "guild_permissions", None)
+    if perms and (getattr(perms, "administrator", False) or getattr(perms, "manage_guild", False)):
+        return "Admin"
+    if perms and any(getattr(perms, p, False) for p in ("manage_messages", "kick_members", "ban_members",
+                                                         "moderate_members")):
+        return "Mod"
+    return "Staff"
+
+
+def _staff_colour(role) -> Optional[str]:
+    try:
+        v = int(getattr(getattr(role, "color", None), "value", 0) or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return f"#{v:06x}" if v else None
+
+
+def staff_people(guild_id: int) -> dict:
+    """Everyone who can see the staff channel (the admin alert channel): the roles that open it, the members the bot
+    knows, and who's been on the staff page. Names and roles only."""
+    ch = outage_channel(bot, guild_id, "admin")
+    seen = {int(r["uid"]): r for r in staff_seen_rows() if str(r.get("guild")) == str(guild_id)}
+    out = {"channel": None, "roles": [], "people": [], "everyone": False, "partial": not MEMBERS_INTENT,
+           "lockdown": owner_lockdown(), "guild": str(int(guild_id))}
+    if ch is None:
+        out["people"] = [{"id": str(int(r["uid"])), "name": clip(r.get("name") or "?", 40), "role": "", "level": "Staff",
+                          "color": None, "seen": r.get("at"), "removed": int(r["uid"]) in owner_blocked_ids()}
+                         for r in sorted(seen.values(), key=lambda r: r.get("at") or "", reverse=True)]
+        return out
+    out["channel"] = "#" + clip(getattr(ch, "name", "") or str(ch.id), 60)
+    guild = getattr(ch, "guild", None)
+    for role in list(getattr(guild, "roles", None) or [])[::-1]:
+        try:
+            can = ch.permissions_for(role).view_channel
+        except Exception:
+            continue
+        if role.is_default():
+            out["everyone"] = bool(can)
+            continue
+        if can and not getattr(role, "managed", False):
+            members = getattr(role, "members", None)
+            out["roles"].append({"name": clip(role.name, 40), "color": _staff_colour(role),
+                                 "count": len(members) if (MEMBERS_INTENT and members is not None) else None})
+    people, ids = [], set()
+    try:
+        members = list(getattr(ch, "members", None) or [])
+    except Exception:
+        members = []
+    for mem in members:
+        if getattr(mem, "bot", False):
+            continue
+        top = getattr(mem, "top_role", None)
+        ids.add(int(mem.id))
+        people.append({"id": str(int(mem.id)), "removed": int(mem.id) in owner_blocked_ids(),
+                       "name": clip(getattr(mem, "display_name", "") or getattr(mem, "name", "") or "?", 40),
+                       "role": clip(getattr(top, "name", "") or "", 40) if top is not None and not top.is_default() else "",
+                       "level": _staff_level(mem), "color": _staff_colour(top) if top is not None else None,
+                       "seen": (seen.get(int(mem.id)) or {}).get("at")})
+    for uid, r in seen.items():                  # signed in to the staff page but not in the bot's member cache
+        if uid not in ids:
+            lvl = "Creator" if CREATOR_ID and uid == CREATOR_ID else ("Owner" if OWNER_IDS and uid in OWNER_IDS else "Staff")
+            people.append({"id": str(uid), "removed": uid in owner_blocked_ids(), "name": clip(r.get("name") or "?", 40),
+                           "role": "", "level": lvl, "color": None, "seen": r.get("at")})
+    order = {"Creator": -2, "Owner": -1, "Admin": 0, "Mod": 1, "Staff": 2}
+    people.sort(key=lambda p: (order.get(p["level"], 3), p["name"].lower()))
+    out["people"] = people[:150]
+    return out
+
+
+async def staff_people_api(request):
+    from aiohttp import web
+    st = staff_from_request(request)
+    if st is None:
+        return dash_error(web, request, 403)
+    return web.json_response(staff_people(st["guild"]))
 
 
 async def staff_page(request):
@@ -29403,33 +29761,94 @@ STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 :root{--bg:#0d0a14;--card:#17121f;--card2:#1f1829;--line:#2a2238;--text:#f4f1fb;--muted:#a59cbc;--faint:#6f6688;
  --brand:#7B3FE4;--brand2:#a27bff;--gold:#f0b429;--up:#34d399;--warn:#fbbf24;--down:#fb7185;
  --head:linear-gradient(180deg,#2a1457 0%,#160d2b 70%,#0d0a14 100%);--shadow:0 1px 0 #ffffff08 inset,0 10px 30px -12px #00000099;
- --tile:#211933;--tileh:#2b2042}
+ --tile:#211933;--tileh:#2b2042;--court:{{COURT_D}};--courtH:{{COURT_H}}}
 @media (prefers-color-scheme:light){:root{--bg:#f6f3fc;--card:#fff;--card2:#f6f2fd;--line:#e7dff4;--text:#1d1530;
  --muted:#5d5475;--faint:#9a91b0;--brand2:#6a32d6;--gold:#b7791f;--up:#059669;--warn:#c27c0e;--down:#e11d48;
  --head:linear-gradient(180deg,#e9defe 0%,#f3eefc 70%,#f6f3fc 100%);--shadow:0 1px 2px #1d153010,0 8px 24px -14px #3b1d8a40;
- --tile:#f3edfd;--tileh:#e9defe}}
-*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+ --tile:#f3edfd;--tileh:#e9defe;--court:{{COURT_L}}}}
+*{box-sizing:border-box}[hidden]{display:none!important}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
- min-height:100vh;overflow-x:hidden}
+ min-height:100vh;overflow-x:hidden;position:relative}
+body:before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
+ background:radial-gradient(900px 600px at 12% 8%,#7B3FE422,transparent 60%),radial-gradient(800px 600px at 92% 30%,#f0b42912,transparent 60%),
+ radial-gradient(1000px 700px at 50% 110%,#7B3FE41c,transparent 60%),var(--bg)}
+body:after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:var(--court) center 62%/min(1500px,190vw) auto no-repeat;
+ -webkit-mask-image:radial-gradient(ellipse at 50% 60%,#000 25%,transparent 75%);mask-image:radial-gradient(ellipse at 50% 60%,#000 25%,transparent 75%)}
+.grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+ background-image:radial-gradient(#ffffff0a 1px,transparent 1.2px);background-size:22px 22px}
 a{color:var(--brand2)}
-header{background:var(--head);position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
-header:before{content:"";position:absolute;inset:-60% -8% auto auto;width:520px;height:520px;border-radius:50%;
- background:radial-gradient(closest-side,#7B3FE455,transparent);pointer-events:none}
-.top{max-width:1180px;margin:auto;padding:18px 16px 16px;display:flex;align-items:center;gap:14px;position:relative;flex-wrap:wrap}
-.logo{width:56px;height:56px;flex:none;filter:drop-shadow(0 6px 14px #7B3FE466);animation:bob 5s ease-in-out infinite}
-.logo svg{width:100%;height:100%}
+header{position:relative;overflow:hidden;border-bottom:1px solid #7B3FE455;isolation:isolate;
+ background:linear-gradient(115deg,#1b0d3a 0%,#3a1a78 38%,#24104d 62%,#140a2b 100%)}
+header .art{position:absolute;inset:0;z-index:-1;pointer-events:none}
+header .art:before{content:"";position:absolute;inset:0;background:var(--courtH) 50% 46%/1400px auto no-repeat;opacity:.9}
+header .art:after{content:"";position:absolute;inset:0;
+ background:radial-gradient(520px 260px at 18% 0%,#a27bff55,transparent 70%),radial-gradient(420px 240px at 86% 120%,#f0b42933,transparent 70%),
+ repeating-linear-gradient(115deg,transparent 0 46px,#ffffff06 46px 48px)}
+header .sweep{position:absolute;inset:-50% auto -50% -30%;width:30%;z-index:-1;pointer-events:none;
+ background:linear-gradient(90deg,transparent,#ffffff14,transparent);transform:skewX(-18deg);animation:sweep 9s ease-in-out infinite}
+@keyframes sweep{0%{left:-35%}55%,100%{left:120%}}
+header .stripe{position:absolute;left:0;right:0;bottom:0;height:3px;background:linear-gradient(90deg,#7B3FE4,#f0b429 50%,#7B3FE4)}
+@media (prefers-color-scheme:light){header{background:linear-gradient(115deg,#2a1457 0%,#5b2fb8 40%,#3a1a78 65%,#22104a 100%)}}
+header,header .brand h1,header .meta{color:#f4f1fb}header .brand h1 b{color:#f0b429}
+.top{max-width:1180px;margin:auto;padding:26px 16px 24px;display:flex;align-items:center;gap:16px;position:relative;flex-wrap:wrap}
+.logo{width:64px;height:64px;flex:none;filter:drop-shadow(0 6px 14px #7B3FE466);animation:bob 5s ease-in-out infinite}
+.logo svg{width:100%;height:100%}a.logo{display:block;border-radius:50%;transition:transform .2s}
+a.logo:hover{transform:scale(1.06)}a.logo:focus-visible{outline:2px solid var(--gold);outline-offset:3px}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
-.brand{min-width:0;flex:1}.brand h1{margin:0;font-size:23px;font-weight:850;letter-spacing:.06em;line-height:1.1}
+.brand{min-width:0;flex:1}.brand h1{margin:0;font-size:26px;text-shadow:0 2px 18px #7B3FE499;font-weight:850;letter-spacing:.06em;line-height:1.1}
 .brand h1 b{color:var(--gold)}.meta{font-size:13px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
-.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:650;padding:3px 10px;border-radius:99px;
- background:var(--card2);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
-.pill.v{color:var(--brand2);border-color:#7B3FE455;background:#7B3FE41a}
-.out{font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);padding:6px 12px;border-radius:99px;
- background:var(--card2)}.out:hover{color:var(--text);border-color:var(--brand)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:650;padding:4px 11px;border-radius:99px;
+ background:#ffffff12;border:1px solid #ffffff22;color:#e6def7;white-space:nowrap;backdrop-filter:blur(6px)}
+.pill.v{color:#d9c8ff;border-color:#a27bff66;background:#7B3FE433}
+button.pill{font:inherit;font-size:12px;font-weight:700;cursor:pointer;color:#fff;background:linear-gradient(180deg,#8b55f0,#6a32d6);
+ border-color:#b99bff88;box-shadow:0 4px 14px -6px #7B3FE4}button.pill:hover{filter:brightness(1.12)}
+button.pill:focus-visible,.out:focus-visible,.copy:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.out{font-size:13px;font-weight:650;color:#efe8ff;text-decoration:none;border:1px solid #ffffff2e;padding:7px 14px;border-radius:99px;
+ background:#ffffff12;backdrop-filter:blur(6px)}.out:hover{background:#ffffff22;border-color:#f0b429}
+/* the staff list */
+.sheet{position:fixed;inset:0;z-index:50;display:none;align-items:flex-start;justify-content:center;padding:70px 16px 16px;
+ background:#07040dcc;backdrop-filter:blur(4px)}.sheet.on{display:flex}
+.sheet .panel{width:min(560px,100%);max-height:calc(100vh - 100px);overflow:auto;background:var(--card);border:1px solid var(--line);
+ border-radius:18px;box-shadow:0 30px 60px -20px #000c;padding:16px 18px}
+.sheet h3{margin:0;font-size:18px}.sheet .sub{color:var(--muted);font-size:13px;margin:4px 0 12px}
+.sheet .x{float:right;font:inherit;font-size:13px;background:var(--card2);border:1px solid var(--line);color:var(--muted);
+ border-radius:99px;padding:5px 12px;cursor:pointer}
+.person{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line)}.person:first-of-type{border-top:0}
+.av{width:36px;height:36px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:800;font-size:14px;color:#fff;
+ background:linear-gradient(135deg,#7B3FE4,#3a1a78);border:2px solid var(--line)}
+.person b{display:block;font-size:14.5px}.person i{display:block;font-style:normal;font-size:12px;color:var(--muted)}
+.badge{margin-left:auto;font-size:11px;font-weight:750;padding:3px 9px;border-radius:99px;white-space:nowrap}
+.badge.admin{background:#f0b42926;color:var(--gold);border:1px solid #f0b42955}.badge.mod{background:#7B3FE426;color:var(--brand2);border:1px solid #7B3FE455}
+.badge.staff{background:var(--card2);color:var(--muted);border:1px solid var(--line)}
+.badge.creator{background:linear-gradient(135deg,#f0b429,#ff7ac6 55%,#a27bff);color:#1a0f33;border:0;box-shadow:0 0 12px #f0b42966}
+.badge.owner{background:linear-gradient(135deg,#f0b429,#c9952a);color:#1a0f33;border:0}
+.badge.removed{background:#fb718522;color:var(--down);border:1px solid #fb718555;margin-left:6px}
+.dm{font-size:12px;font-weight:650;color:var(--brand2);text-decoration:none;border:1px solid var(--line);border-radius:99px;
+ padding:4px 10px;white-space:nowrap;margin-left:8px}.dm:hover{border-color:var(--brand);color:var(--text)}
+.person .who{min-width:0;flex:1}.person .who b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* history */
+.hist{max-height:430px;overflow:auto;margin:0 -4px;padding:0 4px}
+.ev{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.ev:first-child{border-top:0}.ev .ic{width:22px;text-align:center;flex:none}.ev .tx{flex:1;min-width:0;overflow-wrap:anywhere}
+.ev time{color:var(--faint);font-size:12px;white-space:nowrap}.ev a{font-size:12px}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:-2px 0 8px}.filters button{font:inherit;font-size:12px;font-weight:650;
+ padding:4px 11px;border-radius:99px;border:1px solid var(--line);background:var(--card2);color:var(--muted);cursor:pointer}
+.filters button.on{color:#fff;background:var(--brand);border-color:var(--brand)}
+.bar{height:8px;border-radius:99px;background:var(--card2);overflow:hidden;margin:6px 0 4px}.bar i{display:block;height:100%;
+ background:linear-gradient(90deg,#7B3FE4,#a27bff);border-radius:99px}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:2px 0 8px}.trio div{background:var(--card2);border:1px solid var(--line);
+ border-radius:12px;padding:8px 10px}.trio b{display:block;font-size:20px}.trio span{font-size:12px;color:var(--muted)}
+.cat h3{margin:10px 0 6px;font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.cmd{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line);background:var(--card2);border-radius:10px;
+ margin-bottom:6px;min-width:0}.cmd code{font:12.5px/1.35 ui-monospace,Menlo,monospace;color:var(--brand2);overflow-wrap:anywhere}
+.cmd span{flex:1;min-width:0}.cmd i{display:block;font-style:normal;font-size:12px;color:var(--muted)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px}.chip{font-size:12px;font-weight:650;padding:3px 10px;border-radius:99px;
+ background:var(--card2);border:1px solid var(--line)}
+.warnbox{background:#fbbf2414;border:1px solid #fbbf2455;color:var(--text);border-radius:12px;padding:9px 11px;font-size:13px;margin:6px 0 10px}
 main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-width:0;box-shadow:var(--shadow)}
 .card h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--brand2);margin:0 0 10px;font-weight:800}
-.wide{grid-column:1/-1}
+.wide{grid-column:1/-1}@media (min-width:980px){.span2{grid-column:span 2}}
 .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:14px}
 .row:first-of-type{border-top:0}.row>span:first-child{min-width:0}.row>span:last-child{text-align:right;color:var(--muted);overflow-wrap:anywhere}
 .muted{color:var(--muted);font-size:13px}.err{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--down);overflow-wrap:anywhere;margin:2px 0 6px}
@@ -29452,6 +29871,7 @@ main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:14px;grid-temp
 .need:first-of-type{border-top:0}.need .ic{width:22px;text-align:center;flex:none}
 .tools{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
 .tools h3{margin:0 0 8px;font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.card{backdrop-filter:blur(2px)}
 .tile{display:flex;align-items:center;gap:10px;padding:9px 11px;margin-bottom:7px;border-radius:12px;background:var(--tile);
  border:1px solid var(--line);color:var(--text);text-decoration:none;min-width:0}
 .tile:hover{background:var(--tileh);border-color:var(--brand)}.tile .ic{font-size:17px;width:22px;text-align:center;flex:none}
@@ -29466,10 +29886,15 @@ main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:14px;grid-temp
  color:var(--muted);cursor:pointer}.copy:hover{color:var(--text);border-color:var(--brand)}
 footer{max-width:1180px;margin:0 auto;padding:4px 16px 28px;color:var(--faint);font-size:12px}
 </style></head><body>
-<header><div class="top"><div class="logo" aria-hidden="true">{{LOGO}}</div>
+<div class="grain" aria-hidden="true"></div>
+<header><div class="art" aria-hidden="true"></div><div class="sweep" aria-hidden="true"></div><div class="top"><a class="logo" href="/" title="Back to the dashboard" aria-label="Back to the dashboard">{{LOGO}}</a>
 <div class="brand"><h1>PIMP-BOT <b>STAFF</b></h1><div class="meta"><span class="pill v" id="ver">…</span>
-<span class="pill" id="who"></span><span class="pill" id="upd">loading…</span></div></div>
-<a class="out" href="/staff/logout">Sign out</a></div></header>
+<button class="pill" id="staffbtn" type="button" aria-haspopup="dialog">👥 Staff</button><span class="pill" id="who" hidden></span>
+<span class="pill" id="upd">loading…</span></div></div>
+<a class="out" href="/staff/logout">Sign out</a></div><div class="stripe" aria-hidden="true"></div></header>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT"><div class="panel">
+<button class="x" id="sheetX" type="button">Close</button><h3 id="sheetT">👥 Staff</h3><div class="sub" id="sheetSub">Loading…</div>
+<div id="sheetBody"></div></div></div>
 <main id="m"><section class="card wide muted">Loading…</section></main>
 <footer>Admins and mods only. This page refreshes every 30 seconds. Links open in a new tab.</footer>
 <script>
@@ -29483,7 +29908,7 @@ const dot=c=>'<i class="dot '+(c||'')+'"></i>';
 const row=(a,b)=>'<div class="row"><span>'+a+'</span><span>'+b+'</span></div>';
 const card=(t,body,cls)=>'<section class="card '+(cls||'')+'"><h2>'+esc(t)+'</h2>'+body+'</section>';
 const safeUrl=u=>/^(https:\/\/[^\s"'<>]+|\/[A-Za-z0-9_\-\/.?=&]*)$/.test(u||'')?u:null;
-let loadedAt=0;
+let loadedAt=0,HF='all',LAST=null;
 function needs(d){
  const n=[], st=d.status;
  if(!st.ok)n.push(['🔴','<b>The bot isn\'t healthy:</b> '+esc(st.why)]);
@@ -29495,14 +29920,18 @@ function needs(d){
  if(!d.outage.channels.admin||!d.outage.channels.members)n.push(['🛠️','<b>Pick the alert channels</b> with <code>/outage channels</code> so outages reach people.']);
  if(d.needs&&d.needs.length)n.push(['🧾','<b>'+d.needs.length+(d.needs.length>1?' slips need':' slip needs')+' a person:</b> '
    +d.needs.slice(0,6).map(x=>esc(x.who)+(x.id?' #'+x.id:'')+' ('+esc(x.why.toLowerCase())+')').join(', ')+(d.needs.length>6?'…':'')]);
+ if(d.owner&&d.owner.lockdown)n.push(['🔒','<b>Locked down:</b> staff tools are owners only. <code>/owner lockdown on:False</code> ends it.']);
+ if(d.owner&&!d.owner.set)n.push(['🛡️','<b>Set your owner ID.</b> Add <code>OWNER_IDS</code> (your Discord user ID) in Railway so nobody else can take over the failsafe.']);
+ if(d.asks&&d.asks.limit&&d.asks.used>=0.9*d.asks.limit)n.push(['💬','<b>Questions almost used up:</b> '+d.asks.used+' of '+d.asks.limit+' today.']);
+ if(d.scans&&d.scans.week&&d.scans.week.failed>=3)n.push(['📸','<b>'+d.scans.week.failed+' screenshots failed to read this week.</b> See the scan log below.']);
  if(d.stale_open)n.push(['⏳','<b>'+d.stale_open+' slip'+(d.stale_open>1?'s have':' has')+' been open 4+ days.</b> Worth a look in <code>/inbox</code>.']);
  if(d.errors.slip&&d.errors.slip_at&&Date.now()-Date.parse(d.errors.slip_at)<3*3600e3)n.push(['🔎','<b>Slip reading had an error</b> '+ago(d.errors.slip_at)+'<div class="err">'+esc(d.errors.slip)+'</div>']);
  return n;
 }
 function render(d){
- loadedAt=Date.now();
+ loadedAt=Date.now();LAST=d;
  $('#ver').textContent=d.version.split(' ').pop();
- $('#who').textContent=d.viewer?('Signed in as '+d.viewer):'Staff';
+ const w=$('#who');if(d.viewer){w.textContent='Signed in as '+d.viewer;w.hidden=false}else w.hidden=true;
  document.title=(d.status.ok?'':'⚠ ')+'PIMP-BOT Staff';
  const st=d.status, list=needs(d), bad=!st.ok, warn=!bad&&list.length>0;
  const h=[];
@@ -29519,11 +29948,13 @@ function render(d){
   +row('Scheduler',dot(st.cycle.ok?'ok':'bad')+esc(st.cycle.ago||'not run yet'))
   +row('Memory',dot(st.memory_mb==null?'':st.memory_mb<700?'ok':st.memory_mb<1500?'warn':'bad')+(st.memory_mb==null?'?':st.memory_mb+' MB'))));
  const u=d.uptime_pct||{};
- const pct=v=>v==null?'–':(v>=99.995?'100':v.toFixed(v>=99.9?2:1))+'%';
+ const pct=v=>v==null?'<small>starting…</small>':(v>=99.995?'100':v.toFixed(v>=99.9?2:1))+'%';
  h.push(card('Uptime','<div class="stats"><div><div class="big num">'+pct(u.d7)+'</div><div class="muted">last 7 days</div></div>'
   +'<div><div class="big num">'+pct(u.d30)+'</div><div class="muted">last 30 days</div></div></div>'
-  +row('Outages in 7 days',u.count7==null?'–':u.count7)+row('Longest in 7 days',esc(u.longest7||'none'))
-  +(u.since?'<div class="muted">Counting since '+esc(when(u.since))+'.</div>':'')));
+  +row('Outages in 7 days',u.count7==null?'–':u.count7)+row('Longest outage',esc(u.longest7||'none'))
+  +row('Restarts in 7 days',u.restarts7==null?'–':u.restarts7)
+  +(u.d7==null?'<div class="muted">The numbers show up after the bot has been tracking for 10 minutes.</div>'
+   :u.since?'<div class="muted">Counting since '+esc(when(u.since))+'. Restarts under '+(u.min||3)+' min don\'t count as outages.</div>':'')));
  const o=d.outage, oc=o.channels;
  let ob=row('Admin alerts',oc.admin?esc(oc.admin):dot('warn')+'not set')+row('Member alerts',oc.members?esc(oc.members):dot('warn')+'not set');
  ob+=o.open?row('Open alert',dot('warn')+esc(o.open.problem)+' · '+ago(o.open.since)):row('Open alert','none');
@@ -29539,7 +29970,21 @@ function render(d){
  if(d.errors.ai)eb+='<div class="muted">Last AI error</div><div class="err">'+esc(d.errors.ai)+'</div>';
  h.push(card('Slip reading & AI',eb));
  const reads=(d.reads||[]).concat(d.questions||[]).filter(r=>r.n);
- h.push(card('Today',reads.length?reads.map(r=>row(esc(r.name),'<span class="num">'+r.n+'</span>')).join(''):'<div class="muted">No slip reads or questions yet today.</div>'));
+ const a=d.asks||{used:0,limit:0}, ap=a.limit?Math.min(100,Math.round(100*a.used/a.limit)):0;
+ h.push(card('Today','<div class="row"><span>Questions</span><span class="num">'+a.used+' of '+a.limit+'</span></div><div class="bar"><i style="width:'+ap+'%"></i></div>'
+  +(reads.length?reads.map(r=>row(esc(r.name),'<span class="num">'+r.n+'</span>')).join(''):'<div class="muted">No slip reads yet today.</div>')));
+ const sc=d.scans||{week:{ok:0,unsure:0,failed:0},recent:[]}, sw=sc.week;
+ h.push(card('Screenshot reads · 7 days','<div class="trio"><div><b class="num" style="color:var(--up)">'+sw.ok+'</b><span>read clean</span></div>'
+  +'<div><b class="num" style="color:var(--warn)">'+sw.unsure+'</b><span>not sure</span></div><div><b class="num" style="color:var(--down)">'+sw.failed+'</b><span>failed</span></div></div>'
+  +((sc.recent||[]).length?sc.recent.map(r=>row(dot(r.result==='failed'?'bad':'warn')+esc(r.who||'someone')+' · '+esc(ago(r.at)),
+   (r.jump&&safeUrl(r.jump)?'<a href="'+esc(r.jump)+'" target="_blank" rel="noopener noreferrer">open</a>':''))+(r.why&&r.why.length?'<div class="err">'+esc(r.why.join(' · '))+'</div>':'')).join('')
+   :'<div class="muted">'+dot('ok')+'No problem reads lately.</div>')));
+ const hist=d.history||[];
+ h.push(card('Live server history','<div class="filters" id="hf">'+[['all','All'],['slips','Slips'],['scans','Scans'],['staff','Staff'],['system','System']]
+  .map(f=>'<button type="button" data-f="'+f[0]+'" class="'+(HF===f[0]?'on':'')+'">'+f[1]+'</button>').join('')+'</div><div class="hist">'
+  +(hist.filter(x=>HF==='all'||x.kind===HF).map(x=>'<div class="ev"><span class="ic">'+esc(x.icon||'•')+'</span><span class="tx">'+esc(x.text)
+   +(x.jump&&safeUrl(x.jump)?' · <a href="'+esc(x.jump)+'" target="_blank" rel="noopener noreferrer">open</a>':'')+'</span><time>'+esc(ago(x.at))+'</time></div>').join('')
+   ||'<div class="muted">Nothing here yet. It fills in as people log slips and staff use the bot.</div>')+'</div>','span2'));
  h.push(card('Data feeds',(d.feeds||[]).map(f=>row(dot(f.state==='ok'?'ok':f.state==='down'?'bad':f.state==='shaky'?'warn':'')+esc(f.name),
   esc(f.state)+(f.last_ok?' · ok '+esc(f.last_ok):'')+(f.fail?' · '+f.fail+' fails':''))).join('')||'<div class="muted">No lookups yet.</div>'));
  const jobs=d.jobs||[], failing=jobs.filter(j=>j.fails);
@@ -29553,11 +29998,42 @@ function render(d){
    +'</div><div class="muted" style="margin-top:6px">Add your own with <code>/links add</code> in Discord.</div>','wide'));
  const steps=[['1 · Tell members','/outage alert problem:'],['2 · Team is on it','/outage update eta:30m note:'],
   ['3 · All clear','/outage resolved note:'],['Check everything','/outage status']];
- h.push(card('Outage playbook','<div class="steps">'+steps.map(s=>'<div class="step"><b>'+esc(s[0])+'</b><code>'+esc(s[1])
-  +'</code><button class="copy" type="button" data-copy="'+esc(s[1])+'">Copy</button></div>').join('')+'</div>','wide'));
- if((o.log||[]).length)h.push(card('Restarts & outages',o.log.map(x=>row(esc(when(x.to)),'down '+esc(x.dur)+' · '+esc(x.why))).join(''),'wide'));
+ const cats=[['🧾 Slips & picks',[['/pick','Log a slip by hand'],['/track pick_id:','Leg by leg: what the bot is following'],['/inbox','Slips that need a person'],['/result pick_id: outcome:','Settle a slip yourself'],['/calc slip pick_id:','How each leg has hit lately']]],
+  ['👥 Staff & access',[['/dashboard section:Admin health','Your own 12-hour link to this page'],['/links add name: url:','Add to the toolbox'],['/admin panel','Every server switch in one place'],['/admin check','Why isn\'t a channel logging slips?']]],
+  ['⚙️ Server setup',[['/outage channels','Admin + member alert channels, ping role'],['/admin setup','Channels and features, step by step'],['/admin status','Version, uptime, connections'],['/backups','Nightly backup to a channel']]],
+  ['🛡️ Owner only',[['/owner status','Owners, lockdown, removed people'],['/owner lockdown on:True','Staff tools owners-only, now'],['/owner remove member:','Take one person\'s staff access'],['/owner newkey','Swap the dashboard key'],['/owner asklimit per_day:','Daily question limit']]]];
+ h.push(card('Playbook','<div class="steps">'+steps.map(s=>'<div class="step"><b>'+esc(s[0])+'</b><code>'+esc(s[1])
+  +'</code><button class="copy" type="button" data-copy="'+esc(s[1])+'">Copy</button></div>').join('')+'</div>'
+  +'<div class="tools" style="margin-top:6px">'+cats.map(c=>'<div class="cat"><h3>'+esc(c[0])+'</h3>'+c[1].map(x=>'<div class="cmd"><span><code>'+esc(x[0])+'</code><i>'+esc(x[1])
+   +'</i></span><button class="copy" type="button" data-copy="'+esc(x[0])+'">Copy</button></div>').join('')+'</div>').join('')+'</div>','wide'));
+
  $('#m').innerHTML=h.join('');
 }
+const initials=n=>(String(n||'?').trim().split(/\s+/).map(x=>x[0]).join('').slice(0,2)||'?').toUpperCase();
+async function openStaff(){const sh=$('#sheet');sh.classList.add('on');$('#sheetX').focus();
+ try{const r=await fetch('/api/staff/people.json',{credentials:'same-origin'});if(r.status===403){location.reload();return}
+  const d=await r.json();
+  $('#sheetSub').innerHTML=d.channel?('Everyone who can see <b>'+esc(d.channel)+'</b>, the staff channel.'):'No staff channel yet.';
+  let b='';
+  if(!d.channel)b+='<div class="warnbox">Pick the staff channel with <code>/outage channels admin:#channel</code>. Whoever can see it counts as staff here.</div>';
+  if(d.everyone)b+='<div class="warnbox">⚠️ Everyone in the server can see '+esc(d.channel)+'. Make it private so it\'s really staff-only.</div>';
+  if((d.roles||[]).length)b+='<div class="muted">Roles with access</div><div class="chips">'+d.roles.map(r=>'<span class="chip" style="'+(r.color?'color:'+esc(r.color):'')+'">'
+   +esc(r.name)+(r.count!=null?' · '+r.count:'')+'</span>').join('')+'</div>';
+  if(d.lockdown)b+='<div class="warnbox">🔒 Locked down: only owners can use staff tools right now (<code>/owner lockdown on:False</code> to undo).</div>';
+  const lab={Creator:'👑 Creator',Owner:'Owner',Admin:'Admin',Mod:'MOD',Staff:'Staff'};
+  b+=(d.people||[]).map(p=>{const id=/^\d{5,22}$/.test(p.id||'')?p.id:null;
+   return '<div class="person"><span class="av"'+(p.color?' style="background:'+esc(p.color)+'"':'')+'>'+esc(initials(p.name))+'</span><span class="who"><b>'+esc(p.name)
+   +'</b><i>'+esc(p.role||'')+(p.seen?(p.role?' · ':'')+'on this page '+esc(ago(p.seen)):'')+'</i></span><span class="badge '+esc(String(p.level).toLowerCase())+'">'+esc(lab[p.level]||p.level)+'</span>'
+   +(p.removed?'<span class="badge removed">removed</span>':'')
+   +(id?'<a class="dm" href="https://discord.com/users/'+id+'" target="_blank" rel="noopener noreferrer" title="Open their Discord profile to message them">💬 Message</a>':'')+'</div>'}).join('')
+   ||'<div class="muted">Nobody to show yet.</div>';
+  if(d.partial)b+='<div class="muted" style="margin-top:10px">Showing the members the bot has seen lately. For the full list, set <code>MEMBERS_INTENT=1</code> in Railway and switch on <b>Server Members Intent</b> in the Discord developer portal.</div>';
+  $('#sheetBody').innerHTML=b}catch(e){$('#sheetSub').textContent='Couldn\'t load the staff list. Try again in a moment.'}}
+function closeStaff(){$('#sheet').classList.remove('on');$('#staffbtn').focus()}
+$('#staffbtn').addEventListener('click',openStaff);$('#sheetX').addEventListener('click',closeStaff);
+$('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeStaff()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sheet').classList.contains('on'))closeStaff()});
+document.addEventListener('click',e=>{const f=e.target.closest('[data-f]');if(f){HF=f.getAttribute('data-f');if(LAST)render(LAST);}});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-copy]');if(!b)return;
  const t=b.getAttribute('data-copy');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{b.textContent='Copied';
  setTimeout(()=>b.textContent='Copy',1500)}).catch(()=>{b.textContent='Copy failed'})});
@@ -29565,7 +30041,9 @@ setInterval(()=>{if(loadedAt)$('#upd').textContent='updated '+ago(new Date(loade
 async function load(){try{const r=await fetch('/api/staff.json',{credentials:'same-origin'});
  if(r.status===403){location.reload();return}render(await r.json());$('#upd').textContent='updated just now'}catch(e){$('#upd').textContent='offline? retrying…'}}
 load();setInterval(load,30000);
-</script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+</script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace(
+    "{{LOGO}}", DASH_LOGO_SVG).replace("{{COURT_D}}", dash_court("#a27bff", 0.06)).replace(
+    "{{COURT_L}}", dash_court("#7B3FE4", 0.08)).replace("{{COURT_H}}", dash_court("#ffffff", 0.10))
 
 HELP_EXTRA.append(("🚨 Outage alerts", (
     "`/outage channels` picks where admin alerts and member alerts go (and a role to ping). When the bot shuts down, "
@@ -30020,7 +30498,7 @@ class PicksBot(discord.Client):
         intent = slip_intent(getattr(message, "content", "")) if images or mentioned else "log"
         if images and (self.is_receipts_channel(message.channel) or mentioned):
             if intent == "ask":
-                await self.review_slip(message, message, images[0])
+                await self.review_slips(message, message, images)
             else:
                 await self.log_slips(message, images)
             return
@@ -30029,7 +30507,7 @@ class PicksBot(discord.Client):
             ref = message.reference.resolved
             if isinstance(ref, discord.Message) and not ref.author.bot and image_attachments(ref):
                 if intent == "ask":
-                    await self.review_slip(message, ref, image_attachments(ref)[0])
+                    await self.review_slips(message, ref, image_attachments(ref))
                 else:
                     await self.log_slips(ref, image_attachments(ref))
                 return
@@ -30059,7 +30537,7 @@ class PicksBot(discord.Client):
                     or self.bot_role_ids(message))
 
     async def log_slips(self, message: discord.Message, images: list, quiet: bool = False):
-        for attachment in images[:4]:
+        for attachment in images[:10]:
             try:
                 await self.handle_slip(message, attachment, quiet=quiet)
             except Exception as exc:
@@ -30109,8 +30587,8 @@ class PicksBot(discord.Client):
             return
         count_key = f"asks:{datetime.now(TZ).date().isoformat()}"
         used = int(get_setting(message.guild.id, count_key) or 0)
-        if used >= ASK_DAILY_LIMIT:
-            await message.reply(f"That's the server's {ASK_DAILY_LIMIT} questions for today. "
+        if used >= ask_limit(message.guild.id):
+            await message.reply(f"That's the server's {ask_limit(message.guild.id):,} questions for today. "
                                 "Back tomorrow.", mention_author=False)
             return
         self.ask_cooldowns[message.author.id] = time.monotonic()
@@ -30175,6 +30653,8 @@ class PicksBot(discord.Client):
         if slip_reader_on() and (attachment.size or 0) <= MAX_IMAGE_BYTES:
             async with message.channel.typing():
                 slip, reason = await read_slip_best(attachment)
+            if not quiet or (slip is not None and slip.get("cost") is not None):
+                scan_log_add(message.guild.id, message, attachment, slip, reason, "log")
         elif slip_reader_on():
             reason = f"the image is too big ({(attachment.size or 0) // 1024} KB)"
             SLIP_STATE["last_error"] = (now_iso(), f"Image too big to read ({(attachment.size or 0) // 1024} KB)")
@@ -30362,19 +30842,54 @@ class PicksBot(discord.Client):
                       getattr(first, "id", None), slip)
         return True
 
-    async def review_slip(self, message: discord.Message, image_message: discord.Message, attachment):
-        """'What do you think of this?' with a screenshot: read it, break it down, log nothing."""
+    async def review_slips(self, message: discord.Message, image_message: discord.Message, images: list):
+        """Several screenshots in one message: one question for all of them, a breakdown for each."""
         gate = ask_gate(message.guild.id, message.author.id)
         if gate:
             await message.reply(gate, mention_author=False)
             return
+        many = len(images) > 1
+        for n, attachment in enumerate(images[:6], 1):
+            try:
+                await self.review_slip(message, image_message, attachment, gated=True,
+                                       label=f"Slip {n} of {min(len(images), 6)}" if many else None)
+            except Exception:
+                log.exception("Breakdown failed for image %s", n)
+                try:
+                    await message.reply(f"⚠️ I couldn't break down slip {n}. Try that one again on its own.",
+                                        mention_author=False)
+                except Exception:
+                    pass
+        if len(images) > 6:
+            await message.reply(f"That's the first 6 of {len(images)}. Send the rest in another message.",
+                                mention_author=False)
+
+    async def review_slip(self, message: discord.Message, image_message: discord.Message, attachment,
+                          gated: bool = False, label: Optional[str] = None):
+        """'What do you think of this?' with a screenshot: read it, break it down, log nothing."""
+        if not gated:
+            gate = ask_gate(message.guild.id, message.author.id)
+            if gate:
+                await message.reply(gate, mention_author=False)
+                return
         slip, reason = None, None
         if (attachment.size or 0) <= MAX_IMAGE_BYTES:
             async with message.channel.typing():
                 slip, reason = await read_slip_best(attachment)
-        if slip is None or not (slip.get("legs") or slip.get("description")):
-            await message.reply(f"I couldn't read that slip{': ' + reason if reason else ''}. Try a clearer screenshot.",
-                                mention_author=False)
+        scan_log_add(message.guild.id, image_message, attachment, slip, reason, "breakdown")
+        head = f"**{label}** · " if label else ""
+        if slip is None or not slip.get("legs"):
+            if not label:
+                ask_refund(message.guild.id)
+            got = ""
+            if slip and slip.get("cost") is not None:
+                got = (f" I can see {money(slip['cost'])}" + (f" to win {money(slip['payout'])}" if slip.get("payout") else "")
+                       + (f" on a {slip['description']}" if slip.get("description") else "") + ", but not the picks.")
+            await message.reply(
+                f"{head}🔎 I couldn't read the picks on that screenshot{': ' + reason if reason and not got else '.'}"
+                f"{got} Try a screenshot of the whole slip, not cropped, or type the legs like "
+                "`Shohei Ohtani over 2.5 Hitter FS`." + ("" if label else " (That one didn't count toward today's questions.)"),
+                mention_author=False)
             return
         save_slip_draft(message.guild.id, image_message, slip)
         question = re.sub(r"<@[!&]?\d+>", " ", getattr(message, "content", "") or "").strip()
@@ -30384,6 +30899,8 @@ class PicksBot(discord.Client):
             text = (f"⚠️ I wasn't sure about {', '.join(clip(u, 60) for u in slip['_unsure'][:3])}"
                     + (f" (and {len(slip['_unsure']) - 3} more)" if len(slip["_unsure"]) > 3 else "")
                     + " on this screenshot, so double-check the legs below.\n\n" + text)
+        if label:
+            text = f"**{label}**\n" + text
         logged = db().execute("SELECT id FROM picks WHERE guild_id = ? AND slip_url = ?",
                               (message.guild.id, image_message.jump_url)).fetchone()
         chunks = split_message(text)
@@ -33099,6 +33616,7 @@ async def dashboard_cmd(interaction: discord.Interaction, section: Optional[app_
                 "**Networking** → **Generate Domain**. Then run this again.", ephemeral=True)
             return
         await audit(interaction.client, interaction.guild_id, f"{who(interaction)} opened the admin health page.")
+        staff_note_seen(interaction.user.id, interaction.user.display_name, interaction.guild_id)
         await interaction.response.send_message(
             f"🛠️ Admin health: {surl}\nThis link is yours: don't share it. It signs you in for "
             f"{STAFF_LINK_HOURS} hours.", ephemeral=True)
@@ -35524,6 +36042,125 @@ async def outage_test(interaction: discord.Interaction):
 
 
 bot.tree.add_command(outage_group)
+
+# ---- /owner: the failsafe (owners only; OWNER_IDS on Railway decides who that is) -------------------------
+
+owner_group = app_commands.Group(name="owner", description="Owner-only failsafe: lock down, remove access, new keys",
+                                 guild_only=True, default_permissions=discord.Permissions(administrator=True))
+
+
+def owner_only(fn):
+    @functools.wraps(fn)
+    async def wrapper(interaction, *args, **kwargs):
+        if not is_owner(interaction.user):
+            await sec_reply(interaction, "That's for the bot's owner only.")
+            try:
+                await audit(interaction.client, interaction.guild_id,
+                            f"🚫 {who(interaction)} tried an owner-only command (`/owner {getattr(fn, '__name__', '?')[6:]}`).")
+            except Exception:
+                pass
+            return
+        return await fn(interaction, *args, **kwargs)
+    return wrapper
+
+
+async def owner_note(interaction, text: str) -> None:
+    for kind in ("admin",):
+        try:
+            await outage_send(interaction.client, interaction.guild_id, kind, f"🛡️ {text}")
+        except Exception:
+            pass
+    await audit(interaction.client, interaction.guild_id, f"🛡️ {text}")
+
+
+@owner_group.command(name="status", description="Who the owners are, lockdown, removed people, the question limit")
+@owner_only
+async def owner_status(interaction: discord.Interaction):
+    blocked = sorted(owner_blocked_ids())
+    owners = ", ".join(f"<@{u}>" for u in sorted(OWNER_IDS)) if OWNER_IDS else \
+        "not set: the Discord server owner counts as the owner until you add `OWNER_IDS` on Railway"
+    lines = [f"**Owners:** {owners}", f"**Creator badge:** {'<@' + str(CREATOR_ID) + '>' if CREATOR_ID else 'not set'}",
+             f"**Lockdown:** {'🔒 ON: staff tools are owners only' if owner_lockdown() else 'off'}",
+             f"**Removed from staff:** {', '.join(f'<@{u}>' for u in blocked) if blocked else 'nobody'}",
+             f"**Questions today:** {ask_used(interaction.guild_id):,} of {ask_limit(interaction.guild_id):,}",
+             f"**Dashboard key:** {'set on Railway (change DASHBOARD_KEY there to swap it)' if env('DASHBOARD_KEY', '') else 'made by the bot (`/owner newkey` swaps it)'}"]
+    await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+@owner_group.command(name="lockdown", description="Lock every staff tool and the staff page to owners only (or unlock)")
+@app_commands.describe(on="True to lock down, False to unlock")
+@owner_only
+async def owner_lockdown_cmd(interaction: discord.Interaction, on: bool):
+    set_setting(0, "owner_lockdown", "on" if on else None)
+    if on:
+        set_setting(0, "staff_epoch", str(int(get_setting(0, "staff_epoch") or 0) + 1))
+    await owner_note(interaction, f"{who(interaction)} {'**locked down** the bot: staff tools and the staff page are owners only, and every staff sign-in was ended' if on else '**ended the lockdown**: staff tools work as normal again'}.")
+    await interaction.response.send_message("🔒 Locked down. Only owners can use staff tools until you unlock."
+                                            if on else "🔓 Unlocked.", ephemeral=True)
+
+
+@owner_group.command(name="remove", description="Take someone's staff access away (bot tools and the staff page)")
+@app_commands.describe(member="Who to remove")
+@owner_only
+async def owner_remove(interaction: discord.Interaction, member: discord.Member):
+    if owner_id_ok(member.id, interaction.guild_id):
+        await interaction.response.send_message("Owners can't be removed.", ephemeral=True)
+        return
+    ids = owner_blocked_ids() | {int(member.id)}
+    set_setting(0, "owner_blocked", json.dumps(sorted(ids)))
+    await owner_note(interaction, f"{who(interaction)} removed **{clip(member.display_name, 40)}**'s staff access.")
+    await interaction.response.send_message(f"Done: {clip(member.display_name, 40)} can't use staff tools or the staff "
+                                            "page anymore, whatever their Discord roles say. `/owner restore` undoes it.",
+                                            ephemeral=True)
+
+
+@owner_group.command(name="restore", description="Give someone their staff access back")
+@app_commands.describe(member="Who to restore")
+@owner_only
+async def owner_restore(interaction: discord.Interaction, member: discord.Member):
+    ids = owner_blocked_ids() - {int(member.id)}
+    set_setting(0, "owner_blocked", json.dumps(sorted(ids)))
+    await owner_note(interaction, f"{who(interaction)} restored **{clip(member.display_name, 40)}**'s staff access.")
+    await interaction.response.send_message(f"Restored {clip(member.display_name, 40)}.", ephemeral=True)
+
+
+@owner_group.command(name="signout", description="End every staff page sign-in right now")
+@owner_only
+async def owner_signout(interaction: discord.Interaction):
+    set_setting(0, "staff_epoch", str(int(get_setting(0, "staff_epoch") or 0) + 1))
+    await owner_note(interaction, f"{who(interaction)} signed everyone out of the staff page.")
+    await interaction.response.send_message("Everyone is signed out of the staff page. Their old links don't work.",
+                                            ephemeral=True)
+
+
+@owner_group.command(name="newkey", description="Swap the dashboard key: old links stop working, everyone signs in again")
+@owner_only
+async def owner_newkey(interaction: discord.Interaction):
+    if env("DASHBOARD_KEY", ""):
+        await interaction.response.send_message("The key is set on Railway (`DASHBOARD_KEY`). Change it there and the bot "
+                                                "redeploys with the new one.", ephemeral=True)
+        return
+    import secrets
+    set_setting(0, "dashboard_key", secrets.token_urlsafe(18))
+    set_setting(0, "staff_epoch", str(int(get_setting(0, "staff_epoch") or 0) + 1))
+    await owner_note(interaction, f"{who(interaction)} swapped the dashboard key. Old dashboard links no longer work.")
+    url = dashboard_url()
+    await interaction.response.send_message("🔑 New key made. Every old dashboard link and sign-in has stopped working."
+                                            + (f"\nYour new link: {url}" if url else ""), ephemeral=True)
+
+
+@owner_group.command(name="asklimit", description="How many questions the server gets per day")
+@app_commands.describe(per_day="Questions per day (10 to 5000)")
+@owner_only
+async def owner_asklimit(interaction: discord.Interaction, per_day: app_commands.Range[int, 10, 5000]):
+    set_setting(interaction.guild_id, "ask_limit", str(per_day))
+    await owner_note(interaction, f"{who(interaction)} set the daily question limit to **{per_day:,}**.")
+    await interaction.response.send_message(f"Done: {per_day:,} questions a day. Free AI services have their own daily "
+                                            "caps; past those, questions use paid Claude (if it's set up).", ephemeral=True)
+
+
+bot.tree.add_command(owner_group)
+
 
 # ---- /links: the staff page's toolbox -------------------------------------------------------------
 
