@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r42"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r43"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -20436,6 +20436,7 @@ def dash_app(web):
     web.get("/staff/backup.db", staff_backup),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get("/api/board.json", dash39_api_board), web.get("/api/search.json", dash39_api_search),
+                    web.get("/api/research.json", dash43_api_research),
                     web.get("/manifest.webmanifest", dash39_manifest), web.get("/sw.js", dash39_sw),
                     web.get("/icon-192.png", dash39_icon_route), web.get("/icon-512.png", dash39_icon_route),
                     web.get("/icon-180.png", dash39_icon_route), web.get("/apple-touch-icon.png", dash39_icon_route),
@@ -21046,6 +21047,17 @@ html[data-theme=light] body:before,html[data-theme=light] body:after{opacity:0}
 html[data-theme=light] .chip,html[data-theme=light] .kbox,html[data-theme=light] .nitem{background:#f6f1ff;border-color:#e4d9fb}
 html[data-theme=light] .tile{background:rgba(250,247,255,.95)!important}
 html[data-theme=light] ::selection{background:#c4a3ff88}
+.rsh{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.rsh input{flex:1;min-width:0}
+.rctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 14px}.rctl input{width:92px;background:var(--card2);color:var(--text);
+ border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;font-size:16px}
+.rctl .chip.on,.rst .chip.on{border-color:var(--brand2);color:var(--brand2)}.rst{display:flex;flex-wrap:wrap;gap:6px}
+.rbars{display:flex;align-items:flex-end;gap:4px;height:150px;position:relative;margin:8px 0 4px;padding-top:6px}
+.rbars .b{flex:1;min-width:6px;border-radius:5px 5px 2px 2px;background:var(--down);opacity:.85;position:relative}
+.rbars .b.y{background:var(--up)}.rbars .b.p{background:var(--muted)}.rbars .ln{position:absolute;left:0;right:0;border-top:2px dashed var(--brand2)}
+.rbars .b span{position:absolute;top:-17px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--muted)}
+.rlab{display:flex;gap:4px}.rlab span{flex:1;min-width:6px;font-size:9px;color:var(--muted);text-align:center;overflow:hidden}
+.rrow{padding:10px 2px;border-bottom:1px solid var(--line)}.rrow:last-child{border-bottom:0}.rrow .nm{font-weight:600}
+.rnote{font-size:12px;color:var(--muted);margin-top:10px}.rlist{margin:0;padding-left:18px}.rlist li{margin:4px 0}
 </style><script>try{var pbb=localStorage.getItem('pb_bg');if(pbb)document.documentElement.dataset.bg=pbb}catch(e){}</script></head><body>
 <div class="bgfx pg" aria-hidden="true"><i></i><i></i><i></i></div>
 <div class="grain" aria-hidden="true"></div>
@@ -21420,12 +21432,58 @@ function openSearch(){openSheet();const inp=h('input',{class:'srch',type:'search
   put(out,grp('People',r.people.map(p=>h('button',{class:'row slip',type:'button',onclick:()=>go('#/p/'+p.key)},avatar(p.name),
     h('div',{style:'min-width:0'},h('div',{class:'nm',text:p.name}),h('div',{class:'sub',text:p.record})),h('span',{class:'net '+tone(p.net)},money(p.net))))),
    grp('Slips',r.slips.map(x=>slipRow(x))),
-   grp('Players on slips',r.players.map(x=>h('div',{class:'row slip'},h('span',{class:'chip',text:String(x.legs)}),
+   grp('Players on slips',r.players.map(x=>h('button',{class:'row slip',type:'button',onclick:()=>go('#/r/'+encodeURIComponent(x.name))},h('span',{class:'chip',text:String(x.legs)}),
     h('div',{style:'min-width:0'},h('div',{class:'nm',text:x.name}),h('div',{class:'sub',text:(x.hit||0)+' hit · '+(x.miss||0)+' missed'})),h('span',null,'')))),
    !r.people.length&&!r.slips.length&&!r.players.length?empty('Nothing found','Try a last name or a team.'):null)},250)});
- put($('#sheet-body'),h('div',{class:'ph'},h('div',{style:'min-width:0'},h('h3',{text:'Search'}),h('div',{class:'sub',text:'People, slips and the players on them. Hidden slips stay hidden.'}))),inp,out);
+ put($('#sheet-body'),h('div',{class:'ph'},h('div',{style:'min-width:0'},h('h3',{text:'Search'}),h('div',{class:'sub',text:'People, slips and the players on them. Hidden slips stay hidden.'}))),inp,
+  h('button',{type:'button',class:'chip',style:'margin-top:10px',onclick:()=>go('#/r'+(inp.value.trim().length>=2?'/'+encodeURIComponent(inp.value.trim()):''))},'🔬 Research any player'),out);
  setTimeout(()=>inp.focus(),50)}
-function route(){if(location.hash==='#/search'){openSearch();return}
+async function openResearch(q,opt){openSheet();opt=opt||{};
+ const inp=h('input',{class:'srch',type:'search',placeholder:'Player name, e.g. Jalen Brunson',autocomplete:'off','aria-label':'Player name',value:q&&q.split('|').length<4?q:''});
+ const body=h('div',{'aria-live':'polite'});
+ const form=h('form',{class:'rsh',onsubmit:e=>{e.preventDefault();const v=inp.value.trim();if(v.length>=2)go('#/r/'+encodeURIComponent(v))}},inp,h('button',{class:'chip',type:'submit'},'Look up'));
+ put($('#sheet-body'),h('div',{class:'ph'},h('div',{style:'min-width:0'},h('h3',{text:'🔬 Research'}),h('div',{class:'sub',text:'Any player: recent games against a line, splits, matchup, injuries. Past results, not a prediction.'}))),form,body);
+ if(!q){put(body,empty('Look up a player','Type a name and press Look up.'));setTimeout(()=>inp.focus(),50);return}
+ put(body,h('div',{class:'kpis'},skel(4,'card')));
+ const want=location.hash;const p=['q='+encodeURIComponent(q)];if(opt.stat)p.push('stat='+opt.stat);if(opt.line!=null&&opt.line!=='')p.push('line='+encodeURIComponent(opt.line));if(opt.side)p.push('side='+opt.side);
+ const d=await api('/api/research.json'+qs(...p));if(location.hash!==want)return;
+ if(!d){put(body,empty('Couldn’t look that up','ESPN may be slow. Try again in a bit.'));return}
+ if(d.error){put(body,empty(d.error,'Check the spelling, or try the full name.'));return}
+ if(d.choices){put(body,card('Which one?','',null,h('div',{class:'rows'},d.choices.map(c=>h('button',{class:'row slip',type:'button',onclick:()=>openResearch(c.ref)},
+  h('div',{style:'min-width:0'},h('div',{class:'nm',text:c.name}),h('div',{class:'sub',text:[c.team,c.league].filter(Boolean).join(' · ')})),h('span',null,'›'))))));return}
+ const re=(o)=>openResearch(d.player.ref,Object.assign({stat:d.stat.key,line:d.line,side:d.side},o));
+ const lineIn=h('input',{type:'number',step:'0.5',min:'0',value:String(d.line),'aria-label':'Line'});
+ const ctl=h('div',{class:'rctl'},h('span',{class:'muted',text:'Line'}),lineIn,
+  h('button',{type:'button',class:'chip'+(d.side==='over'?' on':''),onclick:()=>re({side:'over',line:lineIn.value})},'Over'),
+  h('button',{type:'button',class:'chip'+(d.side==='under'?' on':''),onclick:()=>re({side:'under',line:lineIn.value})},'Under'),
+  h('button',{type:'button',class:'chip',onclick:()=>re({line:lineIn.value})},'Update'));
+ const stats=h('div',{class:'rst'},d.options.map(o=>h('button',{type:'button',class:'chip'+(o.key===d.stat.key?' on':''),onclick:()=>re({stat:o.key,line:''})},o.name)));
+ const rows=d.recent.slice(0,20).reverse(),mx=Math.max(d.line,...rows.map(r=>r.value),1);
+ const bars=h('div',{class:'rbars',role:'img','aria-label':'Last '+rows.length+' games against '+d.line},
+  rows.map(r=>h('div',{class:'b'+(r.hit===true?' y':r.hit===null?' p':''),style:'height:'+Math.max(3,Math.round(r.value/mx*100))+'%',title:r.date+' '+r.at+' '+r.opp+': '+r.value},h('span',{text:String(r.value)}))),
+  h('div',{class:'ln',style:'bottom:'+Math.round(d.line/mx*100)+'%'}));
+ const labs=h('div',{class:'rlab'},rows.map(r=>h('span',{text:r.opp})));
+ const win=w=>w&&w.games?w.hit+'/'+w.games+(w.avg!=null?' · avg '+w.avg:''):'–';
+ const tr=(a,b)=>h('tr',null,h('td',{text:a}),h('td',{text:b}));
+ const more=[['🏠 Home',win(d.splits.home)],['✈️ Away',win(d.splits.away)]];
+ if(d.rest){more.push(['😴 Back-to-backs',win(d.rest.b2b)]);more.push(['Rested',win(d.rest.rested)])}
+ if(d.vs)more.push(['🆚 vs '+d.vs.opp+(d.vs.upcoming?'':' (last opponent)'),win(d.vs)]);
+ (d.role||[]).forEach(r=>more.push(['⏱️ '+r.name,r.l5+' lately'+(r.prev!=null?' ('+(r.trend==='up'?'▲':r.trend==='down'?'▼':'=')+' from '+r.prev+')':'')]));
+ const g=d.group||{};if(g.hit||g.miss)more.push(['👥 The group on him',g.hit+' hit · '+g.miss+' missed']);
+ put(body,h('div',{class:'ph'},avatar(d.player.name),h('div',{style:'min-width:0'},h('h3',{text:d.player.name}),h('div',{class:'sub',text:[d.player.team,d.player.league].filter(Boolean).join(' · ')}))),
+  stats,ctl,
+  h('div',{class:'kpis'},d.windows.map(w=>kbox(w.n+' '+d.side,w.hit+'/'+w.games,w.pct!=null&&w.pct>=50?'up':w.pct!=null?'down':''))),
+  card(d.stat.name+' · last '+rows.length+' games','',h('span',{class:'muted',text:'median '+d.median}),bars,labs),
+  d.next?card('📅 Next game','',null,h('div',{class:'rows'},h('div',{class:'rrow'},h('div',null,h('div',{class:'nm',text:d.next.label}),
+   h('div',{class:'sub',text:[d.next.venue,d.next.indoor?'indoors':d.next.weather].filter(Boolean).join(' · ')}))))):null,
+  card('Splits and role','',null,h('table',{class:'cmp'},h('tbody',null,more.map(m=>tr(m[0],m[1]))))),
+  card('🩹 Injuries','',null,h('div',{class:'rows'},h('div',{class:'rrow'},h('div',null,h('div',{class:'nm',text:d.injury?d.injury.status:'Not on the injury report'}),d.injury&&d.injury.comment?h('div',{class:'sub',text:d.injury.comment}):null))),
+   (d.mates||[]).map(m=>h('div',{class:'rrow'},h('div',null,h('div',{class:'nm',text:m.name+' ('+m.status+')'}),
+    h('div',{class:'sub',text:m.with?'Without him: '+m.without.avg+' in '+m.without.games+' · with him: '+m.with.avg+' in '+m.with.games:'No recent games apart to compare'}))))),
+  d.notes&&d.notes.length?card('📝 What the numbers show','',null,h('ul',{class:'rlist'},d.notes.map(n=>h('li',{text:n})))):null,
+  h('p',{class:'rnote',text:d.note+' The line defaults to just above the recent average.'}))}
+function route(){const rm=location.hash.match(/^#\/r(?:\/(.{1,160}))?$/);if(rm){let q='';try{q=decodeURIComponent(rm[1]||'')}catch(e){}openResearch(q);return}
+ if(location.hash==='#/search'){openSearch();return}
  const cm=location.hash.match(/^#\/c\/(\d{1,20})\/(\d{1,20})$/);if(cm){openCompare(cm[1],cm[2]);return}
  const m=location.hash.match(/^#\/(p|s|g|k)\/([A-Za-z0-9]{1,24})$/);if(!m){closeSheet();return}
  if(m[1]==='k'){openBubble(m[2]);return}
@@ -31541,6 +31599,7 @@ async def staff_avatar(request):
 # ---- Line Watch: how lines move (mods and owners only; nothing here ever posts in Discord) ----------------------
 
 LINE_WATCH_EVERY = 900          # seconds between snapshots
+LINE_BIG_SPREAD, LINE_BIG_TOTAL, LINE_BIG_KALSHI, LINE_BIG_PROP = 1.5, 2.0, 10.0, 1.0
 LINE_KEEP_DAYS = 4
 
 
@@ -31662,7 +31721,35 @@ def lines_data(guild_id: int, now: Optional[datetime] = None) -> dict:
                  moved=len({x["line"] for x in ls}) > 1)
         plist.append(v)
     plist.sort(key=lambda p: (not p["moved"], -abs(p["last"] - p["first"]), -p["count"]))
-    return {"updated": get_setting(0, "linewatch_at"), "games": games[:60], "kalshi": kal[:30], "props": plist[:60]}
+    return {"updated": get_setting(0, "linewatch_at"), "games": games[:60], "kalshi": kal[:30], "props": plist[:60],
+            "alerts": lines_alerts(games, kal, plist)}
+
+
+def lines_alerts(games: list, kal: list, props: list) -> list[dict]:
+    """The moves big enough to look at twice: spreads by 1.5+, totals by 2+, Kalshi by 10¢+, the group's prop lines
+    by a point or more. For the staff page only."""
+    out = []
+    def d(x):
+        return None if not x or x.get("open") is None or x.get("now") is None else round(x["now"] - x["open"], 2)
+    for g in games:
+        for what, x, big in (("spread", g.get("spread"), LINE_BIG_SPREAD), ("total", g.get("total"), LINE_BIG_TOTAL)):
+            m = d(x)
+            if m is not None and abs(m) >= big:
+                out.append({"kind": "game", "label": g["label"], "where": g["league"], "what": what, "from": x["open"],
+                            "to": x["now"], "move": m, "on_slip": g.get("on_slip", False), "size": abs(m) / big})
+    for k in kal:
+        m = d(k.get("price"))
+        if m is not None and abs(m) >= LINE_BIG_KALSHI:
+            out.append({"kind": "kalshi", "label": k["label"], "where": k["ticker"], "what": "price ¢",
+                        "from": k["price"]["open"], "to": k["price"]["now"], "move": m, "on_slip": True,
+                        "size": abs(m) / LINE_BIG_KALSHI})
+    for p in props:
+        m = round(p["last"] - p["first"], 2)
+        if abs(m) >= LINE_BIG_PROP:
+            out.append({"kind": "prop", "label": p["player"], "where": p["stat"], "what": "line", "from": p["first"],
+                        "to": p["last"], "move": m, "on_slip": True, "size": abs(m) / LINE_BIG_PROP})
+    out.sort(key=lambda a: (not a["on_slip"], -a["size"]))
+    return out[:20]
 
 
 async def lines_page(request):
@@ -32084,6 +32171,11 @@ function render(){
  const games=d.games.filter(g=>F!=='moved'||g.moved), kal=d.kalshi.filter(k=>F!=='moved'||k.moved), props=d.props.filter(p=>F!=='moved'||p.moved);
  ITEMS=[];
  const bar='<div class="bar"><button type="button" data-f="moved" class="'+(F==='moved'?'on':'')+'">Moved only</button><button type="button" data-f="all" class="'+(F==='all'?'on':'')+'">Everything</button></div>';
+ const al=d.alerts||[];
+ h.push('<section class="card"><h2>🚨 Big moves</h2><p class="sub">Spreads 1.5+, totals 2+, Kalshi 10¢+, your group\'s prop lines 1+. Staff only: this never posts in Discord.</p>'
+  +(al.length?'<div class="rows">'+al.map(a=>'<div class="r"><span><b>'+esc(a.label)+'</b><i>'+esc(a.where)+' · '+esc(a.what)+(a.on_slip&&a.kind==='game'?' · on a slip':'')+'</i></span>'
+   +move({open:a.from,now:a.to},a.what)+'<span></span><span class="spc"></span></div>').join('')+'</div>'
+   :'<div class="empty">No big moves right now.</div>')+'</section>');
  h.push('<section class="card"><h2>Game lines</h2><p class="sub">Spread and total for today\'s games, first seen → now. Tap a game for every change.</p>'+bar
   +(games.length?'<div class="rows">'+games.map(g=>{ITEMS.push({t:g.label,s:g.league+(g.start?' · '+when(g.start):''),h:g.history,kind:'game'});
    return '<div class="r" data-i="'+(ITEMS.length-1)+'"><span><b>'+esc(g.label)+'</b><i>'+esc(g.league)+(g.start?' · '+esc(when(g.start)):'')+(g.on_slip?' · on a slip':'')+'</i></span>'
@@ -37846,7 +37938,8 @@ async def scout_cmd(interaction: discord.Interaction, player: app_commands.Range
     if grp.get("groups"):
         e.add_field(name="The group on him", inline=False, value=clip(" · ".join(
             f"{r['group']} {r['hit']}/{r['hit'] + r['miss']}" for r in grp["groups"][:6]), 1000))
-    e.set_footer(text="Lines on the chart sit just above each recent average unless you give one.")
+    e.set_footer(text="Past results, not a prediction. Lines sit just above each recent average unless you give one. "
+                      "/research has splits, matchups and teammates out.")
     png = await asyncio.to_thread(locked_render, render_xray, f"{cand['name']} · last 10 games", rows, "SCOUTING REPORT",
                                   cand.get("path"))
     e.set_image(url="attachment://scout.png")
@@ -40398,6 +40491,617 @@ async def slip_pnl(interaction: discord.Interaction):
 
 
 bot.tree.add_command(slip_group)
+
+
+# ==== r43: research tools ==========================================================================================
+# Everything here describes past games. Nothing in it calls a pick good or bad, or tells anyone to bet.
+
+RESEARCH_NOTE = "Past results, not a prediction."
+RESEARCH_ROLE = {"basketball": [("min", "Minutes")],
+                 "football": [("targets", "Targets"), ("rush_att", "Carries"), ("pass_att", "Pass attempts")],
+                 "hockey": [("sog", "Shots")], "baseball": [("outs", "Pitching outs")]}
+RESEARCH_OUTDOOR = ("football", "baseball", "soccer")
+RESEARCH_OUT = ("out", "doubtful", "suspension", "injured reserve", "ir")
+RESEARCH_TTL = 300
+_RESEARCH_CACHE: dict = {}
+
+
+def research_window(vals: list[float], line: float, side: str = "over") -> dict:
+    """How a list of values (newest first) did against one line."""
+    n = len(vals)
+    o, u, p = hit_counts(vals, line) if vals else (0, 0, 0)
+    hit = o if side == "over" else u
+    return {"games": n, "hit": hit, "over": o, "under": u, "push": p,
+            "avg": round(sum(vals) / n, 1) if n else None, "pct": round(hit / n * 100) if n else None}
+
+
+def research_rest(games: list[dict]) -> list[Optional[int]]:
+    """Days of rest before each game (newest first); None for the oldest game or a missing date."""
+    out: list[Optional[int]] = []
+    for k, g in enumerate(games):
+        try:
+            a = datetime.fromisoformat((g.get("date") or "").replace("Z", "+00:00"))
+            b = datetime.fromisoformat((games[k + 1].get("date") or "").replace("Z", "+00:00"))
+            out.append(max(0, (a.astimezone(TZ).date() - b.astimezone(TZ).date()).days))
+        except (IndexError, ValueError):
+            out.append(None)
+    return out
+
+
+def research_role(games: list[dict], fam: str) -> list[dict]:
+    """Minutes, targets, carries, shots: the last 5 against the 5 before, to spot a role getting bigger or smaller."""
+    out = []
+    for comp, label in RESEARCH_ROLE.get(fam, []):
+        vals = []
+        for g in games[:10]:
+            try:
+                v = component_value(g["groups"], comp)
+            except Exception:
+                v = None
+            if v is not None:
+                vals.append(float(v))
+        if len(vals) < 3 or not any(vals):
+            continue
+        l5, prev = vals[:5], vals[5:10]
+        a = sum(l5) / len(l5)
+        b = sum(prev) / len(prev) if prev else None
+        trend = "steady"
+        if b is not None and b > 0:
+            if a >= b * 1.1 and a - b >= 1:
+                trend = "up"
+            elif a <= b * 0.9 and b - a >= 1:
+                trend = "down"
+        out.append({"name": label, "l5": round(a, 1), "prev": round(b, 1) if b is not None else None, "trend": trend,
+                    "values": [round(v, 1) for v in vals]})
+    return out
+
+
+def research_group(guild_id: Optional[int], norm: str) -> dict:
+    """How the group's graded legs on this player went (hidden slips stay out until they're revealed)."""
+    if not guild_id:
+        return {"hit": 0, "miss": 0}
+    out = {"hit": 0, "miss": 0}
+    last = norm.split()[-1] if norm.split() else norm
+    for l in db().execute(f"""SELECT l.text, l.status FROM legs l JOIN picks p ON p.id = l.pick_id
+                              WHERE p.guild_id = ? AND l.status IN ('hit', 'miss') AND lower(l.text) LIKE ? ESCAPE '\\'
+                              AND {_DASH_VISIBLE.replace('hidden', 'p.hidden').replace('revealed_at', 'p.revealed_at')}
+                              LIMIT 600""", (guild_id, like_pattern(last))):
+        pr = cached_prop(l["text"] or "")
+        if pr and not pr.get("combo") and norm_name(pr["player"]) == norm:
+            out[l["status"]] += 1
+    return out
+
+
+async def research_without(cand: dict, games: list[dict], stat: str, mates: list[dict]) -> list[dict]:
+    """For teammates on the injury report: this player's number in recent games with them and without them."""
+    if not mates:
+        return []
+    recent = games[:12]
+    sem = asyncio.Semaphore(4)
+
+    async def box(g):
+        async with sem:
+            try:
+                return g, await asyncio.wait_for(fetch_summary(cand["path"], g["id"]), 6)
+            except Exception:
+                return g, None
+    boxes = await asyncio.gather(*(box(g) for g in recent))
+    out = []
+    for m in mates[:3]:
+        mn = norm_name(m["name"])
+        with_v, without_v = [], []
+        for g, b in boxes:
+            if not b:
+                continue
+            got = stat_value(g["groups"], stat)
+            if got is None:
+                continue
+            played = any(pl["norm"] == mn and not pl.get("dnp") for pl in b.get("players") or [])
+            (with_v if played else without_v).append(got[0])
+        if with_v and without_v:
+            out.append({"name": m["name"], "status": m["status"],
+                        "with": {"games": len(with_v), "avg": round(sum(with_v) / len(with_v), 1)},
+                        "without": {"games": len(without_v), "avg": round(sum(without_v) / len(without_v), 1)}})
+        elif m:
+            out.append({"name": m["name"], "status": m["status"], "with": None, "without": None})
+    return out
+
+
+def research_notes(d: dict) -> list[str]:
+    """Plain words about what the numbers show. Descriptions of the past only, never advice."""
+    notes = []
+    w = {x["n"]: x for x in d["windows"]}
+    side = "over" if d["side"] == "over" else "under"
+    l10 = w.get("L10")
+    if l10 and l10["games"]:
+        notes.append(f"Went {side} {d['line']:g} in {l10['hit']} of the last {l10['games']}.")
+    l5 = w.get("L5")
+    if l5 and l10 and l5["games"] >= 3 and l10["avg"] is not None and l5["avg"] is not None:
+        if l5["avg"] >= l10["avg"] * 1.15 and l5["avg"] - l10["avg"] >= 1:
+            notes.append(f"Recent games run higher: {l5['avg']:g} over the last 5 against {l10['avg']:g} over 10.")
+        elif l5["avg"] <= l10["avg"] * 0.85 and l10["avg"] - l5["avg"] >= 1:
+            notes.append(f"Recent games run lower: {l5['avg']:g} over the last 5 against {l10['avg']:g} over 10.")
+    for r in d.get("role") or []:
+        if r["trend"] != "steady" and r["prev"] is not None:
+            notes.append(f"{r['name']} {'up' if r['trend'] == 'up' else 'down'}: {r['l5']:g} a game lately, "
+                         f"{r['prev']:g} before.")
+    sp = d.get("splits") or {}
+    if sp.get("home", {}).get("games", 0) >= 3 and sp.get("away", {}).get("games", 0) >= 3:
+        a, b = sp["home"]["avg"], sp["away"]["avg"]
+        if a is not None and b is not None and abs(a - b) >= max(1.0, 0.15 * max(a, b)):
+            notes.append(f"Home {a:g}, away {b:g} on average.")
+    for m in d.get("mates") or []:
+        if m.get("with") and m.get("without") and m["without"]["games"] >= 1:
+            notes.append(f"Without {m['name']} ({m['status']}): {m['without']['avg']:g} in {m['without']['games']} "
+                         f"game{'s' if m['without']['games'] != 1 else ''}, {m['with']['avg']:g} with him.")
+    if d.get("injury"):
+        notes.append(f"On the injury report: {d['injury']['status']}.")
+    return notes[:6]
+
+
+async def research_build(cand: dict, stat: Optional[str] = None, line: Optional[float] = None, side: str = "over",
+                         guild_id: Optional[int] = None) -> Optional[dict]:
+    """One player's whole scouting page as plain data (Discord and the dashboard both draw from it)."""
+    path = cand["path"]
+    fam = FAMILY_OF_PATH.get(path)
+    if not fam:
+        return None
+    side = "under" if side == "under" else "over"
+    key = (path, cand["id"], stat, line, side, guild_id)
+    hit = _RESEARCH_CACHE.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    games = await trend_games(path, cand["id"], need=20)
+    if not games:
+        return None
+    options = [k for k in MAIN_STATS.get(fam, []) if k in STATS and k != "minutes"
+               and any(v for _, v in trend_values(games[:10], k))]
+    if stat and (stat not in STATS or STATS[stat][1] != fam):
+        found = [k for k in stat_keys_in(stat) if STATS[k][1] == fam]
+        stat = found[0] if found else None
+    stat = stat or (options[0] if options else None)
+    if not stat:
+        return None
+    if stat not in options:
+        options.insert(0, stat)
+    tv = trend_values(games, stat)
+    vals = [v for _, v in tv]
+    if not vals:
+        return None
+    line = float(line) if line is not None else default_line(vals[:10])
+    windows = [dict(research_window(vals[:n], line, side), n=f"L{n}") for n, need in ((5, 1), (10, 6), (20, 11))
+               if len(vals) >= need]
+    if len(vals) > 20:
+        windows.append(dict(research_window(vals, line, side), n="All"))
+    recent = []
+    for g, v in tv[:20]:
+        recent.append({"date": (g.get("date") or "")[:10], "opp": g["opp"], "at": g["at"], "result": g.get("result") or "",
+                       "value": round(v, 1), "hit": None if v == line else ((v > line) == (side == "over"))})
+    home = [v for g, v in tv if g["at"] != "@"]
+    away = [v for g, v in tv if g["at"] == "@"]
+    splits = {"home": research_window(home, line, side), "away": research_window(away, line, side)}
+    rest = None
+    if path in B2B_PATHS:
+        days = dict(zip([g["id"] for g in games], research_rest(games)))
+        b2b = [v for g, v in tv if days.get(g["id"]) == 1]
+        rested = [v for g, v in tv if (days.get(g["id"]) or 0) >= 2]
+        if b2b:
+            rest = {"b2b": research_window(b2b, line, side), "rested": research_window(rested, line, side)}
+    nxt, opp = None, None
+    if cand.get("team"):
+        try:
+            found = await asyncio.wait_for(next_game(cand["team"], [path]), 6)
+        except Exception:
+            found = None
+        if found:
+            _, ev, i = found
+            them = ev["teams"][1 - i] if len(ev["teams"]) == 2 else None
+            opp = (them or {}).get("abbr")
+            when = event_time(ev)
+            v = ev.get("venue") or {}
+            weather = None
+            if fam in RESEARCH_OUTDOOR or path.startswith("soccer/"):
+                if not v.get("indoor") and v.get("city") and when:
+                    try:
+                        w = await asyncio.wait_for(kickoff_weather(v.get("city") or "", v.get("state") or "", when), 6)
+                    except Exception:
+                        w = None
+                    weather = weather_line(w) if w else None
+            nxt = {"label": short_game(ev), "when": iso(when) if when else None, "venue": clip(v.get("name") or "", 60),
+                   "indoor": bool(v.get("indoor")), "weather": weather, "opp": opp,
+                   "opp_name": (them or {}).get("short") or opp}
+    vs = None
+    opp_key = opp or (games[0]["opp"] if games else None)
+    if opp_key:
+        vv = [v for g, v in tv if g["opp"] == opp_key]
+        if vv:
+            vs = dict(research_window(vv, line, side), opp=opp_key, upcoming=bool(opp))
+    try:
+        inj = (await fetch_injuries(path)).get(norm_name(cand["name"]))
+    except Exception:
+        inj = None
+    mates = []
+    if cand.get("team"):
+        try:
+            listed = await asyncio.wait_for(team_injuries(path, cand["team"]), 6)
+        except Exception:
+            listed = []
+        out = [m for m in listed if norm_name(m["name"]) != norm_name(cand["name"])
+               and any(str(m["status"]).lower().startswith(x) for x in RESEARCH_OUT)]
+        mates = await research_without(cand, games, stat, out)
+    d = {"player": {"name": cand["name"], "team": cand.get("team") or "", "path": path,
+                    "league": LEAGUE_NAMES.get(path, path), "ref": f"{path}|{cand['id']}|{cand['name']}|{cand.get('team') or ''}"},
+         "stat": {"key": stat, "name": STATS[stat][0]}, "options": [{"key": k, "name": STATS[k][0]} for k in options[:10]],
+         "line": line, "side": side, "windows": windows,
+         "median": round(sorted(vals[:10])[len(vals[:10]) // 2], 1), "recent": recent, "splits": splits, "rest": rest,
+         "next": nxt, "vs": vs, "role": research_role(games, fam),
+         "injury": {"status": inj["status"], "comment": clip(inj.get("comment") or "", 200)} if inj else None,
+         "mates": mates, "group": research_group(guild_id, norm_name(cand["name"])), "note": RESEARCH_NOTE}
+    d["notes"] = research_notes(d)
+    if len(_RESEARCH_CACHE) > 400:
+        _RESEARCH_CACHE.clear()
+    _RESEARCH_CACHE[key] = (time.monotonic() + RESEARCH_TTL, d)
+    return d
+
+
+def _rw(w: Optional[dict]) -> str:
+    if not w or not w.get("games"):
+        return "-"
+    return f"{w['hit']}/{w['games']}" + (f" · avg {w['avg']:g}" if w.get("avg") is not None else "")
+
+
+def research_embed(d: dict) -> discord.Embed:
+    p, st = d["player"], d["stat"]
+    e = discord.Embed(title=clip(f"🔬 {p['name']} · {st['name']} {d['side']} {d['line']:g}", 256), color=BRAND,
+                      description=clip(" · ".join(f"{w['n']} **{w['hit']}/{w['games']}**" for w in d["windows"])
+                                       + f"\nMedian (last 10) {d['median']:g}" + (f" · {p['team']}" if p["team"] else ""), 4000))
+    marks = " ".join(("✅" if r["hit"] else "➖" if r["hit"] is None else "❌") + f"{r['value']:g}" for r in d["recent"][:10])
+    if marks:
+        e.add_field(name="Last 10 (newest first)", value=clip(marks, 1024), inline=False)
+    e.add_field(name="🏠 Home", value=_rw(d["splits"]["home"]))
+    e.add_field(name="✈️ Away", value=_rw(d["splits"]["away"]))
+    if d.get("rest"):
+        e.add_field(name="😴 Back-to-backs", value=f"{_rw(d['rest']['b2b'])}\nrested {_rw(d['rest']['rested'])}")
+    if d.get("next"):
+        n = d["next"]
+        e.add_field(name="📅 Next game", value=clip(n["label"] + (f"\n🌤️ {n['weather']}" if n.get("weather") else "")
+                                                   + ("\n🏟️ indoors" if n.get("indoor") else ""), 1024), inline=False)
+    if d.get("vs"):
+        e.add_field(name=f"🆚 vs {d['vs']['opp']}" + ("" if d["vs"]["upcoming"] else " (last opponent)"), value=_rw(d["vs"]))
+    if d.get("role"):
+        e.add_field(name="⏱️ Role", value=clip("\n".join(
+            f"{r['name']}: {r['l5']:g} lately" + (f" ({'▲' if r['trend'] == 'up' else '▼' if r['trend'] == 'down' else '='} "
+                                                  f"from {r['prev']:g})" if r["prev"] is not None else "") for r in d["role"]), 1024))
+    e.add_field(name="🩹 Injury report", value=(f"**{d['injury']['status']}**" + (f": {clip(d['injury']['comment'], 150)}"
+                                                if d["injury"]["comment"] else "")) if d.get("injury") else "Not listed ✅")
+    if d.get("mates"):
+        e.add_field(name="🚑 Teammates out", inline=False, value=clip("\n".join(
+            f"**{m['name']}** ({m['status']})" + (f": without him {m['without']['avg']:g} in {m['without']['games']}, with him "
+                                                  f"{m['with']['avg']:g} in {m['with']['games']}" if m.get("with") else
+                                                  ": no recent games apart to compare") for m in d["mates"]), 1024))
+    g = d.get("group") or {}
+    if g.get("hit") or g.get("miss"):
+        e.add_field(name="👥 The group on him", value=f"{g['hit']} hit · {g['miss']} missed")
+    if d.get("notes"):
+        e.add_field(name="📝 What the numbers show", value=clip("\n".join("• " + x for x in d["notes"]), 1024), inline=False)
+    e.set_footer(text=f"{RESEARCH_NOTE} Lines default to just above the recent average unless you give one.")
+    return e
+
+
+def research_rows(d: dict) -> list[dict]:
+    """The X-ray chart rows for the research card's picture (oldest on the left)."""
+    vals = [(r["opp"], r["at"], r["value"]) for r in d["recent"][:10]][::-1]
+    return [{"text": f"{d['stat']['name']} · line {d['line']:g}", "values": vals, "line": d["line"], "side": d["side"],
+             "name": d["player"]["name"], "stat": d["stat"]["name"], "why": "", "key": d["stat"]["key"]}]
+
+
+def _ref_bits(path: str, pid: str, name: str) -> str:
+    return clip(f"{path}|{pid}|{name}", 96)
+
+
+class ResearchWatchButton(discord.ui.DynamicItem[discord.ui.Button],
+                          template=r"rw:(?P<path>[a-z0-9\-/.]{3,40})\|(?P<pid>[A-Za-z0-9_-]{1,20})\|(?P<name>.{1,60})"):
+    def __init__(self, path: str, pid: str, name: str):
+        super().__init__(discord.ui.Button(label="👀 Watch", style=discord.ButtonStyle.secondary,
+                                           custom_id=clip(f"rw:{_ref_bits(path, pid, name)}", 100)))
+        self.path, self.pid, self.name = path, pid, name
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["path"], match["pid"], match["name"])
+
+    async def callback(self, interaction: discord.Interaction):
+        msg = watch_add(interaction.guild_id, interaction.user.id, {"path": self.path, "id": self.pid, "name": self.name})
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
+class ResearchLinkButton(discord.ui.DynamicItem[discord.ui.Button],
+                         template=r"rl:(?P<path>[a-z0-9\-/.]{3,40})\|(?P<pid>[A-Za-z0-9_-]{1,20})\|(?P<name>.{1,60})"):
+    def __init__(self, path: str, pid: str, name: str):
+        super().__init__(discord.ui.Button(label="🌐 Full page", style=discord.ButtonStyle.secondary,
+                                           custom_id=clip(f"rl:{_ref_bits(path, pid, name)}", 100)))
+        self.path, self.pid, self.name = path, pid, name
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["path"], match["pid"], match["name"])
+
+    async def callback(self, interaction: discord.Interaction):
+        url = dashboard_url()
+        if not url:
+            await interaction.response.send_message("The web dashboard isn't set up on this bot yet.", ephemeral=True)
+            return
+        from urllib.parse import quote
+        await interaction.response.send_message(
+            f"🔬 [{self.name} on the dashboard]({url}#/r/{quote(self.path + '|' + self.pid + '|' + self.name + '|', safe='')})\n"
+            "Only you can see this link. Don't share it outside the group.", ephemeral=True)
+
+
+EXTRA_ITEMS.extend([ResearchWatchButton, ResearchLinkButton])
+
+
+class ResearchStatSelect(discord.ui.Select):
+    def __init__(self, cand: dict, d: dict, owner: int):
+        opts = [discord.SelectOption(label=clip(o["name"], 100), value=o["key"], default=o["key"] == d["stat"]["key"])
+                for o in d["options"][:25]]
+        super().__init__(placeholder="Another stat", options=opts)
+        self.cand, self.owner = cand, owner
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner:
+            await interaction.response.send_message("Run /research yourself to look at another stat.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        d = await research_build(self.cand, self.values[0], None, "over", interaction.guild_id)
+        if not d:
+            await interaction.followup.send("No numbers for that stat.", ephemeral=True)
+            return
+        await interaction.edit_original_response(embed=research_embed(d), view=research_view(self.cand, d, self.owner),
+                                                 attachments=[])
+
+
+def research_view(cand: dict, d: dict, owner: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=900)
+    if len(d.get("options") or []) > 1:
+        view.add_item(ResearchStatSelect(cand, d, owner))
+    view.add_item(ResearchWatchButton(cand["path"], cand["id"], cand["name"]))
+    view.add_item(ResearchLinkButton(cand["path"], cand["id"], cand["name"]))
+    return view
+
+
+@bot.tree.command(name="research", description="One scouting page: L5/L10/L20, splits, matchup, injuries, role, weather")
+@app_commands.guild_only()
+@app_commands.describe(player="Start typing a name", stat="Optional: the stat (defaults to their main one)",
+                       line="Optional: the line to check against", side="Over or under (default over)")
+@app_commands.choices(side=[app_commands.Choice(name="Over", value="over"), app_commands.Choice(name="Under", value="under")])
+@app_commands.autocomplete(player=trend_player_autocomplete, stat=trend_stat_autocomplete)
+@sec_rate("render")
+async def research_cmd(interaction: discord.Interaction, player: app_commands.Range[str, 2, 100], stat: Optional[str] = None,
+                       line: Optional[app_commands.Range[float, 0.0, 1000.0]] = None,
+                       side: Optional[app_commands.Choice[str]] = None):
+    await interaction.response.defer(thinking=True)
+    cand = await player_lookup(interaction, player)
+    if cand is None:
+        await interaction.followup.send(f"I couldn't pin down **{player}**. Pick one from the list as you type.")
+        return
+    try:
+        d = await research_build(cand, stat, line, side.value if side else "over", interaction.guild_id)
+    except Exception:
+        log.exception("Research failed")
+        await interaction.followup.send("ESPN's game log isn't answering right now. Try again in a bit.")
+        return
+    if not d:
+        await interaction.followup.send(f"No recent games on file for {cand['name']} yet.")
+        return
+    note_scouted(interaction.guild_id, interaction.user.id, [cand["name"]])
+    e = research_embed(d)
+    kw = {}
+    try:
+        png = await asyncio.to_thread(locked_render, render_xray, f"{cand['name']} · last 10", research_rows(d),
+                                      "RESEARCH", cand.get("path"))
+        e.set_image(url="attachment://research.png")
+        kw["file"] = discord.File(png, filename="research.png")
+    except Exception:
+        log.warning("Research chart failed", exc_info=True)
+    await interaction.followup.send(embed=e, view=research_view(cand, d, interaction.user.id), **kw)
+
+
+# ---- the watchlist: a DM when a player's injury status changes --------------------------------------------------
+
+WATCH_MAX = 15
+WATCH_EVERY = 1200
+
+
+def watch_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS watchlist (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+                    user_id INTEGER, path TEXT, pid TEXT, name TEXT, norm TEXT, status TEXT, comment TEXT,
+                    added_at TEXT, changed_at TEXT, UNIQUE (guild_id, user_id, path, pid))""")
+
+
+def watch_rows(guild_id: int, user_id: int) -> list:
+    watch_db()
+    return db().execute("SELECT * FROM watchlist WHERE guild_id = ? AND user_id = ? ORDER BY name",
+                        (guild_id, user_id)).fetchall()
+
+
+def watch_add(guild_id: int, user_id: int, cand: dict) -> str:
+    watch_db()
+    if cand["path"] not in PROP_PATHS:
+        return "I can't watch that player."
+    have = watch_rows(guild_id, user_id)
+    if any(r["path"] == cand["path"] and r["pid"] == str(cand["id"]) for r in have):
+        return f"👀 **{cand['name']}** is already on your watchlist."
+    if len(have) >= WATCH_MAX:
+        return f"Your watchlist is full ({WATCH_MAX}). Remove someone with `/watch remove` first."
+    db().execute("INSERT INTO watchlist (guild_id, user_id, path, pid, name, norm, status, comment, added_at) "
+                 "VALUES (?,?,?,?,?,?,?,?,?)", (guild_id, user_id, cand["path"], str(cand["id"]), clip(cand["name"], 60),
+                                                norm_name(cand["name"]), None, None, now_iso()))
+    db().commit()
+    return (f"👀 Watching **{clip(cand['name'], 60)}**. I'll DM you when he goes on or off the injury report "
+            "(quiet hours are respected).")
+
+
+def watch_remove(guild_id: int, user_id: int, text: str) -> Optional[str]:
+    watch_db()
+    t = norm_name(text.split("|")[2] if text.count("|") >= 2 else text)
+    for r in watch_rows(guild_id, user_id):
+        if r["norm"] == t or (len(t) >= 3 and t in r["norm"]):
+            db().execute("DELETE FROM watchlist WHERE id = ?", (r["id"],))
+            db().commit()
+            return r["name"]
+    return None
+
+
+def watch_embed(guild_id: int, user_id: int) -> discord.Embed:
+    rows = watch_rows(guild_id, user_id)
+    e = discord.Embed(title="👀 Your watchlist", color=BRAND, description="\n".join(
+        f"• **{r['name']}** · {LEAGUE_SLUGS.get(r['path'], r['path']).upper()} · "
+        + (f"🩹 {r['status']}" if r["status"] else "not on the injury report") for r in rows)
+        or "Nobody yet. Add someone with `/watch add` or the 👀 button on `/research`.")
+    e.set_footer(text=f"{len(rows)}/{WATCH_MAX} · You get a DM when someone goes on or off the injury report.")
+    return e
+
+
+async def watch_job(client, now: Optional[datetime] = None) -> None:
+    """Every 20 minutes: check the injury reports for everyone on a watchlist; DM the people watching on a change."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        last = datetime.fromisoformat(get_setting(0, "watch_at") or "")
+        if (now - last).total_seconds() < WATCH_EVERY - 30:
+            return
+    except ValueError:
+        pass
+    set_setting(0, "watch_at", iso(now))
+    watch_db()
+    rows = db().execute("SELECT * FROM watchlist ORDER BY id LIMIT 3000").fetchall()
+    reports: dict = {}
+    for path in {r["path"] for r in rows}:
+        reports[path] = await fetch_injuries(path)
+        if path not in _injury_cache:
+            reports[path] = None                     # the fetch failed: no news is not "he's healthy"
+    for r in rows:
+        rep_ = reports.get(r["path"])
+        if rep_ is None:
+            continue
+        inj = rep_.get(r["norm"])
+        if inj and inj.get("ambiguous"):
+            continue
+        new = inj["status"] if inj else ""
+        old = r["status"]
+        if old is None:                              # first look since being added: remember, don't ping
+            db().execute("UPDATE watchlist SET status = ?, comment = ? WHERE id = ?",
+                         (new, (inj or {}).get("comment") or "", r["id"]))
+            continue
+        if new == old:
+            continue
+        if is_quiet(r["guild_id"], r["user_id"], now):
+            continue                                 # try again after quiet hours
+        db().execute("UPDATE watchlist SET status = ?, comment = ?, changed_at = ? WHERE id = ?",
+                     (new, (inj or {}).get("comment") or "", iso(now), r["id"]))
+        db().commit()
+        text = (f"👀 Watchlist: **{r['name']}** is now **{new}**" + (f" (was {old})" if old else "") + "."
+                + (f"\n> {clip(inj['comment'], 200)}" if inj and inj.get("comment") else "")) if new else \
+            f"👀 Watchlist: **{r['name']}** is off the injury report" + (f" (was {old})." if old else ".")
+        try:
+            user = await client.fetch_user(r["user_id"])
+            await user.send(text + "\n-# /watch remove to stop watching · /research for the numbers")
+        except Exception:
+            log.info("Watchlist DM failed for %s", r["user_id"])
+    db().commit()
+
+
+EXTRA_JOBS.append(("watchlist", watch_job))
+
+watch_group = app_commands.Group(name="watch", description="Your watchlist: a DM when a player's injury status changes",
+                                 guild_only=True)
+
+
+async def watch_name_autocomplete(interaction: discord.Interaction, current: str):
+    cur = norm_name(current or "")
+    return [app_commands.Choice(name=clip(r["name"], 100), value=clip(r["name"], 100))
+            for r in watch_rows(interaction.guild_id, interaction.user.id) if not cur or cur in r["norm"]][:25]
+
+
+@watch_group.command(name="add", description="Watch a player: get a DM when he goes on or off the injury report")
+@app_commands.describe(player="Start typing a name")
+@app_commands.autocomplete(player=trend_player_autocomplete)
+@sec_rate("lookup")
+async def watch_add_cmd(interaction: discord.Interaction, player: app_commands.Range[str, 2, 100]):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    cand = await player_lookup(interaction, player)
+    if cand is None:
+        await interaction.followup.send(f"I couldn't pin down **{player}**. Pick one from the list as you type.",
+                                        ephemeral=True)
+        return
+    await interaction.followup.send(watch_add(interaction.guild_id, interaction.user.id, cand), ephemeral=True)
+
+
+@watch_group.command(name="list", description="Everyone on your watchlist")
+async def watch_list_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=watch_embed(interaction.guild_id, interaction.user.id), ephemeral=True)
+
+
+@watch_group.command(name="remove", description="Take a player off your watchlist")
+@app_commands.describe(player="Who to stop watching")
+@app_commands.autocomplete(player=watch_name_autocomplete)
+async def watch_remove_cmd(interaction: discord.Interaction, player: app_commands.Range[str, 2, 100]):
+    name = watch_remove(interaction.guild_id, interaction.user.id, player)
+    await interaction.response.send_message(f"Stopped watching **{name}**." if name else
+                                            f"**{player}** isn't on your watchlist.", ephemeral=True)
+
+
+bot.tree.add_command(watch_group)
+HELP_EXTRA.append(("🔬 Research", "`/research player` one scouting page: last 5/10/20 against a line, home and away, "
+                                  "back-to-backs, the next opponent and weather, role trend, injuries and teammates out · "
+                                  "`/watch add|list|remove` a DM when a player goes on or off the injury report. "
+                                  "Past results, not predictions."))
+
+
+# ---- the research page on the dashboard ---------------------------------------------------------------------------
+
+async def dash43_api_research(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    ip = dash_client_ip(request)
+    if not dash_rate(ip, "research", 40, 60):
+        return dash_error(web, request, 429)
+    q = str(request.query.get("q") or "").strip()
+    stat = str(request.query.get("stat") or "").strip() or None
+    side = "under" if request.query.get("side") == "under" else "over"
+    try:
+        line = float(request.query["line"]) if request.query.get("line") else None
+    except ValueError:
+        line = None
+    if line is not None and not (0 <= line <= 1000):
+        line = None
+    if len(q) < 2 or len(q) > 120 or (stat and not re.fullmatch(r"[a-z0-9_]{1,30}", stat)):
+        return dash_error(web, request, 400)
+    if q.count("|") >= 3:
+        cand = sec_player_ref(q)
+        cands = [cand] if cand else []
+    else:
+        nn = norm_name(q)
+        try:
+            cands = await asyncio.wait_for(resolve_player(PLAYER_NICKNAMES.get(nn, nn), PROP_PATHS), 8)
+        except Exception:
+            cands = []
+    if not cands:
+        return web.json_response({"error": "I couldn't find that player."})
+    if len(cands) > 1:
+        return web.json_response({"choices": [{"name": c["name"], "team": c.get("team") or "",
+                                               "league": LEAGUE_NAMES.get(c["path"], c["path"]),
+                                               "ref": f"{c['path']}|{c['id']}|{c['name']}|{c.get('team') or ''}"}
+                                              for c in cands[:10]]})
+    try:
+        d = await research_build(cands[0], stat, line, side, prm["guild"])
+    except Exception:
+        log.warning("Dashboard research failed", exc_info=True)
+        d = None
+    if not d:
+        return web.json_response({"error": "No recent games on file for that player yet."})
+    return web.json_response(d)
 
 
 # ==========================================================================
