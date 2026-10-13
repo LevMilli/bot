@@ -12,8 +12,8 @@ Picks
   * /export        download every pick as a CSV (opens in Excel / Sheets)
 
 Channels
-  * /receipts      turn the current channel into a "receipts" channel
-  * /recapchannel  post the weekly recap and open-pick reminders here
+  * /admin receipts      turn the current channel into a "receipts" channel
+  * /admin recapchannel  post the weekly recap and open-pick reminders here
   * /recap         show the last 7 days right now
 
 Players
@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r44"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r45"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -12127,7 +12127,7 @@ def slip_check_embed(interaction) -> discord.Embed:
     elif allm:
         lines.append("✅ Every-channel mode is on, so slips here get logged (non-slips are skipped quietly)")
     else:
-        lines.append("❌ Slip logging is **off** here. Run `/receipts` here, or @mention me with a screenshot")
+        lines.append("❌ Slip logging is **off** here. Run `/admin receipts` here, or @mention me with a screenshot")
     missing = missing_perms(ch, getattr(getattr(interaction, "guild", None), "me", None))
     lines.append(f"❌ I'm missing: **{', '.join(missing)}**" if missing else "✅ My permissions here look fine")
     lines.append("✅ Claude key set (screenshots are read automatically)" if ai_enabled() else
@@ -17789,10 +17789,10 @@ def doctor_channel_checks(client, guild_id: int, guild) -> list[dict]:
     roles = {r for r, _, _ in targets}
     if "Receipts" not in roles and not server_on(guild_id, "receipts_all"):
         out.append(ops_check("warn", "chan:receipts", "No receipts channel yet, so screenshots only log when someone @mentions me",
-                             "`/admin setup` → Receipts, or run `/receipts` in the channel where slips get posted."))
+                             "`/admin setup` → Receipts, or run `/admin receipts` in the channel where slips get posted."))
     if "Recap" not in roles:
         out.append(ops_check("warn", "chan:recap", "No recap channel: weekly recaps, reminders and autopilot results have nowhere to go",
-                             "`/admin setup` → Recap, or run `/recapchannel` in that channel."))
+                             "`/admin setup` → Recap, or run `/admin recapchannel` in that channel."))
     if "Audit" not in roles:
         out.append(ops_check("warn", "chan:audit", "No audit channel: edits, deletes and self-check alerts aren't logged",
                              "`/admin setup` → Audit (keep that channel mods-only)."))
@@ -20446,7 +20446,7 @@ def dash_app(web):
     web.get("/staff/backup.db", staff_backup),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get("/api/board.json", dash39_api_board), web.get("/api/search.json", dash39_api_search),
-                    web.get("/api/research.json", dash43_api_research),
+                    web.get("/api/research.json", dash43_api_research), web.get("/guide", guide_page),
                     web.get("/manifest.webmanifest", dash39_manifest), web.get("/sw.js", dash39_sw),
                     web.get("/icon-192.png", dash39_icon_route), web.get("/icon-512.png", dash39_icon_route),
                     web.get("/icon-180.png", dash39_icon_route), web.get("/apple-touch-icon.png", dash39_icon_route),
@@ -32710,7 +32710,7 @@ function render(d){
  h.push(card('Database',row('Saved on a volume',dot(db.on_volume?'ok':'bad')+(db.on_volume?'yes (/data)':'NO: a redeploy wipes it'))
   +row('Size',db.size_mb==null?'?':db.size_mb+' MB')+row('Picks',db.picks+' ('+db.open+' open)')
   +(d.can_backup?'<a class="tile" href="/staff/backup.db" style="margin-top:10px"><span class="ic">💾</span><span><b>Download a backup</b><i>This server\'s picks, as a .db file</i></span></a>'
-   :'<div class="muted" style="margin-top:6px">Backups: <code>/backups</code> posts one every night. The developer and owners can download one here.</div>')));
+   :'<div class="muted" style="margin-top:6px">Backups: <code>/admin backups</code> posts one every night. The developer and owners can download one here.</div>')));
  let eb=(d.engines||[]).map(e=>row(esc(e.name),dot(e.on?'ok':'')+(e.on?'on':'off'))).join('');
  eb+=row('Claude calls today',d.claude_today+(d.claude_cap?' / '+d.claude_cap:''));
  if(d.errors.slip)eb+='<div class="muted">Last slip-read error '+esc(ago(d.errors.slip_at))+'</div><div class="err">'+esc(d.errors.slip)+'</div>';
@@ -33355,7 +33355,8 @@ class PicksBot(discord.Client):
         if member.bot or get_setting(member.guild.id, "welcome") != "on":
             return
         try:
-            await member.send(WELCOME_TEXT)
+            await member.send(f"👋 Welcome to {clip(getattr(member.guild, 'name', None) or 'the server', 80)}!",
+                              embed=onboard_embed(member), view=onboard_view(member.guild.id))
         except Exception:
             pass
 
@@ -34574,6 +34575,336 @@ bot.tree.add_command(player_group)
 
 # ---- help -------------------------------------------------------------------
 
+# ---- r45: the /help hub ---------------------------------------------------------------------------------------------
+
+HELP_CATS = [
+    ("start", "🚀 Start here", ("Start here, inbox, setup", "Slips", "🔎 Reading slips for free")),
+    ("slips", "🧾 Picks & slips", ("Picks", "Auto-grading", "New in r19: Autopilot", "🧾 Slip tools", "🩺 Tracking check",
+                                  "🧱 Build, rank, look up, team up")),
+    ("live", "📺 Live & research", ("Live and props", "📡 Live", "📡 Live, bigger", "🔬 Research", "Sports info", "Players",
+                                    "📚 Data sources")),
+    ("games", "🎮 Games & coins", ("Games and coins", "Games and pools")),
+    ("group", "🏆 The group", ("With the group", "Your numbers", "Recaps", "Questions", "💬 Ask channel")),
+    ("you", "⚙️ You", ("You", "Make it personal", "🫂 Personal", "🎨 Look & feel", "New in r18")),
+    ("admin", "🛡️ Admins & staff", ("Setup (admins)", "🚨 Outage alerts", "🛡️ Staff tools")),
+]
+HELP_TOPIC_CHOICES = [(k, n) for k, n, _ in HELP_CATS] + [("new", "🆕 What's new"), ("all", "📚 Everything else")]
+
+HELP_HOME = (
+    "**New here?** Post a slip screenshot in the receipts channel and I log it, then grade it as games finish.\n"
+    "Type one instead: `@PIMP-BOT log Tatum o22.5 PRA, $10 to win $30`. Ask first with `@PIMP-BOT thoughts?`.\n"
+    "`/start` is a one-minute tour · `/inbox` is anything waiting on you · `/research` looks up any player.\n\n"
+    "Pick a topic below. Everything here is past results and tracking: nothing is a sure thing, and the bot never "
+    "tells anyone to bet more.")
+
+
+def help_sections() -> list[tuple[str, str]]:
+    """Every help section: the classic list plus everything added since (the old /help stopped at 25)."""
+    out, seen = [], set()
+    for f in help_embed().fields:
+        out.append((f.name, f.value))
+        seen.add(f.name)
+    for title, text in HELP_EXTRA:
+        if title not in seen:
+            out.append((title, clip(text, 1024)))
+            seen.add(title)
+    return out
+
+
+def help_page(key: str, guild_id: Optional[int] = None) -> discord.Embed:
+    secs = help_sections()
+    by = dict(secs)
+    if key == "new":
+        return whatsnew_embed(WHATS_NEW_LATEST)
+    if key == "home":
+        e = discord.Embed(title="📖 PIMP-BOT help", description=HELP_HOME, color=BRAND)
+        for k, name, titles in HELP_CATS:
+            have = [t for t in titles if t in by]
+            if have:
+                e.add_field(name=name, value=clip(" · ".join(t.lstrip("🚀🧾📺🎮🏆⚙️🛡️📡🔬🔎🩺🧱📚💬🎨🫂🚨 ") for t in have), 200))
+        if PUBLIC_DOMAIN:
+            e.add_field(name="🌐 Member guide", value=f"https://{PUBLIC_DOMAIN}/guide", inline=False)
+        e.set_footer(text=f"PIMP-BOT {BOT_VERSION.split()[-1]} · 💬 Feedback goes straight to the staff")
+        return e
+    if key == "all":
+        used = {t for _, _, ts in HELP_CATS for t in ts}
+        items = [(t, v) for t, v in secs if t not in used]
+        title = "📚 Everything else"
+    else:
+        cat = next((c for c in HELP_CATS if c[0] == key), HELP_CATS[0])
+        items = [(t, by[t]) for t in cat[2] if t in by]
+        title = cat[1]
+    e = discord.Embed(title=f"Help · {title}", color=BRAND)
+    total = len(title)
+    for t, v in items[:25]:
+        if total + len(t) + len(v) > 5600:
+            break
+        e.add_field(name=clip(t, 256), value=clip(v, 1024), inline=False)
+        total += len(t) + len(v)
+    if not e.fields:
+        e.description = "Nothing here yet."
+    e.set_footer(text=f"PIMP-BOT {BOT_VERSION.split()[-1]} · /help any time")
+    return e
+
+
+class HelpTopicButton(discord.ui.Button):
+    def __init__(self, key: str, label: str, on: bool, row: int):
+        super().__init__(label=clip(label, 80), style=discord.ButtonStyle.primary if on else discord.ButtonStyle.secondary,
+                         row=row)
+        self.key = key
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(embed=help_page(self.key, interaction.guild_id),
+                                                view=help_hub_view(interaction.guild_id, self.key))
+
+
+class HelpSettingsButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="⚙️ My settings", style=discord.ButtonStyle.success, row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        gid = interaction.guild_id
+        if not gid:
+            await interaction.response.send_message("Run `/me settings` in the server.", ephemeral=True)
+            return
+        await interaction.response.send_message(embed=me_settings_embed(gid, interaction.user.id, interaction.user.display_name),
+                                                view=me_settings_view(gid, interaction.user.id), ephemeral=True)
+
+
+class HelpFeedbackButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="💬 Feedback", style=discord.ButtonStyle.success, row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.guild_id:
+            await interaction.response.send_message("Send feedback from inside the server.", ephemeral=True)
+            return
+        await interaction.response.send_modal(FeedbackModal())
+
+
+def help_hub_view(guild_id: Optional[int], current: str = "home") -> discord.ui.View:
+    v = discord.ui.View(timeout=900)
+    keys = [("home", "🏠 Home")] + [(k, n) for k, n, _ in HELP_CATS]
+    for i, (k, n) in enumerate(keys):
+        v.add_item(HelpTopicButton(k, n, k == current, i // 4))
+    v.add_item(HelpTopicButton("new", "🆕 What's new", current == "new", 2))
+    v.add_item(HelpTopicButton("all", "📚 Everything else", current == "all", 2))
+    if guild_id:
+        v.add_item(HelpSettingsButton())
+        v.add_item(HelpFeedbackButton())
+    if PUBLIC_DOMAIN:
+        v.add_item(discord.ui.Button(label="🌐 Member guide", url=f"https://{PUBLIC_DOMAIN}/guide", row=3))
+    return v
+
+
+# ---- feedback: a button that opens a ticket for the staff ----
+
+FEEDBACK_PER_DAY = 3
+
+
+class FeedbackModal(discord.ui.Modal, title="Send feedback to the staff"):
+    text = discord.ui.TextInput(label="What's on your mind?", style=discord.TextStyle.paragraph, max_length=1000,
+                                placeholder="An idea, something that broke, a slip that graded wrong...")
+    where = discord.ui.TextInput(label="Where? (a command, page or slip #)", required=False, max_length=100)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        msg = await feedback_submit(interaction.client, interaction.guild_id, interaction.user, self.text.value,
+                                    self.where.value)
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
+async def feedback_submit(client, guild_id: int, user, text: str, where: str = "") -> str:
+    text = (text or "").strip()
+    if len(text) < 3:
+        return "Write a few words so the staff knows what you mean."
+    day = datetime.now(TZ).date().isoformat()
+    key = f"feedback_n:{user.id}:{day}"
+    n = int(get_setting(guild_id, key) or 0)
+    if n >= FEEDBACK_PER_DAY:
+        return f"That's {FEEDBACK_PER_DAY} today, thanks! Send more tomorrow, or tell a mod directly."
+    set_setting(guild_id, key, str(n + 1))
+    tickets_db()
+    name = clip(getattr(user, "display_name", None) or "someone", 40)
+    detail = (f"From **{name}** (<@{user.id}>)" + (f" · about: {clip(where, 100)}" if (where or "").strip() else "")
+              + "\n>>> " + clip(sec_redact(text), 1000))
+    ch = ticket_channel(client, guild_id)
+    c = db().execute("""INSERT INTO tickets (guild_id, key, kind, title, detail, pick_id, jump, hidden, channel_id, status,
+                        opened_at) VALUES (?,?,?,?,?,?,?,?,?, 'open', ?)""",
+                     (guild_id, f"feedback:{user.id}:{int(time.time() * 1000)}", "feedback",
+                      clip(f"Feedback from {name}", 80), detail, None, None, 0, ch.id if ch is not None else None, now_iso()))
+    db().commit()
+    t = db().execute("SELECT * FROM tickets WHERE id = ?", (c.lastrowid,)).fetchone()
+    if ch is not None:
+        try:
+            m = await ch.send(embed=ticket_embed(t), view=ticket_view(t), allowed_mentions=discord.AllowedMentions.none())
+            db().execute("UPDATE tickets SET message_id = ? WHERE id = ?", (m.id, t["id"]))
+            db().commit()
+        except Exception:
+            log.warning("Feedback ticket post failed", exc_info=True)
+    activity_add(guild_id, "staff", f"💬 Feedback from {name} (ticket #{t['id']})")
+    return f"💬 Thanks, {name}. The staff got it as ticket **#{t['id']}**." + (
+        "" if ch is not None else " (They'll see it on the staff page.)")
+
+
+# ---- the welcome DM with buttons ----
+
+def onboard_embed(member) -> discord.Embed:
+    e = discord.Embed(title="🚀 Getting started with PIMP-BOT", color=BRAND, description=WELCOME_TEXT)
+    e.add_field(name="Your first slip", inline=False, value=(
+        "1. Post the screenshot in the receipts channel (or @mention me with it).\n"
+        "2. I read it and log it. Tap ✏️ Fix if I misread anything.\n"
+        "3. It grades itself as games finish, and you get a DM as legs clear."))
+    e.set_footer(text="Tap a button below. You can change any of this later with /me settings.")
+    return e
+
+
+class OnboardButton(discord.ui.DynamicItem[discord.ui.Button], template=r"ob:(?P<gid>\d+):(?P<act>tour|alerts|help)"):
+    LABELS = {"tour": "🚀 How it works", "alerts": "🔔 My alerts", "help": "📖 All commands"}
+
+    def __init__(self, guild_id: int, act: str):
+        super().__init__(discord.ui.Button(label=self.LABELS[act], style=discord.ButtonStyle.primary if act == "tour"
+                                           else discord.ButtonStyle.secondary, custom_id=f"ob:{guild_id}:{act}"))
+        self.guild_id, self.act = guild_id, act
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["gid"]), match["act"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.act == "alerts":
+            await interaction.response.send_message(
+                embed=me_settings_embed(self.guild_id, interaction.user.id, interaction.user.display_name),
+                view=me_settings_view(self.guild_id, interaction.user.id))
+        elif self.act == "help":
+            await interaction.response.send_message(embed=help_page("home"), view=help_hub_view(None, "home"))
+        else:
+            await interaction.response.send_message(embed=help_page("start"), view=help_hub_view(None, "start"))
+
+
+def onboard_view(guild_id: int) -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    for act in ("tour", "alerts", "help"):
+        v.add_item(OnboardButton(guild_id, act))
+    if PUBLIC_DOMAIN:
+        v.add_item(discord.ui.Button(label="🌐 Member guide", url=f"https://{PUBLIC_DOMAIN}/guide"))
+    return v
+
+
+EXTRA_ITEMS.append(OnboardButton)
+
+
+# ---- What's new: one post per release, in plain words ----
+
+WHATS_NEW = {
+    "r36": ["🎫 Things that need a person now open as tickets with buttons to fix and close them",
+            "🛡️ New dark purple MOD badge"],
+    "r37": ["🌍 More sports: women's college hoops, more soccer leagues, college hockey, tennis and more"],
+    "r38": ["📈 Live sweats show what each leg still needs and whether it's on pace",
+            "🌙 A 'riding tonight' post before games start (admins can turn it on)"],
+    "r39": ["🖥️ Dashboard filters, search and head-to-head compare", "📱 Install the dashboard as an app on your phone"],
+    "r40": ["🎨 Nine backgrounds for the dashboard (🎨 button), and a cleaner light mode",
+            "🛡️ A bigger staff toolkit: reminders, lookups and a weekly report"],
+    "r41": ["🏅 30 new badges for skill, not volume", "🏆 A weekly skill contest and squads of 3",
+            "💀 Bad Beat of the Week vote and a Hall of Fame"],
+    "r42": ["📸 The free screenshot reader got much better at PrizePicks: KBO, esports combos, soccer and refunds"],
+    "r43": ["🔬 /research: one page per player with recent games, splits, matchups and injuries",
+            "👀 /watch: a DM when a player you follow goes on or off the injury report"],
+    "r44": ["⚡ Faster and steadier: start-up checks, timing on everything, checked backups"],
+    "r45": ["📖 A new /help with topics and buttons, and a member guide page",
+            "💬 Feedback button in /help: it goes straight to the staff as a ticket",
+            "👋 New members get a welcome DM with buttons",
+            "♿ Every image now has a text description for screen readers",
+            "🛡️ Admins: the setup commands now live under /admin (for example `/admin receipts`, `/admin backups`)"],
+}
+WHATS_NEW_LATEST = max(WHATS_NEW, key=lambda k: int(k[1:]))
+SERVER_TOGGLES.append(("whatsnew", "What's new post after each update", "optout"))
+
+
+def whatsnew_embed(tag: str) -> discord.Embed:
+    notes = WHATS_NEW.get(tag) or []
+    e = discord.Embed(title=f"🆕 What's new in PIMP-BOT {tag}", color=BRAND,
+                      description="\n".join("• " + x for x in notes) or "Small fixes and polish.")
+    if tag == "r45":                                  # the launch post for the 10-release run
+        e.add_field(name="🚀 The last 10 updates, in one place", inline=False, value=clip("\n".join(
+            f"**{k}** · {WHATS_NEW[k][0]}" for k in sorted(WHATS_NEW, key=lambda k: int(k[1:])) if k != "r45"), 1024))
+    e.set_footer(text="/help → 🆕 What's new any time · 💬 Feedback in /help goes to the staff")
+    return e
+
+
+def whatsnew_channel(client, guild_id: int):
+    for key in ("whatsnew_channel", "today_channel", "recap_channel"):
+        cid = get_setting(guild_id, key)
+        if cid and str(cid).isdigit():
+            ch = client.get_channel(int(cid))
+            if ch is not None:
+                return ch
+    return None
+
+
+async def whatsnew_job(client, now: Optional[datetime] = None) -> None:
+    """Once per release with notes: post What's new in the group's channel (admins can turn it off)."""
+    tag = BOT_VERSION.split()[-1]
+    if tag not in WHATS_NEW:
+        return                                       # a hotfix (r45.1) has no notes of its own
+    for g in list(getattr(client, "guilds", []) or []):
+        if get_setting(g.id, "whatsnew_last") == tag:
+            continue
+        set_setting(g.id, "whatsnew_last", tag)
+        if not server_on(g.id, "whatsnew"):
+            continue
+        ch = whatsnew_channel(client, g.id)
+        if ch is None:
+            continue
+        try:
+            await ch.send(embed=whatsnew_embed(tag), allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("What's new post failed", exc_info=True)
+
+
+EXTRA_JOBS.append(("whatsnew", whatsnew_job))
+
+
+# ---- alt text on every image: screen readers describe what's in it ----
+
+ALT_TEXT = [
+    (r"^receipt", "A slip receipt: each leg with a check for hit, an X for miss, and the amounts"),
+    (r"^(research|scout|xray|trend)", "A bar chart of recent games against the line: green bars went over, red went under"),
+    (r"^card|_card\.", "A player card with the record and recent results"),
+    (r"^board", "The live board of open slips and how each leg is doing"),
+    (r"^(standings|power_rankings)", "The standings: rank, name, record and profit"),
+    (r"^cashed", "This week's cashed slips"),
+    (r"^(chart|profit|pnl|timeline)", "A line chart of profit over time"),
+    (r"^(wrapped|report_card)", "A season summary card"),
+    (r"^(heatmap|legs|hot)", "A chart of how the group's legs went"),
+    (r"^(gameday|squares|group_goal)", "A game graphic"),
+]
+
+
+def alt_text_for(filename: str) -> Optional[str]:
+    f = os.path.basename(str(filename or "")).lower()
+    if not f.endswith((".png", ".gif", ".jpg", ".jpeg")):
+        return None
+    for rx, text in ALT_TEXT:
+        if re.search(rx, f):
+            return text
+    return "An image from PIMP-BOT"
+
+
+_PlainFile = discord.File
+
+
+class _AltFile(_PlainFile):
+    """discord.File with a text description (alt text) for images unless one is given."""
+    def __init__(self, fp, filename=None, *args, **kw):
+        if "description" not in kw:
+            alt = alt_text_for(filename)
+            if alt:
+                kw["description"] = alt
+        super().__init__(fp, filename, *args, **kw)
+
+
+discord.File = _AltFile
+
 HELP_START = (
     "**Start here**\n"
     "• Post a slip screenshot in the receipts channel (or @mention me with it) and I log it\n"
@@ -34603,16 +34934,13 @@ def help_view(sections: list) -> discord.ui.View:
     return v
 
 
-@bot.tree.command(name="help", description="Everything this bot can do")
-async def help_cmd(interaction: discord.Interaction):
-    full = help_embed()
-    e = discord.Embed(title="What I can do", description=HELP_START, color=BRAND)
-    for f in full.fields:   # the full list is still here for anyone scrolling; the menu shows one section at a time
-        e.add_field(name=f.name, value=f.value, inline=False)
-    while sum(len(f.name) + len(f.value) for f in e.fields) + len(HELP_START) > 5500 and e.fields:
-        e.remove_field(len(e.fields) - 1)
-    e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
-    await interaction.response.send_message(embed=e, view=help_view(full.fields), ephemeral=True)
+@bot.tree.command(name="help", description="Everything this bot can do, by topic, plus what's new")
+@app_commands.describe(topic="Optional: jump straight to one topic")
+@app_commands.choices(topic=[app_commands.Choice(name=n, value=k) for k, n in HELP_TOPIC_CHOICES])
+async def help_cmd(interaction: discord.Interaction, topic: Optional[app_commands.Choice[str]] = None):
+    key = topic.value if topic else "home"
+    await interaction.response.send_message(embed=help_page(key, interaction.guild_id), ephemeral=True,
+                                            view=help_hub_view(interaction.guild_id, key))
 
 
 def help_embed() -> discord.Embed:
@@ -34643,10 +34971,10 @@ def help_embed() -> discord.Embed:
     e.add_field(name="Slips", inline=False, value=(
         "Post a slip screenshot in the receipts channel and I'll log it. Anywhere else, @mention me with it "
         "(or reply `@me log` to one). Ask a question with it (\"@me thoughts?\") for a leg-by-leg breakdown "
-        "that isn't logged. Admins: `/receipts`; `/admin check` if screenshots aren't logging."))
+        "that isn't logged. Admins: `/admin receipts`; `/admin check` if screenshots aren't logging."))
     e.add_field(name="Recaps", inline=False, value=(
         "`/recap` the last 7 days. Weekly recap and open-pick reminders post automatically "
-        "once an admin runs `/recapchannel`."))
+        "once an admin runs `/admin recapchannel`."))
     e.add_field(name="Auto-grading", inline=False, value=(
         f"Picks still open {AUTOGRADE_AFTER_HOURS} hours after they're logged get their results looked up "
         "and settled automatically: moneylines, spreads and totals from the free ESPN scoreboard, "
@@ -34655,9 +34983,9 @@ def help_embed() -> discord.Embed:
         "👍/👎 buttons on a pick: tail or fade it · `/tailfade` who's worth following\n"
         "`/challenge` head-to-head bet · `/h2h` your record vs someone\n"
         "`/lock` your lock of the week · `/locks` this week + standings · `/lockresult` fix one\n"
-        "`/awards` monthly awards · `/hotroles` weekly 🔥/🧊 roles (admins)\n"
+        "`/awards` monthly awards · `/admin hotroles` weekly 🔥/🧊 roles (admins)\n"
         "`/pickem start` weekly pick'em (mods) · `/pickem mine` · `/pickem standings`\n"
-        "`/halloffame` repost big wins in a channel (admins)\n"
+        "`/admin halloffame` repost big wins in a channel (admins)\n"
         "`/season start` new season (admins) · `/season standings` · `/season list`\n"
         "`/survivor start` NFL survivor pool (mods) · `/survivor pick` · `/survivor standings`"))
     e.add_field(name="Your numbers", inline=False, value=(
@@ -34667,8 +34995,8 @@ def help_embed() -> discord.Embed:
         "`/bankroll` units on your picks · `/limit` weekly loss heads-up (private)\n"
         "`/compare` two people side by side · `/remind` DM yourself later · `/reminders`"))
     e.add_field(name="Setup (admins)", inline=False, value=(
-        "`/guide` post and pin the how-to in this channel · `/receipts` · `/recapchannel` · `/import`\n"
-        "`/backups` nightly backup to this channel · `/settings` everything that's set up\n"
+        "`/admin guide` post and pin the how-to in this channel · `/admin receipts` · `/admin recapchannel` · `/import`\n"
+        "`/admin backups` nightly backup to this channel · `/admin settings` everything that's set up\n"
         "`/admin` status · audit · announce · sheets · welcome · unlock"))
     e.add_field(name="Players", inline=False, value=(
         "`/player add` · `/player note` · `/player view` · `/player list` · `/player remove`"))
@@ -35057,13 +35385,13 @@ def guide_embeds() -> list[discord.Embed]:
         "• **Pings you** about picks open 3+ days, and DMs you if a player on your open props is listed "
         "Out, Doubtful or Questionable.\n"
         "• **Sunday 8 PM:** weekly recap, plus the 🔥 Hot Hand and 🧊 Ice Cold roles.\n"
-        "• **Every morning:** today's games, in the channel an admin picked with `/todaypost`.\n"
+        "• **Every morning:** today's games, in the channel an admin picked with `/admin todaypost`.\n"
         "• **The 1st of each month:** monthly awards.\n"
         "• **Shouts out** new badges and 5, 10, 15 and 20-win streaks.\n"
-        "• **Nightly backup** of every pick, in the channel an admin picked with `/backups`.\n"
+        "• **Nightly backup** of every pick, in the channel an admin picked with `/admin backups`.\n"
         "• **🚨 One leg away** alerts, ✅/❌ reactions on slips, and a 💵 settle button once a PrizePicks slip is graded.\n"
         "• **Weekly rivals** on Mondays, 🌟 member of the week, 💰 monthly 20x bounty, 👑 Top Dog role, big-win banners "
-        "and roasts, game threads (if an admin turns them on in `/settings`)."))
+        "and roasts, game threads (if an admin turns them on in `/admin settings`)."))
     group = discord.Embed(title="🤝 With the group", color=BRAND, description=(
         "👍 **Tail** / 👎 **Fade** / 📋 **Copy** / 🥵 **Sweat** buttons on every pick card. `/tailfade` who's worth following.\n"
         "`/challenge` head-to-head bets · `/lock` lock of the week · `/groupparlay` one leg each, every week\n"
@@ -35743,17 +36071,17 @@ async def settings_cmd(interaction: discord.Interaction):
     pool = active_pool(gid)
     e = discord.Embed(title="⚙️ PIMP-BOT settings", color=BRAND)
     e.add_field(name="Channels", inline=False, value=(
-        f"Receipts: {', '.join(receipts) or 'not set'} (`/receipts`)\n"
-        f"Recaps, reminders, results: {chan('recap_channel')} (`/recapchannel`)\n"
-        f"Hall of fame: {chan('hof_channel')} (`/halloffame`)\n"
-        f"Morning games: {chan('today_channel')} (`/todaypost`)\n"
-        f"Backups: {chan('backup_channel')} (`/backups`)\n"
-        f"Guide: {', '.join(guides) or 'not posted'} (`/guide`)"))
+        f"Receipts: {', '.join(receipts) or 'not set'} (`/admin receipts`)\n"
+        f"Recaps, reminders, results: {chan('recap_channel')} (`/admin recapchannel`)\n"
+        f"Hall of fame: {chan('hof_channel')} (`/admin halloffame`)\n"
+        f"Morning games: {chan('today_channel')} (`/admin todaypost`)\n"
+        f"Backups: {chan('backup_channel')} (`/admin backups`)\n"
+        f"Guide: {', '.join(guides) or 'not posted'} (`/admin guide`)"))
     e.add_field(name="Features", inline=False, value=(
         f"Claude (slips, questions, prop grading): {'on' if ai_enabled() else 'off: add ANTHROPIC_API_KEY on Railway'}\n"
         f"Auto-grading: {'after ' + str(AUTOGRADE_AFTER_HOURS) + 'h' if AUTOGRADE_AFTER_HOURS else 'off'} · "
         f"paid lookups today: {get_setting(gid, 'autogrades:' + datetime.now(TZ).date().isoformat()) or 0}/{AUTOGRADE_DAILY_LIMIT}\n"
-        f"Hot Hand roles: {'on' if get_setting(gid, 'hotroles') == 'on' else 'off'} (`/hotroles`)\n"
+        f"Hot Hand roles: {'on' if get_setting(gid, 'hotroles') == 'on' else 'off'} (`/admin hotroles`)\n"
         f"Season: {season['name'] if season else 'none'} · Survivor: {pool['name'] if pool else 'none'}\n"
         f"Dashboard: {'on (`/dashboard` for the link)' if dashboard_url() else 'off (generate a domain on Railway)'} · "
         f"Prop of the Day: {chan('potd_channel')}"))
@@ -39371,7 +39699,8 @@ async def badge_remove(interaction: discord.Interaction, member: discord.Member)
 
 # ---- tickets: everything that needs attention, posted to a staff channel with buttons to fix and close it -----
 
-TICKET_ICON = {"needs": "🧾", "payout": "💵", "stale": "⏳", "scan": "📸", "blacklist": "🚫", "system": "⚙️"}
+TICKET_ICON = {"needs": "🧾", "payout": "💵", "stale": "⏳", "scan": "📸", "blacklist": "🚫", "system": "⚙️",
+               "feedback": "💬"}
 TICKET_COLOR = {"open": 0xF5B942, "claimed": 0x5B8DEF, "closed": 0x3FB97A}
 
 
@@ -39617,7 +39946,7 @@ async def tickets_job(client, now: Optional[datetime] = None) -> None:
         live = db().execute("SELECT * FROM tickets WHERE guild_id = ? AND status != 'closed'", (gid,)).fetchall()
         live_keys = {t["key"] for t in live}
         for t in live:                                    # fixed elsewhere (graded with /result, feed back up...)
-            if t["key"] not in keys:
+            if t["key"] not in keys and t["kind"] != "feedback":
                 ticket_close(t["id"], "the bot", "Auto-closed after 2 days." if t["kind"] in ("scan", "blacklist")
                              else "Fixed: it doesn't need attention anymore.")
                 await ticket_refresh(client, t["id"])
@@ -40189,7 +40518,7 @@ def local_backup_on() -> bool:
 
 def local_backup(now: Optional[datetime] = None, folder: Optional[str] = None) -> dict:
     """A full copy of the database next to it on the volume, checked, keeping the last LOCAL_BACKUP_KEEP. A safety net
-    for a bad update or a damaged file (it doesn't help if the whole volume is lost: that's what /backups is for)."""
+    for a bad update or a damaged file (it doesn't help if the whole volume is lost: that's what /admin backups is for)."""
     now = now or datetime.now(timezone.utc)
     folder = folder or os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "backups")
     os.makedirs(folder, exist_ok=True)
@@ -40410,6 +40739,87 @@ def health_embed(d: dict) -> discord.Embed:
 async def staff_health_cmd(interaction: discord.Interaction):
     selftest_run(interaction.client)
     await interaction.response.send_message(embed=health_embed(reliability_data()), ephemeral=True)
+
+
+
+# ==== r45: admin setup commands move under /admin (Discord allows 100 top-level commands) ==========================
+
+R45_MOVED = ('receipts', 'recapchannel', 'todaypost', 'backups', 'settings', 'hotroles', 'halloffame', 'guide')
+
+
+def r45_move_into(group, names) -> list[str]:
+    moved = []
+    for n in names:
+        try:
+            c = bot.tree.get_command(n)
+        except Exception:
+            c = None
+        if c is None:
+            continue
+        bot.tree.remove_command(n)
+        group.add_command(c)
+        moved.append(n)
+    return moved
+
+
+r45_move_into(admin_group, R45_MOVED)
+HELP_EXTRA.append(("🛡️ Staff tools", "`/staff` tickets · lookup · report · health · whatsnew · badges · blacklist · "
+                                   "announcements · `/admin` receipts · recapchannel · todaypost · backups · settings · "
+                                   "hotroles · halloffame · guide · panel · setup · check"))
+
+
+@staff_group.command(name="whatsnew", description="Post What's new here now, and use this channel for future posts")
+@sec_staff_only
+async def staff_whatsnew_cmd(interaction: discord.Interaction):
+    set_setting(interaction.guild_id, "whatsnew_channel", str(interaction.channel_id))
+    await interaction.response.send_message(embed=whatsnew_embed(WHATS_NEW_LATEST), allowed_mentions=discord.AllowedMentions.none())
+
+
+# ---- the member guide: a plain web page with every help topic --------------------------------------------------------
+
+def guide_html() -> str:
+    import html as _h
+    def md(t):
+        t = _h.escape(t)
+        t = re.sub(r"`([^`]{1,120})`", r"<code>\1</code>", t)
+        t = re.sub(r"\*\*([^*]{1,200})\*\*", r"<b>\1</b>", t)
+        return t.replace("\n", "<br>")
+    by = dict(help_sections())
+    parts = []
+    for k, name, titles in HELP_CATS:
+        secs = [(t, by[t]) for t in titles if t in by]
+        if not secs:
+            continue
+        parts.append(f'<section id="{k}"><h2>{_h.escape(name)}</h2>' + "".join(
+            f"<h3>{_h.escape(t)}</h3><p>{md(v)}</p>" for t, v in secs) + "</section>")
+    nav = "".join(f'<a href="#{k}">{_h.escape(n)}</a>' for k, n, _ in HELP_CATS)
+    new = "".join(f"<li>{md(x)}</li>" for x in WHATS_NEW.get(WHATS_NEW_LATEST) or [])
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PIMP-BOT · Member guide</title><link rel="icon" href="/favicon.svg"><style>
+:root{{--bg:#0d0a14;--card:#17121f;--text:#f3effa;--muted:#a79fb8;--line:#2a2236;--brand:#7b3fe4;--gold:#f0b429}}
+@media (prefers-color-scheme: light){{:root{{--bg:#f6f3fb;--card:#fff;--text:#1d1828;--muted:#5d5670;--line:#e4def0}}}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}}
+header{{background:linear-gradient(135deg,#2a1457,#7b3fe4);color:#fff;padding:28px 16px}}header h1{{margin:0;font-size:28px;letter-spacing:.02em}}
+header p{{margin:6px 0 0;opacity:.85}}main{{max-width:860px;margin:0 auto;padding:16px}}
+nav{{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 4px}}nav a{{color:var(--text);text-decoration:none;border:1px solid var(--line);
+background:var(--card);border-radius:999px;padding:6px 12px;font-size:14px}}nav a:focus,nav a:hover{{border-color:var(--brand)}}
+section{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:16px 0}}
+h2{{margin:0 0 6px;font-size:20px}}h3{{margin:16px 0 4px;font-size:15px;color:var(--gold)}}p{{margin:0}}
+code{{background:rgba(123,63,228,.18);border-radius:6px;padding:1px 6px;font-size:.92em}}.new li{{margin:4px 0}}
+footer{{color:var(--muted);font-size:13px;text-align:center;padding:24px 16px}}</style></head><body>
+<header><h1>PIMP-BOT · Member guide</h1><p>Everything the bot does, in one page. Type <code>/help</code> in Discord for the same, with buttons.</p></header>
+<main><nav aria-label="Topics">{nav}</nav>
+<section class="new" id="new"><h2>🆕 What's new in {WHATS_NEW_LATEST}</h2><ul>{new}</ul></section>
+{''.join(parts)}
+<section><h2>Ground rules</h2><p>The bot tracks and grades. It never calls a pick a lock or a sure thing, and it never pushes anyone to bet more.
+Hidden slips stay hidden until they're revealed. Bet what you can afford to lose.</p></section></main>
+<footer>PIMP-BOT {BOT_VERSION.split()[-1]} · questions or ideas? <code>/help</code> → 💬 Feedback</footer></body></html>"""
+
+
+async def guide_page(request):
+    from aiohttp import web
+    resp = dash_html(web, guide_html())
+    return resp
 
 
 bot.tree.add_command(staff_group)
