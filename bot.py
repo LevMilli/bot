@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r41"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r42"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -25395,9 +25395,15 @@ FREE_STATS = sorted({
     "Pass Comp", "Pass Comps", "Pass Atts", "Pass Att", "Rush Atts", "Rush Att", "Rec Yds", "Pass Yds", "Rush Yds",
     "Rec Tgts", "Receiving Yards", "Passing Yards", "Rushing Yards", "Maps 1-3 Kills", "Maps 1-2 Headshots",
     "Maps 1-3 Headshots", "Map 1 Kills", "Map 1 Headshots", "Assists",
+    "SOT", "PO", "Goalie Fantasy Score", "Goalie Saves", "Shots On Target", "Pitching Outs", "Pitcher Outs",
+    "Hitter Fantasy Score", "Kills (Combo)", "Maps 1-2 Kills (Combo)",
 }, key=len, reverse=True)
+# Short names the cards print, written out the way the grader knows them.
+FREE_STAT_ALIAS = {"SOT": "Shots On Target", "PO": "Pitching Outs", "Pitcher Outs": "Pitching Outs",
+                   "Kills (Combo)": "Kills", "Maps 1-2 Kills (Combo)": "Maps 1-2 Kills"}
+FREE_CASE_STATS = {"SOT", "PO"}       # only in capitals: "po" and "sot" inside other words are not stats
 FREE_ESPORTS_STATS = {"Kills", "Headshots", "Maps 1-2 Kills", "Maps 1-3 Kills", "Maps 1-2 Headshots",
-                      "Maps 1-3 Headshots", "Map 1 Kills", "Map 1 Headshots"}
+                      "Maps 1-3 Headshots", "Map 1 Kills", "Map 1 Headshots", "Kills (Combo)", "Maps 1-2 Kills (Combo)"}
 # Stats whose lines can reach 100+; any other stat over 100 is a misread (a "693.5 Pitcher Strikeouts").
 FREE_BIG_STATS = {"Pass Yards", "Pass Yds", "Passing Yards", "Rush Yards", "Rush Yds", "Rushing Yards", "Rec Yards",
                   "Rec Yds", "Receiving Yards", "Rush+Rec Yds", "Pass+Rush Yds", "Pitches Thrown", "Field Goal Yards",
@@ -25405,10 +25411,16 @@ FREE_BIG_STATS = {"Pass Yards", "Pass Yds", "Passing Yards", "Rush Yards", "Rush
                   "Hitter Fantasy Score", "Pitcher Fantasy Score", "Time On Ice"}
 FREE_SPORT_FAMILY = {"NFL": "football", "CFB": "football", "NCAAF": "football", "NBA": "basketball",
                      "WNBA": "basketball", "CBB": "basketball", "NCAAB": "basketball", "NHL": "hockey",
-                     "MLB": "baseball", "SOCCER": "soccer"}
+                     "MLB": "baseball", "SOCCER": "soccer", "KBO": "baseball", "NPB": "baseball",
+                     "CPBL": "baseball", "KHL": "hockey", "SHL": "hockey", "WTA": "tennis", "ATP": "tennis"}
 _FREE_TEAM_TOKEN = re.compile(r"(?<![A-Za-z])([A-Z]{2,3})(?![A-Za-z])")
-_FREE_STAT_RX = [(s, re.compile(r"(?<![A-Za-z])" + r"\s*".join(re.escape(ch) for ch in s.replace(" ", "")) + r"(?![a-z])",
-                                re.I)) for s in FREE_STATS]
+def _free_stat_char(ch: str) -> str:
+    return "[Il1|]" if ch in "Il" else re.escape(ch)      # OCR swaps I and l: "Hits+Runs+RBls"
+
+
+_FREE_STAT_RX = [(s, re.compile(r"(?<![A-Za-z])" + r"\s*".join(_free_stat_char(ch) for ch in s.replace(" ", ""))
+                                + (r"(?![A-Za-z])" if s in FREE_CASE_STATS else r"(?![a-z])"),
+                                0 if s in FREE_CASE_STATS else re.I)) for s in FREE_STATS]
 _FREE_NUM = re.compile(r"^\d{1,4}(?:[.,]\d)?$")
 _FREE_MONEY = r"\$\s?([\d,]+(?:\.\d{1,2})?)"
 _FREE_JUNK = {"less", "more", "over", "under", "higher", "lower", "vs", "at", "nba", "nfl", "nhl", "mlb", "wnba",
@@ -25416,6 +25428,7 @@ _FREE_JUNK = {"less", "more", "over", "under", "higher", "lower", "vs", "at", "n
               "flex", "pick", "picks", "entry", "fee", "to", "win", "payout", "paid", "won", "lost", "live", "final",
               "copied", "lineup", "early", "balance", "players", "teams", "submit", "demon", "goblin", "taco",
               "points", "promo", "boosted", "free", "squares", "prizepicks", "underdog", "contest", "of", "mon", "tue",
+              "maps", "map", "dnp", "kbo", "npb", "combo", "final", "refund", "refunded",
               "wed", "thu", "fri", "sat", "sun", "today", "tomorrow", "am", "pm", "lineup"}
 _FREE_NAME_TOKEN = re.compile(r"^(?:[A-ZÀ-ÞĀ-ž][A-Za-zÀ-ÿĀ-ž'’.\-]*|[A-Z]{2,3})$")
 
@@ -25597,11 +25610,18 @@ def _free_name(line: dict, max_x: Optional[float] = None, single: bool = False) 
     gamer tag ('Aegis'), for esports stats."""
     text = " ".join(t for t in line["text"].split() if not ("@" in t and (free_pill_num(t)
                                                                            or not re.search(r"@\s?[A-Z]{2,4}", t))))
-    if re.search(r"vs\b|\d{1,2}:\d{2}|@|\$|#\s?\d", text, re.I) or re.search(
+    if re.search(r"vs\b|\d{1,2}:\d{2}|@|\$\s?\d|#\s?\d", text, re.I) or re.search(
             r"\b(defender|midfielder|attacker|forward|goalkeeper|guard|center|qb|rb|wr|te|lw|rw|sp|rp)\b", line["text"], re.I):
         return None                            # a game header, an amount, or a team/position/jersey line
     toks = [w["text"].strip(",;:|()[]{}©@&*") for w in line["words"] if not ("@" in w["text"] and free_pill_num(w["text"]))
             and (max_x is None or w["x"] < max_x)]
+    toks = ["I" + t[1:] if re.match(r"^l[^aeiouy\W\d]", t) else t for t in toks]   # "lriafen" is "Iriafen"
+    if single:
+        if re.search(r"[•·«»+\-]\s*[-»·•]?\s*G\b", line["text"]):
+            return None                        # "Natus Vincere • G": the team and role line, not the gamer
+        cm = re.search(r"(?<![\w])([A-Za-z][\w.\-]{1,15})\s*\+\s*([A-Za-z][\w.\-]{1,15})(?![\w])", " ".join(toks))
+        if cm and not any(x.lower() in _FREE_JUNK or _free_stat_in(x) or len(x) < 3 for x in cm.groups()):
+            return f"{cm.group(1)} + {cm.group(2)}"    # a combo pick: "Fuuu + Morttheus"
     best: list[str] = []
     run: list[str] = []
     for t in toks + [""]:
@@ -25624,7 +25644,7 @@ def _free_name(line: dict, max_x: Optional[float] = None, single: bool = False) 
         if re.search(r"vs|final|\d{1,2}:\d{2}", line["text"], re.I):
             return None                        # the game header ("LGDvsJDG Final"), not a gamer tag
         tags = [t for t in toks if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.\-]{2,15}", t) and t.lower() not in _FREE_JUNK
-                and not t.isupper() and not _free_stat_in(t)]
+                and (not t.isupper() or (len(t) >= 4 and t.lower() not in TEAM_ABBRS)) and not _free_stat_in(t)]
         return tags[0] if tags else None
     if len(best) < 2 or len(best) > 4:
         return None
@@ -25676,7 +25696,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     # amounts: "$25 to win $450" / "Entry fee ... To Win ... $15 $562.50"
     cost = payout = None
     status, returned = "open", None
-    m = re.search(_FREE_MONEY + r"\s*(to\s*(?:win|pay)|for|paid|won)\s*" + _FREE_MONEY, full, re.I)
+    m = re.search(_FREE_MONEY + r"\s*(to\s*(?:win|pay)|for|paid|won)\s*[$S]\s?([\d,]+(?:\.\d{1,2})?)(?![\d,])",
+                  full, re.I)
     if m:
         cost, payout = as_amount(m.group(1)), as_amount(m.group(3))
         if m.group(2).lower() in ("paid", "won") and payout:
@@ -25697,6 +25718,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         unsure.append("the amount risked")
     if payout is None:
         unsure.append("the payout")
+    if status == "open" and re.search(r"\brefund(?:ed)?\b", "\n".join(x["text"] for x in lines[:8]), re.I):
+        status, returned = "push", cost                         # every pick voided: the entry fee came back
     if status == "open":
         for ln in lines[:8]:                                   # the result badge next to the header
             toks = [w["text"].strip(".,:;!()") for w in ln["words"]]
@@ -25706,7 +25729,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             if any(t in ("Win", "WIN", "Won") and (i == 0 or toks[i - 1].lower() != "to") for i, t in enumerate(toks)):
                 status = "win"
                 break
-    slip_fams = {FREE_SPORT_FAMILY[x] for x in re.findall(r"\b(NFL|CFB|NCAAF|NBA|WNBA|CBB|NCAAB|NHL|MLB|SOCCER)\b", full)}
+    slip_fams = {FREE_SPORT_FAMILY[x] for x in re.findall(r"\b(NFL|CFB|NCAAF|NBA|WNBA|CBB|NCAAB|NHL|MLB|SOCCER|KBO|NPB"
+                                                          r"|CPBL|KHL|SHL|WTA|ATP)\b", full)}
     if re.search(r"\b(LoL|CS2|VAL|DOTA|COD)\b", full):
         slip_fams.add("esports")
     teams: dict = {}
@@ -25718,6 +25742,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         lines = sorted(lines + extra, key=lambda ln: (ln["y"], ln["x0"]))
     # legs: anchor on each stat name, take the line number before it, the name above it, and the side
     legs: list[str] = []
+    dnp: list[str] = []           # legs marked DNP (the player didn't play: PrizePicks voids that pick)
     used_lines: set = set()       # a name line belongs to one leg; the same player can be on two lines
     num_hs = sorted(w["h"] for w in words if _FREE_NUM.match(_free_numtext(w["text"])))
     builder = bool(re.search(r"\bless\b", low) and re.search(r"\bmore\b", low))
@@ -25788,14 +25813,20 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                 whole = (ws, cl)
         if not num_words and whole:
             num_words, src = whole
+        if not num_words and right and platform == "PrizePicks":
+            got = free_box_number(grey, ln, hn)
+            if got:
+                num_words, src = [got], (lines[k - 1] if k and ln["y"] - lines[k - 1]["y"] < 2.5 * max(hn, ln["h"])
+                                         else ln)
         if not num_words:
             continue
+        stat = FREE_STAT_ALIAS.get(stat, stat)
         fams = {STATS[x][1] for x in stat_keys_in(stat)} if stat not in FREE_ESPORTS_STATS else {"esports"}
         if slip_fams and fams and not (fams & slip_fams) and "fantasy" not in stat.lower():
             continue                                          # a baseball stat read off a hockey slip: noise
         wd = max(num_words, key=lambda w: w["x"])            # the new line, never a crossed-out old one
         txt = wd.get("_num") or _free_numtext(wd["text"])
-        again = free_reocr_number(grey, wd)
+        again = None if wd.get("_boxread") else free_reocr_number(grey, wd)
         if again and (("." in again) or "." not in txt):
             txt = again
         try:
@@ -25868,11 +25899,23 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             rr, cy = wd["x"] + wd["w"], wd["y"] + wd["h"] / 2
             nw = digits * 0.6 * hn
             side = free_arrow(img, (rr - nw - 1.9 * hn, cy - 0.9 * hn, rr - nw - 0.15 * hn, cy + 0.9 * hn))
+        if side is None and right and not wd.get("_boxread"):
+            # Tesseract's box for "18.5" took in the arrow too: look just left of where the digits really start
+            vt = f"{value:g}"
+            hh = wd["h"]
+            nw = (len(vt.replace(".", "")) * 0.6 + (0.25 if "." in vt else 0)) * hh
+            rr = wd["x"] + wd["w"]
+            if wd["w"] > nw + 0.6 * hh and wd["conf"] < 60 and re.fullmatch(r"\d{1,3}(?:\.\d)?", wd["text"]):
+                a = free_arrow(img, (rr - nw - 1.6 * hh, wd["y"] - 0.3 * hh, rr - nw - 0.1 * hh, wd["y"] + 1.3 * hh))
+                b = free_arrow(img, (wd["x"] - 0.2 * hh, wd["y"] - 0.3 * hh, wd["x"] + 1.2 * hh, wd["y"] + 1.3 * hh))
+                side = a if a and a == b else None     # both looks must agree, or we ask
         if side is None:
             unsure.append(f"over or under for {name}")
             side = "over"
         if num_hs and wd["h"] > 1.35 * num_hs[len(num_hs) // 2] and wd.get("conf", 100) < 60:
             unsure.append(f"the line for {name}")           # an arrow glued onto the number
+        if wd.get("_boxread") and len(txt.replace(".", "")) < 2:
+            unsure.append(f"the line for {name}")           # a lone digit from the re-read box: half a number
         if stat.lower().startswith("anytime") and value > 1.5:
             unsure.append(f"the line for {name}")
             value = 0.5
@@ -25894,6 +25937,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                                                      head[-1]["text"]).strip())
         if leg not in legs:
             legs.append(leg)
+            if re.search(r"\bDNP\b", ln["text"] + " " + src["text"]):
+                dnp.append(leg)
     if not legs:
         if platform and (cost or payout):
             return {"is_slip": True, "platform": platform, "sport": None, "description": "Slip", "legs": [],
@@ -25913,7 +25958,32 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     return {"is_slip": True, "platform": platform, "sport": ", ".join(s.title() if s == "SOCCER" else s for s in sports)
             or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": status,
             "returned": returned, "game_date": None, "entry_type": entry_type, "placed": placed,
-            "_unsure": unsure, "_how": "scan", "_teams": teams, "_games": games, "_want": want}
+            "_unsure": unsure, "_how": "scan", "_teams": teams, "_games": games, "_want": want, "_dnp": dnp}
+
+
+def free_box_number(grey, ln: dict, hn: float) -> Optional[dict]:
+    """The line's number box on a share card, read again when Tesseract skipped the number: the strip just above
+    the stat name, right-aligned with it, digits only. A fake word for free_parse, or None."""
+    from PIL import Image
+    hn = max(18.0, float(hn or 25))
+    x1 = ln["x1"]
+    box = (int(x1 - 2.7 * hn), max(0, int(ln["y"] - 2.1 * hn)), min(grey.width, int(x1 + 0.4 * hn)),
+           max(0, int(ln["y"] - 0.05 * hn)))
+    if box[2] - box[0] < 10 or box[3] - box[1] < 10:
+        return None
+    crop = grey.crop(box)
+    crop = crop.resize((crop.width * 3, crop.height * 3), Image.LANCZOS)
+    for psm in (7, 8):
+        txt = _free_tess(crop, psm, ["-c", "tessedit_char_whitelist=0123456789."], tsv=False).strip()
+        txt = re.sub(r"\s+", "", txt)
+        m = re.search(r"(\d{1,3}(?:\.\d)?)$", txt)
+        if m:
+            num = m.group(1)
+            if len(num) >= 3 and "." not in num and num[0] in "14" and num[1:] not in ("00",):
+                num = num[1:]                 # the arrow read as a 1 or 4 in front: "111" is 11
+            return {"text": num, "_num": num, "x": box[0], "y": box[1], "w": box[2] - box[0], "h": box[3] - box[1],
+                    "conf": 70, "_boxread": True, "_glued": True}
+    return None
 
 
 def free_name_reread(grey, top: float, bottom: float, single: bool = False) -> Optional[str]:
