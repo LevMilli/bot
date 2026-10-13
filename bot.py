@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r33"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r35"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -8729,7 +8729,7 @@ def dashboard_data(guild_id: int) -> dict:
     _people = dashboard_people(guild_id)
     return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": _people,
             "badges": {p["key"]: p["badge"] for p in _people if p.get("badge")}, "breakdown": dash33_breakdown(guild_id),
-            "settled24": dashboard_recent(guild_id),
+            "settled24": dashboard_recent(guild_id), "badbeats": dash35_badbeats(guild_id), "sotd": sotd_latest(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
             "series": {k: [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in v] for k, v in series.items()},
@@ -15016,6 +15016,9 @@ def people_badge(guild_id: int, key: str) -> Optional[dict]:
             return {"t": "Admin", "k": "admin"}
         if lvl == "Mod":
             return {"t": "MOD", "k": "mod"}
+    custom = member_badges(guild_id).get(str(uid))
+    if custom:
+        return {"t": clip(custom["t"], 20), "k": "vip" if custom.get("k") == "vip" else "custom"}
     return None
 
 
@@ -19770,6 +19773,7 @@ def dash_app(web):
                     web.get("/api/staff/people.json", staff_people_api),
                     web.get(r"/staff/avatar/{uid:\d+}.png", staff_avatar),
                     web.get("/lines", lines_page), web.get("/api/lines.json", lines_api),
+                    *([web.post("/api/staff/toggle", staff_toggle)] if hasattr(web, "post") else []),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -19828,6 +19832,7 @@ header{background:var(--head);position:relative;overflow:hidden;isolation:isolat
 .bdg.owner{background:linear-gradient(135deg,#f0b429,#c9952a);color:#1a0f33}
 .bdg.admin{background:#7B3FE433;color:var(--brand2);border:1px solid #7B3FE466}
 .bdg.mod{background:linear-gradient(135deg,#7B3FE4,#5a2bc0);color:#fff}
+.bdg.vip{background:linear-gradient(135deg,#ffe08a,#f0b429);color:#3a2600}.bdg.custom{background:#a27bff26;color:var(--brand2);border:1px solid #a27bff55}
 .bsheet h3{margin:14px 0 8px;font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
 .brow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
 .brow:first-of-type{border-top:0}.brow .bb{grid-column:1/-1;height:6px;border-radius:99px;background:var(--card2);overflow:hidden;margin-top:-2px}
@@ -20217,11 +20222,11 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
   <li><a href="/staff#ai-pool-today"><span class="ic">🤖</span><span><b>AI pool & usage</b><i>Questions, limits, services</i></span></a></li>
   <li><a href="/staff#playbook"><span class="ic">📘</span><span><b>Playbook</b><i>Every staff command, ready to copy</i></span></a></li>
   <li><a href="/api/picks.csv" download><span class="ic">⬇️</span><span><b>Export picks (CSV)</b><i>Every visible pick, for a spreadsheet</i></span></a></li>
-  <li class="soon"><a href="#"><span class="ic">🚫</span><span><b>Blacklist</b><i>Players, teams, situations</i></span></a></li>
-  <li class="soon"><a href="#"><span class="ic">📣</span><span><b>Announcements</b><i>Post to chosen channels</i></span></a></li>
-  <li class="soon"><a href="#"><span class="ic">🛡️</span><span><b>Mod log</b><i>Warns, mutes, bans</i></span></a></li>
-  <li class="soon"><a href="#"><span class="ic">🏷️</span><span><b>Roles & badges</b><i>Owner, MOD, VIP</i></span></a></li>
-  <li class="soon"><a href="#"><span class="ic">🎛️</span><span><b>Feature switches</b><i>Turn features on and off</i></span></a></li>
+  <li><a href="/staff#blacklist"><span class="ic">🚫</span><span><b>Blacklist</b><i>Players, teams, situations</i></span></a></li>
+  <li><a href="/staff#announcements"><span class="ic">📣</span><span><b>Announcements</b><i>Post to chosen channels</i></span></a></li>
+  <li><a href="/staff#mod-log"><span class="ic">🛡️</span><span><b>Mod log</b><i>Warns, mutes, bans</i></span></a></li>
+  <li><a href="/staff#roles-badges"><span class="ic">🏷️</span><span><b>Roles & badges</b><i>Owner, MOD, VIP</i></span></a></li>
+  <li><a href="/staff#feature-switches"><span class="ic">🎛️</span><span><b>Feature switches</b><i>Turn features on and off</i></span></a></li>
  </ul>
  <p class="anote" id="anote">Admins and mods: run <b>/dashboard section:Admin health</b> in Discord once to unlock these.</p>
 </div></aside>
@@ -20368,7 +20373,12 @@ function renderOverview(el,d){
   card('Profit over time','',null,chart(d.series)),
   card(S.lb==='season'&&d.season?'Leaderboard · '+d.season:'Leaderboard','s7',d.season?seg:null,
    board.length?h('div',{class:'rows'},board.map(personRow)):empty('No results yet','Settle a slip and the race is on.')),
-  card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}
+  card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')),
+  d.sotd?card('🏆 Slip of the Day','s5',d.sotd.open?'voting':null,d.sotd.open?h('p',{class:'hint'},'Voting is open on '+d.sotd.slips+' slips ('+d.sotd.votes+' vote'+(d.sotd.votes===1?'':'s')+' so far). Vote in Discord; it closes at midnight.')
+   :h('div',{class:'rows'},slipRow({id:d.sotd.id,who:'👑 '+d.sotd.who,what:d.sotd.what,status:d.sotd.status,when:d.sotd.votes+' vote'+(d.sotd.votes===1?'':'s')+' · '+d.sotd.day,net:null,cost:d.sotd.cost}))):null,
+  card('💀 Bad beat board',d.sotd?'s7':'s6',(d.badbeats||[]).length?'30 days':null,(d.badbeats||[]).length?h('div',{class:'rows'},d.badbeats.map(b=>h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+b.id)},
+   h('span',{class:'chip',text:'−'+nfmt(b.by)}),h('div',{style:'min-width:0'},h('div',{class:'nm'},b.who),h('div',{class:'sub'},b.leg)),h('span',{class:'net faint',text:cash(b.payout)})))):
+   empty('No heartbreakers','Legs that miss by half a point or less land here.')))}
 const wide=b=>{b.classList.add('wide');return b};
 async function loadScores(){const d=await api('/api/scores.json'+qs());if(!d)return;S.scores=d;S.scoresAt=Date.now();if(S.tab==='live')render()}
 function scoreTile(g){const a=g.away,b=g.home,sc=v=>v==null?'':nfmt(v),live=g.state==='in',done=g.state==='post';
@@ -29953,6 +29963,16 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
         "owner": {"lockdown": owner_lockdown(), "removed": len(owner_blocked_ids()), "set": bool(DEVELOPER_IDS)},
         "pool": engine_usage(),
         "allow": staff_allowances(guild_id),
+        "blacklist": {"entries": [{"name": r["name"], "kind": BL_KINDS.get(r.get("kind"), "Entry"), "reason": r.get("reason") or "",
+                                   "alert": r.get("alert") or "staff", "by": r.get("by") or ""} for r in bl_rows(guild_id)],
+                      "hits": bl_recent(guild_id)},
+        "modlog": modlog_rows(guild_id, 25),
+        "badges": [{"id": k, "t": v["t"], "k": v.get("k") or "custom", "name": v.get("name") or ""}
+                   for k, v in member_badges(guild_id).items()],
+        "toggles": staff_toggles(guild_id),
+        "can_switch": staff_can_switch(uid, guild_id) if uid else False,
+        "usage": staff_usage(guild_id),
+        "announcements": staff_announcements(guild_id),
     }
 
 
@@ -30002,6 +30022,265 @@ def staff_history(guild_id: int, limit: int = 60) -> list:
     out = [x for x in out if x.get("at")]
     out.sort(key=lambda x: x["at"], reverse=True)
     return out[:limit]
+
+
+# ==========================================================================
+# r34: staff tools: blacklist, announcements, mod log, badges, feature switches, usage
+# ==========================================================================
+
+BL_KINDS = {"player": "Player", "team": "Team", "situation": "Game situation"}
+
+
+def bl_rows(guild_id: int) -> list:
+    try:
+        rows = json.loads(get_setting(guild_id, "blacklist") or "[]")
+    except ValueError:
+        rows = []
+    return [r for r in rows if isinstance(r, dict) and r.get("name")]
+
+
+def bl_save(guild_id: int, rows: list) -> None:
+    set_setting(guild_id, "blacklist", json.dumps(rows[:200]))
+
+
+def _bl_norm(t: str) -> str:
+    return " " + " ".join(re.sub(r"[^a-z0-9+ ]", " ", norm_name(t or "")).split()) + " "
+
+
+def bl_hits(guild_id: int, texts: list) -> list:
+    """[(entry, the leg it matched)] for a slip's legs: a player's full name, a team (name or abbreviation) or a
+    situation's words (like '1st half', 'overtime', 'anytime td')."""
+    rows = bl_rows(guild_id)
+    if not rows:
+        return []
+    out, seen = [], set()
+    for text in texts or []:
+        t = str(text or "")
+        n = _bl_norm(t)
+        for r in rows:
+            key = r.get("id")
+            if key in seen:
+                continue
+            name = r["name"]
+            hit = False
+            if r.get("kind") == "team" and re.fullmatch(r"[A-Za-z]{2,4}", name.strip()):
+                hit = bool(re.search(rf"(?<![A-Za-z]){re.escape(name.strip().upper())}(?![A-Za-z])", t))
+            if not hit:
+                needle = _bl_norm(name)
+                hit = needle.strip() != "" and needle in n
+            if hit:
+                seen.add(key)
+                out.append((r, t))
+    return out
+
+
+def bl_note(hits: list, for_poster: bool = True) -> str:
+    """'🚫 On the group's blacklist: ...' for a reply, or '' when nothing (or nothing the poster should see) matched."""
+    show = [r for r, _ in hits if not for_poster or r.get("alert") == "both"]
+    if not show:
+        return ""
+    parts = [f"**{clip(r['name'], 40)}** ({BL_KINDS.get(r.get('kind'), 'Entry').lower()}"
+             + (f": {clip(r['reason'], 80)}" if r.get("reason") else "") + ")" for r in show[:4]]
+    return "🚫 On the group's blacklist: " + "; ".join(parts) + "."
+
+
+def bl_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS blacklist_hits (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+                    at TEXT, pick_id INTEGER, who TEXT, entry TEXT, kind TEXT, leg TEXT, hidden INTEGER)""")
+
+
+async def blacklist_job(client, now: Optional[datetime] = None) -> None:
+    """New slips with a blacklisted player, team or situation: tell the admins (and the poster, when the entry says
+    so). Runs every cycle; picks are checked once, in order."""
+    last = get_setting(0, "bl_last_pick")
+    top = db().execute("SELECT MAX(id) AS m FROM picks").fetchone()["m"] or 0
+    if last is None or not str(last).isdigit():
+        set_setting(0, "bl_last_pick", str(top))       # first run: start from now, don't alert on history
+        return
+    last = int(last)
+    if top <= last:
+        return
+    picks = db().execute("SELECT * FROM picks WHERE id > ? ORDER BY id LIMIT 60", (last,)).fetchall()
+    set_setting(0, "bl_last_pick", str(picks[-1]["id"] if picks else top))
+    bl_db()
+    for p in picks:
+        try:
+            texts = [l["text"] for l in get_legs(p["id"])] or [p["description"] or ""]
+            hits = bl_hits(p["guild_id"], texts)
+            if not hits:
+                continue
+            secret = bool(sec_secret(p))
+            for r, leg in hits:
+                db().execute("INSERT INTO blacklist_hits (guild_id, at, pick_id, who, entry, kind, leg, hidden) "
+                             "VALUES (?,?,?,?,?,?,?,?)", (p["guild_id"], now_iso(), p["id"], clip(p["bettor_name"] or "", 40),
+                                                          clip(r["name"], 60), r.get("kind"), clip(leg, 120), int(secret)))
+            db().commit()
+            names = ", ".join(f"**{clip(r['name'], 40)}**" for r, _ in hits[:4])
+            jump = p["slip_url"] if (p["slip_url"] or "").startswith("https://discord.com/channels/") else ""
+            await outage_send(client, p["guild_id"], "admin",
+                              f"🚫 Blacklist: {clip(p['bettor_name'] or 'someone', 40)}'s slip `#{p['id']}`"
+                              + (" (hidden)" if secret else "") + f" has {names}." + (f" {jump}" if jump and not secret else ""))
+            activity_add(p["guild_id"], "staff", f"🚫 Blacklist hit on slip #{p['id']} ({', '.join(r['name'] for r, _ in hits[:3])})")
+            note = bl_note(hits, for_poster=True)
+            m = re.match(r"https://discord\.com/channels/\d+/(\d+)/(\d+)", jump)
+            if note and m and not secret:
+                ch = client.get_channel(int(m.group(1)))
+                if ch is not None:
+                    try:
+                        await ch.send(note, reference=ch.get_partial_message(int(m.group(2))),
+                                      allowed_mentions=discord.AllowedMentions.none())
+                    except Exception:
+                        await ch.send(note, allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Blacklist check failed for pick %s", p["id"], exc_info=True)
+
+
+EXTRA_JOBS.append(("blacklist", blacklist_job))
+
+
+def bl_recent(guild_id: int, limit: int = 12) -> list:
+    try:
+        bl_db()
+        rows = db().execute("SELECT * FROM blacklist_hits WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+                            (guild_id, limit)).fetchall()
+    except Exception:
+        return []
+    return [{"at": r["at"], "pick": None if r["hidden"] else r["pick_id"], "who": r["who"], "entry": r["entry"],
+             "kind": r["kind"], "leg": "a hidden slip" if r["hidden"] else r["leg"]} for r in rows]
+
+
+# ---- the mod log: warnings from /staff warn, and bans / unbans / timeouts from Discord -------------------------
+
+def modlog_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS mod_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, at TEXT,
+                    kind TEXT, target_id INTEGER, target_name TEXT, actor_id INTEGER, actor_name TEXT, reason TEXT)""")
+
+
+def modlog_add(guild_id: int, kind: str, target, actor=None, reason: str = "") -> None:
+    try:
+        modlog_db()
+        db().execute("INSERT INTO mod_log (guild_id, at, kind, target_id, target_name, actor_id, actor_name, reason) "
+                     "VALUES (?,?,?,?,?,?,?,?)",
+                     (guild_id, now_iso(), kind, getattr(target, "id", None),
+                      clip(getattr(target, "display_name", None) or getattr(target, "name", None) or "someone", 40),
+                      getattr(actor, "id", None), clip(getattr(actor, "display_name", None) or getattr(actor, "name", None) or "", 40),
+                      clip(reason or "", 300)))
+        db().commit()
+    except Exception:
+        log.warning("Mod log write failed", exc_info=True)
+
+
+def modlog_rows(guild_id: int, limit: int = 30, target_id: Optional[int] = None) -> list:
+    try:
+        modlog_db()
+        if target_id:
+            rows = db().execute("SELECT * FROM mod_log WHERE guild_id = ? AND target_id = ? ORDER BY id DESC LIMIT ?",
+                                (guild_id, int(target_id), limit)).fetchall()
+        else:
+            rows = db().execute("SELECT * FROM mod_log WHERE guild_id = ? ORDER BY id DESC LIMIT ?", (guild_id, limit)).fetchall()
+    except Exception:
+        return []
+    return [{"at": r["at"], "kind": r["kind"], "who": r["target_name"], "by": r["actor_name"], "reason": r["reason"],
+             "id": str(r["target_id"]) if r["target_id"] else None} for r in rows]
+
+
+async def modlog_actor(guild, action_name: str, target_id: int):
+    """(moderator, reason) from Discord's audit log when the bot may read it; (None, '') otherwise."""
+    try:
+        action = getattr(discord.AuditLogAction, action_name)
+        async for entry in guild.audit_logs(limit=5, action=action):
+            if getattr(entry.target, "id", None) == target_id:
+                return entry.user, entry.reason or ""
+    except Exception:
+        pass
+    return None, ""
+
+
+# ---- badges: VIP and custom ones the owners hand out (Developer / Owner / MOD come by themselves) -------------
+
+BADGE_STYLES = {"vip": "VIP", "custom": "Custom"}
+
+
+def member_badges(guild_id: int) -> dict:
+    try:
+        rows = json.loads(get_setting(guild_id, "member_badges") or "{}")
+    except ValueError:
+        rows = {}
+    return {str(k): v for k, v in rows.items() if isinstance(v, dict) and v.get("t")} if isinstance(rows, dict) else {}
+
+
+# ---- feature switches on the staff page ----------------------------------------------------------------------
+
+def staff_toggles(guild_id: int) -> list:
+    return [{"key": k, "label": label, "on": server_on(guild_id, k)} for k, label, _ in SERVER_TOGGLES]
+
+
+def staff_can_switch(uid: int, guild_id: int) -> bool:
+    """Flipping features: the developer, owners, or a cached member with Manage Server (and not removed)."""
+    if developer_id_ok(uid):
+        return True
+    if int(uid) in owner_blocked_ids():
+        return False
+    if owner_id_ok(uid, guild_id):
+        return True
+    if owner_lockdown():
+        return False
+    try:
+        g = bot.get_guild(int(guild_id))
+        m = g.get_member(int(uid)) if g is not None else None
+    except Exception:
+        m = None
+    perms = getattr(m, "guild_permissions", None)
+    return bool(perms and (getattr(perms, "manage_guild", False) or getattr(perms, "administrator", False)))
+
+
+async def staff_toggle(request):
+    """POST /api/staff/toggle {key}: flip one feature. Needs the staff sign-in (a SameSite=Strict cookie) and the
+    X-PB-Staff header, so another site can't flip anything."""
+    from aiohttp import web
+    st = staff_from_request(request)
+    if st is None or request.headers.get("X-PB-Staff") != "1":
+        return dash_error(web, request, 403)
+    if not staff_can_switch(st["uid"], st["guild"]):
+        return web.json_response({"ok": False, "why": "Only the developer, owners and admins can flip features."}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    key = str((body or {}).get("key") or "")
+    kind = next((k for kk, _, k in SERVER_TOGGLES if kk == key), None)
+    if kind is None:
+        return dash_error(web, request, 400)
+    gid = st["guild"]
+    set_setting(gid, key, toggle_flip(get_setting(gid, key), kind))
+    label = next(lbl for kk, lbl, _ in SERVER_TOGGLES if kk == key)
+    on = server_on(gid, key)
+    who_name = staff_viewer(st["uid"]) or "A staff member"
+    await audit(bot, gid, f"{who_name} turned **{label}** {'on' if on else 'off'} on the staff page.")
+    return web.json_response({"ok": True, "key": key, "on": on})
+
+
+def staff_usage(guild_id: int, days: int = 7) -> list:
+    out = []
+    today = datetime.now(TZ).date()
+    for k in range(days - 1, -1, -1):
+        d = today - timedelta(days=k)
+        try:
+            n = int(get_setting(guild_id, f"asks:{d.isoformat()}") or 0)
+        except ValueError:
+            n = 0
+        out.append({"day": d.isoformat(), "n": n})
+    return out
+
+
+def staff_announcements(guild_id: int) -> list:
+    rows = db().execute("SELECT * FROM announcements WHERE guild_id = ? ORDER BY id DESC LIMIT 12", (guild_id,)).fetchall()
+    out = []
+    for r in rows:
+        ch = bot.get_channel(r["channel_id"]) if r["channel_id"] else None
+        out.append({"text": clip(r["text"], 200), "channel": "#" + clip(getattr(ch, "name", "") or str(r["channel_id"]), 40),
+                    "due": r["due_at"], "sent": r["sent_at"]})
+    return out
 
 def staff_uptime(rows: list, now: Optional[datetime] = None) -> dict:
     """Percent of the time the bot was up over the last 7 and 30 days (counting from when tracking began)."""
@@ -30703,6 +30982,18 @@ main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:14px;grid-temp
 .copy{font:inherit;font-size:12px;font-weight:650;padding:4px 10px;border-radius:99px;border:1px solid var(--line);background:var(--card);
  color:var(--muted);cursor:pointer}.copy:hover{color:var(--text);border-color:var(--brand)}
 footer{max-width:1180px;margin:0 auto;padding:4px 16px 28px;color:var(--faint);font-size:12px}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:8px 10px;margin:4px 0;
+ border:1px solid var(--line,#3a2a5a);border-radius:10px;background:transparent;color:inherit;font:inherit;cursor:pointer;text-align:left}
+.sw:disabled{cursor:default;opacity:.75}.sw:not(:disabled):hover{border-color:var(--accent,#a970ff)}
+.knob{flex:none;width:38px;height:22px;border-radius:11px;background:#4a3d63;position:relative;transition:background .2s}
+.knob::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .2s}
+.sw.on .knob{background:var(--up,#3ddc97)}.sw.on .knob::after{left:19px}
+.ubars{display:flex;align-items:flex-end;gap:6px;height:110px;margin:8px 0 4px}
+.ubars div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:3px}
+.ubars i{display:block;width:100%;min-height:2px;border-radius:6px 6px 2px 2px;background:linear-gradient(180deg,var(--accent,#a970ff),#6b3fd1)}
+.ubars b{font-size:11px;font-weight:600}.ubars span{font-size:11px;opacity:.7}
+.tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;border:1px solid currentColor;opacity:.85;margin-left:4px}
+.tag.vip{color:#ffd166}.tag.custom{color:#7cc4ff}.tag.warn{color:var(--warn,#f5b942)}.tag.ban{color:var(--down,#ff6b6b)}
 </style></head><body>
 <div class="grain" aria-hidden="true"></div>
 <header><div class="art" aria-hidden="true"></div><div class="sweep" aria-hidden="true"></div><div class="top"><a class="logo" href="/" title="Back to the dashboard" aria-label="Back to the dashboard">{{LOGO}}</a>
@@ -30746,6 +31037,8 @@ function needs(d){
  if(d.scans&&d.scans.week&&d.scans.week.failed>=3)n.push(['📸','<b>'+d.scans.week.failed+' screenshots failed to read this week.</b> See the scan log below.']);
  if(d.stale_open)n.push(['⏳','<b>'+d.stale_open+' slip'+(d.stale_open>1?'s have':' has')+' been open 4+ days.</b> Worth a look in <code>/inbox</code>.']);
  if(d.errors.slip&&d.errors.slip_at&&Date.now()-Date.parse(d.errors.slip_at)<3*3600e3)n.push(['🔎','<b>Slip reading had an error</b> '+ago(d.errors.slip_at)+'<div class="err">'+esc(d.errors.slip)+'</div>']);
+ const bh=((d.blacklist||{}).hits||[]).filter(x=>x.at&&Date.now()-Date.parse(x.at)<864e5);
+ if(bh.length)n.push(['🚫','<b>'+bh.length+' blacklist hit'+(bh.length>1?'s':'')+' today:</b> '+bh.slice(0,4).map(x=>esc(x.who||'someone')+' · '+esc(x.entry)).join(', ')+(bh.length>4?'…':'')+'. See the Blacklist card.']);
  return n;
 }
 function render(d){
@@ -30808,6 +31101,37 @@ function render(d){
   +row('Mods and owners','unlimited')
   +(al.top.length?'<div class="muted" style="margin:8px 0 2px">Most questions today</div>'+al.top.map(x=>row(esc(x.name),'<span class="num">'+x.n+'</span>'+(x.per_day==null?'':' of '+(x.per_day<0?'∞':x.per_day))+' · '+esc(x.tier))).join(''):'')
   +'<div class="muted" style="margin-top:6px">Change them with <code>/owner quota</code>.</div>'));
+ const bl=d.blacklist||{entries:[],hits:[]};
+ h.push(card('Blacklist',(bl.entries.length?bl.entries.map(e=>row(esc(e.name)+' <span class="muted">'+esc(e.kind)+'</span>',
+   (e.alert==='both'?'staff + slip reply':'staff alert'))).join('')
+   +bl.entries.filter(e=>e.reason).map(e=>'<div class="muted">'+esc(e.name)+': '+esc(e.reason)+'</div>').join('')
+   :'<div class="muted">Nobody on the list yet.</div>')
+  +'<div class="muted" style="margin:8px 0 2px">Recent hits</div>'
+  +(bl.hits.length?bl.hits.map(x=>row(esc(x.who||'someone')+' · '+esc(x.entry),esc(ago(x.at)))+'<div class="muted">'+esc(x.leg||'')+(x.pick?' · slip #'+x.pick:'')+'</div>').join('')
+   :'<div class="muted">'+dot('ok')+'No slips have hit the list.</div>')
+  +'<div class="muted" style="margin-top:6px">Add with <code>/staff blacklist add</code>: a player, a team, or a situation like <i>overtime</i>.</div>'));
+ const an=d.announcements||[];
+ h.push(card('Announcements',(an.length?an.map(a=>row(dot(a.sent?'ok':'warn')+esc(a.channel),a.sent?'sent '+esc(ago(a.sent)):'scheduled '+esc(when(a.due)))
+   +'<div class="muted">'+esc(a.text)+'</div>').join(''):'<div class="muted">No announcements yet.</div>')
+  +'<div class="muted" style="margin-top:6px">Write one with <code>/staff announce</code>: you see a preview first, then Post or Schedule.</div>'));
+ const ml=d.modlog||[], mk={warn:['⚠️','warn'],ban:['⛔','ban'],unban:['✅',''],timeout:['⏱️','warn'],untimeout:['✅','']};
+ h.push(card('Mod log',(ml.length?ml.map(x=>{const k=mk[x.kind]||['•',''];return row(k[0]+' '+esc(x.who||'someone')+'<span class="tag '+k[1]+'">'+esc(x.kind)+'</span>',esc(ago(x.at)))
+   +((x.by||x.reason)?'<div class="muted">'+(x.by?'by '+esc(x.by):'')+(x.by&&x.reason?' · ':'')+esc(x.reason||'')+'</div>':'')}).join('')
+   :'<div class="muted">'+dot('ok')+'Nothing logged. Warnings, timeouts and bans show up here.</div>')
+  +'<div class="muted" style="margin-top:6px"><code>/staff warn</code> logs a warning; <code>/staff modlog</code> shows one person\'s history.</div>'));
+ const bd=d.badges||[];
+ h.push(card('Roles & badges',row('⚡ Developer · 👑 Owner · MOD','automatic')
+  +(bd.length?bd.map(b=>row(esc(b.name||('member '+b.id)),'<span class="tag '+(b.k==='vip'?'vip':'custom')+'">'+esc(b.t)+'</span>')).join('')
+   :'<div class="muted">No VIP or custom badges handed out yet.</div>')
+  +'<div class="muted" style="margin-top:6px"><code>/staff badge give</code> and <code>/staff badge remove</code>. Badges show on the dashboard next to names.</div>'));
+ const tg=d.toggles||[];
+ h.push(card('Feature switches',tg.map(x=>'<button type="button" class="sw'+(x.on?' on':'')+'" data-tg="'+esc(x.key)+'"'+(d.can_switch?'':' disabled')
+   +' aria-pressed="'+(x.on?'true':'false')+'"><span>'+esc(x.label)+'</span><span class="knob"></span></button>').join('')
+  +'<div class="muted" id="tgmsg" style="margin-top:6px">'+(d.can_switch?'Tap to flip. Every change is written to the audit channel.':'Only the developer, owners and admins can flip these.')+'</div>'));
+ const us=d.usage||[], um=Math.max(1,...us.map(x=>x.n)), ut=us.reduce((a,x)=>a+x.n,0);
+ h.push(card('Usage · 7 days','<div class="ubars">'+us.map(x=>'<div><b class="num">'+x.n+'</b><i style="height:'+Math.round(80*x.n/um)+'%"></i><span>'
+   +esc(new Date(x.day+'T12:00:00').toLocaleDateString([],{weekday:'short'}))+'</span></div>').join('')+'</div>'
+  +row('Questions this week','<span class="num">'+ut+'</span>')));
  const hist=d.history||[];
  h.push(card('Live server history','<div class="filters" id="hf">'+[['all','All'],['slips','Slips'],['scans','Scans'],['staff','Staff'],['system','System']]
   .map(f=>'<button type="button" data-f="'+f[0]+'" class="'+(HF===f[0]?'on':'')+'">'+f[1]+'</button>').join('')+'</div><div class="hist">'
@@ -30828,6 +31152,7 @@ function render(d){
  const steps=[['1 · Tell members','/outage alert problem:'],['2 · Team is on it','/outage update eta:30m note:'],
   ['3 · All clear','/outage resolved note:'],['Check everything','/outage status']];
  const cats=[['🧾 Slips & picks',[['/pick','Log a slip by hand'],['/track pick_id:','Leg by leg: what the bot is following'],['/inbox','Slips that need a person'],['/result pick_id: outcome:','Settle a slip yourself'],['/calc slip pick_id:','How each leg has hit lately']]],
+  ['🧰 Staff tools',[['/staff blacklist add name:','Flag a player, team or situation'],['/staff blacklist list','Everything on the list'],['/staff announce','Write, preview, post or schedule'],['/staff warn member: reason:','Log a warning (DM optional)'],['/staff modlog member:','One person\'s history'],['/staff badge give member: text:','VIP or custom badge']]],
   ['👥 Staff & access',[['/dashboard section:Admin health','Your own 12-hour link to this page'],['/links add name: url:','Add to the toolbox'],['/admin panel','Every server switch in one place'],['/admin check','Why isn\'t a channel logging slips?']]],
   ['⚙️ Server setup',[['/outage channels','Admin + member alert channels, ping role'],['/admin setup','Channels and features, step by step'],['/admin status','Version, uptime, connections'],['/backups','Nightly backup to a channel']]],
   ['🛡️ Developer only',[['/owner status','You, the owners, lockdown, removed people'],['/owner addowner member:','Make someone an owner'],['/owner lockdown on:True','Staff tools: you and the owners only'],['/owner remove member:','Take one person\'s staff access'],['/owner newkey','Swap the dashboard key'],['/owner asklimit per_day:','Daily question limit'],['/owner quota','Questions per person (tiers or one person)'],['/owner title text:','Your badge title']]]];
@@ -30867,6 +31192,12 @@ function closeStaff(){$('#sheet').classList.remove('on');$('#staffbtn').focus()}
 $('#staffbtn').addEventListener('click',openStaff);$('#sheetX').addEventListener('click',closeStaff);
 $('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeStaff()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sheet').classList.contains('on'))closeStaff()});
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-tg]');if(!b||b.disabled)return;b.disabled=true;
+ try{const r=await fetch('/api/staff/toggle',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-PB-Staff':'1'},
+  body:JSON.stringify({key:b.getAttribute('data-tg')})});const j=await r.json().catch(()=>({}));
+  if(r.ok&&j.ok){b.classList.toggle('on',j.on);b.setAttribute('aria-pressed',j.on?'true':'false');const m=$('#tgmsg');if(m)m.textContent=(b.textContent||'')+' is now '+(j.on?'on':'off')+'.'}
+  else{const m=$('#tgmsg');if(m)m.textContent=j.why||'That didn\'t work. Try again.'}}catch(x){const m=$('#tgmsg');if(m)m.textContent='Couldn\'t reach the bot.'}
+ b.disabled=false});
 document.addEventListener('click',e=>{const f=e.target.closest('[data-f]');if(f){HF=f.getAttribute('data-f');if(LAST)render(LAST);}});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-copy]');if(!b)return;
  const t=b.getAttribute('data-copy');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{b.textContent='Copied';
@@ -30955,6 +31286,21 @@ class PicksBot(discord.Client):
         else:
             down, self._dc_at = self._dc_at, None
             await outage_reconnected(self, down)
+
+    async def on_member_ban(self, guild, user):
+        actor, reason = await modlog_actor(guild, "ban", user.id)
+        modlog_add(guild.id, "ban", user, actor, reason)
+
+    async def on_member_unban(self, guild, user):
+        actor, reason = await modlog_actor(guild, "unban", user.id)
+        modlog_add(guild.id, "unban", user, actor, reason)
+
+    async def on_member_update(self, before, after):
+        b, a = getattr(before, "timed_out_until", None), getattr(after, "timed_out_until", None)
+        if a and a != b:
+            actor, reason = await modlog_actor(after.guild, "member_update", after.id)
+            modlog_add(after.guild.id, "timeout", after, actor,
+                       (reason + " · " if reason else "") + f"until {a.astimezone(TZ):%b %-d %-I:%M %p}")
 
     async def on_disconnect(self):
         if self._dc_at is None:
@@ -31727,6 +32073,9 @@ class PicksBot(discord.Client):
             text = (f"⚠️ I wasn't sure about {', '.join(clip(u, 60) for u in slip['_unsure'][:3])}"
                     + (f" (and {len(slip['_unsure']) - 3} more)" if len(slip["_unsure"]) > 3 else "")
                     + " on this screenshot, so double-check the legs below.\n\n" + text)
+        bl = bl_note(bl_hits(message.guild.id, slip.get("legs") or []), for_poster=True)
+        if bl:
+            text = bl + "\n\n" + text
         if label:
             text = f"**{label}**\n" + text
         logged = db().execute("SELECT id FROM picks WHERE guild_id = ? AND slip_url = ?",
@@ -37072,6 +37421,233 @@ async def owner_title(interaction: discord.Interaction, text: app_commands.Range
 
 bot.tree.add_command(owner_group)
 
+# ---- /staff: blacklist, announcements, warnings, badges ------------------------------------------------------
+
+staff_group = app_commands.Group(name="staff", description="Staff tools: blacklist, announcements, warnings, badges",
+                                 guild_only=True, default_permissions=discord.Permissions(manage_messages=True))
+bl_group = app_commands.Group(name="blacklist", description="Players, teams and game situations to flag on slips",
+                              parent=staff_group)
+badge_group = app_commands.Group(name="badge", description="VIP and custom badges on the dashboards", parent=staff_group)
+BL_KIND_CHOICES = [app_commands.Choice(name=v, value=k) for k, v in BL_KINDS.items()]
+BL_ALERT_CHOICES = [app_commands.Choice(name="Tell the admins only", value="staff"),
+                    app_commands.Choice(name="Tell the admins and the person who posted it", value="both")]
+
+
+@bl_group.command(name="add", description="Flag a player, team or game situation on every slip that has it")
+@app_commands.describe(kind="Player, team or game situation", name="Like 'Drake London', 'KC' or '1st half'",
+                       reason="Optional: why (shown to staff, and to the poster if you pick that)",
+                       alert="Who hears about it (default: the admins only)")
+@app_commands.choices(kind=BL_KIND_CHOICES, alert=BL_ALERT_CHOICES)
+@sec_staff_only
+async def bl_add(interaction: discord.Interaction, kind: app_commands.Choice[str], name: app_commands.Range[str, 2, 60],
+                 reason: Optional[app_commands.Range[str, 1, 200]] = None, alert: Optional[app_commands.Choice[str]] = None):
+    gid = interaction.guild_id
+    rows = [r for r in bl_rows(gid) if norm_name(r["name"]) != norm_name(name)]
+    if len(rows) >= 200:
+        await interaction.response.send_message("The blacklist is full (200). Remove a few first.", ephemeral=True)
+        return
+    rows.append({"id": f"b{int(time.time() * 1000)}", "kind": kind.value, "name": clip(name.strip(), 60),
+                 "reason": clip(reason or "", 200), "alert": alert.value if alert else "staff",
+                 "by": clip(interaction.user.display_name, 40), "at": now_iso()})
+    bl_save(gid, rows)
+    await audit(interaction.client, gid, f"{who(interaction)} blacklisted the {BL_KINDS[kind.value].lower()} **{clip(name, 60)}**"
+                + (f" ({clip(reason, 80)})" if reason else "") + ".")
+    await interaction.response.send_message(
+        f"🚫 **{clip(name, 60)}** is on the blacklist. Any new slip with it pings the admin alert channel"
+        + (" and tells the person who posted it." if alert and alert.value == "both" else ".") , ephemeral=True)
+
+
+@bl_group.command(name="remove", description="Take something off the blacklist")
+@app_commands.describe(name="The name as you added it")
+@sec_staff_only
+async def bl_remove(interaction: discord.Interaction, name: app_commands.Range[str, 2, 60]):
+    gid = interaction.guild_id
+    rows = bl_rows(gid)
+    keep = [r for r in rows if norm_name(r["name"]) != norm_name(name)]
+    if len(keep) == len(rows):
+        await interaction.response.send_message("That isn't on the blacklist. `/staff blacklist list` shows it.", ephemeral=True)
+        return
+    bl_save(gid, keep)
+    await audit(interaction.client, gid, f"{who(interaction)} took **{clip(name, 60)}** off the blacklist.")
+    await interaction.response.send_message(f"Removed **{clip(name, 60)}**.", ephemeral=True)
+
+
+@bl_group.command(name="list", description="Everything on the blacklist")
+@sec_staff_only
+async def bl_list(interaction: discord.Interaction):
+    rows = bl_rows(interaction.guild_id)
+    text = "\n".join(f"🚫 **{clip(r['name'], 40)}** · {BL_KINDS.get(r.get('kind'), 'Entry')}"
+                     + (f" · {clip(r['reason'], 60)}" if r.get("reason") else "")
+                     + (" · tells the poster" if r.get("alert") == "both" else "") for r in rows[:40])
+    await interaction.response.send_message(clip(text or "The blacklist is empty. `/staff blacklist add` starts it.", 1900),
+                                            ephemeral=True)
+
+
+class AnnounceView(discord.ui.View):
+    """Send / Cancel under an announcement preview (only for the person who wrote it)."""
+    def __init__(self, author_id: int, payload: dict):
+        super().__init__(timeout=600)
+        self.author_id, self.payload = author_id, payload
+        send = discord.ui.Button(label="Post it" if not payload.get("due") else "Schedule it", style=discord.ButtonStyle.success)
+        cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+        send.callback, cancel.callback = self.do_send, self.do_cancel
+        self.add_item(send)
+        self.add_item(cancel)
+
+    async def do_send(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id or not sec_staff(interaction.user):
+            await interaction.response.send_message("Only the person who wrote it can post it.", ephemeral=True)
+            return
+        await announce_go(interaction, self.payload)
+        self.stop()
+
+    async def do_cancel(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Not yours to cancel.", ephemeral=True)
+            return
+        await interaction.response.edit_message(content="Cancelled. Nothing was posted.", embed=None, view=None)
+        self.stop()
+
+
+def announce_embed(p: dict) -> "discord.Embed":
+    e = discord.Embed(title=clip(p.get("title") or "📣 Announcement", 256), description=clip(p["text"], 4000), color=BRAND)
+    e.set_footer(text=f"From {clip(p.get('by') or 'the staff', 60)}")
+    return e
+
+
+async def announce_go(interaction, p: dict) -> None:
+    ch = interaction.client.get_channel(int(p["channel"]))
+    if ch is None:
+        await interaction.response.edit_message(content="I can't see that channel anymore.", embed=None, view=None)
+        return
+    gid = interaction.guild_id
+    if p.get("due"):
+        text = (f"**{p['title']}**\n" if p.get("title") else "") + p["text"]
+        if p.get("role"):
+            text = f"<@&{p['role']}> " + text
+        db().execute("INSERT INTO announcements (guild_id, channel_id, text, due_at, created_by, created_at) VALUES (?,?,?,?,?,?)",
+                     (gid, ch.id, clip(text, 1900), p["due"], interaction.user.id, now_iso()))
+        db().commit()
+        await interaction.response.edit_message(content=f"⏰ Scheduled for <t:{int(datetime.fromisoformat(p['due']).timestamp())}:f> "
+                                                f"in <#{ch.id}>.", embed=None, view=None)
+        await audit(interaction.client, gid, f"{who(interaction)} scheduled an announcement in #{getattr(ch, 'name', ch.id)}.")
+        return
+    mentions = discord.AllowedMentions.none()
+    content = None
+    if p.get("role"):
+        content = f"<@&{p['role']}>"
+        mentions = discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(id=int(p["role"]))])
+    try:
+        await ch.send(content, embed=announce_embed(p), allowed_mentions=mentions)
+    except Exception:
+        await interaction.response.edit_message(content="I couldn't post there. Check I have Send Messages and Embed Links.",
+                                                embed=None, view=None)
+        return
+    db().execute("INSERT INTO announcements (guild_id, channel_id, text, due_at, created_by, created_at, sent_at) "
+                 "VALUES (?,?,?,?,?,?,?)", (gid, ch.id, clip(((p.get("title") or "") + " " + p["text"]).strip(), 1900),
+                                            now_iso(), interaction.user.id, now_iso(), now_iso()))
+    db().commit()
+    await interaction.response.edit_message(content=f"✅ Posted in <#{ch.id}>.", embed=None, view=None)
+    await audit(interaction.client, gid, f"{who(interaction)} posted an announcement in #{getattr(ch, 'name', ch.id)}.")
+
+
+@staff_group.command(name="announce", description="Write an announcement, preview it, then post it or schedule it")
+@app_commands.describe(channel="Where it goes", message="What it says (use \\n for a new line)", title="Optional: a title",
+                       ping="Optional: a role to ping", when="Optional: later, like 6pm, 2h or tomorrow 9am")
+@sec_staff_only
+async def staff_announce(interaction: discord.Interaction, channel: discord.TextChannel,
+                         message: app_commands.Range[str, 1, 1800], title: Optional[app_commands.Range[str, 1, 120]] = None,
+                         ping: Optional[discord.Role] = None, when: Optional[app_commands.Range[str, 1, 40]] = None):
+    due = None
+    if when:
+        d = parse_when(when)
+        if d is None:
+            await interaction.response.send_message("I couldn't read that time. Try `6pm`, `2h` or `tomorrow 9am`.",
+                                                    ephemeral=True)
+            return
+        due = iso(d)
+    p = {"channel": channel.id, "text": message.replace("\\n", "\n"), "title": title or "", "role": ping.id if ping else None,
+         "due": due, "by": interaction.user.display_name}
+    head = (f"**Preview** for <#{channel.id}>" + (f", pinging <@&{ping.id}>" if ping else "")
+            + (f", at <t:{int(datetime.fromisoformat(due).timestamp())}:f>" if due else "") + ":")
+    await interaction.response.send_message(head, embed=announce_embed(p), view=AnnounceView(interaction.user.id, p),
+                                            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+@staff_group.command(name="warn", description="Give someone a warning (goes in the mod log; DMs them if you like)")
+@app_commands.describe(member="Who", reason="Why", dm="Also DM them the warning (default yes)")
+@sec_staff_only
+async def staff_warn(interaction: discord.Interaction, member: discord.Member, reason: app_commands.Range[str, 3, 300],
+                     dm: Optional[bool] = True):
+    if developer_id_ok(member.id) or (owner_id_ok(member.id, interaction.guild_id) and not is_developer(interaction.user)):
+        await interaction.response.send_message("You can't warn them.", ephemeral=True)
+        return
+    modlog_add(interaction.guild_id, "warn", member, interaction.user, reason)
+    n = len([r for r in modlog_rows(interaction.guild_id, 200, member.id) if r["kind"] == "warn"])
+    sent = False
+    if dm:
+        try:
+            await member.send(f"⚠️ A warning from the staff of **{getattr(getattr(interaction, 'guild', None), 'name', None) or 'the server'}**: {reason}")
+            sent = True
+        except Exception:
+            sent = False
+    await audit(interaction.client, interaction.guild_id, f"{who(interaction)} warned **{clip(member.display_name, 40)}**: "
+                f"{clip(reason, 120)} (warning {n}).")
+    await interaction.response.send_message(f"Warning {n} logged for {clip(member.display_name, 40)}."
+                                            + (" They got a DM." if sent else " (No DM: theirs are closed.)" if dm else ""),
+                                            ephemeral=True)
+
+
+@staff_group.command(name="modlog", description="Warnings, bans, unbans and timeouts (for one person, or everyone)")
+@app_commands.describe(member="Optional: just this person")
+@sec_staff_only
+async def staff_modlog(interaction: discord.Interaction, member: Optional[discord.Member] = None):
+    rows = modlog_rows(interaction.guild_id, 25, member.id if member else None)
+    icon = {"warn": "⚠️", "ban": "🔨", "unban": "🕊️", "timeout": "⏳"}
+    text = "\n".join(f"{icon.get(r['kind'], '•')} <t:{int(datetime.fromisoformat(r['at']).timestamp())}:d> **{clip(r['who'], 30)}** · "
+                     f"{r['kind']}" + (f" by {clip(r['by'], 30)}" if r["by"] else "") + (f": {clip(r['reason'], 80)}" if r["reason"] else "")
+                     for r in rows)
+    await interaction.response.send_message(clip(text or "Nothing in the mod log yet.", 1900), ephemeral=True,
+                                            allowed_mentions=discord.AllowedMentions.none())
+
+
+@badge_group.command(name="give", description="Give someone a badge on the dashboards (VIP or your own words)")
+@app_commands.describe(member="Who", text="The badge, like VIP or Sharp", style="VIP (gold) or custom (purple)")
+@app_commands.choices(style=[app_commands.Choice(name="VIP", value="vip"), app_commands.Choice(name="Custom", value="custom")])
+@sec_staff_only
+async def badge_give(interaction: discord.Interaction, member: discord.Member, text: app_commands.Range[str, 2, 20],
+                     style: Optional[app_commands.Choice[str]] = None):
+    if not (is_owner(interaction.user) or is_admin(interaction)):
+        await interaction.response.send_message("Badges are for owners and admins to hand out.", ephemeral=True)
+        return
+    rows = member_badges(interaction.guild_id)
+    clean = re.sub(r"[^\w &+.'!-]", "", text).strip()[:20] or "VIP"
+    rows[str(member.id)] = {"t": clean, "k": style.value if style else "vip", "name": clip(member.display_name, 40),
+                            "by": clip(interaction.user.display_name, 40)}
+    set_setting(interaction.guild_id, "member_badges", json.dumps(rows))
+    await audit(interaction.client, interaction.guild_id, f"{who(interaction)} gave {clip(member.display_name, 40)} the **{clean}** badge.")
+    await interaction.response.send_message(f"🏷️ {clip(member.display_name, 40)} now has the **{clean}** badge.", ephemeral=True)
+
+
+@badge_group.command(name="remove", description="Take someone's VIP or custom badge away")
+@app_commands.describe(member="Who")
+@sec_staff_only
+async def badge_remove(interaction: discord.Interaction, member: discord.Member):
+    if not (is_owner(interaction.user) or is_admin(interaction)):
+        await interaction.response.send_message("Badges are for owners and admins to manage.", ephemeral=True)
+        return
+    rows = member_badges(interaction.guild_id)
+    if rows.pop(str(member.id), None) is None:
+        await interaction.response.send_message("They don't have a VIP or custom badge.", ephemeral=True)
+        return
+    set_setting(interaction.guild_id, "member_badges", json.dumps(rows))
+    await audit(interaction.client, interaction.guild_id, f"{who(interaction)} removed {clip(member.display_name, 40)}'s badge.")
+    await interaction.response.send_message("Removed.", ephemeral=True)
+
+
+bot.tree.add_command(staff_group)
+
+
 
 # ---- /links: the staff page's toolbox -------------------------------------------------------------
 
@@ -37129,6 +37705,504 @@ async def links_list(interaction: discord.Interaction):
 
 
 bot.tree.add_command(links_group)
+
+
+
+# ==========================================================================
+# r35: member tools: slip check (risk, links between legs, Flex or Power), Slip of the Day, my P&L, bad beat board
+# ==========================================================================
+
+async def slip_leg_rates(p) -> list:
+    """[{text, status, rate, prop, team, path}] per leg: how often it hit its line in the last 10 games (when there's
+    a game log), plus the player's team, which the link check needs."""
+    out = []
+    paths = [x for x in leagues_for(p["sport"]) if x in PROP_PATHS]
+    for leg in get_legs(p["id"]) or []:
+        prop = prop_of(leg["text"])
+        item = {"text": leg["text"], "status": leg["status"], "rate": None, "prop": prop, "team": None, "path": None}
+        out.append(item)
+        if not prop or not paths:
+            continue
+        try:
+            fams = {STATS[k][1] for k in prop["stats"]}
+            cands = await resolve_player(prop["player"], [x for x in paths if FAMILY_OF_PATH[x] in fams])
+            if len(cands) != 1:
+                continue
+            c = cands[0]
+            item["team"], item["path"], item["name"] = (c.get("team_abbr") or None), c["path"], c.get("name")
+            if leg["status"] != "open":
+                continue
+            games = await trend_games(c["path"], c["id"], need=10)
+            key = next(k for k in prop["stats"] if STATS[k][1] == FAMILY_OF_PATH[c["path"]])
+            vals = [v for _, v in trend_values(games, key)[:10]]
+            if len(vals) >= 5:
+                over = sum(1 for v in vals if v > prop["line"]) / len(vals)
+                rate = over if prop["side"] == "over" else 1 - over
+                if prop.get("negate"):
+                    rate = 1 - rate
+                item["rate"] = min(0.95, max(0.05, rate))
+        except Exception:
+            log.warning("Slip check lookup failed for %r", leg["text"], exc_info=True)
+    return out
+
+
+def hits_dist(rates: list) -> list:
+    """Chance of exactly 0, 1, ... n legs hitting, when each leg hits with its own chance."""
+    dist = [1.0]
+    for r in rates:
+        nxt = [0.0] * (len(dist) + 1)
+        for k, pk in enumerate(dist):
+            nxt[k] += pk * (1 - r)
+            nxt[k + 1] += pk * r
+        dist = nxt
+    return dist
+
+
+def flex_or_power(guild_id: Optional[int], rates: list) -> Optional[dict]:
+    """What a $10 Power Play and a $10 Flex Play pay back on average with these hit rates, and how often each pays
+    anything. None when the slip size has no Flex table (2 picks, or more than 6)."""
+    n = len(rates)
+    power, flex = pp_tables(guild_id)
+    if n not in flex or n not in power:
+        return None
+    dist = hits_dist(rates)
+    p_back = round(10 * dist[n] * power[n], 2)
+    f_back = round(10 * sum(dist[k] * m for k, m in flex[n].items()), 2)
+    f_any = sum(dist[k] for k, m in flex[n].items() if m > 0)
+    if f_back > p_back * 1.03:
+        verdict = "flex"
+    elif p_back > f_back * 1.03:
+        verdict = "power"
+    else:
+        verdict = "even"
+    return {"n": n, "power": p_back, "flex": f_back, "p_all": dist[n], "f_any": f_any, "verdict": verdict,
+            "power_mult": power[n], "flex_top": flex[n].get(n)}
+
+
+def risk_band(prob: Optional[float], legs: int) -> tuple:
+    """(emoji, label, color, how). With no data, slips with more legs are simply riskier."""
+    if prob is None:
+        band = 1 if legs <= 2 else 2 if legs <= 4 else 3
+        how = "by leg count (not every leg has a game log)"
+    else:
+        band = 0 if prob >= 0.35 else 1 if prob >= 0.15 else 2 if prob >= 0.05 else 3
+        how = "from the legs' recent hit rates"
+    return [("🟢", "Low", 0x3FB97A), ("🟡", "Medium", 0xF5B942), ("🟠", "High", 0xF08A3C), ("🔴", "Very high", 0xE66767)][band] + (how,)
+
+
+_PITCH_STATS = {"pitcher_k", "pitching_outs"}
+_HIT_STATS = {"hits", "runs", "rbis", "hrr", "home_runs", "walks"}
+
+
+def _corr_name(x: dict) -> str:
+    n = x.get("name") or (x.get("prop") or {}).get("player") or "?"
+    return n if any(ch.isupper() for ch in n) else n.title()
+
+
+def corr_notes(items: list, matchups: Optional[dict] = None) -> list:
+    """Plain-language notes on legs that move together (or against each other). items: slip_leg_rates() output;
+    matchups: {team abbr: opponent abbr} for today's games."""
+    matchups = matchups or {}
+    props = [(i, x) for i, x in enumerate(items) if x.get("prop")]
+    notes, done = [], set()
+    by_player: dict = {}
+    for i, x in props:
+        by_player.setdefault(norm_name(x["prop"]["player"]), []).append((i, x))
+    for legs in by_player.values():
+        if len(legs) < 2:
+            continue
+        name = _corr_name(legs[0][1])
+        sides = {x["prop"]["side"] for _, x in legs}
+        done.update(frozenset((a, b)) for a, _ in legs for b, _ in legs if a != b)
+        if len(sides) == 1:
+            notes.append(f"🔗 **{clip(name, 30)}** is on {len(legs)} legs: one quiet game can sink all of them.")
+        else:
+            notes.append(f"⚖️ **{clip(name, 30)}** has an over and an under: they pull against each other.")
+    for a in range(len(props)):
+        for b in range(a + 1, len(props)):
+            (ia, xa), (ib, xb) = props[a], props[b]
+            if frozenset((ia, ib)) in done or not xa.get("team") or not xb.get("team"):
+                continue
+            pa, pb = xa["prop"], xb["prop"]
+            ta, tb = xa["team"], xb["team"]
+            na, nb = clip(_corr_name(xa), 26), clip(_corr_name(xb), 26)
+            sa, sb = set(pa["stats"]), set(pb["stats"])
+            if ta == tb:
+                if pa["side"] == pb["side"] == "over":
+                    if (any(k.startswith("pass") for k in sa) and any(k.startswith("rec") for k in sb)) or \
+                       (any(k.startswith("pass") for k in sb) and any(k.startswith("rec") for k in sa)):
+                        notes.append(f"🔗 **{na}** and **{nb}** ({ta}): passing and receiving yards come from the same "
+                                     "plays, so these tend to hit or miss together.")
+                    else:
+                        notes.append(f"🔗 **{na}** and **{nb}** are teammates ({ta}): both overs need a big night from "
+                                     "the same team.")
+                elif pa["side"] != pb["side"]:
+                    notes.append(f"⚖️ **{na}** and **{nb}** are teammates ({ta}) on opposite sides: they can work against "
+                                 "each other.")
+            elif matchups.get(ta) == tb or matchups.get(tb) == ta:
+                pitch_vs_bat = (sa & _PITCH_STATS and sb & _HIT_STATS) or (sb & _PITCH_STATS and sa & _HIT_STATS)
+                if pitch_vs_bat and pa["side"] == pb["side"] == "over":
+                    notes.append(f"⚖️ **{na}** and **{nb}** face each other ({ta} vs {tb}): a pitcher's over and a "
+                                 "hitter's over pull against each other.")
+                elif pa["side"] == pb["side"] == "over":
+                    notes.append(f"🔥 **{na}** and **{nb}** are in the same game ({ta} vs {tb}): both overs lean on a "
+                                 "high-scoring game.")
+                elif pa["side"] == pb["side"] == "under":
+                    notes.append(f"🧊 **{na}** and **{nb}** are in the same game ({ta} vs {tb}): both unders lean on a "
+                                 "slow, low-scoring game.")
+    if not notes and len(props) >= 2:
+        if all(x.get("team") for _, x in props):
+            notes.append("✅ No obvious links: the legs don't depend on each other.")
+        else:
+            notes.append("No links found (I couldn't match every player to a team).")
+    return notes[:6]
+
+
+async def slip_matchups(items: list) -> dict:
+    """{team: opponent} from today's scoreboards for the leagues on the slip."""
+    out: dict = {}
+    for path in {x["path"] for x in items if x.get("path")}:
+        try:
+            evs = await fetch_scoreboard(path, datetime.now(TZ))
+        except Exception:
+            continue
+        for ev in evs or []:
+            ab = [t.get("abbr") for t in ev.get("teams") or [] if t.get("abbr")]
+            if len(ab) == 2:
+                out[ab[0]], out[ab[1]] = ab[1], ab[0]
+    return out
+
+
+async def slip_review_embed(p) -> "discord.Embed":
+    items = await slip_leg_rates(p)
+    lines, rates, known = [], [], True
+    for x in items:
+        if x["status"] != "open":
+            lines.append(f"{LEG_ICON.get(x['status'], '•')} {clip(x['text'], 60)} (done)")
+            if x["status"] in ("hit", "miss"):
+                rates.append(1.0 if x["status"] == "hit" else 0.0)
+            continue
+        if x["rate"] is None:
+            known = False
+            lines.append(f"❔ {clip(x['text'], 60)} · no game log")
+            continue
+        rates.append(x["rate"])
+        lines.append(f"{'🟢' if x['rate'] >= 0.6 else '🟡' if x['rate'] >= 0.45 else '🔴'} {clip(x['text'], 60)} · "
+                     f"{x['rate'] * 100:.0f}% L10")
+    prob = None
+    if known and rates:
+        prob = 1.0
+        for r in rates:
+            prob *= r
+    emoji, label, color, how = risk_band(prob, len(items))
+    e = discord.Embed(title=f"🔍 Slip check · pick #{p['id']}", color=color, description="\n".join(lines)[:4000])
+    risk = f"{emoji} **{label}** risk, {how}."
+    if prob is not None:
+        risk += f"\nChance every leg hits: **{prob * 100:.1f}%** (if the legs were independent)."
+        if p["cost"] and p["payout"]:
+            risk += f"\nThe payout implies {p['cost'] / p['payout'] * 100:.1f}%."
+    e.add_field(name="Risk", value=risk, inline=False)
+    open_known = [x for x in items if x["status"] == "open" and x["rate"] is not None]
+    if len(open_known) >= 2:
+        weak = min(open_known, key=lambda x: x["rate"])
+        e.add_field(name="Weakest leg", value=f"{clip(weak['text'], 80)} ({weak['rate'] * 100:.0f}% lately)", inline=False)
+    notes = corr_notes(items, await slip_matchups(items))
+    if notes:
+        e.add_field(name="Links between legs", value=clip("\n".join(notes), 1024), inline=False)
+    if is_dfs(p["platform"] or "") and known and len(rates) == len(items):
+        fp = flex_or_power(p["guild_id"], rates)
+        if fp:
+            pick = {"flex": "**Flex** pays back more on average with these hit rates.",
+                    "power": "**Power** pays back more on average with these hit rates.",
+                    "even": "About even on average. Flex pays something more often."}[fp["verdict"]]
+            e.add_field(name="Flex or Power?", inline=False, value=(
+                f"Per $10: Power ({fp['power_mult']:g}x) averages **{money(fp['power'])}** back and pays "
+                f"{fp['p_all'] * 100:.0f}% of the time. Flex averages **{money(fp['flex'])}** back and pays something "
+                f"{fp['f_any'] * 100:.0f}% of the time.\n{pick}"))
+    e.set_footer(text="Last 10 games against each line. Past results, not a prediction.")
+    return e
+
+
+# ---- Slip of the Day: everyone votes on the day's best-looking slip --------------------------------------------
+
+def sotd_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS sotd (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, day TEXT,
+                    channel_id INTEGER, message_id INTEGER, picks TEXT, created_by INTEGER, created_at TEXT,
+                    closed_at TEXT, winner TEXT)""")
+    db().execute("""CREATE TABLE IF NOT EXISTS sotd_votes (sotd_id INTEGER, user_id INTEGER, pick_id INTEGER, at TEXT,
+                    PRIMARY KEY (sotd_id, user_id))""")
+
+
+def sotd_candidates(guild_id: int, now: Optional[datetime] = None) -> list:
+    now = now or datetime.now(timezone.utc)
+    rows = db().execute("""SELECT * FROM picks WHERE guild_id = ? AND created_at >= ? AND COALESCE(hidden, 0) = 0
+                           AND bettor_key NOT LIKE 'label:%' ORDER BY id DESC LIMIT 5""",
+                        (guild_id, iso(now - timedelta(hours=24)))).fetchall()
+    return list(reversed(rows))
+
+
+def sotd_tally(sid: int) -> dict:
+    return {r["pick_id"]: r["n"] for r in db().execute(
+        "SELECT pick_id, COUNT(*) AS n FROM sotd_votes WHERE sotd_id = ? GROUP BY pick_id", (sid,))}
+
+
+def sotd_embed(row) -> "discord.Embed":
+    ids = json.loads(row["picks"] or "[]")
+    tally = sotd_tally(row["id"])
+    total = sum(tally.values())
+    closed = bool(row["closed_at"])
+    e = discord.Embed(title="🏆 Slip of the Day" + ("" if closed else " · vote"), color=0xFFD166 if closed else BRAND)
+    out = []
+    for i, pid in enumerate(ids, 1):
+        p = db().execute("SELECT * FROM picks WHERE id = ?", (pid,)).fetchone()
+        if p is None:
+            continue
+        n = tally.get(pid, 0)
+        bar = "▰" * round(8 * n / total) + "▱" * (8 - round(8 * n / total)) if total else "▱" * 8
+        won = closed and str(pid) in (row["winner"] or "").split(",")
+        out.append(f"{'👑' if won else f'**{i}.**'} **{clip(p['bettor_name'] or 'someone', 30)}** · {clip(shown_desc(p), 50)} · "
+                   f"{money(p['cost'])} → {money(p['payout'])}\n{bar} {n} vote{'s' if n != 1 else ''}")
+    e.description = "\n".join(out) or "No slips."
+    if closed:
+        e.set_footer(text="Voting closed. Thanks for voting!")
+    else:
+        e.set_footer(text="One vote each (change it anytime). Not your own slip. Voting closes at midnight.")
+    return e
+
+
+class SotdButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sv:(?P<sid>\d+):(?P<pid>\d+):(?P<n>\d)"):
+    def __init__(self, sid: int, pid: int, n: int):
+        super().__init__(discord.ui.Button(label=f"Vote {n}", style=discord.ButtonStyle.primary,
+                                           custom_id=f"sv:{sid}:{pid}:{n}"))
+        self.sid, self.pid, self.n = sid, pid, n
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["sid"]), int(match["pid"]), int(match["n"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        sotd_db()
+        row = db().execute("SELECT * FROM sotd WHERE id = ?", (self.sid,)).fetchone()
+        if row is None or not sec_same_guild(row, interaction) or row["closed_at"]:
+            await interaction.response.send_message("Voting's closed on that one.", ephemeral=True)
+            return
+        if self.pid not in json.loads(row["picks"] or "[]"):
+            await interaction.response.send_message("That slip isn't on this ballot.", ephemeral=True)
+            return
+        p = db().execute("SELECT bettor_key FROM picks WHERE id = ?", (self.pid,)).fetchone()
+        if p is not None and str(p["bettor_key"]) == str(interaction.user.id):
+            await interaction.response.send_message("You can't vote for your own slip. 😄", ephemeral=True)
+            return
+        db().execute("INSERT OR REPLACE INTO sotd_votes (sotd_id, user_id, pick_id, at) VALUES (?,?,?,?)",
+                     (row["id"], interaction.user.id, self.pid, now_iso()))
+        db().commit()
+        await interaction.response.edit_message(embed=sotd_embed(row), view=sotd_view(row))
+
+
+def sotd_view(row) -> "discord.ui.View":
+    v = discord.ui.View(timeout=None)
+    for i, pid in enumerate(json.loads(row["picks"] or "[]"), 1):
+        v.add_item(SotdButton(row["id"], pid, i))
+    return v
+
+
+EXTRA_ITEMS.append(SotdButton)
+
+
+async def sotd_job(client, now: Optional[datetime] = None) -> None:
+    """Close yesterday's ballots: crown the slip with the most votes and post it."""
+    sotd_db()
+    today = (now or datetime.now(timezone.utc)).astimezone(TZ).date().isoformat()
+    for row in db().execute("SELECT * FROM sotd WHERE closed_at IS NULL AND day < ?", (today,)).fetchall():
+        tally = sotd_tally(row["id"])
+        top = max(tally.values()) if tally else 0
+        winners = [pid for pid, n in tally.items() if n == top and top > 0]
+        db().execute("UPDATE sotd SET closed_at = ?, winner = ? WHERE id = ?",
+                     (now_iso(), ",".join(str(x) for x in winners), row["id"]))
+        db().commit()
+        row = db().execute("SELECT * FROM sotd WHERE id = ?", (row["id"],)).fetchone()
+        ch = client.get_channel(row["channel_id"]) if row["channel_id"] else None
+        if ch is None:
+            continue
+        names = []
+        for pid in winners:
+            p = db().execute("SELECT * FROM picks WHERE id = ?", (pid,)).fetchone()
+            if p is not None:
+                names.append(f"**{clip(p['bettor_name'] or 'someone', 30)}** ({clip(shown_desc(p), 50)})")
+        text = (f"🏆 **Slip of the Day:** {' and '.join(names)} with {top} vote{'s' if top != 1 else ''}. Nice slip!"
+                if names else "🏆 No votes for Slip of the Day yesterday. Try `/slip vote` today.")
+        try:
+            await ch.send(text, allowed_mentions=discord.AllowedMentions.none())
+            if row["message_id"]:
+                await ch.get_partial_message(row["message_id"]).edit(embed=sotd_embed(row), view=None)
+        except Exception:
+            log.warning("Slip of the Day post failed", exc_info=True)
+        if names:
+            activity_add(row["guild_id"], "slips", "🏆 Slip of the Day: " + ", ".join(re.sub(r"\*", "", n) for n in names))
+
+
+EXTRA_JOBS.append(("sotd", sotd_job))
+
+
+def sotd_latest(guild_id: int) -> Optional[dict]:
+    """The dashboard's Slip of the Day: today's open ballot, or the last winner."""
+    try:
+        sotd_db()
+        row = db().execute("SELECT * FROM sotd WHERE guild_id = ? ORDER BY id DESC LIMIT 1", (guild_id,)).fetchone()
+    except Exception:
+        return None
+    if row is None:
+        return None
+    tally = sotd_tally(row["id"])
+    if not row["closed_at"]:
+        return {"open": True, "slips": len(json.loads(row["picks"] or "[]")), "votes": sum(tally.values()), "day": row["day"]}
+    wins = [int(x) for x in (row["winner"] or "").split(",") if x.isdigit()]
+    if not wins:
+        return None
+    p = db().execute("SELECT * FROM picks WHERE id = ?", (wins[0],)).fetchone()
+    if p is None:
+        return None
+    return {"open": False, "id": p["id"], "who": p["bettor_name"], "what": shown_desc(p), "votes": tally.get(p["id"], 0),
+            "day": row["day"], "status": p["status"], "cost": p["cost"]}
+
+
+def dash35_badbeats(guild_id: int, limit: int = 8) -> list:
+    """Legs that missed by a hair in the last 30 days (hidden picks only once they're revealed)."""
+    since = iso(datetime.now(timezone.utc) - timedelta(days=30))
+    try:
+        rows = db().execute("""SELECT l.text, l.margin, p.id AS pid, p.bettor_name, p.payout FROM legs l
+                               JOIN picks p ON p.id = l.pick_id
+                               WHERE p.guild_id = ? AND l.status = 'miss' AND l.margin IS NOT NULL AND l.margin < 0
+                               AND l.margin >= -1 AND p.created_at >= ?
+                               AND (COALESCE(p.hidden, 0) = 0 OR p.revealed_at IS NOT NULL)
+                               ORDER BY l.margin DESC, p.payout DESC LIMIT ?""", (guild_id, since, limit)).fetchall()
+    except Exception:
+        return []
+    return [{"id": r["pid"], "who": r["bettor_name"], "leg": clip(r["text"], 70), "by": abs(r["margin"]),
+             "payout": r["payout"]} for r in rows]
+
+
+def my_pnl_embed(guild_id: int, user) -> tuple:
+    """(embed, settled rows) for /slip pnl: your own numbers, only you see them."""
+    rows = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND status != 'open' ORDER BY settled_at",
+                        (guild_id, str(user.id))).fetchall()
+    e = discord.Embed(title=f"📈 {clip(user.display_name, 40)} · your P&L", color=BRAND)
+    if not rows:
+        e.description = "Nothing settled yet. Your numbers show up here once a slip cashes or misses."
+        return e, rows
+    net = sum(pick_net(p) for p in rows)
+    staked = sum(p["cost"] or 0 for p in rows)
+    w = sum(1 for p in rows if p["status"] == "win")
+    l = sum(1 for p in rows if p["status"] == "loss")
+    since = iso(datetime.now(timezone.utc) - timedelta(days=30))
+    recent = [p for p in rows if (p["settled_at"] or "") >= since]
+    e.description = (f"**All time:** {signed(net)} · {w}-{l}" + (f" · ROI {net / staked * 100:+.1f}%" if staked else "")
+                     + f"\n**Last 30 days:** {signed(sum(pick_net(p) for p in recent))} on {len(recent)} slip"
+                     + ("s" if len(recent) != 1 else ""))
+    def group(fn):
+        g: dict = {}
+        for p in rows:
+            k = fn(p) or "Other"
+            a = g.setdefault(k, [0.0, 0, 0])
+            a[0] += pick_net(p)
+            a[1] += p["status"] == "win"
+            a[2] += p["status"] == "loss"
+        return "\n".join(f"{k}: {signed(v[0])} ({v[1]}-{v[2]})" for k, v in sorted(g.items(), key=lambda kv: -abs(kv[1][0]))[:5])
+    e.add_field(name="By sport", value=group(lambda p: sport_group(p["sport"])) or "-", inline=True)
+    e.add_field(name="By app", value=group(lambda p: p["platform"]) or "-", inline=True)
+    best, worst = max(rows, key=pick_net), min(rows, key=pick_net)
+    e.add_field(name="Best and toughest", inline=False,
+                value=f"💰 {signed(pick_net(best))} · {clip(best['description'] or '', 50)}\n"
+                      f"💀 {signed(pick_net(worst))} · {clip(worst['description'] or '', 50)}")
+    e.set_footer(text="Only you can see this. Play within what you're happy to lose.")
+    return e, rows
+
+
+slip_group = app_commands.Group(name="slip", description="Check a slip, vote on Slip of the Day, see your own P&L",
+                                guild_only=True)
+
+
+@slip_group.command(name="check", description="Risk, links between legs, and Flex or Power for one of your slips")
+@app_commands.describe(pick_id="The slip's number")
+@app_commands.autocomplete(pick_id=open_pick_autocomplete)
+@sec_rate("lookup")
+async def slip_check(interaction: discord.Interaction, pick_id: int):
+    p = get_pick(interaction.guild_id, pick_id) if interaction.guild_id else None
+    if p is None or not get_legs(p["id"]):
+        await interaction.response.send_message("Give me a slip number that has legs (`/track` shows them).", ephemeral=True)
+        return
+    if sec_secret(p) and not sec_owns(p, interaction.user.id):
+        await interaction.response.send_message("That one's hidden.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True, ephemeral=bool(p["hidden"]))
+    await interaction.followup.send(embed=bl_add_note(await slip_review_embed(p), p), ephemeral=bool(p["hidden"]))
+
+
+def bl_add_note(e, p):
+    """Blacklisted things on a slip, as one more line for its owner (only entries marked to tell the poster)."""
+    try:
+        note = bl_note(bl_hits(p["guild_id"], [l["text"] for l in get_legs(p["id"])]), for_poster=True)
+    except Exception:
+        note = ""
+    if note:
+        e.add_field(name="Blacklist", value=clip(note, 1024), inline=False)
+    return e
+
+
+@slip_group.command(name="vote", description="Start today's Slip of the Day vote (the last day's slips)")
+@sec_rate("post")
+async def slip_vote(interaction: discord.Interaction):
+    sotd_db()
+    gid = interaction.guild_id
+    today = datetime.now(TZ).date().isoformat()
+    cur = db().execute("SELECT * FROM sotd WHERE guild_id = ? AND day = ? AND closed_at IS NULL", (gid, today)).fetchone()
+    if cur is not None:
+        link = f" https://discord.com/channels/{gid}/{cur['channel_id']}/{cur['message_id']}" if cur["message_id"] else ""
+        await interaction.response.send_message("Today's vote is already up." + link, ephemeral=True)
+        return
+    picks = sotd_candidates(gid)
+    if len(picks) < 2:
+        await interaction.response.send_message("I need at least 2 slips from the last day to vote on.", ephemeral=True)
+        return
+    c = db().execute("INSERT INTO sotd (guild_id, day, channel_id, picks, created_by, created_at) VALUES (?,?,?,?,?,?)",
+                     (gid, today, interaction.channel_id, json.dumps([p["id"] for p in picks]), interaction.user.id, now_iso()))
+    db().commit()
+    row = db().execute("SELECT * FROM sotd WHERE id = ?", (c.lastrowid,)).fetchone()
+    await interaction.response.send_message(embed=sotd_embed(row), view=sotd_view(row))
+    try:
+        msg = await interaction.original_response()
+        db().execute("UPDATE sotd SET message_id = ? WHERE id = ?", (msg.id, row["id"]))
+        db().commit()
+    except Exception:
+        pass
+    activity_add(gid, "slips", f"🏆 {interaction.user.display_name} started the Slip of the Day vote")
+
+
+@slip_group.command(name="pnl", description="Your own profit and loss, by sport and app, with a chart (only you see it)")
+@sec_rate("render")
+async def slip_pnl(interaction: discord.Interaction):
+    e, rows = my_pnl_embed(interaction.guild_id, interaction.user)
+    if not rows:
+        await interaction.response.send_message(embed=e, ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    series = chart_series(interaction.guild_id, 3650, str(interaction.user.id))
+    files = []
+    if series:
+        try:
+            png = await asyncio.to_thread(locked_render, render_chart, series, "Your profit over time")
+            files.append(discord.File(png, filename="pnl.png"))
+            e.set_image(url="attachment://pnl.png")
+        except Exception:
+            log.warning("P&L chart failed", exc_info=True)
+    await interaction.followup.send(embed=e, files=files, ephemeral=True)
+
+
+bot.tree.add_command(slip_group)
+
+HELP_EXTRA.append(("🧾 Slip tools", (
+    "`/slip check` risk, links between legs, Flex or Power · `/slip vote` Slip of the Day · "
+    "`/slip pnl` your own P&L (private) · `/insights badbeats` the bad beat board")))
 
 
 @bot.tree.error
