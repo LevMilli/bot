@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r38"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r39"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -9118,6 +9118,7 @@ def dashboard_data(guild_id: int) -> dict:
     _people = dashboard_people(guild_id)
     return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": _people,
             "badges": {p["key"]: p["badge"] for p in _people if p.get("badge")}, "breakdown": dash33_breakdown(guild_id),
+            "filters": dash39_filters(guild_id),
             "settled24": dashboard_recent(guild_id), "badbeats": dash35_badbeats(guild_id), "sotd": sotd_latest(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
@@ -20000,7 +20001,7 @@ def dash_person(guild_id: int, key: str) -> Optional[dict]:
             "form": form, "best": [dict(slip(p), mult=round((p["returned"] or 0) / p["cost"], 1) if p["cost"] else None)
                                    for p in wins],
             "sports": split(lambda p: sport_group(p["sport"]), 6), "apps": split(lambda p: p["platform"] or "Other", 4),
-            "recent": [slip(p) for p in rows[:12]],
+            "recent": [slip(p) for p in rows[:12]], "bystat": dash39_bystat(guild_id, key),
             "series": [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in series]}
 
 
@@ -20158,6 +20159,178 @@ async def dash_not_found(request):
     return dash_error(web, request, 404)
 
 
+
+# ---- r39 dashboard pro: leaderboard filters, search, compare, legs by stat, install on a phone ---------------
+
+def _dash39_settled(guild_id: int) -> list:
+    rows = db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND {_DASH_VISIBLE}",
+                        (guild_id,)).fetchall()
+    return [p for p in rows if not dash_secret(p)]
+
+
+def _dash39_month(p) -> str:
+    try:
+        return datetime.fromisoformat(p["settled_at"]).astimezone(TZ).strftime("%Y-%m")
+    except (TypeError, ValueError):
+        return ""
+
+
+def dash39_filters(guild_id: int) -> dict:
+    rows = _dash39_settled(guild_id)
+    count = lambda fn: sorted({fn(p) for p in rows if fn(p)}, key=lambda k: -sum(1 for p in rows if fn(p) == k))
+    return {"sports": count(lambda p: sport_group(p["sport"]))[:12], "apps": count(lambda p: p["platform"] or "")[:8],
+            "months": sorted({_dash39_month(p) for p in rows if _dash39_month(p)}, reverse=True)[:12]}
+
+
+def dash39_board(guild_id: int, sport: Optional[str] = None, app: Optional[str] = None, month: Optional[str] = None) -> list:
+    """The leaderboard over just one sport, app and/or month (settled, visible slips)."""
+    g: dict = {}
+    for p in _dash39_settled(guild_id):
+        if sport and sport_group(p["sport"]) != sport or app and (p["platform"] or "") != app or month and _dash39_month(p) != month:
+            continue
+        x = g.setdefault(p["bettor_key"], {"key": p["bettor_key"], "name": p["bettor_name"], "wins": 0, "losses": 0,
+                                           "pushes": 0, "net": 0.0, "staked": 0.0})
+        x["name"] = p["bettor_name"] or x["name"]
+        x["wins" if p["status"] == "win" else "losses" if p["status"] == "loss" else "pushes"] += 1
+        x["net"] += pick_net(p)
+        x["staked"] += p["cost"] or 0
+    out = [{"key": x["key"], "name": clip(x["name"] or "?", 60), "record": record_line(x), "net": round(x["net"], 2),
+            "roi": round(x["net"] / x["staked"] * 100, 1) if x["staked"] else 0.0, "streak": "", "open": 0}
+           for x in g.values() if x["wins"] + x["losses"] + x["pushes"] > 0]
+    return sorted(out, key=lambda r: (-r["net"], r["name"]))[:30]
+
+
+async def dash39_api_board(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    q = request.query
+    f = dash39_filters(prm["guild"])
+    sport, app, month = q.get("sport") or None, q.get("app") or None, q.get("month") or None
+    if (sport and sport not in f["sports"]) or (app and app not in f["apps"]) or (month and month not in f["months"]):
+        return dash_error(web, request, 400)
+    return web.json_response({"rows": dash39_board(prm["guild"], sport, app, month),
+                              "filters": {"sport": sport, "app": app, "month": month}})
+
+
+def dash39_search(guild_id: int, text: str) -> dict:
+    """People, slips and players matching the words (hidden slips stay out until they're revealed)."""
+    t = norm_name(text)[:40]
+    if len(t) < 2:
+        return {"q": text, "people": [], "slips": [], "players": []}
+    people = [{"key": s["key"], "name": clip(s["name"], 60), "record": record_line(s), "net": round(s["net"], 2)}
+              for s in compute_stats(guild_id) if t in norm_name(s["name"]) and not s["key"].startswith("label:")][:8]
+    like = like_pattern(t)
+    rows = db().execute(f"""SELECT DISTINCT p.* FROM picks p LEFT JOIN legs l ON l.pick_id = p.id
+                            WHERE p.guild_id = ? AND {_DASH_VISIBLE.replace('hidden', 'p.hidden').replace('revealed_at', 'p.revealed_at')}
+                            AND (lower(p.description) LIKE ? ESCAPE '\\' OR lower(l.text) LIKE ? ESCAPE '\\'
+                                 OR lower(p.bettor_name) LIKE ? ESCAPE '\\')
+                            ORDER BY p.id DESC LIMIT 40""", (guild_id, like, like, like)).fetchall()
+    slips = [{"id": p["id"], "who": clip(p["bettor_name"] or "?", 40), "what": clip(shown_desc(p), 120), "status": p["status"],
+              "platform": p["platform"], "net": round(pick_net(p), 2) if p["status"] != "open" else None, "cost": p["cost"],
+              "when": local_day(p["settled_at"] or p["created_at"])} for p in rows if not dash_secret(p)][:15]
+    players: dict = {}
+    for l in db().execute(f"""SELECT l.text, l.status FROM legs l JOIN picks p ON p.id = l.pick_id
+                              WHERE p.guild_id = ? AND lower(l.text) LIKE ? ESCAPE '\\'
+                              AND {_DASH_VISIBLE.replace('hidden', 'p.hidden').replace('revealed_at', 'p.revealed_at')}
+                              LIMIT 400""", (guild_id, like)):
+        pr = prop_of(l["text"])
+        if not pr or t not in norm_name(pr["player"]):
+            continue
+        name = " ".join(w.capitalize() for w in pr["player"].split())
+        x = players.setdefault(name, {"name": name, "legs": 0, "hit": 0, "miss": 0})
+        x["legs"] += 1
+        if l["status"] in ("hit", "miss"):
+            x[l["status"]] += 1
+    return {"q": text, "people": people, "slips": slips,
+            "players": sorted(players.values(), key=lambda x: -x["legs"])[:8]}
+
+
+async def dash39_api_search(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    q = str(request.query.get("q") or "")
+    if len(q) > 60:
+        return dash_error(web, request, 400)
+    return web.json_response(dash39_search(prm["guild"], q))
+
+
+def dash39_bystat(guild_id: int, key: str) -> list:
+    """How one person's graded legs went by stat type (points, rec yds...), visible slips only."""
+    g: dict = {}
+    for l in db().execute(f"""SELECT l.text, l.status FROM legs l JOIN picks p ON p.id = l.pick_id
+                              WHERE p.guild_id = ? AND p.bettor_key = ? AND l.status IN ('hit', 'miss')
+                              AND {_DASH_VISIBLE.replace('hidden', 'p.hidden').replace('revealed_at', 'p.revealed_at')}""",
+                          (guild_id, key)):
+        pr = prop_of(l["text"])
+        if not pr or not pr.get("stats"):
+            continue
+        name = STATS.get(pr["stats"][0], ("Other",))[0]
+        x = g.setdefault(name, {"name": clip(name, 24), "hit": 0, "miss": 0})
+        x[l["status"]] += 1
+    return sorted(g.values(), key=lambda x: -(x["hit"] + x["miss"]))[:8]
+
+
+_DASH39_ICONS: dict = {}
+
+
+def dash39_icon(size: int) -> bytes:
+    """The home-screen icon: the brand purple with a gold PB, drawn once per size."""
+    if size in _DASH39_ICONS:
+        return _DASH39_ICONS[size]
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (size, size), (26, 15, 51))
+    d = ImageDraw.Draw(img)
+    for y in range(size):                                   # soft vertical gradient
+        t = y / size
+        d.line([(0, y), (size, y)], fill=(int(42 + 40 * (1 - t)), int(20 + 10 * (1 - t)), int(87 + 60 * (1 - t))))
+    pad = size // 9
+    d.rounded_rectangle([pad, pad, size - pad, size - pad], radius=size // 6, outline=(240, 180, 41), width=max(2, size // 40))
+    try:
+        font = art_font(int(size * 0.42), True)
+    except Exception:
+        from PIL import ImageFont
+        font = ImageFont.load_default()
+    box = d.textbbox((0, 0), "PB", font=font)
+    d.text(((size - (box[2] - box[0])) / 2 - box[0], (size - (box[3] - box[1])) / 2 - box[1]), "PB", font=font, fill=(240, 180, 41))
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    _DASH39_ICONS[size] = out.getvalue()
+    return _DASH39_ICONS[size]
+
+
+DASH39_MANIFEST = json.dumps({"name": "PIMP-BOT", "short_name": "PIMP-BOT", "start_url": "/", "scope": "/",
+                              "display": "standalone", "background_color": "#0d0a14", "theme_color": "#1a0f33",
+                              "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                                        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                                        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]})
+DASH39_SW = ("self.addEventListener('install',e=>self.skipWaiting());"
+             "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"
+             "self.addEventListener('fetch',e=>{});")
+
+
+async def dash39_manifest(request):
+    from aiohttp import web
+    return web.Response(text=DASH39_MANIFEST, content_type="application/manifest+json",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+async def dash39_sw(request):
+    from aiohttp import web
+    return web.Response(text=DASH39_SW, content_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
+async def dash39_icon_route(request):
+    from aiohttp import web
+    size = 512 if "512" in request.path else 192
+    return web.Response(body=await asyncio.to_thread(dash39_icon, size), content_type="image/png",
+                        headers={"Cache-Control": "public, max-age=604800"})
+
+
 def dash_app(web):
     """The aiohttp app: every route goes through dash_guard."""
     @web.middleware
@@ -20173,6 +20346,9 @@ def dash_app(web):
                     web.get("/lines", lines_page), web.get("/api/lines.json", lines_api),
                     *([web.post("/api/staff/toggle", staff_toggle)] if hasattr(web, "post") else []),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
+                    web.get("/api/board.json", dash39_api_board), web.get("/api/search.json", dash39_api_search),
+                    web.get("/manifest.webmanifest", dash39_manifest), web.get("/sw.js", dash39_sw),
+                    web.get("/icon-192.png", dash39_icon_route), web.get("/icon-512.png", dash39_icon_route),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
                     web.get("/img/{kind}/{arg}.png", dash_image), web.get("/favicon.ico", dash_favicon),
@@ -20186,7 +20362,7 @@ def dash_app(web):
 DASHBOARD_HTML_V3 = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light">
-<meta name="theme-color" content="#1a0f33"><title>PIMP-BOT</title><link rel="icon" href="{{FAVICON}}">
+<meta name="theme-color" content="#1a0f33"><title>PIMP-BOT</title><link rel="icon" href="{{FAVICON}}"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="PIMP-BOT">
 <style>
 :root{--bg:#0d0a14;--bg2:#141020;--card:#17121f;--card2:#1f1829;--line:#2a2238;--text:#f4f1fb;--muted:#a59cbc;
  --faint:#6f6688;--brand:#7B3FE4;--brand2:#a27bff;--gold:#f0b429;--up:#34d399;--down:#fb7185;--flat:#94a3b8;
@@ -20580,6 +20756,15 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
  .gline{grid-template-columns:62px auto minmax(0,1fr);gap:10px}.gline .arr{display:none}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.tk .rail{overflow-x:auto}}
+.lbf{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}.lbf select{background:var(--card2);color:var(--text);border:1px solid var(--line);
+ border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;max-width:100%}.lbf select.on{border-color:var(--brand2);color:var(--brand2)}
+.srch{width:100%;background:var(--card2);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;font-size:16px}
+.srch:focus{outline:2px solid var(--brand2);outline-offset:1px}.sgrp{margin-top:16px}.sgrp h4{margin:0 0 6px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.cmp{width:100%;border-collapse:collapse;font-size:14px}.cmp th,.cmp td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:center}
+.cmp th:first-child,.cmp td:first-child{text-align:left;color:var(--muted);font-weight:500}.cmp td.win{font-weight:700;color:var(--up)}
+.cmpsel{background:var(--card2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;margin-top:8px}
+.sbars .sb{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;margin:8px 0}.sbars .bb{grid-column:1/-1;height:6px;border-radius:4px;background:var(--sk);overflow:hidden}
+.sbars .bb i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--brand2))}
 </style></head><body>
 <div class="grain" aria-hidden="true"></div>
 <header>
@@ -20588,6 +20773,10 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
   <div class="logo" id="logo">{{LOGO}}</div>
   <div class="brand"><h1>PIMP<b>-</b>BOT</h1><div class="meta" id="meta"><span class="skl" style="width:150px;height:14px;display:inline-block"></span></div></div>
   <div class="spacer"></div>
+  <button class="iconbtn" id="install" type="button" aria-label="Install on this phone" title="Install the app" hidden>
+   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></button>
+  <button class="iconbtn" id="search" type="button" aria-label="Search people, slips and players" title="Search (/)">
+   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
   <button class="iconbtn" id="theme" type="button" aria-label="Switch light or dark mode" title="Light / dark">
    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
  </div>
@@ -20755,7 +20944,8 @@ function gamesCount(d){const n=d.games.filter(g=>g.state==='in').length;return n
 
 /* ---------- tabs ---------- */
 function renderOverview(el,d){
- const board=S.lb==='season'&&d.season?d.leaderboard:d.alltime;
+ const bfOn=S.bf&&(S.bf.sport||S.bf.app||S.bf.month);
+ const board=bfOn&&S.fb?S.fb:S.lb==='season'&&d.season?d.leaderboard:d.alltime;
  const net=d.alltime.reduce((a,r)=>a+r.net,0);let w=0,l=0;for(const r of d.alltime){const m=r.record.split('-');w+=+m[0]||0;l+=+m[1]||0}
  const kpi=(k,v,s,c,b)=>h('button',{class:'card kpi',type:'button',onclick:()=>go('#/k/'+b),'aria-label':k+': '+v+'. Tap for more'},
   h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}));
@@ -20769,8 +20959,8 @@ function renderOverview(el,d){
    disabled:n.id==null,onclick:n.id==null?null:()=>go('#/s/'+n.id)},h('b',{text:n.who}),h('span',{text:n.why}),n.id!=null?h('span',{class:'chip',text:'#'+n.id}):null))),
    h('p',{class:'hint'},'Finish these in Discord with ',h('code',null,'/result'),'. They clear off here once they’re graded.')):null,
   card('Profit over time','',null,chart(d.series)),
-  card(S.lb==='season'&&d.season?'Leaderboard · '+d.season:'Leaderboard','s7',d.season?seg:null,
-   board.length?h('div',{class:'rows'},board.map(personRow)):empty('No results yet','Settle a slip and the race is on.')),
+  card(bfOn?'Leaderboard · '+[S.bf.sport,S.bf.app,S.bf.month&&monthName(S.bf.month)].filter(Boolean).join(' · '):S.lb==='season'&&d.season?'Leaderboard · '+d.season:'Leaderboard','s7',d.season&&!bfOn?seg:null,
+   lbFilters(d),board.length?h('div',{class:'rows'},board.map(personRow)):empty('No results yet','Settle a slip and the race is on.')),
   card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')),
   d.sotd?card('🏆 Slip of the Day','s5',d.sotd.open?'voting':null,d.sotd.open?h('p',{class:'hint'},'Voting is open on '+d.sotd.slips+' slips ('+d.sotd.votes+' vote'+(d.sotd.votes===1?'':'s')+' so far). Vote in Discord; it closes at midnight.')
    :h('div',{class:'rows'},slipRow({id:d.sotd.id,who:'👑 '+d.sotd.who,what:d.sotd.what,status:d.sotd.status,when:d.sotd.votes+' vote'+(d.sotd.votes===1?'':'s')+' · '+d.sotd.day,net:null,cost:d.sotd.cost}))):null,
@@ -20778,6 +20968,16 @@ function renderOverview(el,d){
    h('span',{class:'chip',text:'−'+nfmt(b.by)}),h('div',{style:'min-width:0'},h('div',{class:'nm'},b.who),h('div',{class:'sub'},b.leg)),h('span',{class:'net faint',text:cash(b.payout)})))):
    empty('No heartbreakers','Legs that miss by half a point or less land here.')))}
 const wide=b=>{b.classList.add('wide');return b};
+function lbFilters(d){const f=d.filters||{sports:[],apps:[],months:[]};S.bf=S.bf||{};
+ const sel=(label,key,opts,fmt)=>opts.length>1||S.bf[key]?h('select',{class:S.bf[key]?'on':'','aria-label':label,onchange:e=>setBF(key,e.target.value)},
+  h('option',{value:''},'All '+label.toLowerCase()),opts.map(o=>h('option',{value:o,selected:S.bf[key]===o},fmt?fmt(o):o))):null;
+ const any=S.bf.sport||S.bf.app||S.bf.month;
+ return h('div',{class:'lbf'},sel('Sports','sport',f.sports),sel('Apps','app',f.apps),sel('Months','month',f.months,monthName),
+  any?h('button',{type:'button',class:'chip',onclick:()=>{S.bf={};S.fb=null;render()}},'Clear'):null)}
+async function setBF(k,v){S.bf=Object.assign({},S.bf||{},{[k]:v||null});
+ if(!(S.bf.sport||S.bf.app||S.bf.month)){S.fb=null;render();return}
+ const p=Object.entries(S.bf).filter(([,x])=>x).map(([a,b])=>a+'='+encodeURIComponent(b));
+ const r=await api('/api/board.json'+qs(...p));S.fb=r?r.rows:[];render()}
 async function loadScores(){const d=await api('/api/scores.json'+qs());if(!d)return;S.scores=d;S.scoresAt=Date.now();if(S.tab==='live')render()}
 function scoreTile(g){const a=g.away,b=g.home,sc=v=>v==null?'':nfmt(v),live=g.state==='in',done=g.state==='post';
  const lead=(x,y)=>x.score!=null&&y.score!=null&&+x.score>+y.score;
@@ -20876,12 +21076,17 @@ async function openPerson(key){openSheet();const p=await api('/api/person/'+key+
   h('div',{class:'bar'},h('i',{style:'width:'+(r.w/n*100)+'%'}),h('i',{style:'width:'+(r.l/n*100)+'%'})))}));
  const series={};if(p.series.length)series[p.name]=p.series;
  put($('#sheet-body'),
-  h('div',{class:'ph'},avatar(p.name),h('div',{style:'min-width:0'},h('h3',{text:p.name}),h('div',{class:'sub'},p.record+' record',streakChip(p.streak)))),
+  h('div',{class:'ph'},avatar(p.name),h('div',{style:'min-width:0'},h('h3',{text:p.name}),h('div',{class:'sub'},p.record+' record',streakChip(p.streak)),
+   (S.data&&S.data.people||[]).length>1?h('select',{class:'cmpsel','aria-label':'Compare with someone',onchange:e=>{if(e.target.value)go('#/c/'+p.key+'/'+e.target.value)}},
+    h('option',{value:''},'⚖️ Compare with…'),S.data.people.filter(x=>x.key!==p.key&&/^\d+$/.test(x.key)).map(x=>h('option',{value:x.key},x.name))):null)),
   h('div',{class:'kpis'},kbox('Record',p.record),kbox('Net',money(p.net),tone(p.net)),kbox('ROI',pct(p.roi),tone(p.roi)),kbox('Legs hit',lr)),
   h('div',{class:'pgrid'},h('div',null,cardBox,p.form.length?card('Last '+p.form.length,'',null,h('div',{class:'form'},p.form.map(x=>h('i',{class:x,text:x})))):null),
    h('div',null,card('Profit over time','',null,chart(series,190)),
     card('Best hits','',null,p.best.length?h('div',{class:'rows'},p.best.map(b=>slipRow(Object.assign({},b,{who:b.what,what:(b.mult?b.mult+'x · ':'')+b.platform}),true)))
      :empty('No cashes yet','The first one will look great here.')),
+    (p.bystat||[]).length?card('Legs by stat','',null,h('div',{class:'sbars'},p.bystat.map(b=>{const n=b.hit+b.miss||1;
+     return h('div',{class:'sb'},h('b',{text:b.name}),h('span',{class:'muted',text:b.hit+'/'+(b.hit+b.miss)+' · '+Math.round(b.hit/n*100)+'%'}),
+      h('div',{class:'bb'},h('i',{style:'width:'+Math.round(b.hit/n*100)+'%'})))}))):null,
     p.sports.length?card('By sport','',null,split(p.sports)):null,p.apps.length?card('By app','',null,split(p.apps)):null,
     card('Recent slips','',null,p.recent.length?h('div',{class:'rows'},p.recent.map(r=>slipRow(r,false))):empty('No slips yet','')))))}
 async function openSlip(id){openSheet();const s=await api('/api/slip/'+id+'.json'+qs());if(location.hash!=='#/s/'+id)return;
@@ -20899,7 +21104,39 @@ async function openSlip(id){openSheet();const s=await api('/api/slip/'+id+'.json
     s.legs.length?h('div',{class:'legs'},s.legs.map(l=>h('div',{class:'leg'},legDot(l),h('div',{style:'min-width:0'},h('div',{class:'t',text:l.text}),
      l.sub?h('div',{class:'s',text:l.sub}):null,legBar(l),l.note?h('div',{class:'note'},h('span',{class:'ni','aria-hidden':'true'},'\u{1F4DD}'),h('span',{text:l.note})):null),l.value!=null?h('span',{class:'v',text:l.value+' / '+l.line}):h('span',{class:'v faint',text:l.status==='open'?'':l.status.toUpperCase()}))))
     :empty('No legs listed','This slip was logged as one bet.')))))}
-function route(){const m=location.hash.match(/^#\/(p|s|g|k)\/([A-Za-z0-9]{1,24})$/);if(!m){closeSheet();return}
+async function openCompare(a,b){openSheet();const [A,B]=await Promise.all([api('/api/person/'+a+'.json'+qs()),api('/api/person/'+b+'.json'+qs())]);
+ if(location.hash!=='#/c/'+a+'/'+b)return;if(!A||!B){sheetError('Couldn’t open one of them');return}
+ const lr=p=>p.legs_graded?Math.round(p.legs_hit/p.legs_graded*100):null;
+ const best=p=>p.best&&p.best[0]?p.best[0].net:null;
+ const rows=[['Record',A.record,B.record,null],['Net',money(A.net),money(B.net),[A.net,B.net]],['ROI',pct(A.roi),pct(B.roi),[A.roi,B.roi]],
+  ['Legs hit',lr(A)==null?'–':lr(A)+'%',lr(B)==null?'–':lr(B)+'%',[lr(A),lr(B)]],['Wins',String(A.wins),String(B.wins),[A.wins,B.wins]],
+  ['Biggest cash',best(A)==null?'–':money(best(A)),best(B)==null?'–':money(best(B)),[best(A),best(B)]],['Streak',A.streak||'–',B.streak||'–',null]];
+ const cell=(v,vs,i)=>h('td',{class:vs&&vs[0]!=null&&vs[1]!=null&&vs[i]>vs[1-i]?'win':'',text:v});
+ const sports=[...new Set([...A.sports.map(x=>x.name),...B.sports.map(x=>x.name)])];
+ const sp=(P,n)=>{const r=P.sports.find(x=>x.name===n);return r?r.w+'-'+r.l+' · '+money(r.net):'–'};
+ const series={};if(A.series.length)series[A.name]=A.series;if(B.series.length)series[B.name]=B.series;
+ put($('#sheet-body'),h('div',{class:'ph'},avatar(A.name),h('div',{style:'min-width:0'},h('h3',{text:A.name+' vs '+B.name}),h('div',{class:'sub'},'Head to head, all time'))),
+  card('Side by side','',null,h('table',{class:'cmp'},h('thead',null,h('tr',null,h('th',null,''),h('th',{text:A.name}),h('th',{text:B.name}))),
+   h('tbody',null,rows.map(r=>h('tr',null,h('td',{text:r[0]}),cell(r[1],r[3],0),cell(r[2],r[3],1)))))),
+  card('Profit over time','',null,chart(series,220)),
+  sports.length?card('By sport','',null,h('table',{class:'cmp'},h('tbody',null,sports.map(n=>h('tr',null,h('td',{text:n}),h('td',{text:sp(A,n)}),h('td',{text:sp(B,n)})))))):null)}
+function openSearch(){openSheet();const inp=h('input',{class:'srch',type:'search',placeholder:'Search people, slips or players',autocomplete:'off','aria-label':'Search'});
+ const out=h('div',{'aria-live':'polite'});let tm=0,seq=0;
+ inp.addEventListener('input',()=>{clearTimeout(tm);tm=setTimeout(async()=>{const q=inp.value.trim();const my=++seq;
+  if(q.length<2){put(out,h('p',{class:'muted',text:'Type at least 2 letters.'}));return}
+  const r=await api('/api/search.json'+qs('q='+encodeURIComponent(q)));if(my!==seq||!r)return;
+  const grp=(t,items)=>items.length?h('div',{class:'sgrp'},h('h4',{text:t}),items):null;
+  put(out,grp('People',r.people.map(p=>h('button',{class:'row slip',type:'button',onclick:()=>go('#/p/'+p.key)},avatar(p.name),
+    h('div',{style:'min-width:0'},h('div',{class:'nm',text:p.name}),h('div',{class:'sub',text:p.record})),h('span',{class:'net '+tone(p.net)},money(p.net))))),
+   grp('Slips',r.slips.map(x=>slipRow(x))),
+   grp('Players on slips',r.players.map(x=>h('div',{class:'row slip'},h('span',{class:'chip',text:String(x.legs)}),
+    h('div',{style:'min-width:0'},h('div',{class:'nm',text:x.name}),h('div',{class:'sub',text:(x.hit||0)+' hit · '+(x.miss||0)+' missed'})),h('span',null,'')))),
+   !r.people.length&&!r.slips.length&&!r.players.length?empty('Nothing found','Try a last name or a team.'):null)},250)});
+ put($('#sheet-body'),h('div',{class:'ph'},h('div',{style:'min-width:0'},h('h3',{text:'Search'}),h('div',{class:'sub',text:'People, slips and the players on them. Hidden slips stay hidden.'}))),inp,out);
+ setTimeout(()=>inp.focus(),50)}
+function route(){if(location.hash==='#/search'){openSearch();return}
+ const cm=location.hash.match(/^#\/c\/(\d{1,20})\/(\d{1,20})$/);if(cm){openCompare(cm[1],cm[2]);return}
+ const m=location.hash.match(/^#\/(p|s|g|k)\/([A-Za-z0-9]{1,24})$/);if(!m){closeSheet();return}
  if(m[1]==='k'){openBubble(m[2]);return}
  if(m[1]==='g')openGame(m[2]);else if(/^\d{1,20}$/.test(m[2])){if(m[1]==='p')openPerson(m[2]);else openSlip(m[2])}else closeSheet()}
 
@@ -21040,6 +21277,11 @@ function fresh(t){if(t==='live'&&(!S.live||Date.now()-S.liveAt>20000))loadLive()
 /* ---------- theme + wiring ---------- */
 function setTheme(t){if(t)document.documentElement.dataset.theme=t;else delete document.documentElement.dataset.theme}
 try{setTheme(localStorage.getItem('pb-theme'))}catch(e){}
+$('#search').addEventListener('click',()=>go('#/search'));
+document.addEventListener('keydown',e=>{if(e.key==='/'&&!/input|textarea|select/i.test((e.target&&e.target.tagName)||'')){e.preventDefault();go('#/search')}});
+let INSTALL=null;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();INSTALL=e;$('#install').hidden=false});
+$('#install').addEventListener('click',async()=>{if(!INSTALL)return;INSTALL.prompt();try{await INSTALL.userChoice}catch(x){}INSTALL=null;$('#install').hidden=true});
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}
 $('#theme').addEventListener('click',()=>{const cur=document.documentElement.dataset.theme||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
  const nxt=cur==='light'?'dark':'light';setTheme(nxt);try{localStorage.setItem('pb-theme',nxt)}catch(e){};if(S.data&&S.tab==='overview')render()});
 document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.t)));
