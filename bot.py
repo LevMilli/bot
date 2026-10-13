@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r32.1"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r33"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -99,7 +99,19 @@ ASK_MODEL = env("ASK_MODEL", "claude-sonnet-5-5")
 ASK_DAILY_LIMIT = env_int("ASK_DAILY_LIMIT", 1000)
 # The bot's owner(s), by Discord user id, comma separated. Set on Railway only: nothing in Discord can change it.
 OWNER_IDS = {int(x) for x in env("OWNER_IDS", "").replace(" ", "").split(",") if x.isdigit()}
-CREATOR_ID = int(env("CREATOR_ID", "") or 0) if env("CREATOR_ID", "").isdigit() else (min(OWNER_IDS) if OWNER_IDS else 0)
+CREATOR_ID = int(env("CREATOR_ID", "") or 0) if env("CREATOR_ID", "").isdigit() else 0
+# The bot's developer(s): full control, /owner included. Set on Railway only.
+DEVELOPER_IDS = {int(x) for x in env("DEVELOPER_IDS", "").replace(" ", "").split(",") if x.isdigit()}
+DEVELOPER_TITLE_DEFAULT = "Lead Developer"
+
+
+def developer_ids() -> set:
+    """DEVELOPER_IDS; before it's set, CREATOR_ID, then OWNER_IDS (how r32 set things up), so nobody gets locked out."""
+    if DEVELOPER_IDS:
+        return set(DEVELOPER_IDS)
+    if CREATOR_ID:
+        return {CREATOR_ID}
+    return set(OWNER_IDS)
 ASK_COOLDOWN_SECONDS = env_int("ASK_COOLDOWN_SECONDS", 20)
 MEMBERS_INTENT = env("MEMBERS_INTENT", "") in ("1", "true", "yes", "on")
 DB_PATH = env("DB_PATH", "picks.db")
@@ -989,14 +1001,37 @@ def resolve_bettor(interaction: discord.Interaction,
     return str(m.id), m.display_name, m.id
 
 
+def developer_id_ok(uid) -> bool:
+    try:
+        return int(uid) in developer_ids()
+    except (TypeError, ValueError):
+        return False
+
+
+def is_developer(user) -> bool:
+    return developer_id_ok(getattr(user, "id", None))
+
+
+def developer_title() -> str:
+    return clip(get_setting(0, "developer_title") or DEVELOPER_TITLE_DEFAULT, 30)
+
+
+def server_owner_ids() -> set:
+    """Owners the developer added with /owner addowner."""
+    try:
+        return {int(x) for x in json.loads(get_setting(0, "server_owners") or "[]")}
+    except (ValueError, TypeError):
+        return set()
+
+
 def owner_id_ok(uid, guild_id: Optional[int] = None) -> bool:
-    """An owner: in OWNER_IDS, or (only when OWNER_IDS isn't set) the Discord server's owner."""
+    """The developer or an owner: OWNER_IDS, added with /owner addowner, or the Discord server's owner."""
     try:
         uid = int(uid)
     except (TypeError, ValueError):
         return False
-    if OWNER_IDS:
-        return uid in OWNER_IDS
+    if uid in developer_ids() or uid in OWNER_IDS or uid in server_owner_ids():
+        return True
     g = None
     try:
         g = bot.get_guild(int(guild_id)) if guild_id else None
@@ -1006,8 +1041,9 @@ def owner_id_ok(uid, guild_id: Optional[int] = None) -> bool:
 
 
 def is_owner(user) -> bool:
+    """The developer or an owner (shares running the server)."""
     gid = getattr(getattr(user, "guild", None), "id", None)
-    if not OWNER_IDS and gid is not None and getattr(getattr(user, "guild", None), "owner_id", None) == getattr(user, "id", None):
+    if gid is not None and getattr(getattr(user, "guild", None), "owner_id", None) == getattr(user, "id", None):
         return True
     return owner_id_ok(getattr(user, "id", None), gid)
 
@@ -1024,10 +1060,15 @@ def owner_lockdown() -> bool:
 
 
 def owner_gate(user) -> Optional[bool]:
-    """True: an owner, always allowed. False: removed by the owner, or the bot is locked down. None: the usual rules."""
+    """True: the developer or an owner, always allowed. False: removed by the developer, or locked down (developer and
+    owners only). None: the usual Discord-permission rules."""
+    if is_developer(user):
+        return True
+    if getattr(user, "id", None) in owner_blocked_ids():
+        return False
     if is_owner(user):
         return True
-    if getattr(user, "id", None) in owner_blocked_ids() or owner_lockdown():
+    if owner_lockdown():
         return False
     return None
 
@@ -8685,7 +8726,9 @@ def dashboard_data(guild_id: int) -> dict:
         names[p["bettor_id"]] = p["bettor_name"]
     coins = [{"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"])} for u in coins_top(guild_id, 10)]
     rec = dash30_safe_records(guild_id, records_embed(guild_id).description or "")
-    return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": dashboard_people(guild_id),
+    _people = dashboard_people(guild_id)
+    return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": _people,
+            "badges": {p["key"]: p["badge"] for p in _people if p.get("badge")}, "breakdown": dash33_breakdown(guild_id),
             "settled24": dashboard_recent(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
@@ -14947,8 +14990,125 @@ async def dashboard_image(kind: str, guild_id: int, arg: str = "", back: bool = 
 
 
 def dashboard_people(guild_id: int) -> list[dict]:
-    return [{"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2)}
+    return [{"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
+             "badge": people_badge(guild_id, s["key"])}
             for s in compute_stats(guild_id) if s["wins"] + s["losses"] + s["pushes"] > 0 and not s["key"].startswith("label:")]
+
+
+def people_badge(guild_id: int, key: str) -> Optional[dict]:
+    """{t: label, k: developer|owner|admin|mod} for the dashboard's badges, or None."""
+    if not str(key or "").isdigit():
+        return None
+    uid = int(key)
+    if developer_id_ok(uid):
+        return {"t": developer_title(), "k": "developer"}
+    if owner_id_ok(uid, guild_id):
+        return {"t": "Owner", "k": "owner"}
+    member = None
+    try:
+        g = bot.get_guild(int(guild_id))
+        member = g.get_member(uid) if g is not None else None
+    except Exception:
+        member = None
+    if member is not None:
+        lvl = _staff_level(member)
+        if lvl == "Admin":
+            return {"t": "Admin", "k": "admin"}
+        if lvl == "Mod":
+            return {"t": "MOD", "k": "mod"}
+    return None
+
+
+def dash33_breakdown(guild_id: int) -> dict:
+    """The numbers behind the top tiles: by sport, platform and month, plus the biggest win and loss. Settled picks
+    only; hidden ones stay out until they're revealed."""
+    rows = db().execute("""SELECT id, bettor_name, sport, platform, status, cost, returned, settled_at, hidden, revealed_at
+                           FROM picks WHERE guild_id = ? AND status IN ('win','loss','push')""", (guild_id,)).fetchall()
+    def bucket():
+        return {"w": 0, "l": 0, "p": 0, "net": 0.0, "staked": 0.0}
+    by_sport, by_plat, by_month = {}, {}, {}
+    best = worst = None
+    for r in rows:
+        if r["hidden"] and not r["revealed_at"]:
+            continue
+        net = (r["returned"] or 0.0) - (r["cost"] or 0.0)
+        for table, k in ((by_sport, sport_group(r["sport"]) or "Other"), (by_plat, r["platform"] or "Other"),
+                         (by_month, (r["settled_at"] or "")[:7] or "?")):
+            b = table.setdefault(k, bucket())
+            b[{"win": "w", "loss": "l"}.get(r["status"], "p")] += 1
+            b["net"] += net
+            b["staked"] += r["cost"] or 0.0
+        if best is None or net > best[0]:
+            best = (net, r)
+        if worst is None or net < worst[0]:
+            worst = (net, r)
+    def out(table, limit=12, key=None):
+        items = [{"name": k, "w": v["w"], "l": v["l"], "p": v["p"], "net": round(v["net"], 2),
+                  "roi": round(v["net"] / v["staked"] * 100, 1) if v["staked"] else 0.0} for k, v in table.items()]
+        items.sort(key=key or (lambda x: -(x["w"] + x["l"] + x["p"])))
+        return items[:limit]
+    big = lambda t: {"who": clip(t[1]["bettor_name"] or "", 30), "net": round(t[0], 2), "id": t[1]["id"]} if t else None
+    return {"sport": out(by_sport), "platform": out(by_plat), "month": out(by_month, 12, key=lambda x: x["name"])[-12:],
+            "best": big(best) if best and best[0] > 0 else None, "worst": big(worst) if worst and worst[0] < 0 else None}
+
+
+_DASH33_SCORES: dict = {}
+DASH33_LEAGUE_URL = {"football/nfl": "nfl", "basketball/nba": "nba", "baseball/mlb": "mlb", "hockey/nhl": "nhl",
+                     "football/college-football": "college-football", "basketball/wnba": "wnba",
+                     "basketball/mens-college-basketball": "mens-college-basketball"}
+
+
+async def dash33_scores(guild_id: int) -> dict:
+    """Every game today in the main leagues, live ones first, refreshed at most every 20 seconds."""
+    hit = _DASH33_SCORES.get("all")
+    if hit and hit[0] > time.monotonic():
+        games = hit[1]
+    else:
+        games = []
+        today = datetime.now(TZ)
+        for path in DEFAULT_LEAGUES:
+            try:
+                evs = await fetch_scoreboard(path, today)
+            except Exception:
+                evs = []
+            for ev in evs:
+                tile = dash_game(ev)
+                if not tile:
+                    continue
+                slug = DASH33_LEAGUE_URL.get(path)
+                tile.update(league=LEAGUE_NAMES.get(path, path).split(" ")[0][:12], path=path,
+                            url=f"https://www.espn.com/{slug}/game/_/gameId/{tile['id']}" if slug and tile["id"].isdigit() else None,
+                            away_abbr=clip(next((t.get("abbr") for t in ev["teams"] if not t["home"]), "") or "", 6),
+                            home_abbr=clip(next((t.get("abbr") for t in ev["teams"] if t["home"]), "") or "", 6),
+                            odds=clip(((ev.get("odds") or {}).get("details") or ""), 20))
+                games.append(tile)
+        order = {"in": 0, "pre": 1, "post": 2}
+        games.sort(key=lambda g: (order.get(g["state"], 3), g["start"] or ""))
+        _DASH33_SCORES["all"] = (time.monotonic() + 20, games)
+    mine = set()
+    try:
+        mine = {g["id"] for g in (await dash_live(guild_id)).get("games") or []}
+    except Exception:
+        pass
+    return {"games": [dict(g, mine=g["id"] in mine) for g in games[:80]], "updated": now_iso(),
+            "live": sum(1 for g in games if g["state"] == "in")}
+
+
+async def dash33_api_scores(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    return web.json_response(await dash33_scores(prm["guild"]))
+
+
+def dash33_mask(name: str) -> tuple[str, bool]:
+    """Public health panel: the free services' names aren't shown."""
+    if re.search(r"free", name or "", re.I):
+        return "✱✱✱✱✱✱", True
+    return name, False
+
+
 
 
 DASHBOARD_HTML_V2 = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -19648,7 +19808,46 @@ button{font:inherit;color:inherit}a{color:var(--brand2)}
 .num,.money{font-variant-numeric:tabular-nums}.up{color:var(--up)}.down{color:var(--down)}.flat{color:var(--flat)}
 .muted{color:var(--muted)}.faint{color:var(--faint)}
 /* header */
-header{background:var(--head);position:relative;overflow:hidden}
+header{background:var(--head);position:relative;overflow:hidden;isolation:isolate}
+.hart{position:absolute;inset:0;z-index:-1;pointer-events:none;background:var(--court) 50% 40%/1500px auto no-repeat;opacity:.9}
+.hart:after{content:"";position:absolute;inset:0;background:radial-gradient(520px 260px at 14% 0%,#a27bff40,transparent 70%),
+ radial-gradient(420px 240px at 88% 110%,#f0b42926,transparent 70%),repeating-linear-gradient(115deg,transparent 0 46px,#ffffff05 46px 48px)}
+.hsweep{position:absolute;top:-50%;bottom:-50%;left:-30%;width:28%;z-index:-1;pointer-events:none;
+ background:linear-gradient(90deg,transparent,#ffffff12,transparent);transform:skewX(-18deg);animation:hsweep 10s ease-in-out infinite}
+@keyframes hsweep{0%{left:-35%}55%,100%{left:120%}}
+.hstripe{position:absolute;left:0;right:0;bottom:0;height:3px;background:linear-gradient(90deg,#7B3FE4,#f0b429 50%,#7B3FE4);z-index:1}
+.grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.45;background-image:radial-gradient(#ffffff09 1px,transparent 1.2px);
+ background-size:22px 22px}
+@media (prefers-reduced-motion:reduce){.hsweep{animation:none;display:none}}
+/* r33 */
+.kpi{cursor:pointer;transition:border-color .15s,transform .15s;font:inherit;color:inherit;text-align:left;width:100%;display:block}.kpi:hover{border-color:#7B3FE499;transform:translateY(-1px)}
+.kpi .s:after{content:" · tap for more";color:var(--brand2);opacity:0;transition:opacity .15s}.kpi:hover .s:after{opacity:1}
+.bdg{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:800;letter-spacing:.03em;padding:1px 7px;border-radius:99px;
+ vertical-align:1px;margin-left:4px;white-space:nowrap}
+.bdg.developer{background:linear-gradient(135deg,#f0b429,#ff7ac6 55%,#a27bff);color:#1a0f33;box-shadow:0 0 10px #f0b42955}
+.bdg.owner{background:linear-gradient(135deg,#f0b429,#c9952a);color:#1a0f33}
+.bdg.admin{background:#7B3FE433;color:var(--brand2);border:1px solid #7B3FE466}
+.bdg.mod{background:linear-gradient(135deg,#7B3FE4,#5a2bc0);color:#fff}
+.bsheet h3{margin:14px 0 8px;font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.brow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.brow:first-of-type{border-top:0}.brow .bb{grid-column:1/-1;height:6px;border-radius:99px;background:var(--card2);overflow:hidden;margin-top:-2px}
+.brow .bb i{display:block;height:100%;border-radius:99px}.brow b{font-weight:700}.brow span{font-variant-numeric:tabular-nums}
+.sbgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.sbt{display:block;background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:10px 12px;color:inherit;text-decoration:none;
+ position:relative}.sbt:hover{border-color:#7B3FE499}.sbt.mine{box-shadow:inset 0 0 0 1px #f0b42988}
+.sbt .sblg{display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--faint);margin-bottom:6px;white-space:nowrap}
+.sbt .sblg .lv{color:#fff;background:#e11d48;border-radius:99px;padding:1px 8px;display:inline-flex;gap:5px;align-items:center}
+.sbt .sblg .lv i{width:6px;height:6px;border-radius:50%;background:#fff;animation:pulse 1.4s infinite}
+.sbt .tm{display:flex;justify-content:space-between;align-items:center;font-size:14.5px;padding:2px 0}.sbt .tm b{font-weight:750}
+.sbt .tm span{font-variant-numeric:tabular-nums;font-weight:800;font-size:16px}.sbt .tm.lead span,.sbt .tm.lead b{color:var(--text)}
+.sbt .tm.trail{color:var(--muted)}.sbt .ft{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px}
+.chips2{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}.chips2 button{font:inherit;font-size:12px;font-weight:650;padding:4px 11px;
+ border-radius:99px;border:1px solid var(--line);background:var(--card2);color:var(--muted);cursor:pointer}
+.chips2 button.on{color:#fff;background:var(--brand);border-color:var(--brand)}
+.nrow.note{opacity:.78}.nrow.note .nd{font-size:13px}
+.blurx{filter:blur(4px);user-select:none}
+.alinks li.soon a{opacity:.55;pointer-events:none}.alinks li.soon a:after{content:"soon";margin-left:auto;font-size:10.5px;font-weight:800;
+ letter-spacing:.06em;text-transform:uppercase;color:var(--faint);border:1px solid var(--line);border-radius:99px;padding:1px 7px}
 header:before{content:"";position:absolute;inset:-40% -10% auto auto;width:520px;height:520px;border-radius:50%;
  background:radial-gradient(closest-side,#7B3FE455,transparent);pointer-events:none}
 .top{max-width:1180px;margin:auto;padding:18px 20px 14px;display:flex;align-items:center;gap:14px;position:relative}
@@ -19979,7 +20178,9 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.tk .rail{overflow-x:auto}}
 </style></head><body>
+<div class="grain" aria-hidden="true"></div>
 <header>
+ <div class="hart" aria-hidden="true"></div><div class="hsweep" aria-hidden="true"></div><div class="hstripe" aria-hidden="true"></div>
  <div class="top">
   <div class="logo" id="logo">{{LOGO}}</div>
   <div class="brand"><h1>PIMP<b>-</b>BOT</h1><div class="meta" id="meta"><span class="skl" style="width:150px;height:14px;display:inline-block"></span></div></div>
@@ -20011,6 +20212,16 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
  <ul class="alinks" id="alinks">
   <li><a href="/staff"><span class="ic">🛠️</span><span><b>Server Dashboard</b><i>Bot health, outages and tools</i></span></a></li>
   <li><a href="/lines"><span class="ic">📈</span><span><b>Line Watch</b><i>Line moves · mods and owners</i></span></a></li>
+  <li><a href="/staff#live-server-history"><span class="ic">📜</span><span><b>Server history</b><i>Slips, scans, staff actions</i></span></a></li>
+  <li><a href="/staff#screenshot-reads-7-days"><span class="ic">📸</span><span><b>Scan log</b><i>Screenshots that didn't read</i></span></a></li>
+  <li><a href="/staff#ai-pool-today"><span class="ic">🤖</span><span><b>AI pool & usage</b><i>Questions, limits, services</i></span></a></li>
+  <li><a href="/staff#playbook"><span class="ic">📘</span><span><b>Playbook</b><i>Every staff command, ready to copy</i></span></a></li>
+  <li><a href="/api/picks.csv" download><span class="ic">⬇️</span><span><b>Export picks (CSV)</b><i>Every visible pick, for a spreadsheet</i></span></a></li>
+  <li class="soon"><a href="#"><span class="ic">🚫</span><span><b>Blacklist</b><i>Players, teams, situations</i></span></a></li>
+  <li class="soon"><a href="#"><span class="ic">📣</span><span><b>Announcements</b><i>Post to chosen channels</i></span></a></li>
+  <li class="soon"><a href="#"><span class="ic">🛡️</span><span><b>Mod log</b><i>Warns, mutes, bans</i></span></a></li>
+  <li class="soon"><a href="#"><span class="ic">🏷️</span><span><b>Roles & badges</b><i>Owner, MOD, VIP</i></span></a></li>
+  <li class="soon"><a href="#"><span class="ic">🎛️</span><span><b>Feature switches</b><i>Turn features on and off</i></span></a></li>
  </ul>
  <p class="anote" id="anote">Admins and mods: run <b>/dashboard section:Admin health</b> in Discord once to unlock these.</p>
 </div></aside>
@@ -20107,10 +20318,12 @@ function drawChart(host,series,names,height){
  put(host,svg,tip,names.length>1?legend:null)}
 
 /* ---------- pieces ---------- */
+function badge(key){const b=S.data&&S.data.badges&&S.data.badges[key];if(!b)return null;
+ return h('span',{class:'bdg '+b.k,title:b.k==='developer'?'Runs the bot':b.k==='owner'?'Runs the server':''},(b.k==='developer'?'⚡ ':b.k==='owner'?'👑 ':'')+b.t)}
 function personRow(r,i){const medal=['\u{1F947}','\u{1F948}','\u{1F949}'][i];const link=r.key&&/^\d+$/.test(r.key);
  return h(link?'button':'div',{class:'row',type:link?'button':null,onclick:link?()=>go('#/p/'+r.key):null},
   h('span',{class:'rk'},medal||String(i+1)),avatar(r.name),
-  h('div',{style:'min-width:0'},h('div',{class:'nm'},r.name,' ',streakChip(r.streak)),h('div',{class:'sub',text:r.record+(r.open?' · '+r.open+' open':'')})),
+  h('div',{style:'min-width:0'},h('div',{class:'nm'},r.name,badge(r.key),' ',streakChip(r.streak)),h('div',{class:'sub',text:r.record+(r.open?' · '+r.open+' open':'')})),
   h('span',{class:'net '+tone(r.net)},money(r.net)),h('span',{class:'roi '+tone(r.roi)},pct(r.roi)+' ROI'))}
 function slipRow(p,showWho){return h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},stBadge(p.status),
   h('div',{style:'min-width:0'},h('div',{class:'nm'},showWho===false?p.what:p.who),h('div',{class:'sub'},(showWho===false?'':p.what+' · ')+(p.when||''))),
@@ -20141,12 +20354,13 @@ function gamesCount(d){const n=d.games.filter(g=>g.state==='in').length;return n
 function renderOverview(el,d){
  const board=S.lb==='season'&&d.season?d.leaderboard:d.alltime;
  const net=d.alltime.reduce((a,r)=>a+r.net,0);let w=0,l=0;for(const r of d.alltime){const m=r.record.split('-');w+=+m[0]||0;l+=+m[1]||0}
- const kpi=(k,v,s,c)=>h('div',{class:'card kpi'},h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}));
+ const kpi=(k,v,s,c,b)=>h('button',{class:'card kpi',type:'button',onclick:()=>go('#/k/'+b),'aria-label':k+': '+v+'. Tap for more'},
+  h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}));
  const seg=h('div',{class:'seg'},[['season','Season'],['all','All time']].map(([k,t])=>h('button',{type:'button',class:S.lb===k?'on':'',
   onclick:()=>{S.lb=k;render()}},t)));
  put(el,
-  kpi('Group net',money(net),'all time, everyone',tone(net)),kpi('Record',w+'-'+l,'wins · losses'),
-  kpi('Open slips',String(d.open.length),'riding right now'),kpi('Legs in play',String(d.ticker.length),d.ticker.length?'tap Live to sweat':'quiet for now'),
+  kpi('Group net',money(net),'all time, everyone',tone(net),'net'),kpi('Record',w+'-'+l,'wins · losses','record'),
+  kpi('Open slips',String(d.open.length),'riding right now','open'),kpi('Legs in play',String(d.ticker.length),d.ticker.length?'tap Live to sweat':'quiet for now','legs'),
   d.games.length?card('Games we’re on','',gamesCount(d),gamesStrip(d.games)):null,
   d.needs.length?card('✋ Needs attention','needs',String(d.needs.length),h('div',{class:'nlist'},d.needs.map(n=>h('button',{class:'nitem',type:'button',
    disabled:n.id==null,onclick:n.id==null?null:()=>go('#/s/'+n.id)},h('b',{text:n.who}),h('span',{text:n.why}),n.id!=null?h('span',{class:'chip',text:'#'+n.id}):null))),
@@ -20156,6 +20370,22 @@ function renderOverview(el,d){
    board.length?h('div',{class:'rows'},board.map(personRow)):empty('No results yet','Settle a slip and the race is on.')),
   card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}
 const wide=b=>{b.classList.add('wide');return b};
+async function loadScores(){const d=await api('/api/scores.json'+qs());if(!d)return;S.scores=d;S.scoresAt=Date.now();if(S.tab==='live')render()}
+function scoreTile(g){const a=g.away,b=g.home,sc=v=>v==null?'':nfmt(v),live=g.state==='in',done=g.state==='post';
+ const lead=(x,y)=>x.score!=null&&y.score!=null&&+x.score>+y.score;
+ return h(g.url?'a':'div',{class:'sbt'+(g.mine?' mine':''),href:g.url||null,target:g.url?'_blank':null,rel:g.url?'noopener noreferrer':null,
+   title:g.mine?'The group has legs on this game':''},
+  h('div',{class:'sblg'},h('span',{text:g.league+(g.mine?' · ON A SLIP':'')}),live?h('span',{class:'lv'},h('i'),'LIVE'):h('span',{text:done?'FINAL':startTime(g)})),
+  h('div',{class:'tm '+(lead(a,b)?'lead':done&&lead(b,a)?'trail':'')},h('b',{text:g.away_abbr||a.name}),h('span',{text:sc(a.score)})),
+  h('div',{class:'tm '+(lead(b,a)?'lead':done&&lead(a,b)?'trail':'')},h('b',{text:g.home_abbr||b.name}),h('span',{text:sc(b.score)})),
+  h('div',{class:'ft'},h('span',{text:live?g.clock:done?'Final':''}),h('span',{text:g.odds||''})))}
+function scoresCard(){const D=S.scores;if(!D)return card('Around the league','',null,h('div',{class:'sbgrid'},skel(6)));
+ const leagues=[...new Set(D.games.map(g=>g.league))];const f=S.sbf||'all';
+ const games=D.games.filter(g=>f==='all'||(f==='live'?g.state==='in':g.league===f));
+ return card('Around the league','',D.live?D.live+' live':String(D.games.length),
+  h('div',{class:'chips2'},[['all','All'],['live','Live now'],...leagues.map(l=>[l,l])].map(([k,t])=>h('button',{type:'button',class:f===k?'on':'',onclick:()=>{S.sbf=k;render()}},t))),
+  games.length?h('div',{class:'sbgrid'},games.map(scoreTile)):empty(f==='live'?'No games live right now':'No games today','Scores update by themselves every 30 seconds.'),
+  h('p',{class:'hint'},'Every game today in the NFL, NBA, MLB, NHL and college football. Gold outline = the group has legs on it. Tap a game for ESPN’s page.'))}
 function renderLive(el,d){
  const L=S.live,settled=d.settled24||[],later=L?[...L.later,...L.finals]:[];
  const next=L&&L.later.length?'Next up: '+L.later[0].away.abbr+' @ '+L.later[0].home.abbr+' at '+startTime(L.later[0])+'.':'';
@@ -20163,6 +20393,7 @@ function renderLive(el,d){
   !L?h('div',{class:'lgrid'},[0,1].map(skelGame)):L.games.length?h('div',{class:'lgrid'},L.games.map(gameCard))
    :card('In play','',null,empty('Nothing in play right now',(next?next+' ':'')+'When a game the group is on tips off, it shows up here with every leg.')),
   later.length?card('Later today & finals','',String(later.length),h('div',{class:'glist'},later.map(gameLine))):null,
+  scoresCard(),
   L&&L.games.length?card('The /live picture','',L.updated?'Updated '+L.updated:null,wide(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
   card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
   card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(p=>slipRow({id:p.id,who:p.who,status:p.status,net:p.net,what:'Slip #'+p.id,when:'settled today'})))
@@ -20170,7 +20401,7 @@ function renderLive(el,d){
 function renderPeople(el,d){
  put(el,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>
   h('button',{class:'tile',type:'button',onclick:()=>go('#/p/'+p.key)},imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
-   h('div',{class:'cap'},h('b',{text:p.name}),h('span',{class:tone(p.net)},money(p.net))),h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))))
+   h('div',{class:'cap'},h('b',{text:p.name}),h('span',{class:tone(p.net)},money(p.net))),badge(p.key)?h('div',{class:'cap',style:'padding-top:2px'},badge(p.key)):null,h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))))
   :empty('No one on the board yet','Once someone settles a slip, their card shows up here.')))}
 function renderPosters(el,d){
  const seg=h('div',{class:'seg'},[['season','Season'],['month','Month'],['week','Week']].map(([k,t])=>h('button',{type:'button',class:S.period===k?'on':'',
@@ -20260,8 +20491,36 @@ async function openSlip(id){openSheet();const s=await api('/api/slip/'+id+'.json
     s.legs.length?h('div',{class:'legs'},s.legs.map(l=>h('div',{class:'leg'},legDot(l),h('div',{style:'min-width:0'},h('div',{class:'t',text:l.text}),
      l.sub?h('div',{class:'s',text:l.sub}):null,legBar(l),l.note?h('div',{class:'note'},h('span',{class:'ni','aria-hidden':'true'},'\u{1F4DD}'),h('span',{text:l.note})):null),l.value!=null?h('span',{class:'v',text:l.value+' / '+l.line}):h('span',{class:'v faint',text:l.status==='open'?'':l.status.toUpperCase()}))))
     :empty('No legs listed','This slip was logged as one bet.')))))}
-function route(){const m=location.hash.match(/^#\/(p|s|g)\/([A-Za-z0-9]{1,24})$/);if(!m){closeSheet();return}
+function route(){const m=location.hash.match(/^#\/(p|s|g|k)\/([A-Za-z0-9]{1,24})$/);if(!m){closeSheet();return}
+ if(m[1]==='k'){openBubble(m[2]);return}
  if(m[1]==='g')openGame(m[2]);else if(/^\d{1,20}$/.test(m[2])){if(m[1]==='p')openPerson(m[2]);else openSlip(m[2])}else closeSheet()}
+
+/* ---------- r33: the numbers behind the tiles ---------- */
+function bRows(rows,show){const max=Math.max(1,...rows.map(r=>Math.abs(show(r))));
+ return rows.map(r=>{const v=show(r);return h('div',{class:'brow'},h('b',{text:r.name}),h('span',{class:'muted',text:r.w+'-'+r.l+(r.p?'-'+r.p:'')}),
+  h('span',{class:tone(r.net)},money(r.net)),h('div',{class:'bb'},h('i',{style:'width:'+Math.round(Math.abs(v)/max*100)+'%;background:'+(v>=0?'var(--up)':'var(--down)')})))})}
+function monthName(k){const m=/^(\d{4})-(\d{2})$/.exec(k||'');return m?new Date(+m[1],+m[2]-1,1).toLocaleDateString([],{month:'short',year:'numeric'}):k}
+function openBubble(kind){openSheet();const d=S.data;if(!d){sheetError('Still loading');return}
+ const B=d.breakdown||{sport:[],platform:[],month:[]};const body=[];
+ const wr=r=>r.w+r.l?Math.round(r.w/(r.w+r.l)*100):0;
+ if(kind==='net'){const net=d.alltime.reduce((a,r)=>a+r.net,0);
+  body.push(h('h2',null,'Group net · '+money(net)),h('p',{class:'muted'},'Every settled slip, everyone together. Hidden slips count once they’re revealed.'),
+   B.best||B.worst?h('div',{class:'money3'},B.best?kbox('Biggest cash',money(B.best.net)+' · '+B.best.who,'up'):null,B.worst?kbox('Toughest beat',money(B.worst.net)+' · '+B.worst.who,'down'):null):null,
+   h('h3',null,'By sport'),h('div',null,bRows(B.sport,r=>r.net)),h('h3',null,'By app'),h('div',null,bRows(B.platform,r=>r.net)),
+   h('h3',null,'By month'),h('div',null,bRows(B.month.map(r=>Object.assign({},r,{name:monthName(r.name)})),r=>r.net)))}
+ else if(kind==='record'){body.push(h('h2',null,'Record'),h('p',{class:'muted'},'Win rate by sport and app (pushes left out).'),
+   h('h3',null,'By sport'),h('div',null,B.sport.map(r=>h('div',{class:'brow'},h('b',{text:r.name}),h('span',{class:'muted',text:r.w+'-'+r.l+(r.p?'-'+r.p:'')}),
+    h('span',{text:wr(r)+'%'}),h('div',{class:'bb'},h('i',{style:'width:'+wr(r)+'%;background:var(--brand2)'}))))),
+   h('h3',null,'By app'),h('div',null,B.platform.map(r=>h('div',{class:'brow'},h('b',{text:r.name}),h('span',{class:'muted',text:r.w+'-'+r.l}),
+    h('span',{text:wr(r)+'%'}),h('div',{class:'bb'},h('i',{style:'width:'+wr(r)+'%;background:var(--brand2)'}))))))}
+ else if(kind==='open'){const by={};for(const p of d.open){const k=p.platform||'Other';by[k]=(by[k]||0)+1}
+  body.push(h('h2',null,d.open.length+' open slip'+(d.open.length===1?'':'s')),h('div',{class:'money3'},Object.entries(by).map(([k,v])=>kbox(k,String(v)))),
+   d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.'))}
+ else if(kind==='legs'){body.push(h('h2',null,d.ticker.length+' leg'+(d.ticker.length===1?'':'s')+' in play'),
+   d.ticker.length?h('div',{class:'legs'},d.ticker.map(tickerLeg)):empty('Quiet for now','Legs show up here when their games are on.'),
+   h('p',{class:'hint'},h('button',{class:'chip',type:'button',onclick:()=>{closeClick();setTimeout(()=>show('live'),50)}},'Open the Live tab →')))}
+ else{sheetError('Nothing here');return}
+ put($('#sheet-body'),h('div',{class:'bsheet'},body))}
 
 /* ---------- r30: live games, game pages, news, bot health ---------- */
 const HEX=/^#[0-9a-f]{6}$/i,col=c=>HEX.test(c||'')?c:'#7B3FE4';
@@ -20332,34 +20591,42 @@ const NEWS_TONE={out:'down',suspension:'down',doubtful:'orange',questionable:'wa
 function ago(iso){const t=Date.parse(iso);if(isNaN(t))return '';const s=Math.max(0,(Date.now()-t)/1000);
  return s<60?'just now':s<3600?Math.floor(s/60)+'m ago':s<86400?Math.floor(s/3600)+'h ago':Math.floor(s/86400)+'d ago'}
 async function loadNews(){const d=await api('/api/news.json'+qs());if(!d)return;d.items=d.items||[];S.news=d;S.newsAt=Date.now();if(S.tab==='news')render()}
-function newsRow(n){const chip=n.kind==='reboot'?'REBOOT':n.kind==='off'?'BACK':String(n.status||'').toUpperCase();
+function newsRow(n){const chip=n.kind==='reboot'?'REBOOT':n.kind==='off'?'BACK':n.note?'NOTE':String(n.status||'').toUpperCase();
  const what=n.kind==='injury'?'is '+String(n.status||'').toLowerCase():n.kind==='off'?'is off the injury report':'didn’t play';
  return h('div',{class:'nrow'},h('div',{style:'min-width:0'},h('div',{class:'nh'},h('span',{class:'sc '+(NEWS_TONE[n.chip]||''),text:chip}),h('b',{text:n.player}),h('span',{class:'muted',text:what})),
   n.detail?h('div',{class:'nd',text:n.detail}):null,
   n.slips&&n.slips.length?h('div',{class:'nslips'},n.slips.map(x=>h('button',{class:'chip',type:'button',onclick:()=>go('#/s/'+x.id)},x.who+' · #'+x.id))):null),
   h('span',{class:'nt',text:ago(n.when)}))}
-function renderNews(el,d){const N=S.news;
- put(el,card('Injury & reboot news','',N&&N.items.length?String(N.items.length):null,
-  !N?h('div',null,skel(5)):N.items.length?h('div',{class:'news'},N.items.map(newsRow))
+function renderNews(el,d){const N=S.news;const f=S.nf||'all';
+ const pick=n=>f==='all'?true:f==='injury'?(n.kind==='injury'&&!n.note):f==='back'?n.kind==='off':f==='reboot'?n.kind==='reboot':n.note;
+ const items=N?N.items.filter(pick):[];
+ const counts=N?{injury:N.items.filter(n=>n.kind==='injury'&&!n.note).length,back:N.items.filter(n=>n.kind==='off').length,
+  reboot:N.items.filter(n=>n.kind==='reboot').length,note:N.items.filter(n=>n.note).length}:{};
+ const checked=N&&N.checked?'Checked '+ago(N.checked)+' · every '+(N.every||10)+' min':null;
+ put(el,card('Injury & reboot news','',checked||(N&&N.items.length?String(N.items.length):null),
+  N&&N.items.length?h('div',{class:'chips2'},[['all','All',N.items.length],['injury','Injuries',counts.injury],['back','Back',counts.back],
+   ['reboot','Reboots',counts.reboot],['note','Player notes',counts.note]].filter(x=>x[0]==='all'||x[2]).map(([k,t,c])=>h('button',{type:'button',class:f===k?'on':'',
+   onclick:()=>{S.nf=k;render()}},t+' · '+c))):null,
+  !N?h('div',null,skel(5)):items.length?h('div',{class:'news'},items.map(n=>{const r=newsRow(n);if(n.note)r.classList.add('note');return r}))
   :empty(N.on?'No news yet':'The news feed is off',N.on?'When a player on the group’s slips lands on (or comes off) an injury report, it shows up here.':'An admin can switch it on with /admin askchannel in Discord.')),
   card('How it works','',null,h('p',{class:'muted',style:'margin:0'},'The bot checks the injury reports every 10 minutes for players on the group’s open slips, and posts changes in the ask channel. ',
-   h('b',null,'Reboot'),' means a player didn’t play and that leg was voided. Hidden slips never show up here.')))}
+   h('b',null,'Reboot'),' means a player didn’t play and that leg was voided. ',h('b',null,'Note'),' is ESPN’s routine update on a player who’s active (often last game’s line). Hidden slips never show up here.')))}
 async function loadHealth(){const d=await api('/api/health.json'+qs());if(!d)return;S.health=d;S.healthAt=Date.now();if(S.tab==='more')render()}
 function healthCard(){const H=S.health;
  if(!H)return card('Bot health','',null,h('div',{class:'hgrid'},[0,1,2,3].map(()=>h('div',{class:'hbox'},skel(3)))));
  const kv=(k,v,c)=>h('div',{class:'kv'},h('b',{text:k}),h('span',{class:c||'',text:v}));
- const bars=rows=>{const max=Math.max(1,...rows.map(r=>r.n));return rows.map(r=>h('div',{class:'hb'+(r.n?'':' zero')},h('span',{text:r.name}),h('b',{text:String(r.n)}),
+ const bars=rows=>{const max=Math.max(1,...rows.map(r=>r.n));return rows.map(r=>h('div',{class:'hb'+(r.n?'':' zero')},h('span',{class:r.masked?'blurx':'',text:r.name}),h('b',{text:String(r.n)}),
   h('div',{class:'bar'},h('i',{style:'width:'+(r.n/max*100)+'%'}))))};
  const feedTxt=f=>f.state==='idle'?'not used yet':f.state==='down'?'not answering'+(f.code?' ('+f.code+')':''):(f.last_ok?'answered '+f.last_ok:'')+(f.fail?' · '+f.fail+' missed':'');
  const fail=H.jobs.failing;
  return card('Bot health','',h('span',{class:'faint',text:H.version}),h('div',{class:'hgrid'},
-  h('div',{class:'hbox'},h('h3',null,'Data feeds'),H.feeds.map(f=>h('div',{class:'feed'},h('i',{class:'dot '+f.state}),h('b',{text:f.name}),h('span',{text:feedTxt(f)})))),
-  h('div',{class:'hbox'},h('h3',null,'Slips read today'),bars(H.reads),h('p',{class:'hint',text:'Readers on, in order: '+(H.readers_on.join(' → ')||'none (the form only)')})),
+  h('div',{class:'hbox'},h('h3',null,'Data feeds'),H.feeds.map(f=>h('div',{class:'feed'},h('i',{class:'dot '+f.state}),h('b',{class:f.masked?'blurx':'',text:f.name}),h('span',{text:feedTxt(f)})))),
+  h('div',{class:'hbox'},h('h3',null,'Slips read today'),bars(H.reads),h('p',{class:'hint',text:H.readers_on.length?H.readers_on.length+' reader'+(H.readers_on.length===1?'':'s')+' on':'No reader on (the form only)'})),
   h('div',{class:'hbox'},h('h3',null,'Questions today'),bars(H.questions),h('p',{class:'hint',text:'Claude calls today: '+H.claude_today})),
   h('div',{class:'hbox'},h('h3',null,'Background'),kv('Last cycle',H.cycle.ago||'not yet',H.cycle.ok?'up':'down'),
    kv('Jobs',fail.length?fail.length+' failing':(H.jobs.total?'all '+H.jobs.total+' healthy':'not run yet'),fail.length?'down':'up'),
    fail.slice(0,4).map(j=>kv(j.name,'failed ×'+j.fails,'down')),kv('Up for',H.uptime),kv('Version',H.version))))}
-function fresh(t){if(t==='live'&&(!S.live||Date.now()-S.liveAt>20000))loadLive();
+function fresh(t){if(t==='live'&&(!S.live||Date.now()-S.liveAt>20000))loadLive();if(t==='live'&&(!S.scores||Date.now()-S.scoresAt>25000))loadScores();
  if(t==='news'&&(!S.news||Date.now()-S.newsAt>300000))loadNews();if(t==='more'&&(!S.health||Date.now()-S.healthAt>60000))loadHealth()}
 
 /* ---------- theme + wiring ---------- */
@@ -20374,6 +20641,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sheet').classLi
 addEventListener('popstate',route);
 let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(S.data&&S.tab==='overview')render()},250)});
 setInterval(()=>{if(document.visibilityState==='visible')load()},60000);
+setInterval(()=>{if(document.visibilityState==='visible'&&S.tab==='live')loadScores()},30000);
 setInterval(()=>{if(document.visibilityState!=='visible')return;if(S.tab==='live')loadLive();if(/^#\/g\//.test(location.hash))openGame(location.hash.slice(3),true)},20000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-S.loadedAt>60000)load()});
 try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}
@@ -29185,7 +29453,9 @@ async def dash30_api_news(request):
     if err is not None:
         return err
     gid = prm["guild"]
-    return web.json_response({"items": dash30_news(gid), "on": bool(ask_channel_id(gid)) and server_on(gid, "newsfeed")})
+    items = [dict(n, note=str(n.get("status") or "").lower() == "active") for n in dash30_news(gid)]
+    return web.json_response({"items": items, "on": bool(ask_channel_id(gid)) and server_on(gid, "newsfeed"),
+                              "checked": get_setting(gid, "news_checked"), "every": NEWS_EVERY_MIN})
 
 
 async def dash30_api_health(request):
@@ -29193,7 +29463,12 @@ async def dash30_api_health(request):
     prm, err = dash_gate(web, request)
     if err is not None:
         return err
-    return web.json_response(dash30_health())
+    h = dash30_health()
+    for group in ("feeds", "reads", "questions"):
+        for x in h.get(group) or []:
+            x["name"], x["masked"] = dash33_mask(x.get("name") or "")
+    h["readers_on"] = [dash33_mask(n)[0] for n in h.get("readers_on") or []]
+    return web.json_response(h)
 
 
 async def dash30_live_img(request):
@@ -29243,7 +29518,8 @@ async def dash30_logo(request):
 def dash30_routes(web) -> list:
     """The r30 routes; dash_app puts them ahead of the generic /img/{kind}.png ones."""
     return [web.get("/api/live.json", dash30_api_live), web.get(r"/api/game/{eid:[A-Za-z0-9]+}.json", dash30_api_game),
-            web.get("/api/news.json", dash30_api_news), web.get("/api/health.json", dash30_api_health),
+            web.get("/api/news.json", dash30_api_news),
+            web.get("/api/scores.json", dash33_api_scores), web.get("/api/health.json", dash30_api_health),
             web.get("/img/live.png", dash30_live_img), web.get(r"/img/game/{eid:[A-Za-z0-9]+}.png", dash30_game_img),
             web.get(r"/img/logo/{eid:[A-Za-z0-9]+}/{side:[ah]}.png", dash30_logo)]
 
@@ -29583,8 +29859,9 @@ def staff_check(token: Optional[str], now: Optional[float] = None) -> Optional[d
         return None
     if int(exp) < (now or time.time()):
         return None
-    if not owner_id_ok(uid, int(gid)) and (int(uid) in owner_blocked_ids() or owner_lockdown()):
-        return None                       # removed by the owner, or locked down to owners only
+    if not developer_id_ok(uid) and (int(uid) in owner_blocked_ids()
+                                     or (owner_lockdown() and not owner_id_ok(uid, int(gid)))):
+        return None                       # removed by the developer, or locked down to the developer and owners
     return {"uid": int(uid), "guild": int(gid), "exp": int(exp)}
 
 
@@ -29673,7 +29950,7 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
         "scans": {"week": scan_log_stats(guild_id), "recent": [r for r in scan_log_rows(guild_id, 30)
                                                                if r["result"] != "ok"][:8]},
         "asks": {"used": ask_used(guild_id), "limit": ask_limit(guild_id)},
-        "owner": {"lockdown": owner_lockdown(), "removed": len(owner_blocked_ids()), "set": bool(OWNER_IDS)},
+        "owner": {"lockdown": owner_lockdown(), "removed": len(owner_blocked_ids()), "set": bool(DEVELOPER_IDS)},
         "pool": engine_usage(),
         "allow": staff_allowances(guild_id),
     }
@@ -30061,10 +30338,10 @@ def staff_viewer(uid: Optional[int]) -> str:
 
 def _staff_level(member) -> str:
     uid = getattr(member, "id", None)
-    if CREATOR_ID and uid == CREATOR_ID:
-        return "Creator"
+    if developer_id_ok(uid):
+        return "Developer"
     gid = getattr(getattr(member, "guild", None), "id", None)
-    if (OWNER_IDS and uid in OWNER_IDS) or (getattr(getattr(member, "guild", None), "owner_id", None) == uid):
+    if owner_id_ok(uid, gid) or (getattr(getattr(member, "guild", None), "owner_id", None) == uid):
         return "Owner"
     perms = getattr(member, "guild_permissions", None)
     if perms and (getattr(perms, "administrator", False) or getattr(perms, "manage_guild", False)):
@@ -30089,7 +30366,7 @@ def staff_people(guild_id: int) -> dict:
     ch = outage_channel(bot, guild_id, "admin")
     seen = {int(r["uid"]): r for r in staff_seen_rows() if str(r.get("guild")) == str(guild_id)}
     out = {"channel": None, "roles": [], "people": [], "everyone": False, "partial": not MEMBERS_INTENT,
-           "lockdown": owner_lockdown(), "guild": str(int(guild_id))}
+           "lockdown": owner_lockdown(), "guild": str(int(guild_id)), "dev_title": developer_title()}
     if ch is None:
         out["people"] = [{"id": str(int(r["uid"])), "name": clip(r.get("name") or "?", 40), "role": "", "level": "Staff",
                           "color": None, "seen": r.get("at"), "removed": int(r["uid"]) in owner_blocked_ids()}
@@ -30126,10 +30403,10 @@ def staff_people(guild_id: int) -> dict:
                        "seen": (seen.get(int(mem.id)) or {}).get("at")})
     for uid, r in seen.items():                  # signed in to the staff page but not in the bot's member cache
         if uid not in ids:
-            lvl = "Creator" if CREATOR_ID and uid == CREATOR_ID else ("Owner" if OWNER_IDS and uid in OWNER_IDS else "Staff")
+            lvl = "Developer" if developer_id_ok(uid) else ("Owner" if owner_id_ok(uid, guild_id) else "Staff")
             people.append({"id": str(uid), "removed": uid in owner_blocked_ids(), "name": clip(r.get("name") or "?", 40),
                            "role": "", "level": lvl, "color": None, "seen": r.get("at")})
-    order = {"Creator": -2, "Owner": -1, "Admin": 0, "Mod": 1, "Staff": 2}
+    order = {"Developer": -2, "Owner": -1, "Admin": 0, "Mod": 1, "Staff": 2}
     people.sort(key=lambda p: (order.get(p["level"], 3), p["name"].lower()))
     out["people"] = people[:150]
     return out
@@ -30361,7 +30638,7 @@ button.pill:focus-visible,.out:focus-visible,.copy:focus-visible{outline:2px sol
 .badge{margin-left:auto;font-size:11px;font-weight:750;padding:3px 9px;border-radius:99px;white-space:nowrap}
 .badge.admin{background:#f0b42926;color:var(--gold);border:1px solid #f0b42955}.badge.mod{background:#7B3FE426;color:var(--brand2);border:1px solid #7B3FE455}
 .badge.staff{background:var(--card2);color:var(--muted);border:1px solid var(--line)}
-.badge.creator{background:linear-gradient(135deg,#f0b429,#ff7ac6 55%,#a27bff);color:#1a0f33;border:0;box-shadow:0 0 12px #f0b42966}
+.badge.developer{background:linear-gradient(135deg,#f0b429,#ff7ac6 55%,#a27bff);color:#1a0f33;border:0;box-shadow:0 0 12px #f0b42966}
 .badge.owner{background:linear-gradient(135deg,#f0b429,#c9952a);color:#1a0f33;border:0}
 .badge.removed{background:#fb718522;color:var(--down);border:1px solid #fb718555;margin-left:6px}
 .dm{font-size:12px;font-weight:650;color:var(--brand2);text-decoration:none;border:1px solid var(--line);border-radius:99px;
@@ -30447,7 +30724,7 @@ const ago=iso=>{if(!iso)return'never';const s=(Date.now()-Date.parse(iso))/1000;
 const when=iso=>iso?new Date(iso).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
 const dot=c=>'<i class="dot '+(c||'')+'"></i>';
 const row=(a,b)=>'<div class="row"><span>'+a+'</span><span>'+b+'</span></div>';
-const card=(t,body,cls)=>'<section class="card '+(cls||'')+'"><h2>'+esc(t)+'</h2>'+body+'</section>';
+const card=(t,body,cls)=>'<section class="card '+(cls||'')+'" id="'+String(t).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'"><h2>'+esc(t)+'</h2>'+body+'</section>';
 const safeUrl=u=>/^(https:\/\/[^\s"'<>]+|\/[A-Za-z0-9_\-\/.?=&]*)$/.test(u||'')?u:null;
 let loadedAt=0,HF='all',LAST=null;
 function needs(d){
@@ -30462,7 +30739,7 @@ function needs(d){
  if(d.needs&&d.needs.length)n.push(['🧾','<b>'+d.needs.length+(d.needs.length>1?' slips need':' slip needs')+' a person:</b> '
    +d.needs.slice(0,6).map(x=>esc(x.who)+(x.id?' #'+x.id:'')+' ('+esc(x.why.toLowerCase())+')').join(', ')+(d.needs.length>6?'…':'')]);
  if(d.owner&&d.owner.lockdown)n.push(['🔒','<b>Locked down:</b> staff tools are owners only. <code>/owner lockdown on:False</code> ends it.']);
- if(d.owner&&!d.owner.set)n.push(['🛡️','<b>Set your owner ID.</b> Add <code>OWNER_IDS</code> (your Discord user ID) in Railway so nobody else can take over the failsafe.']);
+ if(d.owner&&!d.owner.set)n.push(['🛡️','<b>Lock in your control.</b> Add <code>DEVELOPER_IDS</code> (your Discord user ID) in Railway so nobody else can take over the failsafe.']);
  const live=(d.pool||[]).filter(e=>e.on&&e.in_pool&&e.engine!=='claude');
  if(live.length&&live.every(e=>e.cooling))n.push(['🤖','<b>Every free AI service is used up for now.</b> Questions fall back to Claude (if set) or the numbers-only breakdown.']);
  if(d.asks&&d.asks.limit&&d.asks.used>=0.9*d.asks.limit)n.push(['💬','<b>Questions almost used up:</b> '+d.asks.used+' of '+d.asks.limit+' today.']);
@@ -30553,7 +30830,7 @@ function render(d){
  const cats=[['🧾 Slips & picks',[['/pick','Log a slip by hand'],['/track pick_id:','Leg by leg: what the bot is following'],['/inbox','Slips that need a person'],['/result pick_id: outcome:','Settle a slip yourself'],['/calc slip pick_id:','How each leg has hit lately']]],
   ['👥 Staff & access',[['/dashboard section:Admin health','Your own 12-hour link to this page'],['/links add name: url:','Add to the toolbox'],['/admin panel','Every server switch in one place'],['/admin check','Why isn\'t a channel logging slips?']]],
   ['⚙️ Server setup',[['/outage channels','Admin + member alert channels, ping role'],['/admin setup','Channels and features, step by step'],['/admin status','Version, uptime, connections'],['/backups','Nightly backup to a channel']]],
-  ['🛡️ Owner only',[['/owner status','Owners, lockdown, removed people'],['/owner lockdown on:True','Staff tools owners-only, now'],['/owner remove member:','Take one person\'s staff access'],['/owner newkey','Swap the dashboard key'],['/owner asklimit per_day:','Daily question limit'],['/owner quota','Questions per person (tiers or one person)']]]];
+  ['🛡️ Developer only',[['/owner status','You, the owners, lockdown, removed people'],['/owner addowner member:','Make someone an owner'],['/owner lockdown on:True','Staff tools: you and the owners only'],['/owner remove member:','Take one person\'s staff access'],['/owner newkey','Swap the dashboard key'],['/owner asklimit per_day:','Daily question limit'],['/owner quota','Questions per person (tiers or one person)'],['/owner title text:','Your badge title']]]];
  h.push(card('Playbook','<div class="steps">'+steps.map(s=>'<div class="step"><b>'+esc(s[0])+'</b><code>'+esc(s[1])
   +'</code><button class="copy" type="button" data-copy="'+esc(s[1])+'">Copy</button></div>').join('')+'</div>'
   +'<div class="tools" style="margin-top:6px">'+cats.map(c=>'<div class="cat"><h3>'+esc(c[0])+'</h3>'+c[1].map(x=>'<div class="cmd"><span><code>'+esc(x[0])+'</code><i>'+esc(x[1])
@@ -30572,7 +30849,7 @@ async function openStaff(){const sh=$('#sheet');sh.classList.add('on');$('#sheet
   if((d.roles||[]).length)b+='<div class="muted">Roles with access</div><div class="chips">'+d.roles.map(r=>'<span class="chip" style="'+(r.color?'color:'+esc(r.color):'')+'">'
    +esc(r.name)+(r.count!=null?' · '+r.count:'')+'</span>').join('')+'</div>';
   if(d.lockdown)b+='<div class="warnbox">🔒 Locked down: only owners can use staff tools right now (<code>/owner lockdown on:False</code> to undo).</div>';
-  const lab={Creator:'👑 Creator',Owner:'Owner',Admin:'Admin',Mod:'MOD',Staff:'Staff'};
+  const lab={Developer:'⚡ '+(d.dev_title||'Lead Developer'),Owner:'👑 Owner',Admin:'Admin',Mod:'MOD',Staff:'Staff'};
   b+=(d.people||[]).map(p=>{const id=/^\d{5,22}$/.test(p.id||'')?p.id:null;
    const ring=p.color?'--ring:'+esc(p.color)+';':'';
    const pic=id?'<img class="av avimg" src="/staff/avatar/'+id+'.png" alt="" loading="lazy" style="'+ring+'" data-n="'+esc(initials(p.name))+'" data-c="'+esc(p.color||'')+'">'
@@ -30595,8 +30872,11 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-copy]');if
  const t=b.getAttribute('data-copy');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{b.textContent='Copied';
  setTimeout(()=>b.textContent='Copy',1500)}).catch(()=>{b.textContent='Copy failed'})});
 setInterval(()=>{if(loadedAt)$('#upd').textContent='updated '+ago(new Date(loadedAt).toISOString())},5000);
+let JUMPED=false;
 async function load(){try{const r=await fetch('/api/staff.json',{credentials:'same-origin'});
- if(r.status===403){location.reload();return}render(await r.json());$('#upd').textContent='updated just now'}catch(e){$('#upd').textContent='offline? retrying…'}}
+ if(r.status===403){location.reload();return}render(await r.json());$('#upd').textContent='updated just now';
+ if(!JUMPED&&location.hash.length>1){JUMPED=true;const t=document.getElementById(location.hash.slice(1));if(t)t.scrollIntoView({behavior:'smooth',block:'start'})}}
+ catch(e){$('#upd').textContent='offline? retrying…'}}
 load();setInterval(load,30000);
 </script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace(
     "{{LOGO}}", DASH_LOGO_SVG).replace("{{COURT_D}}", dash_court("#a27bff", 0.06)).replace(
@@ -36593,18 +36873,18 @@ bot.tree.add_command(outage_group)
 
 # ---- /owner: the failsafe (owners only; OWNER_IDS on Railway decides who that is) -------------------------
 
-owner_group = app_commands.Group(name="owner", description="Owner-only failsafe: lock down, remove access, new keys",
+owner_group = app_commands.Group(name="owner", description="The developer's failsafe: lock down, owners, access, keys",
                                  guild_only=True, default_permissions=discord.Permissions(administrator=True))
 
 
 def owner_only(fn):
     @functools.wraps(fn)
     async def wrapper(interaction, *args, **kwargs):
-        if not is_owner(interaction.user):
-            await sec_reply(interaction, "That's for the bot's owner only.")
+        if not is_developer(interaction.user):
+            await sec_reply(interaction, f"That's for the bot's {developer_title()} only.")
             try:
                 await audit(interaction.client, interaction.guild_id,
-                            f"🚫 {who(interaction)} tried an owner-only command (`/owner {getattr(fn, '__name__', '?')[6:]}`).")
+                            f"🚫 {who(interaction)} tried a developer-only command (`/owner {getattr(fn, '__name__', '?')[6:]}`).")
             except Exception:
                 pass
             return
@@ -36625,10 +36905,13 @@ async def owner_note(interaction, text: str) -> None:
 @owner_only
 async def owner_status(interaction: discord.Interaction):
     blocked = sorted(owner_blocked_ids())
-    owners = ", ".join(f"<@{u}>" for u in sorted(OWNER_IDS)) if OWNER_IDS else \
-        "not set: the Discord server owner counts as the owner until you add `OWNER_IDS` on Railway"
-    lines = [f"**Owners:** {owners}", f"**Creator badge:** {'<@' + str(CREATOR_ID) + '>' if CREATOR_ID else 'not set'}",
-             f"**Lockdown:** {'🔒 ON: staff tools are owners only' if owner_lockdown() else 'off'}",
+    devs = ", ".join(f"<@{u}>" for u in sorted(developer_ids())) or "nobody yet"
+    g = getattr(interaction, "guild", None) or bot.get_guild(interaction.guild_id)
+    owners = sorted(set(OWNER_IDS) | server_owner_ids() | ({g.owner_id} if getattr(g, "owner_id", None) else set()))
+    lines = [f"**{developer_title()} (full control):** {devs}" + ("" if DEVELOPER_IDS else
+                                                                  " ⚠️ add `DEVELOPER_IDS` on Railway to lock this in"),
+             f"**Owners (run the server with you):** {', '.join(f'<@{u}>' for u in owners) or 'nobody yet'}",
+             f"**Lockdown:** {'🔒 ON: staff tools are you and the owners only' if owner_lockdown() else 'off'}",
              f"**Removed from staff:** {', '.join(f'<@{u}>' for u in blocked) if blocked else 'nobody'}",
              f"**Questions today:** {ask_used(interaction.guild_id):,} of {ask_limit(interaction.guild_id):,}",
              f"**Dashboard key:** {'set on Railway (change DASHBOARD_KEY there to swap it)' if env('DASHBOARD_KEY', '') else 'made by the bot (`/owner newkey` swaps it)'}"]
@@ -36651,8 +36934,8 @@ async def owner_lockdown_cmd(interaction: discord.Interaction, on: bool):
 @app_commands.describe(member="Who to remove")
 @owner_only
 async def owner_remove(interaction: discord.Interaction, member: discord.Member):
-    if owner_id_ok(member.id, interaction.guild_id):
-        await interaction.response.send_message("Owners can't be removed.", ephemeral=True)
+    if developer_id_ok(member.id):
+        await interaction.response.send_message(f"The {developer_title()} can't be removed.", ephemeral=True)
         return
     ids = owner_blocked_ids() | {int(member.id)}
     set_setting(0, "owner_blocked", json.dumps(sorted(ids)))
@@ -36750,6 +37033,42 @@ async def owner_quota(interaction: discord.Interaction, tier: Optional[app_comma
                      f"{'unlimited' if a['per_day'] < 0 else a['per_day']} a day · used {a['used']} today · {a['why']}")
     lines.append(f"**Server cap:** {ask_limit(gid):,} a day (`/owner asklimit`)")
     await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+@owner_group.command(name="addowner", description="Make someone an owner: they share running the server with you")
+@app_commands.describe(member="Who to make an owner")
+@owner_only
+async def owner_addowner(interaction: discord.Interaction, member: discord.Member):
+    ids = server_owner_ids() | {int(member.id)}
+    set_setting(0, "server_owners", json.dumps(sorted(ids)))
+    await owner_note(interaction, f"{who(interaction)} made **{clip(member.display_name, 40)}** an owner.")
+    await interaction.response.send_message(
+        f"Done: {clip(member.display_name, 40)} is an owner. They get every staff tool, unlimited questions and the Owner "
+        "badge. `/owner` stays yours.", ephemeral=True)
+
+
+@owner_group.command(name="removeowner", description="Take someone's owner status away (they keep their normal roles)")
+@app_commands.describe(member="Who to remove as an owner")
+@owner_only
+async def owner_removeowner(interaction: discord.Interaction, member: discord.Member):
+    ids = server_owner_ids() - {int(member.id)}
+    set_setting(0, "server_owners", json.dumps(sorted(ids)))
+    extra = ""
+    if int(member.id) in OWNER_IDS:
+        extra = " They're also in `OWNER_IDS` on Railway; take them out there too."
+    elif getattr(getattr(interaction, "guild", None) or bot.get_guild(interaction.guild_id), "owner_id", None) == member.id:
+        extra = " They own the Discord server, so they still count as an owner; `/owner remove` takes their staff access."
+    await owner_note(interaction, f"{who(interaction)} removed **{clip(member.display_name, 40)}** as an owner.")
+    await interaction.response.send_message(f"Removed {clip(member.display_name, 40)} as an owner.{extra}", ephemeral=True)
+
+
+@owner_group.command(name="title", description="Your badge title on the dashboards (default: Lead Developer)")
+@app_commands.describe(text="Like Lead Developer, Bot Architect, AI Engineer")
+@owner_only
+async def owner_title(interaction: discord.Interaction, text: app_commands.Range[str, 2, 30]):
+    clean = re.sub(r"[^\w &+./'-]", "", text).strip() or DEVELOPER_TITLE_DEFAULT
+    set_setting(0, "developer_title", clean)
+    await interaction.response.send_message(f"Your badge now reads **{clip(clean, 30)}**.", ephemeral=True)
 
 bot.tree.add_command(owner_group)
 
