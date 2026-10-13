@@ -52,7 +52,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r43"   # shown in /help and the startup log, so you can tell which upload is live
+RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
+CMD_STATS: dict = {}                                                      # r44: per-command timings
+BOT_VERSION = "2026-10-13 r44"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -5200,6 +5202,7 @@ def backup_files(guild_id: int) -> list:
     db().backup(dest)
     dest.close()
     sec_scrub_backup(path, guild_id)
+    backup_note(backup_verify(path), guild_id)
     files = []
     if os.path.getsize(path) <= 9 * 1024 * 1024:
         files.append(discord.File(path, filename=f"picks_backup_{stamp}.db"))
@@ -13847,6 +13850,11 @@ def cleanup_db(now: Optional[datetime] = None, vacuum: bool = False) -> dict:
         "DELETE FROM pick_msgs WHERE done = 1 AND updated_at < ?", (month,)).rowcount
     removed["leg alert marks"] += db().execute(
         "DELETE FROM leg_pings WHERE pick_id NOT IN (SELECT id FROM picks)").rowcount
+    try:
+        removed["old injury alert marks"] = db().execute(
+            "DELETE FROM injury_alerts WHERE sent_at < ?", (iso(now - timedelta(days=60)),)).rowcount
+    except sqlite3.Error:
+        pass                                      # the table only exists once an injury alert went out
     db().commit()
     try:
         db().execute("PRAGMA optimize")
@@ -13869,6 +13877,8 @@ async def nightly_cleanup(client: discord.Client, now: Optional[datetime] = None
     set_setting(0, "cleanup_day", today)
     removed = cleanup_db(now, vacuum=local.weekday() == 6)
     log.info("Nightly cleanup removed %s", removed)
+    if local.weekday() == 6 or not get_setting(0, "db_check"):
+        db_check()
     for cache in (_PROP_CACHE, _PROGRESS_CACHE, _AVATAR_CACHE, _LEG_SEEN):
         if len(cache) > 1000:
             cache.clear()
@@ -30784,7 +30794,9 @@ def outage_reason(prev: dict) -> tuple[str, bool]:
 
 
 async def outage_going_down(client) -> None:
-    """Railway sent SIGTERM: mark it, tell the admins, then close cleanly."""
+    """Railway sent SIGTERM: mark it, tell the admins, let the running cycle finish (up to SHUTDOWN_GRACE seconds),
+    save the database, then close cleanly."""
+    RELIABILITY["stopping"] = True
     try:
         set_setting(0, "stop_reason", "sigterm")
         set_setting(0, "stop_at", now_iso())
@@ -30798,7 +30810,12 @@ async def outage_going_down(client) -> None:
                     "within a couple of minutes, and I'll post here when I am."), 4)
             except Exception:
                 pass
+        await shutdown_wait()
     finally:
+        try:
+            db().commit()
+        except Exception:
+            pass
         await client.close()
 
 
@@ -31043,6 +31060,7 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
         "asks": {"used": ask_used(guild_id), "limit": ask_limit(guild_id)},
         "owner": {"lockdown": owner_lockdown(), "removed": len(owner_blocked_ids()), "set": bool(DEVELOPER_IDS)},
         "pool": engine_usage(),
+        "reliability": reliability_data(),
         "allow": staff_allowances(guild_id),
         "blacklist": {"entries": [{"name": r["name"], "kind": BL_KINDS.get(r.get("kind"), "Entry"), "reason": r.get("reason") or "",
                                    "alert": r.get("alert") or "staff", "by": r.get("by") or ""} for r in bl_rows(guild_id)],
@@ -31448,6 +31466,7 @@ def staff_uptime(rows: list, now: Optional[datetime] = None) -> dict:
     out["restarts7"] = len(week) - len(real)
     out["longest7"] = outage_dur(max((b - a).total_seconds() for a, b in real)) if real else None
     out["min"] = OUTAGE_ADMIN_MIN
+    out.update(uptime_budget(spans, since, now))
     return out
 
 
@@ -32611,6 +32630,10 @@ function needs(d){
  if(d.outage.open)n.push(['📣','<b>Open member alert:</b> '+esc(d.outage.open.problem)+' · '+ago(d.outage.open.since)
    +(d.outage.open.eta?' · ETA '+esc(d.outage.open.eta):'')+'. Close it with <code>/outage resolved</code> when it\'s fixed.']);
  if(!d.database.on_volume)n.push(['💾','<b>The database isn\'t on a volume.</b> The next redeploy wipes every pick. In Railway, attach a volume at <code>/data</code>.']);
+ ((d.reliability&&d.reliability.selftest&&d.reliability.selftest.checks)||[]).filter(c=>c.level==='bad').forEach(c=>n.push(['🩺','<b>Start-up check: '+esc(c.name)+'.</b> '+esc(c.detail)+' <code>/staff health</code> re-runs it.']));
+ if(d.reliability&&d.reliability.backup&&d.reliability.backup.ok===false)n.push(['💾','<b>The last backup failed its check:</b> '+esc(d.reliability.backup.why||'')]);
+ if(d.reliability&&d.reliability.db&&d.reliability.db.ok===false)n.push(['🗄️','<b>The weekly database check failed:</b> '+esc(d.reliability.db.result||'')]);
+ if(d.uptime_pct&&d.uptime_pct.over)n.push(['⏳','<b>Over the downtime budget:</b> '+d.uptime_pct.used_min+' of '+d.uptime_pct.budget_min+' minutes used in 30 days (goal '+d.uptime_pct.goal+'%).']);
  (d.jobs||[]).filter(j=>j.fails).forEach(j=>n.push(['⚙️','<b>'+esc(j.name)+'</b> failed '+j.fails+'× in a row<div class="err">'+esc(j.error)+'</div>']));
  (d.feeds||[]).filter(f=>f.state==='down').forEach(f=>n.push(['📡','<b>'+esc(f.name)+'</b> is down'+(f.last_ok?' (last worked '+esc(f.last_ok)+')':'')]));
  if(!d.outage.channels.admin||!d.outage.channels.members)n.push(['🛠️','<b>Pick the alert channels</b> with <code>/outage channels</code> so outages reach people.']);
@@ -32656,6 +32679,7 @@ function render(d){
   +'<div><div class="big num">'+pct(u.d30)+'</div><div class="muted">last 30 days</div></div></div>'
   +row('Outages in 7 days',u.count7==null?'–':u.count7)+row('Longest outage',esc(u.longest7||'none'))
   +row('Restarts in 7 days',u.restarts7==null?'–':u.restarts7)
+  +(u.goal!=null?row('Goal',u.goal+'% · '+dot(u.over?'bad':u.left_min<u.budget_min*0.25?'warn':'ok')+Math.max(0,Math.round(u.left_min))+' of '+Math.round(u.budget_min)+' min of downtime left (30 days)'):'')
   +(u.d7==null?'<div class="muted">The numbers show up after the bot has been tracking for 10 minutes.</div>'
    :u.since?'<div class="muted">Counting since '+esc(when(u.since))+'. Restarts under '+(u.min||3)+' min don\'t count as outages.</div>':'')));
  const o=d.outage, oc=o.channels;
@@ -32664,6 +32688,24 @@ function render(d){
  ob+=o.last?row('Last outage',esc(when(o.last.from))+' → '+esc(when(o.last.to))):row('Last outage','none recorded');
  if(o.last&&o.last.why)ob+='<div class="muted">'+esc(o.last.why)+'</div>';
  h.push(card('Outages',ob));
+ const R=d.reliability||{};
+ if(R.selftest||(R.commands||[]).length||(R.jobs||[]).length){
+  const st=R.selftest||{checks:[]};const lv={ok:'ok',warn:'warn',bad:'bad'};
+  let rb='<div class="muted">Start-up check '+(st.at?esc(ago(st.at)):'not run yet')+(st.ms!=null?' · '+st.ms+' ms':'')+'</div>'
+   +(st.checks||[]).map(c=>row(esc(c.name),dot(lv[c.level]||'')+esc(c.detail))).join('');
+  if((R.commands||[]).length)rb+='<div class="muted" style="margin-top:10px">Slowest commands (95% finish within)</div>'
+   +R.commands.slice(0,6).map(c=>row('/'+esc(c.name),dot(c.p95>=R.slow_ms.command?'warn':'ok')+(c.p95/1000).toFixed(1)+'s · '+c.n+' runs'+(c.errors?' · '+c.errors+' errors':''))).join('');
+  if((R.jobs||[]).length)rb+='<div class="muted" style="margin-top:10px">Slowest background jobs</div>'
+   +R.jobs.slice(0,6).map(j=>row(esc(j.name),dot(j.max>=R.slow_ms.job?'warn':'ok')+'longest '+(j.max/1000).toFixed(1)+'s · usually '+(j.avg/1000).toFixed(1)+'s')).join('');
+  const m=R.memory||{};
+  rb+='<div class="muted" style="margin-top:10px">System</div>'
+   +(m.now!=null?row('Memory now',m.now+' MB'+(m.peak?' · peak '+m.peak+' MB':'')):'')
+   +(R.cycle_ms?row('Scheduler cycle',(R.cycle_ms/1000).toFixed(1)+'s'):'')
+   +(R.db?row('Database check',dot(R.db.ok?'ok':'bad')+(R.db.ok?'passed':esc(R.db.result))+' · '+esc(ago(R.db.at))):'')
+   +(R.backup?row('Last backup',dot(R.backup.ok?'ok':'bad')+(R.backup.ok?'checked · '+R.backup.picks+' picks':esc(R.backup.why))+' · '+esc(ago(R.backup.at))):'')
+   +(R.sweep?row('Caches',R.sweep.kept+' entries · '+R.sweep.swept+' expired cleared '+esc(ago(R.sweep.at))):'');
+  h.push(card('Reliability',rb));
+ }
  const db=d.database;
  h.push(card('Database',row('Saved on a volume',dot(db.on_volume?'ok':'bad')+(db.on_volume?'yes (/data)':'NO: a redeploy wipes it'))
   +row('Size',db.size_mb==null?'?':db.size_mb+' MB')+row('Picks',db.picks+' ('+db.open+' open)')
@@ -32900,6 +32942,11 @@ class PicksBot(discord.Client):
         r14_db()
         r15_db()
         try:
+            install_log_filter()
+            RELIABILITY["selftest"] = selftest_run(self)
+        except Exception:
+            log.exception("Start-up self-test didn't run")
+        try:
             await start_dashboard()
         except Exception:
             log.exception("Dashboard didn't start")
@@ -32958,11 +33005,16 @@ class PicksBot(discord.Client):
                 log.info("Refreshed %d posted guide(s) for version %s", n, BOT_VERSION)
         except Exception:
             log.exception("Guide refresh failed")
-        while not self.is_closed():
+        while not self.is_closed() and not RELIABILITY["stopping"]:
+            t0 = time.monotonic()
+            _last_cycle["running"] = "1"
             try:
                 await self.run_schedules()
             except Exception:
                 log.exception("Scheduled post failed")
+            finally:
+                _last_cycle.pop("running", None)
+                _last_cycle["ms"] = str(int((time.monotonic() - t0) * 1000))
             await asyncio.sleep(120)
 
     async def run_autograde(self, now: Optional[datetime] = None, limit: int = 3):
@@ -33224,12 +33276,16 @@ class PicksBot(discord.Client):
                     lambda n: send_digests(self, n), lambda n: game_previews(self, n), lambda n: check_quests(self, n),
                     *[_named_job(name, fn, self) for name, fn in EXTRA_JOBS]):
             name = job_name(job)
+            if RELIABILITY["stopping"]:
+                break                                  # shutting down: don't start anything new
+            t0 = time.monotonic()
             try:
                 await asyncio.wait_for(job(now.astimezone(timezone.utc)), timeout=SEC_JOB_TIMEOUT)
                 alert = record_job(name, None)
             except Exception as exc:
                 log.exception("Live job %s failed", name)
                 alert = record_job(name, exc)
+            job_time(name, (time.monotonic() - t0) * 1000)
             if alert:
                 for g in self.guilds if hasattr(self, "guilds") else []:
                     try:
@@ -39871,6 +39927,491 @@ async def staff_report_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=staff_report_embed(interaction.guild_id), ephemeral=True)
 
 
+
+# ==== r44: speed & reliability ====================================================================================
+
+SLOW_CMD_MS = 3000            # a command that takes longer than this to finish counts as slow
+SLOW_JOB_MS = 30000           # a background job that takes longer than this counts as slow
+SHUTDOWN_GRACE = 15           # seconds a redeploy waits for the running cycle to finish
+def _uptime_goal() -> float:
+    try:
+        return max(90.0, min(99.99, float(env("UPTIME_GOAL", "99.5"))))
+    except ValueError:
+        return 99.5
+
+
+UPTIME_GOAL = _uptime_goal()
+LOCAL_BACKUP_KEEP = 3
+LOCAL_BACKUPS = env("LOCAL_BACKUPS", "auto").lower()       # auto = on when the database is on a /data volume
+
+
+def cmd_name(interaction) -> str:
+    c = getattr(interaction, "command", None)
+    return clip(str(getattr(c, "qualified_name", None) or getattr(c, "name", None) or "?"), 60)
+
+
+def cmd_ms(interaction) -> float:
+    """How long since the person ran the command (Discord stamps the interaction when they press enter)."""
+    t = getattr(interaction, "created_at", None)
+    if isinstance(t, datetime):
+        return max(0.0, (datetime.now(timezone.utc) - t).total_seconds() * 1000)
+    return 0.0
+
+
+def cmd_note(name: str, ms: float, ok: bool = True) -> None:
+    s_ = CMD_STATS.setdefault(name, {"n": 0, "total": 0.0, "max": 0.0, "slow": 0, "errors": 0, "last": None, "recent": []})
+    s_["n"] += 1
+    s_["total"] += ms
+    s_["max"] = max(s_["max"], ms)
+    s_["slow"] += ms >= SLOW_CMD_MS
+    s_["errors"] += not ok
+    s_["last"] = now_iso()
+    s_["recent"] = (s_["recent"] + [round(ms)])[-50:]
+    if len(CMD_STATS) > 300:
+        CMD_STATS.pop(next(iter(CMD_STATS)))
+
+
+async def _pb_on_app_command_completion(self, interaction, command):
+    try:
+        cmd_note(clip(str(getattr(command, "qualified_name", None) or getattr(command, "name", "?")), 60), cmd_ms(interaction))
+    except Exception:
+        pass
+
+
+PicksBot.on_app_command_completion = _pb_on_app_command_completion
+
+
+def _p95(xs: list) -> Optional[int]:
+    if not xs:
+        return None
+    ys = sorted(xs)
+    return int(ys[min(len(ys) - 1, int(round(0.95 * (len(ys) - 1))))])
+
+
+def cmd_report(limit: int = 8) -> list[dict]:
+    rows = [{"name": k, "n": v["n"], "avg": round(v["total"] / v["n"]) if v["n"] else 0, "p95": _p95(v["recent"]),
+             "max": round(v["max"]), "slow": v["slow"], "errors": v["errors"], "last": v["last"]} for k, v in CMD_STATS.items()]
+    rows.sort(key=lambda r: (-(r["p95"] or 0), -r["n"]))
+    return rows[:limit]
+
+
+def job_time(name: str, ms: float) -> None:
+    h = JOB_HEALTH.setdefault(name, {"fails": 0, "last_error": None, "alerted": False, "ok_at": None})
+    h["ms"] = round(ms)
+    h["max_ms"] = max(int(h.get("max_ms") or 0), round(ms))
+    h["runs"] = int(h.get("runs") or 0) + 1
+    h["total_ms"] = float(h.get("total_ms") or 0) + ms
+    h["slow"] = int(h.get("slow") or 0) + (ms >= SLOW_JOB_MS)
+
+
+def job_report(limit: int = 8) -> list[dict]:
+    rows = [{"name": clip(k, 40), "last": int(v.get("ms") or 0), "max": int(v.get("max_ms") or 0),
+             "avg": round(v["total_ms"] / v["runs"]) if v.get("runs") else 0, "runs": int(v.get("runs") or 0),
+             "slow": int(v.get("slow") or 0)} for k, v in JOB_HEALTH.items() if v.get("runs")]
+    rows.sort(key=lambda r: -r["max"])
+    return rows[:limit]
+
+
+async def shutdown_wait(grace: float = SHUTDOWN_GRACE) -> bool:
+    """Wait (up to `grace` seconds) for the scheduler cycle that's running to finish. True when it finished."""
+    end = time.monotonic() + grace
+    while _last_cycle.get("running") and time.monotonic() < end:
+        await asyncio.sleep(0.25)
+    return not _last_cycle.get("running")
+
+
+def memory_now_mb() -> Optional[int]:
+    """Memory in use right now (not the peak), from /proc on Linux."""
+    try:
+        with open("/proc/self/statm") as f:
+            pages = int(f.read().split()[1])
+        return round(pages * os.sysconf("SC_PAGE_SIZE") / 1048576)
+    except Exception:
+        return None
+
+
+# ---- the cache sweeper: drop expired entries so memory doesn't creep up between restarts ----
+
+def cache_sweep(now: Optional[float] = None) -> dict:
+    """Every in-memory cache keeps (expires at, value). Remove what has expired; cap anything that grew huge."""
+    now = time.monotonic() if now is None else now
+    swept = kept = capped = 0
+    for name, obj in list(globals().items()):
+        if not isinstance(obj, dict) or not re.search(r"cache$", name, re.I) or name.startswith("__"):
+            continue
+        for k, v in list(obj.items()):
+            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], float) and v[0] < now:
+                obj.pop(k, None)
+                swept += 1
+        if len(obj) > 5000:
+            obj.clear()
+            capped += 1
+        kept += len(obj)
+    out = {"at": now_iso(), "swept": swept, "kept": kept, "capped": capped, "memory_mb": memory_now_mb()}
+    RELIABILITY["sweep"] = out
+    return out
+
+
+async def cache_sweep_job(client, now: Optional[datetime] = None) -> None:
+    last = RELIABILITY.get("sweep_t") or 0.0
+    if time.monotonic() - last < 600:
+        return
+    RELIABILITY["sweep_t"] = time.monotonic()
+    cache_sweep()
+
+
+EXTRA_JOBS.append(("cache_sweep", cache_sweep_job))
+
+
+# ---- secrets out of the logs ----
+
+_LOG_SECRETS: dict = {"at": 0.0, "list": []}
+
+
+def _log_secret_list() -> list[str]:
+    if time.monotonic() - _LOG_SECRETS["at"] > 60:
+        xs = [TOKEN, ANTHROPIC_API_KEY, env("DASHBOARD_KEY", ""), globals().get("GEMINI_API_KEY") or "",
+              globals().get("GROQ_API_KEY") or "", globals().get("CEREBRAS_API_KEY") or "",
+              globals().get("OPENROUTER_API_KEY") or ""]
+        try:
+            xs.append(get_setting(0, "dashboard_key") or "")
+        except Exception:
+            pass
+        _LOG_SECRETS.update(at=time.monotonic(), list=[x for x in xs if x and len(x) >= 8])
+    return _LOG_SECRETS["list"]
+
+
+def log_redact(text: str) -> str:
+    out = str(text)
+    for x in _log_secret_list():
+        out = out.replace(x, "[hidden]")
+    out = re.sub(r"(?i)(x-goog-api-key|authorization|x-api-key)(['\"]?\s*[:=]\s*['\"]?)(bearer\s+)?[A-Za-z0-9_\-.]{12,}",
+                 r"\1\2[hidden]", out)
+    return re.sub(r"(?i)([?&](?:key|api_key|token)=)[A-Za-z0-9_\-.]{12,}", r"\1[hidden]", out)
+
+
+class SecretFilter(logging.Filter):
+    """Keys never reach Railway's logs, even inside an error's traceback."""
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+            red = log_redact(msg)
+            if red != msg:
+                record.msg, record.args = red, ()
+            if record.exc_info and not record.exc_text:
+                record.exc_text = log_redact(logging.Formatter().formatException(record.exc_info))
+            elif record.exc_text:
+                record.exc_text = log_redact(record.exc_text)
+        except Exception:
+            pass
+        return True
+
+
+def install_log_filter() -> int:
+    """Put the filter on every log handler (the bot's, discord.py's and aiohttp's all end up there)."""
+    f = next((x for x in getattr(install_log_filter, "_f", [])), None) or SecretFilter()
+    install_log_filter._f = [f]
+    n = 0
+    for h in list(logging.getLogger().handlers) + list(log.handlers):
+        if f not in h.filters:
+            h.addFilter(f)
+            n += 1
+    if f not in log.filters:
+        log.addFilter(f)
+    return n
+
+
+# ---- the database: indexes for the slow queries, a weekly check ----
+
+R44_INDEXES = ("CREATE INDEX IF NOT EXISTS idx_settings_key ON settings (key)",
+               "CREATE INDEX IF NOT EXISTS idx_picks_guild_created ON picks (guild_id, created_at)",
+               "CREATE INDEX IF NOT EXISTS idx_picks_guild_settled ON picks (guild_id, settled_at)",
+               "CREATE INDEX IF NOT EXISTS idx_legs_status ON legs (status)")
+
+
+def r44_indexes() -> int:
+    n = 0
+    for ddl in R44_INDEXES:
+        try:
+            db().execute(ddl)
+            n += 1
+        except sqlite3.Error:
+            log.warning("Index skipped: %s", ddl, exc_info=True)
+    db().commit()
+    return n
+
+
+def db_check() -> dict:
+    """PRAGMA quick_check plus the file's shape (pages, free pages). Saved for the staff page."""
+    t0 = time.monotonic()
+    try:
+        res = str(db().execute("PRAGMA quick_check").fetchone()[0])
+    except sqlite3.Error as exc:
+        res = f"error: {exc}"
+    try:
+        pages = int(db().execute("PRAGMA page_count").fetchone()[0])
+        free = int(db().execute("PRAGMA freelist_count").fetchone()[0])
+        size = int(db().execute("PRAGMA page_size").fetchone()[0])
+    except sqlite3.Error:
+        pages = free = size = 0
+    out = {"at": now_iso(), "ok": res == "ok", "result": clip(res, 160), "pages": pages, "free_pages": free,
+           "size_mb": round(pages * size / 1048576, 1), "ms": int((time.monotonic() - t0) * 1000)}
+    set_setting(0, "db_check", json.dumps(out))
+    return out
+
+
+# ---- backups: open every copy and check it ----
+
+def backup_verify(path: str) -> dict:
+    """Open a backup file on its own and check it: readable, passes quick_check, has the picks table."""
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            res = str(con.execute("PRAGMA quick_check").fetchone()[0])
+            n = int(con.execute("SELECT COUNT(*) FROM picks").fetchone()[0])
+        finally:
+            con.close()
+        return {"ok": res == "ok", "picks": n, "kb": round(os.path.getsize(path) / 1024), "why": "" if res == "ok" else clip(res, 120)}
+    except Exception as exc:
+        return {"ok": False, "picks": 0, "kb": 0, "why": clip(f"{type(exc).__name__}: {exc}", 120)}
+
+
+def backup_note(v: dict, guild_id: int, kind: str = "posted") -> None:
+    v = dict(v, at=now_iso(), kind=kind)
+    set_setting(guild_id, "backup_check", json.dumps(v))
+    if not v["ok"]:
+        log.warning("A %s backup failed its check: %s", kind, v["why"])
+
+
+def local_backup_on() -> bool:
+    return LOCAL_BACKUPS == "on" or (LOCAL_BACKUPS == "auto" and str(DB_PATH).startswith("/data"))
+
+
+def local_backup(now: Optional[datetime] = None, folder: Optional[str] = None) -> dict:
+    """A full copy of the database next to it on the volume, checked, keeping the last LOCAL_BACKUP_KEEP. A safety net
+    for a bad update or a damaged file (it doesn't help if the whole volume is lost: that's what /backups is for)."""
+    now = now or datetime.now(timezone.utc)
+    folder = folder or os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "backups")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"picks-{now.astimezone(TZ):%Y-%m-%d}.db")
+    dest = sqlite3.connect(path)
+    try:
+        db().backup(dest)
+    finally:
+        dest.close()
+    v = backup_verify(path)
+    if not v["ok"]:
+        try:
+            os.remove(path)                       # never keep a copy that doesn't check out
+        except OSError:
+            pass
+    old = sorted(f for f in os.listdir(folder) if re.fullmatch(r"picks-\d{4}-\d{2}-\d{2}\.db", f))
+    for f in old[:-LOCAL_BACKUP_KEEP]:
+        try:
+            os.remove(os.path.join(folder, f))
+        except OSError:
+            pass
+    v.update(file=os.path.basename(path), kept=min(len(old), LOCAL_BACKUP_KEEP))
+    backup_note(v, 0, "local")
+    return v
+
+
+async def local_backup_job(client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    if not local_backup_on() or local.hour < BACKUP_HOUR or get_setting(0, "local_backup_day") == local.date().isoformat():
+        return
+    set_setting(0, "local_backup_day", local.date().isoformat())
+    await asyncio.to_thread(local_backup, now)
+
+
+EXTRA_JOBS.append(("local_backup", local_backup_job))
+
+
+# ---- the uptime goal and its error budget ----
+
+def uptime_budget(spans: list, since: Optional[datetime], now: datetime) -> dict:
+    """The goal (UPTIME_GOAL %, 30 days) as minutes of downtime allowed, how many are used and how many are left."""
+    start = now - timedelta(days=30)
+    if since and since > start:
+        start = since
+    total_min = max(0.0, (now - start).total_seconds() / 60)
+    allowed = total_min * (1 - UPTIME_GOAL / 100)
+    used = sum(max(0.0, (min(b, now) - max(a, start)).total_seconds()) for a, b in spans) / 60
+    return {"goal": UPTIME_GOAL, "budget_min": round(allowed, 1), "used_min": round(used, 1),
+            "left_min": round(allowed - used, 1), "over": used > allowed and total_min >= 60}
+
+
+# ---- the start-up self-test ----
+
+def _count_commands(client) -> tuple[int, list[str]]:
+    tree = getattr(client, "tree", None)
+    cmds = list(tree.get_commands()) if tree is not None and hasattr(tree, "get_commands") else []
+    big = []
+    def kids(c):
+        k = getattr(c, "commands", None)
+        if k is None:
+            k = list((getattr(c, "cmds", None) or {}).values())
+        return list(k or [])
+    for c in cmds:
+        sub = kids(c)
+        if len(sub) > 25:
+            big.append(f"/{getattr(c, 'name', '?')} has {len(sub)} subcommands (Discord allows 25)")
+        for sc in sub:
+            if len(kids(sc)) > 25:
+                big.append(f"/{getattr(c, 'name', '?')} {getattr(sc, 'name', '?')} has too many subcommands")
+    return len(cmds), big
+
+
+def selftest_run(client=None) -> dict:
+    """Quick checks on every start: the database, the disk, the tools the bot needs, its own command list. Saved for the
+    staff page; a failure also goes to the admin channel (selftest_alert_job). Never shows a key's value."""
+    t0 = time.monotonic()
+    checks: list[dict] = []
+
+    def add(name, level, detail):
+        checks.append({"name": name, "level": level, "detail": clip(sec_redact(str(detail)), 200)})
+    try:
+        stamp = now_iso()
+        set_setting(0, "selftest_probe", stamp)
+        good = get_setting(0, "selftest_probe") == stamp
+        add("Database read and write", "ok" if good else "bad", "works" if good else "a saved value didn't read back")
+    except Exception as exc:
+        add("Database read and write", "bad", f"{type(exc).__name__}: {exc}")
+    try:
+        have = {r[0] for r in db().execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        miss = [t for t in ("picks", "legs", "settings") if t not in have]
+        add("Database tables", "bad" if miss else "ok", ("missing: " + ", ".join(miss)) if miss else f"{len(have)} tables")
+        n = r44_indexes()
+        add("Database indexes", "ok" if n == len(R44_INDEXES) else "warn", f"{n} of {len(R44_INDEXES)} speed-up indexes in place")
+    except Exception as exc:
+        add("Database tables", "bad", f"{type(exc).__name__}: {exc}")
+    try:
+        last = json.loads(get_setting(0, "db_check") or "null")
+        if last and not last.get("ok"):
+            add("Database check", "bad", f"last weekly check said: {last.get('result')}")
+        elif last:
+            add("Database check", "ok", f"passed {last.get('at', '')[:10]}")
+    except ValueError:
+        pass
+    on_vol = str(DB_PATH).startswith("/data")
+    add("Saved on a volume", "ok" if on_vol else "warn", "yes (/data)" if on_vol else
+        "no: a redeploy wipes the picks unless a Railway volume is attached at /data")
+    try:
+        free = shutil.disk_usage(os.path.dirname(os.path.abspath(DB_PATH))).free / 1048576
+        add("Disk space", "bad" if free < 50 else "warn" if free < 200 else "ok", f"{free:,.0f} MB free")
+    except Exception as exc:
+        add("Disk space", "warn", f"couldn't check: {type(exc).__name__}")
+    if "scan" in SLIP_READERS:
+        add("Free screenshot reader", "ok" if TESSERACT else "warn",
+            "Tesseract found" if TESSERACT else "Tesseract isn't installed: screenshots fall back to Gemini/Claude")
+    try:
+        art_font(20, True)
+        add("Fonts for cards", "ok", "loaded")
+    except Exception as exc:
+        add("Fonts for cards", "warn", f"{type(exc).__name__}: cards use a plain font")
+    add("Dashboard address", "ok" if PUBLIC_DOMAIN else "warn",
+        "set" if PUBLIC_DOMAIN else "no public domain on Railway: dashboard links are off")
+    add("Developer control", "ok" if DEVELOPER_IDS else "warn",
+        "DEVELOPER_IDS is set" if DEVELOPER_IDS else "add DEVELOPER_IDS in Railway so only you control /developer")
+    if client is not None:
+        try:
+            n, big = _count_commands(client)
+            add("Slash commands", "bad" if n > 100 or big else "warn" if n > 95 else "ok",
+                "; ".join(big) if big else f"{n} of the 100 Discord allows" + (": new commands must go inside a group"
+                                                                              if n > 95 else ""))
+        except Exception as exc:
+            add("Slash commands", "warn", f"couldn't count: {type(exc).__name__}")
+    mem = memory_now_mb()
+    if mem is not None:
+        add("Memory at start", "warn" if mem > 900 else "ok", f"{mem} MB")
+    out = {"at": now_iso(), "version": BOT_VERSION, "ms": int((time.monotonic() - t0) * 1000), "checks": checks,
+           "bad": sum(c["level"] == "bad" for c in checks), "warn": sum(c["level"] == "warn" for c in checks)}
+    try:
+        set_setting(0, "selftest", json.dumps(out))
+    except Exception:
+        pass
+    RELIABILITY["selftest"] = out
+    log.info("Start-up check: %d ok, %d to look at, %d failing (%d ms)", len(checks) - out["bad"] - out["warn"],
+             out["warn"], out["bad"], out["ms"])
+    return out
+
+
+async def selftest_alert_job(client, now: Optional[datetime] = None) -> None:
+    """Once per version: tell the admins if the start-up check found something broken."""
+    st = RELIABILITY.get("selftest")
+    if not st or not st.get("bad") or get_setting(0, "selftest_alerted") == st.get("version"):
+        return
+    set_setting(0, "selftest_alerted", st.get("version"))
+    bad = [c for c in st["checks"] if c["level"] == "bad"]
+    text = ("🩺 **Start-up check found a problem** (" + str(st.get("version", "")).split()[-1] + "):\n"
+            + "\n".join(f"• **{c['name']}**: {c['detail']}" for c in bad[:6])
+            + "\nEverything else is running. `/staff health` re-runs the check.")
+    for g in list(getattr(client, "guilds", []) or []):
+        try:
+            await outage_admin_alert(client, g.id, text)
+        except Exception:
+            log.info("Start-up check alert failed for %s", getattr(g, "id", "?"))
+
+
+EXTRA_JOBS.append(("selftest_alert", selftest_alert_job))
+
+
+def reliability_data() -> dict:
+    def js(key, gid=0):
+        try:
+            return json.loads(get_setting(gid, key) or "null")
+        except ValueError:
+            return None
+    st = RELIABILITY.get("selftest") or js("selftest")
+    try:
+        import resource
+        peak = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)
+    except Exception:
+        peak = None
+    return {"selftest": st, "commands": cmd_report(), "jobs": job_report(), "cycle_ms": int(_last_cycle.get("ms") or 0) or None,
+            "db": js("db_check"), "backup": js("backup_check"), "cleanup": js("cleanup_last"),
+            "sweep": RELIABILITY.get("sweep"), "memory": {"now": memory_now_mb(), "peak": peak},
+            "slow_ms": {"command": SLOW_CMD_MS, "job": SLOW_JOB_MS}}
+
+
+def health_embed(d: dict) -> discord.Embed:
+    st = d.get("selftest") or {}
+    icon = {"ok": "✅", "warn": "🟡", "bad": "🔴"}
+    e = discord.Embed(title="🩺 Bot health", color=0xE74C3C if st.get("bad") else BRAND,
+                      description="\n".join(f"{icon.get(c['level'], '•')} **{c['name']}**: {c['detail']}"
+                                            for c in st.get("checks") or []) or "The start-up check hasn't run yet.")
+    if d.get("commands"):
+        e.add_field(name="⏱️ Slowest commands (95% finish within)", inline=False, value=clip("\n".join(
+            f"`/{c['name']}` {c['p95'] / 1000:.1f}s · {c['n']} runs" + (f" · {c['slow']} slow" if c["slow"] else "")
+            + (f" · {c['errors']} errors" if c["errors"] else "") for c in d["commands"][:6]), 1024))
+    if d.get("jobs"):
+        e.add_field(name="⚙️ Slowest background jobs", inline=False, value=clip("\n".join(
+            f"`{j['name']}` longest {j['max'] / 1000:.1f}s · usually {j['avg'] / 1000:.1f}s" for j in d["jobs"][:6]), 1024))
+    m = d.get("memory") or {}
+    bits = []
+    if m.get("now") is not None:
+        bits.append(f"memory {m['now']} MB now" + (f", {m['peak']} MB peak" if m.get("peak") else ""))
+    if d.get("cycle_ms"):
+        bits.append(f"last scheduler cycle {d['cycle_ms'] / 1000:.1f}s")
+    if d.get("db"):
+        bits.append(f"database check {'passed' if d['db'].get('ok') else 'FAILED'} {str(d['db'].get('at', ''))[:10]}")
+    if d.get("backup"):
+        b = d["backup"]
+        bits.append(f"last backup {'checked ✅' if b.get('ok') else 'failed its check ⚠️'} ({b.get('picks', 0)} picks)")
+    if bits:
+        e.add_field(name="📦 System", value=clip(" · ".join(bits), 1024), inline=False)
+    e.set_footer(text=f"Checked {str(st.get('at', ''))[:16].replace('T', ' ')} UTC · {st.get('ms', 0)} ms")
+    return e
+
+
+@staff_group.command(name="health", description="Re-run the start-up check and see the slowest commands and jobs")
+@sec_staff_only
+async def staff_health_cmd(interaction: discord.Interaction):
+    selftest_run(interaction.client)
+    await interaction.response.send_message(embed=health_embed(reliability_data()), ephemeral=True)
+
+
 bot.tree.add_command(staff_group)
 
 
@@ -41701,6 +42242,10 @@ HELP_EXTRA.append(("🧾 Slip tools", (
 async def on_app_command_error(interaction: discord.Interaction,
                                error: app_commands.AppCommandError):
     log.exception("Command failed", exc_info=error)
+    try:
+        cmd_note(cmd_name(interaction), cmd_ms(interaction), ok=False)
+    except Exception:
+        pass
     original = getattr(error, "original", error)
     if isinstance(original, discord.Forbidden):
         msg = ("I don't have permission to do that here. Check that my role can **View Channel**, "
