@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r39"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r40"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -9118,7 +9118,7 @@ def dashboard_data(guild_id: int) -> dict:
     _people = dashboard_people(guild_id)
     return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": _people,
             "badges": {p["key"]: p["badge"] for p in _people if p.get("badge")}, "breakdown": dash33_breakdown(guild_id),
-            "filters": dash39_filters(guild_id),
+            "filters": dash39_filters(guild_id), "bg_default": dash_bg_default(guild_id),
             "settled24": dashboard_recent(guild_id), "badbeats": dash35_badbeats(guild_id), "sotd": sotd_latest(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
@@ -20331,6 +20331,17 @@ async def dash39_icon_route(request):
                         headers={"Cache-Control": "public, max-age=604800"})
 
 
+
+# ---- r40: page backgrounds (the picker is per device; staff can set the group's default) ---------------------
+
+DASH_BGS = [('classic', 'Classic court', 'The original purple court'), ('arena', 'Arena lights', 'Spotlights over the floor'), ('neon', 'Neon city', 'Skyline after dark'), ('galaxy', 'Galaxy', 'Stars and a nebula'), ('luxe', 'Gold luxe', 'Black and gold, high roller'), ('aurora', 'Aurora', 'Northern lights drifting'), ('gridiron', 'Gridiron', 'Game-night turf'), ('vegas', 'Vegas sunset', 'Synthwave sun and palms'), ('midnight', 'Midnight', 'Clean and quiet')]
+
+
+def dash_bg_default(guild_id: int) -> str:
+    v = get_setting(guild_id, "dash_bg") or "classic"
+    return v if any(k == v for k, _, _ in DASH_BGS) else "classic"
+
+
 def dash_app(web):
     """The aiohttp app: every route goes through dash_guard."""
     @web.middleware
@@ -20344,7 +20355,8 @@ def dash_app(web):
                     web.get("/api/staff/people.json", staff_people_api),
                     web.get(r"/staff/avatar/{uid:\d+}.png", staff_avatar),
                     web.get("/lines", lines_page), web.get("/api/lines.json", lines_api),
-                    *([web.post("/api/staff/toggle", staff_toggle)] if hasattr(web, "post") else []),
+                    *([web.post("/api/staff/toggle", staff_toggle), web.post("/api/staff/theme", staff_theme)] if hasattr(web, "post") else []),
+    web.get("/staff/backup.db", staff_backup),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get("/api/board.json", dash39_api_board), web.get("/api/search.json", dash39_api_search),
                     web.get("/manifest.webmanifest", dash39_manifest), web.get("/sw.js", dash39_sw),
@@ -20765,7 +20777,141 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
 .cmpsel{background:var(--card2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;margin-top:8px}
 .sbars .sb{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;margin:8px 0}.sbars .bb{grid-column:1/-1;height:6px;border-radius:4px;background:var(--sk);overflow:hidden}
 .sbars .bb i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--brand2))}
-</style></head><body>
+
+/* ===== r40 backgrounds ===== */
+.bgfx{position:fixed;inset:0;z-index:-3;pointer-events:none;overflow:hidden;background:var(--bg);transition:opacity .4s}
+.bgfx i{position:absolute;display:block}.bgfx:before,.bgfx:after{content:"";position:absolute;inset:0}
+html[data-bg]:not([data-bg=classic]) body:before,html[data-bg]:not([data-bg=classic]) body:after{opacity:0}
+html[data-bg]:not([data-bg=classic]) .grain{opacity:.25}
+:is(html[data-bg=classic] .bgfx.pg,[data-bgp=classic] .bgfx){background:radial-gradient(900px 600px at 12% 8%,#7B3FE422,transparent 60%),
+ radial-gradient(800px 600px at 92% 30%,#f0b42912,transparent 60%),var(--bg)}
+/* arena lights */
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx){background:radial-gradient(120% 70% at 50% 120%,#3b1784 0%,#140a2b 55%,#07040d 100%)}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx):before{background:conic-gradient(from 160deg at 8% -5%,transparent 0 8deg,#a27bff70 14deg,transparent 22deg 360deg),
+ conic-gradient(from 180deg at 92% -5%,transparent 0 6deg,#f0b42966 12deg,transparent 20deg 360deg),
+ conic-gradient(from 170deg at 50% -10%,transparent 0 10deg,#ffffff2e 15deg,transparent 21deg 360deg);filter:blur(6px);
+ animation:pbsway 14s ease-in-out infinite alternate;transform-origin:50% 0}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx):after{background:var(--court) 50% 108%/min(1700px,220%) auto no-repeat;opacity:.85;
+ -webkit-mask-image:linear-gradient(transparent 30%,#000 80%);mask-image:linear-gradient(transparent 30%,#000 80%)}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx) i:nth-child(1){inset:auto 0 0 0;height:40%;background:radial-gradient(60% 100% at 50% 100%,#7B3FE455,transparent 70%)}
+@keyframes pbsway{from{transform:rotate(-2.5deg)}to{transform:rotate(2.5deg)}}
+/* neon city */
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx){background:linear-gradient(180deg,#05030c 0%,#140a2b 45%,#3a0f4f 72%,#5c1257 82%,#0a0616 83%)}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx):before{background:radial-gradient(70% 40% at 50% 80%,#ff4fd855,transparent 70%),
+ radial-gradient(40% 30% at 20% 78%,#5ee7ff33,transparent 70%)}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx):after{top:auto;height:46%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 320' preserveAspectRatio='xMidYMax slice'%3E%3Crect x='0' y='102' width='63' height='218' fill='%230a0616'/%3E%3Crect x='20' y='114' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='6' y='132' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='132' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='20' y='150' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='20' y='168' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='34' y='168' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='48' y='168' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='20' y='186' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='34' y='222' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='20' y='240' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='6' y='258' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='48' y='258' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='67' y='136' width='84' height='184' fill='%230a0616'/%3E%3Crect x='73' y='148' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='87' y='148' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='129' y='148' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='166' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='129' y='166' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='73' y='184' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='87' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='115' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='129' y='184' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='115' y='202' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='73' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='220' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='115' y='238' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='73' y='256' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='101' y='256' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='87' y='274' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='115' y='274' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='129' y='274' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='87' y='292' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='160' y='75' width='36' height='245' fill='%230a0616'/%3E%3Crect x='180' y='105' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='123' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='166' y='141' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='195' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='166' y='231' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='249' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='166' y='267' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='166' y='303' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='203' y='197' width='34' height='123' fill='%230a0616'/%3E%3Crect x='223' y='227' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='245' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='209' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='263' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='223' y='281' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='299' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='240' y='210' width='58' height='110' fill='%230a0616'/%3E%3Crect x='246' y='222' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='274' y='240' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='246' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='260' y='276' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='274' y='276' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='288' y='276' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='303' y='147' width='70' height='173' fill='%230a0616'/%3E%3Crect x='309' y='159' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='323' y='159' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='351' y='159' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='309' y='177' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='351' y='213' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='309' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='323' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='351' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='323' y='249' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='337' y='267' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='309' y='303' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='337' y='303' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='351' y='303' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='383' y='100' width='53' height='220' fill='%230a0616'/%3E%3Crect x='403' y='112' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='417' y='112' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='130' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='417' y='130' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='389' y='148' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='403' y='148' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='184' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='417' y='184' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='389' y='202' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='417' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='389' y='256' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='403' y='292' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='417' y='292' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='442' y='114' width='41' height='206' fill='%230a0616'/%3E%3Crect x='462' y='126' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='180' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='462' y='180' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='448' y='234' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='448' y='252' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='448' y='270' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='288' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='306' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='493' y='122' width='84' height='198' fill='%230a0616'/%3E%3Crect x='499' y='152' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='527' y='152' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='527' y='170' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='555' y='170' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='555' y='188' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='555' y='206' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='499' y='224' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='527' y='224' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='527' y='242' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='513' y='260' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='513' y='278' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='541' y='296' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='587' y='169' width='74' height='151' fill='%230a0616'/%3E%3Crect x='607' y='181' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='593' y='199' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='607' y='199' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='635' y='199' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='649' y='199' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='649' y='235' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='635' y='253' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='621' y='271' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='649' y='271' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='593' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='621' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='635' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='649' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='649' y='307' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='671' y='235' width='41' height='85' fill='%230a0616'/%3E%3Crect x='677' y='301' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='714' y='210' width='55' height='110' fill='%230a0616'/%3E%3Crect x='734' y='240' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='734' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='720' y='276' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='734' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='748' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='777' y='119' width='39' height='201' fill='%230a0616'/%3E%3Crect x='797' y='275' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='822' y='235' width='66' height='85' fill='%230a0616'/%3E%3Crect x='842' y='247' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='842' y='265' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='870' y='265' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='842' y='283' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='856' y='301' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='892' y='167' width='41' height='153' fill='%230a0616'/%3E%3Crect x='898' y='233' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='912' y='287' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='935' y='89' width='85' height='231' fill='%230a0616'/%3E%3Crect x='969' y='101' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='955' y='119' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1011' y='137' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='941' y='173' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='173' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='191' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='955' y='227' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='997' y='227' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='969' y='245' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='983' y='245' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='997' y='245' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='941' y='263' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='997' y='263' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='983' y='281' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='997' y='299' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1026' y='149' width='82' height='171' fill='%230a0616'/%3E%3Crect x='1032' y='161' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1032' y='197' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1046' y='197' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1032' y='215' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1060' y='215' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1046' y='269' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1074' y='269' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1088' y='269' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1074' y='287' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1046' y='305' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1116' y='103' width='47' height='217' fill='%230a0616'/%3E%3Crect x='1136' y='115' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1150' y='115' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1136' y='133' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='169' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1150' y='169' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1136' y='187' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1136' y='223' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='241' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1150' y='241' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1136' y='259' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1122' y='277' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1169' y='247' width='82' height='73' fill='%230a0616'/%3E%3Crect x='1175' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1203' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1231' y='259' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1175' y='277' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1231' y='277' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1175' y='295' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1231' y='295' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1258' y='230' width='70' height='90' fill='%230a0616'/%3E%3Crect x='1292' y='242' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1306' y='242' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1306' y='260' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1278' y='278' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1292' y='278' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1335' y='89' width='73' height='231' fill='%230a0616'/%3E%3Crect x='1341' y='101' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='101' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='119' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1341' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1341' y='173' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1355' y='173' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1383' y='191' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='191' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1341' y='209' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1355' y='209' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1383' y='209' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1369' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1383' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1355' y='245' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1369' y='245' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1355' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1397' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1355' y='299' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1369' y='299' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1411' y='160' width='75' height='160' fill='%230a0616'/%3E%3Crect x='1445' y='190' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1445' y='208' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='226' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1459' y='226' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1473' y='226' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='244' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1445' y='244' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1459' y='262' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1473' y='262' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='298' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1459' y='298' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1473' y='298' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1490' y='243' width='41' height='77' fill='%230a0616'/%3E%3Crect x='1496' y='273' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1496' y='309' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1539' y='73' width='63' height='247' fill='%230a0616'/%3E%3Crect x='1545' y='85' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1573' y='85' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1587' y='103' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1573' y='121' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1545' y='139' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1559' y='139' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1559' y='175' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1573' y='211' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1545' y='229' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1559' y='229' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1573' y='229' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1545' y='247' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1545' y='283' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1545' y='301' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1559' y='301' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1587' y='301' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3C/svg%3E") bottom/cover no-repeat}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx) i:nth-child(1){left:-50%;right:-50%;bottom:-10%;height:30%;
+ background:repeating-linear-gradient(90deg,#ff4fd855 0 2px,transparent 2px 80px),repeating-linear-gradient(0deg,#ff4fd855 0 2px,transparent 2px 40px);
+ transform:perspective(320px) rotateX(64deg);transform-origin:50% 100%;opacity:.45}
+/* galaxy */
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx){background:radial-gradient(60% 50% at 25% 30%,#5b26c988,transparent 70%),
+ radial-gradient(50% 45% at 78% 62%,#ff4fd855,transparent 70%),radial-gradient(70% 60% at 60% 20%,#2c4fd855,transparent 70%),#04020a}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx):before{background-image:radial-gradient(#fff 1.3px,transparent 1.8px),radial-gradient(#d9c8ff 1.2px,transparent 1.9px);
+ background-size:110px 110px,190px 190px;background-position:0 0,60px 90px;opacity:.85;animation:pbtwinkle 6s ease-in-out infinite alternate}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx):after{background-image:radial-gradient(#fff 1.4px,transparent 2px);background-size:330px 330px;
+ background-position:120px 40px;opacity:.8;animation:pbtwinkle 9s ease-in-out infinite alternate-reverse}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx) i:nth-child(1){left:10%;top:15%;width:60%;height:35%;border-radius:50%;
+ background:radial-gradient(closest-side,#a27bff40,transparent);filter:blur(30px);transform:rotate(-18deg)}
+html[data-bg=galaxy] .bgfx.pg i:nth-child(2),[data-bgp=galaxy] .bgfx i:nth-child(2){inset:0;background-image:radial-gradient(#ffffffcc .7px,transparent 1px);
+ background-size:47px 53px;opacity:.55}
+@keyframes pbtwinkle{from{opacity:.35}to{opacity:.9}}
+/* gold luxe */
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx){background:radial-gradient(80% 60% at 50% 0%,#3a2a0a,transparent 70%),#050403}
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx):before{background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='none' stroke='%23f0b429' stroke-width='1.2' opacity='.6'%3E%3Cpath d='M0 96 A48 48 0 0 1 96 96'/%3E%3Cpath d='M12 96 A36 36 0 0 1 84 96'/%3E%3Cpath d='M24 96 A24 24 0 0 1 72 96'/%3E%3Cpath d='M36 96 A12 12 0 0 1 60 96'/%3E%3Cpath d='M48 48 L48 0'/%3E%3Cpath d='M0 48 L96 48' opacity='.4'/%3E%3C/g%3E%3C/svg%3E") 0 0/96px 96px;opacity:.9;
+ -webkit-mask-image:radial-gradient(ellipse at 50% 40%,#000 20%,transparent 80%);mask-image:radial-gradient(ellipse at 50% 40%,#000 20%,transparent 80%)}
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx):after{background:linear-gradient(90deg,transparent,#f0b42918 50%,transparent),
+ radial-gradient(60% 40% at 50% 100%,#f0b42922,transparent 70%)}
+/* aurora */
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx){background:linear-gradient(180deg,#020611 0%,#061529 60%,#0c0a1e 100%)}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i{left:-20%;width:140%;height:38%;filter:blur(36px);opacity:.95;border-radius:50%}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(1){top:6%;background:linear-gradient(90deg,transparent,#2ef2b066,#5ee7ff55,transparent);animation:pbdrift 18s ease-in-out infinite alternate}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(2){top:22%;background:linear-gradient(90deg,transparent,#a27bff66,#ff4fd844,transparent);animation:pbdrift 24s ease-in-out infinite alternate-reverse}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(3){top:40%;height:24%;background:linear-gradient(90deg,transparent,#2ef2b033,transparent);animation:pbdrift 30s ease-in-out infinite alternate}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx):after{background-image:radial-gradient(#ffffffaa 1px,transparent 1.4px);background-size:180px 180px;opacity:.4}
+@keyframes pbdrift{from{transform:translateX(-6%) skewY(-4deg)}to{transform:translateX(6%) skewY(3deg)}}
+/* gridiron */
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx){background:radial-gradient(80% 60% at 50% 0%,#ffffff1a,transparent 70%),
+ linear-gradient(180deg,#061a10 0%,#0b2a18 50%,#05140c 100%)}
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx):before{background:repeating-linear-gradient(90deg,#ffffff1f 0 3px,transparent 3px 10%),
+ repeating-linear-gradient(90deg,transparent 0 calc(5% - 1px),#ffffff10 calc(5% - 1px) 5%);
+ -webkit-mask-image:linear-gradient(transparent,#000 35%,#000 80%,transparent);mask-image:linear-gradient(transparent,#000 35%,#000 80%,transparent)}
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx):after{background:repeating-linear-gradient(0deg,transparent 0 46px,#ffffff08 46px 48px),
+ radial-gradient(40% 30% at 15% 0%,#ffffff26,transparent 70%),radial-gradient(40% 30% at 85% 0%,#ffffff26,transparent 70%)}
+/* vegas sunset */
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx){background:linear-gradient(180deg,#120428 0%,#3a0f57 38%,#a2246b 62%,#ff8a3d 74%,#1a0626 74.4%,#0a0314 100%)}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx) i:nth-child(1){left:50%;top:44%;width:min(46vmin,420px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
+ background:linear-gradient(180deg,#ffd166,#ff4fd8);box-shadow:0 0 80px #ff4fd877;
+ -webkit-mask-image:linear-gradient(#000 55%,transparent 55% 59%,#000 59% 70%,transparent 70% 74%,#000 74% 83%,transparent 83% 86%,#000 86%);
+ mask-image:linear-gradient(#000 55%,transparent 55% 59%,#000 59% 70%,transparent 70% 74%,#000 74% 83%,transparent 83% 86%,#000 86%)}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx) i:nth-child(2){left:-50%;right:-50%;bottom:-8%;height:28%;
+ background:repeating-linear-gradient(90deg,#ff8a3d66 0 2px,transparent 2px 70px),repeating-linear-gradient(0deg,#ff4fd866 0 2px,transparent 2px 36px);
+ transform:perspective(300px) rotateX(64deg);transform-origin:50% 100%;opacity:.55}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx):before{left:2%;right:auto;top:auto;width:min(26vw,260px);height:min(40vw,390px);bottom:22%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300'%3E%3Cg fill='%2312051f'%3E%3Cpath d='M96 300 C100 220 104 160 98 110 L106 110 C112 160 110 220 108 300 Z'/%3E%3Cpath d='M102 112 C70 90 40 96 10 120 C40 92 70 80 102 104 Z'/%3E%3Cpath d='M102 112 C134 88 166 94 194 122 C164 92 134 82 102 104 Z'/%3E%3Cpath d='M102 108 C80 70 60 56 30 50 C62 52 86 66 104 100 Z'/%3E%3Cpath d='M102 108 C124 70 146 56 176 52 C144 54 120 68 100 100 Z'/%3E%3Cpath d='M102 106 C100 70 92 40 76 20 C98 40 106 70 106 104 Z'/%3E%3C/g%3E%3C/svg%3E") bottom/contain no-repeat}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx):after{left:auto;right:3%;top:auto;width:min(20vw,200px);height:min(32vw,300px);bottom:22%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300'%3E%3Cg fill='%2312051f'%3E%3Cpath d='M96 300 C100 220 104 160 98 110 L106 110 C112 160 110 220 108 300 Z'/%3E%3Cpath d='M102 112 C70 90 40 96 10 120 C40 92 70 80 102 104 Z'/%3E%3Cpath d='M102 112 C134 88 166 94 194 122 C164 92 134 82 102 104 Z'/%3E%3Cpath d='M102 108 C80 70 60 56 30 50 C62 52 86 66 104 100 Z'/%3E%3Cpath d='M102 108 C124 70 146 56 176 52 C144 54 120 68 100 100 Z'/%3E%3Cpath d='M102 106 C100 70 92 40 76 20 C98 40 106 70 106 104 Z'/%3E%3C/g%3E%3C/svg%3E") bottom/contain no-repeat;transform:scaleX(-1)}
+/* midnight */
+:is(html[data-bg=midnight] .bgfx.pg,[data-bgp=midnight] .bgfx){background:radial-gradient(70% 50% at 50% -10%,#7B3FE426,transparent 70%),#07060b}
+:is(html[data-bg=midnight] .bgfx.pg,[data-bgp=midnight] .bgfx):before{background-image:radial-gradient(#ffffff06 1px,transparent 1.2px);background-size:18px 18px}
+/* light mode: the scene stays, softer */
+@media (prefers-color-scheme:light){html:not([data-theme=dark]):not([data-bg=classic]) .bgfx{opacity:.3}}
+html[data-theme=light]:not([data-bg=classic]) .bgfx{opacity:.3}
+@media (prefers-reduced-motion:reduce){.bgfx,.bgfx:before,.bgfx:after,.bgfx i{animation:none!important}}
+/* the picker */
+.bgpick{position:fixed;z-index:60;inset:0;display:none;align-items:flex-start;justify-content:center;padding:70px 16px 16px;background:#07040daa;backdrop-filter:blur(6px)}
+.bgpick.on{display:flex}.bgpick .bp{width:min(760px,100%);max-height:calc(100vh - 90px);overflow:auto;border-radius:22px;padding:18px;
+ background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid #ffffff1c;box-shadow:0 30px 70px -20px #000d}
+.bgpick h3{margin:0;font-size:18px}.bgpick .sub{color:var(--muted);font-size:13px;margin:4px 0 14px}
+.bgpick .grid9{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+.bgt{position:relative;border:2px solid #ffffff18;border-radius:16px;overflow:hidden;cursor:pointer;background:none;padding:0;text-align:left;color:#fff;font:inherit;
+ aspect-ratio:16/10;isolation:isolate;transition:transform .15s,border-color .15s}
+.bgt:hover{transform:translateY(-2px);border-color:#a27bff88}.bgt.on{border-color:var(--gold);box-shadow:0 0 0 3px #f0b42944}
+.bgt .bgfx{position:absolute;z-index:-1;inset:auto;left:0;top:0;width:1280px;height:800px;transform:scale(var(--sc,.13));transform-origin:0 0}.bgt .lb{position:absolute;left:0;right:0;bottom:0;padding:22px 10px 8px;background:linear-gradient(transparent,#000c)}
+.bgt .lb b{display:block;font-size:13.5px}.bgt .lb i{font-style:normal;font-size:11.5px;opacity:.8}
+.bgt .ck{position:absolute;top:8px;right:8px;background:var(--gold);color:#1a0f33;border-radius:99px;font-size:11px;font-weight:800;padding:2px 8px;display:none}
+.bgt.on .ck{display:block}.bgpick .row2{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.bgpick .row2 button{font:inherit;font-size:13px;font-weight:650;padding:8px 14px;border-radius:99px;border:1px solid #ffffff22;background:#ffffff10;color:var(--text);cursor:pointer}
+.bgpick .row2 button:hover{border-color:var(--brand2)}
+
+/* ===== r40 new look ===== */
+:root{--glass:rgba(18,12,30,.5);--glassb:#ffffff1c;--glass2:rgba(31,24,45,.55)}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){--glass:rgba(255,255,255,.74);--glassb:#2a1a5a1a;--glass2:rgba(246,242,253,.8)}}
+:root[data-theme=light]{--glass:rgba(255,255,255,.74);--glassb:#2a1a5a1a;--glass2:rgba(246,242,253,.8)}
+body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,Roboto,sans-serif;letter-spacing:.005em}
+.card{background:var(--glass)!important;border:1px solid var(--glassb)!important;-webkit-backdrop-filter:blur(16px) saturate(140%);
+ backdrop-filter:blur(16px) saturate(140%);border-radius:20px;box-shadow:0 1px 0 #ffffff12 inset,0 24px 48px -30px #000000cc;
+ transition:border-color .18s,box-shadow .18s,transform .18s}
+.card:hover{border-color:#a27bff40!important;box-shadow:0 1px 0 #ffffff14 inset,0 0 0 1px #a27bff1c,0 28px 60px -30px #7B3FE477}
+.card h2{display:flex;align-items:center;flex-wrap:wrap}
+.card h2:before{content:"";flex:none;width:4px;height:14px;border-radius:3px;margin-right:9px;background:linear-gradient(180deg,#a27bff,#f0b429)}
+header{background:linear-gradient(115deg,#1b0d3ad9 0%,#3a1a78bf 38%,#24104dbf 62%,#140a2bd9 100%)!important;
+ -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 18px 40px -26px #000}
+header:after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,#a27bff99,#f0b429aa,#a27bff99,transparent)}
+.brand h1{background:linear-gradient(90deg,#ffffff,#e4d6ff 55%,#ffd98a);-webkit-background-clip:text;background-clip:text;color:transparent!important;
+ text-shadow:none;filter:drop-shadow(0 2px 14px #7B3FE499);font-size:clamp(22px,3.2vw,30px)}
+.brand h1 b{-webkit-text-fill-color:#f0b429;color:#f0b429}
+.logo{filter:drop-shadow(0 8px 20px #7B3FE499) drop-shadow(0 0 1px #fff4)}
+.iconbtn{background:#ffffff12!important;border:1px solid #ffffff22!important;color:#f4f1fb!important;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border-radius:14px}
+.iconbtn:hover{border-color:#f0b42999!important;box-shadow:0 0 0 3px #f0b42922}
+@media (min-width:641px){nav.tabs{gap:6px;padding:4px 20px 14px;flex-wrap:wrap}
+ nav.tabs button{border-radius:12px;padding:9px 15px;background:#ffffff0a;border:1px solid #ffffff12;color:#e2d9f5;transition:background .15s,transform .15s}
+ nav.tabs button:hover{background:#ffffff16;transform:translateY(-1px)}
+ nav.tabs button.on{background:linear-gradient(180deg,#8b55f0,#6a32d6);border-color:#b99bff66;color:#fff;box-shadow:0 10px 24px -12px #7B3FE4}
+ nav.tabs button.on:after{display:none}}
+@media (max-width:640px){nav.tabs{background:color-mix(in srgb,var(--bg) 70%,transparent)!important;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+ border-top:1px solid #ffffff1c!important}nav.tabs button.on{background:linear-gradient(180deg,#8b55f055,#6a32d655)!important;color:#fff!important}}
+.kpi .v{font-size:28px;font-weight:850}
+.kpi{position:relative;overflow:hidden}.kpi:after{content:"";position:absolute;right:-30px;top:-30px;width:90px;height:90px;border-radius:50%;
+ background:radial-gradient(closest-side,#a27bff2a,transparent);pointer-events:none}
+.chip,.pill{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.row{transition:background .12s}button.row:hover,.row.slip:hover{background:#ffffff08}
+.tile{background:var(--glass2)!important;border:1px solid var(--glassb)!important;transition:transform .15s,border-color .15s}
+.tile:hover{transform:translateY(-1px);border-color:#a27bff77!important}
+footer{opacity:.85}
+#banner{background:var(--glass)!important;border:1px solid var(--glassb)!important;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+.sheet .panel,#sheet .panel{background:color-mix(in srgb,var(--card) 92%,transparent)!important;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+::selection{background:#7B3FE466}
+*{scrollbar-color:#7B3FE466 transparent}
+</style><script>try{var pbb=localStorage.getItem('pb_bg');if(pbb)document.documentElement.dataset.bg=pbb}catch(e){}</script></head><body>
+<div class="bgfx pg" aria-hidden="true"><i></i><i></i><i></i></div>
 <div class="grain" aria-hidden="true"></div>
 <header>
  <div class="hart" aria-hidden="true"></div><div class="hsweep" aria-hidden="true"></div><div class="hstripe" aria-hidden="true"></div>
@@ -20777,6 +20923,7 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></button>
   <button class="iconbtn" id="search" type="button" aria-label="Search people, slips and players" title="Search (/)">
    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+  <button class="iconbtn" data-bgbtn="1" id="bgbtn" type="button" aria-label="Pick a background" title="Background"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.5-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5c0-4.1-4-7.6-9-7.6z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10.5" cy="7" r="1.2"/><circle cx="15.5" cy="7.5" r="1.2"/></svg></button>
   <button class="iconbtn" id="theme" type="button" aria-label="Switch light or dark mode" title="Light / dark">
    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
  </div>
@@ -21048,7 +21195,7 @@ function renderMeta(d){const m=$('#meta');put(m,d.season?h('span',{class:'pill s
 
 async function load(){const seq=++S.seq;const d=await api('/api/data'+qs());if(!d||seq!==S.seq)return;
  for(const k of ['open','recent','alltime','leaderboard','people','coins','groupparlay','records','needs','ticker','games'])d[k]=d[k]||[];
- S.data=d;S.loadedAt=Date.now();renderMeta(d);renderTicker(d);renderMini();render()}
+ S.data=d;S.loadedAt=Date.now();if(window.pbBgDefault)pbBgDefault(d.bg_default);renderMeta(d);renderTicker(d);renderMini();render()}
 function skeletonAll(){for(const id of Object.keys(TABS)){const el=$('#tab-'+id);
  put(el,...[0,1,2,3].map(()=>h('div',{class:'card kpi'},h('div',{class:'skl',style:'height:12px;width:60%'}),h('div',{class:'skl',style:'height:26px;width:80%;margin-top:8px'}))),
   card(sk(),'',null,h('div',{class:'skl',style:'height:220px'})),card(sk(),'s7',null,skel(5)),card(sk(),'s5',null,skel(5)))}}
@@ -21298,6 +21445,28 @@ try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}
 fetch('/api/staff/me',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{if(!d||!d.staff)return;
  const st=$('#astate');st.textContent='✓ signed in';st.classList.add('on');$('#anote').textContent='You\'re signed in as staff on this browser.'}).catch(()=>{});
 skeletonAll();show(S.tab);load();route();
+</script><script>
+(function(){const BG=[['classic','Classic court','The original purple court'],['arena','Arena lights','Spotlights over the floor'],['neon','Neon city','Skyline after dark'],['galaxy','Galaxy','Stars and a nebula'],['luxe','Gold luxe','Black and gold, high roller'],['aurora','Aurora','Northern lights drifting'],['gridiron','Gridiron','Game-night turf'],['vegas','Vegas sunset','Synthwave sun and palms'],['midnight','Midnight','Clean and quiet']];const KEY='pb_bg';
+ const get=()=>{try{return localStorage.getItem(KEY)}catch(e){return null}};
+ const set=v=>{try{v?localStorage.setItem(KEY,v):localStorage.removeItem(KEY)}catch(e){}};
+ let DEF='classic';const apply=v=>{const b=BG.some(x=>x[0]===v)?v:'classic';document.documentElement.dataset.bg=b;return b};
+ apply(get()||DEF);
+ window.pbBgDefault=v=>{if(v&&BG.some(x=>x[0]===v))DEF=v;if(!get())apply(DEF)};
+ const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e};
+ const box=el('div','bgpick');box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');box.setAttribute('aria-label','Pick a background');
+ const bp=el('div','bp');box.append(bp);document.body.append(box);
+ function draw(){bp.replaceChildren();const cur=document.documentElement.dataset.bg;
+  bp.append(el('h3',null,'🎨 Background'),el('div','sub','Pick the scene behind the page. It\'s saved on this device only.'+(DEF!=='classic'?' The group default is '+(BG.find(x=>x[0]===DEF)||[0,DEF])[1]+'.':'')));
+  const g=el('div','grid9');
+  for(const [k,name,note] of BG){const b=el('button','bgt'+(k===cur?' on':''));b.type='button';b.setAttribute('data-bgp',k);b.setAttribute('aria-pressed',k===cur?'true':'false');
+   const fx=el('div','bgfx');fx.append(el('i'),el('i'),el('i'));const lb=el('span','lb');lb.append(el('b',null,name),el('i',null,note));
+   b.append(fx,lb,el('span','ck','ON'));requestAnimationFrame(()=>b.style.setProperty('--sc',String((b.clientWidth||170)/1280)));b.addEventListener('click',()=>{set(k);apply(k);draw()});g.append(b)}
+  const r=el('div','row2');const d=el('button',null,'Use the group default');d.type='button';d.addEventListener('click',()=>{set(null);apply(DEF);draw()});
+  const c=el('button',null,'Done');c.type='button';c.addEventListener('click',close);r.append(d,c);bp.append(g,r)}
+ function open(){draw();box.classList.add('on')}function close(){box.classList.remove('on')}
+ box.addEventListener('click',e=>{if(e.target===box)close()});document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+ document.querySelectorAll('[data-bgbtn]').forEach(b=>b.addEventListener('click',open));
+})();
 </script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG).replace(
     "{{COURT_D}}", dash_court("#ffffff", 0.05)).replace("{{COURT_L}}", dash_court("#7B3FE4", 0.09))
 
@@ -30611,9 +30780,11 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
                    for k, v in member_badges(guild_id).items()],
         "toggles": staff_toggles(guild_id),
         "can_switch": staff_can_switch(uid, guild_id) if uid else False,
+        "can_backup": staff_can_backup(uid, guild_id) if uid else False,
         "usage": staff_usage(guild_id),
         "announcements": staff_announcements(guild_id),
         "tickets": staff_tickets(guild_id),
+        "bg_default": dash_bg_default(guild_id), "bg_list": [{"k": k, "n": n} for k, n, _ in DASH_BGS],
     }
 
 
@@ -30873,6 +31044,58 @@ def staff_can_switch(uid: int, guild_id: int) -> bool:
         m = None
     perms = getattr(m, "guild_permissions", None)
     return bool(perms and (getattr(perms, "manage_guild", False) or getattr(perms, "administrator", False)))
+
+
+
+def staff_can_backup(uid: int, guild_id: int) -> bool:
+    return developer_id_ok(uid) or (owner_id_ok(uid, guild_id) and int(uid) not in owner_blocked_ids())
+
+
+async def staff_backup(request):
+    """GET /staff/backup.db: this server's picks database, trimmed like the nightly backup (developer and owners)."""
+    from aiohttp import web
+    st = staff_from_request(request)
+    if st is None or not staff_can_backup(st["uid"], st["guild"]):
+        return dash_error(web, request, 403)
+    folder = tempfile.mkdtemp()
+    path = os.path.join(folder, "backup.db")
+    try:
+        dest = sqlite3.connect(path)
+        db().backup(dest)
+        dest.close()
+        sec_scrub_backup(path, st["guild"])
+        body = open(path, "rb").read()
+    finally:
+        try:
+            os.remove(path)
+            os.rmdir(folder)
+        except OSError:
+            pass
+    stamp = datetime.now(TZ).strftime("%Y-%m-%d")
+    await audit(bot, st["guild"], f"{staff_viewer(st['uid']) or 'A staff member'} downloaded a backup from the staff page.")
+    return web.Response(body=body, content_type="application/octet-stream",
+                        headers={"Content-Disposition": f'attachment; filename="picks_backup_{stamp}.db"',
+                                 "Cache-Control": "private, no-store"})
+
+
+async def staff_theme(request):
+    """POST /api/staff/theme {bg}: the group's default background (developer, owners, Manage Server)."""
+    from aiohttp import web
+    st = staff_from_request(request)
+    if st is None or request.headers.get("X-PB-Staff") != "1":
+        return dash_error(web, request, 403)
+    if not staff_can_switch(st["uid"], st["guild"]):
+        return web.json_response({"ok": False, "why": "Only the developer, owners and admins can set the group's background."}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    bg = str((body or {}).get("bg") or "")
+    if not any(k == bg for k, _, _ in DASH_BGS):
+        return dash_error(web, request, 400)
+    set_setting(st["guild"], "dash_bg", bg)
+    await audit(bot, st["guild"], f"{staff_viewer(st['uid']) or 'A staff member'} set the dashboard background to **{bg}**.")
+    return web.json_response({"ok": True, "bg": bg})
 
 
 async def staff_toggle(request):
@@ -31427,7 +31650,141 @@ svg.sp{width:96px;height:30px;display:block}
 .hr:first-of-type{border-top:0}.hr span:last-child{color:var(--muted)}
 @media (max-width:640px){.r{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.r .spc{display:none}}
 footer{max-width:1180px;margin:0 auto;padding:4px 16px 28px;color:var(--faint);font-size:12px}
-</style></head><body>
+
+/* ===== r40 backgrounds ===== */
+.bgfx{position:fixed;inset:0;z-index:-3;pointer-events:none;overflow:hidden;background:var(--bg);transition:opacity .4s}
+.bgfx i{position:absolute;display:block}.bgfx:before,.bgfx:after{content:"";position:absolute;inset:0}
+html[data-bg]:not([data-bg=classic]) body:before,html[data-bg]:not([data-bg=classic]) body:after{opacity:0}
+html[data-bg]:not([data-bg=classic]) .grain{opacity:.25}
+:is(html[data-bg=classic] .bgfx.pg,[data-bgp=classic] .bgfx){background:radial-gradient(900px 600px at 12% 8%,#7B3FE422,transparent 60%),
+ radial-gradient(800px 600px at 92% 30%,#f0b42912,transparent 60%),var(--bg)}
+/* arena lights */
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx){background:radial-gradient(120% 70% at 50% 120%,#3b1784 0%,#140a2b 55%,#07040d 100%)}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx):before{background:conic-gradient(from 160deg at 8% -5%,transparent 0 8deg,#a27bff70 14deg,transparent 22deg 360deg),
+ conic-gradient(from 180deg at 92% -5%,transparent 0 6deg,#f0b42966 12deg,transparent 20deg 360deg),
+ conic-gradient(from 170deg at 50% -10%,transparent 0 10deg,#ffffff2e 15deg,transparent 21deg 360deg);filter:blur(6px);
+ animation:pbsway 14s ease-in-out infinite alternate;transform-origin:50% 0}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx):after{background:var(--court) 50% 108%/min(1700px,220%) auto no-repeat;opacity:.85;
+ -webkit-mask-image:linear-gradient(transparent 30%,#000 80%);mask-image:linear-gradient(transparent 30%,#000 80%)}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx) i:nth-child(1){inset:auto 0 0 0;height:40%;background:radial-gradient(60% 100% at 50% 100%,#7B3FE455,transparent 70%)}
+@keyframes pbsway{from{transform:rotate(-2.5deg)}to{transform:rotate(2.5deg)}}
+/* neon city */
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx){background:linear-gradient(180deg,#05030c 0%,#140a2b 45%,#3a0f4f 72%,#5c1257 82%,#0a0616 83%)}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx):before{background:radial-gradient(70% 40% at 50% 80%,#ff4fd855,transparent 70%),
+ radial-gradient(40% 30% at 20% 78%,#5ee7ff33,transparent 70%)}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx):after{top:auto;height:46%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 320' preserveAspectRatio='xMidYMax slice'%3E%3Crect x='0' y='102' width='63' height='218' fill='%230a0616'/%3E%3Crect x='20' y='114' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='6' y='132' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='132' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='20' y='150' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='20' y='168' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='34' y='168' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='48' y='168' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='20' y='186' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='34' y='222' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='20' y='240' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='6' y='258' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='48' y='258' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='67' y='136' width='84' height='184' fill='%230a0616'/%3E%3Crect x='73' y='148' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='87' y='148' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='129' y='148' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='166' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='129' y='166' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='73' y='184' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='87' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='115' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='129' y='184' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='115' y='202' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='73' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='220' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='115' y='238' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='73' y='256' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='101' y='256' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='87' y='274' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='115' y='274' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='129' y='274' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='87' y='292' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='160' y='75' width='36' height='245' fill='%230a0616'/%3E%3Crect x='180' y='105' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='123' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='166' y='141' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='195' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='166' y='231' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='249' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='166' y='267' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='166' y='303' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='203' y='197' width='34' height='123' fill='%230a0616'/%3E%3Crect x='223' y='227' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='245' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='209' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='263' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='223' y='281' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='299' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='240' y='210' width='58' height='110' fill='%230a0616'/%3E%3Crect x='246' y='222' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='274' y='240' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='246' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='260' y='276' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='274' y='276' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='288' y='276' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='303' y='147' width='70' height='173' fill='%230a0616'/%3E%3Crect x='309' y='159' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='323' y='159' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='351' y='159' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='309' y='177' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='351' y='213' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='309' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='323' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='351' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='323' y='249' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='337' y='267' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='309' y='303' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='337' y='303' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='351' y='303' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='383' y='100' width='53' height='220' fill='%230a0616'/%3E%3Crect x='403' y='112' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='417' y='112' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='130' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='417' y='130' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='389' y='148' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='403' y='148' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='184' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='417' y='184' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='389' y='202' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='417' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='389' y='256' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='403' y='292' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='417' y='292' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='442' y='114' width='41' height='206' fill='%230a0616'/%3E%3Crect x='462' y='126' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='180' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='462' y='180' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='448' y='234' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='448' y='252' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='448' y='270' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='288' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='306' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='493' y='122' width='84' height='198' fill='%230a0616'/%3E%3Crect x='499' y='152' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='527' y='152' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='527' y='170' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='555' y='170' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='555' y='188' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='555' y='206' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='499' y='224' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='527' y='224' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='527' y='242' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='513' y='260' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='513' y='278' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='541' y='296' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='587' y='169' width='74' height='151' fill='%230a0616'/%3E%3Crect x='607' y='181' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='593' y='199' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='607' y='199' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='635' y='199' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='649' y='199' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='649' y='235' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='635' y='253' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='621' y='271' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='649' y='271' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='593' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='621' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='635' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='649' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='649' y='307' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='671' y='235' width='41' height='85' fill='%230a0616'/%3E%3Crect x='677' y='301' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='714' y='210' width='55' height='110' fill='%230a0616'/%3E%3Crect x='734' y='240' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='734' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='720' y='276' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='734' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='748' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='777' y='119' width='39' height='201' fill='%230a0616'/%3E%3Crect x='797' y='275' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='822' y='235' width='66' height='85' fill='%230a0616'/%3E%3Crect x='842' y='247' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='842' y='265' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='870' y='265' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='842' y='283' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='856' y='301' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='892' y='167' width='41' height='153' fill='%230a0616'/%3E%3Crect x='898' y='233' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='912' y='287' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='935' y='89' width='85' height='231' fill='%230a0616'/%3E%3Crect x='969' y='101' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='955' y='119' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1011' y='137' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='941' y='173' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='173' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='191' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='955' y='227' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='997' y='227' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='969' y='245' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='983' y='245' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='997' y='245' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='941' y='263' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='997' y='263' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='983' y='281' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='997' y='299' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1026' y='149' width='82' height='171' fill='%230a0616'/%3E%3Crect x='1032' y='161' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1032' y='197' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1046' y='197' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1032' y='215' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1060' y='215' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1046' y='269' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1074' y='269' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1088' y='269' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1074' y='287' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1046' y='305' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1116' y='103' width='47' height='217' fill='%230a0616'/%3E%3Crect x='1136' y='115' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1150' y='115' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1136' y='133' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='169' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1150' y='169' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1136' y='187' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1136' y='223' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='241' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1150' y='241' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1136' y='259' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1122' y='277' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1169' y='247' width='82' height='73' fill='%230a0616'/%3E%3Crect x='1175' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1203' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1231' y='259' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1175' y='277' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1231' y='277' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1175' y='295' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1231' y='295' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1258' y='230' width='70' height='90' fill='%230a0616'/%3E%3Crect x='1292' y='242' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1306' y='242' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1306' y='260' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1278' y='278' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1292' y='278' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1335' y='89' width='73' height='231' fill='%230a0616'/%3E%3Crect x='1341' y='101' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='101' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='119' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1341' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1341' y='173' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1355' y='173' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1383' y='191' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='191' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1341' y='209' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1355' y='209' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1383' y='209' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1369' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1383' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1355' y='245' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1369' y='245' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1355' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1397' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1355' y='299' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1369' y='299' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1411' y='160' width='75' height='160' fill='%230a0616'/%3E%3Crect x='1445' y='190' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1445' y='208' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='226' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1459' y='226' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1473' y='226' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='244' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1445' y='244' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1459' y='262' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1473' y='262' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='298' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1459' y='298' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1473' y='298' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1490' y='243' width='41' height='77' fill='%230a0616'/%3E%3Crect x='1496' y='273' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1496' y='309' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1539' y='73' width='63' height='247' fill='%230a0616'/%3E%3Crect x='1545' y='85' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1573' y='85' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1587' y='103' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1573' y='121' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1545' y='139' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1559' y='139' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1559' y='175' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1573' y='211' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1545' y='229' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1559' y='229' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1573' y='229' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1545' y='247' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1545' y='283' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1545' y='301' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1559' y='301' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1587' y='301' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3C/svg%3E") bottom/cover no-repeat}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx) i:nth-child(1){left:-50%;right:-50%;bottom:-10%;height:30%;
+ background:repeating-linear-gradient(90deg,#ff4fd855 0 2px,transparent 2px 80px),repeating-linear-gradient(0deg,#ff4fd855 0 2px,transparent 2px 40px);
+ transform:perspective(320px) rotateX(64deg);transform-origin:50% 100%;opacity:.45}
+/* galaxy */
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx){background:radial-gradient(60% 50% at 25% 30%,#5b26c988,transparent 70%),
+ radial-gradient(50% 45% at 78% 62%,#ff4fd855,transparent 70%),radial-gradient(70% 60% at 60% 20%,#2c4fd855,transparent 70%),#04020a}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx):before{background-image:radial-gradient(#fff 1.3px,transparent 1.8px),radial-gradient(#d9c8ff 1.2px,transparent 1.9px);
+ background-size:110px 110px,190px 190px;background-position:0 0,60px 90px;opacity:.85;animation:pbtwinkle 6s ease-in-out infinite alternate}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx):after{background-image:radial-gradient(#fff 1.4px,transparent 2px);background-size:330px 330px;
+ background-position:120px 40px;opacity:.8;animation:pbtwinkle 9s ease-in-out infinite alternate-reverse}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx) i:nth-child(1){left:10%;top:15%;width:60%;height:35%;border-radius:50%;
+ background:radial-gradient(closest-side,#a27bff40,transparent);filter:blur(30px);transform:rotate(-18deg)}
+html[data-bg=galaxy] .bgfx.pg i:nth-child(2),[data-bgp=galaxy] .bgfx i:nth-child(2){inset:0;background-image:radial-gradient(#ffffffcc .7px,transparent 1px);
+ background-size:47px 53px;opacity:.55}
+@keyframes pbtwinkle{from{opacity:.35}to{opacity:.9}}
+/* gold luxe */
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx){background:radial-gradient(80% 60% at 50% 0%,#3a2a0a,transparent 70%),#050403}
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx):before{background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='none' stroke='%23f0b429' stroke-width='1.2' opacity='.6'%3E%3Cpath d='M0 96 A48 48 0 0 1 96 96'/%3E%3Cpath d='M12 96 A36 36 0 0 1 84 96'/%3E%3Cpath d='M24 96 A24 24 0 0 1 72 96'/%3E%3Cpath d='M36 96 A12 12 0 0 1 60 96'/%3E%3Cpath d='M48 48 L48 0'/%3E%3Cpath d='M0 48 L96 48' opacity='.4'/%3E%3C/g%3E%3C/svg%3E") 0 0/96px 96px;opacity:.9;
+ -webkit-mask-image:radial-gradient(ellipse at 50% 40%,#000 20%,transparent 80%);mask-image:radial-gradient(ellipse at 50% 40%,#000 20%,transparent 80%)}
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx):after{background:linear-gradient(90deg,transparent,#f0b42918 50%,transparent),
+ radial-gradient(60% 40% at 50% 100%,#f0b42922,transparent 70%)}
+/* aurora */
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx){background:linear-gradient(180deg,#020611 0%,#061529 60%,#0c0a1e 100%)}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i{left:-20%;width:140%;height:38%;filter:blur(36px);opacity:.95;border-radius:50%}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(1){top:6%;background:linear-gradient(90deg,transparent,#2ef2b066,#5ee7ff55,transparent);animation:pbdrift 18s ease-in-out infinite alternate}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(2){top:22%;background:linear-gradient(90deg,transparent,#a27bff66,#ff4fd844,transparent);animation:pbdrift 24s ease-in-out infinite alternate-reverse}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(3){top:40%;height:24%;background:linear-gradient(90deg,transparent,#2ef2b033,transparent);animation:pbdrift 30s ease-in-out infinite alternate}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx):after{background-image:radial-gradient(#ffffffaa 1px,transparent 1.4px);background-size:180px 180px;opacity:.4}
+@keyframes pbdrift{from{transform:translateX(-6%) skewY(-4deg)}to{transform:translateX(6%) skewY(3deg)}}
+/* gridiron */
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx){background:radial-gradient(80% 60% at 50% 0%,#ffffff1a,transparent 70%),
+ linear-gradient(180deg,#061a10 0%,#0b2a18 50%,#05140c 100%)}
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx):before{background:repeating-linear-gradient(90deg,#ffffff1f 0 3px,transparent 3px 10%),
+ repeating-linear-gradient(90deg,transparent 0 calc(5% - 1px),#ffffff10 calc(5% - 1px) 5%);
+ -webkit-mask-image:linear-gradient(transparent,#000 35%,#000 80%,transparent);mask-image:linear-gradient(transparent,#000 35%,#000 80%,transparent)}
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx):after{background:repeating-linear-gradient(0deg,transparent 0 46px,#ffffff08 46px 48px),
+ radial-gradient(40% 30% at 15% 0%,#ffffff26,transparent 70%),radial-gradient(40% 30% at 85% 0%,#ffffff26,transparent 70%)}
+/* vegas sunset */
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx){background:linear-gradient(180deg,#120428 0%,#3a0f57 38%,#a2246b 62%,#ff8a3d 74%,#1a0626 74.4%,#0a0314 100%)}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx) i:nth-child(1){left:50%;top:44%;width:min(46vmin,420px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
+ background:linear-gradient(180deg,#ffd166,#ff4fd8);box-shadow:0 0 80px #ff4fd877;
+ -webkit-mask-image:linear-gradient(#000 55%,transparent 55% 59%,#000 59% 70%,transparent 70% 74%,#000 74% 83%,transparent 83% 86%,#000 86%);
+ mask-image:linear-gradient(#000 55%,transparent 55% 59%,#000 59% 70%,transparent 70% 74%,#000 74% 83%,transparent 83% 86%,#000 86%)}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx) i:nth-child(2){left:-50%;right:-50%;bottom:-8%;height:28%;
+ background:repeating-linear-gradient(90deg,#ff8a3d66 0 2px,transparent 2px 70px),repeating-linear-gradient(0deg,#ff4fd866 0 2px,transparent 2px 36px);
+ transform:perspective(300px) rotateX(64deg);transform-origin:50% 100%;opacity:.55}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx):before{left:2%;right:auto;top:auto;width:min(26vw,260px);height:min(40vw,390px);bottom:22%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300'%3E%3Cg fill='%2312051f'%3E%3Cpath d='M96 300 C100 220 104 160 98 110 L106 110 C112 160 110 220 108 300 Z'/%3E%3Cpath d='M102 112 C70 90 40 96 10 120 C40 92 70 80 102 104 Z'/%3E%3Cpath d='M102 112 C134 88 166 94 194 122 C164 92 134 82 102 104 Z'/%3E%3Cpath d='M102 108 C80 70 60 56 30 50 C62 52 86 66 104 100 Z'/%3E%3Cpath d='M102 108 C124 70 146 56 176 52 C144 54 120 68 100 100 Z'/%3E%3Cpath d='M102 106 C100 70 92 40 76 20 C98 40 106 70 106 104 Z'/%3E%3C/g%3E%3C/svg%3E") bottom/contain no-repeat}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx):after{left:auto;right:3%;top:auto;width:min(20vw,200px);height:min(32vw,300px);bottom:22%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300'%3E%3Cg fill='%2312051f'%3E%3Cpath d='M96 300 C100 220 104 160 98 110 L106 110 C112 160 110 220 108 300 Z'/%3E%3Cpath d='M102 112 C70 90 40 96 10 120 C40 92 70 80 102 104 Z'/%3E%3Cpath d='M102 112 C134 88 166 94 194 122 C164 92 134 82 102 104 Z'/%3E%3Cpath d='M102 108 C80 70 60 56 30 50 C62 52 86 66 104 100 Z'/%3E%3Cpath d='M102 108 C124 70 146 56 176 52 C144 54 120 68 100 100 Z'/%3E%3Cpath d='M102 106 C100 70 92 40 76 20 C98 40 106 70 106 104 Z'/%3E%3C/g%3E%3C/svg%3E") bottom/contain no-repeat;transform:scaleX(-1)}
+/* midnight */
+:is(html[data-bg=midnight] .bgfx.pg,[data-bgp=midnight] .bgfx){background:radial-gradient(70% 50% at 50% -10%,#7B3FE426,transparent 70%),#07060b}
+:is(html[data-bg=midnight] .bgfx.pg,[data-bgp=midnight] .bgfx):before{background-image:radial-gradient(#ffffff06 1px,transparent 1.2px);background-size:18px 18px}
+/* light mode: the scene stays, softer */
+@media (prefers-color-scheme:light){html:not([data-theme=dark]):not([data-bg=classic]) .bgfx{opacity:.3}}
+html[data-theme=light]:not([data-bg=classic]) .bgfx{opacity:.3}
+@media (prefers-reduced-motion:reduce){.bgfx,.bgfx:before,.bgfx:after,.bgfx i{animation:none!important}}
+/* the picker */
+.bgpick{position:fixed;z-index:60;inset:0;display:none;align-items:flex-start;justify-content:center;padding:70px 16px 16px;background:#07040daa;backdrop-filter:blur(6px)}
+.bgpick.on{display:flex}.bgpick .bp{width:min(760px,100%);max-height:calc(100vh - 90px);overflow:auto;border-radius:22px;padding:18px;
+ background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid #ffffff1c;box-shadow:0 30px 70px -20px #000d}
+.bgpick h3{margin:0;font-size:18px}.bgpick .sub{color:var(--muted);font-size:13px;margin:4px 0 14px}
+.bgpick .grid9{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+.bgt{position:relative;border:2px solid #ffffff18;border-radius:16px;overflow:hidden;cursor:pointer;background:none;padding:0;text-align:left;color:#fff;font:inherit;
+ aspect-ratio:16/10;isolation:isolate;transition:transform .15s,border-color .15s}
+.bgt:hover{transform:translateY(-2px);border-color:#a27bff88}.bgt.on{border-color:var(--gold);box-shadow:0 0 0 3px #f0b42944}
+.bgt .bgfx{position:absolute;z-index:-1;inset:auto;left:0;top:0;width:1280px;height:800px;transform:scale(var(--sc,.13));transform-origin:0 0}.bgt .lb{position:absolute;left:0;right:0;bottom:0;padding:22px 10px 8px;background:linear-gradient(transparent,#000c)}
+.bgt .lb b{display:block;font-size:13.5px}.bgt .lb i{font-style:normal;font-size:11.5px;opacity:.8}
+.bgt .ck{position:absolute;top:8px;right:8px;background:var(--gold);color:#1a0f33;border-radius:99px;font-size:11px;font-weight:800;padding:2px 8px;display:none}
+.bgt.on .ck{display:block}.bgpick .row2{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.bgpick .row2 button{font:inherit;font-size:13px;font-weight:650;padding:8px 14px;border-radius:99px;border:1px solid #ffffff22;background:#ffffff10;color:var(--text);cursor:pointer}
+.bgpick .row2 button:hover{border-color:var(--brand2)}
+
+/* ===== r40 new look ===== */
+:root{--glass:rgba(18,12,30,.5);--glassb:#ffffff1c;--glass2:rgba(31,24,45,.55)}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){--glass:rgba(255,255,255,.74);--glassb:#2a1a5a1a;--glass2:rgba(246,242,253,.8)}}
+:root[data-theme=light]{--glass:rgba(255,255,255,.74);--glassb:#2a1a5a1a;--glass2:rgba(246,242,253,.8)}
+body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,Roboto,sans-serif;letter-spacing:.005em}
+.card{background:var(--glass)!important;border:1px solid var(--glassb)!important;-webkit-backdrop-filter:blur(16px) saturate(140%);
+ backdrop-filter:blur(16px) saturate(140%);border-radius:20px;box-shadow:0 1px 0 #ffffff12 inset,0 24px 48px -30px #000000cc;
+ transition:border-color .18s,box-shadow .18s,transform .18s}
+.card:hover{border-color:#a27bff40!important;box-shadow:0 1px 0 #ffffff14 inset,0 0 0 1px #a27bff1c,0 28px 60px -30px #7B3FE477}
+.card h2{display:flex;align-items:center;flex-wrap:wrap}
+.card h2:before{content:"";flex:none;width:4px;height:14px;border-radius:3px;margin-right:9px;background:linear-gradient(180deg,#a27bff,#f0b429)}
+header{background:linear-gradient(115deg,#1b0d3ad9 0%,#3a1a78bf 38%,#24104dbf 62%,#140a2bd9 100%)!important;
+ -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 18px 40px -26px #000}
+header:after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,#a27bff99,#f0b429aa,#a27bff99,transparent)}
+.brand h1{background:linear-gradient(90deg,#ffffff,#e4d6ff 55%,#ffd98a);-webkit-background-clip:text;background-clip:text;color:transparent!important;
+ text-shadow:none;filter:drop-shadow(0 2px 14px #7B3FE499);font-size:clamp(22px,3.2vw,30px)}
+.brand h1 b{-webkit-text-fill-color:#f0b429;color:#f0b429}
+.logo{filter:drop-shadow(0 8px 20px #7B3FE499) drop-shadow(0 0 1px #fff4)}
+.iconbtn{background:#ffffff12!important;border:1px solid #ffffff22!important;color:#f4f1fb!important;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border-radius:14px}
+.iconbtn:hover{border-color:#f0b42999!important;box-shadow:0 0 0 3px #f0b42922}
+@media (min-width:641px){nav.tabs{gap:6px;padding:4px 20px 14px;flex-wrap:wrap}
+ nav.tabs button{border-radius:12px;padding:9px 15px;background:#ffffff0a;border:1px solid #ffffff12;color:#e2d9f5;transition:background .15s,transform .15s}
+ nav.tabs button:hover{background:#ffffff16;transform:translateY(-1px)}
+ nav.tabs button.on{background:linear-gradient(180deg,#8b55f0,#6a32d6);border-color:#b99bff66;color:#fff;box-shadow:0 10px 24px -12px #7B3FE4}
+ nav.tabs button.on:after{display:none}}
+@media (max-width:640px){nav.tabs{background:color-mix(in srgb,var(--bg) 70%,transparent)!important;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+ border-top:1px solid #ffffff1c!important}nav.tabs button.on{background:linear-gradient(180deg,#8b55f055,#6a32d655)!important;color:#fff!important}}
+.kpi .v{font-size:28px;font-weight:850}
+.kpi{position:relative;overflow:hidden}.kpi:after{content:"";position:absolute;right:-30px;top:-30px;width:90px;height:90px;border-radius:50%;
+ background:radial-gradient(closest-side,#a27bff2a,transparent);pointer-events:none}
+.chip,.pill{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.row{transition:background .12s}button.row:hover,.row.slip:hover{background:#ffffff08}
+.tile{background:var(--glass2)!important;border:1px solid var(--glassb)!important;transition:transform .15s,border-color .15s}
+.tile:hover{transform:translateY(-1px);border-color:#a27bff77!important}
+footer{opacity:.85}
+#banner{background:var(--glass)!important;border:1px solid var(--glassb)!important;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+.sheet .panel,#sheet .panel{background:color-mix(in srgb,var(--card) 92%,transparent)!important;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+::selection{background:#7B3FE466}
+*{scrollbar-color:#7B3FE466 transparent}
+</style><script>try{var pbb=localStorage.getItem('pb_bg');if(pbb)document.documentElement.dataset.bg=pbb}catch(e){}</script></head><body>
+<div class="bgfx pg" aria-hidden="true"><i></i><i></i><i></i></div>
 <header><div class="art" aria-hidden="true"></div><div class="top"><a class="logo" href="/" aria-label="Back to the dashboard">{{LOGO}}</a>
 <div><h1>PIMP-BOT <b>LINE WATCH</b></h1><div class="meta" id="meta">Mods and owners only · loading…</div></div>
 <div class="navs"><a href="/staff">🛠️ Server Dashboard</a><a href="/">📊 Group dashboard</a></div></div><div class="stripe" aria-hidden="true"></div></header>
@@ -31485,6 +31842,28 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#sheet').classLis
 async function load(){try{const r=await fetch('/api/lines.json',{credentials:'same-origin'});if(r.status===403){location.reload();return}
  D=await r.json();render()}catch(e){$('#meta').textContent='Mods and owners only · offline? retrying…'}}
 load();setInterval(load,60000);
+</script><script>
+(function(){const BG=[['classic','Classic court','The original purple court'],['arena','Arena lights','Spotlights over the floor'],['neon','Neon city','Skyline after dark'],['galaxy','Galaxy','Stars and a nebula'],['luxe','Gold luxe','Black and gold, high roller'],['aurora','Aurora','Northern lights drifting'],['gridiron','Gridiron','Game-night turf'],['vegas','Vegas sunset','Synthwave sun and palms'],['midnight','Midnight','Clean and quiet']];const KEY='pb_bg';
+ const get=()=>{try{return localStorage.getItem(KEY)}catch(e){return null}};
+ const set=v=>{try{v?localStorage.setItem(KEY,v):localStorage.removeItem(KEY)}catch(e){}};
+ let DEF='classic';const apply=v=>{const b=BG.some(x=>x[0]===v)?v:'classic';document.documentElement.dataset.bg=b;return b};
+ apply(get()||DEF);
+ window.pbBgDefault=v=>{if(v&&BG.some(x=>x[0]===v))DEF=v;if(!get())apply(DEF)};
+ const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e};
+ const box=el('div','bgpick');box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');box.setAttribute('aria-label','Pick a background');
+ const bp=el('div','bp');box.append(bp);document.body.append(box);
+ function draw(){bp.replaceChildren();const cur=document.documentElement.dataset.bg;
+  bp.append(el('h3',null,'🎨 Background'),el('div','sub','Pick the scene behind the page. It\'s saved on this device only.'+(DEF!=='classic'?' The group default is '+(BG.find(x=>x[0]===DEF)||[0,DEF])[1]+'.':'')));
+  const g=el('div','grid9');
+  for(const [k,name,note] of BG){const b=el('button','bgt'+(k===cur?' on':''));b.type='button';b.setAttribute('data-bgp',k);b.setAttribute('aria-pressed',k===cur?'true':'false');
+   const fx=el('div','bgfx');fx.append(el('i'),el('i'),el('i'));const lb=el('span','lb');lb.append(el('b',null,name),el('i',null,note));
+   b.append(fx,lb,el('span','ck','ON'));requestAnimationFrame(()=>b.style.setProperty('--sc',String((b.clientWidth||170)/1280)));b.addEventListener('click',()=>{set(k);apply(k);draw()});g.append(b)}
+  const r=el('div','row2');const d=el('button',null,'Use the group default');d.type='button';d.addEventListener('click',()=>{set(null);apply(DEF);draw()});
+  const c=el('button',null,'Done');c.type='button';c.addEventListener('click',close);r.append(d,c);bp.append(g,r)}
+ function open(){draw();box.classList.add('on')}function close(){box.classList.remove('on')}
+ box.addEventListener('click',e=>{if(e.target===box)close()});document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+ document.querySelectorAll('[data-bgbtn]').forEach(b=>b.addEventListener('click',open));
+})();
 </script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace(
     "{{LOGO}}", DASH_LOGO_SVG).replace("{{COURT_D}}", dash_court("#a27bff", 0.06)).replace(
     "{{COURT_L}}", dash_court("#7B3FE4", 0.08)).replace("{{COURT_H}}", dash_court("#ffffff", 0.10))
@@ -31635,12 +32014,151 @@ footer{max-width:1180px;margin:0 auto;padding:4px 16px 28px;color:var(--faint);f
 .ubars b{font-size:11px;font-weight:600}.ubars span{font-size:11px;opacity:.7}
 .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;border:1px solid currentColor;opacity:.85;margin-left:4px}
 .tag.vip{color:#ffd166}.tag.mod{color:#e9dcff;background:linear-gradient(135deg,#1c0a42,#5b26c9);border-color:#8a5cff}.tag.custom{color:#7cc4ff}.tag.warn{color:var(--warn,#f5b942)}.tag.ban{color:var(--down,#ff6b6b)}
-</style></head><body>
+
+/* ===== r40 backgrounds ===== */
+.bgfx{position:fixed;inset:0;z-index:-3;pointer-events:none;overflow:hidden;background:var(--bg);transition:opacity .4s}
+.bgfx i{position:absolute;display:block}.bgfx:before,.bgfx:after{content:"";position:absolute;inset:0}
+html[data-bg]:not([data-bg=classic]) body:before,html[data-bg]:not([data-bg=classic]) body:after{opacity:0}
+html[data-bg]:not([data-bg=classic]) .grain{opacity:.25}
+:is(html[data-bg=classic] .bgfx.pg,[data-bgp=classic] .bgfx){background:radial-gradient(900px 600px at 12% 8%,#7B3FE422,transparent 60%),
+ radial-gradient(800px 600px at 92% 30%,#f0b42912,transparent 60%),var(--bg)}
+/* arena lights */
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx){background:radial-gradient(120% 70% at 50% 120%,#3b1784 0%,#140a2b 55%,#07040d 100%)}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx):before{background:conic-gradient(from 160deg at 8% -5%,transparent 0 8deg,#a27bff70 14deg,transparent 22deg 360deg),
+ conic-gradient(from 180deg at 92% -5%,transparent 0 6deg,#f0b42966 12deg,transparent 20deg 360deg),
+ conic-gradient(from 170deg at 50% -10%,transparent 0 10deg,#ffffff2e 15deg,transparent 21deg 360deg);filter:blur(6px);
+ animation:pbsway 14s ease-in-out infinite alternate;transform-origin:50% 0}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx):after{background:var(--court) 50% 108%/min(1700px,220%) auto no-repeat;opacity:.85;
+ -webkit-mask-image:linear-gradient(transparent 30%,#000 80%);mask-image:linear-gradient(transparent 30%,#000 80%)}
+:is(html[data-bg=arena] .bgfx.pg,[data-bgp=arena] .bgfx) i:nth-child(1){inset:auto 0 0 0;height:40%;background:radial-gradient(60% 100% at 50% 100%,#7B3FE455,transparent 70%)}
+@keyframes pbsway{from{transform:rotate(-2.5deg)}to{transform:rotate(2.5deg)}}
+/* neon city */
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx){background:linear-gradient(180deg,#05030c 0%,#140a2b 45%,#3a0f4f 72%,#5c1257 82%,#0a0616 83%)}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx):before{background:radial-gradient(70% 40% at 50% 80%,#ff4fd855,transparent 70%),
+ radial-gradient(40% 30% at 20% 78%,#5ee7ff33,transparent 70%)}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx):after{top:auto;height:46%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 320' preserveAspectRatio='xMidYMax slice'%3E%3Crect x='0' y='102' width='63' height='218' fill='%230a0616'/%3E%3Crect x='20' y='114' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='6' y='132' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='132' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='20' y='150' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='20' y='168' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='34' y='168' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='48' y='168' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='20' y='186' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='34' y='222' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='20' y='240' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='6' y='258' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='48' y='258' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='20' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='67' y='136' width='84' height='184' fill='%230a0616'/%3E%3Crect x='73' y='148' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='87' y='148' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='129' y='148' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='166' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='129' y='166' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='73' y='184' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='87' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='115' y='184' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='129' y='184' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='115' y='202' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='73' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='101' y='220' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='115' y='238' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='73' y='256' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='101' y='256' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='87' y='274' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='115' y='274' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='129' y='274' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='87' y='292' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='160' y='75' width='36' height='245' fill='%230a0616'/%3E%3Crect x='180' y='105' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='123' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='166' y='141' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='195' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='166' y='231' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='180' y='249' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='166' y='267' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='166' y='303' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='203' y='197' width='34' height='123' fill='%230a0616'/%3E%3Crect x='223' y='227' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='245' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='209' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='263' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='223' y='281' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='223' y='299' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='240' y='210' width='58' height='110' fill='%230a0616'/%3E%3Crect x='246' y='222' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='274' y='240' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='246' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='260' y='276' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='274' y='276' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='288' y='276' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='303' y='147' width='70' height='173' fill='%230a0616'/%3E%3Crect x='309' y='159' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='323' y='159' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='351' y='159' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='309' y='177' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='351' y='213' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='309' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='323' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='351' y='231' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='323' y='249' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='337' y='267' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='309' y='303' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='337' y='303' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='351' y='303' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='383' y='100' width='53' height='220' fill='%230a0616'/%3E%3Crect x='403' y='112' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='417' y='112' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='130' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='417' y='130' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='389' y='148' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='403' y='148' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='184' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='417' y='184' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='389' y='202' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='403' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='417' y='220' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='389' y='256' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='403' y='292' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='417' y='292' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='442' y='114' width='41' height='206' fill='%230a0616'/%3E%3Crect x='462' y='126' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='180' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='462' y='180' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='448' y='234' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='448' y='252' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='448' y='270' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='288' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='448' y='306' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='493' y='122' width='84' height='198' fill='%230a0616'/%3E%3Crect x='499' y='152' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='527' y='152' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='527' y='170' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='555' y='170' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='555' y='188' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='555' y='206' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='499' y='224' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='527' y='224' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='527' y='242' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='513' y='260' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='513' y='278' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='541' y='296' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='587' y='169' width='74' height='151' fill='%230a0616'/%3E%3Crect x='607' y='181' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='593' y='199' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='607' y='199' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='635' y='199' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='649' y='199' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='649' y='235' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='635' y='253' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='621' y='271' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='649' y='271' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='593' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='621' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='635' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='649' y='289' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='649' y='307' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='671' y='235' width='41' height='85' fill='%230a0616'/%3E%3Crect x='677' y='301' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='714' y='210' width='55' height='110' fill='%230a0616'/%3E%3Crect x='734' y='240' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='734' y='258' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='720' y='276' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='734' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='748' y='294' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='777' y='119' width='39' height='201' fill='%230a0616'/%3E%3Crect x='797' y='275' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='822' y='235' width='66' height='85' fill='%230a0616'/%3E%3Crect x='842' y='247' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='842' y='265' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='870' y='265' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='842' y='283' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='856' y='301' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='892' y='167' width='41' height='153' fill='%230a0616'/%3E%3Crect x='898' y='233' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='912' y='287' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='935' y='89' width='85' height='231' fill='%230a0616'/%3E%3Crect x='969' y='101' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='955' y='119' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1011' y='137' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='941' y='173' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='173' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='969' y='191' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='955' y='227' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='997' y='227' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='969' y='245' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='983' y='245' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='997' y='245' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='941' y='263' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='997' y='263' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='983' y='281' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='997' y='299' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1026' y='149' width='82' height='171' fill='%230a0616'/%3E%3Crect x='1032' y='161' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1032' y='197' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1046' y='197' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1032' y='215' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1060' y='215' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1046' y='269' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1074' y='269' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1088' y='269' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1074' y='287' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1046' y='305' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1116' y='103' width='47' height='217' fill='%230a0616'/%3E%3Crect x='1136' y='115' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1150' y='115' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1136' y='133' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='169' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1150' y='169' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1136' y='187' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1136' y='223' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='241' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1150' y='241' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1122' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1136' y='259' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1122' y='277' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1169' y='247' width='82' height='73' fill='%230a0616'/%3E%3Crect x='1175' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1203' y='259' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1231' y='259' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1175' y='277' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1231' y='277' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1175' y='295' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1231' y='295' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1258' y='230' width='70' height='90' fill='%230a0616'/%3E%3Crect x='1292' y='242' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1306' y='242' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1306' y='260' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1278' y='278' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1292' y='278' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1335' y='89' width='73' height='231' fill='%230a0616'/%3E%3Crect x='1341' y='101' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='101' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='119' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1341' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='155' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1341' y='173' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1355' y='173' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1383' y='191' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='191' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1341' y='209' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1355' y='209' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1383' y='209' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1369' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1383' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1397' y='227' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1355' y='245' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1369' y='245' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1355' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1383' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1397' y='263' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1355' y='299' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1369' y='299' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1411' y='160' width='75' height='160' fill='%230a0616'/%3E%3Crect x='1445' y='190' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1445' y='208' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='226' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1459' y='226' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1473' y='226' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='244' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1445' y='244' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1459' y='262' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1473' y='262' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1431' y='298' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1459' y='298' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1473' y='298' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1490' y='243' width='41' height='77' fill='%230a0616'/%3E%3Crect x='1496' y='273' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1496' y='309' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1539' y='73' width='63' height='247' fill='%230a0616'/%3E%3Crect x='1545' y='85' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1573' y='85' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1587' y='103' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1573' y='121' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1545' y='139' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1559' y='139' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1559' y='175' width='5' height='7' fill='%23f0b429' opacity='.75'/%3E%3Crect x='1573' y='211' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1545' y='229' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1559' y='229' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1573' y='229' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3Crect x='1545' y='247' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1545' y='283' width='5' height='7' fill='%23ff4fd8' opacity='.75'/%3E%3Crect x='1545' y='301' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1559' y='301' width='5' height='7' fill='%23a27bff' opacity='.75'/%3E%3Crect x='1587' y='301' width='5' height='7' fill='%235ee7ff' opacity='.75'/%3E%3C/svg%3E") bottom/cover no-repeat}
+:is(html[data-bg=neon] .bgfx.pg,[data-bgp=neon] .bgfx) i:nth-child(1){left:-50%;right:-50%;bottom:-10%;height:30%;
+ background:repeating-linear-gradient(90deg,#ff4fd855 0 2px,transparent 2px 80px),repeating-linear-gradient(0deg,#ff4fd855 0 2px,transparent 2px 40px);
+ transform:perspective(320px) rotateX(64deg);transform-origin:50% 100%;opacity:.45}
+/* galaxy */
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx){background:radial-gradient(60% 50% at 25% 30%,#5b26c988,transparent 70%),
+ radial-gradient(50% 45% at 78% 62%,#ff4fd855,transparent 70%),radial-gradient(70% 60% at 60% 20%,#2c4fd855,transparent 70%),#04020a}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx):before{background-image:radial-gradient(#fff 1.3px,transparent 1.8px),radial-gradient(#d9c8ff 1.2px,transparent 1.9px);
+ background-size:110px 110px,190px 190px;background-position:0 0,60px 90px;opacity:.85;animation:pbtwinkle 6s ease-in-out infinite alternate}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx):after{background-image:radial-gradient(#fff 1.4px,transparent 2px);background-size:330px 330px;
+ background-position:120px 40px;opacity:.8;animation:pbtwinkle 9s ease-in-out infinite alternate-reverse}
+:is(html[data-bg=galaxy] .bgfx.pg,[data-bgp=galaxy] .bgfx) i:nth-child(1){left:10%;top:15%;width:60%;height:35%;border-radius:50%;
+ background:radial-gradient(closest-side,#a27bff40,transparent);filter:blur(30px);transform:rotate(-18deg)}
+html[data-bg=galaxy] .bgfx.pg i:nth-child(2),[data-bgp=galaxy] .bgfx i:nth-child(2){inset:0;background-image:radial-gradient(#ffffffcc .7px,transparent 1px);
+ background-size:47px 53px;opacity:.55}
+@keyframes pbtwinkle{from{opacity:.35}to{opacity:.9}}
+/* gold luxe */
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx){background:radial-gradient(80% 60% at 50% 0%,#3a2a0a,transparent 70%),#050403}
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx):before{background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='none' stroke='%23f0b429' stroke-width='1.2' opacity='.6'%3E%3Cpath d='M0 96 A48 48 0 0 1 96 96'/%3E%3Cpath d='M12 96 A36 36 0 0 1 84 96'/%3E%3Cpath d='M24 96 A24 24 0 0 1 72 96'/%3E%3Cpath d='M36 96 A12 12 0 0 1 60 96'/%3E%3Cpath d='M48 48 L48 0'/%3E%3Cpath d='M0 48 L96 48' opacity='.4'/%3E%3C/g%3E%3C/svg%3E") 0 0/96px 96px;opacity:.9;
+ -webkit-mask-image:radial-gradient(ellipse at 50% 40%,#000 20%,transparent 80%);mask-image:radial-gradient(ellipse at 50% 40%,#000 20%,transparent 80%)}
+:is(html[data-bg=luxe] .bgfx.pg,[data-bgp=luxe] .bgfx):after{background:linear-gradient(90deg,transparent,#f0b42918 50%,transparent),
+ radial-gradient(60% 40% at 50% 100%,#f0b42922,transparent 70%)}
+/* aurora */
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx){background:linear-gradient(180deg,#020611 0%,#061529 60%,#0c0a1e 100%)}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i{left:-20%;width:140%;height:38%;filter:blur(36px);opacity:.95;border-radius:50%}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(1){top:6%;background:linear-gradient(90deg,transparent,#2ef2b066,#5ee7ff55,transparent);animation:pbdrift 18s ease-in-out infinite alternate}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(2){top:22%;background:linear-gradient(90deg,transparent,#a27bff66,#ff4fd844,transparent);animation:pbdrift 24s ease-in-out infinite alternate-reverse}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx) i:nth-child(3){top:40%;height:24%;background:linear-gradient(90deg,transparent,#2ef2b033,transparent);animation:pbdrift 30s ease-in-out infinite alternate}
+:is(html[data-bg=aurora] .bgfx.pg,[data-bgp=aurora] .bgfx):after{background-image:radial-gradient(#ffffffaa 1px,transparent 1.4px);background-size:180px 180px;opacity:.4}
+@keyframes pbdrift{from{transform:translateX(-6%) skewY(-4deg)}to{transform:translateX(6%) skewY(3deg)}}
+/* gridiron */
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx){background:radial-gradient(80% 60% at 50% 0%,#ffffff1a,transparent 70%),
+ linear-gradient(180deg,#061a10 0%,#0b2a18 50%,#05140c 100%)}
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx):before{background:repeating-linear-gradient(90deg,#ffffff1f 0 3px,transparent 3px 10%),
+ repeating-linear-gradient(90deg,transparent 0 calc(5% - 1px),#ffffff10 calc(5% - 1px) 5%);
+ -webkit-mask-image:linear-gradient(transparent,#000 35%,#000 80%,transparent);mask-image:linear-gradient(transparent,#000 35%,#000 80%,transparent)}
+:is(html[data-bg=gridiron] .bgfx.pg,[data-bgp=gridiron] .bgfx):after{background:repeating-linear-gradient(0deg,transparent 0 46px,#ffffff08 46px 48px),
+ radial-gradient(40% 30% at 15% 0%,#ffffff26,transparent 70%),radial-gradient(40% 30% at 85% 0%,#ffffff26,transparent 70%)}
+/* vegas sunset */
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx){background:linear-gradient(180deg,#120428 0%,#3a0f57 38%,#a2246b 62%,#ff8a3d 74%,#1a0626 74.4%,#0a0314 100%)}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx) i:nth-child(1){left:50%;top:44%;width:min(46vmin,420px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
+ background:linear-gradient(180deg,#ffd166,#ff4fd8);box-shadow:0 0 80px #ff4fd877;
+ -webkit-mask-image:linear-gradient(#000 55%,transparent 55% 59%,#000 59% 70%,transparent 70% 74%,#000 74% 83%,transparent 83% 86%,#000 86%);
+ mask-image:linear-gradient(#000 55%,transparent 55% 59%,#000 59% 70%,transparent 70% 74%,#000 74% 83%,transparent 83% 86%,#000 86%)}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx) i:nth-child(2){left:-50%;right:-50%;bottom:-8%;height:28%;
+ background:repeating-linear-gradient(90deg,#ff8a3d66 0 2px,transparent 2px 70px),repeating-linear-gradient(0deg,#ff4fd866 0 2px,transparent 2px 36px);
+ transform:perspective(300px) rotateX(64deg);transform-origin:50% 100%;opacity:.55}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx):before{left:2%;right:auto;top:auto;width:min(26vw,260px);height:min(40vw,390px);bottom:22%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300'%3E%3Cg fill='%2312051f'%3E%3Cpath d='M96 300 C100 220 104 160 98 110 L106 110 C112 160 110 220 108 300 Z'/%3E%3Cpath d='M102 112 C70 90 40 96 10 120 C40 92 70 80 102 104 Z'/%3E%3Cpath d='M102 112 C134 88 166 94 194 122 C164 92 134 82 102 104 Z'/%3E%3Cpath d='M102 108 C80 70 60 56 30 50 C62 52 86 66 104 100 Z'/%3E%3Cpath d='M102 108 C124 70 146 56 176 52 C144 54 120 68 100 100 Z'/%3E%3Cpath d='M102 106 C100 70 92 40 76 20 C98 40 106 70 106 104 Z'/%3E%3C/g%3E%3C/svg%3E") bottom/contain no-repeat}
+:is(html[data-bg=vegas] .bgfx.pg,[data-bgp=vegas] .bgfx):after{left:auto;right:3%;top:auto;width:min(20vw,200px);height:min(32vw,300px);bottom:22%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300'%3E%3Cg fill='%2312051f'%3E%3Cpath d='M96 300 C100 220 104 160 98 110 L106 110 C112 160 110 220 108 300 Z'/%3E%3Cpath d='M102 112 C70 90 40 96 10 120 C40 92 70 80 102 104 Z'/%3E%3Cpath d='M102 112 C134 88 166 94 194 122 C164 92 134 82 102 104 Z'/%3E%3Cpath d='M102 108 C80 70 60 56 30 50 C62 52 86 66 104 100 Z'/%3E%3Cpath d='M102 108 C124 70 146 56 176 52 C144 54 120 68 100 100 Z'/%3E%3Cpath d='M102 106 C100 70 92 40 76 20 C98 40 106 70 106 104 Z'/%3E%3C/g%3E%3C/svg%3E") bottom/contain no-repeat;transform:scaleX(-1)}
+/* midnight */
+:is(html[data-bg=midnight] .bgfx.pg,[data-bgp=midnight] .bgfx){background:radial-gradient(70% 50% at 50% -10%,#7B3FE426,transparent 70%),#07060b}
+:is(html[data-bg=midnight] .bgfx.pg,[data-bgp=midnight] .bgfx):before{background-image:radial-gradient(#ffffff06 1px,transparent 1.2px);background-size:18px 18px}
+/* light mode: the scene stays, softer */
+@media (prefers-color-scheme:light){html:not([data-theme=dark]):not([data-bg=classic]) .bgfx{opacity:.3}}
+html[data-theme=light]:not([data-bg=classic]) .bgfx{opacity:.3}
+@media (prefers-reduced-motion:reduce){.bgfx,.bgfx:before,.bgfx:after,.bgfx i{animation:none!important}}
+/* the picker */
+.bgpick{position:fixed;z-index:60;inset:0;display:none;align-items:flex-start;justify-content:center;padding:70px 16px 16px;background:#07040daa;backdrop-filter:blur(6px)}
+.bgpick.on{display:flex}.bgpick .bp{width:min(760px,100%);max-height:calc(100vh - 90px);overflow:auto;border-radius:22px;padding:18px;
+ background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid #ffffff1c;box-shadow:0 30px 70px -20px #000d}
+.bgpick h3{margin:0;font-size:18px}.bgpick .sub{color:var(--muted);font-size:13px;margin:4px 0 14px}
+.bgpick .grid9{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+.bgt{position:relative;border:2px solid #ffffff18;border-radius:16px;overflow:hidden;cursor:pointer;background:none;padding:0;text-align:left;color:#fff;font:inherit;
+ aspect-ratio:16/10;isolation:isolate;transition:transform .15s,border-color .15s}
+.bgt:hover{transform:translateY(-2px);border-color:#a27bff88}.bgt.on{border-color:var(--gold);box-shadow:0 0 0 3px #f0b42944}
+.bgt .bgfx{position:absolute;z-index:-1;inset:auto;left:0;top:0;width:1280px;height:800px;transform:scale(var(--sc,.13));transform-origin:0 0}.bgt .lb{position:absolute;left:0;right:0;bottom:0;padding:22px 10px 8px;background:linear-gradient(transparent,#000c)}
+.bgt .lb b{display:block;font-size:13.5px}.bgt .lb i{font-style:normal;font-size:11.5px;opacity:.8}
+.bgt .ck{position:absolute;top:8px;right:8px;background:var(--gold);color:#1a0f33;border-radius:99px;font-size:11px;font-weight:800;padding:2px 8px;display:none}
+.bgt.on .ck{display:block}.bgpick .row2{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.bgpick .row2 button{font:inherit;font-size:13px;font-weight:650;padding:8px 14px;border-radius:99px;border:1px solid #ffffff22;background:#ffffff10;color:var(--text);cursor:pointer}
+.bgpick .row2 button:hover{border-color:var(--brand2)}
+
+/* ===== r40 new look ===== */
+:root{--glass:rgba(18,12,30,.5);--glassb:#ffffff1c;--glass2:rgba(31,24,45,.55)}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){--glass:rgba(255,255,255,.74);--glassb:#2a1a5a1a;--glass2:rgba(246,242,253,.8)}}
+:root[data-theme=light]{--glass:rgba(255,255,255,.74);--glassb:#2a1a5a1a;--glass2:rgba(246,242,253,.8)}
+body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,Roboto,sans-serif;letter-spacing:.005em}
+.card{background:var(--glass)!important;border:1px solid var(--glassb)!important;-webkit-backdrop-filter:blur(16px) saturate(140%);
+ backdrop-filter:blur(16px) saturate(140%);border-radius:20px;box-shadow:0 1px 0 #ffffff12 inset,0 24px 48px -30px #000000cc;
+ transition:border-color .18s,box-shadow .18s,transform .18s}
+.card:hover{border-color:#a27bff40!important;box-shadow:0 1px 0 #ffffff14 inset,0 0 0 1px #a27bff1c,0 28px 60px -30px #7B3FE477}
+.card h2{display:flex;align-items:center;flex-wrap:wrap}
+.card h2:before{content:"";flex:none;width:4px;height:14px;border-radius:3px;margin-right:9px;background:linear-gradient(180deg,#a27bff,#f0b429)}
+header{background:linear-gradient(115deg,#1b0d3ad9 0%,#3a1a78bf 38%,#24104dbf 62%,#140a2bd9 100%)!important;
+ -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 18px 40px -26px #000}
+header:after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,#a27bff99,#f0b429aa,#a27bff99,transparent)}
+.brand h1{background:linear-gradient(90deg,#ffffff,#e4d6ff 55%,#ffd98a);-webkit-background-clip:text;background-clip:text;color:transparent!important;
+ text-shadow:none;filter:drop-shadow(0 2px 14px #7B3FE499);font-size:clamp(22px,3.2vw,30px)}
+.brand h1 b{-webkit-text-fill-color:#f0b429;color:#f0b429}
+.logo{filter:drop-shadow(0 8px 20px #7B3FE499) drop-shadow(0 0 1px #fff4)}
+.iconbtn{background:#ffffff12!important;border:1px solid #ffffff22!important;color:#f4f1fb!important;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border-radius:14px}
+.iconbtn:hover{border-color:#f0b42999!important;box-shadow:0 0 0 3px #f0b42922}
+@media (min-width:641px){nav.tabs{gap:6px;padding:4px 20px 14px;flex-wrap:wrap}
+ nav.tabs button{border-radius:12px;padding:9px 15px;background:#ffffff0a;border:1px solid #ffffff12;color:#e2d9f5;transition:background .15s,transform .15s}
+ nav.tabs button:hover{background:#ffffff16;transform:translateY(-1px)}
+ nav.tabs button.on{background:linear-gradient(180deg,#8b55f0,#6a32d6);border-color:#b99bff66;color:#fff;box-shadow:0 10px 24px -12px #7B3FE4}
+ nav.tabs button.on:after{display:none}}
+@media (max-width:640px){nav.tabs{background:color-mix(in srgb,var(--bg) 70%,transparent)!important;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+ border-top:1px solid #ffffff1c!important}nav.tabs button.on{background:linear-gradient(180deg,#8b55f055,#6a32d655)!important;color:#fff!important}}
+.kpi .v{font-size:28px;font-weight:850}
+.kpi{position:relative;overflow:hidden}.kpi:after{content:"";position:absolute;right:-30px;top:-30px;width:90px;height:90px;border-radius:50%;
+ background:radial-gradient(closest-side,#a27bff2a,transparent);pointer-events:none}
+.chip,.pill{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.row{transition:background .12s}button.row:hover,.row.slip:hover{background:#ffffff08}
+.tile{background:var(--glass2)!important;border:1px solid var(--glassb)!important;transition:transform .15s,border-color .15s}
+.tile:hover{transform:translateY(-1px);border-color:#a27bff77!important}
+footer{opacity:.85}
+#banner{background:var(--glass)!important;border:1px solid var(--glassb)!important;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+.sheet .panel,#sheet .panel{background:color-mix(in srgb,var(--card) 92%,transparent)!important;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+::selection{background:#7B3FE466}
+*{scrollbar-color:#7B3FE466 transparent}
+.pm{width:100%;border-collapse:collapse;font-size:13px}.pm th,.pm td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:center}
+.pm th{font-size:11.5px;color:var(--muted);font-weight:700}.pm td:first-child{text-align:left}.pm td.y{color:var(--up);font-weight:800}.pm td.n{color:var(--faint)}
+.hq{width:100%;margin:0 0 8px;background:var(--card2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;font-size:13px}
+.bgset{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
+</style><script>try{var pbb=localStorage.getItem('pb_bg');if(pbb)document.documentElement.dataset.bg=pbb}catch(e){}</script></head><body>
+<div class="bgfx pg" aria-hidden="true"><i></i><i></i><i></i></div>
 <div class="grain" aria-hidden="true"></div>
 <header><div class="art" aria-hidden="true"></div><div class="sweep" aria-hidden="true"></div><div class="top"><a class="logo" href="/" title="Back to the dashboard" aria-label="Back to the dashboard">{{LOGO}}</a>
 <div class="brand"><h1>PIMP-BOT <b>STAFF</b></h1><div class="meta"><span class="pill v" id="ver">…</span>
 <button class="pill" id="staffbtn" type="button" aria-haspopup="dialog">👥 Staff</button><a class="pill v" href="/lines" style="text-decoration:none">📈 Line Watch</a><span class="pill" id="who" hidden></span>
 <span class="pill" id="upd">loading…</span></div></div>
+<button class="out" type="button" data-bgbtn="1" id="bgbtn" style="cursor:pointer;font:inherit;font-size:13px;font-weight:650">🎨 Background</button>
 <a class="out" href="/staff/logout">Sign out</a></div><div class="stripe" aria-hidden="true"></div></header>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT"><div class="panel">
 <button class="x" id="sheetX" type="button">Close</button><h3 id="sheetT">👥 Staff</h3><div class="sub" id="sheetSub">Loading…</div>
@@ -31658,7 +32176,7 @@ const dot=c=>'<i class="dot '+(c||'')+'"></i>';
 const row=(a,b)=>'<div class="row"><span>'+a+'</span><span>'+b+'</span></div>';
 const card=(t,body,cls)=>'<section class="card '+(cls||'')+'" id="'+String(t).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'"><h2>'+esc(t)+'</h2>'+body+'</section>';
 const safeUrl=u=>/^(https:\/\/[^\s"'<>]+|\/[A-Za-z0-9_\-\/.?=&]*)$/.test(u||'')?u:null;
-let loadedAt=0,HF='all',LAST=null;
+let loadedAt=0,HF='all',HQ='',LAST=null;
 function needs(d){
  const n=[], st=d.status;
  if(!st.ok)n.push(['🔴','<b>The bot isn\'t healthy:</b> '+esc(st.why)]);
@@ -31686,7 +32204,7 @@ function needs(d){
  return n;
 }
 function render(d){
- loadedAt=Date.now();LAST=d;
+ loadedAt=Date.now();LAST=d;if(window.pbBgDefault)pbBgDefault(d.bg_default);
  $('#ver').textContent=d.version.split(' ').pop();
  const w=$('#who');if(d.viewer){w.textContent='Signed in as '+d.viewer;w.hidden=false}else w.hidden=true;
  document.title=(d.status.ok?'':'⚠ ')+'PIMP-BOT Staff';
@@ -31720,7 +32238,9 @@ function render(d){
  h.push(card('Outages',ob));
  const db=d.database;
  h.push(card('Database',row('Saved on a volume',dot(db.on_volume?'ok':'bad')+(db.on_volume?'yes (/data)':'NO: a redeploy wipes it'))
-  +row('Size',db.size_mb==null?'?':db.size_mb+' MB')+row('Picks',db.picks+' ('+db.open+' open)')));
+  +row('Size',db.size_mb==null?'?':db.size_mb+' MB')+row('Picks',db.picks+' ('+db.open+' open)')
+  +(d.can_backup?'<a class="tile" href="/staff/backup.db" style="margin-top:10px"><span class="ic">💾</span><span><b>Download a backup</b><i>This server\'s picks, as a .db file</i></span></a>'
+   :'<div class="muted" style="margin-top:6px">Backups: <code>/backups</code> posts one every night. The developer and owners can download one here.</div>')));
  let eb=(d.engines||[]).map(e=>row(esc(e.name),dot(e.on?'ok':'')+(e.on?'on':'off'))).join('');
  eb+=row('Claude calls today',d.claude_today+(d.claude_cap?' / '+d.claude_cap:''));
  if(d.errors.slip)eb+='<div class="muted">Last slip-read error '+esc(ago(d.errors.slip_at))+'</div><div class="err">'+esc(d.errors.slip)+'</div>';
@@ -31750,7 +32270,8 @@ function render(d){
   +(tko.length?tko.map(t=>row((tki[t.kind]||'🎫')+' <b>#'+t.id+'</b> '+esc(t.title)+(t.status==='claimed'?'<span class="tag">🙋 '+esc(t.who||'')+'</span>':''),
     t.link&&safeUrl(t.link)?'<a href="'+esc(t.link)+'" target="_blank" rel="noopener noreferrer">open</a>':esc(ago(t.at)))).join('')
    :'<div class="muted">'+dot('ok')+(d.tickets&&d.tickets.channel?'No open tickets.':'Tickets are off.')+'</div>')
-  +'<div class="muted" style="margin-top:6px"><code>/staff tickets channel</code> picks the channel. Each ticket has buttons to grade the slip, add a payout, claim it, or close it.</div>','span2'));
+  +((d.tickets&&d.tickets.leaders||[]).length?'<div class="muted" style="margin:10px 0 2px">🏅 Most closed · 30 days</div>'+d.tickets.leaders.map((x,i)=>row(['🥇','🥈','🥉'][i]||'·',esc(x.who)+' <b class="num">'+x.n+'</b>')).join(''):'')
+  +'<div class="muted" style="margin-top:6px"><code>/staff tickets channel</code> picks the channel. <code>/staff tickets assign</code> hands one to someone. Open tickets get a reminder after a few hours.</div>','span2'));
  const bl=d.blacklist||{entries:[],hits:[]};
  h.push(card('Blacklist',(bl.entries.length?bl.entries.map(e=>row(esc(e.name)+' <span class="muted">'+esc(e.kind)+'</span>',
    (e.alert==='both'?'staff + slip reply':'staff alert'))).join('')
@@ -31782,8 +32303,18 @@ function render(d){
  h.push(card('Usage · 7 days','<div class="ubars">'+us.map(x=>'<div><b class="num">'+x.n+'</b><i style="height:'+Math.round(80*x.n/um)+'%"></i><span>'
    +esc(new Date(x.day+'T12:00:00').toLocaleDateString([],{weekday:'short'}))+'</span></div>').join('')+'</div>'
   +row('Questions this week','<span class="num">'+ut+'</span>')));
- const hist=d.history||[];
- h.push(card('Live server history','<div class="filters" id="hf">'+[['all','All'],['slips','Slips'],['scans','Scans'],['staff','Staff'],['system','System']]
+ const PM=[['Run /developer (failsafe, keys, owners)','✓','–','–','–','–'],['Grade slips, tickets, warnings','✓','✓','✓','✓','–'],
+  ['Blacklist, announcements','✓','✓','✓','✓','–'],['Badges, ticket channel, background','✓','✓','✓','–','–'],
+  ['Feature switches on this page','✓','✓','✓','–','–'],['Download a backup','✓','✓','–','–','–'],['Line Watch (/lines)','✓','✓','✓','✓','–'],
+  ['Unlimited questions','✓','✓','✓','✓','by activity'],['Log slips, /slip tools, dashboard','✓','✓','✓','✓','✓']];
+ h.push(card('Who can do what','<table class="pm"><thead><tr><th></th><th>⚡ Dev</th><th>👑 Owner</th><th>Admin</th><th>🛡 MOD</th><th>Member</th></tr></thead><tbody>'
+  +PM.map(r=>'<tr><td>'+esc(r[0])+'</td>'+r.slice(1).map(c=>'<td class="'+(c==='✓'?'y':'n')+'">'+esc(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'
+  +'<div class="muted" style="margin-top:6px">Admin = Manage Server in Discord. MOD = Manage Messages in Discord. A MOD badge from /staff badge is a label; it doesn\'t add powers.</div>','span2'));
+ const tg2=(d.bg_list||[]);
+ if(d.can_switch&&tg2.length)h.push(card('Look & feel','<div class="muted" style="margin-bottom:8px">The group\'s default background (everyone can still pick their own with 🎨).</div><div class="bgset">'
+  +tg2.map(x=>'<button type="button" class="sw'+(d.bg_default===x.k?' on':'')+'" data-bgset="'+esc(x.k)+'"><span>'+esc(x.n)+'</span><span class="knob"></span></button>').join('')+'</div>'));
+ const hist=(d.history||[]).filter(x=>!HQ||String(x.text||'').toLowerCase().includes(HQ));
+ h.push(card('Live server history','<input class="hq" id="hq" type="search" placeholder="Search history" aria-label="Search history" value="'+esc(HQ)+'"><div class="filters" id="hf">'+[['all','All'],['slips','Slips'],['scans','Scans'],['staff','Staff'],['system','System']]
   .map(f=>'<button type="button" data-f="'+f[0]+'" class="'+(HF===f[0]?'on':'')+'">'+f[1]+'</button>').join('')+'</div><div class="hist">'
   +(hist.filter(x=>HF==='all'||x.kind===HF).map(x=>'<div class="ev"><span class="ic">'+esc(x.icon||'•')+'</span><span class="tx">'+esc(x.text)
    +(x.jump&&safeUrl(x.jump)?' · <a href="'+esc(x.jump)+'" target="_blank" rel="noopener noreferrer">open</a>':'')+'</span><time>'+esc(ago(x.at))+'</time></div>').join('')
@@ -31802,7 +32333,8 @@ function render(d){
  const steps=[['1 · Tell members','/outage alert problem:'],['2 · Team is on it','/outage update eta:30m note:'],
   ['3 · All clear','/outage resolved note:'],['Check everything','/outage status']];
  const cats=[['🧾 Slips & picks',[['/pick','Log a slip by hand'],['/track pick_id:','Leg by leg: what the bot is following'],['/inbox','Slips that need a person'],['/result pick_id: outcome:','Settle a slip yourself'],['/calc slip pick_id:','How each leg has hit lately']]],
-  ['🧰 Staff tools',[['/staff tickets channel channel:','Turn on tickets (fix + close buttons)'],['/staff tickets list','Open tickets with links'],['/staff blacklist add name:','Flag a player, team or situation'],['/staff blacklist list','Everything on the list'],['/staff announce','Write, preview, post or schedule'],['/staff warn member: reason:','Log a warning (DM optional)'],['/staff modlog member:','One person\'s history'],['/staff badge give member: text:','VIP or custom badge']]],
+  ['🧰 Staff tools',[['/staff tickets channel channel:','Turn on tickets (fix + close buttons)'],['/staff tickets list','Open tickets with links'],['/staff tickets assign ticket: member:','Hand a ticket to someone'],
+['/staff lookup member:','Everything about one member'],['/staff report','The weekly staff report, now'],['/staff background scene:','The group\'s default background'],['/staff blacklist add name:','Flag a player, team or situation'],['/staff blacklist list','Everything on the list'],['/staff announce','Write, preview, post or schedule'],['/staff warn member: reason:','Log a warning (DM optional)'],['/staff modlog member:','One person\'s history'],['/staff badge give member: text:','VIP or custom badge']]],
   ['👥 Staff & access',[['/dashboard section:Admin health','Your own 12-hour link to this page'],['/links add name: url:','Add to the toolbox'],['/admin panel','Every server switch in one place'],['/admin check','Why isn\'t a channel logging slips?']]],
   ['⚙️ Server setup',[['/outage channels','Admin + member alert channels, ping role'],['/admin setup','Channels and features, step by step'],['/admin status','Version, uptime, connections'],['/backups','Nightly backup to a channel']]],
   ['🛡️ Developer only',[['/developer status','You, the owners, lockdown, removed people'],['/developer addowner member:','Make someone an owner'],['/developer lockdown on:True','Staff tools: you and the owners only'],['/developer remove member:','Take one person\'s staff access'],['/developer newkey','Swap the dashboard key'],['/developer asklimit per_day:','Daily question limit'],['/developer quota','Questions per person (tiers or one person)'],['/developer title text:','Your badge title']]]];
@@ -31848,6 +32380,12 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-tg]'
   if(r.ok&&j.ok){b.classList.toggle('on',j.on);b.setAttribute('aria-pressed',j.on?'true':'false');const m=$('#tgmsg');if(m)m.textContent=(b.textContent||'')+' is now '+(j.on?'on':'off')+'.'}
   else{const m=$('#tgmsg');if(m)m.textContent=j.why||'That didn\'t work. Try again.'}}catch(x){const m=$('#tgmsg');if(m)m.textContent='Couldn\'t reach the bot.'}
  b.disabled=false});
+document.addEventListener('input',e=>{if(e.target&&e.target.id==='hq'){HQ=e.target.value.trim().toLowerCase();const pos=e.target.selectionStart;if(LAST)render(LAST);
+  const q=document.getElementById('hq');if(q){q.focus();try{q.setSelectionRange(pos,pos)}catch(x){}}}});
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-bgset]');if(!b)return;
+ try{const r=await fetch('/api/staff/theme',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-PB-Staff':'1'},
+  body:JSON.stringify({bg:b.getAttribute('data-bgset')})});const j=await r.json().catch(()=>({}));
+  if(r.ok&&j.ok){document.querySelectorAll('[data-bgset]').forEach(x=>x.classList.toggle('on',x===b));if(window.pbBgDefault)pbBgDefault(j.bg)}}catch(x){}});
 document.addEventListener('click',e=>{const f=e.target.closest('[data-f]');if(f){HF=f.getAttribute('data-f');if(LAST)render(LAST);}});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-copy]');if(!b)return;
  const t=b.getAttribute('data-copy');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{b.textContent='Copied';
@@ -31859,6 +32397,28 @@ async function load(){try{const r=await fetch('/api/staff.json',{credentials:'sa
  if(!JUMPED&&location.hash.length>1){JUMPED=true;const t=document.getElementById(location.hash.slice(1));if(t)t.scrollIntoView({behavior:'smooth',block:'start'})}}
  catch(e){$('#upd').textContent='offline? retrying…'}}
 load();setInterval(load,30000);
+</script><script>
+(function(){const BG=[['classic','Classic court','The original purple court'],['arena','Arena lights','Spotlights over the floor'],['neon','Neon city','Skyline after dark'],['galaxy','Galaxy','Stars and a nebula'],['luxe','Gold luxe','Black and gold, high roller'],['aurora','Aurora','Northern lights drifting'],['gridiron','Gridiron','Game-night turf'],['vegas','Vegas sunset','Synthwave sun and palms'],['midnight','Midnight','Clean and quiet']];const KEY='pb_bg';
+ const get=()=>{try{return localStorage.getItem(KEY)}catch(e){return null}};
+ const set=v=>{try{v?localStorage.setItem(KEY,v):localStorage.removeItem(KEY)}catch(e){}};
+ let DEF='classic';const apply=v=>{const b=BG.some(x=>x[0]===v)?v:'classic';document.documentElement.dataset.bg=b;return b};
+ apply(get()||DEF);
+ window.pbBgDefault=v=>{if(v&&BG.some(x=>x[0]===v))DEF=v;if(!get())apply(DEF)};
+ const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e};
+ const box=el('div','bgpick');box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');box.setAttribute('aria-label','Pick a background');
+ const bp=el('div','bp');box.append(bp);document.body.append(box);
+ function draw(){bp.replaceChildren();const cur=document.documentElement.dataset.bg;
+  bp.append(el('h3',null,'🎨 Background'),el('div','sub','Pick the scene behind the page. It\'s saved on this device only.'+(DEF!=='classic'?' The group default is '+(BG.find(x=>x[0]===DEF)||[0,DEF])[1]+'.':'')));
+  const g=el('div','grid9');
+  for(const [k,name,note] of BG){const b=el('button','bgt'+(k===cur?' on':''));b.type='button';b.setAttribute('data-bgp',k);b.setAttribute('aria-pressed',k===cur?'true':'false');
+   const fx=el('div','bgfx');fx.append(el('i'),el('i'),el('i'));const lb=el('span','lb');lb.append(el('b',null,name),el('i',null,note));
+   b.append(fx,lb,el('span','ck','ON'));requestAnimationFrame(()=>b.style.setProperty('--sc',String((b.clientWidth||170)/1280)));b.addEventListener('click',()=>{set(k);apply(k);draw()});g.append(b)}
+  const r=el('div','row2');const d=el('button',null,'Use the group default');d.type='button';d.addEventListener('click',()=>{set(null);apply(DEF);draw()});
+  const c=el('button',null,'Done');c.type='button';c.addEventListener('click',close);r.append(d,c);bp.append(g,r)}
+ function open(){draw();box.classList.add('on')}function close(){box.classList.remove('on')}
+ box.addEventListener('click',e=>{if(e.target===box)close()});document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+ document.querySelectorAll('[data-bgbtn]').forEach(b=>b.addEventListener('click',open));
+})();
 </script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace(
     "{{LOGO}}", DASH_LOGO_SVG).replace("{{COURT_D}}", dash_court("#a27bff", 0.06)).replace(
     "{{COURT_L}}", dash_court("#7B3FE4", 0.08)).replace("{{COURT_H}}", dash_court("#ffffff", 0.10))
@@ -38336,6 +38896,10 @@ def tickets_db() -> None:
                     channel_id INTEGER, message_id INTEGER, status TEXT DEFAULT 'open', claimed_by TEXT,
                     opened_at TEXT, closed_at TEXT, closed_by TEXT, note TEXT)""")
     db().execute("CREATE INDEX IF NOT EXISTS tickets_key ON tickets (guild_id, key, status)")
+    cols = {r[1] for r in db().execute("PRAGMA table_info(tickets)")}
+    for col, kind in (("reminded", "INTEGER DEFAULT 0"), ("claimed_id", "INTEGER")):
+        if col not in cols:
+            db().execute(f"ALTER TABLE tickets ADD COLUMN {col} {kind}")
 
 
 def ticket_channel(client, guild_id: int):
@@ -38598,6 +39162,7 @@ async def tickets_job(client, now: Optional[datetime] = None) -> None:
                 log.warning("Ticket post failed", exc_info=True)
         if new:
             activity_add(gid, "staff", f"🎫 {len(new)} new ticket{'s' if len(new) != 1 else ''} opened")
+        await ticket_reminders(client, gid, ch, now)
 
 
 async def ticket_refresh(client, tid: int) -> None:
@@ -38616,6 +39181,46 @@ async def ticket_refresh(client, tid: int) -> None:
 EXTRA_JOBS.append(("tickets", tickets_job))
 
 
+TICKET_REMIND_H = env_int("TICKET_REMIND_HOURS", 6, 1, 168)
+
+
+async def ticket_reminders(client, gid: int, ch, now: Optional[datetime] = None) -> None:
+    """A nudge in the ticket channel when a ticket sits open TICKET_REMIND_HOURS (and again after a day)."""
+    now = now or datetime.now(timezone.utc)
+    for t in db().execute("SELECT * FROM tickets WHERE guild_id = ? AND status != 'closed'", (gid,)).fetchall():
+        try:
+            age = now - datetime.fromisoformat(t["opened_at"])
+        except (TypeError, ValueError):
+            continue
+        step = int(t["reminded"] or 0)
+        due = 2 if age >= timedelta(hours=max(24, TICKET_REMIND_H * 2)) and step < 2 else \
+            1 if age >= timedelta(hours=TICKET_REMIND_H) and step < 1 else 0
+        if not due:
+            continue
+        db().execute("UPDATE tickets SET reminded = ? WHERE id = ?", (due, t["id"]))
+        db().commit()
+        hours = int(age.total_seconds() // 3600)
+        link = f"https://discord.com/channels/{gid}/{t['channel_id']}/{t['message_id']}" if t["message_id"] else ""
+        who_txt = (f" <@{t['claimed_id']}> has it." if t["claimed_id"] else
+                   f" {clip(t['claimed_by'], 40)} has it." if t["claimed_by"] else " Nobody has claimed it yet.")
+        role = get_setting(gid, "ticket_role")
+        ping = f"<@&{role}> " if role and not t["claimed_id"] and not t["claimed_by"] else ""
+        try:
+            await ch.send(f"{ping}⏰ Ticket **#{t['id']}** has been open {hours} hours: {clip(t['title'], 90)}.{who_txt} {link}",
+                          allowed_mentions=discord.AllowedMentions(everyone=False, users=True,
+                                                                   roles=[discord.Object(id=int(role))] if ping else False))
+        except Exception:
+            log.warning("Ticket reminder failed", exc_info=True)
+
+
+def ticket_leaders(guild_id: int, days: int = 30) -> list:
+    tickets_db()
+    return [{"who": r["closed_by"], "n": r["n"]} for r in db().execute(
+        """SELECT closed_by, COUNT(*) AS n FROM tickets WHERE guild_id = ? AND status = 'closed' AND closed_by IS NOT NULL
+           AND closed_by != 'the bot' AND closed_at >= ? GROUP BY closed_by ORDER BY n DESC LIMIT 5""",
+        (guild_id, iso(datetime.now(timezone.utc) - timedelta(days=days))))]
+
+
 def staff_tickets(guild_id: int) -> dict:
     try:
         tickets_db()
@@ -38631,7 +39236,7 @@ def staff_tickets(guild_id: int) -> dict:
                       "at": t["opened_at"],
                       "link": f"https://discord.com/channels/{guild_id}/{t['channel_id']}/{t['message_id']}" if t["message_id"] else None}
                      for t in rows],
-            "closed_week": int(week or 0)}
+            "closed_week": int(week or 0), "leaders": ticket_leaders(guild_id)}
 
 
 tickets_group = app_commands.Group(name="tickets", description="Needs-attention tickets for the staff", parent=staff_group)
@@ -38664,8 +39269,177 @@ async def tickets_list(interaction: discord.Interaction):
     lines = [f"{TICKET_ICON.get(t['kind'], '🎫')} **#{t['id']}** {clip(t['title'], 70)}" + (f" · 🙋 {t['who']}" if t["status"] == "claimed" else "")
              + (f" · [open]({t['link']})" if t["link"] else "") for t in d["open"]]
     head = (f"Tickets go to {d['channel']}." if d["channel"] else "No ticket channel yet: `/staff tickets channel`.")
+    if d.get("leaders"):
+        head += "\n🏅 Most closed (30 days): " + ", ".join(f"{clip(x['who'], 30)} {x['n']}" for x in d["leaders"])
     await interaction.response.send_message(clip(head + "\n" + ("\n".join(lines) or "✅ No open tickets.")
                                                  + f"\n{d['closed_week']} closed this week.", 1900), ephemeral=True)
+
+
+
+@tickets_group.command(name="assign", description="Give a ticket to someone on the staff")
+@app_commands.describe(ticket="The ticket number", member="Who takes it")
+@sec_staff_only
+async def tickets_assign(interaction: discord.Interaction, ticket: int, member: discord.Member):
+    tickets_db()
+    t = db().execute("SELECT * FROM tickets WHERE id = ? AND guild_id = ?", (ticket, interaction.guild_id)).fetchone()
+    if t is None:
+        await interaction.response.send_message("No ticket with that number.", ephemeral=True)
+        return
+    if not sec_staff(member):
+        await interaction.response.send_message("Tickets go to staff (mods and up).", ephemeral=True)
+        return
+    db().execute("UPDATE tickets SET status = 'claimed', claimed_by = ?, claimed_id = ? WHERE id = ?",
+                 (clip(member.display_name, 40), member.id, t["id"]))
+    db().commit()
+    await ticket_refresh(interaction.client, t["id"])
+    try:
+        link = f"https://discord.com/channels/{t['guild_id']}/{t['channel_id']}/{t['message_id']}" if t["message_id"] else ""
+        await member.send(f"🎫 {clip(interaction.user.display_name, 40)} gave you ticket #{t['id']}: {clip(t['title'], 90)} {link}")
+    except Exception:
+        pass
+    await audit(interaction.client, interaction.guild_id, f"{who(interaction)} assigned ticket #{t['id']} to {clip(member.display_name, 40)}.")
+    await interaction.response.send_message(f"🎫 Ticket #{t['id']} is now {clip(member.display_name, 40)}'s.", ephemeral=True)
+
+
+def member_lookup_embed(guild_id: int, member) -> "discord.Embed":
+    key = str(member.id)
+    e = discord.Embed(title=f"🔎 {clip(member.display_name, 60)}", color=BRAND)
+    st = compute_stats(guild_id, key)
+    if st:
+        s0 = st[0]
+        e.add_field(name="Record", value=f"{record_line(s0)} · {signed(s0['net'])} · ROI {s0['roi']:+.1f}%")
+    else:
+        e.add_field(name="Record", value="No slips yet")
+    last = db().execute("SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY id DESC LIMIT 1",
+                        (guild_id, key)).fetchone()
+    n_open = db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND bettor_key = ? AND status = 'open'",
+                          (guild_id, key)).fetchone()["n"]
+    e.add_field(name="Open slips", value=str(n_open))
+    if last is not None:
+        e.add_field(name="Last slip", value=f"<t:{int(datetime.fromisoformat(last['created_at']).timestamp())}:R> · "
+                                            f"{clip(shown_desc(last), 60)}", inline=False)
+    mods = modlog_rows(guild_id, 100, member.id)
+    if mods:
+        counts = {}
+        for r in mods:
+            counts[r["kind"]] = counts.get(r["kind"], 0) + 1
+        e.add_field(name="Mod log", value=" · ".join(f"{k} {v}" for k, v in counts.items()) +
+                    f"\nLatest: {mods[0]['kind']} ({clip(mods[0]['reason'] or 'no reason', 60)})", inline=False)
+    else:
+        e.add_field(name="Mod log", value="Clean", inline=True)
+    badge = people_badge(guild_id, key)
+    e.add_field(name="Badge", value=badge["t"] if badge else "None")
+    try:
+        al = ask_allowance(guild_id, member.id, member)
+        e.add_field(name="Questions today", value=f"{ask_user_used(guild_id, member.id)} of "
+                                                  f"{'unlimited' if al['per_day'] < 0 else al['per_day']} ({al.get('tier') or '-'})")
+    except Exception:
+        pass
+    try:
+        bl_db()
+        hits = db().execute("SELECT COUNT(*) AS n FROM blacklist_hits WHERE guild_id = ? AND who = ?",
+                            (guild_id, clip(member.display_name, 40))).fetchone()["n"]
+        if hits:
+            e.add_field(name="Blacklist hits", value=str(hits))
+    except Exception:
+        pass
+    joined = getattr(member, "joined_at", None)
+    if joined:
+        e.set_footer(text=f"Joined {joined.astimezone(TZ):%b %-d, %Y} · only staff see this")
+    else:
+        e.set_footer(text="Only staff see this")
+    return e
+
+
+@staff_group.command(name="lookup", description="Everything about one member: slips, mod log, badge, questions")
+@app_commands.describe(member="Who")
+@sec_staff_only
+async def staff_lookup(interaction: discord.Interaction, member: discord.Member):
+    await interaction.response.send_message(embed=member_lookup_embed(interaction.guild_id, member), ephemeral=True)
+
+
+@staff_group.command(name="background", description="The group's default background on the dashboards")
+@app_commands.describe(scene="Pick one (each person can still pick their own)")
+@app_commands.choices(scene=[app_commands.Choice(name=n, value=k) for k, n, _ in DASH_BGS])
+@sec_staff_only
+async def staff_background(interaction: discord.Interaction, scene: app_commands.Choice[str]):
+    if not (is_owner(interaction.user) or is_admin(interaction)):
+        await interaction.response.send_message("Owners and admins set the group's background.", ephemeral=True)
+        return
+    set_setting(interaction.guild_id, "dash_bg", scene.value)
+    await audit(interaction.client, interaction.guild_id, f"{who(interaction)} set the dashboard background to **{scene.name}**.")
+    await interaction.response.send_message(f"🎨 The dashboards now default to **{scene.name}**. Anyone can still pick their own "
+                                            "with the 🎨 button.", ephemeral=True)
+
+
+def staff_report_embed(guild_id: int, now: Optional[datetime] = None) -> "discord.Embed":
+    now = now or datetime.now(timezone.utc)
+    since = iso(now - timedelta(days=7))
+    tickets_db()
+    opened = db().execute("SELECT COUNT(*) AS n FROM tickets WHERE guild_id = ? AND opened_at >= ?", (guild_id, since)).fetchone()["n"]
+    closed = db().execute("SELECT COUNT(*) AS n FROM tickets WHERE guild_id = ? AND status = 'closed' AND closed_at >= ?",
+                          (guild_id, since)).fetchone()["n"]
+    still = db().execute("SELECT COUNT(*) AS n FROM tickets WHERE guild_id = ? AND status != 'closed'", (guild_id,)).fetchone()["n"]
+    leaders = ticket_leaders(guild_id, 7)
+    sc = scan_log_stats(guild_id, 7)
+    mods = [r for r in modlog_rows(guild_id, 200) if (r["at"] or "") >= since]
+    try:
+        bl_db()
+        hits = db().execute("SELECT COUNT(*) AS n FROM blacklist_hits WHERE guild_id = ? AND at >= ?", (guild_id, since)).fetchone()["n"]
+    except Exception:
+        hits = 0
+    slips = db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND created_at >= ?", (guild_id, since)).fetchone()["n"]
+    asks = sum(x["n"] for x in staff_usage(guild_id, 7))
+    try:
+        up = staff_uptime(json.loads(get_setting(0, "outage_log") or "[]"), now).get("d7")
+    except Exception:
+        up = None
+    e = discord.Embed(title="🗂️ Weekly staff report", color=BRAND,
+                      description=f"The last 7 days, up to <t:{int(now.timestamp())}:f>.")
+    e.add_field(name="🎫 Tickets", value=f"{opened} opened · {closed} closed · {still} still open")
+    e.add_field(name="🏅 Most closed", value=", ".join(f"{clip(x['who'], 24)} {x['n']}" for x in leaders) or "Nobody yet")
+    e.add_field(name="📸 Screenshots", value=f"{sc['ok']} clean · {sc['unsure']} not sure · {sc['failed']} failed")
+    e.add_field(name="🧾 Slips logged", value=str(slips))
+    e.add_field(name="💬 Questions", value=str(asks))
+    e.add_field(name="🛡️ Mod log", value=(" · ".join(f"{k} {sum(1 for r in mods if r['kind'] == k)}"
+                                                    for k in sorted({r['kind'] for r in mods})) or "Quiet"))
+    e.add_field(name="🚫 Blacklist hits", value=str(hits))
+    e.add_field(name="⏱️ Uptime", value=("–" if up is None else f"{up:.2f}%"))
+    e.set_footer(text="Every Monday morning · turn it off in the staff page's feature switches")
+    return e
+
+
+STAFF_REPORT_HOUR = env_int("STAFF_REPORT_HOUR", 9, 0, 23)
+SERVER_TOGGLES.append(("staffreport", "Weekly staff report (Mondays)", "optout"))
+
+
+async def staff_report_job(client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    if local.weekday() != 0 or local.hour < STAFF_REPORT_HOUR:
+        return
+    week = week_id(local)
+    for g in list(getattr(client, "guilds", []) or []):
+        gid = g.id
+        if not server_on(gid, "staffreport") or get_setting(gid, "staff_report_week") == week:
+            continue
+        ch = ticket_channel(client, gid) or outage_channel(client, gid, "admin")
+        if ch is None:
+            continue
+        set_setting(gid, "staff_report_week", week)
+        try:
+            await ch.send(embed=staff_report_embed(gid, now), allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Staff report failed", exc_info=True)
+
+
+EXTRA_JOBS.append(("staffreport", staff_report_job))
+
+
+@staff_group.command(name="report", description="The weekly staff report, right now")
+@sec_staff_only
+async def staff_report_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=staff_report_embed(interaction.guild_id), ephemeral=True)
 
 
 bot.tree.add_command(staff_group)
