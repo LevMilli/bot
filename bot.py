@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r37"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r38"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -5970,12 +5970,130 @@ def progress_icon(e: dict) -> str:
 SWEAT_HOURS = 36
 
 
+# ---- r38 live sweat 2.0: what each leg still needs, its pace, close calls, halftime check-ins ----------------
+
+GAME_SHAPE = {"basketball/nba": (4, 12), "basketball/wnba": (4, 10), "basketball/mens-college-basketball": (2, 20),
+              "basketball/womens-college-basketball": (4, 10), "football/nfl": (4, 15),
+              "football/college-football": (4, 15), "hockey/nhl": (3, 20)}
+
+
+def game_fraction(ev: Optional[dict], path: Optional[str]) -> Optional[float]:
+    """How much of a live game is done (0 to 1), from its period and clock; None when it can't be told."""
+    if not ev or ev.get("state") != "in" or not path:
+        return None
+    try:
+        per = int(ev.get("period") or 0)
+    except (TypeError, ValueError):
+        return None
+    det = str(ev.get("detail") or "")
+    if per <= 0:
+        return None
+    if path == "baseball/mlb":
+        half = 0.5 if re.search(r"\b(bot|bottom|mid|middle|end)\b", det, re.I) else 0.0
+        return max(0.0, min(1.0, (per - 1 + half) / 9))
+    shape = GAME_SHAPE.get(path)
+    if not shape:
+        return None
+    n, length = shape
+    if per > n:
+        return 1.0
+    if re.search(r"half ?time|\bhalf\b", det, re.I) and not re.search(r"\d{1,2}:\d{2}", det):
+        return 0.5
+    m = re.search(r"(\d{1,2}):(\d{2})", det)
+    if m:
+        left = int(m.group(1)) + int(m.group(2)) / 60
+    elif re.search(r"\bend\b", det, re.I):
+        left = 0.0
+    else:
+        return None
+    return max(0.0, min(1.0, ((per - 1) * length + (length - min(left, length))) / (n * length)))
+
+
+def _leg_num(e: dict):
+    num = e.get("num") or {}
+    try:
+        return float(num["value"]), float(num["line"]), num.get("side") or "over"
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _unit(e: dict) -> str:
+    u = str((e.get("track_info") or {}).get("stat") or "").strip()
+    return (" " + u.lower()) if u and len(u) <= 24 else ""
+
+
+def leg_need(e: dict) -> str:
+    """'needs 12 more rec yds' / '3 to spare' for an open stat leg with a live number; '' otherwise."""
+    if e.get("status") != "open":
+        return ""
+    n = _leg_num(e)
+    if not n:
+        return ""
+    v, line, side = n
+    if side == "over":
+        target = math.floor(line) + 1 if line % 1 else line
+        need = round(target - v, 1)
+        return "" if need <= 0 else f"needs {need:g} more{_unit(e)}"
+    cap = math.floor(line) if line % 1 else line - 1
+    room = round(cap - v, 1)
+    return "over the line" if room < 0 else f"{room:g} to spare"
+
+
+def leg_pace(e: dict) -> str:
+    """'on pace for 78' while the game is on (only for over legs, after a fifth of the game)."""
+    n = _leg_num(e)
+    if not n or e.get("status") != "open":
+        return ""
+    v, line, side = n
+    frac = game_fraction(e.get("event"), e.get("path") or (e.get("track_info") or {}).get("path"))
+    if frac is None or frac < 0.2 or frac >= 0.97 or v <= 0:
+        return ""
+    pace = v / frac
+    return f"on pace for {pace:.0f}" if pace >= 10 else f"on pace for {pace:.1f}".replace(".0", "")
+
+
+def leg_on_pace(e: dict) -> Optional[bool]:
+    if e.get("status") == "hit" or e.get("live") in ("hit", "ahead"):
+        return True
+    if e.get("status") == "miss" or e.get("live") in ("miss", "behind"):
+        return False
+    n = _leg_num(e)
+    frac = game_fraction(e.get("event"), e.get("path") or (e.get("track_info") or {}).get("path"))
+    if not n or not frac:
+        return None
+    v, line, side = n
+    proj = v / frac if frac > 0 else v
+    return proj > line if side == "over" else proj < line
+
+
+def close_call(e: dict) -> Optional[str]:
+    """A live leg right on the edge: 'needs 1 more' on an over, or almost out of room on an under late."""
+    if e.get("status") != "open" or not e.get("in_play"):
+        return None
+    n = _leg_num(e)
+    if not n:
+        return None
+    v, line, side = n
+    near = max(1.0, round(0.1 * line))
+    need = leg_need(e)
+    if side == "over":
+        target = math.floor(line) + 1 if line % 1 else line
+        left = target - v
+        return need if 0 < left <= near else None
+    frac = game_fraction(e.get("event"), e.get("path") or (e.get("track_info") or {}).get("path"))
+    cap = math.floor(line) if line % 1 else line - 1
+    room = cap - v
+    return need if frac is not None and frac >= 0.75 and 0 <= room <= near else None
+
+
 def sweat_embed(p, entries: list[dict], ended: bool = False) -> discord.Embed:
     hits = sum(1 for e in entries if e["status"] == "hit" or (e["status"] == "open" and e["live"] == "hit"))
     misses = sum(1 for e in entries if e["status"] == "miss")
     lines = []
     for e in entries:
-        lines.append(f"{progress_icon(e)} **{clip(e['text'], 70)}**" + (f"\n　{e['line']}" if e["line"] else ""))
+        extra = " · ".join(x for x in (leg_need(e), leg_pace(e)) if x)
+        lines.append(f"{progress_icon(e)} **{clip(e['text'], 70)}**" + (f"\n　{e['line']}" if e["line"] else "")
+                     + (f"\n　*{extra}*" if extra else ""))
     color = 0xE74C3C if misses else (0x2ECC71 if p["status"] == "win" else BRAND)
     title = f"🥵 Sweat · Pick #{p['id']} · {p['bettor_name']}"
     e = discord.Embed(title=clip(title, 256), color=color,
@@ -6056,6 +6174,7 @@ async def update_sweats(client: discord.Client, now: Optional[datetime] = None) 
         entries = await cached_progress(p, ttl=90)
         state = sweat_state(entries)
         old = json.loads(s["state"] or "{}")
+        state.update({k: v for k, v in old.items() if k[:1] in ("c", "h")})     # close calls / halftimes already said
         done = p["status"] != "open" or s["created_at"] < cutoff
         try:
             await channel.get_partial_message(s["message_id"]).edit(
@@ -6082,6 +6201,33 @@ async def update_sweats(client: discord.Client, now: Optional[datetime] = None) 
                 await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
             except Exception:
                 pass
+        if not done:
+            for e in entries:                                      # close calls: once per leg
+                cc = close_call(e)
+                if cc and f"c{e['n']}" not in state:
+                    state[f"c{e['n']}"] = "1"
+                    try:
+                        await channel.send(f"😰 **Close call** · {p['bettor_name']}: {clip(e['text'], 80)} {cc} "
+                                           f"(pick #{p['id']})", allowed_mentions=discord.AllowedMentions.none())
+                    except Exception:
+                        pass
+            halves = {}
+            for e in entries:                                      # halftime check-in: once per game
+                ev = e.get("event") or {}
+                if ev.get("status_name") == "STATUS_HALFTIME" and ev.get("id") and f"h{ev['id']}" not in state:
+                    halves[ev["id"]] = ev
+            for evid, ev in halves.items():
+                state[f"h{evid}"] = "1"
+                marks = [leg_on_pace(e) for e in entries]
+                good = sum(1 for m in marks if m)
+                known = sum(1 for m in marks if m is not None)
+                try:
+                    await channel.send(f"⏸️ **Halftime check** · pick #{p['id']} ({p['bettor_name']}): "
+                                       f"{good} of {len(entries)} leg{'s' if len(entries) != 1 else ''} on pace"
+                                       + (f" ({len(entries) - known} not started)" if known < len(entries) else "")
+                                       + f" · {short_game(ev)}", allowed_mentions=discord.AllowedMentions.none())
+                except Exception:
+                    pass
         db().execute("UPDATE sweats SET state = ?, ended_at = ? WHERE id = ?",
                      (json.dumps(state), now_iso() if done else None, s["id"]))
         db().commit()
@@ -19809,6 +19955,7 @@ async def dash_live(guild_id: int) -> dict:
             ticker.append({"id": p["id"], "who": clip(p["bettor_name"], 40), "leg": clip(e.get("text") or "", 80),
                            "label": clip(leg_label(e.get("text") or ""), 30),
                            "value": num.get("value"), "line": num.get("line"), "side": num.get("side"),
+                           "need": leg_need(e), "pace": leg_pace(e),
                            "sub": clip(e.get("sub") or "", 60), "live": e.get("live")})
     order = {"in": 0, "pre": 1, "post": 2}
     gl = sorted(games.values(), key=lambda g: (order[g["state"]], g["start"], -g["legs"]))[:16]
@@ -20594,7 +20741,7 @@ function legDot(l){if(l.status==='hit')return h('span',{class:'lg hit'},'✓');i
 function legBar(l){if(l.value==null||!l.line)return null;const w=Math.max(3,Math.min(100,l.value/l.line*100));
  const good=l.side==='under'?l.value<l.line:l.value>l.line;return h('div',{class:'bar'},h('i',{style:'width:'+w+'%;background:'+(good?'var(--up)':'var(--brand2)')}))}
 function tickerLeg(t){return h('button',{class:'leg',type:'button',onclick:()=>go('#/s/'+t.id)},legDot(Object.assign({in_play:true},t)),
-  h('div',{style:'min-width:0'},h('div',{class:'t'},h('b',null,t.who),' · ',t.leg),h('div',{class:'s',text:t.sub||'In play'}),legBar(t)),
+  h('div',{style:'min-width:0'},h('div',{class:'t'},h('b',null,t.who),' · ',t.leg),h('div',{class:'s',text:[t.sub||'In play',t.need,t.pace].filter(Boolean).join(' · ')}),legBar(t)),
   t.value!=null?h('span',{class:'v'},String(t.value)+' / '+String(t.line)):h('span',{class:'v faint'},''))}
 
 function gameTile(g){const live=g.state==='in';const sc=v=>v==null?'':String(+v);
@@ -38751,6 +38898,72 @@ def my_pnl_embed(guild_id: int, user) -> tuple:
     e.set_footer(text="Only you can see this. Play within what you're happy to lose.")
     return e, rows
 
+
+
+# ---- r38: "Riding tonight" — one evening post of the slips with legs in today's games (opt-in) -------------
+
+RIDING_HOUR = env_int("RIDING_HOUR", 17, 0, 23)
+SERVER_TOGGLES.append(("riding", "Riding tonight post (evening)", "optin"))
+
+
+async def riding_embed(guild_id: int, now: Optional[datetime] = None) -> Optional["discord.Embed"]:
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(TZ).date()
+    rows = db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND created_at >= ?
+                           ORDER BY id DESC LIMIT 40""", (guild_id, iso(now - timedelta(days=7)))).fetchall()
+    lines, hidden = [], 0
+    for p in rows:
+        try:
+            entries = await cached_progress(p, ttl=600)
+        except Exception:
+            continue
+        tonight = []
+        for e in entries:
+            ev = e.get("event") or {}
+            when = event_time(ev) if ev else None
+            if e.get("status") == "open" and when and when.astimezone(TZ).date() == today and ev.get("state") in ("pre", "in"):
+                tonight.append(when)
+        if not tonight:
+            continue
+        if sec_secret(p):
+            hidden += 1
+            continue
+        first = min(tonight).astimezone(TZ)
+        lines.append(f"**{clip(p['bettor_name'] or 'someone', 30)}** · {clip(shown_desc(p), 50)} · {len(tonight)} "
+                     f"leg{'s' if len(tonight) != 1 else ''} tonight, first at {first:%-I:%M %p}")
+    if not lines and not hidden:
+        return None
+    e = discord.Embed(title=f"🌙 Riding tonight · {len(lines) + hidden} slip{'s' if len(lines) + hidden != 1 else ''}",
+                      color=BRAND, description=clip("\n".join(lines[:25]) or "Only hidden slips tonight.", 4000))
+    if hidden:
+        e.add_field(name="Hidden", value=f"{hidden} hidden slip{'s' if hidden != 1 else ''} riding too")
+    e.set_footer(text="/sweat follows one live · /slip check for risk · Play it safe")
+    return e
+
+
+async def riding_job(client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    if local.hour < RIDING_HOUR:
+        return
+    for g in list(getattr(client, "guilds", []) or []):
+        gid = g.id
+        if not server_on(gid, "riding") or get_setting(gid, "riding_last") == local.date().isoformat():
+            continue
+        cid = get_setting(gid, "today_channel")
+        ch = client.get_channel(int(cid)) if cid and str(cid).isdigit() else None
+        if ch is None:
+            continue
+        set_setting(gid, "riding_last", local.date().isoformat())
+        e = await riding_embed(gid, now)
+        if e is not None:
+            try:
+                await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                log.warning("Riding tonight post failed", exc_info=True)
+
+
+EXTRA_JOBS.append(("riding", riding_job))
 
 slip_group = app_commands.Group(name="slip", description="Check a slip, vote on Slip of the Day, see your own P&L",
                                 guild_only=True)
