@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-13 r32"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r32.1"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -1987,7 +1987,7 @@ class SlipDraftButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sd:(
                 return
             await interaction.response.send_modal(DraftEditModal(self.message_id, d))
             return
-        gate = ask_gate(interaction.guild_id, interaction.user.id)
+        gate = ask_gate(interaction.guild_id, interaction.user.id, interaction.user)
         if gate:
             await interaction.response.send_message(gate, ephemeral=True)
             return
@@ -2029,26 +2029,109 @@ def ask_used(guild_id: int) -> int:
         return 0
 
 
-def ask_refund(guild_id: int) -> None:
+def ask_refund(guild_id: int, user_id: Optional[int] = None) -> None:
     """Give a question back (the screenshot had nothing the AI could look at)."""
     key = f"asks:{datetime.now(TZ).date().isoformat()}"
     used = ask_used(guild_id)
     if used > 0:
         set_setting(guild_id, key, str(used - 1))
+    if user_id:
+        mine = ask_user_used(guild_id, user_id)
+        if mine > 0:
+            set_setting(guild_id, f"askuser:{datetime.now(TZ).date().isoformat()}:{int(user_id)}", str(mine - 1))
 
 
-def ask_gate(guild_id: int, user_id: int) -> Optional[str]:
-    """Shares the @mention question limits. Returns why not, or None and counts the question."""
-    wait = bot.ask_cooldowns.get(user_id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
-    if wait > 0:
-        return f"Give me {int(wait) + 1}s before the next question."
-    count_key = f"asks:{datetime.now(TZ).date().isoformat()}"
+# Questions per person per day, by how active they've been in the last 30 days. Mods and owners are unlimited.
+ASK_TIERS = [("New", 0, 5), ("Regular", 5, 10), ("Active", 15, 20), ("Core", 40, 35)]   # (name, score from, per day)
+
+
+def ask_tiers(guild_id: int) -> list:
+    """The tiers with the owner's numbers (/owner quota)."""
+    try:
+        over = json.loads(get_setting(guild_id, "ask_tiers") or "{}")
+    except ValueError:
+        over = {}
+    return [(name, start, int(over.get(name, per))) for name, start, per in ASK_TIERS]
+
+
+def ask_activity(guild_id: int, user_id: int) -> dict:
+    """{score, picks, days}: slips logged in the last 30 days, plus 2 points for every day they logged one."""
+    since = iso(datetime.now(timezone.utc) - timedelta(days=30))
+    r = db().execute("""SELECT COUNT(*) AS n, COUNT(DISTINCT substr(created_at, 1, 10)) AS d FROM picks
+                        WHERE guild_id = ? AND (bettor_id = ? OR logged_by = ?) AND created_at >= ?""",
+                     (guild_id, int(user_id), int(user_id), since)).fetchone()
+    picks, days = int(r["n"] or 0), int(r["d"] or 0)
+    return {"score": picks + 2 * days, "picks": picks, "days": days}
+
+
+def ask_user_used(guild_id: int, user_id: int) -> int:
+    try:
+        return int(get_setting(guild_id, f"askuser:{datetime.now(TZ).date().isoformat()}:{int(user_id)}") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def ask_allowance(guild_id: int, user_id: int, member=None) -> dict:
+    """{per_day (-1 = unlimited), tier, why, used, score}."""
+    used = ask_user_used(guild_id, user_id)
+    if member is not None and (is_owner(member) or sec_staff(member) or is_mod(member)):
+        return {"per_day": -1, "tier": "Staff", "why": "mods and owners are unlimited", "used": used, "score": None}
+    over = get_setting(guild_id, f"askcap:{int(user_id)}")
+    act = ask_activity(guild_id, user_id)
+    if over is not None and over.lstrip("-").isdigit():
+        n = int(over)
+        return {"per_day": n, "tier": "Custom", "why": "set by the owner", "used": used, "score": act["score"]}
+    tier = ask_tiers(guild_id)[0]
+    for t in ask_tiers(guild_id):
+        if act["score"] >= t[1]:
+            tier = t
+    return {"per_day": tier[2], "tier": tier[0], "why": f"{act['picks']} slips over {act['days']} days this month",
+            "used": used, "score": act["score"]}
+
+
+def ask_gate(guild_id: int, user_id: int, member=None) -> Optional[str]:
+    """Shares the @mention question limits. Returns why not, or None and counts the question. Mods and owners skip
+    every limit; everyone else gets an allowance that grows with how active they are."""
+    if member is None:
+        try:
+            g = bot.get_guild(int(guild_id))
+            member = g.get_member(int(user_id)) if g is not None else None
+        except Exception:
+            member = None
+    allow = ask_allowance(guild_id, user_id, member)
+    staff = allow["per_day"] == -1 and allow["tier"] == "Staff"
+    today = datetime.now(TZ).date().isoformat()
+    if not staff:
+        wait = bot.ask_cooldowns.get(user_id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
+        if wait > 0:
+            return f"Give me {int(wait) + 1}s before the next question."
+        if allow["per_day"] >= 0 and allow["used"] >= allow["per_day"]:
+            nxt = next(((n, p) for n, start, p in ask_tiers(guild_id) if allow["score"] is not None and start > allow["score"]), None)
+            more = (f" Keep logging slips to reach **{nxt[0]}** ({nxt[1]} a day)." if nxt and allow["tier"] != "Custom" else "")
+            return (f"That's your {allow['per_day']} question{'s' if allow['per_day'] != 1 else ''} for today "
+                    f"(**{allow['tier']}**). Logging slips, `/calc` and the numbers-only breakdowns don't count.{more}")
+    count_key = f"asks:{today}"
     used = int(get_setting(guild_id, count_key) or 0)
-    if used >= ask_limit(guild_id):
+    if not staff and used >= ask_limit(guild_id):
         return f"That's the server's {ask_limit(guild_id):,} questions for today. Back tomorrow."
     bot.ask_cooldowns[user_id] = time.monotonic()
     set_setting(guild_id, count_key, str(used + 1))
+    set_setting(guild_id, f"askuser:{today}:{int(user_id)}", str(allow["used"] + 1))
     return None
+
+
+def ask_top_today(guild_id: int, limit: int = 8) -> list:
+    """[{uid, n}] most questions today."""
+    pre = f"askuser:{datetime.now(TZ).date().isoformat()}:"
+    rows = db().execute("SELECT key, value FROM settings WHERE guild_id = ? AND key LIKE ?", (guild_id, pre + "%")).fetchall()
+    out = []
+    for r in rows:
+        try:
+            out.append({"uid": int(r["key"][len(pre):]), "n": int(r["value"])})
+        except (TypeError, ValueError):
+            continue
+    out.sort(key=lambda x: -x["n"])
+    return out[:limit]
 
 
 REVIEW_RULES = """Someone posted a slip and asked what you think. It is NOT logged as a pick, and may not \
@@ -2808,6 +2891,21 @@ async def _http_get_json(url: str, params: dict, session=None) -> dict:
     raise last
 
 
+def ev_odds(comp: dict) -> Optional[dict]:
+    """The game line ESPN shows with a game: {details 'KC -3.5', spread, total, provider} or None."""
+    o = (comp.get("odds") or [None])[0]
+    if not isinstance(o, dict) or not o:
+        return None
+    def num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+    out = {"details": str(o.get("details") or "")[:40], "spread": num(o.get("spread")), "total": num(o.get("overUnder")),
+           "provider": str((o.get("provider") or {}).get("name") or "")[:30]}
+    return out if out["spread"] is not None or out["total"] is not None else None
+
+
 def simplify_events(raw: dict) -> list[dict]:
     """Keep what grading needs from an ESPN scoreboard response."""
     events = []
@@ -2850,7 +2948,7 @@ def simplify_events(raw: dict) -> list[dict]:
                                                          "indoor": bool(venue.get("indoor"))}, "id": str(ev.get("id")), "date": ev.get("date") or "", "teams": teams,
                            "state": status.get("state") or "pre", "status_name": status.get("name") or "",
                            "final": bool(status.get("completed")) and status.get("state") == "post",
-                           "week": (ev.get("week") or {}).get("number"),
+                           "week": (ev.get("week") or {}).get("number"), "odds": ev_odds(comp),
                            "detail": status.get("shortDetail") or "",
                            "season_type": (ev.get("season") or {}).get("type"),
                            "season": (ev.get("season") or {}).get("year")})
@@ -19510,6 +19608,8 @@ def dash_app(web):
                     web.get("/staff", staff_page), web.get("/api/staff.json", staff_api),
                     web.get("/staff/logout", staff_logout), web.get("/api/staff/me", staff_me),
                     web.get("/api/staff/people.json", staff_people_api),
+                    web.get(r"/staff/avatar/{uid:\d+}.png", staff_avatar),
+                    web.get("/lines", lines_page), web.get("/api/lines.json", lines_api),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -19910,6 +20010,7 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
  <h2>🔒 Admin only <span class="astate" id="astate">admins and mods</span></h2>
  <ul class="alinks" id="alinks">
   <li><a href="/staff"><span class="ic">🛠️</span><span><b>Server Dashboard</b><i>Bot health, outages and tools</i></span></a></li>
+  <li><a href="/lines"><span class="ic">📈</span><span><b>Line Watch</b><i>Line moves · mods and owners</i></span></a></li>
  </ul>
  <p class="anote" id="anote">Admins and mods: run <b>/dashboard section:Admin health</b> in Discord once to unlock these.</p>
 </div></aside>
@@ -23045,7 +23146,7 @@ async def _build_log(interaction, sess):
 
 async def _build_ask(interaction, sess):
     """'Just ask': the usual slip breakdown, nothing logged. Skipping it afterwards counts as a pass."""
-    gate = ask_gate(interaction.guild_id, interaction.user.id)
+    gate = ask_gate(interaction.guild_id, interaction.user.id, interaction.user)
     if gate:
         await interaction.response.send_message(gate, ephemeral=True)
         return
@@ -24027,6 +24128,11 @@ import difflib
 TESSERACT = shutil.which("tesseract")
 GEMINI_API_KEY = env("GEMINI_API_KEY", "")
 GROQ_API_KEY = env("GROQ_API_KEY", "")                       # free at console.groq.com
+CEREBRAS_API_KEY = env("CEREBRAS_API_KEY", "")               # free at cloud.cerebras.ai
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", "")           # free models at openrouter.ai
+CEREBRAS_MODELS = [m.strip() for m in env("CEREBRAS_MODELS", "gpt-oss-120b,qwen-3.8-27b").split(",") if m.strip()]
+OPENROUTER_MODELS = [m.strip() for m in env("OPENROUTER_MODELS", "openai/gpt-oss-120b:free,meta-llama/llama-3.3-70b-instruct:free,"
+                                                              "deepseek/deepseek-chat-v3.1:free").split(",") if m.strip()]
 GROQ_MODEL = env("GROQ_MODEL", "openai/gpt-oss-120b")        # can search the web (Groq's browser_search tool)
 GROQ_FALLBACK_MODELS = ("openai/gpt-oss-20b", "qwen/qwen3.8-27b")
 GROQ_SEARCH_OK = ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "openai/gpt-oss-safeguard-20b")
@@ -24106,9 +24212,11 @@ def free_counts_line() -> str:
         counts = {}
     names = {"scan": "free scan", "scan_confirm": "free scan (confirmed by hand)", "gemini": "Gemini (free)",
              "claude": "Claude", "ask_gemini": "questions on Gemini (free)", "ask_claude": "questions on Claude",
-             "ask_groq": "questions on Groq (free)"}
+             "ask_groq": "questions on Groq (free)", "ask_cerebras": "questions on Cerebras (free)",
+             "ask_openrouter": "questions on OpenRouter (free)"}
     parts = [f"{counts[k]} {names.get(k, k)}" for k in ("scan", "scan_confirm", "gemini", "claude", "ask_groq",
-                                                         "ask_gemini", "ask_claude") if counts.get(k)]
+                                                         "ask_cerebras", "ask_openrouter", "ask_gemini", "ask_claude")
+             if counts.get(k)]
     on = [names[r] if r != "scan" else "free scan" for r in SLIP_READERS
           if (r == "scan" and TESSERACT) or (r == "gemini" and GEMINI_API_KEY) or (r == "claude" and ai_enabled())]
     return (" · ".join(parts) or "none yet") + "\nReaders on, in order: " + (" → ".join(on) or "none (the form only)")
@@ -24864,7 +24972,106 @@ HELP_EXTRA.append(("🔎 Reading slips for free", (
 
 # ---- questions: Gemini's free tier first (with Google Search), Claude as the backup ---------------------------
 
-ASK_ENGINES = [x.strip().lower() for x in env("ASK_ENGINES", "groq,gemini,claude").split(",") if x.strip()]
+ASK_ENGINES = [x.strip().lower() for x in env("ASK_ENGINES", "groq,cerebras,openrouter,gemini,claude").split(",")
+               if x.strip()]
+ENGINE_NAMES = {"groq": "Groq (free)", "cerebras": "Cerebras (free)", "openrouter": "OpenRouter (free)",
+                "gemini": "Gemini (free)", "claude": "Claude (paid)"}
+ENGINE_COOL: dict = {}             # engine -> (monotonic time it's usable again, why)
+ENGINE_STRIKES: dict = {}          # engine -> limit errors in a row
+
+
+def engine_key_set(engine: str) -> bool:
+    return bool({"groq": GROQ_API_KEY, "cerebras": CEREBRAS_API_KEY, "openrouter": OPENROUTER_API_KEY,
+                 "gemini": GEMINI_API_KEY}.get(engine)) or (engine == "claude" and ai_enabled())
+
+
+def engine_cooling(engine: str) -> Optional[str]:
+    hit = ENGINE_COOL.get(engine)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    return None
+
+
+def engine_note(engine: str, ok: bool, tokens: int = 0, err: Optional[str] = None) -> None:
+    """Today's use of each AI service (for the staff page), and a cool-down when a service says its free limit is hit:
+    15 minutes for a per-minute limit, until midnight for a daily one."""
+    key = f"engines:{datetime.now(TZ).date().isoformat()}"
+    try:
+        data = json.loads(get_setting(0, key) or "{}")
+    except ValueError:
+        data = {}
+    e = data.setdefault(engine, {"ok": 0, "fail": 0, "tokens": 0})
+    e["ok" if ok else "fail"] += 1
+    e["tokens"] += max(0, int(tokens or 0))
+    if ok:
+        ENGINE_STRIKES.pop(engine, None)
+    if err:
+        e["last_error"] = clip(sec_redact(err), 160)
+        low = err.lower()
+        if "429" in err or "rate limit" in low or "quota" in low or "exhausted" in low:
+            daily = any(w in low for w in ("per day", "perday", "daily", "rpd", "tpd"))
+            strikes = ENGINE_STRIKES[engine] = ENGINE_STRIKES.get(engine, 0) + 1
+            now = datetime.now(TZ)
+            if daily:
+                wait = ((now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)) - now).total_seconds()
+                ENGINE_COOL[engine] = (time.monotonic() + wait, "free limit used up for today")
+            elif strikes >= 2:
+                ENGINE_COOL[engine] = (time.monotonic() + 120, "busy for a couple of minutes")
+            e["limited_at"] = now_iso()
+    set_setting(0, key, json.dumps(data))
+
+
+def engine_usage() -> list:
+    try:
+        data = json.loads(get_setting(0, f"engines:{datetime.now(TZ).date().isoformat()}") or "{}")
+    except ValueError:
+        data = {}
+    out = []
+    for eng in dict.fromkeys(ASK_ENGINES + ["groq", "cerebras", "openrouter", "gemini", "claude"]):
+        d = data.get(eng) or {}
+        out.append({"engine": eng, "name": ENGINE_NAMES.get(eng, eng), "on": engine_key_set(eng),
+                    "in_pool": eng in ASK_ENGINES, "ok": int(d.get("ok") or 0), "fail": int(d.get("fail") or 0),
+                    "tokens": int(d.get("tokens") or 0), "cooling": engine_cooling(eng),
+                    "error": d.get("last_error")})
+    return out
+
+
+async def ask_compat(engine: str, system: str, user_text: str) -> tuple[str, list[str], int]:
+    """(answer, [], tokens used) from an OpenAI-style free service (Cerebras or OpenRouter). Each model is tried in
+    turn; a model that's busy or out of free uses hands off to the next."""
+    import aiohttp
+    url, key, models = {"cerebras": ("https://api.cerebras.ai/v1/chat/completions", CEREBRAS_API_KEY, CEREBRAS_MODELS),
+                        "openrouter": ("https://openrouter.ai/api/v1/chat/completions", OPENROUTER_API_KEY,
+                                       OPENROUTER_MODELS)}[engine]
+    headers = {"Authorization": f"Bearer {key}"}
+    if engine == "openrouter":
+        headers.update({"HTTP-Referer": f"https://{PUBLIC_DOMAIN}" if PUBLIC_DOMAIN else "https://discord.com",
+                        "X-Title": "PIMP-BOT"})
+    errors = []
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+        for model in models:
+            body = {"model": model, "temperature": 0.4, "max_tokens": 2048,
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user_text}]}
+            try:
+                async with session.post(url, json=body, headers=headers) as resp:
+                    if resp.status != 200:
+                        err = f"{ENGINE_NAMES[engine].split()[0]} HTTP {resp.status}: {(await resp.text())[:200]}"
+                        if resp.status in (401, 403):
+                            raise RuntimeError(err)
+                        errors.append(err)
+                        continue
+                    data = await resp.json(content_type=None)
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                errors.append(f"{engine} timed out or dropped ({type(exc).__name__})")
+                continue
+            msg = ((data.get("choices") or [{}])[0].get("message") or {})
+            text = re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).strip()
+            if text:
+                return text, [], int(((data.get("usage") or {}).get("total_tokens")) or 0)
+            errors.append(f"{engine} came back empty on {model}")
+    raise RuntimeError(" | ".join(errors) or f"{engine} came back empty")
 
 
 GEMINI_FALLBACK_MODELS = ("gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash")
@@ -24920,9 +25127,8 @@ def claude_error_hint(exc: Optional[BaseException]) -> str:
 
 
 def ask_enabled() -> bool:
-    """Can the bot answer questions at all (a Gemini or a Claude key)?"""
-    return any((e == "groq" and GROQ_API_KEY) or (e == "gemini" and GEMINI_API_KEY) or (e == "claude" and ai_enabled())
-               for e in ASK_ENGINES)
+    """Can the bot answer questions at all (any AI key in the pool)?"""
+    return any(engine_key_set(e) for e in ASK_ENGINES)
 
 
 def groq_models(search: bool) -> list[tuple[str, bool]]:
@@ -25082,9 +25288,14 @@ async def ask_any(system: str, user_text: str, search: bool = True) -> tuple[str
     why: list[str] = []
     ASK_LAST_ERROR["text"] = None
     for engine in ASK_ENGINES:
+        cool = engine_cooling(engine) if engine_key_set(engine) else None
+        if cool:
+            why.append(f"{ENGINE_NAMES.get(engine, engine)}: {cool}")
+            continue
         if engine == "groq" and GROQ_API_KEY:
             try:
                 answer, sources = await ask_groq(system, user_text, search)
+                engine_note("groq", bool(answer))
                 if answer and not ask_unanswered(answer):
                     free_count("ask_groq")
                     return answer, sources
@@ -25092,11 +25303,29 @@ async def ask_any(system: str, user_text: str, search: bool = True) -> tuple[str
                     fallback = (answer, sources)
             except Exception as exc:
                 last = exc
+                engine_note("groq", False, err=str(exc))
                 why.append(groq_error_hint(exc))
                 log.warning("Groq answer failed: %s", str(exc)[:300])
+        elif engine in ("cerebras", "openrouter") and engine_key_set(engine):
+            try:
+                answer, sources, used = await ask_compat(engine, system, user_text)
+                engine_note(engine, bool(answer), used)
+                if answer and not ask_unanswered(answer):
+                    free_count("ask_" + engine)
+                    return answer, sources
+                if answer and fallback is None:
+                    fallback = (answer, sources)
+            except Exception as exc:
+                last = exc
+                engine_note(engine, False, err=str(exc))
+                why.append(f"{ENGINE_NAMES[engine]}: " + ("its free limit is used up for now" if "429" in str(exc)
+                                                          else "the key on Railway was refused" if re.search(r"HTTP 40[13]", str(exc))
+                                                          else ask_error_snip(str(exc))))
+                log.warning("%s answer failed: %s", engine, str(exc)[:300])
         elif engine == "gemini" and GEMINI_API_KEY:
             try:
                 answer, sources = await ask_gemini(system, user_text, search=search)
+                engine_note("gemini", bool(answer))
                 if answer and not ask_unanswered(answer):
                     free_count("ask_gemini")
                     return answer, sources
@@ -25106,6 +25335,7 @@ async def ask_any(system: str, user_text: str, search: bool = True) -> tuple[str
                     why.append("Gemini: it blocked or skipped the request")
             except Exception as exc:
                 last = exc
+                engine_note("gemini", False, err=str(exc))
                 h = ask_error_hint(exc)
                 why.append(h if "Gemini" in h else "Gemini: " + h)
                 log.warning("Gemini answer failed: %s", str(exc)[:300])
@@ -25118,6 +25348,7 @@ async def ask_any(system: str, user_text: str, search: bool = True) -> tuple[str
                 log.warning("Claude answer failed: %s", str(exc)[:300])
                 continue
             if answer:
+                engine_note("claude", True)
                 free_count("ask_claude")
                 return answer, sources
     if fallback is not None:
@@ -29443,6 +29674,8 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
                                                                if r["result"] != "ok"][:8]},
         "asks": {"used": ask_used(guild_id), "limit": ask_limit(guild_id)},
         "owner": {"lockdown": owner_lockdown(), "removed": len(owner_blocked_ids()), "set": bool(OWNER_IDS)},
+        "pool": engine_usage(),
+        "allow": staff_allowances(guild_id),
     }
 
 
@@ -29568,6 +29801,7 @@ def staff_links(guild_id: int) -> list:
     chan = lambda cid: f"https://discord.com/channels/{int(guild_id)}/{int(cid)}"
     groups = {g: [] for g in STAFF_LINK_GROUPS}
     groups["PIMP-BOT"] += [{"icon": "📊", "name": "Group dashboard", "url": "/", "note": "what members see"},
+                           {"icon": "📈", "name": "Line Watch", "url": "/lines", "note": "line moves, mods + owners"},
                            {"icon": "🩺", "name": "Status check", "url": "/status", "note": "for an uptime monitor"}]
     for key, icon, name in (("outage_admin_channel", "🛠️", "Admin alert channel"),
                             ("outage_members_channel", "📣", "Member alert channel"),
@@ -29616,6 +29850,203 @@ def staff_note_seen(uid: int, name: str, guild_id: int) -> None:
     rows.append({"uid": str(int(uid)), "name": clip(name or "", 40), "guild": str(int(guild_id)), "at": now_iso()})
     set_setting(0, "staff_seen", json.dumps(rows[-40:]))
 
+
+
+def staff_allowances(guild_id: int) -> dict:
+    top = []
+    for x in ask_top_today(guild_id):
+        user = None
+        try:
+            g = bot.get_guild(int(guild_id))
+            user = g.get_member(x["uid"]) if g is not None else None
+        except Exception:
+            user = None
+        a = ask_allowance(guild_id, x["uid"], user)
+        name = getattr(user, "display_name", "") or staff_viewer(x["uid"]) or db_name_for(guild_id, x["uid"])
+        top.append({"name": clip(name or f"member …{str(x['uid'])[-4:]}", 40), "n": x["n"], "tier": a["tier"],
+                    "per_day": a["per_day"]})
+    return {"tiers": [{"name": n, "from": f, "per_day": p} for n, f, p in ask_tiers(guild_id)], "top": top}
+
+
+def db_name_for(guild_id: int, uid: int) -> str:
+    r = db().execute("SELECT bettor_name FROM picks WHERE guild_id = ? AND bettor_id = ? ORDER BY id DESC LIMIT 1",
+                     (guild_id, int(uid))).fetchone()
+    return r["bettor_name"] if r else ""
+
+
+# ---- profile pictures for the staff list (Discord's CDN only, re-drawn as a small PNG) -----------------
+
+_STAFF_AV: dict = {}
+
+
+async def staff_avatar(request):
+    from aiohttp import web
+    if staff_from_request(request) is None:
+        return dash_error(web, request, 403)
+    uid = request.match_info.get("uid", "")
+    if not re.fullmatch(r"\d{5,22}", uid):
+        return dash_error(web, request, 404)
+    hit = _STAFF_AV.get(uid)
+    if hit and hit[0] > time.monotonic():
+        return _dash30_png(web, hit[1], 3600)
+    png = None
+    try:
+        user = await known_user(bot, int(uid))
+        url = str(user.display_avatar.replace(size=128, format="png").url) if user is not None else ""
+        if url.startswith(("https://cdn.discordapp.com/", "https://media.discordapp.net/")):
+            raw = await fetch_avatar(user)
+            png = _dash30_logo_png(raw) if raw else None
+    except Exception:
+        png = None
+    if len(_STAFF_AV) > 500:
+        _STAFF_AV.clear()
+    _STAFF_AV[uid] = (time.monotonic() + (6 * 3600 if png else 600), png)
+    return _dash30_png(web, png, 3600)
+
+
+# ---- Line Watch: how lines move (mods and owners only; nothing here ever posts in Discord) ----------------------
+
+LINE_WATCH_EVERY = 900          # seconds between snapshots
+LINE_KEEP_DAYS = 4
+
+
+def line_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS line_snap (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT, source TEXT,
+                    label TEXT, league TEXT, start TEXT, value REAL, extra REAL, text TEXT, at TEXT)""")
+    db().execute("CREATE INDEX IF NOT EXISTS line_snap_k ON line_snap (key, at)")
+
+
+def line_put(key: str, source: str, label: str, league: str, start: str, value: Optional[float], extra: Optional[float],
+             text: str, at: str) -> bool:
+    """Keep a snapshot only when the number changed (or it's the first one)."""
+    last = db().execute("SELECT value, extra FROM line_snap WHERE key = ? ORDER BY id DESC LIMIT 1", (key,)).fetchone()
+    if last is not None and last["value"] == value and last["extra"] == extra:
+        return False
+    db().execute("INSERT INTO line_snap (key, source, label, league, start, value, extra, text, at) VALUES (?,?,?,?,?,?,?,?,?)",
+                 (key, source, clip(label, 80), clip(league, 30), start or "", value, extra, clip(text, 60), at))
+    return True
+
+
+async def line_watch_job(client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    try:
+        last = datetime.fromisoformat(get_setting(0, "linewatch_at") or "")
+        if (now - last).total_seconds() < LINE_WATCH_EVERY - 30:
+            return
+    except ValueError:
+        pass
+    set_setting(0, "linewatch_at", iso(now))
+    line_db()
+    at = iso(now)
+    for path in DEFAULT_LEAGUES:
+        try:
+            events = await fetch_scoreboard(path, now.astimezone(TZ))
+        except Exception:
+            continue
+        for ev in events:
+            o = ev.get("odds")
+            if not o or ev.get("final") or ev.get("state") == "post":
+                continue
+            try:
+                away = next(t for t in ev["teams"] if not t["home"])
+                home = next(t for t in ev["teams"] if t["home"])
+            except StopIteration:
+                continue
+            label = f"{away.get('abbr') or away['short']} @ {home.get('abbr') or home['short']}"
+            line_put(f"game:{path}:{ev['id']}", "game", label, LEAGUE_NAMES.get(path, path), ev.get("date") or "",
+                     o.get("spread"), o.get("total"), o.get("details") or "", at)
+    tickers = [r["kalshi_ticker"] for r in db().execute(
+        "SELECT DISTINCT kalshi_ticker FROM picks WHERE status = 'open' AND kalshi_ticker IS NOT NULL LIMIT 30")]
+    for t in tickers:
+        try:
+            m = await kalshi_market(t, fresh=True)
+        except Exception:
+            m = None
+        if not m:
+            continue
+        price = m.get("last_price") if m.get("last_price") is not None else m.get("yes_bid")
+        try:
+            price = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            price = None
+        line_put(f"kalshi:{t.upper()}", "kalshi", m.get("title") or t, "Kalshi", m.get("close_time") or "", price, None,
+                 f"{price:g}¢" if price is not None else "", at)
+    db().execute("DELETE FROM line_snap WHERE at < ?", (iso(now - timedelta(days=LINE_KEEP_DAYS)),))
+    db().commit()
+
+
+EXTRA_JOBS.append(("line_watch", line_watch_job))
+
+
+def lines_data(guild_id: int, now: Optional[datetime] = None) -> dict:
+    """Everything the Line Watch page shows."""
+    now = now or datetime.now(timezone.utc)
+    line_db()
+    since = iso(now - timedelta(hours=36))
+    by: dict = {}
+    for r in db().execute("SELECT * FROM line_snap WHERE at >= ? ORDER BY id", (since,)):
+        by.setdefault(r["key"], []).append(r)
+    open_teams = " ".join((p["description"] or "") + " " + (p["legs"] or "") for p in db().execute(
+        "SELECT description, legs FROM picks WHERE guild_id = ? AND status = 'open'", (guild_id,))).lower()
+    games, kal = [], []
+    my_tickers = {(r["kalshi_ticker"] or "").upper() for r in db().execute(
+        "SELECT kalshi_ticker FROM picks WHERE guild_id = ? AND kalshi_ticker IS NOT NULL", (guild_id,))}
+    for key, rows in by.items():
+        first, last = rows[0], rows[-1]
+        if key.startswith("game:"):
+            sp = {"open": first["value"], "now": last["value"]} if last["value"] is not None else None
+            tt = {"open": first["extra"], "now": last["extra"]} if last["extra"] is not None else None
+            abbrs = [x.lower() for x in re.findall(r"[A-Za-z]{2,4}", last["label"] or "")]
+            games.append({"key": key, "label": last["label"], "league": last["league"], "start": last["start"],
+                          "spread": sp, "total": tt, "details": last["text"],
+                          "moved": (sp is not None and sp["open"] != sp["now"]) or (tt is not None and tt["open"] != tt["now"]),
+                          "on_slip": any(re.search(rf"\b{re.escape(a)}\b", open_teams) for a in abbrs),
+                          "history": [{"at": r["at"], "spread": r["value"], "total": r["extra"]} for r in rows][-40:]})
+        elif key.startswith("kalshi:") and key[7:] in my_tickers:
+            kal.append({"ticker": key[7:], "label": last["label"], "price": {"open": first["value"], "now": last["value"]},
+                        "moved": first["value"] != last["value"],
+                        "history": [{"at": r["at"], "value": r["value"]} for r in rows][-60:]})
+    games.sort(key=lambda g: (not g["on_slip"], -abs(((g["spread"] or {}).get("now") or 0) - ((g["spread"] or {}).get("open") or 0))
+                              - abs(((g["total"] or {}).get("now") or 0) - ((g["total"] or {}).get("open") or 0)), g["start"] or ""))
+    props: dict = {}
+    since_p = iso(now - timedelta(days=21))
+    for r in db().execute("""SELECT l.text, p.created_at, p.bettor_name, p.hidden, p.status, p.revealed_at FROM legs l
+                             JOIN picks p ON p.id = l.pick_id WHERE p.guild_id = ? AND p.created_at >= ?
+                             ORDER BY p.created_at""", (guild_id, since_p)):
+        if r["hidden"] and (r["status"] == "open" or not r["revealed_at"]):
+            continue                                   # a hidden slip's legs stay secret here too
+        pr = cached_prop(r["text"] or "")
+        if not pr or pr.get("combo"):
+            continue
+        k = (pr["player"], pr["stats"][0])
+        props.setdefault(k, {"player": pr["display"], "stat": STATS[pr["stats"][0]][0], "lines": []})["lines"].append(
+            {"line": pr["line"], "side": pr["side"], "at": r["created_at"], "who": clip(r["bettor_name"] or "", 30)})
+    plist = []
+    for v in props.values():
+        ls = v["lines"]
+        v.update(count=len(ls), first=ls[0]["line"], last=ls[-1]["line"],
+                 moved=len({x["line"] for x in ls}) > 1)
+        plist.append(v)
+    plist.sort(key=lambda p: (not p["moved"], -abs(p["last"] - p["first"]), -p["count"]))
+    return {"updated": get_setting(0, "linewatch_at"), "games": games[:60], "kalshi": kal[:30], "props": plist[:60]}
+
+
+async def lines_page(request):
+    from aiohttp import web
+    if staff_from_request(request) is None:
+        if not dash_rate(dash_client_ip(request), "bad", *DASH_BAD_KEYS, count=False):
+            return dash_error(web, request, 429)
+        return dash_page(web, 403, "Mods and owners only",
+                         "Run /dashboard section:Admin health in Discord to sign in, then open Line Watch.")
+    return dash_html(web, LINES_HTML)
+
+
+async def lines_api(request):
+    from aiohttp import web
+    st = staff_from_request(request)
+    if st is None:
+        return dash_error(web, request, 403)
+    return web.json_response(lines_data(st["guild"]))
 
 def staff_viewer(uid: Optional[int]) -> str:
     try:
@@ -29688,7 +30119,7 @@ def staff_people(guild_id: int) -> dict:
             continue
         top = getattr(mem, "top_role", None)
         ids.add(int(mem.id))
-        people.append({"id": str(int(mem.id)), "removed": int(mem.id) in owner_blocked_ids(),
+        people.append({"id": str(int(mem.id)), "removed": int(mem.id) in owner_blocked_ids(), "avatar": True,
                        "name": clip(getattr(mem, "display_name", "") or getattr(mem, "name", "") or "?", 40),
                        "role": clip(getattr(top, "name", "") or "", 40) if top is not None and not top.is_default() else "",
                        "level": _staff_level(mem), "color": _staff_colour(top) if top is not None else None,
@@ -29753,6 +30184,114 @@ async def staff_logout(request):
     return resp
 
 
+LINES_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#1a0f33"><title>PIMP-BOT Line Watch</title><link rel="icon" href="{{FAVICON}}">
+<style>
+:root{--bg:#0d0a14;--card:#17121f;--card2:#1f1829;--line:#2a2238;--text:#f4f1fb;--muted:#a59cbc;--faint:#6f6688;
+ --brand:#7B3FE4;--brand2:#a27bff;--gold:#f0b429;--up:#34d399;--warn:#fbbf24;--down:#fb7185;--court:{{COURT_D}};--courtH:{{COURT_H}}}
+@media (prefers-color-scheme:light){:root{--bg:#f6f3fc;--card:#fff;--card2:#f6f2fd;--line:#e7dff4;--text:#1d1530;--muted:#5d5475;
+ --faint:#9a91b0;--brand2:#6a32d6;--gold:#b7791f;--up:#059669;--warn:#c27c0e;--down:#e11d48;--court:{{COURT_L}}}}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:radial-gradient(900px 600px at 12% 8%,#7B3FE422,transparent 60%),
+ radial-gradient(800px 600px at 92% 30%,#f0b42912,transparent 60%),var(--bg)}
+body:after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:var(--court) center 62%/min(1500px,190vw) auto no-repeat;
+ -webkit-mask-image:radial-gradient(ellipse at 50% 60%,#000 25%,transparent 75%);mask-image:radial-gradient(ellipse at 50% 60%,#000 25%,transparent 75%)}
+a{color:var(--brand2)}
+header{position:relative;overflow:hidden;border-bottom:1px solid #7B3FE455;isolation:isolate;background:linear-gradient(115deg,#1b0d3a 0%,#3a1a78 38%,#24104d 62%,#140a2b 100%);color:#f4f1fb}
+header .art{position:absolute;inset:0;z-index:-1;pointer-events:none;background:var(--courtH) 50% 46%/1400px auto no-repeat}
+header .stripe{position:absolute;left:0;right:0;bottom:0;height:3px;background:linear-gradient(90deg,#7B3FE4,#f0b429 50%,#7B3FE4)}
+.top{max-width:1180px;margin:auto;padding:22px 16px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{width:54px;height:54px;flex:none;display:block;border-radius:50%;filter:drop-shadow(0 6px 14px #7B3FE466)}.logo svg{width:100%;height:100%}
+h1{margin:0;font-size:24px;font-weight:850;letter-spacing:.06em}h1 b{color:#f0b429}.meta{font-size:13px;color:#d6cdea;margin-top:4px}
+.navs{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}.navs a{font-size:13px;font-weight:650;color:#efe8ff;text-decoration:none;border:1px solid #ffffff2e;
+ padding:7px 14px;border-radius:99px;background:#ffffff12}.navs a:hover{border-color:#f0b429}
+main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-width:0}
+.card h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--brand2);margin:0 0 4px;font-weight:800}
+.sub{color:var(--muted);font-size:13px;margin:0 0 10px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.bar button{font:inherit;font-size:12px;font-weight:650;padding:5px 12px;border-radius:99px;border:1px solid var(--line);background:var(--card2);color:var(--muted);cursor:pointer}
+.bar button.on{color:#fff;background:var(--brand);border-color:var(--brand)}
+.rows{display:grid;gap:0}.r{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 96px;gap:10px;align-items:center;padding:9px 6px;
+ border-top:1px solid var(--line);cursor:pointer;border-radius:8px}.r:first-child{border-top:0}.r:hover{background:var(--card2)}
+.r b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.r i{display:block;font-style:normal;font-size:12px;color:var(--muted)}
+.mv{font-variant-numeric:tabular-nums;font-size:14px}.mv small{display:block;font-size:12px;color:var(--muted)}
+.d{font-weight:750}.d.up{color:var(--up)}.d.dn{color:var(--down)}.d.z{color:var(--faint)}
+svg.sp{width:96px;height:30px;display:block}
+.chips{display:flex;gap:5px;flex-wrap:wrap}.chip{font-size:12px;font-weight:650;padding:2px 9px;border-radius:99px;background:var(--card2);border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);font-size:13px;padding:6px 0}
+.sheet{position:fixed;inset:0;z-index:50;display:none;align-items:flex-start;justify-content:center;padding:80px 16px 16px;background:#07040dcc;backdrop-filter:blur(4px)}
+.sheet.on{display:flex}.panel{width:min(520px,100%);max-height:calc(100vh - 110px);overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 18px}
+.panel h3{margin:0 0 4px}.panel .x{float:right;font:inherit;font-size:13px;background:var(--card2);border:1px solid var(--line);color:var(--muted);border-radius:99px;padding:5px 12px;cursor:pointer}
+.hr{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:14px;font-variant-numeric:tabular-nums}
+.hr:first-of-type{border-top:0}.hr span:last-child{color:var(--muted)}
+@media (max-width:640px){.r{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.r .spc{display:none}}
+footer{max-width:1180px;margin:0 auto;padding:4px 16px 28px;color:var(--faint);font-size:12px}
+</style></head><body>
+<header><div class="art" aria-hidden="true"></div><div class="top"><a class="logo" href="/" aria-label="Back to the dashboard">{{LOGO}}</a>
+<div><h1>PIMP-BOT <b>LINE WATCH</b></h1><div class="meta" id="meta">Mods and owners only · loading…</div></div>
+<div class="navs"><a href="/staff">🛠️ Server Dashboard</a><a href="/">📊 Group dashboard</a></div></div><div class="stripe" aria-hidden="true"></div></header>
+<main id="m"><section class="card"><div class="empty">Loading…</div></section></main>
+<footer>Snapshots every 15 minutes from ESPN's game lines and Kalshi prices, plus every line your group has logged. Staff only; nothing here posts in Discord.</footer>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sT"><div class="panel"><button class="x" id="sX" type="button">Close</button>
+<h3 id="sT"></h3><div class="sub" id="sS"></div><div id="sB"></div></div></div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=t=>String(t==null?'':t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const when=iso=>iso?new Date(iso).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+const fmt=v=>v==null?'–':(Math.round(v*10)/10).toString();
+const sgn=v=>v==null?'':(v>0?'+':'')+fmt(v);
+let D=null,F='moved',ITEMS=[];
+function spark(vals){vals=(vals||[]).filter(v=>v!=null);if(vals.length<2)return '<svg class="sp" viewBox="0 0 96 30"></svg>';
+ const mn=Math.min(...vals),mx=Math.max(...vals),r=(mx-mn)||1;
+ const pts=vals.map((v,i)=>(i*(92/(vals.length-1))+2).toFixed(1)+','+(26-(v-mn)/r*22).toFixed(1)).join(' ');
+ const last=vals[vals.length-1]-vals[0], col=last>0?'var(--up)':last<0?'var(--down)':'var(--faint)';
+ return '<svg class="sp" viewBox="0 0 96 30" aria-hidden="true"><polyline fill="none" stroke="'+col+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="'+pts+'"/></svg>'}
+function delta(a,b){if(a==null||b==null)return '<span class="d z">–</span>';const x=b-a;return '<span class="d '+(x>0?'up':x<0?'dn':'z')+'">'+(x===0?'no move':sgn(x))+'</span>'}
+function move(o,label){return '<div class="mv">'+(o?fmt(o.open)+' → <b style="display:inline">'+fmt(o.now)+'</b> '+delta(o.open,o.now):'–')+'<small>'+esc(label)+'</small></div>'}
+function render(){
+ const d=D, h=[];
+ $('#meta').textContent='Mods and owners only · updated '+(d.updated?when(d.updated):'not yet')+' · '+(d.games.length+d.kalshi.length+d.props.length)+' lines tracked';
+ const games=d.games.filter(g=>F!=='moved'||g.moved), kal=d.kalshi.filter(k=>F!=='moved'||k.moved), props=d.props.filter(p=>F!=='moved'||p.moved);
+ ITEMS=[];
+ const bar='<div class="bar"><button type="button" data-f="moved" class="'+(F==='moved'?'on':'')+'">Moved only</button><button type="button" data-f="all" class="'+(F==='all'?'on':'')+'">Everything</button></div>';
+ h.push('<section class="card"><h2>Game lines</h2><p class="sub">Spread and total for today\'s games, first seen → now. Tap a game for every change.</p>'+bar
+  +(games.length?'<div class="rows">'+games.map(g=>{ITEMS.push({t:g.label,s:g.league+(g.start?' · '+when(g.start):''),h:g.history,kind:'game'});
+   return '<div class="r" data-i="'+(ITEMS.length-1)+'"><span><b>'+esc(g.label)+'</b><i>'+esc(g.league)+(g.start?' · '+esc(when(g.start)):'')+(g.on_slip?' · on a slip':'')+'</i></span>'
+   +move(g.spread,'spread')+move(g.total,'total')+'<span class="spc">'+spark((g.history||[]).map(x=>x.spread))+'</span></div>'}).join('')+'</div>'
+   :'<div class="empty">'+(F==='moved'?'No game line has moved yet today.':'No game lines yet. They show up once ESPN posts them.')+'</div>')+'</section>');
+ h.push('<section class="card"><h2>Kalshi prices</h2><p class="sub">Markets your group has linked to slips (/kalshi). Price in cents.</p>'
+  +(kal.length?'<div class="rows">'+kal.map(k=>{ITEMS.push({t:k.label,s:k.ticker,h:k.history,kind:'kalshi'});
+   return '<div class="r" data-i="'+(ITEMS.length-1)+'"><span><b>'+esc(k.label)+'</b><i>'+esc(k.ticker)+'</i></span>'+move(k.price,'price ¢')+'<span></span><span class="spc">'+spark((k.history||[]).map(x=>x.value))+'</span></div>'}).join('')+'</div>'
+   :'<div class="empty">No linked Kalshi markets'+(F==='moved'?' have moved.':' yet.')+'</div>')+'</section>');
+ h.push('<section class="card"><h2>Your group\'s prop lines</h2><p class="sub">The same player and stat logged at different numbers over the last 3 weeks.</p>'
+  +(props.length?'<div class="rows">'+props.map(p=>{ITEMS.push({t:p.player+' · '+p.stat,s:p.count+' slips',h:p.lines,kind:'prop'});
+   return '<div class="r" data-i="'+(ITEMS.length-1)+'"><span><b>'+esc(p.player)+'</b><i>'+esc(p.stat)+' · '+p.count+' slips</i></span>'
+   +move({open:p.first,now:p.last},'first → latest')+'<span class="chips">'+p.lines.slice(-5).map(x=>'<span class="chip">'+fmt(x.line)+'</span>').join('')+'</span>'
+   +'<span class="spc">'+spark(p.lines.map(x=>x.line))+'</span></div>'}).join('')+'</div>'
+   :'<div class="empty">'+(F==='moved'?'No prop has been logged at two different lines yet.':'No props logged in the last 3 weeks.')+'</div>')+'</section>');
+ $('#m').innerHTML=h.join('');
+}
+function openItem(i){const it=ITEMS[i];if(!it)return;$('#sT').textContent=it.t;$('#sS').textContent=it.s||'';
+ const rows=(it.h||[]).slice().reverse().map(x=>it.kind==='game'?'<div class="hr"><span>'+esc(when(x.at))+'</span><span>spread '+fmt(x.spread)+' · total '+fmt(x.total)+'</span></div>'
+  :it.kind==='kalshi'?'<div class="hr"><span>'+esc(when(x.at))+'</span><span>'+fmt(x.value)+'¢</span></div>'
+  :'<div class="hr"><span>'+esc(when(x.at))+(x.who?' · '+esc(x.who):'')+'</span><span>'+esc(x.side||'')+' '+fmt(x.line)+'</span></div>').join('');
+ $('#sB').innerHTML=rows||'<div class="empty">No history yet.</div>';$('#sheet').classList.add('on');$('#sX').focus()}
+document.addEventListener('click',e=>{const f=e.target.closest('[data-f]');if(f){F=f.getAttribute('data-f');render();return}
+ const r=e.target.closest('[data-i]');if(r)openItem(+r.getAttribute('data-i'))});
+$('#sX').addEventListener('click',()=>$('#sheet').classList.remove('on'));
+$('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')$('#sheet').classList.remove('on')});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#sheet').classList.remove('on')});
+async function load(){try{const r=await fetch('/api/lines.json',{credentials:'same-origin'});if(r.status===403){location.reload();return}
+ D=await r.json();render()}catch(e){$('#meta').textContent='Mods and owners only · offline? retrying…'}}
+load();setInterval(load,60000);
+</script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace(
+    "{{LOGO}}", DASH_LOGO_SVG).replace("{{COURT_D}}", dash_court("#a27bff", 0.06)).replace(
+    "{{COURT_L}}", dash_court("#7B3FE4", 0.08)).replace("{{COURT_H}}", dash_court("#ffffff", 0.10))
+
 STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light">
@@ -29814,8 +30353,10 @@ button.pill:focus-visible,.out:focus-visible,.copy:focus-visible{outline:2px sol
 .sheet .x{float:right;font:inherit;font-size:13px;background:var(--card2);border:1px solid var(--line);color:var(--muted);
  border-radius:99px;padding:5px 12px;cursor:pointer}
 .person{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line)}.person:first-of-type{border-top:0}
-.av{width:36px;height:36px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:800;font-size:14px;color:#fff;
- background:linear-gradient(135deg,#7B3FE4,#3a1a78);border:2px solid var(--line)}
+.av{width:40px;height:40px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff;
+ background:linear-gradient(135deg,#7B3FE4,#3a1a78);box-shadow:0 0 0 2px var(--ring,var(--line));object-fit:cover;position:relative}
+.avwrap{position:relative;flex:none;width:40px;height:40px}.avwrap .pres{position:absolute;right:-2px;bottom:-2px;width:14px;height:14px;
+ border-radius:50%;background:var(--up);border:3px solid var(--card)}
 .person b{display:block;font-size:14.5px}.person i{display:block;font-style:normal;font-size:12px;color:var(--muted)}
 .badge{margin-left:auto;font-size:11px;font-weight:750;padding:3px 9px;border-radius:99px;white-space:nowrap}
 .badge.admin{background:#f0b42926;color:var(--gold);border:1px solid #f0b42955}.badge.mod{background:#7B3FE426;color:var(--brand2);border:1px solid #7B3FE455}
@@ -29889,7 +30430,7 @@ footer{max-width:1180px;margin:0 auto;padding:4px 16px 28px;color:var(--faint);f
 <div class="grain" aria-hidden="true"></div>
 <header><div class="art" aria-hidden="true"></div><div class="sweep" aria-hidden="true"></div><div class="top"><a class="logo" href="/" title="Back to the dashboard" aria-label="Back to the dashboard">{{LOGO}}</a>
 <div class="brand"><h1>PIMP-BOT <b>STAFF</b></h1><div class="meta"><span class="pill v" id="ver">…</span>
-<button class="pill" id="staffbtn" type="button" aria-haspopup="dialog">👥 Staff</button><span class="pill" id="who" hidden></span>
+<button class="pill" id="staffbtn" type="button" aria-haspopup="dialog">👥 Staff</button><a class="pill v" href="/lines" style="text-decoration:none">📈 Line Watch</a><span class="pill" id="who" hidden></span>
 <span class="pill" id="upd">loading…</span></div></div>
 <a class="out" href="/staff/logout">Sign out</a></div><div class="stripe" aria-hidden="true"></div></header>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT"><div class="panel">
@@ -29922,6 +30463,8 @@ function needs(d){
    +d.needs.slice(0,6).map(x=>esc(x.who)+(x.id?' #'+x.id:'')+' ('+esc(x.why.toLowerCase())+')').join(', ')+(d.needs.length>6?'…':'')]);
  if(d.owner&&d.owner.lockdown)n.push(['🔒','<b>Locked down:</b> staff tools are owners only. <code>/owner lockdown on:False</code> ends it.']);
  if(d.owner&&!d.owner.set)n.push(['🛡️','<b>Set your owner ID.</b> Add <code>OWNER_IDS</code> (your Discord user ID) in Railway so nobody else can take over the failsafe.']);
+ const live=(d.pool||[]).filter(e=>e.on&&e.in_pool&&e.engine!=='claude');
+ if(live.length&&live.every(e=>e.cooling))n.push(['🤖','<b>Every free AI service is used up for now.</b> Questions fall back to Claude (if set) or the numbers-only breakdown.']);
  if(d.asks&&d.asks.limit&&d.asks.used>=0.9*d.asks.limit)n.push(['💬','<b>Questions almost used up:</b> '+d.asks.used+' of '+d.asks.limit+' today.']);
  if(d.scans&&d.scans.week&&d.scans.week.failed>=3)n.push(['📸','<b>'+d.scans.week.failed+' screenshots failed to read this week.</b> See the scan log below.']);
  if(d.stale_open)n.push(['⏳','<b>'+d.stale_open+' slip'+(d.stale_open>1?'s have':' has')+' been open 4+ days.</b> Worth a look in <code>/inbox</code>.']);
@@ -29979,6 +30522,15 @@ function render(d){
   +((sc.recent||[]).length?sc.recent.map(r=>row(dot(r.result==='failed'?'bad':'warn')+esc(r.who||'someone')+' · '+esc(ago(r.at)),
    (r.jump&&safeUrl(r.jump)?'<a href="'+esc(r.jump)+'" target="_blank" rel="noopener noreferrer">open</a>':''))+(r.why&&r.why.length?'<div class="err">'+esc(r.why.join(' · '))+'</div>':'')).join('')
    :'<div class="muted">'+dot('ok')+'No problem reads lately.</div>')));
+ const pool=(d.pool||[]).filter(e=>e.in_pool||e.on);
+ h.push(card('AI pool · today',pool.map(e=>row(dot(!e.on?'':e.cooling?'warn':'ok')+esc(e.name),
+  !e.on?'no key':e.cooling?esc(e.cooling):'<span class="num">'+e.ok+'</span> answers'+(e.tokens?' · '+Math.round(e.tokens/1000)+'K tokens':'')+(e.fail?' · '+e.fail+' fails':''))).join('')
+  +'<div class="muted" style="margin-top:6px">Answers go to the first service with free uses left, top to bottom. Add keys in Railway: CEREBRAS_API_KEY, OPENROUTER_API_KEY.</div>'));
+ const al=d.allow||{tiers:[],top:[]};
+ h.push(card('Questions per person',al.tiers.map(t=>row(esc(t.name)+' <span class="muted">activity '+t.from+'+</span>',t.per_day<0?'unlimited':t.per_day+' a day')).join('')
+  +row('Mods and owners','unlimited')
+  +(al.top.length?'<div class="muted" style="margin:8px 0 2px">Most questions today</div>'+al.top.map(x=>row(esc(x.name),'<span class="num">'+x.n+'</span>'+(x.per_day==null?'':' of '+(x.per_day<0?'∞':x.per_day))+' · '+esc(x.tier))).join(''):'')
+  +'<div class="muted" style="margin-top:6px">Change them with <code>/owner quota</code>.</div>'));
  const hist=d.history||[];
  h.push(card('Live server history','<div class="filters" id="hf">'+[['all','All'],['slips','Slips'],['scans','Scans'],['staff','Staff'],['system','System']]
   .map(f=>'<button type="button" data-f="'+f[0]+'" class="'+(HF===f[0]?'on':'')+'">'+f[1]+'</button>').join('')+'</div><div class="hist">'
@@ -30001,7 +30553,7 @@ function render(d){
  const cats=[['🧾 Slips & picks',[['/pick','Log a slip by hand'],['/track pick_id:','Leg by leg: what the bot is following'],['/inbox','Slips that need a person'],['/result pick_id: outcome:','Settle a slip yourself'],['/calc slip pick_id:','How each leg has hit lately']]],
   ['👥 Staff & access',[['/dashboard section:Admin health','Your own 12-hour link to this page'],['/links add name: url:','Add to the toolbox'],['/admin panel','Every server switch in one place'],['/admin check','Why isn\'t a channel logging slips?']]],
   ['⚙️ Server setup',[['/outage channels','Admin + member alert channels, ping role'],['/admin setup','Channels and features, step by step'],['/admin status','Version, uptime, connections'],['/backups','Nightly backup to a channel']]],
-  ['🛡️ Owner only',[['/owner status','Owners, lockdown, removed people'],['/owner lockdown on:True','Staff tools owners-only, now'],['/owner remove member:','Take one person\'s staff access'],['/owner newkey','Swap the dashboard key'],['/owner asklimit per_day:','Daily question limit']]]];
+  ['🛡️ Owner only',[['/owner status','Owners, lockdown, removed people'],['/owner lockdown on:True','Staff tools owners-only, now'],['/owner remove member:','Take one person\'s staff access'],['/owner newkey','Swap the dashboard key'],['/owner asklimit per_day:','Daily question limit'],['/owner quota','Questions per person (tiers or one person)']]]];
  h.push(card('Playbook','<div class="steps">'+steps.map(s=>'<div class="step"><b>'+esc(s[0])+'</b><code>'+esc(s[1])
   +'</code><button class="copy" type="button" data-copy="'+esc(s[1])+'">Copy</button></div>').join('')+'</div>'
   +'<div class="tools" style="margin-top:6px">'+cats.map(c=>'<div class="cat"><h3>'+esc(c[0])+'</h3>'+c[1].map(x=>'<div class="cmd"><span><code>'+esc(x[0])+'</code><i>'+esc(x[1])
@@ -30022,13 +30574,18 @@ async function openStaff(){const sh=$('#sheet');sh.classList.add('on');$('#sheet
   if(d.lockdown)b+='<div class="warnbox">🔒 Locked down: only owners can use staff tools right now (<code>/owner lockdown on:False</code> to undo).</div>';
   const lab={Creator:'👑 Creator',Owner:'Owner',Admin:'Admin',Mod:'MOD',Staff:'Staff'};
   b+=(d.people||[]).map(p=>{const id=/^\d{5,22}$/.test(p.id||'')?p.id:null;
-   return '<div class="person"><span class="av"'+(p.color?' style="background:'+esc(p.color)+'"':'')+'>'+esc(initials(p.name))+'</span><span class="who"><b>'+esc(p.name)
+   const ring=p.color?'--ring:'+esc(p.color)+';':'';
+   const pic=id?'<img class="av avimg" src="/staff/avatar/'+id+'.png" alt="" loading="lazy" style="'+ring+'" data-n="'+esc(initials(p.name))+'" data-c="'+esc(p.color||'')+'">'
+    :'<span class="av" style="'+ring+(p.color?'background:'+esc(p.color):'')+'">'+esc(initials(p.name))+'</span>';
+   return '<div class="person"><span class="avwrap">'+pic+(p.seen&&Date.now()-Date.parse(p.seen)<36e5?'<i class="pres" title="On this page in the last hour"></i>':'')+'</span><span class="who"><b>'+esc(p.name)
    +'</b><i>'+esc(p.role||'')+(p.seen?(p.role?' · ':'')+'on this page '+esc(ago(p.seen)):'')+'</i></span><span class="badge '+esc(String(p.level).toLowerCase())+'">'+esc(lab[p.level]||p.level)+'</span>'
    +(p.removed?'<span class="badge removed">removed</span>':'')
    +(id?'<a class="dm" href="https://discord.com/users/'+id+'" target="_blank" rel="noopener noreferrer" title="Open their Discord profile to message them">💬 Message</a>':'')+'</div>'}).join('')
    ||'<div class="muted">Nobody to show yet.</div>';
   if(d.partial)b+='<div class="muted" style="margin-top:10px">Showing the members the bot has seen lately. For the full list, set <code>MEMBERS_INTENT=1</code> in Railway and switch on <b>Server Members Intent</b> in the Discord developer portal.</div>';
-  $('#sheetBody').innerHTML=b}catch(e){$('#sheetSub').textContent='Couldn\'t load the staff list. Try again in a moment.'}}
+  $('#sheetBody').innerHTML=b;
+  document.querySelectorAll('img.avimg').forEach(im=>im.addEventListener('error',()=>{const s=document.createElement('span');
+   s.className='av';s.textContent=im.dataset.n||'?';if(im.dataset.c)s.style.background=im.dataset.c;s.style.cssText+=im.getAttribute('style')||'';im.replaceWith(s)}))}catch(e){$('#sheetSub').textContent='Couldn\'t load the staff list. Try again in a moment.'}}
 function closeStaff(){$('#sheet').classList.remove('on');$('#staffbtn').focus()}
 $('#staffbtn').addEventListener('click',openStaff);$('#sheetX').addEventListener('click',closeStaff);
 $('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeStaff()});
@@ -30580,19 +31137,10 @@ class PicksBot(discord.Client):
             await message.reply("Questions aren't switched on yet: add a free `GROQ_API_KEY` (console.groq.com) or "
                                 "`GEMINI_API_KEY` (or an `ANTHROPIC_API_KEY`) variable to the bot on Railway.", mention_author=False)
             return
-        wait = self.ask_cooldowns.get(message.author.id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
-        if wait > 0:
-            await message.reply(f"Give me {int(wait) + 1}s before the next question.",
-                                mention_author=False)
+        gate = ask_gate(message.guild.id, message.author.id, message.author)
+        if gate:
+            await message.reply(gate, mention_author=False)
             return
-        count_key = f"asks:{datetime.now(TZ).date().isoformat()}"
-        used = int(get_setting(message.guild.id, count_key) or 0)
-        if used >= ask_limit(message.guild.id):
-            await message.reply(f"That's the server's {ask_limit(message.guild.id):,} questions for today. "
-                                "Back tomorrow.", mention_author=False)
-            return
-        self.ask_cooldowns[message.author.id] = time.monotonic()
-        set_setting(message.guild.id, count_key, str(used + 1))
 
         user_text = f"Question from {message.author.display_name}: {question}"
         ref = message.reference.resolved if message.reference else None
@@ -30816,7 +31364,7 @@ class PicksBot(discord.Client):
             slip, reason = await read_text_slip(words)
         if slip is None:
             return False
-        gate = ask_gate(message.guild.id, message.author.id)
+        gate = ask_gate(message.guild.id, message.author.id, message.author)
         if gate:
             await message.reply(gate, mention_author=False)
             return True
@@ -30844,7 +31392,7 @@ class PicksBot(discord.Client):
 
     async def review_slips(self, message: discord.Message, image_message: discord.Message, images: list):
         """Several screenshots in one message: one question for all of them, a breakdown for each."""
-        gate = ask_gate(message.guild.id, message.author.id)
+        gate = ask_gate(message.guild.id, message.author.id, message.author)
         if gate:
             await message.reply(gate, mention_author=False)
             return
@@ -30868,7 +31416,7 @@ class PicksBot(discord.Client):
                           gated: bool = False, label: Optional[str] = None):
         """'What do you think of this?' with a screenshot: read it, break it down, log nothing."""
         if not gated:
-            gate = ask_gate(message.guild.id, message.author.id)
+            gate = ask_gate(message.guild.id, message.author.id, message.author)
             if gate:
                 await message.reply(gate, mention_author=False)
                 return
@@ -30880,7 +31428,7 @@ class PicksBot(discord.Client):
         head = f"**{label}** · " if label else ""
         if slip is None or not slip.get("legs"):
             if not label:
-                ask_refund(message.guild.id)
+                ask_refund(message.guild.id, message.author.id)
             got = ""
             if slip and slip.get("cost") is not None:
                 got = (f" I can see {money(slip['cost'])}" + (f" to win {money(slip['payout'])}" if slip.get("payout") else "")
@@ -36158,6 +36706,50 @@ async def owner_asklimit(interaction: discord.Interaction, per_day: app_commands
     await interaction.response.send_message(f"Done: {per_day:,} questions a day. Free AI services have their own daily "
                                             "caps; past those, questions use paid Claude (if it's set up).", ephemeral=True)
 
+
+
+QUOTA_TIER_CHOICES = [app_commands.Choice(name=f"{n} (activity {s}+)", value=n) for n, s, _ in ASK_TIERS]
+
+
+@owner_group.command(name="quota", description="Questions per person: set a tier's number, one person's, or see them")
+@app_commands.describe(tier="Optional: which activity tier to change", member="Optional: one person to set",
+                       per_day="Questions a day (-1 = unlimited, 0 = none)", reset="True: put that person back on tiers")
+@app_commands.choices(tier=QUOTA_TIER_CHOICES)
+@owner_only
+async def owner_quota(interaction: discord.Interaction, tier: Optional[app_commands.Choice[str]] = None,
+                      member: Optional[discord.Member] = None,
+                      per_day: Optional[app_commands.Range[int, -1, 1000]] = None, reset: Optional[bool] = None):
+    gid = interaction.guild_id
+    if member is not None and reset:
+        set_setting(gid, f"askcap:{int(member.id)}", None)
+        await owner_note(interaction, f"{who(interaction)} put {clip(member.display_name, 40)} back on the activity tiers.")
+    elif member is not None and per_day is not None:
+        set_setting(gid, f"askcap:{int(member.id)}", str(per_day))
+        await owner_note(interaction, f"{who(interaction)} set {clip(member.display_name, 40)} to "
+                         f"{'unlimited' if per_day < 0 else per_day} questions a day.")
+    elif tier is not None and per_day is not None:
+        try:
+            over = json.loads(get_setting(gid, "ask_tiers") or "{}")
+        except ValueError:
+            over = {}
+        over[tier.value] = per_day
+        set_setting(gid, "ask_tiers", json.dumps(over))
+        await owner_note(interaction, f"{who(interaction)} set the **{tier.value}** tier to "
+                         f"{'unlimited' if per_day < 0 else per_day} questions a day.")
+    lines = ["**Questions per person per day** (activity = slips logged in 30 days + 2 per day they logged)"]
+    for n, start, per in ask_tiers(gid):
+        lines.append(f"• **{n}** (activity {start}+): {'unlimited' if per < 0 else per}")
+    lines.append("• **Mods and owners:** unlimited")
+    custom = db().execute("SELECT key, value FROM settings WHERE guild_id = ? AND key LIKE 'askcap:%'", (gid,)).fetchall()
+    if custom:
+        lines.append("**Set by you:** " + ", ".join(f"<@{r['key'][7:]}> {'unlimited' if int(r['value']) < 0 else r['value']}"
+                                                   for r in custom[:15]))
+    if member is not None and not reset and per_day is None:
+        a = ask_allowance(gid, member.id, member)
+        lines.append(f"**{clip(member.display_name, 40)}:** {a['tier']} · "
+                     f"{'unlimited' if a['per_day'] < 0 else a['per_day']} a day · used {a['used']} today · {a['why']}")
+    lines.append(f"**Server cap:** {ask_limit(gid):,} a day (`/owner asklimit`)")
+    await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 bot.tree.add_command(owner_group)
 
