@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r46.2"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r46.3"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -3102,8 +3102,15 @@ def team_matches(text: str, team: dict) -> bool:
 
 
 def parse_simple_leg(text: str) -> Optional[dict]:
-    """Moneyline, spread, game total or team total, or None if it's anything else."""
+    """Moneyline, spread, game total or team total, or None if it's anything else. A part-of-the-game marker
+    ("1H", "(1Q)", "F5", "1st Half") becomes "period"."""
     t = text.strip()
+    period = None
+    pm = _PERIOD_RX.search(t)
+    if pm:
+        period = leg_period(pm.group(0))
+        t = (t[:pm.start()] + " " + t[pm.end():]).strip()
+        t = re.sub(r"\s{2,}", " ", t)
     negate = False
     m = re.search(r"\((yes|no)\b[^)]*\)\s*$", t, re.I)       # Kalshi "(NO @ 20¢)"
     if m:
@@ -3119,6 +3126,13 @@ def parse_simple_leg(text: str) -> Optional[dict]:
     t = t.rstrip("?! ").strip()
     if NOT_SIMPLE.search(t):
         return None
+    out = _parse_simple_core(t, negate)
+    if out is not None and period:
+        out["period"] = period
+    return out
+
+
+def _parse_simple_core(t: str, negate: bool) -> Optional[dict]:
     num = r"(\d+(?:\.\d+)?)"
     unit = r"(?:\s+(?:total\s+)?(?:points|pts|runs|goals)(?:\s+scored)?)?"
     patterns = [
@@ -3218,7 +3232,38 @@ def score_line(ev: dict) -> str:
     return f"{away['short']} {away['score']:g}, {home['short']} {home['score']:g} (final)"
 
 
+def period_scores(ev: dict, period: str) -> Optional[list]:
+    """Each team's score for one part of the game, from the line scores: quarters, halves (summed quarters, or
+    the two halves in soccer and college hoops), hockey periods, MLB's first five innings. None if unknown."""
+    lines = [list(t.get("linescores") or []) for t in ev["teams"]]
+    if any(not ls or any(x is None for x in ls) for ls in lines):
+        return None
+    path = ev.get("path") or ""
+    halves = len(lines[0]) <= 3 and not path.startswith("hockey/") and not path.startswith("baseball/")
+    def part(ls):
+        if period[1] == "Q":
+            q = int(period[0])
+            return ls[q - 1] if len(ls) >= q and not halves else None
+        if period == "1H":
+            return ls[0] if halves else (sum(ls[:2]) if len(ls) >= 2 else None)
+        if period == "2H":                                   # the second half counts overtime, like the books
+            return sum(ls[1:]) if halves else (sum(ls[2:]) if len(ls) >= 4 else None)
+        if period[1] == "P":
+            p_ = int(period[0])
+            return ls[p_ - 1] if len(ls) >= p_ else None
+        if period == "F5":
+            return sum(ls[:5]) if len(ls) >= 5 else None
+        return None
+    out = [part(ls) for ls in lines]
+    return None if any(x is None for x in out) else [float(x) for x in out]
+
+
 def judge(leg: dict, ev: dict, i: Optional[int]) -> Optional[str]:
+    if leg.get("period"):
+        ps = period_scores(ev, leg["period"])
+        if ps is None:
+            return None                              # no line scores: a person grades it
+        ev = dict(ev, teams=[dict(t, score=v) for t, v in zip(ev["teams"], ps)])
     if i is not None:
         mine, theirs = ev["teams"][i]["score"], ev["teams"][1 - i]["score"]
     total = sum(t["score"] for t in ev["teams"])
@@ -6023,6 +6068,7 @@ async def leg_progress(p, legs: Optional[list] = None) -> list[dict]:
                     entry["in_play"] = st["state"] == "in"
                     entry["track"], entry["track_note"] = st.get("track") or "tracked", st.get("track_note") or ""
                     entry["track_info"] = {"player": st["player"], "team": st.get("team") or "", "stat": st["stat"],
+                                           "stat_key": st.get("stat_key"),
                                            "game": short_game(st["event"]) if st["event"] else "",
                                            "start": (st["event"] or {}).get("date") or "", "path": st["path"],
                                            "value": st["value"], "line": st["line"]}
@@ -11775,6 +11821,10 @@ class DisputeModal(discord.ui.Modal, title="What's wrong with this grade?"):
         e = pick_embed(dict(p) | {"hidden": 0} if get_setting(interaction.guild_id, "audit_channel") else p)
         e.title = clip(f"⚠️ Disputed: {e.title}", 256)
         e.add_field(name=f"From {interaction.user.display_name}", value=clip(self.reason.value, 1024), inline=False)
+        if not sec_secret(p) or get_setting(interaction.guild_id, "audit_channel"):
+            rows = dispute_leg_lines(p)
+            if rows and len(e.fields) < 24:
+                e.add_field(name="Legs as graded", value=clip("\n".join(rows), 1024), inline=False)
         view = discord.ui.View(timeout=None)
         for st in ("win", "loss", "push"):
             view.add_item(FixButton(p["id"], st))
@@ -22872,6 +22922,23 @@ def track_can_view(interaction, p) -> bool:
     return not secret or can_edit(interaction, p)
 
 
+def leg_source(e: dict) -> Optional[str]:
+    """Where a leg's number comes from, in plain words (for /track)."""
+    info = e.get("track_info") or {}
+    k = info.get("stat_key")
+    if e.get("track") == "manual":
+        return "graded by hand (no free feed has this stat)"
+    if k and k in STATS:
+        comps = [c for c, _ in STATS[k][2]]
+        core = any((C.get(c, ((), (), None))[2] or "").startswith("core.") for c in comps)
+        if k in CUSTOM_STATS:
+            return "ESPN per-game stats, scored the way PrizePicks scores it"
+        return "ESPN per-game stats" if core else "ESPN box score"
+    if info.get("team") and e.get("event"):
+        return "ESPN scoreboard" + (" (line scores)" if (parse_simple_leg(e.get("text") or "") or {}).get("period") else "")
+    return None
+
+
 def track_doctor_lines(e: dict) -> str:
     info = e.get("track_info") or {}
     lines = []
@@ -22888,6 +22955,9 @@ def track_doctor_lines(e: dict) -> str:
         v, line = info.get("value"), info.get("line")
         lines.append(f"📊 {info['stat']}: " + (f"**{v:g}** (line {line:g})" if v is not None and line is not None else
                                               f"line {line:g}, no number yet" if line is not None else "no number yet"))
+    src = leg_source(e)
+    if src:
+        lines.append(f"🔎 Source: {src}")
     if e.get("decided"):
         lines.append(f"🏁 {e['decided']}: {e.get('why') or ''}".rstrip(": "))
     if e.get("status") not in (None, "open"):
@@ -35036,7 +35106,9 @@ WHATS_NEW = {
             "📊 `/track` links each leg to its ESPN box score",
             "🗣️ Staff can teach the bot player nicknames (`/staff nickname`)",
             "🌧️ A postponed or called-off game voids its legs (pick'em apps right away, sportsbooks after a day)",
-            "🕘 `/track` shows every grade change on a slip"],
+            "🕘 `/track` shows every grade change on a slip",
+            "⏱️ Half, quarter, period and first-5-innings team legs grade themselves (like 'Celtics 1H -3.5')",
+            "⚠️ Wrong-grade reports show the staff every leg, why it graded that way, and the box score"],
     "r45": ["📖 A new /help with topics and buttons, and a member guide page",
             "💬 Feedback button in /help: it goes straight to the staff as a ticket",
             "👋 New members get a welcome DM with buttons",
@@ -41863,6 +41935,23 @@ async def slip_pnl(interaction: discord.Interaction):
 bot.tree.add_command(slip_group)
 
 
+# ==== r46.3 ========================================================================================================
+
+def dispute_leg_lines(p) -> list[str]:
+    """Each leg as graded, with the reason and a box score link when the bot has looked at the game."""
+    hit = _PROGRESS_CACHE.get(p["id"])
+    entries = {e.get("n"): e for e in (hit[1] if hit else [])}
+    out = []
+    for leg in get_legs(p["id"]):
+        e = entries.get(leg["idx"]) or {}
+        ev = e.get("event") or {}
+        url = espn_game_url(e.get("path") or ev.get("path"), ev.get("id"))
+        why = leg["note"] if "note" in leg.keys() and leg["note"] else (e.get("why") or "")
+        out.append(f"{LEG_ICON.get(leg['status'], '•')} {leg['idx']}. {clip(leg['text'], 70)}"
+                   + (f" · {clip(why, 70)}" if why else "") + (f" · [box score]({url})" if url else ""))
+    return out
+
+
 # ==== r46.2 ========================================================================================================
 
 POSTPONED_STATUSES = ("STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_CANCELLED", "STATUS_ABANDONED")
@@ -42250,6 +42339,12 @@ async def research_build(cand: dict, stat: Optional[str] = None, line: Optional[
             vs = dict(research_window(vv, line, side), opp=opp_key, upcoming=bool(opp))
     try:
         inj = (await fetch_injuries(path)).get(norm_name(cand["name"]))
+        if inj and inj.get("ambiguous"):             # two players, one name: keep it only if the team matches
+            inj = inj if cand.get("team") and norm_team(inj.get("team") or "") == norm_team(cand["team"]) else None
+            if inj is None and cand.get("team"):
+                listed = await asyncio.wait_for(team_injuries(path, cand["team"]), 6)
+                hit = next((x for x in listed if norm_name(x["name"]) == norm_name(cand["name"])), None)
+                inj = {"status": hit["status"], "comment": ""} if hit else None
     except Exception:
         inj = None
     mates = []
