@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r46"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r46.1"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -747,7 +747,27 @@ def grade_leg(guild_id: int, pick_id: int, idx: int,
     return p2, note
 
 
-def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
+_STATS_CACHE: dict = {}
+
+
+def compute_stats(*args, **kw):
+    """compute_stats_fresh, reused while nothing in the database has changed (a copy each time: callers may edit it)."""
+    import copy
+    try:
+        key = (db().total_changes, repr(args), repr(sorted(kw.items())))
+    except Exception:
+        return compute_stats_fresh(*args, **kw)
+    hit = _STATS_CACHE.get(key)
+    if hit is not None and hit[0] > time.monotonic():
+        return copy.deepcopy(hit[1])
+    out = compute_stats_fresh(*args, **kw)
+    if len(_STATS_CACHE) > 200:
+        _STATS_CACHE.clear()
+    _STATS_CACHE[key] = (time.monotonic() + 30, out)
+    return copy.deepcopy(out)
+
+
+def compute_stats_fresh(guild_id: int, bettor_key: Optional[str] = None,
                   since: Optional[str] = None, until: Optional[str] = None,
                   sport: Optional[str] = None, preseason: bool = True, platform: Optional[str] = None) -> list[dict]:
     """Per-bettor totals, sorted by net profit (best first)."""
@@ -14334,6 +14354,7 @@ async def leg_watch(client: discord.Client, now: Optional[datetime] = None) -> N
                             ORDER BY id DESC LIMIT 60""", (recent, cutoff)).fetchall()
     spoken: dict[int, int] = {}
     said: set = set()
+    leg_batch: dict = {}
     checked = 0
     for p in picks:
         if checked >= 25:
@@ -14375,13 +14396,8 @@ async def leg_watch(client: discord.Client, now: Optional[datetime] = None) -> N
             hits = sum(1 for e in entries if leg_outcome(e) == "hit")
             tail = (f"\n-# {hits}/{len(entries)} in" + ("" if alive == len(entries) else " · slip's dead") +
                     " · `/me legalerts` turns these off")
-            try:
-                user = await known_user(client, p["bettor_id"])
-                user = user or await client.fetch_user(p["bettor_id"])
-                for chunk in split_message(f"🎯 **{clip(p['description'], 60)}** (`#{p['id']}`)\n" + "\n".join(news) + tail):
-                    await user.send(chunk)
-            except Exception:
-                log.info("Couldn't DM leg alert for pick %s", p["id"])
+            leg_batch.setdefault(p["bettor_id"], []).append(
+                f"🎯 **{clip(p['description'], 60)}** (`#{p['id']}`)\n" + "\n".join(news) + tail)
         if voice_lines and not p["hidden"] and p["guild_id"] in VOICE:
             for line in voice_lines:
                 if spoken.get(p["guild_id"], 0) >= 4:
@@ -14391,6 +14407,14 @@ async def leg_watch(client: discord.Client, now: Optional[datetime] = None) -> N
                 said.add((p["guild_id"], line))
                 spoken[p["guild_id"]] = spoken.get(p["guild_id"], 0) + 1
                 await voice_say(client, p["guild_id"], line)
+    for uid, parts in leg_batch.items():          # r46.1: one DM per person, every slip that moved in it
+        try:
+            user = await known_user(client, uid)
+            user = user or await client.fetch_user(uid)
+            for chunk in split_message("\n\n".join(parts)):
+                await user.send(chunk)
+        except Exception:
+            log.info("Couldn't DM leg alerts for %s", uid)
     if len(_LEG_SEEN) > 2000:
         _LEG_SEEN.clear()
 
@@ -20231,7 +20255,7 @@ async def dash_api_data(request):
     if err is not None:
         return err
     gid = prm["guild"]
-    d = dashboard_data(gid)
+    d = dict(dashboard_data(gid))          # r46.1: a copy, the cached one stays as it was
     d["needs"] = dash_needs(gid)
     d.update(await dash_live(gid))
     d["updated"] = datetime.now(TZ).strftime("%-I:%M %p")
@@ -22099,6 +22123,8 @@ def sec_scrub_backup(path: str, guild_id: int) -> None:
         for t, (col, parent) in SEC_CHILD_TABLES.items():
             if t in tables and parent in tables:
                 con.execute(f'DELETE FROM "{t}" WHERE {col} NOT IN (SELECT id FROM "{parent}")')
+        if "line_snap" in tables:
+            con.execute("DELETE FROM line_snap")        # r46.1: market snapshots, not picks
         if "fav_alerts" in tables:
             con.execute("DELETE FROM fav_alerts WHERE user_id NOT IN (SELECT CAST(substr(key, 5) AS INTEGER) FROM settings "
                         "WHERE key LIKE 'bio:%')")
@@ -22855,6 +22881,16 @@ def track_doctor_lines(e: dict) -> str:
     return "\n".join(lines) or "Nothing found yet."
 
 
+def espn_game_url(path: Optional[str], eid) -> Optional[str]:
+    """ESPN's game page for an event (box score and play-by-play), or None."""
+    if not path or not re.fullmatch(r"\d{4,14}", str(eid or "")):
+        return None
+    slug = "soccer" if path.startswith("soccer/") else path.split("/", 1)[-1]
+    if not re.fullmatch(r"[a-z\-]{2,40}", slug):
+        return None
+    return f"https://www.espn.com/{slug}/game/_/gameId/{eid}"
+
+
 def track_doctor_embed(p, entries: list[dict]) -> discord.Embed:
     counts = {k: sum(1 for e in entries if e.get("track") == k) for k in TRACK_ICON}
     words = {"tracked": "tracked", "manual": "by hand", "unknown": "not found yet", "broken": "not a pick"}
@@ -22870,8 +22906,9 @@ def track_doctor_embed(p, entries: list[dict]) -> discord.Embed:
                       description=clip(f"*{p['description']}*\n{summary}{anchor}", 4000))
     for x in entries[:24]:
         icon = LEG_ICON.get(x["status"], "") if x.get("status") != "open" else TRACK_ICON.get(x.get("track"), "⏳")
-        e.add_field(name=clip(f"{icon} {x['n']}. {x['text']}", 256), value=clip(track_doctor_lines(x), 1024),
-                    inline=False)
+        url = espn_game_url(x.get("path") or (x.get("event") or {}).get("path"), (x.get("event") or {}).get("id"))
+        e.add_field(name=clip(f"{icon} {x['n']}. {x['text']}", 256), inline=False,
+                    value=clip(track_doctor_lines(x) + (f"\n[📊 Box score on ESPN]({url})" if url else ""), 1024))
     e.set_footer(text="Free ESPN data · 🔄 Re-check clears what I remembered about this slip and looks again")
     return e
 
@@ -34972,7 +35009,10 @@ WHATS_NEW = {
             "⚽ Soccer Fantasy Score and Goalie Fantasy Score now grade themselves (PrizePicks scoring)",
             "🔎 Unsure reads show a confidence level and mark the legs to check with ❓",
             "🧠 Fix a misread name once and the reader remembers it",
-            "👀 Watchlist news comes in one DM instead of several"],
+            "👀 Watchlist news comes in one DM instead of several",
+            "🎯 Leg updates from all your slips arrive in one DM",
+            "📊 `/track` links each leg to its ESPN box score",
+            "🗣️ Staff can teach the bot player nicknames (`/staff nickname`)"],
     "r45": ["📖 A new /help with topics and buttons, and a member guide page",
             "💬 Feedback button in /help: it goes straight to the staff as a ticket",
             "👋 New members get a welcome DM with buttons",
@@ -35006,9 +35046,9 @@ def whatsnew_channel(client, guild_id: int):
 
 async def whatsnew_job(client, now: Optional[datetime] = None) -> None:
     """Once per release with notes: post What's new in the group's channel (admins can turn it off)."""
-    tag = BOT_VERSION.split()[-1]
+    tag = BOT_VERSION.split()[-1].split(".")[0]      # r46.1 → r46: a hotfix shares its release's notes
     if tag not in WHATS_NEW:
-        return                                       # a hotfix (r45.1) has no notes of its own
+        return
     for g in list(getattr(client, "guilds", []) or []):
         if get_setting(g.id, "whatsnew_last") == tag:
             continue
@@ -40085,6 +40125,8 @@ def ticket_view(t) -> "discord.ui.View":
                 v.add_item(TicketButton(t["id"], act))
         if t["kind"] == "payout" and t["pick_id"] and not t["hidden"]:
             v.add_item(TicketButton(t["id"], "payout"))
+        if t["kind"] == "statfix" and t["pick_id"] and not t["hidden"]:
+            v.add_item(StatfixApplyButton(t["id"]))
         if t["status"] != "claimed":
             v.add_item(TicketButton(t["id"], "claim"))
         v.add_item(TicketButton(t["id"], "close"))
@@ -41058,6 +41100,7 @@ async def statfix_job(client, now: Optional[datetime] = None) -> None:
                          (p["guild_id"], key, "statfix", f"Stat correction? Slip #{p['id']}" if not secret else "Stat correction? A hidden slip",
                           detail, p["id"], None, int(secret), ch.id if ch is not None else None, now_iso()))
         db().commit()
+        set_setting(p["guild_id"], f"statfix_diff:{c.lastrowid}", json.dumps([[n, b] for n, _, _, b, _ in diffs]))
         if ch is not None:
             t = db().execute("SELECT * FROM tickets WHERE id = ?", (c.lastrowid,)).fetchone()
             try:
@@ -41074,6 +41117,104 @@ HELP_EXTRA.append(("⚡ Speed and accuracy", "Screenshots read in about 1-2 seco
                                           "next morning, the staff get a ticket to check it. Unsure reads show a "
                                           "confidence level and ❓ on the legs to look at. Fix a misread name once and "
                                           "the reader remembers it."))
+
+
+
+# ==== r46.1 ========================================================================================================
+
+class StatfixApplyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sfa:(?P<tid>\d+)"):
+    """On a stat-correction ticket: re-grade the changed legs the way the stats now read, then close it (staff only)."""
+    def __init__(self, tid: int):
+        super().__init__(discord.ui.Button(label="🔁 Apply the new grades", style=discord.ButtonStyle.success,
+                                           custom_id=f"sfa:{tid}"))
+        self.tid = tid
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["tid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        if not sec_staff(interaction.user):
+            await interaction.response.send_message("Only the staff can apply a stat correction.", ephemeral=True)
+            return
+        t = db().execute("SELECT * FROM tickets WHERE id = ? AND guild_id = ?", (self.tid, interaction.guild_id)).fetchone()
+        if t is None or t["status"] == "closed" or not t["pick_id"]:
+            await interaction.response.send_message("That ticket is already closed.", ephemeral=True)
+            return
+        try:
+            diffs = json.loads(get_setting(interaction.guild_id, f"statfix_diff:{self.tid}") or "[]")
+        except ValueError:
+            diffs = []
+        done = []
+        for n, status in diffs:
+            if status in ("hit", "miss", "push"):
+                p, _ = grade_leg(interaction.guild_id, t["pick_id"], int(n), status)
+                done.append(f"leg {n} → {status}")
+        p = get_pick(interaction.guild_id, t["pick_id"])
+        ticket_close(self.tid, interaction.user.display_name, "Applied: " + ", ".join(done) if done else "Nothing to apply")
+        await audit(interaction.client, interaction.guild_id,
+                    f"{interaction.user.display_name} applied a stat correction on slip #{t['pick_id']}: {', '.join(done) or 'nothing'}")
+        await interaction.response.send_message(
+            (f"🔁 Done: {', '.join(done)}." + (f" Slip #{t['pick_id']} is now **{STATUS[p['status']][0]}**." if p else ""))
+            if done else "Nothing to apply.", ephemeral=True)
+        try:
+            await ticket_refresh(interaction.client, self.tid)
+        except Exception:
+            pass
+
+
+EXTRA_ITEMS.append(StatfixApplyButton)
+
+
+# ---- staff-approved nicknames: "wemby" → Victor Wembanyama everywhere names are typed ----
+
+def nicknames_load() -> int:
+    n = 0
+    for r in db().execute("SELECT key, value FROM settings WHERE guild_id = 0 AND key LIKE 'nick:%'"):
+        nick = r["key"][5:]
+        if nick and r["value"]:
+            PLAYER_NICKNAMES[nick] = r["value"]
+            n += 1
+    return n
+
+
+def nickname_set(nick: str, full: str) -> tuple[str, str]:
+    a, b = norm_name(nick)[:30], norm_name(full)[:60]
+    if not a or not b or a == b:
+        raise ValueError("bad nickname")
+    set_setting(0, f"nick:{a}", b)
+    PLAYER_NICKNAMES[a] = b
+    return a, b
+
+
+try:
+    nicknames_load()
+except Exception:
+    pass
+
+
+@staff_group.command(name="nickname", description="Teach the bot a player nickname (e.g. wemby → Victor Wembanyama)")
+@app_commands.describe(nickname="What people type", player="The player's full name (blank removes the nickname)")
+@sec_staff_only
+async def staff_nickname_cmd(interaction: discord.Interaction, nickname: app_commands.Range[str, 2, 30],
+                             player: Optional[app_commands.Range[str, 3, 60]] = None):
+    if not player:
+        key = norm_name(nickname)
+        had = get_setting(0, f"nick:{key}")
+        set_setting(0, f"nick:{key}", None)
+        PLAYER_NICKNAMES.pop(key, None) if had else None
+        await interaction.response.send_message(f"Removed **{key}**." if had else f"**{key}** wasn't a saved nickname.",
+                                                ephemeral=True)
+        return
+    try:
+        a, b = nickname_set(nickname, player)
+    except ValueError:
+        await interaction.response.send_message("That nickname doesn't work. Use letters and the full player name.",
+                                                ephemeral=True)
+        return
+    await audit(interaction.client, interaction.guild_id, f"{interaction.user.display_name} taught the nickname {a} → {b}")
+    await interaction.response.send_message(f"👍 **{a}** now means **{b.title()}** in slips, research and lookups.",
+                                            ephemeral=True)
 
 
 bot.tree.add_command(staff_group)
@@ -43030,7 +43171,10 @@ async def on_app_command_error(interaction: discord.Interaction,
                "**Send Messages**, **Embed Links** and **Attach Files** in this channel "
                "(Edit Channel → Permissions → add PIMP-BOT).")
     else:
-        msg = "Something went wrong running that. Check the bot's logs for details."
+        ref = f"E{int(time.time()) % 100000:05d}"
+        log.warning("Command error reference %s for /%s", ref, cmd_name(interaction))
+        msg = (f"⚠️ That didn't work (ref `{ref}`). Try again in a minute. If it keeps happening, tap **💬 Feedback** "
+               "in `/help` and mention the ref, and the staff will look.")
     try:
         if interaction.response.is_done():
             await interaction.followup.send(msg, ephemeral=True)
