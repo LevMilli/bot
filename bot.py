@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r47.5"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r47.7"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -4685,10 +4685,20 @@ async def _today_embed(path: str, day: Optional[datetime] = None) -> Optional[di
     return e
 
 
+def server_leagues(guild_id: int) -> list[str]:
+    """The sports an admin picked in /admin setup (in LEAGUE_NAMES order)."""
+    try:
+        raw = json.loads(get_setting(guild_id, "leagues") or "[]")
+    except (ValueError, TypeError):
+        raw = []
+    return [p for p in LEAGUE_NAMES if p in raw]
+
+
 def group_leagues(guild_id: int) -> list[str]:
-    """The leagues this group has bet on in the last 30 days (NFL and NBA if none)."""
+    """The sports the server follows (/admin setup) first, then the leagues bet on in the last 30 days (NFL and NBA
+    if none)."""
     since = iso(datetime.now(timezone.utc) - timedelta(days=30))
-    found: list[str] = []
+    found: list[str] = server_leagues(guild_id)
     for r in db().execute("SELECT DISTINCT sport FROM picks WHERE guild_id = ? AND created_at >= ? AND sport IS NOT NULL",
                           (guild_id, since)):
         text = r["sport"].lower()
@@ -16892,6 +16902,65 @@ def _brand_sparkle(cx: float, cy: float, r: float, n: int = 48) -> list:
 # ---- the mascot ------------------------------------------------------------------------------------
 
 _BRAND_LOGO_CACHE: dict = {}
+import contextvars as _ctxv2
+_BRAND_GUILD: "_ctxv2.ContextVar" = _ctxv2.ContextVar("brand_guild", default=None)
+_CUSTOM_LOGO_CACHE: dict = {}
+BRAND_LOGO_MAX = 4 * 1024 * 1024          # upload limit
+BRAND_LOGO_PX = 512                        # stored size
+
+
+def brand_logo_prepare(raw: bytes) -> bytes:
+    """An uploaded image as a square 512px PNG (centre crop). Raises ValueError if it isn't a usable picture."""
+    from PIL import Image, ImageOps
+    if not raw or len(raw) > BRAND_LOGO_MAX:
+        raise ValueError("too big" if raw else "empty")
+    try:
+        im = Image.open(io.BytesIO(raw))
+        if im.format not in ("PNG", "JPEG", "WEBP", "GIF"):
+            raise ValueError("format")
+        if im.width * im.height > 40_000_000:
+            raise ValueError("too big")
+        im.seek(0)
+        im = ImageOps.exif_transpose(im).convert("RGBA")
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("not an image") from exc
+    if min(im.size) < 64:
+        raise ValueError("too small")
+    side = min(im.size)
+    im = im.crop(((im.width - side) // 2, (im.height - side) // 2, (im.width + side) // 2, (im.height + side) // 2))
+    im = im.resize((BRAND_LOGO_PX, BRAND_LOGO_PX), Image.LANCZOS)
+    out = io.BytesIO()
+    im.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+
+def brand_custom_logo(guild_id: int, size: int, raw: Optional[str] = None):
+    """The server's uploaded logo as a round RGBA badge, or None. Pass raw (the stored base64) from a render thread."""
+    from PIL import Image, ImageDraw
+    raw = raw if raw is not None else get_setting(guild_id, "brand_logo")
+    if not raw:
+        return None
+    key = (guild_id, size, hash(raw))
+    hit = _CUSTOM_LOGO_CACHE.get(key)
+    if hit is not None:
+        return hit.copy()
+    try:
+        im = Image.open(io.BytesIO(base64.b64decode(raw))).convert("RGBA")
+    except Exception:
+        return None
+    k = 4
+    big = im.resize((size * k, size * k), Image.LANCZOS)
+    mask = Image.new("L", big.size, 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, big.width - 1, big.height - 1), fill=255)
+    out = Image.new("RGBA", big.size, (0, 0, 0, 0))
+    out.paste(big, (0, 0), mask)
+    out = out.resize((size, size), Image.LANCZOS)
+    if len(_CUSTOM_LOGO_CACHE) > 64:
+        _CUSTOM_LOGO_CACHE.clear()
+    _CUSTOM_LOGO_CACHE[key] = out
+    return out.copy()
 
 
 def brand_logo(size: int, variant: str = "default", accent=None, plate: bool = True):
@@ -16899,6 +16968,11 @@ def brand_logo(size: int, variant: str = "default", accent=None, plate: bool = T
     the bare robot. variant is a mood from BRAND_MOODS. Drawn at 2-4x and downscaled, so it is crisp from 24px up."""
     from PIL import Image
     size = max(12, int(size))
+    own = _BRAND_GUILD.get()
+    if plate and own and variant in ("default", own[1]):
+        custom = brand_custom_logo(own[0], size, own[2])          # the server's own logo replaces the robot badge
+        if custom is not None:
+            return custom
     variant = variant if variant in BRAND_MOODS else "default"
     accent = tuple(accent[:3]) if accent else BRAND_DEFAULT_ACCENT
     key = (size, variant, accent, plate)
@@ -17195,10 +17269,42 @@ def brand_for(guild_id: int) -> dict:
         raw = {}
     accent = brand_parse_colour(raw.get("accent")) or BRAND_DEFAULT_ACCENT
     mood = raw.get("mood") if raw.get("mood") in BRAND_MOODS else "default"
+    logo_raw = get_setting(guild_id, "brand_logo") if guild_id else None
+    has_logo = bool(logo_raw)
+    _BRAND_GUILD.set((guild_id, mood, logo_raw) if has_logo else None)   # read here: renders run in a thread     # r47.6: renders after this use the server's logo
     return {"accent": accent, "hex": _brand_hex(accent), "mood": mood, "tagline": raw.get("tagline") or "",
-            "name": raw.get("name") or "PIMP-BOT", "custom": bool(raw),
+            "name": raw.get("name") or "PIMP-BOT", "custom": bool(raw) or has_logo, "logo": has_logo,
             "stops": [_brand_mix(accent, (255, 255, 255), 0.2), _brand_mix(accent, (0, 0, 0), 0.45),
                       _brand_mix(accent, (0, 0, 0), 0.8)]}
+
+
+def brand_preview(guild_id: int, reset: bool = False, **changes) -> dict:
+    """What brand_save would give, without saving anything."""
+    cur = get_setting(guild_id, "brand")
+    try:
+        raw = {} if reset else json.loads(cur or "{}")
+    except (ValueError, TypeError):
+        raw = {}
+    for k, v in changes.items():
+        if v is None:
+            raw.pop(k, None)
+        else:
+            raw[k] = v
+    with _setting_override(guild_id, "brand", json.dumps(raw) if raw else None):
+        return brand_for(guild_id)
+
+
+import contextlib as _ctxlib
+
+
+@_ctxlib.contextmanager
+def _setting_override(guild_id: int, key: str, value):
+    old = get_setting(guild_id, key)
+    set_setting(guild_id, key, value)
+    try:
+        yield
+    finally:
+        set_setting(guild_id, key, old)
 
 
 def brand_save(guild_id: int, **changes) -> dict:
@@ -17620,8 +17726,9 @@ def render_brand_logo(b: dict) -> io.BytesIO:
     y = max(y + 26, 330)
     d.rounded_rectangle((x, y, x + 44, y + 44), 12, fill=b["accent"], outline=(255, 255, 255), width=3)
     d.text((x + 60, y + 8), b["hex"], font=art_font(24, True), fill=ART_TEXT)
-    label = BRAND_MOODS[b["mood"]][0]
-    _brand_pill(d, x + 60 + _tw(d, b["hex"], art_font(24, True)) + 24, y + 4, f"MASCOT · {label.upper()}",
+    label = "your logo" if b.get("logo") else BRAND_MOODS[b["mood"]][0]
+    _brand_pill(d, x + 60 + _tw(d, b["hex"], art_font(24, True)) + 24, y + 4,
+                ("LOGO · YOURS" if b.get("logo") else f"MASCOT · {label.upper()}"),
                 art_font(18, True), (255, 255, 255, 40), ART_TEXT)
     d.text((x, H - 66), "Set with /admin brand", font=art_font(17, True), fill=(200, 196, 220))
     return _brand_png(img)
@@ -18256,7 +18363,7 @@ EXTRA_JOBS.append(("doctor_daily", doctor_daily))
 
 # ---- /admin setup: the wizard -------------------------------------------------------------------------
 
-SETUP_STEPS = ["receipts", "recap", "audit", "switches", "test"]
+SETUP_STEPS = ["receipts", "recap", "audit", "sports", "switches", "test"]
 
 
 def setup_channel_lines(client, guild, guild_id: int, role: str, ids: list[int], need) -> list[str]:
@@ -18292,6 +18399,11 @@ def setup_embed(client, guild, guild_id: int, step: int, note: str = "") -> disc
                  "Edits, deletes, manual settles, disputes and self-check alerts. Keep this channel mods-only."])
         current = setup_channel_lines(client, guild, guild_id, name.title(), [int(v)] if v and v.isdigit() else [],
                                       OPS_PERMS if name == "recap" else OPS_AUDIT_PERMS) or ["off"]
+    elif name == "sports":
+        body = ["**🏟️ Which sports does the server follow?**",
+                "Pick them below. `/today`, the morning post and game-day previews show these first, on top of "
+                "whatever people are betting on."]
+        current = [LEAGUE_NAMES.get(p, p) for p in server_leagues(guild_id)] or ["none picked: I follow what people bet"]
     elif name == "switches":
         body = ["**🎛️ The main switches**", "Tap one to flip it. Everything else lives in `/admin panel`."]
         labels = {k: lab for k, lab, _ in SERVER_TOGGLES}
@@ -18417,6 +18529,22 @@ def setup_view(client, guild, guild_id: int, step: int) -> discord.ui.View:
                 await render(interaction, step, "✅ " + setup_apply(interaction.client, guild_id, name, []))
             off.callback = turn_off
             v.add_item(off)
+    elif name == "sports":
+        have = set(server_leagues(guild_id))
+        opts = [discord.SelectOption(label=clip(n, 100), value=p, default=p in have) for p, n in list(LEAGUE_NAMES.items())[:25]]
+        sel = discord.ui.Select(placeholder="Pick the sports (clear them all to follow bets only)", options=opts, row=0,
+                                min_values=0, max_values=len(opts))
+
+        async def picked_sports(interaction):
+            if not await gate(interaction):
+                return
+            chosen = [x for x in sel.values if x in LEAGUE_NAMES]
+            set_setting(guild_id, "leagues", json.dumps(chosen) if chosen else None)
+            await audit(interaction.client, guild_id, f"{who(interaction)} set the server's sports in /admin setup")
+            await render(interaction, step, "✅ " + (", ".join(LEAGUE_NAMES[p] for p in chosen) if chosen else
+                                                    "No sports picked: I follow what people bet."))
+        sel.callback = picked_sports
+        v.add_item(sel)
     elif name == "switches":
         labels = {k: (lab, kind) for k, lab, kind in SERVER_TOGGLES}
         for n, (key, _) in enumerate([s for s in OPS_KEY_SWITCHES if s[0] in labels]):
@@ -18465,6 +18593,7 @@ def setup_view(client, guild, guild_id: int, step: int) -> discord.ui.View:
             async def cb(interaction):
                 if not await gate(interaction):
                     return
+                set_setting(guild_id, "setup_step", None if target < 0 else str(target))
                 if target < 0:
                     await interaction.response.edit_message(
                         content=None, view=None, embed=discord.Embed(
@@ -35267,9 +35396,12 @@ WHATS_NEW = {
             "📏 Help and the guide explain how results count on sportsbooks and DFS apps",
             "🛠️ `/admin panel` groups the server switches by area",
             "🟢 A status page anyone can open: `/statuspage` on the dashboard link",
-            "🕐 `/admin timezone`: game times show in your server's own time zone",
+            "🕐 `/admin server timezone`: game times show in your server's own time zone",
             "⚽ 20 more soccer competitions grade themselves, including the WSL and the women's Champions League",
-            "📦 `/admin exportall`: the whole server's data as one zip",
+            "📦 `/admin server export`: the whole server's data as one zip",
+            "🎨 `/admin server logo`: your server's own logo on the bot's cards · `/admin brand preview:True` shows a look first",
+            "🧭 `/admin setup` asks which sports you follow and picks up where you stopped",
+            "👋 New servers get a welcome with the setup steps · `/admin server wipe` (owner only) deletes the server's data after a 24-hour wait",
             "🏁 F1 finishing-position legs grade themselves (like 'Lando Norris under 3.5 Finishing Position')",
             "⚾ `/research` on a pitcher shows the probable starters for his next game",
             "🌍 /help has a 'Sports covered' page with where every number comes from"],
@@ -38439,6 +38571,8 @@ async def insights_confidence(interaction: discord.Interaction, member: Optional
 
 admin_group = app_commands.Group(name="admin", description="Server tools for admins", guild_only=True,
                                  default_permissions=discord.Permissions(manage_guild=True))
+admin_server_group = app_commands.Group(name="server", description="This server's own settings: time zone, logo, export, delete",
+                                        parent=admin_group)
 
 
 @admin_group.command(name="status", description="Is everything running? Version, uptime, connections")
@@ -38929,20 +39063,22 @@ async def _brand_send(interaction: discord.Interaction, fn, args: tuple, filenam
 @app_commands.describe(colour="A preset (purple, gold, green, blue, red, pink, teal, orange, ice, black) or hex #ff66cc",
                        mascot="The mascot's everyday mood", tagline="A short line under the logo ('none' clears it)",
                        name="The name printed on images ('none' resets to PIMP-BOT)",
-                       reset="Go back to the default look")
+                       reset="Go back to the default look",
+                       preview="Show how it would look without saving")
 @app_commands.choices(mascot=[app_commands.Choice(name=v[0], value=k) for k, v in BRAND_MOODS.items()])
 @app_commands.autocomplete(colour=_brand_colour_ac)
 async def admin_brand(interaction: discord.Interaction, colour: Optional[str] = None,
                       mascot: Optional[app_commands.Choice[str]] = None,
                       tagline: Optional[app_commands.Range[str, 1, 60]] = None,
-                      name: Optional[app_commands.Range[str, 1, 24]] = None, reset: Optional[bool] = False):
+                      name: Optional[app_commands.Range[str, 1, 24]] = None, reset: Optional[bool] = False,
+                      preview: Optional[bool] = False):
     perms = getattr(interaction.user, "guild_permissions", None)
     if not (perms and getattr(perms, "manage_guild", False)):
         await interaction.response.send_message("Only server admins (Manage Server) can change the bot's look.",
                                                 ephemeral=True)
         return
     gid = interaction.guild_id
-    if reset:
+    if reset and not preview:
         set_setting(gid, "brand", None)
     changes: dict = {}
     if colour is not None:
@@ -38962,6 +39098,11 @@ async def admin_brand(interaction: discord.Interaction, colour: Optional[str] = 
     if n is not None:
         changes["name"] = None if not n or n.upper() == "PIMP-BOT" else n
     await interaction.response.defer(ephemeral=True, thinking=True)
+    if preview:                                       # r47.6: show it, change nothing
+        b = brand_preview(gid, reset=bool(reset), **changes)
+        await _brand_send(interaction, render_brand_logo, (b,), "brand_preview.png", True,
+                          "👀 Preview only, nothing saved. Run the same command without `preview` to keep it.")
+        return
     b = brand_save(gid, **changes) if changes else brand_for(gid)
     if reset or changes:
         await audit(interaction.client, gid, f"🎨 {interaction.user.display_name} changed the bot's look "
@@ -39086,8 +39227,13 @@ async def admin_setup(interaction: discord.Interaction):
         await interaction.response.send_message("Only admins can run setup.", ephemeral=True)
         return
     guild = ops_guild(interaction.client, interaction.guild_id, interaction)
-    await interaction.response.send_message(embed=setup_embed(interaction.client, guild, interaction.guild_id, 0),
-                                            view=setup_view(interaction.client, guild, interaction.guild_id, 0),
+    try:
+        step = min(max(int(get_setting(interaction.guild_id, "setup_step") or 0), 0), len(SETUP_STEPS) - 1)
+    except ValueError:
+        step = 0
+    note = (f"↩️ Picking up where you stopped (step {step + 1}). Tap ◀ Back for the earlier steps." if step else "")
+    await interaction.response.send_message(embed=setup_embed(interaction.client, guild, interaction.guild_id, step, note),
+                                            view=setup_view(interaction.client, guild, interaction.guild_id, step),
                                             ephemeral=True)
 
 
@@ -42222,6 +42368,286 @@ async def slip_pnl(interaction: discord.Interaction):
 bot.tree.add_command(slip_group)
 
 
+# ==== r47.7: joining and leaving servers ===========================================================================
+
+LEFT_KEEP_DAYS = env_int("LEFT_SERVER_KEEP_DAYS", 30, 0, 3650)    # 0 keeps a left server's data forever
+WIPE_WAIT_HOURS = 24
+
+
+def server_wipe(guild_id: int) -> dict:
+    """Delete every row this server has (picks and their legs included). Returns rows removed per table."""
+    if not guild_id:
+        raise ValueError("no server")
+    gone: dict = {}
+    tables = [r[0] for r in db().execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")]
+    if "legs" in tables:
+        c = db().execute("DELETE FROM legs WHERE pick_id IN (SELECT id FROM picks WHERE guild_id = ?)", (guild_id,))
+        gone["legs"] = c.rowcount
+    for t in tables:
+        cols = [r[1] for r in db().execute(f'PRAGMA table_info("{t}")')]
+        if "guild_id" in cols:
+            c = db().execute(f'DELETE FROM "{t}" WHERE guild_id = ?', (guild_id,))
+            if c.rowcount:
+                gone[t] = c.rowcount
+    db().commit()
+    return gone
+
+
+async def _dm_file(client, uid: int, text: str, data: bytes, filename: str) -> bool:
+    try:
+        user = client.get_user(uid) if hasattr(client, "get_user") else None
+        user = user or await client.fetch_user(uid)
+        await user.send(text, file=discord.File(io.BytesIO(data), filename=filename))
+        return True
+    except Exception:
+        log.info("Couldn't DM %s the export", uid, exc_info=True)
+        return False
+
+
+def welcome_channel(guild):
+    """Where to say hello: the server's system channel, else the first text channel the bot can post in."""
+    me = getattr(guild, "me", None)
+    chans = [getattr(guild, "system_channel", None)] + list(getattr(guild, "text_channels", []) or [])
+    for ch in chans:
+        if ch is None:
+            continue
+        try:
+            perms = ch.permissions_for(me) if me is not None else None
+            if perms is None or (perms.send_messages and perms.embed_links):
+                return ch
+        except Exception:
+            continue
+    return None
+
+
+def welcome_embed(guild) -> discord.Embed:
+    e = discord.Embed(title="👋 Thanks for adding PIMP-BOT", color=BRAND,
+                      description="I log slips from screenshots, grade them as games finish, and keep the group's "
+                                  "records. Past results only: nothing here is a sure thing.")
+    e.add_field(name="1 · Set it up (2 minutes)", value="An admin runs `/admin setup`: the slip channel, recaps, the audit "
+                                                        "log, your sports and the main switches.", inline=False)
+    e.add_field(name="2 · Make it yours", value="`/admin brand` for colours and name, `/admin server logo` for your own logo, "
+                                                "`/admin server timezone` for game times.", inline=False)
+    e.add_field(name="3 · Post a slip", value="Drop a screenshot in the slip channel, or type "
+                                              "`@PIMP-BOT log Tatum o22.5 PRA, $10 to win $30`.", inline=False)
+    e.set_footer(text="/help shows everything · /admin doctor checks permissions")
+    return e
+
+
+async def _pb_on_guild_join(self, guild):
+    gid = guild.id
+    left = get_setting(0, f"left:{gid}")
+    set_setting(0, f"left:{gid}", None)               # came back in time: nothing gets removed
+    log.info("Joined server %s (%s)%s", gid, getattr(guild, "name", "?"), " again" if left else "")
+    ch = welcome_channel(guild)
+    if ch is not None:
+        try:
+            await ch.send(embed=welcome_embed(guild))
+        except Exception:
+            log.info("Couldn't post the welcome in %s", gid, exc_info=True)
+
+
+async def _pb_on_guild_remove(self, guild):
+    gid = guild.id
+    set_setting(0, f"left:{gid}", now_iso())
+    log.info("Left server %s (%s)", gid, getattr(guild, "name", "?"))
+    try:
+        data, counts = server_export_zip(gid)
+    except Exception:
+        log.warning("Export on leave failed for %s", gid, exc_info=True)
+        return
+    if not counts.get("picks"):
+        return
+    keep = (f"Its data is removed in {LEFT_KEEP_DAYS} days unless the bot is added back."
+            if LEFT_KEEP_DAYS else "Its data is kept (LEFT_SERVER_KEEP_DAYS is 0).")
+    for uid in sorted(developer_ids())[:3]:
+        await _dm_file(self, uid, f"📦 I left **{clip(getattr(guild, 'name', '') or str(gid), 60)}**. Here's its export "
+                                  f"({counts.get('picks', 0):,} picks). {keep}", data, f"server_{gid}_export.zip")
+
+
+PicksBot.on_guild_join = _pb_on_guild_join
+PicksBot.on_guild_remove = _pb_on_guild_remove
+
+
+async def left_servers_job(client, now: Optional[datetime] = None) -> None:
+    """Remove a left server's data once LEFT_SERVER_KEEP_DAYS have passed (and it hasn't come back)."""
+    if not LEFT_KEEP_DAYS:
+        return
+    now = now or datetime.now(timezone.utc)
+    here = {g.id for g in getattr(client, "guilds", []) or []}
+    for r in db().execute("SELECT key, value FROM settings WHERE guild_id = 0 AND key LIKE 'left:%'").fetchall():
+        gid = int(r["key"].split(":", 1)[1])
+        if gid in here:
+            set_setting(0, r["key"], None)
+            continue
+        try:
+            at = datetime.fromisoformat(r["value"])
+        except (TypeError, ValueError):
+            continue
+        if now - at >= timedelta(days=LEFT_KEEP_DAYS):
+            gone = server_wipe(gid)
+            set_setting(0, r["key"], None)
+            log.info("Removed the data of server %s (left %s): %s", gid, r["value"], gone)
+
+
+EXTRA_JOBS.append(("left_servers", left_servers_job))
+
+
+# ---- /admin server wipe: ask twice, wait a day ----
+
+def wipe_pending(guild_id: int) -> Optional[dict]:
+    try:
+        return json.loads(get_setting(0, f"wipe:{guild_id}") or "null")
+    except ValueError:
+        return None
+
+
+def can_wipe(interaction) -> bool:
+    g = getattr(interaction, "guild", None) or bot.get_guild(interaction.guild_id)
+    return is_developer(interaction.user) or (g is not None and getattr(g, "owner_id", None) == interaction.user.id)
+
+
+class WipeNameModal(discord.ui.Modal, title="Delete this server's data"):
+    typed = discord.ui.TextInput(label="Type the server's name to confirm", max_length=100)
+
+    def __init__(self, guild_id: int, guild_name: str):
+        super().__init__()
+        self.guild_id, self.guild_name = guild_id, guild_name
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not can_wipe(interaction):
+            await interaction.response.send_message("Only the server owner can do this.", ephemeral=True)
+            return
+        if (self.typed.value or "").strip().lower() != (self.guild_name or "").strip().lower():
+            await interaction.response.send_message("That name doesn't match. Nothing will be deleted.", ephemeral=True)
+            return
+        due = datetime.now(timezone.utc) + timedelta(hours=WIPE_WAIT_HOURS)
+        set_setting(0, f"wipe:{self.guild_id}", json.dumps({"due": iso(due), "by": interaction.user.id, "at": now_iso()}))
+        await audit(interaction.client, self.guild_id,
+                    f"🗑️ {interaction.user.display_name} asked to delete all of this server's bot data. It happens "
+                    f"{outage_ts(due, 'R')} unless someone runs `/admin server wipe cancel:True`.")
+        await interaction.response.send_message(
+            f"🗑️ Scheduled. Everything this server has in the bot is deleted {outage_ts(due, 'R')}. You'll get an export "
+            "in your DMs first. Changed your mind? `/admin server wipe cancel:True`.", ephemeral=True)
+
+
+class WipeConfirmButton(discord.ui.Button):
+    def __init__(self, guild_id: int, guild_name: str):
+        super().__init__(label="Yes, delete it all", style=discord.ButtonStyle.danger)
+        self.guild_id, self.guild_name = guild_id, guild_name
+
+    async def callback(self, interaction: discord.Interaction):
+        if not can_wipe(interaction):
+            await interaction.response.send_message("Only the server owner can do this.", ephemeral=True)
+            return
+        await interaction.response.send_modal(WipeNameModal(self.guild_id, self.guild_name))
+
+
+@admin_server_group.command(name="wipe", description="Delete everything this server has in the bot (owner only, waits 24 hours)")
+@app_commands.describe(cancel="Stop a delete that's waiting")
+async def admin_wipe(interaction: discord.Interaction, cancel: Optional[bool] = False):
+    gid = interaction.guild_id
+    pend = wipe_pending(gid)
+    if cancel:
+        if not is_admin(interaction) and not can_wipe(interaction):
+            await interaction.response.send_message("Only admins can cancel it.", ephemeral=True)
+            return
+        set_setting(0, f"wipe:{gid}", None)
+        if pend:
+            await audit(interaction.client, gid, f"🛑 {interaction.user.display_name} cancelled the data delete.")
+        await interaction.response.send_message("🛑 Cancelled. Nothing will be deleted." if pend else
+                                                "Nothing was waiting to be deleted.", ephemeral=True)
+        return
+    if not can_wipe(interaction):
+        await interaction.response.send_message("Only the server owner can delete the server's data.", ephemeral=True)
+        return
+    if pend:
+        await interaction.response.send_message(f"A delete is already waiting: it happens at `{pend['due']}` (UTC). "
+                                                "`/admin server wipe cancel:True` stops it.", ephemeral=True)
+        return
+    g = getattr(interaction, "guild", None) or bot.get_guild(gid)
+    name = getattr(g, "name", "") or str(gid)
+    picks = db().execute("SELECT COUNT(*) FROM picks WHERE guild_id = ?", (gid,)).fetchone()[0]
+    v = discord.ui.View(timeout=300)
+    v.add_item(WipeConfirmButton(gid, name))
+    await interaction.response.send_message(
+        f"⚠️ This deletes **everything** this server has in the bot: {picks:,} picks, records, settings and history. "
+        f"It can't be undone. You'll type the server's name next, then it waits {WIPE_WAIT_HOURS} hours (anyone with "
+        "admin can cancel). Want a copy first? `/admin server export`.", view=v, ephemeral=True)
+
+
+async def wipe_job(client, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    for r in db().execute("SELECT key, value FROM settings WHERE guild_id = 0 AND key LIKE 'wipe:%'").fetchall():
+        gid = int(r["key"].split(":", 1)[1])
+        try:
+            p = json.loads(r["value"])
+            due = datetime.fromisoformat(p["due"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if now < due:
+            continue
+        set_setting(0, r["key"], None)
+        try:
+            data, counts = server_export_zip(gid)
+            if counts.get("picks") and p.get("by"):
+                await _dm_file(client, int(p["by"]), "🗑️ Here's the export of everything before the delete.",
+                               data, f"server_{gid}_before_delete.zip")
+        except Exception:
+            log.warning("Export before wipe failed for %s", gid, exc_info=True)
+        cid = get_setting(gid, "audit_channel")          # read before the settings go too
+        gone = server_wipe(gid)
+        log.info("Wiped server %s on request: %s", gid, gone)
+        try:
+            ch = client.get_channel(int(cid)) if cid else None
+            if ch is not None:
+                await ch.send(f"🗑️ Done: this server's bot data was deleted ({sum(gone.values()):,} rows).")
+        except Exception:
+            pass
+
+
+EXTRA_JOBS.append(("wipe", wipe_job))
+
+
+# ==== r47.6: the server's own logo =================================================================================
+
+@admin_server_group.command(name="logo", description="Put your server's own logo on the bot's cards (or go back to the robot)")
+@app_commands.describe(image="A square-ish PNG or JPG, at least 64 px (up to 4 MB)", remove="Go back to the PIMP-BOT robot")
+@sec_rate("render")
+async def admin_logo(interaction: discord.Interaction, image: Optional[discord.Attachment] = None,
+                     remove: Optional[bool] = False):
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if not (perms and getattr(perms, "manage_guild", False)):
+        await interaction.response.send_message("Only server admins (Manage Server) can change the logo.", ephemeral=True)
+        return
+    gid = interaction.guild_id
+    if remove:
+        set_setting(gid, "brand_logo", None)
+        await audit(interaction.client, gid, f"🎨 {interaction.user.display_name} went back to the robot logo.")
+        await interaction.response.send_message("🤖 Back to the PIMP-BOT robot.", ephemeral=True)
+        return
+    if image is None:
+        await interaction.response.send_message(
+            ("Your logo is on. " if get_setting(gid, "brand_logo") else "No logo yet: the robot shows. ")
+            + "Attach a picture with `/admin server logo image:` to change it, or `remove:True` to go back.", ephemeral=True)
+        return
+    if (image.size or 0) > BRAND_LOGO_MAX:
+        await interaction.response.send_message("That file is over 4 MB. Try a smaller picture.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        png = await asyncio.to_thread(brand_logo_prepare, await image.read())
+    except ValueError as exc:
+        why = {"too small": "It's too small: use at least 64 × 64 pixels.", "too big": "It's too big."}.get(
+            str(exc), "That isn't a picture I can use. Send a PNG or JPG.")
+        await interaction.followup.send(f"❌ {why}", ephemeral=True)
+        return
+    set_setting(gid, "brand_logo", base64.b64encode(png).decode())
+    await audit(interaction.client, gid, f"🎨 {interaction.user.display_name} uploaded a new server logo.")
+    await _brand_send(interaction, render_brand_logo, (brand_for(gid),), "brand.png", True,
+                      "🎨 Saved. Your logo now shows on the bot's cards where the robot badge was.")
+
+
 # ==== r47.5: the whole server's data as one zip ====================================================================
 
 EXPORT_SKIP_SETTINGS = re.compile(r"key|token|secret|cookie|password|epoch|webhook|statfix_diff", re.I)
@@ -42279,7 +42705,7 @@ def server_export_zip(guild_id: int) -> tuple[bytes, dict]:
     return buf.getvalue(), counts
 
 
-@admin_group.command(name="exportall", description="Everything this server has in the bot, as one zip of spreadsheets")
+@admin_server_group.command(name="export", description="Everything this server has in the bot, as one zip of spreadsheets")
 @sec_rate("file")
 async def admin_exportall(interaction: discord.Interaction):
     perms = getattr(interaction.user, "guild_permissions", None)
@@ -42303,7 +42729,7 @@ async def admin_exportall(interaction: discord.Interaction):
 # ==== r47.4: per-server time zones =================================================================================
 
 def guild_tz(guild_id: Optional[int]):
-    """The server's own time zone (/admin timezone), else the bot's TIMEZONE."""
+    """The server's own time zone (/admin server timezone), else the bot's TIMEZONE."""
     if not guild_id:
         return TZ
     key = get_setting(guild_id, "timezone")
@@ -42319,7 +42745,7 @@ def guild_now(guild_id: Optional[int]) -> datetime:
     return datetime.now(guild_tz(guild_id))
 
 
-@admin_group.command(name="timezone", description="The time zone game times are shown in for this server")
+@admin_server_group.command(name="timezone", description="The time zone game times are shown in for this server")
 @app_commands.describe(zone="Pick one (leave empty to see the current one)", reset="Go back to the bot's default")
 @app_commands.choices(zone=[app_commands.Choice(name=n, value=v) for n, v in TZ_CHOICES])
 async def admin_timezone(interaction: discord.Interaction, zone: Optional[app_commands.Choice[str]] = None,
