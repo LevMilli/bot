@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r45"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r46"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -689,6 +689,10 @@ def grade_leg(guild_id: int, pick_id: int, idx: int,
               status: str) -> tuple[Optional[sqlite3.Row], str]:
     """Grade one leg. Settles the pick when the legs decide it.
     Returns (pick, note for the person)."""
+    try:
+        note_grade_fix(guild_id, pick_id, idx, status)
+    except Exception:
+        pass
     db().execute("UPDATE legs SET status = ? WHERE pick_id = ? AND idx = ?",
                  (status, pick_id, idx))
     db().commit()
@@ -3010,6 +3014,9 @@ def simplify_events(raw: dict) -> list[dict]:
     return events
 
 
+_SCORE_LAST: dict = {}        # r46: the last good scoreboard per league and day, served when ESPN fails
+
+
 async def fetch_scoreboard(path: str, day: datetime, params: Optional[dict] = None) -> list[dict]:
     extra = params if params is not None else next((x for _, pth, x in LEAGUES if pth == path), {})
     key = (path, day.strftime("%Y%m%d"), tuple(sorted(extra.items())))
@@ -3022,7 +3029,11 @@ async def fetch_scoreboard(path: str, day: datetime, params: Optional[dict] = No
         ttl = scoreboard_ttl(events)
     except Exception:
         log.warning("Scoreboard lookup failed for %s %s", path, key[1])
-        events, ttl = [], 180
+        events, ttl = _SCORE_LAST.get(key, []), 60 if key in _SCORE_LAST else 180   # r46: the last good copy
+    if events:
+        _SCORE_LAST[key] = events
+        if len(_SCORE_LAST) > 600:
+            _SCORE_LAST.pop(next(iter(_SCORE_LAST)))
     _score_cache[key] = (time.monotonic() + ttl, events)
     return events
 
@@ -5747,6 +5758,9 @@ def innings_to_outs(v: str) -> Optional[float]:
 
 def stat_value(groups: dict[str, dict], stat_key: str) -> Optional[tuple[float, str]]:
     """(value, breakdown) or None when the box score doesn't have it."""
+    fn = CUSTOM_STATS.get(stat_key)
+    if fn is not None:
+        return fn(groups)
     _, _, parts, _ = STATS[stat_key]
     total, shown = 0.0, []
     football = STATS[stat_key][1] == "football"
@@ -5764,6 +5778,35 @@ def stat_value(groups: dict[str, dict], stat_key: str) -> Optional[tuple[float, 
     detail = "" if len(parts) == 1 or len(parts) > 6 else \
         " (" + ", ".join(f"{v:g} {COMP_SHORT.get(c, c)}" for c, v in shown) + ")"
     return total, detail
+
+
+def _soccer_fs(groups: dict) -> Optional[tuple[float, str]]:
+    """PrizePicks soccer Fantasy Score (outfield): goal 10, assist 5, shot 1, shot on target 1, pass 0.05, shot
+    assisted 0.5, clearance 1, tackle 1, dribble attempted 1, cross 0.5, yellow -1, red -2, foul -0.5. A card the feed
+    doesn't list counts as none; with no per-game numbers at all there's no grade."""
+    w = {"s_g": 10, "s_a": 5, "s_sh": 1, "s_sot": 1, "s_pass": 0.05, "s_shast": 0.5, "s_clr": 1, "s_tkl": 1,
+         "s_drib": 1, "s_cross": 0.5, "s_yc": -1, "s_rc": -2, "s_fc": -0.5}
+    got = {c: component_value(groups, c) for c in w}
+    if sum(v is not None for c, v in got.items() if c not in ("s_yc", "s_rc")) < 6:
+        return None
+    total = round(sum((v or 0) * w[c] for c, v in got.items()), 2)
+    bits = [f"{got[c]:g} {n}" for c, n in (("s_g", "G"), ("s_a", "A"), ("s_sh", "shots"), ("s_sot", "SOT"),
+                                           ("s_tkl", "tkl")) if got.get(c)]
+    return total, (" (" + ", ".join(bits) + ")") if bits else ""
+
+
+def _soccer_gk_fs(groups: dict) -> Optional[tuple[float, str]]:
+    """PrizePicks Goalie Fantasy Score: 5 for starting, save 2, goal conceded -2, clean sheet 5."""
+    sv, ga = component_value(groups, "s_sv"), component_value(groups, "s_ga")
+    if sv is None and ga is None:
+        return None
+    sv, ga = sv or 0, ga or 0
+    clean = 5 if ga == 0 else 0
+    total = round(5 + 2 * sv - 2 * ga + clean, 2)
+    return total, f" ({sv:g} saves, {ga:g} conceded" + (", clean sheet" if clean else "") + ")"
+
+
+CUSTOM_STATS = {"s_fantasy": _soccer_fs, "s_gk_fantasy": _soccer_gk_fs}
 
 
 COMP_SHORT = {"pts": "pts", "reb": "reb", "ast": "ast", "stl": "stl", "blk": "blk", "tov": "TO", "rush_yds": "rush",
@@ -9130,7 +9173,21 @@ def dashboard_url() -> Optional[str]:
     return f"https://{PUBLIC_DOMAIN}/?key={dashboard_key()}"
 
 
+_DASH_DATA_CACHE: dict = {}
+
+
 def dashboard_data(guild_id: int) -> dict:
+    """The dashboard's data, reused while nothing in the database has changed (at most 20 seconds old)."""
+    key = (guild_id, db().total_changes)
+    hit = _DASH_DATA_CACHE.get(guild_id)
+    if hit and hit[0] == key and hit[1] > time.monotonic():
+        return hit[2]
+    out = _dashboard_data_fresh(guild_id)
+    _DASH_DATA_CACHE[guild_id] = (key, time.monotonic() + 20, out)
+    return out
+
+
+def _dashboard_data_fresh(guild_id: int) -> dict:
     season = current_season(guild_id)
     def board(stats):
         return [{"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
@@ -13851,6 +13908,12 @@ def cleanup_db(now: Optional[datetime] = None, vacuum: bool = False) -> dict:
     removed["leg alert marks"] += db().execute(
         "DELETE FROM leg_pings WHERE pick_id NOT IN (SELECT id FROM picks)").rowcount
     try:
+        fix_db()
+        removed["old grade corrections"] = db().execute(
+            "DELETE FROM grade_fixes WHERE at < ?", (iso(now - timedelta(days=90)),)).rowcount
+    except sqlite3.Error:
+        pass
+    try:
         removed["old injury alert marks"] = db().execute(
             "DELETE FROM injury_alerts WHERE sent_at < ?", (iso(now - timedelta(days=60)),)).rowcount
     except sqlite3.Error:
@@ -14486,8 +14549,18 @@ async def read_text_slip(text: str) -> tuple[Optional[dict], Optional[str]]:
 
 def slip_draft_embed(slip: dict, title: str = "🧾 Log this slip?") -> discord.Embed:
     legs = [str(x) for x in slip.get("legs") or []]
+    unsure = [str(u) for u in slip.get("_unsure") or []]
+    def check(leg):
+        m = re.match(r"^(.+?) (?:over|under) ", leg)
+        return bool(m) and any(m.group(1) in u for u in unsure)
     e = discord.Embed(title=title, color=BRAND,
-                      description=clip("\n".join(f"`{k}` {leg}" for k, leg in enumerate(legs, 1)), 3500) or "No legs")
+                      description=clip("\n".join(f"`{k}` {'❓ ' if check(leg) else ''}{leg}" for k, leg in enumerate(legs, 1)),
+                                       3500) or "No legs")
+    if slip.get("_how") == "scan" or unsure:
+        level = "high" if not unsure else ("medium" if len(unsure) <= 2 else "low")
+        e.add_field(name="🔎 Read confidence", inline=False,
+                    value=f"**{level}**" + (": check " + clip("; ".join(unsure), 300) if unsure else "")
+                    + ("\n❓ marks the legs to look at." if any(check(l) for l in legs) else ""))
     e.add_field(name="Platform", value=str(slip.get("platform") or "Other")[:40])
     e.add_field(name="Play", value=clip(str(slip.get("description") or "Slip"), 100))
     if slip.get("cost"):
@@ -14534,6 +14607,10 @@ class DraftEditModal(discord.ui.Modal, title="Edit before logging"):
             await interaction.response.send_message(cooloff_message(until), ephemeral=True)
             return
         legs = [x.strip() for x in self.legs.value.splitlines() if x.strip()]
+        try:
+            namefix_learn(d["slip"].get("legs") or [], legs)
+        except Exception:
+            pass
         d["slip"].update(platform=self.platform.value.strip() or "Other", description=self.description.value.strip() or "Slip",
                          legs=legs, cost=cost, payout=payout, placed=True)
         d["used"] = -1
@@ -22221,7 +22298,8 @@ for _comp, _name, _grp in (
         ("s_sot", "shotsOnTarget", "soccer"), ("s_shast", "shotAssists", "soccer"), ("s_pass", "totalPasses", "soccer"),
         ("s_clr", "totalClearance", "soccer"), ("s_drib", "totalContest", "soccer"), ("s_dribw", "wonContest", "soccer"),
         ("s_tkl", "totalTackles", "soccer"), ("s_sv", "saves", "soccer"), ("s_ga", "goalsConceded", "soccer"),
-        ("s_fc", "foulsCommitted", "soccer"), ("s_cross", "totalCrosses", "soccer")):
+        ("s_fc", "foulsCommitted", "soccer"), ("s_cross", "totalCrosses", "soccer"),
+        ("s_yc", "yellowCards", "soccer"), ("s_rc", "redCards", "soccer")):
     C[_comp] = ((_name,), (), "core." + _grp)
 
 STATS.update({
@@ -22269,7 +22347,12 @@ STATS.update({
     "s_goals_allowed": ("Goals Allowed", "soccer", [("s_ga", 1)], ["goals allowed", "goals conceded", "goals against"]),
     "s_fouls": ("Fouls", "soccer", [("s_fc", 1)], ["fouls", "fouls committed"]),
     "s_crosses": ("Crosses", "soccer", [("s_cross", 1)], ["crosses"]),
-    "s_fantasy": ("Fantasy Score", "soccer", [("manual", 1)], ["soccer fantasy score", "soccer fantasy points"]),
+    "s_fantasy": ("Fantasy Score", "soccer", [("s_g", 10), ("s_a", 5), ("s_sh", 1), ("s_sot", 1), ("s_pass", 0.05),
+                                              ("s_shast", 0.5), ("s_clr", 1), ("s_tkl", 1), ("s_drib", 1), ("s_cross", 0.5),
+                                              ("s_yc", -1), ("s_rc", -2), ("s_fc", -0.5)],
+                  ["soccer fantasy score", "soccer fantasy points"]),
+    "s_gk_fantasy": ("Goalie Fantasy Score", "soccer", [("s_sv", 2), ("s_ga", -2)],
+                     ["goalie fantasy score", "goalkeeper fantasy score", "goalie fantasy points"]),
 })
 _ALIAS_INDEX[:] = sorted(((alias, key) for key, (_, _, _, aliases) in STATS.items() for alias in aliases),
                          key=lambda x: -len(x[0]))
@@ -22277,7 +22360,7 @@ COMP_SHORT.update({"s_g": "G", "s_a": "A", "c_tb": "TB", "c_win": "W", "c_qs": "
                    "c_outs": "outs", "c_h": "H", "c_2b": "2B", "c_3b": "3B", "c_hr": "HR"})
 # Stats people bet on that no free feed has: the leg is tracked to its game, then graded by hand or looked up.
 TRACK_MANUAL = {"ppp": "Power Play Points isn't in the free stats: grade by hand",
-                "s_fantasy": "Soccer Fantasy Score isn't in the free stats: grade by hand"}
+}
 # The slip says one stat, the player's position says another: (stats as written, player's sport, positions
 # (None = any), what it really is). A punter's "Pts" on PrizePicks is Punts; a kicker's "Points" is Kicking Points.
 TRACK_REMAP = [
@@ -22285,6 +22368,7 @@ TRACK_REMAP = [
     ({"points", "nhl_points"}, "football", {"PK", "K"}, "kick_pts"),
     ({"fantasy", "nfl_fantasy"}, "baseball", {"SP", "RP", "P"}, "pitcher_fs"),
     ({"fantasy", "nfl_fantasy"}, "baseball", None, "hitter_fs"),
+    ({"fantasy", "nfl_fantasy", "s_fantasy"}, "soccer", {"G", "GK"}, "s_gk_fantasy"),
     ({"fantasy", "nfl_fantasy"}, "soccer", None, "s_fantasy"),
 ]
 
@@ -25554,16 +25638,59 @@ def free_prepare(raw: bytes):
     return img, grey, scale
 
 
+_TESS_ENV = dict(os.environ, OMP_THREAD_LIMIT="1")     # r46: one thread per read, reads run side by side instead
+FREE_BANDS = env("FREE_BANDS", "off").lower() == "on"     # r46: try reading tall shots as two bands (off: less accurate)
+
+
 def _free_tess(img, psm: int, extra: Optional[list] = None, tsv: bool = True) -> str:
     buf = io.BytesIO()
     img.save(buf, "PNG")
     args = [TESSERACT, "stdin", "stdout", "--psm", str(psm), "-l", "eng"] + (extra or []) + (["tsv"] if tsv else [])
-    r = subprocess.run(args, input=buf.getvalue(), capture_output=True, timeout=FREE_SCAN_TIMEOUT)
+    r = subprocess.run(args, input=buf.getvalue(), capture_output=True, timeout=FREE_SCAN_TIMEOUT, env=_TESS_ENV)
     return r.stdout.decode("utf-8", "replace")
 
 
+def free_split_row(grey) -> Optional[int]:
+    """An empty row near the middle of a tall image (all one shade), so two halves can be read apart."""
+    from PIL import ImageStat
+    w, h = grey.size
+    if h < 2200 or w < 200:
+        return None
+    best, best_sd = None, None
+    for y in range(int(h * 0.42), int(h * 0.58), 3):
+        sd = ImageStat.Stat(grey.crop((0, y, w, y + 3))).stddev[0]
+        if best_sd is None or sd < best_sd:
+            best, best_sd = y + 1, sd
+            if sd < 1.0:
+                break
+    return best if best_sd is not None and best_sd < 6.0 else None
+
+
+def _free_words_one(grey, band: int = 0, dy: int = 0) -> list[dict]:
+    out = []
+    for row in _free_tess(grey, 4).splitlines()[1:]:
+        f = row.split("\t")
+        if len(f) < 12 or f[0] != "5" or not f[11].strip():
+            continue
+        try:
+            out.append({"text": f[11].strip(), "conf": float(f[10]), "x": int(f[6]), "y": int(f[7]) + dy, "w": int(f[8]),
+                        "h": int(f[9]), "line": (band, int(f[2]), int(f[3]), int(f[4]))})
+        except ValueError:
+            continue
+    return out
+
+
 def free_words(grey) -> list[dict]:
-    """Every word Tesseract saw: {text, conf, x, y, w, h, line} with line = a key shared by words on one line."""
+    """Every word Tesseract saw: {text, conf, x, y, w, h, line} with line = a key shared by words on one line.
+    A tall screenshot is read as two bands at the same time, split on an empty row."""
+    cut = free_split_row(grey) if FREE_BANDS else None
+    if cut:
+        from concurrent.futures import ThreadPoolExecutor
+        top, bottom = grey.crop((0, 0, grey.width, cut)), grey.crop((0, cut, grey.width, grey.height))
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            a = ex.submit(_free_words_one, top, 0, 0)
+            b = ex.submit(_free_words_one, bottom, 1, cut)
+            return a.result() + b.result()
     out = []
     for row in _free_tess(grey, 4).splitlines()[1:]:
         f = row.split("\t")
@@ -25657,6 +25784,8 @@ def _free_numtext(t: str) -> str:
     """'«12.5' -> '12.5', '49,5' -> '49.5' (icons and punctuation OCR glues onto a number)."""
     if re.search(r"[#:$%/x]|\d[a-wyz]", t, re.I):   # jersey numbers, times, money, '37.5x', '6pm'
         return ""
+    if "½" in t:
+        t = re.sub(r"(\d*)½", lambda m: (m.group(1) or "0") + ".5", t)       # r46: "1½" is 1.5, "½" is 0.5
     core = re.sub(r"^[^\d]+|[^\d]+$", "", t).replace(",", ".")
     lead = re.match(r"^[^\d]*", t).group(0)
     if lead[-1:] in (".", ",") and lead[-2:-1] in ("", "O", "o", "D", "Q"):
@@ -26087,6 +26216,7 @@ def free_missing_stats(lines: list, grey, img) -> list:
     W = img.width
     stat_lines = [ln for ln in lines if _free_stat_in(ln["text"])]
     out = []
+    jobs = []
     for ln in lines:
         right = [w for w in ln["words"] if w["x"] > 0.6 * W]
         if not right or _free_stat_in(ln["text"]):
@@ -26103,7 +26233,13 @@ def free_missing_stats(lines: list, grey, img) -> list:
             continue
         crop = grey.crop(box)
         crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
-        txt = " ".join(_free_tess(crop, 7, tsv=False).split())
+        jobs.append((ln, h, box, crop))
+    if not jobs:
+        return out
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(4, len(jobs))) as ex:
+        texts = list(ex.map(lambda j: " ".join(_free_tess(j[3], 7, tsv=False).split()), jobs))
+    for (ln, h, box, _), txt in zip(jobs, texts):
         st = _free_stat_in(txt)
         if not st:
             continue
@@ -26180,8 +26316,18 @@ def scan_log_stats(guild_id: int, days: int = 7) -> dict:
 
 def free_scan(raw: bytes) -> Optional[dict]:
     """The whole free scan on one image (sync, for a worker thread)."""
-    img, grey, _ = free_prepare(raw)
-    return free_parse(free_words(grey), img, grey)
+    t0 = time.monotonic()
+    img, grey, scale = free_prepare(raw)
+    out = free_parse(free_words(grey), img, grey)
+    if out and out.get("_unsure") and scale >= 2.2:
+        out["_unsure"].append("the screenshot is small or blurry: a full-size one reads better")
+    ms = int((time.monotonic() - t0) * 1000)
+    try:
+        RELIABILITY.setdefault("scan_ms", []).append(ms)
+        RELIABILITY["scan_ms"] = RELIABILITY["scan_ms"][-60:]
+    except Exception:
+        pass
+    return out
 
 
 # ---- names: the scan's spelling checked against ESPN's players ---------------------------------------
@@ -26194,6 +26340,7 @@ async def free_fix_names(slip: dict) -> None:
             return [it.get("displayName") or "" for it in (raw.get("items") or []) if isinstance(it, dict)]
         except Exception:
             return []
+    namefix_apply(slip)
     legs = slip.get("legs") or []
     shapes = [re.match(r"^(.+?) (over|under) ([\d.]+) (.+)$", leg) for leg in legs]
     names = list(dict.fromkeys(m.group(1) for m in shapes if m))
@@ -31061,6 +31208,7 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
         "owner": {"lockdown": owner_lockdown(), "removed": len(owner_blocked_ids()), "set": bool(DEVELOPER_IDS)},
         "pool": engine_usage(),
         "reliability": reliability_data(),
+        "accuracy": accuracy_data(guild_id),
         "allow": staff_allowances(guild_id),
         "blacklist": {"entries": [{"name": r["name"], "kind": BL_KINDS.get(r.get("kind"), "Entry"), "reason": r.get("reason") or "",
                                    "alert": r.get("alert") or "staff", "by": r.get("by") or ""} for r in bl_rows(guild_id)],
@@ -32703,8 +32851,18 @@ function render(d){
    +(R.cycle_ms?row('Scheduler cycle',(R.cycle_ms/1000).toFixed(1)+'s'):'')
    +(R.db?row('Database check',dot(R.db.ok?'ok':'bad')+(R.db.ok?'passed':esc(R.db.result))+' · '+esc(ago(R.db.at))):'')
    +(R.backup?row('Last backup',dot(R.backup.ok?'ok':'bad')+(R.backup.ok?'checked · '+R.backup.picks+' picks':esc(R.backup.why))+' · '+esc(ago(R.backup.at))):'')
+   +(R.scans?row('Screenshot reads',(R.scans.p50/1000).toFixed(1)+'s typical · '+(R.scans.p95/1000).toFixed(1)+'s slowest · '+R.scans.n+' reads'):'')
    +(R.sweep?row('Caches',R.sweep.kept+' entries · '+R.sweep.swept+' expired cleared '+esc(ago(R.sweep.at))):'');
   h.push(card('Reliability',rb));
+ }
+ const A=d.accuracy;
+ if(A&&A.settled){
+  let ab='<div class="stats"><div><div class="big num">'+(A.pct==null?'–':A.pct+'%')+'</div><div class="muted">settled on their own</div></div>'
+   +'<div><div class="big num">'+A.fixes+'</div><div class="muted">corrected by a person</div></div></div>'
+   +'<div class="muted">Last '+A.days+' days · '+A.auto+' of '+A.settled+' slips'+(A.fix_rate!=null?' · '+A.fix_rate+'% of auto-graded legs corrected':'')+'</div>';
+  ab+=(A.by_sport||[]).map(x=>row(esc(x.name),dot(x.pct>=80?'ok':x.pct>=50?'warn':'bad')+x.pct+'% · '+x.auto+'/'+x.n)).join('');
+  if((A.needs||[]).length)ab+='<div class="muted" style="margin-top:10px">Why the rest needed a person</div>'+A.needs.map(x=>row(esc(x.why),String(x.n))).join('');
+  h.push(card('Grading accuracy',ab));
  }
  const db=d.database;
  h.push(card('Database',row('Saved on a volume',dot(db.on_volume?'ok':'bad')+(db.on_volume?'yes (/data)':'NO: a redeploy wipes it'))
@@ -34810,6 +34968,11 @@ WHATS_NEW = {
     "r43": ["🔬 /research: one page per player with recent games, splits, matchups and injuries",
             "👀 /watch: a DM when a player you follow goes on or off the injury report"],
     "r44": ["⚡ Faster and steadier: start-up checks, timing on everything, checked backups"],
+    "r46": ["⚡ Screenshot reads are about twice as fast",
+            "⚽ Soccer Fantasy Score and Goalie Fantasy Score now grade themselves (PrizePicks scoring)",
+            "🔎 Unsure reads show a confidence level and mark the legs to check with ❓",
+            "🧠 Fix a misread name once and the reader remembers it",
+            "👀 Watchlist news comes in one DM instead of several"],
     "r45": ["📖 A new /help with topics and buttons, and a member guide page",
             "💬 Feedback button in /help: it goes straight to the staff as a ticket",
             "👋 New members get a welcome DM with buttons",
@@ -39700,7 +39863,7 @@ async def badge_remove(interaction: discord.Interaction, member: discord.Member)
 # ---- tickets: everything that needs attention, posted to a staff channel with buttons to fix and close it -----
 
 TICKET_ICON = {"needs": "🧾", "payout": "💵", "stale": "⏳", "scan": "📸", "blacklist": "🚫", "system": "⚙️",
-               "feedback": "💬"}
+               "feedback": "💬", "statfix": "🔁"}
 TICKET_COLOR = {"open": 0xF5B942, "claimed": 0x5B8DEF, "closed": 0x3FB97A}
 
 
@@ -39946,7 +40109,7 @@ async def tickets_job(client, now: Optional[datetime] = None) -> None:
         live = db().execute("SELECT * FROM tickets WHERE guild_id = ? AND status != 'closed'", (gid,)).fetchall()
         live_keys = {t["key"] for t in live}
         for t in live:                                    # fixed elsewhere (graded with /result, feed back up...)
-            if t["key"] not in keys and t["kind"] != "feedback":
+            if t["key"] not in keys and t["kind"] not in ("feedback", "statfix"):
                 ticket_close(t["id"], "the bot", "Auto-closed after 2 days." if t["kind"] in ("scan", "blacklist")
                              else "Fixed: it doesn't need attention anymore.")
                 await ticket_refresh(client, t["id"])
@@ -40219,6 +40382,7 @@ def staff_report_embed(guild_id: int, now: Optional[datetime] = None) -> "discor
                                                     for k in sorted({r['kind'] for r in mods})) or "Quiet"))
     e.add_field(name="🚫 Blacklist hits", value=str(hits))
     e.add_field(name="⏱️ Uptime", value=("–" if up is None else f"{up:.2f}%"))
+    e.add_field(name="🎯 Grading", value=clip(accuracy_line(guild_id, 7), 1024), inline=False)
     e.set_footer(text="Every Monday morning · turn it off in the staff page's feature switches")
     return e
 
@@ -40698,7 +40862,7 @@ def reliability_data() -> dict:
         peak = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)
     except Exception:
         peak = None
-    return {"selftest": st, "commands": cmd_report(), "jobs": job_report(), "cycle_ms": int(_last_cycle.get("ms") or 0) or None,
+    return {"selftest": st, "commands": cmd_report(), "jobs": job_report(), "scans": scan_speed(), "cycle_ms": int(_last_cycle.get("ms") or 0) or None,
             "db": js("db_check"), "backup": js("backup_check"), "cleanup": js("cleanup_last"),
             "sweep": RELIABILITY.get("sweep"), "memory": {"now": memory_now_mb(), "peak": peak},
             "slow_ms": {"command": SLOW_CMD_MS, "job": SLOW_JOB_MS}}
@@ -40728,8 +40892,14 @@ def health_embed(d: dict) -> discord.Embed:
     if d.get("backup"):
         b = d["backup"]
         bits.append(f"last backup {'checked ✅' if b.get('ok') else 'failed its check ⚠️'} ({b.get('picks', 0)} picks)")
+    if d.get("scans"):
+        bits.append(f"screenshot reads {d['scans']['p50'] / 1000:.1f}s typical, {d['scans']['p95'] / 1000:.1f}s slowest "
+                    f"({d['scans']['n']} reads)")
     if bits:
         e.add_field(name="📦 System", value=clip(" · ".join(bits), 1024), inline=False)
+    if d.get("speed"):
+        e.add_field(name="⚡ Speed check (just now)", inline=False, value=clip(" · ".join(
+            f"{k} {v} ms" for k, v in d["speed"].items()), 1024))
     e.set_footer(text=f"Checked {str(st.get('at', ''))[:16].replace('T', ' ')} UTC · {st.get('ms', 0)} ms")
     return e
 
@@ -40738,7 +40908,9 @@ def health_embed(d: dict) -> discord.Embed:
 @sec_staff_only
 async def staff_health_cmd(interaction: discord.Interaction):
     selftest_run(interaction.client)
-    await interaction.response.send_message(embed=health_embed(reliability_data()), ephemeral=True)
+    d = reliability_data()
+    d["speed"] = speed_check(interaction.guild_id)
+    await interaction.response.send_message(embed=health_embed(d), ephemeral=True)
 
 
 
@@ -40820,6 +40992,88 @@ async def guide_page(request):
     from aiohttp import web
     resp = dash_html(web, guide_html())
     return resp
+
+
+
+def speed_check(guild_id: int) -> dict:
+    # Time the heaviest everyday work right now, in milliseconds (staff health).
+    out = {}
+    for name, fn in (("dashboard", lambda: _dashboard_data_fresh(guild_id)), ("leaderboard", lambda: compute_stats(guild_id)),
+                     ("staff page", lambda: staff_data(guild_id, None)), ("tickets", lambda: ticket_items(guild_id)),
+                     ("line watch", lambda: lines_data(guild_id))):
+        t0 = time.monotonic()
+        try:
+            fn()
+            out[name] = int((time.monotonic() - t0) * 1000)
+        except Exception:
+            out[name] = -1
+    return out
+
+
+# ---- stat corrections: the morning after, re-check what the autopilot graded -----------------------------------------
+
+STATFIX_HOUR = env_int("STATFIX_HOUR", 10, 0, 23)
+
+
+async def statfix_job(client, now: Optional[datetime] = None) -> None:
+    # Each morning: look again at slips the autopilot settled 12-36 hours ago. If a leg now reads differently (a stat
+    # correction), open a ticket for the staff. Nothing is changed by itself.
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    if local.hour < STATFIX_HOUR or get_setting(0, "statfix_day") == local.date().isoformat():
+        return
+    set_setting(0, "statfix_day", local.date().isoformat())
+    rows = db().execute("SELECT * FROM picks WHERE settled_by = 'auto' AND settled_at >= ? AND settled_at <= ? "
+                        "ORDER BY id DESC LIMIT 25", (iso(now - timedelta(hours=36)), iso(now - timedelta(hours=12)))).fetchall()
+    tickets_db()
+    for p in rows:
+        if get_setting(p["guild_id"], f"statfix:{p['id']}"):
+            continue
+        set_setting(p["guild_id"], f"statfix:{p['id']}", "1")
+        legs = {l["idx"]: l for l in get_legs(p["id"])}
+        try:
+            entries = await asyncio.wait_for(leg_progress(p), 60)
+        except Exception:
+            continue
+        diffs = []
+        for e in entries:
+            leg = legs.get(e.get("n"))
+            if leg is None or e.get("decided") not in ("hit", "miss", "push") or leg["status"] == e["decided"]:
+                continue
+            if leg["status"] in ("hit", "miss", "push"):
+                diffs.append((e["n"], leg["text"], leg["status"], e["decided"], e.get("why") or ""))
+        if not diffs:
+            continue
+        key = f"statfix:{p['id']}"
+        if db().execute("SELECT 1 FROM tickets WHERE guild_id = ? AND key = ?", (p["guild_id"], key)).fetchone():
+            continue
+        secret = sec_secret(p)
+        detail = ("A hidden slip: ask its owner to check it." if secret else
+                  "\n".join(f"Leg {n}: {clip(t, 70)} was **{a}**, the stats now say **{b}**" + (f" ({clip(w, 80)})" if w else "")
+                            for n, t, a, b, w in diffs[:6])
+                  + f"\nIf it's right, fix it with `/leg pick_id:{p['id']}` and the result.")
+        ch = ticket_channel(client, p["guild_id"])
+        c = db().execute("INSERT INTO tickets (guild_id, key, kind, title, detail, pick_id, jump, hidden, channel_id, status, "
+                         "opened_at) VALUES (?,?,?,?,?,?,?,?,?, 'open', ?)",
+                         (p["guild_id"], key, "statfix", f"Stat correction? Slip #{p['id']}" if not secret else "Stat correction? A hidden slip",
+                          detail, p["id"], None, int(secret), ch.id if ch is not None else None, now_iso()))
+        db().commit()
+        if ch is not None:
+            t = db().execute("SELECT * FROM tickets WHERE id = ?", (c.lastrowid,)).fetchone()
+            try:
+                m = await ch.send(embed=ticket_embed(t), view=ticket_view(t), allowed_mentions=discord.AllowedMentions.none())
+                db().execute("UPDATE tickets SET message_id = ? WHERE id = ?", (m.id, t["id"]))
+                db().commit()
+            except Exception:
+                log.warning("Stat correction ticket post failed", exc_info=True)
+
+
+EXTRA_JOBS.append(("statfix", statfix_job))
+HELP_EXTRA.append(("⚡ Speed and accuracy", "Screenshots read in about 1-2 seconds. Most slips grade themselves from the "
+                                          "free box scores, soccer Fantasy Score included. If a stat gets corrected the "
+                                          "next morning, the staff get a ticket to check it. Unsure reads show a "
+                                          "confidence level and ❓ on the legs to look at. Fix a misread name once and "
+                                          "the reader remembers it."))
 
 
 bot.tree.add_command(staff_group)
@@ -41444,6 +41698,117 @@ async def slip_pnl(interaction: discord.Interaction):
 bot.tree.add_command(slip_group)
 
 
+# ==== r46: faster and sharper ======================================================================================
+
+_LEG_SHAPE = re.compile(r"^(.+?) (over|under) ([\d.]+) (.+)$")
+
+
+def namefix_learn(before: list, after: list) -> int:
+    """When someone fixes a misread name on a draft (same side, line and stat, different name), remember it."""
+    n = 0
+    for a, b in zip(before, after):
+        ma, mb = _LEG_SHAPE.match(str(a)), _LEG_SHAPE.match(str(b))
+        if not ma or not mb or ma.group(2, 3, 4) != mb.group(2, 3, 4):
+            continue
+        old, new = ma.group(1).strip(), mb.group(1).strip()
+        if norm_name(old) == norm_name(new) or not (2 <= len(new) <= 60) or not re.fullmatch(r"[\w .'’+\-]+", new):
+            continue
+        set_setting(0, "namefix:" + norm_name(old)[:60], new)
+        n += 1
+    return n
+
+
+def namefix_apply(slip: dict) -> int:
+    """Swap in names people fixed before ('Arda Giler' → 'Arda Güler')."""
+    out, n = [], 0
+    for leg in slip.get("legs") or []:
+        m = _LEG_SHAPE.match(str(leg))
+        fix = get_setting(0, "namefix:" + norm_name(m.group(1))[:60]) if m else None
+        if fix:
+            leg = f"{fix} {m.group(2)} {m.group(3)} {m.group(4)}"
+            n += 1
+        out.append(leg)
+    if n:
+        slip["legs"] = out
+    return n
+
+
+def fix_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS grade_fixes (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+                    pick_id INTEGER, idx INTEGER, old TEXT, new TEXT, leg TEXT, at TEXT)""")
+    db().execute("CREATE INDEX IF NOT EXISTS grade_fixes_g ON grade_fixes (guild_id, at)")
+
+
+def note_grade_fix(guild_id: int, pick_id: int, idx: int, status: str) -> None:
+    """A leg the autopilot graded, changed by a person afterwards: a correction (counted for the accuracy report)."""
+    p = db().execute("SELECT settled_by, status FROM picks WHERE id = ?", (pick_id,)).fetchone()
+    leg = db().execute("SELECT status, text FROM legs WHERE pick_id = ? AND idx = ?", (pick_id, idx)).fetchone()
+    if not p or not leg or leg["status"] == status or leg["status"] not in ("hit", "miss", "push"):
+        return
+    if (p["settled_by"] or "") != "auto" or GRADE_CTX.get("auto"):
+        return
+    fix_db()
+    db().execute("INSERT INTO grade_fixes (guild_id, pick_id, idx, old, new, leg, at) VALUES (?,?,?,?,?,?,?)",
+                 (guild_id, pick_id, idx, leg["status"], status, clip(leg["text"] or "", 120), now_iso()))
+
+
+GRADE_CTX: dict = {"auto": False}
+
+
+def accuracy_data(guild_id: int, days: int = 30, now: Optional[datetime] = None) -> dict:
+    """How much graded itself: settled slips by who settled them, per sport and app, why the rest needed a person,
+    and how often a person had to correct the autopilot."""
+    now = now or datetime.now(timezone.utc)
+    since = iso(now - timedelta(days=days))
+    rows = db().execute("""SELECT sport, platform, settled_by FROM picks WHERE guild_id = ? AND status IN ('win', 'loss', 'push')
+                           AND settled_at >= ?""", (guild_id, since)).fetchall()
+    total = len(rows)
+    auto = sum(1 for r in rows if (r["settled_by"] or "") == "auto")
+    def split(field):
+        g: dict = {}
+        for r in rows:
+            k = clip(str(r[field] or "Other"), 24)
+            x = g.setdefault(k, {"name": k, "n": 0, "auto": 0})
+            x["n"] += 1
+            x["auto"] += (r["settled_by"] or "") == "auto"
+        out = sorted(g.values(), key=lambda x: -x["n"])[:8]
+        for x in out:
+            x["pct"] = round(100 * x["auto"] / x["n"]) if x["n"] else None
+        return out
+    needs: dict = {}
+    for r in db().execute("SELECT auto_state FROM picks WHERE guild_id = ? AND auto_state LIKE 'needs:%' AND created_at >= ?",
+                          (guild_id, since)):
+        why = clip((r["auto_state"] or "")[6:].replace("_", " ").strip() or "other", 60)
+        needs[why] = needs.get(why, 0) + 1
+    fix_db()
+    fixes = db().execute("SELECT COUNT(*) AS n FROM grade_fixes WHERE guild_id = ? AND at >= ?", (guild_id, since)).fetchone()["n"]
+    graded_legs = db().execute("""SELECT COUNT(*) AS n FROM legs l JOIN picks p ON p.id = l.pick_id WHERE p.guild_id = ?
+                                  AND p.settled_by = 'auto' AND p.settled_at >= ? AND l.status IN ('hit', 'miss', 'push')""",
+                               (guild_id, since)).fetchone()["n"]
+    return {"days": days, "settled": total, "auto": auto, "pct": round(100 * auto / total) if total else None,
+            "by_sport": split("sport"), "by_app": split("platform"),
+            "needs": sorted(({"why": k, "n": v} for k, v in needs.items()), key=lambda x: -x["n"])[:6],
+            "fixes": int(fixes or 0), "auto_legs": int(graded_legs or 0),
+            "fix_rate": round(100 * fixes / graded_legs, 1) if graded_legs else None}
+
+
+def accuracy_line(guild_id: int, days: int = 7) -> str:
+    a = accuracy_data(guild_id, days)
+    if not a["settled"]:
+        return "No slips settled yet."
+    return (f"{a['auto']} of {a['settled']} slips settled on their own ({a['pct']}%)"
+            + (f" · {a['fixes']} grade{'s' if a['fixes'] != 1 else ''} corrected by a person" if a["fixes"] else
+               " · no corrections needed"))
+
+
+def scan_speed() -> Optional[dict]:
+    xs = list(RELIABILITY.get("scan_ms") or [])
+    if not xs:
+        return None
+    ys = sorted(xs)
+    return {"n": len(xs), "p50": ys[len(ys) // 2], "p95": ys[min(len(ys) - 1, int(round(0.95 * (len(ys) - 1))))]}
+
+
 # ==== r43: research tools ==========================================================================================
 # Everything here describes past games. Nothing in it calls a pick good or bad, or tells anyone to bet.
 
@@ -41925,6 +42290,7 @@ async def watch_job(client, now: Optional[datetime] = None) -> None:
     set_setting(0, "watch_at", iso(now))
     watch_db()
     rows = db().execute("SELECT * FROM watchlist ORDER BY id LIMIT 3000").fetchall()
+    batch: dict = {}
     reports: dict = {}
     for path in {r["path"] for r in rows}:
         reports[path] = await fetch_injuries(path)
@@ -41950,15 +42316,17 @@ async def watch_job(client, now: Optional[datetime] = None) -> None:
         db().execute("UPDATE watchlist SET status = ?, comment = ?, changed_at = ? WHERE id = ?",
                      (new, (inj or {}).get("comment") or "", iso(now), r["id"]))
         db().commit()
-        text = (f"👀 Watchlist: **{r['name']}** is now **{new}**" + (f" (was {old})" if old else "") + "."
+        _text = (f"👀 Watchlist: **{r['name']}** is now **{new}**" + (f" (was {old})" if old else "") + "."
                 + (f"\n> {clip(inj['comment'], 200)}" if inj and inj.get("comment") else "")) if new else \
             f"👀 Watchlist: **{r['name']}** is off the injury report" + (f" (was {old})." if old else ".")
-        try:
-            user = await client.fetch_user(r["user_id"])
-            await user.send(text + "\n-# /watch remove to stop watching · /research for the numbers")
-        except Exception:
-            log.info("Watchlist DM failed for %s", r["user_id"])
+        batch.setdefault(r["user_id"], []).append(_text)
     db().commit()
+    for uid, texts in batch.items():          # r46: one DM per person per check, however many players changed
+        try:
+            user = await client.fetch_user(uid)
+            await user.send(clip("\n".join(texts), 1800) + "\n-# /watch remove to stop watching · /research for the numbers")
+        except Exception:
+            log.info("Watchlist DM failed for %s", uid)
 
 
 EXTRA_JOBS.append(("watchlist", watch_job))
