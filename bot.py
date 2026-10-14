@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r47.3"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r47.5"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -123,6 +123,31 @@ try:
 except Exception:
     log.warning("Unknown TIMEZONE; using America/Chicago")
     TZ = ZoneInfo("America/Chicago")
+
+import contextvars as _ctxv
+_SHOW_TZ: "_ctxv.ContextVar" = _ctxv.ContextVar("show_tz", default=None)
+TZ_CHOICES = [("Eastern (New York)", "America/New_York"), ("Central (Chicago)", "America/Chicago"),
+              ("Mountain (Denver)", "America/Denver"), ("Arizona (Phoenix)", "America/Phoenix"),
+              ("Pacific (Los Angeles)", "America/Los_Angeles"), ("Alaska", "America/Anchorage"),
+              ("Hawaii", "Pacific/Honolulu"), ("Atlantic (Puerto Rico)", "America/Puerto_Rico"),
+              ("Toronto", "America/Toronto"), ("Mexico City", "America/Mexico_City"), ("UK (London)", "Europe/London"),
+              ("Central Europe (Berlin)", "Europe/Berlin"), ("Brazil (São Paulo)", "America/Sao_Paulo"),
+              ("Australia (Sydney)", "Australia/Sydney"), ("Japan (Tokyo)", "Asia/Tokyo"),
+              ("Philippines (Manila)", "Asia/Manila"), ("India (Kolkata)", "Asia/Kolkata")]
+_TZ_WORDS = {"America/New_York": "Eastern", "America/Toronto": "Eastern", "America/Chicago": "Central",
+             "America/Denver": "Mountain", "America/Phoenix": "Arizona time", "America/Los_Angeles": "Pacific",
+             "America/Anchorage": "Alaska time", "Pacific/Honolulu": "Hawaii time"}
+
+
+def show_tz():
+    """The zone to show times in: the server's own (set around a reply), else the bot's TIMEZONE."""
+    return _SHOW_TZ.get() or TZ
+
+
+def tz_label(tz=None) -> str:
+    tz = tz or show_tz()
+    key = getattr(tz, "key", None) or str(tz)
+    return _TZ_WORDS.get(key) or datetime.now(tz).strftime("%Z") or key
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 _recap_day = env("RECAP_DAY", "sunday").lower()
 RECAP_DAY = DAYS.index(_recap_day) if _recap_day in DAYS else DAYS.index("sunday")
@@ -2855,6 +2880,28 @@ LEAGUES = [  # (pattern in the pick's sport, ESPN path, extra query params)
     (r"scottish|\bspfl\b", "soccer/sco.1", {}),
     (r"brasileir|serie a brazil|brazil", "soccer/bra.1", {}),
     (r"saudi|\bspl\b", "soccer/ksa.1", {}),
+    # r47.5: more leagues and cups (ESPN's competition codes)
+    (r"turk|s[uü]per lig", "soccer/tur.1", {}),
+    (r"belgi|jupiler|pro league", "soccer/bel.1", {}),
+    (r"a-?league", "soccer/aus.1", {}),
+    (r"argentin|liga profesional", "soccer/arg.1", {}),
+    (r"\bj1\b|j\.? ?league", "soccer/jpn.1", {}),
+    (r"danish|superliga", "soccer/den.1", {}),
+    (r"swiss super league", "soccer/sui.1", {}),
+    (r"austria", "soccer/aut.1", {}),
+    (r"greek|greece", "soccer/gre.1", {}),
+    (r"norw|eliteserien", "soccer/nor.1", {}),
+    (r"swed|allsvenskan", "soccer/swe.1", {}),
+    (r"\busl\b", "soccer/usa.usl.1", {}),
+    (r"libertadores", "soccer/conmebol.libertadores", {}),
+    (r"concacaf champions", "soccer/concacaf.champions", {}),
+    (r"carabao|league cup|\befl cup\b", "soccer/eng.league_cup", {}),
+    (r"copa del rey", "soccer/esp.copa_del_rey", {}),
+    (r"dfb|pokal", "soccer/ger.dfb_pokal", {}),
+    (r"coppa italia", "soccer/ita.coppa_italia", {}),
+    (r"coupe de france", "soccer/fra.coupe_de_france", {}),
+    (r"\bwsl\b|women'?s super league", "soccer/eng.w.1", {}),
+    (r"women'?s champions league|\buwcl\b", "soccer/uefa.wchampions", {}),
     (r"college hockey|ncaa hockey", "hockey/mens-college-hockey", {}),
 ]
 NO_FREE_LOOKUP = r"esports|\bcs2?\b|counter|valorant|league of legends|dota|tennis|\bwta\b|\batp\b|golf|ufc|mma|boxing|f1|nascar|politic|crypto"
@@ -4603,11 +4650,20 @@ def today_line(ev) -> str:
         return (f"🔴 {away['short']} {away['score']:g}, {home['short']} {home['score']:g} "
                 f"({ev.get('detail') or 'live'})")
     when = event_time(ev)
-    return f"`{when.astimezone(TZ):%-I:%M %p}` {away['short']} @ {home['short']}" if when else \
+    return f"`{when.astimezone(show_tz()):%-I:%M %p}` {away['short']} @ {home['short']}" if when else \
         f"{away['short']} @ {home['short']}"
 
 
-async def today_embed(path: str, day: Optional[datetime] = None) -> Optional[discord.Embed]:
+async def today_embed(path: str, day: Optional[datetime] = None, guild_id: Optional[int] = None) -> Optional[discord.Embed]:
+    tok = _SHOW_TZ.set(guild_tz(guild_id)) if guild_id else None
+    try:
+        return await _today_embed(path, day)
+    finally:
+        if tok is not None:
+            _SHOW_TZ.reset(tok)
+
+
+async def _today_embed(path: str, day: Optional[datetime] = None) -> Optional[discord.Embed]:
     day = day or datetime.now(TZ)
     events = await fetch_scoreboard(path, day, TODAY_PARAMS.get(path))
     local = day.astimezone(TZ).date()
@@ -4623,7 +4679,7 @@ async def today_embed(path: str, day: Optional[datetime] = None) -> Optional[dis
     more = len(lines) - 25
     e = discord.Embed(title=f"{LEAGUE_NAMES.get(path, path)} · {day.astimezone(TZ):%a %b %-d}", color=BRAND,
                       description=clip("\n".join(lines[:25]) + (f"\n…and {more} more" if more > 0 else ""), 4000))
-    e.set_footer(text="Times are Central" + (" · 🔁 B2B = second night of a back-to-back" if b2b else ""))
+    e.set_footer(text=f"Times are {tz_label()}" + (" · 🔁 B2B = second night of a back-to-back" if b2b else ""))
     if events and all(x.get("season_type") == 1 for x in events):
         e.title += " · Preseason"
     return e
@@ -7590,6 +7646,14 @@ class WrappedView(discord.ui.View):
 # ---- schedule -----------------------------------------------------------------------------
 
 async def schedule_embed(guild_id: int, key: Optional[str], title: str) -> discord.Embed:
+    tok = _SHOW_TZ.set(guild_tz(guild_id))
+    try:
+        return await _schedule_embed(guild_id, key, title)
+    finally:
+        _SHOW_TZ.reset(tok)
+
+
+async def _schedule_embed(guild_id: int, key: Optional[str], title: str) -> discord.Embed:
     sql, args = "SELECT * FROM picks WHERE guild_id = ? AND status = 'open'", [guild_id]
     if key:
         sql += " AND bettor_key = ?"
@@ -7616,7 +7680,7 @@ async def schedule_embed(guild_id: int, key: Optional[str], title: str) -> disco
     by_day: dict[str, list] = {}
     for g in sorted(games.values(), key=lambda g: g["ev"]["date"]):
         when = event_time(g["ev"])
-        day = when.astimezone(TZ).strftime("%A %b %-d") if when else "Unknown day"
+        day = when.astimezone(show_tz()).strftime("%A %b %-d") if when else "Unknown day"
         who = ", ".join(f"#{p['id']} {p['bettor_name']}" + (f" ({n} legs)" if n > 1 else "")
                         for p, n in g["picks"].values())
         by_day.setdefault(day, []).append(f"{today_line(g['ev'])}\n　{clip(who, 200)}")
@@ -7626,7 +7690,7 @@ async def schedule_embed(guild_id: int, key: Optional[str], title: str) -> disco
     if loose:
         add_field_capped(e, "No game found (props on other sports, futures...)",
                          clip(", ".join(f"#{p['id']} {p['bettor_name']}" for p in loose[:30]), 1024))
-    e.set_footer(text="Times are Central · 🔴 live · ✅ final")
+    e.set_footer(text=f"Times are {tz_label()} · 🔴 live · ✅ final")
     return e
 
 
@@ -9540,7 +9604,7 @@ async def matchup_embed(guild_id: Optional[int], path: str, ev: dict) -> discord
     home = next(t for t in ev["teams"] if t["home"])
     when = event_time(ev)
     e = discord.Embed(title=f"🆚 {away['short']} @ {home['short']}", color=BRAND,
-                      description=(today_line(ev) + (f"\n{when.astimezone(TZ):%A %b %-d, %-I:%M %p} Central" if when and
+                      description=(today_line(ev) + (f"\n{when.astimezone(guild_tz(guild_id)):%A %b %-d, %-I:%M %p} {tz_label(guild_tz(guild_id))}" if when and
                                                      ev.get("state") == "pre" else "")))
     for t in (away, home):
         rec = " · ".join(f"{k} {v}" for k, v in (t.get("records") or {}).items())
@@ -9759,7 +9823,7 @@ async def ufc_embed() -> discord.Embed:
         lines.append(f"**{who(cs[0])}** vs **{who(cs[1])}** · {wc}" + (f" · {tail}" if tail else ""))
     when = event_time(ev)
     e = discord.Embed(title=f"🥊 {ev.get('name')}", color=BRAND,
-                      description=(f"{when.astimezone(TZ):%a %b %-d, %-I:%M %p} Central\n" if when else "") +
+                      description=(f"{when.astimezone(show_tz()):%a %b %-d, %-I:%M %p} {tz_label()}\n" if when else "") +
                       clip("\n".join(lines[:20]), 3900))
     return e
 
@@ -33622,7 +33686,7 @@ class PicksBot(discord.Client):
             channel = self.get_channel(int(r["value"]))
             if channel is None:
                 continue
-            embeds = [e for e in [await today_embed(p, now) for p in group_leagues(r["guild_id"])[:10]] if e]
+            embeds = [e for e in [await today_embed(p, now, r["guild_id"]) for p in group_leagues(r["guild_id"])[:10]] if e]
             if embeds:
                 await channel.send("📅 Today's games", embeds=embeds)
 
@@ -35203,6 +35267,9 @@ WHATS_NEW = {
             "📏 Help and the guide explain how results count on sportsbooks and DFS apps",
             "🛠️ `/admin panel` groups the server switches by area",
             "🟢 A status page anyone can open: `/statuspage` on the dashboard link",
+            "🕐 `/admin timezone`: game times show in your server's own time zone",
+            "⚽ 20 more soccer competitions grade themselves, including the WSL and the women's Champions League",
+            "📦 `/admin exportall`: the whole server's data as one zip",
             "🏁 F1 finishing-position legs grade themselves (like 'Lando Norris under 3.5 Finishing Position')",
             "⚾ `/research` on a pitcher shows the probable starters for his next game",
             "🌍 /help has a 'Sports covered' page with where every number comes from"],
@@ -36034,7 +36101,7 @@ async def today_cmd(interaction: discord.Interaction, league: Optional[app_comma
     await interaction.response.defer(thinking=True)
     paths = [league.value] if league else (group_leagues(interaction.guild_id) if interaction.guild_id
                                            else ["football/nfl", "basketball/nba"])
-    embeds = [e for e in [await today_embed(p) for p in paths[:10]] if e]
+    embeds = [e for e in [await today_embed(p, None, interaction.guild_id) for p in paths[:10]] if e]
     if not embeds:
         await interaction.followup.send("No games today in " + ", ".join(LEAGUE_NAMES.get(p, p) for p in paths) + ".")
         return
@@ -36423,7 +36490,7 @@ async def remind_cmd(interaction: discord.Interaction, when: app_commands.Range[
     db().execute("INSERT INTO reminders (guild_id, user_id, channel_id, text, due_at, created_at) VALUES (?,?,?,?,?,?)",
                  (interaction.guild_id, interaction.user.id, interaction.channel_id, text, iso(due), now_iso()))
     db().commit()
-    await interaction.response.send_message(f"⏰ Got it. I'll DM you **{due:%a %b %-d at %-I:%M %p}** Central: {text}",
+    await interaction.response.send_message(f"⏰ Got it. I'll DM you **{due.astimezone(TZ):%a %b %-d at %-I:%M %p}** {tz_label(TZ)}: {text}",
                                             ephemeral=True)
 
 
@@ -42155,6 +42222,125 @@ async def slip_pnl(interaction: discord.Interaction):
 bot.tree.add_command(slip_group)
 
 
+# ==== r47.5: the whole server's data as one zip ====================================================================
+
+EXPORT_SKIP_SETTINGS = re.compile(r"key|token|secret|cookie|password|epoch|webhook|statfix_diff", re.I)
+
+
+def server_export_zip(guild_id: int) -> tuple[bytes, dict]:
+    """Every table row for this server as CSV files in one zip. Hidden slips that are still open keep their details
+    out; settings that look like keys or sign-ins are skipped."""
+    import zipfile
+    counts: dict = {}
+    buf = io.BytesIO()
+    hidden_ids = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        tables = [r[0] for r in db().execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+                                             "ORDER BY name")]
+        for t in tables:
+            cols = [r[1] for r in db().execute(f'PRAGMA table_info("{t}")')]
+            if "guild_id" not in cols:
+                continue
+            rows = db().execute(f'SELECT * FROM "{t}" WHERE guild_id = ?', (guild_id,)).fetchall()
+            out = io.StringIO()
+            w = QaCsvWriter(out)
+            w.writerow(cols)
+            n = 0
+            for r in rows:
+                if t == "settings" and EXPORT_SKIP_SETTINGS.search(str(r["key"])):
+                    continue
+                vals = list(r)
+                if t == "picks" and sec_secret(r):
+                    hidden_ids.add(r["id"])
+                    keep = {"id", "guild_id", "bettor_key", "bettor_name", "status", "hidden", "created_at"}
+                    vals = [v if c in keep else ("(hidden until it settles)" if c == "description" else None)
+                            for c, v in zip(cols, vals)]
+                w.writerow(vals)
+                n += 1
+            z.writestr(f"{t}.csv", out.getvalue())
+            counts[t] = n
+        if "legs" in tables:
+            cols = [r[1] for r in db().execute('PRAGMA table_info("legs")')]
+            out = io.StringIO()
+            w = QaCsvWriter(out)
+            w.writerow(cols)
+            n = 0
+            for r in db().execute("SELECT legs.* FROM legs JOIN picks ON picks.id = legs.pick_id WHERE picks.guild_id = ? "
+                                  "ORDER BY legs.pick_id, legs.idx", (guild_id,)):
+                if r["pick_id"] in hidden_ids:
+                    continue
+                w.writerow(list(r))
+                n += 1
+            z.writestr("legs.csv", out.getvalue())
+            counts["legs"] = n
+        z.writestr("README.txt", f"PIMP-BOT export for server {guild_id}, made {now_iso()} ({BOT_VERSION}).\n"
+                                 "One CSV per table. Hidden slips that haven't settled show only who and when.\n"
+                                 "Keys, sign-ins and other secrets are never included.\n")
+    return buf.getvalue(), counts
+
+
+@admin_group.command(name="exportall", description="Everything this server has in the bot, as one zip of spreadsheets")
+@sec_rate("file")
+async def admin_exportall(interaction: discord.Interaction):
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if not (perms and getattr(perms, "manage_guild", False)):
+        await interaction.response.send_message("Only server admins (Manage Server) can export the server's data.",
+                                                ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    data, counts = server_export_zip(interaction.guild_id)
+    if len(data) > 24 * 1024 * 1024:
+        await interaction.followup.send("The export is too big for Discord (over 24 MB). Ask the developer for the "
+                                        "database backup instead.", ephemeral=True)
+        return
+    stamp = datetime.now(TZ).strftime("%Y-%m-%d")
+    main = ", ".join(f"{n:,} {t}" for t, n in sorted(counts.items(), key=lambda kv: -kv[1])[:4] if n)
+    await audit(interaction.client, interaction.guild_id, f"📦 {interaction.user.display_name} exported the server's data.")
+    await interaction.followup.send(f"📦 Everything this server has: {main or 'nothing yet'}. Hidden slips stay hidden.",
+                                    file=discord.File(io.BytesIO(data), filename=f"server_export_{stamp}.zip"), ephemeral=True)
+
+
+# ==== r47.4: per-server time zones =================================================================================
+
+def guild_tz(guild_id: Optional[int]):
+    """The server's own time zone (/admin timezone), else the bot's TIMEZONE."""
+    if not guild_id:
+        return TZ
+    key = get_setting(guild_id, "timezone")
+    if key:
+        try:
+            return ZoneInfo(key)
+        except Exception:
+            pass
+    return TZ
+
+
+def guild_now(guild_id: Optional[int]) -> datetime:
+    return datetime.now(guild_tz(guild_id))
+
+
+@admin_group.command(name="timezone", description="The time zone game times are shown in for this server")
+@app_commands.describe(zone="Pick one (leave empty to see the current one)", reset="Go back to the bot's default")
+@app_commands.choices(zone=[app_commands.Choice(name=n, value=v) for n, v in TZ_CHOICES])
+async def admin_timezone(interaction: discord.Interaction, zone: Optional[app_commands.Choice[str]] = None,
+                         reset: Optional[bool] = False):
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if (zone or reset) and not (perms and getattr(perms, "manage_guild", False)):
+        await interaction.response.send_message("Only server admins (Manage Server) can change the time zone.",
+                                                ephemeral=True)
+        return
+    gid = interaction.guild_id
+    if reset:
+        set_setting(gid, "timezone", None)
+    elif zone:
+        set_setting(gid, "timezone", zone.value)
+        await audit(interaction.client, gid, f"🕐 {interaction.user.display_name} set the server's time zone to {zone.name}.")
+    tz = guild_tz(gid)
+    await interaction.response.send_message(
+        f"🕐 Game times here show in **{tz_label(tz)}** (now {datetime.now(tz):%-I:%M %p}). "
+        "Daily posts and resets still run on the bot's own clock.", ephemeral=True)
+
+
 # ==== r47.3: the public status page ================================================================================
 
 def status_page_data(client=None) -> dict:
@@ -42900,7 +43086,9 @@ async def research_build(cand: dict, stat: Optional[str] = None, line: Optional[
                     except Exception:
                         w = None
                     weather = weather_line(w, guild_id) if w else None
-            nxt = {"label": short_game(ev), "when": iso(when) if when else None, "venue": clip(v.get("name") or "", 60),
+            nxt = {"label": short_game(ev) + (f" · {when.astimezone(guild_tz(guild_id)):%a %-I:%M %p} "
+                                              f"{tz_label(guild_tz(guild_id))}" if when else ""),
+                   "when": iso(when) if when else None, "venue": clip(v.get("name") or "", 60),
                    "indoor": bool(v.get("indoor")), "weather": weather, "opp": opp,
                    "opp_name": (them or {}).get("short") or opp}
             if path == "baseball/mlb" and when:
