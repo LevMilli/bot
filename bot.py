@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r46.3"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r46.5"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -1897,6 +1897,7 @@ def settled_view(pick_id: int) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
     view.add_item(NoteButton(pick_id))
     view.add_item(DisputeButton(pick_id))
+    view.add_item(WhyButton(pick_id))
     return view
 
 
@@ -5470,7 +5471,8 @@ STATS = {
             ["hits+runs+rbis", "hits+runs+rbi", "h+r+rbi", "hrr"]),
     "home_runs": ("Home Runs", "baseball", [("hr", 1)], ["home runs", "homers", "hr"]),
     "walks": ("Walks", "baseball", [("bb", 1)], ["walks", "batter walks"]),
-    "hitter_k": ("Hitter Strikeouts", "baseball", [("so_bat", 1)], ["hitter strikeouts", "batter strikeouts"]),
+    "hitter_k": ("Hitter Strikeouts", "baseball", [("so_bat", 1)], ["hitter strikeouts", "batter strikeouts",
+                                                                     "hitter ks", "hitter k's", "batter ks"]),
     "pitcher_k": ("Pitcher Strikeouts", "baseball", [("k", 1)],
                   ["pitcher strikeouts", "strikeouts", "ks", "k's", "pitching strikeouts"]),
     "hits_allowed": ("Hits Allowed", "baseball", [("h_allowed", 1)], ["hits allowed"]),
@@ -14644,9 +14646,10 @@ def slip_draft_embed(slip: dict, title: str = "🧾 Log this slip?") -> discord.
     def check(leg):
         m = re.match(r"^(.+?) (?:over|under) ", leg)
         return bool(m) and any(m.group(1) in u for u in unsure)
+    gob = set(slip.get("_goblins") or [])
     e = discord.Embed(title=title, color=BRAND,
-                      description=clip("\n".join(f"`{k}` {'❓ ' if check(leg) else ''}{leg}" for k, leg in enumerate(legs, 1)),
-                                       3500) or "No legs")
+                      description=clip("\n".join(f"`{k}` {'❓ ' if check(leg) else ''}{leg}{' 🟢 goblin' if leg in gob else ''}"
+                                                 for k, leg in enumerate(legs, 1)), 3500) or "No legs")
     if slip.get("_how") == "scan" or unsure:
         level = "high" if not unsure else ("medium" if len(unsure) <= 2 else "low")
         e.add_field(name="🔎 Read confidence", inline=False,
@@ -22396,7 +22399,9 @@ for _comp, _name, _grp in (
         ("s_yc", "yellowCards", "soccer"), ("s_rc", "redCards", "soccer")):
     C[_comp] = ((_name,), (), "core." + _grp)
 
+C["p_seen"] = (("pitches", "pitchesSeen"), ("#P",), "batting")
 STATS.update({
+    "pitches_seen": ("Pitches Seen", "baseball", [("p_seen", 1)], ["pitches seen", "pitches faced"]),
     # basketball
     "threes_att": ("3-PT Attempted", "basketball", [("3pa", 1)],
                    ["3-pt attempted", "3pt attempted", "3-pointers attempted", "3 pointers attempted",
@@ -22463,6 +22468,7 @@ TRACK_REMAP = [
     ({"fantasy", "nfl_fantasy"}, "baseball", {"SP", "RP", "P"}, "pitcher_fs"),
     ({"fantasy", "nfl_fantasy"}, "baseball", None, "hitter_fs"),
     ({"fantasy", "nfl_fantasy", "s_fantasy"}, "soccer", {"G", "GK"}, "s_gk_fantasy"),
+    ({"pitcher_k"}, "baseball", {"C", "1B", "2B", "3B", "SS", "IF", "OF", "LF", "CF", "RF", "DH"}, "hitter_k"),
     ({"fantasy", "nfl_fantasy"}, "soccer", None, "s_fantasy"),
 ]
 
@@ -22470,9 +22476,12 @@ TRACK_REMAP = [
 def track_stat_for(stats: list[str], family: Optional[str], position: Optional[str]) -> Optional[str]:
     """The stat key a leg means for a player of this sport and position, or None if it isn't one of theirs."""
     native = next((k for k in stats if STATS[k][1] == family), None)
-    if native:
-        return native
     pos = (position or "").upper()
+    if native:
+        for keys, fam, positions, target in TRACK_REMAP:     # r46.5: a hitter's "Ks" are his strikeouts at the plate
+            if fam == family and native in keys and positions and pos in positions and STATS[target][1] == family:
+                return target
+        return native
     for keys, fam, positions, target in TRACK_REMAP:
         if fam == family and keys & set(stats) and (positions is None or pos in positions):
             return target
@@ -25677,14 +25686,18 @@ FREE_STATS = sorted({
     "Rec Tgts", "Receiving Yards", "Passing Yards", "Rushing Yards", "Maps 1-3 Kills", "Maps 1-2 Headshots",
     "Maps 1-3 Headshots", "Map 1 Kills", "Map 1 Headshots", "Assists",
     "SOT", "PO", "Goalie Fantasy Score", "Goalie Saves", "Shots On Target", "Pitching Outs", "Pitcher Outs",
+    "Hitter Ks", "Pitcher Ks", "Pitches Seen", "Maps 1-3 Kills (Combo)", "Maps 1-3 Headshots (Combo)",
     "Hitter Fantasy Score", "Kills (Combo)", "Maps 1-2 Kills (Combo)",
 }, key=len, reverse=True)
 # Short names the cards print, written out the way the grader knows them.
 FREE_STAT_ALIAS = {"SOT": "Shots On Target", "PO": "Pitching Outs", "Pitcher Outs": "Pitching Outs",
+                   "Hitter Ks": "Hitter Strikeouts", "Pitcher Ks": "Pitcher Strikeouts",
+                   "Maps 1-3 Kills (Combo)": "Maps 1-3 Kills", "Maps 1-3 Headshots (Combo)": "Maps 1-3 Headshots",
                    "Kills (Combo)": "Kills", "Maps 1-2 Kills (Combo)": "Maps 1-2 Kills"}
 FREE_CASE_STATS = {"SOT", "PO"}       # only in capitals: "po" and "sot" inside other words are not stats
 FREE_ESPORTS_STATS = {"Kills", "Headshots", "Maps 1-2 Kills", "Maps 1-3 Kills", "Maps 1-2 Headshots",
-                      "Maps 1-3 Headshots", "Map 1 Kills", "Map 1 Headshots", "Kills (Combo)", "Maps 1-2 Kills (Combo)"}
+                      "Maps 1-3 Headshots", "Map 1 Kills", "Map 1 Headshots", "Kills (Combo)", "Maps 1-2 Kills (Combo)",
+                      "Maps 1-3 Kills (Combo)", "Maps 1-3 Headshots (Combo)"}
 # Stats whose lines can reach 100+; any other stat over 100 is a misread (a "693.5 Pitcher Strikeouts").
 FREE_BIG_STATS = {"Pass Yards", "Pass Yds", "Passing Yards", "Rush Yards", "Rush Yds", "Rushing Yards", "Rec Yards",
                   "Rec Yds", "Receiving Yards", "Rush+Rec Yds", "Pass+Rush Yds", "Pitches Thrown", "Field Goal Yards",
@@ -25945,9 +25958,12 @@ def _free_name(line: dict, max_x: Optional[float] = None, single: bool = False) 
     if single:
         if re.search(r"[•·«»+\-]\s*[-»·•]?\s*G\b", line["text"]):
             return None                        # "Natus Vincere • G": the team and role line, not the gamer
-        cm = re.search(r"(?<![\w])([A-Za-z][\w.\-]{1,15})\s*\+\s*([A-Za-z][\w.\-]{1,15})(?![\w])", " ".join(toks))
-        if cm and not any(x.lower() in _FREE_JUNK or _free_stat_in(x) or len(x) < 3 for x in cm.groups()):
-            return f"{cm.group(1)} + {cm.group(2)}"    # a combo pick: "Fuuu + Morttheus"
+        cm = re.search(r"(?<![\w])([A-Za-z][\w.\-]{1,15}(?:\s*\+\s*[A-Za-z][\w.\-]{1,15}){1,3})(?![\w])",
+                       " ".join(toks))
+        if cm:
+            parts = [x.strip() for x in cm.group(1).split("+")]
+            if len(parts) >= 2 and not any(x.lower() in _FREE_JUNK or _free_stat_in(x) or len(x) < 3 for x in parts):
+                return " + ".join(parts)          # a combo pick: "Fuuu + Morttheus", "PerfecT + Cuzz + Bdd"
     best: list[str] = []
     run: list[str] = []
     for t in toks + [""]:
@@ -26056,7 +26072,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                 status = "win"
                 break
     slip_fams = {FREE_SPORT_FAMILY[x] for x in re.findall(r"\b(NFL|CFB|NCAAF|NBA|WNBA|CBB|NCAAB|NHL|MLB|SOCCER|KBO|NPB"
-                                                          r"|CPBL|KHL|SHL|WTA|ATP)\b", full)}
+                                                          r"|CPBL|KHL|SHL|WTA|ATP)P?\b", full)}
     if re.search(r"\b(LoL|CS2|VAL|DOTA|COD)\b", full):
         slip_fams.add("esports")
     teams: dict = {}
@@ -26069,6 +26085,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     # legs: anchor on each stat name, take the line number before it, the name above it, and the side
     legs: list[str] = []
     dnp: list[str] = []           # legs marked DNP (the player didn't play: PrizePicks voids that pick)
+    goblins: list[str] = []       # r46.4: legs with PrizePicks' green goblin (an easier line that pays less)
     used_lines: set = set()       # a name line belongs to one leg; the same player can be on two lines
     num_hs = sorted(w["h"] for w in words if _FREE_NUM.match(_free_numtext(w["text"])))
     builder = bool(re.search(r"\bless\b", low) and re.search(r"\bmore\b", low))
@@ -26152,7 +26169,10 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             continue                                          # a baseball stat read off a hockey slip: noise
         wd = max(num_words, key=lambda w: w["x"])            # the new line, never a crossed-out old one
         txt = wd.get("_num") or _free_numtext(wd["text"])
-        again = None if wd.get("_boxread") else free_reocr_number(grey, wd)
+        promo = re.fullmatch(r"(\d{1,2})\.?5(\d{1,2})\.?5", txt or "")
+        if promo and stat not in FREE_BIG_STATS:     # r46.5: "6515" is a crossed-out 6.5 next to the new 1.5
+            txt = promo.group(2) + ".5"
+        again = None if wd.get("_boxread") or promo else free_reocr_number(grey, wd)
         if again and (("." in again) or "." not in txt):
             txt = again
         try:
@@ -26225,6 +26245,15 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             rr, cy = wd["x"] + wd["w"], wd["y"] + wd["h"] / 2
             nw = digits * 0.6 * hn
             side = free_arrow(img, (rr - nw - 1.9 * hn, cy - 0.9 * hn, rr - nw - 0.15 * hn, cy + 0.9 * hn))
+        if promo:                                     # r46.5: promo boxes are wide, read the arrow glyph instead
+            gl = re.match(r"^[^\d]*", wd.get("text") or "").group(0)
+            if not gl:
+                left_ = [w for w in src["words"] if w["x"] + w["w"] <= wd["x"] + 2 and len(w["text"]) <= 2]
+                gl = max(left_, key=lambda w: w["x"])["text"] if left_ else ""
+            if re.search(r"[Tt↑]", gl):
+                side = "over"
+            elif re.search(r"[JVv↓]", gl):
+                side = "under"
         if side is None and right and not wd.get("_boxread"):
             # Tesseract's box for "18.5" took in the arrow too: look just left of where the digits really start
             vt = f"{value:g}"
@@ -26265,6 +26294,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             legs.append(leg)
             if re.search(r"\bDNP\b", ln["text"] + " " + src["text"]):
                 dnp.append(leg)
+            if platform == "PrizePicks" and right and free_goblin(img, wd, hn):
+                goblins.append(leg)
     if not legs:
         if platform and (cost or payout):
             return {"is_slip": True, "platform": platform, "sport": None, "description": "Slip", "legs": [],
@@ -26280,11 +26311,12 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     n = want or len(legs)
     desc = (f"{n}-Pick {'Flex' if entry_type == 'flex' else 'Power'} Play" if platform in ("PrizePicks", "Underdog")
             else f"{n}-leg slip" if n > 1 else legs[0])
-    sports = [s for s in ("NFL", "NBA", "NHL", "MLB", "WNBA", "SOCCER", "CFB", "CBB") if re.search(rf"\b{s}\b", full)]
+    sports = [s for s in ("NFL", "NBA", "NHL", "MLB", "WNBA", "SOCCER", "CFB", "CBB") if re.search(rf"\b{s}P?\b", full)]
     return {"is_slip": True, "platform": platform, "sport": ", ".join(s.title() if s == "SOCCER" else s for s in sports)
             or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": status,
             "returned": returned, "game_date": None, "entry_type": entry_type, "placed": placed,
-            "_unsure": unsure, "_how": "scan", "_teams": teams, "_games": games, "_want": want, "_dnp": dnp}
+            "_unsure": unsure, "_how": "scan", "_teams": teams, "_games": games, "_want": want, "_dnp": dnp,
+            "_goblins": goblins}
 
 
 def free_box_number(grey, ln: dict, hn: float) -> Optional[dict]:
@@ -26310,6 +26342,30 @@ def free_box_number(grey, ln: dict, hn: float) -> Optional[dict]:
             return {"text": num, "_num": num, "x": box[0], "y": box[1], "w": box[2] - box[0], "h": box[3] - box[1],
                     "conf": 70, "_boxread": True, "_glued": True}
     return None
+
+
+def free_goblin(img, wd: dict, hn: float) -> bool:
+    """PrizePicks marks a goblin line with a small green face just left of the arrow in the number box."""
+    try:
+        h = float(wd.get("h") or hn or 25)
+        if wd.get("_boxread"):
+            h = max(18.0, float(hn or 25))
+            x1 = wd["x"] + 0.5 * h
+            box = (int(wd["x"] - 3.2 * h), int(wd["y"]), int(x1), int(wd["y"] + wd["h"]))
+        else:
+            rr = wd["x"] + wd["w"]
+            digits = re.sub(r"\D", "", _free_numtext(wd.get("text") or "") or "") or "00"
+            nw = (min(len(digits), 4) * 0.6 + 0.25) * h       # the number's own width: the icon sits left of the arrow
+            box = (int(rr - nw - 4.4 * h), int(wd["y"] - 0.4 * h), int(rr - nw - 0.6 * h), int(wd["y"] + 1.4 * h))
+        box = (max(0, box[0]), max(0, box[1]), min(img.width, box[2]), min(img.height, box[3]))
+        if box[2] - box[0] < 6 or box[3] - box[1] < 6:
+            return False
+        px = img.crop(box).convert("RGB").getdata()
+        n = len(px)
+        g = sum(1 for r, gg, b in px if gg > 140 and gg > r + 40 and gg > b + 40)
+        return n > 0 and g / n >= 0.03
+    except Exception:
+        return False
 
 
 def free_name_reread(grey, top: float, bottom: float, single: bool = False) -> Optional[str]:
@@ -35108,7 +35164,10 @@ WHATS_NEW = {
             "🌧️ A postponed or called-off game voids its legs (pick'em apps right away, sportsbooks after a day)",
             "🕘 `/track` shows every grade change on a slip",
             "⏱️ Half, quarter, period and first-5-innings team legs grade themselves (like 'Celtics 1H -3.5')",
-            "⚠️ Wrong-grade reports show the staff every leg, why it graded that way, and the box score"],
+            "⚠️ Wrong-grade reports show the staff every leg, why it graded that way, and the box score",
+            "🔎 A Why? button on every result shows how each leg graded",
+            "🟢 The screenshot reader spots PrizePicks goblin lines",
+            "📸 Builder screenshots read better: NBAP boards, promo (taco) lines, Hitter Ks, Pitches Seen, 3-player combos"],
     "r45": ["📖 A new /help with topics and buttons, and a member guide page",
             "💬 Feedback button in /help: it goes straight to the staff as a ticket",
             "👋 New members get a welcome DM with buttons",
@@ -41933,6 +41992,42 @@ async def slip_pnl(interaction: discord.Interaction):
 
 
 bot.tree.add_command(slip_group)
+
+
+# ==== r46.4 ========================================================================================================
+
+class WhyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"why:(?P<pid>\d+)"):
+    """🔎 Why? on a result: every leg, how it graded and why, where the number came from, the box score."""
+    def __init__(self, pick_id: int):
+        super().__init__(discord.ui.Button(label="🔎 Why?", style=discord.ButtonStyle.secondary,
+                                           custom_id=f"why:{pick_id}", row=2))
+        self.pick_id = pick_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["pid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        p = get_pick(interaction.guild_id, self.pick_id)
+        if p is None:
+            await interaction.response.send_message("That pick is gone.", ephemeral=True)
+            return
+        if sec_secret(p) and not can_edit(interaction, p):
+            await interaction.response.send_message("That slip is hidden.", ephemeral=True)
+            return
+        rows = dispute_leg_lines(p)
+        e = discord.Embed(title=clip(f"🔎 Why #{p['id']} graded {STATUS[p['status']][0]}", 256), color=BRAND,
+                          description=clip("\n".join(rows) or "No legs: the whole slip was graded at once.", 4000))
+        hist = leg_history(p["id"])
+        if hist:
+            e.add_field(name="🕘 Grade changes", inline=False, value=clip("\n".join(
+                f"Leg {h['idx']}: {h['old'] or 'open'} → **{h['new']}** · {local_day(h['at'])}" for h in hist[-6:]), 1024))
+        if _rg(p, "settled_by") == "auto":
+            e.set_footer(text="Graded by the bot from the free stats. Something off? Tap ⚠️ Wrong grade?")
+        await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+EXTRA_ITEMS.append(WhyButton)
 
 
 # ==== r46.3 ========================================================================================================
