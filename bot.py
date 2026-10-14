@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r46.1"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r46.2"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -908,10 +908,19 @@ import threading
 _RENDER_LOCK = threading.Lock()
 
 
+_RENDER_COUNT = [0]
+
+
 def locked_render(fn, *args):
-    """pyplot keeps global state, so charts are drawn one at a time."""
+    """pyplot keeps global state, so charts are drawn one at a time. Every 20th render tidies memory (images are big)."""
     with _RENDER_LOCK:
-        return fn(*args)
+        try:
+            return fn(*args)
+        finally:
+            _RENDER_COUNT[0] += 1
+            if _RENDER_COUNT[0] % 20 == 0:
+                import gc
+                gc.collect()
 
 
 def money(x: float) -> str:
@@ -6313,7 +6322,9 @@ async def update_sweats(client: discord.Client, now: Optional[datetime] = None) 
                     except Exception:
                         pass
             halves = {}
-            for e in entries:                                      # halftime check-in: once per game
+            flex = "flex" in (p["description"] or "").lower()
+            dead = not flex and any(leg_outcome(e) == "miss" for e in entries)
+            for e in ([] if dead else entries):                    # halftime check-in: once per game, live slips only
                 ev = e.get("event") or {}
                 if ev.get("status_name") == "STATUS_HALFTIME" and ev.get("id") and f"h{ev['id']}" not in state:
                     halves[ev["id"]] = ev
@@ -11558,7 +11569,7 @@ async def favorite_team_alerts(client: discord.Client, now: Optional[datetime] =
                             f"{'tied' if tied else 'beat' if won else 'lost to'} the "
                             f"{theirs['short']} {mine['score']:g}-{theirs['score']:g}.")
                     try:
-                        if is_quiet(r["guild_id"], uid):
+                        if is_quiet(r["guild_id"], uid, now):
                             raise QuietHours()
                         user = await client.fetch_user(uid)
                         await user.send(text)
@@ -13928,6 +13939,12 @@ def cleanup_db(now: Optional[datetime] = None, vacuum: bool = False) -> dict:
     removed["leg alert marks"] += db().execute(
         "DELETE FROM leg_pings WHERE pick_id NOT IN (SELECT id FROM picks)").rowcount
     try:
+        leg_history_db()
+        removed["old grade history"] = db().execute(
+            "DELETE FROM leg_history WHERE at < ?", (iso(now - timedelta(days=180)),)).rowcount
+    except sqlite3.Error:
+        pass
+    try:
         fix_db()
         removed["old grade corrections"] = db().execute(
             "DELETE FROM grade_fixes WHERE at < ?", (iso(now - timedelta(days=90)),)).rowcount
@@ -16275,6 +16292,7 @@ async def autopilot_pick(client, p, now: datetime, allow_ai: bool = True, allow_
                 return out
     try:
         entries = await leg_progress(p)       # always fresh here; the board and receipts reuse it
+        entries = postponed_voids(p, entries, now)
         _PROGRESS_CACHE[pid] = (time.monotonic() + 100, entries)
     except Exception:
         log.exception("Progress failed for pick %s", pid)
@@ -22909,6 +22927,10 @@ def track_doctor_embed(p, entries: list[dict]) -> discord.Embed:
         url = espn_game_url(x.get("path") or (x.get("event") or {}).get("path"), (x.get("event") or {}).get("id"))
         e.add_field(name=clip(f"{icon} {x['n']}. {x['text']}", 256), inline=False,
                     value=clip(track_doctor_lines(x) + (f"\n[📊 Box score on ESPN]({url})" if url else ""), 1024))
+    hist = leg_history(p["id"])
+    if hist and len(e.fields) < 25:
+        e.add_field(name="🕘 Grade changes", inline=False, value=clip("\n".join(
+            f"Leg {h['idx']}: {h['old'] or 'open'} → **{h['new']}** · {local_day(h['at'])}" for h in hist[-8:]), 1024))
     e.set_footer(text="Free ESPN data · 🔄 Re-check clears what I remembered about this slip and looks again")
     return e
 
@@ -35012,7 +35034,9 @@ WHATS_NEW = {
             "👀 Watchlist news comes in one DM instead of several",
             "🎯 Leg updates from all your slips arrive in one DM",
             "📊 `/track` links each leg to its ESPN box score",
-            "🗣️ Staff can teach the bot player nicknames (`/staff nickname`)"],
+            "🗣️ Staff can teach the bot player nicknames (`/staff nickname`)",
+            "🌧️ A postponed or called-off game voids its legs (pick'em apps right away, sportsbooks after a day)",
+            "🕘 `/track` shows every grade change on a slip"],
     "r45": ["📖 A new /help with topics and buttons, and a member guide page",
             "💬 Feedback button in /help: it goes straight to the staff as a ticket",
             "👋 New members get a welcome DM with buttons",
@@ -41837,6 +41861,57 @@ async def slip_pnl(interaction: discord.Interaction):
 
 
 bot.tree.add_command(slip_group)
+
+
+# ==== r46.2 ========================================================================================================
+
+POSTPONED_STATUSES = ("STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_CANCELLED", "STATUS_ABANDONED")
+DFS_APPS = ("prizepicks", "underdog", "sleeper", "betr", "dabble", "pick6", "draftkings pick6", "parlayplay", "chalkboard")
+
+
+def postponed_voids(p, entries: list, now: Optional[datetime] = None) -> list:
+    """A leg whose game was postponed or called off is voided (a push). Pick'em apps void it right away; for a
+    sportsbook, once the game is a day past its start (books usually give it 24 hours to be played)."""
+    now = now or datetime.now(timezone.utc)
+    dfs = any(a in (p["platform"] or "").lower() for a in DFS_APPS)
+    for e in entries:
+        ev = e.get("event") or {}
+        if ev.get("status_name") not in POSTPONED_STATUSES or e.get("decided") in ("hit", "miss", "push"):
+            continue
+        if e.get("status") not in (None, "open"):
+            continue
+        start = event_time(ev)
+        if dfs or (start is not None and now - start >= timedelta(hours=24)):
+            e["decided"] = "push"
+            e["why"] = "game postponed or called off, so the leg is voided"
+    return entries
+
+
+def leg_history_db() -> None:
+    db().execute("""CREATE TABLE IF NOT EXISTS leg_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pick_id INTEGER,
+                    idx INTEGER, old TEXT, new TEXT, at TEXT)""")
+    db().execute("CREATE INDEX IF NOT EXISTS leg_history_p ON leg_history (pick_id)")
+    db().execute("""CREATE TRIGGER IF NOT EXISTS leg_history_t AFTER UPDATE OF status ON legs
+                    WHEN OLD.status IS NOT NEW.status
+                    BEGIN INSERT INTO leg_history (pick_id, idx, old, new, at)
+                          VALUES (NEW.pick_id, NEW.idx, OLD.status, NEW.status, strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now'));
+                    END""")
+    db().commit()
+
+
+def leg_history(pick_id: int) -> list:
+    try:
+        leg_history_db()
+        return [dict(r) for r in db().execute("SELECT idx, old, new, at FROM leg_history WHERE pick_id = ? ORDER BY id",
+                                              (pick_id,))]
+    except sqlite3.Error:
+        return []
+
+
+try:
+    leg_history_db()
+except Exception:
+    pass
 
 
 # ==== r46: faster and sharper ======================================================================================
