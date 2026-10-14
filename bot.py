@@ -54,7 +54,7 @@ load_dotenv()
 log = logging.getLogger("picksbot")
 RELIABILITY: dict = {"stopping": False, "selftest": None, "sweep": None}   # r44: shared speed & reliability state
 CMD_STATS: dict = {}                                                      # r44: per-command timings
-BOT_VERSION = "2026-10-13 r46.5"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-13 r47.3"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -3427,6 +3427,12 @@ def solo_judge(text: str, path: str, found: list) -> Optional[tuple]:
             except (TypeError, ValueError):
                 return None
             return ("hit" if pos < rp else "miss", f"{me['name']} P{pos}, {rival['name']} P{rp}")
+        fp = re.search(r"\b(over|under)\s+(\d+(?:\.\d+)?)\s*(?:finish(?:ing)?\s*(?:pos(?:ition)?|place)|position|place)", low)
+        if fp:                                                # r47: a finishing-position line (lower is better)
+            line, side = float(fp.group(2)), fp.group(1)
+            if pos == line:
+                return ("push", f"{me['name']} finished P{pos}")
+            return ("hit" if (pos < line) == (side == "under") else "miss", f"{me['name']} finished P{pos}")
         top = re.search(r"top ?(\d+)", low)
         n = int(top.group(1)) if top else 3 if "podium" in low else 1 if re.search(r"\bwin|\bwinner\b", low) else None
         if n is None:
@@ -9487,12 +9493,15 @@ US_STATES = {"AL": "Alabama", "AZ": "Arizona", "AR": "Arkansas", "CA": "Californ
              "WI": "Wisconsin", "WV": "West Virginia", "ID": "Idaho", "NM": "New Mexico", "AK": "Alaska", "HI": "Hawaii"}
 
 
-def weather_line(w: dict) -> str:
+def weather_line(w: dict, guild_id: Optional[int] = None) -> str:
     bits = []
+    metric = bool(guild_id) and server_on(guild_id, "celsius")     # r47.1: a server can show °C and km/h
     if w.get("temp") is not None:
-        bits.append(f"{w['temp']:.0f}°F")
+        bits.append(f"{(w['temp'] - 32) * 5 / 9:.0f}°C" if metric else f"{w['temp']:.0f}°F")
     if w.get("wind") is not None:
-        bits.append(f"wind {w['wind']:.0f} mph" + (f" (gusts {w['gust']:.0f})" if w.get("gust") and w["gust"] >= w["wind"] + 8 else ""))
+        k = 1.609 if metric else 1
+        bits.append(f"wind {w['wind'] * k:.0f} {'km/h' if metric else 'mph'}"
+                    + (f" (gusts {w['gust'] * k:.0f})" if w.get("gust") and w["gust"] >= w["wind"] + 8 else ""))
     if w.get("rain") is not None:
         bits.append(f"{w['rain']:.0f}% chance of rain")
     flag = ""
@@ -9544,7 +9553,7 @@ async def matchup_embed(guild_id: Optional[int], path: str, ev: dict) -> discord
         elif when and v.get("city") and ev.get("state") == "pre" and when - datetime.now(timezone.utc) < timedelta(days=7):
             w = await kickoff_weather(v["city"], v.get("state") or "", when)
             if w:
-                line += f"\n🌤️ Kickoff: {weather_line(w)}"
+                line += f"\n🌤️ Kickoff: {weather_line(w, guild_id)}"
         e.add_field(name="Venue", value=clip(line, 1024), inline=False)
     b2b = await b2b_team_ids(path, when or datetime.now(timezone.utc))
     tired = [t["short"] for t in ev["teams"] if t["id"] in b2b]
@@ -9771,6 +9780,10 @@ async def f1_embed() -> discord.Embed:
         value = (f"{when.astimezone(TZ):%a %-I:%M %p}" if when else "") + (f" · {podium}" if podium and st.get("state") == "post"
                                                                            else ("" if st.get("state") != "in" else " · 🔴 live"))
         e.add_field(name=kind, value=value or "-", inline=False)
+    try:
+        await f1_jolpica_fields(e)
+    except Exception:
+        log.debug("Jolpica F1 extras skipped", exc_info=True)
     return e
 
 
@@ -15052,9 +15065,31 @@ def me_settings_view(guild_id: int, user_id: int) -> discord.ui.View:
     return v
 
 
+TOGGLE_AREAS = {
+    "🧾 Slips": ("receipts_all", "autopilot", "reactions", "cashgifs", "exclude_preseason", "stacks", "riding"),
+    "📺 Live": ("board_auto", "gamethreads", "gametracker", "ticker", "finalwhistle", "celsius"),
+    "📣 Posts": ("show", "previews", "gp_autopost", "powerrank", "sotdauto", "badbeatweek", "otd_off", "lore",
+                "contests", "rivals_off", "quests"),
+    "👋 Members": ("welcome", "newsfeed", "whatsnew"),
+    "🛠️ Staff & bot": ("selfcheck", "outage_restarts", "staffreport"),
+}
+
+
+def toggle_area(key: str) -> str:
+    return next((a for a, keys in TOGGLE_AREAS.items() if key in keys), "⚙️ Other")
+
+
 def admin_panel_embed(guild_id: int) -> discord.Embed:
-    lines = [f"{'✅' if server_on(guild_id, k) else '⬜'} {label}" for k, label, _ in SERVER_TOGGLES]
-    e = discord.Embed(title="🛠️ Server control panel", color=BRAND, description="\n".join(lines))
+    areas: dict = {}
+    for k, label, _ in SERVER_TOGGLES:                   # r47.2: grouped by area, in the order the areas are listed
+        areas.setdefault(toggle_area(k), []).append(f"{'✅' if server_on(guild_id, k) else '⬜'} {label}")
+    order = list(TOGGLE_AREAS) + ["⚙️ Other"]
+    lines = []
+    for a in order:
+        if a in areas:
+            lines.append(f"**{a}**")
+            lines += areas[a]
+    e = discord.Embed(title="🛠️ Server control panel", color=BRAND, description=clip("\n".join(lines), 4000))
     e.add_field(name="Bot voice", value=PERSONAS[persona(guild_id)][0])
     cap = f" (cap {CLAUDE_DAILY_CAP})" if CLAUDE_DAILY_CAP else ""
     e.add_field(name="Claude calls today", value=f"{claude_calls_today()}{cap}")
@@ -20618,7 +20653,7 @@ def dash_app(web):
     web.get("/staff/backup.db", staff_backup),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get("/api/board.json", dash39_api_board), web.get("/api/search.json", dash39_api_search),
-                    web.get("/api/research.json", dash43_api_research), web.get("/guide", guide_page),
+                    web.get("/api/research.json", dash43_api_research), web.get("/guide", guide_page), web.get("/statuspage", dash47_status_page),
                     web.get("/manifest.webmanifest", dash39_manifest), web.get("/sw.js", dash39_sw),
                     web.get("/icon-192.png", dash39_icon_route), web.get("/icon-512.png", dash39_icon_route),
                     web.get("/icon-180.png", dash39_icon_route), web.get("/apple-touch-icon.png", dash39_icon_route),
@@ -31394,6 +31429,7 @@ def staff_data(guild_id: int, uid: Optional[int] = None) -> dict:
         "pool": engine_usage(),
         "reliability": reliability_data(),
         "accuracy": accuracy_data(guild_id),
+        "feed_dir": feed_directory(),
         "allow": staff_allowances(guild_id),
         "blacklist": {"entries": [{"name": r["name"], "kind": BL_KINDS.get(r.get("kind"), "Entry"), "reason": r.get("reason") or "",
                                    "alert": r.get("alert") or "staff", "by": r.get("by") or ""} for r in bl_rows(guild_id)],
@@ -31999,7 +32035,8 @@ async def line_watch_job(client, now: Optional[datetime] = None) -> None:
                 continue
             label = f"{away.get('abbr') or away['short']} @ {home.get('abbr') or home['short']}"
             line_put(f"game:{path}:{ev['id']}", "game", label, LEAGUE_NAMES.get(path, path), ev.get("date") or "",
-                     o.get("spread"), o.get("total"), o.get("details") or "", at)
+                     o.get("spread"), o.get("total"),
+                     (o.get("details") or "") + (f" · {o['provider']}" if o.get("provider") else ""), at)
     tickers = [r["kalshi_ticker"] for r in db().execute(
         "SELECT DISTINCT kalshi_ticker FROM picks WHERE status = 'open' AND kalshi_ticker IS NOT NULL LIMIT 30")]
     for t in tickers:
@@ -33039,6 +33076,13 @@ function render(d){
    +(R.scans?row('Screenshot reads',(R.scans.p50/1000).toFixed(1)+'s typical · '+(R.scans.p95/1000).toFixed(1)+'s slowest · '+R.scans.n+' reads'):'')
    +(R.sweep?row('Caches',R.sweep.kept+' entries · '+R.sweep.swept+' expired cleared '+esc(ago(R.sweep.at))):'');
   h.push(card('Reliability',rb));
+ }
+ if((d.feed_dir||[]).length){
+  const sc={ok:'ok',shaky:'warn',down:'bad',idle:''};
+  h.push(card('Data feeds',d.feed_dir.map(f=>'<div class="row"><span>'+dot(sc[f.state])+'<b>'+esc(f.name)+'</b><br><small class="muted">'+esc(f.covers)
+   +(f.backup?' · backup: '+esc(f.backup):'')+'</small></span><span>'+(f.state==='idle'?'not used yet':f.state==='ok'?'working':esc(f.state)+(f.why?': '+esc(f.why):''))
+   +(f.week_pct!=null?'<br><small class="muted">'+f.week_pct+'% answered (7 days)</small>':'')+'</span></div>').join('')
+   +'<div class="muted" style="margin-top:8px">'+d.feed_dir.map(f=>esc(f.name)+': '+esc(f.note)).join(' · ')+'</div>','wide'));
  }
  const A=d.accuracy;
  if(A&&A.settled){
@@ -34923,9 +34967,9 @@ bot.tree.add_command(player_group)
 HELP_CATS = [
     ("start", "🚀 Start here", ("Start here, inbox, setup", "Slips", "🔎 Reading slips for free")),
     ("slips", "🧾 Picks & slips", ("Picks", "Auto-grading", "New in r19: Autopilot", "🧾 Slip tools", "🩺 Tracking check",
-                                  "🧱 Build, rank, look up, team up")),
+                                  "🧱 Build, rank, look up, team up", "📏 How results count")),
     ("live", "📺 Live & research", ("Live and props", "📡 Live", "📡 Live, bigger", "🔬 Research", "Sports info", "Players",
-                                    "📚 Data sources")),
+                                    "📚 Data sources", "🌍 Sports covered")),
     ("games", "🎮 Games & coins", ("Games and coins", "Games and pools")),
     ("group", "🏆 The group", ("With the group", "Your numbers", "Recaps", "Questions", "💬 Ask channel")),
     ("you", "⚙️ You", ("You", "Make it personal", "🫂 Personal", "🎨 Look & feel", "New in r18")),
@@ -35153,6 +35197,15 @@ WHATS_NEW = {
     "r43": ["🔬 /research: one page per player with recent games, splits, matchups and injuries",
             "👀 /watch: a DM when a player you follow goes on or off the injury report"],
     "r44": ["⚡ Faster and steadier: start-up checks, timing on everything, checked backups"],
+    "r47": ["🏎️ `/sports f1` shows the driver standings, the last race and qualifying",
+            "📡 `/staff feeds` lists every data feed with a Test now button",
+            "🌡️ Servers can show weather in °C (`/admin panel`)",
+            "📏 Help and the guide explain how results count on sportsbooks and DFS apps",
+            "🛠️ `/admin panel` groups the server switches by area",
+            "🟢 A status page anyone can open: `/statuspage` on the dashboard link",
+            "🏁 F1 finishing-position legs grade themselves (like 'Lando Norris under 3.5 Finishing Position')",
+            "⚾ `/research` on a pitcher shows the probable starters for his next game",
+            "🌍 /help has a 'Sports covered' page with where every number comes from"],
     "r46": ["⚡ Screenshot reads are about twice as fast",
             "⚽ Soccer Fantasy Score and Goalie Fantasy Score now grade themselves (PrizePicks scoring)",
             "🔎 Unsure reads show a confidence level and mark the legs to check with ❓",
@@ -37286,7 +37339,7 @@ async def sports_weather(interaction: discord.Interaction, team: app_commands.Ra
     if not w:
         await interaction.followup.send(f"No forecast yet for {short_game(ev)} (forecasts go about a week out).")
         return
-    await interaction.followup.send(f"🌤️ **{short_game(ev)}** at {v.get('name')}, {v.get('city')}: {weather_line(w)}")
+    await interaction.followup.send(f"🌤️ **{short_game(ev)}** at {v.get('name')}, {v.get('city')}: {weather_line(w, interaction.guild_id)}")
 
 
 @sports_group.command(name="injuries", description="A team's injury report")
@@ -39657,6 +39710,12 @@ async def owner_note(interaction, text: str) -> None:
     await audit(interaction.client, interaction.guild_id, f"🛡️ {text}")
 
 
+@owner_group.command(name="servers", description="Every server the bot is in: usage today and a setup score")
+@owner_only
+async def owner_servers(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=servers_embed(servers_overview(interaction.client)), ephemeral=True)
+
+
 @owner_group.command(name="status", description="Who the owners are, lockdown, removed people, the question limit")
 @owner_only
 async def owner_status(interaction: discord.Interaction):
@@ -40161,10 +40220,11 @@ def ticket_items(guild_id: int, now: Optional[datetime] = None) -> list:
             sysitems.append((f"job:{name}", f"Background job '{clip(name, 40)}' keeps failing",
                              f"Failed {h.get('fails')} times in a row.\n`{clip(sec_redact(h.get('last_error') or ''), 300)}`"))
     try:
-        for f in dash30_health().get("feeds") or []:
-            if f.get("state") == "down":
+        for f in feed_directory():
+            if f.get("state") == "down" and (f.get("down_min") or 0) >= FEED_TICKET_MIN:
                 sysitems.append((f"feed:{f.get('name')}", f"Data feed down: {clip(f.get('name') or '?', 40)}",
-                                 "Lookups from it are failing" + (f" (last worked {f.get('last_ok')})" if f.get("last_ok") else "") + "."))
+                                 f"{f['why'] or 'Lookups from it are failing'}" + (f" (last worked {f.get('last_ok')})" if f.get("last_ok") else "")
+                                 + f". It covers: {f['covers']}." + (f" Backup: {f['backup']}." if f.get("backup") else "")))
     except Exception:
         pass
     for k, title, detail in sysitems:
@@ -40664,6 +40724,7 @@ def cmd_note(name: str, ms: float, ok: bool = True) -> None:
 async def _pb_on_app_command_completion(self, interaction, command):
     try:
         cmd_note(clip(str(getattr(command, "qualified_name", None) or getattr(command, "name", "?")), 60), cmd_ms(interaction))
+        guild_use_note(getattr(interaction, "guild_id", None))
     except Exception:
         pass
 
@@ -41012,6 +41073,16 @@ def selftest_run(client=None) -> dict:
                                                                               if n > 95 else ""))
         except Exception as exc:
             add("Slash commands", "warn", f"couldn't count: {type(exc).__name__}")
+    have = [n for n, v in (("Gemini", globals().get("GEMINI_API_KEY")), ("Groq", globals().get("GROQ_API_KEY")),
+                           ("Cerebras", globals().get("CEREBRAS_API_KEY")), ("OpenRouter", globals().get("OPENROUTER_API_KEY")),
+                           ("Claude", ANTHROPIC_API_KEY)) if v]
+    miss = [k for k, v in (("GEMINI_API_KEY", globals().get("GEMINI_API_KEY")), ("GROQ_API_KEY", globals().get("GROQ_API_KEY")),
+                           ("CEREBRAS_API_KEY", globals().get("CEREBRAS_API_KEY")),
+                           ("OPENROUTER_API_KEY", globals().get("OPENROUTER_API_KEY")),
+                           ("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY)) if not v]
+    add("Optional keys", "ok", (("on: " + ", ".join(have)) if have else
+                                "none set: free scan and free stats still work; add GROQ_API_KEY in Railway for free AI answers")
+        + (f" · not set: {', '.join(miss)}" if have and miss else ""))
     mem = memory_now_mb()
     if mem is not None:
         add("Memory at start", "warn" if mem > 900 else "ok", f"{mem} MB")
@@ -41371,6 +41442,96 @@ async def staff_nickname_cmd(interaction: discord.Interaction, nickname: app_com
     await interaction.response.send_message(f"👍 **{a}** now means **{b.title()}** in slips, research and lookups.",
                                             ephemeral=True)
 
+
+
+# ==== r47.1 ========================================================================================================
+
+SERVER_TOGGLES.append(("celsius", "Weather in °C and km/h", "optin"))
+
+HELP_EXTRA.append(("📏 How results count", "**Sportsbooks** (DraftKings, FanDuel and the rest): a line landing exactly on "
+                                         "the number is a push. A postponed game waits 24 hours before the leg is void. "
+                                         "Overtime counts. A half or quarter leg uses that part only; the second half "
+                                         "includes overtime.\n**DFS apps** (PrizePicks, "
+                                         "Underdog, Sleeper and the rest): a player who doesn't play (DNP) or a "
+                                         "postponed game voids that pick right away, and the slip pays on the legs left. "
+                                         "A refunded pick counts as a push. Power plays need every leg; a Flex play "
+                                         "with a missed leg can still pay, so staff settle it with the real amount.\nSomething graded wrong? Tap 🔎 Why? on the result, then ⚠️ "
+                                         "Wrong grade?"))
+
+# a small, cheap call per feed, for the staff feed test
+FEED_TESTS = {
+    "site.api.espn.com": (ESPN_BOARD.format(path="basketball/nba"), {}),
+    "site.web.api.espn.com": ("https://site.web.api.espn.com/apis/common/v3/search", {"query": "james", "limit": 1}),
+    "statsapi.mlb.com": (f"{MLB_API}/sports", {}),
+    "api-web.nhle.com": ("https://api-web.nhle.com/v1/schedule/now", {}),
+    "api.sleeper.app": ("https://api.sleeper.app/v1/state/nfl", {}),
+    "api.jolpi.ca": ("https://api.jolpi.ca/ergast/f1/current.json", {"limit": 1}),
+    "api.elections.kalshi.com": (f"{KALSHI_API}/markets", {"limit": 1}),
+    "api.open-meteo.com": ("https://api.open-meteo.com/v1/forecast", {"latitude": 40.7, "longitude": -74.0,
+                                                                     "current": "temperature_2m"}),
+}
+
+
+async def feed_test_one(host: str) -> dict:
+    url, params = FEED_TESTS[host]
+    t0 = time.monotonic()
+    try:
+        await asyncio.wait_for(_get_json(url, params), 12)
+        return {"host": host, "ok": True, "ms": int((time.monotonic() - t0) * 1000), "why": ""}
+    except Exception as exc:
+        code = getattr(exc, "status", None) or ("timeout" if isinstance(exc, asyncio.TimeoutError) else type(exc).__name__)
+        return {"host": host, "ok": False, "ms": int((time.monotonic() - t0) * 1000),
+                "why": feed_why(code) or "it didn't answer"}
+
+
+async def feed_test_all() -> list[dict]:
+    return list(await asyncio.gather(*(feed_test_one(h) for h in FEED_TESTS)))
+
+
+def feeds_embed(rows: list[dict], tests: Optional[list[dict]] = None) -> discord.Embed:
+    icon = {"ok": "🟢", "shaky": "🟡", "down": "🔴", "idle": "⚪"}
+    t = {x["host"]: x for x in tests or []}
+    e = discord.Embed(title="📡 Data feeds", color=BRAND,
+                      description="Every free source the bot reads, and how it's doing since the restart." +
+                                  (" Just tested each one." if tests else " Tap **Test now** for a fresh check."))
+    for f in rows[:24]:
+        x = t.get(f["host"])
+        now_ = ((f"\n✅ answered in {x['ms']} ms" if x["ok"] else f"\n❌ {x['why']}") if x else "")
+        week = f" · {f['week_pct']:g}% ok this week" if f.get("week_pct") is not None else ""
+        state = {"ok": "working", "shaky": "a few misses", "down": f"down {f['down_min']} min", "idle": "not used yet"}[f["state"]]
+        e.add_field(name=f"{icon[f['state']]} {f['name']}", inline=True,
+                    value=clip(f"{state}{week}\n{f['covers']}" + (f"\nBackup: {f['backup']}" if f.get("backup") else "") + now_, 1024))
+    e.set_footer(text="Line movement stays on the staff Line Watch page.")
+    return e
+
+
+class FeedTestButton(discord.ui.DynamicItem[discord.ui.Button], template=r"feedtest:go"):
+    def __init__(self):
+        super().__init__(discord.ui.Button(label="🧪 Test now", style=discord.ButtonStyle.secondary,
+                                           custom_id="feedtest:go"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, interaction: discord.Interaction):
+        if not sec_staff(interaction.user):
+            await interaction.response.send_message("Staff only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        tests = await feed_test_all()
+        await interaction.followup.send(embed=feeds_embed(feed_directory(), tests), ephemeral=True)
+
+
+EXTRA_ITEMS.append(FeedTestButton)
+
+
+@staff_group.command(name="feeds", description="Every data feed the bot reads, how it's doing, and a test button")
+@sec_staff_only
+async def staff_feeds_cmd(interaction: discord.Interaction):
+    v = discord.ui.View(timeout=None)
+    v.add_item(FeedTestButton())
+    await interaction.response.send_message(embed=feeds_embed(feed_directory()), view=v, ephemeral=True)
 
 bot.tree.add_command(staff_group)
 
@@ -41994,6 +42155,315 @@ async def slip_pnl(interaction: discord.Interaction):
 bot.tree.add_command(slip_group)
 
 
+# ==== r47.3: the public status page ================================================================================
+
+def status_page_data(client=None) -> dict:
+    """What anyone may see: is the bot up, is it connected to Discord, and is each feed working. No picks, no names,
+    no error details."""
+    client = client or bot
+    ok, why = outage_status_ok(client)
+    try:
+        lat = round(float(client.latency) * 1000)
+        lat = lat if 0 <= lat < 60000 else None
+    except Exception:
+        lat = None
+    word = {"ok": "Working", "shaky": "A few misses", "down": "Not answering", "idle": "Not used yet"}
+    feeds = [{"name": f["name"], "covers": f["covers"], "state": f["state"], "word": word[f["state"]]}
+             for f in feed_directory()]
+    down = [f for f in feeds if f["state"] == "down"]
+    overall = "down" if not ok else "degraded" if down else "ok"
+    return {"overall": overall, "bot": ok, "why": "" if ok else why, "latency_ms": lat, "version": BOT_VERSION,
+            "up_hours": round((datetime.now(timezone.utc) - STARTED_AT).total_seconds() / 3600, 1),
+            "feeds": feeds, "at": now_iso()}
+
+
+def status_page_html(d: dict) -> str:
+    import html as _h
+    head = {"ok": ("🟢", "Everything's working"), "degraded": ("🟡", "Up, but some data is slow to update"),
+            "down": ("🔴", "The bot is having trouble")}[d["overall"]]
+    dot = {"ok": "#2fbf71", "shaky": "#f0b429", "down": "#e5484d", "idle": "#8a8399"}
+    rows = "".join(f'<li><i style="background:{dot[f["state"]]}"></i><b>{_h.escape(f["name"])}</b>'
+                   f'<span>{_h.escape(f["word"])}</span><small>{_h.escape(f["covers"])}</small></li>' for f in d["feeds"])
+    disc = "Connected" if d["bot"] else _h.escape(d["why"] or "Not connected")
+    lat = f' · {d["latency_ms"]} ms' if d.get("latency_ms") is not None else ""
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="60"><title>PIMP-BOT · Status</title><link rel="icon" href="/favicon.svg"><style>
+:root{{--bg:#0d0a14;--card:#17121f;--text:#f3effa;--muted:#a79fb8;--line:#2a2236}}
+@media (prefers-color-scheme: light){{:root{{--bg:#f6f3fb;--card:#fff;--text:#1d1828;--muted:#5d5670;--line:#e4def0}}}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}}
+main{{max-width:720px;margin:0 auto;padding:24px 16px}}h1{{font-size:24px;margin:0 0 4px}}.muted{{color:var(--muted)}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:16px}}
+ul{{list-style:none;margin:0;padding:0}}li{{display:grid;grid-template-columns:12px 1fr auto;gap:4px 10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}}
+li:first-child{{border-top:0}}li i{{width:10px;height:10px;border-radius:50%}}li small{{grid-column:2/4;color:var(--muted)}}
+li span{{color:var(--muted);font-size:14px}}</style></head><body><main>
+<h1>{head[0]} {_h.escape(head[1])}</h1><p class="muted">PIMP-BOT status · refreshes every minute</p>
+<div class="card"><ul><li><i style="background:{dot['ok'] if d['bot'] else dot['down']}"></i><b>Discord</b><span>{disc}{lat}</span>
+<small>Logging slips, commands and posts</small></li></ul></div>
+<div class="card"><h2 style="margin:0 0 8px;font-size:17px">Data feeds</h2><ul>{rows}</ul></div>
+<p class="muted" style="font-size:13px">Version {_h.escape(d['version'])} · up {d['up_hours']:g} h. When a feed is down, slips wait and catch up
+when it's back.</p></main></body></html>"""
+
+
+async def dash47_status_page(request):
+    from aiohttp import web
+    d = status_page_data()
+    if request.query.get("format") == "json":
+        return web.json_response(d, headers={"Cache-Control": "no-store"})
+    return dash_html(web, status_page_html(d))
+
+
+# ==== r47.2: multi-server basics ===================================================================================
+
+GUILD_USE: dict = {}          # guild id -> {"day", "cmds", "errors"} since the restart (today only)
+
+
+def guild_use_note(guild_id, error: bool = False) -> None:
+    if not guild_id:
+        return
+    day = datetime.now(TZ).date().isoformat()
+    u = GUILD_USE.get(guild_id)
+    if not u or u["day"] != day:
+        u = GUILD_USE[guild_id] = {"day": day, "cmds": 0, "errors": 0}
+    if error:
+        u["errors"] += 1
+    else:
+        u["cmds"] += 1
+
+
+def server_health(client, guild_id: int) -> dict:
+    """A setup score out of 100, and what's missing in plain words."""
+    checks = [
+        ("admin alerts", bool(outage_channel(client, guild_id, "admin")), 15, "`/outage channels` (admin alerts)"),
+        ("member alerts", bool(outage_channel(client, guild_id, "members")), 15, "`/outage channels` (member alerts)"),
+        ("audit log", bool(get_setting(guild_id, "audit_channel")), 15, "an audit log channel"),
+        ("recaps", bool(get_setting(guild_id, "recap_channel")), 15, "`/admin recapchannel`"),
+        ("tickets", bool(get_setting(guild_id, "ticket_channel")), 15, "`/staff tickets channel`"),
+    ]
+    since = iso(datetime.now(timezone.utc) - timedelta(days=14))
+    active = db().execute("SELECT COUNT(*) FROM picks WHERE guild_id = ? AND created_at >= ?", (guild_id, since)).fetchone()[0]
+    checks.append(("active", active > 0, 25, "no slips logged in 2 weeks"))
+    score = sum(w for _, ok, w, _ in checks if ok)
+    return {"score": score, "missing": [fix for _, ok, _, fix in checks if not ok], "picks14": active}
+
+
+def servers_overview(client) -> list[dict]:
+    out = []
+    for g in list(getattr(client, "guilds", []) or []):
+        last = db().execute("SELECT MAX(created_at) FROM picks WHERE guild_id = ?", (g.id,)).fetchone()[0]
+        u = GUILD_USE.get(g.id) or {}
+        today = u.get("day") == datetime.now(TZ).date().isoformat()
+        out.append({"id": g.id, "name": clip(getattr(g, "name", "") or str(g.id), 40),
+                    "members": getattr(g, "member_count", None), "last_pick": last,
+                    "cmds": u.get("cmds", 0) if today else 0, "errors": u.get("errors", 0) if today else 0,
+                    **server_health(client, g.id)})
+    out.sort(key=lambda r: (-r["picks14"], r["name"].lower()))
+    return out
+
+
+def servers_embed(rows: list[dict]) -> discord.Embed:
+    e = discord.Embed(title=f"🌐 Servers ({len(rows)})", color=BRAND,
+                      description="Every server the bot is in. Usage counts since the last restart, today only.")
+    for r in rows[:24]:
+        icon = "🟢" if r["score"] >= 80 else "🟡" if r["score"] >= 50 else "🔴"
+        bits = [f"{icon} setup {r['score']}/100", f"{r['picks14']} slips in 2 weeks",
+                f"{r['cmds']} commands today" + (f" ({r['errors']} failed)" if r["errors"] else "")]
+        if r.get("members"):
+            bits.insert(1, f"{r['members']:,} members")
+        if r["last_pick"]:
+            bits.append(f"last slip {local_day(r['last_pick'])}")
+        val = " · ".join(bits) + (("\nMissing: " + ", ".join(r["missing"][:4])) if r["missing"] else "")
+        e.add_field(name=clip(r["name"], 256), value=clip(val, 1024), inline=False)
+    if len(rows) > 24:
+        e.set_footer(text=f"…and {len(rows) - 24} more")
+    return e
+
+
+# ==== r47: more servers =============================================================================================
+
+JOLPICA = "https://api.jolpi.ca/ergast/f1"
+HEALTH_NAMES.update({"api.jolpi.ca": "Jolpica (F1)", "liquipedia.net": "Liquipedia (esports)",
+                     "api.open-meteo.com": "Open-Meteo (weather)", "geocoding-api.open-meteo.com": "Open-Meteo (places)"})
+
+
+def _ergast_driver(d: dict) -> str:
+    return clip(f"{d.get('givenName', '')} {d.get('familyName', '')}".strip() or d.get("code") or "?", 40)
+
+
+async def jolpica_standings(limit: int = 5) -> list[dict]:
+    raw = await _alt_get(f"{JOLPICA}/current/driverStandings.json", {}, 1800)
+    lists = (((raw or {}).get("MRData") or {}).get("StandingsTable") or {}).get("StandingsLists") or []
+    rows = (lists[0].get("DriverStandings") or []) if lists else []
+    return [{"pos": r.get("position"), "name": _ergast_driver(r.get("Driver") or {}), "points": r.get("points"),
+             "wins": r.get("wins"), "team": clip(((r.get("Constructors") or [{}])[0] or {}).get("name") or "", 30)}
+            for r in rows[:limit]]
+
+
+async def jolpica_last(kind: str = "results", limit: int = 5) -> Optional[dict]:
+    raw = await _alt_get(f"{JOLPICA}/current/last/{kind}.json", {}, 1800)
+    races = (((raw or {}).get("MRData") or {}).get("RaceTable") or {}).get("Races") or []
+    if not races:
+        return None
+    race = races[0]
+    key = "Results" if kind == "results" else "QualifyingResults"
+    rows = race.get(key) or []
+    return {"race": clip(race.get("raceName") or "", 60), "date": race.get("date") or "",
+            "rows": [{"pos": r.get("position"), "name": _ergast_driver(r.get("Driver") or {}),
+                      "team": clip((r.get("Constructor") or {}).get("name") or "", 30),
+                      "status": clip(r.get("status") or "", 30), "best": r.get("Q3") or r.get("Q2") or r.get("Q1") or ""}
+                     for r in rows[:limit]]}
+
+
+async def f1_jolpica_fields(e) -> None:
+    st, last, q = await asyncio.gather(jolpica_standings(), jolpica_last("results"), jolpica_last("qualifying", 3))
+    if st and len(e.fields) < 23:
+        e.add_field(name="🏆 Driver standings", inline=False, value=clip("\n".join(
+            f"{r['pos']}. **{r['name']}** · {r['points']} pts" + (f" · {r['wins']} wins" if r.get("wins") not in (None, "0") else "")
+            for r in st), 1024))
+    if last and last["rows"] and len(e.fields) < 24:
+        e.add_field(name=f"🏁 Last race: {last['race']}", inline=False, value=clip("\n".join(
+            f"P{r['pos']} {r['name']} ({r['team']})" for r in last["rows"]), 1024))
+    if q and q["rows"] and len(e.fields) < 25:
+        e.add_field(name=f"⏱️ Qualifying: {q['race']}", inline=False, value=clip("\n".join(
+            f"P{r['pos']} {r['name']}" + (f" · {r['best']}" if r.get("best") else "") for r in q["rows"]), 1024))
+    e.set_footer(text="Schedule from ESPN · standings and results from Jolpica (the free Ergast F1 data)")
+
+
+async def mlb_probables(when: datetime, team_names: list[str]) -> list[dict]:
+    """The probable starters for this game, from MLB's own feed: [{team, pitcher}]."""
+    day = when.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    raw = await _alt_get(f"{MLB_API}/schedule", {"sportId": 1, "date": day, "hydrate": "probablePitcher"}, 900)
+    want = {norm_team(n) for n in team_names if n}
+    for d in (raw or {}).get("dates") or []:
+        for g in d.get("games") or []:
+            sides = [((g.get("teams") or {}).get(k) or {}) for k in ("away", "home")]
+            names = {norm_team(((x.get("team") or {}).get("name")) or "") for x in sides}
+            if want and not any(w == n or n.endswith(" " + w) or w.endswith(" " + n) for w in want for n in names if w and n):
+                continue                              # "Yankees" matches "New York Yankees"
+            out = []
+            for x in sides:
+                pp = x.get("probablePitcher") or {}
+                if pp.get("fullName"):
+                    out.append({"team": clip((x.get("team") or {}).get("name") or "", 30), "pitcher": clip(pp["fullName"], 40)})
+            return out
+    return []
+
+
+# ---- the data-feed directory (staff page) ----
+
+FEED_TICKET_MIN = 60          # a feed must be down this many minutes before a ticket opens
+FEED_DIRECTORY = [
+    {"host": "site.api.espn.com", "covers": "scores, schedules, box scores, injuries, odds (every league)",
+     "backup": "NHL.com, MLB Stats API, Sleeper", "key": None, "note": "free public feed; can change without notice"},
+    {"host": "site.web.api.espn.com", "covers": "player search and game logs", "backup": None, "key": None,
+     "note": "free public feed"},
+    {"host": "sports.core.api.espn.com", "covers": "per-game player stats (baseball extras, all soccer)", "backup": None,
+     "key": None, "note": "free public feed"},
+    {"host": "api-web.nhle.com", "covers": "NHL stats when ESPN is missing them", "backup": None, "key": None,
+     "note": "NHL's own feed; unofficial and undocumented"},
+    {"host": "statsapi.mlb.com", "covers": "MLB stats backup, probable pitchers", "backup": None, "key": None,
+     "note": "MLB's own feed; personal, non-commercial use"},
+    {"host": "api.sleeper.app", "covers": "NFL injuries and stats backup", "backup": None, "key": None, "note": "free"},
+    {"host": "api.jolpi.ca", "covers": "Formula 1 standings, results, qualifying", "backup": "ESPN (schedule)", "key": None,
+     "note": "free, the community replacement for Ergast"},
+    {"host": "liquipedia.net", "covers": "CS2 match results", "backup": None, "key": None,
+     "note": "rate-limited; credit Liquipedia when showing its data"},
+    {"host": "api.elections.kalshi.com", "covers": "Kalshi market prices and results", "backup": None, "key": None,
+     "note": "Kalshi's public API"},
+    {"host": "api.open-meteo.com", "covers": "game-time weather", "backup": None, "key": None, "note": "free, no key"},
+]
+
+
+def feed_why(code) -> str:
+    """A feed failure in plain words."""
+    if code == 429:
+        return "it's limiting how often we ask (429)"
+    if isinstance(code, int) and code >= 500:
+        return f"its servers are erroring ({code})"
+    if code in (401, 403):
+        return f"it's refusing our requests ({code})"
+    if isinstance(code, str) and "timeout" in code.lower():
+        return "it isn't answering in time"
+    if isinstance(code, str) and code:
+        return f"the connection keeps failing ({clip(code, 30)})"
+    return ""
+
+
+def feed_directory(now: Optional[float] = None) -> list[dict]:
+    now = now or time.time()
+    hist = feed_history()
+    out = []
+    for f in FEED_DIRECTORY:
+        h = DATA_HEALTH.get(f["host"]) or {}
+        streak = int(h.get("streak") or 0)
+        state = "idle" if not h else ("down" if streak >= 3 else "shaky" if streak else "ok")
+        down_min = int((now - h["fail_since"]) / 60) if h.get("fail_since") and state == "down" else 0
+        hh = hist.get(f["host"])
+        week = round(100 * hh[0] / (hh[0] + hh[1]), 1) if hh and hh[0] + hh[1] else None
+        out.append({"name": HEALTH_NAMES.get(f["host"]) or f["host"], "host": f["host"], "covers": f["covers"],
+                    "backup": f["backup"], "note": f["note"], "state": state, "down_min": down_min,
+                    "why": feed_why(h.get("status")) if state in ("down", "shaky") else "",
+                    "last_ok": _dash30_ago(h.get("last_ok"), now) if h.get("last_ok") else None,
+                    "ok": int(h.get("ok") or 0), "fail": int(h.get("fail") or 0), "week_pct": week})
+    return out
+
+
+_FEED_SEEN: dict = {}
+
+
+def feed_history_note(now: Optional[datetime] = None) -> None:
+    """Add what each feed did since the last note to today's tally (kept 8 days, in settings)."""
+    now = now or datetime.now(timezone.utc)
+    day = now.astimezone(TZ).date().isoformat()
+    try:
+        tally = json.loads(get_setting(0, f"feedhist:{day}") or "{}")
+    except ValueError:
+        tally = {}
+    changed = False
+    for host, h in DATA_HEALTH.items():
+        ok, fail = int(h.get("ok") or 0), int(h.get("fail") or 0)
+        pok, pfail = _FEED_SEEN.get(host, (0, 0))
+        if ok < pok or fail < pfail:                  # the counters restarted with the bot
+            pok, pfail = 0, 0
+        dok, dfail = ok - pok, fail - pfail
+        _FEED_SEEN[host] = (ok, fail)
+        if dok or dfail:
+            cur = tally.get(host, [0, 0])
+            tally[host] = [cur[0] + dok, cur[1] + dfail]
+            changed = True
+    if changed:
+        set_setting(0, f"feedhist:{day}", json.dumps(tally))
+    old = (now.astimezone(TZ).date() - timedelta(days=8)).isoformat()
+    set_setting(0, f"feedhist:{old}", None)
+
+
+def feed_history(days: int = 7, now: Optional[datetime] = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    out: dict = {}
+    for k in range(days):
+        day = (now.astimezone(TZ).date() - timedelta(days=k)).isoformat()
+        try:
+            tally = json.loads(get_setting(0, f"feedhist:{day}") or "{}")
+        except ValueError:
+            tally = {}
+        for host, (ok, fail) in tally.items():
+            cur = out.get(host, [0, 0])
+            out[host] = [cur[0] + ok, cur[1] + fail]
+    return out
+
+
+async def feed_history_job(client, now: Optional[datetime] = None) -> None:
+    feed_history_note(now)
+
+
+EXTRA_JOBS.append(("feed_history", feed_history_job))
+
+HELP_EXTRA.append(("🌍 Sports covered", "Scores and stats come from free feeds: ESPN for most leagues (NFL, NBA, WNBA, MLB, NHL, "
+                                        "college football and hoops, 40+ soccer leagues, UFC, golf, tennis), with MLB's and "
+                                        "the NHL's own feeds and Sleeper as backups. Formula 1 standings and results come "
+                                        "from Jolpica, CS2 from Liquipedia, Kalshi markets from Kalshi, weather from "
+                                        "Open-Meteo. `/sports` shows what's on."))
+
+
 # ==== r46.4 ========================================================================================================
 
 class WhyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"why:(?P<pid>\d+)"):
@@ -42042,8 +42512,10 @@ def dispute_leg_lines(p) -> list[str]:
         ev = e.get("event") or {}
         url = espn_game_url(e.get("path") or ev.get("path"), ev.get("id"))
         why = leg["note"] if "note" in leg.keys() and leg["note"] else (e.get("why") or "")
+        src = leg_source(e) if e else None
         out.append(f"{LEG_ICON.get(leg['status'], '•')} {leg['idx']}. {clip(leg['text'], 70)}"
-                   + (f" · {clip(why, 70)}" if why else "") + (f" · [box score]({url})" if url else ""))
+                   + (f" · {clip(why, 70)}" if why else "") + (f" · from {clip(src, 60)}" if src else "")
+                   + (f" · [box score]({url})" if url else ""))
     return out
 
 
@@ -42352,6 +42824,11 @@ def research_notes(d: dict) -> list[str]:
                          f"game{'s' if m['without']['games'] != 1 else ''}, {m['with']['avg']:g} with him.")
     if d.get("injury"):
         notes.append(f"On the injury report: {d['injury']['status']}.")
+    nx = d.get("next") or {}
+    if nx.get("probables") and d["stat"]["key"] in ("pitcher_k", "pitching_outs", "earned_runs", "pitcher_fs", "hits_allowed",
+                                                    "walks_allowed", "pitches"):
+        notes.append("Listed as the probable starter." if nx.get("starting") else
+                     "Not listed as the probable starter yet: pitcher lines need him to start.")
     return notes[:6]
 
 
@@ -42422,10 +42899,19 @@ async def research_build(cand: dict, stat: Optional[str] = None, line: Optional[
                         w = await asyncio.wait_for(kickoff_weather(v.get("city") or "", v.get("state") or "", when), 6)
                     except Exception:
                         w = None
-                    weather = weather_line(w) if w else None
+                    weather = weather_line(w, guild_id) if w else None
             nxt = {"label": short_game(ev), "when": iso(when) if when else None, "venue": clip(v.get("name") or "", 60),
                    "indoor": bool(v.get("indoor")), "weather": weather, "opp": opp,
                    "opp_name": (them or {}).get("short") or opp}
+            if path == "baseball/mlb" and when:
+                try:
+                    pr_ = await asyncio.wait_for(mlb_probables(when, [t.get("name") or "" for t in ev["teams"]]), 6)
+                except Exception:
+                    pr_ = None
+                if pr_:
+                    nxt["probables"] = pr_
+                    me_ = norm_name(cand["name"])
+                    nxt["starting"] = any(norm_name(x["pitcher"]) == me_ for x in pr_)
     vs = None
     opp_key = opp or (games[0]["opp"] if games else None)
     if opp_key:
@@ -42486,8 +42972,10 @@ def research_embed(d: dict) -> discord.Embed:
         e.add_field(name="😴 Back-to-backs", value=f"{_rw(d['rest']['b2b'])}\nrested {_rw(d['rest']['rested'])}")
     if d.get("next"):
         n = d["next"]
+        probs = " · ".join(f"{x['team']}: {x['pitcher']}" for x in n.get("probables") or [])
         e.add_field(name="📅 Next game", value=clip(n["label"] + (f"\n🌤️ {n['weather']}" if n.get("weather") else "")
-                                                   + ("\n🏟️ indoors" if n.get("indoor") else ""), 1024), inline=False)
+                                                   + ("\n🏟️ indoors" if n.get("indoor") else "")
+                                                   + (f"\n⚾ Probable starters: {probs}" if probs else ""), 1024), inline=False)
     if d.get("vs"):
         e.add_field(name=f"🆚 vs {d['vs']['opp']}" + ("" if d["vs"]["upcoming"] else " (last opponent)"), value=_rw(d["vs"]))
     if d.get("role"):
@@ -42506,7 +42994,10 @@ def research_embed(d: dict) -> discord.Embed:
         e.add_field(name="👥 The group on him", value=f"{g['hit']} hit · {g['miss']} missed")
     if d.get("notes"):
         e.add_field(name="📝 What the numbers show", value=clip("\n".join("• " + x for x in d["notes"]), 1024), inline=False)
-    e.set_footer(text=f"{RESEARCH_NOTE} Lines default to just above the recent average unless you give one.")
+    srcs = ["ESPN game logs"] + (["MLB probable starters"] if (d.get("next") or {}).get("probables") else []) \
+        + (["Open-Meteo weather"] if (d.get("next") or {}).get("weather") else [])
+    e.set_footer(text=f"{RESEARCH_NOTE} Lines default to just above the recent average unless you give one. "
+                      f"Sources: {', '.join(srcs)}.")
     return e
 
 
@@ -43425,9 +43916,11 @@ HELP_EXTRA.append(("🧾 Slip tools", (
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction,
                                error: app_commands.AppCommandError):
-    log.exception("Command failed", exc_info=error)
+    log.error("Command /%s failed in server %s", cmd_name(interaction), getattr(interaction, "guild_id", None) or "DM",
+              exc_info=error)
     try:
         cmd_note(cmd_name(interaction), cmd_ms(interaction), ok=False)
+        guild_use_note(getattr(interaction, "guild_id", None), error=True)
     except Exception:
         pass
     original = getattr(error, "original", error)
@@ -43437,7 +43930,8 @@ async def on_app_command_error(interaction: discord.Interaction,
                "(Edit Channel → Permissions → add PIMP-BOT).")
     else:
         ref = f"E{int(time.time()) % 100000:05d}"
-        log.warning("Command error reference %s for /%s", ref, cmd_name(interaction))
+        log.warning("Command error reference %s for /%s in server %s", ref, cmd_name(interaction),
+                    getattr(interaction, "guild_id", None) or "DM")
         msg = (f"⚠️ That didn't work (ref `{ref}`). Try again in a minute. If it keeps happening, tap **💬 Feedback** "
                "in `/help` and mention the ref, and the staff will look.")
     try:
