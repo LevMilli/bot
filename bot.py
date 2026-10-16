@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r62"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r63"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -80,6 +80,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r60", "The face picture is drawn at the same size as the square, so the head is not clipped down to the hair."),
     ("r61", "Each search photo is a finished 72-pixel face, the same size as the box, so the hair cannot be the only thing left in view."),
     ("r62", "The search result includes the 72-pixel face itself, so a missed picture request cannot drop the card back to an initial."),
+    ("r63", "Search cards load a finished 72-pixel face into the photo box."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20008,24 +20009,13 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
 
 
 async def dash_face_data(league, aid, size: int = 72) -> str:
-    """The face picture itself. A 72 or 120 pixel file, inlined, so the card does not depend on a second request."""
+    """Address of the finished face file. 72 pixels on a search card, 120 on the player sheet."""
     league = str(league or "")
     aid = str(aid or "")
     size = 120 if int(size) == 120 else 72
     if not league or not aid.isdigit() or not design_headshot_url(f"{league}:{aid}"):
         return ""
-    path = f"/img/face/{league}/{aid}.png?v=62&s={size}"
-    try:
-        url = design_headshot_url(f"{league}:{aid}")
-        got = await design_fetch_images([url])
-        raw = (got or {}).get(url) if got else None
-        png = design_head_web_png(raw, size) if raw else b""
-    except Exception:
-        log.debug("Face picture skipped", exc_info=True)
-        png = b""
-    if png:
-        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
-    return path
+    return f"/img/face/{league}/{aid}.png?v=63&s={size}"
 
 
 async def dash_api_player(request):
@@ -20158,6 +20148,8 @@ async def dash_head_img(request):
         log.debug("Head crop skipped", exc_info=True)
         png = b""
     if not png:
+        png = design_head_box_png(raw, size)
+    if not png:
         return dash_error(web, request, 404)
     return web.Response(body=png, content_type="image/png",
                         headers={"Cache-Control": "private, no-store"})
@@ -20236,7 +20228,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r62';"
+    "const CACHE='pb-shell-r63';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21363,7 +21355,6 @@ function faceBox(photo,name,lg){const px=lg?120:72,cls='pface'+(lg?' lg':'');
  img.style.setProperty('max-width',px+'px','important');
  img.style.setProperty('max-height',px+'px','important');
  img.style.setProperty('object-fit','fill','important');
- img.addEventListener('error',function(){img.replaceWith(letter)});
  return img}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
  const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
@@ -30173,6 +30164,30 @@ def design_head_web_jpeg(raw: bytes) -> bytes:
         return b""
     buf = io.BytesIO()
     bg.save(buf, format="JPEG", quality=82, optimize=True)
+    return buf.getvalue()
+
+
+def design_head_box_png(raw: bytes, size: int = 72) -> bytes:
+    """A square face at the exact card size. Empty only when the bytes are not a picture."""
+    from PIL import Image
+    size = 120 if int(size) == 120 else 72
+    try:
+        im = Image.open(io.BytesIO(raw)).convert("RGBA")
+    except Exception:
+        return b""
+    w, h = im.size
+    if w < 8 or h < 8:
+        return b""
+    box = im.getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox() or (0, 0, w, h)
+    x0, y0, x1, y1 = box
+    bw, bh = max(1, x1 - x0), max(1, y1 - y0)
+    side = min(bw, bh)
+    left = x0 + max(0, (bw - side) // 2)
+    crop = im.crop((left, y0, left + side, y0 + side)).resize((size, size), Image.LANCZOS)
+    bg = Image.new("RGB", (size, size), (26, 16, 40))
+    bg.paste(crop, mask=crop.split()[-1])
+    buf = io.BytesIO()
+    bg.save(buf, format="PNG")
     return buf.getvalue()
 
 
