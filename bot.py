@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r76"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r77"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -94,6 +94,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r74", "The board filters by book, sport, and day. The ticker can pause. The chart is the last 10 or the last 20. People tiles show best and worst sport, and head-to-head wins. Rows that were already shipping are marked live."),
     ("r75", "Open slips sit on a sideways rail. A player can be pinned from search. A nudged line is labeled yours. Recent and season averages sit together. This week's logged plays are on the board. The status card names the last job, and the ticker stays off a sheet you are reading."),
     ("r76", "The scanner keeps every card on a PrizePicks slip: SOG, Hitter FS, Singles, tennis, darts, cricket, and table tennis. The review uses the matching league and the batting columns ESPN actually sends, so those legs get a game log when one exists."),
+    ("r77", "Season boards (NBASZN, NFLSZN) and short names (PPG, RPG, APG, BPG, 3PTM, 3PTA, FTM, 50+ Point Games) scan and chart. A two-player combo adds both logs. The player page groups those stats and lets you switch the window and home or away."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2918,7 +2919,9 @@ and Fantasy Score, darts 180's Throw, cricket Fours and Sixes, and table tennis 
 Do not drop a leg because the sport is tennis, darts, cricket, or table tennis.
 
 Copy each stat name exactly as the slip shows it ("Punts" is not "Points"; "Faceoffs Won", "Fantasy Score", \
-"Longest Rec"). A two-player combo is written "Player A + Player B over LINE stat (Combo)". If you can't read \
+"Longest Rec"). A two-player combo is written "Player A + Player B over LINE stat (Combo)". \
+NBASZN is NBA and NFLSZN is NFL. PPG, RPG, APG, BPG, 3PTM, 3PTA, FTM, and 50+ Point Games are real stats. \
+A green More button is over and a green Less button is under. If you can't read \
 the individual picks, still return what you can, never a placeholder like "6 Pick Power Play" as a leg."""
 
 ASK_SYSTEM = """You are {bot_name}, the assistant in a Discord server where a group of \
@@ -3212,9 +3215,9 @@ async def ask_claude(system: str, user_text: str, max_searches: int = 5) -> tupl
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard"
 LEAGUES = [  # (pattern in the pick's sport, ESPN path, extra query params)
     (r"\bwnba\b", "basketball/wnba", {}),
-    (r"\bnfl\b", "football/nfl", {}),
+    (r"\bnfl(?:szn)?\b", "football/nfl", {}),
     (r"ncaa ?f|college football|\bncaaf\b|\bcfb\b", "football/college-football", {"groups": "80"}),
-    (r"\b(?:nba|nbap)\b", "basketball/nba", {}),
+    (r"\b(?:nba(?:szn|p)?|nbap)\b", "basketball/nba", {}),
     (r"ncaa ?b|college basketball|\bncaab\b|\bcbb\b", "basketball/mens-college-basketball", {"groups": "50"}),
     (r"\bmlb\b|baseball", "baseball/mlb", {}),
     (r"\bnhl\b|hockey", "hockey/nhl", {}),
@@ -4077,8 +4080,8 @@ def settle_lock(lock_id: int, status: str, why: Optional[str] = None) -> None:
 
 SPORT_NAMES = [
     ("CS2", r"\bcs2?\b|counter-?strike"), ("Esports", r"esports|valorant|league of legends|dota"),
-    ("College FB", r"ncaa ?f|college football|ncaaf|\bcfb\b|ncaa football"), ("NFL", r"\bnfl\b"),
-    ("WNBA", r"\bwnba\b"), ("College BB", r"ncaa ?b|college basketball|ncaab"), ("NBA", r"\b(?:nba|nbap)\b"),
+    ("College FB", r"ncaa ?f|college football|ncaaf|\bcfb\b|ncaa football"), ("NFL", r"\bnfl(?:szn)?\b"),
+    ("WNBA", r"\bwnba\b"), ("College BB", r"ncaa ?b|college basketball|ncaab"), ("NBA", r"\b(?:nba(?:szn|p)?|nbap)\b"),
     ("MLB", r"\bmlb\b|baseball"), ("NHL", r"\bnhl\b|hockey"),
     ("Soccer", r"soccer|\bepl\b|premier league|la ?liga|serie a|bundesliga|ligue 1|\bmls\b|champions league|liga ?mx"),
     ("Tennis", r"tennis|\batp\b|\bwta\b"), ("Table Tennis", r"table tennis|(?<![a-z])tt(?![a-z])"),
@@ -5456,9 +5459,9 @@ C = {
 # stat key: (display name, family, [(component, weight)], aliases)
 STATS = {
     # basketball
-    "points": ("Points", "basketball", [("pts", 1)], ["points", "pts", "point"]),
-    "rebounds": ("Rebounds", "basketball", [("reb", 1)], ["rebounds", "rebs", "reb", "boards"]),
-    "assists": ("Assists", "basketball", [("ast", 1)], ["assists", "asts", "ast", "dimes"]),
+    "points": ("Points", "basketball", [("pts", 1)], ["points", "pts", "point", "ppg", "points per game"]),
+    "rebounds": ("Rebounds", "basketball", [("reb", 1)], ["rebounds", "rebs", "reb", "boards", "rpg", "rebounds per game"]),
+    "assists": ("Assists", "basketball", [("ast", 1)], ["assists", "asts", "ast", "dimes", "apg", "assists per game"]),
     "pra": ("Pts+Rebs+Asts", "basketball", [("pts", 1), ("reb", 1), ("ast", 1)],
             ["pra", "pts+rebs+asts", "pts+reb+ast", "points+rebounds+assists", "p+r+a", "pts rebs asts"]),
     "pr": ("Pts+Rebs", "basketball", [("pts", 1), ("reb", 1)], ["pts+rebs", "pts+reb", "points+rebounds", "p+r", "pr"]),
@@ -5466,9 +5469,10 @@ STATS = {
     "ra": ("Rebs+Asts", "basketball", [("reb", 1), ("ast", 1)], ["rebs+asts", "reb+ast", "rebounds+assists", "r+a", "ra"]),
     "threes": ("3-PT Made", "basketball", [("3pm", 1)],
                ["3-pt made", "3pt made", "3-pointers made", "3 pointers made", "threes made", "threes", "3pm",
-                "3-pointers", "three pointers", "3pt", "3-pt"]),
+                "3-pointers", "three pointers", "3pt", "3-pt", "3ptm", "3pm per game"]),
     "steals": ("Steals", "basketball", [("stl", 1)], ["steals", "stl", "stls"]),
-    "blocks": ("Blocked Shots", "basketball", [("blk", 1)], ["blocked shots", "blocks", "blk", "blks"]),
+    "blocks": ("Blocked Shots", "basketball", [("blk", 1)],
+               ["blocked shots", "blocks", "blk", "blks", "bpg", "blocks per game"]),
     "stocks": ("Blks+Stls", "basketball", [("blk", 1), ("stl", 1)],
                ["blks+stls", "blocks+steals", "steals+blocks", "stls+blks", "stocks"]),
     "turnovers": ("Turnovers", "basketball", [("tov", 1)], ["turnovers", "tov", "tos"]),
@@ -5871,6 +5875,11 @@ def innings_to_outs(v: str) -> Optional[float]:
 
 def stat_value(groups: dict[str, dict], stat_key: str) -> Optional[tuple[float, str]]:
     """(value, breakdown) or None when the box score doesn't have it."""
+    if stat_key == "pts50":
+        got = stat_value(groups, "points")
+        if got is None:
+            return None
+        return (1.0 if got[0] >= 50 else 0.0), ""
     _, _, parts, _ = STATS[stat_key]
     total, shown = 0.0, []
     football = STATS[stat_key][1] == "football"
@@ -9002,8 +9011,9 @@ async def copy_from_message(interaction: discord.Interaction, message: discord.M
 
 # ---- player research: averages, history vs a team, back-to-backs ----------------------------------
 
-MAIN_STATS = {"basketball": ["points", "rebounds", "assists", "pra", "threes", "stocks", "turnovers"],
-              "football": ["pass_yds", "pass_td", "rush_yds", "rec", "rec_yds", "rush_rec_yds", "anytime_td"],
+MAIN_STATS = {"basketball": ["points", "rebounds", "assists", "pra", "pr", "pa", "ra", "threes", "threes_att",
+                             "fgm", "fga", "ftm", "oreb", "steals", "blocks", "stocks", "turnovers", "fantasy", "pts50"],
+              "football": ["pass_yds", "pass_td", "rush_yds", "rush_td", "rec", "rec_yds", "rush_rec_yds", "anytime_td"],
               "baseball": ["hits", "hrr", "home_runs", "pitcher_k", "pitching_outs", "earned_runs"],
               "hockey": ["goals", "nhl_assists", "nhl_points", "sog", "saves"]}
 B2B_PATHS = ("basketball/nba", "basketball/wnba", "hockey/nhl", "basketball/mens-college-basketball")
@@ -14023,6 +14033,54 @@ def hour_label(h: int) -> str:
 
 # ---- slip X-ray --------------------------------------------------------------------------------
 
+async def _xray_one(player: str, stats: list, sport: Optional[str]):
+    """One player's newest games for the first stat that resolves, or why it didn't."""
+    sport_paths = [p for p in leagues_for(sport) if p in PROP_PATHS] if sport else []
+    cand, stat, ambiguous = None, None, False
+    for key in stats:
+        fam = STATS[key][1]
+        paths = [p for p in PROP_PATHS if FAMILY_OF_PATH[p] == fam]
+        narrowed = [p for p in paths if p in sport_paths]
+        # A mixed slip (MLB + WNBA + NBAP) must not hide an NBA player just because WNBA was also on the screenshot.
+        cands = fit_position(await resolve_player(player, narrowed), key) if narrowed else []
+        if len(cands) != 1:
+            wider = fit_position(await resolve_player(player, paths), key)
+            if len(wider) == 1 or not cands:
+                cands = wider
+        if len(cands) == 1:
+            cand, stat = cands[0], key
+            break
+        ambiguous = ambiguous or len(cands) > 1
+    if cand is None:
+        why = "more than one player by that name" if ambiguous else "no ESPN game log for this player"
+        return None, None, [], why
+    games = await trend_games(cand["path"], cand["id"], need=10)
+    values = trend_values(games, stat)[:10]
+    return cand, stat, values, ""
+
+
+def _pair_combo(a: list, b: list) -> list:
+    """Add two newest-first logs. Same game when they share one; otherwise the same slot in each last 10."""
+    b_by = {}
+    for g, v in b:
+        gid = str(g.get("id") or "")
+        if gid:
+            b_by.setdefault(gid, v)
+    shared = []
+    for g, v in a:
+        gid = str(g.get("id") or "")
+        if gid and gid in b_by:
+            shared.append((g, round(v + b_by[gid], 2)))
+    if len(shared) >= 4:
+        return shared[:10]
+    out = []
+    for i in range(min(len(a), len(b), 10)):
+        g = dict(a[i][0])
+        g["opp"] = "A+B"
+        out.append((g, round(a[i][1] + b[i][1], 2)))
+    return out
+
+
 async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
     """The player's last 10 games against this leg's number, or why there isn't a chart."""
     out = {"text": leg_text, "values": [], "line": None, "side": None, "name": None, "stat": None, "why": ""}
@@ -14032,27 +14090,27 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
         return out
     side = pr["side"] if not pr.get("negate") else ("under" if pr["side"] == "over" else "over")
     out.update(line=pr["line"], side=side, name=pr["display"])
-    sport_paths = [p for p in leagues_for(sport) if p in PROP_PATHS] if sport else []
-    cand, stat, ambiguous = None, None, False
-    for key in pr["stats"]:
-        fam = STATS[key][1]
-        paths = [p for p in PROP_PATHS if FAMILY_OF_PATH[p] == fam]
-        narrowed = [p for p in paths if p in sport_paths]
-        # A mixed slip (MLB + WNBA + NBAP) must not hide an NBA player just because WNBA was also on the screenshot.
-        cands = fit_position(await resolve_player(pr["player"], narrowed), key) if narrowed else []
-        if len(cands) != 1:
-            wider = fit_position(await resolve_player(pr["player"], paths), key)
-            if len(wider) == 1 or not cands:
-                cands = wider
-        if len(cands) == 1:
-            cand, stat = cands[0], key
-            break
-        ambiguous = ambiguous or len(cands) > 1
-    if cand is None:
-        out["why"] = "more than one player by that name" if ambiguous else "no ESPN game log for this player"
+    if pr.get("combo"):
+        series, names, stat = [], [], None
+        for part in pr["combo"]:
+            cand, stat, values, why = await _xray_one(part["player"], part.get("stats") or pr["stats"], sport)
+            if cand is None:
+                out["why"] = why
+                return out
+            names.append(cand["name"])
+            series.append(values)
+            out["path"] = cand["path"]
+        paired = _pair_combo(series[0], series[1]) if len(series) == 2 else []
+        label = STATS[stat][0] if stat else ""
+        out.update(name=" + ".join(names), stat=label,
+                   values=[(g["opp"], g["at"], v) for g, v in paired][::-1])
+        if not paired:
+            out["why"] = f"no {label} in recent games"
         return out
-    games = await trend_games(cand["path"], cand["id"], need=10)
-    values = trend_values(games, stat)[:10]
+    cand, stat, values, why = await _xray_one(pr["player"], pr["stats"], sport)
+    if cand is None:
+        out["why"] = why
+        return out
     out.update(name=cand["name"], stat=STATS[stat][0], values=[(g["opp"], g["at"], v) for g, v in values][::-1],
                path=cand["path"])
     if not values:
@@ -21013,7 +21071,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r75';"
+    "const CACHE='pb-shell-r77';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22082,6 +22140,14 @@ body.v4 .pstat{background:var(--bg);border:1px solid var(--line);border-radius:1
 body.v4 .pstat b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
 body.v4 .pstat span{display:block;line-height:1.25;font-size:10.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
 body.v4 .pchips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+body.v4 .pgroups{display:flex;flex-direction:column;gap:8px;margin:0 0 14px}
+body.v4 .pgroup{display:flex;gap:8px;align-items:flex-start}
+body.v4 .pglab{flex:0 0 86px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:8px;font-weight:800}
+body.v4 .pgroup .pchips{margin:0;flex:1}
+body.v4 .pmeter{display:flex;align-items:center;gap:10px;margin:10px 0 0}
+body.v4 .pmeterbar{flex:1;height:8px;border-radius:99px;background:var(--card2);overflow:hidden}
+body.v4 .pmeterbar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#fb7185,#34d399)}
+@media (max-width:720px){body.v4 .pgroup{flex-direction:column;gap:4px}body.v4 .pglab{flex:none;padding-top:0}}
 body.v4 .pchip{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:99px;
  padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer}
 body.v4 .pchip.on{background:linear-gradient(90deg,var(--brand),var(--brand2));border-color:var(--brand);color:#fff}
@@ -22262,15 +22328,27 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const stat=stats.some(s=>s.key===S.pstat)?S.pstat:(d.stat||(stats[0]&&stats[0].key)||'');S.pstat=stat;
  const hits=playerHits(stat),vals=hits.map(x=>x.v),fmt=v=>v==null||isNaN(+v)?'':String(Math.round(+v*10)/10);
  if(S.pline==null)S.pline=defaultLine(vals.slice(0,10));const line=+S.pline;
- const win=n=>{const part=vals.slice(0,n);if(!part.length)return null;let o=0;for(const v of part)if(v>line)o++;
+ if(S.psplit!=='home'&&S.psplit!=='away')S.psplit='all';
+ const view=S.psplit==='home'?hits.filter(x=>x.g.at!=='@'):S.psplit==='away'?hits.filter(x=>x.g.at==='@'):hits;
+ const viewVals=view.map(x=>x.v);
+ const win=n=>{const part=viewVals.slice(0,n);if(!part.length)return null;let o=0;for(const v of part)if(v>line)o++;
   return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
  const base=defaultLine(vals.slice(0,10));const yours=Math.abs(line-base)>0.05;
  const L5=win(5),L10=win(10),L20=win(20),lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
  const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
  const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;try{localStorage.setItem('pb-stat',s.key)}catch(e){}paintPlayer()}},s.label);
+ const GROUPS=[['Scoring',['points','pra','pr','pa','threes','fgm','ftm','fantasy','pts50','anytime_td','pass_td','rush_td']],
+  ['Boards',['rebounds','oreb','ra']],['Playmaking',['assists']],['Defense',['steals','blocks','stocks','turnovers']],
+  ['Shooting',['threes_att','fga']],['Passing',['pass_yds']],['Rushing',['rush_yds','rush_rec_yds']],
+  ['Receiving',['rec','rec_yds']],['Hitting',['hits','hrr','home_runs']],['Pitching',['pitcher_k','pitching_outs','earned_runs']],
+  ['Hockey',['goals','nhl_assists','nhl_points','sog','saves']]];
+ const used={};const groups=[];
+ GROUPS.forEach(pair=>{const rows=pair[1].map(k=>stats.find(s=>s.key===k)).filter(Boolean);rows.forEach(s=>{used[s.key]=1});if(rows.length)groups.push([pair[0],rows])});
+ const rest=stats.filter(s=>!used[s.key]);if(rest.length)groups.push(['More',rest]);
+ const chipRows=h('div',{class:'pgroups'},groups.map(g=>h('div',{class:'pgroup'},h('div',{class:'pglab',text:g[0]}),h('div',{class:'pchips'},g[1].map(chip)))));
  const nudge=x=>h('button',{class:'pnudge',type:'button',onclick:()=>{S.pline=Math.max(0,Math.round((line+x)*10)/10);paintPlayer()}},(x>0?'+':'')+String(x));
  const box=(t,w)=>w?kbox(t,w.o+'/'+w.n+'  '+w.pct+'%',w.pct>=60?'up':w.pct<=40?'down':''):kbox(t,'–');
- if(S.pn!==10)S.pn=20;const games=hits.slice(0,S.pn);
+ if(S.pn!==5&&S.pn!==10)S.pn=20;const games=view.slice(0,S.pn);
  const home=hits.filter(x=>x.g.at!=='@').map(x=>x.v),away=hits.filter(x=>x.g.at==='@').map(x=>x.v);
  const opp=(d.next&&d.next.opp||'').toLowerCase();
  const vs=opp?hits.filter(x=>(x.g.opp||'').toLowerCase()===opp).map(x=>x.v):[];
@@ -22282,14 +22360,19 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  if(car)splits.push(srow('⏱️','Carries',car));
  if(att)splits.push(srow('⏱️','Pass attempts',att));
  if(d.group&&(d.group.hit||d.group.miss))splits.push(srow('👥','The group on him',(d.group.hit||0)+' hit · '+(d.group.miss||0)+' missed'));
- const notes=playerNotes(d,stat,line,fmt,hits);
+ const notes=playerNotes(d,stat,line,fmt,view);
  const kids=[
   h('div',{class:'plhead'},faceBox(d.photo,d.name,true,d.slug,d.id),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
-  h('div',{class:'pchips'},stats.map(chip)),
+  chipRows,
   h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:yours?'Your line':lab})),nudge(0.5),nudge(1)),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
-  h('div',{class:'card'},h('h2',null,'Last '+games.length+' vs '+fmt(line),h('span',{class:'r'},h('span',{class:'seg'},[10,20].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},'Last '+n))))),
+  h('div',{class:'card'},h('h2',null,'Last '+games.length+' vs '+fmt(line),h('span',{class:'r'},
+   h('span',{class:'seg'},['all','home','away'].map(k=>h('button',{type:'button',class:S.psplit===k?'on':'',onclick:()=>{S.psplit=k;paintPlayer()}},k==='all'?'All':k==='home'?'Home':'Away'))),
+   h('span',{class:'seg'},[5,10,20].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},'Last '+n))))),
+   stat==='pts50'?h('p',{class:'muted',style:'margin:0 0 6px',text:'Each bar is one game. 1 means 50 or more points that night.'}):null,
    games.length?playerChart(games,line,fmt):null,
+   games.length?h('div',{class:'pmeter'},h('div',{class:'pmeterbar'},h('i',{style:'width:'+Math.round(games.filter(x=>x.v>line).length/games.length*100)+'%'})),
+    h('span',{class:'muted',text:games.filter(x=>x.v>line).length+' of '+games.length+' cleared this line'})) :null,
    games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
     title:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'})),
   h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Recent',L10?String(L10.avg):'–'),kbox('Season',vals.length?String(Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10):'–'))];
@@ -24523,9 +24606,11 @@ for _comp, _name, _grp in (
 
 STATS.update({
     # basketball
+    "pts50": ("50+ Point Games", "basketball", [("pts", 1)],
+              ["50+ point games", "50+ points", "50 point games"]),
     "threes_att": ("3-PT Attempted", "basketball", [("3pa", 1)],
                    ["3-pt attempted", "3pt attempted", "3-pointers attempted", "3 pointers attempted",
-                    "three pointers attempted", "3pa"]),
+                    "three pointers attempted", "3pa", "3pta"]),
     "fga": ("FG Attempted", "basketball", [("fga", 1)], ["fg attempted", "field goals attempted", "fga"]),
     # football
     "pass_rush_rec_yds": ("Pass+Rush+Rec Yds", "football", [("pass_yds", 1), ("rush_yds", 1), ("rec_yds", 1)],
@@ -27738,7 +27823,8 @@ FREE_READ_COUNTS: dict = {}       # in-memory mirror of today's per-reader count
 # Stat names as PrizePicks / Underdog print them, longest first so "Pass+Rush Yds" wins over "Rush Yds".
 FREE_STATS = sorted({
     "Points", "Rebounds", "Assists", "Pts+Rebs+Asts", "Pts+Rebs", "Pts+Asts", "Rebs+Asts", "Blks+Stls", "PRA",
-    "3-PT Made", "3-Pointers Made", "Steals", "Blocked Shots", "Blocks", "Turnovers", "Fantasy Score", "FG Made",
+    "3-PT Made", "3-Pointers Made", "3PTM", "3PTA", "3PM Per Game", "PPG", "RPG", "APG", "BPG",
+    "50+ Point Games", "FTM", "Steals", "Blocked Shots", "Blocks", "Turnovers", "Fantasy Score", "FG Made",
     "FG Attempted", "Free Throws Made", "Offensive Rebounds", "Defensive Rebounds", "Two Pointers Made",
     "Pass Yards", "Pass TDs", "Pass Completions", "Pass Attempts", "INT", "Interceptions", "Rush Yards",
     "Rush Yards Per Carry", "Rush Yds Per Carry", "Yards Per Carry", "Rush Yds/Carry",
@@ -27981,6 +28067,24 @@ def _free_label(text: str) -> Optional[str]:
     return t
 
 
+def _free_combo_name(line: dict) -> Optional[str]:
+    """'Gabby Williams + Rhyne Howard' is one combo card, even when the stat sits on the same line."""
+    text = re.sub(r"\s+", " ", line.get("text") or "").strip()
+    m = re.search(
+        r"([A-Z][\w'’.\-]+(?:\s+[A-Z][\w'’.\-]+){0,2})\s*\+\s*([A-Z][\w'’.\-]+(?:\s+[A-Z][\w'’.\-]+){0,2})",
+        text)
+    if not m:
+        return None
+    a, b = m.group(1), m.group(2)
+    if len(a.split()) < 2 or len(b.split()) < 2 or _free_stat_in(a) or _free_stat_in(b):
+        return None
+    return f"{a} + {b}"
+
+
+def _free_named(line: dict, max_x: Optional[float] = None) -> Optional[str]:
+    return _free_combo_name(line) or _free_name(line, max_x)
+
+
 def _free_name(line: dict, max_x: Optional[float] = None) -> Optional[str]:
     """A player's name at the start of a line (skipping OCR noise from photos and icons)."""
     text = " ".join(t for t in line["text"].split() if not ("@" in t and free_pill_num(t)))
@@ -28004,7 +28108,8 @@ def _free_name(line: dict, max_x: Optional[float] = None) -> Optional[str]:
             run.pop(0)                         # a lone letter from the photo: "A Shohei Ohtani"
         if len(run) >= 4 and len(run[0]) <= 3 and not run[0].isupper() and run[-1] in ("Jr", "Sr", "II", "III", "IV"):
             run.pop(0)                         # "Aan James Cook III": the scrap before a full name with a suffix
-        if len(run) >= 2 and sum(len(x) for x in run) > len(" ".join(best).replace(" ", "")):
+        joined = " ".join(run)
+        if len(run) >= 2 and not _free_stat_in(joined) and sum(len(x) for x in run) > len(" ".join(best).replace(" ", "")):
             best = run[:]
         run = []
     if len(best) < 2 or len(best) > 4:
@@ -28190,7 +28295,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         order = [start] + ([start + 1] if start + 1 < len(lines) and lines[start + 1]["y"] - src["y"] < 1.2 * src["h"]
                            else []) + list(range(start - 1, max(-1, start - 4), -1))
         for j in order:
-            name = _free_name(lines[j], 0.55 * img.width if right else None)
+            name = _free_named(lines[j], 0.55 * img.width if right else None)
             if name and j not in used_lines:
                 name_at = j
                 break
@@ -28213,7 +28318,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         if side is None and "more" in words_low and "less" in words_low:
             gm, gl = free_green(img, words_low["more"]), free_green(img, words_low["less"])
             side = "over" if gm > gl * 1.5 and gm > 0.08 else ("under" if gl > gm * 1.5 and gl > 0.08 else None)
-        elif side is None and not builder:
+        elif side is None and (("more" in words_low) ^ ("less" in words_low) or not builder):
             for word, s in (("more", "over"), ("over", "over"), ("higher", "over"), ("less", "under"),
                             ("under", "under"), ("lower", "under")):
                 if word in words_low:
@@ -28281,7 +28386,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             continue
         name, name_at = None, None
         for j in range(k - 1, max(-1, k - 5), -1):
-            name = _free_name(lines[j], 0.55 * img.width)
+            name = _free_named(lines[j], 0.55 * img.width)
             if name and j not in used_lines:
                 name_at = j
                 break
@@ -28315,7 +28420,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     desc = (f"{n}-Pick {'Flex' if entry_type == 'flex' else 'Power'} Play" if platform in ("PrizePicks", "Underdog")
             else f"{n}-leg slip" if n > 1 else legs[0])
     sports = []
-    for label, rx in (("NFL", r"\bNFL\b"), ("NBA", r"\bNBA\b|\bNBAP\b"), ("NHL", r"\bNHL\b"), ("MLB", r"\bMLB\b"),
+    for label, rx in (("NFL", r"\bNFL(?:SZN)?\b"), ("NBA", r"\bNBA(?:SZN|P)?\b|\bNBAP\b"), ("NHL", r"\bNHL\b"), ("MLB", r"\bMLB\b"),
                       ("WNBA", r"\bWNBA\b"), ("SOCCER", r"\bSOCCER\b"), ("CFB", r"\bCFB\b|\bNCAAF\b"),
                       ("CBB", r"\bCBB\b|\bNCAAB\b"), ("Tennis", r"\bTENNIS\b"), ("Darts", r"\bDARTS\b"),
                       ("Cricket", r"\bCRICKET\b"), ("Table Tennis", r"(?<![A-Za-z])TT(?![A-Za-z])")):
@@ -28633,7 +28738,9 @@ HELP_EXTRA.append(("🔎 Reading slips for free", (
     "phone screenshot. Scanner **3.0** skips extra OCR when that first pass already has the legs and the amount, "
     "and tags Kalshi cents tickets and stacked photos. Scanner **4.0** remembers ESPN name fixes and counts "
     "failed reads on Staff HQ. Scanner **5.0** keeps every card: SOG, Hitter FS, Singles, tennis, darts, cricket, "
-    "and table tennis, and the review pulls the game log from the right league. If it's sure, the slip logs like before; if not, you get a card to check and tap 🧾 "
+    "and table tennis, and the review pulls the game log from the right league. Scanner **5.1** also reads combos, "
+    "NBASZN and NFLSZN, and PPG, RPG, APG, BPG, 3PTM, 3PTA, FTM, and 50+ Point Games. The player page groups those "
+    "stats and lets you switch last 5, 10, or 20, and home or away. If it's sure, the slip logs like before; if not, you get a card to check and tap 🧾 "
     "**Log this slip** (or ✏️ Edit). A free `GEMINI_API_KEY` on Railway adds a second free reader, and Claude is "
     "only the last resort. `/admin status` shows which reader handled today's slips.")))
 
