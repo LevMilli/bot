@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r57"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r58"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -75,6 +75,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r55", "Player photos are the square itself, so a computer cannot clip them down to a hairline, and the stat lines under the name stay on their own rows."),
     ("r56", "Player photos fill the square from the headshot, and the last-20 graph sits directly under Pass Yards, Pass TDs, and the other stat buttons."),
     ("r57", "Player photos are drawn into the square from the headshot itself, so the face shows instead of a clipped hairline."),
+    ("r58", "Search and the player sheet send the face already cropped into the square, so the card cannot clip it down to a hairline."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20002,6 +20003,32 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
     return {"next": nxt, "injuries": injuries, "group": group}
 
 
+async def dash_face_data(league, aid) -> str:
+    """Square face JPEG as a data URL, so the card paints the face itself and cannot clip a headshot."""
+    league = str(league or "")
+    aid = str(aid or "")
+    if not league or not aid.isdigit():
+        return ""
+    url = design_headshot_url(f"{league}:{aid}")
+    if not url:
+        return ""
+    try:
+        got = await design_fetch_images([url])
+    except Exception:
+        return ""
+    raw = (got or {}).get(url)
+    if not raw:
+        return ""
+    try:
+        jpg = design_head_web_jpeg(raw)
+    except Exception:
+        log.debug("Face jpeg skipped", exc_info=True)
+        return ""
+    if not jpg:
+        return ""
+    return "data:image/jpeg;base64," + base64.b64encode(jpg).decode("ascii")
+
+
 async def dash_api_player(request):
     from aiohttp import web
     prm, err = dash_gate(web, request)
@@ -20029,7 +20056,9 @@ async def dash_api_player(request):
                 return await espn_athlete_bio(f["path"], f["id"])
             except Exception:
                 return {}
-        games, bio = await asyncio.gather(_games(), _bio())
+        league = design_head_league(f.get("path"))
+        aid = str(f.get("id") or "")
+        games, bio, photo = await asyncio.gather(_games(), _bio(), dash_face_data(league, aid))
         try:
             for k in keys:
                 rows = trend_values(games, k)
@@ -20040,9 +20069,6 @@ async def dash_api_player(request):
                               "n": len(vals)})
         except Exception:
             pass
-        league = design_head_league(f.get("path"))
-        aid = str(f.get("id") or "")
-        photo = f"/img/face/{league}/{aid}.png?v=57" if league and aid.isdigit() else ""
         out.append({"id": aid, "slug": league or "", "path": f.get("path") or "",
                     "name": clip(f.get("name") or bio.get("name") or "", 40),
                     "team": clip(bio.get("team") or f.get("team") or "", 40),
@@ -20079,7 +20105,8 @@ async def dash_api_player_one(request):
         except Exception:
             return {}
 
-    games, bio = await asyncio.gather(_games(), _bio())
+    slug = design_head_league(path) or league
+    games, bio, photo = await asyncio.gather(_games(), _bio(), dash_face_data(slug, aid))
     name = clip(bio.get("name") or "", 40)
     if not name:
         return dash_error(web, request, 404)
@@ -20087,8 +20114,6 @@ async def dash_api_player_one(request):
     pack_keys = keys + [k for k in ("pass_att", "rush_att", "minutes") if k in STATS and k not in keys]
     packed = dash_pack_games(games, pack_keys, 30)
     stats = dash_pack_stats(packed, keys)
-    slug = design_head_league(path) or league
-    photo = f"/img/face/{slug}/{aid}.png?v=57" if slug and aid.isdigit() else ""
     default = next((s["key"] for s in stats if s["key"] != "minutes"), stats[0]["key"] if stats else "")
     brief = {"next": None, "injuries": [], "group": None}
     try:
@@ -20203,7 +20228,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r57';"
+    "const CACHE='pb-shell-r58';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21193,13 +21218,13 @@ body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;al
 body.v4 .pcard:last-child{margin-bottom:0}
 body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
 body.v4 canvas.pface,body.v4 img.pface{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important;
- max-width:72px!important;max-height:72px!important;object-fit:cover!important;object-position:50% 50%!important;
+ max-width:72px!important;max-height:72px!important;object-fit:fill!important;object-position:50% 50%!important;
  border-radius:14px;background:#1a1028;display:block;flex:0 0 72px}
 body.v4 canvas.pface.lg,body.v4 img.pface.lg{width:120px!important;height:120px!important;min-width:120px!important;min-height:120px!important;
  max-width:120px!important;max-height:120px!important;flex:0 0 120px;border-radius:18px}
-body.v4 .pface{position:relative;width:72px;height:72px;min-width:72px;min-height:72px;max-width:72px;max-height:72px;
+body.v4 .pface{position:relative;width:72px;height:72px;min-width:0;min-height:0;max-width:72px;max-height:72px;
  border-radius:14px;overflow:hidden;background:#1a1028;flex:0 0 72px;align-self:start;aspect-ratio:1/1;
- object-fit:cover;object-position:center center;display:block}
+ object-fit:fill;object-position:center center;display:block}
 body.v4 .pface .pletter{position:absolute;inset:0;display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
 body.v4 .plhead .pface,body.v4 .pface.lg{width:120px;height:120px;min-width:120px;min-height:120px;max-width:120px;max-height:120px;
  flex:0 0 120px;border-radius:18px}
@@ -21337,7 +21362,11 @@ function paintFace(canvas,img){const S=canvas.width,c=canvas.getContext('2d');if
 function faceBox(photo,name,lg){const px=lg?120:72,cls='pface'+(lg?' lg':'');
  if(!photo)return h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}));
  const canvas=h('canvas',{class:cls,width:String(px*2),height:String(px*2),'aria-label':name||'Player'});
+ canvas.width=px*2;canvas.height=px*2;
  canvas.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
+ canvas.style.setProperty('width',px+'px','important');
+ canvas.style.setProperty('height',px+'px','important');
+ canvas.style.setProperty('object-fit','fill','important');
  const img=new Image();img.onload=function(){paintFace(canvas,img)};img.src=photo;return canvas}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
  const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
@@ -30116,6 +30145,35 @@ def _design_face_rgba(raw: bytes):
     if pic.size[0] < 8 or pic.size[1] < 8:
         return None
     return ImageOps.fit(pic, (256, 256), Image.LANCZOS, centering=(0.5, 0.12))
+
+
+def _design_face_filled(im) -> bool:
+    """True when the middle of the square is a person, not empty purple."""
+    w, h = im.size
+    purple = (26, 16, 40)
+    hit = total = 0
+    for y in range(h // 5, (h * 4) // 5, 8):
+        for x in range(w // 5, (w * 4) // 5, 8):
+            p = im.getpixel((x, y))
+            total += 1
+            if abs(p[0] - purple[0]) + abs(p[1] - purple[1]) + abs(p[2] - purple[2]) > 36:
+                hit += 1
+    return total > 0 and hit / total >= 0.45
+
+
+def design_head_web_jpeg(raw: bytes) -> bytes:
+    """Square face JPEG. Empty bytes if the crop would be a hairline on purple."""
+    from PIL import Image
+    face = _design_face_rgba(raw)
+    if face is None:
+        return b""
+    bg = Image.new("RGB", face.size, (26, 16, 40))
+    bg.paste(face, mask=face.split()[3])
+    if not _design_face_filled(bg):
+        return b""
+    buf = io.BytesIO()
+    bg.save(buf, format="JPEG", quality=82, optimize=True)
+    return buf.getvalue()
 
 
 def design_head_web_png(raw: bytes) -> bytes:
