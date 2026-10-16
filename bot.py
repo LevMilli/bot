@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r55"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r56"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -73,6 +73,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r53", "Tap a player: next game and weather, home/away/vs splits, injuries with with/without, and what the numbers show — same brief as before, plus the last-20 chart."),
     ("r54", "Every player photo is one face crop, drawn as a real image, so the head fills the square on iPhone and in Discord."),
     ("r55", "Player photos are the square itself, so a computer cannot clip them down to a hairline, and the stat lines under the name stay on their own rows."),
+    ("r56", "Player photos fill the square from the headshot, and the last-20 graph sits directly under Pass Yards, Pass TDs, and the other stat buttons."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20040,7 +20041,7 @@ async def dash_api_player(request):
             pass
         league = design_head_league(f.get("path"))
         aid = str(f.get("id") or "")
-        photo = f"/img/head/{league}/{aid}.png?v=55" if league and aid.isdigit() else ""
+        photo = f"/img/head/{league}/{aid}.png?v=56" if league and aid.isdigit() else ""
         out.append({"id": aid, "slug": league or "", "path": f.get("path") or "",
                     "name": clip(f.get("name") or bio.get("name") or "", 40),
                     "team": clip(bio.get("team") or f.get("team") or "", 40),
@@ -20086,7 +20087,7 @@ async def dash_api_player_one(request):
     packed = dash_pack_games(games, pack_keys, 30)
     stats = dash_pack_stats(packed, keys)
     slug = design_head_league(path) or league
-    photo = f"/img/head/{slug}/{aid}.png?v=55" if slug and aid.isdigit() else ""
+    photo = f"/img/head/{slug}/{aid}.png?v=56" if slug and aid.isdigit() else ""
     default = next((s["key"] for s in stats if s["key"] != "minutes"), stats[0]["key"] if stats else "")
     brief = {"next": None, "injuries": [], "group": None}
     try:
@@ -20201,7 +20202,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r55';"
+    "const CACHE='pb-shell-r56';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21189,12 +21190,17 @@ body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;al
  border:1px solid transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 body.v4 .pcard:last-child{margin-bottom:0}
 body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
+body.v4 img.pface{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important;
+ max-width:72px!important;max-height:72px!important;object-fit:cover!important;object-position:center center!important;
+ border-radius:14px;background:#1a1028;display:block;flex:0 0 72px}
+body.v4 img.pface.lg{width:120px!important;height:120px!important;min-width:120px!important;min-height:120px!important;
+ max-width:120px!important;max-height:120px!important;flex:0 0 120px;border-radius:18px}
 body.v4 .pface{position:relative;width:72px;height:72px;min-width:72px;min-height:72px;max-width:72px;max-height:72px;
  border-radius:14px;overflow:hidden;background:#1a1028;flex:0 0 72px;align-self:start;aspect-ratio:1/1;
- object-fit:cover;object-position:50% 50%;display:block}
+ object-fit:cover;object-position:center center;display:block}
 body.v4 .pface .pletter{position:absolute;inset:0;display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
-body.v4 .pface.lg,body.v4 .plhead .pface{width:88px;height:88px;min-width:88px;min-height:88px;max-width:88px;max-height:88px;
- flex:0 0 88px;border-radius:18px}
+body.v4 .plhead .pface,body.v4 .pface.lg{width:120px;height:120px;min-width:120px;min-height:120px;max-width:120px;max-height:120px;
+ flex:0 0 120px;border-radius:18px}
 body.v4 .plhead{display:flex;align-items:flex-start;gap:14px;margin:0 50px 16px 0}
 body.v4 .plhead h3{margin:0;font-size:22px;font-weight:800;overflow-wrap:anywhere;line-height:1.15}
 body.v4 .plhead .sub{color:var(--muted);font-size:13.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:3px}
@@ -21310,7 +21316,7 @@ function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
 function pathForTab(t){return t==='overview'?'/':'/'+t}
 function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
-function faceBox(photo,name,lg){const px=lg?88:72;const cls='pface'+(lg?' lg':'');
+function faceBox(photo,name,lg){const px=lg?120:72;const cls='pface'+(lg?' lg':'');
  if(!photo)return h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}));
  return h('img',{class:cls,src:photo,alt:name||'Player',width:String(px),height:String(px),decoding:'async',
   style:'width:'+px+'px;height:'+px+'px;object-fit:cover;object-position:50% 50%;display:block'})}
@@ -21396,7 +21402,14 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const notes=playerNotes(d,stat,line,fmt,hits);
  const kids=[
   h('div',{class:'plhead'},faceBox(d.photo,d.name,true),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
-  h('div',{class:'pchips'},stats.map(chip))];
+  h('div',{class:'pchips'},stats.map(chip)),
+  h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:lab})),nudge(0.5),nudge(1)),
+   h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
+  h('div',{class:'card'},h('h2',null,'Last 20 vs '+fmt(line)),
+   games.length?playerChart(games,line,fmt):null,
+   games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
+    title:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'})),
+  h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Avg L10',L10?String(L10.avg):'–'))];
  if(d.next&&d.next.line)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'NEXT GAME'}),
   h('div',{class:'nm',text:d.next.line}),d.next.sub?h('div',{class:'sub',text:d.next.sub}):null));
  if(splits.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'SPLITS AND ROLE'}),...splits));
@@ -21406,13 +21419,6 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  if(notes.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'WHAT THE NUMBERS SHOW'}),
   h('ul',{class:'nlist'},notes.map(n=>h('li',{text:n})))));
  kids.push(
-  h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:lab})),nudge(0.5),nudge(1)),
-   h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
-  h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Avg L10',L10?String(L10.avg):'–')),
-  h('div',{class:'card'},h('h2',null,'Last 20 vs '+fmt(line)),
-   games.length?playerChart(games,line,fmt):null,
-   games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
-    title:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'})),
   h('div',{class:'card'},h('h2',null,'Game log'),
    games.length?h('div',null,games.map(x=>h('div',{class:'plog'},
     h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),text:x.v>line?'▲':x.v<line?'▼':'–'}),
@@ -30058,10 +30064,8 @@ def design_head_disc(raw: Optional[bytes], size: int, ring: Optional[tuple] = No
 def _design_face_rgba(raw: bytes):
     """256×256 RGBA of the head and shoulders, or None.
 
-    ESPN's file is a wide transparent canvas. A one-pixel hair wisp used to keep the
-    whole canvas, and a CSS background then showed only that hair on purple. Sparse
-    rows and columns are ignored. The square is the person's width, taken from the
-    top, so the face fills the frame. Transparency stays so Discord can tint the disc."""
+    ESPN's file is a wide transparent canvas. Scale the opaque person to cover the
+    square from the top, so the frame is the face and not a hairline on empty purple."""
     from PIL import Image
     pic = Image.open(io.BytesIO(raw))
     sec_check_image(pic)
@@ -30069,10 +30073,10 @@ def _design_face_rgba(raw: bytes):
     w, h = pic.size
     if w < 16 or h < 16:
         return None
-    mask = pic.getchannel("A").point(lambda a: 255 if a > 48 else 0)
+    mask = pic.getchannel("A").point(lambda a: 255 if a > 40 else 0)
     px = mask.load()
     step = 2
-    min_run = max(10, w // 35)
+    min_run = max(12, w // 28)
     ys = [y for y in range(h) if sum(1 for x in range(0, w, step) if px[x, y]) * step >= min_run]
     if len(ys) < 8:
         box = mask.getbbox()
@@ -30080,22 +30084,29 @@ def _design_face_rgba(raw: bytes):
             return None
         x0, y0, x1, y1 = box
     else:
-        y0, y1 = ys[0], ys[-1]
-        min_col = max(6, (y1 - y0) // 48)
-        xs = [x for x in range(w) if sum(1 for y in range(y0, y1 + 1, step) if px[x, y]) * step >= min_col]
+        y0, y1 = ys[0], ys[-1] + 1
+        min_col = max(8, (y1 - y0) // 36)
+        xs = [x for x in range(w) if sum(1 for y in range(y0, min(h, y1), step) if px[x, y]) * step >= min_col]
         if len(xs) < 8:
-            return None
-        x0, x1 = xs[0], xs[-1] + 1
-        y1 += 1
-    bw, bh = max(1, x1 - x0), max(1, y1 - y0)
-    if bh > int(bw * 1.05):
-        side = max(16, min(bw, h - y0, w))
-    else:
-        side = max(16, min(bw, bh, w, h))
-    top = max(0, min(h - side, y0 - max(2, int(side * 0.04))))
-    left = max(0, min(w - side, (x0 + x1) // 2 - side // 2))
-    face = pic.crop((left, top, left + side, top + side))
-    return face.resize((256, 256), Image.LANCZOS)
+            box = mask.getbbox()
+            if not box:
+                return None
+            x0, y0, x1, y1 = box
+        else:
+            x0, x1 = xs[0], xs[-1] + 1
+    person = pic.crop((max(0, x0), max(0, y0), min(w, x1), min(h, y1)))
+    tight = person.getchannel("A").point(lambda a: 255 if a > 32 else 0).getbbox()
+    if tight:
+        person = person.crop(tight)
+    pw, ph = person.size
+    if pw < 8 or ph < 8:
+        return None
+    scale = max(256 / pw, 256 / ph)
+    nw, nh = max(256, int(pw * scale)), max(256, int(ph * scale))
+    person = person.resize((nw, nh), Image.LANCZOS)
+    left = max(0, (nw - 256) // 2)
+    top = 0 if nh <= 256 else min(nh - 256, int(nh * 0.02))
+    return person.crop((left, top, left + 256, top + 256))
 
 
 def design_head_web_png(raw: bytes) -> bytes:
