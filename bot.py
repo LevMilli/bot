@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r87"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r88"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "r70"               # the idea list this upload is filling; r81 on the site was update r69
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -106,6 +106,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r85", "On a wide screen the background stays the size of the window and sits at the top, so the scene is visible instead of a blown-up crop."),
     ("r86", "On a phone the background stays a scene at the top of the screen and fades out, so it does not cut through the cards as a stripe."),
     ("r87", "A second player is added into the same green-and-red chart, one bar for both, instead of a separate combo graph."),
+    ("r88", "The opening smoke is soft gray clouds, the same shape as a real puff, instead of purple circles."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -21616,7 +21617,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r87';"
+    "const CACHE='pb-shell-r88';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22571,7 +22572,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#14003A;display:grid;place-items:center;transition:opacity 1.2s ease}
+#intro{position:fixed;inset:0;z-index:90;background:#050505;display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro.go{opacity:0;pointer-events:none}#intro.skip{display:none}
 #smokecan{position:absolute;inset:0;width:100%;height:100%}
 #introbrand{position:relative;z-index:1;display:grid;justify-items:center;gap:18px;transform:translateY(28px);
@@ -22633,34 +22634,41 @@ SITE_SMOKE_JS = r"""
 function smokeIntro(){
  const o=$('#intro');if(!o)return;
  const app=navigator.standalone||matchMedia('(display-mode:standalone)').matches;
- const key=app?'pb-intro-app':'pb-intro';
+ const key=app?'pb-intro-app-r88':'pb-intro-r88';
  const skip=()=>{try{localStorage.setItem(key,'1')}catch(e){}o.classList.add('skip');o.remove()};
  try{if(localStorage.getItem(key)){o.remove();return}}catch(e){}
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
  fit();addEventListener('resize',fit);
+ const puff=sz=>{const s=document.createElement('canvas');s.width=s.height=sz;const g=s.getContext('2d');
+  for(let i=0;i<12;i++){const cx=sz*(.30+Math.random()*.40),cy=sz*(.24+Math.random()*.52),r=sz*(.18+Math.random()*.28);
+   const gr=g.createRadialGradient(cx,cy,0,cx,cy,r);const a=.16+Math.random()*.22;
+   gr.addColorStop(0,'rgba(242,242,242,'+a+')');
+   gr.addColorStop(.4,'rgba(160,160,160,'+(a*.45)+')');
+   gr.addColorStop(1,'rgba(0,0,0,0)');
+   g.fillStyle=gr;g.beginPath();g.arc(cx,cy,r,0,6.3);g.fill()}
+  g.globalCompositeOperation='destination-in';
+  const mask=g.createRadialGradient(sz*.5,sz*.5,sz*.08,sz*.5,sz*.5,sz*.5);
+  mask.addColorStop(0,'rgba(0,0,0,1)');mask.addColorStop(.62,'rgba(0,0,0,.75)');mask.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=mask;g.fillRect(0,0,sz,sz);return s};
+ const clouds=[puff(280),puff(280),puff(220),puff(180)];
  const spawn=(kind)=>{const w=c.width,h=c.height;const fat=kind==='fog';
-  return{x:w*.5+(Math.random()-.5)*w*(fat?.55:.22),y:h*(fat?.82:.70)+(Math.random()*h*(fat?.28:.38)),
-   r:(fat?140:70)+Math.random()*(fat?220:170),vx:(Math.random()-.5)*(fat?.30:.66),
-   vy:-(fat?.14:.34)-Math.random()*(fat?.42:1.02),a:(fat?.18:.10)+Math.random()*(fat?.16:.16),
-   grow:(fat?.05:.08)+Math.random()*(fat?.14:.22),ph:Math.random()*6.3,life:1}};
+  return{x:w*.5+(Math.random()-.5)*w*(fat?.24:.16),y:h*(fat?.50:.48)+(Math.random()-.5)*h*(fat?.46:.34),
+   r:(fat?240:170)+Math.random()*(fat?280:200),vx:(Math.random()-.5)*(fat?.30:.66),
+   vy:-(fat?.14:.34)-Math.random()*(fat?.42:1.02),a:(fat?.22:.14)+Math.random()*(fat?.20:.18),
+   grow:(fat?.05:.08)+Math.random()*(fat?.14:.22),ph:Math.random()*6.3,rot:Math.random()*6.3,
+   spin:(Math.random()-.5)*.006,sprite:clouds[(Math.random()*clouds.length)|0],kind:kind,life:1}};
  const fog=Array.from({length:58},()=>spawn('fog'));
  const parts=Array.from({length:336},()=>spawn('wisp'));
  let start=performance.now();
- (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
-  const vent=x.createRadialGradient(w*.5,h*1.02,20,w*.5,h*.42,h*.85);
-  vent.addColorStop(0,'rgba(90,40,160,0.55)');vent.addColorStop(.35,'rgba(40,10,80,0.28)');
-  vent.addColorStop(.7,'rgba(12,4,28,0.12)');vent.addColorStop(1,'rgba(5,2,12,0)');
-  x.fillStyle=vent;x.fillRect(0,0,w,h);
-  const draw=p=>{p.ph+=0.015;p.x+=p.vx+Math.sin(p.ph)*0.54+(w*.5-p.x)*0.0022;p.y+=p.vy;p.r+=p.grow;p.a*=.9985;
-   if(p.y<-p.r||p.a<.03)Object.assign(p,spawn(p.r>160?'fog':'wisp'));
-   const g=x.createRadialGradient(p.x,p.y,p.r*0.08,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(210,190,255,'+(p.a*0.95)+')');
-   g.addColorStop(.28,'rgba(123,63,228,'+(p.a*0.72)+')');
-   g.addColorStop(.62,'rgba(50,20,90,'+(p.a*0.38)+')');
-   g.addColorStop(1,'rgba(8,4,20,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()};
-  for(const p of fog)draw(p);for(const p of parts)draw(p);
+ (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);x.globalCompositeOperation='source-over';
+  const draw=p=>{p.ph+=0.015;p.rot+=p.spin;p.x+=p.vx+Math.sin(p.ph)*0.54+(w*.5-p.x)*0.0022;p.y+=p.vy;p.r+=p.grow;p.a*=.9985;
+   if(p.y<-p.r||p.a<.03)Object.assign(p,spawn(p.r>200?'fog':'wisp'));
+   const fat=p.kind==='fog';const d=p.r*(fat?3.1:1.35);
+   x.save();x.translate(p.x,p.y);x.rotate(p.rot);x.globalAlpha=Math.min(fat?.82:.34,p.a*(fat?2.3:1));
+   x.drawImage(p.sprite,-d/2,-d/2,d,d);x.restore()};
+  for(const p of fog)draw(p);for(const p of parts)draw(p);x.globalAlpha=1;
   const el=now-start;if(el>1100&&brand)brand.classList.add('on');if(el>7000)o.classList.add('go');
   if(el<9200)requestAnimationFrame(tick);else skip()})(start)}
 """
