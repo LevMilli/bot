@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-15 r33"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r34"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -508,6 +508,32 @@ def db() -> sqlite3.Connection:
                 author_name TEXT    NOT NULL,
                 text        TEXT    NOT NULL,
                 created_at  TEXT    NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                pass_hash TEXT NOT NULL,
+                discord_id INTEGER UNIQUE,
+                created_at TEXT NOT NULL,
+                last_seen TEXT
+            );
+            CREATE TABLE IF NOT EXISTS account_access (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                at TEXT NOT NULL,
+                how TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS staff_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER,
+                message_id INTEGER,
+                author_id INTEGER,
+                author_name TEXT NOT NULL,
+                text TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                closed_at TEXT
             );
             """
         )
@@ -18795,6 +18821,7 @@ from urllib.parse import quote as _dash_quote, urlencode as _dash_urlencode
 
 DASH_COOKIE = "pb_dash"
 DASH_STAFF_COOKIE = "pb_staff"
+DASH_ACCT_COOKIE = "pb_acct"
 DASH_COOKIE_AGE = 400 * 86400   # stay signed in on this device (~13 months)
 DASH_STAFF_COOKIE_AGE = 365 * 86400
 DASH_RATE = (300, 60.0)          # requests per IP per window (a page load with images is ~30)
@@ -19344,6 +19371,7 @@ async def dash_logout(request):
     resp = web.Response(status=303, headers={"Location": "/"})
     resp.del_cookie(DASH_COOKIE, path="/")
     resp.del_cookie(DASH_STAFF_COOKIE, path="/")
+    resp.del_cookie(DASH_ACCT_COOKIE, path="/")
     return resp
 
 
@@ -19369,6 +19397,8 @@ def dash_app(web):
                     web.get("/img/{kind}/{arg}.png", dash_image), web.get("/favicon.ico", dash_favicon),
                     web.get("/favicon.svg", dash_favicon),                     web.get("/logout", dash_logout),
                     web.get("/staff", dash_staff), web.get("/api/staff.json", dash_api_staff),
+                    web.post("/api/staff.json", dash_api_staff_post),
+                    web.get("/account", dash_account), web.post("/account", dash_account_post),
                     web.get("/{tail:.*}", dash_not_found)])
     return app
 
@@ -19720,7 +19750,7 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
 </style></head><body>
 <header>
  <div class="top">
-  <div class="logo" id="logo">{{LOGO}}</div>
+  <a class="logo" id="logo" href="/" title="Dashboard" aria-label="PIMP-BOT dashboard">{{LOGO}}</a>
   <div class="brand"><h1>PIMP<b>-</b>BOT</h1><div class="meta" id="meta"><span class="skl" style="width:150px;height:14px;display:inline-block"></span></div></div>
   <div class="spacer"></div>
   <button class="iconbtn" id="theme" type="button" aria-label="Switch light or dark mode" title="Light / dark">
@@ -19745,7 +19775,7 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
  <section class="tab" id="tab-posters"></section>
  <section class="tab" id="tab-more"></section>
 </main>
-<footer><span id="ver"></span><a href="/?v=2">Classic view</a><a href="/logout">Sign out</a></footer>
+<footer><span id="ver"></span><a href="/">Dashboard</a><a href="/account">Account</a><a href="/?v=2">Classic view</a><a href="/logout">Sign out</a></footer>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Details"><div class="panel" id="panel">
  <button class="iconbtn x" id="close" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
  <div id="sheet-body"></div></div></div>
@@ -20153,12 +20183,13 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#05030c;display:grid;place-items:center;transition:opacity .9s ease}
+#intro{position:fixed;inset:0;z-index:90;background:#05030c;display:grid;place-items:center;transition:opacity 1.4s ease}
 #intro.go{opacity:0;pointer-events:none}#smokecan{position:absolute;inset:0;width:100%;height:100%}
 #introtitle{position:relative;z-index:1;font:900 clamp(28px,6vw,62px)/1.1 ui-sans-serif,system-ui;letter-spacing:.14em;
  text-transform:uppercase;color:#fff;text-shadow:0 0 42px #7B3FE4,0 10px 50px #000;opacity:0;transform:translateY(10px);
- transition:opacity .7s ease,transform .7s ease}#introtitle.on{opacity:1;transform:none}
-.lookbtn{width:38px;height:38px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;
+ transition:opacity 1s ease,transform 1s ease}#introtitle.on{opacity:1;transform:none}
+a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{width:100%;height:100%}
+.lookbtn.icon{width:38px;height:38px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;
  place-items:center;cursor:pointer;flex:none;color:var(--gold)}
 .looksheet{position:fixed;inset:0;z-index:40;display:none;place-items:center;background:#05030acc;padding:18px}
 .looksheet.on{display:grid}.lookbox{width:min(720px,100%);background:var(--card);border:1px solid var(--line);
@@ -20214,7 +20245,7 @@ body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;pad
     html = html.replace(
         '  <div class="spacer"></div>\n  <button class="iconbtn" id="theme"',
         '  <input class="find" id="find" type="search" placeholder="Find a person or slip" autocomplete="off" '
-        'spellcheck="false">\n  <div class="spacer"></div>\n  <button class="lookbtn" id="lookbtn" type="button" '
+        'spellcheck="false">\n  <div class="spacer"></div>\n  <button class="lookbtn icon" id="lookbtn" type="button" '
         'aria-label="Background and accent" title="Your look">◐</button>\n  <button class="iconbtn" id="theme"',
         1)
     html = html.replace(
@@ -20315,14 +20346,17 @@ if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet
 function smokeIntro(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
  try{if(sessionStorage.getItem('pb-intro'))return;sessionStorage.setItem('pb-intro','1')}catch(e){}
  const o=$('#intro');const c=$('#smokecan');const t=$('#introtitle');if(!o||!c)return;
- const x=c.getContext('2d');const W=()=>c.width=innerWidth,H=()=>c.height=innerHeight;W();H();
- const parts=Array.from({length:70},()=>({x:Math.random()*c.width,y:c.height*(.4+Math.random()*.7),r:40+Math.random()*90,
-  vx:(Math.random()-.5)*.4,vy:-.25-Math.random()*.55,a:.04+Math.random()*.08}));
+ const x=c.getContext('2d');c.width=innerWidth;c.height=innerHeight;
+ const parts=Array.from({length:220},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:90+Math.random()*200,
+  vx:(Math.random()-.5)*.7,vy:-.12-Math.random()*.4,a:.1+Math.random()*.16}));
  let start=performance.now();
  (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
-  for(const p of parts){p.x+=p.vx;p.y+=p.vy;p.r+=.08;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(180,170,200,'+p.a+')');g.addColorStop(1,'rgba(20,10,40,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
-  const el=now-start;if(el>400)t.classList.add('on');if(el>2200)o.classList.add('go');if(el<3200)requestAnimationFrame(tick);else o.remove()})(start)}
+  x.fillStyle='rgba(12,8,22,0.55)';x.fillRect(0,0,w,h);
+  for(const p of parts){p.x+=p.vx;p.y+=p.vy;if(p.y<-p.r)p.y=h+p.r;if(p.x<-p.r)p.x=w+p.r;if(p.x>w+p.r)p.x=-p.r;
+   p.r+=.12;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(200,188,220,'+p.a+')');g.addColorStop(.45,'rgba(80,50,110,'+(p.a*.55)+')');g.addColorStop(1,'rgba(10,8,20,0)');
+   x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
+  const el=now-start;if(el>1600)t.classList.add('on');if(el>7000)o.classList.add('go');if(el<9200)requestAnimationFrame(tick);else o.remove()})(start)}
 addEventListener('load',smokeIntro);
 """
     html = html.replace("skeletonAll();show(S.tab);load();route();", look_js + "skeletonAll();show(S.tab);load();route();", 1)
@@ -20391,9 +20425,9 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
 </style></head><body>
 <div class="wrap">
 <header>
- <div class="logo">{{LOGO}}</div>
+ <a class="logo" href="/" aria-label="PIMP-BOT dashboard">{{LOGO}}</a>
  <div class="brand">PIMP<b>-</b>BOT</div>
- <nav><a href="#how">How it works</a><a href="#signin">Sign in</a><a class="btn" href="#signin">Open the site</a></nav>
+ <nav><a href="#how">How it works</a><a href="/account">Account</a><a href="#signin">Sign in</a><a class="btn" href="#signin">Open the site</a></nav>
 </header>
 <section class="hero">
  <div>
@@ -20699,6 +20733,142 @@ def staff_log_add(gid: Optional[int], kind: str, text: str, name: str = "") -> N
     set_setting(g, "staff_log", json.dumps(items[:40]))
 
 
+ASK_QUOTA_DEFAULT = [
+    {"id": "new", "name": "New activity 0+", "n": 5},
+    {"id": "regular", "name": "Regular activity 5+", "n": 10},
+    {"id": "active", "name": "Active activity 15+", "n": 20},
+    {"id": "core", "name": "Core activity 40+", "n": 35},
+    {"id": "staff", "name": "Mods and owners", "n": 0},
+]
+
+
+def staff_quota_rows(gid: Optional[int] = None) -> list:
+    try:
+        raw = json.loads(get_setting(staff_gid(gid), "ask_quota") or "[]")
+    except Exception:
+        raw = []
+    by_id = {x.get("id"): x for x in raw if isinstance(x, dict) and x.get("id")}
+    out = []
+    for row in ASK_QUOTA_DEFAULT:
+        cur = by_id.get(row["id"], row)
+        n = cur.get("n", row["n"])
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            n = row["n"]
+        out.append({"id": row["id"], "name": row["name"], "n": n,
+                    "label": "unlimited" if int(n) == 0 else f"{int(n)} a day"})
+    return out
+
+
+def staff_channel_name(gid: int, cid) -> str:
+    try:
+        g = bot.get_guild(int(gid))
+        ch = g.get_channel(int(cid)) if g else None
+        if ch is not None:
+            return getattr(ch, "name", None) or str(cid)
+    except Exception:
+        pass
+    return str(cid or "")
+
+
+def staff_channels(gid: int) -> list:
+    out = []
+    try:
+        g = bot.get_guild(int(gid))
+        for ch in list(getattr(g, "text_channels", None) or [])[:40]:
+            out.append({"id": ch.id, "name": getattr(ch, "name", str(ch.id))})
+    except Exception:
+        pass
+    if not out:
+        for key, label in (("ticket_channel", "staff-tickets"), ("audit_channel", "audit"),
+                           ("recap_channel", "recap")):
+            cid = get_setting(gid, key)
+            if cid:
+                out.append({"id": int("".join(c for c in str(cid) if c.isdigit()) or 0), "name": label})
+    return [c for c in out if c["id"]]
+
+
+def acct_clean_name(name: str) -> Optional[str]:
+    s = re.sub(r"[^A-Za-z0-9_]+", "_", (name or "").strip())[:24].strip("_")
+    return s if len(s) >= 3 else None
+
+
+def acct_fresh_name(name: str) -> str:
+    base = acct_clean_name(name) or "user"
+    cand, n = base, 2
+    while db().execute("SELECT 1 FROM accounts WHERE name = ?", (cand,)).fetchone():
+        cand = clip(f"{base}{n}", 24)
+        n += 1
+    return cand
+
+
+def acct_hash(password: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), dashboard_key().encode(), 120000).hex()
+
+
+def acct_cookie(aid: int) -> str:
+    sig = hmac.new(dashboard_key().encode(), f"acct:{aid}".encode(), hashlib.sha256).hexdigest()[:24]
+    return f"{aid}.{sig}"
+
+
+def acct_cookie_ok(token: Optional[str]) -> Optional[int]:
+    if not token or token.count(".") != 1:
+        return None
+    aid_s, sig = token.split(".", 1)
+    if not aid_s.isdigit() or len(sig) != 24:
+        return None
+    want = acct_cookie(int(aid_s))
+    if len(want) != len(token) or not hmac.compare_digest(want.encode(), token.encode()):
+        return None
+    return int(aid_s)
+
+
+def acct_from_request(request) -> Optional[dict]:
+    aid = acct_cookie_ok((getattr(request, "cookies", None) or {}).get(DASH_ACCT_COOKIE) or "")
+    if not aid:
+        return None
+    row = db().execute("SELECT * FROM accounts WHERE id = ?", (aid,)).fetchone()
+    return dict(row) if row else None
+
+
+def acct_touch(aid: int, how: str) -> None:
+    db().execute("UPDATE accounts SET last_seen = ? WHERE id = ?", (now_iso(), aid))
+    db().execute("INSERT INTO account_access (account_id, at, how) VALUES (?,?,?)", (aid, now_iso(), clip(how, 40)))
+    db().commit()
+
+
+def acct_login_token(aid: int) -> str:
+    exp = str(int(time.time()) + 600)
+    sig = hmac.new(dashboard_key().encode(), f"dlogin:{aid}:{exp}".encode(), hashlib.sha256).hexdigest()[:20]
+    return f"{aid}.{exp}.{sig}"
+
+
+def acct_login_ok(token: Optional[str]) -> Optional[int]:
+    if not token or token.count(".") != 2:
+        return None
+    aid_s, exp, sig = token.split(".")
+    if not aid_s.isdigit() or not exp.isdigit() or int(exp) < time.time():
+        return None
+    want = hmac.new(dashboard_key().encode(), f"dlogin:{aid_s}:{exp}".encode(), hashlib.sha256).hexdigest()[:20]
+    if len(want) != len(sig) or not hmac.compare_digest(want.encode(), sig.encode()):
+        return None
+    return int(aid_s)
+
+
+def staff_ticket_add(guild_id: int, message) -> None:
+    text = clip(getattr(message, "content", "") or "(attachment)", 200)
+    if not text.strip():
+        return
+    db().execute(
+        "INSERT INTO staff_tickets (guild_id, channel_id, message_id, author_id, author_name, text, status, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (guild_id, getattr(message.channel, "id", None), getattr(message, "id", None),
+         getattr(message.author, "id", None), clip(getattr(message.author, "display_name", None) or "Member", 40),
+         text, "open", now_iso()))
+    db().commit()
+
+
 def staff_ops(uid: int) -> dict:
     """Numbers and lists for Staff HQ. Names only; nothing a person typed is marked HTML."""
     gid = staff_gid()
@@ -20720,6 +20890,14 @@ def staff_ops(uid: int) -> dict:
             for k in asks:
                 asks[k] = num(k)
     tickets = []
+    try:
+        for t in db().execute(
+                "SELECT id, author_name, text, status FROM staff_tickets WHERE guild_id = ? AND status = 'open' "
+                "ORDER BY id DESC LIMIT 20", (gid,)):
+            tickets.append({"id": "d" + str(t["id"]), "who": clip(t["author_name"], 40),
+                            "title": clip(t["text"], 90), "state": "open", "kind": "discord"})
+    except Exception:
+        pass
     for need in dash_needs(gid)[:12]:
         tickets.append({"id": need.get("id"), "who": need["who"], "title": need["why"], "state": "open",
                         "kind": "grade" if "grade" in (need.get("why") or "").lower() else "pay"})
@@ -20739,8 +20917,16 @@ def staff_ops(uid: int) -> dict:
         closed = db().execute(
             "SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ?",
             (gid, week)).fetchone()["n"]
+        closed += db().execute(
+            "SELECT COUNT(*) AS n FROM staff_tickets WHERE guild_id = ? AND status != 'open' "
+            "AND COALESCE(closed_at, created_at) >= ?", (gid, week)).fetchone()["n"]
     except Exception:
         pass
+    raw_ch = get_setting(gid, "ticket_channel") or ""
+    ch_digits = "".join(c for c in str(raw_ch) if c.isdigit())
+    ch_label = staff_channel_name(gid, ch_digits) if ch_digits else "staff-tickets"
+    if str(ch_label).isdigit():
+        ch_label = "staff-tickets"
     try:
         blacklist = json.loads(get_setting(gid, "staff_blacklist") or "[]")
     except Exception:
@@ -20768,7 +20954,8 @@ def staff_ops(uid: int) -> dict:
                 "SELECT text, due_at, sent_at, channel_id FROM announcements WHERE guild_id = ? "
                 "ORDER BY COALESCE(sent_at, due_at) DESC LIMIT 6", (gid,)):
             anns.append({"text": clip(a["text"], 120), "due": a["due_at"] or "",
-                         "sent": bool(a["sent_at"]), "channel": str(a["channel_id"] or "")})
+                         "sent": bool(a["sent_at"]),
+                         "channel": staff_channel_name(gid, a["channel_id"]) if a["channel_id"] else ""})
     except Exception:
         pass
     crew = []
@@ -20784,15 +20971,25 @@ def staff_ops(uid: int) -> dict:
         {"name": "Gemini (free)", "on": bool(env("GEMINI_API_KEY", ""))},
         {"name": "Claude (paid)", "on": bool(ANTHROPIC_API_KEY)},
     ]
-    quota = [{"name": "New activity 0+", "n": "5 a day"}, {"name": "Regular activity 5+", "n": "10 a day"},
-             {"name": "Active activity 15+", "n": "20 a day"}, {"name": "Core activity 40+", "n": "35 a day"},
-             {"name": "Mods and owners", "n": "unlimited"}]
+    quota = staff_quota_rows(gid)
+    servers = []
+    try:
+        for f in (dash30_health().get("feeds") or [])[:18]:
+            servers.append({"name": f.get("name") or "feed", "state": f.get("state") or "idle",
+                            "kind": "feed", "ago": f.get("last_ok") or ""})
+    except Exception:
+        pass
+    try:
+        for g in list(getattr(bot, "guilds", None) or [])[:12]:
+            servers.append({"name": clip(getattr(g, "name", None) or str(getattr(g, "id", "")), 40),
+                            "state": "ok", "kind": "discord", "ago": ""})
+    except Exception:
+        pass
     return {
         "me": {"id": uid, "role": crew_role_name(uid, gid) or "staff", "boss": crew_at_least(uid, "owner", gid)},
         "reads": {"clean": clean, "unsure": unsure, "failed": failed},
-        "pool": pool, "quota": quota, "asks": asks,
-        "tickets": {"channel": get_setting(gid, "ticket_channel") or "staff-tickets", "closed": int(closed or 0),
-                    "open": tickets[:10]},
+        "pool": pool, "quota": quota, "asks": asks, "servers": servers, "channels": staff_channels(gid),
+        "tickets": {"channel": ch_label, "closed": int(closed or 0), "open": tickets[:12]},
         "blacklist": [x for x in blacklist if isinstance(x, dict)][:20],
         "hits": hits, "log": log_rows[:12], "announce": anns, "crew": crew, "pending": pending,
         "version": BOT_VERSION,
@@ -20808,11 +21005,14 @@ STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 :root{--bg:#0b0714;--card:#161022;--line:#2c243c;--text:#f6f3fc;--muted:#a59cbc;--brand:#7B3FE4;--gold:#f0b429;--up:#34d399;--down:#fb7185}
 *{box-sizing:border-box}body{margin:0;color:var(--text);min-height:100vh;font:15px/1.45 ui-sans-serif,system-ui,sans-serif;
  background:radial-gradient(1000px 600px at 10% -10%,#7B3FE444,transparent),var(--bg)}
-.top{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid #F5C54222}
-.logo{width:42px;height:42px}.brand{font-weight:850;letter-spacing:.14em}.brand b{color:var(--gold)}
-.pill{margin-left:auto;background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px 22px;border-bottom:1px solid #F5C54222}
+.logo{width:42px;height:42px;flex:none}.brand{font-weight:850;letter-spacing:.14em}.brand b{color:var(--gold)}
+.pill{background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;
  font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:7px 11px;border-radius:999px}
-nav a,.lookbtn{margin-left:10px;color:#c4a6ff;text-decoration:none;font-weight:700;font-size:13px;background:none;border:0;cursor:pointer}
+.nav{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.navchip{display:inline-flex;align-items:center;height:36px;padding:0 12px;border-radius:12px;border:1px solid var(--line);
+ background:var(--card);color:#c4a6ff;text-decoration:none;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
+.navchip:hover{color:#fff;border-color:var(--brand)}
 .wrap{max-width:1180px;margin:0 auto;padding:18px 18px 48px}
 .g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}
 .g2{display:grid;grid-template-columns:1.4fr .9fr;gap:12px;margin-bottom:12px}
@@ -20820,34 +21020,59 @@ nav a,.lookbtn{margin-left:10px;color:#c4a6ff;text-decoration:none;font-weight:7
 h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .reads{display:flex;gap:8px}.rbox{flex:1;background:#110c1b;border-radius:14px;padding:12px;text-align:center}
 .rbox b{display:block;font-size:22px}.ok{color:var(--up)}.warn{color:var(--gold)}.bad{color:var(--down)}
-.row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
 .row:first-of-type{border-top:0}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:8px;background:var(--muted)}
 .dot.on{background:var(--up)}.muted{color:var(--muted);font-size:13px}.who{font-size:11px;background:#7B3FE433;border-radius:99px;padding:1px 8px}
 .open{color:#c4a6ff;font-weight:700}.chip{display:inline-block;font-size:11px;font-weight:800;padding:2px 7px;border-radius:99px;margin-left:6px}
 .ban{background:#fb718522;color:var(--down)}.warnc{background:#f0b42922;color:var(--gold)}.vip{border:1px solid var(--gold);color:var(--gold)}
 .modc{background:#7B3FE433;color:#c4a6ff}
-@media (max-width:900px){.g3,.g2{grid-template-columns:1fr}}
+.sv{display:flex;flex-wrap:wrap;gap:8px 14px}
+.sv .item{display:flex;align-items:center;gap:8px;font-size:13px;min-width:140px}
+.lamp{width:10px;height:10px;border-radius:50%;flex:none;background:var(--muted)}
+.lamp.ok,.lamp.idle{background:#34d399;animation:lamp-ok 2.8s ease-in-out infinite}
+.lamp.warn,.lamp.shaky{background:#f0b429;animation:lamp-warn .32s linear infinite}
+.lamp.down{background:#fb7185;animation:none;box-shadow:none}
+@keyframes lamp-ok{0%,100%{opacity:.45;box-shadow:0 0 0 #34d39900}50%{opacity:1;box-shadow:0 0 10px #34d399aa}}
+@keyframes lamp-warn{0%,100%{opacity:1}50%{opacity:.18}}
+.form{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.form input,.form select,.form textarea{height:36px;border-radius:10px;border:1px solid var(--line);background:#110c1b;
+ color:var(--text);padding:0 10px;font:inherit;min-width:0}
+.form textarea{height:64px;padding:8px 10px;flex:1 1 100%}
+.form button,.xbtn{height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--brand);
+ color:#fff;font-weight:700;cursor:pointer;font:inherit}
+.xbtn{background:#110c1b;color:var(--muted);font-size:12px}
+@media (max-width:900px){.g3,.g2{grid-template-columns:1fr}.nav{margin-left:0;width:100%}}
 </style></head><body>
-<div class="top"><div class="logo">{{LOGO}}</div><div class="brand">PIMP<b>-</b>BOT · STAFF</div>
-<span class="pill">24/7</span><button class="lookbtn" id="lookbtn" type="button">Background</button>
-<a href="/">Group site</a><a href="/logout">Sign out</a></div>
+<div class="top"><a class="logo" href="/" title="Dashboard" aria-label="PIMP-BOT dashboard">{{LOGO}}</a>
+<div class="brand">PIMP<b>-</b>BOT · STAFF</div>
+<div class="nav"><span class="pill">24/7</span>
+<button class="navchip" id="lookbtn" type="button">Background</button>
+<a class="navchip" href="/account">Account</a>
+<a class="navchip" href="/">Dashboard</a>
+<a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap">
+<section class="card" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
+ <p class="muted">Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy.</p></section>
 <div class="g3">
  <section class="card"><h2>Screenshot reads · 7 days</h2><div class="reads" id="reads"></div><p class="muted" id="readsnote"></p></section>
  <section class="card"><h2>AI pool · today</h2><div id="pool"></div>
   <p class="muted">Answers go to the first service with free uses left, top to bottom. Add keys in Railway: CEREBRAS_API_KEY, OPENROUTER_API_KEY.</p></section>
  <section class="card"><h2>Questions per person</h2><div id="quota"></div>
-  <p class="muted">Change them with /staff add. Mods and owners unlimited.</p></section>
+  <p class="muted">Per role and activity tier. 0 is unlimited. Change here or with /staff quota.</p></section>
 </div>
 <div class="g2">
  <section class="card"><h2>Tickets</h2><div id="tickets"></div>
-  <p class="muted">/staff tickets channel picks the channel. Each ticket is a slip that needs a grade, a payout, or has been open too long.</p></section>
+  <p class="muted">Discord messages in the tickets channel land here, plus slips that need a grade, a payout, or have been open too long. /staff tickets channel picks the channel.</p></section>
  <section class="card"><h2>Blacklist</h2><div id="blacklist"></div>
-  <p class="muted">Add with /staff blacklist. Recent hits on the right.</p></section>
+  <p class="muted">Staff-selected players, teams, or situations. Add here or with /staff blacklist.</p></section>
 </div>
 <div class="g3">
  <section class="card"><h2>Announcements</h2><div id="announce"></div>
-  <p class="muted">Write one with /admin announce; you see a preview here.</p></section>
+  <form class="form" id="annform"><textarea name="text" maxlength="1800" placeholder="Message" required></textarea>
+   <input name="when" placeholder="tonight 7pm, sat 10am" required>
+   <select name="channel" id="annch"></select>
+   <button type="submit">Schedule</button></form>
+  <p class="muted">Pick the channel and a time. Same as /staff announce.</p></section>
  <section class="card"><h2>Mod log</h2><div id="modlog"></div></section>
  <section class="card"><h2>Roles &amp; badges</h2><div id="roles"></div></section>
 </div>
@@ -20864,35 +21089,63 @@ const $=s=>document.querySelector(s);
 function h(tag,props,...kids){const el=document.createElement(tag);
  if(props)for(const k in props){const v=props[k];if(v==null||v===false)continue;
   if(k==='class')el.className=v;else if(k==='text')el.textContent=v;else if(k==='style')el.style.cssText=v;
+  else if(k.slice(0,2)==='on'&&typeof v==='function')el.addEventListener(k.slice(2),v);
   else el.setAttribute(k,v===true?'':String(v))}
  for(const c of kids.flat(8)){if(c==null||c===false)continue;el.append(c instanceof Node?c:String(c))}return el}
 function put(el,...kids){el.replaceChildren(...kids.flat(8).filter(k=>k!=null&&k!==false))}
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.bg)document.documentElement.dataset.bg=s.bg;if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
+ headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
  const R=d.reads||{};put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'read clean'})),
   h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'not sure'})),
   h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})));
  $('#readsnote').textContent=(R.failed||R.unsure)?'Check the not-sure pile.':'No problem reads lately.';
+ put($('#servers'),(d.servers||[]).length?(d.servers||[]).map(s=>h('div',{class:'item'},
+  h('i',{class:'lamp '+(s.state||'idle')}),h('span',{text:s.name+(s.kind==='discord'?' · Discord':'')}))):
+  h('p',{class:'muted',text:'Feeds show up once the bot has called them.'}));
  put($('#pool'),(d.pool||[]).map(p=>h('div',{class:'row'},h('span',null,h('i',{class:'dot'+(p.on?' on':'')}),p.name),
   h('span',{class:'muted',text:p.on?'key on':'no key'}))));
- put($('#quota'),(d.quota||[]).map(q=>h('div',{class:'row'},h('span',{text:q.name}),h('b',{text:q.n}))));
- const T=d.tickets||{};put($('#tickets'),h('div',{class:'row'},h('span',{text:'Channel'}),h('b',{text:'#'+(T.channel||'staff-tickets')})),
+ put($('#quota'),(d.quota||[]).map(q=>h('div',{class:'row'},h('span',{text:q.name}),
+  d.me&&d.me.boss?h('input',{type:'number',min:'0',value:String(q.n),style:'width:72px',onchange:e=>{
+   staffPost({op:'quota',id:q.id,n:e.target.value}).then(load)}}):h('b',{text:q.label||q.n}))));
+ const T=d.tickets||{};const kindMark=k=>k==='stale'?'⏳ ':k==='discord'?'🎫 ':k==='pay'?'💸 ':'✋ ';
+ put($('#tickets'),h('div',{class:'row'},h('span',{text:'Channel'}),h('b',{text:'#'+(T.channel||'staff-tickets')})),
   h('div',{class:'row'},h('span',{text:'Closed this week'}),h('b',{text:String(T.closed||0)})),
-  (T.open||[]).length?(T.open||[]).map(t=>h('div',{class:'row'},h('span',null,'#'+String(t.id||'—')+' '+t.title+' ',
-   t.who?h('span',{class:'who',text:t.who}):null),h('span',{class:'open',text:t.state||'open'}))):h('p',{class:'muted',text:'No open tickets.'}));
+  (T.open||[]).length?(T.open||[]).map(t=>h('div',{class:'row'},h('span',null,kindMark(t.kind),String(t.id||'—')+'  '+t.title+' ',
+   t.who?h('span',{class:'who',text:t.who}):null),h('span',null,h('span',{class:'open',text:t.state||'open'}),' ',
+   h('button',{class:'xbtn',type:'button',text:'close',onclick:()=>staffPost({op:'close',id:t.id}).then(load)})))):
+  h('p',{class:'muted',text:'No open tickets.'}));
  const bl=d.blacklist||[];put($('#blacklist'),bl.length?bl.map(b=>h('div',{class:'row'},h('span',{text:(b.name||'')+' '+(b.kind||'')}),
-  h('span',{class:'muted',text:b.action||''}))):h('p',{class:'muted',text:'Nothing blacklisted.'}),
+  h('span',null,h('span',{class:'muted',text:b.action||''}),' ',
+   h('button',{class:'xbtn',type:'button',text:'remove',onclick:()=>staffPost({op:'unban',name:b.name}).then(load)})))):
+  h('p',{class:'muted',text:'Nothing blacklisted.'}),
   (d.hits||[]).length?h('p',{class:'muted',text:'Recent hits'}):null,
-  (d.hits||[]).map(x=>h('div',{class:'row'},h('span',{text:x.who+' · '+x.what}),h('span',{class:'muted',text:x.when||''}))));
- put($('#announce'),(d.announce||[]).length?(d.announce||[]).map(a=>h('div',{class:'row'},h('span',{text:a.text}),
-  h('span',{class:'muted',text:a.sent?'sent':'scheduled'}))):h('p',{class:'muted',text:'None scheduled.'}));
- put($('#modlog'),(d.log||[]).length?(d.log||[]).map(l=>h('div',{class:'row'},h('span',{text:l.text}),
-  h('span',{class:'muted',text:l.name||''}))):h('p',{class:'muted',text:'Quiet so far.'}));
- const roleChip=r=>h('span',{class:'chip '+(r==='developer'||r==='owner'?'vip':r==='admin'?'warnc':'modc'),text:r});
+  (d.hits||[]).map(x=>h('div',{class:'row'},h('span',{text:x.who+' · '+x.what}),h('span',{class:'muted',text:x.when||''}))),
+  h('form',{class:'form',onsubmit:e=>{e.preventDefault();const f=e.target;
+   staffPost({op:'ban',name:f.name.value,kind:f.kind.value,action:f.action.value}).then(()=>{f.reset();load()})}},
+   h('input',{name:'name',placeholder:'Player, team, situation',required:true}),
+   h('select',{name:'kind'},h('option',{value:'player',text:'Player'}),h('option',{value:'team',text:'Team'}),
+    h('option',{value:'situation',text:'Situation'})),
+   h('input',{name:'action',placeholder:'staff alert / no reply'}),
+   h('button',{type:'submit',text:'Add'})));
+ put($('#announce'),(d.announce||[]).length?(d.announce||[]).map(a=>h('div',{class:'row'},
+  h('span',null,(a.channel?'#'+a.channel+' ':'')+a.text),
+  h('span',{class:'muted',text:a.sent?'sent':'scheduled '+(a.due||'')}))) :h('p',{class:'muted',text:'None scheduled.'}));
+ const sel=$('#annch');if(sel)put(sel,(d.channels||[]).length?(d.channels||[]).map(c=>h('option',{value:String(c.id),text:'#'+c.name})):
+  h('option',{value:'',text:'this Discord'}));
+ const logChip=k=>k==='ban'?h('span',{class:'chip ban',text:'ban'}):k==='warn'?h('span',{class:'chip warnc',text:'warn'}):null;
+ put($('#modlog'),(d.log||[]).length?(d.log||[]).map(l=>h('div',{class:'row'},
+  h('span',null,logChip(l.kind),' ',l.text,l.name?h('span',{class:'who',text:l.name}):null),
+  h('span',{class:'muted',text:l.at?String(l.at).slice(11,16):''}))):h('p',{class:'muted',text:'Quiet so far.'}));
+ const roleChip=r=>h('span',{class:'chip '+(r==='developer'||r==='owner'?'vip':r==='admin'?'warnc':'modc'),
+  text:r==='developer'?'⚡ Developer':r==='owner'?'👑 Owner':r.toUpperCase()});
  put($('#roles'),(d.crew||[]).length?(d.crew||[]).map(c=>h('div',{class:'row'},h('span',{text:c.name}),roleChip(c.role))):
   h('p',{class:'muted',text:'Set DEVELOPER_IDS and OWNER_IDS on Railway, then /staff add.'}));
 }
+$('#annform').addEventListener('submit',e=>{e.preventDefault();const f=e.target;
+ staffPost({op:'announce',text:f.text.value,when:f.when.value,channel:f.channel.value}).then(()=>{f.reset();load()})});
 const LOOKS=[["court","Classic court"],["arena","Arena lights"],["neoncity","Neon city"],["galaxy","Galaxy"],
  ["goldluxe","Gold luxe"],["aurora","Aurora"],["gridiron","Gridiron"],["vegas","Vegas sunset"],["midnight","Midnight"],["hardwood","Hardwood"]];
 $('#lookbtn').addEventListener('click',()=>{$('#looksheet').classList.add('on');
@@ -20906,12 +21159,15 @@ function smokeIntro(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)
  try{if(sessionStorage.getItem('pb-intro'))return;sessionStorage.setItem('pb-intro','1')}catch(e){}
  const o=$('#intro'),c=$('#smokecan'),t=$('#introtitle');if(!o||!c)return;
  c.width=innerWidth;c.height=innerHeight;const x=c.getContext('2d');
- const parts=Array.from({length:60},()=>({x:Math.random()*c.width,y:c.height*(.45+Math.random()*.6),r:50+Math.random()*80,
-  vx:(Math.random()-.5)*.35,vy:-.3-Math.random()*.5,a:.05+Math.random()*.07}));
+ const parts=Array.from({length:220},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:90+Math.random()*200,
+  vx:(Math.random()-.5)*.7,vy:-.12-Math.random()*.4,a:.1+Math.random()*.16}));
  let t0=performance.now();(function tick(now){x.clearRect(0,0,c.width,c.height);
-  for(const p of parts){p.x+=p.vx;p.y+=p.vy;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(190,180,210,'+p.a+')');g.addColorStop(1,'rgba(10,8,20,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
-  if(now-t0>400)t.classList.add('on');if(now-t0>2200)o.classList.add('go');if(now-t0<3200)requestAnimationFrame(tick);else o.remove()})(t0)}
+  x.fillStyle='rgba(12,8,22,0.55)';x.fillRect(0,0,c.width,c.height);
+  for(const p of parts){p.x+=p.vx;p.y+=p.vy;if(p.y<-p.r)p.y=c.height+p.r;if(p.x<-p.r)p.x=c.width+p.r;if(p.x>c.width+p.r)p.x=-p.r;
+   p.r+=.12;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(200,188,220,'+p.a+')');g.addColorStop(.45,'rgba(80,50,110,'+(p.a*.55)+')');g.addColorStop(1,'rgba(10,8,20,0)');
+   x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
+  const el=now-t0;if(el>1600)t.classList.add('on');if(el>7000)o.classList.add('go');if(el<9200)requestAnimationFrame(tick);else o.remove()})(t0)}
 load();smokeIntro();
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
@@ -20961,6 +21217,304 @@ async def dash_api_staff(request):
     if uid is None:
         return dash_error(web, request, 403)
     return web.json_response(staff_ops(uid))
+
+
+async def _req_json(request) -> dict:
+    fn = getattr(request, "json", None)
+    if not callable(fn):
+        return {}
+    try:
+        data = fn()
+        if asyncio.iscoroutine(data):
+            data = await data
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _req_form(request) -> dict:
+    fn = getattr(request, "post", None)
+    if callable(fn):
+        try:
+            data = fn()
+            if asyncio.iscoroutine(data):
+                data = await data
+            if hasattr(data, "items"):
+                return {str(k): (v if isinstance(v, str) else str(v)) for k, v in dict(data).items()}
+        except Exception:
+            pass
+    q = getattr(request, "query", None) or {}
+    return {str(k): str(v) for k, v in dict(q).items()}
+
+
+def staff_blacklist_save(gid: int, items: list) -> None:
+    set_setting(gid, "staff_blacklist", json.dumps(items[:40]))
+
+
+def staff_quota_save(gid: int, tier: str, n) -> None:
+    rows = staff_quota_rows(gid)
+    try:
+        n = max(0, min(200, int(n)))
+    except (TypeError, ValueError):
+        return
+    out = []
+    for row in rows:
+        out.append({"id": row["id"], "n": n if row["id"] == tier else row["n"]})
+    set_setting(gid, "ask_quota", json.dumps(out))
+
+
+async def dash_api_staff_post(request):
+    from aiohttp import web
+    uid = staff_uid_from_request(request)
+    if uid is None:
+        return dash_error(web, request, 403)
+    gid = staff_gid()
+    body = await _req_json(request)
+    op = str(body.get("op") or "")
+    if op == "close":
+        tid = str(body.get("id") or "")
+        if tid.startswith("d") and tid[1:].isdigit():
+            db().execute("UPDATE staff_tickets SET status = 'closed', closed_at = ? WHERE id = ? AND guild_id = ?",
+                         (now_iso(), int(tid[1:]), gid))
+            db().commit()
+            staff_log_add(gid, "ok", f"Closed ticket {tid}", staff_rec(uid, gid).get("name") or str(uid))
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "ban":
+        name = clip(str(body.get("name") or ""), 40)
+        if name:
+            try:
+                items = [x for x in json.loads(get_setting(gid, "staff_blacklist") or "[]") if isinstance(x, dict)]
+            except Exception:
+                items = []
+            items.insert(0, {"name": name, "kind": clip(str(body.get("kind") or "player"), 16),
+                             "action": clip(str(body.get("action") or "staff alert"), 40)})
+            staff_blacklist_save(gid, items)
+            staff_log_add(gid, "ban", f"Blacklisted {name}", staff_rec(uid, gid).get("name") or str(uid))
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "unban":
+        name = clip(str(body.get("name") or ""), 40)
+        try:
+            items = [x for x in json.loads(get_setting(gid, "staff_blacklist") or "[]") if isinstance(x, dict)
+                     and x.get("name") != name]
+        except Exception:
+            items = []
+        staff_blacklist_save(gid, items)
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "quota" and crew_at_least(uid, "owner", gid):
+        staff_quota_save(gid, str(body.get("id") or ""), body.get("n"))
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "announce":
+        due = parse_due(str(body.get("when") or ""))
+        text = clip(str(body.get("text") or ""), 1800)
+        ch = str(body.get("channel") or "")
+        cid = int(ch) if ch.isdigit() else 0
+        if due is None or not text:
+            return web.json_response({"ok": False, "error": "Need a message and a time I can read."}, status=400)
+        if not cid:
+            chans = staff_channels(gid)
+            cid = chans[0]["id"] if chans else 0
+        if not cid:
+            return web.json_response({"ok": False, "error": "Pick a channel."}, status=400)
+        db().execute(
+            "INSERT INTO announcements (guild_id, channel_id, text, due_at, created_by, created_at) VALUES (?,?,?,?,?,?)",
+            (gid, cid, text, iso(due), uid, now_iso()))
+        db().commit()
+        staff_log_add(gid, "ok", "Scheduled an announcement", staff_rec(uid, gid).get("name") or str(uid))
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    return web.json_response({"ok": False}, status=400)
+
+
+ACCOUNT_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1a0f33"><title>Account · PIMP-BOT</title>
+<link rel="icon" href="{{FAVICON}}">
+<style>
+:root{--bg:#0b0714;--card:#161022;--line:#2c243c;--text:#f6f3fc;--muted:#a59cbc;--brand:#7B3FE4;--gold:#f0b429;--up:#34d399}
+*{box-sizing:border-box}body{margin:0;color:var(--text);min-height:100vh;font:15px/1.5 ui-sans-serif,system-ui,sans-serif;
+ background:radial-gradient(1000px 600px at 10% -10%,#7B3FE444,transparent),var(--bg)}
+.top{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid #F5C54222}
+.logo{width:42px;height:42px}.brand{font-weight:850;letter-spacing:.14em}.brand b{color:var(--gold)}
+.nav{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.navchip{display:inline-flex;align-items:center;height:36px;padding:0 12px;border-radius:12px;border:1px solid var(--line);
+ background:var(--card);color:#c4a6ff;text-decoration:none;font-weight:700;font-size:13px}
+.wrap{max-width:720px;margin:0 auto;padding:28px 18px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:14px}
+h1{margin:0 0 8px;font-size:26px}h2{margin:0 0 10px;font-size:16px}
+.muted{color:var(--muted);font-size:13.5px}label{display:block;margin:12px 0 6px;font-size:13px;color:var(--muted)}
+input{width:100%;height:42px;border-radius:12px;border:1px solid var(--line);background:#110c1b;color:var(--text);
+ padding:0 12px;font:inherit}button{height:42px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(90deg,var(--gold),#e08a1e);
+ color:#1a1204;font-weight:800;cursor:pointer;font:inherit;margin-top:12px}
+.row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.row:first-of-type{border-top:0}.err{color:#fb7185;font-size:13px}.ok{color:var(--up)}
+code{background:#110c1b;padding:2px 7px;border-radius:8px}
+</style></head><body>
+<div class="top"><a class="logo" href="/" title="Dashboard" aria-label="PIMP-BOT dashboard">{{LOGO}}</a>
+<div class="brand">PIMP<b>-</b>BOT · ACCOUNT</div>
+<div class="nav"><a class="navchip" href="/">Dashboard</a><a class="navchip" href="/logout">Sign out</a></div></div>
+<div class="wrap" id="box"></div>
+<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introtitle">Pimps Dashboard</div></div>
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+function h(tag,props,...kids){const el=document.createElement(tag);
+ if(props)for(const k in props){const v=props[k];if(v==null||v===false)continue;
+  if(k==='class')el.className=v;else if(k==='text')el.textContent=v;else if(k==='style')el.style.cssText=v;
+  else if(k.slice(0,2)==='on'&&typeof v==='function')el.addEventListener(k.slice(2),v);
+  else el.setAttribute(k,v===true?'':String(v))}
+ for(const c of kids.flat(8)){if(c==null||c===false)continue;el.append(c instanceof Node?c:String(c))}return el}
+function put(el,...kids){el.replaceChildren(...kids.flat(8).filter(k=>k!=null&&k!==false))}
+try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
+ if(s.bg)document.documentElement.dataset.bg=s.bg;if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+const ME={{ME}};
+function field(form,name,label,type){return [h('label',{for:name,text:label}),h('input',{id:name,name:name,type:type||'text',required:true,autocomplete:name==='password'?'current-password':'username'})]}
+function paint(){
+ const box=$('#box');
+ if(ME&&ME.name){
+  put(box,h('section',{class:'card'},h('h1',{text:'Hey, '+ME.name}),
+    h('p',{class:'muted',text:ME.discord?'Discord is linked. /account in Discord signs you in here.':'Link Discord so /account signs you in and we can track access.'}),
+    ME.discord?h('p',{class:'ok',text:'Linked Discord id '+ME.discord}):h('p',null,'Run ',h('code',{text:'/account link '+ (ME.code||'')}),' in Discord.'),
+    h('p',{class:'muted',text:'Made '+ (ME.created||'') + (ME.seen?' · last here '+ME.seen:'')} )),
+   h('section',{class:'card'},h('h2',{text:'Access log'}),
+    (ME.log||[]).length?(ME.log||[]).map(x=>h('div',{class:'row'},h('span',{text:x.how}),h('span',{class:'muted',text:x.at||''}))):
+     h('p',{class:'muted',text:'No visits logged yet.'})),
+   h('section',{class:'card'},h('h2',{text:'New password'}),
+    h('form',{method:'post'},h('input',{type:'hidden',name:'op',value:'password'}),
+     h('label',{for:'np',text:'New password (8+ letters)'}),h('input',{id:'np',name:'password',type:'password',minlength:'8',required:true}),
+     h('button',{type:'submit',text:'Save password'}))));
+  return}
+ put(box,h('section',{class:'card'},h('h1',{text:'Your account'}),
+   h('p',{class:'muted',text:'Make a name and password for this site. Link Discord after, then /account signs you in without typing the password.'})),
+  h('section',{class:'card'},h('h2',{text:'Sign in'}),
+   h('form',{method:'post'},h('input',{type:'hidden',name:'op',value:'signin'}),
+    ...field(null,'name','Name'),...field(null,'password','Password','password'),
+    h('button',{type:'submit',text:'Sign in'}))),
+  h('section',{class:'card'},h('h2',{text:'Make an account'}),
+   h('form',{method:'post'},h('input',{type:'hidden',name:'op',value:'signup'}),
+    h('label',{for:'n2',text:'Name (letters, numbers, underscore)'}),h('input',{id:'n2',name:'name',required:true,minlength:'3',maxlength:'24'}),
+    h('label',{for:'p2',text:'Password (8+ letters)'}),h('input',{id:'p2',name:'password',type:'password',minlength:'8',required:true}),
+    h('button',{type:'submit',text:'Create account'}))));
+}
+function smokeIntro(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ try{if(sessionStorage.getItem('pb-intro'))return;sessionStorage.setItem('pb-intro','1')}catch(e){}
+ const o=$('#intro'),c=$('#smokecan'),t=$('#introtitle');if(!o||!c)return;
+ c.width=innerWidth;c.height=innerHeight;const x=c.getContext('2d');
+ const parts=Array.from({length:220},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:90+Math.random()*200,
+  vx:(Math.random()-.5)*.7,vy:-.12-Math.random()*.4,a:.1+Math.random()*.16}));
+ let t0=performance.now();(function tick(now){x.clearRect(0,0,c.width,c.height);
+  x.fillStyle='rgba(12,8,22,0.55)';x.fillRect(0,0,c.width,c.height);
+  for(const p of parts){p.x+=p.vx;p.y+=p.vy;if(p.y<-p.r)p.y=c.height+p.r;if(p.x<-p.r)p.x=c.width+p.r;if(p.x>c.width+p.r)p.x=-p.r;
+   p.r+=.12;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(200,188,220,'+p.a+')');g.addColorStop(.45,'rgba(80,50,110,'+(p.a*.55)+')');g.addColorStop(1,'rgba(10,8,20,0)');
+   x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
+  const el=now-t0;if(el>1600)t.classList.add('on');if(el>7000)o.classList.add('go');if(el<9200)requestAnimationFrame(tick);else o.remove()})(t0)}
+paint();smokeIntro();
+</script>
+</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+ACCOUNT_HTML = ACCOUNT_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
+if "innerHTML" in ACCOUNT_HTML:
+    raise RuntimeError("account page used innerHTML")
+
+
+def acct_link_code(aid: int) -> str:
+    code = hmac.new(dashboard_key().encode(), f"alink:{aid}:{int(time.time()) // 300}".encode(),
+                    hashlib.sha256).hexdigest()[:8].upper()
+    set_setting(0, f"acct_link:{code}", json.dumps({"id": aid, "exp": time.time() + 900}))
+    return code
+
+
+def acct_take_link(code: str) -> Optional[int]:
+    raw = get_setting(0, f"acct_link:{(code or '').strip().upper()}") or ""
+    try:
+        d = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(d, dict) or time.time() > float(d.get("exp") or 0):
+        return None
+    try:
+        return int(d["id"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def acct_page_html(row: Optional[dict]) -> str:
+    me = "null"
+    if row:
+        logs = []
+        try:
+            for r in db().execute(
+                    "SELECT at, how FROM account_access WHERE account_id = ? ORDER BY id DESC LIMIT 12",
+                    (row["id"],)):
+                logs.append({"at": r["at"], "how": r["how"]})
+        except Exception:
+            pass
+        payload = {"name": row["name"], "discord": str(row["discord_id"] or ""),
+                   "created": row["created_at"], "seen": row["last_seen"] or "",
+                   "code": "" if row["discord_id"] else acct_link_code(row["id"]), "log": logs}
+        me = json.dumps(payload)
+    html = ACCOUNT_HTML.replace("{{ME}}", me)
+    if "innerHTML" in html:
+        raise RuntimeError("account page used innerHTML")
+    return html
+
+
+def acct_set_cookie(resp, aid: int):
+    resp.set_cookie(DASH_ACCT_COOKIE, acct_cookie(aid), max_age=DASH_COOKIE_AGE, path="/",
+                    httponly=True, secure=True, samesite="Lax")
+    return resp
+
+
+async def dash_account(request):
+    from aiohttp import web
+    q = request.query
+    tok = q.get("d")
+    if tok:
+        aid = acct_login_ok(tok)
+        if aid is None:
+            return dash_error(web, request, 403)
+        acct_touch(aid, "discord")
+        resp = web.Response(status=303, headers={"Location": "/account"})
+        return acct_set_cookie(resp, aid)
+    return dash_html(web, dash_paint_look(acct_page_html(acct_from_request(request))))
+
+
+async def dash_account_post(request):
+    from aiohttp import web
+    form = await _req_form(request)
+    op = str(form.get("op") or "")
+    name = acct_clean_name(str(form.get("name") or ""))
+    pw = str(form.get("password") or "")
+    ip = dash_client_ip(request)
+    if not dash_rate(ip, "acct", 20, 600.0):
+        return dash_error(web, request, 429)
+    if op == "signup":
+        if not name or len(pw) < 8:
+            return web.Response(status=303, headers={"Location": "/account?err=1"})
+        if db().execute("SELECT 1 FROM accounts WHERE name = ?", (name,)).fetchone():
+            return web.Response(status=303, headers={"Location": "/account?err=1"})
+        db().execute("INSERT INTO accounts (name, pass_hash, created_at) VALUES (?,?,?)",
+                     (name, acct_hash(pw), now_iso()))
+        db().commit()
+        aid = db().execute("SELECT id FROM accounts WHERE name = ?", (name,)).fetchone()["id"]
+        acct_touch(aid, "signup")
+        resp = web.Response(status=303, headers={"Location": "/account"})
+        return acct_set_cookie(resp, aid)
+    if op == "signin":
+        row = db().execute("SELECT * FROM accounts WHERE name = ?", (name or "",)).fetchone()
+        if not row or not hmac.compare_digest(row["pass_hash"], acct_hash(pw)):
+            return web.Response(status=303, headers={"Location": "/account?err=1"})
+        acct_touch(row["id"], "password")
+        resp = web.Response(status=303, headers={"Location": "/account"})
+        return acct_set_cookie(resp, row["id"])
+    if op == "password":
+        row = acct_from_request(request)
+        if row is None or len(pw) < 8:
+            return web.Response(status=303, headers={"Location": "/account?err=1"})
+        db().execute("UPDATE accounts SET pass_hash = ? WHERE id = ?", (acct_hash(pw), row["id"]))
+        db().commit()
+        acct_touch(row["id"], "password")
+        return web.Response(status=303, headers={"Location": "/account"})
+    return web.Response(status=303, headers={"Location": "/account"})
 
 
 # ==========================================================================
@@ -30022,6 +30576,15 @@ class PicksBot(discord.Client):
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
+        if message.guild is not None:
+            try:
+                want = get_setting(message.guild.id, "ticket_channel") or ""
+                cid = "".join(c for c in str(want) if c.isdigit())
+                if cid and str(getattr(message.channel, "id", "")) == cid:
+                    staff_ticket_add(message.guild.id, message)
+                    return
+            except Exception:
+                log.exception("ticket ingest")
         if message.guild is None:
             dm_images = image_attachments(message)
             if dm_images:
@@ -33348,13 +33911,156 @@ async def staff_look(interaction: discord.Interaction, background: Optional[str]
         f"Site look: **{SITE_BGS[bg][0]}** · accent **{ac}**. Change it here or on Staff HQ.", ephemeral=True)
 
 
+@staff_group.command(name="tickets", description="Pick the Discord channel that sends open tickets to Staff HQ")
+@app_commands.guild_only()
+@app_commands.describe(channel="Messages here become Staff HQ tickets")
+async def staff_tickets_cmd(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not staff_web_ok(interaction.user.id, interaction.guild_id):
+        await interaction.response.send_message("Staff HQ only.", ephemeral=True)
+        return
+    set_setting(interaction.guild_id, "ticket_channel", str(channel.id))
+    staff_log_add(interaction.guild_id, "ok", f"Tickets channel #{channel.name}", interaction.user.display_name)
+    await interaction.response.send_message(
+        f"Open tickets now come from {channel.mention}. Review them on Staff HQ.", ephemeral=True)
+
+
+@staff_group.command(name="blacklist", description="Add or remove a player, team, or situation staff selected")
+@app_commands.guild_only()
+@app_commands.describe(name="Player, team, or situation", kind="What it is",
+                       action="What staff should do", remove="Take them off the list")
+@app_commands.choices(kind=[app_commands.Choice(name="Player", value="player"),
+                            app_commands.Choice(name="Team", value="team"),
+                            app_commands.Choice(name="Situation", value="situation")])
+async def staff_blacklist_cmd(interaction: discord.Interaction, name: str,
+                              kind: Optional[app_commands.Choice[str]] = None,
+                              action: Optional[str] = None, remove: Optional[bool] = False):
+    if not staff_web_ok(interaction.user.id, interaction.guild_id):
+        await interaction.response.send_message("Staff HQ only.", ephemeral=True)
+        return
+    gid = interaction.guild_id
+    label = clip(name, 40)
+    try:
+        items = [x for x in json.loads(get_setting(gid, "staff_blacklist") or "[]") if isinstance(x, dict)]
+    except Exception:
+        items = []
+    if remove:
+        items = [x for x in items if (x.get("name") or "").lower() != label.lower()]
+        staff_blacklist_save(gid, items)
+        await interaction.response.send_message(f"Removed **{label}** from the blacklist.", ephemeral=True)
+        return
+    items.insert(0, {"name": label, "kind": (kind.value if kind else "player"),
+                     "action": clip(action or "staff alert", 40)})
+    staff_blacklist_save(gid, items)
+    staff_log_add(gid, "ban", f"Blacklisted {label}", interaction.user.display_name)
+    await interaction.response.send_message(f"Blacklisted **{label}**. Staff HQ shows it.", ephemeral=True)
+
+
+@staff_group.command(name="quota", description="Questions per person per activity tier (0 = unlimited)")
+@app_commands.guild_only()
+@app_commands.describe(tier="Activity / role tier", per_day="How many questions a day. 0 = unlimited")
+@app_commands.choices(tier=[app_commands.Choice(name=r["name"], value=r["id"]) for r in ASK_QUOTA_DEFAULT])
+async def staff_quota_cmd(interaction: discord.Interaction, tier: app_commands.Choice[str], per_day: int):
+    if not crew_at_least(interaction.user.id, "owner", interaction.guild_id):
+        await interaction.response.send_message("Owner or developer can change quotas.", ephemeral=True)
+        return
+    staff_quota_save(interaction.guild_id, tier.value, per_day)
+    rows = staff_quota_rows(interaction.guild_id)
+    line = next((r["label"] for r in rows if r["id"] == tier.value), str(per_day))
+    await interaction.response.send_message(f"**{tier.name}** is now {line}.", ephemeral=True)
+
+
+class StaffAnnounceModal(discord.ui.Modal, title="Schedule an announcement"):
+    when = discord.ui.TextInput(label="When: 6pm, tomorrow 9am, sat 10am, 2h", max_length=40)
+    text = discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph, max_length=1800)
+
+    def __init__(self, channel: discord.abc.Snowflake):
+        super().__init__()
+        self._channel_id = channel.id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        due = parse_due(self.when.value)
+        if due is None:
+            await interaction.response.send_message("I couldn't read that time.", ephemeral=True)
+            return
+        db().execute(
+            "INSERT INTO announcements (guild_id, channel_id, text, due_at, created_by, created_at) VALUES (?,?,?,?,?,?)",
+            (interaction.guild_id, self._channel_id, self.text.value, iso(due), interaction.user.id, now_iso()))
+        db().commit()
+        staff_log_add(interaction.guild_id, "ok", "Scheduled an announcement", interaction.user.display_name)
+        await interaction.response.send_message(
+            f"📣 Scheduled for <t:{int(due.timestamp())}:f> in <#{self._channel_id}>.", ephemeral=True)
+
+
+@staff_group.command(name="announce", description="Schedule an announcement in a channel you pick")
+@app_commands.guild_only()
+@app_commands.describe(channel="Where it should post. Defaults to here.")
+async def staff_announce_cmd(interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+    if not staff_web_ok(interaction.user.id, interaction.guild_id):
+        await interaction.response.send_message("Staff HQ only.", ephemeral=True)
+        return
+    ch = channel or interaction.channel
+    if ch is None:
+        await interaction.response.send_message("Pick a text channel.", ephemeral=True)
+        return
+    await interaction.response.send_modal(StaffAnnounceModal(ch))
+
+
 bot.tree.add_command(staff_group)
 HELP_EXTRA.append(("🛠️ Staff HQ", (
     "Ladder: **developer** (failsafe, `DEVELOPER_IDS` on Railway) · **owner** (full permission, `OWNER_IDS`) · "
     "**admin** / **mod** (add as many as you want with `/staff add` and a Discord ID).\n"
     "`/staff who` lists everyone · `/staff add role:admin member:@them` or `discord_id:` · `/staff remove` · "
     "`/staff ask` if you're not on the list · `/staff open` for the 24/7 Staff HQ button. "
+    "`/staff tickets` · `/staff blacklist` · `/staff quota` · `/staff announce`. "
     "Developers cannot be removed. Owners locked in Railway cannot be removed.")))
+
+
+@bot.tree.command(name="account", description="Open your PIMP-BOT account, or link Discord with a code from the site")
+@app_commands.describe(link="Paste the code from the Account page to attach this Discord")
+async def account_cmd(interaction: discord.Interaction, link: Optional[str] = None):
+    uid = interaction.user.id
+    if link:
+        aid = acct_take_link(link)
+        if aid is None:
+            await interaction.response.send_message(
+                "That code is expired or wrong. Open /account on the site while signed in and copy a fresh one.",
+                ephemeral=True)
+            return
+        try:
+            db().execute("UPDATE accounts SET discord_id = ? WHERE id = ?", (uid, aid))
+            db().commit()
+        except sqlite3.IntegrityError:
+            await interaction.response.send_message(
+                "This Discord is already tied to a different account.", ephemeral=True)
+            return
+        acct_touch(aid, "discord-link")
+        await interaction.response.send_message(
+            "Linked. Next time, `/account` with no code signs you in on the site.", ephemeral=True)
+        return
+    row = db().execute("SELECT * FROM accounts WHERE discord_id = ?", (uid,)).fetchone()
+    if row is None:
+        name = acct_fresh_name(getattr(interaction.user, "display_name", None) or f"user_{uid}")
+        db().execute("INSERT INTO accounts (name, pass_hash, discord_id, created_at) VALUES (?,?,?,?)",
+                     (name, acct_hash(os.urandom(16).hex()), uid, now_iso()))
+        db().commit()
+        row = db().execute("SELECT * FROM accounts WHERE discord_id = ?", (uid,)).fetchone()
+        acct_touch(row["id"], "discord-create")
+    if not PUBLIC_DOMAIN:
+        await interaction.response.send_message(
+            "Account is saved. Generate a public domain on Railway, then `/account` again for the sign-in button.",
+            ephemeral=True)
+        return
+    url = f"https://{PUBLIC_DOMAIN}/account?d={acct_login_token(row['id'])}"
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Open account", style=discord.ButtonStyle.link, url=url))
+    await interaction.response.send_message(
+        f"Signed in as **{row['name']}**. This button is only for you and lasts about 10 minutes.",
+        ephemeral=True, view=view)
+
+
+HELP_EXTRA.append(("👤 Account",
+    "The website has an Account page: make a name and password, then `/account link CODE` in Discord. "
+    "After that, `/account` gives you a private sign-in button. The bot icon on every page goes back to the dashboard."))
 
 
 @bot.tree.context_menu(name="Log as pick")
