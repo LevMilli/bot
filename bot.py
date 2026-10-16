@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r56"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r57"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -74,6 +74,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r54", "Every player photo is one face crop, drawn as a real image, so the head fills the square on iPhone and in Discord."),
     ("r55", "Player photos are the square itself, so a computer cannot clip them down to a hairline, and the stat lines under the name stay on their own rows."),
     ("r56", "Player photos fill the square from the headshot, and the last-20 graph sits directly under Pass Yards, Pass TDs, and the other stat buttons."),
+    ("r57", "Player photos are drawn into the square from the headshot itself, so the face shows instead of a clipped hairline."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20041,7 +20042,7 @@ async def dash_api_player(request):
             pass
         league = design_head_league(f.get("path"))
         aid = str(f.get("id") or "")
-        photo = f"/img/head/{league}/{aid}.png?v=56" if league and aid.isdigit() else ""
+        photo = f"/img/face/{league}/{aid}.png?v=57" if league and aid.isdigit() else ""
         out.append({"id": aid, "slug": league or "", "path": f.get("path") or "",
                     "name": clip(f.get("name") or bio.get("name") or "", 40),
                     "team": clip(bio.get("team") or f.get("team") or "", 40),
@@ -20087,7 +20088,7 @@ async def dash_api_player_one(request):
     packed = dash_pack_games(games, pack_keys, 30)
     stats = dash_pack_stats(packed, keys)
     slug = design_head_league(path) or league
-    photo = f"/img/head/{slug}/{aid}.png?v=56" if slug and aid.isdigit() else ""
+    photo = f"/img/face/{slug}/{aid}.png?v=57" if slug and aid.isdigit() else ""
     default = next((s["key"] for s in stats if s["key"] != "minutes"), stats[0]["key"] if stats else "")
     brief = {"next": None, "injuries": [], "group": None}
     try:
@@ -20126,7 +20127,7 @@ async def dash_head_img(request):
     except Exception:
         log.debug("Head crop skipped", exc_info=True)
     return web.Response(body=raw, content_type="image/png",
-                        headers={"Cache-Control": "private, max-age=3600"})
+                        headers={"Cache-Control": "private, no-store"})
 
 
 async def dash_look_img(request):
@@ -20202,11 +20203,11 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r56';"
+    "const CACHE='pb-shell-r57';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
-    "const u=new URL(req.url);if(u.origin!==location.origin)return;if(u.pathname.startsWith('/api/'))return;"
+    "const u=new URL(req.url);if(u.origin!==location.origin)return;if(u.pathname.startsWith('/api/')||u.pathname.startsWith('/img/'))return;"
     "e.respondWith(fetch(req).then(r=>{try{const copy=r.clone();caches.open(CACHE).then(c=>c.put(req,copy))}catch(x){}"
     "return r}).catch(()=>caches.match(req)))});"
 )
@@ -20261,6 +20262,7 @@ def dash_app(web):
                     web.get(r"/api/player/{league:[a-z0-9-]{2,28}}/{aid:[0-9]{1,12}}.json", dash_api_player_one),
                     web.get("/health", dash_health), web.get(r"/img/look/{name:[a-z]+}.svg", dash_look_img),
                     web.get(r"/img/head/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
+                    web.get(r"/img/face/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -21190,10 +21192,10 @@ body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;al
  border:1px solid transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 body.v4 .pcard:last-child{margin-bottom:0}
 body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
-body.v4 img.pface{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important;
- max-width:72px!important;max-height:72px!important;object-fit:cover!important;object-position:center center!important;
+body.v4 canvas.pface,body.v4 img.pface{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important;
+ max-width:72px!important;max-height:72px!important;object-fit:cover!important;object-position:50% 50%!important;
  border-radius:14px;background:#1a1028;display:block;flex:0 0 72px}
-body.v4 img.pface.lg{width:120px!important;height:120px!important;min-width:120px!important;min-height:120px!important;
+body.v4 canvas.pface.lg,body.v4 img.pface.lg{width:120px!important;height:120px!important;min-width:120px!important;min-height:120px!important;
  max-width:120px!important;max-height:120px!important;flex:0 0 120px;border-radius:18px}
 body.v4 .pface{position:relative;width:72px;height:72px;min-width:72px;min-height:72px;max-width:72px;max-height:72px;
  border-radius:14px;overflow:hidden;background:#1a1028;flex:0 0 72px;align-self:start;aspect-ratio:1/1;
@@ -21316,10 +21318,27 @@ function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
 function pathForTab(t){return t==='overview'?'/':'/'+t}
 function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
-function faceBox(photo,name,lg){const px=lg?120:72;const cls='pface'+(lg?' lg':'');
+function paintFace(canvas,img){const S=canvas.width,c=canvas.getContext('2d');if(!c)return;
+ const w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;if(!w||!h)return;
+ const pw=Math.min(w,160),ph=Math.max(1,Math.round(h*(pw/w)));
+ const probe=document.createElement('canvas');probe.width=pw;probe.height=ph;
+ const g=probe.getContext('2d',{willReadFrequently:true});
+ let x0=0,y0=0,x1=pw,y1=ph;
+ if(g){g.drawImage(img,0,0,pw,ph);
+  try{const d=g.getImageData(0,0,pw,ph).data;let minx=pw,miny=ph,maxx=-1,maxy=-1;
+   for(let y=0;y<ph;y+=2){let row=0,lx=pw,rx=-1;
+    for(let x=0;x<pw;x+=2){if(d[(y*pw+x)*4+3]>32){row++;if(x<lx)lx=x;if(x>rx)rx=x}}
+    if(row*2>=Math.max(8,pw/28)){if(lx<minx)minx=lx;if(rx>maxx)maxx=rx;if(y<miny)miny=y;if(y>maxy)maxy=y}}
+   if(maxx>minx+4&&maxy>miny+4){x0=minx;y0=miny;x1=maxx+1;y1=maxy+1}}catch(e){}}
+ const sx=w/pw,sy=h/ph,bw=Math.max(1,(x1-x0)*sx),bh=Math.max(1,(y1-y0)*sy);
+ const scale=Math.max(S/bw,S/bh),dw=bw*scale,dh=bh*scale;
+ c.fillStyle='#1a1028';c.fillRect(0,0,S,S);
+ c.drawImage(img,x0*sx,y0*sy,bw,bh,(S-dw)/2,0,dw,dh)}
+function faceBox(photo,name,lg){const px=lg?120:72,cls='pface'+(lg?' lg':'');
  if(!photo)return h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}));
- return h('img',{class:cls,src:photo,alt:name||'Player',width:String(px),height:String(px),decoding:'async',
-  style:'width:'+px+'px;height:'+px+'px;object-fit:cover;object-position:50% 50%;display:block'})}
+ const canvas=h('canvas',{class:cls,width:String(px*2),height:String(px*2),'aria-label':name||'Player'});
+ canvas.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
+ const img=new Image();img.onload=function(){paintFace(canvas,img)};img.src=photo;return canvas}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
  const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
  const stats=(pl.stats||[]).map(st=>h('div',{class:'pstat'},h('b',{text:String(st.last)}),
@@ -30064,16 +30083,16 @@ def design_head_disc(raw: Optional[bytes], size: int, ring: Optional[tuple] = No
 def _design_face_rgba(raw: bytes):
     """256×256 RGBA of the head and shoulders, or None.
 
-    ESPN's file is a wide transparent canvas. Scale the opaque person to cover the
-    square from the top, so the frame is the face and not a hairline on empty purple."""
-    from PIL import Image
+    Trim to the opaque person, then cover-crop into the square from the top so the
+    face fills the frame. A transparent ESPN canvas cannot leave a hairline on purple."""
+    from PIL import Image, ImageOps
     pic = Image.open(io.BytesIO(raw))
     sec_check_image(pic)
     pic = pic.convert("RGBA")
     w, h = pic.size
     if w < 16 or h < 16:
         return None
-    mask = pic.getchannel("A").point(lambda a: 255 if a > 40 else 0)
+    mask = pic.getchannel("A").point(lambda a: 255 if a > 24 else 0)
     px = mask.load()
     step = 2
     min_run = max(12, w // 28)
@@ -30082,7 +30101,7 @@ def _design_face_rgba(raw: bytes):
         box = mask.getbbox()
         if not box:
             return None
-        x0, y0, x1, y1 = box
+        pic = pic.crop(box)
     else:
         y0, y1 = ys[0], ys[-1] + 1
         min_col = max(8, (y1 - y0) // 36)
@@ -30091,22 +30110,12 @@ def _design_face_rgba(raw: bytes):
             box = mask.getbbox()
             if not box:
                 return None
-            x0, y0, x1, y1 = box
+            pic = pic.crop(box)
         else:
-            x0, x1 = xs[0], xs[-1] + 1
-    person = pic.crop((max(0, x0), max(0, y0), min(w, x1), min(h, y1)))
-    tight = person.getchannel("A").point(lambda a: 255 if a > 32 else 0).getbbox()
-    if tight:
-        person = person.crop(tight)
-    pw, ph = person.size
-    if pw < 8 or ph < 8:
+            pic = pic.crop((xs[0], y0, xs[-1] + 1, min(h, y1)))
+    if pic.size[0] < 8 or pic.size[1] < 8:
         return None
-    scale = max(256 / pw, 256 / ph)
-    nw, nh = max(256, int(pw * scale)), max(256, int(ph * scale))
-    person = person.resize((nw, nh), Image.LANCZOS)
-    left = max(0, (nw - 256) // 2)
-    top = 0 if nh <= 256 else min(nh - 256, int(nh * 0.02))
-    return person.crop((left, top, left + 256, top + 256))
+    return ImageOps.fit(pic, (256, 256), Image.LANCZOS, centering=(0.5, 0.12))
 
 
 def design_head_web_png(raw: bytes) -> bytes:
