@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r59"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r60"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -77,6 +77,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r57", "Player photos are drawn into the square from the headshot itself, so the face shows instead of a clipped hairline."),
     ("r58", "Search and the player sheet send the face already cropped into the square, so the card cannot clip it down to a hairline."),
     ("r59", "Search cards load each face from its own picture again, so a missed crop shows the photo instead of the initial."),
+    ("r60", "The face picture is drawn at the same size as the square, so the head is not clipped down to the hair."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20010,7 +20011,7 @@ async def dash_face_data(league, aid) -> str:
     aid = str(aid or "")
     if not league or not aid.isdigit() or not design_headshot_url(f"{league}:{aid}"):
         return ""
-    return f"/img/face/{league}/{aid}.png?v=59"
+    return f"/img/face/{league}/{aid}.png?v=60"
 
 
 async def dash_api_player(request):
@@ -20212,7 +20213,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r59';"
+    "const CACHE='pb-shell-r60';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21201,7 +21202,7 @@ body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;al
  border:1px solid transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 body.v4 .pcard:last-child{margin-bottom:0}
 body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
-body.v4 canvas.pface,body.v4 img.pface{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important;
+body.v4 canvas.pface,body.v4 img.pface{width:72px!important;height:72px!important;min-width:0!important;min-height:0!important;
  max-width:72px!important;max-height:72px!important;object-fit:fill!important;object-position:50% 50%!important;
  border-radius:14px;background:#1a1028;display:block;flex:0 0 72px}
 body.v4 canvas.pface.lg,body.v4 img.pface.lg{width:120px!important;height:120px!important;min-width:120px!important;min-height:120px!important;
@@ -21328,28 +21329,16 @@ function pathForTab(t){return t==='overview'?'/':'/'+t}
 function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
 function paintFace(canvas,img){const S=canvas.width,c=canvas.getContext('2d');if(!c)return;
- const w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;if(!w||!h)return;
- const pw=Math.min(w,160),ph=Math.max(1,Math.round(h*(pw/w)));
- const probe=document.createElement('canvas');probe.width=pw;probe.height=ph;
- const g=probe.getContext('2d',{willReadFrequently:true});
- let x0=0,y0=0,x1=pw,y1=ph;
- if(g){g.drawImage(img,0,0,pw,ph);
-  try{const d=g.getImageData(0,0,pw,ph).data;let minx=pw,miny=ph,maxx=-1,maxy=-1;
-   for(let y=0;y<ph;y+=2){let row=0,lx=pw,rx=-1;
-    for(let x=0;x<pw;x+=2){if(d[(y*pw+x)*4+3]>32){row++;if(x<lx)lx=x;if(x>rx)rx=x}}
-    if(row*2>=Math.max(8,pw/28)){if(lx<minx)minx=lx;if(rx>maxx)maxx=rx;if(y<miny)miny=y;if(y>maxy)maxy=y}}
-   if(maxx>minx+4&&maxy>miny+4){x0=minx;y0=miny;x1=maxx+1;y1=maxy+1}}catch(e){}}
- const sx=w/pw,sy=h/ph,bw=Math.max(1,(x1-x0)*sx),bh=Math.max(1,(y1-y0)*sy);
- const scale=Math.max(S/bw,S/bh),dw=bw*scale,dh=bh*scale;
- c.fillStyle='#1a1028';c.fillRect(0,0,S,S);
- c.drawImage(img,x0*sx,y0*sy,bw,bh,(S-dw)/2,0,dw,dh)}
+ c.fillStyle='#1a1028';c.fillRect(0,0,S,S);c.drawImage(img,0,0,S,S)}
 function faceBox(photo,name,lg){const px=lg?120:72,cls='pface'+(lg?' lg':'');
  if(!photo)return h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}));
- const canvas=h('canvas',{class:cls,width:String(px*2),height:String(px*2),'aria-label':name||'Player'});
- canvas.width=px*2;canvas.height=px*2;
+ const canvas=h('canvas',{class:cls,width:String(px),height:String(px),'aria-label':name||'Player'});
+ canvas.width=px;canvas.height=px;
  canvas.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
  canvas.style.setProperty('width',px+'px','important');
  canvas.style.setProperty('height',px+'px','important');
+ canvas.style.setProperty('min-width','0','important');
+ canvas.style.setProperty('min-height','0','important');
  canvas.style.setProperty('object-fit','fill','important');
  const img=new Image();img.onload=function(){paintFace(canvas,img)};img.src=photo;return canvas}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
