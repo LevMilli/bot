@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r64"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r65"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -82,6 +82,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r62", "The search result includes the 72-pixel face itself, so a missed picture request cannot drop the card back to an initial."),
     ("r63", "Search cards load a finished 72-pixel face into the photo box."),
     ("r64", "Search puts the player's face in the photo box, and a missed crop still sends the picture instead of a broken image."),
+    ("r65", "The photo box paints the whole headshot into the square, so the face stays in view instead of a hairline on purple."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20009,20 +20010,23 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
     return {"next": nxt, "injuries": injuries, "group": group}
 
 
+def _png_square(png: bytes, size: int) -> bool:
+    """True when these bytes are a PNG whose width and height are both `size`."""
+    if not png or not png.startswith(b"\x89PNG\r\n\x1a\n") or len(png) < 24:
+        return False
+    return int.from_bytes(png[16:20], "big") == size and int.from_bytes(png[20:24], "big") == size
+
+
 def design_face_file(raw: bytes, size: int = 72) -> tuple:
-    """(bytes, content-type) for the photo box. A finished square when the crop works, otherwise the original picture."""
+    """(bytes, content-type). Always a square of `size`, never the original headshot."""
     size = 120 if int(size) == 120 else 72
-    png = b""
-    try:
-        png = design_head_web_png(raw, size) or design_head_box_png(raw, size) or b""
-    except Exception:
-        png = b""
-    if png.startswith(b"\x89PNG"):
-        return png, "image/png"
-    if raw.startswith(b"\x89PNG"):
-        return raw, "image/png"
-    if raw.startswith(b"\xff\xd8\xff"):
-        return raw, "image/jpeg"
+    for make in (design_head_web_png, design_head_box_png, _design_plain_square):
+        try:
+            png = make(raw, size) or b""
+        except Exception:
+            png = b""
+        if _png_square(png, size):
+            return png, "image/png"
     return b"", ""
 
 
@@ -20033,7 +20037,7 @@ async def dash_face_data(league, aid, size: int = 72) -> str:
     aid = str(aid or "")
     size = 120 if int(size) == 120 else 72
     url = design_headshot_url(f"{league}:{aid}") if league and aid.isdigit() else None
-    path = f"/img/face/{league}/{aid}.png?v=64&s={size}" if url else ""
+    path = f"/img/face/{league}/{aid}.png?v=65&s={size}" if url else ""
     if not url:
         return ""
     got = await design_fetch_images([url])
@@ -20250,7 +20254,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r64';"
+    "const CACHE='pb-shell-r65';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21239,8 +21243,9 @@ body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;al
  border:1px solid transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 body.v4 .pcard:last-child{margin-bottom:0}
 body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
-body.v4 canvas.pface,body.v4 img.pface{width:72px!important;height:72px!important;min-width:0!important;min-height:0!important;
+body.v4 canvas.pface,body.v4 img.pface{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important;
  max-width:72px!important;max-height:72px!important;object-fit:fill!important;object-position:50% 50%!important;
+ overflow:visible!important;aspect-ratio:auto!important;
  border-radius:14px;background:#1a1028;display:block;flex:0 0 72px}
 body.v4 canvas.pface.lg,body.v4 img.pface.lg{width:120px!important;height:120px!important;min-width:120px!important;min-height:120px!important;
  max-width:120px!important;max-height:120px!important;flex:0 0 120px;border-radius:18px}
@@ -21368,16 +21373,15 @@ function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
 function faceBox(photo,name,lg){const px=lg?120:72,cls='pface'+(lg?' lg':'');
  const letter=h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}));
  if(!photo)return letter;
- const raw=String(photo),src=raw.indexOf('data:')===0||raw.indexOf('s=')>=0?raw:(raw+(raw.indexOf('?')>=0?'&':'?')+'s='+px);
- const img=h('img',{class:cls,alt:name||'Player',width:String(px),height:String(px),src:src});
- img.width=px;img.height=px;
- img.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
- img.style.setProperty('width',px+'px','important');
- img.style.setProperty('height',px+'px','important');
- img.style.setProperty('max-width',px+'px','important');
- img.style.setProperty('max-height',px+'px','important');
- img.style.setProperty('object-fit','fill','important');
- return img}
+ const canvas=h('canvas',{class:cls,width:String(px),height:String(px),'aria-label':name||'Player'});
+ canvas.width=px;canvas.height=px;
+ canvas.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
+ const img=new Image();
+ img.onload=function(){canvas.width=px;canvas.height=px;const g=canvas.getContext('2d');
+  g.drawImage(img,0,0,img.naturalWidth||px,img.naturalHeight||px,0,0,px,px)};
+ img.onerror=function(){if(canvas.parentNode)canvas.replaceWith(letter)};
+ img.src=String(photo);
+ return canvas}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
  const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
  const stats=(pl.stats||[]).map(st=>h('div',{class:'pstat'},h('b',{text:String(st.last)}),
@@ -30225,6 +30229,21 @@ def design_head_web_jpeg(raw: bytes) -> bytes:
         return b""
     buf = io.BytesIO()
     bg.save(buf, format="JPEG", quality=82, optimize=True)
+    return buf.getvalue()
+
+
+def _design_plain_square(raw: bytes, size: int = 72) -> bytes:
+    """Last resort: the whole headshot squeezed into the square. Still never the original file."""
+    from PIL import Image
+    size = 120 if int(size) == 120 else 72
+    im = Image.open(io.BytesIO(raw)).convert("RGBA")
+    if min(im.size) < 8:
+        return b""
+    im = im.resize((size, size), _pil_lanczos())
+    bg = Image.new("RGB", (size, size), (26, 16, 40))
+    bg.paste(im, mask=im.split()[-1])
+    buf = io.BytesIO()
+    bg.save(buf, format="PNG")
     return buf.getvalue()
 
 
