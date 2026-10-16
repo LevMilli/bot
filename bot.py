@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r79"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r81"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -97,6 +97,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r77", "Season boards (NBASZN, NFLSZN) and short names (PPG, RPG, APG, BPG, 3PTM, 3PTA, FTM, 50+ Point Games) scan and chart. A two-player combo adds both logs. The player page groups those stats and lets you switch the window and home or away."),
     ("r78", "Staff HQ lists the browsers signed in right now, and the daily key stays hidden until the eye is clicked. A second scan reads only the holes. An edit you make is used the next time that same line shows up. Command answers stay in the channel you used."),
     ("r79", "The weekly summary stake is the sum of the rows. A logged cash-out sits on the slip as its own number. An edit keeps the old line in the staff log. /admin status says whether the dashboard answered, a slow job is named, and the going-down note names the last job that finished."),
+("r80", "Kalshi tickets show yes or no, the price in cents, and the contracts, and they still settle when Kalshi does. PrizePicks rows keep the line the card had. A copy gets the same result. A closed week keeps its name. The live picture uses the same frame as the posters."),
+("r81", "Staff HQ can sign out one browser. A dashboard sign-in is logged as who and when, never the key. A kicked member loses the board on the next request. The scan card says sure, confirm, and failed, and a photo with two slips stays two slips."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -491,8 +493,8 @@ BOT_PLAN = [  # r67–r71: 250 adds, 50 per update, 10 from each lane. The r50 m
 
 _PLAN_BUILT = {
     "r67": "On the board now: this week's open count, settled count, net, and coins. Staff HQ lists signed-in devices and keeps the key hidden until the eye. A second scan reads only the holes, and an edit is remembered for the next similar line.",
-    "r68": "On the board now: a settled row shows risk, what it pays, and the net. The summary stake is the sum of the rows. A cash-out is its own number. An edit keeps the old line in the staff log. A slow job and the last finished job are named.",
-    "r69": "On the board now: the smoke intro plays once, then stays off on this device. A rate limit says to wait. The board filters by book, sport, and day. Preseason can be hidden. A missed game says DNP.",
+    "r68": "On the board now: a settled row shows risk, what it pays, and the net. Kalshi shows yes or no, cents, and contracts. PrizePicks keeps the logged line. A copy gets the same result. A closed week keeps its name. The live picture uses the poster frame.",
+    "r69": "On the board now: Staff HQ can sign out one browser and keeps the key masked. A sign-in is logged as who and when. A kicked member loses the board. The scan card says sure, confirm, and failed. Mine filters the list to this login.",
     "r70": "On the board now: People filters to up, down, or flat. Search finds a slip number, a player, or a teammate. Tiles show best and worst sport. Head-to-head shows wins. The ticker can pause. Rows can sit tighter.",
     "r71": "On the board now: the footer shows the version from this file. A built row is marked live and stays in the list. The chart can be the last 10 or the last 20. Print is black text without the smoke.",
 }
@@ -585,6 +587,21 @@ _PLAN_LIVE = {
         "A down note names the last job that finished.",
         "/admin status includes whether the dashboard answered.",
         "The scheduler names a job that ran too long.",
+        "Kalshi tickets show yes or no, contracts, and price in cents, and settle when Kalshi does.",
+        "PrizePicks entries show the line, the play, and over or under the way the card was logged.",
+        "Two people on one slip both get the result, the way the group parlay already does.",
+        "A closed week can be named and left on the record book.",
+        "The live picture frame matches the poster frame.",
+        "Standings and cashed posters share one type size.",
+        "With and without a teammate covers the first injuries that have games.",
+        "A linked market says open, settled, or waiting.",
+        "Kalshi check still settles combo legs one by one.",
+        "A linked market that cannot be found is said plainly.",
+        "A missed ESPN call does not wipe a cached game log.",
+        "Player search still returns names when the photo host is slow.",
+        "Trivia and coins keep their own jobs.",
+        "The group parlay stays opt-in each week.",
+        "A confirm card stays required when the read is not sure.",
     ],
     "r69": [
         "A rate limit says to wait, instead of a blank page.",
@@ -611,6 +628,32 @@ _PLAN_LIVE = {
         "Do not animate the net.",
         "Do not run the ticker across a sheet you are reading.",
         "Accents recolor accents. Win and loss colors stay put.",
+        "Staff can revoke one dashboard session from HQ.",
+        "A dashboard login lands in the staff log: who and when, never the key.",
+        "The daily key rotates once, and the previous key stops working.",
+        "Changing a grade writes an audit line.",
+        "Scan hit-rate does not store a second copy of the screenshot.",
+        "Keys stay out of HTML, Discord, and the export.",
+        "A kicked member loses the dashboard on the next request.",
+        "Staff-only pages stay closed for everyone else, with a plain sentence.",
+        "The access key stays masked until the eye is pressed.",
+        "The eye on the access key is a button with a name.",
+        "The Home Screen splash uses the same mark as the tab icon.",
+        "A photo background does not wash the page out of dark mode.",
+        "A switch limits the list to slips tied to this login.",
+        "Staff HQ shows the week's scan mix: sure, confirm, and failed.",
+        "That hit-rate card does not keep an extra copy of the picture.",
+        "An iPhone HEIC still goes through the reader.",
+        "Several slips in one photo stay several slips.",
+        "Dark-mode share cards stay in the reader.",
+        "A tight crop still gets a pass.",
+        "PrizePicks, Kalshi, Underdog, FanDuel, DraftKings, and Sleeper stay on the first pass.",
+        "A failed read offers the confirm card instead of dropping the slip.",
+        "The older scanner stays as the fallback.",
+        "Staff can see the last scan result line without opening the image.",
+        "An Android install prompt can ship. A store wrap waits.",
+        "Offline means the shell, not a stale slip marked as current.",
+        "Backgrounds stay personal. The group default stays its own choice.",
     ],
     "r70": [
         "A person's card can show their best and worst sport from slips already graded.",
@@ -1314,7 +1357,7 @@ def settle_pick(guild_id: int, pick_id: int, status: str,
     pick = get_pick(guild_id, pick_id)
     if pick is None:
         return None
-    if returned is None and status in ("win", "loss", "push") and pick["status"] == "open":
+    if status in ("win", "loss", "push") and pick["status"] == "open":
         propagate_to_copies(pick_id, None, status)
     if status == "open":
         db().execute(
@@ -1617,6 +1660,11 @@ def pick_embed(p: sqlite3.Row) -> discord.Embed:
     if field:
         e.add_field(name=field[0], value=field[1], inline=False)
     e.add_field(name="Platform", value=p["platform"])
+    if "prize" in (p["platform"] or "").lower():
+        pp_legs = get_legs(p["id"])
+        if pp_legs:
+            e.add_field(name="PrizePicks", value=clip("\n".join(leg["text"] for leg in pp_legs[:12]), 1024),
+                        inline=False)
     if p["sport"]:
         e.add_field(name="Sport", value=clip(p["sport"], 100))
     units, warn = units_note(p["guild_id"], p)
@@ -2550,6 +2598,52 @@ def slip_intent(text: str) -> str:
     """'ask' when the words with a screenshot are a question about it, otherwise 'log'."""
     t = re.sub(r"<@[!&]?\d+>", " ", text or "").strip()
     return "ask" if t and SLIP_ASK.search(t) else "log"
+
+
+async def offer_extra_slips(message, slip) -> None:
+    """A photo with two tickets stays two confirm cards. The picture is not copied onto either card."""
+    if getattr(message, "guild", None) is None or not slip:
+        return
+    extras = list(slip.pop("_extra", None) or [])
+    for extra in extras[:3]:
+        if not isinstance(extra, dict) or not extra.get("legs"):
+            continue
+        extra.pop("_extra", None)
+        note = await message.reply("Another slip was in that photo. Confirm this one on its own.",
+                                   mention_author=False)
+        mid = getattr(note, "id", None)
+        if not mid:
+            continue
+        set_setting(message.guild.id, f"draft:{mid}", json.dumps({
+            "slip": extra, "poster": message.author.id, "poster_name": message.author.display_name,
+            "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso(), "typed": False}))
+        try:
+            await note.edit(embed=slip_draft_embed(extra),
+                            view=slip_draft_view(mid, review=ai_enabled(), edit=True))
+        except Exception:
+            log.warning("Couldn't attach the second slip card")
+
+
+async def offer_extra_slips(message, slip) -> None:
+    """A photo with two tickets gets a confirm card for each, instead of one merged slip."""
+    extras = []
+    if isinstance(slip, dict):
+        extras = list(slip.pop("_extra", None) or [])
+    for extra in extras[:3]:
+        if not isinstance(extra, dict) or not extra.get("legs"):
+            continue
+        extra.pop("_extra", None)
+        note = await message.reply("Another slip was in that photo. Confirm this one on its own.", mention_author=False)
+        mid = getattr(note, "id", None)
+        if not mid or message.guild is None:
+            continue
+        set_setting(message.guild.id, f"draft:{mid}", json.dumps({
+            "slip": extra, "poster": message.author.id, "poster_name": message.author.display_name,
+            "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso(), "typed": False}))
+        try:
+            await note.edit(embed=slip_draft_embed(extra), view=slip_draft_view(mid, review=ai_enabled(), edit=True))
+        except Exception:
+            log.warning("Couldn't attach the second slip")
 
 
 def save_slip_draft(guild_id: int, message, slip: dict, typed: bool = False) -> None:
@@ -6287,7 +6381,17 @@ async def fetch_gamelog(path: str, athlete_id: str, season: Optional[str] = None
     if hit and hit[0] > time.monotonic():
         return hit[1]
     params = {"season": season} if season else {}
-    raw = await _get_json(ESPN_GAMELOG.format(path=path, athlete_id=athlete_id), params)
+    try:
+        raw = await _get_json(ESPN_GAMELOG.format(path=path, athlete_id=athlete_id), params)
+    except Exception:
+        log.warning("Game log missed for %s; keeping the last copy", athlete_id)
+        if hit:
+            return hit[1]
+        return [], []
+    if not isinstance(raw, dict) or not raw:
+        if hit:
+            return hit[1]
+        return [], []
     names = [str(x).lower() for x in raw.get("names") or []]
     labels = [str(x).upper() for x in raw.get("labels") or []]
     meta = raw.get("events") or {}
@@ -6684,12 +6788,39 @@ def kalshi_outcome(m: dict) -> Optional[str]:
     return "void" if r in ("void", "", "scalar") else None
 
 
+def _kalshi_cents(v) -> Optional[int]:
+    if v is None or v == "":
+        return None
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    if n <= 1:
+        n *= 100
+    return int(round(n))
+
+
+def kalshi_ticket_line(m: dict, side: str) -> str:
+    """Yes or no, the price in cents, and how many contracts are out."""
+    yes_c = _kalshi_cents(m.get("yes_ask") if m.get("yes_ask") not in (None, "") else m.get("last_price"))
+    no_c = _kalshi_cents(m.get("no_ask"))
+    contracts = m.get("open_interest") or m.get("volume") or m.get("volume_fp")
+    bits = [f"Your side: **{side}**"]
+    if yes_c is not None:
+        bits.append(f"YES {yes_c}¢")
+    if no_c is not None:
+        bits.append(f"NO {no_c}¢")
+    if contracts not in (None, ""):
+        bits.append(f"{contracts} contracts")
+    return " · ".join(bits)
+
+
 async def kalshi_embed(p, m: dict) -> discord.Embed:
     side = (p["kalshi_side"] or "yes").upper()
     out = kalshi_outcome(m)
     status = {"yes": "Resolved YES", "no": "Resolved NO", "void": "Voided"}.get(out or "", (m.get("status") or "open").title())
     e = discord.Embed(title=clip(f"🟣 Kalshi · Pick #{p['id']} · {p['bettor_name']}", 256), color=BRAND,
-                      description=clip(f"**{kalshi_label(m)}**\nYour side: **{side}** · Market: {status}", 4000))
+                      description=clip(f"**{kalshi_label(m)}**\n{kalshi_ticket_line(m, side)} · Market: {status}", 4000))
     lines = []
     for leg in kalshi_legs(m)[:20]:
         lm = await kalshi_market(leg["ticker"])
@@ -6803,6 +6934,13 @@ async def grade_kalshi(client: discord.Client, now: Optional[datetime] = None) -
         db().commit()
         m = await kalshi_market(p["kalshi_ticker"], fresh=True)
         if not m:
+            if get_setting(p["guild_id"], f"kalshi_miss:{p['id']}") != "1":
+                set_setting(p["guild_id"], f"kalshi_miss:{p['id']}", "1")
+                channel = await recap_channel_for(client, p["guild_id"])
+                if channel is not None:
+                    await channel.send(
+                        f"I couldn't find the Kalshi market linked to pick `#{p['id']}` ({p['kalshi_ticker']}). "
+                        "The link is still there; it just isn't on Kalshi right now.")
             continue
         legs = get_legs(p["id"])
         klegs = kalshi_legs(m)
@@ -7103,7 +7241,7 @@ async def post_weekly_group_parlay(client: discord.Client, now: Optional[datetim
         return
     for row in db().execute("SELECT guild_id, value FROM settings WHERE key = 'recap_channel'").fetchall():
         gid = row["guild_id"]
-        if get_setting(gid, "gp_autopost") == "off" or get_setting(gid, "last_gp_week") == week_id(now):
+        if get_setting(gid, "gp_autopost") != "on" or get_setting(gid, "last_gp_week") == week_id(now):
             continue
         set_setting(gid, "last_gp_week", week_id(now))
         channel = client.get_channel(int(row["value"]))
@@ -7241,10 +7379,10 @@ class CardKalshiButton(discord.ui.DynamicItem[discord.ui.Button], template=r"ckl
 
 
 def propagate_to_copies(pick_id: int, idx: Optional[int], status: str) -> None:
-    """When the original's leg (or the whole single pick) is graded, grade open copies the same way."""
+    """When the original's leg (or the whole slip) is graded, open copies get the same result."""
     for c in db().execute("SELECT * FROM picks WHERE copied_from = ? AND status = 'open'", (pick_id,)).fetchall():
         if idx is None:
-            if not get_legs(c["id"]) and status in ("win", "loss", "push"):
+            if status in ("win", "loss", "push"):
                 settle_pick(c["guild_id"], c["id"], status)
             continue
         leg = db().execute("SELECT * FROM legs WHERE pick_id = ? AND idx = ?", (c["id"], idx)).fetchone()
@@ -7541,7 +7679,7 @@ class SettingsView(discord.ui.View):
         super().__init__(timeout=900)
         self.guild_id = guild_id
         pre_out = get_setting(guild_id, "exclude_preseason") == "on"
-        gp_on = get_setting(guild_id, "gp_autopost") != "off"
+        gp_on = get_setting(guild_id, "gp_autopost") == "on"
         for key, label, on in (("exclude_preseason", "Preseason on leaderboard", not pre_out),
                                ("gp_autopost", "Monday group parlay", gp_on),
                                ("rivals_off", "Weekly rivals", get_setting(guild_id, "rivals_off") != "on"),
@@ -7558,7 +7696,7 @@ class SettingsView(discord.ui.View):
             if not (perms and getattr(perms, "manage_guild", False)):
                 await interaction.response.send_message("Admins only.", ephemeral=True)
                 return
-            if key in ("exclude_preseason", "rivals_off", "otd_off", "gamethreads"):
+            if key in ("exclude_preseason", "rivals_off", "otd_off", "gamethreads", "gp_autopost"):
                 set_setting(self.guild_id, key, None if get_setting(self.guild_id, key) == "on" else "on")
             else:
                 set_setting(self.guild_id, key, None if get_setting(self.guild_id, key) == "off" else "off")
@@ -8034,6 +8172,20 @@ def bad_beat_line(r) -> str:
             + (f" · {clip(r['note'], 60)}" if r["note"] else "") + f" (`#{r['pid']}`, {money(r['payout'])} slip)")
 
 
+def name_closed_week(guild_id: int, now: Optional[datetime] = None) -> str:
+    """Name the week that just closed and leave that name on the record book."""
+    now = (now or datetime.now(TZ)).astimezone(TZ)
+    prev = now - timedelta(days=7)
+    key = f"weekname:{week_id(prev)}"
+    name = get_setting(guild_id, key)
+    if name:
+        return name
+    monday = prev - timedelta(days=prev.weekday())
+    name = f"Week of {monday.strftime('%b')} {monday.day}"
+    set_setting(guild_id, key, name)
+    return name
+
+
 def records_embed(guild_id: int) -> discord.Embed:
     e = discord.Embed(title="📜 The record book", color=BRAND)
     settled = [p for p in settled_picks(guild_id) if not unrevealed_hidden(p)]
@@ -8086,6 +8238,7 @@ def records_embed(guild_id: int) -> discord.Embed:
     if beats:
         lines.append(f"💀 **Cruelest beat:** missed by {abs(beats[0]['margin']):g} · {beats[0]['bettor_name']} · "
                      f"{clip(beats[0]['text'], 50)}")
+    lines.append(f"📕 **Closed week:** {name_closed_week(guild_id)}")
     e.description = "\n".join(lines)
     return e
 
@@ -8373,12 +8526,14 @@ def market_embed(m) -> discord.Embed:
     lines = [f"**YES** {COIN}{pools['yes']:,} · **NO** {COIN}{pools['no']:,}",
              "🟩" * bar_n + "🟥" * (10 - bar_n) + f"  {yes_pct:.0f}% of coins on YES"]
     if m["status"] == "resolved":
-        lines.insert(0, f"✅ Resolved **{m['outcome'].upper()}**. Winners split the pot.")
+        lines.insert(0, f"Settled **{(m['outcome'] or '').upper()}**. Winners split the pot.")
     elif m["status"] == "void":
-        lines.insert(0, "↩️ Voided. Everyone got their coins back.")
+        lines.insert(0, "Settled. Voided, so everyone got their coins back.")
     elif not market_open(m):
-        lines.insert(0, "🔒 Betting's closed. Waiting on the result.")
-    elif m["closes_at"]:
+        lines.insert(0, "Waiting on the result.")
+    else:
+        lines.insert(0, "Open.")
+    if m["status"] not in ("resolved", "void") and market_open(m) and m["closes_at"]:
         lines.append(f"Closes <t:{int(datetime.fromisoformat(m['closes_at']).timestamp())}:R>")
     backers = db().execute("""SELECT user_name, side, SUM(amount) AS a FROM market_bets WHERE market_id = ?
                               GROUP BY user_id, side ORDER BY a DESC LIMIT 8""", (m["id"],)).fetchall()
@@ -9268,14 +9423,16 @@ def dashboard_data(guild_id: int) -> dict:
                  "roi": round(s["roi"], 1), "streak": current_streak(guild_id, s["key"]), "open": s["open"]}
                 for s in stats if s["wins"] + s["losses"] + s["pushes"] > 0]
     series = chart_series(guild_id, 3650)
-    recent = [{"id": p["id"], "who": p["bettor_name"], "what": shown_desc(p), "platform": p["platform"],
+    recent = [{"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
+               "what": shown_desc(p), "platform": p["platform"],
                "sport": clip(p["sport"] or "", 24), "status": p["status"], "net": round(pick_net(p), 2),
                "cost": p["cost"], "payout": p["payout"], "when": local_day(p["settled_at"] or p["created_at"]),
                "stamp": local_stamp(p["settled_at"] or p["created_at"] or "")}
               for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND
                                        (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)
                                        ORDER BY settled_at DESC LIMIT 25""", (guild_id,))]
-    open_ = [{"id": p["id"], "who": p["bettor_name"], "what": shown_desc(p), "platform": p["platform"],
+    open_ = [{"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
+              "what": shown_desc(p), "platform": p["platform"],
               "sport": clip(p["sport"] or "", 24), "cost": p["cost"], "payout": p["payout"]}
              for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND (hidden IS NULL OR hidden = 0) "
                                    "ORDER BY id DESC LIMIT 40", (guild_id,))]
@@ -14781,6 +14938,10 @@ async def scout_data(cand: dict, stat: Optional[str] = None, line: Optional[floa
 
 # ---- posters ----------------------------------------------------------------------------------------
 
+POSTER_TITLE = 46
+POSTER_SUB = 22
+
+
 def render_cashed_poster(title: str, sub: str, receipts: list[io.BytesIO]) -> io.BytesIO:
     from PIL import Image, ImageDraw
     thumbs = []
@@ -14799,10 +14960,9 @@ def render_cashed_poster(title: str, sub: str, receipts: list[io.BytesIO]) -> io
         col_h[c] += t.height + 20
     H = 190 + max(col_h or [0]) + 40
     img, d = _design_card(W, H, "stadium", (20, 120, 80), (90, 230, 160), head=200, margin=0, radius=0)
-    t, f = fit_text(d, title, W - 80, 46, True)
+    t, f = fit_text(d, title, W - 80, POSTER_TITLE, True)
     d.text((40, 36), t, font=f, fill=ART_TEXT)
-    t, f = fit_text(d, sub, W - 80, 22, True)
-    d.text((42, 104), t, font=f, fill=ART_GREEN)
+    d.text((42, 104), sub, font=art_font(POSTER_SUB, True), fill=ART_GREEN)
     for th, (c, y) in zip(thumbs, places):
         d.rounded_rectangle((34 + c * 490, 174 + y, 46 + c * 490 + th.width, 186 + y + th.height), 34,
                             fill=(0, 0, 0, 110))
@@ -14818,9 +14978,9 @@ def render_standings_poster(title: str, sub: str, rows: list[dict]) -> io.BytesI
     rows = rows[:12]
     H = 210 + RH * len(rows) + 50
     img, d = _design_card(W, H, "stadium", (150, 110, 20), (255, 214, 102), head=210, margin=0, radius=0)
-    t, f = fit_text(d, title, W - 80, 46, True)
+    t, f = fit_text(d, title, W - 80, POSTER_TITLE, True)
     d.text((40, 36), t, font=f, fill=ART_TEXT)
-    d.text((42, 104), sub, font=art_font(22, True), fill=ART_MUTED)
+    d.text((42, 104), sub, font=art_font(POSTER_SUB, True), fill=ART_MUTED)
     medal = {1: (255, 214, 102), 2: (210, 216, 226), 3: (214, 150, 90)}
     y = 205
     for r in rows:
@@ -14943,7 +15103,7 @@ SERVER_TOGGLES = [
     ("previews", "Game-day previews", "optout"), ("quests", "Weekly quests", "optout"),
     ("receipts_all", "Log slips in every channel", "optin"), ("board_auto", "Auto live board", "optin"),
     ("gamethreads", "Game threads", "optin"), ("welcome", "Welcome DMs", "optin"),
-    ("gp_autopost", "Monday group parlay", "optout"), ("rivals_off", "Weekly rivals", "inverted"),
+    ("gp_autopost", "Monday group parlay", "optin"), ("rivals_off", "Weekly rivals", "inverted"),
     ("otd_off", "On this day posts", "inverted"), ("exclude_preseason", "Preseason on leaderboard", "inverted"),
 ]
 PERSONAL_TOGGLES = [
@@ -19830,6 +19990,7 @@ import hmac
 from urllib.parse import quote as _dash_quote, urlencode as _dash_urlencode
 
 DASH_COOKIE = "pb_dash"
+DASH_DEV_COOKIE = "pb_dev"
 DASH_STAFF_COOKIE = "pb_staff"
 DASH_ACCT_COOKIE = "pb_acct"
 DASH_COOKIE_AGE = 400 * 86400   # stay signed in on this device (~13 months)
@@ -19882,6 +20043,7 @@ DASH_FAVICON = "data:image/svg+xml," + _dash_quote(DASH_LOGO_SVG)
 PWA_HEAD = (
     '<link rel="manifest" href="/manifest.webmanifest">'
     '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
+    '<link rel="apple-touch-startup-image" href="/apple-touch-icon.png">'
     '<meta name="apple-mobile-web-app-capable" content="yes">'
     '<meta name="mobile-web-app-capable" content="yes">'
     '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
@@ -20079,21 +20241,74 @@ def dash_device_label(ua: str) -> str:
     return "Browser"
 
 
-def dash_touch_device(request) -> None:
-    """Remember this browser for the current key. A kick drops the list because the epoch changed."""
+def dash_touch_device(request) -> str:
+    """Remember this browser for the current key. Returns its id so one session can be signed out."""
+    ip = dash_client_ip(request)
+    ua = str(request.headers.get("User-Agent") or "")
+    who = dash_device_label(ua)
+    epoch = dash_epoch()
+    when = datetime.now(TZ).strftime("%b %-d %-I:%M %p CT")
     try:
-        ip = dash_client_ip(request)
-        ua = str(request.headers.get("User-Agent") or "")
-        who = dash_device_label(ua)
-        epoch = dash_epoch()
-        when = datetime.now(TZ).strftime("%b %-d %-I:%M %p CT")
         raw = json.loads(get_setting(0, "dash_devices") or "[]")
-        rows = [r for r in raw if isinstance(r, dict) and str(r.get("epoch")) == epoch
-                and not (r.get("ip") == ip and r.get("who") == who)]
-        rows.insert(0, {"who": who, "ip": ip, "when": when, "epoch": epoch})
-        set_setting(0, "dash_devices", json.dumps(rows[:12]))
     except Exception:
-        pass
+        raw = []
+    if not isinstance(raw, list):
+        raw = []
+    dev = ""
+    for r in raw:
+        if isinstance(r, dict) and str(r.get("epoch")) == epoch and r.get("ip") == ip and r.get("who") == who and r.get("id"):
+            dev = str(r["id"])
+            break
+    dev = dev or secrets.token_hex(4)
+    kept = [r for r in raw if isinstance(r, dict) and not (
+        str(r.get("epoch")) == epoch and (r.get("id") == dev or (r.get("ip") == ip and r.get("who") == who)))]
+    kept.insert(0, {"id": dev, "who": who, "ip": ip, "when": when, "epoch": epoch})
+    set_setting(0, "dash_devices", json.dumps(kept[:12]))
+    return dev
+
+
+def dash_revoke_device(dev_id: str) -> bool:
+    """Drop one signed-in browser. The shared key stays; that browser's next request is signed out."""
+    dev_id = str(dev_id or "")
+    if not dev_id:
+        return False
+    try:
+        raw = json.loads(get_setting(0, "dash_devices") or "[]")
+    except Exception:
+        raw = []
+    if not isinstance(raw, list):
+        raw = []
+    kept = [r for r in raw if not (isinstance(r, dict) and str(r.get("id") or "") == dev_id)]
+    set_setting(0, "dash_devices", json.dumps(kept[:12]))
+    return len(kept) != len(raw)
+
+
+def dash_kicked_ids() -> set:
+    try:
+        raw = json.loads(get_setting(0, "dash_kicked") or "[]")
+    except Exception:
+        return set()
+    return {int(x) for x in raw if str(x).isdigit()}
+
+
+def dash_note_kick(uid: int, out: bool) -> None:
+    ids = dash_kicked_ids()
+    if out:
+        ids.add(int(uid))
+    else:
+        ids.discard(int(uid))
+    set_setting(0, "dash_kicked", json.dumps(sorted(ids)[:200]))
+
+
+def dash_member_blocked(request) -> bool:
+    """A Discord member who was kicked loses the board while their account cookie is still on the device."""
+    try:
+        acct = acct_from_request(request)
+    except Exception:
+        return False
+    if not acct or not acct.get("discord_id"):
+        return False
+    return int(acct["discord_id"]) in dash_kicked_ids()
 
 
 def dash_devices() -> list:
@@ -20105,21 +20320,30 @@ def dash_devices() -> list:
     return [r for r in raw if isinstance(r, dict) and str(r.get("epoch")) == epoch][:12]
 
 
-def dash_note_login(request, how: str) -> None:
-    """Staff log line for a dashboard sign-in. IP only — never the access key."""
+def dash_note_login(request, how: str) -> str:
+    """Staff log line for a dashboard sign-in: who and when. Never the access key."""
+    dev = dash_touch_device(request)
     try:
-        ip = dash_client_ip(request)
-        staff_log_add(staff_gid(), "ok", f"Dashboard sign-in ({how}) from {ip}", "site")
-        dash_touch_device(request)
+        who = dash_device_label(str(request.headers.get("User-Agent") or ""))
+        when = datetime.now(TZ).strftime("%b %-d %-I:%M %p CT")
+        staff_log_add(staff_gid(), "ok", f"Dashboard sign-in: {who} at {when}", "site")
     except Exception:
         pass
+    return dev
 
 
 def dash_authed(request) -> bool:
+    if dash_member_blocked(request):
+        return False
     if dash_key_ok(request.query.get("key")):
         return True
     c = request.cookies.get(DASH_COOKIE, "") or ""
-    return 0 < len(c) <= 128 and hmac.compare_digest(c.encode(), dash_cookie_value().encode())
+    if not (0 < len(c) <= 128 and hmac.compare_digest(c.encode(), dash_cookie_value().encode())):
+        return False
+    dev = request.cookies.get(DASH_DEV_COOKIE, "") or ""
+    if not dev:
+        return True
+    return any(str(r.get("id") or "") == dev for r in dash_devices())
 
 
 def dash_client_ip(request) -> str:
@@ -20281,6 +20505,9 @@ def dash_gate(web, request):
     ip = dash_client_ip(request)
     if not dash_rate(ip, "bad", *DASH_BAD_KEYS, count=False):
         return None, dash_error(web, request, 429)
+    if dash_member_blocked(request):
+        return None, dash_page(web, 403, "Dashboard closed",
+                               "You were removed from the server, so this dashboard is closed.")
     key = request.query.get("key")
     if key is not None and not dash_key_ok(key):
         dash_rate(ip, "bad", *DASH_BAD_KEYS)
@@ -20517,8 +20744,11 @@ async def dash_index(request):
         if stay:
             ck["max_age"] = DASH_COOKIE_AGE
         resp.set_cookie(DASH_COOKIE, dash_cookie_value(), **ck)
-        dash_note_login(request, "link")
+        resp.set_cookie(DASH_DEV_COOKIE, dash_note_login(request, "link"), **ck)
         return resp
+    if dash_member_blocked(request):
+        return dash_page(web, 403, "Dashboard closed",
+                         "You were removed from the server, so this dashboard is closed.")
     if not dash_authed(request):
         if not dash_rate(ip, "bad", *DASH_BAD_KEYS, count=False):
             return dash_error(web, request, 429)
@@ -20549,7 +20779,7 @@ async def dash_login_post(request):
     if stay:
         ck["max_age"] = DASH_COOKIE_AGE
     resp.set_cookie(DASH_COOKIE, dash_cookie_value(), **ck)
-    dash_note_login(request, "form")
+    resp.set_cookie(DASH_DEV_COOKIE, dash_note_login(request, "form"), **ck)
     return resp
 
 
@@ -20568,6 +20798,8 @@ async def dash_api_data(request):
     else:
         d.update(await dash_live(gid))
     d["updated"] = datetime.now(TZ).strftime("%-I:%M %p")
+    acct = acct_from_request(request)
+    d["me"] = str(acct.get("discord_id") or "") if acct else ""
     DASH_ANSWERED["at"] = now_iso()
     return web.json_response(d)
 
@@ -20859,7 +21091,9 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
 
     ww_map: dict[str, Optional[dict]] = {}
     jobs = []
-    for rec in mates[:3]:
+    for rec in mates:
+        if len(jobs) >= 3:
+            break
         tid = ids_by_name.get(norm_name(rec.get("name") or ""))
         if tid and stat_key:
             jobs.append((rec, tid))
@@ -20969,7 +21203,12 @@ async def dash_api_player(request):
                 return {}
         league = design_head_league(f.get("path"))
         aid = str(f.get("id") or "")
-        games, bio, photo = await asyncio.gather(_games(), _bio(), dash_face_data(league, aid))
+        photo = espn_face_url(league, aid)
+        try:
+            games, bio, photo = await asyncio.wait_for(
+                asyncio.gather(_games(), _bio(), dash_face_data(league, aid)), 4)
+        except Exception:
+            games, bio = [], {}
         try:
             for k in keys:
                 rows = trend_values(games, k)
@@ -21144,7 +21383,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r77';"
+    "const CACHE='pb-shell-r81';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21179,6 +21418,7 @@ async def dash_logout(request):
     from aiohttp import web
     resp = web.Response(status=303, headers={"Location": "/"})
     resp.del_cookie(DASH_COOKIE, path="/")
+    resp.del_cookie(DASH_DEV_COOKIE, path="/")
     resp.del_cookie(DASH_STAFF_COOKIE, path="/")
     resp.del_cookie(DASH_ACCT_COOKIE, path="/")
     return resp
@@ -21353,6 +21593,7 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
 .img{position:relative;border-radius:14px;overflow:hidden;background:var(--card2)}
 .img img{display:block;width:100%;height:auto;opacity:0;transition:opacity .35s}.img img.ok{opacity:1}
 .img.sk{min-height:220px}.img.wide{max-width:760px;margin:0 auto;width:100%}
+.img.shot{border-radius:18px;border:1px solid var(--line)}
 .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
 .tile{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:8px;cursor:pointer;text-align:left;
  transition:transform .18s,box-shadow .18s;display:block;width:100%}
@@ -21770,6 +22011,7 @@ function renderOverview(el,d){
    board.length?h('div',{class:'rows'},board.map(personRow)):empty('No results yet','Settle a slip and the race is on.')),
   card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}
 const wide=b=>{b.classList.add('wide');return b};
+const shot=b=>{b.classList.add('shot');return b};
 function renderLive(el,d){
  const L=S.live,settled=d.settled24||[],later=L?[...L.later,...L.finals]:[];
  const next=L&&L.later.length?'Next up: '+L.later[0].away.abbr+' @ '+L.later[0].home.abbr+' at '+startTime(L.later[0])+'.':'';
@@ -21777,7 +22019,7 @@ function renderLive(el,d){
   !L?h('div',{class:'lgrid'},[0,1].map(skelGame)):L.games.length?h('div',{class:'lgrid'},L.games.map(gameCard))
    :card('In play','',null,empty('Nothing in play right now',(next?next+' ':'')+'When a game the group is on tips off, it shows up here with every leg.')),
   later.length?card('Later today & finals','',String(later.length),h('div',{class:'glist'},later.map(gameLine))):null,
-  L&&L.games.length?card('The /live picture','',L.updated?'Updated '+L.updated:null,wide(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
+  L&&L.games.length?card('The /live picture','s6',L.updated?'Updated '+L.updated:null,shot(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
   card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
   card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(p=>slipRow({id:p.id,who:p.who,status:p.status,net:p.net,what:'Slip #'+p.id,when:'settled today'})))
    :empty('Nothing settled in the last day','Fresh results land here.')))}
@@ -21803,8 +22045,8 @@ function renderPeople(el,d){
 function renderPosters(el,d){
  const seg=h('div',{class:'seg'},[['season','Season'],['month','Month'],['week','Week']].map(([k,t])=>h('button',{type:'button',class:S.period===k?'on':'',
   onclick:()=>{S.period=k;render()}},t)));
- put(el,card('Standings','s6',seg,imgBox('standings.png','period='+S.period,'No standings yet','Settle a few slips first.','Standings poster')),
-  card('Cashed this week','s6',null,imgBox('cashed.png','','No cashed slips this week','The next one gets its own poster.','Cashed poster')),
+ put(el,card('Standings','s6',seg,shot(imgBox('standings.png','period='+S.period,'No standings yet','Settle a few slips first.','Standings poster'))),
+  card('Cashed this week','s6',null,shot(imgBox('cashed.png','','No cashed slips this week','The next one gets its own poster.','Cashed poster'))),
   card('Hot & cold players','',null,imgBox('hot.png','','Not enough graded legs yet','Once legs get graded, the hot and cold list fills in.','Hot and cold players')))}
 function renderMore(el,d){
  const icons={hit:'✅',miss:'❌',push:'➖'};
@@ -21852,7 +22094,11 @@ function renderMeta(d){const m=$('#meta');put(m,d.season?h('span',{class:'pill s
  const live=document.querySelector('#nav button[data-t=live]');live.querySelector('.badge')?.remove();
  if(d.ticker.length)live.append(h('span',{class:'badge',text:String(d.ticker.length)}))}
 
-async function load(){const seq=++S.seq;const d=await api('/api/data'+qs());if(!d||seq!==S.seq)return;
+async function load(){const seq=++S.seq;const d=await api('/api/data'+qs());
+ if(!d){if(typeof navigator!=='undefined'&&navigator.onLine===false&&!$('#offbanner')){
+  const bar=h('div',{id:'offbanner',class:'banner',role:'status',text:'You are offline. This is the saved shell, not a current slip.'});
+  ($('main')||document.body).prepend(bar);if(S.data)S.data.updated='offline'}return}
+ if(seq!==S.seq)return;
  for(const k of ['open','recent','alltime','leaderboard','people','coins','groupparlay','records','needs','ticker','games'])d[k]=d[k]||[];
  S.data=d;S.loadedAt=Date.now();renderMeta(d);renderTicker(d);renderMini();render()}
 function skeletonAll(){for(const id of Object.keys(TABS)){const el=$('#tab-'+id);
@@ -22121,7 +22367,8 @@ SITE_LOOK_CSS += (
     ".looktile .sw img{width:100%;height:86px;object-fit:cover;display:block;background:#110818}"
 )
 SITE_LOOK_CSS += "".join(
-    f"html[data-bg={k}] body,body[data-bg={k}]{{background-image:linear-gradient(#0b071466,#0b071433),url('/img/look/{k}.svg')!important;"
+    f"html[data-bg={k}] body,body[data-bg={k}]{{background-color:#0b0714!important;"
+    f"background-image:linear-gradient(#0b0714d0,#0b0714b8),url('/img/look/{k}.svg')!important;"
     f"background-size:cover!important;background-position:center!important;background-repeat:no-repeat!important;"
     f"background-attachment:scroll!important}}"
     f".looktile[data-bg={k}] .sw{{background-image:url('/img/look/{k}.svg')}}"
@@ -22516,6 +22763,7 @@ function whenOk(stamp){if(!S.when||S.when==='all')return true;if(!stamp)return f
 function boardPick(p,settled){loadView();if(!matchQ(p))return false;
  if(S.book!=='all'&&bookOf(p)!==S.book)return false;
  if(S.sport!=='all'&&(p.sport||'')!==S.sport)return false;
+ if(S.mine&&(!S.data||!S.data.me||String(p.key||'')!==String(S.data.me)))return false;
  if(settled&&!whenOk(p.stamp||''))return false;return true}
 function sportNames(d){const s=[];const seen={};for(const p of [...(d.open||[]),...(d.recent||[])]){const n=p.sport||'';if(n&&!seen[n]){seen[n]=1;s.push(n)}}return s.sort()}
 function boardBar(d){loadView();
@@ -22523,7 +22771,8 @@ function boardBar(d){loadView();
  return h('div',{class:'bars'},
   seg('book',[['all','All books'],['prizepicks','PrizePicks'],['kalshi','Kalshi'],['other','Other']]),
   seg('sport',[['all','All sports'],...sportNames(d).map(s=>[s,s])]),
-  seg('when',[['all','Any time'],['today','Today'],['week','This week'],['month','This month']]))}
+  seg('when',[['all','Any time'],['today','Today'],['week','This week'],['month','This month']]),
+  h('button',{type:'button',class:'tpause'+(S.mine?' on':''),onclick:()=>{S.mine=!S.mine;render()}},S.mine?'Mine: on':'Mine'))}
 function renderOpen(el,d){const rows=(d.open||[]).filter(p=>boardPick(p,false));
  put(el,card('Open slips','',String(rows.length),boardBar(d),rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
   :empty(d.open.length?'Nothing matches that search':'Nothing open',d.open.length?'Clear the search box.':'Log a slip in Discord and it shows up here.')),
@@ -22640,7 +22889,13 @@ function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();
   h('i',{class:'acdot'}),h('span',{text:a}))))}
 applyLook();phoneHomeHint();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
-addEventListener('beforeinstallprompt',()=>{});
+let installEvt=null;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;const head=$('header');
+ if(!head||$('#installapp')||matchMedia('(display-mode:standalone)').matches)return;
+ const bar=h('div',{class:'homehint',id:'installapp'},
+  h('p',{text:'Add PIMP-BOT to your home screen. A store app waits.'}),
+  h('button',{type:'button',onclick:async()=>{if(!installEvt)return;installEvt.prompt();installEvt=null;const n=$('#installapp');if(n)n.remove()}},'Install'));
+ head.after(bar)});
 const lookSheet=$('#looksheet');const lookBtn=$('#lookbtn');
 if(lookBtn)lookBtn.addEventListener('click',()=>{paintLook();lookSheet.classList.add('on')});
 if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')lookSheet.classList.remove('on')});
@@ -23547,8 +23802,8 @@ def staff_ops(uid: int) -> dict:
         "crashes": [x for x in crashes if isinstance(x, dict)][:12], "version": BOT_VERSION,
         "access": {"key": dash_gate_code(), "day": dash_gate_state().get("day") or "",
                    "used": int(dash_gate_state().get("used") or 0)},
-        "devices": [{"who": r.get("who") or "Browser", "ip": r.get("ip") or "", "when": r.get("when") or ""}
-                    for r in dash_devices()],
+        "devices": [{"id": r.get("id") or "", "who": r.get("who") or "Browser", "ip": r.get("ip") or "",
+                     "when": r.get("when") or ""} for r in dash_devices()],
     }
 
 
@@ -23692,7 +23947,8 @@ function paintAccess(A){A=A||{};const key=A.key||'';const shown=keyOpen&&!!key;
    h('button',{class:'xbtn',type:'button',text:'Sign everyone out',onclick:()=>staffPost({op:'kick'}).then(load)})))}
 function paintDevices(rows){const box=$('#devices');if(!box)return;
  put(box,(rows||[]).length?(rows||[]).map(d=>h('div',{class:'row'},h('span',null,h('b',{text:d.who||'Browser'}),' ',
-  h('span',{class:'muted',text:d.ip||''})),h('span',{class:'muted',text:d.when||''}))):
+  h('span',{class:'muted',text:d.ip||''})),h('span',null,h('span',{class:'muted',text:d.when||''}),' ',
+  d.id?h('button',{class:'xbtn',type:'button',text:'Sign this one out',onclick:()=>staffPost({op:'revoke',id:d.id}).then(load)}):null))):
   h('p',{class:'muted',text:'No browsers are signed in with the current key.'}))}
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
@@ -23701,14 +23957,16 @@ async function staffPost(body){const r=await fetch('/api/staff.json',{method:'PO
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
  paintAccess(d.access||{});paintDevices(d.devices||[]);
- const R=d.reads||{};put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'read clean'})),
-  h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'not sure'})),
+ const R=d.reads||{};const last=(R.slips||[])[0];
+ put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'sure'})),
+  h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'confirm'})),
   h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})),
+  last?h('p',{text:'Last read: '+(last.title||last.how||'a slip')+' · '+(last.who||'')}):null,
   h('div',{class:'slips'},(R.slips||[]).length?(R.slips||[]).map(s=>h('div',{class:'slip'},
    h('span',null,h('b',{text:s.who||'Slip'}),' ',h('span',{class:'muted',text:s.title||s.how||''})),
    s.url?h('a',{href:s.url,target:'_blank',rel:'noreferrer',text:'screenshot'}):
     (s.id?h('a',{href:'/#/s/'+s.id,text:'slip #'+s.id}):h('span',{class:'muted',text:s.how||''})))):
-   h('p',{class:'muted',text:'Reads show up here with a screenshot link.'})));
+   h('p',{class:'muted',text:'Reads show up here as a line. The picture stays in Discord.'})));
  $('#readsnote').textContent=(R.failed||R.unsure)?'Check the not-sure pile.':'No problem reads lately.';
  put($('#servers'),(d.servers||[]).length?(d.servers||[]).map(s=>h('div',{class:'item'},
   h('i',{class:'lamp '+(s.state||'idle')}),h('div',null,h('b',{text:s.name+(s.kind==='discord'?' · Discord':s.kind==='bot'?' · robot':'')}),
@@ -23817,7 +24075,7 @@ async def dash_staff(request):
         return resp
     uid = staff_uid_from_request(request)
     if uid is None:
-        return dash_error(web, request, 403)
+        return dash_page(web, 403, "Staff only", "This page is for staff. Everyone else stays on the dashboard.")
     if q.get("bg") or q.get("accent"):
         site_look_save(q.get("bg"), q.get("accent"))
         return web.Response(status=303, headers={"Location": "/staff"})
@@ -23948,6 +24206,11 @@ async def dash_api_staff_post(request):
         dash_kick_sessions()
         staff_log_add(gid, "ok", "Signed everyone out of the dashboard",
                       staff_rec(uid, gid).get("name") or str(uid))
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "revoke":
+        who = staff_rec(uid, gid).get("name") or str(uid)
+        if dash_revoke_device(str(body.get("id") or "")):
+            staff_log_add(gid, "ok", "Signed one browser out of the dashboard", who)
         return web.json_response({"ok": True, **staff_ops(uid)})
     return web.json_response({"ok": False}, status=400)
 
@@ -28526,6 +28789,28 @@ def _free_scan_ready(slip) -> bool:
     return not holes
 
 
+def _free_slip_parts(words: list[dict]) -> list:
+    """Split one photo into separate slips when two pick-count headers sit far apart."""
+    lines = free_lines(words)
+    heads = [ln for ln in lines if re.search(r"\b\d{1,2}\s*-?\s*pick\b", ln["text"], re.I)]
+    if len(heads) < 2:
+        return [words]
+    heads.sort(key=lambda ln: ln["y"])
+    cuts = []
+    for a, b in zip(heads, heads[1:]):
+        if b["y"] - a["y"] >= 90:
+            cuts.append((a["y"] + b["y"]) // 2)
+    if not cuts:
+        return [words]
+    bounds = [0] + cuts + [10 ** 9]
+    parts = []
+    for lo, hi in zip(bounds, bounds[1:]):
+        part = [w for w in words if lo <= w["y"] < hi]
+        if part:
+            parts.append(part)
+    return parts or [words]
+
+
 def free_scan(raw: bytes) -> Optional[dict]:
     """The whole free scan on one image (sync, for a worker thread). Scanner 2.0: a clean first pass
     is kept as-is; extra treatments (other contrast, a tighter crop, a second Tesseract layout) only
@@ -28533,7 +28818,19 @@ def free_scan(raw: bytes) -> Optional[dict]:
     replace a sure read with a different one. Scanner 3.0 skips those retries when the first pass
     already has legs and the amount."""
     img, grey, _ = free_prepare(raw)
-    first = free_parse(free_words(grey), img, grey)
+    words = free_words(grey)
+    parts = _free_slip_parts(words)
+    if len(parts) > 1:
+        slips = []
+        for part in parts[:4]:
+            one = free_parse(part, img, grey)
+            if one and one.get("legs"):
+                slips.append(one)
+        if len(slips) >= 2:
+            head = slips[0]
+            head["_extra"] = slips[1:]
+            return head
+    first = free_parse(words, img, grey)
     if _free_scan_ready(first):
         return first
     best = first
@@ -28848,8 +29145,18 @@ async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
                 continue
             try:
                 await free_fix_names(slip)
+                for extra in slip.get("_extra") or []:
+                    if isinstance(extra, dict):
+                        await free_fix_names(extra)
             except Exception:
                 log.debug("Name check skipped", exc_info=True)
+            if slip.get("_extra"):
+                return slip, None
+            if slip.get("_extra"):
+                if not slip["_unsure"] and slip["legs"]:
+                    free_count("scan")
+                    slip.pop("_unsure", None)
+                return slip, None
             if not slip["_unsure"] and slip["legs"]:
                 free_count("scan")
                 slip.pop("_unsure", None)
@@ -32393,7 +32700,7 @@ def render_live_board(b: dict) -> io.BytesIO:
     d = ImageDraw.Draw(img, "RGBA")
     d.ellipse((38, 42, 74, 78), fill=ART_RED + (60,))
     d.ellipse((44, 48, 68, 72), fill=ART_RED)
-    d.text((84, 34), b.get("title", "LIVE NOW"), font=art_font(50, True), fill=ART_TEXT)
+    d.text((84, 34), b.get("title", "LIVE NOW"), font=art_font(POSTER_TITLE, True), fill=ART_TEXT)
     sub = f"{b.get('who', 'everyone').upper()}  ·  UPDATED {b.get('updated', '')}"
     d.text((86, 98), sub, font=art_font(22, True), fill=(235, 216, 226))
     legend = [("NOW", ART_GREEN), ("ON PACE", _brand_mix(ART_GREEN, (44, 44, 58), 0.55)), ("LINE", (255, 255, 255))]
@@ -33698,12 +34005,25 @@ class PicksBot(discord.Client):
     # ---- messages ----------------------------------------------------------
 
     async def on_member_join(self, member):
+        if not member.bot:
+            try:
+                dash_note_kick(member.id, False)
+            except Exception:
+                pass
         if member.bot or get_setting(member.guild.id, "welcome") != "on":
             return
         try:
             await member.send(WELCOME_TEXT)
         except Exception:
             pass
+
+    async def on_member_remove(self, member):
+        if member.bot:
+            return
+        try:
+            dash_note_kick(member.id, True)
+        except Exception:
+            log.warning("Couldn't close the dashboard for a removed member")
 
     async def on_message(self, message: discord.Message):
         if message.author.bot:
@@ -33895,6 +34215,7 @@ class PicksBot(discord.Client):
 
         # The free scan read it but wasn't sure of everything: show what it read and let the poster confirm.
         if slip is not None and slip.get("_unsure") and slip.get("legs"):
+            await offer_extra_slips(message, slip)
             save_slip_draft(message.guild.id, message, slip)
             free_count("scan_confirm")
             note_slip_read("unsure", who=message.author.display_name,
@@ -33920,6 +34241,7 @@ class PicksBot(discord.Client):
         if dup is not None:
             if quiet:
                 return
+            await offer_extra_slips(message, slip)
             save_slip_draft(message.guild.id, message, slip)
             await message.reply(f"👀 That looks like pick `#{dup['id']}` (logged "
                                 f"<t:{int(datetime.fromisoformat(dup['created_at']).timestamp())}:R>), so I didn't log it "
@@ -33930,6 +34252,7 @@ class PicksBot(discord.Client):
         if not slip.get("placed", True):
             if quiet:
                 return
+            await offer_extra_slips(message, slip)
             save_slip_draft(message.guild.id, message, slip)
             sent = await message.reply("🤔 This one doesn't look placed yet (it's still on the entry screen), so I didn't "
                                        "log it. Want a breakdown, or is it in?", view=slip_draft_view(message.id),
@@ -33940,6 +34263,7 @@ class PicksBot(discord.Client):
 
         async def reply(**kw):
             return await message.reply(mention_author=False, **kw)
+        await offer_extra_slips(message, slip)
         await self.log_parsed_slip(message.guild.id, message.author, message.channel, slip, message.jump_url, reply)
 
     async def log_parsed_slip(self, guild_id: int, author, channel, slip: dict, slip_url: str, reply) -> int:
@@ -34316,11 +34640,17 @@ async def result_cmd(
         await interaction.response.send_message(
             f"Only {p['bettor_name']} or a mod can settle this one.", ephemeral=True)
         return
+    before = p["status"]
     p = settle_pick(interaction.guild_id, pick_id, outcome.value, returned)
     await interaction.response.send_message(embed=pick_embed(p), view=view_or_missing(p))
-    await audit(getattr(interaction, "client", None), interaction.guild_id, f"{who(interaction)} used /result on {p['bettor_name']}'s pick "
-                                                          f"#{pick_id}: {outcome.value}" + (f", returned {money(returned)}"
-                                                                                            if returned is not None else ""))
+    if before not in ("open", outcome.value):
+        line = (f"{who(interaction)} changed the grade on {p['bettor_name']}'s pick #{pick_id} "
+                f"from {before} to {outcome.value}")
+    else:
+        line = (f"{who(interaction)} used /result on {p['bettor_name']}'s pick #{pick_id}: {outcome.value}")
+    if returned is not None:
+        line += f", returned {money(returned)}"
+    await audit(getattr(interaction, "client", None), interaction.guild_id, line)
 
 
 @bot.tree.command(name="open", description="Picks still waiting on a result")
@@ -36845,7 +37175,7 @@ async def dashboard_cmd(interaction: discord.Interaction):
         view.add_item(discord.ui.Button(label="Staff HQ", style=discord.ButtonStyle.link, url=su))
         extra = "\n🛠️ **Staff HQ** is only on this message for you — 24/7, owner-approved."
     if su:
-        extra = (extra or "") + f"\nToday's access key is on **Staff HQ** (`{dash_gate_code()}`). One person, then it changes."
+        extra = (extra or "") + "\nToday's access key stays on **Staff HQ**, hidden until the eye. It is not in this message."
     await interaction.response.send_message(
         f"📊 PIMP-BOT website: {url}\nSign in with today's access key from Staff HQ. Open it once and your browser "
         f"stays signed in on this device.{extra}",
