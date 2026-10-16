@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r63"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r64"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -81,6 +81,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r61", "Each search photo is a finished 72-pixel face, the same size as the box, so the hair cannot be the only thing left in view."),
     ("r62", "The search result includes the 72-pixel face itself, so a missed picture request cannot drop the card back to an initial."),
     ("r63", "Search cards load a finished 72-pixel face into the photo box."),
+    ("r64", "Search puts the player's face in the photo box, and a missed crop still sends the picture instead of a broken image."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20008,14 +20009,41 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
     return {"next": nxt, "injuries": injuries, "group": group}
 
 
+def design_face_file(raw: bytes, size: int = 72) -> tuple:
+    """(bytes, content-type) for the photo box. A finished square when the crop works, otherwise the original picture."""
+    size = 120 if int(size) == 120 else 72
+    png = b""
+    try:
+        png = design_head_web_png(raw, size) or design_head_box_png(raw, size) or b""
+    except Exception:
+        png = b""
+    if png.startswith(b"\x89PNG"):
+        return png, "image/png"
+    if raw.startswith(b"\x89PNG"):
+        return raw, "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return raw, "image/jpeg"
+    return b"", ""
+
+
 async def dash_face_data(league, aid, size: int = 72) -> str:
-    """Address of the finished face file. 72 pixels on a search card, 120 on the player sheet."""
+    """The face itself, already cropped, so the card does not depend on a second request."""
+    import base64
     league = str(league or "")
     aid = str(aid or "")
     size = 120 if int(size) == 120 else 72
-    if not league or not aid.isdigit() or not design_headshot_url(f"{league}:{aid}"):
+    url = design_headshot_url(f"{league}:{aid}") if league and aid.isdigit() else None
+    path = f"/img/face/{league}/{aid}.png?v=64&s={size}" if url else ""
+    if not url:
         return ""
-    return f"/img/face/{league}/{aid}.png?v=63&s={size}"
+    got = await design_fetch_images([url])
+    raw = (got or {}).get(url)
+    if not raw:
+        return path
+    body, kind = design_face_file(raw, size)
+    if body and kind == "image/png" and len(body) <= 80000:
+        return "data:image/png;base64," + base64.b64encode(body).decode("ascii")
+    return path
 
 
 async def dash_api_player(request):
@@ -20142,16 +20170,10 @@ async def dash_head_img(request):
         size = 72
     if size not in (72, 120):
         size = 72
-    try:
-        png = design_head_web_png(raw, size)
-    except Exception:
-        log.debug("Head crop skipped", exc_info=True)
-        png = b""
-    if not png:
-        png = design_head_box_png(raw, size)
-    if not png:
+    body, kind = design_face_file(raw, size)
+    if not body or not kind:
         return dash_error(web, request, 404)
-    return web.Response(body=png, content_type="image/png",
+    return web.Response(body=body, content_type=kind,
                         headers={"Cache-Control": "private, no-store"})
 
 
@@ -20228,7 +20250,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r63';"
+    "const CACHE='pb-shell-r64';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -29850,6 +29872,33 @@ def design_headshot_url(key: Optional[str]) -> Optional[str]:
     return f"https://a.espncdn.com/i/headshots/{league}/players/full/{aid}.png"
 
 
+def _design_fetch_urllib(url: str) -> Optional[bytes]:
+    """Backup fetch when aiohttp cannot get the headshot. Stays on ESPN's image hosts."""
+    import urllib.request
+    if not _design_img_ok(url):
+        return None
+
+    class _Stay(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if not _design_img_ok(newurl):
+                return None
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0", "Accept": "image/png,image/*;q=0.8,*/*;q=0.5"})
+    try:
+        opener = urllib.request.build_opener(_Stay)
+        with opener.open(req, timeout=DESIGN_FETCH_BUDGET) as resp:
+            if not _design_img_ok(resp.geturl()):
+                return None
+            raw = resp.read(DESIGN_IMG_MAX + 1)
+    except Exception:
+        return None
+    if len(raw) > DESIGN_IMG_MAX or not raw.startswith(_DESIGN_IMG_MAGIC):
+        return None
+    return raw
+
+
 def _design_img_ok(url: Optional[str]) -> bool:
     """Only https images on ESPN's CDN hosts are ever fetched."""
     if not url or len(url) > 400:
@@ -29870,10 +29919,11 @@ def design_cached_image(url: Optional[str]) -> Optional[bytes]:
 
 async def _design_get_image(session, url: str) -> Optional[bytes]:
     try:
-        async with session.get(url, allow_redirects=False) as resp:
-            if resp.status != 200 or int(resp.headers.get("Content-Length") or 0) > DESIGN_IMG_MAX:
+        async with session.get(url, allow_redirects=True, max_redirects=2, headers={
+                "User-Agent": "Mozilla/5.0", "Accept": "image/png,image/*;q=0.8,*/*;q=0.5"}) as resp:
+            if resp.status != 200 or not _design_img_ok(str(resp.url)):
                 return None
-            if not (resp.headers.get("Content-Type") or "image/").lower().startswith("image/"):
+            if int(resp.headers.get("Content-Length") or 0) > DESIGN_IMG_MAX:
                 return None
             raw = await resp.content.read(DESIGN_IMG_MAX + 1)
     except Exception:
@@ -29907,7 +29957,18 @@ async def design_fetch_images(urls) -> dict:
                         got[u] = await _design_get_image(session, u)
                 await asyncio.wait_for(asyncio.gather(*(one(u) for u in todo[:40])), DESIGN_FETCH_BUDGET + 1)
         except Exception:
-            pass                                   # no aiohttp, a timeout or a network error: initials this time
+            pass                                   # no aiohttp, a timeout or a network error: try the backup fetch
+        missing = [u for u in todo if not got.get(u)]
+        if missing:
+            async def via_url(u):
+                try:
+                    got[u] = await asyncio.to_thread(_design_fetch_urllib, u)
+                except Exception:
+                    got[u] = got.get(u)
+            try:
+                await asyncio.wait_for(asyncio.gather(*(via_url(u) for u in missing)), DESIGN_FETCH_BUDGET + 1)
+            except Exception:
+                pass
         now = time.monotonic()
         for u in todo:
             raw = got.get(u)
@@ -30135,7 +30196,7 @@ def _design_face_rgba(raw: bytes):
     w, h = pic.size
     side = min(w, h)
     left = max(0, (w - side) // 2)
-    return pic.crop((left, 0, left + side, side)).resize((256, 256), Image.LANCZOS)
+    return pic.crop((left, 0, left + side, side)).resize((256, 256), _pil_lanczos())
 
 
 def _design_face_filled(im) -> bool:
@@ -30167,28 +30228,37 @@ def design_head_web_jpeg(raw: bytes) -> bytes:
     return buf.getvalue()
 
 
+def _pil_lanczos():
+    """A resize filter that exists on the Pillow this server actually has."""
+    from PIL import Image
+    resampling = getattr(Image, "Resampling", None)
+    if resampling is not None and hasattr(resampling, "LANCZOS"):
+        return resampling.LANCZOS
+    return getattr(Image, "LANCZOS", getattr(Image, "BICUBIC", 1))
+
+
 def design_head_box_png(raw: bytes, size: int = 72) -> bytes:
     """A square face at the exact card size. Empty only when the bytes are not a picture."""
     from PIL import Image
     size = 120 if int(size) == 120 else 72
     try:
         im = Image.open(io.BytesIO(raw)).convert("RGBA")
+        w, h = im.size
+        if w < 8 or h < 8:
+            return b""
+        box = im.getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox() or (0, 0, w, h)
+        x0, y0, x1, y1 = box
+        bw, bh = max(1, x1 - x0), max(1, y1 - y0)
+        side = min(bw, bh)
+        left = x0 + max(0, (bw - side) // 2)
+        crop = im.crop((left, y0, left + side, y0 + side)).resize((size, size), _pil_lanczos())
+        bg = Image.new("RGB", (size, size), (26, 16, 40))
+        bg.paste(crop, mask=crop.split()[-1])
+        buf = io.BytesIO()
+        bg.save(buf, format="PNG")
+        return buf.getvalue()
     except Exception:
         return b""
-    w, h = im.size
-    if w < 8 or h < 8:
-        return b""
-    box = im.getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox() or (0, 0, w, h)
-    x0, y0, x1, y1 = box
-    bw, bh = max(1, x1 - x0), max(1, y1 - y0)
-    side = min(bw, bh)
-    left = x0 + max(0, (bw - side) // 2)
-    crop = im.crop((left, y0, left + side, y0 + side)).resize((size, size), Image.LANCZOS)
-    bg = Image.new("RGB", (size, size), (26, 16, 40))
-    bg.paste(crop, mask=crop.split()[-1])
-    buf = io.BytesIO()
-    bg.save(buf, format="PNG")
-    return buf.getvalue()
 
 
 def design_head_web_png(raw: bytes, size: int = 256) -> bytes:
@@ -30210,7 +30280,7 @@ def design_head_web_png(raw: bytes, size: int = 256) -> bytes:
     bg = Image.new("RGB", face.size, (26, 16, 40))
     bg.paste(face, mask=face.split()[-1])
     if bg.size != (size, size):
-        bg = bg.resize((size, size), Image.LANCZOS)
+        bg = bg.resize((size, size), _pil_lanczos())
     buf = io.BytesIO()
     bg.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
