@@ -53,7 +53,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r39"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r41"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
+    ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
+    ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
+    ("r40", "Accent chips are equal bubbles with a color circle. They recolor the whole site. Group default is its own scene."),
+    ("r41", "This channel now gets a note when the bot goes down, comes back, or a new upload is live."),
+]
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -19055,6 +19061,12 @@ def look_svg(name: str) -> str:
             '<rect width="800" height="500" fill="#180808"/>'
             '<circle cx="560" cy="60" r="160" fill="#ff6a2044"/>'
             '<path d="M0 420 C200 300 400 460 800 280 L800 500 L0 500z" fill="#ff6a2033"/>'),
+        "default": (
+            '<rect width="800" height="500" fill="#12081c"/>'
+            '<rect x="70" y="60" width="660" height="380" rx="36" fill="none" stroke="#7B3FE4" stroke-width="8"/>'
+            '<circle cx="400" cy="250" r="110" fill="#7B3FE4"/>'
+            '<circle cx="400" cy="250" r="64" fill="#F5C542"/>'
+            '<circle cx="400" cy="250" r="28" fill="#14003A"/>'),
     }
     inner = scenes.get(name) or scenes["court"]
     return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice">'
@@ -19729,7 +19741,7 @@ async def dash_head_img(request):
 async def dash_look_img(request):
     from aiohttp import web
     name = request.match_info.get("name", "")
-    if name not in LOOK_IDS:
+    if name not in LOOK_IDS and name != "default":
         return dash_error(web, request, 404)
     return web.Response(text=look_svg(name), content_type="image/svg+xml",
                         headers={"Cache-Control": "public, max-age=86400"})
@@ -20558,11 +20570,16 @@ skeletonAll();show(S.tab);load();route();
 
 
 SITE_LOOK_CSS = r"""
-html[data-accent=gold]{--brand:#CE9618;--brand2:#F5C542}html[data-accent=green]{--brand:#169660;--brand2:#34d399}
-html[data-accent=blue]{--brand:#2563EB;--brand2:#60a5fa}html[data-accent=red]{--brand:#D62834;--brand2:#fb7185}
-html[data-accent=pink]{--brand:#D62C80;--brand2:#f472b6}html[data-accent=teal]{--brand:#0E8C82;--brand2:#2dd4bf}
-html[data-accent=orange]{--brand:#E65C12;--brand2:#fb923c}html[data-accent=ice]{--brand:#328CD7;--brand2:#7dd3fc}
-html[data-accent=black]{--brand:#3A3A48;--brand2:#a1a1aa}html[data-accent=purple]{--brand:#7B3FE4;--brand2:#a27bff}
+html[data-accent=gold],body[data-accent=gold]{--brand:#CE9618;--brand2:#F5C542;--gold:#F5C542}
+html[data-accent=green],body[data-accent=green]{--brand:#169660;--brand2:#34d399;--gold:#6ee7b7}
+html[data-accent=blue],body[data-accent=blue]{--brand:#2563EB;--brand2:#60a5fa;--gold:#93c5fd}
+html[data-accent=red],body[data-accent=red]{--brand:#D62834;--brand2:#fb7185;--gold:#fda4af}
+html[data-accent=pink],body[data-accent=pink]{--brand:#D62C80;--brand2:#f472b6;--gold:#f9a8d4}
+html[data-accent=teal],body[data-accent=teal]{--brand:#0E8C82;--brand2:#2dd4bf;--gold:#5eead4}
+html[data-accent=orange],body[data-accent=orange]{--brand:#E65C12;--brand2:#fb923c;--gold:#fdba74}
+html[data-accent=ice],body[data-accent=ice]{--brand:#328CD7;--brand2:#7dd3fc;--gold:#bae6fd}
+html[data-accent=black],body[data-accent=black]{--brand:#3A3A48;--brand2:#a1a1aa;--gold:#e4e4e7}
+html[data-accent=purple],body[data-accent=purple]{--brand:#7B3FE4;--brand2:#a27bff;--gold:#F5C542}
 html[data-bg=court] body,body[data-bg=court]{background:radial-gradient(1200px 700px at 8% -12%,#7B3FE466,transparent 55%),
  radial-gradient(900px 500px at 100% 0,#F5C54222,transparent 50%),var(--bg)!important}
 html[data-bg=arena] body,body[data-bg=arena]{background:
@@ -20624,7 +20641,20 @@ a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{wid
 .lookrow{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .lookrow button{height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--card2);
  color:var(--text);cursor:pointer;font-weight:700}
-@media (max-width:720px){.lookgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lookaccents{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:4px}
+.acchip{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;width:100%;min-width:0;
+ padding:0 8px;border-radius:999px;border:1px solid var(--line);background:var(--card2);color:var(--text);
+ cursor:pointer;font:inherit;font-weight:700;font-size:12.5px}
+.acchip .acdot{width:14px;height:14px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 1px #ffffff44}
+.acchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acchip.on{outline:2px solid var(--gold);outline-offset:1px;border-color:transparent}
+.acchip[data-ac=purple] .acdot{background:#7B3FE4}.acchip[data-ac=gold] .acdot{background:#F5C542}
+.acchip[data-ac=green] .acdot{background:#34d399}.acchip[data-ac=blue] .acdot{background:#60a5fa}
+.acchip[data-ac=red] .acdot{background:#fb7185}.acchip[data-ac=pink] .acdot{background:#f472b6}
+.acchip[data-ac=teal] .acdot{background:#2dd4bf}.acchip[data-ac=orange] .acdot{background:#fb923c}
+.acchip[data-ac=ice] .acdot{background:#7dd3fc}.acchip[data-ac=black] .acdot{background:#a1a1aa}
+@media (max-width:720px){.lookgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .lookaccents{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (prefers-reduced-motion:reduce){#intro{display:none}}
 """
 SITE_LOOK_CSS += (
@@ -20682,13 +20712,13 @@ body.v4{background:
  radial-gradient(900px 520px at 100% 0,#F5C54228,transparent 52%),
  radial-gradient(700px 380px at 50% 120%,#3b1d8a33,transparent),var(--bg)}
 body.v4 .top,body.v4 nav.tabs,body.v4 main,body.v4 footer,body.v4 .ticker{max-width:var(--max)}
-body.v4 header{overflow:visible;box-shadow:0 22px 50px -24px #7B3FE488,0 1px 0 #F5C54233 inset;border-bottom:1px solid #F5C54222}
-body.v4 .brand h1{font-size:28px;letter-spacing:.16em;background:linear-gradient(90deg,#fff,#F5C542,#c4a6ff);
+body.v4 header{overflow:visible;box-shadow:0 22px 50px -24px color-mix(in srgb,var(--brand) 53%,transparent),0 1px 0 color-mix(in srgb,var(--gold) 20%,transparent) inset;border-bottom:1px solid color-mix(in srgb,var(--gold) 13%,transparent)}
+body.v4 .brand h1{font-size:28px;letter-spacing:.16em;background:linear-gradient(90deg,#fff,var(--gold),var(--brand2));
  -webkit-background-clip:text;background-clip:text;color:transparent}
 body.v4 .findwrap{position:relative;flex:1;max-width:340px;min-width:0;z-index:20}
 body.v4 .find{width:100%;max-width:none;height:38px;border-radius:12px;border:1px solid var(--line);
  background:var(--card);color:var(--text);padding:0 12px;outline:none}
-body.v4 .find:focus{border-color:var(--brand2);box-shadow:0 0 0 3px #7B3FE433}
+body.v4 .find:focus{border-color:var(--brand2);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 20%,transparent)}
 body.v4 .sheet{z-index:40}
 body.v4 .findpop{position:absolute;top:calc(100% + 8px);left:0;width:min(680px,94vw);z-index:30;
  background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px 10px 16px;
@@ -20697,7 +20727,7 @@ body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;al
  padding:10px;border-radius:14px;background:var(--card2);margin:0 0 8px;min-width:0;width:100%;
  border:1px solid transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 body.v4 .pcard:last-child{margin-bottom:0}
-body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:#7B3FE41a}
+body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
 body.v4 .pface{width:72px;height:72px;border-radius:14px;overflow:hidden;background:#1a1028;flex:none;align-self:start}
 body.v4 .pface img,body.v4 .pface .pletter{width:72px;height:72px;object-fit:cover;object-position:center 18%;display:block}
 body.v4 .pface .pletter{display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
@@ -20711,7 +20741,7 @@ body.v4 .pstat span{font-size:10.5px;color:var(--muted);letter-spacing:.04em;tex
 body.v4 .pchips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
 body.v4 .pchip{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:99px;
  padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer}
-body.v4 .pchip.on{background:linear-gradient(90deg,#7B3FE4,#5b2bb8);border-color:#7B3FE4;color:#fff}
+body.v4 .pchip.on{background:linear-gradient(90deg,var(--brand),var(--brand2));border-color:var(--brand);color:#fff}
 body.v4 .proj{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:14px}
 body.v4 .projl{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
 body.v4 .projn{text-align:center;min-width:110px}.projn b{display:block;font-size:34px;font-weight:850;font-variant-numeric:tabular-nums;line-height:1.05}
@@ -20728,14 +20758,14 @@ body.v4 .plog:first-child{border-top:0}
 body.v4 .plog .nm{font-weight:700;white-space:normal;overflow:visible}
 body.v4 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-width:var(--max);
  margin:0 auto;padding:4px 20px 16px}
-body.v4 .kpis .card.kpi{margin:0;padding:12px 14px;box-shadow:0 16px 40px -28px #7B3FE466;grid-column:auto}
+body.v4 .kpis .card.kpi{margin:0;padding:12px 14px;box-shadow:0 16px 40px -28px color-mix(in srgb,var(--brand) 40%,transparent);grid-column:auto}
 body.v4 .card{border-radius:18px}
 body.v4 nav.tabs button.on:after{height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--gold),var(--brand2))}
 body.v4 .oslip{border-radius:16px}
 a.staffbtn{display:none}
 body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;padding:0 14px;border-radius:12px;
- background:linear-gradient(90deg,#F5C542,#7B3FE4);color:#14003A;font-weight:850;font-size:11px;letter-spacing:.12em;
- text-transform:uppercase;text-decoration:none;box-shadow:0 8px 22px -12px #F5C542aa}
+ background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;font-size:11px;letter-spacing:.12em;
+ text-transform:uppercase;text-decoration:none;box-shadow:0 8px 22px -12px color-mix(in srgb,var(--gold) 67%,transparent)}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 .findwrap{max-width:none;width:100%;order:5;flex:1 1 100%}
  body.v4 .findpop{width:min(100vw - 24px,680px);left:0;right:auto}}
@@ -20890,31 +20920,38 @@ const LOOKS=[["court","Classic court","The original purple court"],["arena","Are
  ["gridiron","Gridiron","Game-night turf"],["vegas","Vegas sunset","Synthwave sun and palms"],
  ["midnight","Midnight","Clean and quiet"],["hardwood","Hardwood","Warm wood floor"]];
 const ACCENTS=["purple","gold","green","blue","red","pink","teal","orange","ice","black"];
+const GROUP_LOOK={bg:document.documentElement.dataset.bg||(document.body&&document.body.dataset.bg)||'',
+ ac:document.documentElement.dataset.accent||(document.body&&document.body.dataset.accent)||''};
 function readLook(){try{return JSON.parse(localStorage.getItem('pb-look')||'{}')}catch(e){return {}}}
 function applyLook(){const s=readLook();const bg=LOOKS.some(x=>x[0]===s.bg)?s.bg:'';const ac=ACCENTS.includes(s.accent)?s.accent:'';
- const root=document.documentElement;if(bg){root.dataset.bg=bg;if(document.body)document.body.dataset.bg=bg}
- else{delete root.dataset.bg;if(document.body)delete document.body.dataset.bg}
- if(ac)root.dataset.accent=ac;else delete root.dataset.accent}
+ const root=document.documentElement,body=document.body,set=(el,k,v)=>{if(!el)return;if(v)el.dataset[k]=v;else delete el.dataset[k]};
+ const useBg=bg||GROUP_LOOK.bg,useAc=ac||GROUP_LOOK.ac;
+ set(root,'bg',useBg);set(body,'bg',useBg);set(root,'accent',useAc);set(body,'accent',useAc)}
 function saveLook(bg,ac){const s=readLook();if(bg!==undefined)s.bg=bg;if(ac!==undefined)s.accent=ac;
  try{if(!s.bg&&!s.accent)localStorage.removeItem('pb-look');else localStorage.setItem('pb-look',JSON.stringify(s))}catch(e){}
  applyLook();paintLook()}
+function resetLook(){try{localStorage.removeItem('pb-look')}catch(e){}applyLook();paintLook()}
 const LOOK_SW={court:'radial-gradient(80% 80% at 20% 0,#7B3FE4aa,transparent),#12081c',
  arena:'radial-gradient(40% 100% at 20% 0,#F5C54299,transparent),radial-gradient(40% 100% at 80% 0,#F5C54266,transparent),#12081c',
  neoncity:'linear-gradient(#1a1038,#c45cff33),#12061c',galaxy:'radial-gradient(circle at 70% 30%,#7B3FE4,#070614)',
  goldluxe:'linear-gradient(135deg,#1a1408,#F5C54255)',aurora:'linear-gradient(#0a1824,#34d39966)',
  gridiron:'linear-gradient(#0a1a10,#1a5c32aa)',vegas:'linear-gradient(#1a0a28,#F5C542)',midnight:'linear-gradient(#0a1024,#070814)'};
-function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();
- put(box,LOOKS.map(([id,n,d])=>h('button',{class:'looktile'+(s.bg===id?' on':''),type:'button','data-bg':id},
+function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();const def=!s.bg;
+ put(box,h('button',{class:'looktile'+(def?' on':''),type:'button','data-reset':'1'},
+  h('i',{class:'sw'},h('img',{src:'/img/look/default.svg',alt:'',decoding:'async'})),h('b',{text:'Group default'}),
+  h('span',{text:'The group’s court and accent'}),def?h('em',{class:'onpill',text:'ON'}):null),
+  LOOKS.map(([id,n,d])=>h('button',{class:'looktile'+(s.bg===id?' on':''),type:'button','data-bg':id},
   h('i',{class:'sw'},h('img',{src:'/img/look/'+id+'.svg',alt:'',decoding:'async'})),h('b',{text:n}),h('span',{text:d}),
   s.bg===id?h('em',{class:'onpill',text:'ON'}):null)));
- const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{type:'button',class:s.accent===a?'on':'','data-ac':a,text:a})))}
+ const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{class:'acchip'+(s.accent===a?' on':''),type:'button','data-ac':a},
+  h('i',{class:'acdot'}),h('span',{text:a}))))}
 applyLook();
 const lookSheet=$('#looksheet');const lookBtn=$('#lookbtn');
 if(lookBtn)lookBtn.addEventListener('click',()=>{paintLook();lookSheet.classList.add('on')});
 if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')lookSheet.classList.remove('on')});
- $('#lookgrid')&&$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile');if(t)saveLook(t.getAttribute('data-bg'),undefined)});
- $('#lookaccents')&&$('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});
- $('#lookreset')&&$('#lookreset').addEventListener('click',()=>{try{localStorage.removeItem('pb-look')}catch(e){}applyLook();paintLook()})}
+ $('#lookgrid')&&$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile');if(!t)return;
+  if(t.hasAttribute('data-reset'))resetLook();else saveLook(t.getAttribute('data-bg'),undefined)});
+ $('#lookaccents')&&$('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});}
 """ + SITE_SMOKE_JS + r"""
 addEventListener('load',smokeIntro);
 """
@@ -20924,9 +20961,8 @@ addEventListener('load',smokeIntro);
         '<div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">'
         '<h3>Background</h3><p class="lookhint">Pick the scene behind the page. It\'s saved on this device only.</p>'
         '<div class="lookgrid" id="lookgrid"></div>'
-        '<p class="lookhint" style="margin-top:14px">Accent</p><div class="lookrow" id="lookaccents"></div>'
-        '<div class="lookrow"><button type="button" id="lookreset">Use the group default</button>'
-        '<button type="button" id="lookdone">Done</button></div></div></div>'
+        '<p class="lookhint" style="margin-top:14px">Accent</p><div class="lookaccents" id="lookaccents"></div>'
+        '<div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>'
         '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">'
         '<img src="' + DASH_FAVICON + '" alt="" width="120" height="120">'
         '<div id="introtitle">Pimp\'s Dashboard</div></div></div>'
@@ -21224,21 +21260,151 @@ async def crash_notify(client, kind: str, title: str, why: str) -> None:
     crash_note(kind, title, why)
     if kind in ("ok", "info"):
         return
-    text = f"🚨 **{title}**\n{clip(why, 300)}"
+    await post_alert(client, f"🚨 **{title}**\n{clip(why, 300)}", ping=True)
+
+
+def alert_channel_ids(guild_id: int) -> list[int]:
+    """Recap first (the group chat), then audit, then tickets."""
+    ids = []
+    for key in ("recap_channel", "audit_channel", "ticket_channel"):
+        v = get_setting(guild_id, key)
+        if v and str(v).isdigit():
+            n = int(v)
+            if n not in ids:
+                ids.append(n)
+    return ids
+
+
+def bot_gap_seconds(since: Optional[str]) -> Optional[int]:
+    if not since:
+        return None
+    try:
+        t = datetime.fromisoformat(str(since).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return max(0, int((datetime.now(timezone.utc) - t.astimezone(timezone.utc)).total_seconds()))
+    except Exception:
+        return None
+
+
+def bot_gap_words(sec: int) -> str:
+    if sec < 90:
+        return f"{sec}s"
+    if sec < 3600:
+        return f"{sec // 60} min"
+    h, m = divmod(sec // 60, 60)
+    return f"{h}h {m}m" if m else f"{h}h"
+
+
+def bot_update_lines(prev: str) -> list[str]:
+    """Notes for versions after `prev`. Unknown/empty prev → the full current list (first announce)."""
+    if not prev:
+        return [line for _, line in BOT_UPDATES]
+    started = False
+    out = []
+    for ver, line in BOT_UPDATES:
+        if started:
+            out.append(line)
+        if ver in str(prev):
+            started = True
+    if not out:
+        return [line for ver, line in BOT_UPDATES if ver in BOT_VERSION]
+    return out
+
+
+def boot_notice(prev_ver: str, gap_sec: Optional[int], planned: bool) -> Optional[str]:
+    """The recap-channel note for a new upload and/or a real outage. None when nothing to say."""
+    new = (prev_ver or "") != BOT_VERSION
+    down = gap_sec is not None and gap_sec >= 180
+    if not new and not down:
+        return None
+    bits = [f"🛠️ **PIMP-BOT is live · {BOT_VERSION}**"]
+    if down:
+        bits.append("Back from an update." if planned else f"Was down about {bot_gap_words(gap_sec)}.")
+    if new:
+        notes = bot_update_lines(prev_ver)
+        if notes:
+            bits.append("**What's new**")
+            bits.extend(f"• {n}" for n in notes)
+    return "\n".join(bits)
+
+
+async def _alert_channel(client, cid: int):
+    ch = client.get_channel(cid) if cid else None
+    if ch is not None:
+        return ch
+    fetch = getattr(client, "fetch_channel", None)
+    if fetch is None:
+        return None
+    try:
+        return await fetch(cid)
+    except Exception:
+        return None
+
+
+async def post_alert(client, text: str, *, ping: bool = False) -> int:
+    """One message per server, recap channel first. Returns how many channels took it."""
+    sent = 0
+    guilds = list(getattr(client, "guilds", None) or [])
+    gids = [g.id for g in guilds if getattr(g, "id", None)]
+    if not gids:
+        gids = [r["guild_id"] for r in db().execute(
+            "SELECT DISTINCT guild_id FROM settings WHERE key IN ('recap_channel','audit_channel','ticket_channel')")]
+    body = text
+    mentions = discord.AllowedMentions.none()
+    if ping and OWNER_IDS:
+        body = text + "\n" + " ".join(f"<@{i}>" for i in OWNER_IDS[:4])
+        mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
     seen = set()
-    for g in list(getattr(client, "guilds", None) or []):
-        gid = getattr(g, "id", None)
-        if not gid or gid in seen:
+    for gid in gids:
+        if gid in seen:
             continue
         seen.add(gid)
-        cid = get_setting(gid, "audit_channel") or get_setting(gid, "recap_channel")
-        ch = client.get_channel(int(cid)) if cid else None
-        if ch is None:
+        posted = False
+        for cid in alert_channel_ids(gid):
+            ch = await _alert_channel(client, cid)
+            if ch is None:
+                continue
+            try:
+                await ch.send(body, allowed_mentions=mentions)
+                posted, sent = True, sent + 1
+                break
+            except Exception:
+                log.warning("Alert failed in channel %s guild %s", cid, gid)
+        if posted:
+            continue
+        g = next((x for x in guilds if getattr(x, "id", None) == gid), None)
+        sysch = getattr(g, "system_channel", None) if g is not None else None
+        if sysch is None:
             continue
         try:
-            await ch.send(text, allowed_mentions=discord.AllowedMentions.none())
+            await sysch.send(body, allowed_mentions=mentions)
+            sent += 1
         except Exception:
-            log.warning("Crash notify failed in guild %s", gid)
+            log.warning("Alert failed in system channel guild %s", gid)
+    return sent
+
+
+async def announce_boot(client) -> Optional[str]:
+    """On process start: tell the recap channel if the version changed or we were gone."""
+    prev = get_setting(0, "bot_announced") or ""
+    hb = get_setting(0, "bot_heartbeat")
+    planned = bool(get_setting(0, "bot_stopping"))
+    gap = bot_gap_seconds(get_setting(0, "bot_disconnect_at") or hb)
+    note = boot_notice(prev, gap, planned)
+    set_setting(0, "bot_heartbeat", now_iso())
+    set_setting(0, "bot_announced", BOT_VERSION)
+    set_setting(0, "bot_stopping", None)
+    set_setting(0, "bot_disconnect_at", None)
+    if not note:
+        return None
+    crash_note("ok" if planned or prev == BOT_VERSION else "bot", "PIMP-BOT is live",
+               clip(note.replace("\n", " · "), 180))
+    try:
+        await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned))
+    except Exception:
+        log.warning("Boot announce failed")
+    return note
 
 
 def staff_rec(uid: int, gid: Optional[int] = None) -> dict:
@@ -21784,8 +21950,8 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">
 <h3>Background</h3><p class="lookhint">Pick the scene behind the page. It's saved on this device only. Hardwood, midnight and the rest are here too.</p>
 <div class="lookgrid" id="lookgrid"></div>
-<div class="lookrow"><button type="button" id="lookreset">Use the group default</button>
-<button type="button" id="lookdone">Done</button></div></div></div>
+<p class="lookhint" style="margin-top:14px">Accent</p><div class="lookaccents" id="lookaccents"></div>
+<div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>
 <div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">
 <img src="{{FAVICON}}" alt="" width="120" height="120"><div id="introtitle">Pimp's Dashboard</div></div></div>
 <script>
@@ -21817,7 +21983,7 @@ function paintAccess(A){A=A||{};const key=A.key||'';const shown=keyOpen&&!!key;
    h('button',{class:'xbtn',type:'button',text:'Copy',onclick:()=>{try{navigator.clipboard.writeText(key)}catch(e){}}})))}
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
- if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+ if(s.accent){document.documentElement.dataset.accent=s.accent;if(document.body)document.body.dataset.accent=s.accent}}catch(e){}
 async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
@@ -21883,20 +22049,32 @@ $('#annform').addEventListener('submit',e=>{e.preventDefault();const f=e.target;
  staffPost({op:'announce',text:f.text.value,when:f.when.value,channel:f.channel.value}).then(()=>{f.reset();load()})});
 const LOOKS=[["court","Classic court"],["arena","Arena lights"],["neoncity","Neon city"],["galaxy","Galaxy"],
  ["goldluxe","Gold luxe"],["aurora","Aurora"],["gridiron","Gridiron"],["vegas","Vegas sunset"],["midnight","Midnight"],["hardwood","Hardwood"]];
-$('#lookbtn').addEventListener('click',()=>{$('#looksheet').classList.add('on');
- const on=document.documentElement.dataset.bg||'';
- put($('#lookgrid'),LOOKS.map(([id,n])=>h('button',{class:'looktile'+(on===id?' on':''),type:'button','data-bg':id},
-  h('i',{class:'sw'},h('img',{src:'/img/look/'+id+'.svg',alt:'',decoding:'async'})),h('b',{text:n}),
-  on===id?h('em',{class:'onpill',text:'ON'}):null)));});
+const ACCENTS=["purple","gold","green","blue","red","pink","teal","orange","ice","black"];
+const GROUP_LOOK={bg:document.documentElement.dataset.bg||'',ac:document.documentElement.dataset.accent||''};
+function readLook(){try{return JSON.parse(localStorage.getItem('pb-look')||'{}')}catch(e){return {}}}
+function applyLook(){const s=readLook();const bg=LOOKS.some(x=>x[0]===s.bg)?s.bg:(GROUP_LOOK.bg||'');
+ const ac=ACCENTS.includes(s.accent)?s.accent:(GROUP_LOOK.ac||'');
+ const set=(el,k,v)=>{if(!el)return;if(v)el.dataset[k]=v;else delete el.dataset[k]};
+ set(document.documentElement,'bg',bg);set(document.body,'bg',bg);
+ set(document.documentElement,'accent',ac);set(document.body,'accent',ac)}
+function paintLook(){const s=readLook();const def=!s.bg;
+ put($('#lookgrid'),h('button',{class:'looktile'+(def?' on':''),type:'button','data-reset':'1'},
+  h('i',{class:'sw'},h('img',{src:'/img/look/default.svg',alt:'',decoding:'async'})),h('b',{text:'Group default'}),
+  h('span',{text:'The group’s court and accent'}),def?h('em',{class:'onpill',text:'ON'}):null),
+  LOOKS.map(([id,n])=>h('button',{class:'looktile'+(s.bg===id?' on':''),type:'button','data-bg':id},
+   h('i',{class:'sw'},h('img',{src:'/img/look/'+id+'.svg',alt:'',decoding:'async'})),h('b',{text:n}),
+   s.bg===id?h('em',{class:'onpill',text:'ON'}):null)));
+ put($('#lookaccents'),ACCENTS.map(a=>h('button',{class:'acchip'+(s.accent===a?' on':''),type:'button','data-ac':a},
+  h('i',{class:'acdot'}),h('span',{text:a}))))}
+function saveLook(bg,ac){const s=readLook();if(bg!==undefined)s.bg=bg;if(ac!==undefined)s.accent=ac;
+ try{if(!s.bg&&!s.accent)localStorage.removeItem('pb-look');else localStorage.setItem('pb-look',JSON.stringify(s))}catch(e){}
+ applyLook();paintLook()}
+$('#lookbtn').addEventListener('click',()=>{paintLook();$('#looksheet').classList.add('on')});
 $('#looksheet').addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')$('#looksheet').classList.remove('on')});
-$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('[data-bg]');if(!t)return;
- const bg=t.getAttribute('data-bg');
- try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');s.bg=bg;localStorage.setItem('pb-look',JSON.stringify(s))}catch(x){}
- document.documentElement.dataset.bg=bg;if(document.body)document.body.dataset.bg=bg;
- document.querySelectorAll('#lookgrid .looktile').forEach(b=>b.classList.toggle('on',b.getAttribute('data-bg')===bg))});
-$('#lookreset').addEventListener('click',()=>{try{localStorage.removeItem('pb-look')}catch(e){}
- delete document.documentElement.dataset.bg;if(document.body)delete document.body.dataset.bg;
- document.querySelectorAll('#lookgrid .looktile').forEach(b=>b.classList.remove('on'))});
+$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile');if(!t)return;
+ if(t.hasAttribute('data-reset')){try{localStorage.removeItem('pb-look')}catch(x){}applyLook();paintLook()}
+ else saveLook(t.getAttribute('data-bg'),undefined)});
+$('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});
 function smokeIntro(){const o=$('#intro');if(o)o.remove()}
 addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
 load();smokeIntro();
@@ -30949,12 +31127,42 @@ class PicksBot(discord.Client):
         log.info("Logged in as %s | version %s | Claude features: %s | receipts channels: %d",
                  self.user, BOT_VERSION, "on" if ai_enabled() else "off",
                  len(self.receipt_channels))
+        if not getattr(self, "_boot_said", False):
+            self._boot_said = True
+            try:
+                await announce_boot(self)
+            except Exception:
+                log.exception("Boot announce failed")
 
     async def on_disconnect(self):
+        try:
+            set_setting(0, "bot_disconnect_at", now_iso())
+        except Exception:
+            pass
         crash_note("bot", "Robot disconnected", "Lost the Discord websocket. It will try to reconnect.")
+        last = getattr(self, "_disc_ping_at", 0)
+        if time.monotonic() - last < 600:
+            return
+        self._disc_ping_at = time.monotonic()
+        try:
+            await asyncio.wait_for(
+                crash_notify(self, "bot", "Robot disconnected",
+                             "Lost the Discord websocket. It will try to reconnect."), 4)
+        except Exception:
+            pass
 
     async def on_resumed(self):
         crash_note("ok", "Robot reconnected", "Discord websocket is back.")
+
+    async def close(self):
+        try:
+            set_setting(0, "bot_stopping", now_iso())
+            await asyncio.wait_for(
+                post_alert(self, f"🛠️ **PIMP-BOT is going down**\nUpdate or restart. Version was {BOT_VERSION}. "
+                           "It should be back in a minute."), 5)
+        except Exception:
+            log.info("Couldn't post going-down note")
+        await super().close()
 
     # ---- scheduled posts ---------------------------------------------------
 
@@ -31210,6 +31418,10 @@ class PicksBot(discord.Client):
     async def run_schedules(self, now: Optional[datetime] = None):
         now = now or datetime.now(TZ)
         _last_cycle["at"] = now_iso()
+        try:
+            set_setting(0, "bot_heartbeat", now_iso())
+        except Exception:
+            pass
         for job in (self.run_live_grading, lambda n: grade_pickem_games(self, n), lambda n: post_hall_of_fame(self),
                     self.run_game_pings, lambda n: self.post_today(n.astimezone(TZ)),
                     lambda n: grade_survivor(self, n), lambda n: send_reminders(self, n),
