@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r74"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r75"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -92,6 +92,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r72", "Each of the five updates now has something on the board: this week's numbers, risk and net on a settled row, the intro only the first time, a People filter, and the version in the footer."),
     ("r73", "People tiles show week, month, and season. A lost combo marks the leg that decided it. A busy dashboard says to wait. Search finds a slip number or a teammate. Built rows are marked live and the list stays."),
     ("r74", "The board filters by book, sport, and day. The ticker can pause. The chart is the last 10 or the last 20. People tiles show best and worst sport, and head-to-head wins. Rows that were already shipping are marked live."),
+    ("r75", "Open slips sit on a sideways rail. A player can be pinned from search. A nudged line is labeled yours. Recent and season averages sit together. This week's logged plays are on the board. The status card names the last job, and the ticker stays off a sheet you are reading."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -533,6 +534,12 @@ _PLAN_LIVE = {
         "Do not drop a sport to make a page faster.",
         "Cache the shell, not the slip numbers.",
         "Label the time zone on anything that is a clock time.",
+        "Staff can open a status card: version, last job, and whether ESPN, Kalshi, and the dashboard answered.",
+        "The ticket rail snaps sideways on a phone.",
+        "The More tab scrolls a long map without covering the header.",
+        "Open slips sit on a sideways rail.",
+        "Logging a slip on the site uses the same confirm rules as Discord.",
+        "An unsure leg still waits for a confirm card.",
     ],
     "r68": [
         "A void or a push is labeled and is not counted as a win.",
@@ -557,6 +564,13 @@ _PLAN_LIVE = {
         "A push stays a push.",
         "The watchlist stays on this device.",
         "The eye stays the only way to reveal the key.",
+        "A player can be pinned from search.",
+        "Coins use one mark.",
+        "The find box stays usable when the phone keyboard is open.",
+        "Legs on one slip stay in the order they were scanned.",
+        "Staff tools stay on Staff HQ.",
+        "Coins stay a game, not a balance to cash out.",
+        "Slip photos stay off the public board.",
     ],
     "r69": [
         "A rate limit says to wait, instead of a blank page.",
@@ -574,6 +588,15 @@ _PLAN_LIVE = {
         "The intro plays once, then stays out of the way.",
         "Win and loss stay green and red.",
         "Keep search at four names until the list is a real results page.",
+        "A line you nudged is labeled as yours.",
+        "Injury status uses the words the feed sent.",
+        "Search results show a focus ring so a keyboard can move through them.",
+        "Player-page buttons are at least a thumb tall.",
+        "The result list has a max height and scrolls inside itself.",
+        "iPhone safe areas keep the header out from under the clock.",
+        "Do not animate the net.",
+        "Do not run the ticker across a sheet you are reading.",
+        "Accents recolor accents. Win and loss colors stay put.",
     ],
     "r70": [
         "A person's card can show their best and worst sport from slips already graded.",
@@ -595,6 +618,9 @@ _PLAN_LIVE = {
         "Discord stays the chat. The board does not grow a second one.",
         "Exports stay the spreadsheet and the CSV.",
         "The record book is written from results. It is not edited on the site.",
+        "A small board lists players the crew logged this week.",
+        "A season average sits next to the recent average.",
+        "The game log is a calm list: date, opponent, number.",
     ],
     "r71": [
         "Classic v1, v2, and v3 stay linked.",
@@ -620,6 +646,8 @@ _PLAN_LIVE = {
         "Posters can keep Pillow. Faces stay on ESPN's square.",
         "The owner still uploads one file. /help is the version check.",
         "These 250 are the roadmap. They are listed here so the order is fixed.",
+        "Roadmap lanes indent so a list of 50 stays readable.",
+        "A player link opens that sheet.",
     ],
 }
 for _row in BOT_PLAN:
@@ -9154,6 +9182,29 @@ def dash_this_week(guild_id: int) -> dict:
     return {"open": int(open_n or 0), "settled": settled, "net": round(net, 2), "coins": coins}
 
 
+def dash_week_plays(guild_id: int) -> list[dict]:
+    """Slips logged since Monday, for the small board of what the crew put in this week."""
+    now = datetime.now(TZ)
+    start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
+    out = []
+    try:
+        rows = db().execute(
+            """SELECT id, bettor_name, description, created_at, hidden, revealed_at
+               FROM picks WHERE guild_id = ? ORDER BY id DESC LIMIT 40""", (guild_id,)).fetchall()
+    except Exception:
+        return []
+    for p in rows:
+        if p["hidden"] and not p["revealed_at"]:
+            continue
+        if local_stamp(p["created_at"] or "") < start:
+            continue
+        out.append({"id": p["id"], "who": clip(p["bettor_name"], 40),
+                    "what": clip(p["description"] or "", 80)})
+        if len(out) >= 8:
+            break
+    return out
+
+
 def dashboard_data(guild_id: int) -> dict:
     season = current_season(guild_id)
     def board(stats):
@@ -9210,7 +9261,7 @@ def dashboard_data(guild_id: int) -> dict:
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "week": dash_this_week(guild_id),
-            "h2h": dash_h2h_board(guild_id)}
+            "h2h": dash_h2h_board(guild_id), "weekplays": dash_week_plays(guild_id)}
 
 
 DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -20375,6 +20426,9 @@ async def dash_api_log(request):
     payout = as_amount(body.get("payout")) or 0.0
     if not who or not what:
         return web.json_response({"ok": False, "error": "Need a name and a pick."}, status=400)
+    low = what.lower()
+    if "sure thing" in low or "sure-thing" in low or re.search(r"\block\b", low):
+        return web.json_response({"ok": False, "error": "Log the play. Leave out lock language."}, status=400)
     acct = acct_from_request(request)
     bettor_id = None
     if acct:
@@ -20927,7 +20981,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r74';"
+    "const CACHE='pb-shell-r75';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21236,7 +21290,17 @@ tr:first-child td{border-top:0}td.n{text-align:right;font-variant-numeric:tabula
 .ticker.paused .track{animation-play-state:paused}
 .tpause{margin-left:8px;border:0;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer}
 body.dense .card{padding:10px 12px}body.dense .row{padding-top:4px;padding-bottom:4px}
-@media print{body,body.v4{background:#fff!important;color:#111!important}
+body.sheet-on .ticker{display:none}
+body.v4 .pcardwrap{position:relative}
+body.v4 .pcardwrap .tpause{position:absolute;top:8px;right:10px;z-index:2}
+@media (max-width:720px){
+ body.v4 .slips{display:flex;flex-wrap:nowrap;overflow-x:auto;scroll-snap-type:x mandatory;gap:10px}
+ body.v4 .oslip{flex:0 0 240px;scroll-snap-align:start}}
+body.v4 .pcard:focus-visible,body.v4 .nitem:focus-visible,body.v4 .find:focus-visible{outline:2px solid var(--brand2);outline-offset:2px}
+body.v4 .pchip,body.v4 .pnudge{min-height:44px}
+body.v4 .findpop{max-height:min(70dvh,680px)}
+body.v4 .rmap .rms{margin-left:6px}body.v4 .rmbits{padding-left:28px}
+body.v4 .net{animation:none}
  .ticker,#intro,.findwrap,nav.tabs,.kpis{display:none!important}
  .card,.rmap,.rmbits{background:#fff!important;color:#111!important;box-shadow:none!important}}
 footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:var(--faint);font-size:12.5px;display:flex;gap:12px;flex-wrap:wrap}
@@ -21634,11 +21698,11 @@ function skeletonAll(){for(const id of Object.keys(TABS)){const el=$('#tab-'+id)
 const sk=()=>h('span',{class:'skl',style:'display:inline-block;width:130px;height:12px'});
 
 /* ---------- person + slip pages ---------- */
-function openSheet(){const sh=$('#sheet');if(!sh.classList.contains('on')){sh.classList.add('on');document.body.style.overflow='hidden'}
+function openSheet(){const sh=$('#sheet');document.body.classList.add('sheet-on');if(!sh.classList.contains('on')){sh.classList.add('on');document.body.style.overflow='hidden'}
  put($('#sheet-body'),h('div',{class:'ph'},h('div',{class:'skl',style:'width:56px;height:56px;border-radius:18px'}),
   h('div',{style:'flex:1'},h('div',{class:'skl',style:'height:22px;width:45%'}),h('div',{class:'skl',style:'height:14px;width:30%;margin-top:8px'}))),
   h('div',{class:'kpis'},skel(4,'card')),h('div',{class:'pgrid'},h('div',null,h('div',{class:'img sk',style:'aspect-ratio:5/7'})),h('div',null,skel(6))));$('#close').focus()}
-function closeSheet(){$('#sheet').classList.remove('on');document.body.style.overflow=''}
+function closeSheet(){$('#sheet').classList.remove('on');document.body.classList.remove('sheet-on');document.body.style.overflow=''}
 function closeClick(){if(history.state&&history.state.pb)history.back();else{history.replaceState(null,'',location.pathname+location.search);closeSheet()}}
 function sheetError(t){put($('#sheet-body'),empty(t,'It may be private, or it was deleted. Close this and try another.'))}
 function kbox(k,v,c){return h('div',{class:'card kbox'},h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}))}
@@ -21776,6 +21840,7 @@ function healthCard(){const H=S.health;
   h('div',{class:'hbox'},h('h3',null,'Slips read today'),bars(H.reads),h('p',{class:'hint',text:'Readers on, in order: '+(H.readers_on.join(' → ')||'none (the form only)')})),
   h('div',{class:'hbox'},h('h3',null,'Questions today'),bars(H.questions),h('p',{class:'hint',text:'Claude calls today: '+H.claude_today})),
   h('div',{class:'hbox'},h('h3',null,'Background'),kv('Last cycle',H.cycle.ago||'not yet',H.cycle.ok?'up':'down'),
+   kv('Last job',H.last_job||'not yet'),
    kv('Jobs',fail.length?fail.length+' failing':(H.jobs.total?'all '+H.jobs.total+' healthy':'not run yet'),fail.length?'down':'up'),
    fail.slice(0,4).map(j=>kv(j.name,'failed ×'+j.fails,'down')),kv('Up for',H.uptime),kv('Version',H.version))))}
 function fresh(t){if(t==='live'&&(!S.live||Date.now()-S.liveAt>20000))loadLive();
@@ -22098,15 +22163,22 @@ function faceBox(photo,name,lg,league,id){const px=lg?120:72,cls='pface'+(lg?' l
  img.width=w;img.height=w;
  img.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
  return img}
+function pins(){try{const xs=JSON.parse(localStorage.getItem('pb-pins')||'[]');return Array.isArray(xs)?xs:[]}catch(e){return []}}
+function pinOn(pl){return pins().some(x=>x.slug===pl.slug&&String(x.id)===String(pl.id))}
+function togglePin(pl){let xs=pins().filter(x=>!(x.slug===pl.slug&&String(x.id)===String(pl.id)));
+ if(xs.length===pins().length)xs.unshift({slug:pl.slug,id:String(pl.id),name:pl.name||''});
+ try{localStorage.setItem('pb-pins',JSON.stringify(xs.slice(0,12)))}catch(e){}
+ if(S.data)render();else paintFind()}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
  const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
  const stats=(pl.stats||[]).map(st=>h('div',{class:'pstat'},h('b',{text:String(st.last)}),
   h('span',{text:st.stat+' last'}),h('span',{text:'avg '+st.avg+' · '+st.n})));
  const open=()=>{const box=$('#findpop');if(box)box.hidden=true;if(pl.slug&&pl.id)go('#/pl/'+pl.slug+'/'+pl.id)};
- return h('button',{class:'pcard',type:'button',onclick:open},faceBox(pl.photo,pl.name,false,pl.slug,pl.id),
+ return h('div',{class:'pcardwrap'},h('button',{class:'pcard',type:'button',onclick:open},faceBox(pl.photo,pl.name,false,pl.slug,pl.id),
   h('div',{style:'min-width:0'},h('div',{class:'pn',text:pl.name}),
   h('div',{class:'pm',text:bits.join(' · ')+(extra?' · '+extra:'')}),
-  stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'})))}
+  stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'}))),
+  h('button',{type:'button',class:'tpause',onclick:ev=>{ev.stopPropagation();togglePin(pl)}},pinOn(pl)?'Pinned':'Pin'))}
 function phoneHomeHint(){const stand=matchMedia('(display-mode:standalone)').matches||navigator.standalone;
  if(stand){document.documentElement.classList.add('app');return}
  const find=$('#find');if(find&&matchMedia('(max-width:720px)').matches)find.placeholder='Search';
@@ -22160,6 +22232,7 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  if(S.pline==null)S.pline=defaultLine(vals.slice(0,10));const line=+S.pline;
  const win=n=>{const part=vals.slice(0,n);if(!part.length)return null;let o=0;for(const v of part)if(v>line)o++;
   return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
+ const base=defaultLine(vals.slice(0,10));const yours=Math.abs(line-base)>0.05;
  const L5=win(5),L10=win(10),L20=win(20),lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
  const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
  const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;try{localStorage.setItem('pb-stat',s.key)}catch(e){}paintPlayer()}},s.label);
@@ -22181,13 +22254,13 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const kids=[
   h('div',{class:'plhead'},faceBox(d.photo,d.name,true,d.slug,d.id),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
   h('div',{class:'pchips'},stats.map(chip)),
-  h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:lab})),nudge(0.5),nudge(1)),
+  h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:yours?'Your line':lab})),nudge(0.5),nudge(1)),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
   h('div',{class:'card'},h('h2',null,'Last '+games.length+' vs '+fmt(line),h('span',{class:'r'},h('span',{class:'seg'},[10,20].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},'Last '+n))))),
    games.length?playerChart(games,line,fmt):null,
    games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
     title:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'})),
-  h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Avg L10',L10?String(L10.avg):'–'))];
+  h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Recent',L10?String(L10.avg):'–'),kbox('Season',vals.length?String(Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10):'–'))];
  if(d.next&&d.next.line)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'NEXT GAME'}),
   h('div',{class:'nm',text:d.next.line}),d.next.sub?h('div',{class:'sub',text:d.next.sub}):null));
  if(splits.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'SPLITS AND ROLE'}),...splits));
@@ -22214,18 +22287,24 @@ async function showPlayer(slug,id){openSheet();const box=$('#findpop');if(box)bo
  paintPlayer()}
 function paintFind(){const box=$('#findpop');if(!box)return;
  const q=(S.q||'').trim();const digits=/^[0-9]{1,10}$/.test(q);
- if(q.length<3&&!digits){box.hidden=true;put(box);return}
+ if(q.length<3&&!digits){const saved=pins();if(!saved.length){box.hidden=true;put(box);return}
+  box.hidden=false;put(box,h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Pinned'}),
+   saved.map(p=>h('button',{class:'nitem',type:'button',onclick:()=>{box.hidden=true;if(p.slug&&p.id)go('#/pl/'+p.slug+'/'+p.id)}},h('b',{text:p.name||'Player'}))));return}
  const d=S.players;const ql=q.toLowerCase();
  const people=(S.data&&S.data.people||[]).filter(p=>(p.name||'').toLowerCase().includes(ql));
  const slips=[...(S.data&&S.data.open||[]),...(S.data&&S.data.recent||[])].filter(matchQ).slice(0,5);
  const mates=(S.data&&S.data.groupparlay||[]).filter(l=>((l.who||'')+' '+(l.leg||'')).toLowerCase().includes(ql)).slice(0,4);
  const pls=digits?[]:((d&&d.players)||[]);
+ const saved=q.length?[]:pins();
  if(!digits&&q.length>=3&&!d&&!people.length&&!slips.length&&!mates.length){box.hidden=false;put(box,h('p',{class:'muted',text:'Looking up “'+q+'”…'}));return}
- if(!pls.length&&!people.length&&!slips.length&&!mates.length){box.hidden=false;put(box,h('p',{class:'muted',text:'No match for “'+q+'”'}));return}
+ if(!pls.length&&!people.length&&!slips.length&&!mates.length&&!saved.length){box.hidden=false;put(box,h('p',{class:'muted',text:'No match for “'+q+'”'}));return}
  const openMate=l=>{const pop=$('#findpop');if(pop)pop.hidden=true;
   const person=(S.data&&S.data.people||[]).find(p=>(p.name||'').toLowerCase()===(l.who||'').toLowerCase());
   if(person)go('#/p/'+person.key);else show('more')};
- box.hidden=false;put(box,pls.map(playerCard),
+ box.hidden=false;put(box,
+  saved.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Pinned'}):null,
+  saved.map(p=>h('button',{class:'nitem',type:'button',onclick:()=>{box.hidden=true;if(p.slug&&p.id)go('#/pl/'+p.slug+'/'+p.id)}},h('b',{text:p.name||'Player'}))),
+  pls.map(playerCard),
   people.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'In this group'}):null,
   people.map(p=>h('button',{class:'nitem',type:'button',onclick:()=>go('#/p/'+p.key)},h('b',{text:p.name}),h('span',{text:p.record||''}))),
   slips.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Matching slips'}):null,
@@ -22299,6 +22378,7 @@ function logBox(){return h('form',{class:'logbox',onsubmit:async e=>{e.preventDe
         "  card('My board','',null,watchList()),\n"
         "  card('Log a slip','',null,logBox()),\n"
         "  card('Tonight’s board','s6',null,wide(imgBox('board.png','','No board yet','The board fills in from open slips.','Tonight’s board'))),\n"
+        "  (d.weekplays&&d.weekplays.length)?card('Logged this week','',String(d.weekplays.length),h('div',{class:'rows'},d.weekplays.map(p=>h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},h('div',{style:'min-width:0'},h('div',{class:'nm',text:p.who}),h('div',{class:'sub',text:p.what})))))):null,\n"
         "  card('Recent results','s5',null,boardBar(d),d.recent.filter(p=>boardPick(p,true)).length?h('div',{class:'rows'},d.recent.filter(p=>boardPick(p,true)).slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
         1)
     html = html.replace(
@@ -32547,7 +32627,7 @@ def _dash30_ago(ts: Optional[float], now: float) -> Optional[str]:
 def dash30_health() -> dict:
     """Data feeds, today's slip reads and questions, the scheduler, the version. Safe to show anyone signed in."""
     now = time.time()
-    feeds = []
+    feeds = [{"name": "Dashboard", "state": "ok", "ok": 1, "fail": 0, "last_ok": "just now", "code": None}]
     hosts = list(HEALTH_NAMES) + sorted(h for h in DATA_HEALTH if h not in HEALTH_NAMES)
     for host in hosts[:20]:
         h = DATA_HEALTH.get(host)
@@ -32581,8 +32661,15 @@ def dash30_health() -> dict:
         claude_n = int(claude_calls_today())
     except Exception:
         claude_n = 0
+    last_job = ""
+    best_ok = ""
+    for jname, jh in JOB_HEALTH.items():
+        ok_at = jh.get("ok_at") or ""
+        if ok_at >= best_ok:
+            best_ok, last_job = ok_at, jname
     return {"version": BOT_VERSION, "uptime": f"{up.days}d {up.seconds // 3600}h {(up.seconds // 60) % 60}m",
             "cycle": {"ago": _dash30_ago(last_ts, now), "ok": bool(last_ts and now - last_ts < 600)},
+            "last_job": last_job or "not yet",
             "jobs": {"total": len(JOB_HEALTH), "failing": failing[:8]}, "feeds": feeds, "reads": reads,
             "questions": questions, "readers_on": on, "claude_today": claude_n}
 
