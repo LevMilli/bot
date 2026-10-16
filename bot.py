@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r85"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r87"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "r70"               # the idea list this upload is filling; r81 on the site was update r69
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -104,6 +104,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r83", "A ticket opens the same X-ray as /trend. Two players can share one last-10 chart. Rest days and the opponent's last result sit on the next game. Search takes a team name."),
     ("r84", "Dark mode keeps the accent in the cards, backgrounds read clearly, and the home order is yours. The smoke intro plays on the phone app. The footer shows the upload and the update together."),
     ("r85", "On a wide screen the background stays the size of the window and sits at the top, so the scene is visible instead of a blown-up crop."),
+    ("r86", "On a phone the background stays a scene at the top of the screen and fades out, so it does not cut through the cards as a stripe."),
+    ("r87", "A second player is added into the same green-and-red chart, one bar for both, instead of a separate combo graph."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -21614,7 +21616,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r85';"
+    "const CACHE='pb-shell-r87';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22620,10 +22622,9 @@ SITE_LOOK_CSS += "".join(
     f"html[data-bg={k}] body,body[data-bg={k}]{{background-color:transparent!important;background-image:none!important}}"
     f"html[data-bg={k}] body:before,body[data-bg={k}]:before{{content:\"\"!important;position:fixed;inset:0;z-index:-1;"
     f"pointer-events:none;background-image:linear-gradient(#0b071424,#0b071448),url('/img/look/{k}.svg')!important;"
-    f"background-repeat:no-repeat!important;background-position:center top!important;background-size:cover!important;"
-    f"-webkit-mask-image:none!important;mask-image:none!important}}"
-    f"@media (min-width:1100px){{html[data-bg={k}] body:before,body[data-bg={k}]:before{{"
-    f"background-size:100vw auto!important}}}}"
+    f"background-repeat:no-repeat!important;background-position:center top!important;background-size:100% auto!important;"
+    f"-webkit-mask-image:linear-gradient(#000 0%,#000 78%,transparent 100%)!important;"
+    f"mask-image:linear-gradient(#000 0%,#000 78%,transparent 100%)!important}}"
     f".looktile[data-bg={k}] .sw{{background-image:url('/img/look/{k}.svg')}}"
     for k in LOOK_IDS
 )
@@ -22893,22 +22894,14 @@ function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().revers
   kids.push(sv('rect',{x:String(x0),y:String(y(Math.max(0,x.v))),width:String(Math.max(5,bw*0.64)),height:String(hgt),rx:'3',fill:fill}));
   kids.push(sv('text',{x:String(cx),y:String(y(Math.max(0,x.v))-5),'text-anchor':'middle','font-size':n>14?'7':'8.5',fill:'#e8dff8'},fmt(x.v)));
   kids.push(sv('text',{x:String(cx),y:String(H-10),'text-anchor':'middle','font-size':n>14?'7':'9',fill:'#a59cbc'},
-   (x.g.at==='@'?'@':'v')+(x.g.opp||'')))});
+   x.label||((x.g.at==='@'?'@':'v')+(x.g.opp||''))))});
  return sv('svg',{class:'pchart',viewBox:'0 0 '+W+' '+H,width:'100%',role:'img','aria-label':'Last '+n+' games vs '+fmt(line)},...kids)}
-function playerChartTwo(a,b,line,fmt,nameA,nameB){const rowsA=a.slice(0,10).slice().reverse(),rowsB=b.slice(0,10).slice().reverse();
- const n=Math.max(rowsA.length,rowsB.length);if(!n)return null;
- const W=640,H=248,pL=8,pR=40,pT=26,pB=36,iW=W-pL-pR,iH=H-pT-pB;
- const mx=Math.max(line,...rowsA.map(x=>x.v),...rowsB.map(x=>x.v),1)*1.22;const bw=iW/n;const y=v=>pT+iH-(Math.max(0,v)/mx*iH);const ly=y(line);
- const kids=[sv('line',{x1:String(pL),x2:String(W-pR),y1:String(H-pB),y2:String(H-pB),stroke:'#3a2a55','stroke-width':'1'}),
-  sv('line',{x1:String(pL),x2:String(W-pR),y1:String(ly),y2:String(ly),stroke:'#f4f1fb','stroke-width':'1.6','stroke-dasharray':'5 4'}),
-  sv('text',{x:String(W-4),y:String(ly-6),'text-anchor':'end','font-size':'11',fill:'#c4b8dc'},fmt(line))];
- const bar=(row,i,shift,over,under)=>{if(!row)return;const hgt=Math.max(4,(Math.max(0,row.v)/mx)*iH);
-  const x0=pL+i*bw+bw*shift;const fill=row.v>line?over:row.v<line?under:'#94a3b8';
-  kids.push(sv('rect',{x:String(x0),y:String(y(Math.max(0,row.v))),width:String(Math.max(4,bw*0.34)),height:String(hgt),rx:'3',fill:fill}))};
- for(let i=0;i<n;i++){bar(rowsA[i],i,0.12,'#34d399','#fb7185');bar(rowsB[i],i,0.50,'#a78bfa','#fbbf24')}
- kids.push(sv('text',{x:'8',y:String(H-10),'font-size':'11',fill:'#34d399'},(nameA||'Player').slice(0,18)));
- kids.push(sv('text',{x:'200',y:String(H-10),'font-size':'11',fill:'#a78bfa'},(nameB||'Second').slice(0,18)));
- return sv('svg',{class:'pchart',viewBox:'0 0 '+W+' '+H,width:'100%',role:'img','aria-label':'Last 10 for '+(nameA||'')+' and '+(nameB||'')+' vs '+fmt(line)},...kids)}
+function statHits(games,stat){return (games||[]).map(g=>g.vals&&g.vals[stat]!=null&&!g.dnp?{g,v:+g.vals[stat]}:null).filter(Boolean).filter(x=>!(S.hidePre&&x.g.pre))}
+function togetherGames(aRows,bRows,n){const out=[];const m=Math.min(aRows.length,bRows.length,n);
+ for(let i=0;i<m;i++){const a=aRows[i],b=bRows[i];
+  const lab=o=>{const t=(o.opp||'').slice(0,3).toUpperCase();return (o.at==='@'?'@':'')+t};
+  out.push({g:a.g,v:Math.round((a.v+b.v)*10)/10,label:lab(a.g)+'+'+lab(b.g)})}
+ return out}
 function latelyTxt(games,key){const xs=(games||[]).map(g=>g.vals&&g.vals[key]!=null?+g.vals[key]:null).filter(v=>v!=null);
  if(xs.length<6)return '';const a=mean(xs.slice(0,5)),b=mean(xs.slice(5,Math.min(10,xs.length)));
  if(a==null||b==null)return '';const dlt=a-b,arrow=dlt>0.35?'▲ from ':dlt<-0.35?'▼ from ':'= from ';
@@ -22937,10 +22930,8 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  if(S.psplit!=='home'&&S.psplit!=='away')S.psplit='all';
  const view=S.psplit==='home'?hits.filter(x=>x.g.at!=='@'):S.psplit==='away'?hits.filter(x=>x.g.at==='@'):hits;
  const viewVals=view.map(x=>x.v);
- const win=n=>{const part=viewVals.slice(0,n);if(!part.length)return null;let o=0;for(const v of part)if(v>line)o++;
-  return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
  const base=defaultLine(vals.slice(0,10));const yours=Math.abs(line-base)>0.05;
- const L5=win(5),L10=win(10),L20=win(20),lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
+ const lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
  const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
  const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;try{localStorage.setItem('pb-stat',s.key)}catch(e){}paintPlayer()}},s.label);
  const GROUPS=[['Scoring',['points','pra','pr','pa','threes','fgm','ftm','fantasy','pts50','anytime_td','pass_td','rush_td']],
@@ -22954,7 +22945,16 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const chipRows=h('div',{class:'pgroups'},groups.map(g=>h('div',{class:'pgroup'},h('div',{class:'pglab',text:g[0]}),h('div',{class:'pchips'},g[1].map(chip)))));
  const nudge=x=>h('button',{class:'pnudge',type:'button',onclick:()=>{S.pline=Math.max(0,Math.round((line+x)*10)/10);paintPlayer()}},(x>0?'+':'')+String(x));
  const box=(t,w)=>w?kbox(t,w.o+'/'+w.n+'  '+w.pct+'%',w.pct>=60?'up':w.pct<=40?'down':''):kbox(t,'–');
- if(S.pn!==5&&S.pn!==10)S.pn=20;const games=view.slice(0,S.pn);
+ if(S.pn!==5&&S.pn!==10)S.pn=20;
+ const mate=S.pair&&String(S.pair.id)!==String(d.id)?S.pair:null;
+ const mateHits=mate?statHits(mate.games,stat).filter(x=>S.psplit==='home'?x.g.at!=='@':S.psplit==='away'?x.g.at==='@':true):[];
+ const joined=mate&&mateHits.length?togetherGames(view,mateHits,S.pn):null;
+ const games=joined||view.slice(0,S.pn);
+ const scoreVals=joined?togetherGames(view,mateHits,20).map(x=>x.v):viewVals;
+ const seasonVals=joined?togetherGames(view,mateHits,view.length).map(x=>x.v):vals;
+ const win=n=>{const part=scoreVals.slice(0,n);if(!part.length)return null;let o=0;for(const v of part)if(v>line)o++;
+  return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
+ const L5=win(5),L10=win(10),L20=win(20);
  const home=hits.filter(x=>x.g.at!=='@').map(x=>x.v),away=hits.filter(x=>x.g.at==='@').map(x=>x.v);
  const opp=(d.next&&d.next.opp||'').toLowerCase();
  const vs=opp?hits.filter(x=>(x.g.opp||'').toLowerCase()===opp).map(x=>x.v):[];
@@ -22972,7 +22972,7 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
   chipRows,
   h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:yours?'Your line':lab})),nudge(0.5),nudge(1)),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 vs this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
-  h('div',{class:'card'},h('h2',null,'Last '+games.length+' vs '+fmt(line),h('span',{class:'r'},
+  h('div',{class:'card'},h('h2',null,'Last '+games.length+(joined?' together':'')+' vs '+fmt(line),h('span',{class:'r'},
    h('span',{class:'seg'},['all','home','away'].map(k=>h('button',{type:'button',class:S.psplit===k?'on':'',onclick:()=>{S.psplit=k;paintPlayer()}},k==='all'?'All':k==='home'?'Home':'Away'))),
    h('span',{class:'seg'},[5,10,20].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},'Last '+n))))),
    stat==='pts50'?h('p',{class:'muted',style:'margin:0 0 6px',text:'Each bar is one game. 1 means 50 or more points that night.'}):null,
@@ -22980,8 +22980,17 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
    games.length?h('div',{class:'pmeter'},h('div',{class:'pmeterbar'},h('i',{style:'width:'+Math.round(games.filter(x=>x.v>line).length/games.length*100)+'%'})),
     h('span',{class:'muted',text:games.filter(x=>x.v>line).length+' of '+games.length+' cleared this line'})) :null,
    games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
-    title:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'})),
-  h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Recent',L10?String(L10.avg):'–'),kbox('Season',vals.length?String(Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10):'–'))];
+    title:(x.label||((x.g.when||'')+' '+x.g.at+' '+x.g.opp))+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'}),
+   joined?h('p',{class:'muted',style:'margin:8px 0 0',text:'Each bar is '+(d.name||'this player')+' plus '+(mate.name||'the second player')+' for that game. Green cleared the line, red did not.'}):
+    (mate?h('p',{class:'muted',style:'margin:8px 0 0',text:(mate.name||'That player')+' has no '+lab+' in these games.'}):null),
+   h('form',{class:'logbox',style:'margin-top:10px',onsubmit:async e=>{e.preventDefault();const name=(e.target.who.value||'').trim();if(name.length<3)return;
+    const found=await api('/api/player.json'+qs('q='+encodeURIComponent(name)));const pls=(found&&found.players)||[];const ql=name.toLowerCase();
+    const hit=pls.find(p=>(p.name||'').toLowerCase()===ql&&p.slug&&p.id)||pls.find(p=>p.slug&&p.id);if(!hit)return;
+    const one=await api('/api/player/'+hit.slug+'/'+hit.id+'.json'+qs());if(one&&one.name){S.pair={id:one.id,name:one.name,games:one.games||[]};paintPlayer()}}},
+    h('input',{name:'who',placeholder:'Second player',maxlength:'40',required:true}),
+    h('button',{type:'submit',text:mate?'Swap':'Add'})),
+   mate?h('button',{type:'button',class:'tpause',onclick:()=>{S.pair=null;paintPlayer()}},'Clear the second player'):null),
+  h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Recent',L10?String(L10.avg):'–'),kbox('Season',seasonVals.length?String(Math.round(seasonVals.reduce((a,b)=>a+b,0)/seasonVals.length*10)/10):'–'))];
  if(d.next&&d.next.line)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'NEXT GAME'}),
   h('div',{class:'nm',text:d.next.line}),
   d.next.rest?h('div',{class:'sub',text:d.next.rest}):null,
@@ -22993,19 +23002,6 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
    h('p',{text:x.note||''})))));
  if(notes.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'WHAT THE NUMBERS SHOW'}),
   h('ul',{class:'nlist'},notes.map(n=>h('li',{text:n})))));
- const pair=S.pair&&String(S.pair.id)!==String(d.id)?S.pair:null;
- const hitsB=pair?((pair.games||[]).map(g=>g.vals&&g.vals[stat]!=null&&!g.dnp?{g,v:+g.vals[stat]}:null).filter(Boolean).filter(x=>!(S.hidePre&&x.g.pre)).slice(0,10)):[];
- kids.push(h('div',{class:'card'},h('h2',null,'Two last 10s'),
-  h('p',{class:'muted',style:'margin:0 0 8px',text:'Another player on this same line. Green and red are '+(d.name||'this player')+'. Purple and gold are the second. Past games, not a prediction.'}),
-  pair&&hitsB.length?playerChartTwo(view.slice(0,10),hitsB,line,fmt,d.name,pair.name):null,
-  pair&&!hitsB.length?h('p',{class:'muted',text:(pair.name||'That player')+' has no '+lab+' in the last games.'}):null,
-  h('form',{class:'logbox',onsubmit:async e=>{e.preventDefault();const name=(e.target.who.value||'').trim();if(name.length<3)return;
-   const found=await api('/api/player.json'+qs('q='+encodeURIComponent(name)));const pls=(found&&found.players)||[];const ql=name.toLowerCase();
-   const hit=pls.find(p=>(p.name||'').toLowerCase()===ql&&p.slug&&p.id)||pls.find(p=>p.slug&&p.id);if(!hit)return;
-   const one=await api('/api/player/'+hit.slug+'/'+hit.id+'.json'+qs());if(one&&one.name){S.pair={id:one.id,name:one.name,games:one.games||[]};paintPlayer()}}},
-   h('input',{name:'who',placeholder:'Second player',maxlength:'40',required:true}),
-   h('button',{type:'submit',text:pair?'Swap':'Add'})),
-  pair?h('button',{type:'button',class:'tpause',onclick:()=>{S.pair=null;paintPlayer()}},'Clear the second player'):null));
  const logged=(d.games||[]).filter(g=>!(S.hidePre&&g.pre)).slice(0,20);
  kids.push(
   h('div',{class:'card'},h('h2',null,'Game log',h('button',{type:'button',class:'tpause',onclick:()=>{S.hidePre=!S.hidePre;paintPlayer()}},S.hidePre?'Show preseason':'Hide preseason')),
