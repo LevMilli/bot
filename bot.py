@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r61"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r62"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -79,6 +79,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r59", "Search cards load each face from its own picture again, so a missed crop shows the photo instead of the initial."),
     ("r60", "The face picture is drawn at the same size as the square, so the head is not clipped down to the hair."),
     ("r61", "Each search photo is a finished 72-pixel face, the same size as the box, so the hair cannot be the only thing left in view."),
+    ("r62", "The search result includes the 72-pixel face itself, so a missed picture request cannot drop the card back to an initial."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20006,13 +20007,25 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
     return {"next": nxt, "injuries": injuries, "group": group}
 
 
-async def dash_face_data(league, aid) -> str:
-    """Same-origin face picture. The card loads it on its own, then paints the face into the square."""
+async def dash_face_data(league, aid, size: int = 72) -> str:
+    """The face picture itself. A 72 or 120 pixel file, inlined, so the card does not depend on a second request."""
     league = str(league or "")
     aid = str(aid or "")
+    size = 120 if int(size) == 120 else 72
     if not league or not aid.isdigit() or not design_headshot_url(f"{league}:{aid}"):
         return ""
-    return f"/img/face/{league}/{aid}.png?v=61"
+    path = f"/img/face/{league}/{aid}.png?v=62&s={size}"
+    try:
+        url = design_headshot_url(f"{league}:{aid}")
+        got = await design_fetch_images([url])
+        raw = (got or {}).get(url) if got else None
+        png = design_head_web_png(raw, size) if raw else b""
+    except Exception:
+        log.debug("Face picture skipped", exc_info=True)
+        png = b""
+    if png:
+        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    return path
 
 
 async def dash_api_player(request):
@@ -20092,7 +20105,7 @@ async def dash_api_player_one(request):
             return {}
 
     slug = design_head_league(path) or league
-    games, bio, photo = await asyncio.gather(_games(), _bio(), dash_face_data(slug, aid))
+    games, bio, photo = await asyncio.gather(_games(), _bio(), dash_face_data(slug, aid, 120))
     name = clip(bio.get("name") or "", 40)
     if not name:
         return dash_error(web, request, 404)
@@ -20223,7 +20236,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r61';"
+    "const CACHE='pb-shell-r62';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21341,7 +21354,7 @@ function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
 function faceBox(photo,name,lg){const px=lg?120:72,cls='pface'+(lg?' lg':'');
  const letter=h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}));
  if(!photo)return letter;
- const src=photo+(String(photo).indexOf('?')>=0?'&':'?')+'s='+px;
+ const raw=String(photo),src=raw.indexOf('data:')===0||raw.indexOf('s=')>=0?raw:(raw+(raw.indexOf('?')>=0?'&':'?')+'s='+px);
  const img=h('img',{class:cls,alt:name||'Player',width:String(px),height:String(px),src:src});
  img.width=px;img.height=px;
  img.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
@@ -30098,7 +30111,7 @@ def _design_face_rgba(raw: bytes):
 
     Trim to the opaque person, then cover-crop into the square from the top so the
     face fills the frame. A transparent ESPN canvas cannot leave a hairline on purple."""
-    from PIL import Image, ImageOps
+    from PIL import Image
     pic = Image.open(io.BytesIO(raw))
     sec_check_image(pic)
     pic = pic.convert("RGBA")
@@ -30128,7 +30141,10 @@ def _design_face_rgba(raw: bytes):
             pic = pic.crop((xs[0], y0, xs[-1] + 1, min(h, y1)))
     if pic.size[0] < 8 or pic.size[1] < 8:
         return None
-    return ImageOps.fit(pic, (256, 256), Image.LANCZOS, centering=(0.5, 0.12))
+    w, h = pic.size
+    side = min(w, h)
+    left = max(0, (w - side) // 2)
+    return pic.crop((left, 0, left + side, side)).resize((256, 256), Image.LANCZOS)
 
 
 def _design_face_filled(im) -> bool:
@@ -30167,13 +30183,17 @@ def design_head_web_png(raw: bytes, size: int = 256) -> bytes:
     try:
         face = _design_face_rgba(raw)
     except Exception:
-        return b""
+        face = None
     if face is None:
-        return b""
+        try:
+            opened = Image.open(io.BytesIO(raw)).convert("RGBA")
+        except Exception:
+            return b""
+        if min(opened.size) < 8:
+            return b""
+        face = opened
     bg = Image.new("RGB", face.size, (26, 16, 40))
-    bg.paste(face, mask=face.split()[3])
-    if not _design_face_filled(bg):
-        return b""
+    bg.paste(face, mask=face.split()[-1])
     if bg.size != (size, size):
         bg = bg.resize((size, size), Image.LANCZOS)
     buf = io.BytesIO()
