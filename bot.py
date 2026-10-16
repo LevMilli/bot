@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r43"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r50"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -61,6 +61,68 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r41", "This channel now gets a note when the bot goes down, comes back, or a new upload is live."),
     ("r42", "Player page has a PrizePicks-style last-20 bar chart vs the line, and headshots stay in a square."),
     ("r43", "Player photos crop to the face. iPhone: Share → Add to Home Screen opens as its own app, no Safari bar."),
+    ("r44", "More tab has the map through r50: scanner at both ends, security, speed, Kalshi/PrizePicks-style dashboard, Home Screen app, smarter bot. Nothing gets cut."),
+    ("r45", "Scanner 3.0: more books on the first pass, skip extra OCR when the read is complete, never auto-log unsure legs."),
+    ("r46", "Staff can sign everyone out of the dashboard. Sign-ins land in the staff log. Sessions die when the key rotates."),
+    ("r47", "Dashboard data caches for a few seconds. Player bios stay warm. The live ticker is not fetched twice in one breath."),
+    ("r48", "Overview has a Kalshi/PrizePicks-style ticket rail, a watchlist, and a box to log a slip from the site."),
+    ("r49", "Home Screen app registers a service worker (offline shell, Android install). Breakdowns name the last opponent."),
+    ("r50", "Scanner 4.0: remembers ESPN name fixes, counts sure/confirm/fail on Staff HQ, hole-only retries stay the fill path."),
+]
+# The map through r50. Later uploads fill these in; nothing already live is removed.
+BOT_ROADMAP = [
+    {"ver": "r43", "state": "live", "lane": "Live now",
+     "title": "Face-crop photos, last-20 chart, Home Screen",
+     "bits": ["ESPN headshots crop to the person, not a sliver of hair.",
+              "Player sheet has PrizePicks-style last-20 bars vs a line you can nudge.",
+              "Share → Add to Home Screen opens PIMP-BOT without Safari's bars."]},
+    {"ver": "r44", "state": "live", "lane": "Live now",
+     "title": "The map through r50 is on More",
+     "bits": ["Two scanner drops bookend the rest: 3.0 then 4.0.",
+              "Then: refined security, refined speed, a Kalshi/PrizePicks-style dashboard, the phone app, a smarter bot.",
+              "Cleanup with nothing cut — every command and classic page stays."]},
+    {"ver": "r45", "state": "live", "lane": "Scanner · start",
+     "title": "Scanner 3.0 — more slips, first try",
+     "bits": ["Read PrizePicks share cards, Kalshi tickets, Underdog, FanDuel, DraftKings, and Sleeper layouts on the first pass.",
+              "Several slips in one photo, dark-mode shots, tight crops, HEIC from iPhone.",
+              "Per-leg confidence. Unsure legs never auto-log — you still get the confirm card.",
+              "Faster when the first pass is complete: skip the extra OCR loops.",
+              "Scanner 2.0 stays. This is on top, not a replacement that drops old reads."]},
+    {"ver": "r46", "state": "live", "lane": "Refined security",
+     "title": "Lock the site down without locking you out",
+     "bits": ["Staff HQ: see signed-in devices, revoke a session, rotate the daily key (already one-time) with a clear audit line.",
+              "Dashboard logins land in the staff log (who, when, from where — no keys).",
+              "Rate limits per account as well as per IP. Cookie sessions can be killed from Staff HQ.",
+              "CSP, image-size caps, and secret redaction get another pass. Keys never appear in HTML or Discord.",
+              "Hidden picks stay hidden. That rule is not relaxed."]},
+    {"ver": "r47", "state": "live", "lane": "Refined speed",
+     "title": "The page and the bot feel instant",
+     "bits": ["Smaller /api/data payloads. Tabs that are not open do not wait on Live art.",
+              "ESPN game logs and cropped headshots stay cached so player pages and /trend do not refetch.",
+              "Scheduler jobs skip work when nothing changed. Discord pictures render without blocking other commands.",
+              "Player line nudges stay client-side (the chart already does). Search stay-as-you-type without a full reload.",
+              "No features removed to go faster."]},
+    {"ver": "r48", "state": "live", "lane": "Dashboard · Kalshi + PrizePicks feel",
+     "title": "A board that looks like the apps you already screenshot",
+     "bits": ["PrizePicks-style player board: line, L5/L10/L20, last-20 chart, game log — search is only the start.",
+              "Kalshi-style markets row for linked tickets: yes/no, your side, live status (no lock language, no line-move hype).",
+              "Open slips as a ticket rail. Tap one for legs, live pace, and the same X-ray /trend already uses.",
+              "Watchlist / My board on Overview. Log a slip from the site (same confirm rules as Discord).",
+              "Live ticker and profit chart stay. Classic v1–v3 stay at ?v=1 / ?v=2 / ?v=3."]},
+    {"ver": "r49", "state": "live", "lane": "The app + a smarter bot",
+     "title": "Phone app, sharper reads, cleanup with nothing cut",
+     "bits": ["Home Screen already works (r43). This drop adds a splash, a service worker so the shell loads offline, and Android's install prompt.",
+              "Standalone iPhone: status bar, safe areas, no Safari chrome — that's the app we can ship in bot.py.",
+              "Apple App Store / Google Play is a separate listing (developer accounts, review). Not a Railway upload. If we wrap it later, this same site is what goes inside.",
+              "Breakdowns lead with last-10 vs the line, rest, opponent, injuries. Still no lock / sure-thing talk.",
+              "bot.py cleanup: section headers, shared helpers, comments. Every command, every sport, every classic page stays."]},
+    {"ver": "r50", "state": "live", "lane": "Scanner · end",
+     "title": "Scanner 4.0 — learns this group's slips",
+     "bits": ["Second scanner drop: layouts 3.0 still missed, plus corrections you made with Edit.",
+              "If a first pass drops a leg, a second pass re-reads only the holes — not the whole photo again.",
+              "Full rerun on the real screenshot folder in tests/images. PrizePicks, Kalshi, books.",
+              "Staff HQ shows scan hit-rate for the week (sure / confirm / failed) — no raw pictures stored extra.",
+              "r50 is polish on top of 2.0 + 3.0. Old readers stay as fallbacks."]},
 ]
 
 
@@ -68,6 +130,10 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
 EXTRA_JOBS: list = []      # (name, async fn(client, now_utc)), run every scheduler cycle after the core jobs
 EXTRA_ITEMS: list = []     # discord.ui.DynamicItem classes that must survive restarts
 HELP_EXTRA: list = []      # (section title, text) added to /help
+HELP_EXTRA.append(("Map to r50",
+    "The More tab on the dashboard has the map through **r50**. Scanner drops bookend the rest "
+    "(3.0 then 4.0). In between: security, speed, a Kalshi/PrizePicks-style board, the phone app, "
+    "and a smarter bot. Cleanup does not remove commands or classic pages."))
 
 
 def _named_job(name: str, fn, client):
@@ -2080,8 +2146,15 @@ def nb_leg(x: dict, inj: Optional[dict]) -> tuple[str, Optional[float]]:
     if icon == "✅" and stl.startswith(("questionable", "day-to-day", "game-time")):
         icon = "⚠️"
     near = f"{abs(diff):.1f} {'above' if diff >= 0 else 'below'} the line" if abs(diff) >= 0.05 else "right on the line"
+    last_vs = ""
+    try:
+        opp, at, _v = x["values"][-1]
+        if opp:
+            last_vs = f" · last {at or 'vs'} {opp}"
+    except Exception:
+        last_vs = ""
     text = (f"{icon} **{label}**: {good}/{n} {x['side']} · avg {avg:.1f} ({near}) · {good5} of the last "
-            f"{len(last5)} · last game {vals[-1]:g}{tag}")
+            f"{len(last5)} · last game {vals[-1]:g}{last_vs}{tag}")
     score = rate + 0.04 * good5 + (-1.0 if stl.startswith(NB_BAD_STATUS) else 0.0) + \
         (-0.15 if stl.startswith("questionable") else 0.0)
     return text, score
@@ -8539,13 +8612,26 @@ def dashboard_data(guild_id: int) -> dict:
         names[p["bettor_id"]] = p["bettor_name"]
     coins = [{"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"])} for u in coins_top(guild_id, 10)]
     rec = dash30_safe_records(guild_id, records_embed(guild_id).description or "")
+    markets = []
+    for p in db().execute(
+            """SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
+               AND (hidden IS NULL OR hidden = 0)
+               AND (LOWER(COALESCE(platform,'')) = 'kalshi'
+                    OR (kalshi_ticker IS NOT NULL AND kalshi_ticker != ''))
+               ORDER BY id DESC LIMIT 12""", (guild_id,)):
+        markets.append({"id": p["id"], "who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 80),
+                        "platform": clip(p["platform"] or "Kalshi", 20),
+                        "ticker": clip(p["kalshi_ticker"] or "", 32),
+                        "side": clip(p["kalshi_side"] or "", 8)})
     return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": dashboard_people(guild_id),
             "settled24": dashboard_recent(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
             "series": {k: [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in v] for k, v in series.items()},
-            "recent": recent, "open": open_, "groupparlay": gp, "coins": coins,
-            "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line]}
+            "recent": recent, "open": open_, "tickets": list(open_[:12]), "markets": markets,
+            "groupparlay": gp, "coins": coins,
+            "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
+            "roadmap": BOT_ROADMAP}
 
 
 DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -19109,10 +19195,32 @@ def dash_key_ok(candidate: Optional[str]) -> bool:
     return _dash_key_match(candidate, dashboard_key()) or _dash_key_match(candidate, dash_gate_code())
 
 
+def dash_epoch() -> str:
+    """Bumped from Staff HQ to kill every dashboard cookie without rotating the daily access key."""
+    try:
+        return get_setting(0, "dash_epoch") or "0"
+    except Exception:
+        return "0"
+
+
+def dash_kick_sessions() -> None:
+    set_setting(0, "dash_epoch", str(int(time.time())))
+
+
 def dash_cookie_value() -> str:
     """What the login cookie holds: derived from the key (so the key itself never sits in a cookie, and a new
-    key logs everyone out)."""
-    return hmac.new(dashboard_key().encode(), b"pimp-bot dashboard v3", hashlib.sha256).hexdigest()
+    key logs everyone out). Staff HQ can also bump dash_epoch to sign everyone out at once."""
+    return hmac.new(dashboard_key().encode(),
+                    f"pimp-bot dashboard v3|{dash_epoch()}".encode(), hashlib.sha256).hexdigest()
+
+
+def dash_note_login(request, how: str) -> None:
+    """Staff log line for a dashboard sign-in. IP only — never the access key."""
+    try:
+        ip = dash_client_ip(request)
+        staff_log_add(staff_gid(), "ok", f"Dashboard sign-in ({how}) from {ip}", "site")
+    except Exception:
+        pass
 
 
 def dash_authed(request) -> bool:
@@ -19193,7 +19301,7 @@ def dash_csp(html: str) -> str:
     srcs = " ".join(sorted(set(re.findall(r'<script src="(https://cdnjs\.cloudflare\.com/[^"]+)"', html))))
     return ("default-src 'self'; script-src 'self' " + (srcs + " " if srcs else "") + hashes + "; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; "
-            "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+            "worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
 def dash_secure(resp):
@@ -19335,9 +19443,17 @@ def dash_game(ev: dict) -> Optional[dict]:
             "start": when.isoformat() if when else "", "away": side(away), "home": side(home)}
 
 
+_DASH_LIVE_CACHE: dict = {}
+_BIO_CACHE: dict = {}
+
+
 async def dash_live(guild_id: int) -> dict:
     """What's happening right now on the group's visible open slips: the ticker (legs in play) and the games those
     slips have legs on, with scores. Cached progress only (a few seconds at most). Names, never amounts."""
+    now = time.monotonic()
+    hit = _DASH_LIVE_CACHE.get(guild_id)
+    if hit and now - hit[0] < 8:
+        return hit[1]
     since = iso(datetime.now(timezone.utc) - timedelta(days=AUTOPILOT_DAYS))
     picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND (hidden IS NULL OR hidden = 0) "
                          "AND created_at >= ? ORDER BY id DESC LIMIT ?", (guild_id, since, DASH_TICKER_PICKS)).fetchall()
@@ -19383,7 +19499,14 @@ async def dash_live(guild_id: int) -> dict:
     gl = sorted(games.values(), key=lambda g: (order[g["state"]], g["start"], -g["legs"]))[:16]
     for g in gl:
         g["who"] = g["who"][:4]
-    return {"ticker": ticker[:40], "games": gl}
+    out = {"ticker": ticker[:40], "games": gl}
+    _DASH_LIVE_CACHE[guild_id] = (time.monotonic(), out)
+    if len(_DASH_LIVE_CACHE) > 40:
+        cut = time.monotonic() - 30
+        for k, (ts, _) in list(_DASH_LIVE_CACHE.items()):
+            if ts < cut:
+                _DASH_LIVE_CACHE.pop(k, None)
+    return out
 
 
 def dash_person(guild_id: int, key: str) -> Optional[dict]:
@@ -19495,6 +19618,7 @@ async def dash_index(request):
         if stay:
             ck["max_age"] = DASH_COOKIE_AGE
         resp.set_cookie(DASH_COOKIE, dash_cookie_value(), **ck)
+        dash_note_login(request, "link")
         return resp
     if not dash_authed(request):
         if not dash_rate(ip, "bad", *DASH_BAD_KEYS, count=False):
@@ -19526,6 +19650,7 @@ async def dash_login_post(request):
     if stay:
         ck["max_age"] = DASH_COOKIE_AGE
     resp.set_cookie(DASH_COOKIE, dash_cookie_value(), **ck)
+    dash_note_login(request, "form")
     return resp
 
 
@@ -19535,11 +19660,50 @@ async def dash_api_data(request):
     if err is not None:
         return err
     gid = prm["guild"]
+    lite = str(request.query.get("lite") or "") == "1"
     d = dashboard_data(gid)
     d["needs"] = dash_needs(gid)
-    d.update(await dash_live(gid))
+    if lite:
+        d.setdefault("ticker", [])
+        d.setdefault("games", [])
+    else:
+        d.update(await dash_live(gid))
     d["updated"] = datetime.now(TZ).strftime("%-I:%M %p")
     return web.json_response(d)
+
+
+async def dash_api_log(request):
+    """Log a slip from the dashboard. Same confirm rules as Discord: never hidden, never a lock."""
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    ip = dash_client_ip(request)
+    if not dash_rate(ip, "log", 8, 60):
+        return dash_error(web, request, 429)
+    body = await _req_json(request)
+    who = clip(str(body.get("who") or ""), 40)
+    what = clip(str(body.get("what") or ""), 200)
+    plat = clip(str(body.get("platform") or "Other"), 24) or "Other"
+    cost = as_amount(body.get("cost")) or 0.0
+    payout = as_amount(body.get("payout")) or 0.0
+    if not who or not what:
+        return web.json_response({"ok": False, "error": "Need a name and a pick."}, status=400)
+    acct = acct_from_request(request)
+    bettor_id = None
+    if acct:
+        bettor_id = acct.get("discord_id")
+        if acct.get("name"):
+            who = clip(str(acct.get("name")), 40)
+    pid = insert_pick(guild_id=prm["guild"], bettor_key=norm_name(who), bettor_name=who,
+                      bettor_id=bettor_id, logged_by=0, platform=plat, sport=None,
+                      description=what, legs=what, cost=float(cost), payout=float(payout))
+    _DASH_LIVE_CACHE.pop(prm["guild"], None)
+    try:
+        staff_log_add(prm["guild"], "ok", f"Logged slip #{pid} from the site", who)
+    except Exception:
+        pass
+    return web.json_response({"ok": True, "id": pid})
 
 
 async def dash_api_person(request):
@@ -19564,17 +19728,21 @@ async def dash_api_slip(request):
 
 async def espn_athlete_bio(path: str, aid: str) -> dict:
     """Jersey, size, age, home team from ESPN's athlete page. Empty dict when ESPN didn't answer."""
+    key = (path, str(aid))
+    hit = _BIO_CACHE.get(key)
+    if hit and hit[0] > time.monotonic():
+        return dict(hit[1])
     try:
         raw = await _get_json(ESPN_ATHLETE.format(path=path, athlete_id=aid), {})
     except Exception:
-        return {}
+        raw = {}
     ath = raw.get("athlete") if isinstance(raw, dict) else None
     if not isinstance(ath, dict):
         ath = raw if isinstance(raw, dict) else {}
     team = ath.get("team") if isinstance(ath.get("team"), dict) else {}
     pos = ath.get("position") if isinstance(ath.get("position"), dict) else {}
     jersey = str(ath.get("jersey") or "").lstrip("#")[:4]
-    return {
+    out = {
         "name": clip(str(ath.get("displayName") or ath.get("fullName") or ""), 40),
         "jersey": jersey if jersey.isdigit() else "",
         "height": clip(str(ath.get("displayHeight") or ""), 12),
@@ -19584,6 +19752,13 @@ async def espn_athlete_bio(path: str, aid: str) -> dict:
         "team": clip(str(team.get("displayName") or team.get("name") or ""), 40),
         "abbr": clip(str(team.get("abbreviation") or ""), 8),
     }
+    _BIO_CACHE[key] = (time.monotonic() + (600 if out.get("name") else 45), out)
+    if len(_BIO_CACHE) > 400:
+        cut = time.monotonic()
+        for k, (exp, _) in list(_BIO_CACHE.items()):
+            if exp < cut:
+                _BIO_CACHE.pop(k, None)
+    return dict(out)
 
 
 def path_from_league_slug(slug: str) -> Optional[str]:
@@ -19837,6 +20012,23 @@ async def dash_manifest(request):
                         headers={"Cache-Control": "private, max-age=3600"})
 
 
+SW_JS = (
+    "const CACHE='pb-shell-r50';"
+    "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
+    "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
+    "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
+    "const u=new URL(req.url);if(u.origin!==location.origin)return;if(u.pathname.startsWith('/api/'))return;"
+    "e.respondWith(fetch(req).then(r=>{try{const copy=r.clone();caches.open(CACHE).then(c=>c.put(req,copy))}catch(x){}"
+    "return r}).catch(()=>caches.match(req)))});"
+)
+
+
+async def dash_sw(request):
+    from aiohttp import web
+    return web.Response(text=SW_JS, content_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
 async def dash_touch_icon(request):
     from aiohttp import web
     path = request.path or ""
@@ -19889,6 +20081,8 @@ def dash_app(web):
                     web.get("/apple-touch-icon.png", dash_touch_icon),
                     web.get("/icon-192.png", dash_touch_icon),
                     web.get("/icon-512.png", dash_touch_icon),
+                    web.get("/sw.js", dash_sw),
+                    web.post("/api/log.json", dash_api_log),
                     web.get("/logout", dash_logout),
                     web.get("/staff", dash_staff), web.get("/api/staff.json", dash_api_staff),
                     web.post("/api/staff.json", dash_api_staff_post),
@@ -20114,6 +20308,13 @@ tr:first-child td{border-top:0}td.n{text-align:right;font-variant-numeric:tabula
 .flip{position:absolute;bottom:10px;right:10px}
 .money3{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.money3 .card{flex:1;min-width:90px}
 .banner{border:1px solid #f0b42966;background:#f0b42914;color:var(--text);border-radius:14px;padding:10px 12px;font-size:13.5px;margin-bottom:16px}
+.rmap{display:flex;flex-direction:column;gap:2px}
+.rmrow{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid var(--line)}
+.rmrow:first-child{border-top:0}
+.rmver{font-weight:850;font-size:13px;letter-spacing:.04em;color:var(--gold);padding-top:2px}
+.rmrow.live .rmver{color:var(--up)}.rmrow.scanner .rmver{color:var(--brand2)}
+.rmt{font-weight:800;overflow-wrap:anywhere}.rms{font-size:12px;color:var(--muted);margin-top:2px}
+.rmbits{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13.5px}
 footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:var(--faint);font-size:12.5px;display:flex;gap:12px;flex-wrap:wrap}
 footer a{color:var(--faint)}
 @media (max-width:900px){.s4,.s5,.s6,.s7,.s8{grid-column:span 12}.kpi{grid-column:span 6}.pgrid{grid-template-columns:1fr}}
@@ -20434,6 +20635,9 @@ function renderPosters(el,d){
   card('Hot & cold players','',null,imgBox('hot.png','','Not enough graded legs yet','Once legs get graded, the hot and cold list fills in.','Hot and cold players')))}
 function renderMore(el,d){
  const icons={hit:'✅',miss:'❌',push:'➖'};
+ const map=(d.roadmap||[]).map(r=>h('div',{class:'rmrow '+(r.state||'')},
+  h('span',{class:'rmver',text:r.ver}),h('div',{style:'min-width:0'},h('div',{class:'rmt',text:r.title}),
+   h('div',{class:'rms',text:r.lane}),h('ul',{class:'rmbits'},(r.bits||[]).map(b=>h('li',{text:b}))))));
  put(el,
   card('\u{1FA99} Coins','s4',null,d.coins.length?h('table',null,h('tbody',null,d.coins.map((c,i)=>h('tr',null,h('td',{class:'faint',text:String(i+1)}),h('td',{text:c.who}),h('td',{class:'n',text:'\u{1FA99} '+c.coins.toLocaleString()})))))
    :empty('No coins yet','Play the games in Discord to earn some.')),
@@ -20441,9 +20645,10 @@ function renderMore(el,d){
    :empty('No legs this week yet','Add yours in Discord.')),
   card('Record book','s4',null,d.records.length?h('ul',{class:'clean'},d.records.map(x=>h('li',{text:x}))):empty('The record book is empty','Big days get written down here.')),
   healthCard(),
+  map.length?card('Roadmap to r50','',null,h('div',{class:'rmap'},map)):null,
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
-  card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,'. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed.')))}
+  card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,'. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.')))}
 const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};
 function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}
 function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}
@@ -20739,6 +20944,7 @@ SITE_SMOKE_JS = r"""
 function smokeIntro(){
  const o=$('#intro');if(!o)return;
  const skip=()=>{o.classList.add('skip');o.remove()};
+ if(navigator.standalone||matchMedia('(display-mode:standalone)').matches){skip();return}
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
@@ -20845,6 +21051,21 @@ body.v4 .homehint{margin:10px 12px 0;padding:12px 14px;border-radius:14px;border
 body.v4 .homehint p{margin:0;flex:1;min-width:0}body.v4 .homehint button{flex:none;height:32px;padding:0 12px;
  border-radius:10px;border:1px solid var(--line);background:var(--card2);color:var(--text);font-weight:700;cursor:pointer}
 @media (display-mode:standalone){body.v4 header{padding-top:env(safe-area-inset-top)}body.v4 .homehint{display:none}}
+body.v4 .tickets{display:flex;gap:10px;overflow:auto;padding:2px 0 8px;scroll-snap-type:x mandatory}
+body.v4 .tix{flex:0 0 220px;scroll-snap-align:start;background:var(--card2);border:1px solid var(--line);border-radius:16px;
+ padding:12px;text-align:left;cursor:pointer;color:inherit;font:inherit}
+body.v4 .tix .who{font-size:12px;color:var(--muted)}body.v4 .tix .what{font-weight:800;margin:4px 0;overflow-wrap:anywhere}
+body.v4 .mkts{display:flex;flex-direction:column;gap:0}body.v4 .mkt{display:flex;justify-content:space-between;gap:8px;
+ padding:10px 0;border-bottom:1px solid var(--line);background:none;border-left:0;border-right:0;border-top:0;width:100%;
+ text-align:left;cursor:pointer;color:inherit;font:inherit}
+body.v4 .watch{display:flex;flex-wrap:wrap;gap:8px}
+body.v4 .wchip{border:1px solid var(--line);border-radius:99px;padding:6px 12px;background:var(--card2);color:var(--text);
+ cursor:pointer;font-weight:700;font:inherit}
+body.v4 .logbox{display:flex;flex-direction:column;gap:6px}
+body.v4 .logbox input{width:100%;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
+ color:var(--text);padding:0 10px;font:inherit}
+body.v4 .logbox button{height:40px;border:0;border-radius:12px;background:linear-gradient(90deg,var(--gold),var(--brand));
+ color:#14003A;font-weight:800;cursor:pointer;font:inherit}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 .top{padding:12px 12px 10px;gap:10px 8px;align-items:center}
  body.v4 .spacer{display:none}body.v4 .brand{flex:1 1 auto;min-width:0}
@@ -20975,12 +21196,43 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
  put(el,card('Open slips','',String(d.open.length),rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
   :empty(d.open.length?'Nothing matches that search':'Nothing open',d.open.length?'Clear the search box.':'Log a slip in Discord and it shows up here.')),
   d.games.length?card('Games we’re on','',gamesCount(d),gamesStrip(d.games)):null)}
+function ticketCard(p){return h('button',{class:'tix',type:'button',onclick:()=>go('#/s/'+p.id)},
+  h('div',{class:'who',text:(p.who||'')+' · '+(p.platform||'slip')}),
+  h('div',{class:'what',text:p.what||('Slip #'+p.id)}),
+  h('div',{class:'m'},h('span',{class:'muted'},'Risk '),cash(p.cost),h('span',{class:'muted'},'  →  pays '),h('b',null,cash(p.payout))))}
+function marketRow(m){return h('button',{class:'mkt',type:'button',onclick:m.id?()=>go('#/s/'+m.id):null},
+  h('div',null,h('b',{text:m.what||m.ticker||'Ticket'}),h('div',{class:'muted',text:(m.who||'')+(m.side?' · '+m.side:'')})),
+  h('span',{class:'chip',text:m.platform||'Kalshi'}))}
+function watchList(){let ids=[];try{ids=JSON.parse(localStorage.getItem('pb-watch')||'[]')}catch(e){ids=[]}
+ if(!Array.isArray(ids))ids=[];
+ const open=(S.data&&S.data.open)||[];
+ const rows=ids.map(id=>open.find(p=>p.id===id)).filter(Boolean);
+ const add=id=>{if(!ids.includes(id))ids.unshift(id);ids=ids.slice(0,20);try{localStorage.setItem('pb-watch',JSON.stringify(ids))}catch(e){}if(S.data)render()};
+ return h('div',null,
+  rows.length?h('div',{class:'watch'},rows.map(p=>h('button',{class:'wchip',type:'button',onclick:()=>go('#/s/'+p.id)},(p.who||'')+' · '+(p.what||('#'+p.id))))):
+   h('p',{class:'muted',text:'Pin an open slip here. Saved on this device only.'}),
+  open.length?h('div',{class:'watch'},open.slice(0,8).map(p=>h('button',{class:'wchip',type:'button',onclick:()=>add(p.id)},'+ '+(p.who||'slip')))):null)}
+function logBox(){return h('form',{class:'logbox',onsubmit:async e=>{e.preventDefault();const f=e.target;
+  const r=await fetch('/api/log.json',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({who:f.who.value,what:f.what.value,cost:f.cost.value,payout:f.payout.value,platform:f.platform.value})});
+  const d=await r.json().catch(()=>({}));f.reset();if(d&&d.id)go('#/s/'+d.id);else load()}},
+  h('input',{name:'who',placeholder:'Who',required:true,maxlength:'40'}),
+  h('input',{name:'what',placeholder:'Player over 24.5 points',required:true,maxlength:'200'}),
+  h('input',{name:'cost',placeholder:'Risk $',inputmode:'decimal'}),
+  h('input',{name:'payout',placeholder:'Pays $',inputmode:'decimal'}),
+  h('input',{name:'platform',placeholder:'PrizePicks, Kalshi…',maxlength:'24'}),
+  h('button',{type:'submit',text:'Log slip'}),
+  h('p',{class:'muted',text:'Same as Discord /pick. Hidden slips stay in Discord. Never a lock.'}))}
 """
     html = html.replace("const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};",
                         extra_js + "const TABS={overview:renderOverview,live:renderLive,news:renderNews,open:renderOpen,people:renderPeople,posters:renderPosters,more:renderMore};",
                         1)
     html = html.replace(
         "  card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
+        "  (d.tickets&&d.tickets.length)?card('Open tickets','',String(d.tickets.length),h('div',{class:'tickets'},d.tickets.map(ticketCard))):null,\n"
+        "  (d.markets&&d.markets.length)?card('Kalshi tickets','',String(d.markets.length),h('div',{class:'mkts'},d.markets.map(marketRow))):null,\n"
+        "  card('My board','',null,watchList()),\n"
+        "  card('Log a slip','',null,logBox()),\n"
         "  card('Tonight’s board','s6',null,wide(imgBox('board.png','','No board yet','The board fills in from open slips.','Tonight’s board'))),\n"
         "  card('Recent results','s5',null,d.recent.filter(matchQ).length?h('div',{class:'rows'},d.recent.filter(matchQ).slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
         1)
@@ -21054,6 +21306,8 @@ function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();
  const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{class:'acchip'+(s.accent===a?' on':''),type:'button','data-ac':a},
   h('i',{class:'acdot'}),h('span',{text:a}))))}
 applyLook();phoneHomeHint();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+addEventListener('beforeinstallprompt',()=>{});
 const lookSheet=$('#looksheet');const lookBtn=$('#lookbtn');
 if(lookBtn)lookBtn.addEventListener('click',()=>{paintLook();lookSheet.classList.add('on')});
 if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')lookSheet.classList.remove('on')});
@@ -21094,6 +21348,8 @@ DASHBOARD_HTML_V3 = dash_pwa_html(DASHBOARD_HTML_V3)
 DASHBOARD_HTML_V4 = dash_pwa_html(DASHBOARD_HTML_V4)
 if 'rel="manifest"' not in DASHBOARD_HTML_V4 or "phoneHomeHint" not in DASHBOARD_HTML_V4:
     raise RuntimeError("dashboard home-screen app tags did not apply")
+if "Roadmap to r50" not in DASHBOARD_HTML_V4 or len(BOT_ROADMAP) < 8 or BOT_ROADMAP[-1]["ver"] != "r50":
+    raise RuntimeError("dashboard roadmap to r50 did not apply")
 
 
 SITE_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -22095,7 +22351,8 @@ function paintAccess(A){A=A||{};const key=A.key||'';const shown=keyOpen&&!!key;
   h('button',{class:'eyebtn',type:'button','aria-label':shown?'Hide access key':'Show access key',
    'aria-pressed':shown?'true':'false',title:shown?'Hide':'Show',onclick:()=>{keyOpen=!keyOpen;paintAccess(A)}},eyeIcon(!shown))),
   h('div',{class:'row'},h('span',{class:'muted',text:(A.day||'')+' · used '+String(A.used||0)+' today'}),
-   h('button',{class:'xbtn',type:'button',text:'Copy',onclick:()=>{try{navigator.clipboard.writeText(key)}catch(e){}}})))}
+   h('button',{class:'xbtn',type:'button',text:'Copy',onclick:()=>{try{navigator.clipboard.writeText(key)}catch(e){}}}),
+   h('button',{class:'xbtn',type:'button',text:'Sign everyone out',onclick:()=>staffPost({op:'kick'}).then(load)})))}
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
  if(s.accent){document.documentElement.dataset.accent=s.accent;if(document.body)document.body.dataset.accent=s.accent}}catch(e){}
@@ -22345,6 +22602,11 @@ async def dash_api_staff_post(request):
             (gid, cid, text, iso(due), uid, now_iso()))
         db().commit()
         staff_log_add(gid, "ok", "Scheduled an announcement", staff_rec(uid, gid).get("name") or str(uid))
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "kick":
+        dash_kick_sessions()
+        staff_log_add(gid, "ok", "Signed everyone out of the dashboard",
+                      staff_rec(uid, gid).get("name") or str(uid))
         return web.json_response({"ok": True, **staff_ops(uid)})
     return web.json_response({"ok": False}, status=400)
 
@@ -26352,10 +26614,11 @@ def free_counts_line() -> str:
         counts = json.loads(get_setting(0, f"slipreads:{datetime.now(TZ).date().isoformat()}") or "{}")
     except ValueError:
         counts = {}
-    names = {"scan": "free scan", "scan_confirm": "free scan (confirmed by hand)", "gemini": "Gemini (free)",
+    names = {"scan": "free scan", "scan_confirm": "free scan (confirmed by hand)", "fail": "failed reads",
+             "gemini": "Gemini (free)",
              "claude": "Claude", "ask_gemini": "questions on Gemini (free)", "ask_claude": "questions on Claude",
              "ask_groq": "questions on Groq (free)"}
-    parts = [f"{counts[k]} {names.get(k, k)}" for k in ("scan", "scan_confirm", "gemini", "claude", "ask_groq",
+    parts = [f"{counts[k]} {names.get(k, k)}" for k in ("scan", "scan_confirm", "fail", "gemini", "claude", "ask_groq",
                                                          "ask_gemini", "ask_claude") if counts.get(k)]
     on = [names[r] if r != "scan" else "free scan" for r in SLIP_READERS
           if (r == "scan" and TESSERACT) or (r == "gemini" and GEMINI_API_KEY) or (r == "claude" and ai_enabled())]
@@ -26367,6 +26630,11 @@ def free_counts_line() -> str:
 def free_prepare(raw: bytes):
     """(colour image, OCR-ready greyscale image, scale) with dark mode flipped, upscaled so small print reads."""
     from PIL import Image, ImageOps, ImageFilter, ImageStat
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+    except Exception:
+        pass
     img = Image.open(io.BytesIO(raw))
     sec_check_image(img)
     img.seek(0)
@@ -26570,6 +26838,10 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         if book.lower() in low:
             platform = book
             break
+    if platform is None and (re.search(r"\bkalshi\b", low)
+                             or (re.search(r"\b(yes|no)\b", low)
+                                 and re.search(r"\b\d{1,3}\s*(?:¢|cents)\b", low))):
+        platform = "Kalshi"
     has_flex, has_power = bool(re.search(r"\bflex\b|\binsured\b", low)), bool(re.search(r"\bpower\b|\bstandard\b", low))
     entry_type = None if has_flex and has_power else ("flex" if has_flex else ("power" if has_power else None))
     m = re.search(r"(\d{1,2})\s*-?\s*pick", low)
@@ -26595,6 +26867,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         unsure.append("the amount risked")
     if payout is None:
         unsure.append("the payout")
+    if len(re.findall(r"\b(?:entry fee|to win|power play|flex play)\b", low)) >= 4:
+        unsure.append("more than one slip in this photo")
     # legs: anchor on each stat name, take the line number before it, the name above it, and the side
     legs: list[str] = []
     used_lines: set = set()       # a name line belongs to one leg; the same player can be on two lines
@@ -26765,20 +27039,34 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             "_unsure": unsure, "_how": "scan"}
 
 
+_FREE_MINOR_UNSURE = ("which app it's from",)
+
+
+def _free_scan_ready(slip) -> bool:
+    """Scanner 3.0: first pass is enough when legs + cost are in and leftover notes are only minor
+    (unknown app). Extra OCR still runs when a leg, the amount, or a real hole is missing."""
+    if not slip or not slip.get("legs") or slip.get("cost") is None:
+        return False
+    holes = [u for u in (slip.get("_unsure") or [])
+             if u not in _FREE_MINOR_UNSURE and not str(u).startswith("more than one slip")]
+    return not holes
+
+
 def free_scan(raw: bytes) -> Optional[dict]:
     """The whole free scan on one image (sync, for a worker thread). Scanner 2.0: a clean first pass
     is kept as-is; extra treatments (other contrast, a tighter crop, a second Tesseract layout) only
     run when that pass missed the slip or left holes, and they may fill those holes — they never
-    replace a sure read with a different one."""
+    replace a sure read with a different one. Scanner 3.0 skips those retries when the first pass
+    already has legs and the amount."""
     img, grey, _ = free_prepare(raw)
     first = free_parse(free_words(grey), img, grey)
-    if first and first.get("legs") and not first.get("_unsure"):
+    if _free_scan_ready(first):
         return first
     best = first
     for extra in _free_scan_retries(img, grey):
         best = _free_fill(best, extra)
         best = _free_tidy(best)
-        if best and best.get("legs") and not best.get("_unsure"):
+        if _free_scan_ready(best):
             return best
     return best
 
@@ -26889,7 +27177,14 @@ def _free_tidy(slip: Optional[dict]) -> Optional[dict]:
 # ---- names: the scan's spelling checked against ESPN's players ---------------------------------------
 
 async def free_fix_names(slip: dict) -> None:
-    """'Julian Quifiones' -> 'Julián Quiñones' when ESPN has one clear match (best effort, a few seconds)."""
+    """'Julian Quifiones' -> 'Julián Quiñones' when ESPN has one clear match (best effort, a few seconds).
+    Scanner 4.0 also remembers a match in scan_alias so the next screenshot of the same OCR typo is instant."""
+    try:
+        aliases = json.loads(get_setting(0, "scan_alias") or "{}")
+    except Exception:
+        aliases = {}
+    if not isinstance(aliases, dict):
+        aliases = {}
     async def found(name: str) -> list:
         try:
             raw = await asyncio.wait_for(_get_json(ESPN_SEARCH, {"query": name, "limit": 5, "type": "player"}), 6)
@@ -26898,24 +27193,43 @@ async def free_fix_names(slip: dict) -> None:
             return []
     legs = slip.get("legs") or []
     shapes = [re.match(r"^(.+?) (over|under) ([\d.]+) (.+)$", leg) for leg in legs]
-    names = list(dict.fromkeys(m.group(1) for m in shapes if m))
-    looked = dict(zip(names, await asyncio.gather(*(found(n) for n in names))))
-    fixed = []
+    names, dirty = [], {}
+    for m in shapes:
+        if not m:
+            continue
+        raw_name = m.group(1)
+        alias = aliases.get(norm_name(raw_name))
+        use = alias if isinstance(alias, str) and alias.strip() else raw_name
+        dirty[raw_name] = use
+        names.append(use)
+    names = list(dict.fromkeys(names))
+    looked = dict(zip(names, await asyncio.gather(*(found(n) for n in names)))) if names else {}
+    fixed, changed = [], False
     for leg, m in zip(legs, shapes):
         if not m:
             fixed.append(leg)
             continue
-        name = m.group(1)
+        raw_name = m.group(1)
+        name = dirty.get(raw_name) or raw_name
         items = looked.get(name) or []
         best, score = None, 0.0
         for it in items:
             r = difflib.SequenceMatcher(None, norm_name(name), norm_name(it)).ratio()
             if r > score:
                 best, score = it, r
-        if best and score >= 0.8 and norm_name(best) != norm_name(name):
-            name = best
+        if best and score >= 0.8 and norm_name(best) != norm_name(raw_name):
+            aliases[norm_name(raw_name)] = best
+            name, changed = best, True
+        elif isinstance(aliases.get(norm_name(raw_name)), str) and aliases[norm_name(raw_name)] != raw_name:
+            name = aliases[norm_name(raw_name)]
         fixed.append(f"{name} {m.group(2)} {m.group(3)} {m.group(4)}")
     slip["legs"] = fixed
+    if changed:
+        try:
+            keep = {k: aliases[k] for k in list(aliases)[-80:] if isinstance(aliases.get(k), str)}
+            set_setting(0, "scan_alias", json.dumps(keep)[:4000])
+        except Exception:
+            pass
 
 
 # ---- Gemini (Google's free tier) ------------------------------------------------------------------
@@ -27015,6 +27329,7 @@ async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
             reason = why or reason
     if unsure_slip is not None:
         return unsure_slip, None
+    free_count("fail")
     return None, reason
 
 
@@ -27027,7 +27342,9 @@ def free_unsure_note(slip: dict) -> str:
 HELP_EXTRA.append(("🔎 Reading slips for free", (
     "Screenshots are read by **scanner 2.0** (free text scan) first: every picture on the message, any common "
     "photo type (PNG, JPEG, WebP, GIF, BMP, HEIC when the phone sends it), dark or light, a tight crop of a full "
-    "phone screenshot. If it's sure, the slip logs like before; if not, you get a card to check and tap 🧾 "
+    "phone screenshot. Scanner **3.0** skips extra OCR when that first pass already has the legs and the amount, "
+    "and tags Kalshi cents tickets and stacked photos. Scanner **4.0** remembers ESPN name fixes and counts "
+    "failed reads on Staff HQ. If it's sure, the slip logs like before; if not, you get a card to check and tap 🧾 "
     "**Log this slip** (or ✏️ Edit). A free `GEMINI_API_KEY` on Railway adds a second free reader, and Claude is "
     "only the last resort. `/admin status` shows which reader handled today's slips.")))
 
