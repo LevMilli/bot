@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r84"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r85"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "r70"               # the idea list this upload is filling; r81 on the site was update r69
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -103,6 +103,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
 ("r82", "Watchlist chips match the tickets. Kalshi rows line up yes, no, and your side. Posters name the period you picked, including a past month. Coins show the last game. Wrapped on More is only for the person signed in."),
     ("r83", "A ticket opens the same X-ray as /trend. Two players can share one last-10 chart. Rest days and the opponent's last result sit on the next game. Search takes a team name."),
     ("r84", "Dark mode keeps the accent in the cards, backgrounds read clearly, and the home order is yours. The smoke intro plays on the phone app. The footer shows the upload and the update together."),
+    ("r85", "On a wide screen the background stays the size of the window and sits at the top, so the scene is visible instead of a blown-up crop."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20255,11 +20256,16 @@ def look_svg(name: str) -> str:
             '<circle cx="620" cy="80" r="8"/><circle cx="580" cy="140" r="8"/>'
             '<circle cx="180" cy="420" r="8"/><circle cx="620" cy="420" r="8"/></g>'),
         "crown": (
-            '<rect width="800" height="500" fill="#2a1460"/>'
-            '<circle cx="400" cy="250" r="180" fill="#3d1d86"/>'
-            '<path d="M230 300 L260 160 L330 230 L400 120 L470 230 L540 160 L570 300z" fill="#F5C542"/>'
-            '<rect x="240" y="300" width="320" height="36" rx="8" fill="#F5C542"/>'
-            '<circle cx="400" cy="120" r="16" fill="#fff4c2"/>'),
+            '<rect width="800" height="500" fill="#16082e"/>'
+            '<ellipse cx="400" cy="0" rx="560" ry="210" fill="#4a1f96"/>'
+            '<ellipse cx="120" cy="30" rx="180" ry="90" fill="#F5C54233"/>'
+            '<ellipse cx="680" cy="30" rx="180" ry="90" fill="#F5C54233"/>'
+            '<ellipse cx="400" cy="8" rx="260" ry="100" fill="#F5C54255"/>'
+            '<path d="M16 168 L78 36 L168 118 L250 22 L332 110 L400 4 L468 110 L550 22 L632 118 L722 36 L784 168 Z" fill="#F5C542"/>'
+            '<rect x="16" y="156" width="768" height="22" rx="6" fill="#F5C542"/>'
+            '<g fill="#fff6c8"><circle cx="78" cy="36" r="8"/><circle cx="250" cy="22" r="8"/>'
+            '<circle cx="400" cy="6" r="10"/><circle cx="550" cy="22" r="8"/><circle cx="722" cy="36" r="8"/></g>'
+            '<ellipse cx="400" cy="430" rx="480" ry="90" fill="#2a146088"/>'),
         "default": (
             '<rect width="800" height="500" fill="#12081c"/>'
             '<rect x="70" y="60" width="660" height="380" rx="36" fill="none" stroke="#7B3FE4" stroke-width="8"/>'
@@ -20268,8 +20274,10 @@ def look_svg(name: str) -> str:
             '<circle cx="400" cy="250" r="28" fill="#14003A"/>'),
     }
     inner = scenes.get(name) or scenes["court"]
-    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice">'
-            + inner + "</svg>")
+    # Wide frame, art scaled to the width and kept at the top, so a desktop shows the scene
+    # instead of a square crop blown up to the full page.
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMin slice">'
+            '<g transform="scale(2)">' + inner + "</g></svg>")
 
 
 def look_css_url(name: str) -> str:
@@ -21606,7 +21614,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r84';"
+    "const CACHE='pb-shell-r85';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22608,10 +22616,14 @@ SITE_LOOK_CSS += (
     ".looktile .sw img{width:100%;height:86px;object-fit:cover;display:block;background:#110818}"
 )
 SITE_LOOK_CSS += "".join(
-    f"html[data-bg={k}] body,body[data-bg={k}]{{background-color:#0b0714!important;"
-    f"background-image:linear-gradient(#0b071472,#0b071448),url('/img/look/{k}.svg')!important;"
-    f"background-size:cover!important;background-position:center!important;background-repeat:no-repeat!important;"
-    f"background-attachment:scroll!important}}"
+    f"html[data-bg={k}]{{background:#0b0714!important}}"
+    f"html[data-bg={k}] body,body[data-bg={k}]{{background-color:transparent!important;background-image:none!important}}"
+    f"html[data-bg={k}] body:before,body[data-bg={k}]:before{{content:\"\"!important;position:fixed;inset:0;z-index:-1;"
+    f"pointer-events:none;background-image:linear-gradient(#0b071424,#0b071448),url('/img/look/{k}.svg')!important;"
+    f"background-repeat:no-repeat!important;background-position:center top!important;background-size:cover!important;"
+    f"-webkit-mask-image:none!important;mask-image:none!important}}"
+    f"@media (min-width:1100px){{html[data-bg={k}] body:before,body[data-bg={k}]:before{{"
+    f"background-size:100vw auto!important}}}}"
     f".looktile[data-bg={k}] .sw{{background-image:url('/img/look/{k}.svg')}}"
     for k in LOOK_IDS
 )
