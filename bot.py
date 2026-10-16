@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r58"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r59"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -76,6 +76,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r56", "Player photos fill the square from the headshot, and the last-20 graph sits directly under Pass Yards, Pass TDs, and the other stat buttons."),
     ("r57", "Player photos are drawn into the square from the headshot itself, so the face shows instead of a clipped hairline."),
     ("r58", "Search and the player sheet send the face already cropped into the square, so the card cannot clip it down to a hairline."),
+    ("r59", "Search cards load each face from its own picture again, so a missed crop shows the photo instead of the initial."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -20004,29 +20005,12 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
 
 
 async def dash_face_data(league, aid) -> str:
-    """Square face JPEG as a data URL, so the card paints the face itself and cannot clip a headshot."""
+    """Same-origin face picture. The card loads it on its own, then paints the face into the square."""
     league = str(league or "")
     aid = str(aid or "")
-    if not league or not aid.isdigit():
+    if not league or not aid.isdigit() or not design_headshot_url(f"{league}:{aid}"):
         return ""
-    url = design_headshot_url(f"{league}:{aid}")
-    if not url:
-        return ""
-    try:
-        got = await design_fetch_images([url])
-    except Exception:
-        return ""
-    raw = (got or {}).get(url)
-    if not raw:
-        return ""
-    try:
-        jpg = design_head_web_jpeg(raw)
-    except Exception:
-        log.debug("Face jpeg skipped", exc_info=True)
-        return ""
-    if not jpg:
-        return ""
-    return "data:image/jpeg;base64," + base64.b64encode(jpg).decode("ascii")
+    return f"/img/face/{league}/{aid}.png?v=59"
 
 
 async def dash_api_player(request):
@@ -20228,7 +20212,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r58';"
+    "const CACHE='pb-shell-r59';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
