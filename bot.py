@@ -53,8 +53,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r90"   # shown in /help and the startup log, so you can tell which upload is live
-ROADMAP_NOW = "r70"               # the idea list this upload is filling; r81 on the site was update r69
+BOT_VERSION = "2026-10-16 r91"   # shown in /help and the startup log, so you can tell which upload is live
+ROADMAP_NOW = "r71"               # the idea list this upload is filling; r67–r70 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -109,6 +109,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r88", "The opening smoke is soft gray clouds, the same shape as a real puff, instead of purple circles."),
     ("r89", "The background picker scrolls on a phone and has an X to close it. The scene fits the phone screen."),
     ("r90", "The opening smoke is bright white curls on black, the shape of a real plume."),
+    ("r91", "Updates r67 through r70 show as live on More. A weekly note counts open, settled, and net."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -169,7 +170,7 @@ BOT_ROADMAP = [
 
 BOT_PLAN = [  # r67–r71: 250 adds, 50 per update, 10 from each lane. The r50 map is untouched.
     {
-        "ver": "r67", "state": "next",
+        "ver": "r67", "state": "live",
         "title": 'What you open every day',
         "lanes": [
             {"lane": 'Professional', "bits": [
@@ -235,7 +236,7 @@ BOT_PLAN = [  # r67–r71: 250 adds, 50 per update, 10 from each lane. The r50 m
         ],
     },
     {
-        "ver": "r68", "state": "next",
+        "ver": "r68", "state": "live",
         "title": 'The slip, the line, and the read',
         "lanes": [
             {"lane": 'Professional', "bits": [
@@ -301,7 +302,7 @@ BOT_PLAN = [  # r67–r71: 250 adds, 50 per update, 10 from each lane. The r50 m
         ],
     },
     {
-        "ver": "r69", "state": "next",
+        "ver": "r69", "state": "live",
         "title": 'The phone, the look, and the staff door',
         "lanes": [
             {"lane": 'Professional', "bits": [
@@ -367,7 +368,7 @@ BOT_PLAN = [  # r67–r71: 250 adds, 50 per update, 10 from each lane. The r50 m
         ],
     },
     {
-        "ver": "r70", "state": "next",
+        "ver": "r70", "state": "live",
         "title": 'The crew, the books, and the history',
         "lanes": [
             {"lane": 'Professional', "bits": [
@@ -702,6 +703,20 @@ _PLAN_LIVE = {
         "The opponent's last result is one line.",
         "Search accepts a team name as well as a player.",
         "Jersey and position stay on the card when the bio is slow.",
+        "The bot does not grade a hidden pick into a public channel.",
+        "A copied slip stays tied to the original.",
+        "Wrapped uses the same net as the sheet.",
+        "Schedule posts use Central time.",
+        "An injury note names the player and the status, once.",
+        "A kickoff is posted once.",
+        "A box-score recap is labeled as a recap.",
+        "With and without can look past the first three teammates when you ask for one player.",
+        "Do not add a second odds feed beside what the slip already has.",
+        "Do not scrape a book that needs an account.",
+        "Player pages stay on the free stats feed.",
+        "Kalshi stays the only market that settles itself.",
+        "A manual grade wins when it disagrees with an automatic one, and the log says which.",
+        "Reactions are not a way to grade.",
     ],
     "r71": [
         "Classic v1, v2, and v3 stay linked.",
@@ -1782,8 +1797,12 @@ def build_recap(guild_id: int, days: int = 7) -> discord.Embed:
         "SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? ORDER BY id",
         (guild_id, since)).fetchall()
     e = discord.Embed(title=f"Weekly recap · last {days} days", color=BRAND)
+    open_n = db().execute("SELECT COUNT(*) FROM picks WHERE guild_id = ? AND status = 'open'",
+                          (guild_id,)).fetchone()[0]
+    week_net = sum(pick_net(p) for p in rows)
+    note = f"{open_n} open · {len(rows)} settled · {signed(week_net)}"
     if not rows:
-        e.description = "Quiet week. No picks were settled."
+        e.description = note + "\nQuiet week. No picks were settled."
     else:
         stats = compute_stats(guild_id, since=since)
         medals = ["🥇", "🥈", "🥉"]
@@ -1791,7 +1810,7 @@ def build_recap(guild_id: int, days: int = 7) -> discord.Embed:
         for i, s in enumerate(stats[:15]):
             rank = medals[i] if i < 3 else f"`{i + 1}.`"
             lines.append(f"{rank} **{s['name']}** · {record_line(s)} · {signed(s['net'])}")
-        e.description = "\n".join(lines)
+        e.description = note + "\n\n" + "\n".join(lines)
 
         def net(p): return (p["returned"] or 0.0) - p["cost"]
         best = max(rows, key=net)
@@ -21081,14 +21100,15 @@ def dash_with_without(player_games: list, teammate_games: list, stat_key: str) -
     return out or None
 
 
-def dash_ww_line(ww: Optional[dict]) -> str:
+def dash_ww_line(ww: Optional[dict], who: str = "") -> str:
     if not ww or (ww.get("without") is None and ww.get("with") is None):
         return "No recent games apart to compare"
+    label = who or "them"
     bits = []
     if ww.get("without") is not None:
-        bits.append(f"Without him: {ww['without']:g} in {int(ww.get('wn') or 0)}")
+        bits.append(f"Without {label}: {ww['without']:g} in {int(ww.get('wn') or 0)}")
     if ww.get("with") is not None:
-        bits.append(f"with him: {ww['with']:g} in {int(ww.get('hn') or 0)}")
+        bits.append(f"with {label}: {ww['with']:g} in {int(ww.get('hn') or 0)}")
     return " · ".join(bits)
 
 
@@ -21259,7 +21279,7 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
     ww_map: dict[str, Optional[dict]] = {}
     jobs = []
     for rec in mates:
-        if len(jobs) >= 3:
+        if len(jobs) >= 8:
             break
         tid = ids_by_name.get(norm_name(rec.get("name") or ""))
         if tid and stat_key:
@@ -21281,16 +21301,17 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
 
     injuries = []
     if active_note:
-        injuries.append({"name": "Active", "status": "", "note": clip(active_note, 420), "ww": None})
+        injuries.append({"name": clip(name, 40), "status": "Active", "note": clip(active_note, 420), "ww": None})
     else:
         recap = dash_last_recap(packed, keys)
         if recap:
-            injuries.append({"name": "Active", "status": "", "note": clip(recap, 420), "ww": None})
+            injuries.append({"name": "Recap", "status": "", "note": clip(recap, 420), "ww": None})
     for rec in mates[:8]:
+        who = clip(rec.get("name") or "", 40)
         ww = ww_map.get(norm_name(rec.get("name") or ""))
-        injuries.append({"name": clip(rec.get("name") or "", 40),
+        injuries.append({"name": who,
                          "status": clip(str(rec.get("status") or ""), 24),
-                         "note": clip(dash_ww_line(ww), 160), "ww": ww})
+                         "note": clip(dash_ww_line(ww, who), 160), "ww": ww})
 
     group = None
     if gid:
@@ -21619,7 +21640,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r90';"
+    "const CACHE='pb-shell-r91';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22300,7 +22321,7 @@ function renderMore(el,d){
  const map=(d.roadmap||[]).map(r=>h('div',{class:'rmrow '+(r.state||'')},
   h('span',{class:'rmver',text:r.ver}),h('div',{style:'min-width:0'},h('div',{class:'rmt',text:r.title}),
    h('div',{class:'rms',text:r.lane}),h('ul',{class:'rmbits'},(r.bits||[]).map(b=>h('li',{text:b}))))));
- const plan=(d.plan||[]).map(r=>h('div',{class:'rmrow next'},
+ const plan=(d.plan||[]).map(r=>h('div',{class:'rmrow '+(r.state||'next')},
   h('span',{class:'rmver',text:r.ver}),h('div',{style:'min-width:0'},h('div',{class:'rmt',text:r.title}),
    h('div',{class:'rms',text:'50 to add · 10 from each lane'}),
    r.built?h('p',{class:'muted',text:r.built}):null,
@@ -22319,7 +22340,7 @@ function renderMore(el,d){
   card('Record book','s4',null,d.records.length?h('ul',{class:'clean'},d.records.map(x=>h('li',{text:x}))):empty('The record book is empty','Big days get written down here.')),
   healthCard(),
   map.length?card('Roadmap to r50','',null,h('div',{class:'rmap'},map)):null,
-  plan.length?card('Next five updates','','250',h('div',{class:'rmap'},plan)):null,
+  plan.length?card('Five updates','',((d.plan||[]).filter(r=>r.state==='live').length)+' live',h('div',{class:'rmap'},plan)):null,
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
   card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,' · update ',(d.update||''),'. The first number is this file. The second is the idea list it is filling. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.')))}
@@ -35029,11 +35050,14 @@ async def result_cmd(
             f"Only {p['bettor_name']} or a mod can settle this one.", ephemeral=True)
         return
     before = p["status"]
+    was_auto = (p["settled_by"] if "settled_by" in p.keys() else None) == "auto"
     p = settle_pick(interaction.guild_id, pick_id, outcome.value, returned)
     await interaction.response.send_message(embed=pick_embed(p), view=view_or_missing(p))
     if before not in ("open", outcome.value):
         line = (f"{who(interaction)} changed the grade on {p['bettor_name']}'s pick #{pick_id} "
                 f"from {before} to {outcome.value}")
+        if was_auto:
+            line += ". Manual grade kept over the automatic one"
     else:
         line = (f"{who(interaction)} used /result on {p['bettor_name']}'s pick #{pick_id}: {outcome.value}")
     if returned is not None:
