@@ -53,13 +53,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r42"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r43"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
     ("r40", "Accent chips are equal bubbles with a color circle. They recolor the whole site. Group default is its own scene."),
     ("r41", "This channel now gets a note when the bot goes down, comes back, or a new upload is live."),
     ("r42", "Player page has a PrizePicks-style last-20 bar chart vs the line, and headshots stay in a square."),
+    ("r43", "Player photos crop to the face. iPhone: Share → Add to Home Screen opens as its own app, no Safari bar."),
 ]
 
 
@@ -18941,6 +18942,27 @@ DASH_LOGO_SVG = (
     'height="16" rx="2.5"/><rect x="279.5" y="329" width="5" height="16" rx="2.5"/></g>'
     '<circle cx="168" cy="337" r="8" fill="url(#pbG)"/><circle cx="344" cy="337" r="8" fill="url(#pbG)"/></svg>')
 DASH_FAVICON = "data:image/svg+xml," + _dash_quote(DASH_LOGO_SVG)
+PWA_HEAD = (
+    '<link rel="manifest" href="/manifest.webmanifest">'
+    '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
+    '<meta name="apple-mobile-web-app-capable" content="yes">'
+    '<meta name="mobile-web-app-capable" content="yes">'
+    '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
+    '<meta name="apple-mobile-web-app-title" content="PIMP-BOT">'
+)
+
+
+def dash_pwa_html(html: str) -> str:
+    """Home Screen / standalone app tags. Safari on iPhone cannot hide its own chrome otherwise."""
+    if 'rel="manifest"' in html:
+        return html
+    i = html.find('<link rel="icon"')
+    if i < 0:
+        return html
+    j = html.find(">", i)
+    if j < 0:
+        return html
+    return html[: j + 1] + PWA_HEAD + html[j + 1 :]
 
 
 def dash_court(color: str, alpha: float) -> str:
@@ -19666,7 +19688,7 @@ async def dash_api_player(request):
             pass
         league = design_head_league(f.get("path"))
         aid = str(f.get("id") or "")
-        photo = f"/img/head/{league}/{aid}.png" if league and aid.isdigit() else ""
+        photo = f"/img/head/{league}/{aid}.png?v=43" if league and aid.isdigit() else ""
         out.append({"id": aid, "slug": league or "", "path": f.get("path") or "",
                     "name": clip(f.get("name") or bio.get("name") or "", 40),
                     "team": clip(bio.get("team") or f.get("team") or "", 40),
@@ -19711,7 +19733,7 @@ async def dash_api_player_one(request):
     packed = dash_pack_games(games, keys, 20)
     stats = dash_pack_stats(packed, keys)
     slug = design_head_league(path) or league
-    photo = f"/img/head/{slug}/{aid}.png" if slug and aid.isdigit() else ""
+    photo = f"/img/head/{slug}/{aid}.png?v=43" if slug and aid.isdigit() else ""
     default = next((s["key"] for s in stats if s["key"] != "minutes"), stats[0]["key"] if stats else "")
     return web.json_response({
         "id": aid, "slug": slug, "path": path, "name": name,
@@ -19795,6 +19817,41 @@ async def dash_favicon(request):
                         headers={"Cache-Control": "private, max-age=86400"})
 
 
+def dash_manifest_body() -> str:
+    return json.dumps({
+        "name": "Pimp's Dashboard", "short_name": "PIMP-BOT",
+        "description": "The group's sports picks.",
+        "start_url": "/", "scope": "/", "display": "standalone",
+        "background_color": "#14003A", "theme_color": "#1a0f33",
+        "icons": [
+            {"src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
+            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    }, separators=(",", ":"))
+
+
+async def dash_manifest(request):
+    from aiohttp import web
+    return web.Response(text=dash_manifest_body(), content_type="application/manifest+json",
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+
+async def dash_touch_icon(request):
+    from aiohttp import web
+    path = request.path or ""
+    size = 180 if "apple" in path else 192 if "192" in path else 512
+    try:
+        img = brand_logo(size)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        raw = buf.getvalue()
+    except Exception:
+        return dash_error(web, request, 404)
+    return web.Response(body=raw, content_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 async def dash_logout(request):
     from aiohttp import web
     resp = web.Response(status=303, headers={"Location": "/"})
@@ -19826,8 +19883,13 @@ def dash_app(web):
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
-                    web.get("/img/{kind}/{arg}.png", dash_image), web.get("/favicon.ico", dash_favicon),
-                    web.get("/favicon.svg", dash_favicon),                     web.get("/logout", dash_logout),
+                    web.get("/img/{kind}/{arg}.png", dash_image),                     web.get("/favicon.ico", dash_favicon),
+                    web.get("/favicon.svg", dash_favicon),
+                    web.get("/manifest.webmanifest", dash_manifest),
+                    web.get("/apple-touch-icon.png", dash_touch_icon),
+                    web.get("/icon-192.png", dash_touch_icon),
+                    web.get("/icon-512.png", dash_touch_icon),
+                    web.get("/logout", dash_logout),
                     web.get("/staff", dash_staff), web.get("/api/staff.json", dash_api_staff),
                     web.post("/api/staff.json", dash_api_staff_post),
                     web.get("/account", dash_account), web.post("/account", dash_account_post),
@@ -19855,9 +19917,9 @@ DASHBOARD_HTML_V3 = r"""<!doctype html><html lang="en"><head><meta charset="utf-
  --faint:#9a91b0;--up:#059669;--down:#e11d48;--flat:#64748b;--live:#b45309;--gold:#b7791f;
  --shadow:0 1px 2px #1d153010,0 8px 24px -14px #3b1d8a40;--sk:#eee8f8;--sk2:#e2d9f3;
  --head:linear-gradient(180deg,#e9defe 0%,#f3eefc 70%,#f6f3fc 100%);--glass:#f6f3fccc;--court:{{COURT_L}}}
-*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%;background:var(--bg)}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
- overflow-x:hidden;min-height:100vh;position:relative}
+ overflow-x:hidden;min-height:100vh;min-height:100dvh;position:relative;overscroll-behavior:none}
 body:before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:var(--court) center 58%/min(1500px,180vw) auto no-repeat;
  -webkit-mask-image:radial-gradient(ellipse at 50% 55%,#000 30%,transparent 78%);mask-image:radial-gradient(ellipse at 50% 55%,#000 30%,transparent 78%)}
 header,main,footer,.ticker{position:relative}
@@ -20735,7 +20797,7 @@ body.v4 .pcard:last-child{margin-bottom:0}
 body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
 body.v4 .pface{position:relative;width:72px;height:72px;min-width:72px;min-height:72px;max-width:72px;max-height:72px;
  border-radius:14px;overflow:hidden;background:#1a1028;flex:0 0 72px;align-self:start;aspect-ratio:1/1}
-body.v4 .pface img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 22%;display:block}
+body.v4 .pface img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 18%;display:block}
 body.v4 .pface .pletter{position:absolute;inset:0;display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
 body.v4 .pface.lg,body.v4 .plhead .pface{width:88px;height:88px;min-width:88px;min-height:88px;max-width:88px;max-height:88px;
  flex:0 0 88px;border-radius:18px}
@@ -20777,9 +20839,20 @@ a.staffbtn{display:none}
 body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;padding:0 14px;border-radius:12px;
  background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;font-size:11px;letter-spacing:.12em;
  text-transform:uppercase;text-decoration:none;box-shadow:0 8px 22px -12px color-mix(in srgb,var(--gold) 67%,transparent)}
+body.v4 .top{flex-wrap:wrap}
+body.v4 .homehint{margin:10px 12px 0;padding:12px 14px;border-radius:14px;border:1px solid var(--line);
+ background:var(--card);display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--muted)}
+body.v4 .homehint p{margin:0;flex:1;min-width:0}body.v4 .homehint button{flex:none;height:32px;padding:0 12px;
+ border-radius:10px;border:1px solid var(--line);background:var(--card2);color:var(--text);font-weight:700;cursor:pointer}
+@media (display-mode:standalone){body.v4 header{padding-top:env(safe-area-inset-top)}body.v4 .homehint{display:none}}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
+ body.v4 .top{padding:12px 12px 10px;gap:10px 8px;align-items:center}
+ body.v4 .spacer{display:none}body.v4 .brand{flex:1 1 auto;min-width:0}
+ body.v4 .brand h1{font-size:17px;letter-spacing:.08em;white-space:nowrap}
+ body.v4 .brand .meta{gap:6px}body.v4 .pill{font-size:11px;padding:2px 8px}
  body.v4 .findwrap{max-width:none;width:100%;order:5;flex:1 1 100%}
- body.v4 .findpop{width:min(100vw - 24px,680px);left:0;right:auto}}
+ body.v4 .findpop{width:min(100vw - 24px,680px);left:0;right:auto}
+ body.v4 a.staffbtn{height:32px;padding:0 10px;font-size:10px;letter-spacing:.08em}}
 """ + SITE_LOOK_CSS
     html = html.replace("</style>", extra_css + "</style>", 1)
     html = html.replace("<body>", '<body class="v4">', 1)
@@ -20823,6 +20896,16 @@ function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl
   h('div',{style:'min-width:0'},h('div',{class:'pn',text:pl.name}),
   h('div',{class:'pm',text:bits.join(' · ')+(extra?' · '+extra:'')}),
   stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'})))}
+function phoneHomeHint(){const stand=matchMedia('(display-mode:standalone)').matches||navigator.standalone;
+ if(stand){document.documentElement.classList.add('app');return}
+ const find=$('#find');if(find&&matchMedia('(max-width:720px)').matches)find.placeholder='Search';
+ try{if(localStorage.getItem('pb-home'))return}catch(e){}
+ const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ if(!ios)return;const head=$('header');if(!head)return;
+ const bar=h('div',{class:'homehint',id:'homehint'},
+  h('p',{text:'Put PIMP-BOT on your Home Screen. Tap Share (the square with the arrow) → Add to Home Screen. It opens as its own app — no Safari bar.'}),
+  h('button',{type:'button',onclick:()=>{try{localStorage.setItem('pb-home','1')}catch(e){}const n=$('#homehint');if(n)n.remove()}},'Got it'));
+ head.after(bar)}
 function defaultLine(vals){if(!vals.length)return 0.5;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;return Math.max(0.5,Math.floor(avg)+0.5)}
 function playerHits(stat){return (S.pl&&S.pl.games||[]).map(g=>g.vals&&g.vals[stat]!=null?{g,v:+g.vals[stat]}:null).filter(Boolean)}
 function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().reverse();const n=rows.length;if(!n)return null;
@@ -20970,7 +21053,7 @@ function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();
   s.bg===id?h('em',{class:'onpill',text:'ON'}):null)));
  const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{class:'acchip'+(s.accent===a?' on':''),type:'button','data-ac':a},
   h('i',{class:'acdot'}),h('span',{text:a}))))}
-applyLook();
+applyLook();phoneHomeHint();
 const lookSheet=$('#looksheet');const lookBtn=$('#lookbtn');
 if(lookBtn)lookBtn.addEventListener('click',()=>{paintLook();lookSheet.classList.add('on')});
 if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')lookSheet.classList.remove('on')});
@@ -21007,6 +21090,10 @@ if "showPlayer" not in DASHBOARD_HTML_V4 or "#/pl/" not in DASHBOARD_HTML_V4 or 
     raise RuntimeError("dashboard player page did not apply")
 if "playerChart" not in DASHBOARD_HTML_V4 or "class:'plhead'" not in DASHBOARD_HTML_V4 or "stroke-dasharray" not in DASHBOARD_HTML_V4:
     raise RuntimeError("dashboard player chart did not apply")
+DASHBOARD_HTML_V3 = dash_pwa_html(DASHBOARD_HTML_V3)
+DASHBOARD_HTML_V4 = dash_pwa_html(DASHBOARD_HTML_V4)
+if 'rel="manifest"' not in DASHBOARD_HTML_V4 or "phoneHomeHint" not in DASHBOARD_HTML_V4:
+    raise RuntimeError("dashboard home-screen app tags did not apply")
 
 
 SITE_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -21065,7 +21152,7 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
  </div>
  <form class="panel" id="signin" action="/login" method="post">
   <h2>Sign in</h2>
-  <p class="hint">Ask an admin for today's access key on Staff HQ. Paste it here once — your browser stays signed in on this device. Each key works for one person, then a new one is minted.</p>
+  <p class="hint">Ask an admin for today's access key on Staff HQ. Paste it here once — your browser stays signed in on this device. Each key works for one person, then a new one is minted. On iPhone, after you sign in: Share → Add to Home Screen.</p>
   <label for="key">Access key</label>
   <input id="key" name="key" type="text" maxlength="128" autocomplete="off" spellcheck="false" required>
   <div class="stay">
@@ -21096,6 +21183,7 @@ document.querySelectorAll('a[href="#signin"]').forEach(a=>a.addEventListener('cl
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
 SITE_HTML = SITE_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
+SITE_HTML = dash_pwa_html(SITE_HTML)
 if "/api/data" in SITE_HTML or "{{" in SITE_HTML:
     raise RuntimeError("public website leaked an API path or leftover placeholder")
 
@@ -22108,6 +22196,7 @@ load();smokeIntro();
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
 STAFF_HTML = STAFF_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
+STAFF_HTML = dash_pwa_html(STAFF_HTML)
 if "innerHTML" in STAFF_HTML:
     raise RuntimeError("staff page used innerHTML")
 
@@ -22345,6 +22434,7 @@ paint();smokeIntro();
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
 ACCOUNT_HTML = ACCOUNT_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
+ACCOUNT_HTML = dash_pwa_html(ACCOUNT_HTML)
 if "innerHTML" in ACCOUNT_HTML:
     raise RuntimeError("account page used innerHTML")
 
@@ -29403,8 +29493,9 @@ def design_head_disc(raw: Optional[bytes], size: int, ring: Optional[tuple] = No
 def design_head_web_png(raw: bytes) -> bytes:
     """Square head-and-shoulders PNG for search cards and the player sheet.
 
-    ESPN's full file is a wide frame with empty space around the player. Serving it raw
-    makes the dashboard box show a sliver of hair on purple. Same crop the posters use."""
+    ESPN's file is a wide transparent canvas with the player cutout near the top. Cropping
+    the canvas (instead of the person) left a sliver of hair on purple. Trim to the opaque
+    pixels, then take a head-and-shoulders square from the top of that cutout."""
     from PIL import Image
     pic = Image.open(io.BytesIO(raw))
     sec_check_image(pic)
@@ -29412,12 +29503,20 @@ def design_head_web_png(raw: bytes) -> bytes:
     w, h = pic.size
     if w < 16 or h < 16:
         return raw
-    side = max(16, min(int(min(w, h) * 0.86), w, h))
-    left = max(0, (w - side) // 2)
-    top = max(0, int(h * 0.06))
-    if top + side > h:
-        top = max(0, h - side)
-    face = pic.crop((left, top, left + side, top + side)).resize((256, 256), Image.LANCZOS)
+    mask = pic.getchannel("A").point(lambda a: 255 if a > 24 else 0)
+    box = mask.getbbox()
+    if box:
+        pic = pic.crop(box)
+        w, h = pic.size
+    if h >= w:
+        inset = int(w * 0.06)
+        side = max(16, min(w - 2 * inset, h))
+        face = pic.crop((inset, 0, inset + side, side))
+    else:
+        side = h
+        left = max(0, (w - side) // 2)
+        face = pic.crop((left, 0, left + side, side))
+    face = face.resize((256, 256), Image.LANCZOS)
     bg = Image.new("RGBA", (256, 256), (26, 16, 40, 255))
     bg.alpha_composite(face)
     buf = io.BytesIO()
