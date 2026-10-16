@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r65"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r66"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -83,6 +83,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r63", "Search cards load a finished 72-pixel face into the photo box."),
     ("r64", "Search puts the player's face in the photo box, and a missed crop still sends the picture instead of a broken image."),
     ("r65", "The photo box paints the whole headshot into the square, so the face stays in view instead of a hairline on purple."),
+    ("r66", "Player photos load ESPN's own square face, so the box shows the head instead of an initial or a clipped hairline."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -19315,14 +19316,14 @@ def dash_csp(html: str) -> str:
                       for s in re.findall(r"<script>(.*?)</script>", html, re.S))
     srcs = " ".join(sorted(set(re.findall(r'<script src="(https://cdnjs\.cloudflare\.com/[^"]+)"', html))))
     return ("default-src 'self'; script-src 'self' " + (srcs + " " if srcs else "") + hashes + "; "
-            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data: https://a.espncdn.com https://a1.espncdn.com https://a2.espncdn.com https://a3.espncdn.com https://a4.espncdn.com; connect-src 'self'; font-src 'self'; "
             "worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
 def dash_secure(resp):
     h = resp.headers
     if "Content-Security-Policy" not in h:
-        h["Content-Security-Policy"] = ("default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; "
+        h["Content-Security-Policy"] = ("default-src 'none'; img-src 'self' data: https://a.espncdn.com https://a1.espncdn.com https://a2.espncdn.com https://a3.espncdn.com https://a4.espncdn.com; style-src 'unsafe-inline'; "
                                         "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
     h["X-Frame-Options"] = "DENY"
     h["X-Content-Type-Options"] = "nosniff"
@@ -20030,24 +20031,20 @@ def design_face_file(raw: bytes, size: int = 72) -> tuple:
     return b"", ""
 
 
-async def dash_face_data(league, aid, size: int = 72) -> str:
-    """The face itself, already cropped, so the card does not depend on a second request."""
-    import base64
+def espn_face_url(league, aid, size: int = 72) -> str:
+    """ESPN's own square crop. The browser loads this itself. Nothing is fetched or cropped here."""
     league = str(league or "")
     aid = str(aid or "")
     size = 120 if int(size) == 120 else 72
-    url = design_headshot_url(f"{league}:{aid}") if league and aid.isdigit() else None
-    path = f"/img/face/{league}/{aid}.png?v=65&s={size}" if url else ""
-    if not url:
+    if not league or not aid.isdigit() or not design_headshot_url(f"{league}:{aid}"):
         return ""
-    got = await design_fetch_images([url])
-    raw = (got or {}).get(url)
-    if not raw:
-        return path
-    body, kind = design_face_file(raw, size)
-    if body and kind == "image/png" and len(body) <= 80000:
-        return "data:image/png;base64," + base64.b64encode(body).decode("ascii")
-    return path
+    return (f"https://a.espncdn.com/combiner/i?img=/i/headshots/{league}/players/full/{aid}.png"
+            f"&w={size}&h={size}&scale=crop")
+
+
+async def dash_face_data(league, aid, size: int = 72) -> str:
+    """The square face address. No download, so a missed server fetch cannot turn the box into an initial."""
+    return espn_face_url(league, aid, size)
 
 
 async def dash_api_player(request):
@@ -20254,7 +20251,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r65';"
+    "const CACHE='pb-shell-r66';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21370,24 +21367,20 @@ function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
 function pathForTab(t){return t==='overview'?'/':'/'+t}
 function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
-function faceBox(photo,name,lg){const px=lg?120:72,cls='pface'+(lg?' lg':'');
- const letter=h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}));
- if(!photo)return letter;
- const canvas=h('canvas',{class:cls,width:String(px),height:String(px),'aria-label':name||'Player'});
- canvas.width=px;canvas.height=px;
- canvas.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
- const img=new Image();
- img.onload=function(){canvas.width=px;canvas.height=px;const g=canvas.getContext('2d');
-  g.drawImage(img,0,0,img.naturalWidth||px,img.naturalHeight||px,0,0,px,px)};
- img.onerror=function(){if(canvas.parentNode)canvas.replaceWith(letter)};
- img.src=String(photo);
- return canvas}
+function faceBox(photo,name,lg,league,id){const px=lg?120:72,cls='pface'+(lg?' lg':'');
+ const w=px>=120?120:72,lgOk=/^[a-z0-9-]{2,32}$/.test(String(league||'')),idOk=/^[0-9]{1,12}$/.test(String(id||''));
+ const src=lgOk&&idOk?('https://a.espncdn.com/combiner/i?img=/i/headshots/'+league+'/players/full/'+id+'.png&w='+w+'&h='+w+'&scale=crop'):'';
+ if(!src)return h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}));
+ const img=h('img',{class:cls,alt:name||'Player',width:String(w),height:String(w),src:src,referrerpolicy:'no-referrer',decoding:'async'});
+ img.width=w;img.height=w;
+ img.style.cssText='width:'+px+'px;height:'+px+'px;display:block;border-radius:'+(lg?18:14)+'px;background:#1a1028';
+ return img}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
  const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
  const stats=(pl.stats||[]).map(st=>h('div',{class:'pstat'},h('b',{text:String(st.last)}),
   h('span',{text:st.stat+' last'}),h('span',{text:'avg '+st.avg+' · '+st.n})));
  const open=()=>{const box=$('#findpop');if(box)box.hidden=true;if(pl.slug&&pl.id)go('#/pl/'+pl.slug+'/'+pl.id)};
- return h('button',{class:'pcard',type:'button',onclick:open},faceBox(pl.photo,pl.name),
+ return h('button',{class:'pcard',type:'button',onclick:open},faceBox(pl.photo,pl.name,false,pl.slug,pl.id),
   h('div',{style:'min-width:0'},h('div',{class:'pn',text:pl.name}),
   h('div',{class:'pm',text:bits.join(' · ')+(extra?' · '+extra:'')}),
   stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'})))}
@@ -21463,7 +21456,7 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  if(d.group&&(d.group.hit||d.group.miss))splits.push(srow('👥','The group on him',(d.group.hit||0)+' hit · '+(d.group.miss||0)+' missed'));
  const notes=playerNotes(d,stat,line,fmt,hits);
  const kids=[
-  h('div',{class:'plhead'},faceBox(d.photo,d.name,true),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
+  h('div',{class:'plhead'},faceBox(d.photo,d.name,true,d.slug,d.id),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
   h('div',{class:'pchips'},stats.map(chip)),
   h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:lab})),nudge(0.5),nudge(1)),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
