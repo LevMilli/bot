@@ -38,6 +38,7 @@ import logging
 import math
 import os
 import re
+import secrets
 import sqlite3
 import tempfile
 import time
@@ -52,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r36"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r37"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -8443,12 +8444,12 @@ PUBLIC_DOMAIN = env("RAILWAY_PUBLIC_DOMAIN", "")
 
 
 def dashboard_key() -> str:
+    """Stable cookie secret. Never shown. Env DASHBOARD_KEY still works as a master sign-in."""
     key = env("DASHBOARD_KEY", "")
     if key:
         return key
     key = get_setting(0, "dashboard_key")
     if not key:
-        import secrets
         key = secrets.token_urlsafe(18)
         set_setting(0, "dashboard_key", key)
     return key
@@ -8457,7 +8458,54 @@ def dashboard_key() -> str:
 def dashboard_url() -> Optional[str]:
     if not PUBLIC_DOMAIN:
         return None
-    return f"https://{PUBLIC_DOMAIN}/?key={dashboard_key()}"
+    return f"https://{PUBLIC_DOMAIN}/"
+
+
+def _dash_key_match(a: Optional[str], b: str) -> bool:
+    if not a or not b or len(a) > 128:
+        return False
+    ae, be = a.encode(), b.encode()
+    if len(ae) != len(be):
+        hmac.compare_digest(ae, ae)
+        return False
+    return hmac.compare_digest(ae, be)
+
+
+def dash_gate_state() -> dict:
+    """Today's unused access code. Minted at midnight and again each time someone signs in with it."""
+    day = datetime.now(TZ).date().isoformat()
+    try:
+        d = json.loads(get_setting(0, "dash_gate") or "{}")
+    except Exception:
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    if d.get("day") != day or not d.get("code") or len(str(d.get("code") or "")) > 40:
+        d = {"day": day, "code": secrets.token_urlsafe(10), "used": int(d.get("used") or 0)}
+        set_setting(0, "dash_gate", json.dumps(d))
+    return d
+
+
+def dash_gate_code() -> str:
+    return str(dash_gate_state().get("code") or "")
+
+
+def dash_gate_rotate() -> str:
+    day = datetime.now(TZ).date().isoformat()
+    prev = dash_gate_state()
+    d = {"day": day, "code": secrets.token_urlsafe(10), "used": int(prev.get("used") or 0) + 1}
+    set_setting(0, "dash_gate", json.dumps(d))
+    return d["code"]
+
+
+def dash_take_key(candidate: Optional[str]) -> bool:
+    """True when this key may sign in. A one-time staff code is spent and a fresh one is minted."""
+    if _dash_key_match(candidate, dashboard_key()):
+        return True
+    if _dash_key_match(candidate, dash_gate_code()):
+        dash_gate_rotate()
+        return True
+    return False
 
 
 def dashboard_data(guild_id: int) -> dict:
@@ -19023,7 +19071,7 @@ def dash_key_ok(candidate: Optional[str]) -> bool:
     """The dashboard key, compared in constant time (bounded length; any text is fine)."""
     if not candidate or len(candidate) > 128:
         return False
-    return hmac.compare_digest(candidate.encode(), dashboard_key().encode())
+    return _dash_key_match(candidate, dashboard_key()) or _dash_key_match(candidate, dash_gate_code())
 
 
 def dash_cookie_value() -> str:
@@ -19402,6 +19450,7 @@ async def dash_index(request):
         prm, err = dash_gate(web, request)
         if err is not None:
             return err
+        dash_take_key(key)
         # good key: remember it in a cookie and take it out of the address bar (and history)
         go = "/" if path in ("/", "/login", "/app") else path
         q = {k: v for k, v in (("v", prm["v"]), ("guild", request.query.get("guild"))) if v}
@@ -19422,6 +19471,27 @@ async def dash_index(request):
     if prm is None:
         return dash_error(web, request, 400)
     return dash_html(web, dash_staff_inject(dash_paint_look(dash_signed_in_html(prm)), request))
+
+
+async def dash_login_post(request):
+    """Sign-in form: POST so the access key is not stripped the way a GET password field often is."""
+    from aiohttp import web
+    ip = dash_client_ip(request)
+    form = await _req_form(request)
+    key = str(form.get("key") or "")
+    if not dash_rate(ip, "bad", *DASH_BAD_KEYS, count=False):
+        return dash_error(web, request, 429)
+    if not dash_key_ok(key):
+        dash_rate(ip, "bad", *DASH_BAD_KEYS)
+        return dash_error(web, request, 403)
+    dash_take_key(key)
+    resp = web.Response(status=303, headers={"Location": "/"})
+    stay = str(form.get("stay") or "1") != "0"
+    ck = dict(path="/", httponly=True, secure=True, samesite="Lax")
+    if stay:
+        ck["max_age"] = DASH_COOKIE_AGE
+    resp.set_cookie(DASH_COOKIE, dash_cookie_value(), **ck)
+    return resp
 
 
 async def dash_api_data(request):
@@ -19634,6 +19704,7 @@ def dash_app(web):
                     web.get("/staff", dash_staff), web.get("/api/staff.json", dash_api_staff),
                     web.post("/api/staff.json", dash_api_staff_post),
                     web.get("/account", dash_account), web.post("/account", dash_account_post),
+                    web.post("/login", dash_login_post),
                     web.get("/{tail:.*}", dash_not_found)])
     return app
 
@@ -20465,23 +20536,29 @@ function smokeIntro(){
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
  fit();addEventListener('resize',fit);
- const spawn=()=>{const w=c.width,h=c.height;return{
-  x:w*.5+(Math.random()-.5)*w*.28,y:h*(.78+Math.random()*.28),
-  r:50+Math.random()*160,vx:(Math.random()-.5)*.55,vy:-.45-Math.random()*1.1,
-  a:.07+Math.random()*.14,grow:.08+Math.random()*.22}};
- const parts=Array.from({length:180},spawn);
+ const spawn=(kind)=>{const w=c.width,h=c.height;const fat=kind==='fog';
+  return{x:w*.5+(Math.random()-.5)*w*(fat?.55:.22),y:h*(fat?.82:.70)+(Math.random()*h*(fat?.28:.38)),
+   r:(fat?140:70)+Math.random()*(fat?220:170),vx:(Math.random()-.5)*(fat?.25:.55),
+   vy:-(fat?.12:.28)-Math.random()*(fat?.35:.85),a:(fat?.18:.10)+Math.random()*(fat?.16:.16),
+   grow:(fat?.04:.07)+Math.random()*(fat?.12:.18),ph:Math.random()*6.3,life:1}};
+ const fog=Array.from({length:48},()=>spawn('fog'));
+ const parts=Array.from({length:280},()=>spawn('wisp'));
  let start=performance.now();
  (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
-  const vent=x.createRadialGradient(w*.5,h*.92,10,w*.5,h*.55,h*.7);
-  vent.addColorStop(0,'rgba(123,63,228,0.28)');vent.addColorStop(.45,'rgba(20,0,58,0.12)');vent.addColorStop(1,'rgba(5,3,12,0)');
+  const vent=x.createRadialGradient(w*.5,h*1.02,20,w*.5,h*.42,h*.85);
+  vent.addColorStop(0,'rgba(90,40,160,0.55)');vent.addColorStop(.35,'rgba(40,10,80,0.28)');
+  vent.addColorStop(.7,'rgba(12,4,28,0.12)');vent.addColorStop(1,'rgba(5,2,12,0)');
   x.fillStyle=vent;x.fillRect(0,0,w,h);
-  for(const p of parts){p.x+=p.vx+(w*.5-p.x)*0.003;p.y+=p.vy;p.r+=p.grow;p.a*=.997;
-   if(p.y<-p.r||p.a<.02)Object.assign(p,spawn());
-   const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(220,200,255,'+p.a+')');g.addColorStop(.4,'rgba(123,63,228,'+(p.a*.55)+')');
-   g.addColorStop(1,'rgba(20,0,58,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
-  const el=now-start;if(el>900&&brand)brand.classList.add('on');if(el>6200)o.classList.add('go');
-  if(el<8400)requestAnimationFrame(tick);else skip()})(start)}
+  const draw=p=>{p.ph+=0.012;p.x+=p.vx+Math.sin(p.ph)*0.45+(w*.5-p.x)*0.0018;p.y+=p.vy;p.r+=p.grow;p.a*=.9985;
+   if(p.y<-p.r||p.a<.03)Object.assign(p,spawn(p.r>160?'fog':'wisp'));
+   const g=x.createRadialGradient(p.x,p.y,p.r*0.08,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(210,190,255,'+(p.a*0.95)+')');
+   g.addColorStop(.28,'rgba(123,63,228,'+(p.a*0.72)+')');
+   g.addColorStop(.62,'rgba(50,20,90,'+(p.a*0.38)+')');
+   g.addColorStop(1,'rgba(8,4,20,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()};
+  for(const p of fog)draw(p);for(const p of parts)draw(p);
+  const el=now-start;if(el>1100&&brand)brand.classList.add('on');if(el>7000)o.classList.add('go');
+  if(el<9200)requestAnimationFrame(tick);else skip()})(start)}
 """
 
 
@@ -20707,6 +20784,7 @@ header{display:flex;align-items:center;gap:14px;padding:18px 0 8px;border-bottom
 .brand{font-weight:850;letter-spacing:.14em;font-size:15px}.brand b{color:var(--gold)}
 nav{margin-left:auto;display:flex;gap:18px;align-items:center;font-weight:650;font-size:14px;color:var(--muted)}
 nav a.btn{background:linear-gradient(90deg,var(--brand),#5a22c8);color:#fff;padding:8px 14px;border-radius:999px;box-shadow:0 8px 20px -10px #7B3FE4}
+#signin{scroll-margin-top:24px}#signin.pulse{outline:2px solid var(--gold);outline-offset:4px}
 .hero{padding:48px 0 28px;display:grid;grid-template-columns:1.2fr .8fr;gap:36px;align-items:center}
 .kicker{margin:0 0 10px;font-size:12px;letter-spacing:.18em;font-weight:800;color:var(--gold)}
 h1{font-size:clamp(32px,5vw,52px);line-height:1.05;margin:0 0 14px;letter-spacing:-.03em}
@@ -20742,11 +20820,11 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
   <p class="lead">PIMP-BOT is the Discord bot your crew already uses. This site is the same record — live games, open slips, standings and news — in a real browser, on your phone or laptop.</p>
   <p class="hint">Celebrate the scouting, the notes and the good passes. Never a lock, never a sure thing.</p>
  </div>
- <form class="panel" id="signin" action="/" method="get">
+ <form class="panel" id="signin" action="/login" method="post">
   <h2>Sign in</h2>
-  <p class="hint">Ask an admin for the dashboard link: /dashboard in Discord. Paste the access key here, or just open that link once — your browser stays signed in on this device.</p>
+  <p class="hint">Ask an admin for today's access key on Staff HQ. Paste it here once — your browser stays signed in on this device. Each key works for one person, then a new one is minted.</p>
   <label for="key">Access key</label>
-  <input id="key" name="key" type="password" maxlength="128" autocomplete="off" required>
+  <input id="key" name="key" type="text" maxlength="128" autocomplete="off" spellcheck="false" required>
   <div class="stay">
    <label><input type="radio" name="stay" value="1" checked> Keep me signed in on this device</label>
    <label><input type="radio" name="stay" value="0"> This browser session only</label>
@@ -20768,6 +20846,10 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
  if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+document.querySelectorAll('a[href="#signin"]').forEach(a=>a.addEventListener('click',e=>{
+ e.preventDefault();const p=document.getElementById('signin'),k=document.getElementById('key');
+ if(p){p.scrollIntoView({block:'center'});p.classList.add('pulse');setTimeout(()=>p.classList.remove('pulse'),1200)}
+ if(k)k.focus()}));
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
 SITE_HTML = SITE_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
@@ -21413,6 +21495,8 @@ def staff_ops(uid: int) -> dict:
         "blacklist": [x for x in blacklist if isinstance(x, dict)][:20],
         "hits": hits, "log": log_rows[:12], "announce": anns, "crew": crew, "pending": pending,
         "crashes": [x for x in crashes if isinstance(x, dict)][:12], "version": BOT_VERSION,
+        "access": {"key": dash_gate_code(), "day": dash_gate_state().get("day") or "",
+                   "used": int(dash_gate_state().get("used") or 0)},
     }
 
 
@@ -21469,6 +21553,8 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .form button,.xbtn{height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--brand);
  color:#fff;font-weight:700;cursor:pointer;font:inherit}
 .xbtn{background:#110c1b;color:var(--muted);font-size:12px}
+.akey{font:800 22px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;color:#fff;
+ background:#110c1b;border:1px solid var(--line);border-radius:12px;padding:12px 14px;word-break:break-all}
 @media (max-width:900px){.g3,.g2{grid-template-columns:1fr}.nav{margin-left:0;width:100%}}
 </style></head><body>
 <div class="top"><a class="logo" href="/" title="Dashboard" aria-label="PIMP-BOT dashboard">{{LOGO}}</a>
@@ -21479,6 +21565,8 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <a class="navchip" href="/">Dashboard</a>
 <a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap">
+<section class="card" style="margin-bottom:12px"><h2>Today's access key</h2><div id="access"></div>
+ <p class="muted">Only staff can see this. One person uses it, we mint a fresh key for the next. It also changes at midnight.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
  <p class="muted">Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>Robot &amp; crashes</h2><div id="crashes"></div>
@@ -21530,6 +21618,9 @@ try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
 async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
+ const A=d.access||{};put($('#access'),h('div',{class:'akey',text:A.key||'—'}),
+  h('div',{class:'row'},h('span',{class:'muted',text:(A.day||'')+' · used '+String(A.used||0)+' today'}),
+   h('button',{class:'xbtn',type:'button',text:'Copy',onclick:()=>{try{navigator.clipboard.writeText(A.key||'')}catch(e){}}})));
  const R=d.reads||{};put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'read clean'})),
   h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'not sure'})),
   h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})),
@@ -34155,9 +34246,11 @@ async def dashboard_cmd(interaction: discord.Interaction):
     if su:
         view.add_item(discord.ui.Button(label="Staff HQ", style=discord.ButtonStyle.link, url=su))
         extra = "\n🛠️ **Staff HQ** is only on this message for you — 24/7, owner-approved."
+    if su:
+        extra = (extra or "") + f"\nToday's access key is on **Staff HQ** (`{dash_gate_code()}`). One person, then it changes."
     await interaction.response.send_message(
-        f"📊 PIMP-BOT website: {url}\nThat's the sign-in link. Open it once and your browser stays signed in "
-        f"on this device. Keep the link in the group; anyone with it can see the public stats.{extra}",
+        f"📊 PIMP-BOT website: {url}\nSign in with today's access key from Staff HQ. Open it once and your browser "
+        f"stays signed in on this device.{extra}",
         ephemeral=True, view=view)
 
 
