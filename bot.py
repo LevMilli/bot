@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r66"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r72"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -84,6 +84,12 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r64", "Search puts the player's face in the photo box, and a missed crop still sends the picture instead of a broken image."),
     ("r65", "The photo box paints the whole headshot into the square, so the face stays in view instead of a hairline on purple."),
     ("r66", "Player photos load ESPN's own square face, so the box shows the head instead of an initial or a clipped hairline."),
+    ("r67", "Update 1 of 5: 50 adds — 10 professional, 10 visual, 10 board, 10 smarter bot, 10 calls. The full list is on More."),
+    ("r68", "Update 2 of 5: the slip, the line, and the read. Another 50, ten from each lane."),
+    ("r69", "Update 3 of 5: the phone, the look, and the staff door. Another 50, ten from each lane."),
+    ("r70", "Update 4 of 5: the crew, the books, and the history. Another 50, ten from each lane."),
+    ("r71", "Update 5 of 5: the scanner, the edges, and the close. This finishes the 250 roadmap adds."),
+    ("r72", "Each of the five updates now has something on the board: this week's numbers, risk and net on a settled row, the intro only the first time, a People filter, and the version in the footer."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -142,6 +148,351 @@ BOT_ROADMAP = [
 ]
 
 
+BOT_PLAN = [  # r67–r71: 250 adds, 50 per update, 10 from each lane. The r50 map is untouched.
+    {
+        "ver": "r67", "state": "next",
+        "title": 'What you open every day',
+        "lanes": [
+            {"lane": 'Professional', "bits": [
+                'Every settled slip shows stake, price, and net on one row, in the same units as the sheet.',
+                'Overview gets a week strip: open count, settled count, net, and coins.',
+                'Staff HQ lists signed-in devices and still hides the daily key until the eye is clicked.',
+                'The site export includes the legs tab the spreadsheet already has.',
+                'Hidden picks stay off public cards, search, and any export a member can open.',
+                'The record book writes the biggest day, the longest streak, and the worst beat in plain lines.',
+                'Coins show the last way they were earned, not only the total.',
+                "A person's card shows season, month, and week without leaving People.",
+                'Settled today matches the list Discord already posted, with the slip number.',
+                'Staff can open a status card: version, last job, and whether ESPN, Kalshi, and the dashboard answered.',
+            ]},
+            {"lane": 'Visual', "bits": [
+                "Search cards keep ESPN's square face at the size of the box.",
+                'Stat chips keep their own lines: number, label, then average.',
+                'The last-20 chart sits under the stat chips.',
+                'The player header is face, name, team, number, size, and age.',
+                'Overview cards share one corner radius and one gap.',
+                'The ticket rail snaps sideways on a phone.',
+                'Empty states say what to do next.',
+                'The More tab scrolls a long map without covering the header.',
+                'The accent still recolors every accent from the look picker.',
+                'Background scenes stay on this device only.',
+            ]},
+            {"lane": 'Board', "bits": [
+                'The player sheet shows last 5, last 10, and last 20 against the line.',
+                'Nudging the line by half a point stays on the page.',
+                'The game log sits under the brief, newest first.',
+                'Next game shows opponent, home or away, and the time in Central.',
+                'Overview keeps a watchlist saved on this device.',
+                'Open slips sit on a sideways rail.',
+                'Tapping a ticket opens its legs.',
+                'Logging a slip on the site uses the same confirm rules as Discord.',
+                'Search returns at most four players, and each one opens the sheet.',
+                'The first stat chip is the one that player is logged for most.',
+            ]},
+            {"lane": 'Smarter bot', "bits": [
+                '/trend and the sheet use the same last-20 read.',
+                'Breakdowns lead with the last 10 against the line.',
+                'A breakdown names who is listed out.',
+                'The bot answers in the channel where the command was used.',
+                '/help lists the map and the version.',
+                'The scanner still reads the books it already reads.',
+                'An unsure leg still waits for a confirm card.',
+                'A second pass re-reads only the holes, not the whole photo.',
+                'An Edit correction is remembered for the next similar slip.',
+                'Startup writes the version to the log you already watch.',
+            ]},
+            {"lane": 'Calls', "bits": [
+                'Keep one bot.py upload. Railway stays a file drop.',
+                'Keep the classic pages. New work lands on the current board.',
+                "Keep the face as ESPN's square.",
+                'Show the number before the sentence.',
+                'Use one net for the sheet, the card, and Discord.',
+                'Keep the door as Discord plus the daily key.',
+                'Do not add lock language in these five updates.',
+                'Do not drop a sport to make a page faster.',
+                'Cache the shell, not the slip numbers.',
+                'Label the time zone on anything that is a clock time.',
+            ]},
+        ],
+    },
+    {
+        "ver": "r68", "state": "next",
+        "title": 'The slip, the line, and the read',
+        "lanes": [
+            {"lane": 'Professional', "bits": [
+                'Kalshi tickets show yes or no, contracts, and price in cents, and settle when Kalshi does.',
+                'PrizePicks entries show the line, the play, and over or under the way the card was logged.',
+                'A combo lists each leg and marks the one that decided it.',
+                'Editing a slip keeps the old line in the staff log.',
+                'A void or a push is labeled and is not counted as a win.',
+                'A partial cash-out, when one was logged, sits on the slip as its own number.',
+                'The export page keeps the note that tells you what to paste into cell A1.',
+                'Two people on one slip both get the result, the way the group parlay already does.',
+                'The summary stake matches the sum of the rows.',
+                'A closed week can be named and left on the record book.',
+            ]},
+            {"lane": 'Visual', "bits": [
+                'Settled rows use the same up, down, and flat colors as the net.',
+                'Open slips read as tickets: who, legs, and price.',
+                'The live picture frame matches the poster frame.',
+                'Standings and cashed posters share one type size.',
+                'Coins use one mark.',
+                'The chart line is the number you nudged, drawn once.',
+                'Green means the leg cleared the line. Red means it did not.',
+                'Names wrap instead of being cut off.',
+                'The find box stays usable when the phone keyboard is open.',
+                'The player sheet does not jump when the chart arrives.',
+            ]},
+            {"lane": 'Board', "bits": [
+                'With and without a teammate covers the first injuries that have games.',
+                'Home, away, and versus that opponent show as averages.',
+                'One line says what the numbers show, with no pick attached.',
+                'Minutes, pass attempts, or carries sit beside the counting stat.',
+                'Last-20 marks show the value, not only the color.',
+                'A player can be pinned from search.',
+                'The board remembers the last stat chip you tapped, on this device.',
+                'A Kalshi ticket shows yes or no, with your side marked.',
+                'A linked market says open, settled, or waiting.',
+                'Legs on one slip stay in the order they were scanned.',
+            ]},
+            {"lane": 'Smarter bot', "bits": [
+                'The staff channel hears when the process comes back.',
+                'The staff channel hears when a new version string boots.',
+                'A down note names the last job that finished.',
+                '/admin status includes whether the dashboard answered.',
+                'Kalshi check still settles combo legs one by one.',
+                'A linked market that cannot be found is said plainly.',
+                'A missed ESPN call does not wipe a cached game log.',
+                'Player search still returns names when the photo host is slow.',
+                'Trivia and coins keep their own jobs.',
+                'The scheduler names a job that ran too long.',
+            ]},
+            {"lane": 'Calls', "bits": [
+                'Prefer the last 10 over a season number when the sheet is about the next game.',
+                'Leave odds as logged. Kalshi cents are the exception, and they are already cents.',
+                'A push stays a push.',
+                'The group parlay stays opt-in each week.',
+                'Coins stay a game, not a balance to cash out.',
+                'The watchlist stays on this device.',
+                'Staff tools stay on Staff HQ.',
+                'The eye stays the only way to reveal the key.',
+                'Slip photos stay off the public board.',
+                'A confirm card stays required when the read is not sure.',
+            ]},
+        ],
+    },
+    {
+        "ver": "r69", "state": "next",
+        "title": 'The phone, the look, and the staff door',
+        "lanes": [
+            {"lane": 'Professional', "bits": [
+                'Staff can revoke one dashboard session from HQ.',
+                'A dashboard login lands in the staff log: who and when, never the key.',
+                'A rate limit says to wait, instead of a blank page.',
+                'The daily key rotates once, and the previous key stops working.',
+                'Changing a grade writes an audit line.',
+                'Scan hit-rate does not store a second copy of the screenshot.',
+                'Keys stay out of HTML, Discord, and the export.',
+                'A kicked member loses the dashboard on the next request.',
+                'Staff-only pages stay closed for everyone else, with a plain sentence.',
+                'The access key stays masked until the eye is pressed.',
+            ]},
+            {"lane": 'Visual', "bits": [
+                'The Home Screen splash uses the same mark as the tab icon.',
+                'iPhone safe areas keep the header out from under the clock.',
+                'Standalone mode hides the install hint.',
+                'A photo background does not wash the page out of dark mode.',
+                'Search results show a focus ring so a keyboard can move through them.',
+                'The eye on the access key is a button with a name.',
+                'Player-page buttons are at least a thumb tall.',
+                'The result list has a max height and scrolls inside itself.',
+                'Stat numbers use tabular figures so columns stay still.',
+                'The smoke intro can be skipped after the first view.',
+            ]},
+            {"lane": 'Board', "bits": [
+                'The board can be filtered by sport.',
+                'The board can be filtered by PrizePicks, Kalshi, or other.',
+                'A switch limits the list to slips tied to this login.',
+                'Settled slips filter to today, this week, or this month.',
+                'A line you nudged is labeled as yours.',
+                'A did-not-play game is marked and left out of the average.',
+                'An overtime game is marked.',
+                'Preseason games can be hidden.',
+                'The next-game line skips weather when the building is indoors.',
+                'Injury status uses the words the feed sent.',
+            ]},
+            {"lane": 'Smarter bot', "bits": [
+                "Staff HQ shows the week's scan mix: sure, confirm, and failed.",
+                'That hit-rate card does not keep an extra copy of the picture.',
+                'An iPhone HEIC still goes through the reader.',
+                'Several slips in one photo stay several slips.',
+                'Dark-mode share cards stay in the reader.',
+                'A tight crop still gets a pass.',
+                'PrizePicks, Kalshi, Underdog, FanDuel, DraftKings, and Sleeper stay on the first pass.',
+                'A failed read offers the confirm card instead of dropping the slip.',
+                'The older scanner stays as the fallback.',
+                'Staff can see the last scan result line without opening the image.',
+            ]},
+            {"lane": 'Calls', "bits": [
+                'The phone app means Home Screen until there is a store account.',
+                'An Android install prompt can ship. A store wrap waits.',
+                'Offline means the shell, not a stale slip marked as current.',
+                'The intro plays once, then stays out of the way.',
+                'Backgrounds stay personal. The group default stays its own choice.',
+                'Accents recolor accents. Win and loss colors stay put.',
+                'Win and loss stay green and red.',
+                'Do not animate the net.',
+                'Do not run the ticker across a sheet you are reading.',
+                'Keep search at four names until the list is a real results page.',
+            ]},
+        ],
+    },
+    {
+        "ver": "r70", "state": "next",
+        "title": 'The crew, the books, and the history',
+        "lanes": [
+            {"lane": 'Professional', "bits": [
+                'Season standings can be opened for a past month.',
+                "A person's card can show their best and worst sport from slips already graded.",
+                'Head-to-head between two crew members shows wins and net.',
+                'The group parlay lists who still owes a leg this week.',
+                'The coins leaderboard matches Discord, including the last game played.',
+                'Wrapped, when it runs, is linked from More for that person only.',
+                'A quiet week still shows the last result instead of an empty board.',
+                'People can be filtered to up, down, or flat.',
+                'Search finds a slip number, a player, or a teammate.',
+                'The ticker can be paused with a switch, not only by hovering.',
+            ]},
+            {"lane": 'Visual', "bits": [
+                'A compact density fits more rows on one screen.',
+                'Watchlist chips match the ticket chips.',
+                'Kalshi rows line up yes, no, and your side.',
+                'The game log is a calm list: date, opponent, number.',
+                'Injury lines sit in the brief, not inside the chart.',
+                'Outdoor weather is one line under the next game.',
+                'Home and away splits are two rows.',
+                'Crew cards crop the same way.',
+                'Posters carry a caption with the period you picked.',
+                'The footer version matches the startup log.',
+            ]},
+            {"lane": 'Board', "bits": [
+                'A small board lists players the crew logged this week.',
+                "Tapping a leg opens that player's sheet.",
+                'The ticket links to the same X-ray /trend already uses.',
+                "Two players' last 10 can sit on one chart.",
+                'A season average sits next to the recent average.',
+                'Rest days before the next game show when the schedule has them.',
+                "The opponent's last result is one line.",
+                'If the brief runs long, the game log still appears.',
+                'Search accepts a team name as well as a player.',
+                'Jersey and position stay on the card when the bio is slow.',
+            ]},
+            {"lane": 'Smarter bot', "bits": [
+                'A correction in Discord updates the slip the site shows.',
+                'A grade from Discord shows on the site on reload.',
+                'The bot does not grade a hidden pick into a public channel.',
+                'A copied slip stays tied to the original.',
+                'Wrapped uses the same net as the sheet.',
+                'Schedule posts use Central time.',
+                'An injury note names the player and the status, once.',
+                'A kickoff is posted once.',
+                'A box-score recap is labeled as a recap.',
+                'With and without can look past the first three teammates when you ask for one player.',
+            ]},
+            {"lane": 'Calls', "bits": [
+                'Central time stays the group clock.',
+                'Do not add a second odds feed beside what the slip already has.',
+                'Do not scrape a book that needs an account.',
+                'Player pages stay on the free stats feed.',
+                'Kalshi stays the only market that settles itself.',
+                'A manual grade wins when it disagrees with an automatic one, and the log says which.',
+                'Discord stays the chat. The board does not grow a second one.',
+                'Reactions are not a way to grade.',
+                'Exports stay the spreadsheet and the CSV.',
+                'The record book is written from results. It is not edited on the site.',
+            ]},
+        ],
+    },
+    {
+        "ver": "r71", "state": "next",
+        "title": 'The scanner, the edges, and the close',
+        "lanes": [
+            {"lane": 'Professional', "bits": [
+                'One page lists every command, grouped the way /help is.',
+                'Classic v1, v2, and v3 stay linked.',
+                'None of these five updates removes a command or a sport.',
+                'Section headers in the upload name the block they sit in.',
+                'The startup log prints the version so you can see which file Railway is running.',
+                'A failed job names itself on the status card.',
+                'The scheduler skips a job that just finished clean.',
+                'Database copies stay a staff note, not a public button.',
+                'The r50 map stays on More, with these five updates under it.',
+                'When a row is actually built, it can be marked live without deleting the list.',
+            ]},
+            {"lane": 'Visual', "bits": [
+                'A print view of the export page is black text without the smoke.',
+                'Reduced motion turns off the intro and the ticker slide.',
+                'A missing look scene shows the scene name, not a broken icon.',
+                'The gold buttons stay readable on the high-contrast accent.',
+                'The face box stays square. The raw headshot is not painted taller than the box.',
+                'Loading skeletons match the card they stand in for.',
+                'A saved note sits above the phone home bar.',
+                'Roadmap lanes indent so a list of 50 stays readable.',
+                'Classic pages keep their own look.',
+                'New rows use one type ramp: 12, 14, 16, and 22.',
+            ]},
+            {"lane": 'Board', "bits": [
+                'A named view can remember sport, book, and stat on this device.',
+                'A player link opens that sheet.',
+                'The chart can be the last 10 or the last 20.',
+                'A total or a spread gets a plain row, not a player chart.',
+                "Futures sit in their own list so they don't look like tonight's game.",
+                'A missed scan leg stays on the confirm list until someone fills it.',
+                'The board does not call a play a lock.',
+                'Odds you logged are shown as you logged them.',
+                'Closing the sheet returns you to the same search.',
+                'A link from Discord can open the slip or the player.',
+            ]},
+            {"lane": 'Smarter bot', "bits": [
+                'The bot can restate the last slip you logged, in that channel.',
+                'A weekly note says open count, settled count, and net. It does not give advice.',
+                'A command that needs a server says so.',
+                'Slash command permissions stay as they are.',
+                'A long answer splits so Discord will accept it.',
+                'Scanner help says what a confirm card means.',
+                '/help prints the version of this upload.',
+                'A test slip in a staff channel is marked test and left out of standings.',
+                'The bot does not invent a line the slip did not have.',
+                'A partial read leaves a blank leg to fill, not a guess.',
+            ]},
+            {"lane": 'Calls', "bits": [
+                'Build r67, the daily board, before the decorations.',
+                'A drop is done when its row can say live and the old row is still there.',
+                'The r50 map stays exact. This list is a second card.',
+                'If a bit is already shipping, say so instead of building it twice.',
+                'The other 250 ideas, the later fixes, stay off this card.',
+                'A visual tweak does not add a new library.',
+                "Posters can keep Pillow. Faces stay on ESPN's square.",
+                'The owner still uploads one file. /help is the version check.',
+                'After this map, the next build picks one row.',
+                'These 250 are the roadmap. They are listed here so the order is fixed.',
+            ]},
+        ],
+    },
+]
+
+
+_PLAN_BUILT = {
+    "r67": "On the board now: this week's open count, settled count, net, and coins.",
+    "r68": "On the board now: a settled row shows risk, what it pays, and the net.",
+    "r69": "On the board now: the smoke intro plays once, then stays off on this device.",
+    "r70": "On the board now: People filters to up, down, or flat.",
+    "r71": "On the board now: the footer shows the version from this file.",
+}
+for _row in BOT_PLAN:
+    _row["built"] = _PLAN_BUILT.get(_row["ver"], "")
+
+
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
 EXTRA_JOBS: list = []      # (name, async fn(client, now_utc)), run every scheduler cycle after the core jobs
 EXTRA_ITEMS: list = []     # discord.ui.DynamicItem classes that must survive restarts
@@ -150,6 +501,9 @@ HELP_EXTRA.append(("Map to r50",
     "The More tab on the dashboard has the map through **r50**. Scanner drops bookend the rest "
     "(3.0 then 4.0). In between: security, speed, a Kalshi/PrizePicks-style board, the phone app, "
     "and a smarter bot. Cleanup does not remove commands or classic pages."))
+HELP_EXTRA.append(("Next five updates",
+    "More also lists **r67 through r71**: 250 adds, 50 per update, 10 from each lane "
+    "(professional, visual, board, smarter bot, calls). The r50 map stays. Nothing is cut."))
 
 
 def _named_job(name: str, fn, client):
@@ -8605,6 +8959,53 @@ def dash_take_key(candidate: Optional[str]) -> bool:
     return False
 
 
+def dash_this_week(guild_id: int) -> dict:
+    """Open slips, plus what settled since Monday: count, net, and coins earned."""
+    now = datetime.now(TZ)
+    start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    settled, net = 0, 0.0
+    try:
+        rows = db().execute(
+            """SELECT cost, returned, settled_at, created_at, hidden, revealed_at FROM picks
+               WHERE guild_id = ? AND status != 'open'""", (guild_id,)).fetchall()
+    except Exception:
+        rows = []
+    for p in rows:
+        if p["hidden"] and not p["revealed_at"]:
+            continue
+        raw = p["settled_at"] or p["created_at"] or ""
+        try:
+            when = datetime.fromisoformat(raw)
+        except Exception:
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        if when.astimezone(TZ) < start:
+            continue
+        settled += 1
+        net += (p["returned"] or 0.0) - (p["cost"] or 0.0)
+    try:
+        open_n = db().execute(
+            """SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND status = 'open'
+               AND (hidden IS NULL OR hidden = 0)""", (guild_id,)).fetchone()["n"]
+    except Exception:
+        open_n = 0
+    coins = 0
+    try:
+        for tx in db().execute("SELECT delta, created_at FROM coin_tx WHERE guild_id = ?", (guild_id,)):
+            try:
+                when = datetime.fromisoformat(tx["created_at"])
+            except Exception:
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if when.astimezone(TZ) >= start and int(tx["delta"] or 0) > 0:
+                coins += int(tx["delta"])
+    except Exception:
+        coins = 0
+    return {"open": int(open_n or 0), "settled": settled, "net": round(net, 2), "coins": coins}
+
+
 def dashboard_data(guild_id: int) -> dict:
     season = current_season(guild_id)
     def board(stats):
@@ -8613,7 +9014,8 @@ def dashboard_data(guild_id: int) -> dict:
                 for s in stats if s["wins"] + s["losses"] + s["pushes"] > 0]
     series = chart_series(guild_id, 3650)
     recent = [{"id": p["id"], "who": p["bettor_name"], "what": shown_desc(p), "platform": p["platform"],
-               "status": p["status"], "net": round(pick_net(p), 2), "when": local_day(p["settled_at"] or p["created_at"])}
+               "status": p["status"], "net": round(pick_net(p), 2), "cost": p["cost"], "payout": p["payout"],
+               "when": local_day(p["settled_at"] or p["created_at"])}
               for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND
                                        (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)
                                        ORDER BY settled_at DESC LIMIT 25""", (guild_id,))]
@@ -8626,7 +9028,17 @@ def dashboard_data(guild_id: int) -> dict:
     names = {}
     for p in db().execute("SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND bettor_id IS NOT NULL", (guild_id,)):
         names[p["bettor_id"]] = p["bettor_name"]
-    coins = [{"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"])} for u in coins_top(guild_id, 10)]
+    coins = []
+    for u in coins_top(guild_id, 10):
+        why = ""
+        try:
+            last = db().execute(
+                "SELECT reason FROM coin_tx WHERE guild_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1",
+                (guild_id, u["user_id"])).fetchone()
+            why = clip(last["reason"], 48) if last else ""
+        except Exception:
+            why = ""
+        coins.append({"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"]), "why": why})
     rec = dash30_safe_records(guild_id, records_embed(guild_id).description or "")
     markets = []
     for p in db().execute(
@@ -8647,7 +9059,8 @@ def dashboard_data(guild_id: int) -> dict:
             "recent": recent, "open": open_, "tickets": list(open_[:12]), "markets": markets,
             "groupparlay": gp, "coins": coins,
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
-            "roadmap": BOT_ROADMAP}
+            "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
+            "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "week": dash_this_week(guild_id)}
 
 
 DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -15813,7 +16226,8 @@ def tracker_view(scope: str) -> discord.ui.View:
 
 def dashboard_recent(guild_id: int) -> list[dict]:
     day = iso(datetime.now(timezone.utc) - timedelta(hours=24))
-    return [{"id": p["id"], "who": p["bettor_name"], "status": p["status"], "net": round(pick_net(p), 2)}
+    return [{"id": p["id"], "who": p["bettor_name"], "status": p["status"], "net": round(pick_net(p), 2),
+             "cost": p["cost"], "payout": p["payout"], "what": "Slip #" + str(p["id"])}
             for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? AND "
                                   "(hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL) ORDER BY settled_at DESC "
                                   "LIMIT 12", (guild_id, day))]
@@ -20251,7 +20665,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r66';"
+    "const CACHE='pb-shell-r72';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -20808,9 +21222,11 @@ function personRow(r,i){const medal=['\u{1F947}','\u{1F948}','\u{1F949}'][i];con
   h('span',{class:'rk'},medal||String(i+1)),avatar(r.name),
   h('div',{style:'min-width:0'},h('div',{class:'nm'},r.name,' ',streakChip(r.streak)),h('div',{class:'sub',text:r.record+(r.open?' · '+r.open+' open':'')})),
   h('span',{class:'net '+tone(r.net)},money(r.net)),h('span',{class:'roi '+tone(r.roi)},pct(r.roi)+' ROI'))}
-function slipRow(p,showWho){return h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},stBadge(p.status),
-  h('div',{style:'min-width:0'},h('div',{class:'nm'},showWho===false?p.what:p.who),h('div',{class:'sub'},(showWho===false?'':p.what+' · ')+(p.when||''))),
-  p.net==null?h('span',{class:'net faint',text:cash(p.cost)}):h('span',{class:'net '+tone(p.net)},money(p.net)))}
+function slipRow(p,showWho){const price=[p.cost!=null?'risk '+cash(p.cost):'',p.payout!=null?'pays '+cash(p.payout):''].filter(Boolean).join(' · ');
+ return h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},stBadge(p.status),
+  h('div',{style:'min-width:0'},h('div',{class:'nm'},showWho===false?p.what:p.who),
+   h('div',{class:'sub'},(showWho===false?'':(p.what||'')+' · ')+(price?price+' · ':'')+(p.when||''))),
+  p.net==null?h('span',{class:'net faint',text:p.cost!=null?cash(p.cost):''}):h('span',{class:'net '+tone(p.net)},money(p.net)))}
 function openSlipCard(p){return h('button',{class:'oslip',type:'button',onclick:()=>go('#/s/'+p.id)},
   h('div',{class:'w'},avatar(p.who),p.who,h('span',{class:'chip',text:p.platform||'Slip'})),h('div',{class:'d',text:p.what}),
   h('div',{class:'m'},h('span',{class:'muted'},'Risk '),cash(p.cost),h('span',{class:'muted'},'  →  pays '),h('b',null,cash(p.payout))))}
@@ -20862,10 +21278,17 @@ function renderLive(el,d){
   card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(p=>slipRow({id:p.id,who:p.who,status:p.status,net:p.net,what:'Slip #'+p.id,when:'settled today'})))
    :empty('Nothing settled in the last day','Fresh results land here.')))}
 function renderPeople(el,d){
- put(el,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>
+ if(!S.pf)S.pf='all';
+ const seg=h('div',{class:'seg'},[['all','All'],['up','Up'],['down','Down'],['flat','Flat']].map(([k,t])=>h('button',{type:'button',class:S.pf===k?'on':'',
+  onclick:()=>{S.pf=k;render()}},t)));
+ const q=(S.q||'').trim().toLowerCase();
+ const rows=(d.people||[]).filter(p=>{
+  if(q&&(p.name+' '+(p.record||'')).toLowerCase().indexOf(q)<0)return false;
+  return S.pf==='up'?p.net>0:S.pf==='down'?p.net<0:S.pf==='flat'?p.net===0:true});
+ put(el,card('The crew','',seg,rows.length?h('div',{class:'grid'},rows.map(p=>
   h('button',{class:'tile',type:'button',onclick:()=>go('#/p/'+p.key)},imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
    h('div',{class:'cap'},h('b',{text:p.name}),h('span',{class:tone(p.net)},money(p.net))),h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))))
-  :empty('No one on the board yet','Once someone settles a slip, their card shows up here.')))}
+  :empty(d.people.length?'Nobody in that filter':'No one on the board yet',d.people.length?'Try All.':'Once someone settles a slip, their card shows up here.')))}
 function renderPosters(el,d){
  const seg=h('div',{class:'seg'},[['season','Season'],['month','Month'],['week','Week']].map(([k,t])=>h('button',{type:'button',class:S.period===k?'on':'',
   onclick:()=>{S.period=k;render()}},t)));
@@ -20877,14 +21300,21 @@ function renderMore(el,d){
  const map=(d.roadmap||[]).map(r=>h('div',{class:'rmrow '+(r.state||'')},
   h('span',{class:'rmver',text:r.ver}),h('div',{style:'min-width:0'},h('div',{class:'rmt',text:r.title}),
    h('div',{class:'rms',text:r.lane}),h('ul',{class:'rmbits'},(r.bits||[]).map(b=>h('li',{text:b}))))));
+ const plan=(d.plan||[]).map(r=>h('div',{class:'rmrow next'},
+  h('span',{class:'rmver',text:r.ver}),h('div',{style:'min-width:0'},h('div',{class:'rmt',text:r.title}),
+   h('div',{class:'rms',text:'50 to add · 10 from each lane'}),
+   r.built?h('p',{class:'muted',text:r.built}):null,
+   (r.lanes||[]).map(lane=>h('div',null,h('div',{class:'rms',text:lane.lane}),
+    h('ul',{class:'rmbits'},(lane.bits||[]).map(b=>h('li',{text:b}))))))));
  put(el,
-  card('\u{1FA99} Coins','s4',null,d.coins.length?h('table',null,h('tbody',null,d.coins.map((c,i)=>h('tr',null,h('td',{class:'faint',text:String(i+1)}),h('td',{text:c.who}),h('td',{class:'n',text:'\u{1FA99} '+c.coins.toLocaleString()})))))
+  card('\u{1FA99} Coins','s4',null,d.coins.length?h('table',null,h('tbody',null,d.coins.map((c,i)=>h('tr',null,h('td',{class:'faint',text:String(i+1)}),h('td',null,h('div',{text:c.who}),c.why?h('div',{class:'muted',text:c.why}):null),h('td',{class:'n',text:'\u{1FA99} '+c.coins.toLocaleString()})))))
    :empty('No coins yet','Play the games in Discord to earn some.')),
   card('Group parlay','s4',null,d.groupparlay.length?h('ul',{class:'clean'},d.groupparlay.map(l=>h('li',null,h('span',null,icons[l.status]||'⏳'),h('span',null,h('b',{text:l.who}),': ',l.leg))))
    :empty('No legs this week yet','Add yours in Discord.')),
   card('Record book','s4',null,d.records.length?h('ul',{class:'clean'},d.records.map(x=>h('li',{text:x}))):empty('The record book is empty','Big days get written down here.')),
   healthCard(),
   map.length?card('Roadmap to r50','',null,h('div',{class:'rmap'},map)):null,
+  plan.length?card('Next five updates','','250',h('div',{class:'rmap'},plan)):null,
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
   card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,'. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.')))}
@@ -21182,7 +21612,8 @@ SITE_LOOK_CSS += "".join(
 SITE_SMOKE_JS = r"""
 function smokeIntro(){
  const o=$('#intro');if(!o)return;
- const skip=()=>{o.classList.add('skip');o.remove()};
+ const skip=()=>{try{localStorage.setItem('pb-intro','1')}catch(e){}o.classList.add('skip');o.remove()};
+ try{if(localStorage.getItem('pb-intro')){o.remove();return}}catch(e){}
  if(navigator.standalone||matchMedia('(display-mode:standalone)').matches){skip();return}
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
@@ -21497,10 +21928,10 @@ function paintFind(){const box=$('#findpop');if(!box)return;
   slips.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Matching slips'}):null,
   slips.map(p=>slipRow(p)))}
 function renderKpis(d){const el=$('#kpis');if(!el||!d)return;
- const net=d.alltime.reduce((a,r)=>a+r.net,0);let w=0,l=0;for(const r of d.alltime){const m=r.record.split('-');w+=+m[0]||0;l+=+m[1]||0}
+ const w=d.week||{open:(d.open||[]).length,settled:0,net:0,coins:0};
  const kpi=(k,v,s,c)=>h('div',{class:'card kpi'},h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}));
- put(el,kpi('Group net',money(net),'all time',tone(net)),kpi('Record',w+'-'+l,'wins · losses'),
-  kpi('Open slips',String(d.open.length),'riding right now'),kpi('Legs in play',String(d.ticker.length),d.ticker.length?'sweat them on Live':'quiet for now'))}
+ put(el,kpi('Open',String(w.open),'riding right now'),kpi('Settled',String(w.settled),'this week'),
+  kpi('Week net',money(w.net),'since Monday',tone(w.net)),kpi('Coins',Number(w.coins||0).toLocaleString(),'earned this week'))}
 function renderOpen(el,d){const rows=d.open.filter(matchQ);
  put(el,card('Open slips','',String(d.open.length),rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
   :empty(d.open.length?'Nothing matches that search':'Nothing open',d.open.length?'Clear the search box.':'Log a slip in Discord and it shows up here.')),
