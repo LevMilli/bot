@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-15 r32.3"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-15 r33"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -10855,6 +10855,10 @@ async def audit(client, guild_id: Optional[int], text: str) -> None:
         await channel.send(clip(f"📝 {text}", 2000), allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         log.warning("Audit post failed")
+    try:
+        staff_log_add(guild_id, "audit", text)
+    except Exception:
+        pass
 
 
 def who(interaction) -> str:
@@ -18791,7 +18795,7 @@ from urllib.parse import quote as _dash_quote, urlencode as _dash_urlencode
 
 DASH_COOKIE = "pb_dash"
 DASH_STAFF_COOKIE = "pb_staff"
-DASH_COOKIE_AGE = 30 * 86400
+DASH_COOKIE_AGE = 400 * 86400   # stay signed in on this device (~13 months)
 DASH_STAFF_COOKIE_AGE = 365 * 86400
 DASH_RATE = (300, 60.0)          # requests per IP per window (a page load with images is ~30)
 DASH_BAD_KEYS = (12, 600.0)      # wrong keys per IP before it's locked out for the window
@@ -19241,8 +19245,11 @@ async def dash_index(request):
         go = "/" if path in ("/", "/login", "/app") else path
         q = {k: v for k, v in (("v", prm["v"]), ("guild", request.query.get("guild"))) if v}
         resp = web.Response(status=303, headers={"Location": go + ("?" + _dash_urlencode(q) if q else "")})
-        resp.set_cookie(DASH_COOKIE, dash_cookie_value(), max_age=DASH_COOKIE_AGE, path="/", httponly=True,
-                        secure=True, samesite="Lax")
+        stay = request.query.get("stay") != "0"
+        ck = dict(path="/", httponly=True, secure=True, samesite="Lax")
+        if stay:
+            ck["max_age"] = DASH_COOKIE_AGE
+        resp.set_cookie(DASH_COOKIE, dash_cookie_value(), **ck)
         return resp
     if not dash_authed(request):
         if not dash_rate(ip, "bad", *DASH_BAD_KEYS, count=False):
@@ -19360,8 +19367,8 @@ def dash_app(web):
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
                     web.get("/img/{kind}/{arg}.png", dash_image), web.get("/favicon.ico", dash_favicon),
-                    web.get("/favicon.svg", dash_favicon), web.get("/logout", dash_logout),
-                    web.get("/staff", dash_staff),
+                    web.get("/favicon.svg", dash_favicon),                     web.get("/logout", dash_logout),
+                    web.get("/staff", dash_staff), web.get("/api/staff.json", dash_api_staff),
                     web.get("/{tail:.*}", dash_not_found)])
     return app
 
@@ -20106,6 +20113,73 @@ skeletonAll();show(S.tab);load();route();
     "{{COURT_D}}", dash_court("#ffffff", 0.05)).replace("{{COURT_L}}", dash_court("#7B3FE4", 0.09))
 
 
+SITE_LOOK_CSS = r"""
+html[data-accent=gold]{--brand:#CE9618;--brand2:#F5C542}html[data-accent=green]{--brand:#169660;--brand2:#34d399}
+html[data-accent=blue]{--brand:#2563EB;--brand2:#60a5fa}html[data-accent=red]{--brand:#D62834;--brand2:#fb7185}
+html[data-accent=pink]{--brand:#D62C80;--brand2:#f472b6}html[data-accent=teal]{--brand:#0E8C82;--brand2:#2dd4bf}
+html[data-accent=orange]{--brand:#E65C12;--brand2:#fb923c}html[data-accent=ice]{--brand:#328CD7;--brand2:#7dd3fc}
+html[data-accent=black]{--brand:#3A3A48;--brand2:#a1a1aa}html[data-accent=purple]{--brand:#7B3FE4;--brand2:#a27bff}
+html[data-bg=court] body,body[data-bg=court]{background:radial-gradient(1200px 700px at 8% -12%,#7B3FE466,transparent 55%),
+ radial-gradient(900px 500px at 100% 0,#F5C54222,transparent 50%),var(--bg)!important}
+html[data-bg=arena] body,body[data-bg=arena]{background:
+ radial-gradient(40% 80% at 22% 0,#F5C54255,transparent 50%),
+ radial-gradient(36% 80% at 78% 0,#F5C54244,transparent 50%),
+ radial-gradient(80% 50% at 50% 120%,#3b1d8a44,transparent),#0c0814!important}
+html[data-bg=neoncity] body,body[data-bg=neoncity]{background:
+ radial-gradient(900px 420px at 80% 100%,#ff46be44,transparent),
+ linear-gradient(180deg,#1a1038 0%,#12061c 40%,#2a0a40 70%,#0a0614)!important}
+html[data-bg=galaxy] body,body[data-bg=galaxy]{background:
+ radial-gradient(2px 2px at 20% 30%,#fff8,transparent),
+ radial-gradient(1px 1px at 70% 40%,#fff6,transparent),
+ radial-gradient(900px 500px at 70% 20%,#7B3FE466,transparent),
+ radial-gradient(700px 400px at 20% 80%,#3b1d8a88,transparent),#070614!important}
+html[data-bg=goldluxe] body,body[data-bg=goldluxe]{background:
+ repeating-linear-gradient(135deg,#F5C54208 0 2px,transparent 2px 18px),
+ radial-gradient(800px 500px at 100% 0,#F5C54233,transparent),#0a0804!important}
+html[data-bg=aurora] body,body[data-bg=aurora]{background:
+ linear-gradient(180deg,#07141c,#0a1824 30%,#123028 55%,#0c1020)!important}
+html[data-bg=gridiron] body,body[data-bg=gridiron]{background:
+ repeating-linear-gradient(0deg,#1a3d2411 0 2px,transparent 2px 32px),
+ radial-gradient(900px 500px at 50% 0,#1a5c3222,transparent),#07140c!important}
+html[data-bg=vegas] body,body[data-bg=vegas]{background:
+ radial-gradient(ellipse 80% 50% at 50% 110%,#F5C54266,transparent 50%),
+ linear-gradient(180deg,#1a0a28,#4a1848 45%,#c45c2a 78%,#F5C542)!important}
+html[data-bg=midnight] body,body[data-bg=midnight]{background:linear-gradient(#0a1024,#070814)!important}
+html[data-bg=hardwood] body,body[data-bg=hardwood]{background:radial-gradient(1000px 620px at 50% -20%,#c47a3a66,transparent),
+ linear-gradient(180deg,#2a1608,#120a06 55%,#0c0806)!important}
+html[data-bg=neon] body,body[data-bg=neon]{background:radial-gradient(760px 500px at 85% 0,#ff46be66,transparent),
+ radial-gradient(620px 420px at 0 100%,#5af5ff44,transparent),#12061c!important}
+html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg,#22242a,#0c0c0e)!important}
+html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
+html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
+html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
+#intro{position:fixed;inset:0;z-index:90;background:#05030c;display:grid;place-items:center;transition:opacity .9s ease}
+#intro.go{opacity:0;pointer-events:none}#smokecan{position:absolute;inset:0;width:100%;height:100%}
+#introtitle{position:relative;z-index:1;font:900 clamp(28px,6vw,62px)/1.1 ui-sans-serif,system-ui;letter-spacing:.14em;
+ text-transform:uppercase;color:#fff;text-shadow:0 0 42px #7B3FE4,0 10px 50px #000;opacity:0;transform:translateY(10px);
+ transition:opacity .7s ease,transform .7s ease}#introtitle.on{opacity:1;transform:none}
+.lookbtn{width:38px;height:38px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;
+ place-items:center;cursor:pointer;flex:none;color:var(--gold)}
+.looksheet{position:fixed;inset:0;z-index:40;display:none;place-items:center;background:#05030acc;padding:18px}
+.looksheet.on{display:grid}.lookbox{width:min(720px,100%);background:var(--card);border:1px solid var(--line);
+ border-radius:22px;padding:18px 18px 14px;box-shadow:0 30px 80px -24px #000}
+.lookbox h3{margin:0 0 4px;font-size:18px}.lookhint{color:var(--muted);font-size:13px;margin:0 0 14px}
+.lookgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.looktile{border:1px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;background:var(--bg);
+ color:var(--text);text-align:left;padding:0;font:inherit;position:relative;min-height:92px}
+.looktile .sw{height:52px;display:block}.looktile b,.looktile span{display:block;padding:0 10px}
+.looktile b{margin-top:8px;font-size:13px}.looktile span{font-size:11px;color:var(--muted);padding-bottom:10px}
+.looktile.on{outline:2px solid var(--gold);outline-offset:1px}
+.looktile .onpill{position:absolute;top:8px;right:8px;background:var(--gold);color:#14003A;font-size:10px;font-weight:800;
+ letter-spacing:.08em;padding:2px 7px;border-radius:99px}
+.lookrow{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.lookrow button{height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--card2);
+ color:var(--text);cursor:pointer;font-weight:700}
+@media (max-width:720px){.lookgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (prefers-reduced-motion:reduce){#intro{display:none}}
+"""
+
+
 def _dash_html_v4(html: str) -> str:
     """v4 is a remake of v3: same APIs, same tabs, same security (no innerHTML), plus a command strip, search,
     an Open tab, and the board poster on Overview. Classic v3 stays at ?v=3."""
@@ -20134,13 +20208,14 @@ body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;pad
  text-transform:uppercase;text-decoration:none;box-shadow:0 8px 22px -12px #F5C542aa}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 .find{max-width:none;width:100%;order:5;flex:1 1 100%}}
-"""
+""" + SITE_LOOK_CSS
     html = html.replace("</style>", extra_css + "</style>", 1)
     html = html.replace("<body>", '<body class="v4">', 1)
     html = html.replace(
         '  <div class="spacer"></div>\n  <button class="iconbtn" id="theme"',
         '  <input class="find" id="find" type="search" placeholder="Find a person or slip" autocomplete="off" '
-        'spellcheck="false">\n  <div class="spacer"></div>\n  <button class="iconbtn" id="theme"',
+        'spellcheck="false">\n  <div class="spacer"></div>\n  <button class="lookbtn" id="lookbtn" type="button" '
+        'aria-label="Background and accent" title="Your look">◐</button>\n  <button class="iconbtn" id="theme"',
         1)
     html = html.replace(
         '  <button type="button" data-t="people">',
@@ -20206,6 +20281,62 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
         "document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.t)));",
         "document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.t)));",
         1)
+    look_js = r"""
+const LOOKS=[["court","Classic court","The original purple court"],["arena","Arena lights","Spotlights over the floor"],
+ ["neoncity","Neon city","Skyline after dark"],["galaxy","Galaxy","Stars and a nebula"],
+ ["goldluxe","Gold luxe","Black and gold, high roller"],["aurora","Aurora","Northern lights drifting"],
+ ["gridiron","Gridiron","Game-night turf"],["vegas","Vegas sunset","Synthwave sun and palms"],
+ ["midnight","Midnight","Clean and quiet"]];
+const ACCENTS=["purple","gold","green","blue","red","pink","teal","orange","ice","black"];
+function readLook(){try{return JSON.parse(localStorage.getItem('pb-look')||'{}')}catch(e){return {}}}
+function applyLook(){const s=readLook();const bg=LOOKS.some(x=>x[0]===s.bg)?s.bg:'';const ac=ACCENTS.includes(s.accent)?s.accent:'';
+ if(bg)document.documentElement.dataset.bg=bg;else delete document.documentElement.dataset.bg;
+ if(ac)document.documentElement.dataset.accent=ac;else delete document.documentElement.dataset.accent}
+function saveLook(bg,ac){const s=readLook();if(bg!==undefined)s.bg=bg;if(ac!==undefined)s.accent=ac;
+ try{if(!s.bg&&!s.accent)localStorage.removeItem('pb-look');else localStorage.setItem('pb-look',JSON.stringify(s))}catch(e){}
+ applyLook();paintLook()}
+const LOOK_SW={court:'radial-gradient(80% 80% at 20% 0,#7B3FE4aa,transparent),#12081c',
+ arena:'radial-gradient(40% 100% at 20% 0,#F5C54299,transparent),radial-gradient(40% 100% at 80% 0,#F5C54266,transparent),#12081c',
+ neoncity:'linear-gradient(#1a1038,#c45cff33),#12061c',galaxy:'radial-gradient(circle at 70% 30%,#7B3FE4,#070614)',
+ goldluxe:'linear-gradient(135deg,#1a1408,#F5C54255)',aurora:'linear-gradient(#0a1824,#34d39966)',
+ gridiron:'linear-gradient(#0a1a10,#1a5c32aa)',vegas:'linear-gradient(#1a0a28,#F5C542)',midnight:'linear-gradient(#0a1024,#070814)'};
+function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();
+ put(box,LOOKS.map(([id,n,d])=>h('button',{class:'looktile'+(s.bg===id?' on':''),type:'button','data-bg':id},
+  h('i',{class:'sw',style:'background:'+(LOOK_SW[id]||'#12081c')}),h('b',{text:n}),h('span',{text:d}),
+  s.bg===id?h('em',{class:'onpill',text:'ON'}):null)));
+ const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{type:'button',class:s.accent===a?'on':'','data-ac':a,text:a})))}
+applyLook();
+const lookSheet=$('#looksheet');const lookBtn=$('#lookbtn');
+if(lookBtn)lookBtn.addEventListener('click',()=>{paintLook();lookSheet.classList.add('on')});
+if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')lookSheet.classList.remove('on')});
+ $('#lookgrid')&&$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile');if(t)saveLook(t.getAttribute('data-bg'),undefined)});
+ $('#lookaccents')&&$('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});
+ $('#lookreset')&&$('#lookreset').addEventListener('click',()=>{try{localStorage.removeItem('pb-look')}catch(e){}applyLook();paintLook()})}
+function smokeIntro(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ try{if(sessionStorage.getItem('pb-intro'))return;sessionStorage.setItem('pb-intro','1')}catch(e){}
+ const o=$('#intro');const c=$('#smokecan');const t=$('#introtitle');if(!o||!c)return;
+ const x=c.getContext('2d');const W=()=>c.width=innerWidth,H=()=>c.height=innerHeight;W();H();
+ const parts=Array.from({length:70},()=>({x:Math.random()*c.width,y:c.height*(.4+Math.random()*.7),r:40+Math.random()*90,
+  vx:(Math.random()-.5)*.4,vy:-.25-Math.random()*.55,a:.04+Math.random()*.08}));
+ let start=performance.now();
+ (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
+  for(const p of parts){p.x+=p.vx;p.y+=p.vy;p.r+=.08;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(180,170,200,'+p.a+')');g.addColorStop(1,'rgba(20,10,40,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
+  const el=now-start;if(el>400)t.classList.add('on');if(el>2200)o.classList.add('go');if(el<3200)requestAnimationFrame(tick);else o.remove()})(start)}
+addEventListener('load',smokeIntro);
+"""
+    html = html.replace("skeletonAll();show(S.tab);load();route();", look_js + "skeletonAll();show(S.tab);load();route();", 1)
+    html = html.replace(
+        '<noscript><p style="text-align:center">The dashboard needs JavaScript switched on.</p></noscript>',
+        '<div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">'
+        '<h3>Background</h3><p class="lookhint">Pick the scene behind the page. It\'s saved on this device only.</p>'
+        '<div class="lookgrid" id="lookgrid"></div>'
+        '<p class="lookhint" style="margin-top:14px">Accent</p><div class="lookrow" id="lookaccents"></div>'
+        '<div class="lookrow"><button type="button" id="lookreset">Use the group default</button>'
+        '<button type="button" id="lookdone">Done</button></div></div></div>'
+        '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introtitle">Pimps Dashboard</div></div>'
+        '<noscript><p style="text-align:center">The dashboard needs JavaScript switched on.</p></noscript>',
+        1)
     return html
 
 
@@ -20214,6 +20345,8 @@ if "body.v4" not in DASHBOARD_HTML_V4 or 'data-t="open"' not in DASHBOARD_HTML_V
     raise RuntimeError("dashboard v4 remake did not apply")
 if "tabFromPath" not in DASHBOARD_HTML_V4 or "pathForTab" not in DASHBOARD_HTML_V4:
     raise RuntimeError("dashboard website paths did not apply")
+if "Pimps Dashboard" not in DASHBOARD_HTML_V4 or "lookbtn" not in DASHBOARD_HTML_V4:
+    raise RuntimeError("dashboard intro / look picker did not apply")
 
 
 SITE_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -20240,9 +20373,11 @@ h1{font-size:clamp(32px,5vw,52px);line-height:1.05;margin:0 0 14px;letter-spacin
 .lead{color:var(--muted);font-size:18px;margin:0 0 22px;max-width:40rem}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 24px 50px -28px #000}
 .panel h2{margin:0 0 8px;font-size:18px}label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px}
-input{width:100%;height:44px;border-radius:12px;border:1px solid var(--line);background:#110c1b;color:var(--text);padding:0 12px;font:inherit}
-button{width:100%;margin-top:14px;height:44px;border:0;border-radius:12px;background:linear-gradient(90deg,var(--gold),#e08a1e);color:#1a1204;
+input[type=password],input[type=text]{width:100%;height:44px;border-radius:12px;border:1px solid var(--line);background:#110c1b;color:var(--text);padding:0 12px;font:inherit}
+button[type=submit]{width:100%;margin-top:14px;height:44px;border:0;border-radius:12px;background:linear-gradient(90deg,var(--gold),#e08a1e);color:#1a1204;
  font-weight:800;cursor:pointer;font:inherit}
+.stay{display:flex;flex-direction:column;gap:8px;margin-top:14px;font-size:13px;color:var(--muted)}
+.stay label{display:flex;align-items:center;gap:8px;margin:0;cursor:pointer}
 .hint{font-size:13px;color:var(--muted);margin:12px 0 0}
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:10px 0 48px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
@@ -20269,9 +20404,13 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
  </div>
  <form class="panel" id="signin" action="/" method="get">
   <h2>Sign in</h2>
-  <p class="hint">Ask an admin for the dashboard link: /dashboard in Discord. Paste the access key here, or just open that link once — your browser stays signed in.</p>
+  <p class="hint">Ask an admin for the dashboard link: /dashboard in Discord. Paste the access key here, or just open that link once — your browser stays signed in on this device.</p>
   <label for="key">Access key</label>
   <input id="key" name="key" type="password" maxlength="128" autocomplete="off" required>
+  <div class="stay">
+   <label><input type="radio" name="stay" value="1" checked> Keep me signed in on this device</label>
+   <label><input type="radio" name="stay" value="0"> This browser session only</label>
+  </div>
   <button type="submit">Enter PIMP-BOT</button>
  </form>
 </section>
@@ -20285,7 +20424,12 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
  <span>Need the link? Run /dashboard in Discord.</span>
 </footer>
 </div>
+<script>
+try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
+ if(s.bg)document.documentElement.dataset.bg=s.bg;if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+</script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+SITE_HTML = SITE_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
 if "/api/data" in SITE_HTML or "{{" in SITE_HTML:
     raise RuntimeError("public website leaked an API path or leftover placeholder")
 
@@ -20293,12 +20437,19 @@ if "/api/data" in SITE_HTML or "{{" in SITE_HTML:
 # ---- Staff HQ (owner-approved 24/7 site, look designer) ----------------------------------------------
 
 SITE_BGS = {
-    "court": ("Home court", "radial-gradient(1200px 700px at 8% -12%,#7B3FE466,transparent 55%),"
+    "court": ("Classic court", "radial-gradient(1200px 700px at 8% -12%,#7B3FE466,transparent 55%),"
               "radial-gradient(900px 500px at 100% 0,#F5C54228,transparent 50%),var(--bg)"),
+    "arena": ("Arena lights", "radial-gradient(40% 80% at 22% 0,#F5C54255,transparent 50%),"
+              "radial-gradient(36% 80% at 78% 0,#F5C54244,transparent 50%),#0c0814"),
+    "neoncity": ("Neon city", "linear-gradient(180deg,#1a1038,#12061c 40%,#2a0a40 70%,#0a0614)"),
+    "galaxy": ("Galaxy", "radial-gradient(900px 500px at 70% 20%,#7B3FE466,transparent),#070614"),
+    "goldluxe": ("Gold luxe", "radial-gradient(800px 500px at 100% 0,#F5C54233,transparent),#0a0804"),
+    "aurora": ("Aurora", "linear-gradient(180deg,#07141c,#123028 55%,#0c1020)"),
+    "gridiron": ("Gridiron", "radial-gradient(900px 500px at 50% 0,#1a5c3222,transparent),#07140c"),
+    "vegas": ("Vegas sunset", "linear-gradient(180deg,#1a0a28,#4a1848 45%,#c45c2a 78%,#F5C542)"),
+    "midnight": ("Midnight", "linear-gradient(#0a1024,#070814)"),
     "hardwood": ("Hardwood", "radial-gradient(1000px 620px at 50% -20%,#c47a3a66,transparent),"
                  "linear-gradient(180deg,#2a1608,#120a06 55%,#0c0806)"),
-    "midnight": ("Midnight", "radial-gradient(900px 520px at 18% 0,#3b5ad088,transparent),"
-                 "linear-gradient(#0a1024,#070814)"),
     "neon": ("Vegas neon", "radial-gradient(760px 500px at 85% 0,#ff46be66,transparent),"
              "radial-gradient(620px 420px at 0 100%,#5af5ff44,transparent),#12061c"),
     "carbon": ("Carbon", "linear-gradient(180deg,#22242a,#0c0c0e)"),
@@ -20536,96 +20687,241 @@ def dash_staff_inject(html: str, request) -> str:
     return html
 
 
+def staff_log_add(gid: Optional[int], kind: str, text: str, name: str = "") -> None:
+    g = staff_gid(gid)
+    try:
+        items = json.loads(get_setting(g, "staff_log") or "[]")
+    except Exception:
+        items = []
+    if not isinstance(items, list):
+        items = []
+    items.insert(0, {"kind": clip(kind, 12), "text": clip(text, 140), "name": clip(name, 40), "at": now_iso()})
+    set_setting(g, "staff_log", json.dumps(items[:40]))
+
+
+def staff_ops(uid: int) -> dict:
+    """Numbers and lists for Staff HQ. Names only; nothing a person typed is marked HTML."""
+    gid = staff_gid()
+    clean = unsure = failed = 0
+    asks = {"ask_groq": 0, "ask_gemini": 0, "ask_claude": 0}
+    for i in range(7):
+        day = (datetime.now(TZ).date() - timedelta(days=i)).isoformat()
+        try:
+            c = json.loads(get_setting(0, f"slipreads:{day}") or "{}")
+        except Exception:
+            c = {}
+        if not isinstance(c, dict):
+            c = {}
+        num = lambda k, d=c: int(d[k]) if str(d.get(k) or "").isdigit() else 0
+        clean += num("scan")
+        unsure += num("scan_confirm")
+        failed += num("fail")
+        if i == 0:
+            for k in asks:
+                asks[k] = num(k)
+    tickets = []
+    for need in dash_needs(gid)[:12]:
+        tickets.append({"id": need.get("id"), "who": need["who"], "title": need["why"], "state": "open",
+                        "kind": "grade" if "grade" in (need.get("why") or "").lower() else "pay"})
+    try:
+        cutoff = iso(datetime.now(timezone.utc) - timedelta(days=4))
+        for p in db().execute(
+                "SELECT id, bettor_name FROM picks WHERE guild_id = ? AND status = 'open' AND created_at <= ? "
+                "AND (hidden IS NULL OR hidden = 0) ORDER BY id LIMIT 8", (gid, cutoff)):
+            if not any(t.get("id") == p["id"] for t in tickets):
+                tickets.append({"id": p["id"], "who": clip(p["bettor_name"], 40),
+                                "title": f"Slip #{p['id']} has been open 4+ days", "state": "open", "kind": "stale"})
+    except Exception:
+        pass
+    closed = 0
+    try:
+        week = iso(datetime.now(timezone.utc) - timedelta(days=7))
+        closed = db().execute(
+            "SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ?",
+            (gid, week)).fetchone()["n"]
+    except Exception:
+        pass
+    try:
+        blacklist = json.loads(get_setting(gid, "staff_blacklist") or "[]")
+    except Exception:
+        blacklist = []
+    if not isinstance(blacklist, list):
+        blacklist = []
+    hits = []
+    try:
+        for p in db().execute(
+                f"SELECT bettor_name, description, settled_at FROM picks WHERE guild_id = ? AND status != 'open' "
+                f"AND {_DASH_VISIBLE} ORDER BY settled_at DESC LIMIT 5", (gid,)):
+            hits.append({"who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 80),
+                         "when": local_day(p["settled_at"]) if p["settled_at"] else ""})
+    except Exception:
+        pass
+    try:
+        log_rows = json.loads(get_setting(gid, "staff_log") or "[]")
+    except Exception:
+        log_rows = []
+    if not isinstance(log_rows, list):
+        log_rows = []
+    anns = []
+    try:
+        for a in db().execute(
+                "SELECT text, due_at, sent_at, channel_id FROM announcements WHERE guild_id = ? "
+                "ORDER BY COALESCE(sent_at, due_at) DESC LIMIT 6", (gid,)):
+            anns.append({"text": clip(a["text"], 120), "due": a["due_at"] or "",
+                         "sent": bool(a["sent_at"]), "channel": str(a["channel_id"] or "")})
+    except Exception:
+        pass
+    crew = []
+    for kind in ("developer", "owner", "admin", "mod"):
+        for i in crew_ids(kind, gid):
+            rec = staff_rec(i, gid)
+            crew.append({"id": i, "name": rec.get("name") or str(i), "role": kind})
+    pending = staff_rows("pending", gid) if crew_at_least(uid, "owner", gid) else []
+    pool = [
+        {"name": "Groq (free)", "on": bool(env("GROQ_API_KEY", ""))},
+        {"name": "Cerebras (free)", "on": bool(env("CEREBRAS_API_KEY", ""))},
+        {"name": "OpenRouter (free)", "on": bool(env("OPENROUTER_API_KEY", ""))},
+        {"name": "Gemini (free)", "on": bool(env("GEMINI_API_KEY", ""))},
+        {"name": "Claude (paid)", "on": bool(ANTHROPIC_API_KEY)},
+    ]
+    quota = [{"name": "New activity 0+", "n": "5 a day"}, {"name": "Regular activity 5+", "n": "10 a day"},
+             {"name": "Active activity 15+", "n": "20 a day"}, {"name": "Core activity 40+", "n": "35 a day"},
+             {"name": "Mods and owners", "n": "unlimited"}]
+    return {
+        "me": {"id": uid, "role": crew_role_name(uid, gid) or "staff", "boss": crew_at_least(uid, "owner", gid)},
+        "reads": {"clean": clean, "unsure": unsure, "failed": failed},
+        "pool": pool, "quota": quota, "asks": asks,
+        "tickets": {"channel": get_setting(gid, "ticket_channel") or "staff-tickets", "closed": int(closed or 0),
+                    "open": tickets[:10]},
+        "blacklist": [x for x in blacklist if isinstance(x, dict)][:20],
+        "hits": hits, "log": log_rows[:12], "announce": anns, "crew": crew, "pending": pending,
+        "version": BOT_VERSION,
+    }
+
+
 STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#1a0f33"><title>Staff HQ · PIMP-BOT</title>
 <link rel="icon" href="{{FAVICON}}">
 <style>
-:root{--bg:#0c0914;--card:#171221;--line:#2c243c;--text:#f6f3fc;--muted:#a59cbc;--brand:#7B3FE4;--gold:#f0b429}
-*{box-sizing:border-box}body{margin:0;color:var(--text);min-height:100vh;
- font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
- background:radial-gradient(1000px 600px at 10% -10%,#7B3FE466,transparent),var(--bg)}
-.wrap{max-width:980px;margin:0 auto;padding:22px}
-header{display:flex;align-items:center;gap:14px;margin-bottom:22px}
-.logo{width:48px;height:48px}.brand{font-weight:850;letter-spacing:.16em}.brand b{color:var(--gold)}
+:root{--bg:#0b0714;--card:#161022;--line:#2c243c;--text:#f6f3fc;--muted:#a59cbc;--brand:#7B3FE4;--gold:#f0b429;--up:#34d399;--down:#fb7185}
+*{box-sizing:border-box}body{margin:0;color:var(--text);min-height:100vh;font:15px/1.45 ui-sans-serif,system-ui,sans-serif;
+ background:radial-gradient(1000px 600px at 10% -10%,#7B3FE444,transparent),var(--bg)}
+.top{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid #F5C54222}
+.logo{width:42px;height:42px}.brand{font-weight:850;letter-spacing:.14em}.brand b{color:var(--gold)}
 .pill{margin-left:auto;background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;
- font-size:11px;letter-spacing:.14em;text-transform:uppercase;padding:8px 12px;border-radius:999px}
-h1{font-size:28px;margin:0 0 8px}p.lead{color:var(--muted);margin:0 0 22px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
-h2{margin:0 0 10px;font-size:16px}.chips{display:flex;flex-wrap:wrap;gap:8px}
-a.chip{display:inline-block;padding:8px 12px;border-radius:999px;border:1px solid var(--line);color:var(--text);
- text-decoration:none;font-size:13px;font-weight:650}a.chip.on,a.chip:hover{border-color:var(--gold);color:var(--gold)}
-ul{margin:0;padding-left:18px}li{margin:8px 0}a.act{margin-left:8px;color:#c4a6ff}
-.muted{color:var(--muted);font-size:13px}nav a{color:#c4a6ff;margin-right:14px}
-@media (max-width:720px){.grid{grid-template-columns:1fr}}
+ font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:7px 11px;border-radius:999px}
+nav a,.lookbtn{margin-left:10px;color:#c4a6ff;text-decoration:none;font-weight:700;font-size:13px;background:none;border:0;cursor:pointer}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 18px 48px}
+.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.g2{display:grid;grid-template-columns:1.4fr .9fr;gap:12px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px}
+h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.reads{display:flex;gap:8px}.rbox{flex:1;background:#110c1b;border-radius:14px;padding:12px;text-align:center}
+.rbox b{display:block;font-size:22px}.ok{color:var(--up)}.warn{color:var(--gold)}.bad{color:var(--down)}
+.row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.row:first-of-type{border-top:0}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:8px;background:var(--muted)}
+.dot.on{background:var(--up)}.muted{color:var(--muted);font-size:13px}.who{font-size:11px;background:#7B3FE433;border-radius:99px;padding:1px 8px}
+.open{color:#c4a6ff;font-weight:700}.chip{display:inline-block;font-size:11px;font-weight:800;padding:2px 7px;border-radius:99px;margin-left:6px}
+.ban{background:#fb718522;color:var(--down)}.warnc{background:#f0b42922;color:var(--gold)}.vip{border:1px solid var(--gold);color:var(--gold)}
+.modc{background:#7B3FE433;color:#c4a6ff}
+@media (max-width:900px){.g3,.g2{grid-template-columns:1fr}}
 </style></head><body>
+<div class="top"><div class="logo">{{LOGO}}</div><div class="brand">PIMP<b>-</b>BOT · STAFF</div>
+<span class="pill">24/7</span><button class="lookbtn" id="lookbtn" type="button">Background</button>
+<a href="/">Group site</a><a href="/logout">Sign out</a></div>
 <div class="wrap">
-<header><div class="logo">{{LOGO}}</div><div class="brand">STAFF<b> HQ</b></div>
-<span class="pill">24/7</span></header>
-<h1>Staff server dashboard</h1>
-<p class="lead">Owner-approved crew only. Pick a background and accent the same way as /admin brand. This pass stays
- signed in on this device for a year.</p>
-<nav><a href="/">Group site</a><a href="/logout">Sign out</a></nav>
-<div class="grid">
- <div class="card"><h2>Background</h2><div class="chips">{{BGS}}</div>
-  <p class="muted">Live on the public site and Staff HQ after you tap one.</p></div>
- <div class="card"><h2>Accent</h2><div class="chips">{{ACCENTS}}</div></div>
- <div class="card"><h2>Waiting on you</h2>{{PENDING}}</div>
- <div class="card"><h2>Approved staff</h2>{{APPROVED}}</div>
+<div class="g3">
+ <section class="card"><h2>Screenshot reads · 7 days</h2><div class="reads" id="reads"></div><p class="muted" id="readsnote"></p></section>
+ <section class="card"><h2>AI pool · today</h2><div id="pool"></div>
+  <p class="muted">Answers go to the first service with free uses left, top to bottom. Add keys in Railway: CEREBRAS_API_KEY, OPENROUTER_API_KEY.</p></section>
+ <section class="card"><h2>Questions per person</h2><div id="quota"></div>
+  <p class="muted">Change them with /staff add. Mods and owners unlimited.</p></section>
+</div>
+<div class="g2">
+ <section class="card"><h2>Tickets</h2><div id="tickets"></div>
+  <p class="muted">/staff tickets channel picks the channel. Each ticket is a slip that needs a grade, a payout, or has been open too long.</p></section>
+ <section class="card"><h2>Blacklist</h2><div id="blacklist"></div>
+  <p class="muted">Add with /staff blacklist. Recent hits on the right.</p></section>
+</div>
+<div class="g3">
+ <section class="card"><h2>Announcements</h2><div id="announce"></div>
+  <p class="muted">Write one with /admin announce; you see a preview here.</p></section>
+ <section class="card"><h2>Mod log</h2><div id="modlog"></div></section>
+ <section class="card"><h2>Roles &amp; badges</h2><div id="roles"></div></section>
 </div>
 </div>
+<div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">
+<h3>Background</h3><p class="lookhint">Pick the scene behind the page. It's saved on this device only. Hardwood, midnight and the rest are here too.</p>
+<div class="lookgrid" id="lookgrid"></div>
+<div class="lookrow"><button type="button" id="lookreset">Use the group default</button>
+<button type="button" id="lookdone">Done</button></div></div></div>
+<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introtitle">Pimps Dashboard</div></div>
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+function h(tag,props,...kids){const el=document.createElement(tag);
+ if(props)for(const k in props){const v=props[k];if(v==null||v===false)continue;
+  if(k==='class')el.className=v;else if(k==='text')el.textContent=v;else if(k==='style')el.style.cssText=v;
+  else el.setAttribute(k,v===true?'':String(v))}
+ for(const c of kids.flat(8)){if(c==null||c===false)continue;el.append(c instanceof Node?c:String(c))}return el}
+function put(el,...kids){el.replaceChildren(...kids.flat(8).filter(k=>k!=null&&k!==false))}
+try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
+ if(s.bg)document.documentElement.dataset.bg=s.bg;if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
+ const R=d.reads||{};put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'read clean'})),
+  h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'not sure'})),
+  h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})));
+ $('#readsnote').textContent=(R.failed||R.unsure)?'Check the not-sure pile.':'No problem reads lately.';
+ put($('#pool'),(d.pool||[]).map(p=>h('div',{class:'row'},h('span',null,h('i',{class:'dot'+(p.on?' on':'')}),p.name),
+  h('span',{class:'muted',text:p.on?'key on':'no key'}))));
+ put($('#quota'),(d.quota||[]).map(q=>h('div',{class:'row'},h('span',{text:q.name}),h('b',{text:q.n}))));
+ const T=d.tickets||{};put($('#tickets'),h('div',{class:'row'},h('span',{text:'Channel'}),h('b',{text:'#'+(T.channel||'staff-tickets')})),
+  h('div',{class:'row'},h('span',{text:'Closed this week'}),h('b',{text:String(T.closed||0)})),
+  (T.open||[]).length?(T.open||[]).map(t=>h('div',{class:'row'},h('span',null,'#'+String(t.id||'—')+' '+t.title+' ',
+   t.who?h('span',{class:'who',text:t.who}):null),h('span',{class:'open',text:t.state||'open'}))):h('p',{class:'muted',text:'No open tickets.'}));
+ const bl=d.blacklist||[];put($('#blacklist'),bl.length?bl.map(b=>h('div',{class:'row'},h('span',{text:(b.name||'')+' '+(b.kind||'')}),
+  h('span',{class:'muted',text:b.action||''}))):h('p',{class:'muted',text:'Nothing blacklisted.'}),
+  (d.hits||[]).length?h('p',{class:'muted',text:'Recent hits'}):null,
+  (d.hits||[]).map(x=>h('div',{class:'row'},h('span',{text:x.who+' · '+x.what}),h('span',{class:'muted',text:x.when||''}))));
+ put($('#announce'),(d.announce||[]).length?(d.announce||[]).map(a=>h('div',{class:'row'},h('span',{text:a.text}),
+  h('span',{class:'muted',text:a.sent?'sent':'scheduled'}))):h('p',{class:'muted',text:'None scheduled.'}));
+ put($('#modlog'),(d.log||[]).length?(d.log||[]).map(l=>h('div',{class:'row'},h('span',{text:l.text}),
+  h('span',{class:'muted',text:l.name||''}))):h('p',{class:'muted',text:'Quiet so far.'}));
+ const roleChip=r=>h('span',{class:'chip '+(r==='developer'||r==='owner'?'vip':r==='admin'?'warnc':'modc'),text:r});
+ put($('#roles'),(d.crew||[]).length?(d.crew||[]).map(c=>h('div',{class:'row'},h('span',{text:c.name}),roleChip(c.role))):
+  h('p',{class:'muted',text:'Set DEVELOPER_IDS and OWNER_IDS on Railway, then /staff add.'}));
+}
+const LOOKS=[["court","Classic court"],["arena","Arena lights"],["neoncity","Neon city"],["galaxy","Galaxy"],
+ ["goldluxe","Gold luxe"],["aurora","Aurora"],["gridiron","Gridiron"],["vegas","Vegas sunset"],["midnight","Midnight"],["hardwood","Hardwood"]];
+$('#lookbtn').addEventListener('click',()=>{$('#looksheet').classList.add('on');
+ put($('#lookgrid'),LOOKS.map(([id,n])=>h('button',{class:'looktile',type:'button','data-bg':id},h('b',{text:n}))));});
+$('#looksheet').addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')$('#looksheet').classList.remove('on')});
+$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('[data-bg]');if(!t)return;
+ try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');s.bg=t.getAttribute('data-bg');localStorage.setItem('pb-look',JSON.stringify(s));
+  document.documentElement.dataset.bg=s.bg}catch(x){}});
+$('#lookreset').addEventListener('click',()=>{try{localStorage.removeItem('pb-look')}catch(e){}delete document.documentElement.dataset.bg});
+function smokeIntro(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ try{if(sessionStorage.getItem('pb-intro'))return;sessionStorage.setItem('pb-intro','1')}catch(e){}
+ const o=$('#intro'),c=$('#smokecan'),t=$('#introtitle');if(!o||!c)return;
+ c.width=innerWidth;c.height=innerHeight;const x=c.getContext('2d');
+ const parts=Array.from({length:60},()=>({x:Math.random()*c.width,y:c.height*(.45+Math.random()*.6),r:50+Math.random()*80,
+  vx:(Math.random()-.5)*.35,vy:-.3-Math.random()*.5,a:.05+Math.random()*.07}));
+ let t0=performance.now();(function tick(now){x.clearRect(0,0,c.width,c.height);
+  for(const p of parts){p.x+=p.vx;p.y+=p.vy;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(190,180,210,'+p.a+')');g.addColorStop(1,'rgba(10,8,20,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
+  if(now-t0>400)t.classList.add('on');if(now-t0>2200)o.classList.add('go');if(now-t0<3200)requestAnimationFrame(tick);else o.remove()})(t0)}
+load();smokeIntro();
+</script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+STAFF_HTML = STAFF_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
+if "innerHTML" in STAFF_HTML:
+    raise RuntimeError("staff page used innerHTML")
 
 
 def staff_page_html(uid: int) -> str:
-    bg, accent, _ = site_look()
-    boss = crew_at_least(uid, "owner")
-    role = crew_role_name(uid) or "staff"
-    bgs = "".join(
-        f'<a class="chip{" on" if k == bg else ""}" href="/staff?bg={k}">{_html.escape(lab)}</a>'
-        for k, (lab, _) in SITE_BGS.items())
-    accents = "".join(
-        f'<a class="chip{" on" if k == accent else ""}" href="/staff?accent={k}">{_html.escape(k)}</a>'
-        for k in BRAND_PRESETS)
-
-    def people(kind):
-        rows = []
-        for i in crew_ids(kind):
-            rec = staff_rec(i)
-            rows.append({"id": i, "name": rec.get("name") or str(i)})
-        return rows
-
-    if boss:
-        pending = staff_rows("pending")
-        pend = ("<ul>" + "".join(
-            f'<li>{_html.escape(r["name"])} <code>{r["id"]}</code> '
-            f'<a class="act" href="/staff?approve={r["id"]}">Approve as mod</a>'
-            f'<a class="act" href="/staff?deny={r["id"]}">Deny</a></li>' for r in pending) + "</ul>"
-                if pending else '<p class="muted">Nobody waiting. They run /staff ask, or add them with /staff add.</p>')
-        blocks = []
-        for kind, title in (("developer", "Developers (failsafe)"), ("owner", "Owner"),
-                            ("admin", "Admins"), ("mod", "Mods")):
-            rows = people(kind)
-            if not rows:
-                blocks.append(f"<p class=muted><b>{title}:</b> none yet.</p>")
-                continue
-            items = "".join(
-                f'<li>{_html.escape(r["name"])} <code>{r["id"]}</code>'
-                + ("" if kind == "developer" or r["id"] in crew_baked(kind)
-                   else f' <a class="act" href="/staff?revoke={r["id"]}">Revoke</a>')
-                + "</li>" for r in rows)
-            blocks.append(f"<p><b>{title}</b></p><ul>{items}</ul>")
-        appr = "".join(blocks)
-    else:
-        pend = '<p class="muted">Only the owner and developers see requests.</p>'
-        appr = f'<p class="muted">You are <b>{_html.escape(role)}</b>. The owner adds admins and mods with /staff add.</p>'
-    html = (STAFF_HTML.replace("{{BGS}}", bgs).replace("{{ACCENTS}}", accents)
-            .replace("{{PENDING}}", pend).replace("{{APPROVED}}", appr))
-    html = html.replace("Owner-approved crew only.",
-                        f"You are <b>{_html.escape(role)}</b>. Developer failsafe + owner full access, then admins and mods by Discord ID.")
-    return html
+    return STAFF_HTML
 
 
 async def dash_staff(request):
@@ -20657,6 +20953,14 @@ async def dash_staff(request):
             crew_revoke(tid)
         return web.Response(status=303, headers={"Location": "/staff"})
     return dash_html(web, dash_paint_look(staff_page_html(uid)))
+
+
+async def dash_api_staff(request):
+    from aiohttp import web
+    uid = staff_uid_from_request(request)
+    if uid is None:
+        return dash_error(web, request, 403)
+    return web.json_response(staff_ops(uid))
 
 
 # ==========================================================================
