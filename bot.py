@@ -53,12 +53,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r41"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r42"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
     ("r40", "Accent chips are equal bubbles with a color circle. They recolor the whole site. Group default is its own scene."),
     ("r41", "This channel now gets a note when the bot goes down, comes back, or a new upload is live."),
+    ("r42", "Player page has a PrizePicks-style last-20 bar chart vs the line, and headshots stay in a square."),
 ]
 
 
@@ -19734,6 +19735,10 @@ async def dash_head_img(request):
     raw = got.get(url)
     if not raw:
         return dash_error(web, request, 404)
+    try:
+        raw = design_head_web_png(raw)
+    except Exception:
+        pass
     return web.Response(body=raw, content_type="image/png",
                         headers={"Cache-Control": "private, max-age=86400"})
 
@@ -20728,10 +20733,16 @@ body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;al
  border:1px solid transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 body.v4 .pcard:last-child{margin-bottom:0}
 body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
-body.v4 .pface{width:72px;height:72px;border-radius:14px;overflow:hidden;background:#1a1028;flex:none;align-self:start}
-body.v4 .pface img,body.v4 .pface .pletter{width:72px;height:72px;object-fit:cover;object-position:center 18%;display:block}
-body.v4 .pface .pletter{display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
-body.v4 .pface.lg,body.v4 .pface.lg img,body.v4 .pface.lg .pletter{width:96px;height:96px;border-radius:18px}
+body.v4 .pface{position:relative;width:72px;height:72px;min-width:72px;min-height:72px;max-width:72px;max-height:72px;
+ border-radius:14px;overflow:hidden;background:#1a1028;flex:0 0 72px;align-self:start;aspect-ratio:1/1}
+body.v4 .pface img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 22%;display:block}
+body.v4 .pface .pletter{position:absolute;inset:0;display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
+body.v4 .pface.lg,body.v4 .plhead .pface{width:88px;height:88px;min-width:88px;min-height:88px;max-width:88px;max-height:88px;
+ flex:0 0 88px;border-radius:18px}
+body.v4 .plhead{display:flex;align-items:flex-start;gap:14px;margin:0 50px 16px 0}
+body.v4 .plhead h3{margin:0;font-size:22px;font-weight:800;overflow-wrap:anywhere;line-height:1.15}
+body.v4 .plhead .sub{color:var(--muted);font-size:13.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:3px}
+body.v4 .pchart{display:block;width:100%;height:auto;max-height:240px;margin:6px 0 12px}
 body.v4 .pcard .pn{font-weight:800;font-size:16px;line-height:1.25;overflow:visible;white-space:normal;overflow-wrap:anywhere}
 body.v4 .pcard .pm{color:var(--muted);font-size:12.5px;margin-top:3px;overflow-wrap:anywhere;white-space:normal}
 body.v4 .pstats{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -20814,6 +20825,19 @@ function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl
   stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'})))}
 function defaultLine(vals){if(!vals.length)return 0.5;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;return Math.max(0.5,Math.floor(avg)+0.5)}
 function playerHits(stat){return (S.pl&&S.pl.games||[]).map(g=>g.vals&&g.vals[stat]!=null?{g,v:+g.vals[stat]}:null).filter(Boolean)}
+function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().reverse();const n=rows.length;if(!n)return null;
+ const W=640,H=228,pL=8,pR=40,pT=26,pB=30,iW=W-pL-pR,iH=H-pT-pB;
+ const mx=Math.max(line,...rows.map(x=>x.v),1)*1.22;const bw=iW/n;const y=v=>pT+iH-(Math.max(0,v)/mx*iH);const ly=y(line);
+ const kids=[sv('line',{x1:String(pL),x2:String(W-pR),y1:String(H-pB),y2:String(H-pB),stroke:'#3a2a55','stroke-width':'1'}),
+  sv('line',{x1:String(pL),x2:String(W-pR),y1:String(ly),y2:String(ly),stroke:'#f4f1fb','stroke-width':'1.6','stroke-dasharray':'5 4'}),
+  sv('text',{x:String(W-4),y:String(ly-6),'text-anchor':'end','font-size':'11',fill:'#c4b8dc'},fmt(line))];
+ rows.forEach((x,i)=>{const hgt=Math.max(4,(Math.max(0,x.v)/mx)*iH);const x0=pL+i*bw+bw*0.18;
+  const fill=x.v>line?'#34d399':x.v<line?'#fb7185':'#94a3b8';const cx=pL+i*bw+bw/2;
+  kids.push(sv('rect',{x:String(x0),y:String(y(Math.max(0,x.v))),width:String(Math.max(5,bw*0.64)),height:String(hgt),rx:'3',fill:fill}));
+  kids.push(sv('text',{x:String(cx),y:String(y(Math.max(0,x.v))-5),'text-anchor':'middle','font-size':n>14?'7':'8.5',fill:'#e8dff8'},fmt(x.v)));
+  kids.push(sv('text',{x:String(cx),y:String(H-10),'text-anchor':'middle','font-size':n>14?'7':'9',fill:'#a59cbc'},
+   (x.g.at==='@'?'@':'v')+(x.g.opp||'')))});
+ return sv('svg',{class:'pchart',viewBox:'0 0 '+W+' '+H,width:'100%',role:'img','aria-label':'Last '+n+' games vs '+fmt(line)},...kids)}
 function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const stat=stats.some(s=>s.key===S.pstat)?S.pstat:(d.stat||(stats[0]&&stats[0].key)||'');S.pstat=stat;
  const hits=playerHits(stat),vals=hits.map(x=>x.v),fmt=v=>v==null||isNaN(+v)?'':String(Math.round(+v*10)/10);
@@ -20821,7 +20845,7 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const win=n=>{const part=vals.slice(0,n);if(!part.length)return null;let o=0;for(const v of part)if(v>line)o++;
   return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
  const L5=win(5),L10=win(10),L20=win(20),lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
- const pic=d.photo?h('img',{src:d.photo,alt:'',width:'96',height:'96',decoding:'async'}):
+ const pic=d.photo?h('img',{src:d.photo,alt:'',width:'88',height:'88',decoding:'async'}):
   h('div',{class:'pletter',text:(d.name||'?').trim().charAt(0).toUpperCase()});
  const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
  const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;paintPlayer()}},s.label);
@@ -20829,12 +20853,13 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const box=(t,w)=>w?kbox(t,w.o+'/'+w.n+'  '+w.pct+'%',w.pct>=60?'up':w.pct<=40?'down':''):kbox(t,'–');
  const games=hits.slice(0,20);
  put($('#sheet-body'),
-  h('div',{class:'ph'},h('div',{class:'pface lg'},pic),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
+  h('div',{class:'plhead'},h('div',{class:'pface lg'},pic),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
   h('div',{class:'pchips'},stats.map(chip)),
   h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:lab})),nudge(0.5),nudge(1)),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
   h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Avg L10',L10?String(L10.avg):'–')),
   h('div',{class:'card'},h('h2',null,'Last 20 vs '+fmt(line)),
+   games.length?playerChart(games,line,fmt):null,
    games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
     title:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'})),
   h('div',{class:'card'},h('h2',null,'Game log'),
@@ -20980,6 +21005,8 @@ if "Pimp's Dashboard" not in DASHBOARD_HTML_V4 or "lookbtn" not in DASHBOARD_HTM
     raise RuntimeError("dashboard intro / look picker did not apply")
 if "showPlayer" not in DASHBOARD_HTML_V4 or "#/pl/" not in DASHBOARD_HTML_V4 or "class:'pcard'" not in DASHBOARD_HTML_V4:
     raise RuntimeError("dashboard player page did not apply")
+if "playerChart" not in DASHBOARD_HTML_V4 or "class:'plhead'" not in DASHBOARD_HTML_V4 or "stroke-dasharray" not in DASHBOARD_HTML_V4:
+    raise RuntimeError("dashboard player chart did not apply")
 
 
 SITE_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -29371,6 +29398,31 @@ def design_head_disc(raw: Optional[bytes], size: int, ring: Optional[tuple] = No
     ring = tuple(ring)[:3] if ring else None
     key = ("head", _design_hash(raw) if raw else "", size, ring, tint, "" if raw else name[:30], plain)
     return _design_sprite(key, lambda: _design_draw_head(raw, size, ring, name, tint, plain))
+
+
+def design_head_web_png(raw: bytes) -> bytes:
+    """Square head-and-shoulders PNG for search cards and the player sheet.
+
+    ESPN's full file is a wide frame with empty space around the player. Serving it raw
+    makes the dashboard box show a sliver of hair on purple. Same crop the posters use."""
+    from PIL import Image
+    pic = Image.open(io.BytesIO(raw))
+    sec_check_image(pic)
+    pic = pic.convert("RGBA")
+    w, h = pic.size
+    if w < 16 or h < 16:
+        return raw
+    side = max(16, min(int(min(w, h) * 0.86), w, h))
+    left = max(0, (w - side) // 2)
+    top = max(0, int(h * 0.06))
+    if top + side > h:
+        top = max(0, h - side)
+    face = pic.crop((left, top, left + side, top + side)).resize((256, 256), Image.LANCZOS)
+    bg = Image.new("RGBA", (256, 256), (26, 16, 40, 255))
+    bg.alpha_composite(face)
+    buf = io.BytesIO()
+    bg.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def _design_draw_head(raw, size, ring, name, tint, plain=False):
