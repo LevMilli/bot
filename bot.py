@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-15 r32"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-15 r32.2"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -93,6 +93,7 @@ if _GUILD_RAW and (_GUILD_RAW != GUILD_ID or not 15 <= len(GUILD_ID) <= 21):
     log.warning("GUILD_ID on Railway should be just the server's number (no quotes); read it as %r", GUILD_ID or "nothing")
     if not 15 <= len(GUILD_ID) <= 21:
         GUILD_ID = ""
+OWNER_ID = "".join(ch for ch in env("OWNER_ID", "") if ch.isdigit())
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 ASK_MODEL = env("ASK_MODEL", "claude-sonnet-5-5")
@@ -16722,7 +16723,7 @@ HELP_EXTRA.append(("🎨 Look & feel", (
     "`/me theme`: pick your colours (10 palettes) for your card and banner · `/me banner`: your profile banner · "
     "`/me badges`: your trophy case, locked badges show how to earn them · `/art`: logo, mascot moods, themes, "
     "banner or trophy case as an image · Admins: `/admin brand` sets the server's accent colour, mascot, "
-    "tagline and the name on images.")))
+    "tagline and the name on images · Staff: `/staff look` paints the website background the same way.")))
 
 
 # ==========================================================================
@@ -18767,7 +18768,9 @@ import hmac
 from urllib.parse import quote as _dash_quote, urlencode as _dash_urlencode
 
 DASH_COOKIE = "pb_dash"
+DASH_STAFF_COOKIE = "pb_staff"
 DASH_COOKIE_AGE = 30 * 86400
+DASH_STAFF_COOKIE_AGE = 365 * 86400
 DASH_RATE = (300, 60.0)          # requests per IP per window (a page load with images is ~30)
 DASH_BAD_KEYS = (12, 600.0)      # wrong keys per IP before it's locked out for the window
 DASH_POSTERS = ("board", "standings", "cashed", "hot")
@@ -19195,29 +19198,40 @@ class DashCsvWriter:
 
 # ---- the handlers ---------------------------------------------------------------------------------------
 
+SITE_APP_PATHS = ("/live", "/news", "/open", "/people", "/posters", "/more", "/app", "/login")
+
+
+def dash_signed_in_html(prm: dict) -> str:
+    return {"1": DASHBOARD_HTML, "2": DASHBOARD_HTML_V2, "3": DASHBOARD_HTML_V3,
+            "4": DASHBOARD_HTML_V4}.get(prm["v"] or "4", DASHBOARD_HTML_V4)
+
+
 async def dash_index(request):
     from aiohttp import web
     ip = dash_client_ip(request)
     key = request.query.get("key")
+    path = request.path or "/"
     if key is not None:
         prm, err = dash_gate(web, request)
         if err is not None:
             return err
         # good key: remember it in a cookie and take it out of the address bar (and history)
+        go = "/" if path in ("/", "/login", "/app") else path
         q = {k: v for k, v in (("v", prm["v"]), ("guild", request.query.get("guild"))) if v}
-        resp = web.Response(status=303, headers={"Location": "/" + ("?" + _dash_urlencode(q) if q else "")})
+        resp = web.Response(status=303, headers={"Location": go + ("?" + _dash_urlencode(q) if q else "")})
         resp.set_cookie(DASH_COOKIE, dash_cookie_value(), max_age=DASH_COOKIE_AGE, path="/", httponly=True,
                         secure=True, samesite="Lax")
         return resp
     if not dash_authed(request):
         if not dash_rate(ip, "bad", *DASH_BAD_KEYS, count=False):
             return dash_error(web, request, 429)
-        return dash_page(web, 200, "PIMP-BOT is running", "Ask an admin for the dashboard link: /dashboard in Discord.")
+        return dash_html(web, dash_paint_look(SITE_HTML))
+    if path == "/login":
+        return web.Response(status=303, headers={"Location": "/"})
     prm = dash_params(request)
     if prm is None:
         return dash_error(web, request, 400)
-    return dash_html(web, {"1": DASHBOARD_HTML, "2": DASHBOARD_HTML_V2, "3": DASHBOARD_HTML_V3,
-                           "4": DASHBOARD_HTML_V4}.get(prm["v"] or "4", DASHBOARD_HTML_V4))
+    return dash_html(web, dash_staff_inject(dash_paint_look(dash_signed_in_html(prm)), request))
 
 
 async def dash_api_data(request):
@@ -19300,6 +19314,7 @@ async def dash_logout(request):
     from aiohttp import web
     resp = web.Response(status=303, headers={"Location": "/"})
     resp.del_cookie(DASH_COOKIE, path="/")
+    resp.del_cookie(DASH_STAFF_COOKIE, path="/")
     return resp
 
 
@@ -19315,12 +19330,16 @@ def dash_app(web):
         return await dash_guard(request, handler)
 
     app = web.Application(middlewares=[guard], client_max_size=64 * 1024)
-    app.add_routes([web.get("/", dash_index), web.get("/api/data", dash_api_data), web.get("/health", dash_health),
+    app.add_routes([web.get("/", dash_index), web.get("/login", dash_index), web.get("/app", dash_index),
+                    web.get("/live", dash_index), web.get("/news", dash_index), web.get("/open", dash_index),
+                    web.get("/people", dash_index), web.get("/posters", dash_index), web.get("/more", dash_index),
+                    web.get("/api/data", dash_api_data), web.get("/health", dash_health),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
                     web.get("/img/{kind}/{arg}.png", dash_image), web.get("/favicon.ico", dash_favicon),
                     web.get("/favicon.svg", dash_favicon), web.get("/logout", dash_logout),
+                    web.get("/staff", dash_staff),
                     web.get("/{tail:.*}", dash_not_found)])
     return app
 
@@ -20070,18 +20089,27 @@ def _dash_html_v4(html: str) -> str:
     an Open tab, and the board poster on Overview. Classic v3 stays at ?v=3."""
     extra_css = r"""
 body.v4{--max:1320px}
+body.v4{background:
+ radial-gradient(1100px 640px at 8% -18%,#7B3FE459,transparent 58%),
+ radial-gradient(900px 520px at 100% 0,#F5C54228,transparent 52%),
+ radial-gradient(700px 380px at 50% 120%,#3b1d8a33,transparent),var(--bg)}
 body.v4 .top,body.v4 nav.tabs,body.v4 main,body.v4 footer,body.v4 .ticker{max-width:var(--max)}
-body.v4 header{box-shadow:0 18px 40px -28px #7B3FE466}
-body.v4 .brand h1{font-size:26px;letter-spacing:.12em}
+body.v4 header{box-shadow:0 22px 50px -24px #7B3FE488,0 1px 0 #F5C54233 inset;border-bottom:1px solid #F5C54222}
+body.v4 .brand h1{font-size:28px;letter-spacing:.16em;background:linear-gradient(90deg,#fff,#F5C542,#c4a6ff);
+ -webkit-background-clip:text;background-clip:text;color:transparent}
 body.v4 .find{min-width:0;flex:1;max-width:280px;height:38px;border-radius:12px;border:1px solid var(--line);
  background:var(--card);color:var(--text);padding:0 12px;outline:none}
 body.v4 .find:focus{border-color:var(--brand2);box-shadow:0 0 0 3px #7B3FE433}
 body.v4 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-width:var(--max);
  margin:0 auto;padding:4px 20px 16px}
-body.v4 .kpis .card.kpi{margin:0;padding:12px 14px}
+body.v4 .kpis .card.kpi{margin:0;padding:12px 14px;box-shadow:0 16px 40px -28px #7B3FE466}
 body.v4 .card{border-radius:18px}
 body.v4 nav.tabs button.on:after{height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--gold),var(--brand2))}
 body.v4 .oslip{border-radius:16px}
+a.staffbtn{display:none}
+body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;padding:0 14px;border-radius:12px;
+ background:linear-gradient(90deg,#F5C542,#7B3FE4);color:#14003A;font-weight:850;font-size:11px;letter-spacing:.12em;
+ text-transform:uppercase;text-decoration:none;box-shadow:0 8px 22px -12px #F5C542aa}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 .find{max-width:none;width:100%;order:5;flex:1 1 100%}}
 """
@@ -20109,6 +20137,9 @@ body.v4 .oslip{border-radius:16px}
     html = html.replace('href="/?v=2">Classic view</a>',
                         'href="/?v=3">Classic view</a><a href="/?v=2">v2</a><a href="/?v=1">v1</a>')
     extra_js = r"""
+function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
+ return ({'/':'overview','/app':'overview','/live':'live','/news':'news','/open':'open','/people':'people','/posters':'posters','/more':'more'}[p]||'overview')}
+function pathForTab(t){return t==='overview'?'/':'/'+t}
 function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
 function renderKpis(d){const el=$('#kpis');if(!el||!d)return;
@@ -20139,8 +20170,19 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
         1)
     html = html.replace(
         "try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}\n",
-        "try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}\n"
+        "S.tab=tabFromPath();\n"
+        "try{if(S.tab==='overview'){const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}}catch(e){}\n"
         "const find=$('#find');if(find){find.addEventListener('input',()=>{S.q=find.value;if(S.data)render()})}\n",
+        1)
+    html = html.replace(
+        "function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}",
+        "function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}"
+        "const want=pathForTab(t);const here=(location.pathname.replace(/\\/$/,'')||'/');"
+        "if(here!==want&&!(location.hash||'').startsWith('#/'))history.pushState({pb:1},'',want+location.search);",
+        1)
+    html = html.replace(
+        "document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.t)));",
+        "document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.t)));",
         1)
     return html
 
@@ -20148,6 +20190,349 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
 DASHBOARD_HTML_V4 = _dash_html_v4(DASHBOARD_HTML_V3)
 if "body.v4" not in DASHBOARD_HTML_V4 or 'data-t="open"' not in DASHBOARD_HTML_V4 or "renderOpen" not in DASHBOARD_HTML_V4:
     raise RuntimeError("dashboard v4 remake did not apply")
+if "tabFromPath" not in DASHBOARD_HTML_V4 or "pathForTab" not in DASHBOARD_HTML_V4:
+    raise RuntimeError("dashboard website paths did not apply")
+
+
+SITE_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#1a0f33"><title>PIMP-BOT</title>
+<link rel="icon" href="{{FAVICON}}">
+<style>
+:root{--bg:#0c0914;--card:#171221;--line:#2c243c;--text:#f6f3fc;--muted:#a59cbc;--brand:#7B3FE4;--gold:#f0b429;--up:#34d399}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:radial-gradient(1200px 700px at 8% -12%,#7B3FE466,transparent 55%),
+ radial-gradient(900px 500px at 100% 0,#F5C54228,transparent 50%),var(--bg);color:var(--text);
+ font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+a{color:#c4a6ff;text-decoration:none}a:hover{color:#fff}
+.wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+header{display:flex;align-items:center;gap:14px;padding:18px 0 8px;border-bottom:1px solid #F5C54222}
+.logo{width:52px;height:52px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg{width:100%;height:100%}
+.brand{font-weight:850;letter-spacing:.14em;font-size:15px}.brand b{color:var(--gold)}
+nav{margin-left:auto;display:flex;gap:18px;align-items:center;font-weight:650;font-size:14px;color:var(--muted)}
+nav a.btn{background:linear-gradient(90deg,var(--brand),#5a22c8);color:#fff;padding:8px 14px;border-radius:999px;box-shadow:0 8px 20px -10px #7B3FE4}
+.hero{padding:48px 0 28px;display:grid;grid-template-columns:1.2fr .8fr;gap:36px;align-items:center}
+.kicker{margin:0 0 10px;font-size:12px;letter-spacing:.18em;font-weight:800;color:var(--gold)}
+h1{font-size:clamp(32px,5vw,52px);line-height:1.05;margin:0 0 14px;letter-spacing:-.03em}
+.lead{color:var(--muted);font-size:18px;margin:0 0 22px;max-width:40rem}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 24px 50px -28px #000}
+.panel h2{margin:0 0 8px;font-size:18px}label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px}
+input{width:100%;height:44px;border-radius:12px;border:1px solid var(--line);background:#110c1b;color:var(--text);padding:0 12px;font:inherit}
+button{width:100%;margin-top:14px;height:44px;border:0;border-radius:12px;background:linear-gradient(90deg,var(--gold),#e08a1e);color:#1a1204;
+ font-weight:800;cursor:pointer;font:inherit}
+.hint{font-size:13px;color:var(--muted);margin:12px 0 0}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:10px 0 48px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
+.card h3{margin:0 0 8px;font-size:16px}.card p{margin:0;color:var(--muted);font-size:14px}
+footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);font-size:13px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+@media (max-width:800px){.hero,.grid{grid-template-columns:1fr}nav{gap:10px;font-size:13px}header{flex-wrap:wrap}}
+@media (prefers-color-scheme:light){
+ body{background:#f6f3fc;color:#1d1530} .lead,.hint,nav,footer,.card p{color:#5d5475}
+ .panel,.card{background:#fff;border-color:#e7dff4} input{background:#f6f3fc;color:#1d1530;border-color:#e7dff4}
+ a{color:#6A2BD9} nav a.btn{color:#fff}}
+</style></head><body>
+<div class="wrap">
+<header>
+ <div class="logo">{{LOGO}}</div>
+ <div class="brand">PIMP<b>-</b>BOT</div>
+ <nav><a href="#how">How it works</a><a href="#signin">Sign in</a><a class="btn" href="#signin">Open the site</a></nav>
+</header>
+<section class="hero">
+ <div>
+  <p class="kicker">LIVE · GROUP RECORD</p>
+  <h1>The group’s picks, live on the web.</h1>
+  <p class="lead">PIMP-BOT is the Discord bot your crew already uses. This site is the same record — live games, open slips, standings and news — in a real browser, on your phone or laptop.</p>
+  <p class="hint">Celebrate the scouting, the notes and the good passes. Never a lock, never a sure thing.</p>
+ </div>
+ <form class="panel" id="signin" action="/" method="get">
+  <h2>Sign in</h2>
+  <p class="hint">Ask an admin for the dashboard link: /dashboard in Discord. Paste the access key here, or just open that link once — your browser stays signed in.</p>
+  <label for="key">Access key</label>
+  <input id="key" name="key" type="password" maxlength="128" autocomplete="off" required>
+  <button type="submit">Enter PIMP-BOT</button>
+ </form>
+</section>
+<section class="grid" id="how">
+ <div class="card"><h3>Live games</h3><p>Score, clock and every public leg the group is on, with pace bars like /live in Discord.</p></div>
+ <div class="card"><h3>The board</h3><p>Open slips, recent results, tonight’s poster and the leaderboard — profit, not volume.</p></div>
+ <div class="card"><h3>News &amp; health</h3><p>Injury and reboot notes for players on public slips, plus whether the bot’s feeds are answering.</p></div>
+</section>
+<footer>
+ <span>Private to your Discord. Hidden picks stay hidden until they’re revealed.</span>
+ <span>Need the link? Run /dashboard in Discord.</span>
+</footer>
+</div>
+</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+if "/api/data" in SITE_HTML or "{{" in SITE_HTML:
+    raise RuntimeError("public website leaked an API path or leftover placeholder")
+
+
+# ---- Staff HQ (owner-approved 24/7 site, look designer) ----------------------------------------------
+
+SITE_BGS = {
+    "court": ("Home court", "radial-gradient(1200px 700px at 8% -12%,#7B3FE466,transparent 55%),"
+              "radial-gradient(900px 500px at 100% 0,#F5C54228,transparent 50%),var(--bg)"),
+    "hardwood": ("Hardwood", "radial-gradient(1000px 620px at 50% -20%,#c47a3a66,transparent),"
+                 "linear-gradient(180deg,#2a1608,#120a06 55%,#0c0806)"),
+    "midnight": ("Midnight", "radial-gradient(900px 520px at 18% 0,#3b5ad088,transparent),"
+                 "linear-gradient(#0a1024,#070814)"),
+    "neon": ("Vegas neon", "radial-gradient(760px 500px at 85% 0,#ff46be66,transparent),"
+             "radial-gradient(620px 420px at 0 100%,#5af5ff44,transparent),#12061c"),
+    "carbon": ("Carbon", "linear-gradient(180deg,#22242a,#0c0c0e)"),
+    "gold": ("Gold rush", "radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04"),
+    "ice": ("Ice", "radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018"),
+    "heater": ("Heater", "radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808"),
+}
+
+
+def staff_gid(gid: Optional[int] = None) -> int:
+    return int(gid if gid is not None else (dashboard_guild() or 0))
+
+
+def owner_id(gid: Optional[int] = None) -> int:
+    raw = OWNER_ID or (get_setting(staff_gid(gid), "owner_id") or "")
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+def owner_claim(uid: int, gid: Optional[int] = None) -> bool:
+    """True when this person is (or just became) the owner."""
+    have = owner_id(gid)
+    if have and have != uid:
+        return False
+    if not have:
+        set_setting(staff_gid(gid), "owner_id", str(uid))
+    return True
+
+
+def staff_rec(uid: int, gid: Optional[int] = None) -> dict:
+    raw = get_setting(staff_gid(gid), f"staff:{uid}") or ""
+    if raw.startswith("{"):
+        try:
+            d = json.loads(raw)
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+    return {"state": raw} if raw else {}
+
+
+def staff_put(uid: int, state: Optional[str], name: Optional[str] = None, gid: Optional[int] = None) -> None:
+    prev = staff_rec(uid, gid)
+    g = staff_gid(gid)
+    if state is None:
+        set_setting(g, f"staff:{uid}", None)
+        return
+    set_setting(g, f"staff:{uid}", json.dumps({
+        "state": state, "name": clip(name or prev.get("name") or str(uid), 40)}))
+
+
+def staff_rows(state: Optional[str] = None, gid: Optional[int] = None) -> list:
+    out = []
+    for r in db().execute("SELECT key, value FROM settings WHERE guild_id = ? AND key LIKE 'staff:%'",
+                          (staff_gid(gid),)):
+        uid_s = str(r["key"]).split(":", 1)[-1]
+        if not uid_s.isdigit():
+            continue
+        try:
+            d = json.loads(r["value"]) if (r["value"] or "").startswith("{") else {"state": r["value"]}
+        except Exception:
+            d = {"state": r["value"]}
+        if state and d.get("state") != state:
+            continue
+        out.append({"id": int(uid_s), "name": clip(d.get("name") or uid_s, 40), "state": d.get("state") or ""})
+    return out
+
+
+def staff_web_ok(uid: int, gid: Optional[int] = None) -> bool:
+    if not uid:
+        return False
+    if uid == owner_id(gid):
+        return True
+    return staff_rec(uid, gid).get("state") == "on"
+
+
+def staff_pass(uid: int) -> str:
+    sig = hmac.new(dashboard_key().encode(), f"staff:{uid}".encode(), hashlib.sha256).hexdigest()[:24]
+    return f"{uid}.{sig}"
+
+
+def staff_pass_ok(token: Optional[str]) -> Optional[int]:
+    if not token or token.count(".") != 1:
+        return None
+    uid_s, sig = token.split(".", 1)
+    if not uid_s.isdigit() or len(sig) != 24:
+        return None
+    uid = int(uid_s)
+    want = staff_pass(uid)
+    if len(want) != len(token) or not hmac.compare_digest(want.encode(), token.encode()):
+        return None
+    return uid if staff_web_ok(uid) else None
+
+
+def staff_site_url(uid: int) -> Optional[str]:
+    if not PUBLIC_DOMAIN or not staff_web_ok(uid):
+        return None
+    return f"https://{PUBLIC_DOMAIN}/staff?pass={staff_pass(uid)}"
+
+
+def staff_uid_from_request(request) -> Optional[int]:
+    tok = (getattr(request, "cookies", None) or {}).get(DASH_STAFF_COOKIE) or ""
+    return staff_pass_ok(tok)
+
+
+def site_look(gid: Optional[int] = None) -> tuple:
+    try:
+        raw = json.loads(get_setting(staff_gid(gid), "sitelook") or "{}")
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    bg = raw.get("bg") if raw.get("bg") in SITE_BGS else "court"
+    accent = raw.get("accent") if raw.get("accent") in BRAND_PRESETS else "purple"
+    return bg, accent, BRAND_PRESETS[accent]
+
+
+def site_look_save(bg: Optional[str] = None, accent: Optional[str] = None, gid: Optional[int] = None) -> tuple:
+    cur_bg, cur_ac, _ = site_look(gid)
+    if bg in SITE_BGS:
+        cur_bg = bg
+    if accent in BRAND_PRESETS:
+        cur_ac = accent
+    set_setting(staff_gid(gid), "sitelook", json.dumps({"bg": cur_bg, "accent": cur_ac}))
+    return site_look(gid)
+
+
+def dash_paint_look(html: str) -> str:
+    """Default look stays byte-identical to the shipped HTML (tests compare the full page)."""
+    bg, accent, rgb = site_look()
+    if bg == "court" and accent == "purple":
+        return html
+    hx = _brand_hex(rgb)
+    css = (f"<style id=look>:root{{--brand:{hx};--brand2:{hx}cc;--gold:#f0b429}}"
+           f"body{{background:{SITE_BGS[bg][1]}!important}}</style>")
+    html = html.replace("</head>", css + "</head>", 1)
+    if 'class="v4"' in html:
+        html = html.replace('<body class="v4">', f'<body class="v4" data-bg="{bg}" data-accent="{accent}">', 1)
+        html = html.replace('<body class="v4 has-staff">',
+                            f'<body class="v4 has-staff" data-bg="{bg}" data-accent="{accent}">', 1)
+    else:
+        html = html.replace("<body>", f'<body data-bg="{bg}" data-accent="{accent}">', 1)
+    return html
+
+
+def dash_staff_inject(html: str, request) -> str:
+    if "body.v4" not in html and 'class="v4"' not in html:
+        return html
+    if not staff_uid_from_request(request):
+        return html
+    if 'class="staffbtn"' in html:
+        return html
+    html = html.replace('<body class="v4">', '<body class="v4 has-staff">', 1)
+    html = html.replace('<button class="iconbtn" id="theme"',
+                        '<a class="staffbtn" href="/staff">Staff HQ</a><button class="iconbtn" id="theme"', 1)
+    return html
+
+
+STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1a0f33"><title>Staff HQ · PIMP-BOT</title>
+<link rel="icon" href="{{FAVICON}}">
+<style>
+:root{--bg:#0c0914;--card:#171221;--line:#2c243c;--text:#f6f3fc;--muted:#a59cbc;--brand:#7B3FE4;--gold:#f0b429}
+*{box-sizing:border-box}body{margin:0;color:var(--text);min-height:100vh;
+ font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ background:radial-gradient(1000px 600px at 10% -10%,#7B3FE466,transparent),var(--bg)}
+.wrap{max-width:980px;margin:0 auto;padding:22px}
+header{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.logo{width:48px;height:48px}.brand{font-weight:850;letter-spacing:.16em}.brand b{color:var(--gold)}
+.pill{margin-left:auto;background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;
+ font-size:11px;letter-spacing:.14em;text-transform:uppercase;padding:8px 12px;border-radius:999px}
+h1{font-size:28px;margin:0 0 8px}p.lead{color:var(--muted);margin:0 0 22px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
+h2{margin:0 0 10px;font-size:16px}.chips{display:flex;flex-wrap:wrap;gap:8px}
+a.chip{display:inline-block;padding:8px 12px;border-radius:999px;border:1px solid var(--line);color:var(--text);
+ text-decoration:none;font-size:13px;font-weight:650}a.chip.on,a.chip:hover{border-color:var(--gold);color:var(--gold)}
+ul{margin:0;padding-left:18px}li{margin:8px 0}a.act{margin-left:8px;color:#c4a6ff}
+.muted{color:var(--muted);font-size:13px}nav a{color:#c4a6ff;margin-right:14px}
+@media (max-width:720px){.grid{grid-template-columns:1fr}}
+</style></head><body>
+<div class="wrap">
+<header><div class="logo">{{LOGO}}</div><div class="brand">STAFF<b> HQ</b></div>
+<span class="pill">24/7</span></header>
+<h1>Staff server dashboard</h1>
+<p class="lead">Owner-approved crew only. Pick a background and accent the same way as /admin brand. This pass stays
+ signed in on this device for a year.</p>
+<nav><a href="/">Group site</a><a href="/logout">Sign out</a></nav>
+<div class="grid">
+ <div class="card"><h2>Background</h2><div class="chips">{{BGS}}</div>
+  <p class="muted">Live on the public site and Staff HQ after you tap one.</p></div>
+ <div class="card"><h2>Accent</h2><div class="chips">{{ACCENTS}}</div></div>
+ <div class="card"><h2>Waiting on you</h2>{{PENDING}}</div>
+ <div class="card"><h2>Approved staff</h2>{{APPROVED}}</div>
+</div>
+</div>
+</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+
+
+def staff_page_html(uid: int) -> str:
+    bg, accent, _ = site_look()
+    owner = uid == owner_id()
+    bgs = "".join(
+        f'<a class="chip{" on" if k == bg else ""}" href="/staff?bg={k}">{_html.escape(lab)}</a>'
+        for k, (lab, _) in SITE_BGS.items())
+    accents = "".join(
+        f'<a class="chip{" on" if k == accent else ""}" href="/staff?accent={k}">{_html.escape(k)}</a>'
+        for k in BRAND_PRESETS)
+    if owner:
+        pending = staff_rows("pending")
+        approved = staff_rows("on")
+        pend = ("<ul>" + "".join(
+            f'<li>{_html.escape(r["name"])} <a class="act" href="/staff?approve={r["id"]}">Approve</a>'
+            f'<a class="act" href="/staff?deny={r["id"]}">Deny</a></li>' for r in pending) + "</ul>"
+                if pending else '<p class="muted">Nobody waiting. They run /staff ask in Discord.</p>')
+        appr = ("<ul>" + "".join(
+            f'<li>{_html.escape(r["name"])} <a class="act" href="/staff?revoke={r["id"]}">Revoke</a></li>'
+            for r in approved) + "</ul>" if approved else '<p class="muted">No extra staff yet.</p>')
+    else:
+        pend = '<p class="muted">Only the owner sees requests.</p>'
+        appr = '<p class="muted">You are on the list. The owner can revoke from here.</p>'
+    return (STAFF_HTML.replace("{{BGS}}", bgs).replace("{{ACCENTS}}", accents)
+            .replace("{{PENDING}}", pend).replace("{{APPROVED}}", appr))
+
+
+async def dash_staff(request):
+    from aiohttp import web
+    q = request.query
+    token = q.get("pass")
+    if token is not None:
+        uid = staff_pass_ok(token)
+        if uid is None:
+            return dash_error(web, request, 403)
+        resp = web.Response(status=303, headers={"Location": "/staff"})
+        resp.set_cookie(DASH_STAFF_COOKIE, staff_pass(uid), max_age=DASH_STAFF_COOKIE_AGE, path="/",
+                        httponly=True, secure=True, samesite="Lax")
+        return resp
+    uid = staff_uid_from_request(request)
+    if uid is None:
+        return dash_error(web, request, 403)
+    if q.get("bg") or q.get("accent"):
+        site_look_save(q.get("bg"), q.get("accent"))
+        return web.Response(status=303, headers={"Location": "/staff"})
+    target = q.get("approve") or q.get("deny") or q.get("revoke")
+    if target is not None:
+        if uid != owner_id() or not str(target).isdigit():
+            return dash_error(web, request, 403)
+        tid = int(target)
+        if q.get("approve"):
+            staff_put(tid, "on")
+        else:
+            staff_put(tid, None)
+        return web.Response(status=303, headers={"Location": "/staff"})
+    return dash_html(web, dash_paint_look(staff_page_html(uid)))
 
 
 # ==========================================================================
@@ -32273,18 +32658,195 @@ async def player_vs(interaction: discord.Interaction, player: app_commands.Range
     await interaction.followup.send(embed=vs_embed(cand, games, opponent))
 
 
+class StaffGateButton(discord.ui.DynamicItem[discord.ui.Button],
+                      template=r"stf:(?P<act>ok|no):(?P<gid>\d+):(?P<uid>\d+)"):
+    def __init__(self, act: str, guild_id: int, uid: int):
+        super().__init__(discord.ui.Button(
+            label="Approve" if act == "ok" else "Deny",
+            style=discord.ButtonStyle.success if act == "ok" else discord.ButtonStyle.secondary,
+            custom_id=f"stf:{act}:{guild_id}:{uid}"))
+        self.act, self.gid, self.uid = act, guild_id, uid
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["act"], int(match["gid"]), int(match["uid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != owner_id(self.gid):
+            await interaction.response.send_message("Only the owner can do that.", ephemeral=True)
+            return
+        name = staff_rec(self.uid, self.gid).get("name")
+        if self.act == "ok":
+            staff_put(self.uid, "on", name, self.gid)
+            msg = "Approved. They can `/staff open`."
+        else:
+            staff_put(self.uid, None, gid=self.gid)
+            msg = "Denied."
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
+EXTRA_ITEMS.append(StaffGateButton)
+
+
 @bot.tree.command(name="dashboard", description="Link to the live web dashboard (only you see it)")
 @app_commands.guild_only()
 async def dashboard_cmd(interaction: discord.Interaction):
     url = dashboard_url()
-    if url:
-        await interaction.response.send_message(f"📊 Live dashboard: {url}\nOpen it once and your browser stays signed in. "
-                                                "Keep the link in the group; anyone with it can see the stats.",
-                                                ephemeral=True)
-    else:
+    if not url:
         await interaction.response.send_message(
             "The dashboard isn't switched on yet. In Railway: open the bot's service → **Settings** → **Networking** → "
             "**Generate Domain**. Then run this again.", ephemeral=True)
+        return
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Open the website", style=discord.ButtonStyle.link, url=url))
+    extra = ""
+    su = staff_site_url(interaction.user.id)
+    if su:
+        view.add_item(discord.ui.Button(label="Staff HQ", style=discord.ButtonStyle.link, url=su))
+        extra = "\n🛠️ **Staff HQ** is only on this message for you — 24/7, owner-approved."
+    await interaction.response.send_message(
+        f"📊 PIMP-BOT website: {url}\nThat's the sign-in link. Open it once and your browser stays signed in "
+        f"on this device. Keep the link in the group; anyone with it can see the public stats.{extra}",
+        ephemeral=True, view=view)
+
+
+staff_group = app_commands.Group(name="staff", description="Staff HQ: 24/7 site, owner approval, look")
+
+
+@staff_group.command(name="claim", description="Register yourself as the owner who approves Staff HQ access")
+@app_commands.guild_only()
+async def staff_claim(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if OWNER_ID and str(uid) != OWNER_ID:
+        await interaction.response.send_message("OWNER_ID on Railway is already set to someone else.", ephemeral=True)
+        return
+    if not owner_claim(uid, interaction.guild_id):
+        await interaction.response.send_message(
+            "Someone else is already the owner. They approve staff with `/staff approve`.", ephemeral=True)
+        return
+    staff_put(uid, "on", interaction.user.display_name, interaction.guild_id)
+    await interaction.response.send_message(
+        "You're the owner. People run `/staff ask`; you Approve. Then `/staff open` (or `/dashboard`) shows **Staff HQ**.",
+        ephemeral=True)
+
+
+@staff_group.command(name="ask", description="Ask the owner for Staff HQ access")
+@app_commands.guild_only()
+async def staff_ask(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if staff_web_ok(uid, interaction.guild_id):
+        await interaction.response.send_message("You're already on Staff HQ. `/staff open` for the button.",
+                                                ephemeral=True)
+        return
+    oid = owner_id(interaction.guild_id)
+    if not oid:
+        await interaction.response.send_message(
+            "No owner yet. The owner runs `/staff claim` once (or set OWNER_ID on Railway).", ephemeral=True)
+        return
+    staff_put(uid, "pending", interaction.user.display_name, interaction.guild_id)
+    view = discord.ui.View(timeout=None)
+    view.add_item(StaffGateButton("ok", interaction.guild_id, uid))
+    view.add_item(StaffGateButton("no", interaction.guild_id, uid))
+    noted = False
+    try:
+        owner = await interaction.client.fetch_user(oid)
+        await owner.send(f"**{interaction.user.display_name}** asked for Staff HQ in **{interaction.guild.name}**.",
+                         view=view)
+        noted = True
+    except Exception:
+        pass
+    await interaction.response.send_message(
+        "Asked. The owner gets Approve / Deny" + (" in DMs." if noted else " — I couldn't DM them, so they can `/staff approve` here."),
+        ephemeral=True)
+
+
+@staff_group.command(name="approve", description="Owner: grant Staff HQ to someone")
+@app_commands.guild_only()
+async def staff_approve_cmd(interaction: discord.Interaction, member: discord.Member):
+    if interaction.user.id != owner_id(interaction.guild_id):
+        await interaction.response.send_message("Only the owner can approve Staff HQ.", ephemeral=True)
+        return
+    staff_put(member.id, "on", member.display_name, interaction.guild_id)
+    await interaction.response.send_message(f"Approved **{member.display_name}**. They run `/staff open`.",
+                                            ephemeral=True)
+
+
+@staff_group.command(name="revoke", description="Owner: take Staff HQ away")
+@app_commands.guild_only()
+async def staff_revoke_cmd(interaction: discord.Interaction, member: discord.Member):
+    if interaction.user.id != owner_id(interaction.guild_id):
+        await interaction.response.send_message("Only the owner can revoke Staff HQ.", ephemeral=True)
+        return
+    staff_put(member.id, None, gid=interaction.guild_id)
+    await interaction.response.send_message(f"Revoked **{member.display_name}**.", ephemeral=True)
+
+
+@staff_group.command(name="open", description="Your private 24/7 Staff HQ button")
+@app_commands.guild_only()
+async def staff_open(interaction: discord.Interaction):
+    su = staff_site_url(interaction.user.id)
+    if not su:
+        if not PUBLIC_DOMAIN:
+            await interaction.response.send_message(
+                "The site isn't on yet. Generate a domain on Railway, then try again.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Staff HQ isn't on for you yet. `/staff ask`, then wait for the owner.", ephemeral=True)
+        return
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Staff HQ", style=discord.ButtonStyle.link, url=su))
+    await interaction.response.send_message(
+        "🛠️ **Staff HQ** — only you see this button. It stays signed in about a year on that device.",
+        ephemeral=True, view=view)
+
+
+async def staff_look_bg_ac(interaction, current: str):
+    q = (current or "").lower()
+    return [app_commands.Choice(name=lab, value=k) for k, (lab, _) in SITE_BGS.items()
+            if q in k or q in lab.lower()][:25]
+
+
+async def staff_look_ac_ac(interaction, current: str):
+    q = (current or "").lower()
+    return [app_commands.Choice(name=k, value=k) for k in BRAND_PRESETS if q in k][:25]
+
+
+@staff_group.command(name="look", description="Staff HQ + site background and accent (same idea as /admin brand)")
+@app_commands.guild_only()
+@app_commands.describe(background="Court, hardwood, midnight, neon, carbon, gold, ice, heater",
+                       accent="purple, gold, green, blue, red, pink, teal, orange, ice, black",
+                       reset="Back to the default court + purple")
+@app_commands.autocomplete(background=staff_look_bg_ac, accent=staff_look_ac_ac)
+async def staff_look(interaction: discord.Interaction, background: Optional[str] = None,
+                     accent: Optional[str] = None, reset: Optional[bool] = False):
+    if not staff_web_ok(interaction.user.id, interaction.guild_id):
+        await interaction.response.send_message("Staff HQ only. `/staff ask` first.", ephemeral=True)
+        return
+    if reset:
+        set_setting(staff_gid(interaction.guild_id), "sitelook", None)
+        await interaction.response.send_message("Look reset to home court / purple.", ephemeral=True)
+        return
+    if background and background not in SITE_BGS:
+        await interaction.response.send_message(
+            "Background: " + ", ".join(SITE_BGS), ephemeral=True)
+        return
+    if accent and accent not in BRAND_PRESETS:
+        await interaction.response.send_message(
+            "Accent: " + ", ".join(BRAND_PRESETS), ephemeral=True)
+        return
+    if background or accent:
+        site_look_save(background, accent, interaction.guild_id)
+    bg, ac, _ = site_look(interaction.guild_id)
+    await interaction.response.send_message(
+        f"Site look: **{SITE_BGS[bg][0]}** · accent **{ac}**. Change it here or on Staff HQ.", ephemeral=True)
+
+
+bot.tree.add_command(staff_group)
+HELP_EXTRA.append(("🛠️ Staff HQ", (
+    "`/staff claim` once if you're the owner · crew `/staff ask` · you Approve in DMs or `/staff approve` · "
+    "`/staff open` (and `/dashboard`) shows a **Staff HQ** button only for approved people · "
+    "`/staff look` backgrounds and accents like `/admin brand` · the site pass stays signed in about a year. "
+    "Optional: set OWNER_ID on Railway to your Discord user number.")))
 
 
 @bot.tree.context_menu(name="Log as pick")
