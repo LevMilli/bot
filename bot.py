@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r73"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r74"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -91,6 +91,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r71", "Update 5 of 5: the scanner, the edges, and the close. This finishes the 250 roadmap adds."),
     ("r72", "Each of the five updates now has something on the board: this week's numbers, risk and net on a settled row, the intro only the first time, a People filter, and the version in the footer."),
     ("r73", "People tiles show week, month, and season. A lost combo marks the leg that decided it. A busy dashboard says to wait. Search finds a slip number or a teammate. Built rows are marked live and the list stays."),
+    ("r74", "The board filters by book, sport, and day. The ticker can pause. The chart is the last 10 or the last 20. People tiles show best and worst sport, and head-to-head wins. Rows that were already shipping are marked live."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -484,35 +485,141 @@ BOT_PLAN = [  # r67–r71: 250 adds, 50 per update, 10 from each lane. The r50 m
 
 
 _PLAN_BUILT = {
-    "r67": "On the board now: this week's open count, settled count, net, and coins. A person tile shows week, month, and season.",
-    "r68": "On the board now: a settled row shows risk, what it pays, and the net. A lost combo marks the one leg that missed.",
-    "r69": "On the board now: the smoke intro plays once, then stays off on this device. A rate limit says to wait.",
-    "r70": "On the board now: People filters to up, down, or flat. Search finds a slip number, a player, or a teammate.",
-    "r71": "On the board now: the footer shows the version from this file. A built row is marked live and stays in the list.",
+    "r67": "On the board now: this week's open count, settled count, net, and coins. A person tile shows week, month, and season. The sheet has last 5, 10, and 20, and the line nudge stays on the page.",
+    "r68": "On the board now: a settled row shows risk, what it pays, and the net. A lost combo marks the one leg that missed. The chart line is the number you nudged.",
+    "r69": "On the board now: the smoke intro plays once, then stays off on this device. A rate limit says to wait. The board filters by book, sport, and day. Preseason can be hidden. A missed game says DNP.",
+    "r70": "On the board now: People filters to up, down, or flat. Search finds a slip number, a player, or a teammate. Tiles show best and worst sport. Head-to-head shows wins. The ticker can pause. Rows can sit tighter.",
+    "r71": "On the board now: the footer shows the version from this file. A built row is marked live and stays in the list. The chart can be the last 10 or the last 20. Print is black text without the smoke.",
 }
 _PLAN_LIVE = {
     "r67": [
         "Every settled slip shows stake, price, and net on one row, in the same units as the sheet.",
         "Overview gets a week strip: open count, settled count, net, and coins.",
+        "The site export includes the legs tab the spreadsheet already has.",
+        "Hidden picks stay off public cards, search, and any export a member can open.",
+        "The record book writes the biggest day, the longest streak, and the worst beat in plain lines.",
         "Coins show the last way they were earned, not only the total.",
         "A person's card shows season, month, and week without leaving People.",
+        "Settled today matches the list Discord already posted, with the slip number.",
+        "Search cards keep ESPN's square face at the size of the box.",
+        "Stat chips keep their own lines: number, label, then average.",
+        "The last-20 chart sits under the stat chips.",
+        "The player header is face, name, team, number, size, and age.",
+        "Overview cards share one corner radius and one gap.",
+        "Empty states say what to do next.",
+        "The accent still recolors every accent from the look picker.",
+        "Background scenes stay on this device only.",
+        "The player sheet shows last 5, last 10, and last 20 against the line.",
+        "Nudging the line by half a point stays on the page.",
+        "The game log sits under the brief, newest first.",
+        "Next game shows opponent, home or away, and the time in Central.",
+        "Overview keeps a watchlist saved on this device.",
+        "Tapping a ticket opens its legs.",
+        "Search returns at most four players, and each one opens the sheet.",
+        "The first stat chip is the one that player is logged for most.",
+        "/trend and the sheet use the same last-20 read.",
+        "Breakdowns lead with the last 10 against the line.",
+        "A breakdown names who is listed out.",
+        "/help lists the map and the version.",
+        "The scanner still reads the books it already reads.",
+        "Startup writes the version to the log you already watch.",
+        "Keep one bot.py upload. Railway stays a file drop.",
+        "Keep the classic pages. New work lands on the current board.",
+        "Keep the face as ESPN's square.",
+        "Show the number before the sentence.",
+        "Use one net for the sheet, the card, and Discord.",
+        "Keep the door as Discord plus the daily key.",
+        "Do not add lock language in these five updates.",
+        "Do not drop a sport to make a page faster.",
+        "Cache the shell, not the slip numbers.",
+        "Label the time zone on anything that is a clock time.",
     ],
     "r68": [
+        "A void or a push is labeled and is not counted as a win.",
+        "The export page keeps the note that tells you what to paste into cell A1.",
         "A combo lists each leg and marks the one that decided it.",
         "Settled rows use the same up, down, and flat colors as the net.",
+        "Open slips read as tickets: who, legs, and price.",
+        "The chart line is the number you nudged, drawn once.",
+        "Green means the leg cleared the line. Red means it did not.",
+        "Names wrap instead of being cut off.",
+        "The player sheet does not jump when the chart arrives.",
+        "Home, away, and versus that opponent show as averages.",
+        "One line says what the numbers show, with no pick attached.",
+        "Minutes, pass attempts, or carries sit beside the counting stat.",
+        "Last-20 marks show the value, not only the color.",
+        "The board remembers the last stat chip you tapped, on this device.",
+        "A Kalshi ticket shows yes or no, with your side marked.",
+        "The staff channel hears when the process comes back.",
+        "The staff channel hears when a new version string boots.",
+        "Prefer the last 10 over a season number when the sheet is about the next game.",
+        "Leave odds as logged. Kalshi cents are the exception, and they are already cents.",
+        "A push stays a push.",
+        "The watchlist stays on this device.",
+        "The eye stays the only way to reveal the key.",
     ],
     "r69": [
         "A rate limit says to wait, instead of a blank page.",
+        "The board can be filtered by sport.",
+        "The board can be filtered by PrizePicks, Kalshi, or other.",
+        "Settled slips filter to today, this week, or this month.",
+        "A did-not-play game is marked and left out of the average.",
+        "An overtime game is marked.",
+        "Preseason games can be hidden.",
+        "The next-game line skips weather when the building is indoors.",
+        "Standalone mode hides the install hint.",
+        "Stat numbers use tabular figures so columns stay still.",
         "The smoke intro can be skipped after the first view.",
+        "The phone app means Home Screen until there is a store account.",
+        "The intro plays once, then stays out of the way.",
+        "Win and loss stay green and red.",
+        "Keep search at four names until the list is a real results page.",
     ],
     "r70": [
+        "A person's card can show their best and worst sport from slips already graded.",
+        "Head-to-head between two crew members shows wins and net.",
+        "The group parlay lists who still owes a leg this week.",
+        "A quiet week still shows the last result instead of an empty board.",
         "People can be filtered to up, down, or flat.",
         "Search finds a slip number, a player, or a teammate.",
+        "A compact density fits more rows on one screen.",
+        "The ticker can be paused with a switch, not only by hovering.",
+        "Injury lines sit in the brief, not inside the chart.",
+        "Outdoor weather is one line under the next game.",
+        "Home and away splits are two rows.",
         "The footer version matches the startup log.",
+        "If the brief runs long, the game log still appears.",
+        "A correction in Discord updates the slip the site shows.",
+        "A grade from Discord shows on the site on reload.",
+        "Central time stays the group clock.",
+        "Discord stays the chat. The board does not grow a second one.",
+        "Exports stay the spreadsheet and the CSV.",
+        "The record book is written from results. It is not edited on the site.",
     ],
     "r71": [
+        "Classic v1, v2, and v3 stay linked.",
+        "None of these five updates removes a command or a sport.",
+        "The startup log prints the version so you can see which file Railway is running.",
         "The r50 map stays on More, with these five updates under it.",
         "When a row is actually built, it can be marked live without deleting the list.",
+        "A print view of the export page is black text without the smoke.",
+        "Reduced motion turns off the intro and the ticker slide.",
+        "The face box stays square. The raw headshot is not painted taller than the box.",
+        "Classic pages keep their own look.",
+        "A named view can remember sport, book, and stat on this device.",
+        "The chart can be the last 10 or the last 20.",
+        "The board does not call a play a lock.",
+        "Odds you logged are shown as you logged them.",
+        "Closing the sheet returns you to the same search.",
+        "/help prints the version of this upload.",
+        "Build r67, the daily board, before the decorations.",
+        "The r50 map stays exact. This list is a second card.",
+        "If a bit is already shipping, say so instead of building it twice.",
+        "The other 250 ideas, the later fixes, stay off this card.",
+        "A visual tweak does not add a new library.",
+        "Posters can keep Pillow. Faces stay on ESPN's square.",
+        "The owner still uploads one file. /help is the version check.",
+        "These 250 are the roadmap. They are listed here so the order is fixed.",
     ],
 }
 for _row in BOT_PLAN:
@@ -1415,6 +1522,19 @@ def clip(text: str, limit: int) -> str:
 
 def local_day(iso: str) -> str:
     return datetime.fromisoformat(iso).astimezone(TZ).strftime("%b %d")
+
+
+def local_stamp(raw: str) -> str:
+    """Calendar day in Central, YYYY-MM-DD, for the board's today / week / month filter."""
+    if not raw:
+        return ""
+    try:
+        when = datetime.fromisoformat(raw)
+    except Exception:
+        return ""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(TZ).strftime("%Y-%m-%d")
 
 
 def record_line(s: dict) -> str:
@@ -9042,13 +9162,14 @@ def dashboard_data(guild_id: int) -> dict:
                 for s in stats if s["wins"] + s["losses"] + s["pushes"] > 0]
     series = chart_series(guild_id, 3650)
     recent = [{"id": p["id"], "who": p["bettor_name"], "what": shown_desc(p), "platform": p["platform"],
-               "status": p["status"], "net": round(pick_net(p), 2), "cost": p["cost"], "payout": p["payout"],
-               "when": local_day(p["settled_at"] or p["created_at"])}
+               "sport": clip(p["sport"] or "", 24), "status": p["status"], "net": round(pick_net(p), 2),
+               "cost": p["cost"], "payout": p["payout"], "when": local_day(p["settled_at"] or p["created_at"]),
+               "stamp": local_stamp(p["settled_at"] or p["created_at"] or "")}
               for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND
                                        (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)
                                        ORDER BY settled_at DESC LIMIT 25""", (guild_id,))]
     open_ = [{"id": p["id"], "who": p["bettor_name"], "what": shown_desc(p), "platform": p["platform"],
-              "cost": p["cost"], "payout": p["payout"]}
+              "sport": clip(p["sport"] or "", 24), "cost": p["cost"], "payout": p["payout"]}
              for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND (hidden IS NULL OR hidden = 0) "
                                    "ORDER BY id DESC LIMIT 40", (guild_id,))]
     r = gp_round(guild_id, create=False)
@@ -9088,7 +9209,8 @@ def dashboard_data(guild_id: int) -> dict:
             "groupparlay": gp, "coins": coins,
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
-            "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "week": dash_this_week(guild_id)}
+            "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "week": dash_this_week(guild_id),
+            "h2h": dash_h2h_board(guild_id)}
 
 
 DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -15369,11 +15491,63 @@ def dash_person_windows(guild_id: int) -> dict:
     return {k: {n: round(v, 2) for n, v in box.items()} for k, box in out.items()}
 
 
+def dash_sport_edges(guild_id: int) -> dict:
+    """Best and worst sport by net, from slips already graded."""
+    bags: dict = {}
+    try:
+        rows = db().execute(
+            """SELECT bettor_key, sport, cost, returned, status, hidden, revealed_at
+               FROM picks WHERE guild_id = ? AND status != 'open'""", (guild_id,)).fetchall()
+    except Exception:
+        return {}
+    for p in rows:
+        if p["hidden"] and not p["revealed_at"]:
+            continue
+        sport = (p["sport"] or "").strip() or "Other"
+        box = bags.setdefault(p["bettor_key"], {})
+        slot = box.setdefault(sport, 0.0)
+        box[sport] = slot + ((p["returned"] or 0.0) - (p["cost"] or 0.0))
+    out = {}
+    for key, sports in bags.items():
+        if not sports:
+            continue
+        best = max(sports.items(), key=lambda kv: kv[1])
+        worst = min(sports.items(), key=lambda kv: kv[1])
+        out[key] = {"best": {"name": best[0], "net": round(best[1], 2)},
+                    "worst": {"name": worst[0], "net": round(worst[1], 2)}}
+    return out
+
+
+def dash_h2h_board(guild_id: int) -> list[dict]:
+    """Settled head-to-head challenges: wins for each side."""
+    try:
+        rows = db().execute(
+            """SELECT challenger_id, challenger_name, opponent_id, opponent_name, winner_id
+               FROM challenges WHERE guild_id = ? AND status = 'settled'""", (guild_id,)).fetchall()
+    except Exception:
+        return []
+    bag: dict = {}
+    for r in rows:
+        a, b = int(r["challenger_id"]), int(r["opponent_id"])
+        lo, hi = (a, b) if a <= b else (b, a)
+        box = bag.setdefault(lo, {}).setdefault(hi, {"a": "", "b": "", "aw": 0, "bw": 0})
+        if not box["a"]:
+            box["a"] = r["challenger_name"] if a == lo else r["opponent_name"]
+            box["b"] = r["opponent_name"] if a == lo else r["challenger_name"]
+        if r["winner_id"] == lo:
+            box["aw"] += 1
+        elif r["winner_id"] == hi:
+            box["bw"] += 1
+    flat = [v for sides in bag.values() for v in sides.values()]
+    return flat[:12]
+
+
 def dashboard_people(guild_id: int) -> list[dict]:
     windows = dash_person_windows(guild_id)
+    edges = dash_sport_edges(guild_id)
     blank = {"season": 0.0, "month": 0.0, "week": 0.0}
     return [{"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
-             "span": windows.get(s["key"], blank)}
+             "span": windows.get(s["key"], blank), "edge": edges.get(s["key"])}
             for s in compute_stats(guild_id) if s["wins"] + s["losses"] + s["pushes"] > 0 and not s["key"].startswith("label:")]
 
 
@@ -20311,10 +20485,15 @@ def dash_pack_games(games: list, keys: list[str], limit: int = 20) -> list[dict]
                 got = None
             if got is not None:
                 vals[k] = round(got[0], 1)
+        result = str(g.get("result") or "")
+        label = str(g.get("label") or "")
         out.append({"date": g.get("date") or "", "when": dash_game_when(g),
                     "opp": clip(str(g.get("opp") or "?"), 8),
                     "at": "@" if g.get("at") == "@" else "vs",
-                    "result": clip(str(g.get("result") or ""), 2), "vals": vals})
+                    "result": clip(result, 8), "vals": vals,
+                    "pre": bool(g.get("preseason")),
+                    "ot": "OT" in result.upper() or "OT" in label.upper(),
+                    "dnp": not vals})
     return out
 
 
@@ -20332,6 +20511,7 @@ def dash_pack_stats(games_payload: list, keys: list[str]) -> list[dict]:
         out.append({"key": k, "label": STATS[k][0], "last": round(vals[0], 1),
                     "avg5": avg(5), "avg10": avg(10), "avg20": avg(20), "n": len(vals),
                     "line": default_line(vals[:10])})
+    out.sort(key=lambda s: (s["key"] == "minutes", -s["n"]))
     return out
 
 
@@ -20747,7 +20927,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r73';"
+    "const CACHE='pb-shell-r74';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21052,6 +21232,13 @@ tr:first-child td{border-top:0}td.n{text-align:right;font-variant-numeric:tabula
 .rmbits{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13.5px}
 .rmbits li.on{color:var(--text)}.rmlive{display:inline-block;margin-right:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--up)}
 .wins{display:flex;flex-wrap:wrap;gap:4px 10px;padding:0 4px 6px;font-size:12px;font-variant-numeric:tabular-nums}
+.bars{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}.bars .seg{flex-wrap:wrap}
+.ticker.paused .track{animation-play-state:paused}
+.tpause{margin-left:8px;border:0;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer}
+body.dense .card{padding:10px 12px}body.dense .row{padding-top:4px;padding-bottom:4px}
+@media print{body,body.v4{background:#fff!important;color:#111!important}
+ .ticker,#intro,.findwrap,nav.tabs,.kpis{display:none!important}
+ .card,.rmap,.rmbits{background:#fff!important;color:#111!important;box-shadow:none!important}}
 footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:var(--faint);font-size:12.5px;display:flex;gap:12px;flex-wrap:wrap}
 footer a{color:var(--faint)}
 @media (max-width:900px){.s4,.s5,.s6,.s7,.s8{grid-column:span 12}.kpi{grid-column:span 6}.pgrid{grid-template-columns:1fr}}
@@ -21312,9 +21499,10 @@ function personRow(r,i){const medal=['\u{1F947}','\u{1F948}','\u{1F949}'][i];con
   h('div',{style:'min-width:0'},h('div',{class:'nm'},r.name,' ',streakChip(r.streak)),h('div',{class:'sub',text:r.record+(r.open?' · '+r.open+' open':'')})),
   h('span',{class:'net '+tone(r.net)},money(r.net)),h('span',{class:'roi '+tone(r.roi)},pct(r.roi)+' ROI'))}
 function slipRow(p,showWho){const price=[p.cost!=null?'risk '+cash(p.cost):'',p.payout!=null?'pays '+cash(p.payout):''].filter(Boolean).join(' · ');
+ const num=p.id&&String(p.what||'').indexOf('#'+p.id)<0?'#'+p.id:'';
  return h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},stBadge(p.status),
   h('div',{style:'min-width:0'},h('div',{class:'nm'},showWho===false?p.what:p.who),
-   h('div',{class:'sub'},(showWho===false?'':(p.what||'')+' · ')+(price?price+' · ':'')+(p.when||''))),
+   h('div',{class:'sub'},(showWho===false?'':(p.what||'')+' · ')+(num?num+' · ':'')+(price?price+' · ':'')+(p.when||''))),
   p.net==null?h('span',{class:'net faint',text:p.cost!=null?cash(p.cost):''}):h('span',{class:'net '+tone(p.net)},money(p.net)))}
 function openSlipCard(p){return h('button',{class:'oslip',type:'button',onclick:()=>go('#/s/'+p.id)},
   h('div',{class:'w'},avatar(p.who),p.who,h('span',{class:'chip',text:p.platform||'Slip'})),h('div',{class:'d',text:p.what}),
@@ -21369,7 +21557,7 @@ function renderLive(el,d){
 function renderPeople(el,d){
  if(!S.pf)S.pf='all';
  const seg=h('div',{class:'seg'},[['all','All'],['up','Up'],['down','Down'],['flat','Flat']].map(([k,t])=>h('button',{type:'button',class:S.pf===k?'on':'',
-  onclick:()=>{S.pf=k;render()}},t)));
+  onclick:()=>{S.pf=k;render()}},t)).concat([h('button',{type:'button',onclick:()=>{const on=!document.body.classList.contains('dense');document.body.classList.toggle('dense',on);try{localStorage.setItem('pb-dense',on?'1':'0')}catch(e){}render()}},document.body.classList.contains('dense')?'Roomy':'Compact')]));
  const q=(S.q||'').trim().toLowerCase();
  const rows=(d.people||[]).filter(p=>{
   if(q&&(p.name+' '+(p.record||'')).toLowerCase().indexOf(q)<0)return false;
@@ -21378,8 +21566,13 @@ function renderPeople(el,d){
   h('button',{class:'tile',type:'button',onclick:()=>go('#/p/'+p.key)},imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
    h('div',{class:'cap'},h('b',{text:p.name}),h('span',{class:tone(p.net)},money(p.net))),
    h('div',{class:'wins'},[['Week',(p.span||{}).week],['Month',(p.span||{}).month],['Season',(p.span||{}).season]].map(([k,n])=>h('span',{class:tone(n||0),text:k+' '+money(n||0)}))),
+   p.edge&&p.edge.best?h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:'Best '+(p.edge.best.name||'')}),h('span',{class:tone(p.edge.best.net),text:money(p.edge.best.net)}),h('span',{text:'Worst '+(p.edge.worst&&p.edge.worst.name||'')}),h('span',{class:tone(p.edge.worst&&p.edge.worst.net),text:money((p.edge.worst&&p.edge.worst.net)||0)})):null,
    h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))))
-  :empty(d.people.length?'Nobody in that filter':'No one on the board yet',d.people.length?'Try All.':'Once someone settles a slip, their card shows up here.')))}
+  :empty(d.people.length?'Nobody in that filter':'No one on the board yet',d.people.length?'Try All.':'Once someone settles a slip, their card shows up here.')),
+  (d.h2h||[]).length?card('Head to head','',null,h('div',{class:'rows'},d.h2h.map(x=>{
+   const na=(d.people||[]).find(p=>(p.name||'')===x.a),nb=(d.people||[]).find(p=>(p.name||'')===x.b);
+   return h('div',{class:'row'},h('div',{style:'min-width:0'},h('div',{class:'nm',text:(x.a||'')+' '+x.aw+'–'+x.bw+' '+(x.b||'')}),
+    h('div',{class:'sub',text:(na?money(na.net):'–')+' · '+(nb?money(nb.net):'–')})))}))):null)}
 function renderPosters(el,d){
  const seg=h('div',{class:'seg'},[['season','Season'],['month','Month'],['week','Week']].map(([k,t])=>h('button',{type:'button',class:S.period===k?'on':'',
   onclick:()=>{S.period=k;render()}},t)));
@@ -21401,8 +21594,10 @@ function renderMore(el,d){
  put(el,
   card('\u{1FA99} Coins','s4',null,d.coins.length?h('table',null,h('tbody',null,d.coins.map((c,i)=>h('tr',null,h('td',{class:'faint',text:String(i+1)}),h('td',null,h('div',{text:c.who}),c.why?h('div',{class:'muted',text:c.why}):null),h('td',{class:'n',text:'\u{1FA99} '+c.coins.toLocaleString()})))))
    :empty('No coins yet','Play the games in Discord to earn some.')),
-  card('Group parlay','s4',null,d.groupparlay.length?h('ul',{class:'clean'},d.groupparlay.map(l=>h('li',null,h('span',null,icons[l.status]||'⏳'),h('span',null,h('b',{text:l.who}),': ',l.leg))))
-   :empty('No legs this week yet','Add yours in Discord.')),
+  card('Group parlay','s4',null,d.groupparlay.length?h('div',null,
+   h('p',{class:'muted',text:(d.groupparlay.filter(l=>!l.status||l.status==='open').length?'Still open this week: '+d.groupparlay.filter(l=>!l.status||l.status==='open').map(l=>l.who).join(', '):'Every leg this week is in.')}),
+   h('ul',{class:'clean'},d.groupparlay.map(l=>h('li',null,h('span',null,icons[l.status]||'⏳'),h('span',null,h('b',{text:l.who}),': ',l.leg))))):
+   empty('No legs this week yet','Add yours in Discord.')),
   card('Record book','s4',null,d.records.length?h('ul',{class:'clean'},d.records.map(x=>h('li',{text:x}))):empty('The record book is empty','Big days get written down here.')),
   healthCard(),
   map.length?card('Roadmap to r50','',null,h('div',{class:'rmap'},map)):null,
@@ -21415,12 +21610,15 @@ function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.d
 function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}
  document.querySelectorAll('#nav button').forEach(b=>{b.classList.toggle('on',b.dataset.t===t);b.setAttribute('aria-current',b.dataset.t===t?'page':'false')});
  document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id==='tab-'+t));render();if(innerWidth<=640)scrollTo({top:0});fresh(t)}
-function renderTicker(d){const el=$('#ticker');if(!d.ticker.length){el.classList.remove('on');put(el,);return}
+function tickPaused(){try{return localStorage.getItem('pb-tick')==='0'}catch(e){return false}}
+function renderTicker(d){const el=$('#ticker');if(!el)return;if(!d.ticker.length){el.classList.remove('on');put(el,);return}
  const items=()=>d.ticker.map(t=>h('button',{class:'it',type:'button',onclick:()=>go('#/s/'+t.id)},
   h('span',{class:t.live==='hit'||t.live==='ahead'?'up':t.live==='miss'||t.live==='behind'?'down':'faint'},'●'),h('b',{text:t.who}),
   h('span',{text:t.label||t.leg}),t.value!=null?h('span',{class:'v',text:t.value+'/'+t.line}):null,t.sub?h('span',{class:'faint',text:t.sub}):null));
  const track=h('div',{class:'track',style:'--dur:'+Math.max(20,d.ticker.length*7)+'s'},h('span',{class:'copy'},items()),h('span',{class:'copy','aria-hidden':'true'},items()));
- put(el,h('div',{class:'tk'},h('span',{class:'lbl'},h('i'),'LIVE'),h('div',{class:'rail'},track)));el.classList.add('on')}
+ const pause=h('button',{type:'button',class:'tpause',onclick:()=>{try{localStorage.setItem('pb-tick',tickPaused()?'1':'0')}catch(e){}renderTicker(S.data||d)}},tickPaused()?'Play':'Pause');
+ put(el,h('div',{class:'tk'},h('span',{class:'lbl'},h('i'),'LIVE'),pause,h('div',{class:'rail'},track)));
+ el.classList.add('on');el.classList.toggle('paused',tickPaused())}
 function renderMeta(d){const m=$('#meta');put(m,d.season?h('span',{class:'pill season',text:d.season}):null,
  h('span',{class:'pill'},h('span',{class:'dot'}),'Updated '+(d.updated||new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}))));
  $('#ver').textContent='PIMP-BOT '+d.version;
@@ -21886,6 +22084,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
     html = html.replace('href="/?v=2">Classic view</a>',
                         'href="/?v=3">Classic view</a><a href="/?v=2">v2</a><a href="/?v=1">v1</a>')
     extra_js = r"""
+try{if(localStorage.getItem('pb-dense')==='1')document.body.classList.add('dense')}catch(e){}
 function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
  return ({'/':'overview','/app':'overview','/live':'live','/news':'news','/open':'open','/people':'people','/posters':'posters','/more':'more'}[p]||'overview')}
 function pathForTab(t){return t==='overview'?'/':'/'+t}
@@ -21920,7 +22119,7 @@ function phoneHomeHint(){const stand=matchMedia('(display-mode:standalone)').mat
  head.after(bar)}
 function defaultLine(vals){if(!vals.length)return 0.5;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;return Math.max(0.5,Math.floor(avg)+0.5)}
 function mean(xs){if(!xs||!xs.length)return null;return Math.round(xs.reduce((a,b)=>a+b,0)/xs.length*10)/10}
-function playerHits(stat){return (S.pl&&S.pl.games||[]).map(g=>g.vals&&g.vals[stat]!=null?{g,v:+g.vals[stat]}:null).filter(Boolean)}
+function playerHits(stat){return (S.pl&&S.pl.games||[]).map(g=>g.vals&&g.vals[stat]!=null&&!g.dnp?{g,v:+g.vals[stat]}:null).filter(Boolean).filter(x=>!(S.hidePre&&x.g.pre))}
 function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().reverse();const n=rows.length;if(!n)return null;
  const W=640,H=228,pL=8,pR=40,pT=26,pB=30,iW=W-pL-pR,iH=H-pT-pB;
  const mx=Math.max(line,...rows.map(x=>x.v),1)*1.22;const bw=iW/n;const y=v=>pT+iH-(Math.max(0,v)/mx*iH);const ly=y(line);
@@ -21963,10 +22162,10 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
   return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
  const L5=win(5),L10=win(10),L20=win(20),lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
  const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
- const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;paintPlayer()}},s.label);
+ const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;try{localStorage.setItem('pb-stat',s.key)}catch(e){}paintPlayer()}},s.label);
  const nudge=x=>h('button',{class:'pnudge',type:'button',onclick:()=>{S.pline=Math.max(0,Math.round((line+x)*10)/10);paintPlayer()}},(x>0?'+':'')+String(x));
  const box=(t,w)=>w?kbox(t,w.o+'/'+w.n+'  '+w.pct+'%',w.pct>=60?'up':w.pct<=40?'down':''):kbox(t,'–');
- const games=hits.slice(0,20);
+ if(S.pn!==10)S.pn=20;const games=hits.slice(0,S.pn);
  const home=hits.filter(x=>x.g.at!=='@').map(x=>x.v),away=hits.filter(x=>x.g.at==='@').map(x=>x.v);
  const opp=(d.next&&d.next.opp||'').toLowerCase();
  const vs=opp?hits.filter(x=>(x.g.opp||'').toLowerCase()===opp).map(x=>x.v):[];
@@ -21984,7 +22183,7 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
   h('div',{class:'pchips'},stats.map(chip)),
   h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:lab})),nudge(0.5),nudge(1)),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
-  h('div',{class:'card'},h('h2',null,'Last 20 vs '+fmt(line)),
+  h('div',{class:'card'},h('h2',null,'Last '+games.length+' vs '+fmt(line),h('span',{class:'r'},h('span',{class:'seg'},[10,20].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},'Last '+n))))),
    games.length?playerChart(games,line,fmt):null,
    games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
     title:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'})),
@@ -21997,17 +22196,22 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
    h('p',{text:x.note||''})))));
  if(notes.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'WHAT THE NUMBERS SHOW'}),
   h('ul',{class:'nlist'},notes.map(n=>h('li',{text:n})))));
+ const logged=(d.games||[]).filter(g=>!(S.hidePre&&g.pre)).slice(0,20);
  kids.push(
-  h('div',{class:'card'},h('h2',null,'Game log'),
-   games.length?h('div',null,games.map(x=>h('div',{class:'plog'},
-    h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),text:x.v>line?'▲':x.v<line?'▼':'–'}),
-    h('div',{style:'min-width:0'},h('div',{class:'nm',text:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+(x.g.result?' · '+x.g.result:'')}),
-     h('div',{class:'sub',text:lab})),h('span',{class:'net '+(x.v>line?'up':x.v<line?'down':'flat'),text:fmt(x.v)}))))
-    :empty('No games on file','ESPN has not posted a game log for this player yet.')));
+  h('div',{class:'card'},h('h2',null,'Game log',h('button',{type:'button',class:'tpause',onclick:()=>{S.hidePre=!S.hidePre;paintPlayer()}},S.hidePre?'Show preseason':'Hide preseason')),
+   logged.length?h('div',null,logged.map(g=>{const v=g.vals&&g.vals[stat]!=null&&!g.dnp?+g.vals[stat]:null;const dnp=v==null;
+    const mark=dnp?'DNP':(g.ot?fmt(v)+' OT':fmt(v));
+    return h('div',{class:'plog'},
+    h('span',{class:'ppg '+(dnp?'push':v>line?'over':v<line?'under':'push'),text:dnp?'–':v>line?'▲':v<line?'▼':'–'}),
+    h('div',{style:'min-width:0'},h('div',{class:'nm',text:(g.when||'')+' '+g.at+' '+g.opp+(g.result?' · '+g.result:'')+(g.pre?' · preseason':'')+(g.ot?' · OT':'')}),
+     h('div',{class:'sub',text:lab})),h('span',{class:'net '+(dnp?'flat':v>line?'up':v<line?'down':'flat'),text:mark}))})):
+    empty('No games on file','ESPN has not posted a game log for this player yet.')));
  put($('#sheet-body'),...kids)}
 async function showPlayer(slug,id){openSheet();const box=$('#findpop');if(box)box.hidden=true;
  const d=await api('/api/player/'+slug+'/'+id+'.json'+qs());if(location.hash!=='#/pl/'+slug+'/'+id)return;
- if(!d||!d.name){sheetError('Couldn’t find that player');return}S.pl=d;S.pstat=d.stat;S.pline=null;paintPlayer()}
+ if(!d||!d.name){sheetError('Couldn’t find that player');return}S.pl=d;S.pstat=d.stat;S.pline=null;
+ try{const saved=localStorage.getItem('pb-stat');if(saved&&(d.stats||[]).some(s=>s.key===saved))S.pstat=saved}catch(e){}
+ paintPlayer()}
 function paintFind(){const box=$('#findpop');if(!box)return;
  const q=(S.q||'').trim();const digits=/^[0-9]{1,10}$/.test(q);
  if(q.length<3&&!digits){box.hidden=true;put(box);return}
@@ -22033,8 +22237,28 @@ function renderKpis(d){const el=$('#kpis');if(!el||!d)return;
  const kpi=(k,v,s,c)=>h('div',{class:'card kpi'},h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}));
  put(el,kpi('Open',String(w.open),'riding right now'),kpi('Settled',String(w.settled),'this week'),
   kpi('Week net',money(w.net),'since Monday',tone(w.net)),kpi('Coins',Number(w.coins||0).toLocaleString(),'earned this week'))}
-function renderOpen(el,d){const rows=d.open.filter(matchQ);
- put(el,card('Open slips','',String(d.open.length),rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
+function loadView(){if(S.viewLoaded)return;S.viewLoaded=1;S.book=S.book||'all';S.sport=S.sport||'all';S.when=S.when||'all';
+ try{const v=JSON.parse(localStorage.getItem('pb-view')||'{}');if(v&&typeof v==='object'){S.book=v.book||'all';S.sport=v.sport||'all';S.when=v.when||'all'}}catch(e){}}
+function saveView(){try{localStorage.setItem('pb-view',JSON.stringify({book:S.book,sport:S.sport,when:S.when}))}catch(e){}}
+function bookOf(p){const x=String(p.platform||'').toLowerCase();if(x.indexOf('kalshi')>=0)return 'kalshi';if(x.indexOf('prize')>=0)return 'prizepicks';return 'other'}
+function ymdCentral(d){try{return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}catch(e){return ''}}
+function whenOk(stamp){if(!S.when||S.when==='all')return true;if(!stamp)return false;const today=ymdCentral(new Date());
+ if(S.when==='today')return stamp===today;if(S.when==='month')return stamp.slice(0,7)===today.slice(0,7);
+ if(S.when==='week'){const a=Date.parse(stamp+'T00:00:00Z'),b=Date.parse(today+'T00:00:00Z');if(isNaN(a)||isNaN(b))return true;
+  const wd=new Date(b).getUTCDay();return a>=b-((wd+6)%7)*86400000&&a<=b}return true}
+function boardPick(p,settled){loadView();if(!matchQ(p))return false;
+ if(S.book!=='all'&&bookOf(p)!==S.book)return false;
+ if(S.sport!=='all'&&(p.sport||'')!==S.sport)return false;
+ if(settled&&!whenOk(p.stamp||''))return false;return true}
+function sportNames(d){const s=[];const seen={};for(const p of [...(d.open||[]),...(d.recent||[])]){const n=p.sport||'';if(n&&!seen[n]){seen[n]=1;s.push(n)}}return s.sort()}
+function boardBar(d){loadView();
+ const seg=(key,opts)=>h('div',{class:'seg'},opts.map(([k,t])=>h('button',{type:'button',class:(S[key]||'all')===k?'on':'',onclick:()=>{S[key]=k;saveView();render()}},t)));
+ return h('div',{class:'bars'},
+  seg('book',[['all','All books'],['prizepicks','PrizePicks'],['kalshi','Kalshi'],['other','Other']]),
+  seg('sport',[['all','All sports'],...sportNames(d).map(s=>[s,s])]),
+  seg('when',[['all','Any time'],['today','Today'],['week','This week'],['month','This month']]))}
+function renderOpen(el,d){const rows=(d.open||[]).filter(p=>boardPick(p,false));
+ put(el,card('Open slips','',String(rows.length),boardBar(d),rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
   :empty(d.open.length?'Nothing matches that search':'Nothing open',d.open.length?'Clear the search box.':'Log a slip in Discord and it shows up here.')),
   d.games.length?card('Games we’re on','',gamesCount(d),gamesStrip(d.games)):null)}
 function ticketCard(p){return h('button',{class:'tix',type:'button',onclick:()=>go('#/s/'+p.id)},
@@ -22075,7 +22299,7 @@ function logBox(){return h('form',{class:'logbox',onsubmit:async e=>{e.preventDe
         "  card('My board','',null,watchList()),\n"
         "  card('Log a slip','',null,logBox()),\n"
         "  card('Tonight’s board','s6',null,wide(imgBox('board.png','','No board yet','The board fills in from open slips.','Tonight’s board'))),\n"
-        "  card('Recent results','s5',null,d.recent.filter(matchQ).length?h('div',{class:'rows'},d.recent.filter(matchQ).slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
+        "  card('Recent results','s5',null,boardBar(d),d.recent.filter(p=>boardPick(p,true)).length?h('div',{class:'rows'},d.recent.filter(p=>boardPick(p,true)).slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
         1)
     html = html.replace(
         "function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
