@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r89"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r90"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "r70"               # the idea list this upload is filling; r81 on the site was update r69
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -108,6 +108,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r87", "A second player is added into the same green-and-red chart, one bar for both, instead of a separate combo graph."),
     ("r88", "The opening smoke is soft gray clouds, the same shape as a real puff, instead of purple circles."),
     ("r89", "The background picker scrolls on a phone and has an X to close it. The scene fits the phone screen."),
+    ("r90", "The opening smoke is bright white curls on black, the shape of a real plume."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -21618,7 +21619,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r89';"
+    "const CACHE='pb-shell-r90';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22645,39 +22646,63 @@ SITE_SMOKE_JS = r"""
 function smokeIntro(){
  const o=$('#intro');if(!o)return;
  const app=navigator.standalone||matchMedia('(display-mode:standalone)').matches;
- const key=app?'pb-intro-app-r88':'pb-intro-r88';
+ const key=app?'pb-intro-app-r90':'pb-intro-r90';
  const skip=()=>{try{localStorage.setItem(key,'1')}catch(e){}o.classList.add('skip');o.remove()};
  try{if(localStorage.getItem(key)){o.remove();return}}catch(e){}
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
  fit();addEventListener('resize',fit);
+ const perm=new Uint8Array(512);for(let i=0;i<256;i++)perm[i]=i;
+ for(let i=255;i>0;i--){const j=(Math.random()*(i+1))|0;const t=perm[i];perm[i]=perm[j];perm[j]=t}
+ for(let i=0;i<256;i++)perm[256+i]=perm[i];
+ const fade=t=>t*t*t*(t*(t*6-15)+10);
+ const n2=(x,y)=>{const X=Math.floor(x)&255,Y=Math.floor(y)&255,xf=x-Math.floor(x),yf=y-Math.floor(y);
+  const u=fade(xf),v=fade(yf);const dot=(h,a,b)=>{const g=h&3;return((g&1)?-1:1)*(g<2?a:b)+((g&2)?-1:1)*(g<2?b:a)};
+  const aa=perm[perm[X]+Y],ab=perm[perm[X]+Y+1],ba=perm[perm[X+1]+Y],bb=perm[perm[X+1]+Y+1];
+  const x1=dot(aa,xf,yf)+(dot(ba,xf-1,yf)-dot(aa,xf,yf))*u;
+  const x2=dot(ab,xf,yf-1)+(dot(bb,xf-1,yf-1)-dot(ab,xf,yf-1))*u;return x1+(x2-x1)*v};
+ const fbm=(x,y)=>{let v=0,a=.5,f=1;for(let i=0;i<4;i++){v+=a*n2(x*f,y*f);a*=.5;f*=2}return v};
  const puff=sz=>{const s=document.createElement('canvas');s.width=s.height=sz;const g=s.getContext('2d');
-  for(let i=0;i<12;i++){const cx=sz*(.30+Math.random()*.40),cy=sz*(.24+Math.random()*.52),r=sz*(.18+Math.random()*.28);
-   const gr=g.createRadialGradient(cx,cy,0,cx,cy,r);const a=.16+Math.random()*.22;
-   gr.addColorStop(0,'rgba(242,242,242,'+a+')');
-   gr.addColorStop(.4,'rgba(160,160,160,'+(a*.45)+')');
-   gr.addColorStop(1,'rgba(0,0,0,0)');
-   g.fillStyle=gr;g.beginPath();g.arc(cx,cy,r,0,6.3);g.fill()}
-  g.globalCompositeOperation='destination-in';
-  const mask=g.createRadialGradient(sz*.5,sz*.5,sz*.08,sz*.5,sz*.5,sz*.5);
-  mask.addColorStop(0,'rgba(0,0,0,1)');mask.addColorStop(.62,'rgba(0,0,0,.75)');mask.addColorStop(1,'rgba(0,0,0,0)');
-  g.fillStyle=mask;g.fillRect(0,0,sz,sz);return s};
- const clouds=[puff(280),puff(280),puff(220),puff(180)];
- const spawn=(kind)=>{const w=c.width,h=c.height;const fat=kind==='fog';
-  return{x:w*.5+(Math.random()-.5)*w*(fat?.24:.16),y:h*(fat?.50:.48)+(Math.random()-.5)*h*(fat?.46:.34),
-   r:(fat?240:170)+Math.random()*(fat?280:200),vx:(Math.random()-.5)*(fat?.30:.66),
-   vy:-(fat?.14:.34)-Math.random()*(fat?.42:1.02),a:(fat?.22:.14)+Math.random()*(fat?.20:.18),
-   grow:(fat?.05:.08)+Math.random()*(fat?.14:.22),ph:Math.random()*6.3,rot:Math.random()*6.3,
-   spin:(Math.random()-.5)*.006,sprite:clouds[(Math.random()*clouds.length)|0],kind:kind,life:1}};
+  g.globalCompositeOperation='lighter';
+  for(let i=0;i<5;i++){const cx=sz*(.4+Math.random()*.2),cy=sz*(.38+Math.random()*.24),r=sz*(.09+Math.random()*.12);
+   const a=.72+Math.random()*.28;const gr=g.createRadialGradient(cx,cy,0,cx,cy,r);
+   gr.addColorStop(0,'rgba(255,255,255,'+a+')');gr.addColorStop(.4,'rgba(220,220,220,'+(a*.5)+')');
+   gr.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gr;g.beginPath();g.arc(cx,cy,r,0,6.3);g.fill()}
+  const src=g.getImageData(0,0,sz,sz),out=g.createImageData(sz,sz),cell=2,cols=(sz/cell)|0;
+  const ox=new Float32Array((cols+1)*(cols+1)),oy=new Float32Array((cols+1)*(cols+1)),amp=sz*.42;
+  for(let gy=0;gy<=cols;gy++)for(let gx=0;gx<=cols;gx++){const i=gy*(cols+1)+gx;
+   ox[i]=(fbm(gx*.08,gy*.08)*.78+fbm(gx*.2+3,gy*.2)*.22)*amp;
+   oy[i]=(fbm(gx*.08+8,gy*.08+8)*.78+fbm(gx*.2+11,gy*.2+5)*.22)*amp}
+  const sd=src.data,od=out.data;
+  for(let y=0;y<sz;y++){const gy=y/cell,gy0=gy|0,gyf=gy-gy0,gy1=Math.min(cols,gy0+1);
+   for(let x=0;x<sz;x++){const gx=x/cell,gx0=gx|0,gxf=gx-gx0,gx1=Math.min(cols,gx0+1);
+    const i00=gy0*(cols+1)+gx0,i10=gy0*(cols+1)+gx1,i01=gy1*(cols+1)+gx0,i11=gy1*(cols+1)+gx1;
+    const dx=ox[i00]*(1-gxf)*(1-gyf)+ox[i10]*gxf*(1-gyf)+ox[i01]*(1-gxf)*gyf+ox[i11]*gxf*gyf;
+    const dy=oy[i00]*(1-gxf)*(1-gyf)+oy[i10]*gxf*(1-gyf)+oy[i01]*(1-gxf)*gyf+oy[i11]*gxf*gyf;
+    const sx=Math.max(0,Math.min(sz-1,(x+dx)|0)),sy=Math.max(0,Math.min(sz-1,(y+dy)|0));
+    const si=(sy*sz+sx)*4,di=(y*sz+x)*4;const ex=x/sz-.5,ey=y/sz-.5,dist=Math.sqrt(ex*ex+ey*ey)*2;
+    let al=sd[si+3]*(dist<.78?1:dist>1.05?0:1-(dist-.78)/.27);
+    if(al>16)al=Math.min(255,al*1.7);
+    od[di]=255;od[di+1]=255;od[di+2]=255;od[di+3]=al|0}}
+  g.globalCompositeOperation='source-over';g.putImageData(out,0,0);
+  const soft=document.createElement('canvas');soft.width=soft.height=sz;const sg=soft.getContext('2d');
+  sg.filter='blur(8px)';sg.drawImage(s,0,0);sg.filter='none';sg.globalAlpha=.5;sg.drawImage(s,0,0);return soft};
+ const clouds=[puff(360),puff(360),puff(340),puff(320)];
+ const spawn=(kind)=>{const w=c.width,h=c.height;const fat=kind==='fog';const hero=fat&&Math.random()<.14;
+  return{x:w*.5+(Math.random()-.5)*w*(hero?.12:.1),y:h*(hero?.5:.5)+(Math.random()-.5)*h*(hero?.1:.12),
+   r:hero?420+Math.random()*90:(fat?16:8)+Math.random()*(fat?28:16),vx:(Math.random()-.5)*(fat?.22:.5),
+   vy:-(fat?.1:.26)-Math.random()*(fat?.18:.48),a:(hero?.16:.07)+Math.random()*(hero?.14:.08),
+   grow:(fat?.03:.05)+Math.random()*(fat?.06:.1),ph:Math.random()*6.3,rot:Math.random()*6.3,
+   spin:(Math.random()-.5)*.003,sprite:clouds[(Math.random()*clouds.length)|0],kind:kind,life:1}};
  const fog=Array.from({length:58},()=>spawn('fog'));
  const parts=Array.from({length:336},()=>spawn('wisp'));
  let start=performance.now();
  (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);x.globalCompositeOperation='source-over';
   const draw=p=>{p.ph+=0.015;p.rot+=p.spin;p.x+=p.vx+Math.sin(p.ph)*0.54+(w*.5-p.x)*0.0022;p.y+=p.vy;p.r+=p.grow;p.a*=.9985;
-   if(p.y<-p.r||p.a<.03)Object.assign(p,spawn(p.r>200?'fog':'wisp'));
-   const fat=p.kind==='fog';const d=p.r*(fat?3.1:1.35);
-   x.save();x.translate(p.x,p.y);x.rotate(p.rot);x.globalAlpha=Math.min(fat?.82:.34,p.a*(fat?2.3:1));
+   if(p.y<-p.r||p.a<.03)Object.assign(p,spawn(p.kind));
+   const fat=p.kind==='fog';const d=p.r*(fat?2.45:1.1);
+   x.save();x.translate(p.x,p.y);x.rotate(p.rot);x.globalAlpha=Math.min(fat?.88:.14,p.a*(fat?3:.7));
    x.drawImage(p.sprite,-d/2,-d/2,d,d);x.restore()};
   for(const p of fog)draw(p);for(const p of parts)draw(p);x.globalAlpha=1;
   const el=now-start;if(el>1100&&brand)brand.classList.add('on');if(el>7000)o.classList.add('go');
