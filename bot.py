@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r91"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r92"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "r71"               # the idea list this upload is filling; r67–r70 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -110,6 +110,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r89", "The background picker scrolls on a phone and has an X to close it. The scene fits the phone screen."),
     ("r90", "The opening smoke is bright white curls on black, the shape of a real plume."),
     ("r91", "Updates r67 through r70 show as live on More. A weekly note counts open, settled, and net."),
+    ("r92", "More lists every command the way /help does. Futures sit on their own list. /last restates the last slip in the channel."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -507,7 +508,7 @@ _PLAN_BUILT = {
     "r68": "On the board now: a settled row shows risk, what it pays, and the net. Kalshi shows yes or no, cents, and contracts. PrizePicks keeps the logged line. A copy gets the same result. A closed week keeps its name. The live picture uses the poster frame.",
     "r69": "On the board now: Staff HQ can sign out one browser and keeps the key masked. A sign-in is logged as who and when. A kicked member loses the board. The scan card says sure, confirm, and failed. Mine filters the list to this login.",
     "r70": "On the board now: a ticket opens the same X-ray as /trend. Two players can share one last-10 chart. Rest days and the opponent's last result sit on the next game. Search takes a team name.",
-    "r71": "On the board now: the footer shows the version from this file. A built row is marked live and stays in the list. The chart can be the last 10 or the last 20. Print is black text without the smoke.",
+    "r71": "On the board now: More lists every command the way /help does. Futures sit on their own list. /last restates the last slip in the channel. A weekly note counts open, settled, and net.",
 }
 _PLAN_LIVE = {
     "r67": [
@@ -744,6 +745,30 @@ _PLAN_LIVE = {
         "These 250 are the roadmap. They are listed here so the order is fixed.",
         "Roadmap lanes indent so a list of 50 stays readable.",
         "A player link opens that sheet.",
+        "One page lists every command, grouped the way /help is.",
+        "Section headers in the upload name the block they sit in.",
+        "A failed job names itself on the status card.",
+        "The scheduler skips a job that just finished clean.",
+        "Database copies stay a staff note, not a public button.",
+        "A missing look scene shows the scene name, not a broken icon.",
+        "The gold buttons stay readable on the high-contrast accent.",
+        "Loading skeletons match the card they stand in for.",
+        "A saved note sits above the phone home bar.",
+        "New rows use one type ramp: 12, 14, 16, and 22.",
+        "A total or a spread gets a plain row, not a player chart.",
+        "Futures sit in their own list so they don't look like tonight's game.",
+        "A missed scan leg stays on the confirm list until someone fills it.",
+        "A link from Discord can open the slip or the player.",
+        "The bot can restate the last slip you logged, in that channel.",
+        "A weekly note says open count, settled count, and net. It does not give advice.",
+        "A command that needs a server says so.",
+        "Slash command permissions stay as they are.",
+        "A long answer splits so Discord will accept it.",
+        "Scanner help says what a confirm card means.",
+        "The bot does not invent a line the slip did not have.",
+        "A partial read leaves a blank leg to fill, not a guess.",
+        "A drop is done when its row can say live and the old row is still there.",
+        "After this map, the next build picks one row.",
     ],
 }
 for _row in BOT_PLAN:
@@ -1734,6 +1759,9 @@ def pick_embed(p: sqlite3.Row) -> discord.Embed:
         e.add_field(name="Confidence", value=CONF_STARS[p["confidence"]])
     if p["notes"] and not sec_secret(p):
         e.add_field(name="Notes", value=clip(p["notes"], 300), inline=False)
+    link = dashboard_url()
+    if link and not sec_secret(p):
+        e.url = link + "#/s/" + str(p["id"])
     if field and p["status"] == "open":
         e.set_footer(text=f"Grade legs with /leg pick_id:{p['id']}")
     return e
@@ -9470,6 +9498,15 @@ def dash_prop_name(text: str) -> str:
     return clip(str(pr.get("display") or ""), 40)
 
 
+def dash_commands() -> list:
+    """The same groups /help uses, so More can list every command on one page."""
+    try:
+        fields = help_embed().fields
+    except Exception:
+        return []
+    return [{"name": clip(f.name, 48), "text": f.value} for f in fields]
+
+
 def dashboard_data(guild_id: int) -> dict:
     season = current_season(guild_id)
     def board(stats):
@@ -9489,8 +9526,17 @@ def dashboard_data(guild_id: int) -> dict:
               "what": shown_desc(p), "platform": p["platform"],
               "sport": clip(p["sport"] or "", 24), "cost": p["cost"], "payout": p["payout"],
               "player": dash_prop_name(shown_desc(p)) or None}
-             for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND (hidden IS NULL OR hidden = 0) "
-                                   "ORDER BY id DESC LIMIT 40", (guild_id,))]
+             for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
+                                       AND (hidden IS NULL OR hidden = 0)
+                                       AND (future_due IS NULL OR future_due = '')
+                                       ORDER BY id DESC LIMIT 40""", (guild_id,))]
+    futures = [{"id": p["id"], "who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 90),
+                "due": local_day(p["future_due"]) if p["future_due"] else "",
+                "cost": p["cost"], "payout": p["payout"]}
+               for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
+                                        AND (hidden IS NULL OR hidden = 0)
+                                        AND future_due IS NOT NULL AND future_due != ''
+                                        ORDER BY future_due LIMIT 20""", (guild_id,))]
     r = gp_round(guild_id, create=False)
     gp = [{"who": x["user_name"], "leg": x["text"], "status": x["status"]} for x in gp_legs(r["id"])] if r else []
     names = {}
@@ -9533,7 +9579,8 @@ def dashboard_data(guild_id: int) -> dict:
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
             "series": {k: [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in v] for k, v in series.items()},
-            "recent": recent, "open": open_, "tickets": list(open_[:12]), "markets": markets,
+            "recent": recent, "open": open_, "futures": futures, "tickets": list(open_[:12]), "markets": markets,
+            "commands": dash_commands(),
             "groupparlay": gp, "coins": coins,
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
@@ -15133,6 +15180,18 @@ def job_name(job) -> str:
         names = [n for n in getattr(getattr(job, "__code__", None), "co_names", ()) if n not in ("astimezone",)]
         return names[0] if names else "job"
     return name
+
+
+def job_recently_clean(name: str, within: float = 90) -> bool:
+    """True when this job finished with no error a moment ago, so this cycle can leave it alone."""
+    h = JOB_HEALTH.get(name)
+    if not h or h.get("fails") or not h.get("ok_at"):
+        return False
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(h["ok_at"])).total_seconds()
+    except (TypeError, ValueError):
+        return False
+    return 0 <= age < within
 
 
 def record_job(name: str, error: Optional[BaseException]) -> Optional[str]:
@@ -21640,7 +21699,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r91';"
+    "const CACHE='pb-shell-r92';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22340,6 +22399,8 @@ function renderMore(el,d){
   card('Record book','s4',null,d.records.length?h('ul',{class:'clean'},d.records.map(x=>h('li',{text:x}))):empty('The record book is empty','Big days get written down here.')),
   healthCard(),
   map.length?card('Roadmap to r50','',null,h('div',{class:'rmap'},map)):null,
+  (d.commands||[]).length?card('Commands','',String(d.commands.length),h('div',null,(d.commands||[]).map(c=>h('div',{class:'cmdsec'},
+   h('div',{class:'rms',text:c.name}),h('p',{class:'muted',style:'margin:4px 0 12px;white-space:pre-wrap',text:c.text}))))):null,
   plan.length?card('Five updates','',((d.plan||[]).filter(r=>r.state==='live').length)+' live',h('div',{class:'rmap'},plan)):null,
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
@@ -22371,9 +22432,14 @@ async function load(){const seq=++S.seq;const d=await api('/api/data'+qs());
  if(seq!==S.seq)return;
  for(const k of ['open','recent','alltime','leaderboard','people','coins','groupparlay','records','needs','ticker','games'])d[k]=d[k]||[];
  S.data=d;S.loadedAt=Date.now();renderMeta(d);renderTicker(d);renderMini();render()}
-function skeletonAll(){for(const id of Object.keys(TABS)){const el=$('#tab-'+id);
- put(el,...[0,1,2,3].map(()=>h('div',{class:'card kpi'},h('div',{class:'skl',style:'height:12px;width:60%'}),h('div',{class:'skl',style:'height:26px;width:80%;margin-top:8px'}))),
-  card(sk(),'',null,h('div',{class:'skl',style:'height:220px'})),card(sk(),'s7',null,skel(5)),card(sk(),'s5',null,skel(5)))}}
+function skeletonAll(){const kpi=()=>h('div',{class:'card kpi'},h('div',{class:'skl',style:'height:12px;width:50%'}),h('div',{class:'skl',style:'height:22px;width:70%;margin-top:8px'}));
+ const slip=()=>h('div',{class:'card'},h('div',{class:'skl',style:'height:14px;width:40%'}),h('div',{class:'skl',style:'height:64px;margin-top:10px'}));
+ const row=()=>h('div',{class:'row'},h('div',{class:'skl',style:'height:16px;width:55%'}),h('div',{class:'skl',style:'height:12px;width:30%;margin-top:6px'}));
+ const shapes={overview:[h('div',{class:'kpis'},kpi(),kpi(),kpi(),kpi()),slip(),slip()],
+  open:[slip(),slip(),slip()],live:[row(),row(),row(),row()],news:[row(),row(),row()],
+  people:[row(),row(),row(),row()],posters:[h('div',{class:'card'},h('div',{class:'skl',style:'height:180px'}))],
+  more:[row(),row(),row(),row(),row()]};
+ for(const id of Object.keys(TABS)){const el=$('#tab-'+id);if(el)put(el,...(shapes[id]||[slip()]))}}
 const sk=()=>h('span',{class:'skl',style:'display:inline-block;width:130px;height:12px'});
 
 /* ---------- person + slip pages ---------- */
@@ -22808,6 +22874,11 @@ body.v4 .plog .nm{font-weight:700;white-space:normal;overflow:visible}
 body.v4 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-width:var(--max);
  margin:0 auto;padding:4px 20px 16px}
 body.v4 .kpis .card.kpi{margin:0;padding:12px 14px;box-shadow:0 16px 40px -28px color-mix(in srgb,var(--brand) 40%,transparent);grid-column:auto}
+body.v4 .row .nm{font-size:16px}body.v4 .row .sub,body.v4 .leg .s{font-size:14px}
+body.v4 .fut{display:block;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);color:inherit;font:inherit;padding:10px 2px;cursor:pointer}
+body.v4 .fut .nm{font-size:16px;font-weight:700;white-space:normal}body.v4 .fut .sub{font-size:14px;color:var(--muted);white-space:normal;margin-top:2px}
+body.v4 .capline,body.v4 .rms{font-size:12px}body.v4 .kbox .v{font-size:22px}
+@media (max-width:720px){body.v4 .homehint{position:fixed;left:12px;right:12px;bottom:calc(72px + env(safe-area-inset-bottom));z-index:16;margin:0}}
 body.v4 .card{border-radius:18px}
 html:not([data-theme=light]) body.v4 .card{background:
  linear-gradient(180deg,color-mix(in srgb,var(--brand) 18%,transparent),transparent 48%),
@@ -23141,8 +23212,12 @@ function boardBar(d){loadView();
   seg('when',[['all','Any time'],['today','Today'],['week','This week'],['month','This month']]),
   h('button',{type:'button',class:'tpause'+(S.mine?' on':''),onclick:()=>{S.mine=!S.mine;render()}},S.mine?'Mine: on':'Mine'))}
 function renderOpen(el,d){const rows=(d.open||[]).filter(p=>boardPick(p,false));
+ const futs=d.futures||[];
  put(el,card('Open slips','',String(rows.length),boardBar(d),rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
   :empty(d.open.length?'Nothing matches that search':'Nothing open',d.open.length?'Clear the search box.':'Log a slip in Discord and it shows up here.')),
+  futs.length?card('Futures','',String(futs.length),h('div',null,futs.map(p=>h('button',{class:'fut',type:'button',onclick:()=>go('#/s/'+p.id)},
+   h('div',{class:'nm',text:p.what||('Slip #'+p.id)}),h('div',{class:'sub',text:(p.who||'')+(p.due?' · settles '+p.due:'')})))))
+   :null,
   d.games.length?card('Games we’re on','',gamesCount(d),gamesStrip(d.games)):null)}
 function ticketCard(p){return h('div',{class:'tixwrap'},
   h('button',{class:'tix',type:'button',onclick:()=>go('#/s/'+p.id)},
@@ -23274,12 +23349,13 @@ const LOOK_SW={court:'radial-gradient(80% 80% at 20% 0,#7B3FE4aa,transparent),#1
  goldluxe:'linear-gradient(135deg,#1a1408,#F5C54255)',aurora:'linear-gradient(#0a1824,#34d39966)',
  gridiron:'linear-gradient(#0a1a10,#1a5c32aa)',vegas:'linear-gradient(#1a0a28,#F5C542)',midnight:'linear-gradient(#0a1024,#070814)',
  nightcourt:'linear-gradient(#1a1030,#c47a3a)',tunnel:'linear-gradient(#14003A,#F5C54288)',crown:'radial-gradient(circle,#F5C542,#3b1d8a)'};
+function lookImg(src){const i=h('img',{alt:'',decoding:'async'});i.addEventListener('error',()=>i.remove());i.src=src;return i}
 function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();const def=!s.bg;
  put(box,h('button',{class:'looktile'+(def?' on':''),type:'button','data-reset':'1'},
-  h('i',{class:'sw'},h('img',{src:'/img/look/default.svg',alt:'',decoding:'async'})),h('b',{text:'Group default'}),
+  h('i',{class:'sw'},lookImg('/img/look/default.svg')),h('b',{text:'Group default'}),
   h('span',{text:'The group’s court and accent'}),def?h('em',{class:'onpill',text:'ON'}):null),
   LOOKS.map(([id,n,d])=>h('button',{class:'looktile'+(s.bg===id?' on':''),type:'button','data-bg':id},
-  h('i',{class:'sw'},h('img',{src:'/img/look/'+id+'.svg',alt:'',decoding:'async'})),h('b',{text:n}),h('span',{text:d}),
+  h('i',{class:'sw'},lookImg('/img/look/'+id+'.svg')),h('b',{text:n}),h('span',{text:d}),
   s.bg===id?h('em',{class:'onpill',text:'ON'}):null)));
  const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{class:'acchip'+(s.accent===a?' on':''),type:'button','data-ac':a},
   h('i',{class:'acdot'}),h('span',{text:a}))))}
@@ -24436,12 +24512,13 @@ function applyLook(){const s=readLook();const bg=LOOKS.some(x=>x[0]===s.bg)?s.bg
  const set=(el,k,v)=>{if(!el)return;if(v)el.dataset[k]=v;else delete el.dataset[k]};
  set(document.documentElement,'bg',bg);set(document.body,'bg',bg);
  set(document.documentElement,'accent',ac);set(document.body,'accent',ac)}
+function lookImg(src){const i=h('img',{alt:'',decoding:'async'});i.addEventListener('error',()=>i.remove());i.src=src;return i}
 function paintLook(){const s=readLook();const def=!s.bg;
  put($('#lookgrid'),h('button',{class:'looktile'+(def?' on':''),type:'button','data-reset':'1'},
-  h('i',{class:'sw'},h('img',{src:'/img/look/default.svg',alt:'',decoding:'async'})),h('b',{text:'Group default'}),
+  h('i',{class:'sw'},lookImg('/img/look/default.svg')),h('b',{text:'Group default'}),
   h('span',{text:'The group’s court and accent'}),def?h('em',{class:'onpill',text:'ON'}):null),
   LOOKS.map(([id,n])=>h('button',{class:'looktile'+(s.bg===id?' on':''),type:'button','data-bg':id},
-   h('i',{class:'sw'},h('img',{src:'/img/look/'+id+'.svg',alt:'',decoding:'async'})),h('b',{text:n}),
+   h('i',{class:'sw'},lookImg('/img/look/'+id+'.svg')),h('b',{text:n}),
    s.bg===id?h('em',{class:'onpill',text:'ON'}):null)));
  put($('#lookaccents'),ACCENTS.map(a=>h('button',{class:'acchip'+(s.accent===a?' on':''),type:'button','data-ac':a},
   h('i',{class:'acdot'}),h('span',{text:a}))))}
@@ -34342,6 +34419,8 @@ class PicksBot(discord.Client):
                     lambda n: send_digests(self, n), lambda n: game_previews(self, n), lambda n: check_quests(self, n),
                     *[_named_job(name, fn, self) for name, fn in EXTRA_JOBS]):
             name = job_name(job)
+            if job_recently_clean(name):
+                continue
             try:
                 await asyncio.wait_for(job(now.astimezone(timezone.utc)), timeout=SEC_JOB_TIMEOUT)
                 alert = record_job(name, None)
@@ -35027,6 +35106,21 @@ async def grade_cmd(interaction: discord.Interaction, pick_id: int):
                                     view=view_or_missing(pick))
 
 
+@bot.tree.command(name="last", description="Restate the last slip you logged, in this channel")
+@app_commands.guild_only()
+async def last_cmd(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("That command needs a server.", ephemeral=True)
+        return
+    p = db().execute(
+        "SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? ORDER BY id DESC LIMIT 1",
+        (interaction.guild_id, str(interaction.user.id))).fetchone()
+    if p is None:
+        await interaction.response.send_message("You haven't logged a slip in this server yet.", ephemeral=True)
+        return
+    await interaction.response.send_message(embed=pick_embed(p))
+
+
 @bot.tree.command(name="result", description="Settle a pick")
 @app_commands.guild_only()
 @app_commands.describe(
@@ -35700,7 +35794,8 @@ def help_embed() -> discord.Embed:
         "`/open` what's pending · `/exposure` open picks by game · `/history` look back with filters\n"
         "`/record` your stats · `/leaderboard` who's up (by week, month, season or sport)\n"
         "`/edit` `/delete` `/undo` fix mistakes · `/export` Excel file with Kalshi, PrizePicks and per-person tabs\n"
-        "`/import` add picks from an old tracker · `/claim` put imported picks on your account"))
+        "`/import` add picks from an old tracker · `/claim` put imported picks on your account\n"
+        "`/last` restate the last slip you logged, in this channel"))
     e.add_field(name="Live and props", inline=False, value=(
         "`/sweat` live leg-by-leg tracker · `/schedule` your games · `/trend` player hit rates with a chart\n"
         "Props grade free from box scores · injury DMs for your props · `/kalshi link` auto-settles Kalshi picks\n"
@@ -35721,7 +35816,8 @@ def help_embed() -> discord.Embed:
     e.add_field(name="Slips", inline=False, value=(
         "Post a slip screenshot in the receipts channel and I'll log it. Anywhere else, @mention me with it "
         "(or reply `@me log` to one). Ask a question with it (\"@me thoughts?\") for a leg-by-leg breakdown "
-        "that isn't logged. Admins: `/receipts`; `/admin check` if screenshots aren't logging."))
+        "that isn't logged. A confirm card means the read was not sure: the blank stays blank until you fill it. "
+        "Admins: `/receipts`; `/admin check` if screenshots aren't logging."))
     e.add_field(name="Recaps", inline=False, value=(
         "`/recap` the last 7 days. Weekly recap and open-pick reminders post automatically "
         "once an admin runs `/recapchannel`."))
