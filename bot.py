@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r77"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r79"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -95,6 +95,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r75", "Open slips sit on a sideways rail. A player can be pinned from search. A nudged line is labeled yours. Recent and season averages sit together. This week's logged plays are on the board. The status card names the last job, and the ticker stays off a sheet you are reading."),
     ("r76", "The scanner keeps every card on a PrizePicks slip: SOG, Hitter FS, Singles, tennis, darts, cricket, and table tennis. The review uses the matching league and the batting columns ESPN actually sends, so those legs get a game log when one exists."),
     ("r77", "Season boards (NBASZN, NFLSZN) and short names (PPG, RPG, APG, BPG, 3PTM, 3PTA, FTM, 50+ Point Games) scan and chart. A two-player combo adds both logs. The player page groups those stats and lets you switch the window and home or away."),
+    ("r78", "Staff HQ lists the browsers signed in right now, and the daily key stays hidden until the eye is clicked. A second scan reads only the holes. An edit you make is used the next time that same line shows up. Command answers stay in the channel you used."),
+    ("r79", "The weekly summary stake is the sum of the rows. A logged cash-out sits on the slip as its own number. An edit keeps the old line in the staff log. /admin status says whether the dashboard answered, a slow job is named, and the going-down note names the last job that finished."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -488,8 +490,8 @@ BOT_PLAN = [  # r67–r71: 250 adds, 50 per update, 10 from each lane. The r50 m
 
 
 _PLAN_BUILT = {
-    "r67": "On the board now: this week's open count, settled count, net, and coins. A person tile shows week, month, and season. The sheet has last 5, 10, and 20, and the line nudge stays on the page.",
-    "r68": "On the board now: a settled row shows risk, what it pays, and the net. A lost combo marks the one leg that missed. The chart line is the number you nudged.",
+    "r67": "On the board now: this week's open count, settled count, net, and coins. Staff HQ lists signed-in devices and keeps the key hidden until the eye. A second scan reads only the holes, and an edit is remembered for the next similar line.",
+    "r68": "On the board now: a settled row shows risk, what it pays, and the net. The summary stake is the sum of the rows. A cash-out is its own number. An edit keeps the old line in the staff log. A slow job and the last finished job are named.",
     "r69": "On the board now: the smoke intro plays once, then stays off on this device. A rate limit says to wait. The board filters by book, sport, and day. Preseason can be hidden. A missed game says DNP.",
     "r70": "On the board now: People filters to up, down, or flat. Search finds a slip number, a player, or a teammate. Tiles show best and worst sport. Head-to-head shows wins. The ticker can pause. Rows can sit tighter.",
     "r71": "On the board now: the footer shows the version from this file. A built row is marked live and stays in the list. The chart can be the last 10 or the last 20. Print is black text without the smoke.",
@@ -542,6 +544,10 @@ _PLAN_LIVE = {
         "Open slips sit on a sideways rail.",
         "Logging a slip on the site uses the same confirm rules as Discord.",
         "An unsure leg still waits for a confirm card.",
+        "Staff HQ lists signed-in devices and still hides the daily key until the eye is clicked.",
+        "The bot answers in the channel where the command was used.",
+        "A second pass re-reads only the holes, not the whole photo.",
+        "An Edit correction is remembered for the next similar slip.",
     ],
     "r68": [
         "A void or a push is labeled and is not counted as a win.",
@@ -573,6 +579,12 @@ _PLAN_LIVE = {
         "Staff tools stay on Staff HQ.",
         "Coins stay a game, not a balance to cash out.",
         "Slip photos stay off the public board.",
+        "The summary stake matches the sum of the rows.",
+        "A partial cash-out, when one was logged, sits on the slip as its own number.",
+        "Editing a slip keeps the old line in the staff log.",
+        "A down note names the last job that finished.",
+        "/admin status includes whether the dashboard answered.",
+        "The scheduler names a job that ran too long.",
     ],
     "r69": [
         "A rate limit says to wait, instead of a blank page.",
@@ -1610,6 +1622,10 @@ def pick_embed(p: sqlite3.Row) -> discord.Embed:
     units, warn = units_note(p["guild_id"], p)
     e.add_field(name="Cost", value=money(p["cost"]) + units)
     e.add_field(name="Max payout", value=money(p["payout"]))
+    if p["returned"] is not None:
+        usual = default_return(p["status"], p["cost"], p["payout"]) if p["status"] != "open" else None
+        if p["status"] == "open" or usual is None or abs((p["returned"] or 0) - usual) >= 0.005:
+            e.add_field(name="Cash-out", value=money(p["returned"]))
     e.add_field(name="Status", value=label)
     if p["status"] != "open":
         e.add_field(name="Net", value=signed((p["returned"] or 0.0) - p["cost"]))
@@ -1742,7 +1758,7 @@ def build_recap(guild_id: int, days: int = 7) -> discord.Embed:
             e.add_field(name="💀 Bad beats", inline=False, value=clip("\n".join(bad_beat_line(r) for r in beats), 1024))
         staked = sum(p["cost"] for p in rows)
         group_net = sum(net(p) for p in rows)
-        e.add_field(name="Group", value=f"{len(rows)} settled · {money(staked)} staked · {signed(group_net)}")
+        e.add_field(name="Group", value=f"{len(rows)} settled · {money(staked)} staked (the sum of these rows) · {signed(group_net)}")
         c = leg_counts_since(guild_id, since)
         rate = hit_rate(c)
         if rate:
@@ -9119,6 +9135,9 @@ def dashboard_key() -> str:
     return key
 
 
+DASH_ANSWERED: dict = {"at": None}
+
+
 def dashboard_url() -> Optional[str]:
     if not PUBLIC_DOMAIN:
         return None
@@ -12208,7 +12227,12 @@ async def status_embed(client) -> discord.Embed:
                                                                              if CLAUDE_DAILY_CAP else ""))
     e.add_field(name="Slips read today", value=clip(free_counts_line(), 1000), inline=False)
     e.add_field(name="Data feeds", value=clip(data_sources_line(), 1000), inline=False)
-    checks.append("✅ Dashboard" if dashboard_url() else "⚪ Dashboard off")
+    if not dashboard_url():
+        checks.append("⚪ Dashboard off")
+    elif DASH_ANSWERED.get("at"):
+        checks.append("✅ Dashboard answered")
+    else:
+        checks.append("⚪ Dashboard up, no page opened yet")
     e.add_field(name="Connections", value=" · ".join(checks), inline=False)
     e.add_field(name="Live data", value=clip(data_health_line(), 1000), inline=False)
     size = os.path.getsize(DB_PATH) / 1024 if os.path.exists(DB_PATH) else 0
@@ -14693,6 +14717,13 @@ class DraftEditModal(discord.ui.Modal, title="Edit before logging"):
             await interaction.response.send_message(cooloff_message(until), ephemeral=True)
             return
         legs = [x.strip() for x in self.legs.value.splitlines() if x.strip()]
+        old_legs = list(d["slip"].get("legs") or [])
+        remember_scan_edits(old_legs, legs)
+        for old, new in zip(old_legs, legs):
+            if old.strip() and old.strip() != new.strip():
+                staff_log_add(interaction.guild_id, "edit", f"Edit kept the old line: {clip(old, 140)}",
+                              getattr(interaction.user, "display_name", "") or "")
+                break
         d["slip"].update(platform=self.platform.value.strip() or "Other", description=self.description.value.strip() or "Slip",
                          legs=legs, cost=cost, payout=payout, placed=True)
         d["used"] = -1
@@ -20034,11 +20065,52 @@ def dash_cookie_value() -> str:
                     f"pimp-bot dashboard v3|{dash_epoch()}".encode(), hashlib.sha256).hexdigest()
 
 
+def dash_device_label(ua: str) -> str:
+    """A short name for the browser that signed in. Never the access key."""
+    u = ua or ""
+    if "iPhone" in u or "iPad" in u:
+        return "iPhone"
+    if "Android" in u:
+        return "Android"
+    if "Mac" in u:
+        return "Mac"
+    if "Windows" in u:
+        return "Windows"
+    return "Browser"
+
+
+def dash_touch_device(request) -> None:
+    """Remember this browser for the current key. A kick drops the list because the epoch changed."""
+    try:
+        ip = dash_client_ip(request)
+        ua = str(request.headers.get("User-Agent") or "")
+        who = dash_device_label(ua)
+        epoch = dash_epoch()
+        when = datetime.now(TZ).strftime("%b %-d %-I:%M %p CT")
+        raw = json.loads(get_setting(0, "dash_devices") or "[]")
+        rows = [r for r in raw if isinstance(r, dict) and str(r.get("epoch")) == epoch
+                and not (r.get("ip") == ip and r.get("who") == who)]
+        rows.insert(0, {"who": who, "ip": ip, "when": when, "epoch": epoch})
+        set_setting(0, "dash_devices", json.dumps(rows[:12]))
+    except Exception:
+        pass
+
+
+def dash_devices() -> list:
+    try:
+        raw = json.loads(get_setting(0, "dash_devices") or "[]")
+    except Exception:
+        return []
+    epoch = dash_epoch()
+    return [r for r in raw if isinstance(r, dict) and str(r.get("epoch")) == epoch][:12]
+
+
 def dash_note_login(request, how: str) -> None:
     """Staff log line for a dashboard sign-in. IP only — never the access key."""
     try:
         ip = dash_client_ip(request)
         staff_log_add(staff_gid(), "ok", f"Dashboard sign-in ({how}) from {ip}", "site")
+        dash_touch_device(request)
     except Exception:
         pass
 
@@ -20496,6 +20568,7 @@ async def dash_api_data(request):
     else:
         d.update(await dash_live(gid))
     d["updated"] = datetime.now(TZ).strftime("%-I:%M %p")
+    DASH_ANSWERED["at"] = now_iso()
     return web.json_response(d)
 
 
@@ -23474,6 +23547,8 @@ def staff_ops(uid: int) -> dict:
         "crashes": [x for x in crashes if isinstance(x, dict)][:12], "version": BOT_VERSION,
         "access": {"key": dash_gate_code(), "day": dash_gate_state().get("day") or "",
                    "used": int(dash_gate_state().get("used") or 0)},
+        "devices": [{"who": r.get("who") or "Browser", "ip": r.get("ip") or "", "when": r.get("when") or ""}
+                    for r in dash_devices()],
     }
 
 
@@ -23549,7 +23624,9 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap">
 <section class="card" style="margin-bottom:12px"><h2>Today's access key</h2><div id="access"></div>
- <p class="muted">Only staff can see this. One person uses it, we mint a fresh key for the next. It also changes at midnight.</p></section>
+ <p class="muted">Only staff can see this. One person uses it, we mint a fresh key for the next. It also changes at midnight. The key stays ********** until you click the eye.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Signed-in devices</h2><div id="devices"></div>
+ <p class="muted">Browsers that signed in with the key that's current now. Signing everyone out clears the list.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
  <p class="muted">Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>Robot &amp; crashes</h2><div id="crashes"></div>
@@ -23613,13 +23690,17 @@ function paintAccess(A){A=A||{};const key=A.key||'';const shown=keyOpen&&!!key;
   h('div',{class:'row'},h('span',{class:'muted',text:(A.day||'')+' · used '+String(A.used||0)+' today'}),
    h('button',{class:'xbtn',type:'button',text:'Copy',onclick:()=>{try{navigator.clipboard.writeText(key)}catch(e){}}}),
    h('button',{class:'xbtn',type:'button',text:'Sign everyone out',onclick:()=>staffPost({op:'kick'}).then(load)})))}
+function paintDevices(rows){const box=$('#devices');if(!box)return;
+ put(box,(rows||[]).length?(rows||[]).map(d=>h('div',{class:'row'},h('span',null,h('b',{text:d.who||'Browser'}),' ',
+  h('span',{class:'muted',text:d.ip||''})),h('span',{class:'muted',text:d.when||''}))):
+  h('p',{class:'muted',text:'No browsers are signed in with the current key.'}))}
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
  if(s.accent){document.documentElement.dataset.accent=s.accent;if(document.body)document.body.dataset.accent=s.accent}}catch(e){}
 async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
- paintAccess(d.access||{});
+ paintAccess(d.access||{});paintDevices(d.devices||[]);
  const R=d.reads||{};put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'read clean'})),
   h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'not sure'})),
   h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})),
@@ -28456,12 +28537,41 @@ def free_scan(raw: bytes) -> Optional[dict]:
     if _free_scan_ready(first):
         return first
     best = first
-    for extra in _free_scan_retries(img, grey):
+    # A first pass that already has legs only re-reads the bands that can fill the holes.
+    # A blank first pass still looks at the whole photo.
+    retries = _free_hole_bands(img, grey, first) if first and first.get("legs") else _free_scan_retries(img, grey)
+    for extra in retries:
         best = _free_fill(best, extra)
         best = _free_tidy(best)
         if _free_scan_ready(best):
             return best
     return best
+
+
+def _free_hole_bands(img, grey, slip) -> list:
+    """Crops for a second pass. Each box is a hole (money, the player list, or the app name), never the whole photo."""
+    from PIL import ImageEnhance, ImageOps
+    unsure = [str(u) for u in (slip.get("_unsure") or [])]
+    w, h = img.size
+    boxes = []
+    if any(u in ("the amount risked", "the payout") for u in unsure):
+        boxes.append((0, int(h * 0.72), w, h))
+    if any("name" in u or "over or under" in u or "picks (I found" in u for u in unsure):
+        boxes.append((0, int(h * 0.12), w, int(h * 0.78)))
+    if any(u == "which app it's from" for u in unsure):
+        boxes.append((0, 0, w, max(40, int(h * 0.22))))
+    out = []
+    for box in boxes:
+        bw, bh = box[2] - box[0], box[3] - box[1]
+        if bw < 40 or bh < 40 or bw * bh >= w * h * 0.92:
+            continue
+        try:
+            crop, cgrey = img.crop(box), grey.crop(box)
+            punch = ImageOps.autocontrast(ImageEnhance.Contrast(cgrey).enhance(1.6), cutoff=1)
+            out.append(free_parse(free_words(punch), crop, punch))
+        except Exception:
+            log.debug("Hole re-read failed", exc_info=True)
+    return [s for s in out if s]
 
 
 def _free_scan_retries(img, grey) -> list:
@@ -28569,9 +28679,57 @@ def _free_tidy(slip: Optional[dict]) -> Optional[dict]:
 
 # ---- names: the scan's spelling checked against ESPN's players ---------------------------------------
 
+def _scan_edit_key(leg: str) -> str:
+    return re.sub(r"\s+", " ", (leg or "").lower()).strip()
+
+
+def remember_scan_edits(before: list, after: list) -> None:
+    """An Edit correction is kept, so the next screenshot with that same line uses the fixed wording."""
+    if len(before) != len(after):
+        return
+    try:
+        edits = json.loads(get_setting(0, "scan_edit") or "{}")
+    except Exception:
+        edits = {}
+    if not isinstance(edits, dict):
+        edits = {}
+    for old, new in zip(before, after):
+        old, new = (old or "").strip(), (new or "").strip()
+        if old and new and old != new:
+            edits[_scan_edit_key(old)] = new[:180]
+    if not edits:
+        return
+    try:
+        keep = dict(list(edits.items())[-40:])
+        set_setting(0, "scan_edit", json.dumps(keep)[:4000])
+    except Exception:
+        pass
+
+
+def free_apply_edits(slip: dict) -> None:
+    try:
+        edits = json.loads(get_setting(0, "scan_edit") or "{}")
+    except Exception:
+        return
+    if not isinstance(edits, dict) or not edits:
+        return
+    legs, changed = [], False
+    for leg in slip.get("legs") or []:
+        hit = edits.get(_scan_edit_key(leg))
+        if isinstance(hit, str) and hit.strip():
+            legs.append(hit.strip())
+            changed = True
+        else:
+            legs.append(leg)
+    if changed:
+        slip["legs"] = legs
+
+
 async def free_fix_names(slip: dict) -> None:
     """'Julian Quifiones' -> 'Julián Quiñones' when ESPN has one clear match (best effort, a few seconds).
-    Scanner 4.0 also remembers a match in scan_alias so the next screenshot of the same OCR typo is instant."""
+    Scanner 4.0 also remembers a match in scan_alias so the next screenshot of the same OCR typo is instant.
+    An earlier Edit correction is applied first."""
+    free_apply_edits(slip)
     try:
         aliases = json.loads(get_setting(0, "scan_alias") or "{}")
     except Exception:
@@ -33172,9 +33330,16 @@ class PicksBot(discord.Client):
     async def close(self):
         try:
             set_setting(0, "bot_stopping", now_iso())
+            last_done = ""
+            best_ok = ""
+            for jname, jh in JOB_HEALTH.items():
+                ok_at = jh.get("ok_at") or ""
+                if ok_at >= best_ok:
+                    best_ok, last_done = ok_at, jname
+            done = f" Last job that finished: {last_done}." if last_done else " No background job had finished yet."
             await asyncio.wait_for(
                 post_alert(self, f"🛠️ **PIMP-BOT is going down**\nUpdate or restart. Version was {BOT_VERSION}. "
-                           "It should be back in a minute."), 5)
+                           f"It should be back in a minute.{done}"), 5)
         except Exception:
             log.info("Couldn't post going-down note")
         await super().close()
@@ -33464,6 +33629,11 @@ class PicksBot(discord.Client):
             try:
                 await asyncio.wait_for(job(now.astimezone(timezone.utc)), timeout=SEC_JOB_TIMEOUT)
                 alert = record_job(name, None)
+            except asyncio.TimeoutError:
+                log.warning("Live job %s ran too long", name)
+                alert = record_job(name, TimeoutError(f"{name} ran too long"))
+                if not alert:
+                    alert = f"⚠️ Background job `{name}` ran too long and was stopped. Everything else keeps running."
             except Exception as exc:
                 log.exception("Live job %s failed", name)
                 alert = record_job(name, exc)
