@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r50"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r53"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -68,6 +68,9 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r48", "Overview has a Kalshi/PrizePicks-style ticket rail, a watchlist, and a box to log a slip from the site."),
     ("r49", "Home Screen app registers a service worker (offline shell, Android install). Breakdowns name the last opponent."),
     ("r50", "Scanner 4.0: remembers ESPN name fixes, counts sure/confirm/fail on Staff HQ, hole-only retries stay the fill path."),
+    ("r51", "Player photos fill the square (face and shoulders), not a sliver of hair on purple."),
+    ("r52", "Search cards and the player sheet paint the photo as a cover background, so every headshot fills the square."),
+    ("r53", "Tap a player: next game and weather, home/away/vs splits, injuries with with/without, and what the numbers show — same brief as before, plus the last-20 chart."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -19823,6 +19826,178 @@ def dash_pack_stats(games_payload: list, keys: list[str]) -> list[dict]:
     return out
 
 
+def dash_with_without(player_games: list, teammate_games: list, stat_key: str) -> Optional[dict]:
+    """This player's stat in games the teammate also logged vs games they did not."""
+    days = {(g.get("date") or "")[:10] for g in (teammate_games or []) if g.get("date")}
+    if not days or not stat_key:
+        return None
+    with_v, without_v = [], []
+    for g in player_games or []:
+        try:
+            got = stat_value(g.get("groups") or {}, stat_key)
+        except Exception:
+            got = None
+        if got is None:
+            continue
+        day = (g.get("date") or "")[:10]
+        (with_v if day in days else without_v).append(got[0])
+    out: dict = {}
+    if without_v:
+        out["without"] = round(sum(without_v) / len(without_v), 1)
+        out["wn"] = len(without_v)
+    if with_v:
+        out["with"] = round(sum(with_v) / len(with_v), 1)
+        out["hn"] = len(with_v)
+    return out or None
+
+
+def dash_ww_line(ww: Optional[dict]) -> str:
+    if not ww or (ww.get("without") is None and ww.get("with") is None):
+        return "No recent games apart to compare"
+    bits = []
+    if ww.get("without") is not None:
+        bits.append(f"Without him: {ww['without']:g} in {int(ww.get('wn') or 0)}")
+    if ww.get("with") is not None:
+        bits.append(f"with him: {ww['with']:g} in {int(ww.get('hn') or 0)}")
+    return " · ".join(bits)
+
+
+def dash_last_recap(packed: list, keys: list[str]) -> str:
+    if not packed:
+        return ""
+    g = packed[0]
+    bits = []
+    for k in keys:
+        if k in (g.get("vals") or {}) and k in STATS:
+            bits.append(f"{STATS[k][0]} {g['vals'][k]:g}")
+            if len(bits) >= 3:
+                break
+    match = f"{g.get('at') or 'vs'} {g.get('opp') or '?'}"
+    when = g.get("when") or ""
+    head = " ".join(x for x in ("Last game", when, match) if x).strip()
+    if bits:
+        return head + ": " + ", ".join(bits) + "."
+    return head + "." if head else ""
+
+
+async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: list,
+                            packed: list, keys: list[str], gid: int, stat_key: str) -> dict:
+    """Next game, injuries (Active recap + teammates), group hit/miss. Splits vs the line stay client-side."""
+    nxt, opp = None, ""
+    try:
+        ng = await next_game(team or abbr, [path] if path else [])
+    except Exception:
+        ng = None
+    if ng:
+        _pth, ev, idx = ng
+        teams = ev.get("teams") or []
+        other = teams[1 - idx] if len(teams) == 2 else {}
+        opp = clip(str(other.get("abbr") or other.get("short") or ""), 8)
+        away = next((t for t in teams if not t.get("home")), teams[0] if teams else {})
+        home = next((t for t in teams if t.get("home")), teams[-1] if teams else {})
+        line = f"{away.get('short') or '?'} @ {home.get('short') or '?'}"
+        when = event_time(ev)
+        if when:
+            line += f" · {when.astimezone(TZ):%a %-I:%M %p} Central"
+        v = ev.get("venue") or {}
+        sub = v.get("name") or ""
+        if v.get("indoor"):
+            sub = (sub + " · indoors") if sub else "indoors"
+        elif when and v.get("city") and ev.get("state") == "pre":
+            try:
+                w = await kickoff_weather(v.get("city") or "", v.get("state") or "", when)
+            except Exception:
+                w = None
+            if w:
+                sub = (sub + " · " if sub else "") + weather_line(w)
+        nxt = {"line": clip(line, 90), "sub": clip(sub, 90), "opp": opp}
+
+    inj_map: dict = {}
+    try:
+        inj_map = await fetch_injuries(path)
+    except Exception:
+        inj_map = {}
+    raw = {}
+    try:
+        raw = await cached_json(ESPN_INJURIES.format(path=path), {}, 900)
+    except Exception:
+        raw = {}
+    ids_by_name: dict[str, str] = {}
+    team_nn = norm_team(team or "")
+    for tm in (raw.get("injuries") or []) if isinstance(raw, dict) else []:
+        if team_nn and norm_team(tm.get("displayName") or "") != team_nn:
+            continue
+        for inj in tm.get("injuries") or []:
+            if not isinstance(inj, dict):
+                continue
+            ath = inj.get("athlete") or {}
+            nm, aid = ath.get("displayName") or "", str(ath.get("id") or "")
+            if nm and aid.isdigit():
+                ids_by_name[norm_name(nm)] = aid
+
+    mine = norm_name(name)
+    active_note, mates = "", []
+    for rec in (inj_map or {}).values():
+        if team_nn and norm_team(rec.get("team") or "") != team_nn:
+            continue
+        status = str(rec.get("status") or "")
+        if norm_name(rec.get("name") or "") == mine:
+            if status.lower() == "active" and rec.get("comment"):
+                active_note = rec["comment"]
+            elif status.lower() != "active":
+                mates.insert(0, rec)
+            continue
+        if status.lower() == "active":
+            continue
+        mates.append(rec)
+
+    ww_map: dict[str, Optional[dict]] = {}
+    jobs = []
+    for rec in mates[:3]:
+        tid = ids_by_name.get(norm_name(rec.get("name") or ""))
+        if tid and stat_key:
+            jobs.append((rec, tid))
+
+    async def _one(rec, tid):
+        try:
+            tg = await trend_games(path, tid, need=16)
+            return norm_name(rec.get("name") or ""), dash_with_without(games, tg, stat_key)
+        except Exception:
+            return norm_name(rec.get("name") or ""), None
+
+    if jobs:
+        try:
+            got = await asyncio.wait_for(asyncio.gather(*(_one(r, t) for r, t in jobs)), 6)
+            ww_map = {k: v for k, v in got}
+        except Exception:
+            ww_map = {}
+
+    injuries = []
+    if active_note:
+        injuries.append({"name": "Active", "status": "", "note": clip(active_note, 420), "ww": None})
+    else:
+        recap = dash_last_recap(packed, keys)
+        if recap:
+            injuries.append({"name": "Active", "status": "", "note": clip(recap, 420), "ww": None})
+    for rec in mates[:8]:
+        ww = ww_map.get(norm_name(rec.get("name") or ""))
+        injuries.append({"name": clip(rec.get("name") or "", 40),
+                         "status": clip(str(rec.get("status") or ""), 24),
+                         "note": clip(dash_ww_line(ww), 160), "ww": ww})
+
+    group = None
+    if gid:
+        try:
+            grp = run_group_stats(gid, "0", {"player": name})
+            rows = grp.get("groups") or []
+            if rows:
+                g0 = rows[0]
+                group = {"hit": int(g0.get("hit") or 0), "miss": int(g0.get("miss") or 0)}
+        except Exception:
+            group = None
+    return {"next": nxt, "injuries": injuries, "group": group}
+
+
 async def dash_api_player(request):
     from aiohttp import web
     prm, err = dash_gate(web, request)
@@ -19863,7 +20038,7 @@ async def dash_api_player(request):
             pass
         league = design_head_league(f.get("path"))
         aid = str(f.get("id") or "")
-        photo = f"/img/head/{league}/{aid}.png?v=43" if league and aid.isdigit() else ""
+        photo = f"/img/head/{league}/{aid}.png?v=52" if league and aid.isdigit() else ""
         out.append({"id": aid, "slug": league or "", "path": f.get("path") or "",
                     "name": clip(f.get("name") or bio.get("name") or "", 40),
                     "team": clip(bio.get("team") or f.get("team") or "", 40),
@@ -19877,7 +20052,7 @@ async def dash_api_player(request):
 
 
 async def dash_api_player_one(request):
-    """One player: last 20 games and the same projection stats /trend uses (PrizePicks-style)."""
+    """One player: last games, projection stats, plus the next-game / splits / injury brief."""
     from aiohttp import web
     prm, err = dash_gate(web, request)
     if err is not None:
@@ -19890,7 +20065,7 @@ async def dash_api_player_one(request):
 
     async def _games():
         try:
-            return await trend_games(path, aid, need=20)
+            return await trend_games(path, aid, need=30)
         except Exception:
             return []
 
@@ -19905,11 +20080,20 @@ async def dash_api_player_one(request):
     if not name:
         return dash_error(web, request, 404)
     keys = dash_player_keys(path)
-    packed = dash_pack_games(games, keys, 20)
+    pack_keys = keys + [k for k in ("pass_att", "rush_att", "minutes") if k in STATS and k not in keys]
+    packed = dash_pack_games(games, pack_keys, 30)
     stats = dash_pack_stats(packed, keys)
     slug = design_head_league(path) or league
-    photo = f"/img/head/{slug}/{aid}.png?v=43" if slug and aid.isdigit() else ""
+    photo = f"/img/head/{slug}/{aid}.png?v=52" if slug and aid.isdigit() else ""
     default = next((s["key"] for s in stats if s["key"] != "minutes"), stats[0]["key"] if stats else "")
+    brief = {"next": None, "injuries": [], "group": None}
+    try:
+        brief = await asyncio.wait_for(
+            dash_player_brief(path, name, bio.get("team") or "", bio.get("abbr") or "",
+                              games, packed, keys, int((prm or {}).get("guild") or 0), default),
+            10)
+    except Exception:
+        log.debug("Player brief skipped", exc_info=True)
     return web.json_response({
         "id": aid, "slug": slug, "path": path, "name": name,
         "team": clip(bio.get("team") or "", 40), "abbr": clip(bio.get("abbr") or "", 8),
@@ -19918,6 +20102,8 @@ async def dash_api_player_one(request):
         "height": bio.get("height") or "", "weight": bio.get("weight") or "",
         "age": bio.get("age") or "", "photo": photo, "stat": default,
         "stats": stats, "games": packed,
+        "next": brief.get("next"), "injuries": brief.get("injuries") or [],
+        "group": brief.get("group"),
     })
 
 
@@ -19935,9 +20121,9 @@ async def dash_head_img(request):
     try:
         raw = design_head_web_png(raw)
     except Exception:
-        pass
+        log.debug("Head crop skipped", exc_info=True)
     return web.Response(body=raw, content_type="image/png",
-                        headers={"Cache-Control": "private, max-age=86400"})
+                        headers={"Cache-Control": "private, max-age=3600"})
 
 
 async def dash_look_img(request):
@@ -21002,8 +21188,9 @@ body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;al
 body.v4 .pcard:last-child{margin-bottom:0}
 body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:color-mix(in srgb,var(--brand) 10%,transparent)}
 body.v4 .pface{position:relative;width:72px;height:72px;min-width:72px;min-height:72px;max-width:72px;max-height:72px;
- border-radius:14px;overflow:hidden;background:#1a1028;flex:0 0 72px;align-self:start;aspect-ratio:1/1}
-body.v4 .pface img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 18%;display:block}
+ border-radius:14px;overflow:hidden;background-color:#1a1028;background-size:cover;background-position:50% 30%;
+ background-repeat:no-repeat;flex:0 0 72px;align-self:start;aspect-ratio:1/1}
+body.v4 .pface img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 30%;display:block}
 body.v4 .pface .pletter{position:absolute;inset:0;display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
 body.v4 .pface.lg,body.v4 .plhead .pface{width:88px;height:88px;min-width:88px;min-height:88px;max-width:88px;max-height:88px;
  flex:0 0 88px;border-radius:18px}
@@ -21066,6 +21253,22 @@ body.v4 .logbox input{width:100%;height:40px;border-radius:10px;border:1px solid
  color:var(--text);padding:0 10px;font:inherit}
 body.v4 .logbox button{height:40px;border:0;border-radius:12px;background:linear-gradient(90deg,var(--gold),var(--brand));
  color:#14003A;font-weight:800;cursor:pointer;font:inherit}
+body.v4 .pbrief{position:relative;padding:14px 16px 14px 18px;margin-bottom:12px}
+body.v4 .pbrief:before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:3px;
+ background:linear-gradient(var(--gold),var(--brand2))}
+body.v4 .pbrief .kicker{margin:0 0 8px;letter-spacing:.14em;font-size:11px}
+body.v4 .pbrief .nm{font-weight:800;font-size:15.5px;line-height:1.3;overflow-wrap:anywhere}
+body.v4 .pbrief .sub{color:var(--muted);font-size:13px;margin-top:4px;overflow-wrap:anywhere}
+body.v4 .srow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;
+ border-top:1px solid var(--line);font-size:14px}
+body.v4 .srow:first-of-type{border-top:0}
+body.v4 .srow .sk{color:var(--muted);display:flex;align-items:center;gap:8px;min-width:0}
+body.v4 .srow .sv{font-weight:750;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+body.v4 .inj{padding:10px 0;border-top:1px solid var(--line)}
+body.v4 .inj:first-of-type{border-top:0}
+body.v4 .inj b{display:block;margin-bottom:3px;font-size:14.5px}
+body.v4 .inj p{margin:0;color:var(--muted);font-size:13.5px;line-height:1.45;overflow-wrap:anywhere}
+body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-height:1.4;overflow-wrap:anywhere}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 .top{padding:12px 12px 10px;gap:10px 8px;align-items:center}
  body.v4 .spacer{display:none}body.v4 .brand{flex:1 1 auto;min-width:0}
@@ -21106,14 +21309,15 @@ function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
 function pathForTab(t){return t==='overview'?'/':'/'+t}
 function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
+function faceBox(photo,name,lg){const cls='pface'+(lg?' lg':'');
+ if(photo)return h('div',{class:cls,style:'background-image:url("'+photo+'")',role:'img','aria-label':name||'Player'});
+ return h('div',{class:cls},h('div',{class:'pletter',text:(String(name||'?').trim().charAt(0)||'?').toUpperCase()}))}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
  const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
- const pic=pl.photo?h('img',{src:pl.photo,alt:'',width:'72',height:'72',decoding:'async'}):
-  h('div',{class:'pletter',text:(pl.name||'?').trim().charAt(0).toUpperCase()});
  const stats=(pl.stats||[]).map(st=>h('div',{class:'pstat'},h('b',{text:String(st.last)}),
   h('span',{text:st.stat+' last'}),h('span',{text:'avg '+st.avg+' · '+st.n})));
  const open=()=>{const box=$('#findpop');if(box)box.hidden=true;if(pl.slug&&pl.id)go('#/pl/'+pl.slug+'/'+pl.id)};
- return h('button',{class:'pcard',type:'button',onclick:open},h('div',{class:'pface'},pic),
+ return h('button',{class:'pcard',type:'button',onclick:open},faceBox(pl.photo,pl.name),
   h('div',{style:'min-width:0'},h('div',{class:'pn',text:pl.name}),
   h('div',{class:'pm',text:bits.join(' · ')+(extra?' · '+extra:'')}),
   stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'})))}
@@ -21128,6 +21332,7 @@ function phoneHomeHint(){const stand=matchMedia('(display-mode:standalone)').mat
   h('button',{type:'button',onclick:()=>{try{localStorage.setItem('pb-home','1')}catch(e){}const n=$('#homehint');if(n)n.remove()}},'Got it'));
  head.after(bar)}
 function defaultLine(vals){if(!vals.length)return 0.5;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;return Math.max(0.5,Math.floor(avg)+0.5)}
+function mean(xs){if(!xs||!xs.length)return null;return Math.round(xs.reduce((a,b)=>a+b,0)/xs.length*10)/10}
 function playerHits(stat){return (S.pl&&S.pl.games||[]).map(g=>g.vals&&g.vals[stat]!=null?{g,v:+g.vals[stat]}:null).filter(Boolean)}
 function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().reverse();const n=rows.length;if(!n)return null;
  const W=640,H=228,pL=8,pR=40,pT=26,pB=30,iW=W-pL-pR,iH=H-pT-pB;
@@ -21142,6 +21347,27 @@ function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().revers
   kids.push(sv('text',{x:String(cx),y:String(H-10),'text-anchor':'middle','font-size':n>14?'7':'9',fill:'#a59cbc'},
    (x.g.at==='@'?'@':'v')+(x.g.opp||'')))});
  return sv('svg',{class:'pchart',viewBox:'0 0 '+W+' '+H,width:'100%',role:'img','aria-label':'Last '+n+' games vs '+fmt(line)},...kids)}
+function latelyTxt(games,key){const xs=(games||[]).map(g=>g.vals&&g.vals[key]!=null?+g.vals[key]:null).filter(v=>v!=null);
+ if(xs.length<6)return '';const a=mean(xs.slice(0,5)),b=mean(xs.slice(5,Math.min(10,xs.length)));
+ if(a==null||b==null)return '';const dlt=a-b,arrow=dlt>0.35?'▲ from ':dlt<-0.35?'▼ from ':'= from ';
+ return a+' lately ('+arrow+b+')'}
+function splitBit(rows,line){if(!rows.length)return '';let o=0;for(const v of rows)if(v>line)o++;return o+'/'+rows.length+'  ·  avg '+mean(rows)}
+function srow(icon,label,value){return h('div',{class:'srow'},h('div',{class:'sk'},icon?h('span',{text:icon}):null,h('span',{text:label})),h('div',{class:'sv',text:value}))}
+function playerNotes(d,stat,line,fmt,hits){const notes=[],vals=hits.map(x=>x.v),L10=vals.slice(0,10);
+ if(L10.length>=5){let u=0,o=0;for(const v of L10){if(v<line)u++;if(v>line)o++;}
+  if(u>=o)notes.push('Went under '+fmt(line)+' in '+u+' of the last '+L10.length+'.');
+  else notes.push('Went over '+fmt(line)+' in '+o+' of the last '+L10.length+'.')}
+ const role=[['rush_att','Carries'],['pass_att','Pass attempts']];
+ for(const [key,label] of role){const xs=(d.games||[]).map(g=>g.vals&&g.vals[key]!=null?+g.vals[key]:null).filter(v=>v!=null);
+  if(xs.length<8)continue;const a=mean(xs.slice(0,5)),b=mean(xs.slice(5,10));if(a==null||b==null)continue;
+  const dir=a<b-0.3?'down':a>b+0.3?'up':'even';
+  notes.push(label+' '+dir+': '+a+' a game lately, '+b+' before.')}
+ const home=hits.filter(x=>x.g.at!=='@').map(x=>x.v),away=hits.filter(x=>x.g.at==='@').map(x=>x.v);
+ if(home.length&&away.length)notes.push('Home '+mean(home)+', away '+mean(away)+' on average.');
+ for(const inj of d.injuries||[]){if(!(inj.ww&&inj.ww.without!=null))continue;
+  let s='Without '+inj.name+(inj.status?' ('+inj.status+')':'')+': '+inj.ww.without+' in '+inj.ww.wn+' game'+(inj.ww.wn===1?'':'s');
+  notes.push(inj.ww.with!=null?s+', '+inj.ww.with+' with him.':s+'.')}
+ return notes}
 function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const stat=stats.some(s=>s.key===S.pstat)?S.pstat:(d.stat||(stats[0]&&stats[0].key)||'');S.pstat=stat;
  const hits=playerHits(stat),vals=hits.map(x=>x.v),fmt=v=>v==null||isNaN(+v)?'':String(Math.round(+v*10)/10);
@@ -21149,16 +21375,35 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const win=n=>{const part=vals.slice(0,n);if(!part.length)return null;let o=0;for(const v of part)if(v>line)o++;
   return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
  const L5=win(5),L10=win(10),L20=win(20),lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
- const pic=d.photo?h('img',{src:d.photo,alt:'',width:'88',height:'88',decoding:'async'}):
-  h('div',{class:'pletter',text:(d.name||'?').trim().charAt(0).toUpperCase()});
  const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
  const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;paintPlayer()}},s.label);
  const nudge=x=>h('button',{class:'pnudge',type:'button',onclick:()=>{S.pline=Math.max(0,Math.round((line+x)*10)/10);paintPlayer()}},(x>0?'+':'')+String(x));
  const box=(t,w)=>w?kbox(t,w.o+'/'+w.n+'  '+w.pct+'%',w.pct>=60?'up':w.pct<=40?'down':''):kbox(t,'–');
  const games=hits.slice(0,20);
- put($('#sheet-body'),
-  h('div',{class:'plhead'},h('div',{class:'pface lg'},pic),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
-  h('div',{class:'pchips'},stats.map(chip)),
+ const home=hits.filter(x=>x.g.at!=='@').map(x=>x.v),away=hits.filter(x=>x.g.at==='@').map(x=>x.v);
+ const opp=(d.next&&d.next.opp||'').toLowerCase();
+ const vs=opp?hits.filter(x=>(x.g.opp||'').toLowerCase()===opp).map(x=>x.v):[];
+ const car=latelyTxt(d.games,'rush_att'),att=latelyTxt(d.games,'pass_att');
+ const splits=[];
+ if(home.length)splits.push(srow('🏠','Home',splitBit(home,line)));
+ if(away.length)splits.push(srow('✈️','Away',splitBit(away,line)));
+ if(vs.length)splits.push(srow('vs','vs '+(d.next.opp||'').toUpperCase(),splitBit(vs,line)));
+ if(car)splits.push(srow('⏱️','Carries',car));
+ if(att)splits.push(srow('⏱️','Pass attempts',att));
+ if(d.group&&(d.group.hit||d.group.miss))splits.push(srow('👥','The group on him',(d.group.hit||0)+' hit · '+(d.group.miss||0)+' missed'));
+ const notes=playerNotes(d,stat,line,fmt,hits);
+ const kids=[
+  h('div',{class:'plhead'},faceBox(d.photo,d.name,true),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
+  h('div',{class:'pchips'},stats.map(chip))];
+ if(d.next&&d.next.line)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'NEXT GAME'}),
+  h('div',{class:'nm',text:d.next.line}),d.next.sub?h('div',{class:'sub',text:d.next.sub}):null));
+ if(splits.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'SPLITS AND ROLE'}),...splits));
+ if((d.injuries||[]).length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'INJURIES'}),
+  ...(d.injuries||[]).map(x=>h('div',{class:'inj'},h('b',{text:x.status?x.name+' ('+x.status+')':x.name}),
+   h('p',{text:x.note||''})))));
+ if(notes.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'WHAT THE NUMBERS SHOW'}),
+  h('ul',{class:'nlist'},notes.map(n=>h('li',{text:n})))));
+ kids.push(
   h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:lab})),nudge(0.5),nudge(1)),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
   h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Avg L10',L10?String(L10.avg):'–')),
@@ -21171,7 +21416,8 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
     h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),text:x.v>line?'▲':x.v<line?'▼':'–'}),
     h('div',{style:'min-width:0'},h('div',{class:'nm',text:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+(x.g.result?' · '+x.g.result:'')}),
      h('div',{class:'sub',text:lab})),h('span',{class:'net '+(x.v>line?'up':x.v<line?'down':'flat'),text:fmt(x.v)}))))
-    :empty('No games on file','ESPN has not posted a game log for this player yet.')))}
+    :empty('No games on file','ESPN has not posted a game log for this player yet.')));
+ put($('#sheet-body'),...kids)}
 async function showPlayer(slug,id){openSheet();const box=$('#findpop');if(box)box.hidden=true;
  const d=await api('/api/player/'+slug+'/'+id+'.json'+qs());if(location.hash!=='#/pl/'+slug+'/'+id)return;
  if(!d||!d.name){sheetError('Couldn’t find that player');return}S.pl=d;S.pstat=d.stat;S.pline=null;paintPlayer()}
@@ -29810,9 +30056,10 @@ def design_head_disc(raw: Optional[bytes], size: int, ring: Optional[tuple] = No
 def design_head_web_png(raw: bytes) -> bytes:
     """Square head-and-shoulders PNG for search cards and the player sheet.
 
-    ESPN's file is a wide transparent canvas with the player cutout near the top. Cropping
-    the canvas (instead of the person) left a sliver of hair on purple. Trim to the opaque
-    pixels, then take a head-and-shoulders square from the top of that cutout."""
+    ESPN's file is a wide transparent canvas with the player near the top. A 1-pixel
+    hair wisp made getbbox() keep the full canvas, and object-position at 18% then
+    showed only that hair on purple. Ignore wisps, crop a head square, flatten onto
+    an opaque background so the parent color can't show through."""
     from PIL import Image
     pic = Image.open(io.BytesIO(raw))
     sec_check_image(pic)
@@ -29820,22 +30067,41 @@ def design_head_web_png(raw: bytes) -> bytes:
     w, h = pic.size
     if w < 16 or h < 16:
         return raw
-    mask = pic.getchannel("A").point(lambda a: 255 if a > 24 else 0)
-    box = mask.getbbox()
-    if box:
-        pic = pic.crop(box)
-        w, h = pic.size
-    if h >= w:
-        inset = int(w * 0.06)
-        side = max(16, min(w - 2 * inset, h))
-        face = pic.crop((inset, 0, inset + side, side))
+    alpha = pic.getchannel("A")
+    px = alpha.load()
+    thresh, step = 40, 2
+    min_run = max(8, w // 40)
+    ys = [y for y in range(h) if sum(1 for x in range(0, w, step) if px[x, y] > thresh) * step >= min_run]
+    ap = pic.load()
+    if ys:
+        y0, y1 = ys[0], ys[-1]
+        xs = [x for y in range(y0, y1 + 1) for x in range(w) if ap[x, y][3] > thresh]
+        x0, x1 = (min(xs), max(xs)) if xs else (0, w)
     else:
-        side = h
-        left = max(0, (w - side) // 2)
-        face = pic.crop((left, 0, left + side, side))
-    face = face.resize((256, 256), Image.LANCZOS)
-    bg = Image.new("RGBA", (256, 256), (26, 16, 40, 255))
-    bg.alpha_composite(face)
+        box = alpha.point(lambda a: 255 if a > 24 else 0).getbbox()
+        x0, y0, x1, y1 = box if box else (0, 0, w, h)
+    bw, bh = max(1, x1 - x0), max(1, y1 - y0)
+    if bh <= int(bw * 1.15):
+        side = max(16, min(bw, bh, w, h))
+        top = max(0, min(h - side, y0))
+    else:
+        side = max(16, min(max(bw, int(bw * 1.12)), bh, w, h))
+        top = max(0, min(h - side, y0 - int(side * 0.04)))
+    cx = (x0 + x1) // 2
+    left = max(0, min(w - side, cx - side // 2))
+    face = pic.crop((left, top, left + side, top + side))
+    tight = face.getchannel("A").point(lambda a: 255 if a > 32 else 0).getbbox()
+    if tight:
+        tw, th = tight[2] - tight[0], tight[3] - tight[1]
+        if tw >= 16 and th >= 16:
+            face = face.crop(tight)
+    fw, fh = face.size
+    pad = max(fw, fh)
+    square = Image.new("RGBA", (pad, pad), (0, 0, 0, 0))
+    square.paste(face, ((pad - fw) // 2, (pad - fh) // 2))
+    face = square.resize((256, 256), Image.LANCZOS)
+    bg = Image.new("RGB", (256, 256), (26, 16, 40))
+    bg.paste(face, mask=face.split()[3])
     buf = io.BytesIO()
     bg.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
