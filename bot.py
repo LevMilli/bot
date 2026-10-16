@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r75"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r76"   # shown in /help and the startup log, so you can tell which upload is live
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -93,6 +93,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r73", "People tiles show week, month, and season. A lost combo marks the leg that decided it. A busy dashboard says to wait. Search finds a slip number or a teammate. Built rows are marked live and the list stays."),
     ("r74", "The board filters by book, sport, and day. The ticker can pause. The chart is the last 10 or the last 20. People tiles show best and worst sport, and head-to-head wins. Rows that were already shipping are marked live."),
     ("r75", "Open slips sit on a sideways rail. A player can be pinned from search. A nudged line is labeled yours. Recent and season averages sit together. This week's logged plays are on the board. The status card names the last job, and the ticker stays off a sheet you are reading."),
+    ("r76", "The scanner keeps every card on a PrizePicks slip: SOG, Hitter FS, Singles, tennis, darts, cricket, and table tennis. The review uses the matching league and the batting columns ESPN actually sends, so those legs get a game log when one exists."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2911,7 +2912,10 @@ numbers with no currency symbols. Never guess an amount you cannot read.
 PrizePicks details: the header reads like "$25 to win $450" (cost 25, payout 450). If a line \
 shows a crossed-out number next to a new number (a discounted or promo line), the leg uses the \
 NEW number, never the crossed-out one. Demon and goblin icons don't change how you write the leg. \
-Up arrow = over, down arrow = under. Keep accents and spelling of player names exactly as shown.
+Up arrow = over, down arrow = under. Keep accents and spelling of player names exactly as shown. \
+Every card is its own leg, including NHL SOG, MLB Hitter FS and Singles, tennis Total Tie Breaks, Total Games \
+and Fantasy Score, darts 180's Throw, cricket Fours and Sixes, and table tennis Total Points. NBAP means NBA. \
+Do not drop a leg because the sport is tennis, darts, cricket, or table tennis.
 
 Copy each stat name exactly as the slip shows it ("Punts" is not "Points"; "Faceoffs Won", "Fantasy Score", \
 "Longest Rec"). A two-player combo is written "Player A + Player B over LINE stat (Combo)". If you can't read \
@@ -3210,7 +3214,7 @@ LEAGUES = [  # (pattern in the pick's sport, ESPN path, extra query params)
     (r"\bwnba\b", "basketball/wnba", {}),
     (r"\bnfl\b", "football/nfl", {}),
     (r"ncaa ?f|college football|\bncaaf\b|\bcfb\b", "football/college-football", {"groups": "80"}),
-    (r"\bnba\b", "basketball/nba", {}),
+    (r"\b(?:nba|nbap)\b", "basketball/nba", {}),
     (r"ncaa ?b|college basketball|\bncaab\b|\bcbb\b", "basketball/mens-college-basketball", {"groups": "50"}),
     (r"\bmlb\b|baseball", "baseball/mlb", {}),
     (r"\bnhl\b|hockey", "hockey/nhl", {}),
@@ -4074,10 +4078,12 @@ def settle_lock(lock_id: int, status: str, why: Optional[str] = None) -> None:
 SPORT_NAMES = [
     ("CS2", r"\bcs2?\b|counter-?strike"), ("Esports", r"esports|valorant|league of legends|dota"),
     ("College FB", r"ncaa ?f|college football|ncaaf|\bcfb\b|ncaa football"), ("NFL", r"\bnfl\b"),
-    ("WNBA", r"\bwnba\b"), ("College BB", r"ncaa ?b|college basketball|ncaab"), ("NBA", r"\bnba\b"),
+    ("WNBA", r"\bwnba\b"), ("College BB", r"ncaa ?b|college basketball|ncaab"), ("NBA", r"\b(?:nba|nbap)\b"),
     ("MLB", r"\bmlb\b|baseball"), ("NHL", r"\bnhl\b|hockey"),
     ("Soccer", r"soccer|\bepl\b|premier league|la ?liga|serie a|bundesliga|ligue 1|\bmls\b|champions league|liga ?mx"),
-    ("Tennis", r"tennis|\batp\b|\bwta\b"), ("UFC/MMA", r"\bufc\b|\bmma\b|boxing"), ("Golf", r"golf|\bpga\b"),
+    ("Tennis", r"tennis|\batp\b|\bwta\b"), ("Table Tennis", r"table tennis|(?<![a-z])tt(?![a-z])"),
+    ("Darts", r"\bdarts\b"), ("Cricket", r"\bcricket\b"),
+    ("UFC/MMA", r"\bufc\b|\bmma\b|boxing"), ("Golf", r"golf|\bpga\b"),
     ("Multi-sport", r"multi"),
 ]
 
@@ -5560,8 +5566,12 @@ _ALIAS_INDEX: list[tuple[str, str]] = sorted(
 
 
 def _alias_regex(alias: str) -> str:
-    parts = [re.escape(x) for x in re.split(r"\s*\+\s*|\s+", alias)]
-    return r"(?<![a-z0-9])" + r"\s*(?:\+|and|\s)\s*".join(parts) + r"(?![a-z0-9])"
+    parts = [re.escape(x) for x in re.split(r"\s*\+\s*|\s+", alias) if x]
+    sep = r"\s*(?:\+|and|\s)\s*"
+    spaced = sep.join(parts)
+    tight = "".join(parts)   # "rec yds" also matches the one word "recyds"
+    body = spaced if tight == spaced else f"(?:{spaced}|{tight})"
+    return r"(?<![a-z0-9])" + body + r"(?![a-z0-9])"
 
 
 _ALIAS_RX: dict = {}
@@ -5723,6 +5733,14 @@ def name_score(query: str, candidate: str) -> int:
 
 async def resolve_player(name: str, paths: list[str]) -> list[dict]:
     found = await espn_search_players(name, paths)
+    parts = (name or "").split()
+    if not any(name_score(name, f["norm"]) for f in found) and len(parts) >= 3:
+        more = await espn_search_players(" ".join(parts[-2:]), paths)
+        seen = {(f["id"], f["path"]) for f in found}
+        for f in more:
+            if (f["id"], f["path"]) not in seen:
+                found.append(f)
+                seen.add((f["id"], f["path"]))
     if not found:
         return []
     best = max(name_score(name, f["norm"]) for f in found)
@@ -5816,9 +5834,18 @@ def _num_from(v: str, second: bool = False) -> Optional[float]:
 def component_value(groups: dict[str, dict], comp: str) -> Optional[float]:
     keys, labels, pref = C[comp]
     if pref and pref not in groups:
-        if pref in ("pitching", "batting", "goalies") or pref.startswith("core."):
+        # Hitter FS and Singles are stored as core.* but the public game log already has hits, doubles, and the rest
+        # under the plain batting (or pitching) group. Read them there before giving up.
+        if pref.startswith("core.") and pref != "core.never":
+            alt = pref.split(".", 1)[1]
+            if alt in groups:
+                pref = alt
+            else:
+                return None
+        elif pref in ("pitching", "batting", "goalies") or pref.startswith("core."):
             return None          # not a pitcher / hitter / goalie in this game, or the per-game feed isn't loaded
-        return 0.0               # football: no line in that group means none of that stat (a WR with 0 carries)
+        else:
+            return 0.0           # football: no line in that group means none of that stat (a WR with 0 carries)
     order = [pref] if pref else list(groups)
     for g in order:
         vals = groups[g]
@@ -14011,7 +14038,12 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
         fam = STATS[key][1]
         paths = [p for p in PROP_PATHS if FAMILY_OF_PATH[p] == fam]
         narrowed = [p for p in paths if p in sport_paths]
-        cands = fit_position(await resolve_player(pr["player"], narrowed or paths), key)
+        # A mixed slip (MLB + WNBA + NBAP) must not hide an NBA player just because WNBA was also on the screenshot.
+        cands = fit_position(await resolve_player(pr["player"], narrowed), key) if narrowed else []
+        if len(cands) != 1:
+            wider = fit_position(await resolve_player(pr["player"], paths), key)
+            if len(wider) == 1 or not cands:
+                cands = wider
         if len(cands) == 1:
             cand, stat = cands[0], key
             break
@@ -27722,6 +27754,8 @@ FREE_STATS = sorted({
     "Shots", "Shots On Target", "Clearances", "Attempted Dribbles", "Passes Attempted", "Tackles", "Crosses",
     "Fouls", "Goal + Assist", "Shots Assisted",
     "Kills", "Headshots", "Maps 1-2 Kills", "Aces", "Double Faults", "Total Games", "Fantasy",
+    "SOG", "Shots on Goal", "Total Tie Breaks", "Tie Breaks", "180's Throw", "180s Throw", "180s",
+    "Fours", "Sixes", "Total Points", "Rec Yds", "Receiving Yds",
     "Passing Yards", "Passing TDs", "Rushing Yards", "Receiving Yards", "Receiving TDs", "Passing + Rushing Yds",
     "Pts+Rebs+Ast", "Rebounds+Assists", "Points+Rebounds", "Points+Assists", "Combo",
 }, key=len, reverse=True)
@@ -27896,7 +27930,7 @@ def free_green_side(img, top: float, bottom: float) -> Optional[str]:
 
 def _free_numtext(t: str) -> str:
     """'«12.5' -> '12.5', '49,5' -> '49.5' (icons and punctuation OCR glues onto a number)."""
-    if re.search(r"[#:$%/x]|\d[a-wyz]", t, re.I):   # jersey numbers, times, money, '37.5x', '6pm'
+    if re.search(r"[#:$%/x]|\d\s*['’]?\s*[a-wyz]", t, re.I):   # jersey numbers, times, money, '37.5x', '6pm', "180's"
         return ""
     core = re.sub(r"^[^\d]+|[^\d]+$", "", t).replace(",", ".")
     lead = re.match(r"^[^\d]*", t).group(0)
@@ -27907,11 +27941,44 @@ def _free_numtext(t: str) -> str:
 
 def _free_stat_in(text: str) -> Optional[tuple[str, int]]:
     """(stat name, where it starts) for the stat printed in this line, if any."""
+    text = (text or "").replace("’", "'").replace("`", "'")
     for name, rx in _FREE_STAT_RX:
         m = rx.search(text)
         if m:
             return name, m.start()
     return None
+
+
+def free_glyph_side(text: str) -> Optional[str]:
+    """The over/under arrow when OCR kept the glyph, which is more reliable than guessing from pixels."""
+    if re.search(r"[↑▲]", text or ""):
+        return "over"
+    if re.search(r"[↓▼]", text or ""):
+        return "under"
+    return None
+
+
+_FREE_LABEL_JUNK = re.compile(
+    r"\b(?:vs|am|pm|refund|payout|prizepicks|flex|power|play|pick|picks|entry|slide|early|self|available|"
+    r"time|remaining|mlb|nba|nbap|nhl|wnba|nfl|cfb|cbb|ncaaf|ncaab|tennis|darts|cricket|soccer|today|"
+    r"tomorrow|mon|tue|wed|thu|fri|sat|sun)\b", re.I)
+
+
+def _free_label(text: str) -> Optional[str]:
+    """A stat printed in the right-hand box that isn't in the known list, kept so the leg still logs."""
+    raw = (text or "").replace("’", "'")
+    if re.search(r"\d{1,2}:\d{2}|\$", raw):
+        return None
+    known = _free_stat_in(raw)
+    if known:
+        return known[0]
+    t = " ".join(re.sub(r"[^A-Za-z0-9+.'’\- ]", " ", raw).split())
+    if not t or len(t) < 2 or len(t) > 28 or not re.search(r"[A-Za-z]", t):
+        return None
+    words = t.split()
+    if not 1 <= len(words) <= 4 or _FREE_LABEL_JUNK.search(t):
+        return None
+    return t
 
 
 def _free_name(line: dict, max_x: Optional[float] = None) -> Optional[str]:
@@ -28019,8 +28086,21 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     used_lines: set = set()       # a name line belongs to one leg; the same player can be on two lines
     num_hs = sorted(w["h"] for w in words if _FREE_NUM.match(_free_numtext(w["text"])))
     builder = bool(re.search(r"\bless\b", low) and re.search(r"\bmore\b", low))
+    used_rows: set = set()
     for k, ln in enumerate(lines):
-        st = _free_stat_in(ln["text"])
+        blob, joined = ln["text"], False
+        if not _free_stat_in(blob) and ln["x0"] > 0.40 * img.width:
+            extra = []
+            for j in range(k + 1, min(len(lines), k + 3)):
+                nxt = " ".join(w["text"] for w in lines[j]["words"] if w["x"] > 0.42 * img.width)
+                if not nxt:
+                    break
+                extra.append(nxt)
+                if _free_stat_in(blob + " " + " ".join(extra)):
+                    blob = blob + " " + " ".join(extra)
+                    joined = True
+                    break
+        st = _free_stat_in(blob)
         if not st:
             continue
         stat, at = st
@@ -28031,6 +28111,8 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                 stat_x = w["x"]
             pos += len(w["text"]) + 1
         right = stat_x is not None and stat_x > 0.55 * img.width
+        if joined and at >= len(ln["text"]):
+            right = True
         # the number: on this line before the stat, else the line(s) just above
         cand_lines = [ln] + [lines[j] for j in range(k - 1, max(-1, k - 3), -1)]
         num_words, src = [], None
@@ -28053,7 +28135,7 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                     fake["_num"] = got
                     num_words, src = [fake], cl
                 break
-        for cl in ([] if num_words else cand_lines):
+        for idx, cl in enumerate([] if num_words else cand_lines):
             ws = [w for w in cl["words"] if _FREE_NUM.match(_free_numtext(w["text"]))]
             if right:
                 ws = []
@@ -28080,6 +28162,10 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                 break
             if ws and whole is None:
                 whole = (ws, cl)
+            # "13 Rebs+Asts" is a real line. Don't walk past it to the previous leg's 2.5.
+            if ws and idx <= 1:
+                num_words, src = ws, cl
+                break
         if not num_words and whole:
             num_words, src = whole
         if not num_words:
@@ -28110,18 +28196,24 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                 break
             name = None
         if not name:
-            unsure.append(f"a player's name near {value:g} {stat}")
+            # The line above this one already logged this same number and stat. Don't flag it twice.
+            if not any(f" {value:g} " in f" {lg} " and stat.lower() in lg.lower() for lg in legs):
+                unsure.append(f"a player's name near {value:g} {stat}")
             continue
         used_lines.add(name_at)
-        # the side: More/Less words (the green one when both show), else the arrow beside the number
+        # the side: an arrow glyph OCR kept, else More/Less words (the green one when both show), else the pixels
         side = None
         lo = min(start, name_at if name_at is not None else start)
         near = [w for j in range(lo, min(len(lines), k + 2)) for w in lines[j]["words"]]
+        for w in near:
+            side = free_glyph_side(w["text"])
+            if side:
+                break
         words_low = {w["text"].lower().strip("+-↑↓"): w for w in near}
-        if "more" in words_low and "less" in words_low:
+        if side is None and "more" in words_low and "less" in words_low:
             gm, gl = free_green(img, words_low["more"]), free_green(img, words_low["less"])
             side = "over" if gm > gl * 1.5 and gm > 0.08 else ("under" if gl > gm * 1.5 and gl > 0.08 else None)
-        elif not builder:
+        elif side is None and not builder:
             for word, s in (("more", "over"), ("over", "over"), ("higher", "over"), ("less", "under"),
                             ("under", "under"), ("lower", "under")):
                 if word in words_low:
@@ -28162,6 +28254,51 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         leg = f"{name} {side} {value:g} {'Anytime TD' if stat.lower().startswith('anytime') else stat}"
         if leg not in legs:
             legs.append(leg)
+            used_rows.add(k)
+            if joined:
+                used_rows.add(min(k + 1, len(lines) - 1))
+                used_rows.add(min(k + 2, len(lines) - 1))
+    # A stat the list has never seen (a new PrizePicks market) still becomes a leg when it sits in the right box.
+    for k, ln in enumerate(lines):
+        if k in used_rows or ln["x0"] < 0.48 * img.width:
+            continue
+        stat = _free_label(ln["text"])
+        if not stat:
+            continue
+        num_w = []
+        src = None
+        for j in range(k, max(-1, k - 3), -1):
+            ws = [w for w in lines[j]["words"] if w["x"] > 0.50 * img.width and _FREE_NUM.match(_free_numtext(w["text"]))]
+            if ws:
+                num_w, src = ws, lines[j]
+                break
+        if not num_w:
+            continue
+        wd = max(num_w, key=lambda w: w["x"])
+        try:
+            value = float(_free_numtext(wd["text"]))
+        except ValueError:
+            continue
+        name, name_at = None, None
+        for j in range(k - 1, max(-1, k - 5), -1):
+            name = _free_name(lines[j], 0.55 * img.width)
+            if name and j not in used_lines:
+                name_at = j
+                break
+            name = None
+        if not name:
+            continue
+        side = free_glyph_side(ln["text"]) or free_glyph_side(wd["text"])
+        if side is None:
+            side = free_arrow(img, (wd["x"] - 2.2 * wd["h"], wd["y"] - wd["h"] * 0.4, wd["x"] - 2, wd["y"] + wd["h"] * 1.4))
+        if side is None:
+            unsure.append(f"over or under for {name}")
+            side = "over"
+        leg = f"{name} {side} {value:g} {stat}"
+        if leg not in legs:
+            legs.append(leg)
+            used_lines.add(name_at)
+            used_rows.add(k)
     if not legs:
         if platform and (cost or payout):
             return {"is_slip": True, "platform": platform, "sport": None, "description": "Slip", "legs": [],
@@ -28177,7 +28314,13 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     n = want or len(legs)
     desc = (f"{n}-Pick {'Flex' if entry_type == 'flex' else 'Power'} Play" if platform in ("PrizePicks", "Underdog")
             else f"{n}-leg slip" if n > 1 else legs[0])
-    sports = [s for s in ("NFL", "NBA", "NHL", "MLB", "WNBA", "SOCCER", "CFB", "CBB") if re.search(rf"\b{s}\b", full)]
+    sports = []
+    for label, rx in (("NFL", r"\bNFL\b"), ("NBA", r"\bNBA\b|\bNBAP\b"), ("NHL", r"\bNHL\b"), ("MLB", r"\bMLB\b"),
+                      ("WNBA", r"\bWNBA\b"), ("SOCCER", r"\bSOCCER\b"), ("CFB", r"\bCFB\b|\bNCAAF\b"),
+                      ("CBB", r"\bCBB\b|\bNCAAB\b"), ("Tennis", r"\bTENNIS\b"), ("Darts", r"\bDARTS\b"),
+                      ("Cricket", r"\bCRICKET\b"), ("Table Tennis", r"(?<![A-Za-z])TT(?![A-Za-z])")):
+        if re.search(rx, full):
+            sports.append(label)
     return {"is_slip": True, "platform": platform, "sport": ", ".join(s.title() if s == "SOCCER" else s for s in sports)
             or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": "open",
             "returned": None, "game_date": None, "entry_type": entry_type, "placed": placed,
@@ -28489,7 +28632,8 @@ HELP_EXTRA.append(("🔎 Reading slips for free", (
     "photo type (PNG, JPEG, WebP, GIF, BMP, HEIC when the phone sends it), dark or light, a tight crop of a full "
     "phone screenshot. Scanner **3.0** skips extra OCR when that first pass already has the legs and the amount, "
     "and tags Kalshi cents tickets and stacked photos. Scanner **4.0** remembers ESPN name fixes and counts "
-    "failed reads on Staff HQ. If it's sure, the slip logs like before; if not, you get a card to check and tap 🧾 "
+    "failed reads on Staff HQ. Scanner **5.0** keeps every card: SOG, Hitter FS, Singles, tennis, darts, cricket, "
+    "and table tennis, and the review pulls the game log from the right league. If it's sure, the slip logs like before; if not, you get a card to check and tap 🧾 "
     "**Log this slip** (or ✏️ Edit). A free `GEMINI_API_KEY` on Railway adds a second free reader, and Claude is "
     "only the last resort. `/admin status` shows which reader handled today's slips.")))
 
