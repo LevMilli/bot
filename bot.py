@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-15 r32.2"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-15 r32.3"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -93,7 +93,25 @@ if _GUILD_RAW and (_GUILD_RAW != GUILD_ID or not 15 <= len(GUILD_ID) <= 21):
     log.warning("GUILD_ID on Railway should be just the server's number (no quotes); read it as %r", GUILD_ID or "nothing")
     if not 15 <= len(GUILD_ID) <= 21:
         GUILD_ID = ""
-OWNER_ID = "".join(ch for ch in env("OWNER_ID", "") if ch.isdigit())
+def parse_snowflakes(raw) -> list:
+    """Discord user numbers from a paste: commas, spaces or one ID. Names are ignored; digits only."""
+    out = []
+    for part in re.split(r"[,\s;/]+", str(raw or "")):
+        d = "".join(c for c in part if c.isdigit())
+        if d:
+            n = int(d)
+            if n not in out:
+                out.append(n)
+    return out
+
+
+# Crew ladder (Railway). Developers are the failsafe and cannot be removed from the bot.
+# Owner has full permission. Extra admins/mods can also be added in Discord with /staff add.
+DEVELOPER_IDS = parse_snowflakes(env("DEVELOPER_IDS", "") or env("DEVELOPER_ID", ""))
+OWNER_IDS = parse_snowflakes(env("OWNER_IDS", "") or env("OWNER_ID", ""))
+ADMIN_IDS = parse_snowflakes(env("ADMIN_IDS", ""))
+MOD_IDS = parse_snowflakes(env("MOD_IDS", ""))
+OWNER_ID = str(OWNER_IDS[0]) if OWNER_IDS else ""
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 ASK_MODEL = env("ASK_MODEL", "claude-sonnet-5-5")
@@ -14139,6 +14157,10 @@ class PersonaSelect(discord.ui.Select):
 
 
 def is_admin(interaction) -> bool:
+    uid = getattr(getattr(interaction, "user", None), "id", 0) or 0
+    gid = getattr(interaction, "guild_id", None)
+    if crew_at_least(uid, "admin", gid):
+        return True
     perms = getattr(interaction.user, "guild_permissions", None)
     return bool(perms and getattr(perms, "manage_guild", False))
 
@@ -20290,19 +20312,102 @@ def staff_gid(gid: Optional[int] = None) -> int:
     return int(gid if gid is not None else (dashboard_guild() or 0))
 
 
+CREW_RANKS = {"developer": 40, "owner": 30, "admin": 20, "mod": 10}
+
+
+def crew_baked(kind: str) -> list:
+    return list({"developer": DEVELOPER_IDS, "owner": OWNER_IDS, "admin": ADMIN_IDS, "mod": MOD_IDS}.get(kind, []))
+
+
+def crew_ids(kind: str, gid: Optional[int] = None) -> list:
+    """Env IDs first (locked), then extras saved with /staff add. Legacy owner_id still counts as owner."""
+    out = []
+    for n in crew_baked(kind) + parse_snowflakes(get_setting(staff_gid(gid), f"crew_{kind}s") or ""):
+        if n not in out:
+            out.append(n)
+    if kind == "owner":
+        for n in parse_snowflakes(get_setting(staff_gid(gid), "owner_id") or ""):
+            if n not in out:
+                out.append(n)
+    return out
+
+
 def owner_id(gid: Optional[int] = None) -> int:
-    raw = OWNER_ID or (get_setting(staff_gid(gid), "owner_id") or "")
-    digits = "".join(ch for ch in str(raw) if ch.isdigit())
-    return int(digits) if digits else 0
+    ids = crew_ids("owner", gid)
+    return ids[0] if ids else 0
+
+
+def crew_rank(uid: int, gid: Optional[int] = None) -> int:
+    if not uid:
+        return 0
+    uid = int(uid)
+    for kind, rank in CREW_RANKS.items():
+        if uid in crew_ids(kind, gid):
+            return rank
+    if staff_rec(uid, gid).get("state") == "on":
+        return CREW_RANKS["mod"]
+    return 0
+
+
+def crew_at_least(uid: int, kind: str, gid: Optional[int] = None) -> bool:
+    return crew_rank(uid, gid) >= CREW_RANKS.get(kind, 99)
+
+
+def crew_role_name(uid: int, gid: Optional[int] = None) -> str:
+    r = crew_rank(uid, gid)
+    return {40: "developer", 30: "owner", 20: "admin", 10: "mod"}.get(r, "")
+
+
+def crew_locked(kind: str, uid: int) -> bool:
+    return int(uid) in crew_baked(kind) or (kind != "developer" and int(uid) in crew_baked("developer"))
+
+
+def crew_save_extras(kind: str, ids: list, gid: Optional[int] = None) -> None:
+    baked = set(crew_baked(kind))
+    extra = [i for i in ids if i not in baked]
+    set_setting(staff_gid(gid), f"crew_{kind}s", ",".join(str(i) for i in extra) or None)
+
+
+def crew_grant(kind: str, uid: int, name: Optional[str] = None, gid: Optional[int] = None) -> str:
+    """Put this Discord user on owner / admin / mod. Developers stay env-only."""
+    uid = int(uid)
+    if kind not in ("owner", "admin", "mod"):
+        return "role"
+    if uid in crew_ids("developer", gid):
+        return "dev"
+    if kind != "owner" and uid not in OWNER_IDS and owner_id(gid) == uid:
+        set_setting(staff_gid(gid), "owner_id", None)
+    for other in ("owner", "admin", "mod"):
+        leftover = [i for i in parse_snowflakes(get_setting(staff_gid(gid), f"crew_{other}s") or "") if i != uid]
+        if other == kind and uid not in crew_baked(kind):
+            leftover.append(uid)
+        crew_save_extras(other, leftover, gid)
+    staff_put(uid, "on", name, gid)
+    return "ok"
+
+
+def crew_revoke(uid: int, gid: Optional[int] = None) -> str:
+    uid = int(uid)
+    if uid in crew_ids("developer", gid):
+        return "dev"
+    if uid in OWNER_IDS:
+        return "env"
+    for kind in ("owner", "admin", "mod"):
+        leftover = [i for i in parse_snowflakes(get_setting(staff_gid(gid), f"crew_{kind}s") or "") if i != uid]
+        crew_save_extras(kind, leftover, gid)
+    if owner_id(gid) == uid and uid not in OWNER_IDS:
+        set_setting(staff_gid(gid), "owner_id", None)
+    staff_put(uid, None, gid=gid)
+    return "ok"
 
 
 def owner_claim(uid: int, gid: Optional[int] = None) -> bool:
-    """True when this person is (or just became) the owner."""
-    have = owner_id(gid)
-    if have and have != uid:
+    """True when this person is (or just became) an owner. Developers may always claim a vacant owner slot."""
+    if uid in crew_ids("owner", gid):
+        return True
+    if crew_ids("owner", gid) and not crew_at_least(uid, "developer", gid):
         return False
-    if not have:
-        set_setting(staff_gid(gid), "owner_id", str(uid))
+    crew_grant("owner", uid, gid=gid)
     return True
 
 
@@ -20346,11 +20451,7 @@ def staff_rows(state: Optional[str] = None, gid: Optional[int] = None) -> list:
 
 
 def staff_web_ok(uid: int, gid: Optional[int] = None) -> bool:
-    if not uid:
-        return False
-    if uid == owner_id(gid):
-        return True
-    return staff_rec(uid, gid).get("state") == "on"
+    return crew_at_least(uid, "mod", gid)
 
 
 def staff_pass(uid: int) -> str:
@@ -20480,28 +20581,51 @@ ul{margin:0;padding-left:18px}li{margin:8px 0}a.act{margin-left:8px;color:#c4a6f
 
 def staff_page_html(uid: int) -> str:
     bg, accent, _ = site_look()
-    owner = uid == owner_id()
+    boss = crew_at_least(uid, "owner")
+    role = crew_role_name(uid) or "staff"
     bgs = "".join(
         f'<a class="chip{" on" if k == bg else ""}" href="/staff?bg={k}">{_html.escape(lab)}</a>'
         for k, (lab, _) in SITE_BGS.items())
     accents = "".join(
         f'<a class="chip{" on" if k == accent else ""}" href="/staff?accent={k}">{_html.escape(k)}</a>'
         for k in BRAND_PRESETS)
-    if owner:
+
+    def people(kind):
+        rows = []
+        for i in crew_ids(kind):
+            rec = staff_rec(i)
+            rows.append({"id": i, "name": rec.get("name") or str(i)})
+        return rows
+
+    if boss:
         pending = staff_rows("pending")
-        approved = staff_rows("on")
         pend = ("<ul>" + "".join(
-            f'<li>{_html.escape(r["name"])} <a class="act" href="/staff?approve={r["id"]}">Approve</a>'
+            f'<li>{_html.escape(r["name"])} <code>{r["id"]}</code> '
+            f'<a class="act" href="/staff?approve={r["id"]}">Approve as mod</a>'
             f'<a class="act" href="/staff?deny={r["id"]}">Deny</a></li>' for r in pending) + "</ul>"
-                if pending else '<p class="muted">Nobody waiting. They run /staff ask in Discord.</p>')
-        appr = ("<ul>" + "".join(
-            f'<li>{_html.escape(r["name"])} <a class="act" href="/staff?revoke={r["id"]}">Revoke</a></li>'
-            for r in approved) + "</ul>" if approved else '<p class="muted">No extra staff yet.</p>')
+                if pending else '<p class="muted">Nobody waiting. They run /staff ask, or add them with /staff add.</p>')
+        blocks = []
+        for kind, title in (("developer", "Developers (failsafe)"), ("owner", "Owner"),
+                            ("admin", "Admins"), ("mod", "Mods")):
+            rows = people(kind)
+            if not rows:
+                blocks.append(f"<p class=muted><b>{title}:</b> none yet.</p>")
+                continue
+            items = "".join(
+                f'<li>{_html.escape(r["name"])} <code>{r["id"]}</code>'
+                + ("" if kind == "developer" or r["id"] in crew_baked(kind)
+                   else f' <a class="act" href="/staff?revoke={r["id"]}">Revoke</a>')
+                + "</li>" for r in rows)
+            blocks.append(f"<p><b>{title}</b></p><ul>{items}</ul>")
+        appr = "".join(blocks)
     else:
-        pend = '<p class="muted">Only the owner sees requests.</p>'
-        appr = '<p class="muted">You are on the list. The owner can revoke from here.</p>'
-    return (STAFF_HTML.replace("{{BGS}}", bgs).replace("{{ACCENTS}}", accents)
+        pend = '<p class="muted">Only the owner and developers see requests.</p>'
+        appr = f'<p class="muted">You are <b>{_html.escape(role)}</b>. The owner adds admins and mods with /staff add.</p>'
+    html = (STAFF_HTML.replace("{{BGS}}", bgs).replace("{{ACCENTS}}", accents)
             .replace("{{PENDING}}", pend).replace("{{APPROVED}}", appr))
+    html = html.replace("Owner-approved crew only.",
+                        f"You are <b>{_html.escape(role)}</b>. Developer failsafe + owner full access, then admins and mods by Discord ID.")
+    return html
 
 
 async def dash_staff(request):
@@ -20524,13 +20648,13 @@ async def dash_staff(request):
         return web.Response(status=303, headers={"Location": "/staff"})
     target = q.get("approve") or q.get("deny") or q.get("revoke")
     if target is not None:
-        if uid != owner_id() or not str(target).isdigit():
+        if not crew_at_least(uid, "owner") or not str(target).isdigit():
             return dash_error(web, request, 403)
         tid = int(target)
         if q.get("approve"):
-            staff_put(tid, "on")
+            crew_grant("mod", tid, staff_rec(tid).get("name"))
         else:
-            staff_put(tid, None)
+            crew_revoke(tid)
         return web.Response(status=303, headers={"Location": "/staff"})
     return dash_html(web, dash_paint_look(staff_page_html(uid)))
 
@@ -20598,7 +20722,11 @@ def sec_redact(text) -> str:
 # ---- permissions: admin commands check at run time too ------------------------------------------------
 # default_permissions only sets who sees a command by default; a server can change that in Integrations.
 
-def sec_staff(user) -> bool:
+def sec_staff(user, guild_id=None) -> bool:
+    uid = getattr(user, "id", 0) or 0
+    gid = guild_id or getattr(getattr(user, "guild", None), "id", None)
+    if crew_at_least(uid, "mod", gid):
+        return True
     perms = getattr(user, "guild_permissions", None)
     return bool(perms and (getattr(perms, "manage_guild", False) or getattr(perms, "manage_messages", False)))
 
@@ -20627,7 +20755,7 @@ def sec_staff_only(fn):
     """Slash command for admins and mods (Manage Server or Manage Messages)."""
     @functools.wraps(fn)
     async def wrapper(interaction, *args, **kwargs):
-        if not sec_staff(interaction.user):
+        if not sec_staff(interaction.user, getattr(interaction, "guild_id", None)):
             await sec_reply(interaction, "That one's for admins and mods. Ask one of them to run it.")
             return
         return await fn(interaction, *args, **kwargs)
@@ -31323,7 +31451,7 @@ async def refresh_guides(client: discord.Client) -> int:
 @app_commands.guild_only()
 @app_commands.default_permissions(manage_guild=True)
 async def guide_cmd(interaction: discord.Interaction):
-    if getattr(interaction.user, "guild_permissions", None) is not None and not sec_staff(interaction.user):
+    if getattr(interaction.user, "guild_permissions", None) is not None and not sec_staff(interaction.user, interaction.guild_id):
         await sec_reply(interaction, "That one's for admins and mods. Ask one of them to post the guide.")
         return
     # Update the guide already in this channel if there is one.
@@ -32672,15 +32800,15 @@ class StaffGateButton(discord.ui.DynamicItem[discord.ui.Button],
         return cls(match["act"], int(match["gid"]), int(match["uid"]))
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != owner_id(self.gid):
-            await interaction.response.send_message("Only the owner can do that.", ephemeral=True)
+        if not crew_at_least(interaction.user.id, "owner", self.gid):
+            await interaction.response.send_message("Only the owner or a developer can do that.", ephemeral=True)
             return
         name = staff_rec(self.uid, self.gid).get("name")
         if self.act == "ok":
-            staff_put(self.uid, "on", name, self.gid)
-            msg = "Approved. They can `/staff open`."
+            crew_grant("mod", self.uid, name, self.gid)
+            msg = "Approved as mod. They can `/staff open`. Promote with `/staff add role:admin` if you want."
         else:
-            staff_put(self.uid, None, gid=self.gid)
+            crew_revoke(self.uid, self.gid)
             msg = "Denied."
         await interaction.response.send_message(msg, ephemeral=True)
 
@@ -32710,74 +32838,149 @@ async def dashboard_cmd(interaction: discord.Interaction):
         ephemeral=True, view=view)
 
 
-staff_group = app_commands.Group(name="staff", description="Staff HQ: 24/7 site, owner approval, look")
+staff_group = app_commands.Group(name="staff", description="Staff HQ: developers, owner, admins and mods")
 
 
-@staff_group.command(name="claim", description="Register yourself as the owner who approves Staff HQ access")
+def _crew_who_lines(gid: int) -> str:
+    lines = []
+    for kind, title in (("developer", "Developers (failsafe)"), ("owner", "Owner"),
+                        ("admin", "Admins"), ("mod", "Mods")):
+        ids = crew_ids(kind, gid)
+        if not ids:
+            lines.append(f"**{title}:** none")
+            continue
+        bits = []
+        for i in ids:
+            nm = staff_rec(i, gid).get("name") or str(i)
+            bits.append(f"{nm} `{i}`")
+        lines.append(f"**{title}:** " + ", ".join(bits))
+    return "\n".join(lines)
+
+
+@staff_group.command(name="who", description="Who has developer, owner, admin or mod access")
 @app_commands.guild_only()
-async def staff_claim(interaction: discord.Interaction):
-    uid = interaction.user.id
-    if OWNER_ID and str(uid) != OWNER_ID:
-        await interaction.response.send_message("OWNER_ID on Railway is already set to someone else.", ephemeral=True)
+async def staff_who(interaction: discord.Interaction):
+    if not staff_web_ok(interaction.user.id, interaction.guild_id) and not is_admin(interaction):
+        await interaction.response.send_message("Staff only.", ephemeral=True)
         return
-    if not owner_claim(uid, interaction.guild_id):
-        await interaction.response.send_message(
-            "Someone else is already the owner. They approve staff with `/staff approve`.", ephemeral=True)
-        return
-    staff_put(uid, "on", interaction.user.display_name, interaction.guild_id)
     await interaction.response.send_message(
-        "You're the owner. People run `/staff ask`; you Approve. Then `/staff open` (or `/dashboard`) shows **Staff HQ**.",
+        "Crew ladder (Railway IDs are locked; extras via `/staff add`):\n" + _crew_who_lines(interaction.guild_id),
         ephemeral=True)
 
 
-@staff_group.command(name="ask", description="Ask the owner for Staff HQ access")
+@staff_group.command(name="add", description="Add owner, admin or mod by @mention or Discord user ID")
+@app_commands.guild_only()
+@app_commands.describe(role="owner (full access), admin, or mod",
+                       member="Ping them in this server",
+                       discord_id="Their Discord user number (Developer Mode → Copy User ID)")
+@app_commands.choices(role=[app_commands.Choice(name="Owner (full permission)", value="owner"),
+                            app_commands.Choice(name="Admin", value="admin"),
+                            app_commands.Choice(name="Mod", value="mod")])
+async def staff_add(interaction: discord.Interaction, role: app_commands.Choice[str],
+                    member: Optional[discord.Member] = None, discord_id: Optional[str] = None):
+    gid, actor = interaction.guild_id, interaction.user.id
+    kind = role.value
+    if kind == "owner" and not crew_at_least(actor, "developer", gid):
+        await interaction.response.send_message("Only a developer can add an owner.", ephemeral=True)
+        return
+    if kind != "owner" and not crew_at_least(actor, "owner", gid):
+        await interaction.response.send_message("Only the owner or a developer can add admins and mods.", ephemeral=True)
+        return
+    uid = member.id if member is not None else (parse_snowflakes(discord_id or "")[:1] or [None])[0]
+    if uid is None:
+        await interaction.response.send_message("Ping a member or paste their Discord ID.", ephemeral=True)
+        return
+    name = member.display_name if member is not None else str(uid)
+    st = crew_grant(kind, uid, name, gid)
+    if st == "dev":
+        await interaction.response.send_message("That's a developer — they already have the failsafe. Don't demote them.",
+                                                ephemeral=True)
+        return
+    await interaction.response.send_message(
+        f"Added **{name}** as **{kind}** (`{uid}`). They run `/staff open` for Staff HQ.", ephemeral=True)
+
+
+@staff_group.command(name="remove", description="Remove an admin or mod (or an extra owner) by @mention or ID")
+@app_commands.guild_only()
+@app_commands.describe(member="Ping them", discord_id="Their Discord user number")
+async def staff_remove(interaction: discord.Interaction, member: Optional[discord.Member] = None,
+                       discord_id: Optional[str] = None):
+    gid, actor = interaction.guild_id, interaction.user.id
+    if not crew_at_least(actor, "owner", gid):
+        await interaction.response.send_message("Only the owner or a developer can remove crew.", ephemeral=True)
+        return
+    uid = member.id if member is not None else (parse_snowflakes(discord_id or "")[:1] or [None])[0]
+    if uid is None:
+        await interaction.response.send_message("Ping a member or paste their Discord ID.", ephemeral=True)
+        return
+    st = crew_revoke(uid, gid)
+    if st == "dev":
+        await interaction.response.send_message("Can't remove a developer. That's the failsafe.", ephemeral=True)
+        return
+    if st == "env":
+        await interaction.response.send_message("Can't remove an owner locked in Railway OWNER_IDS.", ephemeral=True)
+        return
+    name = member.display_name if member is not None else str(uid)
+    await interaction.response.send_message(f"Removed **{name}** (`{uid}`).", ephemeral=True)
+
+
+@staff_group.command(name="ask", description="Ask the owner or a developer for Staff HQ access")
 @app_commands.guild_only()
 async def staff_ask(interaction: discord.Interaction):
     uid = interaction.user.id
-    if staff_web_ok(uid, interaction.guild_id):
+    gid = interaction.guild_id
+    if staff_web_ok(uid, gid):
         await interaction.response.send_message("You're already on Staff HQ. `/staff open` for the button.",
                                                 ephemeral=True)
         return
-    oid = owner_id(interaction.guild_id)
-    if not oid:
+    bosses = crew_ids("developer", gid) + [i for i in crew_ids("owner", gid) if i not in crew_ids("developer", gid)]
+    if not bosses:
         await interaction.response.send_message(
-            "No owner yet. The owner runs `/staff claim` once (or set OWNER_ID on Railway).", ephemeral=True)
+            "No owner or developer IDs yet. Put DEVELOPER_IDS and OWNER_IDS on Railway (Discord user numbers), "
+            "then add admins/mods with `/staff add`.", ephemeral=True)
         return
-    staff_put(uid, "pending", interaction.user.display_name, interaction.guild_id)
+    staff_put(uid, "pending", interaction.user.display_name, gid)
     view = discord.ui.View(timeout=None)
-    view.add_item(StaffGateButton("ok", interaction.guild_id, uid))
-    view.add_item(StaffGateButton("no", interaction.guild_id, uid))
-    noted = False
-    try:
-        owner = await interaction.client.fetch_user(oid)
-        await owner.send(f"**{interaction.user.display_name}** asked for Staff HQ in **{interaction.guild.name}**.",
-                         view=view)
-        noted = True
-    except Exception:
-        pass
+    view.add_item(StaffGateButton("ok", gid, uid))
+    view.add_item(StaffGateButton("no", gid, uid))
+    noted = 0
+    for bid in bosses:
+        try:
+            user = await interaction.client.fetch_user(bid)
+            await user.send(f"**{interaction.user.display_name}** (`{uid}`) asked for Staff HQ in **{interaction.guild.name}**.",
+                            view=view)
+            noted += 1
+        except Exception:
+            pass
     await interaction.response.send_message(
-        "Asked. The owner gets Approve / Deny" + (" in DMs." if noted else " — I couldn't DM them, so they can `/staff approve` here."),
+        "Asked the owner and developers." + (" Check DMs." if noted else " I couldn't DM them — they can `/staff add` here."),
         ephemeral=True)
 
 
-@staff_group.command(name="approve", description="Owner: grant Staff HQ to someone")
+@staff_group.command(name="approve", description="Owner/developer: grant someone as a mod")
 @app_commands.guild_only()
 async def staff_approve_cmd(interaction: discord.Interaction, member: discord.Member):
-    if interaction.user.id != owner_id(interaction.guild_id):
-        await interaction.response.send_message("Only the owner can approve Staff HQ.", ephemeral=True)
+    if not crew_at_least(interaction.user.id, "owner", interaction.guild_id):
+        await interaction.response.send_message("Only the owner or a developer can approve Staff HQ.", ephemeral=True)
         return
-    staff_put(member.id, "on", member.display_name, interaction.guild_id)
-    await interaction.response.send_message(f"Approved **{member.display_name}**. They run `/staff open`.",
-                                            ephemeral=True)
+    crew_grant("mod", member.id, member.display_name, interaction.guild_id)
+    await interaction.response.send_message(
+        f"Approved **{member.display_name}** as **mod**. `/staff add role:admin` to promote.", ephemeral=True)
 
 
-@staff_group.command(name="revoke", description="Owner: take Staff HQ away")
+@staff_group.command(name="revoke", description="Owner/developer: take Staff HQ away")
 @app_commands.guild_only()
 async def staff_revoke_cmd(interaction: discord.Interaction, member: discord.Member):
-    if interaction.user.id != owner_id(interaction.guild_id):
-        await interaction.response.send_message("Only the owner can revoke Staff HQ.", ephemeral=True)
+    if not crew_at_least(interaction.user.id, "owner", interaction.guild_id):
+        await interaction.response.send_message("Only the owner or a developer can revoke Staff HQ.", ephemeral=True)
         return
-    staff_put(member.id, None, gid=interaction.guild_id)
+    st = crew_revoke(member.id, interaction.guild_id)
+    if st == "dev":
+        await interaction.response.send_message("Can't revoke a developer.", ephemeral=True)
+        return
+    if st == "env":
+        await interaction.response.send_message("Can't revoke an owner locked in Railway OWNER_IDS.", ephemeral=True)
+        return
     await interaction.response.send_message(f"Revoked **{member.display_name}**.", ephemeral=True)
 
 
@@ -32843,10 +33046,11 @@ async def staff_look(interaction: discord.Interaction, background: Optional[str]
 
 bot.tree.add_command(staff_group)
 HELP_EXTRA.append(("🛠️ Staff HQ", (
-    "`/staff claim` once if you're the owner · crew `/staff ask` · you Approve in DMs or `/staff approve` · "
-    "`/staff open` (and `/dashboard`) shows a **Staff HQ** button only for approved people · "
-    "`/staff look` backgrounds and accents like `/admin brand` · the site pass stays signed in about a year. "
-    "Optional: set OWNER_ID on Railway to your Discord user number.")))
+    "Ladder: **developer** (failsafe, `DEVELOPER_IDS` on Railway) · **owner** (full permission, `OWNER_IDS`) · "
+    "**admin** / **mod** (add as many as you want with `/staff add` and a Discord ID).\n"
+    "`/staff who` lists everyone · `/staff add role:admin member:@them` or `discord_id:` · `/staff remove` · "
+    "`/staff ask` if you're not on the list · `/staff open` for the 24/7 Staff HQ button. "
+    "Developers cannot be removed. Owners locked in Railway cannot be removed.")))
 
 
 @bot.tree.context_menu(name="Log as pick")
