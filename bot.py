@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r34"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r35"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -2667,9 +2667,24 @@ def _health_note(host: str, ok: bool, status) -> None:
     now = time.time()
     h["status"] = status
     if ok:
-        h.update(ok=h["ok"] + 1, streak=0, last_ok=now, fail_since=None)
+        h.update(ok=h["ok"] + 1, streak=0, last_ok=now, fail_since=None, alerted=False)
     else:
         h.update(fail=h["fail"] + 1, streak=h["streak"] + 1, last_fail=now, fail_since=h["fail_since"] or now)
+        if h["streak"] == 3 and not h.get("alerted"):
+            h["alerted"] = True
+            name = host
+            try:
+                name = HEALTH_NAMES.get(host) or DASH30_HOSTS.get(host) or host
+            except Exception:
+                pass
+            why = f"{h['fail']} failed calls in a row"
+            if status:
+                why += f" (last http {status})"
+            try:
+                asyncio.get_running_loop().create_task(
+                    crash_notify(bot, "feed", f"{name} is down", why))
+            except Exception:
+                crash_note("feed", f"{name} is down", why)
 
 
 def _http_retryable(exc: Exception) -> bool:
@@ -10873,7 +10888,12 @@ async def audit(client, guild_id: Optional[int], text: str) -> None:
     if not guild_id:
         return
     client = client or bot
-    cid = get_setting(guild_id, "audit_channel")
+    try:
+        kind = "crash" if str(text).startswith(("⚠️", "🚨", "📡")) else "audit"
+        staff_log_add(guild_id, kind, clip(text, 140))
+    except Exception:
+        pass
+    cid = get_setting(guild_id, "audit_channel") or get_setting(guild_id, "recap_channel")
     channel = client.get_channel(int(cid)) if cid else None
     if channel is None:
         return
@@ -10881,10 +10901,6 @@ async def audit(client, guild_id: Optional[int], text: str) -> None:
         await channel.send(clip(f"📝 {text}", 2000), allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         log.warning("Audit post failed")
-    try:
-        staff_log_add(guild_id, "audit", text)
-    except Exception:
-        pass
 
 
 def who(interaction) -> str:
@@ -18883,6 +18899,123 @@ def dash_court(color: str, alpha: float) -> str:
     return 'url("data:image/svg+xml,' + _dash_quote(svg) + '")'
 
 
+LOOK_IDS = ("court", "arena", "neoncity", "galaxy", "goldluxe", "aurora", "gridiron", "vegas",
+            "midnight", "hardwood", "neon", "carbon", "gold", "ice", "heater")
+
+
+def look_svg(name: str) -> str:
+    """A small illustrated scene for the look picker and the page background. Same picture in both places."""
+    scenes = {
+        "court": (
+            '<rect width="800" height="500" fill="#12081c"/>'
+            '<rect x="40" y="40" width="720" height="420" fill="none" stroke="#7B3FE4" stroke-width="6"/>'
+            '<line x1="400" y1="40" x2="400" y2="460" stroke="#F5C542" stroke-width="3"/>'
+            '<circle cx="400" cy="250" r="70" fill="none" stroke="#F5C542" stroke-width="4"/>'
+            '<circle cx="120" cy="250" r="55" fill="none" stroke="#7B3FE4" stroke-width="4"/>'
+            '<circle cx="680" cy="250" r="55" fill="none" stroke="#7B3FE4" stroke-width="4"/>'
+            '<path d="M40 140h90a110 110 0 0 1 0 220H40" fill="none" stroke="#c4a6ff" stroke-width="3"/>'
+            '<path d="M760 140h-90a110 110 0 0 0 0 220H760" fill="none" stroke="#c4a6ff" stroke-width="3"/>'),
+        "arena": (
+            '<rect width="800" height="500" fill="#0c0814"/>'
+            '<ellipse cx="400" cy="430" rx="280" ry="40" fill="#F5C54222"/>'
+            '<rect x="60" y="300" width="680" height="18" fill="#F5C54255"/>'
+            '<path d="M80 300 L140 80 h80 L160 300z" fill="#F5C54233"/>'
+            '<path d="M720 300 L660 80 h-80 L640 300z" fill="#F5C54233"/>'
+            '<circle cx="220" cy="70" r="28" fill="#fff6c8" opacity=".8"/>'
+            '<circle cx="400" cy="50" r="36" fill="#fff6c8"/>'
+            '<circle cx="580" cy="70" r="28" fill="#fff6c8" opacity=".8"/>'),
+        "neoncity": (
+            '<rect width="800" height="500" fill="#12061c"/>'
+            '<rect x="0" y="280" width="800" height="220" fill="#1a0a28"/>'
+            '<g fill="#2a0a40">'
+            '<rect x="40" y="160" width="70" height="180"/><rect x="130" y="90" width="90" height="250"/>'
+            '<rect x="240" y="140" width="60" height="200"/><rect x="430" y="70" width="100" height="270"/>'
+            '<rect x="550" y="120" width="80" height="220"/><rect x="650" y="40" width="90" height="300"/></g>'
+            '<g fill="#ff46be" opacity=".85"><rect x="150" y="120" width="8" height="8"/><rect x="470" y="100" width="8" height="8"/>'
+            '<rect x="670" y="70" width="8" height="8"/></g>'
+            '<g fill="#5af5ff" opacity=".8"><rect x="70" y="190" width="6" height="6"/><rect x="580" y="150" width="6" height="6"/></g>'
+            '<path d="M0 400 Q200 340 400 400 T800 400" fill="none" stroke="#ff46be" stroke-width="3"/>'),
+        "galaxy": (
+            '<rect width="800" height="500" fill="#070614"/>'
+            '<circle cx="560" cy="140" r="90" fill="#7B3FE466"/>'
+            '<circle cx="180" cy="360" r="70" fill="#3b1d8a88"/>'
+            '<g fill="#fff"><circle cx="80" cy="80" r="1.6"/><circle cx="200" cy="60" r="1.2"/><circle cx="320" cy="110" r="1.8"/>'
+            '<circle cx="500" cy="40" r="1.4"/><circle cx="640" cy="90" r="2"/><circle cx="720" cy="200" r="1.3"/>'
+            '<circle cx="90" cy="240" r="1.5"/><circle cx="260" cy="300" r="1.2"/><circle cx="400" cy="220" r="1.7"/>'
+            '<circle cx="480" cy="380" r="1.4"/><circle cx="700" cy="340" r="1.8"/><circle cx="140" cy="420" r="1.3"/></g>'),
+        "goldluxe": (
+            '<rect width="800" height="500" fill="#0a0804"/>'
+            '<path d="M0 0h800v80H0z" fill="#F5C54222"/>'
+            '<path d="M80 40h640M80 460h640" stroke="#F5C542" stroke-width="4"/>'
+            '<rect x="300" y="160" width="200" height="180" fill="none" stroke="#F5C542" stroke-width="6"/>'
+            '<circle cx="400" cy="250" r="40" fill="none" stroke="#C98A12" stroke-width="4"/>'
+            '<path d="M120 120 L160 200 L80 200z M680 120 L720 200 L640 200z" fill="#F5C54255"/>'),
+        "aurora": (
+            '<rect width="800" height="500" fill="#07141c"/>'
+            '<path d="M0 280 C160 120 280 200 400 140 C560 60 680 180 800 80 L800 500 L0 500z" fill="#12302888"/>'
+            '<path d="M0 320 C200 180 360 260 520 160 C660 80 740 200 800 140 L800 500 L0 500z" fill="#34d39944"/>'
+            '<circle cx="120" cy="70" r="3" fill="#fff"/><circle cx="300" cy="50" r="2" fill="#fff"/>'
+            '<circle cx="640" cy="90" r="2.4" fill="#fff"/>'),
+        "gridiron": (
+            '<rect width="800" height="500" fill="#07140c"/>'
+            '<g stroke="#1a5c32" stroke-width="3">'
+            '<line x1="40" y1="80" x2="760" y2="80"/><line x1="40" y1="160" x2="760" y2="160"/>'
+            '<line x1="40" y1="250" x2="760" y2="250"/><line x1="40" y1="340" x2="760" y2="340"/>'
+            '<line x1="40" y1="420" x2="760" y2="420"/></g>'
+            '<rect x="370" y="230" width="60" height="40" fill="#F5C54233" stroke="#F5C542" stroke-width="3"/>'),
+        "vegas": (
+            '<rect width="800" height="500" fill="#1a0a28"/>'
+            '<path d="M0 220 C200 160 300 260 400 200 C560 110 680 240 800 160 L800 500 L0 500z" fill="#4a1848"/>'
+            '<path d="M0 300 C180 240 340 340 500 260 C640 190 740 300 800 250 L800 500 L0 500z" fill="#c45c2a"/>'
+            '<path d="M0 380 C220 330 420 420 800 340 L800 500 L0 500z" fill="#F5C542"/>'
+            '<circle cx="400" cy="210" r="70" fill="#F5C542"/>'
+            '<path d="M140 420 C150 300 110 260 140 220 C170 260 130 300 140 420z" fill="#1a3d24"/>'
+            '<path d="M660 430 C670 300 630 250 660 200 C690 250 650 300 660 430z" fill="#1a3d24"/>'),
+        "midnight": (
+            '<rect width="800" height="500" fill="#070814"/>'
+            '<circle cx="560" cy="130" r="50" fill="#dbe7ff" opacity=".85"/>'
+            '<circle cx="540" cy="120" r="44" fill="#070814"/>'
+            '<g fill="#9bbcff" opacity=".7"><circle cx="80" cy="60" r="1.5"/><circle cx="200" cy="90" r="1.2"/>'
+            '<circle cx="340" cy="40" r="1.6"/><circle cx="700" cy="80" r="1.3"/><circle cx="120" cy="200" r="1.1"/></g>'),
+        "hardwood": (
+            '<rect width="800" height="500" fill="#2a1608"/>'
+            '<g fill="#c47a3a33"><rect x="0" y="0" width="800" height="50"/><rect x="0" y="100" width="800" height="50"/>'
+            '<rect x="0" y="200" width="800" height="50"/><rect x="0" y="300" width="800" height="50"/>'
+            '<rect x="0" y="400" width="800" height="50"/></g>'
+            '<circle cx="400" cy="250" r="80" fill="none" stroke="#F5C542" stroke-width="5"/>'),
+        "neon": (
+            '<rect width="800" height="500" fill="#12061c"/>'
+            '<circle cx="640" cy="80" r="120" fill="#ff46be44"/>'
+            '<circle cx="80" cy="400" r="140" fill="#5af5ff33"/>'
+            '<path d="M80 300 C200 200 400 360 720 180" fill="none" stroke="#ff46be" stroke-width="6"/>'
+            '<path d="M40 360 C260 240 480 400 780 220" fill="none" stroke="#5af5ff" stroke-width="4"/>'),
+        "carbon": (
+            '<rect width="800" height="500" fill="#0c0c0e"/>'
+            '<g stroke="#3A3A48" stroke-width="2" opacity=".7">'
+            '<path d="M0 0 L800 500 M80 0 L800 420 M160 0 L800 340 M0 80 L720 500 M0 160 L640 500"/></g>'),
+        "gold": (
+            '<rect width="800" height="500" fill="#160e04"/>'
+            '<circle cx="400" cy="80" r="160" fill="#F5C54255"/>'
+            '<rect x="200" y="280" width="400" height="14" fill="#F5C542"/>'
+            '<rect x="240" y="320" width="320" height="8" fill="#C98A12"/>'),
+        "ice": (
+            '<rect width="800" height="500" fill="#071018"/>'
+            '<circle cx="220" cy="80" r="140" fill="#50a8ff44"/>'
+            '<path d="M0 360 L180 200 L280 300 L420 140 L560 280 L800 80 L800 500 L0 500z" fill="#7dd3fc22"/>'),
+        "heater": (
+            '<rect width="800" height="500" fill="#180808"/>'
+            '<circle cx="560" cy="60" r="160" fill="#ff6a2044"/>'
+            '<path d="M0 420 C200 300 400 460 800 280 L800 500 L0 500z" fill="#ff6a2033"/>'),
+    }
+    inner = scenes.get(name) or scenes["court"]
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice">'
+            + inner + "</svg>")
+
+
+def look_css_url(name: str) -> str:
+    return 'url("data:image/svg+xml,' + _dash_quote(look_svg(name)) + '")'
+
+
 # ---- who may look ---------------------------------------------------------------------------------
 
 def dash_key_ok(candidate: Optional[str]) -> bool:
@@ -19323,6 +19456,49 @@ async def dash_api_slip(request):
     return web.json_response(d) if d else dash_error(web, request, 404)
 
 
+async def dash_api_player(request):
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    q = clip(str(request.query.get("q") or "").strip(), 40)
+    if len(q) < 3:
+        return web.json_response({"q": q, "players": []})
+    out = []
+    try:
+        found = await espn_search_players(q, list(LEAGUE_SLUGS))
+    except Exception:
+        found = []
+    for f in (found or [])[:4]:
+        fam = FAMILY_OF_PATH.get(f.get("path") or "") or ""
+        keys = [k for k in (MAIN_STATS.get(fam) or []) if k in STATS][:3]
+        stats = []
+        try:
+            games = await trend_games(f["path"], f["id"], need=8)
+            for k in keys:
+                rows = trend_values(games, k)
+                if not rows:
+                    continue
+                vals = [v for _, v in rows[:8]]
+                stats.append({"stat": STATS[k][0], "last": round(vals[0], 1), "avg": round(sum(vals) / len(vals), 1),
+                              "n": len(vals)})
+        except Exception:
+            pass
+        out.append({"name": clip(f.get("name") or "", 40), "team": clip(f.get("team") or "", 30),
+                    "league": clip((f.get("path") or "").split("/")[-1].replace("-", " ").upper(), 24),
+                    "pos": clip(f.get("position") or "", 8), "stats": stats})
+    return web.json_response({"q": q, "players": out})
+
+
+async def dash_look_img(request):
+    from aiohttp import web
+    name = request.match_info.get("name", "")
+    if name not in LOOK_IDS:
+        return dash_error(web, request, 404)
+    return web.Response(text=look_svg(name), content_type="image/svg+xml",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 async def dash_csv_out(request):
     from aiohttp import web
     prm, err = dash_gate(web, request)
@@ -19390,7 +19566,8 @@ def dash_app(web):
     app.add_routes([web.get("/", dash_index), web.get("/login", dash_index), web.get("/app", dash_index),
                     web.get("/live", dash_index), web.get("/news", dash_index), web.get("/open", dash_index),
                     web.get("/people", dash_index), web.get("/posters", dash_index), web.get("/more", dash_index),
-                    web.get("/api/data", dash_api_data), web.get("/health", dash_health),
+                    web.get("/api/data", dash_api_data), web.get("/api/player.json", dash_api_player),
+                    web.get("/health", dash_health), web.get(r"/img/look/{name:[a-z]+}.svg", dash_look_img),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -19906,8 +20083,6 @@ function renderOverview(el,d){
  const seg=h('div',{class:'seg'},[['season','Season'],['all','All time']].map(([k,t])=>h('button',{type:'button',class:S.lb===k?'on':'',
   onclick:()=>{S.lb=k;render()}},t)));
  put(el,
-  kpi('Group net',money(net),'all time, everyone',tone(net)),kpi('Record',w+'-'+l,'wins · losses'),
-  kpi('Open slips',String(d.open.length),'riding right now'),kpi('Legs in play',String(d.ticker.length),d.ticker.length?'tap Live to sweat':'quiet for now'),
   d.games.length?card('Games we’re on','',gamesCount(d),gamesStrip(d.games)):null,
   d.needs.length?card('✋ Needs attention','needs',String(d.needs.length),h('div',{class:'nlist'},d.needs.map(n=>h('button',{class:'nitem',type:'button',
    disabled:n.id==null,onclick:n.id==null?null:()=>go('#/s/'+n.id)},h('b',{text:n.who}),h('span',{text:n.why}),n.id!=null?h('span',{class:'chip',text:'#'+n.id}):null))),
@@ -20183,11 +20358,15 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#05030c;display:grid;place-items:center;transition:opacity 1.4s ease}
-#intro.go{opacity:0;pointer-events:none}#smokecan{position:absolute;inset:0;width:100%;height:100%}
-#introtitle{position:relative;z-index:1;font:900 clamp(28px,6vw,62px)/1.1 ui-sans-serif,system-ui;letter-spacing:.14em;
- text-transform:uppercase;color:#fff;text-shadow:0 0 42px #7B3FE4,0 10px 50px #000;opacity:0;transform:translateY(10px);
- transition:opacity 1s ease,transform 1s ease}#introtitle.on{opacity:1;transform:none}
+#intro{position:fixed;inset:0;z-index:90;background:#14003A;display:grid;place-items:center;transition:opacity 1.2s ease}
+#intro.go{opacity:0;pointer-events:none}#intro.skip{display:none}
+#smokecan{position:absolute;inset:0;width:100%;height:100%}
+#introbrand{position:relative;z-index:1;display:grid;justify-items:center;gap:18px;transform:translateY(28px);
+ opacity:0;transition:opacity 1.1s ease,transform 1.3s ease}
+#introbrand.on{opacity:1;transform:none}
+#introbrand img,.intrologo{width:min(120px,28vw);height:min(120px,28vw);filter:drop-shadow(0 0 28px #7B3FE4)}
+#introtitle{font:900 clamp(26px,6vw,58px)/1.05 ui-sans-serif,system-ui;letter-spacing:.16em;
+ text-transform:uppercase;color:#fff;text-align:center;text-shadow:0 0 42px #7B3FE4,0 8px 40px #000}
 a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{width:100%;height:100%}
 .lookbtn.icon{width:38px;height:38px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;
  place-items:center;cursor:pointer;flex:none;color:var(--gold)}
@@ -20198,7 +20377,7 @@ a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{wid
 .lookgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .looktile{border:1px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;background:var(--bg);
  color:var(--text);text-align:left;padding:0;font:inherit;position:relative;min-height:92px}
-.looktile .sw{height:52px;display:block}.looktile b,.looktile span{display:block;padding:0 10px}
+.looktile .sw{height:86px;display:block;background-size:cover;background-position:center}.looktile b,.looktile span{display:block;padding:0 10px}
 .looktile b{margin-top:8px;font-size:13px}.looktile span{font-size:11px;color:var(--muted);padding-bottom:10px}
 .looktile.on{outline:2px solid var(--gold);outline-offset:1px}
 .looktile .onpill{position:absolute;top:8px;right:8px;background:var(--gold);color:#14003A;font-size:10px;font-weight:800;
@@ -20208,6 +20387,45 @@ a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{wid
  color:var(--text);cursor:pointer;font-weight:700}
 @media (max-width:720px){.lookgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (prefers-reduced-motion:reduce){#intro{display:none}}
+"""
+SITE_LOOK_CSS += (
+    ".looktile .sw img{width:100%;height:86px;object-fit:cover;display:block;background:#110818}"
+)
+SITE_LOOK_CSS += "".join(
+    f"html[data-bg={k}] body,body[data-bg={k}]{{background-image:linear-gradient(#0b071466,#0b071433),url('/img/look/{k}.svg')!important;"
+    f"background-size:cover!important;background-position:center!important;background-repeat:no-repeat!important;"
+    f"background-attachment:fixed!important}}"
+    f".looktile[data-bg={k}] .sw{{background-image:url('/img/look/{k}.svg')}}"
+    for k in LOOK_IDS
+)
+
+SITE_SMOKE_JS = r"""
+function smokeIntro(){
+ const o=$('#intro');if(!o)return;
+ const skip=()=>{o.classList.add('skip');o.remove()};
+ if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
+ try{if(sessionStorage.getItem('pb-intro')){skip();return}sessionStorage.setItem('pb-intro','1')}catch(e){}
+ const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
+ const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
+ fit();addEventListener('resize',fit);
+ const spawn=()=>{const w=c.width,h=c.height;return{
+  x:w*.5+(Math.random()-.5)*w*.28,y:h*(.78+Math.random()*.28),
+  r:50+Math.random()*160,vx:(Math.random()-.5)*.55,vy:-.45-Math.random()*1.1,
+  a:.07+Math.random()*.14,grow:.08+Math.random()*.22}};
+ const parts=Array.from({length:180},spawn);
+ let start=performance.now();
+ (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
+  const vent=x.createRadialGradient(w*.5,h*.92,10,w*.5,h*.55,h*.7);
+  vent.addColorStop(0,'rgba(123,63,228,0.28)');vent.addColorStop(.45,'rgba(20,0,58,0.12)');vent.addColorStop(1,'rgba(5,3,12,0)');
+  x.fillStyle=vent;x.fillRect(0,0,w,h);
+  for(const p of parts){p.x+=p.vx+(w*.5-p.x)*0.003;p.y+=p.vy;p.r+=p.grow;p.a*=.997;
+   if(p.y<-p.r||p.a<.02)Object.assign(p,spawn());
+   const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(220,200,255,'+p.a+')');g.addColorStop(.4,'rgba(123,63,228,'+(p.a*.55)+')');
+   g.addColorStop(1,'rgba(20,0,58,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
+  const el=now-start;if(el>900&&brand)brand.classList.add('on');if(el>6200)o.classList.add('go');
+  if(el<8400)requestAnimationFrame(tick);else skip()})(start)}
+addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
 """
 
 
@@ -20244,7 +20462,7 @@ body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;pad
     html = html.replace("<body>", '<body class="v4">', 1)
     html = html.replace(
         '  <div class="spacer"></div>\n  <button class="iconbtn" id="theme"',
-        '  <input class="find" id="find" type="search" placeholder="Find a person or slip" autocomplete="off" '
+        '  <input class="find" id="find" type="search" placeholder="Find a person, slip, or player" autocomplete="off" '
         'spellcheck="false">\n  <div class="spacer"></div>\n  <button class="lookbtn icon" id="lookbtn" type="button" '
         'aria-label="Background and accent" title="Your look">◐</button>\n  <button class="iconbtn" id="theme"',
         1)
@@ -20270,6 +20488,22 @@ function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
 function pathForTab(t){return t==='overview'?'/':'/'+t}
 function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
+function playerHits(){const q=(S.q||'').trim();if(q.length<3)return null;
+ const d=S.players;if(!d)return card('Player search','',null,h('p',{class:'muted',text:'Looking up stats for “'+q+'”…'}));
+ const people=(S.data&&S.data.people||[]).filter(p=>(p.name||'').toLowerCase().includes(q.toLowerCase()));
+ const slips=[...(S.data&&S.data.open||[]),...(S.data&&S.data.recent||[])].filter(matchQ).slice(0,6);
+ const pls=d.players||[];
+ if(!pls.length&&!people.length&&!slips.length)return card('Player search','',null,empty('No match for “'+q+'”','We search the group’s slips and the same ESPN stats the bot pulls.'));
+ return card('Player search','',q,h('div',null,
+  pls.map(pl=>h('div',{class:'card',style:'margin:0 0 10px;padding:12px'},h('div',{class:'row'},h('b',{text:pl.name}),
+   h('span',{class:'muted',text:(pl.team||'')+' · '+(pl.league||'')})),
+   (pl.stats||[]).length?h('div',{class:'rows'},pl.stats.map(st=>h('div',{class:'row'},h('span',{text:st.stat}),
+    h('span',null,'last ',h('b',{text:String(st.last)}),' · avg ',h('b',{text:String(st.avg)}),' over '+st.n)))):
+    h('p',{class:'muted',text:'No recent game log yet.'}))),
+  people.length?h('p',{class:'muted',text:'In this group'}):null,
+  people.map(p=>h('button',{class:'nitem',type:'button',onclick:()=>go('#/p/'+p.key)},h('b',{text:p.name}),h('span',{text:p.record||''}))),
+  slips.length?h('p',{class:'muted',text:'Matching slips'}):null,
+  slips.map(p=>slipRow(p))))}
 function renderKpis(d){const el=$('#kpis');if(!el||!d)return;
  const net=d.alltime.reduce((a,r)=>a+r.net,0);let w=0,l=0;for(const r of d.alltime){const m=r.record.split('-');w+=+m[0]||0;l+=+m[1]||0}
  const kpi=(k,v,s,c)=>h('div',{class:'card kpi'},h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}));
@@ -20290,7 +20524,7 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
         1)
     html = html.replace(
         "function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
-        "function render(){if(!S.data)return;renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
+        "function render(){if(!S.data)return;renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);const hit=playerHits();if(hit&&el)el.prepend(hit)}",
         1)
     html = html.replace(
         "function renderPeople(el,d){\n put(el,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>",
@@ -20300,11 +20534,14 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
         "try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}\n",
         "S.tab=tabFromPath();\n"
         "try{if(S.tab==='overview'){const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}}catch(e){}\n"
-        "const find=$('#find');if(find){find.addEventListener('input',()=>{S.q=find.value;if(S.data)render()})}\n",
+        "const find=$('#find');let _pq=0;if(find){find.addEventListener('input',()=>{S.q=find.value;if(S.data)render();\n"
+        " clearTimeout(_pq);const q=(S.q||'').trim();if(q.length<3){S.players=null;return}\n"
+        " _pq=setTimeout(async()=>{const d=await api('/api/player.json'+qs('q='+encodeURIComponent(q)));\n"
+        " if((S.q||'').trim()!==q)return;S.players=d||{players:[]};if(S.data)render()},280)})}\n",
         1)
     html = html.replace(
         "function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}",
-        "function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}"
+        "function show(t){const intro=$('#intro');if(intro)intro.remove();if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}"
         "const want=pathForTab(t);const here=(location.pathname.replace(/\\/$/,'')||'/');"
         "if(here!==want&&!(location.hash||'').startsWith('#/'))history.pushState({pb:1},'',want+location.search);",
         1)
@@ -20317,12 +20554,13 @@ const LOOKS=[["court","Classic court","The original purple court"],["arena","Are
  ["neoncity","Neon city","Skyline after dark"],["galaxy","Galaxy","Stars and a nebula"],
  ["goldluxe","Gold luxe","Black and gold, high roller"],["aurora","Aurora","Northern lights drifting"],
  ["gridiron","Gridiron","Game-night turf"],["vegas","Vegas sunset","Synthwave sun and palms"],
- ["midnight","Midnight","Clean and quiet"]];
+ ["midnight","Midnight","Clean and quiet"],["hardwood","Hardwood","Warm wood floor"]];
 const ACCENTS=["purple","gold","green","blue","red","pink","teal","orange","ice","black"];
 function readLook(){try{return JSON.parse(localStorage.getItem('pb-look')||'{}')}catch(e){return {}}}
 function applyLook(){const s=readLook();const bg=LOOKS.some(x=>x[0]===s.bg)?s.bg:'';const ac=ACCENTS.includes(s.accent)?s.accent:'';
- if(bg)document.documentElement.dataset.bg=bg;else delete document.documentElement.dataset.bg;
- if(ac)document.documentElement.dataset.accent=ac;else delete document.documentElement.dataset.accent}
+ const root=document.documentElement;if(bg){root.dataset.bg=bg;if(document.body)document.body.dataset.bg=bg}
+ else{delete root.dataset.bg;if(document.body)delete document.body.dataset.bg}
+ if(ac)root.dataset.accent=ac;else delete root.dataset.accent}
 function saveLook(bg,ac){const s=readLook();if(bg!==undefined)s.bg=bg;if(ac!==undefined)s.accent=ac;
  try{if(!s.bg&&!s.accent)localStorage.removeItem('pb-look');else localStorage.setItem('pb-look',JSON.stringify(s))}catch(e){}
  applyLook();paintLook()}
@@ -20333,7 +20571,7 @@ const LOOK_SW={court:'radial-gradient(80% 80% at 20% 0,#7B3FE4aa,transparent),#1
  gridiron:'linear-gradient(#0a1a10,#1a5c32aa)',vegas:'linear-gradient(#1a0a28,#F5C542)',midnight:'linear-gradient(#0a1024,#070814)'};
 function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();
  put(box,LOOKS.map(([id,n,d])=>h('button',{class:'looktile'+(s.bg===id?' on':''),type:'button','data-bg':id},
-  h('i',{class:'sw',style:'background:'+(LOOK_SW[id]||'#12081c')}),h('b',{text:n}),h('span',{text:d}),
+  h('i',{class:'sw'},h('img',{src:'/img/look/'+id+'.svg',alt:'',decoding:'async'})),h('b',{text:n}),h('span',{text:d}),
   s.bg===id?h('em',{class:'onpill',text:'ON'}):null)));
  const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{type:'button',class:s.accent===a?'on':'','data-ac':a,text:a})))}
 applyLook();
@@ -20343,20 +20581,7 @@ if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet
  $('#lookgrid')&&$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile');if(t)saveLook(t.getAttribute('data-bg'),undefined)});
  $('#lookaccents')&&$('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});
  $('#lookreset')&&$('#lookreset').addEventListener('click',()=>{try{localStorage.removeItem('pb-look')}catch(e){}applyLook();paintLook()})}
-function smokeIntro(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
- try{if(sessionStorage.getItem('pb-intro'))return;sessionStorage.setItem('pb-intro','1')}catch(e){}
- const o=$('#intro');const c=$('#smokecan');const t=$('#introtitle');if(!o||!c)return;
- const x=c.getContext('2d');c.width=innerWidth;c.height=innerHeight;
- const parts=Array.from({length:220},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:90+Math.random()*200,
-  vx:(Math.random()-.5)*.7,vy:-.12-Math.random()*.4,a:.1+Math.random()*.16}));
- let start=performance.now();
- (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
-  x.fillStyle='rgba(12,8,22,0.55)';x.fillRect(0,0,w,h);
-  for(const p of parts){p.x+=p.vx;p.y+=p.vy;if(p.y<-p.r)p.y=h+p.r;if(p.x<-p.r)p.x=w+p.r;if(p.x>w+p.r)p.x=-p.r;
-   p.r+=.12;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(200,188,220,'+p.a+')');g.addColorStop(.45,'rgba(80,50,110,'+(p.a*.55)+')');g.addColorStop(1,'rgba(10,8,20,0)');
-   x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
-  const el=now-start;if(el>1600)t.classList.add('on');if(el>7000)o.classList.add('go');if(el<9200)requestAnimationFrame(tick);else o.remove()})(start)}
+""" + SITE_SMOKE_JS + r"""
 addEventListener('load',smokeIntro);
 """
     html = html.replace("skeletonAll();show(S.tab);load();route();", look_js + "skeletonAll();show(S.tab);load();route();", 1)
@@ -20368,7 +20593,9 @@ addEventListener('load',smokeIntro);
         '<p class="lookhint" style="margin-top:14px">Accent</p><div class="lookrow" id="lookaccents"></div>'
         '<div class="lookrow"><button type="button" id="lookreset">Use the group default</button>'
         '<button type="button" id="lookdone">Done</button></div></div></div>'
-        '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introtitle">Pimps Dashboard</div></div>'
+        '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">'
+        '<img src="' + DASH_FAVICON + '" alt="" width="120" height="120">'
+        '<div id="introtitle">Pimp\'s Dashboard</div></div></div>'
         '<noscript><p style="text-align:center">The dashboard needs JavaScript switched on.</p></noscript>',
         1)
     return html
@@ -20379,7 +20606,7 @@ if "body.v4" not in DASHBOARD_HTML_V4 or 'data-t="open"' not in DASHBOARD_HTML_V
     raise RuntimeError("dashboard v4 remake did not apply")
 if "tabFromPath" not in DASHBOARD_HTML_V4 or "pathForTab" not in DASHBOARD_HTML_V4:
     raise RuntimeError("dashboard website paths did not apply")
-if "Pimps Dashboard" not in DASHBOARD_HTML_V4 or "lookbtn" not in DASHBOARD_HTML_V4:
+if "Pimp's Dashboard" not in DASHBOARD_HTML_V4 or "lookbtn" not in DASHBOARD_HTML_V4:
     raise RuntimeError("dashboard intro / look picker did not apply")
 
 
@@ -20460,7 +20687,8 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
 </div>
 <script>
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
- if(s.bg)document.documentElement.dataset.bg=s.bg;if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+ if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
+ if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
 SITE_HTML = SITE_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
@@ -20594,6 +20822,82 @@ def owner_claim(uid: int, gid: Optional[int] = None) -> bool:
         return False
     crew_grant("owner", uid, gid=gid)
     return True
+
+
+def crew_display_name(uid: int, gid: Optional[int] = None) -> str:
+    rec = staff_rec(uid, gid)
+    nm = rec.get("name") or ""
+    if nm and not str(nm).isdigit():
+        return clip(nm, 40)
+    try:
+        g = bot.get_guild(int(gid or staff_gid() or 0))
+        m = g.get_member(int(uid)) if g else None
+        n = (getattr(m, "display_name", None) or getattr(m, "name", None)) if m is not None else None
+        if not n:
+            u = bot.get_user(int(uid)) if hasattr(bot, "get_user") else None
+            n = getattr(u, "display_name", None) or getattr(u, "name", None) if u is not None else None
+        if n and not str(n).isdigit():
+            if rec.get("state"):
+                staff_put(uid, rec.get("state"), n, gid)
+            return clip(n, 40)
+    except Exception:
+        pass
+    try:
+        row = db().execute(
+            "SELECT bettor_name FROM picks WHERE bettor_id = ? AND bettor_name IS NOT NULL AND bettor_name != '' "
+            "LIMIT 1", (int(uid),)).fetchone()
+        if row and row["bettor_name"] and not str(row["bettor_name"]).isdigit():
+            return clip(row["bettor_name"], 40)
+    except Exception:
+        pass
+    return str(uid)
+
+
+def note_slip_read(how: str, pick_id=None, who: str = "", title: str = "", url: str = "") -> None:
+    try:
+        items = json.loads(get_setting(0, "slipread_log") or "[]")
+    except Exception:
+        items = []
+    if not isinstance(items, list):
+        items = []
+    items.insert(0, {"how": clip(how, 16), "id": pick_id, "who": clip(who, 40),
+                     "title": clip(title, 80), "url": clip(url, 160), "at": now_iso()})
+    set_setting(0, "slipread_log", json.dumps(items[:50]))
+
+
+def crash_note(kind: str, title: str, why: str, gid: Optional[int] = None) -> None:
+    g = staff_gid(gid)
+    text = clip(f"{title}: {why}", 180)
+    staff_log_add(g, kind, text, "robot")
+    try:
+        items = json.loads(get_setting(g, "crash_log") or "[]")
+    except Exception:
+        items = []
+    if not isinstance(items, list):
+        items = []
+    items.insert(0, {"kind": clip(kind, 12), "title": clip(title, 60), "why": clip(why, 140), "at": now_iso()})
+    set_setting(g, "crash_log", json.dumps(items[:24]))
+
+
+async def crash_notify(client, kind: str, title: str, why: str) -> None:
+    crash_note(kind, title, why)
+    if kind in ("ok", "info"):
+        return
+    text = f"🚨 **{title}**\n{clip(why, 300)}"
+    seen = set()
+    for g in list(getattr(client, "guilds", None) or []):
+        gid = getattr(g, "id", None)
+        if not gid or gid in seen:
+            continue
+        seen.add(gid)
+        cid = get_setting(gid, "audit_channel") or get_setting(gid, "recap_channel")
+        ch = client.get_channel(int(cid)) if cid else None
+        if ch is None:
+            continue
+        try:
+            await ch.send(text, allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Crash notify failed in guild %s", gid)
 
 
 def staff_rec(uid: int, gid: Optional[int] = None) -> dict:
@@ -20962,7 +21266,7 @@ def staff_ops(uid: int) -> dict:
     for kind in ("developer", "owner", "admin", "mod"):
         for i in crew_ids(kind, gid):
             rec = staff_rec(i, gid)
-            crew.append({"id": i, "name": rec.get("name") or str(i), "role": kind})
+            crew.append({"id": i, "name": crew_display_name(i, gid), "role": kind})
     pending = staff_rows("pending", gid) if crew_at_least(uid, "owner", gid) else []
     pool = [
         {"name": "Groq (free)", "on": bool(env("GROQ_API_KEY", ""))},
@@ -20974,25 +21278,62 @@ def staff_ops(uid: int) -> dict:
     quota = staff_quota_rows(gid)
     servers = []
     try:
-        for f in (dash30_health().get("feeds") or [])[:18]:
-            servers.append({"name": f.get("name") or "feed", "state": f.get("state") or "idle",
-                            "kind": "feed", "ago": f.get("last_ok") or ""})
+        health = dash30_health()
+        for f in (health.get("feeds") or [])[:18]:
+            st = f.get("state") or "idle"
+            detail = []
+            if f.get("last_ok"):
+                detail.append("last ok " + str(f["last_ok"]))
+            elif f.get("ago"):
+                detail.append("last ok " + str(f["ago"]))
+            if f.get("ok") or f.get("fail"):
+                detail.append(f"{int(f.get('ok') or 0)} ok · {int(f.get('fail') or 0)} fail")
+            if f.get("code"):
+                detail.append("http " + str(f["code"]))
+            if st == "idle":
+                detail.append("waiting for a call")
+            elif st == "down":
+                detail.append("offline")
+            elif st in ("shaky", "warn"):
+                detail.append("caution")
+            servers.append({"name": f.get("name") or "feed", "state": st, "kind": "feed",
+                            "detail": " · ".join(detail), "ago": f.get("last_ok") or f.get("ago") or ""})
+        cyc = health.get("cycle") or {}
+        jobs = health.get("jobs") or {}
+        servers.append({"name": "Robot loop", "state": "ok" if cyc.get("ok") else "down", "kind": "bot",
+                        "detail": ("ran " + str(cyc.get("ago") or "never")) + (
+                            f" · {len(jobs.get('failing') or [])} job(s) failing" if jobs.get("failing") else "")})
     except Exception:
         pass
     try:
         for g in list(getattr(bot, "guilds", None) or [])[:12]:
+            n = getattr(g, "member_count", None) or len(getattr(g, "members", []) or [])
+            chans = len(getattr(g, "text_channels", []) or [])
             servers.append({"name": clip(getattr(g, "name", None) or str(getattr(g, "id", "")), 40),
-                            "state": "ok", "kind": "discord", "ago": ""})
+                            "state": "ok", "kind": "discord",
+                            "detail": f"{n} members · {chans} text channels · id {g.id}", "ago": ""})
     except Exception:
         pass
+    try:
+        slog = json.loads(get_setting(0, "slipread_log") or "[]")
+    except Exception:
+        slog = []
+    if not isinstance(slog, list):
+        slog = []
+    try:
+        crashes = json.loads(get_setting(gid, "crash_log") or "[]")
+    except Exception:
+        crashes = []
+    if not isinstance(crashes, list):
+        crashes = []
     return {
         "me": {"id": uid, "role": crew_role_name(uid, gid) or "staff", "boss": crew_at_least(uid, "owner", gid)},
-        "reads": {"clean": clean, "unsure": unsure, "failed": failed},
+        "reads": {"clean": clean, "unsure": unsure, "failed": failed, "slips": [x for x in slog if isinstance(x, dict)][:18]},
         "pool": pool, "quota": quota, "asks": asks, "servers": servers, "channels": staff_channels(gid),
         "tickets": {"channel": ch_label, "closed": int(closed or 0), "open": tickets[:12]},
         "blacklist": [x for x in blacklist if isinstance(x, dict)][:20],
         "hits": hits, "log": log_rows[:12], "announce": anns, "crew": crew, "pending": pending,
-        "version": BOT_VERSION,
+        "crashes": [x for x in crashes if isinstance(x, dict)][:12], "version": BOT_VERSION,
     }
 
 
@@ -21024,10 +21365,18 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .row:first-of-type{border-top:0}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:8px;background:var(--muted)}
 .dot.on{background:var(--up)}.muted{color:var(--muted);font-size:13px}.who{font-size:11px;background:#7B3FE433;border-radius:99px;padding:1px 8px}
 .open{color:#c4a6ff;font-weight:700}.chip{display:inline-block;font-size:11px;font-weight:800;padding:2px 7px;border-radius:99px;margin-left:6px}
-.ban{background:#fb718522;color:var(--down)}.warnc{background:#f0b42922;color:var(--gold)}.vip{border:1px solid var(--gold);color:var(--gold)}
-.modc{background:#7B3FE433;color:#c4a6ff}
-.sv{display:flex;flex-wrap:wrap;gap:8px 14px}
-.sv .item{display:flex;align-items:center;gap:8px;font-size:13px;min-width:140px}
+.ban{background:#fb718522;color:var(--down)}.warnc{background:#f0b42922;color:var(--gold)}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:850;letter-spacing:.06em;padding:5px 10px;border-radius:999px}
+.badge.dev{background:linear-gradient(90deg,#F5C542,#7B3FE4);color:#14003A;box-shadow:0 0 16px #F5C54266}
+.badge.own{background:#14003A;color:#F5C542;border:1px solid #F5C542;box-shadow:0 0 14px #F5C54244}
+.badge.adm{background:linear-gradient(90deg,#D62834,#7B3FE4);color:#fff}
+.badge.mod{background:#7B3FE433;color:#c4a6ff;border:1px solid #7B3FE488}
+.slips{max-height:280px;overflow:auto}.slip{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+.slip:first-child{border-top:0}.slip a{color:#c4a6ff;font-weight:700}
+.sv{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.sv .item{display:flex;align-items:flex-start;gap:10px;font-size:13px;background:#110c1b;border:1px solid var(--line);
+ border-radius:14px;padding:10px 12px}
+.sv .item b{display:block}.sv .item span.d{display:block;color:var(--muted);font-size:12px;margin-top:2px}
 .lamp{width:10px;height:10px;border-radius:50%;flex:none;background:var(--muted)}
 .lamp.ok,.lamp.idle{background:#34d399;animation:lamp-ok 2.8s ease-in-out infinite}
 .lamp.warn,.lamp.shaky{background:#f0b429;animation:lamp-warn .32s linear infinite}
@@ -21052,7 +21401,9 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap">
 <section class="card" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
- <p class="muted">Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy.</p></section>
+ <p class="muted">Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Robot &amp; crashes</h2><div id="crashes"></div>
+ <p class="muted">When the bot or a feed goes down, Discord gets a ping and the synopsis lands here.</p></section>
 <div class="g3">
  <section class="card"><h2>Screenshot reads · 7 days</h2><div class="reads" id="reads"></div><p class="muted" id="readsnote"></p></section>
  <section class="card"><h2>AI pool · today</h2><div id="pool"></div>
@@ -21082,7 +21433,8 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <div class="lookgrid" id="lookgrid"></div>
 <div class="lookrow"><button type="button" id="lookreset">Use the group default</button>
 <button type="button" id="lookdone">Done</button></div></div></div>
-<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introtitle">Pimps Dashboard</div></div>
+<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">
+<img src="{{FAVICON}}" alt="" width="120" height="120"><div id="introtitle">Pimp's Dashboard</div></div></div>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -21094,17 +21446,29 @@ function h(tag,props,...kids){const el=document.createElement(tag);
  for(const c of kids.flat(8)){if(c==null||c===false)continue;el.append(c instanceof Node?c:String(c))}return el}
 function put(el,...kids){el.replaceChildren(...kids.flat(8).filter(k=>k!=null&&k!==false))}
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
- if(s.bg)document.documentElement.dataset.bg=s.bg;if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+ if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
+ if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
 async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
  const R=d.reads||{};put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'read clean'})),
   h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'not sure'})),
-  h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})));
+  h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})),
+  h('div',{class:'slips'},(R.slips||[]).length?(R.slips||[]).map(s=>h('div',{class:'slip'},
+   h('span',null,h('b',{text:s.who||'Slip'}),' ',h('span',{class:'muted',text:s.title||s.how||''})),
+   s.url?h('a',{href:s.url,target:'_blank',rel:'noreferrer',text:'screenshot'}):
+    (s.id?h('a',{href:'/#/s/'+s.id,text:'slip #'+s.id}):h('span',{class:'muted',text:s.how||''})))):
+   h('p',{class:'muted',text:'Reads show up here with a screenshot link.'})));
  $('#readsnote').textContent=(R.failed||R.unsure)?'Check the not-sure pile.':'No problem reads lately.';
  put($('#servers'),(d.servers||[]).length?(d.servers||[]).map(s=>h('div',{class:'item'},
-  h('i',{class:'lamp '+(s.state||'idle')}),h('span',{text:s.name+(s.kind==='discord'?' · Discord':'')}))):
+  h('i',{class:'lamp '+(s.state||'idle')}),h('div',null,h('b',{text:s.name+(s.kind==='discord'?' · Discord':s.kind==='bot'?' · robot':'')}),
+   h('span',{class:'d',text:s.detail||s.ago||s.state||''})))):
   h('p',{class:'muted',text:'Feeds show up once the bot has called them.'}));
+ put($('#crashes'),(d.crashes||[]).length?(d.crashes||[]).map(c=>h('div',{class:'row'},
+  h('span',null,h('span',{class:'chip '+(c.kind==='bot'||c.kind==='crash'?'ban':'warnc'),text:c.kind||'crash'}),' ',
+   h('b',{text:c.title||''}),' ',h('span',{class:'muted',text:c.why||''})),
+  h('span',{class:'muted',text:(c.at||'').replace('T',' ').slice(0,16)}))):
+  h('p',{class:'muted',text:'No crashes logged. When the robot or a feed dies, the synopsis shows up here and in Discord.'}));
  put($('#pool'),(d.pool||[]).map(p=>h('div',{class:'row'},h('span',null,h('i',{class:'dot'+(p.on?' on':'')}),p.name),
   h('span',{class:'muted',text:p.on?'key on':'no key'}))));
  put($('#quota'),(d.quota||[]).map(q=>h('div',{class:'row'},h('span',{text:q.name}),
@@ -21139,8 +21503,8 @@ async function load(){const r=await fetch('/api/staff.json',{credentials:'same-o
  put($('#modlog'),(d.log||[]).length?(d.log||[]).map(l=>h('div',{class:'row'},
   h('span',null,logChip(l.kind),' ',l.text,l.name?h('span',{class:'who',text:l.name}):null),
   h('span',{class:'muted',text:l.at?String(l.at).slice(11,16):''}))):h('p',{class:'muted',text:'Quiet so far.'}));
- const roleChip=r=>h('span',{class:'chip '+(r==='developer'||r==='owner'?'vip':r==='admin'?'warnc':'modc'),
-  text:r==='developer'?'⚡ Developer':r==='owner'?'👑 Owner':r.toUpperCase()});
+ const roleChip=r=>h('span',{class:'badge '+(r==='developer'?'dev':r==='owner'?'own':r==='admin'?'adm':'mod'),
+  text:r==='developer'?'⚡ Developer':r==='owner'?'👑 Owner':r==='admin'?'🛡 Admin':'◆ Mod'});
  put($('#roles'),(d.crew||[]).length?(d.crew||[]).map(c=>h('div',{class:'row'},h('span',{text:c.name}),roleChip(c.role))):
   h('p',{class:'muted',text:'Set DEVELOPER_IDS and OWNER_IDS on Railway, then /staff add.'}));
 }
@@ -21149,25 +21513,41 @@ $('#annform').addEventListener('submit',e=>{e.preventDefault();const f=e.target;
 const LOOKS=[["court","Classic court"],["arena","Arena lights"],["neoncity","Neon city"],["galaxy","Galaxy"],
  ["goldluxe","Gold luxe"],["aurora","Aurora"],["gridiron","Gridiron"],["vegas","Vegas sunset"],["midnight","Midnight"],["hardwood","Hardwood"]];
 $('#lookbtn').addEventListener('click',()=>{$('#looksheet').classList.add('on');
- put($('#lookgrid'),LOOKS.map(([id,n])=>h('button',{class:'looktile',type:'button','data-bg':id},h('b',{text:n}))));});
+ const on=document.documentElement.dataset.bg||'';
+ put($('#lookgrid'),LOOKS.map(([id,n])=>h('button',{class:'looktile'+(on===id?' on':''),type:'button','data-bg':id},
+  h('i',{class:'sw'},h('img',{src:'/img/look/'+id+'.svg',alt:'',decoding:'async'})),h('b',{text:n}),
+  on===id?h('em',{class:'onpill',text:'ON'}):null)));});
 $('#looksheet').addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')$('#looksheet').classList.remove('on')});
 $('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('[data-bg]');if(!t)return;
- try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');s.bg=t.getAttribute('data-bg');localStorage.setItem('pb-look',JSON.stringify(s));
-  document.documentElement.dataset.bg=s.bg}catch(x){}});
-$('#lookreset').addEventListener('click',()=>{try{localStorage.removeItem('pb-look')}catch(e){}delete document.documentElement.dataset.bg});
-function smokeIntro(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
- try{if(sessionStorage.getItem('pb-intro'))return;sessionStorage.setItem('pb-intro','1')}catch(e){}
- const o=$('#intro'),c=$('#smokecan'),t=$('#introtitle');if(!o||!c)return;
- c.width=innerWidth;c.height=innerHeight;const x=c.getContext('2d');
- const parts=Array.from({length:220},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:90+Math.random()*200,
-  vx:(Math.random()-.5)*.7,vy:-.12-Math.random()*.4,a:.1+Math.random()*.16}));
- let t0=performance.now();(function tick(now){x.clearRect(0,0,c.width,c.height);
-  x.fillStyle='rgba(12,8,22,0.55)';x.fillRect(0,0,c.width,c.height);
-  for(const p of parts){p.x+=p.vx;p.y+=p.vy;if(p.y<-p.r)p.y=c.height+p.r;if(p.x<-p.r)p.x=c.width+p.r;if(p.x>c.width+p.r)p.x=-p.r;
-   p.r+=.12;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(200,188,220,'+p.a+')');g.addColorStop(.45,'rgba(80,50,110,'+(p.a*.55)+')');g.addColorStop(1,'rgba(10,8,20,0)');
+ const bg=t.getAttribute('data-bg');
+ try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');s.bg=bg;localStorage.setItem('pb-look',JSON.stringify(s))}catch(x){}
+ document.documentElement.dataset.bg=bg;if(document.body)document.body.dataset.bg=bg;
+ document.querySelectorAll('#lookgrid .looktile').forEach(b=>b.classList.toggle('on',b.getAttribute('data-bg')===bg))});
+$('#lookreset').addEventListener('click',()=>{try{localStorage.removeItem('pb-look')}catch(e){}
+ delete document.documentElement.dataset.bg;if(document.body)delete document.body.dataset.bg;
+ document.querySelectorAll('#lookgrid .looktile').forEach(b=>b.classList.remove('on'))});
+function smokeIntro(){
+ const o=$('#intro');if(!o)return;
+ const skip=()=>{o.classList.add('skip');o.remove()};
+ if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
+ try{if(sessionStorage.getItem('pb-intro')){skip();return}sessionStorage.setItem('pb-intro','1')}catch(e){}
+ const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
+ const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};fit();
+ const spawn=()=>{const w=c.width,h=c.height;return{x:w*.5+(Math.random()-.5)*w*.28,y:h*(.78+Math.random()*.28),
+  r:50+Math.random()*160,vx:(Math.random()-.5)*.55,vy:-.45-Math.random()*1.1,a:.07+Math.random()*.14,grow:.08+Math.random()*.22}};
+ const parts=Array.from({length:180},spawn);let start=performance.now();
+ (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
+  const vent=x.createRadialGradient(w*.5,h*.92,10,w*.5,h*.55,h*.7);
+  vent.addColorStop(0,'rgba(123,63,228,0.28)');vent.addColorStop(.45,'rgba(20,0,58,0.12)');vent.addColorStop(1,'rgba(5,3,12,0)');
+  x.fillStyle=vent;x.fillRect(0,0,w,h);
+  for(const p of parts){p.x+=p.vx+(w*.5-p.x)*0.003;p.y+=p.vy;p.r+=p.grow;p.a*=.997;
+   if(p.y<-p.r||p.a<.02)Object.assign(p,spawn());
+   const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(220,200,255,'+p.a+')');g.addColorStop(.4,'rgba(123,63,228,'+(p.a*.55)+')');g.addColorStop(1,'rgba(20,0,58,0)');
    x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
-  const el=now-t0;if(el>1600)t.classList.add('on');if(el>7000)o.classList.add('go');if(el<9200)requestAnimationFrame(tick);else o.remove()})(t0)}
+  const el=now-start;if(el>900&&brand)brand.classList.add('on');if(el>6200)o.classList.add('go');
+  if(el<8400)requestAnimationFrame(tick);else skip()})(start)}
+addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
 load();smokeIntro();
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
@@ -21353,7 +21733,8 @@ code{background:#110c1b;padding:2px 7px;border-radius:8px}
 <div class="brand">PIMP<b>-</b>BOT · ACCOUNT</div>
 <div class="nav"><a class="navchip" href="/">Dashboard</a><a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap" id="box"></div>
-<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introtitle">Pimps Dashboard</div></div>
+<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">
+<img src="{{FAVICON}}" alt="" width="120" height="120"><div id="introtitle">Pimp's Dashboard</div></div></div>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -21365,7 +21746,8 @@ function h(tag,props,...kids){const el=document.createElement(tag);
  for(const c of kids.flat(8)){if(c==null||c===false)continue;el.append(c instanceof Node?c:String(c))}return el}
 function put(el,...kids){el.replaceChildren(...kids.flat(8).filter(k=>k!=null&&k!==false))}
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
- if(s.bg)document.documentElement.dataset.bg=s.bg;if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
+ if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
+ if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
 const ME={{ME}};
 function field(form,name,label,type){return [h('label',{for:name,text:label}),h('input',{id:name,name:name,type:type||'text',required:true,autocomplete:name==='password'?'current-password':'username'})]}
 function paint(){
@@ -21395,19 +21777,28 @@ function paint(){
     h('label',{for:'p2',text:'Password (8+ letters)'}),h('input',{id:'p2',name:'password',type:'password',minlength:'8',required:true}),
     h('button',{type:'submit',text:'Create account'}))));
 }
-function smokeIntro(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
- try{if(sessionStorage.getItem('pb-intro'))return;sessionStorage.setItem('pb-intro','1')}catch(e){}
- const o=$('#intro'),c=$('#smokecan'),t=$('#introtitle');if(!o||!c)return;
- c.width=innerWidth;c.height=innerHeight;const x=c.getContext('2d');
- const parts=Array.from({length:220},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:90+Math.random()*200,
-  vx:(Math.random()-.5)*.7,vy:-.12-Math.random()*.4,a:.1+Math.random()*.16}));
- let t0=performance.now();(function tick(now){x.clearRect(0,0,c.width,c.height);
-  x.fillStyle='rgba(12,8,22,0.55)';x.fillRect(0,0,c.width,c.height);
-  for(const p of parts){p.x+=p.vx;p.y+=p.vy;if(p.y<-p.r)p.y=c.height+p.r;if(p.x<-p.r)p.x=c.width+p.r;if(p.x>c.width+p.r)p.x=-p.r;
-   p.r+=.12;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(200,188,220,'+p.a+')');g.addColorStop(.45,'rgba(80,50,110,'+(p.a*.55)+')');g.addColorStop(1,'rgba(10,8,20,0)');
+function smokeIntro(){
+ const o=$('#intro');if(!o)return;
+ const skip=()=>{o.classList.add('skip');o.remove()};
+ if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
+ try{if(sessionStorage.getItem('pb-intro')){skip();return}sessionStorage.setItem('pb-intro','1')}catch(e){}
+ const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
+ const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};fit();
+ const spawn=()=>{const w=c.width,h=c.height;return{x:w*.5+(Math.random()-.5)*w*.28,y:h*(.78+Math.random()*.28),
+  r:50+Math.random()*160,vx:(Math.random()-.5)*.55,vy:-.45-Math.random()*1.1,a:.07+Math.random()*.14,grow:.08+Math.random()*.22}};
+ const parts=Array.from({length:180},spawn);let start=performance.now();
+ (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
+  const vent=x.createRadialGradient(w*.5,h*.92,10,w*.5,h*.55,h*.7);
+  vent.addColorStop(0,'rgba(123,63,228,0.28)');vent.addColorStop(.45,'rgba(20,0,58,0.12)');vent.addColorStop(1,'rgba(5,3,12,0)');
+  x.fillStyle=vent;x.fillRect(0,0,w,h);
+  for(const p of parts){p.x+=p.vx+(w*.5-p.x)*0.003;p.y+=p.vy;p.r+=p.grow;p.a*=.997;
+   if(p.y<-p.r||p.a<.02)Object.assign(p,spawn());
+   const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+   g.addColorStop(0,'rgba(220,200,255,'+p.a+')');g.addColorStop(.4,'rgba(123,63,228,'+(p.a*.55)+')');g.addColorStop(1,'rgba(20,0,58,0)');
    x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
-  const el=now-t0;if(el>1600)t.classList.add('on');if(el>7000)o.classList.add('go');if(el<9200)requestAnimationFrame(tick);else o.remove()})(t0)}
+  const el=now-start;if(el>900&&brand)brand.classList.add('on');if(el>6200)o.classList.add('go');
+  if(el<8400)requestAnimationFrame(tick);else skip()})(start)}
+addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
 paint();smokeIntro();
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
@@ -30220,6 +30611,12 @@ class PicksBot(discord.Client):
                  self.user, BOT_VERSION, "on" if ai_enabled() else "off",
                  len(self.receipt_channels))
 
+    async def on_disconnect(self):
+        crash_note("bot", "Robot disconnected", "Lost the Discord websocket. It will try to reconnect.")
+
+    async def on_resumed(self):
+        crash_note("ok", "Robot reconnected", "Discord websocket is back.")
+
     # ---- scheduled posts ---------------------------------------------------
 
     async def scheduler(self):
@@ -30233,8 +30630,13 @@ class PicksBot(discord.Client):
         while not self.is_closed():
             try:
                 await self.run_schedules()
-            except Exception:
+            except Exception as exc:
                 log.exception("Scheduled post failed")
+                try:
+                    await crash_notify(self, "crash", "Scheduler crashed",
+                                      f"{type(exc).__name__}: {exc}"[:180])
+                except Exception:
+                    crash_note("crash", "Scheduler crashed", f"{type(exc).__name__}: {exc}"[:180])
             await asyncio.sleep(120)
 
     async def run_autograde(self, now: Optional[datetime] = None, limit: int = 3):
@@ -30462,11 +30864,9 @@ class PicksBot(discord.Client):
     async def job_alert(self, alert: Optional[str]) -> None:
         if not alert:
             return
-        for g in getattr(self, "guilds", None) or []:
-            try:
-                await audit(self, g.id, alert)
-            except Exception:
-                pass
+        kind = "bot" if alert.startswith("⚠️") or "failed" in alert.lower() else "ok"
+        title = "Robot job failed" if kind == "bot" else "Robot recovered"
+        await crash_notify(self, kind, title, alert)
 
     async def run_schedules(self, now: Optional[datetime] = None):
         now = now or datetime.now(TZ)
@@ -30502,11 +30902,7 @@ class PicksBot(discord.Client):
                 log.exception("Live job %s failed", name)
                 alert = record_job(name, exc)
             if alert:
-                for g in self.guilds if hasattr(self, "guilds") else []:
-                    try:
-                        await audit(self, g.id, alert)
-                    except Exception:
-                        pass
+                await self.job_alert(alert)
         for name, step in (("run_autograde", lambda: self.run_autograde(now.astimezone(timezone.utc))),
                            ("run_lock_grading", lambda: self.run_lock_grading(now.astimezone(timezone.utc))),
                            ("check_limits", lambda: self.check_limits(now))):
@@ -30765,6 +31161,8 @@ class PicksBot(discord.Client):
         if slip is not None and slip.get("_unsure") and slip.get("legs"):
             save_slip_draft(message.guild.id, message, slip)
             free_count("scan_confirm")
+            note_slip_read("unsure", who=message.author.display_name,
+                           title=str(slip.get("description") or "screenshot"), url=message.jump_url)
             await message.reply(free_unsure_note(slip), embed=slip_draft_embed(slip),
                                 view=slip_draft_view(message.id, review=ai_enabled(), edit=True), mention_author=False)
             return
@@ -30773,6 +31171,9 @@ class PicksBot(discord.Client):
         if slip is None or slip["cost"] is None:
             note = "Got it. Tap below to log this slip."
             if slip_reader_on():
+                free_count("fail")
+                note_slip_read("fail", who=message.author.display_name,
+                               title=reason or "couldn't read", url=message.jump_url)
                 note = (f"I couldn't read that one: {reason}. Tap below to log it by hand." if reason else
                         "I couldn't read that one cleanly. Tap below to log it by hand.")
             await message.reply(note, view=log_slip_view(message.author.id),
@@ -30854,6 +31255,7 @@ class PicksBot(discord.Client):
                 await author.send(tip)
             except Exception:
                 pass
+        note_slip_read("clean", pick_id, who=author.display_name, title=p["description"], url=slip_url)
         await voice_say(self, guild_id, f"{call_name(guild_id, author.id, author.display_name)} just logged {p['description']}, "
                                         f"{money(p['cost'])} to win {money(p['payout'])}.")
         try:
@@ -30952,10 +31354,17 @@ class PicksBot(discord.Client):
             async with message.channel.typing():
                 slip, reason = await read_slip_best(attachment)
         if slip is None or not (slip.get("legs") or slip.get("description")):
+            free_count("fail")
+            note_slip_read("fail", who=message.author.display_name,
+                           title=reason or "couldn't read", url=getattr(image_message, "jump_url", "") or "")
             await message.reply(f"I couldn't read that slip{': ' + reason if reason else ''}. Try a clearer screenshot.",
                                 mention_author=False)
             return
         save_slip_draft(message.guild.id, image_message, slip)
+        note_slip_read("unsure" if slip.get("_unsure") else "clean",
+                       who=message.author.display_name,
+                       title=str(slip.get("description") or "screenshot"),
+                       url=getattr(image_message, "jump_url", "") or "")
         question = re.sub(r"<@[!&]?\d+>", " ", getattr(message, "content", "") or "").strip()
         async with message.channel.typing():
             text, xray = await slip_review(self, message.guild.id, message.author, slip, question)
