@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r88"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r89"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "r70"               # the idea list this upload is filling; r81 on the site was update r69
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -107,6 +107,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r86", "On a phone the background stays a scene at the top of the screen and fades out, so it does not cut through the cards as a stripe."),
     ("r87", "A second player is added into the same green-and-red chart, one bar for both, instead of a separate combo graph."),
     ("r88", "The opening smoke is soft gray clouds, the same shape as a real puff, instead of purple circles."),
+    ("r89", "The background picker scrolls on a phone and has an X to close it. The scene fits the phone screen."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -21617,7 +21618,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r88';"
+    "const CACHE='pb-shell-r89';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22584,10 +22585,16 @@ html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 
 a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{width:100%;height:100%}
 .lookbtn.icon{width:38px;height:38px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;
  place-items:center;cursor:pointer;flex:none;color:var(--gold)}
-.looksheet{position:fixed;inset:0;z-index:40;display:none;place-items:center;background:#05030acc;padding:18px}
-.looksheet.on{display:grid}.lookbox{width:min(720px,100%);background:var(--card);border:1px solid var(--line);
+.looksheet{position:fixed;inset:0;z-index:80;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;
+ overscroll-behavior:contain;background:#05030acc;
+ padding:max(12px,env(safe-area-inset-top)) 12px calc(20px + env(safe-area-inset-bottom))}
+.looksheet.on{display:block}.lookbox{width:min(720px,100%);margin:0 auto;background:var(--card);border:1px solid var(--line);
  border-radius:22px;padding:18px 18px 14px;box-shadow:0 30px 80px -24px #000}
-.lookbox h3{margin:0 0 4px;font-size:18px}.lookhint{color:var(--muted);font-size:13px;margin:0 0 14px}
+.lookhead{display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:2;
+ background:var(--card);margin:-18px -18px 8px;padding:12px 12px 10px;border-radius:22px 22px 0 0}
+.lookx{width:44px;height:44px;border-radius:14px;border:1px solid var(--line);background:var(--card2);color:var(--text);
+ font:700 28px/1 ui-sans-serif,system-ui;cursor:pointer;flex:none}
+.lookbox h3{margin:0;font-size:18px}.lookhint{color:var(--muted);font-size:13px;margin:0 0 14px}
 .lookgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .looktile{border:1px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;background:var(--bg);
  color:var(--text);text-align:left;padding:0;font:inherit;position:relative;min-height:92px}
@@ -22612,7 +22619,9 @@ a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{wid
 .acchip[data-ac=teal] .acdot{background:#2dd4bf}.acchip[data-ac=orange] .acdot{background:#fb923c}
 .acchip[data-ac=ice] .acdot{background:#7dd3fc}.acchip[data-ac=black] .acdot{background:#a1a1aa}
 @media (max-width:720px){.lookgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
- .lookaccents{grid-template-columns:repeat(2,minmax(0,1fr))}}
+ .lookaccents{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .looktile .sw,.looktile .sw img{height:72px}.lookbox{padding:14px 12px 12px}
+ .lookhead{margin:-14px -12px 8px}}
 @media (prefers-reduced-motion:reduce){#intro{display:none}}
 """
 SITE_LOOK_CSS += (
@@ -22626,6 +22635,8 @@ SITE_LOOK_CSS += "".join(
     f"background-repeat:no-repeat!important;background-position:center top!important;background-size:100% auto!important;"
     f"-webkit-mask-image:linear-gradient(#000 0%,#000 78%,transparent 100%)!important;"
     f"mask-image:linear-gradient(#000 0%,#000 78%,transparent 100%)!important}}"
+    f"@media (max-width:720px){{html[data-bg={k}] body:before,body[data-bg={k}]:before{{"
+    f"background-size:auto 68vh!important}}}}"
     f".looktile[data-bg={k}] .sw{{background-image:url('/img/look/{k}.svg')}}"
     for k in LOOK_IDS
 )
@@ -23236,8 +23247,9 @@ addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;const
   h('button',{type:'button',onclick:async()=>{if(!installEvt)return;installEvt.prompt();installEvt=null;const n=$('#installapp');if(n)n.remove()}},'Install'));
  head.after(bar)});
 const lookSheet=$('#looksheet');const lookBtn=$('#lookbtn');
-if(lookBtn)lookBtn.addEventListener('click',()=>{paintLook();lookSheet.classList.add('on')});
-if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')lookSheet.classList.remove('on')});
+function closeLook(){if(!lookSheet)return;lookSheet.classList.remove('on');document.documentElement.style.overflow='';document.body.style.overflow=''}
+if(lookBtn)lookBtn.addEventListener('click',()=>{paintLook();lookSheet.classList.add('on');document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden'});
+if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone'||e.target.id==='lookx')closeLook()});
  $('#lookgrid')&&$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile');if(!t)return;
   if(t.hasAttribute('data-reset'))resetLook();else saveLook(t.getAttribute('data-bg'),undefined)});
  $('#lookaccents')&&$('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});}
@@ -23248,7 +23260,8 @@ addEventListener('load',smokeIntro);
     html = html.replace(
         '<noscript><p style="text-align:center">The dashboard needs JavaScript switched on.</p></noscript>',
         '<div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">'
-        '<h3>Background</h3><p class="lookhint">Pick the scene behind the page. It\'s saved on this device only.</p>'
+        '<div class="lookhead"><h3>Background</h3><button type="button" class="lookx" id="lookx" aria-label="Close">×</button></div>'
+        '<p class="lookhint">Pick the scene behind the page. It\'s saved on this device only.</p>'
         '<div class="lookgrid" id="lookgrid"></div>'
         '<p class="lookhint" style="margin-top:14px">Accent</p><div class="lookaccents" id="lookaccents"></div>'
         '<div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>'
@@ -24253,7 +24266,8 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 </div>
 </div>
 <div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">
-<h3>Background</h3><p class="lookhint">Pick the scene behind the page. It's saved on this device only. Hardwood, midnight and the rest are here too.</p>
+<div class="lookhead"><h3>Background</h3><button type="button" class="lookx" id="lookx" aria-label="Close">×</button></div>
+<p class="lookhint">Pick the scene behind the page. It's saved on this device only. Hardwood, midnight and the rest are here too.</p>
 <div class="lookgrid" id="lookgrid"></div>
 <p class="lookhint" style="margin-top:14px">Accent</p><div class="lookaccents" id="lookaccents"></div>
 <div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>
@@ -24388,8 +24402,9 @@ function paintLook(){const s=readLook();const def=!s.bg;
 function saveLook(bg,ac){const s=readLook();if(bg!==undefined)s.bg=bg;if(ac!==undefined)s.accent=ac;
  try{if(!s.bg&&!s.accent)localStorage.removeItem('pb-look');else localStorage.setItem('pb-look',JSON.stringify(s))}catch(e){}
  applyLook();paintLook()}
-$('#lookbtn').addEventListener('click',()=>{paintLook();$('#looksheet').classList.add('on')});
-$('#looksheet').addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone')$('#looksheet').classList.remove('on')});
+function closeLook(){const s=$('#looksheet');if(s)s.classList.remove('on');document.documentElement.style.overflow='';document.body.style.overflow=''}
+$('#lookbtn').addEventListener('click',()=>{paintLook();$('#looksheet').classList.add('on');document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden'});
+$('#looksheet').addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone'||e.target.id==='lookx')closeLook()});
 $('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile');if(!t)return;
  if(t.hasAttribute('data-reset')){try{localStorage.removeItem('pb-look')}catch(x){}applyLook();paintLook()}
  else saveLook(t.getAttribute('data-bg'),undefined)});
