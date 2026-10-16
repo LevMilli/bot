@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r37"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r39"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -19540,6 +19540,7 @@ async def espn_athlete_bio(path: str, aid: str) -> dict:
     pos = ath.get("position") if isinstance(ath.get("position"), dict) else {}
     jersey = str(ath.get("jersey") or "").lstrip("#")[:4]
     return {
+        "name": clip(str(ath.get("displayName") or ath.get("fullName") or ""), 40),
         "jersey": jersey if jersey.isdigit() else "",
         "height": clip(str(ath.get("displayHeight") or ""), 12),
         "weight": clip(str(ath.get("displayWeight") or ""), 12),
@@ -19548,6 +19549,68 @@ async def espn_athlete_bio(path: str, aid: str) -> dict:
         "team": clip(str(team.get("displayName") or team.get("name") or ""), 40),
         "abbr": clip(str(team.get("abbreviation") or ""), 8),
     }
+
+
+def path_from_league_slug(slug: str) -> Optional[str]:
+    s = str(slug or "").lower().strip()
+    if not s or len(s) > 28:
+        return None
+    for path, v in LEAGUE_SLUGS.items():
+        if v == s or path.endswith("/" + s):
+            return path
+    return None
+
+
+def dash_player_keys(path: str) -> list[str]:
+    fam = FAMILY_OF_PATH.get(path) or ""
+    return [k for k in (MAIN_STATS.get(fam) or []) if k in STATS]
+
+
+def dash_game_when(g: dict) -> str:
+    raw = g.get("date") or ""
+    if not raw:
+        return ""
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(TZ).strftime("%b %-d")
+    except Exception:
+        return ""
+
+
+def dash_pack_games(games: list, keys: list[str], limit: int = 20) -> list[dict]:
+    """Last N games with the projection stats already numbered, no raw ESPN groups."""
+    out = []
+    for g in games[:limit]:
+        groups = g.get("groups") or {}
+        vals = {}
+        for k in keys:
+            try:
+                got = stat_value(groups, k)
+            except Exception:
+                got = None
+            if got is not None:
+                vals[k] = round(got[0], 1)
+        out.append({"date": g.get("date") or "", "when": dash_game_when(g),
+                    "opp": clip(str(g.get("opp") or "?"), 8),
+                    "at": "@" if g.get("at") == "@" else "vs",
+                    "result": clip(str(g.get("result") or ""), 2), "vals": vals})
+    return out
+
+
+def dash_pack_stats(games_payload: list, keys: list[str]) -> list[dict]:
+    out = []
+    for k in keys:
+        vals = [g["vals"][k] for g in games_payload if k in (g.get("vals") or {})]
+        if not vals:
+            continue
+
+        def avg(n, rows=vals):
+            part = rows[:n]
+            return round(sum(part) / len(part), 1) if part else 0.0
+
+        out.append({"key": k, "label": STATS[k][0], "last": round(vals[0], 1),
+                    "avg5": avg(5), "avg10": avg(10), "avg20": avg(20), "n": len(vals),
+                    "line": default_line(vals[:10])})
+    return out
 
 
 async def dash_api_player(request):
@@ -19591,7 +19654,8 @@ async def dash_api_player(request):
         league = design_head_league(f.get("path"))
         aid = str(f.get("id") or "")
         photo = f"/img/head/{league}/{aid}.png" if league and aid.isdigit() else ""
-        out.append({"name": clip(f.get("name") or "", 40),
+        out.append({"id": aid, "slug": league or "", "path": f.get("path") or "",
+                    "name": clip(f.get("name") or bio.get("name") or "", 40),
                     "team": clip(bio.get("team") or f.get("team") or "", 40),
                     "abbr": clip(bio.get("abbr") or f.get("team_abbr") or "", 8),
                     "league": clip((f.get("path") or "").split("/")[-1].replace("-", " ").upper(), 24),
@@ -19600,6 +19664,51 @@ async def dash_api_player(request):
                     "height": bio.get("height") or "", "weight": bio.get("weight") or "",
                     "age": bio.get("age") or "", "photo": photo, "stats": stats})
     return web.json_response({"q": q, "players": out})
+
+
+async def dash_api_player_one(request):
+    """One player: last 20 games and the same projection stats /trend uses (PrizePicks-style)."""
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    league = str(request.match_info.get("league") or "")
+    aid = str(request.match_info.get("aid") or "")
+    path = path_from_league_slug(league)
+    if not path or not aid.isdigit():
+        return dash_error(web, request, 404)
+
+    async def _games():
+        try:
+            return await trend_games(path, aid, need=20)
+        except Exception:
+            return []
+
+    async def _bio():
+        try:
+            return await espn_athlete_bio(path, aid)
+        except Exception:
+            return {}
+
+    games, bio = await asyncio.gather(_games(), _bio())
+    name = clip(bio.get("name") or "", 40)
+    if not name:
+        return dash_error(web, request, 404)
+    keys = dash_player_keys(path)
+    packed = dash_pack_games(games, keys, 20)
+    stats = dash_pack_stats(packed, keys)
+    slug = design_head_league(path) or league
+    photo = f"/img/head/{slug}/{aid}.png" if slug and aid.isdigit() else ""
+    default = next((s["key"] for s in stats if s["key"] != "minutes"), stats[0]["key"] if stats else "")
+    return web.json_response({
+        "id": aid, "slug": slug, "path": path, "name": name,
+        "team": clip(bio.get("team") or "", 40), "abbr": clip(bio.get("abbr") or "", 8),
+        "league": clip(path.split("/")[-1].replace("-", " ").upper(), 24),
+        "pos": clip(bio.get("pos") or "", 8), "jersey": clip(bio.get("jersey") or "", 4),
+        "height": bio.get("height") or "", "weight": bio.get("weight") or "",
+        "age": bio.get("age") or "", "photo": photo, "stat": default,
+        "stats": stats, "games": packed,
+    })
 
 
 async def dash_head_img(request):
@@ -19694,6 +19803,7 @@ def dash_app(web):
                     web.get("/live", dash_index), web.get("/news", dash_index), web.get("/open", dash_index),
                     web.get("/people", dash_index), web.get("/posters", dash_index), web.get("/more", dash_index),
                     web.get("/api/data", dash_api_data), web.get("/api/player.json", dash_api_player),
+                    web.get(r"/api/player/{league:[a-z0-9-]{2,28}}/{aid:[0-9]{1,12}}.json", dash_api_player_one),
                     web.get("/health", dash_health), web.get(r"/img/look/{name:[a-z]+}.svg", dash_look_img),
                     web.get(r"/img/head/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
@@ -20579,21 +20689,43 @@ body.v4 .findwrap{position:relative;flex:1;max-width:340px;min-width:0;z-index:2
 body.v4 .find{width:100%;max-width:none;height:38px;border-radius:12px;border:1px solid var(--line);
  background:var(--card);color:var(--text);padding:0 12px;outline:none}
 body.v4 .find:focus{border-color:var(--brand2);box-shadow:0 0 0 3px #7B3FE433}
-body.v4 .findpop{position:absolute;top:calc(100% + 8px);left:0;width:min(560px,84vw);z-index:30;
- background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px;
- box-shadow:0 28px 70px -24px #000;max-height:min(72vh,560px);overflow:auto}
-body.v4 .pcard{display:grid;grid-template-columns:78px minmax(0,1fr);gap:12px;align-items:start;
- padding:10px;border-radius:14px;background:var(--card2);margin:0 0 8px;min-width:0}
+body.v4 .sheet{z-index:40}
+body.v4 .findpop{position:absolute;top:calc(100% + 8px);left:0;width:min(680px,94vw);z-index:30;
+ background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px 10px 16px;
+ box-shadow:0 28px 70px -24px #000;max-height:min(80vh,680px);overflow:auto}
+body.v4 .pcard{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:start;
+ padding:10px;border-radius:14px;background:var(--card2);margin:0 0 8px;min-width:0;width:100%;
+ border:1px solid transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 body.v4 .pcard:last-child{margin-bottom:0}
-body.v4 .pcard img,.pcard .ph{width:78px;height:78px;border-radius:14px;object-fit:cover;object-position:top;
- background:#1a1028;display:block}
-body.v4 .pcard .ph{display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
-body.v4 .pcard .pn{font-weight:800;font-size:16px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-body.v4 .pcard .pm{color:var(--muted);font-size:12.5px;margin-top:3px;overflow-wrap:anywhere}
+body.v4 .pcard:hover,body.v4 .pcard:focus-visible{border-color:var(--brand2);background:#7B3FE41a}
+body.v4 .pface{width:72px;height:72px;border-radius:14px;overflow:hidden;background:#1a1028;flex:none;align-self:start}
+body.v4 .pface img,body.v4 .pface .pletter{width:72px;height:72px;object-fit:cover;object-position:center 18%;display:block}
+body.v4 .pface .pletter{display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
+body.v4 .pface.lg,body.v4 .pface.lg img,body.v4 .pface.lg .pletter{width:96px;height:96px;border-radius:18px}
+body.v4 .pcard .pn{font-weight:800;font-size:16px;line-height:1.25;overflow:visible;white-space:normal;overflow-wrap:anywhere}
+body.v4 .pcard .pm{color:var(--muted);font-size:12.5px;margin-top:3px;overflow-wrap:anywhere;white-space:normal}
 body.v4 .pstats{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 body.v4 .pstat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:5px 8px;min-width:64px}
 body.v4 .pstat b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
 body.v4 .pstat span{font-size:10.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+body.v4 .pchips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+body.v4 .pchip{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:99px;
+ padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer}
+body.v4 .pchip.on{background:linear-gradient(90deg,#7B3FE4,#5b2bb8);border-color:#7B3FE4;color:#fff}
+body.v4 .proj{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:14px}
+body.v4 .projl{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
+body.v4 .projn{text-align:center;min-width:110px}.projn b{display:block;font-size:34px;font-weight:850;font-variant-numeric:tabular-nums;line-height:1.05}
+body.v4 .projn span{font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+body.v4 .pnudge{width:44px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
+ color:var(--text);font-weight:800;cursor:pointer}
+body.v4 .pp20{display:flex;gap:5px;flex-wrap:wrap}
+body.v4 .ppg{width:34px;min-height:40px;border-radius:9px;display:grid;place-items:center;font-size:11px;font-weight:800;
+ color:#fff;font-variant-numeric:tabular-nums}
+body.v4 .ppg.over{background:var(--up)}body.v4 .ppg.under{background:var(--down)}body.v4 .ppg.push{background:var(--flat)}
+body.v4 .plog{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 2px;
+ border-top:1px solid var(--line)}
+body.v4 .plog:first-child{border-top:0}
+body.v4 .plog .nm{font-weight:700;white-space:normal;overflow:visible}
 body.v4 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-width:var(--max);
  margin:0 auto;padding:4px 20px 16px}
 body.v4 .kpis .card.kpi{margin:0;padding:12px 14px;box-shadow:0 16px 40px -28px #7B3FE466;grid-column:auto}
@@ -20606,7 +20738,7 @@ body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;pad
  text-transform:uppercase;text-decoration:none;box-shadow:0 8px 22px -12px #F5C542aa}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 .findwrap{max-width:none;width:100%;order:5;flex:1 1 100%}
- body.v4 .findpop{width:min(100vw - 24px,560px);left:0;right:auto}}
+ body.v4 .findpop{width:min(100vw - 24px,680px);left:0;right:auto}}
 """ + SITE_LOOK_CSS
     html = html.replace("</style>", extra_css + "</style>", 1)
     html = html.replace("<body>", '<body class="v4">', 1)
@@ -20641,13 +20773,49 @@ function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
 function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
  const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
- const pic=pl.photo?h('img',{src:pl.photo,alt:'',width:'78',height:'78',decoding:'async'}):
-  h('div',{class:'ph',text:(pl.name||'?').trim().charAt(0).toUpperCase()});
+ const pic=pl.photo?h('img',{src:pl.photo,alt:'',width:'72',height:'72',decoding:'async'}):
+  h('div',{class:'pletter',text:(pl.name||'?').trim().charAt(0).toUpperCase()});
  const stats=(pl.stats||[]).map(st=>h('div',{class:'pstat'},h('b',{text:String(st.last)}),
   h('span',{text:st.stat+' last'}),h('span',{text:'avg '+st.avg+' · '+st.n})));
- return h('div',{class:'pcard'},pic,h('div',null,h('div',{class:'pn',text:pl.name}),
+ const open=()=>{const box=$('#findpop');if(box)box.hidden=true;if(pl.slug&&pl.id)go('#/pl/'+pl.slug+'/'+pl.id)};
+ return h('button',{class:'pcard',type:'button',onclick:open},h('div',{class:'pface'},pic),
+  h('div',{style:'min-width:0'},h('div',{class:'pn',text:pl.name}),
   h('div',{class:'pm',text:bits.join(' · ')+(extra?' · '+extra:'')}),
   stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'})))}
+function defaultLine(vals){if(!vals.length)return 0.5;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;return Math.max(0.5,Math.floor(avg)+0.5)}
+function playerHits(stat){return (S.pl&&S.pl.games||[]).map(g=>g.vals&&g.vals[stat]!=null?{g,v:+g.vals[stat]}:null).filter(Boolean)}
+function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
+ const stat=stats.some(s=>s.key===S.pstat)?S.pstat:(d.stat||(stats[0]&&stats[0].key)||'');S.pstat=stat;
+ const hits=playerHits(stat),vals=hits.map(x=>x.v),fmt=v=>v==null||isNaN(+v)?'':String(Math.round(+v*10)/10);
+ if(S.pline==null)S.pline=defaultLine(vals.slice(0,10));const line=+S.pline;
+ const win=n=>{const part=vals.slice(0,n);if(!part.length)return null;let o=0;for(const v of part)if(v>line)o++;
+  return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
+ const L5=win(5),L10=win(10),L20=win(20),lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
+ const pic=d.photo?h('img',{src:d.photo,alt:'',width:'96',height:'96',decoding:'async'}):
+  h('div',{class:'pletter',text:(d.name||'?').trim().charAt(0).toUpperCase()});
+ const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
+ const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;paintPlayer()}},s.label);
+ const nudge=x=>h('button',{class:'pnudge',type:'button',onclick:()=>{S.pline=Math.max(0,Math.round((line+x)*10)/10);paintPlayer()}},(x>0?'+':'')+String(x));
+ const box=(t,w)=>w?kbox(t,w.o+'/'+w.n+'  '+w.pct+'%',w.pct>=60?'up':w.pct<=40?'down':''):kbox(t,'–');
+ const games=hits.slice(0,20);
+ put($('#sheet-body'),
+  h('div',{class:'ph'},h('div',{class:'pface lg'},pic),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}))),
+  h('div',{class:'pchips'},stats.map(chip)),
+  h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:lab})),nudge(0.5),nudge(1)),
+   h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 against this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
+  h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Avg L10',L10?String(L10.avg):'–')),
+  h('div',{class:'card'},h('h2',null,'Last 20 vs '+fmt(line)),
+   games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
+    title:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'})),
+  h('div',{class:'card'},h('h2',null,'Game log'),
+   games.length?h('div',null,games.map(x=>h('div',{class:'plog'},
+    h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),text:x.v>line?'▲':x.v<line?'▼':'–'}),
+    h('div',{style:'min-width:0'},h('div',{class:'nm',text:(x.g.when||'')+' '+x.g.at+' '+x.g.opp+(x.g.result?' · '+x.g.result:'')}),
+     h('div',{class:'sub',text:lab})),h('span',{class:'net '+(x.v>line?'up':x.v<line?'down':'flat'),text:fmt(x.v)}))))
+    :empty('No games on file','ESPN has not posted a game log for this player yet.')))}
+async function showPlayer(slug,id){openSheet();const box=$('#findpop');if(box)box.hidden=true;
+ const d=await api('/api/player/'+slug+'/'+id+'.json'+qs());if(location.hash!=='#/pl/'+slug+'/'+id)return;
+ if(!d||!d.name){sheetError('Couldn’t find that player');return}S.pl=d;S.pstat=d.stat;S.pline=null;paintPlayer()}
 function paintFind(){const box=$('#findpop');if(!box)return;
  const q=(S.q||'').trim();if(q.length<3){box.hidden=true;put(box);return}
  const d=S.players;const people=(S.data&&S.data.people||[]).filter(p=>(p.name||'').toLowerCase().includes(q.toLowerCase()));
@@ -20700,6 +20868,16 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
         "function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}"
         "const want=pathForTab(t);const here=(location.pathname.replace(/\\/$/,'')||'/');"
         "if(here!==want&&!(location.hash||'').startsWith('#/'))history.pushState({pb:1},'',want+location.search);",
+        1)
+    html = html.replace(
+        r"function route(){const m=location.hash.match(/^#\/(p|s|g)\/([A-Za-z0-9]{1,24})$/);if(!m){closeSheet();return}" +
+        "\n" +
+        r" if(m[1]==='g')openGame(m[2]);else if(/^\d{1,20}$/.test(m[2])){if(m[1]==='p')openPerson(m[2]);else openSlip(m[2])}else closeSheet()}",
+        r"function route(){const pl=location.hash.match(/^#\/pl\/([a-z0-9-]{2,28})\/([0-9]{1,12})$/);if(pl){showPlayer(pl[1],pl[2]);return}" +
+        "\n" +
+        r" const m=location.hash.match(/^#\/(p|s|g)\/([A-Za-z0-9]{1,24})$/);if(!m){closeSheet();return}" +
+        "\n" +
+        r" if(m[1]==='g')openGame(m[2]);else if(/^\d{1,20}$/.test(m[2])){if(m[1]==='p')openPerson(m[2]);else openSlip(m[2])}else closeSheet()}",
         1)
     html = html.replace(
         "document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.t)));",
@@ -20764,6 +20942,8 @@ if "tabFromPath" not in DASHBOARD_HTML_V4 or "pathForTab" not in DASHBOARD_HTML_
     raise RuntimeError("dashboard website paths did not apply")
 if "Pimp's Dashboard" not in DASHBOARD_HTML_V4 or "lookbtn" not in DASHBOARD_HTML_V4:
     raise RuntimeError("dashboard intro / look picker did not apply")
+if "showPlayer" not in DASHBOARD_HTML_V4 or "#/pl/" not in DASHBOARD_HTML_V4 or "class:'pcard'" not in DASHBOARD_HTML_V4:
+    raise RuntimeError("dashboard player page did not apply")
 
 
 SITE_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -21553,8 +21733,14 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .form button,.xbtn{height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--brand);
  color:#fff;font-weight:700;cursor:pointer;font:inherit}
 .xbtn{background:#110c1b;color:var(--muted);font-size:12px}
+.akeywrap{display:flex;align-items:center;gap:4px;background:#110c1b;border:1px solid var(--line);border-radius:12px;
+ padding:4px 6px 4px 14px}
 .akey{font:800 22px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;color:#fff;
- background:#110c1b;border:1px solid var(--line);border-radius:12px;padding:12px 14px;word-break:break-all}
+ flex:1;min-width:0;word-break:break-all;padding:8px 0}
+.eyebtn{width:42px;height:42px;flex:none;border:0;background:transparent;color:var(--muted);cursor:pointer;
+ display:grid;place-items:center;border-radius:10px}
+.eyebtn:hover,.eyebtn:focus-visible{color:#fff;background:#ffffff14}
+.eyebtn svg{width:22px;height:22px;display:block}
 @media (max-width:900px){.g3,.g2{grid-template-columns:1fr}.nav{margin-left:0;width:100%}}
 </style></head><body>
 <div class="top"><a class="logo" href="/" title="Dashboard" aria-label="PIMP-BOT dashboard">{{LOGO}}</a>
@@ -21612,15 +21798,30 @@ function h(tag,props,...kids){const el=document.createElement(tag);
   else el.setAttribute(k,v===true?'':String(v))}
  for(const c of kids.flat(8)){if(c==null||c===false)continue;el.append(c instanceof Node?c:String(c))}return el}
 function put(el,...kids){el.replaceChildren(...kids.flat(8).filter(k=>k!=null&&k!==false))}
+function sv(tag,attrs,...kids){const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+ for(const k in attrs||{})el.setAttribute(k,String(attrs[k]));for(const c of kids)if(c!=null)el.append(c);return el}
+function eyeIcon(open){return open
+ ?sv('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'2','stroke-linecap':'round','stroke-linejoin':'round'},
+   sv('path',{d:'M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z'}),sv('circle',{cx:'12',cy:'12',r:'3'}))
+ :sv('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'2','stroke-linecap':'round','stroke-linejoin':'round'},
+   sv('path',{d:'M3 3l18 18'}),sv('path',{d:'M10.58 10.58a2 2 0 0 0 2.83 2.83'}),
+   sv('path',{d:'M9.88 5.09A10.9 10.9 0 0 1 12 5c7 0 11 7 11 7a19.5 19.5 0 0 1-3.22 4.18'}),
+   sv('path',{d:'M6.61 6.61A18.45 18.45 0 0 0 1 12s4 7 11 7a10.7 10.7 0 0 0 4.39-.92'}))}
+let keyOpen=false;
+function paintAccess(A){A=A||{};const key=A.key||'';const shown=keyOpen&&!!key;
+ put($('#access'),h('div',{class:'akeywrap'},
+  h('div',{class:'akey',text:shown?key:'**********'}),
+  h('button',{class:'eyebtn',type:'button','aria-label':shown?'Hide access key':'Show access key',
+   'aria-pressed':shown?'true':'false',title:shown?'Hide':'Show',onclick:()=>{keyOpen=!keyOpen;paintAccess(A)}},eyeIcon(!shown))),
+  h('div',{class:'row'},h('span',{class:'muted',text:(A.day||'')+' · used '+String(A.used||0)+' today'}),
+   h('button',{class:'xbtn',type:'button',text:'Copy',onclick:()=>{try{navigator.clipboard.writeText(key)}catch(e){}}})))}
 try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.bg){document.documentElement.dataset.bg=s.bg;if(document.body)document.body.dataset.bg=s.bg}
  if(s.accent)document.documentElement.dataset.accent=s.accent}catch(e){}
 async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
- const A=d.access||{};put($('#access'),h('div',{class:'akey',text:A.key||'—'}),
-  h('div',{class:'row'},h('span',{class:'muted',text:(A.day||'')+' · used '+String(A.used||0)+' today'}),
-   h('button',{class:'xbtn',type:'button',text:'Copy',onclick:()=>{try{navigator.clipboard.writeText(A.key||'')}catch(e){}}})));
+ paintAccess(d.access||{});
  const R=d.reads||{};put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'read clean'})),
   h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'not sure'})),
   h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})),
