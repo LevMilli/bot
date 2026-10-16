@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r35"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r36"   # shown in /help and the startup log, so you can tell which upload is live
 
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
@@ -4747,6 +4747,7 @@ import unicodedata
 ESPN_SUMMARY = "https://site.api.espn.com/apis/site/v2/sports/{path}/summary"
 ESPN_SEARCH = "https://site.web.api.espn.com/apis/common/v3/search"
 ESPN_GAMELOG = "https://site.web.api.espn.com/apis/common/v3/sports/{path}/athletes/{athlete_id}/gamelog"
+ESPN_ATHLETE = "https://site.web.api.espn.com/apis/common/v3/sports/{path}/athletes/{athlete_id}"
 ESPN_INJURIES = "https://site.api.espn.com/apis/site/v2/sports/{path}/injuries"
 LEAGUE_SLUGS = {"basketball/nba": "nba", "basketball/wnba": "wnba", "football/nfl": "nfl",
                 "football/college-football": "college-football", "baseball/mlb": "mlb", "hockey/nhl": "nhl",
@@ -19456,6 +19457,29 @@ async def dash_api_slip(request):
     return web.json_response(d) if d else dash_error(web, request, 404)
 
 
+async def espn_athlete_bio(path: str, aid: str) -> dict:
+    """Jersey, size, age, home team from ESPN's athlete page. Empty dict when ESPN didn't answer."""
+    try:
+        raw = await _get_json(ESPN_ATHLETE.format(path=path, athlete_id=aid), {})
+    except Exception:
+        return {}
+    ath = raw.get("athlete") if isinstance(raw, dict) else None
+    if not isinstance(ath, dict):
+        ath = raw if isinstance(raw, dict) else {}
+    team = ath.get("team") if isinstance(ath.get("team"), dict) else {}
+    pos = ath.get("position") if isinstance(ath.get("position"), dict) else {}
+    jersey = str(ath.get("jersey") or "").lstrip("#")[:4]
+    return {
+        "jersey": jersey if jersey.isdigit() else "",
+        "height": clip(str(ath.get("displayHeight") or ""), 12),
+        "weight": clip(str(ath.get("displayWeight") or ""), 12),
+        "age": str(ath.get("age") or "")[:3],
+        "pos": clip(str(pos.get("abbreviation") or pos.get("displayName") or ""), 8),
+        "team": clip(str(team.get("displayName") or team.get("name") or ""), 40),
+        "abbr": clip(str(team.get("abbreviation") or ""), 8),
+    }
+
+
 async def dash_api_player(request):
     from aiohttp import web
     prm, err = dash_gate(web, request)
@@ -19471,10 +19495,20 @@ async def dash_api_player(request):
         found = []
     for f in (found or [])[:4]:
         fam = FAMILY_OF_PATH.get(f.get("path") or "") or ""
-        keys = [k for k in (MAIN_STATS.get(fam) or []) if k in STATS][:3]
+        keys = [k for k in (MAIN_STATS.get(fam) or []) if k in STATS][:4]
         stats = []
+        async def _games():
+            try:
+                return await trend_games(f["path"], f["id"], need=8)
+            except Exception:
+                return []
+        async def _bio():
+            try:
+                return await espn_athlete_bio(f["path"], f["id"])
+            except Exception:
+                return {}
+        games, bio = await asyncio.gather(_games(), _bio())
         try:
-            games = await trend_games(f["path"], f["id"], need=8)
             for k in keys:
                 rows = trend_values(games, k)
                 if not rows:
@@ -19484,10 +19518,33 @@ async def dash_api_player(request):
                               "n": len(vals)})
         except Exception:
             pass
-        out.append({"name": clip(f.get("name") or "", 40), "team": clip(f.get("team") or "", 30),
+        league = design_head_league(f.get("path"))
+        aid = str(f.get("id") or "")
+        photo = f"/img/head/{league}/{aid}.png" if league and aid.isdigit() else ""
+        out.append({"name": clip(f.get("name") or "", 40),
+                    "team": clip(bio.get("team") or f.get("team") or "", 40),
+                    "abbr": clip(bio.get("abbr") or f.get("team_abbr") or "", 8),
                     "league": clip((f.get("path") or "").split("/")[-1].replace("-", " ").upper(), 24),
-                    "pos": clip(f.get("position") or "", 8), "stats": stats})
+                    "pos": clip(bio.get("pos") or f.get("position") or "", 8),
+                    "jersey": clip(bio.get("jersey") or f.get("jersey") or "", 4),
+                    "height": bio.get("height") or "", "weight": bio.get("weight") or "",
+                    "age": bio.get("age") or "", "photo": photo, "stats": stats})
     return web.json_response({"q": q, "players": out})
+
+
+async def dash_head_img(request):
+    from aiohttp import web
+    league = str(request.match_info.get("league") or "")
+    aid = str(request.match_info.get("aid") or "")
+    url = design_headshot_url(f"{league}:{aid}")
+    if not url:
+        return dash_error(web, request, 404)
+    got = await design_fetch_images([url])
+    raw = got.get(url)
+    if not raw:
+        return dash_error(web, request, 404)
+    return web.Response(body=raw, content_type="image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
 
 
 async def dash_look_img(request):
@@ -19568,6 +19625,7 @@ def dash_app(web):
                     web.get("/people", dash_index), web.get("/posters", dash_index), web.get("/more", dash_index),
                     web.get("/api/data", dash_api_data), web.get("/api/player.json", dash_api_player),
                     web.get("/health", dash_health), web.get(r"/img/look/{name:[a-z]+}.svg", dash_look_img),
+                    web.get(r"/img/head/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -20404,7 +20462,6 @@ function smokeIntro(){
  const o=$('#intro');if(!o)return;
  const skip=()=>{o.classList.add('skip');o.remove()};
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
- try{if(sessionStorage.getItem('pb-intro')){skip();return}sessionStorage.setItem('pb-intro','1')}catch(e){}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
  fit();addEventListener('resize',fit);
@@ -20425,7 +20482,6 @@ function smokeIntro(){
    g.addColorStop(1,'rgba(20,0,58,0)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
   const el=now-start;if(el>900&&brand)brand.classList.add('on');if(el>6200)o.classList.add('go');
   if(el<8400)requestAnimationFrame(tick);else skip()})(start)}
-addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
 """
 
 
@@ -20439,15 +20495,31 @@ body.v4{background:
  radial-gradient(900px 520px at 100% 0,#F5C54228,transparent 52%),
  radial-gradient(700px 380px at 50% 120%,#3b1d8a33,transparent),var(--bg)}
 body.v4 .top,body.v4 nav.tabs,body.v4 main,body.v4 footer,body.v4 .ticker{max-width:var(--max)}
-body.v4 header{box-shadow:0 22px 50px -24px #7B3FE488,0 1px 0 #F5C54233 inset;border-bottom:1px solid #F5C54222}
+body.v4 header{overflow:visible;box-shadow:0 22px 50px -24px #7B3FE488,0 1px 0 #F5C54233 inset;border-bottom:1px solid #F5C54222}
 body.v4 .brand h1{font-size:28px;letter-spacing:.16em;background:linear-gradient(90deg,#fff,#F5C542,#c4a6ff);
  -webkit-background-clip:text;background-clip:text;color:transparent}
-body.v4 .find{min-width:0;flex:1;max-width:280px;height:38px;border-radius:12px;border:1px solid var(--line);
+body.v4 .findwrap{position:relative;flex:1;max-width:340px;min-width:0;z-index:20}
+body.v4 .find{width:100%;max-width:none;height:38px;border-radius:12px;border:1px solid var(--line);
  background:var(--card);color:var(--text);padding:0 12px;outline:none}
 body.v4 .find:focus{border-color:var(--brand2);box-shadow:0 0 0 3px #7B3FE433}
+body.v4 .findpop{position:absolute;top:calc(100% + 8px);left:0;width:min(560px,84vw);z-index:30;
+ background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px;
+ box-shadow:0 28px 70px -24px #000;max-height:min(72vh,560px);overflow:auto}
+body.v4 .pcard{display:grid;grid-template-columns:78px minmax(0,1fr);gap:12px;align-items:start;
+ padding:10px;border-radius:14px;background:var(--card2);margin:0 0 8px;min-width:0}
+body.v4 .pcard:last-child{margin-bottom:0}
+body.v4 .pcard img,.pcard .ph{width:78px;height:78px;border-radius:14px;object-fit:cover;object-position:top;
+ background:#1a1028;display:block}
+body.v4 .pcard .ph{display:grid;place-items:center;font-weight:850;font-size:22px;color:#c4a6ff}
+body.v4 .pcard .pn{font-weight:800;font-size:16px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.v4 .pcard .pm{color:var(--muted);font-size:12.5px;margin-top:3px;overflow-wrap:anywhere}
+body.v4 .pstats{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+body.v4 .pstat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:5px 8px;min-width:64px}
+body.v4 .pstat b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
+body.v4 .pstat span{font-size:10.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
 body.v4 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-width:var(--max);
  margin:0 auto;padding:4px 20px 16px}
-body.v4 .kpis .card.kpi{margin:0;padding:12px 14px;box-shadow:0 16px 40px -28px #7B3FE466}
+body.v4 .kpis .card.kpi{margin:0;padding:12px 14px;box-shadow:0 16px 40px -28px #7B3FE466;grid-column:auto}
 body.v4 .card{border-radius:18px}
 body.v4 nav.tabs button.on:after{height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--gold),var(--brand2))}
 body.v4 .oslip{border-radius:16px}
@@ -20456,14 +20528,16 @@ body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;pad
  background:linear-gradient(90deg,#F5C542,#7B3FE4);color:#14003A;font-weight:850;font-size:11px;letter-spacing:.12em;
  text-transform:uppercase;text-decoration:none;box-shadow:0 8px 22px -12px #F5C542aa}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
- body.v4 .find{max-width:none;width:100%;order:5;flex:1 1 100%}}
+ body.v4 .findwrap{max-width:none;width:100%;order:5;flex:1 1 100%}
+ body.v4 .findpop{width:min(100vw - 24px,560px);left:0;right:auto}}
 """ + SITE_LOOK_CSS
     html = html.replace("</style>", extra_css + "</style>", 1)
     html = html.replace("<body>", '<body class="v4">', 1)
     html = html.replace(
         '  <div class="spacer"></div>\n  <button class="iconbtn" id="theme"',
-        '  <input class="find" id="find" type="search" placeholder="Find a person, slip, or player" autocomplete="off" '
-        'spellcheck="false">\n  <div class="spacer"></div>\n  <button class="lookbtn icon" id="lookbtn" type="button" '
+        '  <div class="findwrap"><input class="find" id="find" type="search" placeholder="Find a person, slip, or player" '
+        'autocomplete="off" spellcheck="false"><div class="findpop" id="findpop" hidden></div></div>\n'
+        '  <div class="spacer"></div>\n  <button class="lookbtn icon" id="lookbtn" type="button" '
         'aria-label="Background and accent" title="Your look">◐</button>\n  <button class="iconbtn" id="theme"',
         1)
     html = html.replace(
@@ -20488,22 +20562,27 @@ function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
 function pathForTab(t){return t==='overview'?'/':'/'+t}
 function matchQ(p){const q=(S.q||'').trim().toLowerCase();if(!q)return true;
  return (p.who+' '+p.what+' '+(p.platform||'')+' '+(p.id||'')).toLowerCase().includes(q)}
-function playerHits(){const q=(S.q||'').trim();if(q.length<3)return null;
- const d=S.players;if(!d)return card('Player search','',null,h('p',{class:'muted',text:'Looking up stats for “'+q+'”…'}));
- const people=(S.data&&S.data.people||[]).filter(p=>(p.name||'').toLowerCase().includes(q.toLowerCase()));
- const slips=[...(S.data&&S.data.open||[]),...(S.data&&S.data.recent||[])].filter(matchQ).slice(0,6);
- const pls=d.players||[];
- if(!pls.length&&!people.length&&!slips.length)return card('Player search','',null,empty('No match for “'+q+'”','We search the group’s slips and the same ESPN stats the bot pulls.'));
- return card('Player search','',q,h('div',null,
-  pls.map(pl=>h('div',{class:'card',style:'margin:0 0 10px;padding:12px'},h('div',{class:'row'},h('b',{text:pl.name}),
-   h('span',{class:'muted',text:(pl.team||'')+' · '+(pl.league||'')})),
-   (pl.stats||[]).length?h('div',{class:'rows'},pl.stats.map(st=>h('div',{class:'row'},h('span',{text:st.stat}),
-    h('span',null,'last ',h('b',{text:String(st.last)}),' · avg ',h('b',{text:String(st.avg)}),' over '+st.n)))):
-    h('p',{class:'muted',text:'No recent game log yet.'}))),
-  people.length?h('p',{class:'muted',text:'In this group'}):null,
+function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl.league].filter(Boolean);
+ const extra=[pl.height,pl.weight,pl.age?pl.age+' yrs':''].filter(Boolean).join(' · ');
+ const pic=pl.photo?h('img',{src:pl.photo,alt:'',width:'78',height:'78',decoding:'async'}):
+  h('div',{class:'ph',text:(pl.name||'?').trim().charAt(0).toUpperCase()});
+ const stats=(pl.stats||[]).map(st=>h('div',{class:'pstat'},h('b',{text:String(st.last)}),
+  h('span',{text:st.stat+' last'}),h('span',{text:'avg '+st.avg+' · '+st.n})));
+ return h('div',{class:'pcard'},pic,h('div',null,h('div',{class:'pn',text:pl.name}),
+  h('div',{class:'pm',text:bits.join(' · ')+(extra?' · '+extra:'')}),
+  stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'})))}
+function paintFind(){const box=$('#findpop');if(!box)return;
+ const q=(S.q||'').trim();if(q.length<3){box.hidden=true;put(box);return}
+ const d=S.players;const people=(S.data&&S.data.people||[]).filter(p=>(p.name||'').toLowerCase().includes(q.toLowerCase()));
+ const slips=[...(S.data&&S.data.open||[]),...(S.data&&S.data.recent||[])].filter(matchQ).slice(0,5);
+ const pls=(d&&d.players)||[];
+ if(!d){box.hidden=false;put(box,h('p',{class:'muted',text:'Looking up “'+q+'”…'}));return}
+ if(!pls.length&&!people.length&&!slips.length){box.hidden=false;put(box,h('p',{class:'muted',text:'No match for “'+q+'”'}));return}
+ box.hidden=false;put(box,pls.map(playerCard),
+  people.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'In this group'}):null,
   people.map(p=>h('button',{class:'nitem',type:'button',onclick:()=>go('#/p/'+p.key)},h('b',{text:p.name}),h('span',{text:p.record||''}))),
-  slips.length?h('p',{class:'muted',text:'Matching slips'}):null,
-  slips.map(p=>slipRow(p))))}
+  slips.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Matching slips'}):null,
+  slips.map(p=>slipRow(p)))}
 function renderKpis(d){const el=$('#kpis');if(!el||!d)return;
  const net=d.alltime.reduce((a,r)=>a+r.net,0);let w=0,l=0;for(const r of d.alltime){const m=r.record.split('-');w+=+m[0]||0;l+=+m[1]||0}
  const kpi=(k,v,s,c)=>h('div',{class:'card kpi'},h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}));
@@ -20524,7 +20603,7 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
         1)
     html = html.replace(
         "function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
-        "function render(){if(!S.data)return;renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);const hit=playerHits();if(hit&&el)el.prepend(hit)}",
+        "function render(){if(!S.data)return;renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);paintFind()}",
         1)
     html = html.replace(
         "function renderPeople(el,d){\n put(el,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>",
@@ -20535,13 +20614,13 @@ function renderOpen(el,d){const rows=d.open.filter(matchQ);
         "S.tab=tabFromPath();\n"
         "try{if(S.tab==='overview'){const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}}catch(e){}\n"
         "const find=$('#find');let _pq=0;if(find){find.addEventListener('input',()=>{S.q=find.value;if(S.data)render();\n"
-        " clearTimeout(_pq);const q=(S.q||'').trim();if(q.length<3){S.players=null;return}\n"
-        " _pq=setTimeout(async()=>{const d=await api('/api/player.json'+qs('q='+encodeURIComponent(q)));\n"
-        " if((S.q||'').trim()!==q)return;S.players=d||{players:[]};if(S.data)render()},280)})}\n",
+        " clearTimeout(_pq);const q=(S.q||'').trim();if(q.length<3){S.players=null;paintFind();return}\n"
+        " paintFind();_pq=setTimeout(async()=>{const d=await api('/api/player.json'+qs('q='+encodeURIComponent(q)));\n"
+        " if((S.q||'').trim()!==q)return;S.players=d||{players:[]};paintFind()},280)})}\n",
         1)
     html = html.replace(
         "function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}",
-        "function show(t){const intro=$('#intro');if(intro)intro.remove();if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}"
+        "function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}"
         "const want=pathForTab(t);const here=(location.pathname.replace(/\\/$/,'')||'/');"
         "if(here!==want&&!(location.hash||'').startsWith('#/'))history.pushState({pb:1},'',want+location.search);",
         1)
@@ -21526,27 +21605,7 @@ $('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('[data-bg]'
 $('#lookreset').addEventListener('click',()=>{try{localStorage.removeItem('pb-look')}catch(e){}
  delete document.documentElement.dataset.bg;if(document.body)delete document.body.dataset.bg;
  document.querySelectorAll('#lookgrid .looktile').forEach(b=>b.classList.remove('on'))});
-function smokeIntro(){
- const o=$('#intro');if(!o)return;
- const skip=()=>{o.classList.add('skip');o.remove()};
- if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
- try{if(sessionStorage.getItem('pb-intro')){skip();return}sessionStorage.setItem('pb-intro','1')}catch(e){}
- const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
- const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};fit();
- const spawn=()=>{const w=c.width,h=c.height;return{x:w*.5+(Math.random()-.5)*w*.28,y:h*(.78+Math.random()*.28),
-  r:50+Math.random()*160,vx:(Math.random()-.5)*.55,vy:-.45-Math.random()*1.1,a:.07+Math.random()*.14,grow:.08+Math.random()*.22}};
- const parts=Array.from({length:180},spawn);let start=performance.now();
- (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
-  const vent=x.createRadialGradient(w*.5,h*.92,10,w*.5,h*.55,h*.7);
-  vent.addColorStop(0,'rgba(123,63,228,0.28)');vent.addColorStop(.45,'rgba(20,0,58,0.12)');vent.addColorStop(1,'rgba(5,3,12,0)');
-  x.fillStyle=vent;x.fillRect(0,0,w,h);
-  for(const p of parts){p.x+=p.vx+(w*.5-p.x)*0.003;p.y+=p.vy;p.r+=p.grow;p.a*=.997;
-   if(p.y<-p.r||p.a<.02)Object.assign(p,spawn());
-   const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(220,200,255,'+p.a+')');g.addColorStop(.4,'rgba(123,63,228,'+(p.a*.55)+')');g.addColorStop(1,'rgba(20,0,58,0)');
-   x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
-  const el=now-start;if(el>900&&brand)brand.classList.add('on');if(el>6200)o.classList.add('go');
-  if(el<8400)requestAnimationFrame(tick);else skip()})(start)}
+function smokeIntro(){const o=$('#intro');if(o)o.remove()}
 addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
 load();smokeIntro();
 </script>
@@ -21728,6 +21787,8 @@ input{width:100%;height:42px;border-radius:12px;border:1px solid var(--line);bac
 .row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
 .row:first-of-type{border-top:0}.err{color:#fb7185;font-size:13px}.ok{color:var(--up)}
 code{background:#110c1b;padding:2px 7px;border-radius:8px}
+a.dlink{color:#c4a6ff;font-weight:800;text-decoration:none;border-bottom:1px solid #7B3FE488}
+a.dlink:hover{color:#fff}
 </style></head><body>
 <div class="top"><a class="logo" href="/" title="Dashboard" aria-label="PIMP-BOT dashboard">{{LOGO}}</a>
 <div class="brand">PIMP<b>-</b>BOT · ACCOUNT</div>
@@ -21755,7 +21816,9 @@ function paint(){
  if(ME&&ME.name){
   put(box,h('section',{class:'card'},h('h1',{text:'Hey, '+ME.name}),
     h('p',{class:'muted',text:ME.discord?'Discord is linked. /account in Discord signs you in here.':'Link Discord so /account signs you in and we can track access.'}),
-    ME.discord?h('p',{class:'ok',text:'Linked Discord id '+ME.discord}):h('p',null,'Run ',h('code',{text:'/account link '+ (ME.code||'')}),' in Discord.'),
+    ME.discord?h('p',{class:'ok',text:'Linked Discord id '+ME.discord}):
+     h('p',null,h('a',{class:'dlink',href:'https://discord.com/app',target:'_blank',rel:'noreferrer',text:'Link your Discord'}),
+      ' — open Discord, then run ',h('code',{text:'/account link '+ (ME.code||'')}),' in the server.'),
     h('p',{class:'muted',text:'Made '+ (ME.created||'') + (ME.seen?' · last here '+ME.seen:'')} )),
    h('section',{class:'card'},h('h2',{text:'Access log'}),
     (ME.log||[]).length?(ME.log||[]).map(x=>h('div',{class:'row'},h('span',{text:x.how}),h('span',{class:'muted',text:x.at||''}))):
@@ -21766,7 +21829,9 @@ function paint(){
      h('button',{type:'submit',text:'Save password'}))));
   return}
  put(box,h('section',{class:'card'},h('h1',{text:'Your account'}),
-   h('p',{class:'muted',text:'Make a name and password for this site. Link Discord after, then /account signs you in without typing the password.'})),
+   h('p',{class:'muted',text:'Make a name and password for this site. Link Discord after, then /account signs you in without typing the password.'}),
+   h('p',null,h('a',{class:'dlink',href:'https://discord.com/register',target:'_blank',rel:'noreferrer',text:'Link your Discord'}),
+    h('span',{class:'muted',text:' — make a Discord account (or open the app), then come back here to attach it.'}))),
   h('section',{class:'card'},h('h2',{text:'Sign in'}),
    h('form',{method:'post'},h('input',{type:'hidden',name:'op',value:'signin'}),
     ...field(null,'name','Name'),...field(null,'password','Password','password'),
@@ -21777,27 +21842,7 @@ function paint(){
     h('label',{for:'p2',text:'Password (8+ letters)'}),h('input',{id:'p2',name:'password',type:'password',minlength:'8',required:true}),
     h('button',{type:'submit',text:'Create account'}))));
 }
-function smokeIntro(){
- const o=$('#intro');if(!o)return;
- const skip=()=>{o.classList.add('skip');o.remove()};
- if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
- try{if(sessionStorage.getItem('pb-intro')){skip();return}sessionStorage.setItem('pb-intro','1')}catch(e){}
- const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
- const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};fit();
- const spawn=()=>{const w=c.width,h=c.height;return{x:w*.5+(Math.random()-.5)*w*.28,y:h*(.78+Math.random()*.28),
-  r:50+Math.random()*160,vx:(Math.random()-.5)*.55,vy:-.45-Math.random()*1.1,a:.07+Math.random()*.14,grow:.08+Math.random()*.22}};
- const parts=Array.from({length:180},spawn);let start=performance.now();
- (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
-  const vent=x.createRadialGradient(w*.5,h*.92,10,w*.5,h*.55,h*.7);
-  vent.addColorStop(0,'rgba(123,63,228,0.28)');vent.addColorStop(.45,'rgba(20,0,58,0.12)');vent.addColorStop(1,'rgba(5,3,12,0)');
-  x.fillStyle=vent;x.fillRect(0,0,w,h);
-  for(const p of parts){p.x+=p.vx+(w*.5-p.x)*0.003;p.y+=p.vy;p.r+=p.grow;p.a*=.997;
-   if(p.y<-p.r||p.a<.02)Object.assign(p,spawn());
-   const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
-   g.addColorStop(0,'rgba(220,200,255,'+p.a+')');g.addColorStop(.4,'rgba(123,63,228,'+(p.a*.55)+')');g.addColorStop(1,'rgba(20,0,58,0)');
-   x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r,0,6.3);x.fill()}
-  const el=now-start;if(el>900&&brand)brand.classList.add('on');if(el>6200)o.classList.add('go');
-  if(el<8400)requestAnimationFrame(tick);else skip()})(start)}
+function smokeIntro(){const o=$('#intro');if(o)o.remove()}
 addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
 paint();smokeIntro();
 </script>
@@ -22574,10 +22619,12 @@ def track_search_items(items: list, paths: list[str]) -> list[dict]:
             continue
         rel = (it.get("teamRelationships") or [{}])[0] or {}
         core = rel.get("core") or {}
+        jersey = str(it.get("jersey") or (it.get("uniform") or {}).get("jersey") or "").lstrip("#")[:4]
         out.append({"id": str(it.get("id")), "name": it.get("displayName") or "", "norm": norm_name(it.get("displayName")),
                     "path": path, "team": core.get("displayName") or rel.get("displayName") or "",
                     "team_abbr": core.get("abbreviation") or "", "team_id": str(core.get("id") or ""),
                     "position": str((it.get("position") or {}).get("abbreviation") or ""),
+                    "jersey": jersey if jersey.isdigit() else "",
                     "national": "national team" in str(rel.get("displayName") or "").lower()})
     return out
 
