@@ -53,7 +53,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r83"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r84"   # shown in /help and the startup log, so you can tell which upload is live
+ROADMAP_NOW = "r70"               # the idea list this upload is filling; r81 on the site was update r69
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
     ("r39", "Staff HQ access key is hidden (**********) until you tap the eyeball."),
@@ -101,6 +102,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
 ("r81", "Staff HQ can sign out one browser. A dashboard sign-in is logged as who and when, never the key. A kicked member loses the board on the next request. The scan card says sure, confirm, and failed, and a photo with two slips stays two slips."),
 ("r82", "Watchlist chips match the tickets. Kalshi rows line up yes, no, and your side. Posters name the period you picked, including a past month. Coins show the last game. Wrapped on More is only for the person signed in."),
     ("r83", "A ticket opens the same X-ray as /trend. Two players can share one last-10 chart. Rest days and the opponent's last result sit on the next game. Search takes a team name."),
+    ("r84", "Dark mode keeps the accent in the cards, backgrounds read clearly, and the home order is yours. The smoke intro plays on the phone app. The footer shows the upload and the update together."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -9501,7 +9503,7 @@ def dashboard_data(guild_id: int) -> dict:
                         "platform": clip(p["platform"] or "Kalshi", 20),
                         "ticker": clip(p["kalshi_ticker"] or "", 32),
                         "side": clip(p["kalshi_side"] or "", 8)})
-    return {"version": BOT_VERSION, "season": season["name"] if season else None, "people": dashboard_people(guild_id),
+    return {"version": BOT_VERSION, "update": ROADMAP_NOW, "season": season["name"] if season else None, "people": dashboard_people(guild_id),
             "settled24": dashboard_recent(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
@@ -12399,7 +12401,7 @@ async def deadline_nudges(client: discord.Client, now: Optional[datetime] = None
 async def status_embed(client) -> discord.Embed:
     e = discord.Embed(title="🩺 PIMP-BOT status", color=0x2ECC71)
     up = datetime.now(timezone.utc) - STARTED_AT
-    e.add_field(name="Version", value=BOT_VERSION)
+    e.add_field(name="Version", value=f"{BOT_VERSION} · update {ROADMAP_NOW}")
     e.add_field(name="Up for", value=f"{up.days}d {up.seconds // 3600}h {(up.seconds // 60) % 60}m")
     last = _last_cycle.get("at")
     e.add_field(name="Last background run", value=f"<t:{int(datetime.fromisoformat(last).timestamp())}:R>" if last else "not yet")
@@ -12482,7 +12484,7 @@ def slip_check_embed(interaction) -> discord.Embed:
         lines.append(f"✅ Last slip logged <t:{int(datetime.fromisoformat(ok).timestamp())}:R>")
     if err:
         lines.append(f"⚠️ Last problem <t:{int(datetime.fromisoformat(err[0]).timestamp())}:R>: `{clip(sec_redact(err[1]), 250)}`")
-    lines.append(f"Version **{BOT_VERSION}**")
+    lines.append(f"Version **{BOT_VERSION}** · update **{ROADMAP_NOW}**")
     e = discord.Embed(title="📸 Slip logging check", description="\n".join(lines), color=0x3498DB)
     e.set_footer(text="Still nothing? Railway → your service → Deployments → View Logs shows the full error.")
     return e
@@ -18246,7 +18248,7 @@ async def doctor_checks(client, guild_id: int, guild=None, deep: bool = True,
     """Every check, grouped into sections. `deep` also tests the Claude key with a real (1-token) call."""
     now = now or datetime.now(timezone.utc)
     up = now - STARTED_AT
-    general = [ops_check("ok", "version", f"Version **{BOT_VERSION}** · up {up.days}d {up.seconds // 3600}h")]
+    general = [ops_check("ok", "version", f"Version **{BOT_VERSION}** · update **{ROADMAP_NOW}** · up {up.days}d {up.seconds // 3600}h")]
     needs = db().execute("SELECT COUNT(*) FROM picks WHERE guild_id = ? AND status = 'open' AND auto_state LIKE 'needs:%'",
                          (guild_id,)).fetchone()[0]
     general.append(ops_check("warn", "needs", f"{needs} open slip{'s' if needs != 1 else ''} need a person to settle",
@@ -20120,30 +20122,33 @@ def dash_court(color: str, alpha: float) -> str:
 
 
 LOOK_IDS = ("court", "arena", "neoncity", "galaxy", "goldluxe", "aurora", "gridiron", "vegas",
-            "midnight", "hardwood", "neon", "carbon", "gold", "ice", "heater")
+            "midnight", "hardwood", "neon", "carbon", "gold", "ice", "heater",
+            "nightcourt", "tunnel", "crown")
 
 
 def look_svg(name: str) -> str:
     """A small illustrated scene for the look picker and the page background. Same picture in both places."""
     scenes = {
         "court": (
-            '<rect width="800" height="500" fill="#12081c"/>'
-            '<rect x="40" y="40" width="720" height="420" fill="none" stroke="#7B3FE4" stroke-width="6"/>'
-            '<line x1="400" y1="40" x2="400" y2="460" stroke="#F5C542" stroke-width="3"/>'
-            '<circle cx="400" cy="250" r="70" fill="none" stroke="#F5C542" stroke-width="4"/>'
-            '<circle cx="120" cy="250" r="55" fill="none" stroke="#7B3FE4" stroke-width="4"/>'
-            '<circle cx="680" cy="250" r="55" fill="none" stroke="#7B3FE4" stroke-width="4"/>'
-            '<path d="M40 140h90a110 110 0 0 1 0 220H40" fill="none" stroke="#c4a6ff" stroke-width="3"/>'
-            '<path d="M760 140h-90a110 110 0 0 0 0 220H760" fill="none" stroke="#c4a6ff" stroke-width="3"/>'),
+            '<rect width="800" height="500" fill="#1a0f2e"/>'
+            '<rect x="36" y="28" width="728" height="444" rx="8" fill="#24143f" stroke="#c4a6ff" stroke-width="8"/>'
+            '<line x1="400" y1="28" x2="400" y2="472" stroke="#F5C542" stroke-width="6"/>'
+            '<circle cx="400" cy="250" r="78" fill="none" stroke="#F5C542" stroke-width="7"/>'
+            '<circle cx="400" cy="250" r="16" fill="#F5C542"/>'
+            '<circle cx="118" cy="250" r="62" fill="none" stroke="#efe7ff" stroke-width="6"/>'
+            '<circle cx="682" cy="250" r="62" fill="none" stroke="#efe7ff" stroke-width="6"/>'
+            '<path d="M36 130h110a120 120 0 0 1 0 240H36" fill="none" stroke="#efe7ff" stroke-width="6"/>'
+            '<path d="M764 130h-110a120 120 0 0 0 0 240H764" fill="none" stroke="#efe7ff" stroke-width="6"/>'),
         "arena": (
-            '<rect width="800" height="500" fill="#0c0814"/>'
-            '<ellipse cx="400" cy="430" rx="280" ry="40" fill="#F5C54222"/>'
-            '<rect x="60" y="300" width="680" height="18" fill="#F5C54255"/>'
-            '<path d="M80 300 L140 80 h80 L160 300z" fill="#F5C54233"/>'
-            '<path d="M720 300 L660 80 h-80 L640 300z" fill="#F5C54233"/>'
-            '<circle cx="220" cy="70" r="28" fill="#fff6c8" opacity=".8"/>'
-            '<circle cx="400" cy="50" r="36" fill="#fff6c8"/>'
-            '<circle cx="580" cy="70" r="28" fill="#fff6c8" opacity=".8"/>'),
+            '<rect width="800" height="500" fill="#140c22"/>'
+            '<rect x="0" y="250" width="800" height="250" fill="#24143a"/>'
+            '<ellipse cx="400" cy="250" rx="340" ry="70" fill="#3a2060"/>'
+            '<ellipse cx="400" cy="250" rx="220" ry="36" fill="#F5C54255"/>'
+            '<path d="M70 250 L150 40 h70 L180 250z" fill="#F5C54266"/>'
+            '<path d="M730 250 L650 40 h-70 L620 250z" fill="#F5C54266"/>'
+            '<circle cx="200" cy="48" r="34" fill="#fff4c2"/>'
+            '<circle cx="400" cy="28" r="46" fill="#fff8dc"/>'
+            '<circle cx="600" cy="48" r="34" fill="#fff4c2"/>'),
         "neoncity": (
             '<rect width="800" height="500" fill="#12061c"/>'
             '<rect x="0" y="280" width="800" height="220" fill="#1a0a28"/>'
@@ -20198,11 +20203,15 @@ def look_svg(name: str) -> str:
             '<g fill="#9bbcff" opacity=".7"><circle cx="80" cy="60" r="1.5"/><circle cx="200" cy="90" r="1.2"/>'
             '<circle cx="340" cy="40" r="1.6"/><circle cx="700" cy="80" r="1.3"/><circle cx="120" cy="200" r="1.1"/></g>'),
         "hardwood": (
-            '<rect width="800" height="500" fill="#2a1608"/>'
-            '<g fill="#c47a3a33"><rect x="0" y="0" width="800" height="50"/><rect x="0" y="100" width="800" height="50"/>'
-            '<rect x="0" y="200" width="800" height="50"/><rect x="0" y="300" width="800" height="50"/>'
-            '<rect x="0" y="400" width="800" height="50"/></g>'
-            '<circle cx="400" cy="250" r="80" fill="none" stroke="#F5C542" stroke-width="5"/>'),
+            '<rect width="800" height="500" fill="#3a2010"/>'
+            '<g fill="#c47a3a"><rect x="0" y="0" width="800" height="46"/><rect x="0" y="92" width="800" height="46"/>'
+            '<rect x="0" y="184" width="800" height="46"/><rect x="0" y="276" width="800" height="46"/>'
+            '<rect x="0" y="368" width="800" height="46"/><rect x="0" y="460" width="800" height="40"/></g>'
+            '<g fill="#8a4b22"><rect x="0" y="46" width="800" height="46"/><rect x="0" y="138" width="800" height="46"/>'
+            '<rect x="0" y="230" width="800" height="46"/><rect x="0" y="322" width="800" height="46"/>'
+            '<rect x="0" y="414" width="800" height="46"/></g>'
+            '<circle cx="400" cy="250" r="90" fill="none" stroke="#F5C542" stroke-width="8"/>'
+            '<line x1="400" y1="40" x2="400" y2="460" stroke="#fff6" stroke-width="4"/>'),
         "neon": (
             '<rect width="800" height="500" fill="#12061c"/>'
             '<circle cx="640" cy="80" r="120" fill="#ff46be44"/>'
@@ -20226,6 +20235,31 @@ def look_svg(name: str) -> str:
             '<rect width="800" height="500" fill="#180808"/>'
             '<circle cx="560" cy="60" r="160" fill="#ff6a2044"/>'
             '<path d="M0 420 C200 300 400 460 800 280 L800 500 L0 500z" fill="#ff6a2033"/>'),
+        "nightcourt": (
+            '<rect width="800" height="500" fill="#12081f"/>'
+            '<rect x="40" y="70" width="720" height="380" fill="#5a3418"/>'
+            '<g fill="#6e4220"><rect x="40" y="70" width="720" height="36"/><rect x="40" y="142" width="720" height="36"/>'
+            '<rect x="40" y="214" width="720" height="36"/><rect x="40" y="286" width="720" height="36"/>'
+            '<rect x="40" y="358" width="720" height="36"/></g>'
+            '<rect x="70" y="100" width="660" height="320" fill="none" stroke="#fff" stroke-width="6"/>'
+            '<line x1="400" y1="100" x2="400" y2="420" stroke="#fff" stroke-width="4"/>'
+            '<circle cx="400" cy="260" r="70" fill="none" stroke="#fff" stroke-width="5"/>'
+            '<circle cx="160" cy="40" r="18" fill="#fff6c8"/><circle cx="640" cy="40" r="18" fill="#fff6c8"/>'),
+        "tunnel": (
+            '<rect width="800" height="500" fill="#1a0a32"/>'
+            '<path d="M0 0 L280 180 L280 320 L0 500z" fill="#2a1450"/>'
+            '<path d="M800 0 L520 180 L520 320 L800 500z" fill="#2a1450"/>'
+            '<rect x="280" y="180" width="240" height="140" fill="#F5C542"/>'
+            '<circle cx="400" cy="250" r="36" fill="#fff8dc"/>'
+            '<g fill="#fff6c8"><circle cx="180" cy="80" r="8"/><circle cx="220" cy="140" r="8"/>'
+            '<circle cx="620" cy="80" r="8"/><circle cx="580" cy="140" r="8"/>'
+            '<circle cx="180" cy="420" r="8"/><circle cx="620" cy="420" r="8"/></g>'),
+        "crown": (
+            '<rect width="800" height="500" fill="#2a1460"/>'
+            '<circle cx="400" cy="250" r="180" fill="#3d1d86"/>'
+            '<path d="M230 300 L260 160 L330 230 L400 120 L470 230 L540 160 L570 300z" fill="#F5C542"/>'
+            '<rect x="240" y="300" width="320" height="36" rx="8" fill="#F5C542"/>'
+            '<circle cx="400" cy="120" r="16" fill="#fff4c2"/>'),
         "default": (
             '<rect width="800" height="500" fill="#12081c"/>'
             '<rect x="70" y="60" width="660" height="380" rx="36" fill="none" stroke="#7B3FE4" stroke-width="8"/>'
@@ -21572,7 +21606,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r83';"
+    "const CACHE='pb-shell-r84';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -21894,6 +21928,7 @@ body.v4 .pchip,body.v4 .pnudge{min-height:44px}
 body.v4 .findpop{max-height:min(70dvh,680px)}
 body.v4 .rmap .rms{margin-left:6px}body.v4 .rmbits{padding-left:28px}
 body.v4 .net{animation:none}
+@media print{
  .ticker,#intro,.findwrap,nav.tabs,.kpis{display:none!important}
  .card,.rmap,.rmbits{background:#fff!important;color:#111!important;box-shadow:none!important}}
 footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:var(--faint);font-size:12.5px;display:flex;gap:12px;flex-wrap:wrap}
@@ -22082,7 +22117,12 @@ function avatar(name){const c=COLORS[hue(name)%COLORS.length];
 function robot(){const s=$('#logo svg');return s?s.cloneNode(true):''}
 function empty(title,sub){return h('div',{class:'empty'},robot(),h('b',{text:title}),sub?h('span',{text:sub}):null)}
 function skel(n,cls){return Array.from({length:n},()=>h('div',{class:'skl '+(cls||'skrow')}))}
-function card(title,cls,right,...body){return h('div',{class:'card '+(cls||'')},h('h2',null,title,right?h('span',{class:'r'},right):null),...body)}
+function card(title,cls,right,...body){const node=h('div',{class:'card '+(cls||'')},h('h2',null,title,right?h('span',{class:'r'},right):null),...body);
+ const label=typeof title==='string'?title:'';
+ const ids={'Games we’re on':'games','Profit over time':'profit','Recent results':'recent','Open tickets':'tickets',
+  'Kalshi tickets':'markets','My board':'watch','Log a slip':'log','Tonight’s board':'tonight','Logged this week':'week'};
+ const id=ids[label]||(label.indexOf('Leaderboard')===0?'board':label.indexOf('Needs')>=0?'needs':'');
+ if(id)node.setAttribute('data-home',id);return node}
 const ST={win:'WIN',loss:'LOSS',push:'PUSH',void:'VOID',open:'OPEN'};
 const stBadge=s=>h('span',{class:'st '+(ST[s]?s:'open')},ST[s]||'OPEN');
 function streakChip(s){if(!s)return null;const hot=s.startsWith('\u{1F525}'),cold=s.startsWith('\u{1F9CA}');
@@ -22269,7 +22309,7 @@ function renderMore(el,d){
   plan.length?card('Next five updates','','250',h('div',{class:'rmap'},plan)):null,
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
-  card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,'. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.')))}
+  card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,' · update ',(d.update||''),'. The first number is this file. The second is the idea list it is filling. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.')))}
 const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};
 function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}
 function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}
@@ -22286,7 +22326,7 @@ function renderTicker(d){const el=$('#ticker');if(!el)return;if(!d.ticker.length
  el.classList.add('on');el.classList.toggle('paused',tickPaused())}
 function renderMeta(d){const m=$('#meta');put(m,d.season?h('span',{class:'pill season',text:d.season}):null,
  h('span',{class:'pill'},h('span',{class:'dot'}),'Updated '+(d.updated||new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}))));
- $('#ver').textContent='PIMP-BOT '+d.version;
+ $('#ver').textContent='PIMP-BOT '+d.version+(d.update?' · update '+d.update:'');
  const live=document.querySelector('#nav button[data-t=live]');live.querySelector('.badge')?.remove();
  if(d.ticker.length)live.append(h('span',{class:'badge',text:String(d.ticker.length)}))}
 
@@ -22569,7 +22609,7 @@ SITE_LOOK_CSS += (
 )
 SITE_LOOK_CSS += "".join(
     f"html[data-bg={k}] body,body[data-bg={k}]{{background-color:#0b0714!important;"
-    f"background-image:linear-gradient(#0b0714d0,#0b0714b8),url('/img/look/{k}.svg')!important;"
+    f"background-image:linear-gradient(#0b071472,#0b071448),url('/img/look/{k}.svg')!important;"
     f"background-size:cover!important;background-position:center!important;background-repeat:no-repeat!important;"
     f"background-attachment:scroll!important}}"
     f".looktile[data-bg={k}] .sw{{background-image:url('/img/look/{k}.svg')}}"
@@ -22579,27 +22619,28 @@ SITE_LOOK_CSS += "".join(
 SITE_SMOKE_JS = r"""
 function smokeIntro(){
  const o=$('#intro');if(!o)return;
- const skip=()=>{try{localStorage.setItem('pb-intro','1')}catch(e){}o.classList.add('skip');o.remove()};
- try{if(localStorage.getItem('pb-intro')){o.remove();return}}catch(e){}
- if(navigator.standalone||matchMedia('(display-mode:standalone)').matches){skip();return}
+ const app=navigator.standalone||matchMedia('(display-mode:standalone)').matches;
+ const key=app?'pb-intro-app':'pb-intro';
+ const skip=()=>{try{localStorage.setItem(key,'1')}catch(e){}o.classList.add('skip');o.remove()};
+ try{if(localStorage.getItem(key)){o.remove();return}}catch(e){}
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
  fit();addEventListener('resize',fit);
  const spawn=(kind)=>{const w=c.width,h=c.height;const fat=kind==='fog';
   return{x:w*.5+(Math.random()-.5)*w*(fat?.55:.22),y:h*(fat?.82:.70)+(Math.random()*h*(fat?.28:.38)),
-   r:(fat?140:70)+Math.random()*(fat?220:170),vx:(Math.random()-.5)*(fat?.25:.55),
-   vy:-(fat?.12:.28)-Math.random()*(fat?.35:.85),a:(fat?.18:.10)+Math.random()*(fat?.16:.16),
-   grow:(fat?.04:.07)+Math.random()*(fat?.12:.18),ph:Math.random()*6.3,life:1}};
- const fog=Array.from({length:48},()=>spawn('fog'));
- const parts=Array.from({length:280},()=>spawn('wisp'));
+   r:(fat?140:70)+Math.random()*(fat?220:170),vx:(Math.random()-.5)*(fat?.30:.66),
+   vy:-(fat?.14:.34)-Math.random()*(fat?.42:1.02),a:(fat?.18:.10)+Math.random()*(fat?.16:.16),
+   grow:(fat?.05:.08)+Math.random()*(fat?.14:.22),ph:Math.random()*6.3,life:1}};
+ const fog=Array.from({length:58},()=>spawn('fog'));
+ const parts=Array.from({length:336},()=>spawn('wisp'));
  let start=performance.now();
  (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);
   const vent=x.createRadialGradient(w*.5,h*1.02,20,w*.5,h*.42,h*.85);
   vent.addColorStop(0,'rgba(90,40,160,0.55)');vent.addColorStop(.35,'rgba(40,10,80,0.28)');
   vent.addColorStop(.7,'rgba(12,4,28,0.12)');vent.addColorStop(1,'rgba(5,2,12,0)');
   x.fillStyle=vent;x.fillRect(0,0,w,h);
-  const draw=p=>{p.ph+=0.012;p.x+=p.vx+Math.sin(p.ph)*0.45+(w*.5-p.x)*0.0018;p.y+=p.vy;p.r+=p.grow;p.a*=.9985;
+  const draw=p=>{p.ph+=0.015;p.x+=p.vx+Math.sin(p.ph)*0.54+(w*.5-p.x)*0.0022;p.y+=p.vy;p.r+=p.grow;p.a*=.9985;
    if(p.y<-p.r||p.a<.03)Object.assign(p,spawn(p.r>160?'fog':'wisp'));
    const g=x.createRadialGradient(p.x,p.y,p.r*0.08,p.x,p.y,p.r);
    g.addColorStop(0,'rgba(210,190,255,'+(p.a*0.95)+')');
@@ -22690,6 +22731,15 @@ body.v4 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10p
  margin:0 auto;padding:4px 20px 16px}
 body.v4 .kpis .card.kpi{margin:0;padding:12px 14px;box-shadow:0 16px 40px -28px color-mix(in srgb,var(--brand) 40%,transparent);grid-column:auto}
 body.v4 .card{border-radius:18px}
+html:not([data-theme=light]) body.v4 .card{background:
+ linear-gradient(180deg,color-mix(in srgb,var(--brand) 18%,transparent),transparent 48%),
+ color-mix(in srgb,var(--card) 76%,transparent);
+ border-color:color-mix(in srgb,var(--brand) 36%,var(--line));
+ backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+@media (prefers-color-scheme:light){html:not([data-theme=dark]) body.v4 .card{background:var(--card);
+ border-color:var(--line);backdrop-filter:none;-webkit-backdrop-filter:none}}
+body.v4 .homerow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+body.v4 .homemove{display:flex;gap:6px;justify-content:flex-end;margin:0 0 8px}
 body.v4 nav.tabs button.on:after{height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--gold),var(--brand2))}
 body.v4 .oslip{border-radius:16px}
 a.staffbtn{display:none}
@@ -23054,6 +23104,26 @@ function logBox(){return h('form',{class:'logbox',onsubmit:async e=>{e.preventDe
   h('input',{name:'platform',placeholder:'PrizePicks, Kalshi…',maxlength:'24'}),
   h('button',{type:'submit',text:'Log slip'}),
   h('p',{class:'muted',text:'Same as Discord /pick. Hidden slips stay in Discord. Never a lock.'}))}
+function homeKey(){const me=S.data&&S.data.me;return 'pb-home-'+(me||'guest')}
+function homeOrder(){try{const a=JSON.parse(localStorage.getItem(homeKey())||'[]');return Array.isArray(a)?a:[]}catch(e){return []}}
+function moveHome(id,dir){const el=$('#tab-overview');if(!el)return;
+ const ids=[...el.querySelectorAll('[data-home]')].map(n=>n.dataset.home);
+ const i=ids.indexOf(id),j=i+dir;if(i<0||j<0||j>=ids.length)return;
+ const t=ids[i];ids[i]=ids[j];ids[j]=t;
+ try{localStorage.setItem(homeKey(),JSON.stringify(ids))}catch(e){}render()}
+function arrangeHome(el){if(!el)return;const order=homeOrder();
+ const kids=[...el.children].filter(n=>n.dataset&&n.dataset.home);
+ if(!kids.length)return;
+ kids.sort((a,b)=>{const ia=order.indexOf(a.dataset.home),ib=order.indexOf(b.dataset.home);return (ia<0?999:ia)-(ib<0?999:ib)});
+ if(S.arrange)kids.forEach(n=>{const tools=h('div',{class:'homemove'},
+  h('button',{type:'button',class:'tpause','aria-label':'Move up',onclick:()=>moveHome(n.dataset.home,-1)},'Up'),
+  h('button',{type:'button',class:'tpause','aria-label':'Move down',onclick:()=>moveHome(n.dataset.home,1)},'Down'));
+  n.insertBefore(tools,n.firstChild)});
+ const bar=h('div',{class:'card homerow'},
+  h('p',{class:'muted',style:'margin:0',text:'Move the home cards. Saved for this login on this device.'}),
+  h('span',null,h('button',{type:'button',class:'tpause',onclick:()=>{S.arrange=!S.arrange;render()}},S.arrange?'Done arranging':'Arrange home'),
+   S.arrange?h('button',{type:'button',class:'tpause',onclick:()=>{try{localStorage.removeItem(homeKey())}catch(e){}S.arrange=false;render()}},'Reset order'):null));
+ put(el,bar,...kids)}
 """
     html = html.replace("const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};",
                         extra_js + "const TABS={overview:renderOverview,live:renderLive,news:renderNews,open:renderOpen,people:renderPeople,posters:renderPosters,more:renderMore};",
@@ -23070,7 +23140,7 @@ function logBox(){return h('form',{class:'logbox',onsubmit:async e=>{e.preventDe
         1)
     html = html.replace(
         "function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
-        "function render(){if(!S.data)return;renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);paintFind()}",
+        "function render(){if(!S.data)return;renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);if(S.tab==='overview')arrangeHome(el);paintFind()}",
         1)
     html = html.replace(
         "function renderPeople(el,d){\n put(el,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>",
@@ -23110,7 +23180,9 @@ const LOOKS=[["court","Classic court","The original purple court"],["arena","Are
  ["neoncity","Neon city","Skyline after dark"],["galaxy","Galaxy","Stars and a nebula"],
  ["goldluxe","Gold luxe","Black and gold, high roller"],["aurora","Aurora","Northern lights drifting"],
  ["gridiron","Gridiron","Game-night turf"],["vegas","Vegas sunset","Synthwave sun and palms"],
- ["midnight","Midnight","Clean and quiet"],["hardwood","Hardwood","Warm wood floor"]];
+ ["midnight","Midnight","Clean and quiet"],["hardwood","Hardwood","Warm wood floor"],
+ ["nightcourt","Night court","Lights on a clear floor"],["tunnel","The tunnel","Walk out under the lights"],
+ ["crown","Crown","Gold on purple, easy to see"]];
 const ACCENTS=["purple","gold","green","blue","red","pink","teal","orange","ice","black"];
 const GROUP_LOOK={bg:document.documentElement.dataset.bg||(document.body&&document.body.dataset.bg)||'',
  ac:document.documentElement.dataset.accent||(document.body&&document.body.dataset.accent)||''};
@@ -23127,7 +23199,8 @@ const LOOK_SW={court:'radial-gradient(80% 80% at 20% 0,#7B3FE4aa,transparent),#1
  arena:'radial-gradient(40% 100% at 20% 0,#F5C54299,transparent),radial-gradient(40% 100% at 80% 0,#F5C54266,transparent),#12081c',
  neoncity:'linear-gradient(#1a1038,#c45cff33),#12061c',galaxy:'radial-gradient(circle at 70% 30%,#7B3FE4,#070614)',
  goldluxe:'linear-gradient(135deg,#1a1408,#F5C54255)',aurora:'linear-gradient(#0a1824,#34d39966)',
- gridiron:'linear-gradient(#0a1a10,#1a5c32aa)',vegas:'linear-gradient(#1a0a28,#F5C542)',midnight:'linear-gradient(#0a1024,#070814)'};
+ gridiron:'linear-gradient(#0a1a10,#1a5c32aa)',vegas:'linear-gradient(#1a0a28,#F5C542)',midnight:'linear-gradient(#0a1024,#070814)',
+ nightcourt:'linear-gradient(#1a1030,#c47a3a)',tunnel:'linear-gradient(#14003A,#F5C54288)',crown:'radial-gradient(circle,#F5C542,#3b1d8a)'};
 function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();const def=!s.bg;
  put(box,h('button',{class:'looktile'+(def?' on':''),type:'button','data-reset':'1'},
   h('i',{class:'sw'},h('img',{src:'/img/look/default.svg',alt:'',decoding:'async'})),h('b',{text:'Group default'}),
@@ -23527,7 +23600,7 @@ def boot_notice(prev_ver: str, gap_sec: Optional[int], planned: bool) -> Optiona
     down = gap_sec is not None and gap_sec >= 180
     if not new and not down:
         return None
-    bits = [f"🛠️ **PIMP-BOT is live · {BOT_VERSION}**"]
+    bits = [f"🛠️ **PIMP-BOT is live · {BOT_VERSION} · update {ROADMAP_NOW}**"]
     if down:
         bits.append("Back from an update." if planned else f"Was down about {bot_gap_words(gap_sec)}.")
     if new:
@@ -24050,6 +24123,7 @@ def staff_ops(uid: int) -> dict:
         "blacklist": [x for x in blacklist if isinstance(x, dict)][:20],
         "hits": hits, "log": log_rows[:12], "announce": anns, "crew": crew, "pending": pending,
         "crashes": [x for x in crashes if isinstance(x, dict)][:12], "version": BOT_VERSION,
+        "update": ROADMAP_NOW,
         "access": {"key": dash_gate_code(), "day": dash_gate_state().get("day") or "",
                    "used": int(dash_gate_state().get("used") or 0)},
         "devices": [{"id": r.get("id") or "", "who": r.get("who") or "Browser", "ip": r.get("ip") or "",
@@ -24128,6 +24202,8 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <a class="navchip" href="/">Dashboard</a>
 <a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap">
+<section class="card" style="margin-bottom:12px"><h2>This upload</h2><div id="upload"></div>
+ <p class="muted">The upload is the file on Railway. The update is the idea list that file is filling. r81 was update r69. Both numbers sit on this card and on the member footer.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>Today's access key</h2><div id="access"></div>
  <p class="muted">Only staff can see this. One person uses it, we mint a fresh key for the next. It also changes at midnight. The key stays ********** until you click the eye.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>Signed-in devices</h2><div id="devices"></div>
@@ -24206,6 +24282,11 @@ try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
 async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
+ const up=$('#upload');if(up)put(up,
+  h('div',{class:'row'},h('span',{text:'Upload'}),h('b',{text:d.version||''})),
+  h('div',{class:'row'},h('span',{text:'Roadmap update'}),h('b',{text:d.update||''})),
+  h('div',{class:'row'},h('a',{class:'navchip',href:'/',text:'Open the member board'}),
+   h('button',{class:'xbtn',type:'button',text:'Copy board link',onclick:()=>{try{navigator.clipboard.writeText(location.origin+'/')}catch(e){}}})));
  paintAccess(d.access||{});paintDevices(d.devices||[]);
  const R=d.reads||{};const last=(R.slips||[])[0];
  put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'sure'})),
@@ -24269,7 +24350,8 @@ async function load(){const r=await fetch('/api/staff.json',{credentials:'same-o
 $('#annform').addEventListener('submit',e=>{e.preventDefault();const f=e.target;
  staffPost({op:'announce',text:f.text.value,when:f.when.value,channel:f.channel.value}).then(()=>{f.reset();load()})});
 const LOOKS=[["court","Classic court"],["arena","Arena lights"],["neoncity","Neon city"],["galaxy","Galaxy"],
- ["goldluxe","Gold luxe"],["aurora","Aurora"],["gridiron","Gridiron"],["vegas","Vegas sunset"],["midnight","Midnight"],["hardwood","Hardwood"]];
+ ["goldluxe","Gold luxe"],["aurora","Aurora"],["gridiron","Gridiron"],["vegas","Vegas sunset"],["midnight","Midnight"],["hardwood","Hardwood"],
+ ["nightcourt","Night court"],["tunnel","The tunnel"],["crown","Crown"]];
 const ACCENTS=["purple","gold","green","blue","red","pink","teal","orange","ice","black"];
 const GROUP_LOOK={bg:document.documentElement.dataset.bg||'',ac:document.documentElement.dataset.accent||''};
 function readLook(){try{return JSON.parse(localStorage.getItem('pb-look')||'{}')}catch(e){return {}}}
@@ -33854,8 +33936,8 @@ class PicksBot(discord.Client):
         self.scheduler_task = asyncio.create_task(self.scheduler())
 
     async def on_ready(self):
-        log.info("Logged in as %s | version %s | Claude features: %s | receipts channels: %d",
-                 self.user, BOT_VERSION, "on" if ai_enabled() else "off",
+        log.info("Logged in as %s | version %s | update %s | Claude features: %s | receipts channels: %d",
+                 self.user, BOT_VERSION, ROADMAP_NOW, "on" if ai_enabled() else "off",
                  len(self.receipt_channels))
         if not getattr(self, "_boot_said", False):
             self._boot_said = True
@@ -35509,7 +35591,7 @@ class HelpSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         f = self.sections[int(self.values[0])]
         e = discord.Embed(title=f"Help · {f.name}", description=f.value, color=BRAND)
-        e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
+        e.set_footer(text=f"PIMP-BOT version {BOT_VERSION} · update {ROADMAP_NOW}")
         await interaction.response.edit_message(embed=e)
 
 
@@ -35527,7 +35609,7 @@ async def help_cmd(interaction: discord.Interaction):
         e.add_field(name=f.name, value=f.value, inline=False)
     while sum(len(f.name) + len(f.value) for f in e.fields) + len(HELP_START) > 5500 and e.fields:
         e.remove_field(len(e.fields) - 1)
-    e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
+    e.set_footer(text=f"PIMP-BOT version {BOT_VERSION} · update {ROADMAP_NOW}")
     await interaction.response.send_message(embed=e, view=help_view(full.fields), ephemeral=True)
 
 
@@ -35609,7 +35691,7 @@ def help_embed() -> discord.Embed:
         "`/me settings` every personal switch in one panel · `/me digest` morning DM · `/hot` who the group hits on\n"
         "`/quests` weekly skill quests for coins · 🧲 stack alerts · game-day previews · duplicate-slip guard\n"
         "Admins: `/admin panel` all server switches + the bot's voice · the web dashboard got Live, Cards and Posters tabs"))
-    e.set_footer(text=f"PIMP-BOT version {BOT_VERSION}")
+    e.set_footer(text=f"PIMP-BOT version {BOT_VERSION} · update {ROADMAP_NOW}")
     for title, text in HELP_EXTRA:
         if len(e.fields) < 25:
             e.add_field(name=title, value=clip(text, 1024), inline=False)
@@ -36685,7 +36767,7 @@ async def settings_cmd(interaction: discord.Interaction):
         f"{count('SELECT COUNT(*) FROM pickem_rounds WHERE guild_id = ?')} pick'em rounds\n"
         f"Database: {size:,.0f} KB at `{DB_PATH}`"
         + ("" if DB_PATH.startswith("/data") else " ⚠️ not on the /data volume")))
-    e.set_footer(text=f"Version {BOT_VERSION}")
+    e.set_footer(text=f"Version {BOT_VERSION} · update {ROADMAP_NOW}")
     await interaction.response.send_message(embed=e, ephemeral=True, view=SettingsView(gid))
 
 
