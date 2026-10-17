@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r98"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.00"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -117,6 +117,26 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r96", "On a phone, PIMP-BOT sits below the status bar. Tap the name to open the main page."),
     ("r97", "Hold a home card and drag it. Accent names start with a capital. A profile shows week, month, and season."),
     ("r98", "On a phone the search bar tucks away as you scroll. Hold a box, then drag it."),
+    ("98.1", "Scrolling on a phone tucks the season line up with the search. The tabs stay."),
+    ("98.2", "The week boxes use a larger number and a gold edge."),
+    ("98.3", "Profit lines are thicker, and each name under the chart sits in its own chip."),
+    ("98.4", "Home cards and the week boxes show a grip mark, so a hold has a place to start."),
+    ("98.5", "The tab you are on keeps a gold mark that is easier to see."),
+    ("98.6", "Your name on People is marked in gold."),
+    ("98.7", "Saving the line on your card says Saved. It still stays on this phone."),
+    ("98.8", "A held card lifts higher, so you can see where it will land."),
+    ("98.9", "The background that is on keeps a thicker gold ring."),
+    ("99.0", "Games the group is on stack full width on a phone."),
+    ("99.1", "Open slips stack as full cards on a phone."),
+    ("99.2", "Names in a list are larger on a phone."),
+    ("99.3", "Poster pictures span the card, and the caption under them is larger."),
+    ("99.4", "More lists the last 20 notes."),
+    ("99.5", "While you scroll, the top bar stays solid so cards do not show through it."),
+    ("99.6", "Server lights on Staff HQ are larger, and each feed is its own row on a phone."),
+    ("99.7", "Staff cards use the same purple glass as the member board."),
+    ("99.8", "The season chip and the updated chip are easier to read."),
+    ("99.9", "The close button on a phone sheet stays 44 pixels, clear of the status bar."),
+    ("1.00", "This is 1.00. The phone board, the chart, the crew, and Staff HQ take the new look."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -10136,7 +10156,7 @@ def dashboard_data(guild_id: int) -> dict:
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "later": BOT_LATER,
-            "updates": [{"ver": v, "text": t} for v, t in reversed(BOT_UPDATES[-15:])],
+            "updates": [{"ver": v, "text": t} for v, t in reversed(BOT_UPDATES[-20:])],
             "week": dash_this_week(guild_id),
             "h2h": dash_h2h_board(guild_id), "weekplays": dash_week_plays(guild_id)}
 
@@ -22337,7 +22357,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r98';"
+    "const CACHE='pb-shell-100';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22905,8 +22925,8 @@ function drawChart(host,series,names,height){
   tx.textContent=new Date(t).toLocaleDateString(undefined,{month:'short',day:'numeric'});svg.append(tx)}
  lines.forEach((L,i)=>{if(!L.length)return;let d='M'+X(L[0][0]).toFixed(1)+' '+Y(L[0][1]).toFixed(1);
   for(let k=1;k<L.length;k++)d+='H'+X(L[k][0]).toFixed(1)+'V'+Y(L[k][1]).toFixed(1);d+='H'+(W-P.r);
-  const c=COLORS[i%COLORS.length];svg.append(sv('path',{d,fill:'none',stroke:c,'stroke-width':2.4,'stroke-linejoin':'round','stroke-linecap':'round'}));
-  svg.append(sv('circle',{cx:W-P.r,cy:Y(L[L.length-1][1]),r:3.8,fill:c}))});
+  const c=COLORS[i%COLORS.length];  svg.append(sv('path',{d,fill:'none',stroke:c,'stroke-width':3.2,'stroke-linejoin':'round','stroke-linecap':'round'}));
+  svg.append(sv('circle',{cx:W-P.r,cy:Y(L[L.length-1][1]),r:5,fill:c}))});
  const cursor=sv('line',{y1:P.t,y2:H-P.b,stroke:'currentColor','stroke-opacity':.3,'stroke-dasharray':'3 3',visibility:'hidden'});svg.append(cursor);
  const tip=h('div',{class:'tip'});
  svg.addEventListener('pointermove',ev=>{const r=svg.getBoundingClientRect();const px=(ev.clientX-r.left)*W/r.width;
@@ -22957,7 +22977,7 @@ function gamesCount(d){const n=d.games.filter(g=>g.state==='in').length;return n
 
 /* ---------- tabs ---------- */
 function whatsNew(d){const v=d.version||'';let seen='';try{seen=localStorage.getItem('pb-seen')||''}catch(e){}
- if(!v||seen===v)return null;const lines=(d.updates||[]).slice(0,3);
+ if(!v||seen===v)return null;const lines=(d.updates||[]).slice(0,5);
  return card("What's new",'',v,h('div',null,lines.map(u=>h('p',{class:'muted',style:'margin:4px 0',text:u.ver+' · '+u.text})),
   h('button',{type:'button',class:'tpause',style:'margin-top:8px',onclick:()=>{try{localStorage.setItem('pb-seen',v)}catch(e){}render()}},'Got it')))}
 function pinBoard(){const xs=pins().slice(0,10);if(!xs.length)return null;
@@ -23012,7 +23032,7 @@ function renderPeople(el,d){
   return S.pf==='up'?p.net>0:S.pf==='down'?p.net<0:S.pf==='flat'?p.net===0:true});
  put(el,card('The crew','',seg,rows.length?h('div',{class:'grid'},rows.map(p=>
   h('button',{class:'tile',type:'button',onclick:()=>go('#/p/'+p.key)},imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
-   h('div',{class:'cap'},h('b',{text:p.name}),String(d.me)===String(p.key)?h('span',{class:'chip',text:'You'}):null,h('span',{class:tone(p.net)},money(p.net))),
+   h('div',{class:'cap'},h('b',{text:p.name}),String(d.me)===String(p.key)?h('span',{class:'chip you',text:'You'}):null,h('span',{class:tone(p.net)},money(p.net))),
    h('div',{class:'wins'},[['Week',(p.span||{}).week],['Month',(p.span||{}).month],['Season',(p.span||{}).season]].map(([k,n])=>h('span',{class:tone(n||0),text:k+' '+money(n||0)}))),
    p.edge&&p.edge.best?h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:'Best '+(p.edge.best.name||'')}),h('span',{class:tone(p.edge.best.net),text:money(p.edge.best.net)}),h('span',{text:'Worst '+(p.edge.worst&&p.edge.worst.name||'')}),h('span',{class:tone(p.edge.worst&&p.edge.worst.net),text:money((p.edge.worst&&p.edge.worst.net)||0)})):null,
    h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))))
@@ -23066,7 +23086,7 @@ function renderMore(el,d){
    h('div',{class:'rms',text:c.name}),h('p',{class:'muted',style:'margin:4px 0 12px;white-space:pre-wrap',text:c.text}))))):null,
   plan.length?card('Five updates','',((d.plan||[]).filter(r=>r.state==='live').length)+' live',h('div',{class:'rmap'},plan)):null,
   later.length?card('Later five','',((d.later||[]).filter(r=>r.state==='live').length)+' live',h('div',{class:'rmap'},later)):null,
-  (d.updates||[]).length?card('Changelog','','Last 15',h('div',null,(d.updates||[]).slice(0,15).map(u=>h('p',{class:'muted',style:'margin:4px 0',text:u.ver+' · '+u.text})))):null,
+  (d.updates||[]).length?card('Changelog','','Last 20',h('div',null,(d.updates||[]).slice(0,20).map(u=>h('p',{class:'muted',style:'margin:4px 0',text:u.ver+' · '+u.text})))):null,
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
   card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,' · update ',(d.update||''),'. The first number is this file. The second is the idea list it is filling. Times are Central. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.')))}
@@ -23135,14 +23155,15 @@ async function openPerson(key){openSheet();const p=await api('/api/person/'+key+
  const note=you?h('form',{class:'card',style:'margin-top:10px',onsubmit:ev=>{ev.preventDefault();
   const v=String(ev.target.note.value||'').slice(0,80);
   try{if(v)localStorage.setItem(aboutKey,v);else localStorage.removeItem(aboutKey)}catch(err){}
-  const b=ev.target.querySelector('b');if(b)b.textContent=v||'Add a line about you'}},
+  const b=ev.target.querySelector('b');if(b)b.textContent=v||'Add a line about you';
+  const btn=ev.target.querySelector('button');if(btn)btn.textContent='Saved'}},
   h('div',{class:'k',text:'About you'}),h('b',{text:about||'Add a line about you'}),
   h('input',{name:'note',maxlength:'80',value:about,placeholder:'A short line, saved on this phone only'}),
   h('button',{type:'submit',class:'tpause',text:'Save'}),
   h('p',{class:'muted',text:'Stays on this phone. It is not sent to the group.'})):null;
  put($('#sheet-body'),
   h('div',{class:'ph'},avatar(p.name),h('div',{style:'min-width:0'},h('h3',{text:p.name}),
-   h('div',{class:'sub'},p.record+' record',streakChip(p.streak),you?h('span',{class:'chip',text:'This is your card'}):null))),
+   h('div',{class:'sub'},p.record+' record',streakChip(p.streak),you?h('span',{class:'chip you',text:'This is your card'}):null))),
   h('div',{class:'kpis'},kbox('This week',money(span.week||0),tone(span.week||0)),kbox('This month',money(span.month||0),tone(span.month||0)),
    kbox('This season',money(span.season||0),tone(span.season||0)),kbox('Open now',String(p.open||0))),
   p.since?h('p',{class:'muted',text:'Logging since '+p.since}):null,
@@ -23578,8 +23599,18 @@ html:not([data-theme=light]) body.v4 .card{background:
 body.v4 .homerow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 body.v4 .homecard,body.v4 .kpis .kpi{touch-action:pan-y;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 body.v4 #kpis:empty{display:none;padding:0;margin:0}
-body.v4 .homecard.dragging,body.v4 .kpi.dragging{position:relative;z-index:6;transform:scale(1.03);
- box-shadow:0 18px 40px -16px #000;opacity:.94;pointer-events:none}
+body.v4 .homecard.dragging,body.v4 .kpi.dragging{position:relative;z-index:6;transform:scale(1.06);
+ box-shadow:0 22px 48px -12px #000;opacity:.96;pointer-events:none}
+body.v4 .homecard>h2:after,body.v4 .kpis .kpi:after{content:'⠿';color:var(--faint);font-weight:400;letter-spacing:0;text-transform:none}
+body.v4 .homecard>h2:after{margin-left:auto}
+body.v4 .kpis .kpi{position:relative}
+body.v4 .kpis .kpi:after{position:absolute;top:8px;right:10px;font-size:14px}
+body.v4 .chip.you{color:#14003A;background:var(--gold);border-color:var(--gold);font-weight:800}
+body.v4 .legend span{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
+body.v4 .pill{font-size:13px}
+body.v4 .pill.season{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 70%,transparent);background:color-mix(in srgb,var(--gold) 14%,transparent)}
+body.v4 .iconbtn.x{width:44px;height:44px}
+body.v4 .looktile.on{outline:3px solid var(--gold)}
 body.v4 nav.tabs button.on:after{height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--gold),var(--brand2))}
 body.v4 .oslip{border-radius:16px}
 a.staffbtn{display:none}
@@ -23642,11 +23673,25 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
  body.v4 .brand h1{font-size:17px;letter-spacing:.08em;white-space:nowrap}
  body.v4 .brand h1 a{display:inline-flex;align-items:center;min-height:44px}
  body.v4 .iconbtn,body.v4 .lookbtn.icon{width:44px;height:44px}
- body.v4 .brand .meta{gap:6px}body.v4 .pill{font-size:11px;padding:2px 8px}
+ body.v4 .brand .meta{gap:6px}body.v4 .pill{font-size:13px;padding:4px 10px}
  body.v4 header{display:flex;flex-direction:column}
  body.v4 nav.tabs{position:relative;left:auto;right:auto;bottom:auto;order:2;background:transparent;border-top:0;z-index:1}
  body.v4 .findwrap{order:3;max-width:none;width:100%;flex:none;padding:0 12px 10px}
- body.v4.findaway .findwrap{display:none}
+ body.v4.findaway .findwrap,body.v4.findaway .brand .meta{display:none}
+ body.v4.findaway header{background:#0b0714}
+ body.v4.findaway .logo{width:36px;height:36px}
+ body.v4.findaway .top{padding-top:2px;padding-bottom:0}
+ body.v4 nav.tabs button.on{color:var(--gold);background:color-mix(in srgb,var(--gold) 18%,transparent)}
+ body.v4 nav.tabs button.on:after{display:block;height:3px;background:var(--gold)}
+ body.v4 .kpi .v{font-size:28px}
+ body.v4 .kpis .card.kpi{border-top:2px solid color-mix(in srgb,var(--gold) 55%,transparent)}
+ body.v4 .games{display:grid;grid-template-columns:1fr;overflow:visible}
+ body.v4 .game{width:100%}
+ body.v4 .slips{flex-direction:column;overflow:visible}
+ body.v4 .oslip{flex:none;width:100%}
+ body.v4 .row .nm{font-size:17px}
+ body.v4 .img.shot,body.v4 .img.shot img{width:100%}
+ body.v4 .capline{font-size:14px}
  body.v4 .findpop{width:min(100vw - 24px,680px);left:12px;right:auto}
  body.v4 a.staffbtn{height:32px;padding:0 10px;font-size:10px;letter-spacing:.08em}}
 """ + SITE_LOOK_CSS
@@ -25061,7 +25106,8 @@ STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 .wrap{max-width:1180px;margin:0 auto;padding:18px 18px 48px}
 .g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}
 .g2{display:grid;grid-template-columns:1.4fr .9fr;gap:12px;margin-bottom:12px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px}
+.card{background:linear-gradient(180deg,color-mix(in srgb,#7B3FE4 18%,transparent),transparent 46%),var(--card);
+ border:1px solid color-mix(in srgb,#7B3FE4 36%,var(--line));border-radius:18px;padding:16px}
 h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .reads{display:flex;gap:8px}.rbox{flex:1;background:#110c1b;border-radius:14px;padding:12px;text-align:center}
 .rbox b{display:block;font-size:22px}.ok{color:var(--up)}.warn{color:var(--gold)}.bad{color:var(--down)}
@@ -25081,7 +25127,7 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .sv .item{display:flex;align-items:flex-start;gap:10px;font-size:13px;background:#110c1b;border:1px solid var(--line);
  border-radius:14px;padding:10px 12px}
 .sv .item b{display:block}.sv .item span.d{display:block;color:var(--muted);font-size:12px;margin-top:2px}
-.lamp{width:10px;height:10px;border-radius:50%;flex:none;background:var(--muted)}
+.lamp{width:14px;height:14px;border-radius:50%;flex:none;margin-top:3px;background:var(--muted)}
 .lamp.ok,.lamp.idle{background:#34d399;animation:lamp-ok 2.8s ease-in-out infinite}
 .lamp.warn,.lamp.shaky{background:#f0b429;animation:lamp-warn .32s linear infinite}
 .lamp.down{background:#fb7185;animation:none;box-shadow:none}
@@ -25104,6 +25150,7 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .eyebtn svg{width:22px;height:22px;display:block}
 @media (max-width:900px){.g3,.g2{grid-template-columns:1fr}.nav{margin-left:0;width:100%}}
 @media (max-width:720px){
+ .sv{grid-template-columns:1fr}.sv .item{padding:14px 16px}.lamp{width:16px;height:16px}
  .top{flex-direction:column;align-items:stretch;gap:8px;padding:calc(8px + env(safe-area-inset-top)) 12px 10px}
  .homebar{width:100%}
  .nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
