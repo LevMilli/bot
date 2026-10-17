@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.00"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.01"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -137,6 +137,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("99.8", "The season chip and the updated chip are easier to read."),
     ("99.9", "The close button on a phone sheet stays 44 pixels, clear of the status bar."),
     ("1.00", "This is 1.00. The phone board, the chart, the crew, and Staff HQ take the new look."),
+    ("1.01", "The four week boxes sit at the top. Drag the grip on a box to move it."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -22357,7 +22358,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-100';"
+    "const CACHE='pb-shell-101';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22983,15 +22984,18 @@ function whatsNew(d){const v=d.version||'';let seen='';try{seen=localStorage.get
 function pinBoard(){const xs=pins().slice(0,10);if(!xs.length)return null;
  return card('Pinned','',String(xs.length),h('div',{class:'watch'},xs.map(p=>h('button',{class:'wchip',type:'button',onclick:()=>{if(p.slug&&p.id)go('#/pl/'+p.slug+'/'+p.id)}},
   h('div',{class:'who',text:p.name||'Player'})))))}
+function gripEl(){return h('button',{type:'button',class:'grip','aria-label':'Move'},'⠿')}
 function kpiStrip(d){
  const w=d.week||{open:(d.open||[]).length,settled:0,net:0,coins:0};
  const tiles=[['open','Open',String(w.open),'riding right now',''],['settled','Settled',String(w.settled),'this week',''],
   ['net','Week net',money(w.net),'since Monday',tone(w.net)],['coins','Coins',Number(w.coins||0).toLocaleString(),'earned this week','']];
- let order=[];try{order=JSON.parse(localStorage.getItem('pb-kpi-'+((S.data&&S.data.me)||'guest'))||'[]')}catch(e){order=[]}
+ let order=[];try{order=JSON.parse(localStorage.getItem('pb-week-'+((S.data&&S.data.me)||'guest'))||'[]')}catch(e){order=[]}
  if(!Array.isArray(order))order=[];
  tiles.sort((a,b)=>{const ia=order.indexOf(a[0]),ib=order.indexOf(b[0]);return (ia<0?99:ia)-(ib<0?99:ib)});
- return h('div',{class:'kpis','data-home':'kpis'},tiles.map(([id,k,v,s,c])=>h('div',{class:'card kpi','data-kpi':id},
-  h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}))))}
+ return h('div',{class:'kpis','data-home':'kpis'},
+  h('div',{class:'kpihead'},h('span',{text:'This week'}),gripEl()),
+  tiles.map(([id,k,v,s,c])=>h('div',{class:'card kpi','data-kpi':id},gripEl(),
+   h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}))))}
 function renderOverview(el,d){
  const board=S.lb==='season'&&d.season?d.leaderboard:d.alltime;
  const net=d.alltime.reduce((a,r)=>a+r.net,0);let w=0,l=0;for(const r of d.alltime){const m=r.record.split('-');w+=+m[0]||0;l+=+m[1]||0}
@@ -23597,14 +23601,21 @@ html:not([data-theme=light]) body.v4 .card{background:
 @media (prefers-color-scheme:light){html:not([data-theme=dark]) body.v4 .card{background:var(--card);
  border-color:var(--line);backdrop-filter:none;-webkit-backdrop-filter:none}}
 body.v4 .homerow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-body.v4 .homecard,body.v4 .kpis .kpi{touch-action:pan-y;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+body.v4 .homecard,body.v4 .kpis .kpi{touch-action:pan-y}
 body.v4 #kpis:empty{display:none;padding:0;margin:0}
-body.v4 .homecard.dragging,body.v4 .kpi.dragging{position:relative;z-index:6;transform:scale(1.06);
- box-shadow:0 22px 48px -12px #000;opacity:.96;pointer-events:none}
-body.v4 .homecard>h2:after,body.v4 .kpis .kpi:after{content:'⠿';color:var(--faint);font-weight:400;letter-spacing:0;text-transform:none}
-body.v4 .homecard>h2:after{margin-left:auto}
-body.v4 .kpis .kpi{position:relative}
-body.v4 .kpis .kpi:after{position:absolute;top:8px;right:10px;font-size:14px}
+body.v4 .kpihead{grid-column:1 / -1;display:flex;align-items:center;justify-content:space-between;min-height:36px;padding:0 2px}
+body.v4 .kpihead span{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+body.v4 .grip{touch-action:none;width:44px;height:44px;margin:0;padding:0;border:0;border-radius:12px;background:transparent;
+ color:var(--faint);font-size:20px;line-height:1;letter-spacing:0;text-transform:none;cursor:grab;flex:none;
+ display:inline-flex;align-items:center;justify-content:center;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+body.v4 .homecard>h2 .grip{margin-left:auto;width:40px;height:40px}
+body.v4 .homecard>h2 .r{margin-left:auto}
+body.v4 .homecard>h2 .r+.grip{margin-left:4px}
+body.v4 .kpis .kpi{position:relative;padding-right:36px}
+body.v4 .kpis .kpi .grip{position:absolute;top:0;right:0;width:40px;height:40px}
+body.v4 .grip:active{color:var(--gold);cursor:grabbing}
+body.v4 .homecard.dragging,body.v4 .kpi.dragging{position:relative;z-index:6;transform:scale(1.04);
+ box-shadow:0 22px 48px -12px #000;opacity:.98;outline:2px solid var(--gold);pointer-events:none}
 body.v4 .chip.you{color:#14003A;background:var(--gold);border-color:var(--gold);font-weight:800}
 body.v4 .legend span{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
 body.v4 .pill{font-size:13px}
@@ -23683,7 +23694,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
  body.v4.findaway .top{padding-top:2px;padding-bottom:0}
  body.v4 nav.tabs button.on{color:var(--gold);background:color-mix(in srgb,var(--gold) 18%,transparent)}
  body.v4 nav.tabs button.on:after{display:block;height:3px;background:var(--gold)}
- body.v4 .kpi .v{font-size:28px}
+ body.v4 .kpi .v{font-size:22px}
  body.v4 .kpis .card.kpi{border-top:2px solid color-mix(in srgb,var(--gold) 55%,transparent)}
  body.v4 .games{display:grid;grid-template-columns:1fr;overflow:visible}
  body.v4 .game{width:100%}
@@ -24027,50 +24038,62 @@ function logBox(){return h('form',{class:'logbox',onsubmit:async e=>{e.preventDe
   h('input',{name:'platform',placeholder:'PrizePicks, Kalshi…',maxlength:'24'}),
   h('button',{type:'submit',text:'Log slip'}),
   h('p',{class:'muted',text:'Same as Discord /pick. Hidden slips stay in Discord. Never a lock.'}))}
-function homeKey(){const me=S.data&&S.data.me;return 'pb-home-'+(me||'guest')}
+function homeKey(){const me=S.data&&S.data.me;return 'pb-board-'+(me||'guest')}
 function homeOrder(){try{const a=JSON.parse(localStorage.getItem(homeKey())||'[]');return Array.isArray(a)?a:[]}catch(e){return []}}
+function placeNodes(nodes,order){if(!order.length)return nodes.slice();
+ const by=new Map(nodes.map(n=>[n.dataset.home,n]));const used=new Set();const out=[];
+ for(const id of order){const n=by.get(id);if(n&&!used.has(n)){out.push(n);used.add(n)}}
+ nodes.forEach((n,i)=>{if(used.has(n))return;out.splice(Math.min(i,out.length),0,n);used.add(n)});
+ return out}
 function homeShift(item,x,y){const el=document.querySelector('#tab-overview');if(!item||!el)return false;
  const box=item.dataset.kpi?item.parentElement:el;
  const under=document.elementFromPoint(x,y);
  const sel=item.dataset.kpi?'[data-kpi]':'[data-home]';
  const other=under&&under.closest(sel);
  if(!other||other===item||!box.contains(other))return false;
- const list=[...box.querySelectorAll(':scope > '+sel)];
- const i=list.indexOf(item),j=list.indexOf(other);if(i<0||j<0)return false;
- if(i<j)other.after(item);else other.before(item);return true}
+ const a=item.getBoundingClientRect(),b=other.getBoundingClientRect();
+ const vertical=Math.abs((b.top+b.height/2)-(a.top+a.height/2))>=Math.abs((b.left+b.width/2)-(a.left+a.width/2));
+ const before=vertical?y<b.top+b.height/2:x<b.left+b.width/2;
+ if(before){if(item!==other.previousElementSibling)other.before(item)}
+ else if(item!==other.nextElementSibling)other.after(item);
+ return true}
 function homeSave(item){const el=document.querySelector('#tab-overview');if(!item||!el)return;
  try{if(item.dataset.kpi){const ids=[...item.parentElement.querySelectorAll(':scope > [data-kpi]')].map(n=>n.dataset.kpi);
-  localStorage.setItem('pb-kpi-'+((S.data&&S.data.me)||'guest'),JSON.stringify(ids))}
+  localStorage.setItem('pb-week-'+((S.data&&S.data.me)||'guest'),JSON.stringify(ids))}
  else{const ids=[...el.querySelectorAll(':scope > [data-home]')].map(n=>n.dataset.home);
   localStorage.setItem(homeKey(),JSON.stringify(ids))}}catch(err){}}
 function arrangeHome(el){if(!el)return;const order=homeOrder();
  const kids=[...el.children].filter(n=>n.dataset&&n.dataset.home);
  if(!kids.length)return;
- kids.sort((a,b)=>{const ia=order.indexOf(a.dataset.home),ib=order.indexOf(b.dataset.home);return (ia<0?999:ia)-(ib<0?999:ib)});
- kids.forEach(n=>n.classList.add('homecard'));
- put(el,...kids);
+ const placed=placeNodes(kids,order);
+ placed.forEach(n=>{n.classList.add('homecard');
+  if(n.classList.contains('kpis'))return;
+  const title=n.querySelector(':scope > h2');
+  if(title&&!title.querySelector('.grip'))title.append(gripEl())});
+ put(el,...placed);
  if(el.dataset.drag)return;
  el.dataset.drag='1';
  let drag=null;
  const end=e=>{if(!drag)return;if(e&&e.pointerId!=null&&e.pointerId!==drag.pid)return;
-  clearTimeout(drag.arm);drag.item.classList.remove('dragging');drag.item.style.touchAction='';
-  if(drag.on)homeSave(drag.item);drag=null};
- el.addEventListener('contextmenu',e=>{if(e.target.closest('[data-home],[data-kpi]'))e.preventDefault()});
+  drag.item.classList.remove('dragging');if(drag.moved)homeSave(drag.item);drag=null};
+ el.addEventListener('contextmenu',e=>{if(e.target.closest('.grip'))e.preventDefault()});
+ el.addEventListener('touchstart',e=>{if(e.target.closest('.grip'))e.preventDefault()},{passive:false});
  el.addEventListener('pointerdown',e=>{
+  const grip=e.target.closest('.grip');
+  if(!grip||!el.contains(grip))return;
   if(e.pointerType==='mouse'&&e.button!==0)return;
-  if(e.target.closest('button,a,input,textarea,select,label'))return;
-  const tile=e.target.closest('[data-kpi]');
-  const card=e.target.closest('[data-home]');
+  const tile=grip.closest('[data-kpi]');
+  const card=grip.closest('[data-home]');
   const item=tile&&el.contains(tile)?tile:(card&&el.contains(card)?card:null);
   if(!item)return;
-  const rec={item:item,pid:e.pointerId,sx:e.clientX,sy:e.clientY,on:false,arm:null};
-  rec.arm=setTimeout(()=>{rec.on=true;item.classList.add('dragging');item.style.touchAction='none'},240);
-  drag=rec});
- el.addEventListener('pointermove',e=>{if(!drag||e.pointerId!==drag.pid)return;
-  if(!drag.on){if(Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)>36){clearTimeout(drag.arm);drag=null}return}
-  if(e.cancelable)e.preventDefault();homeShift(drag.item,e.clientX,e.clientY)},{passive:false});
- el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
- el.addEventListener('touchmove',e=>{if(drag&&drag.on&&e.cancelable)e.preventDefault()},{passive:false})}
+  e.preventDefault();
+  drag={item:item,pid:e.pointerId,sx:e.clientX,sy:e.clientY,moved:false}});
+ const move=e=>{if(!drag||e.pointerId!==drag.pid)return;
+  if(!drag.moved){if(Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)<8)return;drag.moved=true;drag.item.classList.add('dragging')}
+  if(e.cancelable)e.preventDefault();homeShift(drag.item,e.clientX,e.clientY)};
+ addEventListener('pointermove',move,{passive:false});
+ addEventListener('pointerup',end);addEventListener('pointercancel',end);
+ el.addEventListener('touchmove',e=>{if(drag&&drag.moved&&e.cancelable)e.preventDefault()},{passive:false})}
 """
     html = html.replace("const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};",
                         extra_js + "const TABS={overview:renderOverview,live:renderLive,news:renderNews,open:renderOpen,people:renderPeople,posters:renderPosters,more:renderMore};",
