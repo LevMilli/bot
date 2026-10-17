@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 r97"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 r98"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -116,6 +116,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("r95", "The player sheet keeps preseason out of the average, prints the kickoff once, and splits hitters from pitchers."),
     ("r96", "On a phone, PIMP-BOT sits below the status bar. Tap the name to open the main page."),
     ("r97", "Hold a home card and drag it. Accent names start with a capital. A profile shows week, month, and season."),
+    ("r98", "On a phone the search bar tucks away as you scroll. Hold a box, then drag it."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -22336,7 +22337,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-r97';"
+    "const CACHE='pb-shell-r98';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -23575,7 +23576,7 @@ html:not([data-theme=light]) body.v4 .card{background:
 @media (prefers-color-scheme:light){html:not([data-theme=dark]) body.v4 .card{background:var(--card);
  border-color:var(--line);backdrop-filter:none;-webkit-backdrop-filter:none}}
 body.v4 .homerow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-body.v4 .homecard,body.v4 .kpis .kpi{touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+body.v4 .homecard,body.v4 .kpis .kpi{touch-action:pan-y;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 body.v4 #kpis:empty{display:none;padding:0;margin:0}
 body.v4 .homecard.dragging,body.v4 .kpi.dragging{position:relative;z-index:6;transform:scale(1.03);
  box-shadow:0 18px 40px -16px #000;opacity:.94;pointer-events:none}
@@ -23642,8 +23643,11 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
  body.v4 .brand h1 a{display:inline-flex;align-items:center;min-height:44px}
  body.v4 .iconbtn,body.v4 .lookbtn.icon{width:44px;height:44px}
  body.v4 .brand .meta{gap:6px}body.v4 .pill{font-size:11px;padding:2px 8px}
- body.v4 .findwrap{max-width:none;width:100%;order:5;flex:1 1 100%}
- body.v4 .findpop{width:min(100vw - 24px,680px);left:0;right:auto}
+ body.v4 header{display:flex;flex-direction:column}
+ body.v4 nav.tabs{position:relative;left:auto;right:auto;bottom:auto;order:2;background:transparent;border-top:0;z-index:1}
+ body.v4 .findwrap{order:3;max-width:none;width:100%;flex:none;padding:0 12px 10px}
+ body.v4.findaway .findwrap{display:none}
+ body.v4 .findpop{width:min(100vw - 24px,680px);left:12px;right:auto}
  body.v4 a.staffbtn{height:32px;padding:0 10px;font-size:10px;letter-spacing:.08em}}
 """ + SITE_LOOK_CSS
     html = html.replace("</style>", extra_css + "</style>", 1)
@@ -23702,7 +23706,20 @@ function playerCard(pl){const bits=[pl.team,pl.pos,pl.jersey?'#'+pl.jersey:'',pl
   h('div',{class:'pm',text:bits.join(' · ')+(extra?' · '+extra:'')}),
   stats.length?h('div',{class:'pstats'},stats):h('p',{class:'muted',text:'No recent game log yet.'}))),
   h('button',{type:'button',class:'tpause',onclick:ev=>{ev.stopPropagation();togglePin(pl)}},pinOn(pl)?'Pinned':'Pin'))}
-function phoneHomeHint(){const stand=matchMedia('(display-mode:standalone)').matches||navigator.standalone;
+function placeFind(){const wrap=document.querySelector('.findwrap'),nav=$('#nav'),top=document.querySelector('.top');
+ if(!wrap||!nav||!top)return;
+ if(matchMedia('(max-width:720px)').matches){if(wrap.previousElementSibling!==nav)nav.after(wrap)}
+ else{const spacer=top.querySelector('.spacer');if(wrap.parentElement!==top)top.insertBefore(wrap,spacer||null)}}
+function watchFind(){if(watchFind.ok)return;watchFind.ok=1;let y=0;placeFind();
+ addEventListener('resize',placeFind);
+ addEventListener('scroll',()=>{if(!matchMedia('(max-width:720px)').matches){document.body.classList.remove('findaway');return}
+  const now=window.scrollY||0;const wrap=document.querySelector('.findwrap');const pop=$('#findpop');
+  const typing=wrap&&(wrap.contains(document.activeElement)||(pop&&!pop.hidden));
+  if(typing||now<16)document.body.classList.remove('findaway');
+  else if(now>y+8&&now>56)document.body.classList.add('findaway');
+  else if(now<y-8)document.body.classList.remove('findaway');
+  y=now},{passive:true})}
+function phoneHomeHint(){watchFind();const stand=matchMedia('(display-mode:standalone)').matches||navigator.standalone;
  if(stand){document.documentElement.classList.add('app');return}
  const find=$('#find');if(find&&matchMedia('(max-width:720px)').matches)find.placeholder='Player, person, or slip';
  try{if(localStorage.getItem('pb-home'))return}catch(e){}
@@ -23989,26 +24006,26 @@ function arrangeHome(el){if(!el)return;const order=homeOrder();
  put(el,...kids);
  if(el.dataset.drag)return;
  el.dataset.drag='1';
+ let drag=null;
+ const end=e=>{if(!drag)return;if(e&&e.pointerId!=null&&e.pointerId!==drag.pid)return;
+  clearTimeout(drag.arm);drag.item.classList.remove('dragging');drag.item.style.touchAction='';
+  if(drag.on)homeSave(drag.item);drag=null};
  el.addEventListener('contextmenu',e=>{if(e.target.closest('[data-home],[data-kpi]'))e.preventDefault()});
  el.addEventListener('pointerdown',e=>{
-  if(e.button!=null&&e.button!==0)return;
+  if(e.pointerType==='mouse'&&e.button!==0)return;
   if(e.target.closest('button,a,input,textarea,select,label'))return;
   const tile=e.target.closest('[data-kpi]');
   const card=e.target.closest('[data-home]');
   const item=tile&&el.contains(tile)?tile:(card&&el.contains(card)?card:null);
   if(!item)return;
-  const box=tile?item.parentElement:el;
-  const pid=e.pointerId,sx=e.clientX,sy=e.clientY;let on=false;
-  const arm=setTimeout(()=>{on=true;item.classList.add('dragging');item.style.touchAction='none';
-   try{item.setPointerCapture(pid)}catch(err){}},320);
-  const move=ev=>{if(ev.pointerId!==pid)return;
-   if(!on){if(Math.abs(ev.clientX-sx)+Math.abs(ev.clientY-sy)>14)clearTimeout(arm);return}
-   ev.preventDefault();homeShift(item,ev.clientX,ev.clientY)};
-  const up=ev=>{if(ev.pointerId!==pid)return;clearTimeout(arm);
-   item.classList.remove('dragging');item.style.touchAction='';
-   el.removeEventListener('pointermove',move);el.removeEventListener('pointerup',up);el.removeEventListener('pointercancel',up);
-   if(on)homeSave(item)};
-  el.addEventListener('pointermove',move);el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up)})}
+  const rec={item:item,pid:e.pointerId,sx:e.clientX,sy:e.clientY,on:false,arm:null};
+  rec.arm=setTimeout(()=>{rec.on=true;item.classList.add('dragging');item.style.touchAction='none'},240);
+  drag=rec});
+ el.addEventListener('pointermove',e=>{if(!drag||e.pointerId!==drag.pid)return;
+  if(!drag.on){if(Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)>36){clearTimeout(drag.arm);drag=null}return}
+  if(e.cancelable)e.preventDefault();homeShift(drag.item,e.clientX,e.clientY)},{passive:false});
+ el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
+ el.addEventListener('touchmove',e=>{if(drag&&drag.on&&e.cancelable)e.preventDefault()},{passive:false})}
 """
     html = html.replace("const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};",
                         extra_js + "const TABS={overview:renderOverview,live:renderLive,news:renderNews,open:renderOpen,people:renderPeople,posters:renderPosters,more:renderMore};",
