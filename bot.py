@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.01"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.02"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -138,6 +138,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("99.9", "The close button on a phone sheet stays 44 pixels, clear of the status bar."),
     ("1.00", "This is 1.00. The phone board, the chart, the crew, and Staff HQ take the new look."),
     ("1.01", "The four week boxes sit at the top. Drag the grip on a box to move it."),
+    ("1.02", "The crew page groups the team and the members. Discord photos sit beside names. The smoke plays every time the page opens."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -10040,18 +10041,22 @@ def dash_week_plays(guild_id: int) -> list[dict]:
     out = []
     try:
         rows = db().execute(
-            """SELECT id, bettor_name, description, created_at, hidden, revealed_at
-               FROM picks WHERE guild_id = ? ORDER BY id DESC LIMIT 40""", (guild_id,)).fetchall()
+            """SELECT * FROM picks WHERE guild_id = ? ORDER BY id DESC LIMIT 40""", (guild_id,)).fetchall()
     except Exception:
         return []
     for p in rows:
         if p["hidden"] and not p["revealed_at"]:
             continue
+        if pick_is_test(p):
+            continue
         if local_stamp(p["created_at"] or "") < start:
             continue
-        out.append({"id": p["id"], "who": clip(p["bettor_name"], 40),
-                    "what": clip(p["description"] or "", 80)})
-        if len(out) >= 8:
+        uid = p["bettor_id"]
+        key = str(uid) if uid and str(uid).isdigit() else (p["bettor_key"] if str(p["bettor_key"] or "").isdigit() else "")
+        net = None if p["status"] == "open" else round(pick_net(p), 2)
+        out.append({"id": p["id"], "who": clip(p["bettor_name"], 40), "key": key,
+                    "what": clip(p["description"] or "", 80), "net": net, "status": p["status"] or "open"})
+        if len(out) >= 12:
             break
     return out
 
@@ -16576,12 +16581,27 @@ def dash_h2h_board(guild_id: int) -> list[dict]:
     return flat[:12]
 
 
+def dash_crew_role(key: str, guild_id: int) -> str:
+    """developer, owner, admin, or mod when this Discord id is on the crew ladder."""
+    if not str(key or "").isdigit():
+        return ""
+    try:
+        return crew_role_name(int(key), guild_id) or ""
+    except Exception:
+        return ""
+
+
+def dash_dm_on(guild_id: int, key: str) -> bool:
+    return bool(key) and get_setting(guild_id, "dm_" + str(key)) == "1"
+
+
 def dashboard_people(guild_id: int) -> list[dict]:
     windows = dash_person_windows(guild_id)
     edges = dash_sport_edges(guild_id)
     blank = {"season": 0.0, "month": 0.0, "week": 0.0}
     return [{"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
-             "span": windows.get(s["key"], blank), "edge": edges.get(s["key"])}
+             "span": windows.get(s["key"], blank), "edge": edges.get(s["key"]),
+             "role": dash_crew_role(s["key"], guild_id)}
             for s in compute_stats(guild_id) if s["wins"] + s["losses"] + s["pushes"] > 0 and not s["key"].startswith("label:")]
 
 
@@ -21420,7 +21440,8 @@ def dash_person(guild_id: int, key: str) -> Optional[dict]:
                                    for p in wins],
             "sports": split(lambda p: sport_group(p["sport"]), 6), "apps": split(lambda p: p["platform"] or "Other", 4),
             "recent": [slip(p) for p in rows[:12]], "open": sum(1 for p in rows if p["status"] == "open"),
-            "since": since, "span": span,
+            "since": since, "span": span, "role": dash_crew_role(key, guild_id),
+            "dm": dash_dm_on(guild_id, key),
             "series": [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in series]}
 
 
@@ -21594,6 +21615,54 @@ async def dash_api_log(request):
     except Exception:
         pass
     return web.json_response({"ok": True, "id": pid})
+
+
+async def dash_avatar_img(request):
+    """A crew member's Discord picture, circled. Initials when Discord has no photo."""
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    uid_s = request.match_info.get("uid", "")
+    if not uid_s.isdigit():
+        return dash_error(web, request, 404)
+    uid = int(uid_s)
+    user = await known_user(bot, uid)
+    raw = await avatar_bytes(user) if user else None
+    name = ""
+    if user is not None:
+        name = str(getattr(user, "display_name", None) or getattr(user, "name", None) or "")
+    if not name:
+        name = uid_s
+
+    def draw() -> bytes:
+        img = _avatar(raw, 128, name, -1)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    try:
+        png = await asyncio.to_thread(draw)
+    except Exception:
+        log.exception("Avatar image failed")
+        return dash_error(web, request, 404)
+    return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "private, max-age=300"})
+
+
+async def dash_api_dm(request):
+    """A mod, owner, or developer opts in to a Discord profile link on their card."""
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    acct = acct_from_request(request)
+    uid = str((acct or {}).get("discord_id") or "")
+    if not uid.isdigit() or not crew_at_least(int(uid), "mod", prm["guild"]):
+        return web.json_response({"ok": False}, status=403)
+    body = await _req_json(request)
+    on = bool(body.get("on"))
+    set_setting(prm["guild"], "dm_" + uid, "1" if on else None)
+    return web.json_response({"ok": True, "on": on})
 
 
 async def dash_api_person(request):
@@ -22358,7 +22427,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-101';"
+    "const CACHE='pb-shell-102';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22420,6 +22489,8 @@ def dash_app(web):
                     web.get(r"/img/head/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
                     web.get(r"/img/face/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
+                    web.post("/api/dm.json", dash_api_dm),
+                    web.get(r"/img/ava/{uid:[0-9]{1,20}}.png", dash_avatar_img),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
                     web.get("/img/{kind}/{arg}.png", dash_image),                     web.get("/favicon.ico", dash_favicon),
@@ -22866,6 +22937,11 @@ const pct=n=>(n>0?'+':'')+(+n||0).toFixed(1)+'%';
 function hue(s){let x=0;for(const c of String(s))x=(x*31+c.charCodeAt(0))>>>0;return x}
 function avatar(name){const c=COLORS[hue(name)%COLORS.length];
  return h('div',{class:'av',style:'background:linear-gradient(135deg,'+c+','+c+'aa)','aria-hidden':'true'},(String(name||'?').trim()[0]||'?').toUpperCase())}
+function face(key,name){if(key&&/^[0-9]{2,20}$/.test(String(key))){
+ const img=h('img',{class:'ava',alt:'',width:'64',height:'64',decoding:'async'});
+ img.addEventListener('error',()=>{const n=avatar(name);if(img.parentNode)img.replaceWith(n)});
+ img.src='/img/ava/'+key+'.png'+qs();return img}
+ return avatar(name)}
 function robot(){const s=$('#logo svg');return s?s.cloneNode(true):''}
 function empty(title,sub){return h('div',{class:'empty'},robot(),h('b',{text:title}),sub?h('span',{text:sub}):null)}
 function skel(n,cls){return Array.from({length:n},()=>h('div',{class:'skl '+(cls||'skrow')}))}
@@ -22945,9 +23021,12 @@ function drawChart(host,series,names,height){
 /* ---------- pieces ---------- */
 function personRow(r,i){const medal=['\u{1F947}','\u{1F948}','\u{1F949}'][i];const link=r.key&&/^\d+$/.test(r.key);
  return h(link?'button':'div',{class:'row',type:link?'button':null,onclick:link?()=>go('#/p/'+r.key):null},
-  h('span',{class:'rk'},medal||String(i+1)),avatar(r.name),
+  h('span',{class:'rk'},medal||String(i+1)),face(r.key,r.name),
   h('div',{style:'min-width:0'},h('div',{class:'nm'},r.name,' ',streakChip(r.streak)),h('div',{class:'sub',text:r.record+(r.open?' · '+r.open+' open':'')})),
   h('span',{class:'net '+tone(r.net)},money(r.net)),h('span',{class:'roi '+tone(r.roi)},pct(r.roi)+' ROI'))}
+function weekRow(p){const net=p.net==null?h('span',{class:'net faint',text:p.status==='open'?'Open':'–'}):h('span',{class:'net '+tone(p.net)},money(p.net));
+ return h('button',{class:'weekline',type:'button',onclick:()=>go('#/s/'+p.id)},
+  face(p.key,p.who),h('div',{class:'who'},h('b',{text:p.who||''}),h('span',{text:p.what||''})),net)}
 function slipRow(p,showWho){const price=[p.cost!=null?'risk '+cash(p.cost):'',p.payout!=null?'pays '+cash(p.payout):''].filter(Boolean).join(' · ');
  const num=p.id&&String(p.what||'').indexOf('#'+p.id)<0?'#'+p.id:'';
  return h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},stBadge(p.status),
@@ -23026,36 +23105,56 @@ function renderLive(el,d){
   card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
   card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(p=>slipRow({id:p.id,who:p.who,status:p.status,net:p.net,what:'Slip #'+p.id,when:'settled today'})))
    :empty('Nothing settled in the last day','Fresh results land here.')))}
+function crewTile(p,d){return h('button',{class:'tile'+(p.role?' team':''),type:'button',onclick:()=>go('#/p/'+p.key)},
+ imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
+ h('div',{class:'cap'},h('div',{class:'nmwrap'},h('b',{text:p.name}),h('div',{class:'chips'},String(d.me)===String(p.key)?h('span',{class:'chip you',text:'You'}):null,p.role?h('span',{class:'rolechip',text:p.role}):null)),h('span',{class:tone(p.net)},money(p.net))),
+ h('div',{class:'wins'},[['Week',(p.span||{}).week],['Month',(p.span||{}).month],['Season',(p.span||{}).season]].map(([k,n])=>h('span',{class:tone(n||0),text:k+' '+money(n||0)}))),
+ p.edge&&p.edge.best?h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:'Best '+(p.edge.best.name||'')}),h('span',{class:tone(p.edge.best.net),text:money(p.edge.best.net)}),h('span',{text:'Worst '+(p.edge.worst&&p.edge.worst.name||'')}),h('span',{class:tone(p.edge.worst&&p.edge.worst.net),text:money((p.edge.worst&&p.edge.worst.net)||0)})):null,
+ h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))}
 function renderPeople(el,d){
- if(!S.pf)S.pf='all';
- const seg=h('div',{class:'seg'},[['all','All'],['up','Up'],['down','Down'],['flat','Flat']].map(([k,t])=>h('button',{type:'button',class:S.pf===k?'on':'',
-  onclick:()=>{S.pf=k;render()}},t)).concat([h('button',{type:'button',onclick:()=>{const on=!document.body.classList.contains('dense');document.body.classList.toggle('dense',on);try{localStorage.setItem('pb-dense',on?'1':'0')}catch(e){}render()}},document.body.classList.contains('dense')?'Roomy':'Compact')]));
+ if(S.pf!=='team'&&S.pf!=='members')S.pf='all';
+ const seg=h('div',{class:'seg'},[['all','All'],['team','Team'],['members','Members']].map(([k,t])=>h('button',{type:'button',class:S.pf===k?'on':'',
+  onclick:()=>{S.pf=k;render()}},t)));
  const q=(S.q||'').trim().toLowerCase();
- const rows=(d.people||[]).filter(p=>{
-  if(q&&(p.name+' '+(p.record||'')).toLowerCase().indexOf(q)<0)return false;
-  return S.pf==='up'?p.net>0:S.pf==='down'?p.net<0:S.pf==='flat'?p.net===0:true});
- put(el,card('The crew','',seg,rows.length?h('div',{class:'grid'},rows.map(p=>
-  h('button',{class:'tile',type:'button',onclick:()=>go('#/p/'+p.key)},imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
-   h('div',{class:'cap'},h('b',{text:p.name}),String(d.me)===String(p.key)?h('span',{class:'chip you',text:'You'}):null,h('span',{class:tone(p.net)},money(p.net))),
-   h('div',{class:'wins'},[['Week',(p.span||{}).week],['Month',(p.span||{}).month],['Season',(p.span||{}).season]].map(([k,n])=>h('span',{class:tone(n||0),text:k+' '+money(n||0)}))),
-   p.edge&&p.edge.best?h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:'Best '+(p.edge.best.name||'')}),h('span',{class:tone(p.edge.best.net),text:money(p.edge.best.net)}),h('span',{text:'Worst '+(p.edge.worst&&p.edge.worst.name||'')}),h('span',{class:tone(p.edge.worst&&p.edge.worst.net),text:money((p.edge.worst&&p.edge.worst.net)||0)})):null,
-   h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))))
-  :empty(d.people.length?'Nobody in that filter':'No one on the board yet',d.people.length?'Try All.':'Once someone settles a slip, their card shows up here.')),
+ const rows=(d.people||[]).filter(p=>!q||(p.name+' '+(p.record||'')+' '+(p.role||'')).toLowerCase().indexOf(q)>=0);
+ const team=rows.filter(p=>p.role),members=rows.filter(p=>!p.role);
+ const block=(title,list)=>list.length?card(title,'',String(list.length),h('div',{class:'grid'},list.map(p=>crewTile(p,d)))):null;
+ const groups=S.pf==='team'?[block('The team',team)]:S.pf==='members'?[block('Members',members)]:[block('The team',team),block('Members',members)];
+ const shown=groups.filter(Boolean);
+ const none=empty(rows.length?'Nobody in that group':'No one on the board yet',rows.length?'Try All.':'Once someone settles a slip, their card shows up here.');
+ put(el,card('The crew','',seg,shown.length?null:none),
+  ...(shown.length?shown:[]),
   (d.h2h||[]).length?card('Head to head','',null,h('div',{class:'rows'},d.h2h.map(x=>{
    const na=(d.people||[]).find(p=>(p.name||'')===x.a),nb=(d.people||[]).find(p=>(p.name||'')===x.b);
    return h('div',{class:'row'},h('div',{style:'min-width:0'},h('div',{class:'nm',text:(x.a||'')+' '+x.aw+'–'+x.bw+' '+(x.b||'')}),
     h('div',{class:'sub',text:(na?money(na.net):'–')+' · '+(nb?money(nb.net):'–')})))}))):null)}
+function stickersFor(p){const xs=[];const span=p.span||{};
+ if((span.week||0)>0)xs.push('Week up');if((span.week||0)<0)xs.push('Week down');
+ if((span.season||0)>0)xs.push('Season up');if((span.month||0)>0)xs.push('Month up');
+ if(p.edge&&p.edge.best&&p.edge.best.name)xs.push('Best '+p.edge.best.name);
+ if(p.role)xs.push(p.role);if(!xs.length)xs.push('On the board');return xs}
+function frameCard(node){node.classList.add('poster','pf-'+(S.frame||'classic'));return node}
 function renderPosters(el,d){
+ if(!S.frame){try{S.frame=localStorage.getItem('pb-frame')||'classic'}catch(e){S.frame='classic'}}
+ const frames=[['classic','Classic'],['gold','Gold'],['neon','Neon'],['ice','Ice'],['crown','Crown']];
+ const frameSeg=h('div',{class:'seg'},frames.map(([k,t])=>h('button',{type:'button',class:S.frame===k?'on':'',onclick:()=>{S.frame=k;try{localStorage.setItem('pb-frame',k)}catch(e){}render()}},t)));
  const seg=h('div',{class:'seg'},[['season','Season'],['month','Month'],['week','Week'],['last','Last month']].map(([k,t])=>{
   const on=k==='last'?(S.period==='month'&&S.back):S.period===k&&!S.back;
   return h('button',{type:'button',class:on?'on':'',onclick:()=>{if(k==='last'){S.period='month';S.back=1}else{S.period=k;S.back=0}render()}},t)}));
  const cap=S.period==='week'?'This week':S.period==='month'?(S.back?'Previous month':'Last 30 days'):'This season';
  const q='period='+(S.period||'season')+(S.back?'&back=1':'');
- put(el,card('Standings','s6',seg,shot(imgBox('standings.png',q,'No standings yet','Settle a few slips first.','Standings poster')),
-  h('p',{class:'capline',text:'Standings · '+cap})),
-  card('Cashed this week','s6',null,shot(imgBox('cashed.png','','No cashed slips this week','The next one gets its own poster.','Cashed poster')),
-  h('p',{class:'capline',text:'Cashed · this week'})),
-  card('Hot & cold players','',null,imgBox('hot.png','','Not enough graded legs yet','Once legs get graded, the hot and cold list fills in.','Hot and cold players')))}
+ const people=d.people||[];
+ put(el,
+  card('Poster style','',null,h('p',{class:'muted',style:'margin:0 0 8px'},'Pick a frame. It stays on this phone.'),frameSeg),
+  frameCard(card('Standings','s6',seg,shot(imgBox('standings.png',q,'No standings yet','Settle a few slips first.','Standings poster')),
+   h('p',{class:'capline',text:'Standings · '+cap}))),
+  frameCard(card('Cashed this week','s6',null,shot(imgBox('cashed.png','','No cashed slips this week','The next one gets its own poster.','Cashed poster')),
+   h('p',{class:'capline',text:'Cashed · this week'}))),
+  frameCard(card('Hot & cold players','',null,imgBox('hot.png','','Not enough graded legs yet','Once legs get graded, the hot and cold list fills in.','Hot and cold players'))),
+  people.length?card('Earned stickers','',String(people.length),h('div',{class:'stickers'},people.map(p=>h('div',{class:'stick'},
+   face(p.key,p.name),h('div',null,h('b',{text:p.name}),h('div',{class:'rowchips'},stickersFor(p).map(s=>h('span',{class:'chip',text:s})))))))):null,
+  people.length?card('Crew cards','',null,h('div',{class:'crewstrip'},people.slice(0,16).map(p=>h('button',{class:'mini',type:'button',onclick:()=>go('#/p/'+p.key)},
+   imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),h('b',{text:p.name}))))):null)}
 function renderMore(el,d){
  const icons={hit:'✅',miss:'❌',push:'➖'};
  const map=(d.roadmap||[]).map(r=>h('div',{class:'rmrow '+(r.state||'')},
@@ -23165,14 +23264,25 @@ async function openPerson(key){openSheet();const p=await api('/api/person/'+key+
   h('input',{name:'note',maxlength:'80',value:about,placeholder:'A short line, saved on this phone only'}),
   h('button',{type:'submit',class:'tpause',text:'Save'}),
   h('p',{class:'muted',text:'Stays on this phone. It is not sent to the group.'})):null;
+ const roles={developer:1,owner:1,admin:1,mod:1};
+ const dmLink=p.dm?h('a',{class:'dmlink',href:'https://discord.com/users/'+p.key,target:'_blank',rel:'noopener noreferrer'},'Message on Discord'):null;
+ const dmForm=you&&roles[p.role]?h('form',{class:'card',style:'margin-top:10px',onsubmit:async ev=>{ev.preventDefault();
+  const on=!!ev.target.show.checked;
+  const r=await fetch('/api/dm.json'+qs(),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:on})});
+  const d=await r.json().catch(()=>({}));
+  const btn=ev.target.querySelector('button');if(btn)btn.textContent=d&&d.ok?'Saved':'Try again'}},
+  h('div',{class:'k',text:'Message link'}),
+  h('label',{class:'dmtog'},h('input',{type:'checkbox',name:'show',checked:p.dm?true:null}),' Show a Discord message link on this card'),
+  h('button',{type:'submit',class:'tpause',text:'Save'}),
+  h('p',{class:'muted',text:'People on this board can open your Discord profile from the link.'})):null;
  put($('#sheet-body'),
-  h('div',{class:'ph'},avatar(p.name),h('div',{style:'min-width:0'},h('h3',{text:p.name}),
-   h('div',{class:'sub'},p.record+' record',streakChip(p.streak),you?h('span',{class:'chip you',text:'This is your card'}):null))),
+  h('div',{class:'ph'},face(p.key,p.name),h('div',{style:'min-width:0'},h('h3',{text:p.name}),
+   h('div',{class:'sub'},p.record+' record',streakChip(p.streak),p.role?h('span',{class:'rolechip',text:p.role}):null,you?h('span',{class:'chip you',text:'This is your card'}):null))),
   h('div',{class:'kpis'},kbox('This week',money(span.week||0),tone(span.week||0)),kbox('This month',money(span.month||0),tone(span.month||0)),
    kbox('This season',money(span.season||0),tone(span.season||0)),kbox('Open now',String(p.open||0))),
   p.since?h('p',{class:'muted',text:'Logging since '+p.since}):null,
   (p.sports&&p.sports[0])?h('p',{class:'muted',text:'Most slips · '+p.sports[0].name}):null,
-  note,
+  dmLink,note,dmForm,
   h('div',{class:'kpis'},kbox('Record',p.record),kbox('Net',money(p.net),tone(p.net)),kbox('ROI',pct(p.roi),tone(p.roi)),kbox('Legs hit',lr)),
   h('div',{class:'pgrid'},h('div',null,cardBox,p.form.length?card('Last '+p.form.length,'',null,h('div',{class:'form'},p.form.map(x=>h('i',{class:x,text:x})))):null),
    h('div',null,card('Profit over time','',null,chart(series,190)),
@@ -23444,8 +23554,8 @@ function smokeIntro(){
  const o=$('#intro');if(!o)return;
  const app=navigator.standalone||matchMedia('(display-mode:standalone)').matches;
  const key=app?'pb-intro-app-r90':'pb-intro-r90';
- const skip=()=>{try{localStorage.setItem(key,'1')}catch(e){}o.classList.add('skip');o.remove()};
- try{if(localStorage.getItem(key)){o.remove();return}}catch(e){}
+ void key;
+ const skip=()=>{o.classList.add('skip');o.remove()};
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
@@ -23622,6 +23732,40 @@ body.v4 .pill{font-size:13px}
 body.v4 .pill.season{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 70%,transparent);background:color-mix(in srgb,var(--gold) 14%,transparent)}
 body.v4 .iconbtn.x{width:44px;height:44px}
 body.v4 .looktile.on{outline:3px solid var(--gold)}
+body.v4 img.ava{width:36px;height:36px;border-radius:50%;object-fit:cover;display:block;background:var(--card2);box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 45%,transparent)}
+body.v4 .ph img.ava{width:56px;height:56px}
+body.v4 .weeklist{display:flex;flex-direction:column}
+body.v4 .weekline{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;
+ text-align:left;background:none;border:0;border-top:1px solid var(--line);color:inherit;font:inherit;padding:12px 2px;cursor:pointer}
+body.v4 .weekline:first-child{border-top:0}
+body.v4 .weekline .who b{display:block;font-size:16px;font-weight:800;white-space:normal;overflow:visible;line-height:1.25}
+body.v4 .weekline .who span{display:block;color:var(--muted);font-size:13px;margin-top:2px;white-space:normal;overflow-wrap:anywhere}
+body.v4 .weekline .net{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+body.v4 .tile.team{outline:2px solid color-mix(in srgb,var(--gold) 70%,transparent)}
+body.v4 .tile .cap{align-items:flex-start;flex-wrap:wrap}
+body.v4 .tile .nmwrap{min-width:0;display:flex;flex-direction:column;gap:4px;flex:1 1 120px}
+body.v4 .tile .cap b{white-space:normal;overflow:visible;text-overflow:clip}
+body.v4 .tile .chips{display:flex;flex-wrap:wrap;gap:4px}
+body.v4 .tile .cap.muted{flex-wrap:wrap}
+body.v4 .tile .cap.muted span{white-space:normal}
+body.v4 .wins{flex-direction:column;align-items:flex-start;gap:2px}
+body.v4 .rolechip{display:inline-flex;align-items:center;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+ color:#14003A;background:var(--gold);border-radius:99px;padding:2px 7px}
+body.v4 .dmlink{display:inline-flex;align-items:center;min-height:44px;margin:8px 0;padding:0 14px;border-radius:12px;
+ background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:800;text-decoration:none}
+body.v4 .dmtog{display:flex;align-items:center;gap:8px;margin:8px 0;min-height:44px}
+body.v4 .poster.pf-gold{box-shadow:0 0 0 2px var(--gold),0 18px 40px -18px #F5C542}
+body.v4 .poster.pf-neon{box-shadow:0 0 0 2px #c45cff,0 18px 40px -18px #c45cff}
+body.v4 .poster.pf-ice{box-shadow:0 0 0 2px #7dd3fc,0 18px 40px -18px #7dd3fc}
+body.v4 .poster.pf-crown{box-shadow:0 0 0 2px var(--gold),inset 0 0 0 1px #7B3FE4,0 18px 40px -18px #7B3FE4}
+body.v4 .stickers{display:flex;flex-direction:column;gap:8px}
+body.v4 .stick{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:8px 10px}
+body.v4 .stick b{display:block;font-size:14px}
+body.v4 .rowchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+body.v4 .crewstrip{display:flex;gap:10px;overflow:auto;padding:2px 0 8px}
+body.v4 .crewstrip .mini{flex:0 0 132px;border:0;background:none;color:inherit;text-align:left;cursor:pointer;font:inherit;padding:0}
+body.v4 .crewstrip .mini b{display:block;margin-top:6px;font-size:13px;white-space:normal}
+body.v4 .crewstrip .img{aspect-ratio:5/7;border-radius:12px;overflow:hidden}
 body.v4 nav.tabs button.on:after{height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--gold),var(--brand2))}
 body.v4 .oslip{border-radius:16px}
 a.staffbtn{display:none}
@@ -23732,7 +23876,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
     html = html.replace('href="/?v=2">Classic view</a>',
                         'href="/?v=3">Classic view</a><a href="/?v=2">v2</a><a href="/?v=1">v1</a>')
     extra_js = r"""
-try{if(localStorage.getItem('pb-dense')==='1')document.body.classList.add('dense')}catch(e){}
+try{localStorage.removeItem('pb-dense')}catch(e){}
 function tabFromPath(){const p=(location.pathname||'/').replace(/\/$/,'')||'/';
  return ({'/':'overview','/app':'overview','/live':'live','/news':'news','/open':'open','/people':'people','/posters':'posters','/more':'more'}[p]||'overview')}
 function pathForTab(t){return t==='overview'?'/':'/'+t}
@@ -23768,6 +23912,10 @@ function placeFind(){const wrap=document.querySelector('.findwrap'),nav=$('#nav'
  else{const spacer=top.querySelector('.spacer');if(wrap.parentElement!==top)top.insertBefore(wrap,spacer||null)}}
 function watchFind(){if(watchFind.ok)return;watchFind.ok=1;let y=0;placeFind();
  addEventListener('resize',placeFind);
+ const find=$('#find');if(find)find.addEventListener('focus',()=>{S.findOff=0;paintFind()});
+ addEventListener('pointerdown',e=>{const wrap=document.querySelector('.findwrap');const pop=$('#findpop');
+  if(!wrap||!pop||pop.hidden)return;if(wrap.contains(e.target))return;
+  S.findOff=1;pop.hidden=true;if(find)find.blur()});
  addEventListener('scroll',()=>{if(!matchMedia('(max-width:720px)').matches){document.body.classList.remove('findaway');return}
   const now=window.scrollY||0;const wrap=document.querySelector('.findwrap');const pop=$('#findpop');
   const typing=wrap&&(wrap.contains(document.activeElement)||(pop&&!pop.hidden));
@@ -23944,7 +24092,7 @@ async function showPlayer(slug,id){openSheet();const box=$('#findpop');if(box)bo
  if(!d||!d.name){sheetError('Couldn’t find that player');return}S.pl=d;S.pair=null;S.pstat=d.stat;S.pline=null;S.hi='';
  try{const saved=localStorage.getItem('pb-pstat:'+slug+'/'+id);if(saved&&(d.stats||[]).some(s=>s.key===saved))S.pstat=saved}catch(e){}
  paintPlayer()}
-function paintFind(){const box=$('#findpop');if(!box)return;
+function paintFind(){const box=$('#findpop');if(!box)return;if(S.findOff){box.hidden=true;return}
  const q=(S.q||'').trim();const digits=/^[0-9]{1,10}$/.test(q);
  if(q.length<3&&!digits){const saved=pins();
   if(q.length){box.hidden=false;put(box,h('p',{class:'muted',style:'margin:8px 4px',text:'Type at least 3 letters.'}),
@@ -24105,7 +24253,7 @@ function arrangeHome(el){if(!el)return;const order=homeOrder();
         "  card('My board','',null,watchList()),\n"
         "  card('Log a slip','',null,logBox()),\n"
         "  card('Tonight’s board','s6',null,wide(imgBox('board.png','','No board yet','The board fills in from open slips.','Tonight’s board'))),\n"
-        "  (d.weekplays&&d.weekplays.length)?card('Logged this week','',String(d.weekplays.length),h('div',{class:'rows'},d.weekplays.map(p=>h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},h('div',{style:'min-width:0'},h('div',{class:'nm',text:p.who}),h('div',{class:'sub',text:p.what})))))):null,\n"
+        "  (d.weekplays&&d.weekplays.length)?card('Logged this week','',String(d.weekplays.length),h('div',{class:'weeklist'},d.weekplays.map(weekRow))):null,\n"
         "  card('Recent results','s5',null,boardBar(d),d.recent.filter(p=>boardPick(p,true)).length?h('div',{class:'rows'},d.recent.filter(p=>boardPick(p,true)).slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
         1)
     html = html.replace(
@@ -24120,7 +24268,7 @@ function arrangeHome(el){if(!el)return;const order=homeOrder();
         "try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}\n",
         "S.tab=tabFromPath();\n"
         "try{if(S.tab==='overview'){const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}}catch(e){}\n"
-        "const find=$('#find');let _pq=0;if(find){find.addEventListener('input',()=>{S.q=find.value;if(S.data)render();\n"
+        "const find=$('#find');let _pq=0;if(find){find.addEventListener('input',()=>{S.findOff=0;S.q=find.value;if(S.data)render();\n"
         " clearTimeout(_pq);const q=(S.q||'').trim();if(q.length<3){S.players=null;paintFind();return}\n"
         " paintFind();_pq=setTimeout(async()=>{const d=await api('/api/player.json'+qs('q='+encodeURIComponent(q)));\n"
         " if((S.q||'').trim()!==q)return;S.players=d||{players:[]};paintFind()},280)})}\n",
@@ -25154,6 +25302,8 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .lamp.ok,.lamp.idle{background:#34d399;animation:lamp-ok 2.8s ease-in-out infinite}
 .lamp.warn,.lamp.shaky{background:#f0b429;animation:lamp-warn .32s linear infinite}
 .lamp.down{background:#fb7185;animation:none;box-shadow:none}
+.card.lead{border-color:#F5C54266;box-shadow:0 16px 40px -28px #F5C542}
+.card.lead h2{color:#F5C542}
 @keyframes lamp-ok{0%,100%{opacity:.45;box-shadow:0 0 0 #34d39900}50%{opacity:1;box-shadow:0 0 10px #34d399aa}}
 @keyframes lamp-warn{0%,100%{opacity:1}50%{opacity:.18}}
 .form{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
@@ -25189,21 +25339,13 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <a class="navchip" href="/">Dashboard</a>
 <a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap">
-<section class="card" style="margin-bottom:12px"><h2>This upload</h2><div id="upload"></div>
- <p class="muted">The upload is the file on Railway. The update is the idea list that file is filling. r81 was update r69. Both numbers sit on this card and on the member footer.</p></section>
-<section class="card" style="margin-bottom:12px"><h2>Today's access key</h2><div id="access"></div>
- <p class="muted">Only staff can see this. One person uses it, we mint a fresh key for the next. It also changes at midnight. The key stays ********** until you click the eye.</p></section>
-<section class="card" style="margin-bottom:12px"><h2>Signed-in devices</h2><div id="devices"></div>
- <p class="muted">Browsers that signed in with the key that's current now. Signing everyone out clears the list.</p></section>
-<section class="card" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
+<section class="card lead" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
  <p class="muted">Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
-<section class="card" style="margin-bottom:12px"><h2>Robot &amp; crashes</h2><div id="crashes"></div>
- <p class="muted">When the bot or a feed goes down, Discord gets a ping and the synopsis lands here.</p></section>
 <div class="g3">
- <section class="card"><h2>Screenshot reads · 7 days</h2><div class="reads" id="reads"></div><p class="muted" id="readsnote"></p></section>
- <section class="card"><h2>AI pool · today</h2><div id="pool"></div>
+ <section class="card lead"><h2>Screenshot reads · 7 days</h2><div class="reads" id="reads"></div><p class="muted" id="readsnote"></p></section>
+ <section class="card lead"><h2>AI pool · today</h2><div id="pool"></div>
   <p class="muted">Answers go to the first service with free uses left, top to bottom. Add keys in Railway: CEREBRAS_API_KEY, OPENROUTER_API_KEY.</p></section>
- <section class="card"><h2>Questions per person</h2><div id="quota"></div>
+ <section class="card lead"><h2>Questions per person</h2><div id="quota"></div>
   <p class="muted">Per role and activity tier. 0 is unlimited. Change here or with /staff quota.</p></section>
 </div>
 <div class="g2">
@@ -25212,6 +25354,14 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
  <section class="card"><h2>Blacklist</h2><div id="blacklist"></div>
   <p class="muted">Staff-selected players, teams, or situations. Add here or with /staff blacklist.</p></section>
 </div>
+<section class="card" style="margin-bottom:12px"><h2>This upload</h2><div id="upload"></div>
+ <p class="muted">The upload is the file on Railway. The update is the idea list that file is filling. r81 was update r69. Both numbers sit on this card and on the member footer.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Today's access key</h2><div id="access"></div>
+ <p class="muted">Only staff can see this. One person uses it, we mint a fresh key for the next. It also changes at midnight. The key stays ********** until you click the eye.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Signed-in devices</h2><div id="devices"></div>
+ <p class="muted">Browsers that signed in with the key that's current now. Signing everyone out clears the list.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Robot &amp; crashes</h2><div id="crashes"></div>
+ <p class="muted">When the bot or a feed goes down, Discord gets a ping and the synopsis lands here.</p></section>
 <div class="g3">
  <section class="card"><h2>Announcements</h2><div id="announce"></div>
   <form class="form" id="annform"><textarea name="text" maxlength="1800" placeholder="Message" required></textarea>
