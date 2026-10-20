@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.33"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.34"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -171,6 +171,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.31", "What's new on the member board stays quiet after Got it, and only comes back when there is something new."),
     ("1.32", "Just settled shows a Discord photo and a short note on the pick. A slip opens with that photo. Injury and reboot news has a filter, a photo, and the team."),
     ("1.33", "Open slip cards show the Discord photo. More adds a thousand next ideas you can sort as new, refine, and improve."),
+    ("1.34", "Player sheet averages read Last 5 Avg. and Last 10 Avg. Each game log row adds the margin, the score when we have it, and the other stats from that game."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -189,6 +190,7 @@ MEMBER_NEWS = [
     ("1.31", "What's new stays quiet after you tap Got it. It only comes back when there is something new."),
     ("1.32", "Just settled shows a Discord photo and a short note on the pick. Open a slip and the photo is there. Injury news can be filtered, with a photo and the team."),
     ("1.33", "Open slips show your Discord photo. More has a thousand next ideas you can sort as new, refine, and improve."),
+    ("1.34", "Last 5 and last 10 averages are spelled out. Each game in the log shows the margin and the other numbers from that night."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -8836,6 +8838,7 @@ async def fetch_gamelog(path: str, athlete_id: str, season: Optional[str] = None
                                             "interceptions", "batting", "pitching", "goalies")}
                 games.append({"id": eid, "date": m.get("gameDate") or "", "opp": (m.get("opponent") or {}).get(
                     "abbreviation") or "?", "opp_name": (m.get("opponent") or {}).get("displayName") or "", "at": m.get("atVs") or "vs", "result": m.get("gameResult") or "",
+                    "score": dash_event_score(m),
                     "label": label, "preseason": pre, "groups": groups})
     games.sort(key=lambda g: g["date"], reverse=True)
     seasons = []
@@ -24029,6 +24032,22 @@ def dash_sheet_keys(path: str, pos: str) -> list[str]:
     return dash_player_keys(path)
 
 
+def dash_event_score(m: dict) -> str:
+    """Final score from an ESPN game-log event, when the feed included one."""
+    if not isinstance(m, dict):
+        return ""
+    raw = re.sub(r"\s+", " ", str(m.get("score") or "")).strip()
+    if raw and raw.lower() not in {"none", "null"}:
+        return clip(raw, 18)
+    opp = m.get("opponent") if isinstance(m.get("opponent"), dict) else {}
+    team = m.get("team") if isinstance(m.get("team"), dict) else {}
+    ours = str((team or {}).get("score") or "").strip()
+    theirs = str((opp or {}).get("score") or "").strip()
+    if ours.isdigit() and theirs.isdigit():
+        return clip(f"{ours}-{theirs}", 18)
+    return ""
+
+
 def dash_game_when(g: dict) -> str:
     raw = g.get("date") or ""
     if not raw:
@@ -24056,8 +24075,10 @@ def dash_pack_games(games: list, keys: list[str], limit: int = 20) -> list[dict]
         label = str(g.get("label") or "")
         out.append({"date": g.get("date") or "", "when": dash_game_when(g),
                     "opp": clip(str(g.get("opp") or "?"), 8),
+                    "opp_name": clip(str(g.get("opp_name") or ""), 32),
                     "at": "@" if g.get("at") == "@" else "vs",
-                    "result": clip(result, 8), "vals": vals,
+                    "result": clip(result, 12), "score": clip(str(g.get("score") or ""), 18),
+                    "vals": vals,
                     "pre": bool(g.get("preseason")),
                     "ot": "OT" in result.upper() or "OT" in label.upper(),
                     "dnp": not vals})
@@ -24596,7 +24617,8 @@ async def dash_api_player_one(request):
                     xref = f"{xref} · {extra}".strip(" ·") if xref else extra
             except Exception:
                 log.debug("Cross-check skipped", exc_info=True)
-    pack_keys = keys + [k for k in ("pass_att", "rush_att", "minutes", "targets") if k in STATS and k not in keys]
+    pack_keys = keys + [k for k in ("pass_cmp", "pass_att", "pass_int", "rush_yds", "rush_att", "minutes", "targets", "threes_att")
+                        if k in STATS and k not in keys]
     packed = dash_pack_games(games, pack_keys, 30)
     stats = dash_pack_stats(packed, keys)
     default = next((s["key"] for s in stats if s["key"] != "minutes"), stats[0]["key"] if stats else "")
@@ -30649,7 +30671,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-117';"
+    "const CACHE='pb-shell-118';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -32031,14 +32053,20 @@ body.v4 .projn{text-align:center;min-width:110px}.projn b{display:block;font-siz
 body.v4 .projn span{font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
 body.v4 .pnudge{width:44px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
  color:var(--text);font-weight:800;cursor:pointer}
+body.v4 .pavg{width:auto;min-width:112px;height:auto;min-height:48px;padding:6px 14px;border-radius:12px;
+ border:1px solid var(--line);background:var(--card2);color:var(--text);cursor:pointer;
+ display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
+body.v4 .pavg span{font-size:12px;font-weight:750;color:var(--muted);white-space:nowrap}
+body.v4 .pavg b{font-size:16px;font-weight:850;font-variant-numeric:tabular-nums;line-height:1.1}
 body.v4 .pp20{display:flex;gap:5px;flex-wrap:wrap}
 body.v4 .ppg{width:34px;min-height:40px;border-radius:9px;display:grid;place-items:center;font-size:11px;font-weight:800;
  color:#fff;font-variant-numeric:tabular-nums}
 body.v4 .ppg.over{background:var(--up)}body.v4 .ppg.under{background:var(--down)}body.v4 .ppg.push{background:var(--flat)}
-body.v4 .plog{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 2px;
+body.v4 .plog{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 2px;
  border-top:1px solid var(--line)}
 body.v4 .plog:first-child{border-top:0}
 body.v4 .plog.on{background:color-mix(in srgb,var(--gold) 18%,transparent);border-radius:10px}
+body.v4 .plog .sub{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
 body.v4 .twolog{display:grid;grid-template-columns:1fr;gap:12px}
 @media(min-width:900px){body.v4 .twolog{grid-template-columns:1fr 1fr}}
 body.v4 .plog .nm{font-weight:700;white-space:normal;overflow:visible}
@@ -32321,6 +32349,49 @@ function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().revers
   kids.push(sv('text',{x:String(cx),y:String(H-10),'text-anchor':'middle','font-size':n>14?'7':'9',fill:'#a59cbc'},
    x.label||((x.g.at==='@'?'@':'v')+(x.g.opp||''))))});
  return sv('svg',{class:'pchart',viewBox:'0 0 '+W+' '+H,width:'100%',role:'img','aria-label':'Last '+n+' games vs '+fmt(line)},...kids)}
+function logNum(n){const x=Math.round(+n*10)/10;return x===Math.round(x)?String(Math.round(x)):String(x)}
+function logGap(v,line){if(v==null||isNaN(+line))return '';const d=Math.round((+v-+line)*10)/10;
+ if(Math.abs(d)<0.05)return 'On the number';const n=Math.abs(d);return (n===Math.round(n)?String(Math.round(n)):String(n))+(d>0?' over':' under')}
+const LOG_WITH={
+ pass_yds:['pass_cmp','pass_att','pass_td','pass_int','rush_yds','rush_att'],
+ pass_td:['pass_yds','pass_cmp','pass_att','pass_int'],
+ pass_cmp:['pass_att','pass_yds','pass_td','pass_int'],
+ pass_att:['pass_cmp','pass_yds','pass_td'],
+ pass_int:['pass_yds','pass_att','pass_td'],
+ rush_yds:['rush_att','rush_td','rec','rec_yds'],
+ rush_att:['rush_yds','rush_td'],
+ rush_td:['rush_yds','rush_att'],
+ rec:['targets','rec_yds','rec_td'],
+ rec_yds:['rec','targets','rec_td'],
+ rec_td:['rec','rec_yds','targets'],
+ targets:['rec','rec_yds','rec_td'],
+ points:['minutes','rebounds','assists','threes'],
+ rebounds:['minutes','points','assists','oreb'],
+ assists:['minutes','points','rebounds'],
+ threes:['threes_att','points','minutes'],
+ pra:['points','rebounds','assists','minutes'],
+ pr:['points','rebounds'],pa:['points','assists'],ra:['rebounds','assists'],
+ hits:['home_runs','rbis','runs','walks'],
+ home_runs:['hits','rbis','runs'],
+ rbis:['hits','home_runs','runs'],
+ runs:['hits','rbis','home_runs'],
+ pitcher_k:['pitching_outs','earned_runs','hits_allowed','walks_allowed'],
+ saves:['nhl_goals_allowed'],
+ goals:['nhl_assists','sog','nhl_points'],
+ nhl_points:['goals','nhl_assists','sog'],
+ minutes:['points','rebounds','assists']};
+const LOG_SHORT={
+ pass_yds:'pass',pass_td:'TD',pass_cmp:'cmp',pass_att:'att',pass_int:'INT',
+ rush_yds:'rush',rush_att:'car',rush_td:'rush TD',rec:'rec',rec_yds:'rec yds',rec_td:'rec TD',
+ targets:'tgt',points:'pts',rebounds:'reb',assists:'ast',threes:'3pm',threes_att:'3pa',
+ minutes:'min',steals:'stl',blocks:'blk',turnovers:'TO',oreb:'oreb',
+ hits:'H',home_runs:'HR',rbis:'RBI',runs:'R',walks:'BB',hitter_k:'K',
+ pitcher_k:'K',pitching_outs:'outs',earned_runs:'ER',hits_allowed:'H',walks_allowed:'BB',
+ saves:'sv',goals:'G',nhl_assists:'A',nhl_points:'pts',sog:'SOG',nhl_goals_allowed:'GA',
+ fg_made:'FG',kick_pts:'kick',tackles:'tkl',sacks:'sack',anytime_td:'TD'};
+function logMates(stat,vals){if(!vals)return '';const order=LOG_WITH[stat]||Object.keys(vals);const bits=[];
+ for(const k of order){if(k===stat||vals[k]==null)continue;const n=+vals[k];if(isNaN(n))continue;const lab=LOG_SHORT[k];if(!lab)continue;
+  bits.push(logNum(n)+' '+lab);if(bits.length>=4)break}return bits.join(' · ')}
 function statHits(games,stat){return (games||[]).map(g=>g.vals&&g.vals[stat]!=null&&!g.dnp&&!g.pre?{g,v:+g.vals[stat]}:null).filter(Boolean)}
 function togetherGames(aRows,bRows,n){const out=[];const m=Math.min(aRows.length,bRows.length,n);
  for(let i=0;i<m;i++){const a=aRows[i],b=bRows[i];
@@ -32410,9 +32481,9 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
   chipRows,
   h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:yours?'Your line':lab})),nudge(0.5),nudge(1)),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 vs this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'}),
-   h('div',{class:'projl',style:'margin-top:8px'},[['L5 avg',vals.slice(0,5)],['L10 avg',vals.slice(0,10)],['Season',vals]].filter(p=>p[1].length).map(p=>{
+   h('div',{class:'projl pavgs',style:'margin-top:10px'},[['Last 5 Avg.',vals.slice(0,5)],['Last 10 Avg.',vals.slice(0,10)],['Season Avg.',vals]].filter(p=>p[1].length).map(p=>{
     const n=Math.round(p[1].reduce((a,b)=>a+b,0)/p[1].length*10)/10;
-    return h('button',{class:'pnudge',type:'button',style:'white-space:nowrap',onclick:()=>{S.pline=n;paintPlayer()}},p[0])})),
+    return h('button',{class:'pavg',type:'button',onclick:()=>{S.pline=n;paintPlayer()}},h('span',{text:p[0]}),h('b',{text:fmt(n)}))})),
    d.xref?h('p',{class:'muted',style:'margin:8px 0 0',text:d.xref}):null),
   h('div',{class:'card'},h('h2',null,'Last '+games.length+(joined?' together':'')+' vs '+fmt(line),h('span',{class:'r'},
    h('span',{class:'seg'},['all','home','away'].map(k=>h('button',{type:'button',class:S.psplit===k?'on':'',onclick:()=>{S.psplit=k;paintPlayer()}},k==='all'?'All':k==='home'?'Home':'Away'))),
@@ -32448,10 +32519,15 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
   h('ul',{class:'nlist'},notes.map(n=>h('li',{text:n})))));
  const logRows=(rows,who)=>rows.length?h('div',null,rows.map(g=>{const v=g.vals&&g.vals[stat]!=null&&!g.dnp?+g.vals[stat]:null;const dnp=v==null;
   const mark=dnp?'DNP':(g.ot?fmt(v)+' OT':fmt(v));const on=S.hi&&g.date&&g.date===S.hi;
+  const gap=dnp?'':logGap(v,line);const mates=dnp?'':logMates(stat,g.vals);
+  const score=g.score?String(g.score):'';
+  const place=(g.opp_name&&g.opp_name!==g.opp)?((g.at==='@'?'at ':'vs ')+g.opp_name):'';
+  const detail=dnp?'Did not play':[gap,score,place].filter(Boolean).join(' · ');
   return h('div',{class:'plog'+(on?' on':''),id:on?'loghit':''},
    h('span',{class:'ppg '+(dnp?'push':v>line?'over':v<line?'under':'push'),text:dnp?'–':v>line?'▲':v<line?'▼':'–'}),
    h('div',{style:'min-width:0'},h('div',{class:'nm',text:(who?who+' · ':'')+(g.when||'')+' '+g.at+' '+g.opp+(g.result?' · '+g.result:'')+(g.pre?' · preseason':'')+(g.ot?' · OT':'')}),
-    h('div',{class:'sub',text:lab})),h('span',{class:'net '+(dnp?'flat':v>line?'up':v<line?'down':'flat'),text:mark}))})):
+    detail?h('div',{class:'sub',text:detail}):null,
+    mates?h('div',{class:'sub',text:mates}):null),h('span',{class:'net '+(dnp?'flat':v>line?'up':v<line?'down':'flat'),text:mark}))})):
   empty('No games on file','ESPN has not posted a game log for this player yet.');
  const logged=(d.games||[]).filter(g=>!(S.hidePre&&g.pre)).slice(0,S.pn||30);
  const mineLog=h('div',{class:'card'},h('h2',null,'Game log',h('button',{type:'button',class:'tpause',onclick:()=>{S.hidePre=!S.hidePre;paintPlayer()}},S.hidePre?'Show preseason':'Hide preseason')),logRows(logged,''));
