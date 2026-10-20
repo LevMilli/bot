@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.30"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.33"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -168,6 +168,9 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
 ("1.28", "Several photos in one message are read as separate slips. A tag posts each one, and the reply names every slip."),
 ("1.29", "A win card is logged as a win. The stats breakdown stays off a card that already paid."),
     ("1.30", "The opening smoke is a little thicker."),
+    ("1.31", "What's new on the member board stays quiet after Got it, and only comes back when there is something new."),
+    ("1.32", "Just settled shows a Discord photo and a short note on the pick. A slip opens with that photo. Injury and reboot news has a filter, a photo, and the team."),
+    ("1.33", "Open slip cards show the Discord photo. More adds a thousand next ideas you can sort as new, refine, and improve."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -183,6 +186,9 @@ MEMBER_NEWS = [
 ("1.28", "Send a few slips at once. Each one is read, and a tag puts them under that person."),
 ("1.29", "A win card goes on the record as a win, with the amount that was paid."),
     ("1.30", "The opening smoke is a little thicker."),
+    ("1.31", "What's new stays quiet after you tap Got it. It only comes back when there is something new."),
+    ("1.32", "Just settled shows a Discord photo and a short note on the pick. Open a slip and the photo is there. Injury news can be filtered, with a photo and the team."),
+    ("1.33", "Open slips show your Discord photo. More has a thousand next ideas you can sort as new, refine, and improve."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -1334,6 +1340,1155 @@ for _row in BOT_LATER:
     _row["live"] = [bit for bit in _LATER_LIVE.get(_row["ver"], []) if bit in _have]
 
 
+# A thousand next ideas. None are live. Ten lanes, one hundred each.
+# Tags are idea (new), refine, and improve. The r50 map, r67–r71, and L1–L5 stay as they are.
+
+def _lines(block):
+    rows = [ln.strip() for ln in block.strip().splitlines() if ln.strip()]
+    return rows
+
+
+def _lane(head, ideas, refines, improves):
+    if len(head) != 25 or len(ideas) != 25 or len(refines) != 25 or len(improves) != 25:
+        raise RuntimeError((len(head), len(ideas), len(refines), len(improves)))
+    kinds = ("idea", "refine", "improve")
+    rows = [(kinds[i % 3], head[i]) for i in range(25)]
+    for i in range(25):
+        rows.append(("idea", ideas[i]))
+        rows.append(("refine", refines[i]))
+        rows.append(("improve", improves[i]))
+    return rows
+
+
+def _build_thousand():
+    lanes = [
+        ("Open slips", _lane(
+            _lines("""
+Show how many legs are still waiting, right under the play name.
+Keep the Discord photo on the same line as the name, with the book chip on the far side.
+Remember Mine on this phone, so a refresh still shows only your open slips.
+Add the earliest start, in Central, when every leg is on today's card.
+Use one type size for the play name on Mine and on the live rail.
+If the photo does not load, show the colored initial without shifting the name.
+Let a tap on the photo open that person's card, and a tap on the card open the slip.
+Clip a long play name to two lines so the risk line stays on the card.
+When Mine is on, put the soonest start first.
+Paint a thin sport color on the left edge, using the same colors as the games strip.
+Line up the risk and pays amounts so a row of cards can be compared.
+Keep the book filter, the sport filter, and Mine working at the same time.
+Add a quiet line when someone else filed this slip under you.
+Match the photo ring on Mine to the ring on My Board.
+Open the slip from the card you already have, then fill the legs in.
+Show a small count of legs that have already started.
+When Mine is empty, say you have nothing open right now.
+If the payout is missing, show the risk and leave pays blank.
+Group two slips from the same game under one shared game label.
+Keep the Mine label centered, with your open count beside it.
+When a new slip arrives, do not jump the card you are reading.
+Give flex and power their own chip when the title already has the pick count.
+Keep the full play name on a wide screen, and two lines on a phone.
+Make the whole card one tap, with the photo inside that tap.
+Add a starts-soon line when the first leg is inside two hours.
+"""),
+            _lines("""
+Add a sport chip when the title leaves the sport out.
+Put the slip number in the corner so a screenshot of the card can be matched later.
+Add a tonight mark when every leg starts on this Central day.
+Show the name of the person who filed it, when that person is not the bettor.
+Put a one-line first leg on a single-player slip.
+Group cards from the same book under one label.
+Split futures onto their own row, and mark each one future.
+Show your open risk as one total above the cards.
+Let a member hide one card on this phone without voiding the slip.
+Add a filter for slips that start inside three hours.
+Show a quiet mark when a leg is already in play.
+Show Kalshi as yes or no when the slip is a contract.
+Count how many legs are props and how many are game lines.
+Give a one-pick slip a layout that does not mimic a six-pick.
+Add a new-today dot for a slip logged after midnight Central.
+Offer a share line with the play name and the risk, ready to paste in Discord.
+Show a second face when a partner is on the same parlay.
+Add a compare of two open slips by risk and pays.
+Show the channel the slip was posted in, under the name.
+Add an away or home mark when every leg is one game.
+Show demon and goblin labels when the book printed them on the slip.
+Show the week name on a card that will not settle this week.
+Add a mark when a leg can land on the number and push.
+Use the same photo the live rail uses for that slip.
+Add a quiet note when the header count and the leg count differ.
+"""),
+            _lines("""
+Keep the photo circular and the same height as the name line.
+Align every book chip to the right edge of the card.
+Use the same chip color for a book on Mine and on the slip sheet.
+Give a missing photo the initial only, with no empty gap.
+Keep the words Risk and pays in the same muted style as the rest of the board.
+Stop a long name from pushing the book chip onto a second line.
+Match the card corner to the settled rows so the page feels like one board.
+Use tabular figures for every dollar amount on the rail.
+Keep the Mine label centered when the count beside it grows from one digit to three.
+Give the hover lift the same distance as the poster tiles.
+Keep four cards on a wide row and one card on a phone.
+Use the sport color already chosen for that sport.
+Place the photo before the name, in the same order as Just settled.
+Keep the tap area as the full card, including the padding.
+Soften the border so a row of cards does not look heavier than the header.
+Keep flex and power in the words the book used.
+Line the pays amount up across cards when the risk widths differ.
+Use a hairline between the title and the risk line.
+Keep an empty rail the same height as one card so the page does not jump.
+Show the book name in full when the card is wide enough.
+Keep the gold ring on the photo the same weight as My Board.
+Use sentence case for a play name the book printed in capitals.
+Leave a little air under the pays line so the card does not feel cramped.
+Match the Mine title weight to the other section titles.
+Keep the centered Mine label when the row scrolls sideways.
+"""),
+            _lines("""
+Leave Mine on after a refresh of this phone.
+Keep a card in place when a new slip arrives at the front of the rail.
+Load the photo with the card, not a moment later.
+Skip a second request for a photo this page already has.
+Open the slip even when the photo file is missing.
+Do not treat a blank payout as zero. Leave it blank.
+Update the risk total when a slip settles and leaves the rail.
+Hold your scroll position when the minute refresh redraws the cards.
+Show your slips first only when Mine is on, and everyone when it is off.
+Retry a failed photo once, then use the initial.
+Count only open slips in the Mine count unless futures are included.
+Keep the rail readable when twenty slips are open.
+Drop a card from Mine the moment it settles, without a full reload.
+Preserve the sport filter when you switch Mine off and on.
+Use the same slip id in the card link that the sheet uses.
+Ignore a hidden slip even if it is still open.
+Keep a test slip off the member rail.
+Use the Central day for the word today on the card.
+Avoid a layout shift when the photo replaces the initial.
+Keep the pays figure the same number the slip sheet shows.
+Let a narrow phone scroll the rail sideways without clipping the photo.
+Refresh one card when that slip changes, instead of the whole board.
+Keep the signed-in door: a visitor does not get another member's photo.
+Remember the last book filter on this phone, together with Mine.
+Keep a tagged slip under the tagged person, with their photo, on the rail.
+"""),
+        )),
+        ("Just settled", _lane(
+            _lines("""
+Add a filter for wins, losses, and pushes above Just settled.
+Keep the pick note to two lines so one long parlay does not cover the next row.
+Use the same photo on the row and on the slip sheet.
+Add yesterday beside today, so a late settle is still easy to find.
+Line the net amounts up in one column.
+Keep the newest settle at the top after a refresh.
+Show how many legs hit when the slip is already settled.
+Use the same name weight on Just settled as on Mine.
+Keep a row up for the Central day it settled.
+Name the book in the note when the title is only the play type.
+Say settled today only on this Central day.
+Open the slip from the whole row, photo included.
+Put the sport at the front of the note when the group mixed sports.
+Clip the note at a word, not in the middle of a name.
+Leave hidden slips and test slips out of this list.
+Name the person who filed it when that person is not the bettor.
+Keep the photo the same circle size as Mine.
+Refresh the note if a leg is corrected after the settle.
+Give a push its own quiet word when the net is zero.
+Keep the slip number on the meta line, after the name.
+Do not flash an empty list while the refresh is still loading.
+Add a one-tap jump from a settled row to that person's week.
+Use color only on the amount.
+Match a settled photo-read to this row in the same minute.
+Show a same-game mark when every leg was one matchup.
+"""),
+            _lines("""
+Add a chip for the book next to the day, so a mixed day can be sorted.
+Show the stake and the paid amount in the note when both were on the card.
+Add a pushes-only view for days that landed on the number.
+Let a member jump from a settled row to the player who decided it.
+Show a corrected settle with a small edited mark and the new amount.
+Add a week total under Just settled: count, wins, losses, and net.
+Group today's settles by person, with the photo once and the slips under it.
+Add a same-book stack when one person cashed three slips at one book.
+Show the leg that missed, in one line, on a loss.
+Show the leg that cleared it, in one line, on a win.
+Add a filter for one sport on the settled list.
+Let yesterday and today stay as two chips, with older days behind a third chip.
+Show a void as its own word, separate from a loss.
+Add the Central time, quiet, on the right of a row from the last hour.
+Show a parlay that was one leg short of cashing, in plain words, on the loss row.
+Add a link from the Discord settle post to this row.
+Show coins earned on a settled slip, when that slip earned coins.
+Add a season filter so this list can show the current season only.
+Show a staff test settle only on Staff HQ.
+Add a short "filed under" line when the logger and the bettor differ.
+Let a row remember that the read came from a win card or a loss card.
+Show the flex or power label in the note when it changes the pay.
+Add a way to pin one settled slip on My Board from this row.
+Show a rebound: a loss, then a win, for the same person on the same day.
+Add an empty line that names the last settle when today is still empty.
+"""),
+            _lines("""
+Keep the photo to the left of the name on every settled row.
+Keep the amount in one weight, green or red, with no second pill.
+Clip the note on a word boundary.
+Keep slip numbers in the same type as the meta line on the sheet.
+Use the same circle size for a photo here and on Mine.
+Keep a push amount in the muted color, not green or red.
+Line the names up even when one photo is still the initial.
+Keep the day word short: today, yesterday, or the date.
+Match the row padding to the injury rows so the lists feel related.
+Keep a long book name from wrapping under the amount.
+Use the play name the sheet uses, not a second shortened title.
+Keep the filter chips on one line when there is room, and wrap them on a phone.
+Hold the photo ring to the same gold weight as search.
+Keep the list from jumping when one note is two lines and the next is one.
+Show the sport word in the same case as the games strip.
+Keep "Just settled" as the title, with the count on the right.
+Leave a little space between the note and the meta line.
+Keep a cashed amount and a lost amount the same distance from the right edge.
+Use one date style, Central, on every row.
+Keep the empty state to one sentence.
+Match the tap highlight to the open cards.
+Keep a multi-leg note from listing every leg. Two is enough.
+Hold the filter you chose while the minute refresh runs.
+Keep the row height even when the name is one word or four.
+Leave the win and loss words off the left side, where the photo sits.
+"""),
+            _lines("""
+Sort the newest settle first, and keep that order when two slips share a minute.
+Update the amount if a settle is corrected, without duplicating the row.
+Drop a hidden slip from this list as soon as it is hidden.
+Keep a test slip out even if it settled in the last hour.
+Use the same net the person card uses for that slip.
+Reload the note after an edit without scrolling the list back to the top.
+Match the photo key to the bettor, not to the person who typed the command.
+Keep yesterday in view until the Central day rolls.
+Do not show a slip here while it is still open.
+Fill the note from the title and at most two legs that are not already in the title.
+Hold the list steady if the refresh returns the same rows.
+Open the right slip when two people cashed the same play.
+Keep a push at zero net, not as a win.
+Show the row for the whole Central day, then let it age into the longer history.
+Avoid a blank note. Use the play name when the legs add nothing.
+Keep the filter counts honest after a slip is voided.
+Use one request for the photos on the visible rows.
+Retry a broken photo once, then show the initial.
+Keep the deep link to the slip the same id the Discord post used.
+Do not reorder rows while a finger is down on the list.
+Leave a settled slip in the list after the member opens it and comes back.
+Keep the week total in the same units as the rows.
+Ignore a duplicate settle post so the list does not show the slip twice.
+Refresh a single row when only that slip changed.
+Keep the signed-in member's own photo on their row, and everyone else's too.
+"""),
+        )),
+        ("People", _lane(
+            _lines("""
+Add a this-week versus last-week line on the person card.
+Keep the Discord photo and the Message button on the same header.
+Open a person's card from search without losing the letters you typed.
+Show open slips and settled slips in two stacks on the card.
+Give every person with an open slip a card, with the photo first.
+Keep the highlight on the profit chart after you tap a name.
+Let two members share one card that lists only the slips they were both on.
+Use the same record line on the card, the search row, and the leaderboard.
+Load the photo once and reuse it on search, the card, and Mine.
+Let a member pin three people on this phone and see them first.
+Keep Message as a real Discord link, with the name you already show.
+Return to the same person after you close a slip.
+Show each person's best book this month, as a plain net.
+Clip a long display name to one line on the leaderboard and wrap it on the card.
+Keep a person with only open slips visible, even with no settled record yet.
+Add a quiet streak count that does not predict the next result.
+Match the gold ring on search to the ring on the card.
+Do not drop a person from the chart when their net is zero.
+Show coins earned this week on the card, next to season coins.
+Keep season, month, and week as three taps, with the numbers under them.
+Use one net for the card, the chart, and Discord.
+Add a list of who you are most often on a slip with.
+Put a role chip under the name when the member has one.
+Keep a signed-out visitor from opening Message.
+Show the last slip they logged, with the day, under the record.
+"""),
+            _lines("""
+Add a season archive: last season's record on its own tap.
+Show a person's open risk next to their open count.
+Add a favorite sport, counted from slips, not chosen by hand.
+Let a member write a one-line status on their own card, on this phone.
+Show the longest win run and the longest loss run as two plain numbers.
+Add a "slips together" count on the shared card.
+Show which book paid them the most this season.
+Add a calendar of their settles, one dot per Central day.
+Let search match a nickname the group already uses in Discord.
+Show the photo larger on the card than on the leaderboard row.
+Add a jump from the card to Just settled, filtered to that person.
+Show head-to-head net for the season, under the shared slips.
+Add a list of their open legs that start today.
+Show coins and the last way they were earned, on the card.
+Add a quiet "new member" mark for a first slip in the last seven days.
+Let the chart highlight stay on while you scroll the slips.
+Show home-screen friendly initials only when the photo is missing.
+Add a copy line of their record, ready to paste.
+Show the staff role only to staff, and the name to everyone.
+Add a filter on People: everyone, in profit, or with something open.
+Show the week net in the same units as the big tile.
+Add the Central date of their last settle.
+Let a pinned person stay pinned on this phone after a refresh.
+Show a person's futures separate from tonight's slips.
+Add a plain export of one person's month, for staff, from the card.
+"""),
+            _lines("""
+Keep the photo to the left of the name in search.
+Keep Message on the card, not buried in a menu.
+Use one type ramp for the name, the record, and the net.
+Clip the record so a long streak chip does not wrap into the net.
+Hold the gold ring even when the photo is the initial.
+Keep season, month, and week in that order.
+Line the nets up on the leaderboard.
+Keep a zero net visible, in the muted color.
+Match the card width to the other sheets on a phone.
+Leave room under the name for a role chip.
+Keep the search box above the results.
+Use the same empty sentence when a search has no person.
+Hold the chart color for a person steady across refreshes.
+Keep the shared-slip list in date order.
+Show at most four search hits before the list asks for more letters.
+Keep the leaderboard medal on the first three, and a number after that.
+Match the photo size in search to the size on a settled row.
+Keep a long note on the card from pushing the record off.
+Use Central dates on the card.
+Keep the pin control as one tap.
+Leave the visitor a read of the board without Message.
+Hold the header still while the slip list scrolls.
+Keep coins in the same coin mark the games use.
+Match the people grid gap to the open-card gap.
+Keep the back control returning to People, not to the top of the site.
+"""),
+            _lines("""
+Reuse a photo the page has already loaded.
+Keep a person in the list after their only open slip settles, if they have a record.
+Do not lose the search letters when the minute refresh runs.
+Open Message only for a signed-in member.
+Keep the chart highlight in sync with the card you opened.
+Use the bettor id for the photo, not the display name.
+Hold pin choices on this phone, not on the server.
+Return the scroll position when you come back from a slip.
+Keep a hidden slip off the public card.
+Ignore a test slip in the record, the chart, and the streak.
+Update the week net when a slip settles, without rebuilding the whole page.
+Match a search of three letters or more, and wait before that.
+Keep two people with the same display name distinct by their photo and id.
+Load the card header before the slip list.
+Do not flash an empty people list during a refresh.
+Keep the season record the same number Discord prints.
+Hold the last good card if a refresh fails.
+Sort the leaderboard by net, and keep a tie in a stable order.
+Keep Message from showing for a member who has no Discord id.
+Update one person's row when only that person changed.
+Leave last season untouched when this season's slip is edited.
+Keep the shared card from listing a slip only one of them was on.
+Avoid a second copy of the photo on the same card.
+Keep the role chip from counting as part of the record.
+Show a just-settled slip on the card in the same minute it posts.
+"""),
+        )),
+        ("Scanner", _lane(
+            _lines("""
+Show the original screenshot on the slip sheet, behind a tap.
+Name the players, the lines, and the result in the reply.
+File a tagged win under that member even when the long read is slow.
+Warn, before filing, when this photo was already logged.
+Keep a win card, a loss card, and an open parlay as three different reads.
+Read several photos in one message as separate slips.
+Let a reply with the slip number fill one blank leg without a new photo.
+Say how many legs the header claimed and how many were read.
+Log a card that already paid, and skip the stats talk on that card.
+Read a flex or power label from the header and store it on the slip.
+Keep an unsure leg blank, for a person to fill, instead of a guess.
+Hold a good open read while a second pass is still going.
+Add a same-game layout for FanDuel and DraftKings headers.
+Quote the stake and the paid amount from the card, in the reply.
+Accept a tight crop, a dark shot, and an HEIC from an iPhone on the first pass.
+Let staff mark one filed slip as the example a similar photo should follow.
+Keep the reply in the channel where the photo was posted.
+File under the tagged name, and say that name in the reply.
+Split two slips that share one photo into two logged cards.
+Use the book's own words for the play type.
+Treat a paid card as settled and an in-play card as open.
+Add a short confirm when the only missing piece is the stake.
+Keep a second pass on the holes, not a full reread of a good photo.
+Cap a burst of photos so the rest wait, then answer with every slip number.
+Read a Kalshi yes or no and store the contract name on the slip.
+"""),
+            _lines("""
+Read a PrizePicks flex pay table when more than one payout is printed.
+Read an Underdog entry name and the pick count from the header.
+Read a Sleeper slip that uses tokens, and store the stake in the unit shown.
+Read a Betr card with the same leg rules as PrizePicks.
+Detect a voided leg and leave the rest of the slip open.
+Read a boosted label and keep it in the play name.
+Tell a same-game parlay from a regular parlay by the header.
+Read the printed "to win" only as the win amount, not as a settled pay.
+Keep a Faceoffs Won line as a prop, not as a final result.
+Read a college team name the way the book printed it.
+Store the sport the header shows, even when the legs mix two sports.
+Read a live-betting tag and mark the slip in play.
+Capture a promo stake separately from the cash stake when both are printed.
+Read a dead-heat or void note and keep it on the leg.
+Accept a sideways photo and rotate it before the read.
+Read the bettor name printed on the card only as a hint, never over a tag.
+Store the book from the logo when the header text is cropped.
+Read a round-robin as separate slips, and say that in the reply.
+Keep a teaser label in the play name.
+Read an alternate line and store the number that is on the card.
+Notice a cash-out figure and do not treat it as the original pays.
+Read a parlay plus a single that were screenshotted together.
+Keep a pushed leg on the number, not as a hit or a miss.
+Read the Central date if the card prints one, and say so.
+Store a long shot name in full on the leg, and clip it only on the card.
+"""),
+            _lines("""
+Keep the reply to the players, the lines, and the result.
+Lead with what was filed, then the hole if one leg is blank.
+Use the book's play name, not a renamed one.
+Keep a confirm card for an unsure leg.
+Say the tagged member's name in the first line of the reply.
+Keep the stake and the pays in the same units the card showed.
+Number each slip when one message had several photos.
+Keep a failed photo as its own line, not a silent skip.
+Use plain words for a win, a loss, a push, and still open.
+Keep the second pass shorter than the first.
+Hold the reply in the same channel as the photo.
+Clip a long reply so Discord will take it, without dropping a slip.
+Keep an edit of one leg from rewriting the legs that were right.
+Show the slip number in the reply once it is filed.
+Keep a guess out of a blank leg.
+Match the tone of a win reply and a loss reply. Both name the card.
+Leave the stats talk off a card that already shows a paid amount.
+Keep the header count in the reply when it disagrees with the legs.
+Use one confirm style for every book.
+Keep a duplicate warning to one line, with the older slip number.
+Hold the play type in the words flex, power, or the book's own label.
+Keep a Kalshi reply to yes or no plus the contract.
+Say which photo failed when a burst is mixed.
+Keep a staff test file marked, and out of the member reply's cheer.
+Leave a partial read as a list of blanks a person can fill.
+"""),
+            _lines("""
+File the tagged member even if the photo read finishes a moment later.
+Keep a paid card from being graded again as an open parlay.
+Read the photos in a burst two at a time so a long message still finishes.
+Return every slip number, including one that needs a stake.
+Do not invent a line the card did not print.
+Leave a hole blank when the crop cut that leg off.
+Prefer the paid amount on a win card over a second guess.
+Keep an in-play card open until the card itself shows a result.
+Match a repeat photo to the slip already filed, and say the number.
+Hold a good read while a slower read is still out.
+Use the tag on the message over the name printed on the card.
+Keep a missing stake from filing a fake zero.
+Retry a timed-out photo once, then say which one failed.
+Store legs in the order they appear on the card.
+Keep a voided leg from turning the whole slip into a loss.
+Accept HEIC, a dark shot, and a tight crop on the first pass.
+Do not run the long stats talk when the card already shows the result.
+Keep the reply from saying a result the card did not show.
+Fill a later edit into the same slip, not a second slip.
+Cap the burst and queue the rest, then answer once.
+Keep a confirm from filing until someone answers it.
+Use the same settle rules a hand-logged slip uses.
+Ignore a photo that is not a slip, and say it was skipped.
+Keep the book on the slip when the logo is clear and the header is not.
+Log a win, a loss, and an open parlay as three different slips when all three are in one message.
+"""),
+        )),
+        ("Assistant", _lane(
+            _lines("""
+Add a player snapshot under a sports answer: team, next game, and the last line the group logged.
+Keep the weather graph to temperature and rain, with those numbers in the reply.
+Answer in the channel where the question was asked.
+Let a question about an open slip use that slip's legs as the subject.
+Lead with the number, then the sentence.
+Keep a daily cap and a cooldown so one chat does not crowd the channel.
+Show the injury status, when we already have it, under a player question.
+Name the place and the hour on the weather graph.
+Search live facts for a sports question, and say when a fact is missing.
+Add a what's-on-tonight answer that lists the group's open legs by start.
+Keep the voices, and let the group tell which voice answered.
+Do not invent a temperature. Use the hourly read.
+Let a member ask for their own week in a sentence and get the same net as the card.
+Keep weather to a graph plus a short spoken line.
+Stay on sports and weather, and say so when a question is something else.
+Add a compare of two players' last ten, for the stat that was asked.
+Cite the team and the opponent when a next-game fact is in the answer.
+Reuse a fact fetched a moment ago instead of asking again.
+Show a small chart when the answer is a last-ten trend.
+Keep the reply short enough for Discord, and split only when it must.
+Use the same last-20 read the player sheet uses.
+Add a plain restatement of the last slip logged in that channel.
+Say who is listed out when that list is already on the news tab.
+Keep the answer pool from repeating one line all day.
+Let a question name a book and get only that book's open slips.
+"""),
+            _lines("""
+Answer "who is questionable" from the injury list the board already shows.
+Answer a next-tip question with the Central time and the opponent.
+Let a member ask which of their legs start inside two hours.
+Add a rain-only reading when the question is about a delay.
+Show the hourly graph for the city named, not a default city.
+Answer a record question with the same wins, losses, and net as the card.
+Let a question name a sport and get that sport's open slips.
+Add a last-start line for a pitcher when the sheet already has the log.
+Answer a head-to-head question with the season net between those two members.
+Show the stat the group logs most for that player, first.
+Let a member ask what changed on a slip since it was filed.
+Add a plain rest day when the schedule shows one.
+Answer a "why was it voided" question from the reboot note.
+Keep a weather reply to the next twelve hours unless they ask for more.
+Let a question about coins use the same total the card shows.
+Add the book to a "what do I have open" answer.
+Show a missed fact as "not in yet" instead of a made-up number.
+Answer a streak question with the count only, and no prediction.
+Let a member ask for the group net and get the tile they see on the board.
+Add the slip number to any answer that is about one slip.
+Keep a player answer to the team we matched, and say the name we matched.
+Let a question compare this week to last week for one person.
+Show the kickoff, in Central, when they ask when a team plays.
+Add a short list of teammates the group has also logged.
+Keep a chart answer to the stat they named.
+"""),
+            _lines("""
+Keep the graph labeled with the hour and the degree.
+Speak the high and the rain chance in the same reply as the picture.
+Keep a sports answer under a short first line.
+Name the source of a fact in plain words: the sheet, the news list, or the slip.
+Hold one voice per reply.
+Keep the cooldown sentence short.
+Use the member's name when the answer is about their slips.
+Keep a missing fact to one line.
+Match the chart colors to the board.
+Clip a long player list and offer the sheet.
+Keep weather from mentioning a slip.
+Lead a record answer with the net.
+Keep the tonight list in start order.
+Use Central for every time in an answer.
+Hold the reply to the channel, not a private detour.
+Keep a compare to the stat that was asked, not a bundle of extras.
+Number the legs when the answer is about one parlay.
+Keep a book filter in the answer when they named a book.
+Leave odds out of the reply.
+Keep the tone even on a win and a loss.
+Say the slip number before the play name.
+Keep a group-net answer to the figure on the tile.
+Hold a player match to one person when the name is clear.
+Keep the graph from covering the spoken line in Discord.
+Use the same words the board uses for open, win, loss, and push.
+"""),
+            _lines("""
+Fetch the hour read before drawing the graph.
+Do not draw a graph when the place could not be found. Say that.
+Keep a sports search from running on a weather question.
+Reuse the last injury list when the question is about a player on it.
+Answer from the slip already in the channel before searching the web.
+Keep the daily cap from cutting a reply in half. Refuse before the work.
+Hold a cooldown per member, not per whole server.
+Return the card net, not a second math.
+Say when the sheet has no log yet.
+Keep a failed fact from being replaced with a guess.
+Split a long answer on a line, not in the middle of a name.
+Use the player the sheet opened, not a near spelling, when both exist.
+Keep tonight's list to open legs only.
+Refresh a stale fact rather than repeat it past the hour.
+Stay inside sports and weather when the question wanders.
+Keep the voice from changing mid-reply.
+Log the ask without posting the member's private note twice.
+Time the reply out cleanly and say it timed out.
+Keep a book answer to slips on that book.
+Do not mention a hidden slip in an answer.
+Use the tagged member when the question says "their" after a tag.
+Keep last-20 answers on the same numbers as the chart.
+Hold the graph file only for that reply.
+Answer "what did we just file" from the slip number just posted.
+Keep a repeat question inside the cooldown from spending another full search.
+"""),
+        )),
+        ("Live", _lane(
+            _lines("""
+Add a follow star on a game so that game stays at the front of the strip.
+Keep in-play legs on the ticker with the photo of the bettor.
+Refresh the score on a game that is in, and rest a game that has not started.
+Show the group's open legs under a game tile when you tap it.
+Use one live dot for a game in progress and a quiet word for a final.
+Keep the ticker pause on this phone.
+Add the Central start on every tile that has not tipped.
+Match the tile colors to the colors already on the score.
+Let a member hide finished games on this phone.
+Show a leg that just crossed the number, with the player and the value.
+Keep the ahead and behind marks the same on the ticker and the slip.
+Do not redraw the strip while you are scrolling it.
+Add a sport filter on the strip.
+Clip a long team name before it covers the score.
+Hold the last good score if a refresh comes back empty.
+Show how many of the group's legs sit inside that game.
+Keep finals in a muted style so live games read first.
+Update one tile when its score changes, instead of the whole strip.
+Add a your-legs chip on a tile that contains one of your slips.
+Use the same start line the sheet uses, in Central.
+Let a member hide finished games without hiding a game that is still in.
+Add a quarter, period, or inning on the tile when the feed has it.
+Keep the live label readable on a narrow phone.
+Stop the ticker from covering the first card.
+Show the network, or the channel, only when the feed already has it.
+"""),
+            _lines("""
+Add a tap on a tile that opens every slip in that game.
+Show the inning or the period beside the score, not instead of it.
+Add a "starts in" word on a tile inside two hours.
+Let the strip remember the sport filter on this phone.
+Show a delayed start as delayed, when the feed says so.
+Add the group's names, as photos, on a tile with their legs.
+Show a final score in the muted style for the rest of the Central day.
+Add a baseball count only when the feed has balls and strikes.
+Let a member follow a team, not only a game.
+Show a leg value moving on the ticker without waiting for the full board.
+Add an empty strip line that says when the next group game starts.
+Show overtime or extra innings as their own short word.
+Add a filter for games the group has a leg in.
+Show the home team second, in the same order as the sheet.
+Add a quiet mark when a game is in a weather delay.
+Let the ticker name the player, not only the slip.
+Show a national broadcast mark only when we already have it.
+Add a jump from a tile to the player sheet of a logged leg.
+Keep a postponed game out of the live dot.
+Show the series game number when the feed has it for baseball.
+Add a college and pro split on the sport filter.
+Show a shootout as its own word in hockey.
+Add the court or the park only when it fits on a wide tile.
+Let a followed game stay first even after it goes final, until the member clears it.
+Show a leg that finished, with hit or miss, on the ticker once.
+"""),
+            _lines("""
+Keep the live dot to games that are actually in.
+Use one score size on every tile.
+Clip both team names the same way.
+Keep the start time in Central, with the zone written once.
+Hold the strip to a sideways scroll on a phone.
+Keep a final from using the live color.
+Match the ticker type to the slip leg type.
+Leave a little air between tiles.
+Keep the pause control on the ticker, not on each tile.
+Use the same ahead and behind marks as the slip.
+Hold a long team nickname to the short name when the tile is narrow.
+Keep the sport filter chips in the same style as the news filters.
+Show the leg count as a number, not a sentence, on the tile.
+Keep a hidden slip's leg off the public tile.
+Use the group colors already on the board.
+Keep the ticker from duplicating a leg that is also on the tile you opened.
+Hold the follow star to one tap.
+Keep a delayed word in the muted color.
+Match the empty state to the other empty states.
+Keep the inning, period, or quarter in one short form.
+Leave the score on the right of the team name.
+Keep a your-legs chip from covering the score.
+Use tabular figures for the score.
+Hold the strip height steady when one tile has an extra line.
+Keep the ticker speed tied to how many legs are in it.
+"""),
+            _lines("""
+Refresh a live game on a short beat, and a later game on a slow one.
+Keep the last score when a refresh fails.
+Do not mark a game live before the feed says it is in.
+Drop a postponed game from the live dot and say postponed.
+Update the leg value on the ticker from the same read as the slip.
+Keep a pause where the member left it.
+Hold the scroll position of the strip across a refresh.
+Hide a finished game on this phone only, and bring it back from the filter.
+Keep a followed game from being dropped by a refresh.
+Use the sheet's start line so the tile and the sheet agree.
+Skip a second fetch when the score did not change.
+Keep a weather delay from looking like a final.
+Show a crossed line on the ticker once, not on every refresh.
+Match a tile to the slips in that game by team and start, not by a fuzzy name.
+Keep a hidden leg off the tile.
+Rest a game that has not started instead of polling it every few seconds.
+Keep the sport filter from clearing when a score updates.
+Hold a final on the strip until the Central day ends, unless it is hidden.
+Update one leg on the ticker when only that leg changed.
+Keep the member's follow list on this phone.
+Do not cover the Mine cards with the ticker.
+Retry a failed score once, then keep the last good one.
+Leave a game with no feed as a start time only.
+Keep the in-play mark on a leg in sync with the slip.
+Sort live games ahead of the soonest start.
+"""),
+        )),
+        ("News", _lane(
+            _lines("""
+Group the report by team, with that team named once above its players.
+Keep the photo, the team, and the status on one row.
+Filter injuries, reboots, and returns without a reload.
+Add a watch on a player who is not on a slip yet.
+Open the player sheet from the name when we know the player.
+Use the team we already have before asking for a photo.
+Show every open slip that names that player, not only the first.
+Keep reboot, out, and questionable in the same chip style as the rest of the board.
+Leave hidden slips out of the report.
+Add a sport chip so an NBA note and an NFL note can be separated.
+Crop the headshot to the face.
+Ask for at most a few missing photos at a time.
+Let a member save the injury filter on this phone.
+Put the time on the right, in the same quiet style as Just settled.
+Keep a player who just returned in the report until the next check.
+Add a plain line for a reboot: that leg was voided, and the slip can still be open.
+Match the row height to the photo so names do not collide.
+Do not guess a player when two names are close.
+Show the next game under the team when we already have it.
+Keep the All count honest when a filter is on.
+Refresh the report on its own, not only with the whole board.
+Add a list of players who came off the report since yesterday.
+Use the status word the feed used, in the sentence under the name.
+Hold the last report on screen if a check comes back empty.
+Let a tap on the team filter the whole report to that team.
+"""),
+            _lines("""
+Add a team photo line only when one team is meant, never a guess.
+Show the slip chips under the status, each with the member and the slip number.
+Add a filter for questionable, out, and doubtful when those words are in the feed.
+Let a member watch a team and see only that team's notes.
+Show a return in a different chip from a new injury.
+Add the Central time of the last check, in one quiet line.
+Group reboots in their own stack under the injuries.
+Show the leg text that named the player, clipped to one line.
+Add a "no longer listed" section for players who cleared.
+Let a sport filter sit next to the injury, reboot, and back chips.
+Show a college player with the school, and a pro with the club.
+Add a count of open slips touched by today's report.
+Show a player on two slips as two chips, not one merged line.
+Add a plain reason line when the feed includes a note.
+Let the report start with the players on your slips when Mine is on.
+Show a goalie, a pitcher, or a starter the same way as any other name.
+Add a jump from a reboot chip to the slip that was voided.
+Keep a scratched player visible until the group has seen the row.
+Show the feed's status and our chip as the same word.
+Add an empty line that says the check ran and nobody on a slip was listed.
+Let a member collapse a team that has more than three names.
+Show a probable tag when the feed uses that word.
+Add the opponent under the team when the next game is already known.
+Separate a game-time decision from a multi-day absence.
+Show a WNBA note and an NBA note as two sports, not one basketball pile.
+"""),
+            _lines("""
+Keep the face crop on the person, not a sliver of the photo.
+Use one row height when the note is one line or two.
+Keep the team under the name, before the detail.
+Hold the status chip to the right of the name.
+Match the filter chips to the chips on Mine.
+Keep the time in a short ago form.
+Leave a little air between the photo and the name.
+Use the same photo corner on every row.
+Keep a reboot chip in its own color, distinct from out.
+Hold the slip chips to one line, then wrap.
+Keep the section title as Injury and reboot news.
+Show the empty state in one sentence.
+Match the filter count to the rows below it.
+Keep a long detail from covering the time.
+Use sentence case in the line under the name.
+Hold the All chip at the front of the filter.
+Keep the photo from taking the gold ring the Discord faces use.
+Line the names up whether or not a team was found.
+Keep a missing photo as a quiet initial, not a broken icon.
+Use the sport word the rest of the board uses.
+Keep the how-it-works note under the list.
+Hold a filter label to one word where we can.
+Leave hidden slips out of the count in the corner.
+Keep the row tap on the name, and the slip tap on the chip.
+Match the report width to the settled list.
+"""),
+            _lines("""
+Ask for a photo only after the row is on screen.
+Do not search the whole sport when the cached team is already clear.
+Keep a close name from attaching the wrong team.
+Refresh the report on its timer, and keep the filter where the member left it.
+Hold the last good rows if a check fails.
+Limit each wave of photo lookups so the page stays quick.
+Skip a player who is not on an open, visible slip.
+Keep a reboot row even when the leg was voided a minute ago.
+Update one row when only that player changed.
+Do not call the network from the main board payload for these photos.
+Cache a found team for the next check.
+Leave a miss as no photo, not a guessed player.
+Keep the slip chips in sync when a slip settles and should leave the row.
+Use the same player id the sheet uses, once the name is a clear match.
+Hold a saved filter on this phone.
+Retry a photo once, then show the initial.
+Keep the check from posting a duplicate note for the same status.
+Drop a player from the report when they are no longer on an open slip, after the return has been shown.
+Sort out and doubtful above probable.
+Keep a hidden slip's player off the member report.
+Use Central for the check time.
+Do not stall the rest of the board while photos load.
+Show a team only when one team won the match.
+Keep the feed switch where it is: an admin turns it on.
+Leave the how-it-works text in place under the list.
+"""),
+        )),
+        ("Player sheets", _lane(
+            _lines("""
+Add a home and away split under the last-20 chart.
+Keep the last 5, last 10, and last 20 on the same chart.
+Nudge the line by half a point without leaving the page.
+Show rest days and a back-to-back mark when the schedule has them.
+Put the face, name, team, number, and age on one header.
+Use the stat this player is logged for most as the first chip.
+Add the last time they faced this opponent, when the log has it.
+Keep the game log under the brief, newest first.
+Show the next game as opponent, home or away, and Central time.
+Let a member save a line they care about on this phone.
+Keep the headshot square, at the size of the box.
+Search returns a few players, and each one opens the sheet.
+Add a teammate row for others on that team the group has logged.
+Sit the chart under the stat chips.
+Hide preseason on the log unless the member asks for it.
+Show a plain row for a total or a spread, not a player chart.
+Keep the number before the label on every chip.
+Return to the same search when the sheet closes.
+Add a note the member can type on a player, stored on this phone.
+Use one chart height so switching stats does not jump the page.
+Load the log after the header, so the name shows first.
+Show the group's open line on that player, next to the chart line.
+Keep college and pro sheets on the same layout.
+Match the sheet to the position: a pitcher, a hitter, or a goalie.
+Add a last-10 rate against the line the member set.
+"""),
+            _lines("""
+Add a split for wins and losses of their team, under the chart.
+Show the park or the court only when it fits under the next game.
+Add a filter on the log for the last month.
+Let the member set the line and see the games over and under it.
+Show minutes, or innings, on the log when that stat exists.
+Add a home-run, point, or goal pace only as a count, not a projection.
+Show the opponent logo when we already have it.
+Add a "logged by us" mark on a log row the group has a slip for.
+Let a saved line stay on this phone for that player.
+Show a goalie's saves and a skater's shots as different first chips.
+Add the series, when baseball has one, under the next game.
+Show a college conference only on the college sheet.
+Add a clear empty log: we have the player, and no games yet.
+Let the chart be last 10 or last 20 from one control.
+Show a rest day as rest, not as a zero.
+Add the snap count or the pitch count only when the log has it.
+Show a doubleheader as two games, not one.
+Add a jump from a log row to the slip, when we logged that game.
+Keep a total sheet to the number and the teams, with no player face.
+Show the age and the number as quiet facts, not as stats.
+Add a share line for the sheet: name, team, and next game.
+Let two stats be compared on one chart, one at a time.
+Show a postponed next game as postponed.
+Add the handedness when the bio already has it.
+Show a soccer sheet with goals, assists, and shots, on the same layout.
+"""),
+            _lines("""
+Keep the headshot square inside the header.
+Use one chip height for every stat.
+Sit the line control under the chart, easy to tap.
+Keep the log newest first.
+Hold the next game to opponent, home or away, and Central time.
+Match the sheet width to the slip sheet on a phone.
+Keep preseason behind the hide control.
+Use the short team name in the header and the full name once under it.
+Leave a little air between the chips and the chart.
+Keep a long player name to two lines.
+Show the position with the name, not in a second header.
+Hold the saved line on this phone only.
+Keep the search results to a short list.
+Use the same face crop as the news row.
+Match the chart color to the board accent.
+Keep a pitcher sheet from leading with a hitter stat.
+Hold a goalie sheet to goalie stats first.
+Keep college football and pro football on one layout.
+Show the number before the word on a chip.
+Keep the back control on the sheet.
+Leave a total or a spread as a plain row.
+Use tabular figures on the log.
+Keep the empty log to one sentence.
+Hold the chart still while the log loads.
+Match the teammate row to the people rows.
+"""),
+            _lines("""
+Open the header before the log so the name is not late.
+Keep a line nudge on the page, and redraw only the chart.
+Use the stat the group logs most as the first chip, then the rest.
+Hide preseason by default, and remember the choice on this phone.
+Return to the same search text when the sheet closes.
+Match a player only when the name is clear.
+Keep a near name from opening the wrong sheet.
+Load the headshot with the header.
+Hold the saved line with the player, on this phone.
+Use the same last-20 numbers the assistant uses.
+Keep a failed log from wiping the header.
+Retry the log once, then say it did not load.
+Show the next game from the schedule we already fetched.
+Keep a position change from showing the wrong stat list.
+Update an open-line mark when that slip settles.
+Do not fetch every stat before the first paint.
+Hold the chart height so the page does not jump.
+Keep a college id and a pro id from sharing one sheet.
+Leave a spread on the plain row, with no fake player log.
+Cache the sheet for a moment so back and forward is instant.
+Keep the search to a few names.
+Show the Central time on the next game.
+Ignore a hidden slip in the "logged by us" mark.
+Keep the teammate list to players the group has actually logged.
+Refresh the header if the team changes, without clearing the note.
+"""),
+        )),
+        ("Look", _lane(
+            _lines("""
+Add a print view of your week: black text, no smoke, one page.
+Keep the title black with the purple glow.
+Leave the smoke a little thick, and keep the curl.
+Let a member save a named look: sport, book, and accent, on this phone.
+Keep the opening collage where it is.
+Turn the intro off when the phone asks for reduced motion.
+Add a home-screen check so Add to Home Screen still opens without the browser bars.
+Keep accent changes on this device only.
+Cache the shell, and always fetch fresh slip numbers.
+Add a quiet first visit: skip the intro after you have seen it today.
+Keep the gold buttons readable on every accent.
+Match loading skeletons to the card they stand in for.
+Let a member pick a denser type size on this phone.
+Keep the phone home bar from covering the last card.
+Stay on the tab you left when you come back.
+Add a high-contrast pair that keeps the purple and the gold.
+Keep posters in their frame, with the name readable.
+Do not flash feed lights on the opening screen.
+Show the version in About, and keep the member pages free of a stamp.
+Keep section titles in one weight across Mine, news, and More.
+Refresh an open page in place, without a full fade.
+Add a way to turn the ticker slide off without leaving the page.
+Keep empty states to one line that says what to do next.
+Use the same corner and gap on every overview card.
+Add a saved scene that remembers the last tab and the Mine choice.
+"""),
+            _lines("""
+Add a paper-light scene that still uses the purple and the gold.
+Let the smoke stay on, with a smaller curl, from one control.
+Keep the opening title in the old-style face.
+Add a member preview of a poster before it is posted.
+Show the home-screen icon in About, at the real size.
+Let a dense type setting stay on this phone.
+Add a little more air on the wide screen without changing the phone.
+Keep the collage from reloading on every tab change.
+Show a reduced-motion note only in About.
+Add a way to reset the look to the group default, on this phone.
+Keep the gold ring on photos at one weight.
+Let the intro brand fade on the same beat it uses now.
+Add a quiet loading bar that does not cover the title.
+Keep the nav labels readable at the denser type size.
+Show the empty Mine line in the same voice as the other empty lines.
+Add a print of Just settled for the Central day.
+Keep the ticker pause visible when the ticker is on.
+Let a member turn posters to a simple list on a slow phone.
+Keep the purple glow on the title, and the title itself black.
+Add a scene that is only type and cards, with no extra art.
+Hold the last tab in the scene you save.
+Keep the About version on one line.
+Show the shell refresh as a normal reload, not a new design.
+Add a wider tap on the nav for a thumb.
+Keep the card shadow soft enough that text stays first.
+"""),
+            _lines("""
+Keep the title face the one the group already knows.
+Hold the smoke behind the title, not over it.
+Use one corner on cards, tiles, and rows.
+Keep the gold readable on the purple.
+Match the nav height on a phone and on a wide screen.
+Leave the collage as the opening, not as a page background.
+Keep empty states to one line.
+Hold section titles in the same case.
+Use the same gap between cards on every tab.
+Keep the photo rings round.
+Match the chip height on Mine, news, and settled.
+Leave room for the home bar.
+Keep the intro from returning once it has left.
+Hold the accent on this device.
+Use one muted color for notes.
+Keep the live dot the same red the strip already uses.
+Match the poster frame to the card corner.
+Keep About at the bottom of More.
+Hold the type size the member picked.
+Use tabular figures for money everywhere.
+Keep a skeleton the same shape as the card it replaces.
+Leave the feed lights off the opening screen.
+Keep the pager controls the same on every long list.
+Hold the Mine label centered.
+Match the filter chips across the board.
+"""),
+            _lines("""
+Skip the intro when reduced motion is on.
+Keep the shell cached, and fetch slips fresh.
+Stay on the last tab after a reload.
+Remember Mine, the look, and the dense type on this phone.
+Do not redraw the collage for a small copy change.
+Keep the smoke from starting again when you switch tabs.
+Hold the title color and the glow through a refresh.
+Load photos after the text, so names are not late.
+Keep a failed scene from blanking the page. Use the default.
+Reset one device without touching anyone else's look.
+Keep the home-screen launch on the board, not in the browser bars.
+Avoid a fade that hides a card the member was reading.
+Hold the ticker off when they turned the slide off.
+Keep print free of the smoke and the intro.
+Use the same version line in About and in the startup note.
+Do not show a member the staff lamps on the opening screen.
+Keep a dense type from clipping the pays line.
+Reload the page in place when only numbers changed.
+Hold the nav on screen while a list scrolls.
+Keep gold buttons readable if the accent moves.
+Leave classic pages on their own look.
+Cache the icon so Add to Home Screen stays sharp.
+Keep a long More page from covering the header.
+Do not restart the intro when the minute refresh runs.
+Store the scene on this phone, and nowhere else.
+"""),
+        )),
+        ("House", _lane(
+            _lines("""
+Add a plain week note: open count, settled count, and net, with no advice.
+Keep What's new to the newest lines after Got it.
+File a tag under that member, and say their name in the reply.
+Let staff export one person's week, legs included, from the page they already use.
+Keep Staff HQ as the place for feed lights and signed-in devices.
+Leave Needs attention off the member page.
+Add a short undo for a settle, for staff, for a brief moment.
+Keep the commands list grouped the same way help is grouped.
+Mark a staff test slip and leave it out of standings.
+Show who filed a slip when it was filed under someone else.
+Keep the record book to plain lines: biggest day, longest streak, worst beat.
+Use the group total on the tile when staff has chosen group net.
+Add a quiet audit line for a void, an edit, and a settle.
+Keep the door as Discord plus the daily key.
+Skip a job that just finished clean.
+Let an admin pin one note on the week board from the site.
+Keep classic pages linked, on their own look.
+Print the version in the startup log so the upload can be checked.
+Add a member-visible list of the books the scanner already reads.
+Keep coins with the last way they were earned.
+Hide a hidden pick from cards, search, and a member export.
+Add the last clean restart time on About, in Central, without a slip list.
+Keep the map through r50, and this list under it, as two cards.
+Do not drop a sport to make a page faster.
+Add a what-changed line on a slip that was edited after it was filed.
+"""),
+            _lines("""
+Add a staff view of who is signed in, without showing the daily key until the eye is tapped.
+Let an export include the legs tab the sheet already has.
+Show a void in the audit line with the slip number and the member.
+Add a week-board note that members can read and only an admin can change.
+Keep a restart card to the lamps and the time, with no slips on it.
+Show the version and the update name on the status card.
+Add a count of photos read today, for staff, with no stored picture.
+Let staff see a filed-under pair: logger and bettor.
+Keep the record book from giving advice.
+Add a plain list of jobs and the last time each one finished.
+Show coins spent and coins earned as two numbers when both exist.
+Let an admin turn the group-net tile on without a redeploy.
+Add a member page that says which sports this upload reads.
+Keep a hidden pick hidden after a refresh.
+Show the startup version in the same words About uses.
+Add a short "this was a test" mark on Staff HQ only.
+Let the commands page search by the command name.
+Keep the daily key off every member page.
+Show a failed job by its name on the status card.
+Add a Central label on every time that is a time of day.
+Keep one upload as the way a new file goes live.
+Let staff download one day of settles.
+Show the door in one sentence when a visitor is signed out.
+Add a note when the scheduler skipped a job because it had just finished.
+Keep What's new from repeating a line the member already marked.
+"""),
+            _lines("""
+Keep What's new in member words.
+Use one version line in About, help, and the startup note.
+Hold Staff HQ off the member tabs.
+Keep the commands in the same groups as help.
+Leave the r50 map in its own card.
+Keep this thousand list in the card under that map.
+Use plain lines in the record book.
+Hold the group-net choice where staff already set it.
+Keep the daily key behind the eye.
+Match the audit line to the slip number.
+Leave classic pages linked from More.
+Keep coins next to the last reason they moved.
+Show Central on a time of day.
+Hold the week note to counts and a net.
+Keep a test mark off the member board.
+Use the same empty voice on a missing export.
+Leave Needs attention on Staff HQ.
+Keep the restart time, when we show it, to one line.
+Hold the book list to books we already read.
+Match the status card type to the other cards.
+Keep a hidden pick out of the member export.
+Leave the owner on a one-file upload.
+Keep the pager on this list to twenty-five rows.
+Show new, refine, and improve as the three sorts.
+Keep a future row from wearing a live mark.
+"""),
+            _lines("""
+File a tag under the tagged member, not under the person who posted.
+Keep a settled win card on the record as a win.
+Leave a test slip out of standings, the chart, and the week note.
+Hide a hidden pick from search and from the member cards.
+Skip a job that finished clean a moment ago.
+Keep the group-net tile on the total staff chose.
+Show What's new again only when a newer line exists.
+Keep the member card free of Needs attention.
+Use one net for the tile, the card, and Discord.
+Print the version at startup so the running file can be checked.
+Keep the daily key out of the member payload.
+Leave an edit on the same slip, with a what-changed line.
+Do not drop a sport, a command, or a classic page.
+Hold the r50 titles where they are.
+Keep r67 through r71 marked as they are, and leave this list unmarked.
+Store a Got it mark on this phone, for this member.
+Keep a staff export from including a hidden leg for a member link.
+Name a failed job on the status card.
+Use Central on the restart time and the week note.
+Keep the scanner book list equal to the books we actually read.
+Leave the undo, when it exists, to staff and to a short moment.
+Refresh the status card without posting in the channel.
+Keep a signed-out visitor on the door, not on a member's slips.
+Hold the week board note until an admin changes it.
+Keep this list at one thousand, ten lanes, none of them marked live.
+"""),
+        )),
+    ]
+    out = []
+    seen = set()
+    for lane, rows in lanes:
+        if len(rows) != 100:
+            raise RuntimeError((lane, len(rows)))
+        for kind, text in rows:
+            if kind not in ("idea", "refine", "improve"):
+                raise RuntimeError(kind)
+            low = text.lower()
+            if "lock" in low or "sure thing" in low or "sure-thing" in low:
+                raise RuntimeError(text)
+            if text in seen:
+                raise RuntimeError(("dup", text))
+            seen.add(text)
+            if not text.endswith("."):
+                raise RuntimeError(("period", text))
+            out.append({"lane": lane, "kind": kind, "text": text})
+    if len(out) != 1000:
+        raise RuntimeError(len(out))
+    for i, row in enumerate(out, 1):
+        row["n"] = i
+    return out
+
+
+BOT_THOUSAND = _build_thousand()
+
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
 EXTRA_JOBS: list = []      # (name, async fn(client, now_utc)), run every scheduler cycle after the core jobs
 EXTRA_ITEMS: list = []     # discord.ui.DynamicItem classes that must survive restarts
@@ -1345,6 +2500,9 @@ HELP_EXTRA.append(("Map to r50",
 HELP_EXTRA.append(("Next five updates",
     "More also lists **r67 through r71**: 250 adds, 50 per update, 10 from each lane "
     "(professional, visual, board, smarter bot, calls). The r50 map stays. Nothing is cut."))
+HELP_EXTRA.append(("A thousand next ideas",
+    "More also lists **a thousand next ideas**, ten lanes of one hundred. "
+    "Sort them as new, refine, or improve. None of them are live. The r50 map stays."))
 
 
 def _named_job(name: str, fn, client):
@@ -10789,7 +11947,7 @@ def dashboard_data(guild_id: int) -> dict:
             "groupparlay": gp, "coins": coins,
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
-            "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "later": BOT_LATER,
+            "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "later": BOT_LATER, "thousand": BOT_THOUSAND,
             "updates": [{"ver": v, "text": t} for v, t in reversed(MEMBER_NEWS[-5:])],
             "week": dash_this_week(guild_id),
             "netmode": "group" if get_setting(guild_id, "kpi_net") == "group" else "week",
@@ -18555,10 +19713,41 @@ def tracker_view(scope: str) -> discord.ui.View:
     return view
 
 
+def bettor_face_key(p) -> str:
+    """Discord id for a profile photo. A typed name with no account stays blank and the page draws an initial."""
+    raw = p["bettor_id"]
+    if raw:
+        return str(raw)
+    key = str(p["bettor_key"] or "")
+    return key if key.isdigit() else ""
+
+
+def slip_blurb(p) -> str:
+    """A short line for Just settled: the slip title, then a couple of legs."""
+    raw = re.sub(r"\s+", " ", (shown_desc(p) or "").replace("\n", " ")).strip()
+    if raw.lower() in {"slip", "hidden pick"} or raw.startswith("🔒"):
+        raw = ""
+    legs = []
+    try:
+        for row in get_legs(p["id"])[:4]:
+            text = re.sub(r"\s+", " ", str(row["text"] or "").replace("\n", " ")).strip()
+            if text and text.lower() not in raw.lower():
+                legs.append(clip(text, 36))
+    except Exception:
+        legs = []
+    title = clip(raw, 42) if raw else ""
+    if title and legs:
+        return clip(title + " · " + ", ".join(legs[:2]), 88)
+    if legs:
+        return clip(", ".join(legs[:3]), 88)
+    return title
+
+
 def dashboard_recent(guild_id: int) -> list[dict]:
     day = iso(datetime.now(timezone.utc) - timedelta(hours=24))
-    return [{"id": p["id"], "who": p["bettor_name"], "status": p["status"], "net": round(pick_net(p), 2),
-             "cost": p["cost"], "payout": p["payout"], "what": "Slip #" + str(p["id"])}
+    return [{"id": p["id"], "who": p["bettor_name"], "key": bettor_face_key(p), "status": p["status"],
+             "net": round(pick_net(p), 2), "cost": p["cost"], "payout": p["payout"],
+             "what": "Slip #" + str(p["id"]), "sum": slip_blurb(p)}
             for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? AND "
                                   "(hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL) ORDER BY settled_at DESC "
                                   "LIMIT 12", (guild_id, day))]
@@ -29460,7 +30649,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-114';"
+    "const CACHE='pb-shell-117';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -29644,8 +30833,10 @@ main{max-width:1180px;margin:auto;padding:16px 20px 48px}
 .row .sub{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .net{font-weight:750;text-align:right;font-variant-numeric:tabular-nums}
 .row .roi{font-size:12.5px;text-align:right;min-width:56px;font-variant-numeric:tabular-nums}
-.row.slip{grid-template-columns:44px minmax(0,1fr) auto}
+.row.slip{grid-template-columns:48px minmax(0,1fr) auto}
+.row.slip img.ava,.row.slip .av{width:40px;height:40px;border-radius:50%}
 .av{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:#fff;font-size:15px;flex:none}
+img.ava{width:36px;height:36px;border-radius:50%;object-fit:cover;display:block;background:var(--card2)}
 .chip{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:99px;
  background:var(--card2);border:1px solid var(--line);color:var(--muted);vertical-align:1px}
 .chip.hot{color:#f97316;border-color:#f9731655}.chip.cold{color:#38bdf8;border-color:#38bdf855}
@@ -29689,6 +30880,16 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
  display:flex;flex-direction:column;gap:6px;transition:transform .18s,border-color .18s;width:100%}
 .oslip:hover{transform:translateY(-2px);border-color:#7B3FE477}
 .oslip .w{display:flex;align-items:center;gap:8px;font-weight:700}.oslip .w .chip{margin-left:auto}
+.oslip .w img.ava,.oslip .w .av{flex:none}
+.oslip .w .oname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imap .irow{display:grid;grid-template-columns:44px 76px minmax(0,1fr);gap:8px 10px;align-items:start;padding:10px 2px;border-top:1px solid var(--line)}
+.imap .inum{font-variant-numeric:tabular-nums;color:var(--faint);font-size:12px;padding-top:3px}
+.ikind{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:99px;padding:3px 7px;border:1px solid var(--line);justify-self:start}
+.ikind.idea{color:#c4b5fd;border-color:#7B3FE466;background:#7B3FE41a}
+.ikind.refine{color:#e6c15a;border-color:#e6c15a66;background:#e6c15a14}
+.ikind.improve{color:var(--up);border-color:#34d39955;background:#34d39914}
+.ipager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px}
+.ipager button[disabled]{opacity:.4;cursor:default}
 .oslip .d{color:var(--muted);font-size:13.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .oslip .m{font-size:13px;font-variant-numeric:tabular-nums}
 /* live games strip */
@@ -29749,7 +30950,7 @@ tr:first-child td{border-top:0}td.n{text-align:right;font-variant-numeric:tabula
 @keyframes pop{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:none}}
 .x{position:absolute;top:14px;right:14px}
 .ph{display:flex;align-items:center;gap:14px;margin:0 50px 16px 0}
-.ph .av{width:56px;height:56px;border-radius:18px;font-size:24px}
+.ph .av,.ph img.ava{width:56px;height:56px;border-radius:18px;font-size:24px}
 .ph h3{margin:0;font-size:22px;font-weight:800;overflow-wrap:anywhere}.ph .sub{color:var(--muted);font-size:13.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:3px}
 .ph a{cursor:pointer;font-weight:700;text-decoration:none}
 .pgrid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:16px}
@@ -29882,10 +31083,20 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
 .gpage{border-radius:20px;margin:0 50px 16px 0;overflow:hidden;border:1px solid var(--line)}
 .gpage .prog{margin:0 -18px}.gpage{padding:14px 18px 0}
 .news{display:flex;flex-direction:column}
-.nrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:13px 4px;border-top:1px solid var(--line)}
+.nfilt{display:flex;flex-direction:column;gap:8px;margin:2px 0 6px}
+.nfilt .seg{flex-wrap:wrap}
+.nfilt .nc{margin-left:6px;opacity:.72;font-variant-numeric:tabular-nums}
+.nchips{display:flex;flex-wrap:wrap;gap:6px}
+.nchips button{border:1px solid var(--line);background:var(--card2);color:var(--muted);border-radius:99px;padding:4px 10px;
+ font-size:12px;font-weight:700;cursor:pointer;text-transform:capitalize}
+.nchips button.on{background:var(--brand);border-color:transparent;color:#fff}
+.nrow{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:12px 2px;border-top:1px solid var(--line)}
 .news>.nrow:first-child{border-top:0}
+.nava{width:48px;height:48px;border-radius:14px}
+img.nava{object-fit:cover;display:block;background:#1a1028}
 .nh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.nh b{font-size:15px}
-.nd{margin-top:5px;color:var(--muted);font-size:13.5px;overflow-wrap:anywhere}
+.nteam{margin-top:2px;color:var(--muted);font-size:12.5px}
+.nd{margin-top:4px;color:var(--muted);font-size:13.5px;overflow-wrap:anywhere}
 .nslips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.nslips .chip{cursor:pointer}.nslips .chip:hover{color:var(--brand2)}
 .nt{font-size:12px;white-space:nowrap;color:var(--faint)}
 .hgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}
@@ -30087,7 +31298,7 @@ function slipRow(p,showWho){const price=[p.cost!=null?'risk '+cash(p.cost):'',p.
    h('div',{class:'sub'},(showWho===false?'':(p.what||'')+' · ')+(num?num+' · ':'')+(price?price+' · ':'')+(p.when||''))),
   p.net==null?h('span',{class:'net faint',text:p.cost!=null?cash(p.cost):''}):h('span',{class:'net '+tone(p.net)},money(p.net)))}
 function openSlipCard(p){return h('button',{class:'oslip',type:'button',onclick:()=>go('#/s/'+p.id)},
-  h('div',{class:'w'},avatar(p.who),p.who,h('span',{class:'chip',text:p.platform||'Slip'})),h('div',{class:'d',text:p.what}),
+  h('div',{class:'w'},face(p.key,p.who),h('span',{class:'oname',text:p.who||''}),h('span',{class:'chip',text:p.platform||'Slip'})),h('div',{class:'d',text:p.what}),
   h('div',{class:'m'},h('span',{class:'muted'},'Risk '),cash(p.cost),h('span',{class:'muted'},'  →  pays '),h('b',null,cash(p.payout))))}
 function legDot(l){if(l.status==='hit')return h('span',{class:'lg hit'},'✓');if(l.status==='miss')return h('span',{class:'lg miss'},'✕');
  if(l.status==='push')return h('span',{class:'lg push'},'–');if(l.live==='hit'||l.live==='ahead')return h('span',{class:'lg ahead',title:'Ahead'},'▲');
@@ -30109,10 +31320,18 @@ function gamesStrip(games){return h('div',{class:'games',role:'list','aria-label
 function gamesCount(d){const n=d.games.filter(g=>g.state==='in').length;return n?n+' live':String(d.games.length)}
 
 /* ---------- tabs ---------- */
-function whatsNew(d){const v=d.version||'';let seen='';try{seen=localStorage.getItem('pb-seen')||''}catch(e){}
- if(!v||seen===v)return null;const lines=(d.updates||[]).slice(0,5);
- return card("What's new",'',v,h('div',null,lines.map(u=>h('p',{class:'muted',style:'margin:4px 0',text:u.ver+' · '+u.text})),
-  h('button',{type:'button',class:'tpause',style:'margin-top:8px',onclick:()=>{try{localStorage.setItem('pb-seen',v)}catch(e){}render()}},'Got it')))}
+function newsMark(s){const m=String(s||'').match(/(\d+)\.(\d+)/);return m?(+m[1])*1000+(+m[2]):0}
+function newsKey(d){return 'pb-news-'+((d&&d.me)||'guest')}
+function whatsNew(d){const lines=(d.updates||[]).slice(0,5);let mark=0,had=false;
+ try{const saved=localStorage.getItem(newsKey(d));
+  if(saved!=null&&saved!==''){mark=+saved||0;had=true}
+  else{const old=localStorage.getItem('pb-seen')||'';if(old){mark=newsMark(old);had=true}}}catch(e){}
+ let fresh=lines.filter(u=>newsMark(u.ver)>mark);
+ if(!had)fresh=fresh.slice(0,1);
+ if(!fresh.length)return null;
+ const top=fresh.reduce((a,u)=>Math.max(a,newsMark(u.ver)),mark);
+ return card("What's new",'','',h('div',null,fresh.map(u=>h('p',{class:'muted',style:'margin:4px 0',text:u.text})),
+  h('button',{type:'button',class:'tpause',style:'margin-top:8px',onclick:()=>{try{localStorage.setItem(newsKey(d),String(top));localStorage.setItem('pb-seen',d.version||'')}catch(e){}render()}},'Got it')))}
 function pinBoard(){const xs=pins().slice(0,10);if(!xs.length)return null;
  return card('Pinned','',String(xs.length),h('div',{class:'watch'},xs.map(p=>h('button',{class:'wchip',type:'button',onclick:()=>{if(p.slug&&p.id)go('#/pl/'+p.slug+'/'+p.id)}},
   h('div',{class:'who',text:p.name||'Player'})))))}
@@ -30157,8 +31376,13 @@ function renderLive(el,d){
   later.length?card('Later today & finals','',String(later.length),h('div',{class:'glist'},later.map(gameLine))):null,
   L&&L.games.length?card('The /live picture','s6',L.updated?'Updated '+L.updated:null,shot(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
   card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
-  card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(p=>slipRow({id:p.id,who:p.who,status:p.status,net:p.net,what:'Slip #'+p.id,when:'settled today'})))
+  card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(settledRow))
    :empty('Nothing settled in the last day','Fresh results land here.')))}
+function settledRow(p){const note=p.sum||'';const meta='Slip #'+p.id+(p.when?' · '+p.when:' · settled today');
+ return h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},face(p.key,p.who),
+  h('div',{style:'min-width:0'},h('div',{class:'nm',text:p.who||'Slip'}),
+   note?h('div',{class:'sub',text:note}):null,h('div',{class:'sub faint',text:meta})),
+  p.net==null?h('span',{class:'net faint',text:''}):h('span',{class:'net '+tone(p.net)},money(p.net)))}
 function crewTile(p,d){const link=/^\d+$/.test(String(p.key||''));
  return h(link?'button':'div',{class:'tile'+(p.role?' team':''),type:link?'button':null,onclick:link?()=>go('#/p/'+p.key):null},
  imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
@@ -30211,6 +31435,34 @@ function renderPosters(el,d){
    const link=/^\d+$/.test(String(p.key||''));
    return h(link?'button':'div',{class:'mini',type:link?'button':null,onclick:link?()=>go('#/p/'+p.key):null},
    imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),h('b',{text:p.name}))}))):null)}
+function ideaKind(k){return k==='idea'?'New':k==='refine'?'Refine':'Improve'}
+function ideaBoard(rows){
+ const lane=S.il||'all', kind=S.ik||'all', size=25;
+ const lanes=['all'];
+ rows.forEach(r=>{if(lanes.indexOf(r.lane)<0)lanes.push(r.lane)});
+ const inLane=lane==='all'?rows:rows.filter(r=>r.lane===lane);
+ const kinds=[['all','All'],['idea','New'],['refine','Refine'],['improve','Improve']];
+ const seg=h('div',{class:'seg'},kinds.map(([k,t])=>{
+  const n=k==='all'?inLane.length:inLane.filter(r=>r.kind===k).length;
+  return h('button',{type:'button',class:kind===k?'on':'',onclick:()=>{S.ik=k;S.ip=0;render()}},t,h('span',{class:'nc',text:String(n)}));
+ }));
+ const chips=h('div',{class:'nchips'},lanes.map(k=>h('button',{type:'button',class:lane===k?'on':'',onclick:()=>{S.il=k;S.ip=0;render()}},k==='all'?'All lanes':k)));
+ const shown=inLane.filter(r=>kind==='all'||r.kind===kind);
+ const pages=Math.max(1,Math.ceil(shown.length/size)||1);
+ const p=Math.min(S.ip||0,pages-1);
+ const slice=shown.slice(p*size,p*size+size);
+ const label=shown.length?(p*size+1)+'\u2013'+Math.min(shown.length,(p+1)*size)+' of '+shown.length:'0';
+ return h('div',null,
+  h('p',{class:'muted',style:'margin:0 0 8px'},'None of these are live. Sort by new, refine, or improve, and by lane. Twenty-five at a time.'),
+  h('div',{class:'nfilt'},seg,chips),
+  shown.length?h('div',{class:'imap'},slice.map(r=>h('div',{class:'irow'},
+   h('span',{class:'inum',text:String(r.n)}),
+   h('span',{class:'ikind '+r.kind,text:ideaKind(r.kind)}),
+   h('div',{style:'min-width:0'},h('div',{class:'rms',text:r.lane}),h('div',{text:r.text}))))):empty('Nothing in this filter','Try All to see the full list.'),
+  shown.length?h('div',{class:'ipager'},
+   h('button',{type:'button',class:'tpause',disabled:p<=0?true:null,onclick:()=>{if(p<=0)return;S.ip=p-1;render()}},'Prev'),
+   h('span',{class:'muted',text:label}),
+   h('button',{type:'button',class:'tpause',disabled:p>=pages-1?true:null,onclick:()=>{if(p>=pages-1)return;S.ip=p+1;render()}},'Next')):null)}
 function renderMore(el,d){
  const icons={hit:'✅',miss:'❌',push:'➖'};
  const map=(d.roadmap||[]).map(r=>h('div',{class:'rmrow '+(r.state||'')},
@@ -30241,6 +31493,7 @@ function renderMore(el,d){
   card('Record book','s4',null,d.records.length?h('ul',{class:'clean'},d.records.map(x=>h('li',{text:x}))):empty('The record book is empty','Big days get written down here.')),
   healthCard(),
   map.length?card('Roadmap to r50','',null,h('div',{class:'rmap'},map)):null,
+  (d.thousand||[]).length?card('A thousand next ideas','',String((d.thousand||[]).length),ideaBoard(d.thousand)):null,
   (d.commands||[]).length?card('Commands','',String(d.commands.length),h('div',null,(d.commands||[]).map(c=>h('div',{class:'cmdsec'},
    h('div',{class:'rms',text:c.name}),h('p',{class:'muted',style:'margin:4px 0 12px;white-space:pre-wrap',text:c.text}))))):null,
   plan.length?card('Five updates','',((d.plan||[]).filter(r=>r.state==='live').length)+' live',h('div',{class:'rmap'},plan)):null,
@@ -30357,7 +31610,7 @@ async function openSlip(id){openSheet();const s=await api('/api/slip/'+id+'.json
  if(!s){sheetError('Couldn’t open that slip');return}
  const hits=s.legs.filter(l=>l.status==='hit').length;
  put($('#sheet-body'),
-  h('div',{class:'ph'},avatar(s.who),h('div',{style:'min-width:0'},h('h3',null,'Slip #'+s.id,' ',stBadge(s.status)),
+  h('div',{class:'ph'},face(s.key,s.who),h('div',{style:'min-width:0'},h('h3',null,'Slip #'+s.id,' ',stBadge(s.status)),
    h('div',{class:'sub'},s.key?h('a',{onclick:()=>go('#/p/'+s.key)},s.who):h('b',{text:s.who}),h('span',{class:'chip',text:s.platform}),
     s.sport?h('span',{class:'chip',text:s.sport}):null,h('span',{text:'Logged '+s.logged+(s.settled?' · settled '+s.settled:'')})))),
   s.player?h('button',{class:'xray',type:'button',onclick:()=>openNamed(s.player)},'X-ray · same as /trend'):null,
@@ -30441,15 +31694,47 @@ const NEWS_TONE={out:'down',suspension:'down',doubtful:'orange',questionable:'wa
 function ago(iso){const t=Date.parse(iso);if(isNaN(t))return '';const s=Math.max(0,(Date.now()-t)/1000);
  return s<60?'just now':s<3600?Math.floor(s/60)+'m ago':s<86400?Math.floor(s/3600)+'h ago':Math.floor(s/86400)+'d ago'}
 async function loadNews(){const d=await api('/api/news.json'+qs());if(!d)return;d.items=d.items||[];S.news=d;S.newsAt=Date.now();if(S.tab==='news')render()}
+function newsPhoto(n){const league=String(n.slug||''),id=String(n.aid||'');
+ const ok=/^[a-z0-9-]{2,32}$/.test(league)&&/^[0-9]{1,12}$/.test(id);
+ const letter=h('div',{class:'av nava'},(String(n.player||'?').trim().charAt(0)||'?').toUpperCase());
+ if(!ok)return letter;
+ const img=h('img',{class:'ava nava',alt:'',width:'48',height:'48',referrerpolicy:'no-referrer',decoding:'async'});
+ img.addEventListener('error',()=>{if(img.parentNode)img.replaceWith(letter)});
+ img.src='https://a.espncdn.com/combiner/i?img=/i/headshots/'+league+'/players/full/'+id+'.png&w=72&h=72&scale=crop';
+ return img}
 function newsRow(n){const chip=n.kind==='reboot'?'REBOOT':n.kind==='off'?'BACK':String(n.status||'').toUpperCase();
  const what=n.kind==='injury'?'is '+String(n.status||'').toLowerCase():n.kind==='off'?'is off the injury report':'didn’t play';
- return h('div',{class:'nrow'},h('div',{style:'min-width:0'},h('div',{class:'nh'},h('span',{class:'sc '+(NEWS_TONE[n.chip]||''),text:chip}),h('b',{text:n.player}),h('span',{class:'muted',text:what})),
-  n.detail?h('div',{class:'nd',text:n.detail}):null,
+ const team=[n.abbr,n.team].filter(Boolean).join(' · ');
+ const open=n.slug&&n.aid?()=>go('#/pl/'+n.slug+'/'+n.aid):null;
+ return h('div',{class:'nrow'},newsPhoto(n),h('div',{style:'min-width:0'},
+  h('div',{class:'nh'},open?h('button',{type:'button',class:'nm',style:'border:0;background:none;padding:0;cursor:pointer;color:inherit;font:inherit',onclick:open},h('b',{text:n.player})):h('b',{text:n.player}),
+   h('span',{class:'sc '+(NEWS_TONE[n.chip]||''),text:chip})),
+  team?h('div',{class:'nteam',text:team}):null,
+  h('div',{class:'nd',text:what+(n.detail?' · '+n.detail:'')}),
   n.slips&&n.slips.length?h('div',{class:'nslips'},n.slips.map(x=>h('button',{class:'chip',type:'button',onclick:()=>go('#/s/'+x.id)},x.who+' · #'+x.id))):null),
   h('span',{class:'nt',text:ago(n.when)}))}
-function renderNews(el,d){const N=S.news;
- put(el,card('Injury & reboot news','',N&&N.items.length?String(N.items.length):null,
-  !N?h('div',null,skel(5)):N.items.length?h('div',{class:'news'},N.items.map(newsRow))
+function newsFilters(items){const kinds=[['all','All'],['injury','Injuries'],['reboot','Reboots'],['off','Back']];
+ const kind=S.nf||'all';
+ const seg=h('div',{class:'seg newsf'},kinds.map(([k,t])=>{const n=k==='all'?items.length:items.filter(x=>x.kind===k).length;
+  return h('button',{type:'button',class:kind===k?'on':'',onclick:()=>{S.nf=k;S.ns='all';render()}},t,n?h('span',{class:'nc',text:String(n)}):null)}));
+ const pool=kind==='all'?items:items.filter(x=>x.kind===kind);
+ const statuses=[...new Set(pool.map(x=>String(x.chip||'').toLowerCase()).filter(c=>c&&c!=='off'&&c!=='reboot'))];
+ const chips=statuses.length>1?h('div',{class:'nchips'},['all',...statuses].map(k=>h('button',{type:'button',class:(S.ns||'all')===k?'on':'',
+  onclick:()=>{S.ns=k;render()}},k==='all'?'Any status':k))):null;
+ return h('div',{class:'nfilt'},seg,chips)}
+function newsWithFace(n){const f=S.nface&&S.nface[n.player];if(!f||typeof f!=='object')return n;
+ const o=Object.assign({},n);if(f.slug)o.slug=f.slug;if(f.aid)o.aid=String(f.aid);if(f.team&&!o.team)o.team=f.team;if(f.abbr&&!o.abbr)o.abbr=f.abbr;return o}
+async function fillNewsFaces(items){S.nface=S.nface||{};
+ const names=[...new Set(items.map(n=>n.player).filter(p=>p&&S.nface[p]===undefined))].slice(0,8);
+ if(!names.length)return;for(const name of names)S.nface[name]=null;
+ await Promise.all(names.map(async name=>{const d=await api('/api/newsface.json'+qs('q='+encodeURIComponent(name)));
+  S.nface[name]=d&&(d.slug||d.team)?d:{}}));if(S.tab==='news')render()}
+function renderNews(el,d){const N=S.news;const raw=N&&N.items||[];const items=raw.map(newsWithFace);if(N&&raw.length)fillNewsFaces(raw);
+ const kind=S.nf||'all',stat=S.ns||'all';
+ const shown=items.filter(x=>(kind==='all'||x.kind===kind)&&(stat==='all'||String(x.chip||'').toLowerCase()===stat));
+ put(el,card('Injury & reboot news','',items.length?String(shown.length):null,
+  !N?h('div',null,skel(5)):items.length?h('div',null,newsFilters(items),shown.length?h('div',{class:'news'},shown.map(newsRow))
+   :empty('Nothing in this filter','Try All to see the full report.'))
   :empty(N.on?'No news yet':'The news feed is off',N.on?'When a player on the group’s slips lands on (or comes off) an injury report, it shows up here.':'An admin can switch it on with /admin askchannel in Discord.')),
   card('How it works','',null,h('p',{class:'muted',style:'margin:0'},'The bot checks the injury reports every 10 minutes for players on the group’s open slips, and posts changes in the ask channel. ',
    h('b',null,'Reboot'),' means a player didn’t play and that leg was voided. Hidden slips never show up here.')))}
@@ -30801,6 +32086,8 @@ body.v4 .pill.season{color:var(--gold);border-color:color-mix(in srgb,var(--gold
 body.v4 .iconbtn.x{width:44px;height:44px}
 body.v4 .looktile.on{outline:3px solid var(--gold)}
 body.v4 img.ava{width:36px;height:36px;border-radius:50%;object-fit:cover;display:block;background:var(--card2);box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 45%,transparent)}
+body.v4 .row.slip img.ava,body.v4 .row.slip .av{width:40px;height:40px;border-radius:50%}
+body.v4 .nrow .nava{width:48px;height:48px;border-radius:14px;box-shadow:none}
 body.v4 .ph img.ava{width:56px;height:56px}
 body.v4 .weeklist{display:flex;flex-direction:column}
 body.v4 .weekline{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;
@@ -30836,6 +32123,7 @@ body.v4 .crewstrip .mini b{display:block;margin-top:6px;font-size:13px;white-spa
 body.v4 .crewstrip .img{aspect-ratio:5/7;border-radius:12px;overflow:hidden}
 body.v4 nav.tabs button.on:after{height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--gold),var(--brand2))}
 body.v4 .oslip{border-radius:16px}
+body.v4 .oslip .w img.ava,body.v4 .oslip .w .av{flex:none}
 a.staffbtn{display:none}
 body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;padding:0 14px;border-radius:12px;
  background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;font-size:11px;letter-spacing:.12em;
@@ -43022,13 +44310,66 @@ async def dash30_api_game(request):
     return web.json_response(d) if d else dash_error(web, request, 404)
 
 
+def news_cached_team(name: str) -> str:
+    """Team from an injury report already loaded in this process. No network."""
+    key = norm_name(name or "")
+    if len(key) < 3:
+        return ""
+    for cached in _injury_cache.values():
+        report = cached[1] if isinstance(cached, tuple) and len(cached) > 1 else None
+        if not isinstance(report, dict):
+            continue
+        best, team, ambiguous = 0, "", False
+        for k, v in report.items():
+            if not isinstance(v, dict):
+                continue
+            sc = name_score(key, str(k))
+            if sc > best:
+                best, team, ambiguous = sc, str(v.get("team") or ""), bool(v.get("ambiguous"))
+        if best >= 2 and team and not ambiguous:
+            return clip(team, 40)
+    return ""
+
+
 async def dash30_api_news(request):
     from aiohttp import web
     prm, err = dash_gate(web, request)
     if err is not None:
         return err
     gid = prm["guild"]
-    return web.json_response({"items": dash30_news(gid), "on": bool(ask_channel_id(gid)) and server_on(gid, "newsfeed")})
+    items = [dict(x) for x in dash30_news(gid)]
+    for it in items:
+        team = news_cached_team(it.get("player") or "")
+        if team and not it.get("team"):
+            it["team"] = team
+    return web.json_response({"items": items, "on": bool(ask_channel_id(gid)) and server_on(gid, "newsfeed")})
+
+
+async def dash30_api_newsface(request):
+    """One player's photo and team for the news row. One match only, so two players with one name stay blank."""
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    if not dash_rate(dash_client_ip(request), "newsface", 40, 60):
+        return dash_error(web, request, 429)
+    q = clip(str(request.query.get("q") or "").strip(), 40)
+    if len(q) < 3:
+        return web.json_response({})
+    try:
+        found = await resolve_player(q, list(PROP_PATHS))
+    except Exception:
+        found = []
+    if len(found) != 1 or name_score(norm_name(q), found[0].get("norm") or "") < 2:
+        return web.json_response({})
+    f = found[0]
+    league = design_head_league(f.get("path")) or ""
+    aid = str(f.get("id") or "")
+    out = {"team": clip(f.get("team") or "", 40), "abbr": clip(f.get("team_abbr") or "", 8)}
+    if league and aid.isdigit():
+        out["slug"] = league
+        out["aid"] = aid
+    return web.json_response(out)
 
 
 async def dash30_api_health(request):
@@ -43086,7 +44427,8 @@ async def dash30_logo(request):
 def dash30_routes(web) -> list:
     """The r30 routes; dash_app puts them ahead of the generic /img/{kind}.png ones."""
     return [web.get("/api/live.json", dash30_api_live), web.get(r"/api/game/{eid:[A-Za-z0-9]+}.json", dash30_api_game),
-            web.get("/api/news.json", dash30_api_news), web.get("/api/health.json", dash30_api_health),
+            web.get("/api/news.json", dash30_api_news), web.get("/api/newsface.json", dash30_api_newsface),
+            web.get("/api/health.json", dash30_api_health),
             web.get("/img/live.png", dash30_live_img), web.get(r"/img/game/{eid:[A-Za-z0-9]+}.png", dash30_game_img),
             web.get(r"/img/logo/{eid:[A-Za-z0-9]+}/{side:[ah]}.png", dash30_logo)]
 
