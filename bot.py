@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.26"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.27"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -164,6 +164,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.24", "Tag a member on a slip and it is posted under their name."),
     ("1.25", "A screenshot answer names the players, the lines, and the result on the card."),
     ("1.26", "My board shows a profile photo on each slip. Pin and open are separate, so the same name is not listed twice."),
+("1.27", "A tagged win card is filed under that member even when the long picture read is slow."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -175,6 +176,7 @@ MEMBER_NEWS = [
     ("1.24", "Tag a member on a slip and it shows up under their name."),
     ("1.25", "A screenshot answer names the players, the lines, and whether the card won or lost."),
     ("1.26", "My board shows a profile photo on each slip, and pinning one is a tap."),
+("1.27", "Tag someone on a win card and it shows up under their name, even when the picture takes a moment."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -38075,7 +38077,8 @@ async def read_slip_gemini(attachment) -> Optional[dict]:
     return slip
 
 
-async def gemini_see(attachment, prompt: str, temperature: float = 0.5, tokens: int = 420) -> str:
+async def gemini_see(attachment, prompt: str, temperature: float = 0.5, tokens: int = 420,
+                     timeout: float = 8) -> str:
     """One short look at a screenshot. No enlarged slices, so it comes back in a few seconds."""
     if not GEMINI_API_KEY:
         return ""
@@ -38089,7 +38092,7 @@ async def gemini_see(attachment, prompt: str, temperature: float = 0.5, tokens: 
         {"text": prompt},
     ]}], "generationConfig": {"temperature": temperature, "maxOutputTokens": tokens}}
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
         async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
             if resp.status != 200:
                 return ""
@@ -38121,7 +38124,7 @@ async def read_result_card(attachment) -> Optional[dict]:
     """A second look for a settled result card when the first read found no legs."""
     if not GEMINI_API_KEY or attachment is None:
         return None
-    text = await gemini_see(attachment, RESULT_CARD_PROMPT, temperature=0, tokens=900)
+    text = await gemini_see(attachment, RESULT_CARD_PROMPT, temperature=0, tokens=900, timeout=16)
     if not text:
         return None
     try:
@@ -38152,12 +38155,62 @@ async def slip_with_card(attachment, slip, reason):
     if slip and slip.get("legs"):
         return slip, reason
     try:
-        rescued = await asyncio.wait_for(read_result_card(attachment), timeout=8)
+        rescued = await asyncio.wait_for(read_result_card(attachment), timeout=16)
     except Exception:
         log.warning("Result card read failed", exc_info=True)
         rescued = None
     if rescued and rescued.get("legs"):
         return rescued, None
+    return slip, reason
+
+
+async def read_slip_raced(attachment, budget: float = 18):
+    """The short result-card look and the full reader run together.
+    Whichever comes back with legs first is the slip, so a clear win card is not dropped when the long read is slow."""
+    best_task = asyncio.create_task(read_slip_best(attachment))
+    card_task = asyncio.create_task(read_result_card(attachment))
+    slip, reason, timed_out = None, None, False
+    pending = {best_task, card_task}
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + budget
+    try:
+        while pending and not (slip and slip.get("legs")) and loop.time() < deadline:
+            done, pending = await asyncio.wait(
+                pending, timeout=max(0.05, deadline - loop.time()), return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                timed_out = True
+                break
+            ready = []
+            for task in done:
+                if task.cancelled():
+                    continue
+                exc = task.exception()
+                if exc:
+                    log.warning("Slip read failed: %s", type(exc).__name__)
+                    continue
+                if task is best_task:
+                    got, why = task.result()
+                    if why:
+                        reason = why
+                    if got and got.get("legs"):
+                        ready.append((got, why))
+                    elif got is not None and slip is None:
+                        slip = got
+                else:
+                    got = task.result()
+                    if got and got.get("legs"):
+                        ready.append((got, None))
+            if ready:
+                ready.sort(key=lambda item: 0 if item[0].get("status") in ("win", "loss", "push") else 1)
+                slip, reason = ready[0]
+                break
+    finally:
+        for task in (best_task, card_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(best_task, card_task, return_exceptions=True)
+    if not (slip and slip.get("legs")) and timed_out:
+        reason = reason or "that read took too long"
     return slip, reason
 
 
@@ -43663,11 +43716,7 @@ class PicksBot(discord.Client):
             return
         if slip_reader_on() and (attachment.size or 0) <= MAX_IMAGE_BYTES:
             async with message.channel.typing():
-                try:
-                    slip, reason = await asyncio.wait_for(read_slip_best(attachment), timeout=8)
-                except asyncio.TimeoutError:
-                    reason = "that read took too long"
-                slip, reason = await slip_with_card(attachment, slip, reason)
+                slip, reason = await read_slip_raced(attachment)
         elif slip_reader_on():
             reason = f"the image is too big ({(attachment.size or 0) // 1024} KB)"
             SLIP_STATE["last_error"] = (now_iso(), f"Image too big to read ({(attachment.size or 0) // 1024} KB)")
@@ -43893,11 +43942,7 @@ class PicksBot(discord.Client):
         said = ""
         async with message.channel.typing():
             if (attachment.size or 0) <= MAX_IMAGE_BYTES:
-                try:
-                    slip, reason = await asyncio.wait_for(read_slip_best(attachment), timeout=8)
-                except asyncio.TimeoutError:
-                    reason = "that read took too long"
-                slip, reason = await slip_with_card(attachment, slip, reason)
+                slip, reason = await read_slip_raced(attachment)
             if slip is None or not (slip.get("legs") or slip.get("description")):
                 if ask_enabled():
                     try:
