@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.05"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.06"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -143,6 +143,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.03", "An admin can pin a week note. Overview lists the slate and what is still riding. Your bankroll stays on your card."),
     ("1.04", "Restarts report free disk, open slips, and the scanner. A developer can file a screenshot under someone else and edit any pick. Leftover backup copies are removed."),
     ("1.05", "Replies land faster. Chat answers like a person in the group, and a screenshot still gets a take when the paid reader is out."),
+    ("1.06", "A model name in the Grok variable is ignored, so chat stays on Gemini and Groq."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -25456,7 +25457,7 @@ def staff_ops(uid: int) -> dict:
             crew.append({"id": i, "name": crew_display_name(i, gid), "role": kind})
     pending = staff_rows("pending", gid) if crew_at_least(uid, "owner", gid) else []
     pool = [
-        {"name": "Grok (xAI)", "on": bool(env("XAI_API_KEY", ""))},
+        {"name": "Grok (xAI)", "on": xai_ready()},
         {"name": "Groq (free)", "on": bool(env("GROQ_API_KEY", ""))},
         {"name": "Cerebras (free)", "on": bool(env("CEREBRAS_API_KEY", ""))},
         {"name": "OpenRouter (free)", "on": bool(env("OPENROUTER_API_KEY", ""))},
@@ -31086,9 +31087,15 @@ XAI_API_KEY = env("XAI_API_KEY", "")
 XAI_MODEL = env("XAI_MODEL", "grok-3")
 
 
+def xai_ready() -> bool:
+    """A real xAI key starts with xai-. A model name such as grok-3 in that variable is not a key."""
+    key = (XAI_API_KEY or "").strip()
+    return key.startswith("xai-") and len(key) > 12
+
+
 def ask_enabled() -> bool:
     """Can the bot answer questions at all (a Gemini or a Claude key)?"""
-    if XAI_API_KEY or env("OPENROUTER_API_KEY", ""):
+    if xai_ready() or env("OPENROUTER_API_KEY", ""):
         return True
     return any((e == "groq" and GROQ_API_KEY) or (e == "gemini" and GEMINI_API_KEY) or (e == "claude" and ai_enabled())
                for e in ASK_ENGINES)
@@ -31261,7 +31268,7 @@ async def ask_chat(url: str, key: str, model: str, system: str, user_text: str, 
 
 async def ask_xai(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
     """Grok, from xAI, when XAI_API_KEY is set on the host. Cursor does not expose a chat API for this."""
-    return await ask_chat("https://api.x.ai/v1/chat/completions", XAI_API_KEY, XAI_MODEL, system, user_text, "Grok")
+    return await ask_chat("https://api.x.ai/v1/chat/completions", XAI_API_KEY.strip(), XAI_MODEL, system, user_text, "Grok")
 
 
 async def ask_openrouter(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
@@ -31280,12 +31287,12 @@ async def ask_any(system: str, user_text: str, search: bool = True) -> tuple[str
     why: list[str] = []
     ASK_LAST_ERROR["text"] = None
     engines = list(ASK_ENGINES)
-    if XAI_API_KEY and "xai" not in engines:
+    if xai_ready() and "xai" not in engines:
         engines.insert(0, "xai")
     elif env("OPENROUTER_API_KEY", "") and "openrouter" not in engines:
         engines.insert(0, "openrouter")
     for engine in engines:
-        if engine == "xai" and XAI_API_KEY:
+        if engine == "xai" and xai_ready():
             try:
                 answer, sources = await ask_xai(system, user_text, search)
                 if answer and not ask_unanswered(answer):
