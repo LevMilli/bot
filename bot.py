@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.39"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.40"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -177,6 +177,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.37", "Larry Bird and Drew Brees replace two portraits on the opening collage."),
     ("1.38", "Tim Tebow replaces Larry Bird on the opening collage."),
     ("1.39", "A short Discord dropout stays quiet. A heads up goes out only if the robot is still offline."),
+    ("1.40", "The note when the robot comes back lists what the update added."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -201,6 +202,7 @@ MEMBER_NEWS = [
     ("1.37", "The opening page swaps in Larry Bird and Drew Brees."),
     ("1.38", "The opening page swaps in Tim Tebow and Drew Brees."),
     ("1.39", "A quick dropout stays quiet. You only get a note if the robot stays offline."),
+    ("1.40", "When the robot comes back on, the note lists what the update added."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -34123,20 +34125,28 @@ def bot_gap_words(sec: int) -> str:
     return f"{h}h {m}m" if m else f"{h}h"
 
 
+def _ver_token(text: str) -> str:
+    """The version marker in a string. '2026-10-16 1.39' → '1.39', not a piece of '1.3'."""
+    hits = re.findall(r"(r\d+|\d+\.\d+)", str(text or ""), flags=re.I)
+    return hits[-1].lower() if hits else ""
+
+
 def bot_update_lines(prev: str) -> list[str]:
     """Notes for versions after `prev`. Unknown/empty prev → the full current list (first announce)."""
     if not prev:
         return [line for _, line in BOT_UPDATES]
+    token = _ver_token(prev)
     started = False
     out = []
     for ver, line in BOT_UPDATES:
         if started:
             out.append(line)
-        if ver in str(prev):
+        if token and ver.lower() == token:
             started = True
-    if not out:
-        return [line for ver, line in BOT_UPDATES if ver in BOT_VERSION]
-    return out
+    if out:
+        return out
+    cur = _ver_token(BOT_VERSION)
+    return [line for ver, line in BOT_UPDATES if ver.lower() == cur]
 
 
 def boot_notice(prev_ver: str, gap_sec: Optional[int], planned: bool) -> Optional[str]:
@@ -34151,15 +34161,14 @@ def boot_notice(prev_ver: str, gap_sec: Optional[int], planned: bool) -> Optiona
         bits.append("Back from an update." if planned else f"Was down about {bot_gap_words(gap_sec)}.")
     elif new:
         bits.append("New upload. It was not down long enough to call it an outage.")
-    if new:
-        notes = bot_update_lines(prev_ver)
-        show = notes[-3:]
-        if show:
-            bits.append("**What's new**")
-            bits.extend(f"• {n}" for n in show)
-            extra = len(notes) - len(show)
-            if extra:
-                bits.append(f"• {extra} older notes are on the site, under More.")
+    notes = bot_update_lines(prev_ver) if new else (bot_update_lines(prev_ver)[:1] if down else [])
+    show = notes[-8:]
+    if show:
+        bits.append("**What's new**")
+        bits.extend(f"• {n}" for n in show)
+        extra = len(notes) - len(show)
+        if extra:
+            bits.append(f"• {extra} earlier notes from this update are on More.")
     return "\n".join(bits)
 
 
@@ -34488,12 +34497,12 @@ async def announce_boot(client) -> Optional[str]:
     gap = bot_gap_seconds(get_setting(0, "bot_disconnect_at") or hb)
     note = boot_notice(prev, gap, planned)
     set_setting(0, "bot_heartbeat", now_iso())
-    set_setting(0, "bot_announced", BOT_VERSION)
     set_setting(0, "bot_stopping", None)
     set_setting(0, "bot_disconnect_at", None)
     if not note:
         free, _, _ = disk_bytes()
         if not free or free >= 200 * 1024 * 1024:
+            set_setting(0, "bot_announced", BOT_VERSION)
             return None
         note = (f"🛠️ **PIMP-BOT is live · {BOT_VERSION} · update {ROADMAP_NOW}**\n"
                 "Storage is low, so this restart is being reported.")
@@ -34511,19 +34520,24 @@ async def announce_boot(client) -> Optional[str]:
         happened = "New upload. It was not down long enough to call it an outage."
     elif "Storage is low" in (note or ""):
         happened = "Storage is low, so this restart is being reported."
-    news = bot_update_lines(prev)[-3:] if (prev or "") != BOT_VERSION else []
+    fresh = bot_update_lines(prev)
+    news = fresh[-8:] if (prev or "") != BOT_VERSION else fresh[:1]
     tone = "down" if gap and gap >= 180 and not planned else "live"
+    sent = 0
     try:
         def _card(gid, tone=tone, happened=happened, news=news):
             return status_card({
                 "title": "PIMP-BOT IS LIVE", "tone": tone, "happened": happened, "news": list(news),
             })
 
-        await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned),
-                         file=_card, refresh=True)
+        sent = await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned),
+                                file=_card, refresh=True)
     except Exception:
         log.warning("Boot announce failed")
-    return note
+    if sent:
+        set_setting(0, "bot_announced", BOT_VERSION)
+        return note
+    return ""
 
 
 def staff_rec(uid: int, gid: Optional[int] = None) -> dict:
@@ -44115,7 +44129,7 @@ def render_status_fallback(b: dict) -> io.BytesIO:
 def render_status_card(b: dict) -> io.BytesIO:
     """A restart or crash note. Same sections as Staff HQ, drawn like Tonight's Board.
     Tap Refresh on the message for a new draw. Staff HQ is the page that stays current."""
-    news = [str(x) for x in (b.get("news") or []) if str(x).strip()][:3]
+    news = [str(x) for x in (b.get("news") or []) if str(x).strip()][:8]
     rows = list(b.get("rows") or [])[:6]
     happened = str(b.get("happened") or "").strip()
     staff = b.get("staff") if isinstance(b.get("staff"), dict) else {}
@@ -45525,11 +45539,28 @@ class PicksBot(discord.Client):
         if alerted:
             await self._say_reconnected()
         if not getattr(self, "_boot_said", False):
-            self._boot_said = True
             try:
-                await announce_boot(self)
+                landed = await announce_boot(self)
             except Exception:
                 log.exception("Boot announce failed")
+                landed = ""
+            if landed is None or landed:
+                self._boot_said = True
+            else:
+                asyncio.create_task(self._retry_boot())
+
+    async def _retry_boot(self) -> None:
+        """The first ready can fire before the recap channel is in hand."""
+        await asyncio.sleep(8)
+        if getattr(self, "_boot_said", False) or self.is_closed():
+            return
+        try:
+            landed = await announce_boot(self)
+        except Exception:
+            log.exception("Boot announce failed")
+            return
+        if landed is None or landed:
+            self._boot_said = True
 
     async def on_disconnect(self):
         try:
