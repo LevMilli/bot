@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.17"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.19"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -155,6 +155,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.15", "The restart picture follows Staff HQ: reads, feed lights, the answer pool, and open tickets. It is the snapshot from when the bot came back."),
     ("1.16", "The opening collage is torn scattered portraits again, with Angel Reese on the page, newsprint through the faces, and the condensed quotes from the posters."),
     ("1.17", "The opening collage is scattered and tilted, with clearer game photos, each name on its player, and each trophy with the player who won it."),
+    ("1.18", "Staff can file a slip under another person, and the site Who box keeps the name you type."),
+    ("1.19", "Restarts show the live board, with open slips, and a refresh button."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2366,16 +2368,29 @@ def can_edit(interaction: discord.Interaction, p: sqlite3.Row) -> bool:
     return is_mod(interaction.user)
 
 
+def can_file_for_others(user, guild_id: Optional[int] = None) -> bool:
+    """Owner, developer, admin, mod, or a Discord mod can put a slip on someone else's record."""
+    if is_mod(user):
+        return True
+    try:
+        return crew_at_least(getattr(user, "id", 0), "mod", guild_id)
+    except Exception:
+        return False
+
+
+class _FiledWho:
+    """Enough of a member for log_parsed_slip: an id and a display name."""
+
+    def __init__(self, uid: int, name: str):
+        self.id = uid
+        self.display_name = name
+
+
 def slip_on_behalf(message) -> object:
-    """A developer who tags someone in the same message files that screenshot under them."""
+    """Staff who tag someone in the same message file that screenshot under them."""
     author = message.author
     guild = getattr(message, "guild", None)
-    if guild is None:
-        return author
-    try:
-        if not crew_at_least(author.id, "developer", guild.id):
-            return author
-    except Exception:
+    if guild is None or not can_file_for_others(author, getattr(guild, "id", None)):
         return author
     named = [m for m in (getattr(message, "mentions", None) or [])
              if not getattr(m, "bot", False) and getattr(m, "id", None) != author.id]
@@ -3335,7 +3350,8 @@ class SlipDraftButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sd:(
                                                     ephemeral=True)
             return
         if self.act == "log":
-            if interaction.user.id != d["poster"]:
+            staff = can_file_for_others(interaction.user, interaction.guild_id)
+            if interaction.user.id != d["poster"] and not staff:
                 await interaction.response.send_message("Only whoever posted the slip can log it.", ephemeral=True)
                 return
             if d.get("used"):
@@ -3354,9 +3370,15 @@ class SlipDraftButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sd:(
 
             async def reply(**kw):
                 return await interaction.followup.send(wait=True, **kw)
+            bettor = None
+            if staff and d.get("for_id"):
+                bettor = _FiledWho(int(d["for_id"]), d.get("for_name") or "them")
+            elif staff and interaction.user.id != d["poster"]:
+                bettor = _FiledWho(int(d["poster"]), d.get("poster_name") or "them")
             try:
-                pid = await interaction.client.log_parsed_slip(interaction.guild_id, interaction.user, interaction.channel,
-                                                               d["slip"], d["url"], reply)
+                pid = await interaction.client.log_parsed_slip(
+                    interaction.guild_id, interaction.user, interaction.channel,
+                    d["slip"], d["url"], reply, bettor=bettor)
             except Exception:
                 log.exception("Logging a draft failed")
                 d["used"] = None
@@ -3391,12 +3413,58 @@ class SlipDraftButton(discord.ui.DynamicItem[discord.ui.Button], template=r"sd:(
             await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none(), **extra)
 
 
+class SlipWhoSelect(discord.ui.DynamicItem[discord.ui.UserSelect], template=r"sd:who:(?P<mid>\d+)"):
+    """Staff pick whose record a slip goes on. Anyone else is told to leave it."""
+
+    def __init__(self, message_id: int):
+        super().__init__(discord.ui.UserSelect(
+            custom_id=f"sd:who:{message_id}",
+            placeholder="Log it under someone else",
+            min_values=1, max_values=1, row=1))
+        self.message_id = message_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["mid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        if not can_file_for_others(interaction.user, interaction.guild_id):
+            await interaction.response.send_message(
+                "Only staff can log a slip under someone else.", ephemeral=True)
+            return
+        d = get_slip_draft(interaction.guild_id, self.message_id)
+        if d is None:
+            await interaction.response.send_message("I don't have that slip anymore. Post the screenshot again.",
+                                                    ephemeral=True)
+            return
+        if d.get("used"):
+            await interaction.response.send_message(f"Already logged as pick `#{d['used']}`.", ephemeral=True)
+            return
+        raw = (interaction.data or {}).get("values") or []
+        uid = str(raw[0]) if raw else ""
+        if not uid.isdigit():
+            await interaction.response.send_message("Pick a person from the server.", ephemeral=True)
+            return
+        resolved = (interaction.data or {}).get("resolved") or {}
+        member = (resolved.get("members") or {}).get(uid) or {}
+        user = (resolved.get("users") or {}).get(uid) or {}
+        name = member.get("nick") or user.get("global_name") or user.get("username") or "them"
+        d["for_id"] = int(uid)
+        d["for_name"] = clip(str(name), 60)
+        set_setting(interaction.guild_id, f"draft:{self.message_id}", json.dumps(d))
+        await interaction.response.send_message(
+            f"This slip will be logged under **{d['for_name']}**. Tap 🧾 Log this slip.",
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
 def slip_draft_view(message_id: int, review: bool = True, log_it: bool = True, edit: bool = False) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
     order = ("log", "edit", "ask") if edit else ("ask", "log")   # typed slips lead with Log; screenshots with the breakdown
     for act in order:
         if (act == "log" and log_it) or (act == "edit" and edit) or (act == "ask" and review):
             v.add_item(SlipDraftButton(act, message_id))
+    if log_it:
+        v.add_item(SlipWhoSelect(message_id))
     return v
 
 
@@ -3773,7 +3841,7 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
         lines += ["", "The group's own history:"] + list(dict.fromkeys(notes))[:12]
     group_notes = list(dict.fromkeys(notes))
     if not ask_enabled():
-        return numbers_breakdown(data or [], injuries, group_notes) + "\n-# Not logged. Tap 🧾 if you play it."
+        return numbers_breakdown(data or [], injuries, group_notes) + "\n-# Not logged. Tap 🧾 to file it. Staff can put it under someone else."
     system = ASK_SYSTEM.format(bot_name=getattr(getattr(client, "user", None), "display_name", "PIMP-BOT"),
                                today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
     system += f"\n\nYour voice in this server: {persona_prompt(guild_id)}.\n\n" + REVIEW_RULES
@@ -3788,13 +3856,13 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
         why = ASK_LAST_ERROR.get("text") or ask_error_hint(exc)
         return (numbers_breakdown(data or [], injuries, group_notes)
                 + f"\n-# The AI write-up is off right now ({clip(why, 220)}), so these are the straight numbers. "
-                  "Not logged. Tap 🧾 if you play it.")
+                  "Not logged. Tap 🧾 to file it. Staff can put it under someone else.")
     finally:
         ASK_DATA.reset(token)
     answer = review_scrub(answer)
     if sources:
         answer += "\n\n-# Sources: " + " · ".join(f"<{u}>" for u in sources)
-    return (answer or "I came up empty on that one.") + "\n-# Not logged. Tap 🧾 if you play it."
+    return (answer or "I came up empty on that one.") + "\n-# Not logged. Tap 🧾 to file it. Staff can put it under someone else."
 
 
 _SURE_TALK = re.compile(r"\b(?:essentially |basically |practically |pretty much |almost )?(?:a )?(?:sure[- ]thing|"
@@ -14966,7 +15034,8 @@ async def update_boards(client: discord.Client, now: Optional[datetime] = None) 
             st = json.loads(r["value"])
             channel = client.get_channel(st["channel_id"])
             if channel is None:
-                set_setting(gid, "board", None)
+                channel = await _alert_channel(client, st["channel_id"])
+            if channel is None:
                 continue
             expired = datetime.fromisoformat(st["started"]) < now - timedelta(hours=BOARD_HOURS)
             snap = None if expired else await board_snapshot(client, gid)
@@ -22324,6 +22393,29 @@ async def dash_api_data(request):
     return web.json_response(d)
 
 
+def dash_log_who(guild_id: int, typed: str, acct: Optional[dict]) -> tuple[str, str, Optional[int]]:
+    """(bettor key, display name, discord id). A typed name stays that person, not the signed-in account."""
+    me_id = None
+    me_name = ""
+    if acct:
+        raw = acct.get("discord_id")
+        me_id = int(raw) if raw else None
+        me_name = clip(str(acct.get("name") or ""), 40)
+    who = clip(str(typed or "").strip(), 40) or me_name
+    if not who:
+        return "", "", None
+    if me_id and me_name and who.lower() == me_name.lower():
+        return str(me_id), me_name, me_id
+    hit = db().execute(
+        """SELECT bettor_id, bettor_name FROM picks
+           WHERE guild_id = ? AND lower(bettor_name) = lower(?) AND bettor_id IS NOT NULL
+           ORDER BY id DESC LIMIT 1""",
+        (guild_id, who)).fetchone()
+    if hit:
+        return str(hit["bettor_id"]), hit["bettor_name"], hit["bettor_id"]
+    return f"label:{who.strip().lower()}", who, None
+
+
 async def dash_api_log(request):
     """Log a slip from the dashboard. Same confirm rules as Discord: never hidden, never a lock."""
     from aiohttp import web
@@ -22334,24 +22426,20 @@ async def dash_api_log(request):
     if not dash_rate(ip, "log", 8, 60):
         return dash_error(web, request, 429)
     body = await _req_json(request)
-    who = clip(str(body.get("who") or ""), 40)
     what = clip(str(body.get("what") or ""), 200)
     plat = clip(str(body.get("platform") or "Other"), 24) or "Other"
     cost = as_amount(body.get("cost")) or 0.0
     payout = as_amount(body.get("payout")) or 0.0
+    acct = acct_from_request(request)
+    key, who, bettor_id = dash_log_who(prm["guild"], str(body.get("who") or ""), acct)
     if not who or not what:
         return web.json_response({"ok": False, "error": "Need a name and a pick."}, status=400)
     low = what.lower()
     if "sure thing" in low or "sure-thing" in low or re.search(r"\block\b", low):
         return web.json_response({"ok": False, "error": "Log the play. Leave out lock language."}, status=400)
-    acct = acct_from_request(request)
-    bettor_id = None
-    if acct:
-        bettor_id = acct.get("discord_id")
-        if acct.get("name"):
-            who = clip(str(acct.get("name")), 40)
-    pid = insert_pick(guild_id=prm["guild"], bettor_key=norm_name(who), bettor_name=who,
-                      bettor_id=bettor_id, logged_by=0, platform=plat, sport=None,
+    logged_by = int(acct["discord_id"]) if acct and acct.get("discord_id") else 0
+    pid = insert_pick(guild_id=prm["guild"], bettor_key=key, bettor_name=who,
+                      bettor_id=bettor_id, logged_by=logged_by, platform=plat, sport=None,
                       description=what, legs=what, cost=float(cost), payout=float(payout))
     _DASH_LIVE_CACHE.pop(prm["guild"], None)
     try:
@@ -31508,7 +31596,7 @@ async def _alert_channel(client, cid: int):
         return None
 
 
-async def post_alert(client, text: str, *, ping: bool = False, file: Optional[io.BytesIO] = None) -> int:
+async def post_alert(client, text: str, *, ping: bool = False, file=None, refresh: bool = False) -> int:
     """One message per server, recap channel first. Returns how many channels took it."""
     sent = 0
     guilds = list(getattr(client, "guilds", None) or [])
@@ -31523,20 +31611,22 @@ async def post_alert(client, text: str, *, ping: bool = False, file: Optional[io
         mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
     seen = set()
 
-    def _file():
-        if file is None:
+    def _as_file(blob):
+        if blob is None:
             return None
         try:
-            file.seek(0)
-            return discord.File(file, filename="status.png")
+            blob.seek(0)
+            return discord.File(blob, filename="status.png")
         except Exception:
             return None
 
-    async def _send(ch):
-        attachment = _file()
+    async def _send(ch, gid):
+        blob = file(gid) if callable(file) else file
+        attachment = _as_file(blob)
         if attachment is not None:
             try:
-                await ch.send(body, allowed_mentions=mentions, file=attachment)
+                extra = {"view": boot_view()} if refresh else {}
+                await ch.send(body, allowed_mentions=mentions, file=attachment, **extra)
                 return
             except TypeError:
                 pass
@@ -31552,7 +31642,7 @@ async def post_alert(client, text: str, *, ping: bool = False, file: Optional[io
             if ch is None:
                 continue
             try:
-                await _send(ch)
+                await _send(ch, gid)
                 posted, sent = True, sent + 1
                 break
             except Exception:
@@ -31564,7 +31654,7 @@ async def post_alert(client, text: str, *, ping: bool = False, file: Optional[io
         if sysch is None:
             continue
         try:
-            await _send(sysch)
+            await _send(sysch, gid)
             sent += 1
         except Exception:
             log.warning("Alert failed in system channel guild %s", gid)
@@ -31624,6 +31714,59 @@ def boot_facts() -> list[tuple[str, str]]:
 def boot_health_lines() -> list[str]:
     """A short status block for the recap note. Only facts the bot can measure."""
     return ["**Right now**"] + [f"• {k}: {v}" for k, v in boot_facts()]
+
+
+def boot_slip_rows(guild_id: Optional[int] = None) -> list[dict]:
+    """Open slips for the restart board. Hidden and test slips stay off it."""
+    gid = staff_gid(guild_id)
+    if not gid:
+        return []
+    try:
+        rows = db().execute(
+            "SELECT bettor_name, description, platform, cost, payout FROM picks "
+            "WHERE guild_id = ? AND status = 'open' AND (hidden IS NULL OR hidden = 0) "
+            "AND (test IS NULL OR test = 0) ORDER BY id DESC LIMIT 8",
+            (gid,)).fetchall()
+    except Exception:
+        return []
+    out = []
+    for p in rows:
+        out.append({"who": p["bettor_name"] or "Slip", "what": p["description"] or "Slip",
+                    "book": p["platform"] or "", "cost": p["cost"] or 0, "payout": p["payout"] or 0})
+    return out
+
+
+def boot_view() -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    v.add_item(BootRefreshButton())
+    return v
+
+
+class BootRefreshButton(discord.ui.DynamicItem[discord.ui.Button], template=r"boot:ref"):
+    """Redraws the restart board in place."""
+
+    def __init__(self):
+        super().__init__(discord.ui.Button(label="🔄 Refresh", style=discord.ButtonStyle.secondary,
+                                           custom_id="boot:ref"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, interaction: discord.Interaction):
+        if await sec_button_slow(interaction, "boot_refresh"):
+            return
+        await interaction.response.defer()
+        card = status_card({
+            "title": "PIMP-BOT IS LIVE", "tone": "live", "happened": "Refreshed.",
+            "news": [], "slips": boot_slip_rows(interaction.guild_id),
+        })
+        if card is None:
+            await interaction.followup.send("I couldn't redraw the board.", ephemeral=True)
+            return
+        card.seek(0)
+        await interaction.edit_original_response(
+            attachments=[discord.File(card, filename="status.png")], view=boot_view())
 
 
 def poster_staff_snapshot() -> dict:
@@ -31713,11 +31856,19 @@ def poster_staff_snapshot() -> dict:
     return out
 
 
-def status_card(data: dict) -> Optional[io.BytesIO]:
-    """Tonight's Board style picture for a restart or a crash. None if drawing fails."""
+def _boot_clock() -> str:
+    now = datetime.now(TZ)
     try:
-        payload = dict(data)
-        payload.setdefault("when", datetime.now(TZ).strftime("%a %b %-d · %-I:%M %p"))
+        return now.strftime("%a %b %-d · %-I:%M %p")
+    except ValueError:
+        return now.strftime("%a %b %d · %I:%M %p")
+
+
+def status_card(data: dict) -> Optional[io.BytesIO]:
+    """Tonight's Board style picture for a restart or a crash. A plain board if the full draw fails."""
+    payload = dict(data)
+    try:
+        payload.setdefault("when", _boot_clock())
         payload.setdefault("rows", boot_facts())
         if "staff" not in payload:
             try:
@@ -31725,10 +31876,19 @@ def status_card(data: dict) -> Optional[io.BytesIO]:
             except Exception:
                 log.warning("Staff snapshot failed", exc_info=True)
                 payload["staff"] = {}
+        if "slips" not in payload:
+            try:
+                payload["slips"] = boot_slip_rows()
+            except Exception:
+                payload["slips"] = []
         return render_status_card(payload)
     except Exception:
         log.warning("Status card failed", exc_info=True)
-        return None
+        try:
+            return render_status_fallback(payload)
+        except Exception:
+            log.warning("Status fallback failed", exc_info=True)
+            return None
 
 
 async def storage_alert(client) -> None:
@@ -31787,8 +31947,14 @@ async def announce_boot(client) -> Optional[str]:
     news = bot_update_lines(prev)[-3:] if (prev or "") != BOT_VERSION else []
     tone = "down" if gap and gap >= 180 and not planned else "live"
     try:
-        await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned), file=status_card({
-            "title": "PIMP-BOT IS LIVE", "tone": tone, "happened": happened, "news": news}))
+        def _card(gid, tone=tone, happened=happened, news=news):
+            return status_card({
+                "title": "PIMP-BOT IS LIVE", "tone": tone, "happened": happened, "news": list(news),
+                "slips": boot_slip_rows(gid),
+            })
+
+        await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned),
+                         file=_card, refresh=True)
     except Exception:
         log.warning("Boot announce failed")
     return note
@@ -34911,6 +35077,10 @@ async def lv_follows_guild(client, gid: int, snap: list[dict], now: datetime) ->
         channel = client.get_channel(r["channel_id"])
         until = datetime.fromisoformat(r["until"])
         expired = until <= now
+        if channel is None and not expired:
+            channel = await _alert_channel(client, r["channel_id"])
+        if channel is None and not expired:
+            continue
         if channel is None or expired:
             c.execute("DELETE FROM lv_follow WHERE message_id = ?", (r["message_id"],))
             c.commit()
@@ -41084,12 +41254,42 @@ def _status_lamp(state: str):
     return {"down": ART_RED, "shaky": ART_AMBER, "warn": ART_AMBER}.get(state or "", ART_GREEN)
 
 
+def render_status_fallback(b: dict) -> io.BytesIO:
+    """A plain board when the full stadium draw fails, so the restart still has a picture."""
+    from PIL import Image, ImageDraw
+    lines = [str(b.get("title") or "PIMP-BOT IS LIVE")]
+    if b.get("when"):
+        lines.append(str(b["when"]))
+    if b.get("happened"):
+        lines.append(str(b["happened"]))
+    for n in b.get("news") or []:
+        lines.append(str(n))
+    for s in b.get("slips") or []:
+        if isinstance(s, dict):
+            lines.append(f"{s.get('who') or 'Slip'} · {s.get('what') or 'Slip'}")
+    for label, value in b.get("rows") or []:
+        lines.append(f"{label}: {value}")
+    lines.append("Tap Refresh for the current board.")
+    lines = [x.strip() for x in lines if str(x).strip()][:28]
+    W = 1000
+    img = Image.new("RGB", (W, 48 + 36 * len(lines) + 36), (18, 12, 32))
+    d = ImageDraw.Draw(img)
+    y = 24
+    for i, line in enumerate(lines):
+        size = 28 if i == 0 else 20
+        shown, font = fit_text(d, line, W - 72, size, True)
+        d.text((36, y), shown, font=font, fill=(245, 245, 250))
+        y += 40 if i == 0 else 32
+    return _design_png(img)
+
+
 def render_status_card(b: dict) -> io.BytesIO:
-    """A restart or crash note. Same sections as Staff HQ, drawn like Tonight's Board.
-    The picture is the moment the bot came back. Staff HQ is the page that refreshes."""
+    """A restart or crash note. Same sections as Staff HQ, drawn like Tonight's Board, plus open slips.
+    Tap Refresh on the message for a new draw. Staff HQ is the page that stays current."""
     news = [str(x) for x in (b.get("news") or []) if str(x).strip()][:3]
     rows = list(b.get("rows") or [])[:6]
     happened = str(b.get("happened") or "").strip()
+    slips = [s for s in (b.get("slips") or []) if isinstance(s, dict)][:8]
     staff = b.get("staff") if isinstance(b.get("staff"), dict) else {}
     reads = staff.get("reads") if isinstance(staff.get("reads"), (list, tuple)) and len(staff.get("reads")) == 3 else None
     feeds = [f for f in (staff.get("feeds") or []) if isinstance(f, dict)][:7]
@@ -41104,6 +41304,7 @@ def render_status_card(b: dict) -> io.BytesIO:
     H += 56 + 52 * len(feeds) if feeds else 0
     H += 108 if pool else 0
     H += 78 + 46 * len(tickets) if show_tickets else 0
+    H += 56 + 58 * len(slips) if slips else 0
     H += 56 + 70 * len(rows) if rows else 0
     H += 120
     tone = b.get("tone") or "live"
@@ -41193,6 +41394,24 @@ def render_status_card(b: dict) -> io.BytesIO:
         if not tickets:
             d.text((40, y), "No open tickets.", font=art_font(16, False), fill=ART_MUTED)
             y += 28
+    if slips:
+        y += 8
+        d.text((40, y), "OPEN SLIPS", font=art_font(16, True), fill=ART_MUTED)
+        y += 28
+        for slip in slips:
+            d.rounded_rectangle((24, y, W - 24, y + 50), 14, fill=(12, 12, 18, 184), outline=(255, 255, 255, 20))
+            who, wf = fit_text(d, str(slip.get("who") or "Slip"), 200, 18, True)
+            d.text((44, y + 14), who, font=wf, fill=ART_MUTED)
+            what, wtf = fit_text(d, str(slip.get("what") or "Slip"), 430, 18, True)
+            d.text((260, y + 14), what, font=wtf, fill=ART_TEXT)
+            try:
+                meta = f"{money(float(slip.get('cost') or 0))} to {money(float(slip.get('payout') or 0))}"
+            except Exception:
+                meta = ""
+            if meta:
+                mt, mf = fit_text(d, meta, 230, 16, True)
+                d.text((W - 48 - _tw(d, mt, mf), y + 14), mt, font=mf, fill=(245, 197, 66))
+            y += 58
     if rows:
         y += 8
         d.text((40, y), "RIGHT NOW", font=art_font(16, True), fill=ART_MUTED)
@@ -41204,7 +41423,7 @@ def render_status_card(b: dict) -> io.BytesIO:
             d.text((W - 48 - _tw(d, vt, vf2), y + 16), vt, font=vf2, fill=ART_TEXT)
             y += 70
     y += 16
-    note = "Snapshot from this restart. It does not refresh. Staff HQ is the page you refresh."
+    note = "Tap Refresh for the current board. Staff HQ stays up to date."
     nt, nf = fit_text(d, note, W - 80, 16, False)
     d.text((40, y), nt, font=nf, fill=ART_MUTED)
     brand_sign(img, W - 40, H - 48, "PIMP-BOT", 16)
@@ -42398,10 +42617,11 @@ class PicksBot(discord.Client):
     async def setup_hook(self):
         self.receipt_channels = receipt_channel_ids()
         self.add_dynamic_items(SettleButton, LogSlipButton, FollowButton, ChallengeButton, PickemButton,
+                               SlipWhoSelect,
                                SweatButton, InjuryOffButton, GPButton, CopyButton, CardSweatButton, CardKalshiButton,
                                PPSettleButton, MarketButton, TakeButton, PotdButton, TriviaButton, GuessButton,
                                ClosestButton, SquaresButton, DraftButton, NoteButton, DisputeButton, FixButton,
-                               BoardButton, SlipDraftButton, FixPickButton, TrackerButton)
+                               BoardButton, BootRefreshButton, SlipDraftButton, FixPickButton, TrackerButton)
         if EXTRA_ITEMS:
             self.add_dynamic_items(*EXTRA_ITEMS)
         r14_db()
