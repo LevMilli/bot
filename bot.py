@@ -40,6 +40,7 @@ import os
 import re
 import secrets
 import sqlite3
+import shutil
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
@@ -53,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.02"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.04"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -139,6 +140,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.00", "This is 1.00. The phone board, the chart, the crew, and Staff HQ take the new look."),
     ("1.01", "The four week boxes sit at the top. Drag the grip on a box to move it."),
     ("1.02", "The crew page groups the team and the members. Discord photos sit beside names. The smoke plays every time the page opens."),
+    ("1.03", "An admin can pin a week note. Overview lists the slate and what is still riding. Your bankroll stays on your card."),
+    ("1.04", "Restarts report free disk, open slips, and the scanner. A developer can file a screenshot under someone else and edit any pick. Leftover backup copies are removed."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -967,6 +970,11 @@ _LATER_LIVE = {
         "Remember the stat per player",
         "Two players side by side",
         "A board of ten on this device",
+        "A week board an admin pins",
+        "Slate rows",
+        "Exposure report",
+        "Tonight's shared games",
+        "Private bankroll",
         "Brief cached ten minutes",
         "Weather cached an hour",
         "Injuries refresh when stale",
@@ -2334,10 +2342,31 @@ def is_mod(user) -> bool:
 
 
 def can_edit(interaction: discord.Interaction, p: sqlite3.Row) -> bool:
-    """The bettor, whoever logged it, or a moderator."""
+    """The bettor, whoever logged it, a developer, or a moderator."""
     if interaction.user.id in (p["logged_by"], p["bettor_id"]):
         return True
+    try:
+        if crew_at_least(interaction.user.id, "developer", interaction.guild_id):
+            return True
+    except Exception:
+        pass
     return is_mod(interaction.user)
+
+
+def slip_on_behalf(message) -> object:
+    """A developer who tags someone in the same message files that screenshot under them."""
+    author = message.author
+    guild = getattr(message, "guild", None)
+    if guild is None:
+        return author
+    try:
+        if not crew_at_least(author.id, "developer", guild.id):
+            return author
+    except Exception:
+        return author
+    named = [m for m in (getattr(message, "mentions", None) or [])
+             if not getattr(m, "bot", False) and getattr(m, "id", None) != author.id]
+    return named[0] if named else author
 
 
 def split_message(text: str, limit: int = 1900) -> list[str]:
@@ -3872,6 +3901,16 @@ def build_ask_context(guild_id: int, asker_key: str, question: str) -> str:
         s = stats[0]
         parts.append(f"The person asking ({s['name']}) is {record_line(s)}, "
                      f"net {signed(s['net'])}, ROI {s['roi']:+.1f}%, {s['open']} picks open.")
+    try:
+        opens = db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND status = 'open'",
+                             (guild_id,)).fetchone()["n"]
+        parts.append(f"Open slips in this group right now: {opens}.")
+        leaders = compute_stats(guild_id)[:3]
+        if leaders:
+            bits = [f"{s['name']} {record_line(s)} net {signed(s['net'])}" for s in leaders]
+            parts.append("Season board, best net first: " + "; ".join(bits) + ".")
+    except Exception:
+        pass
     return "\n\n".join(parts)
 
 
@@ -6088,10 +6127,67 @@ async def send_reminders(client: discord.Client, now: Optional[datetime] = None)
 
 # ---- backups ------------------------------------------------------------------------------
 
+_BACKUP_FOLDERS: list[str] = []
+
+
+def disk_bytes() -> tuple[int, int, int]:
+    """(free bytes, total bytes, live database bytes) on the folder that holds the picks database."""
+    folder = os.path.dirname(os.path.abspath(DB_PATH)) or "."
+    try:
+        usage = shutil.disk_usage(folder)
+        free, total = usage.free, usage.total
+    except OSError:
+        free, total = 0, 0
+    try:
+        db_n = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+    except OSError:
+        db_n = 0
+    return free, total, db_n
+
+
+def sweep_storage() -> int:
+    """Delete leftover backup folders. The live picks database is never touched."""
+    n = 0
+    root = tempfile.gettempdir()
+    now = time.time()
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    for name in names:
+        folder = os.path.join(root, name)
+        if not os.path.isdir(folder):
+            continue
+        try:
+            files = os.listdir(folder)
+            age = now - os.path.getmtime(folder)
+        except OSError:
+            continue
+        ours = name.startswith("pimpbk-") or any(str(f).startswith("picks_backup_") for f in files)
+        if not ours:
+            continue
+        if age < 600:
+            continue
+        shutil.rmtree(folder, ignore_errors=True)
+        n += 1
+    return n
+
+
+def release_backup_folders() -> None:
+    while _BACKUP_FOLDERS:
+        shutil.rmtree(_BACKUP_FOLDERS.pop(), ignore_errors=True)
+
+
 def backup_files(guild_id: int) -> list:
     """A consistent copy of the database plus an Excel export, as discord.Files."""
+    free, _, db_n = disk_bytes()
+    if free and db_n and free < db_n + 80 * 1024 * 1024:
+        log.warning("Skipping the backup copy: %s MB free, database %s MB",
+                    free // (1024 * 1024), db_n // (1024 * 1024))
+        return []
     stamp = datetime.now(TZ).strftime("%Y-%m-%d")
-    folder = tempfile.mkdtemp()
+    folder = tempfile.mkdtemp(prefix="pimpbk-")
+    _BACKUP_FOLDERS.append(folder)
     path = os.path.join(folder, f"picks_backup_{stamp}.db")
     dest = sqlite3.connect(path)
     db().backup(dest)
@@ -6115,7 +6211,14 @@ async def post_backups(client: discord.Client, now: Optional[datetime] = None) -
         if channel is None:
             continue
         n = db().execute("SELECT COUNT(*) AS n FROM picks WHERE guild_id = ?", (r["guild_id"],)).fetchone()["n"]
-        await channel.send(f"🗄️ Nightly backup · {n} picks", files=backup_files(r["guild_id"]))
+        try:
+            files = backup_files(r["guild_id"])
+            if not files:
+                await channel.send("🗄️ Nightly backup skipped. The disk is too full to copy the database.")
+            else:
+                await channel.send(f"🗄️ Nightly backup · {n} picks", files=files)
+        finally:
+            release_backup_folders()
 
 
 # ==========================================================================
@@ -10100,6 +10203,7 @@ def dashboard_data(guild_id: int) -> dict:
     open_ = [{"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
               "what": shown_desc(p), "platform": p["platform"],
               "sport": clip(p["sport"] or "", 24), "cost": p["cost"], "payout": p["payout"],
+              "slate": local_day(p["slate_date"]) if _rg(p, "slate_date") else "",
               "player": dash_prop_name(shown_desc(p)) or None}
              for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
                                        AND (hidden IS NULL OR hidden = 0)
@@ -10164,7 +10268,8 @@ def dashboard_data(guild_id: int) -> dict:
             "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "later": BOT_LATER,
             "updates": [{"ver": v, "text": t} for v, t in reversed(BOT_UPDATES[-20:])],
             "week": dash_this_week(guild_id),
-            "h2h": dash_h2h_board(guild_id), "weekplays": dash_week_plays(guild_id)}
+            "h2h": dash_h2h_board(guild_id), "weekplays": dash_week_plays(guild_id),
+            "weekboard": clip(get_setting(guild_id, "week_board") or "", 280)}
 
 
 DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -14844,11 +14949,20 @@ def cleanup_db(now: Optional[datetime] = None, vacuum: bool = False) -> dict:
         "DELETE FROM pick_msgs WHERE done = 1 AND updated_at < ?", (month,)).rowcount
     removed["leg alert marks"] += db().execute(
         "DELETE FROM leg_pings WHERE pick_id NOT IN (SELECT id FROM picks)").rowcount
+    cutoff_reads = (now.astimezone(TZ) - timedelta(days=21)).date().isoformat()
+    removed["old scan counters"] = db().execute(
+        "DELETE FROM settings WHERE key LIKE 'slipreads:%' AND substr(key, 11) < ?", (cutoff_reads,)).rowcount
     db().commit()
     try:
         db().execute("PRAGMA optimize")
+        db().execute("PRAGMA wal_checkpoint(TRUNCATE)")
         if vacuum:
-            db().execute("VACUUM")
+            free, _, db_n = disk_bytes()
+            if free and db_n and free < db_n * 2 + 100 * 1024 * 1024:
+                log.warning("Skipping database compact: %s MB free, database %s MB",
+                            free // (1024 * 1024), db_n // (1024 * 1024))
+            else:
+                db().execute("VACUUM")
     except Exception:
         log.warning("Database optimize/vacuum skipped", exc_info=True)
     total = sum(removed.values())
@@ -14864,8 +14978,13 @@ async def nightly_cleanup(client: discord.Client, now: Optional[datetime] = None
     if local.hour < (BACKUP_HOUR + 1) % 24 or get_setting(0, "cleanup_day") == today:
         return
     set_setting(0, "cleanup_day", today)
+    swept = sweep_storage()
     removed = cleanup_db(now, vacuum=local.weekday() == 6)
-    log.info("Nightly cleanup removed %s", removed)
+    log.info("Nightly cleanup removed %s; swept %s leftover backup folders", removed, swept)
+    try:
+        await storage_alert(client)
+    except Exception:
+        log.warning("Storage alert failed", exc_info=True)
     for cache in (_PROP_CACHE, _PROGRESS_CACHE, _AVATAR_CACHE, _LEG_SEEN):
         if len(cache) > 1000:
             cache.clear()
@@ -21665,6 +21784,32 @@ async def dash_api_dm(request):
     return web.json_response({"ok": True, "on": on})
 
 
+async def dash_api_bank(request):
+    """Save the signed-in person's bankroll. Other people do not see the number."""
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    acct = acct_from_request(request)
+    uid = str((acct or {}).get("discord_id") or "")
+    if not uid.isdigit():
+        return web.json_response({"ok": False}, status=403)
+    body = await _req_json(request)
+    if body.get("off"):
+        set_setting(prm["guild"], f"bankroll:{uid}", None)
+        return web.json_response({"ok": True, "on": False})
+    amount = as_amount(body.get("amount"))
+    try:
+        pct = float(body.get("unit_pct")) if body.get("unit_pct") not in (None, "") else 1.0
+    except (TypeError, ValueError):
+        pct = 1.0
+    pct = min(10.0, max(0.1, pct))
+    if amount is None or amount < 1:
+        return web.json_response({"ok": False, "error": "Start with an amount."}, status=400)
+    set_setting(prm["guild"], f"bankroll:{uid}", json.dumps({"start": float(amount), "unit_pct": pct, "since": now_iso()}))
+    return web.json_response({"ok": True, "on": True})
+
+
 async def dash_api_person(request):
     from aiohttp import web
     prm, err = dash_gate(web, request)
@@ -21672,7 +21817,15 @@ async def dash_api_person(request):
         return err
     key = request.match_info.get("key", "")
     d = dash_person(prm["guild"], key) if _DASH_NUM.fullmatch(key) else None
-    return web.json_response(d) if d else dash_error(web, request, 404)
+    if d is None:
+        return dash_error(web, request, 404)
+    acct = acct_from_request(request)
+    if acct and str(acct.get("discord_id") or "") == str(key):
+        b = get_bankroll(prm["guild"], int(key))
+        d["bankroll"] = ({"start": round(float(b["start"]), 2), "current": round(float(b["current"]), 2),
+                          "unit": round(float(b["unit_size"]), 2), "pct": b.get("unit_pct") or 1}
+                         if b else None)
+    return web.json_response(d)
 
 
 async def dash_api_slip(request):
@@ -21752,7 +21905,8 @@ def dash_sheet_keys(path: str, pos: str) -> list[str]:
         want = ["pitcher_k", "pitching_outs", "earned_runs"] if p in _PITCH_POS else ["hits", "hrr", "home_runs", "rbis"]
         return [k for k in want if k in STATS]
     if fam == "hockey":
-        want = ["saves", "nhl_goals_allowed"] if p in _GOALIE_POS else ["goals", "nhl_assists", "sog"]
+        want = (["saves", "nhl_goals_allowed"] if p in _GOALIE_POS else
+                ["goals", "nhl_assists", "sog", "shots", "blocked_shots"])
         return [k for k in want if k in STATS]
     return dash_player_keys(path)
 
@@ -22427,7 +22581,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-102';"
+    "const CACHE='pb-shell-103';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -22490,6 +22644,7 @@ def dash_app(web):
                     web.get(r"/img/face/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
                     web.get(r"/api/person/{key:\d+}.json", dash_api_person),
                     web.post("/api/dm.json", dash_api_dm),
+                    web.post("/api/bank.json", dash_api_bank),
                     web.get(r"/img/ava/{uid:[0-9]{1,20}}.png", dash_avatar_img),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
@@ -24789,8 +24944,58 @@ async def post_alert(client, text: str, *, ping: bool = False) -> int:
     return sent
 
 
+def boot_health_lines() -> list[str]:
+    """Facts for the recap note. Only numbers the bot can measure."""
+    free, total, db_n = disk_bytes()
+    lines = [f"Disk free {free // (1024 * 1024)} MB of {total // (1024 * 1024)} MB. "
+             f"Database {db_n / (1024 * 1024):.1f} MB."]
+    if free and free < 200 * 1024 * 1024:
+        lines.append("Storage is low. Old backup copies were cleared. Add space on the host if this stays low.")
+    try:
+        opens = db().execute("SELECT COUNT(*) AS n FROM picks WHERE status = 'open'").fetchone()["n"]
+        lines.append(f"Open slips right now: {opens}.")
+    except Exception:
+        pass
+    try:
+        if TESSERACT:
+            lines.append("Slip scan: Tesseract is on.")
+        else:
+            lines.append("Slip scan: Tesseract is missing on this host.")
+    except Exception:
+        pass
+    try:
+        err = SLIP_STATE.get("last_error")
+    except Exception:
+        err = None
+    if err and len(err) > 1 and err[1]:
+        lines.append("Last scan problem: " + clip(str(err[1]), 140))
+    return lines
+
+
+async def storage_alert(client) -> None:
+    """Once a night: tell mods and admins when the disk or the scanner needs a person."""
+    free, total, db_n = disk_bytes()
+    today = datetime.now(TZ).date().isoformat()
+    try:
+        counts = json.loads(get_setting(0, f"slipreads:{today}") or "{}")
+    except ValueError:
+        counts = {}
+    fails = int(counts.get("fail") or 0)
+    if free and free < 200 * 1024 * 1024:
+        await crash_notify(client, "bot", "Storage is low",
+                           f"{free // (1024 * 1024)} MB free of {total // (1024 * 1024)} MB. "
+                           f"Database is {db_n // (1024 * 1024)} MB. Old backup copies were removed.")
+    if fails >= 8:
+        await crash_notify(client, "bot", "Scanner missed a lot today",
+                           f"{fails} screenshots could not be read today. A clearer crop, or a Gemini key, covers the rest.")
+
+
 async def announce_boot(client) -> Optional[str]:
     """On process start: tell the recap channel if the version changed or we were gone."""
+    try:
+        sweep_storage()
+    except Exception:
+        log.warning("Storage sweep failed", exc_info=True)
     prev = get_setting(0, "bot_announced") or ""
     hb = get_setting(0, "bot_heartbeat")
     planned = bool(get_setting(0, "bot_stopping"))
@@ -24800,6 +25005,15 @@ async def announce_boot(client) -> Optional[str]:
     set_setting(0, "bot_announced", BOT_VERSION)
     set_setting(0, "bot_stopping", None)
     set_setting(0, "bot_disconnect_at", None)
+    if not note:
+        free, _, _ = disk_bytes()
+        if not free or free >= 200 * 1024 * 1024:
+            return None
+        note = (f"🛠️ **PIMP-BOT is live · {BOT_VERSION} · update {ROADMAP_NOW}**\n"
+                "Storage is low, so this restart is being reported.")
+    health = boot_health_lines()
+    if health:
+        note = note + "\n" + "\n".join(health)
     if not note:
         return None
     crash_note("ok" if planned or prev == BOT_VERSION else "bot", "PIMP-BOT is live",
@@ -25180,6 +25394,7 @@ def staff_ops(uid: int) -> dict:
             crew.append({"id": i, "name": crew_display_name(i, gid), "role": kind})
     pending = staff_rows("pending", gid) if crew_at_least(uid, "owner", gid) else []
     pool = [
+        {"name": "Grok (xAI)", "on": bool(env("XAI_API_KEY", ""))},
         {"name": "Groq (free)", "on": bool(env("GROQ_API_KEY", ""))},
         {"name": "Cerebras (free)", "on": bool(env("CEREBRAS_API_KEY", ""))},
         {"name": "OpenRouter (free)", "on": bool(env("OPENROUTER_API_KEY", ""))},
@@ -25344,7 +25559,7 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <div class="g3">
  <section class="card lead"><h2>Screenshot reads · 7 days</h2><div class="reads" id="reads"></div><p class="muted" id="readsnote"></p></section>
  <section class="card lead"><h2>AI pool · today</h2><div id="pool"></div>
-  <p class="muted">Answers go to the first service with free uses left, top to bottom. Add keys in Railway: CEREBRAS_API_KEY, OPENROUTER_API_KEY.</p></section>
+  <p class="muted">Answers go to the first service with free uses left, top to bottom. Add keys in Railway: XAI_API_KEY for Grok, or CEREBRAS_API_KEY, OPENROUTER_API_KEY.</p></section>
  <section class="card lead"><h2>Questions per person</h2><div id="quota"></div>
   <p class="muted">Per role and activity tier. 0 is unlimited. Change here or with /staff quota.</p></section>
 </div>
@@ -25674,6 +25889,12 @@ async def dash_api_staff_post(request):
             (gid, cid, text, iso(due), uid, now_iso()))
         db().commit()
         staff_log_add(gid, "ok", "Scheduled an announcement", staff_rec(uid, gid).get("name") or str(uid))
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "weekboard" and crew_at_least(uid, "admin", gid):
+        text = clip(str(body.get("text") or ""), 280)
+        set_setting(gid, "week_board", text or None)
+        staff_log_add(gid, "ok", "Pinned the week board" if text else "Cleared the week board",
+                      staff_rec(uid, gid).get("name") or str(uid))
         return web.json_response({"ok": True, **staff_ops(uid)})
     if op == "kick":
         dash_kick_sessions()
@@ -29663,8 +29884,11 @@ FREE_STATS = sorted({
     "Pitcher Fantasy Score", "Ks", "Pitcher Ks", "Hits+Runs+RBIs", "H+R+RBI", "Hitter Strikeouts",
     "Goals", "Shots On Goal", "Goalie Saves", "Saves", "Faceoffs Won", "Power Play Points", "Blocked Shots",
     "Time On Ice", "Goals Allowed",
-    "Shots", "Shots On Target", "Clearances", "Attempted Dribbles", "Passes Attempted", "Tackles", "Crosses",
-    "Fouls", "Goal + Assist", "Shots Assisted",
+    "Shots", "Shots On Target", "Shots on Target", "Clearances", "Attempted Dribbles", "Passes Attempted", "Tackles", "Crosses",
+    "Fouls", "Goal + Assist", "Goals + Assists", "Shots Assisted",
+    "Map 1 Kills", "Map 2 Kills", "Map 3 Kills", "Maps 1-3 Kills", "Fantasy Points",
+    "Pitcher Outs", "Outs Recorded", "Hits Allowed", "Walks Allowed", "Earned Runs",
+    "Total Bases", "Stolen Bases", "Runs Scored", "RBIs", "Home Runs",
     "Kills", "Headshots", "Maps 1-2 Kills", "Aces", "Double Faults", "Total Games", "Fantasy",
     "SOG", "Shots on Goal", "Total Tie Breaks", "Tie Breaks", "180's Throw", "180s Throw", "180s",
     "Fours", "Sixes", "Total Points", "Rec Yds", "Receiving Yds",
@@ -29744,13 +29968,12 @@ def free_prepare(raw: bytes):
 def _free_tess(img, psm: int, extra: Optional[list] = None, tsv: bool = True) -> str:
     buf = io.BytesIO()
     img.save(buf, "PNG")
-    args = [TESSERACT, "stdin", "stdout", "--psm", str(psm), "-l", "eng"] + (extra or []) + (["tsv"] if tsv else [])
+    args = [TESSERACT, "stdin", "stdout", "--oem", "1", "--psm", str(psm), "-l", "eng"] + (extra or []) + (["tsv"] if tsv else [])
     r = subprocess.run(args, input=buf.getvalue(), capture_output=True, timeout=FREE_SCAN_TIMEOUT)
     return r.stdout.decode("utf-8", "replace")
 
 
-def free_words(grey, psm: int = 4) -> list[dict]:
-    """Every word Tesseract saw: {text, conf, x, y, w, h, line} with line = a key shared by words on one line."""
+def _free_word_rows(grey, psm: int) -> list[dict]:
     out = []
     for row in _free_tess(grey, psm).splitlines()[1:]:
         f = row.split("\t")
@@ -29762,6 +29985,27 @@ def free_words(grey, psm: int = 4) -> list[dict]:
         except ValueError:
             continue
     return out
+
+
+def free_words(grey, psm: int = 4) -> list[dict]:
+    """Every word Tesseract saw: {text, conf, x, y, w, h, line} with line = a key shared by words on one line.
+    A thin first pass also tries a block layout and a sparse layout, and keeps the extra words."""
+    words = _free_word_rows(grey, psm)
+    if len(words) >= 12 or psm != 4:
+        return words
+    seen = {(w["text"].lower(), w["x"] // 10, w["y"] // 10) for w in words}
+    for alt in (6, 11):
+        for w in _free_word_rows(grey, alt):
+            if w["conf"] < 45:
+                continue
+            key = (w["text"].lower(), w["x"] // 10, w["y"] // 10)
+            if key in seen:
+                continue
+            seen.add(key)
+            words.append(w)
+        if len(words) >= 12:
+            break
+    return words
 
 
 def free_lines(words: list[dict]) -> list[dict]:
@@ -30749,8 +30993,14 @@ def claude_error_hint(exc: Optional[BaseException]) -> str:
     return f"didn't answer: {ask_error_snip(t)}"
 
 
+XAI_API_KEY = env("XAI_API_KEY", "")
+XAI_MODEL = env("XAI_MODEL", "grok-3")
+
+
 def ask_enabled() -> bool:
     """Can the bot answer questions at all (a Gemini or a Claude key)?"""
+    if XAI_API_KEY or env("OPENROUTER_API_KEY", ""):
+        return True
     return any((e == "groq" and GROQ_API_KEY) or (e == "gemini" and GEMINI_API_KEY) or (e == "claude" and ai_enabled())
                for e in ASK_ENGINES)
 
@@ -30904,15 +31154,73 @@ def ask_unanswered(answer: str) -> bool:
     return len(a) < 20 or bool(m and (m.start() < 120 or len(a) < 200))   # a late hedge in a real answer is fine
 
 
+async def ask_chat(url: str, key: str, model: str, system: str, user_text: str, label: str) -> tuple[str, list[str]]:
+    """One OpenAI-style chat call. Returns (answer, no source links)."""
+    import aiohttp
+    body = {"model": model, "temperature": 0.4, "max_tokens": 900,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user_text}]}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        async with session.post(url, json=body, headers={"Authorization": f"Bearer {key}"}) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"{label} HTTP {resp.status}: {(await resp.text())[:200]}")
+            data = await resp.json(content_type=None)
+    text = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+    if not text:
+        raise RuntimeError(f"{label} came back empty")
+    return text, []
+
+
+async def ask_xai(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
+    """Grok, from xAI, when XAI_API_KEY is set on the host. Cursor does not expose a chat API for this."""
+    return await ask_chat("https://api.x.ai/v1/chat/completions", XAI_API_KEY, XAI_MODEL, system, user_text, "Grok")
+
+
+async def ask_openrouter(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
+    """Grok through OpenRouter when OPENROUTER_API_KEY is set. OPENROUTER_MODEL can pick another model."""
+    key = env("OPENROUTER_API_KEY", "")
+    model = env("OPENROUTER_MODEL", "x-ai/grok-4-fast")
+    return await ask_chat("https://openrouter.ai/api/v1/chat/completions", key, model, system, user_text, "OpenRouter")
+
+
 async def ask_any(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
     """Answer with Gemini (free) first. Claude is the fail-safe: it only runs when Gemini errors out or comes back
-    without a real answer (and a Claude key is set). ASK_ENGINES can change the order."""
+    without a real answer (and a Claude key is set). ASK_ENGINES can change the order.
+    A Grok key (XAI_API_KEY, or OpenRouter) answers first when it is set."""
     last: Optional[Exception] = None
     fallback: Optional[tuple[str, list[str]]] = None
     why: list[str] = []
     ASK_LAST_ERROR["text"] = None
-    for engine in ASK_ENGINES:
-        if engine == "groq" and GROQ_API_KEY:
+    engines = list(ASK_ENGINES)
+    if XAI_API_KEY and "xai" not in engines:
+        engines.insert(0, "xai")
+    elif env("OPENROUTER_API_KEY", "") and "openrouter" not in engines:
+        engines.insert(0, "openrouter")
+    for engine in engines:
+        if engine == "xai" and XAI_API_KEY:
+            try:
+                answer, sources = await ask_xai(system, user_text, search)
+                if answer and not ask_unanswered(answer):
+                    free_count("ask_xai")
+                    return answer, sources
+                if answer and fallback is None:
+                    fallback = (answer, sources)
+            except Exception as exc:
+                last = exc
+                why.append("Grok: " + ask_error_snip(str(exc)))
+                log.warning("Grok answer failed: %s", str(exc)[:300])
+        elif engine == "openrouter" and env("OPENROUTER_API_KEY", ""):
+            try:
+                answer, sources = await ask_openrouter(system, user_text, search)
+                if answer and not ask_unanswered(answer):
+                    free_count("ask_openrouter")
+                    return answer, sources
+                if answer and fallback is None:
+                    fallback = (answer, sources)
+            except Exception as exc:
+                last = exc
+                why.append("OpenRouter: " + ask_error_snip(str(exc)))
+                log.warning("OpenRouter answer failed: %s", str(exc)[:300])
+        elif engine == "groq" and GROQ_API_KEY:
             try:
                 answer, sources = await ask_groq(system, user_text, search)
                 if answer and not ask_unanswered(answer):
@@ -35641,8 +35949,11 @@ class PicksBot(discord.Client):
         system = ASK_SYSTEM.format(bot_name=self.user.display_name,
                                    today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
         system += (f"\n\nYour voice in this server: {persona_prompt(message.guild.id)}.\n"
+                   "Talk to the person by the name in the question. "
                    "For questions about the group's own results (records, profit, hit rates, who's best at "
-                   "something, someone's tendencies), use the group_stats tool and only quote its numbers. 'me', "
+                   "something, someone's tendencies), use the group_stats tool and only quote its numbers. "
+                   "If group numbers are already in the message, quote those and do not invent a record, a profit, "
+                   "or a result. 'me', "
                    "'my' and 'I' mean the person asking. Ask for a chart when comparing several groups.")
         ctx = {"guild_id": message.guild.id, "asker_key": str(message.author.id), "chart": None}
         token = ASK_DATA.set(ctx)
@@ -35721,7 +36032,8 @@ class PicksBot(discord.Client):
                                 mention_author=False)
             return
 
-        dup = find_duplicate(message.guild.id, message.author.id, slip) if slip.get("placed", True) else None
+        bettor = slip_on_behalf(message)
+        dup = find_duplicate(message.guild.id, bettor.id, slip) if slip.get("placed", True) else None
         if dup is not None:
             if quiet:
                 return
@@ -35748,17 +36060,20 @@ class PicksBot(discord.Client):
         async def reply(**kw):
             return await message.reply(mention_author=False, **kw)
         await offer_extra_slips(message, slip)
-        await self.log_parsed_slip(message.guild.id, message.author, message.channel, slip, message.jump_url, reply)
+        await self.log_parsed_slip(message.guild.id, message.author, message.channel, slip, message.jump_url, reply,
+                                   bettor=bettor)
 
-    async def log_parsed_slip(self, guild_id: int, author, channel, slip: dict, slip_url: str, reply) -> int:
+    async def log_parsed_slip(self, guild_id: int, author, channel, slip: dict, slip_url: str, reply,
+                              bettor=None) -> int:
         """Log a slip Claude already read, post its card (with the live receipt), and do the extras."""
+        owner = bettor or author
         legs = [str(leg).strip() for leg in (slip.get("legs") or []) if str(leg).strip()]
         payout = slip["payout"] if slip["payout"] is not None else 0.0
         pick_id = insert_pick(
             guild_id=guild_id,
-            bettor_key=str(author.id),
-            bettor_name=author.display_name,
-            bettor_id=author.id,
+            bettor_key=str(owner.id),
+            bettor_name=owner.display_name,
+            bettor_id=owner.id,
             logged_by=author.id,
             platform=str(slip.get("platform") or "Other")[:40],
             sport=(str(slip["sport"])[:60] if slip.get("sport") else None),
@@ -35777,9 +36092,12 @@ class PicksBot(discord.Client):
         note = None
         if slip["payout"] is None:
             note = f"I couldn't read the payout. Fix it with `/edit pick_id:{pick_id}`."
+        if getattr(owner, "id", None) != getattr(author, "id", None):
+            filed = f"Filed under **{owner.display_name}**."
+            note = f"{note}\n{filed}" if note else filed
         view = settle_view(pick_id) if p["status"] == "open" else None
         SLIP_STATE["last_ok"] = now_iso()
-        logged = voice_line(guild_id, "logged", name=call_name(guild_id, author.id, author.display_name))
+        logged = voice_line(guild_id, "logged", name=call_name(guild_id, owner.id, owner.display_name))
         content = "\n".join(x for x in (logged, note) if x) or None
         embed, extra = pick_embed(p), {}
         try:
@@ -36328,7 +36646,8 @@ async def leaderboard_cmd(interaction: discord.Interaction, period: Optional[app
 @app_commands.guild_only()
 @app_commands.describe(pick_id="The pick number", description="New one-line description",
                        cost="New amount risked", payout="New max payout",
-                       legs="New legs, separated by semicolons (resets leg grades)")
+                       legs="New legs, separated by semicolons (resets leg grades)",
+                       person="Developer only: move this pick onto another person")
 async def edit_cmd(
     interaction: discord.Interaction,
     pick_id: int,
@@ -36336,6 +36655,7 @@ async def edit_cmd(
     cost: Optional[app_commands.Range[float, 0]] = None,
     payout: Optional[app_commands.Range[float, 0]] = None,
     legs: Optional[app_commands.Range[str, 1, 900]] = None,
+    person: Optional[discord.Member] = None,
 ):
     p = get_pick(interaction.guild_id, pick_id)
     if p is None:
@@ -36343,7 +36663,7 @@ async def edit_cmd(
         return
     if not can_edit(interaction, p):
         await interaction.response.send_message(
-            f"Only {p['bettor_name']} or a mod can edit this one.", ephemeral=True)
+            f"Only {p['bettor_name']}, a developer, or a mod can edit this one.", ephemeral=True)
         return
     updates: dict = {}
     if description is not None:
@@ -36354,7 +36674,11 @@ async def edit_cmd(
         updates["payout"] = payout
     if legs is not None:
         updates["legs"] = "\n".join(x.strip() for x in legs.split(";") if x.strip()) or None
-    if not updates:
+    if person is not None and not crew_at_least(interaction.user.id, "developer", interaction.guild_id):
+        await interaction.response.send_message(
+            "Only a developer can move a pick onto someone else.", ephemeral=True)
+        return
+    if not updates and person is None:
         await interaction.response.send_message(
             "Nothing to change. Fill in at least one field.", ephemeral=True)
         return
@@ -36362,8 +36686,13 @@ async def edit_cmd(
     # corrected numbers. A custom amount (partial payout, cash-out) is left alone.
     was_standard = (p["status"] != "open" and
                     p["returned"] == default_return(p["status"], p["cost"], p["payout"]))
-    sets = ", ".join(f"{col} = ?" for col in updates)
-    db().execute(f"UPDATE picks SET {sets} WHERE id = ?", (*updates.values(), pick_id))
+    if updates:
+        sets = ", ".join(f"{col} = ?" for col in updates)
+        db().execute(f"UPDATE picks SET {sets} WHERE id = ?", (*updates.values(), pick_id))
+    if person is not None:
+        db().execute("UPDATE picks SET bettor_key = ?, bettor_name = ?, bettor_id = ? WHERE id = ?",
+                     (str(person.id), person.display_name[:60], person.id, pick_id))
+        updates["who"] = person.display_name
     db().commit()
     if "legs" in updates:
         set_legs_keep(pick_id, updates["legs"])
