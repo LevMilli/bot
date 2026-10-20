@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.38"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.39"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -176,6 +176,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.36", "Player photos are taken from the PrizePicks screenshot once and kept, then shown on the parlay card."),
     ("1.37", "Larry Bird and Drew Brees replace two portraits on the opening collage."),
     ("1.38", "Tim Tebow replaces Larry Bird on the opening collage."),
+    ("1.39", "A short Discord dropout stays quiet. A heads up goes out only if the robot is still offline."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -199,6 +200,7 @@ MEMBER_NEWS = [
     ("1.36", "A player photo from the PrizePicks screenshot is saved and shown on the parlay."),
     ("1.37", "The opening page swaps in Larry Bird and Drew Brees."),
     ("1.38", "The opening page swaps in Tim Tebow and Drew Brees."),
+    ("1.39", "A quick dropout stays quiet. You only get a note if the robot stays offline."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -45499,10 +45501,29 @@ class PicksBot(discord.Client):
             await self.tree.sync()  # global: can take up to an hour to appear
         self.scheduler_task = asyncio.create_task(self.scheduler())
 
+    def _silence_disconnect_alert(self) -> bool:
+        """Cancel a pending dropout note. Returns whether a heads-up was already posted."""
+        self._gateway_up = True
+        self._disc_gen = getattr(self, "_disc_gen", 0) + 1
+        alerted = bool(getattr(self, "_disc_alerted", False))
+        self._disc_alerted = False
+        return alerted
+
+    async def _say_reconnected(self) -> None:
+        if self.is_closed():
+            return
+        try:
+            await post_alert(self, "✅ **Robot reconnected**\nDiscord is back.", ping=False)
+        except Exception:
+            pass
+
     async def on_ready(self):
+        alerted = self._silence_disconnect_alert()
         log.info("Logged in as %s | version %s | update %s | Claude features: %s | receipts channels: %d",
                  self.user, BOT_VERSION, ROADMAP_NOW, "on" if ai_enabled() else "off",
                  len(self.receipt_channels))
+        if alerted:
+            await self._say_reconnected()
         if not getattr(self, "_boot_said", False):
             self._boot_said = True
             try:
@@ -45515,22 +45536,39 @@ class PicksBot(discord.Client):
             set_setting(0, "bot_disconnect_at", now_iso())
         except Exception:
             pass
+        self._gateway_up = False
         crash_note("bot", "Robot disconnected", "Lost the Discord websocket. It will try to reconnect.")
+        gen = getattr(self, "_disc_gen", 0) + 1
+        self._disc_gen = gen
+        asyncio.create_task(self._disconnect_alert(gen))
+
+    async def _disconnect_alert(self, gen: int) -> None:
+        """A gateway blink reconnects in a few seconds. Only speak up if it stays down."""
+        await asyncio.sleep(20)
+        if gen != getattr(self, "_disc_gen", 0):
+            return
+        if getattr(self, "_gateway_up", False) or self.is_closed():
+            return
         last = getattr(self, "_disc_ping_at", 0)
         if time.monotonic() - last < 600:
             return
         self._disc_ping_at = time.monotonic()
+        self._disc_alerted = True
         try:
             await asyncio.wait_for(
                 crash_notify(self, "bot", "Robot disconnected",
-                             "Lost the Discord websocket. It will try to reconnect."), 4)
+                             "Lost the Discord websocket. It will try to reconnect."), 8)
         except Exception:
             pass
 
     async def on_resumed(self):
+        alerted = self._silence_disconnect_alert()
         crash_note("ok", "Robot reconnected", "Discord websocket is back.")
+        if alerted:
+            await self._say_reconnected()
 
     async def close(self):
+        self._silence_disconnect_alert()
         try:
             set_setting(0, "bot_stopping", now_iso())
             last_done = ""
