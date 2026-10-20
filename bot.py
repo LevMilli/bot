@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.22"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.23"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -160,6 +160,15 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.20", "The opening screen shows green, yellow, and red feed lights, and the smoke is thicker. Restart pictures leave the slip list off. Staff can switch the board tile to the group total. A name on profit over time highlights that person's picks. Search shows a Discord face and a few stats, a profile has Message, and anyone with a slip gets a card."),
     ("1.21", "The opening screen drops the feed lights. The title is black with a purple glow, and the smoke is a finer, clearer curl."),
     ("1.22", "Needs attention stays on Staff HQ. Tagging a member files a settled win or loss on their record. A win picture, a loss picture, and an open parlay read as three different slips."),
+    ("1.23", "What's new on the board is for the group: the fun features, in plain words."),
+]
+# Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
+MEMBER_NEWS = [
+    ("1.13", "Ask a sports question, or ask the weather. Weather comes back with an hourly temperature and rain graph."),
+    ("1.17", "The opening page is a scattered collage of players, each name and trophy with the right person."),
+    ("1.20", "Tap a name on the profit chart to light up their picks. Search shows a Discord photo and a few stats, a profile has Message, and anyone with a slip gets a card."),
+    ("1.21", "The opening title is black with a purple glow, and the smoke curls clearer."),
+    ("1.22", "Tag a friend on a screenshot and a win or a loss goes on their record. A cashed ticket and a lost ticket are read that way. A parlay still in play stays open."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -10635,7 +10644,7 @@ def dashboard_data(guild_id: int) -> dict:
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
             "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "later": BOT_LATER,
-            "updates": [{"ver": v, "text": t} for v, t in reversed(BOT_UPDATES[-20:])],
+            "updates": [{"ver": v, "text": t} for v, t in reversed(MEMBER_NEWS[-5:])],
             "week": dash_this_week(guild_id),
             "netmode": "group" if get_setting(guild_id, "kpi_net") == "group" else "week",
             "groupnet": round(sum(s["net"] for s in compute_stats(guild_id)), 2),
