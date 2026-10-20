@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.19"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.20"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -157,6 +157,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.17", "The opening collage is scattered and tilted, with clearer game photos, each name on its player, and each trophy with the player who won it."),
     ("1.18", "Staff can file a slip under another person, and the site Who box keeps the name you type."),
     ("1.19", "Restarts show the live board, with open slips, and a refresh button."),
+    ("1.20", "The opening screen shows green, yellow, and red feed lights, and the smoke is thicker. Restart pictures leave the slip list off. Staff can switch the board tile to the group total. A name on profit over time highlights that person's picks. Search shows a Discord face and a few stats, a profile has Message, and anyone with a slip gets a card."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -10587,6 +10588,8 @@ def dashboard_data(guild_id: int) -> dict:
             "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "later": BOT_LATER,
             "updates": [{"ver": v, "text": t} for v, t in reversed(BOT_UPDATES[-20:])],
             "week": dash_this_week(guild_id),
+            "netmode": "group" if get_setting(guild_id, "kpi_net") == "group" else "week",
+            "groupnet": round(sum(s["net"] for s in compute_stats(guild_id)), 2),
             "h2h": dash_h2h_board(guild_id), "weekplays": dash_week_plays(guild_id),
             "weekboard": clip(get_setting(guild_id, "week_board") or "", 280)}
 
@@ -17412,10 +17415,15 @@ def dashboard_people(guild_id: int) -> list[dict]:
     windows = dash_person_windows(guild_id)
     edges = dash_sport_edges(guild_id)
     blank = {"season": 0.0, "month": 0.0, "week": 0.0}
-    return [{"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
-             "span": windows.get(s["key"], blank), "edge": edges.get(s["key"]),
-             "role": dash_crew_role(s["key"], guild_id)}
-            for s in compute_stats(guild_id) if s["wins"] + s["losses"] + s["pushes"] > 0 and not s["key"].startswith("label:")]
+    out = []
+    for s in compute_stats(guild_id):
+        if s["wins"] + s["losses"] + s["pushes"] <= 0 and not s["open"]:
+            continue
+        out.append({"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
+                    "open": int(s["open"] or 0),
+                    "span": windows.get(s["key"], blank), "edge": edges.get(s["key"]),
+                    "role": dash_crew_role(s["key"], guild_id)})
+    return out
 
 
 DASHBOARD_HTML_V2 = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -29245,7 +29253,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-109';"
+    "const CACHE='pb-shell-110';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -29454,7 +29462,9 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
  border-radius:12px;padding:8px 10px;font-size:12.5px;min-width:150px;opacity:0;transition:opacity .12s;z-index:3}
 .tip .d{color:var(--muted);font-size:11.5px;margin-bottom:3px}.tip div.l{display:flex;gap:8px;align-items:center;justify-content:space-between}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:13px}
-.legend span{display:inline-flex;align-items:center;gap:6px}.legend i{width:10px;height:10px;border-radius:3px}
+.legend span,.legend button{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:2px 0}
+.legend i{width:10px;height:10px;border-radius:3px}.legend button.on{font-weight:800}
+.chartpicks{margin-top:12px}
 /* images */
 .img{position:relative;border-radius:14px;overflow:hidden;background:var(--card2)}
 .img img{display:block;width:100%;height:auto;opacity:0;transition:opacity .35s}.img img.ok{opacity:1}
@@ -29804,10 +29814,24 @@ function imgBox(path,extra,emptyTitle,emptySub,alt){
 
 /* ---------- chart (plain SVG, no libraries) ---------- */
 function niceStep(span){const raw=span/4,p=Math.pow(10,Math.floor(Math.log10(raw||1))),m=raw/p;return (m<1.5?1:m<3?2:m<7?5:10)*p}
+function chartPicks(){
+ const name=S.hiWho||'';if(!name||!S.data)return null;const d=S.data;const who=name.toLowerCase();
+ const rows=[...(d.recent||[]),...(d.open||[])].filter(p=>String(p.who||'').toLowerCase()===who).slice(0,10);
+ const person=(d.alltime||[]).concat(d.people||[]).find(p=>String(p.name||'').toLowerCase()===who);
+ const key=person&&/^\d+$/.test(String(person.key||''))?String(person.key):'';
+ return h('div',{class:'chartpicks'},
+  h('div',{class:'kpihead'},h('span',{text:name+"'s picks"}),
+   key?h('button',{type:'button',class:'tpause',onclick:()=>go('#/p/'+key)},'Open card'):null,
+   h('button',{type:'button',class:'tpause',onclick:()=>{S.hiWho='';render()}},'Show everyone')),
+  rows.length?h('div',{class:'rows'},rows.map(p=>slipRow(Object.assign({status:p.status||'open'},p)))):
+   h('p',{class:'muted',text:'No recent or open slips for this name.'}))}
 function chart(series,height){
  const host=h('div',{class:'chart'});const names=Object.keys(series||{});
  if(!names.length){host.append(empty('No settled slips yet','The chart fills in as slips cash or miss.'));return host}
- requestAnimationFrame(()=>drawChart(host,series,names,height));return host}
+ requestAnimationFrame(()=>drawChart(host,series,names,height));
+ const wrap=h('div',null,host);
+ if(S.hiWho&&names.indexOf(S.hiWho)>=0){const picks=chartPicks();if(picks)wrap.append(picks)}
+ return wrap}
 function drawChart(host,series,names,height){
  const W=Math.max(280,host.clientWidth||640),H=height||(W<520?210:290),P={l:50,r:12,t:12,b:26};
  const lines=names.map(n=>series[n].map(p=>[Date.parse(p[0].replace(' ','T')),p[1]]));
@@ -29822,8 +29846,9 @@ function drawChart(host,series,names,height){
   tx.textContent=new Date(t).toLocaleDateString(undefined,{month:'short',day:'numeric'});svg.append(tx)}
  lines.forEach((L,i)=>{if(!L.length)return;let d='M'+X(L[0][0]).toFixed(1)+' '+Y(L[0][1]).toFixed(1);
   for(let k=1;k<L.length;k++)d+='H'+X(L[k][0]).toFixed(1)+'V'+Y(L[k][1]).toFixed(1);d+='H'+(W-P.r);
-  const c=COLORS[i%COLORS.length];  svg.append(sv('path',{d,fill:'none',stroke:c,'stroke-width':3.2,'stroke-linejoin':'round','stroke-linecap':'round'}));
-  svg.append(sv('circle',{cx:W-P.r,cy:Y(L[L.length-1][1]),r:5,fill:c}))});
+  const n=names[i],picked=!!(S.hiWho&&names.indexOf(S.hiWho)>=0),hot=picked&&S.hiWho===n,dim=picked&&!hot,c=COLORS[i%COLORS.length];
+  svg.append(sv('path',{d,fill:'none',stroke:c,'stroke-width':hot?5.4:3.2,'stroke-opacity':dim?0.18:1,'stroke-linejoin':'round','stroke-linecap':'round'}));
+  svg.append(sv('circle',{cx:W-P.r,cy:Y(L[L.length-1][1]),r:hot?7:5,fill:c,'fill-opacity':dim?0.25:1}))});
  const cursor=sv('line',{y1:P.t,y2:H-P.b,stroke:'currentColor','stroke-opacity':.3,'stroke-dasharray':'3 3',visibility:'hidden'});svg.append(cursor);
  const tip=h('div',{class:'tip'});
  svg.addEventListener('pointermove',ev=>{const r=svg.getBoundingClientRect();const px=(ev.clientX-r.left)*W/r.width;
@@ -29834,9 +29859,10 @@ function drawChart(host,series,names,height){
    ...rows.slice(0,8).map(([n,v,c])=>h('div',{class:'l'},h('span',null,h('i',{style:'display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:'+c}),n),h('b',{class:tone(v)},money(v)))));
   const left=Math.min(Math.max(8,ev.clientX-r.left+14),r.width-170);tip.style.left=left+'px';tip.style.top='8px';tip.style.opacity=1});
  svg.addEventListener('pointerleave',()=>{tip.style.opacity=0;cursor.setAttribute('visibility','hidden')});
- const legend=h('div',{class:'legend'},names.map((n,i)=>{const L=lines[i],v=L.length?L[L.length-1][1]:0;
-  return h('span',null,h('i',{style:'background:'+COLORS[i%COLORS.length]}),n,h('b',{class:tone(v)},money(v)))}));
- put(host,svg,tip,names.length>1?legend:null)}
+ const legend=h('div',{class:'legend'},names.map((n,i)=>{const L=lines[i],v=L.length?L[L.length-1][1]:0;const on=S.hiWho===n;
+  return h('button',{type:'button',class:on?'on':'',onclick:()=>{S.hiWho=on?'':n;render()}},
+   h('i',{style:'background:'+COLORS[i%COLORS.length]}),n,h('b',{class:tone(v)},money(v)))}));
+ put(host,svg,tip,legend)}
 
 /* ---------- pieces ---------- */
 function personRow(r,i){const medal=['\u{1F947}','\u{1F948}','\u{1F949}'][i];const link=r.key&&/^\d+$/.test(r.key);
@@ -29886,8 +29912,9 @@ function pinBoard(){const xs=pins().slice(0,10);if(!xs.length)return null;
 function gripEl(){return h('button',{type:'button',class:'grip','aria-label':'Move'},'⠿')}
 function kpiStrip(d){
  const w=d.week||{open:(d.open||[]).length,settled:0,net:0,coins:0};
+ const group=d.netmode==='group';const netv=group?(+d.groupnet||0):(+w.net||0);
  const tiles=[['open','Open',String(w.open),'riding right now',''],['settled','Settled',String(w.settled),'this week',''],
-  ['net','Week net',money(w.net),'since Monday',tone(w.net)],['coins','Coins',Number(w.coins||0).toLocaleString(),'earned this week','']];
+  ['net',group?'Group net':'Week net',money(netv),group?'all settled slips':'since Monday',tone(netv)],['coins','Coins',Number(w.coins||0).toLocaleString(),'earned this week','']];
  let order=[];try{order=JSON.parse(localStorage.getItem('pb-week-'+((S.data&&S.data.me)||'guest'))||'[]')}catch(e){order=[]}
  if(!Array.isArray(order))order=[];
  tiles.sort((a,b)=>{const ia=order.indexOf(a[0]),ib=order.indexOf(b[0]);return (ia<0?99:ia)-(ib<0?99:ib)});
@@ -29925,23 +29952,23 @@ function renderLive(el,d){
   card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
   card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(p=>slipRow({id:p.id,who:p.who,status:p.status,net:p.net,what:'Slip #'+p.id,when:'settled today'})))
    :empty('Nothing settled in the last day','Fresh results land here.')))}
-function crewTile(p,d){return h('button',{class:'tile'+(p.role?' team':''),type:'button',onclick:()=>go('#/p/'+p.key)},
+function crewTile(p,d){const link=/^\d+$/.test(String(p.key||''));
+ return h(link?'button':'div',{class:'tile'+(p.role?' team':''),type:link?'button':null,onclick:link?()=>go('#/p/'+p.key):null},
  imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
  h('div',{class:'cap'},h('div',{class:'nmwrap'},h('b',{text:p.name}),h('div',{class:'chips'},String(d.me)===String(p.key)?h('span',{class:'chip you',text:'You'}):null,p.role?h('span',{class:'rolechip',text:p.role}):null)),h('span',{class:tone(p.net)},money(p.net))),
  h('div',{class:'wins'},[['Week',(p.span||{}).week],['Month',(p.span||{}).month],['Season',(p.span||{}).season]].map(([k,n])=>h('span',{class:tone(n||0),text:k+' '+money(n||0)}))),
  p.edge&&p.edge.best?h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:'Best '+(p.edge.best.name||'')}),h('span',{class:tone(p.edge.best.net),text:money(p.edge.best.net)}),h('span',{text:'Worst '+(p.edge.worst&&p.edge.worst.name||'')}),h('span',{class:tone(p.edge.worst&&p.edge.worst.net),text:money((p.edge.worst&&p.edge.worst.net)||0)})):null,
- h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:p.record}),h('span',{text:'View →'})))}
+ h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:(p.record||'0-0')+(p.open?' · '+p.open+' open':'')}),link?h('span',{text:'View →'}):null))}
 function renderPeople(el,d){
  if(S.pf!=='team'&&S.pf!=='members')S.pf='all';
  const seg=h('div',{class:'seg'},[['all','All'],['team','Team'],['members','Members']].map(([k,t])=>h('button',{type:'button',class:S.pf===k?'on':'',
   onclick:()=>{S.pf=k;render()}},t)));
- const q=(S.q||'').trim().toLowerCase();
- const rows=(d.people||[]).filter(p=>!q||(p.name+' '+(p.record||'')+' '+(p.role||'')).toLowerCase().indexOf(q)>=0);
+ const rows=d.people||[];
  const team=rows.filter(p=>p.role),members=rows.filter(p=>!p.role);
  const block=(title,list)=>list.length?card(title,'',String(list.length),h('div',{class:'grid'},list.map(p=>crewTile(p,d)))):null;
  const groups=S.pf==='team'?[block('The team',team)]:S.pf==='members'?[block('Members',members)]:[block('The team',team),block('Members',members)];
  const shown=groups.filter(Boolean);
- const none=empty(rows.length?'Nobody in that group':'No one on the board yet',rows.length?'Try All.':'Once someone settles a slip, their card shows up here.');
+ const none=empty(rows.length?'Nobody in that group':'No one on the board yet',rows.length?'Try All.':'Once someone logs a slip, their card shows up here.');
  put(el,card('The crew','',seg,shown.length?null:none),
   ...(shown.length?shown:[]),
   (d.h2h||[]).length?card('Head to head','',null,h('div',{class:'rows'},d.h2h.map(x=>{
@@ -29973,8 +30000,10 @@ function renderPosters(el,d){
   frameCard(card('Hot & cold players','',null,imgBox('hot.png','','Not enough graded legs yet','Once legs get graded, the hot and cold list fills in.','Hot and cold players'))),
   people.length?card('Earned stickers','',String(people.length),h('div',{class:'stickers'},people.map(p=>h('div',{class:'stick'},
    face(p.key,p.name),h('div',null,h('b',{text:p.name}),h('div',{class:'rowchips'},stickersFor(p).map(s=>h('span',{class:'chip',text:s})))))))):null,
-  people.length?card('Crew cards','',null,h('div',{class:'crewstrip'},people.slice(0,16).map(p=>h('button',{class:'mini',type:'button',onclick:()=>go('#/p/'+p.key)},
-   imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),h('b',{text:p.name}))))):null)}
+  people.length?card('Crew cards','',null,h('div',{class:'crewstrip'},people.slice(0,16).map(p=>{
+   const link=/^\d+$/.test(String(p.key||''));
+   return h(link?'button':'div',{class:'mini',type:link?'button':null,onclick:link?()=>go('#/p/'+p.key):null},
+   imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),h('b',{text:p.name}))}))):null)}
 function renderMore(el,d){
  const icons={hit:'✅',miss:'❌',push:'➖'};
  const map=(d.roadmap||[]).map(r=>h('div',{class:'rmrow '+(r.state||'')},
@@ -30085,7 +30114,8 @@ async function openPerson(key){openSheet();const p=await api('/api/person/'+key+
   h('button',{type:'submit',class:'tpause',text:'Save'}),
   h('p',{class:'muted',text:'Stays on this phone. It is not sent to the group.'})):null;
  const roles={developer:1,owner:1,admin:1,mod:1};
- const dmLink=p.dm?h('a',{class:'dmlink',href:'https://discord.com/users/'+p.key,target:'_blank',rel:'noopener noreferrer'},'Message on Discord'):null;
+ const canMsg=/^\d{2,20}$/.test(String(p.key||''));
+ const dmLink=canMsg?h('a',{class:'dmlink',href:'https://discord.com/users/'+p.key,target:'_blank',rel:'noopener noreferrer',style:'margin-left:auto'},'Message'):null;
  const dmForm=you&&roles[p.role]?h('form',{class:'card',style:'margin-top:10px',onsubmit:async ev=>{ev.preventDefault();
   const on=!!ev.target.show.checked;
   const r=await fetch('/api/dm.json'+qs(),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:on})});
@@ -30096,13 +30126,13 @@ async function openPerson(key){openSheet();const p=await api('/api/person/'+key+
   h('button',{type:'submit',class:'tpause',text:'Save'}),
   h('p',{class:'muted',text:'People on this board can open your Discord profile from the link.'})):null;
  put($('#sheet-body'),
-  h('div',{class:'ph'},face(p.key,p.name),h('div',{style:'min-width:0'},h('h3',{text:p.name}),
-   h('div',{class:'sub'},p.record+' record',streakChip(p.streak),p.role?h('span',{class:'rolechip',text:p.role}):null,you?h('span',{class:'chip you',text:'This is your card'}):null))),
+  h('div',{class:'ph'},face(p.key,p.name),h('div',{style:'min-width:0;flex:1'},h('h3',{text:p.name}),
+   h('div',{class:'sub'},p.record+' record',streakChip(p.streak),p.role?h('span',{class:'rolechip',text:p.role}):null,you?h('span',{class:'chip you',text:'This is your card'}):null)),dmLink),
   h('div',{class:'kpis'},kbox('This week',money(span.week||0),tone(span.week||0)),kbox('This month',money(span.month||0),tone(span.month||0)),
    kbox('This season',money(span.season||0),tone(span.season||0)),kbox('Open now',String(p.open||0))),
   p.since?h('p',{class:'muted',text:'Logging since '+p.since}):null,
   (p.sports&&p.sports[0])?h('p',{class:'muted',text:'Most slips · '+p.sports[0].name}):null,
-  dmLink,note,dmForm,
+  note,dmForm,
   h('div',{class:'kpis'},kbox('Record',p.record),kbox('Net',money(p.net),tone(p.net)),kbox('ROI',pct(p.roi),tone(p.roi)),kbox('Legs hit',lr)),
   h('div',{class:'pgrid'},h('div',null,cardBox,p.form.length?card('Last '+p.form.length,'',null,h('div',{class:'form'},p.form.map(x=>h('i',{class:x,text:x})))):null),
    h('div',null,card('Profit over time','',null,chart(series,190)),
@@ -30353,6 +30383,14 @@ a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{wid
  .acchip{min-height:44px;height:auto}
  .looktile .sw,.looktile .sw img{height:72px}.lookbox{padding:14px 12px 12px}
  .lookhead{margin:-14px -12px 8px}}
+#introlamps{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:min(760px,92vw);margin-top:8px}
+#introlamps .il{display:inline-flex;align-items:center;gap:7px;color:#f6f3fc;font:700 13px/1 ui-sans-serif,system-ui,sans-serif;
+ text-shadow:0 1px 6px #000;background:#0c0814d4;border:1px solid #ffffff33;border-radius:999px;padding:7px 12px}
+#introlamps .lamp{width:12px;height:12px;border-radius:50%;display:inline-block;flex:none}
+#introlamps .lamp.ok,#introlamps .lamp.idle{background:#34d399;box-shadow:0 0 10px 3px #34d399cc}
+#introlamps .lamp.warn,#introlamps .lamp.shaky{background:#f0b429;box-shadow:0 0 12px 3px #f0b429;animation:ilblink .4s linear infinite}
+#introlamps .lamp.down{background:#fb7185;box-shadow:0 0 12px 4px #fb7185}
+@keyframes ilblink{0%,100%{opacity:1}50%{opacity:.15}}
 @media (prefers-reduced-motion:reduce){#intro{display:none}}
 """
 SITE_LOOK_CSS += (
@@ -30383,6 +30421,12 @@ function smokeIntro(){
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
  fit();addEventListener('resize',fit);
+ const lamps=$('#introlamps');
+ if(lamps){fetch('/api/health.json',{credentials:'same-origin',headers:{Accept:'application/json'}}).then(r=>r.ok?r.json():null).then(d=>{
+  if(!d||!lamps.isConnected)return;const feeds=(d.feeds||[]).filter(f=>f&&f.name).slice(0,8);
+  lamps.replaceChildren(...feeds.map(f=>{const row=document.createElement('span');row.className='il';
+   const i=document.createElement('i');i.className='lamp '+String(f.state||'idle');
+   const b=document.createElement('b');b.textContent=f.name;row.append(i,b);return row}))}).catch(()=>{})}
  const perm=new Uint8Array(512);for(let i=0;i<256;i++)perm[i]=i;
  for(let i=255;i>0;i--){const j=(Math.random()*(i+1))|0;const t=perm[i];perm[i]=perm[j];perm[j]=t}
  for(let i=0;i<256;i++)perm[256+i]=perm[i];
@@ -30402,21 +30446,21 @@ function smokeIntro(){
     const n=fbm((u+wx*.5)*2.8+seed,(v+wy*.5)*2.8),fine=fbm(u*6.5+wx+seed,v*6.5+wy);
     let dens=n*.6+fine*.4;dens=dens*.5+.5;
     const body=rad<.12?1:rad>1.05?0:Math.pow(1-(rad-.12)/.93,1.05);
-    let al=Math.max(0,dens-.22)*1.55*body;al=Math.pow(Math.min(1,al),1.2);
-    const tone=176+dens*62;
-    const i=(y*sz+x)*4;od[i]=tone;od[i+1]=tone-10;od[i+2]=tone-22;od[i+3]=Math.min(235,al*220)|0}}
+    let al=Math.max(0,dens-.16)*1.85*body;al=Math.pow(Math.min(1,al),1.05);
+    const tone=186+dens*58;
+    const i=(y*sz+x)*4;od[i]=tone;od[i+1]=tone-8;od[i+2]=tone-18;od[i+3]=Math.min(255,al*255)|0}}
   g.putImageData(img,0,0);
   const soft=document.createElement('canvas');soft.width=soft.height=sz;const sg=soft.getContext('2d');
-  sg.filter='blur(5px)';sg.drawImage(s,0,0);sg.filter='none';sg.globalAlpha=.4;sg.drawImage(s,0,0);return soft};
- const clouds=[puff(168),puff(150),puff(136),puff(124),puff(112),puff(96)];
+  sg.filter='blur(6px)';sg.drawImage(s,0,0);sg.filter='none';sg.globalAlpha=.72;sg.drawImage(s,0,0);return soft};
+ const clouds=[puff(220),puff(196),puff(176),puff(156),puff(136),puff(118)];
  const curl=(px,py,sc)=>{const e=8;
   const a=fbm((px+e)*sc,py*sc),b=fbm((px-e)*sc,py*sc),c1=fbm(px*sc,(py+e)*sc),d1=fbm(px*sc,(py-e)*sc);
   return[(c1-d1)*2.4,-(a-b)*2.4]};
- const spawn=(kind)=>{const w=c.width,h=c.height;const fat=kind==='fog';const hero=fat&&Math.random()<.2;
-  return{x:Math.random()*w,y:h*(hero?.42:.72)+Math.random()*h*(hero?.5:.36),
-   r:hero?240+Math.random()*200:(fat?70:12)+Math.random()*(fat?130:28),
-   vx:(Math.random()-.5)*(fat?.4:.8),vy:-(fat?.6:1.4)-Math.random()*(fat?.4:.8),
-   a:(hero?.05:.045)+Math.random()*(hero?.04:.03),
+ const spawn=(kind)=>{const w=c.width,h=c.height;const fat=kind==='fog';const hero=fat&&Math.random()<.28;
+  return{x:Math.random()*w,y:h*(hero?.34:.58)+Math.random()*h*(hero?.62:.48),
+   r:hero?320+Math.random()*280:(fat?120:20)+Math.random()*(fat?210:48),
+   vx:(Math.random()-.5)*(fat?.4:.8),vy:-(fat?.55:1.2)-Math.random()*(fat?.35:.7),
+   a:(hero?.18:.12)+Math.random()*(hero?.1:.08),
    grow:(fat?.22:.06)+Math.random()*(fat?.16:.08),ph:Math.random()*6.3,rot:Math.random()*6.3,
    spin:(Math.random()-.5)*.003,sprite:clouds[(Math.random()*clouds.length)|0],kind:kind,life:.75+Math.random()*.25}};
  const fog=Array.from({length:58},()=>spawn('fog'));
@@ -30430,7 +30474,7 @@ function smokeIntro(){
    if(p.y<-p.r*.3||p.life<=0||p.x<-240||p.x>w+240)Object.assign(p,spawn(p.kind));
    const d=p.r*(fat?2.15:1.15);const sh=Math.max(-.4,Math.min(.4,p.vx*.012));
    x.save();x.translate(p.x,p.y);x.rotate(p.rot);x.transform(1,sh*.15,sh,fat?.74:1.12,0,0);
-   x.globalAlpha=Math.min(fat?.2:.1,p.a*p.life*(fat?2.6:1.5));
+   x.globalAlpha=Math.min(fat?.62:.4,p.a*p.life*(fat?3.6:2.3));
    x.drawImage(p.sprite,-d/2,-d/2,d,d);x.restore()};
   for(const p of fog)draw(p);for(const p of parts)draw(p);x.globalAlpha=1;
   const el=now-start;if(el>1100&&brand)brand.classList.add('on');if(el>7000)o.classList.add('go');
@@ -30548,7 +30592,12 @@ body.v4 .grip:active{color:var(--gold);cursor:grabbing}
 body.v4 .homecard.dragging,body.v4 .kpi.dragging{position:relative;z-index:6;transform:scale(1.04);
  box-shadow:0 22px 48px -12px #000;opacity:.98;outline:2px solid var(--gold);pointer-events:none}
 body.v4 .chip.you{color:#14003A;background:var(--gold);border-color:var(--gold);font-weight:800}
-body.v4 .legend span{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
+body.v4 .legend span,body.v4 .legend button{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:6px 12px;color:inherit;font:inherit;cursor:pointer}
+body.v4 .legend button.on{outline:2px solid var(--gold);border-color:transparent}
+body.v4 .chartpicks{margin-top:12px}
+body.v4 .findpop .nitem .who b{display:block}
+body.v4 .findpop .nitem .who span{display:block;font-size:12px}
+body.v4 .findpop .nitem .net{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
 body.v4 .pill{font-size:13px}
 body.v4 .pill.season{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 70%,transparent);background:color-mix(in srgb,var(--gold) 14%,transparent)}
 body.v4 .iconbtn.x{width:44px;height:44px}
@@ -30949,7 +30998,11 @@ function paintFind(){const box=$('#findpop');if(!box)return;if(S.findOff){box.hi
   saved.map(p=>h('button',{class:'nitem',type:'button',onclick:()=>{box.hidden=true;if(p.slug&&p.id)go('#/pl/'+p.slug+'/'+p.id)}},h('b',{text:p.name||'Player'}))),
   pls.map(playerCard),
   people.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'In this group'}):null,
-  people.map(p=>h('button',{class:'nitem',type:'button',onclick:()=>go('#/p/'+p.key)},h('b',{text:p.name}),h('span',{text:p.record||''}))),
+  people.map(p=>{const link=/^\d+$/.test(String(p.key||''));const openN=+p.open||0;
+   const sub=(p.record||'0-0')+(openN?(' · '+openN+' open'):'')+(p.role?(' · '+p.role):'');
+   return h('button',{class:'nitem',type:'button',onclick:()=>{box.hidden=true;if(link)go('#/p/'+p.key)}},
+    face(p.key,p.name),h('div',{class:'who',style:'min-width:0;flex:1'},h('b',{text:p.name}),h('span',{text:sub})),
+    h('b',{class:'net '+tone(p.net||0),text:money(p.net||0)}))}),
   slips.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Matching slips'}):null,
   slips.map(p=>slipRow(p)),
   mates.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Teammates'}):null,
@@ -31192,7 +31245,7 @@ addEventListener('load',smokeIntro);
         '<div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>'
         '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">'
         '<img src="' + DASH_FAVICON + '" alt="" width="120" height="120">'
-        '<div id="introtitle">Pimp\'s Dashboard</div></div></div>'
+        '<div id="introtitle">Pimp\'s Dashboard</div><div id="introlamps"></div></div></div>'
         '<noscript><p style="text-align:center">The dashboard needs JavaScript switched on.</p></noscript>',
         1)
     return html
@@ -31676,14 +31729,6 @@ def boot_facts() -> list[tuple[str, str]]:
         disk = f"fine, {free_mb} MB free"
     rows = [("Disk", f"{disk}. Picks file {db_mb:.1f} MB.")]
     try:
-        opens = db().execute("SELECT COUNT(*) AS n FROM picks WHERE status = 'open'").fetchone()["n"]
-        start = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-        logged = db().execute("SELECT COUNT(*) AS n FROM picks WHERE created_at >= ?",
-                              (start.isoformat(timespec="seconds"),)).fetchone()["n"]
-        rows.append(("Open slips", f"{opens}. Logged today: {logged}."))
-    except Exception:
-        pass
-    try:
         rows.append(("Scanner", "on." if TESSERACT else "off on this host."))
     except Exception:
         pass
@@ -31876,11 +31921,6 @@ def status_card(data: dict) -> Optional[io.BytesIO]:
             except Exception:
                 log.warning("Staff snapshot failed", exc_info=True)
                 payload["staff"] = {}
-        if "slips" not in payload:
-            try:
-                payload["slips"] = boot_slip_rows()
-            except Exception:
-                payload["slips"] = []
         return render_status_card(payload)
     except Exception:
         log.warning("Status card failed", exc_info=True)
@@ -31950,7 +31990,6 @@ async def announce_boot(client) -> Optional[str]:
         def _card(gid, tone=tone, happened=happened, news=news):
             return status_card({
                 "title": "PIMP-BOT IS LIVE", "tone": tone, "happened": happened, "news": list(news),
-                "slips": boot_slip_rows(gid),
             })
 
         await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned),
@@ -32396,6 +32435,8 @@ def staff_ops(uid: int) -> dict:
         "hits": hits, "log": log_rows[:12], "announce": anns, "crew": crew, "pending": pending,
         "crashes": [x for x in crashes if isinstance(x, dict)][:12], "version": BOT_VERSION,
         "update": ROADMAP_NOW,
+        "netmode": "group" if get_setting(gid, "kpi_net") == "group" else "week",
+        "groupnet": round(sum(s["net"] for s in compute_stats(gid)), 2),
         "access": {"key": dash_gate_code(), "day": dash_gate_state().get("day") or "",
                    "used": int(dash_gate_state().get("used") or 0)},
         "devices": [{"id": r.get("id") or "", "who": r.get("who") or "Browser", "ip": r.get("ip") or "",
@@ -32424,6 +32465,9 @@ STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 .navchip{display:inline-flex;align-items:center;height:36px;padding:0 12px;border-radius:12px;border:1px solid var(--line);
  background:var(--card);color:#c4a6ff;text-decoration:none;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
 .navchip:hover{color:#fff;border-color:var(--brand)}
+.netpick{display:flex;gap:8px;flex-wrap:wrap}
+.netpick button{height:40px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:#110c1b;color:var(--text);font-weight:800;cursor:pointer}
+.netpick button.on{background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;border-color:transparent}
 .wrap{max-width:1180px;margin:0 auto;padding:18px 18px 48px}
 .g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}
 .g2{display:grid;grid-template-columns:1.4fr .9fr;gap:12px;margin-bottom:12px}
@@ -32504,6 +32548,8 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
  <section class="card"><h2>Blacklist</h2><div id="blacklist"></div>
   <p class="muted">Staff-selected players, teams, or situations. Add here or with /staff blacklist.</p></section>
 </div>
+<section class="card" style="margin-bottom:12px"><h2>Board net</h2><div id="netmode"></div>
+ <p class="muted">Week net is since Monday. Group net is the total the crew has made or lost on settled slips, and that is what the member board shows.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>This upload</h2><div id="upload"></div>
  <p class="muted">The upload is the file on Railway. The update is the idea list that file is filling. r81 was update r69. Both numbers sit on this card and on the member footer.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>Today's access key</h2><div id="access"></div>
@@ -32576,6 +32622,12 @@ async function load(){const r=await fetch('/api/staff.json',{credentials:'same-o
   h('div',{class:'row'},h('a',{class:'navchip',href:'/',text:'Open the member board'}),
    h('button',{class:'xbtn',type:'button',text:'Copy board link',onclick:()=>{try{navigator.clipboard.writeText(location.origin+'/')}catch(e){}}})));
  paintAccess(d.access||{});paintDevices(d.devices||[]);
+ const nm=d.netmode==='group'?'group':'week';const gn=+d.groupnet||0;
+ const gtxt=(gn<0?'−':'+')+'$'+Math.abs(gn).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+ put($('#netmode'),h('div',{class:'netpick'},
+  h('button',{type:'button',class:nm==='week'?'on':'',text:'Week net',onclick:()=>staffPost({op:'netmode',mode:'week'}).then(load)}),
+  h('button',{type:'button',class:nm==='group'?'on':'',text:'Group net',onclick:()=>staffPost({op:'netmode',mode:'group'}).then(load)})),
+  h('p',{style:'margin:10px 0 0',text:nm==='group'?('Group total '+gtxt+' on the member board.'):('Week net is on the member board. Group total so far is '+gtxt+'.')}));
  const R=d.reads||{};const last=(R.slips||[])[0];
  put($('#reads'),h('div',{class:'rbox'},h('b',{class:'ok',text:String(R.clean||0)}),h('span',{text:'sure'})),
   h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'confirm'})),
@@ -32824,6 +32876,12 @@ async def dash_api_staff_post(request):
             (gid, cid, text, iso(due), uid, now_iso()))
         db().commit()
         staff_log_add(gid, "ok", "Scheduled an announcement", staff_rec(uid, gid).get("name") or str(uid))
+        return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "netmode" and crew_at_least(uid, "admin", gid):
+        mode = "group" if str(body.get("mode") or "") == "group" else None
+        set_setting(gid, "kpi_net", mode)
+        staff_log_add(gid, "ok", "Switched the board tile to group net" if mode else "Switched the board tile to week net",
+                      staff_rec(uid, gid).get("name") or str(uid))
         return web.json_response({"ok": True, **staff_ops(uid)})
     if op == "weekboard" and crew_at_least(uid, "admin", gid):
         text = clip(str(body.get("text") or ""), 280)
@@ -41255,41 +41313,62 @@ def _status_lamp(state: str):
 
 
 def render_status_fallback(b: dict) -> io.BytesIO:
-    """A plain board when the full stadium draw fails, so the restart still has a picture."""
+    """A plain board when the full stadium draw fails, so the restart still has a picture and feed lights."""
     from PIL import Image, ImageDraw
-    lines = [str(b.get("title") or "PIMP-BOT IS LIVE")]
+    staff = b.get("staff") if isinstance(b.get("staff"), dict) else {}
+    feeds = [f for f in (staff.get("feeds") or []) if isinstance(f, dict)][:10]
+    blocks = [("title", str(b.get("title") or "PIMP-BOT IS LIVE"))]
     if b.get("when"):
-        lines.append(str(b["when"]))
+        blocks.append(("sub", str(b["when"])))
     if b.get("happened"):
-        lines.append(str(b["happened"]))
+        blocks.append(("line", str(b["happened"])))
     for n in b.get("news") or []:
-        lines.append(str(n))
-    for s in b.get("slips") or []:
-        if isinstance(s, dict):
-            lines.append(f"{s.get('who') or 'Slip'} · {s.get('what') or 'Slip'}")
+        if str(n).strip():
+            blocks.append(("line", str(n)))
+    if feeds:
+        blocks.append(("head", "SERVERS"))
+        for feed in feeds:
+            blocks.append(("lamp", feed))
     for label, value in b.get("rows") or []:
-        lines.append(f"{label}: {value}")
-    lines.append("Tap Refresh for the current board.")
-    lines = [x.strip() for x in lines if str(x).strip()][:28]
+        blocks.append(("line", f"{label}: {value}"))
+    blocks.append(("line", "Tap Refresh for the current board."))
     W = 1000
-    img = Image.new("RGB", (W, 48 + 36 * len(lines) + 36), (18, 12, 32))
+    H = 28
+    for kind, _item in blocks:
+        H += 48 if kind == "title" else 40 if kind == "lamp" else 30 if kind == "head" else 36
+    img = Image.new("RGB", (W, H + 20), (18, 12, 32))
     d = ImageDraw.Draw(img)
     y = 24
-    for i, line in enumerate(lines):
-        size = 28 if i == 0 else 20
-        shown, font = fit_text(d, line, W - 72, size, True)
-        d.text((36, y), shown, font=font, fill=(245, 245, 250))
-        y += 40 if i == 0 else 32
+    for kind, item in blocks:
+        if kind == "title":
+            shown, font = fit_text(d, str(item), W - 72, 28, True)
+            d.text((36, y), shown, font=font, fill=(245, 245, 250))
+            y += 46
+        elif kind == "head":
+            d.text((36, y), str(item), font=art_font(14, True), fill=(160, 160, 180))
+            y += 28
+        elif kind == "lamp":
+            lamp = _status_lamp(str(item.get("state") or ""))
+            d.ellipse((36, y + 4, 56, y + 24), fill=lamp)
+            shown, font = fit_text(d, str(item.get("name") or "feed"), 420, 18, True)
+            d.text((68, y + 2), shown, font=font, fill=(245, 245, 250))
+            detail = str(item.get("detail") or item.get("state") or "")
+            dt, df = fit_text(d, detail, 400, 16, False)
+            d.text((W - 40 - _tw(d, dt, df), y + 4), dt, font=df, fill=(170, 170, 186))
+            y += 36
+        else:
+            shown, font = fit_text(d, str(item), W - 72, 20, False)
+            d.text((36, y), shown, font=font, fill=(220, 220, 230))
+            y += 34
     return _design_png(img)
 
 
 def render_status_card(b: dict) -> io.BytesIO:
-    """A restart or crash note. Same sections as Staff HQ, drawn like Tonight's Board, plus open slips.
+    """A restart or crash note. Same sections as Staff HQ, drawn like Tonight's Board.
     Tap Refresh on the message for a new draw. Staff HQ is the page that stays current."""
     news = [str(x) for x in (b.get("news") or []) if str(x).strip()][:3]
     rows = list(b.get("rows") or [])[:6]
     happened = str(b.get("happened") or "").strip()
-    slips = [s for s in (b.get("slips") or []) if isinstance(s, dict)][:8]
     staff = b.get("staff") if isinstance(b.get("staff"), dict) else {}
     reads = staff.get("reads") if isinstance(staff.get("reads"), (list, tuple)) and len(staff.get("reads")) == 3 else None
     feeds = [f for f in (staff.get("feeds") or []) if isinstance(f, dict)][:7]
@@ -41304,7 +41383,6 @@ def render_status_card(b: dict) -> io.BytesIO:
     H += 56 + 52 * len(feeds) if feeds else 0
     H += 108 if pool else 0
     H += 78 + 46 * len(tickets) if show_tickets else 0
-    H += 56 + 58 * len(slips) if slips else 0
     H += 56 + 70 * len(rows) if rows else 0
     H += 120
     tone = b.get("tone") or "live"
@@ -41394,24 +41472,6 @@ def render_status_card(b: dict) -> io.BytesIO:
         if not tickets:
             d.text((40, y), "No open tickets.", font=art_font(16, False), fill=ART_MUTED)
             y += 28
-    if slips:
-        y += 8
-        d.text((40, y), "OPEN SLIPS", font=art_font(16, True), fill=ART_MUTED)
-        y += 28
-        for slip in slips:
-            d.rounded_rectangle((24, y, W - 24, y + 50), 14, fill=(12, 12, 18, 184), outline=(255, 255, 255, 20))
-            who, wf = fit_text(d, str(slip.get("who") or "Slip"), 200, 18, True)
-            d.text((44, y + 14), who, font=wf, fill=ART_MUTED)
-            what, wtf = fit_text(d, str(slip.get("what") or "Slip"), 430, 18, True)
-            d.text((260, y + 14), what, font=wtf, fill=ART_TEXT)
-            try:
-                meta = f"{money(float(slip.get('cost') or 0))} to {money(float(slip.get('payout') or 0))}"
-            except Exception:
-                meta = ""
-            if meta:
-                mt, mf = fit_text(d, meta, 230, 16, True)
-                d.text((W - 48 - _tw(d, mt, mf), y + 14), mt, font=mf, fill=(245, 197, 66))
-            y += 58
     if rows:
         y += 8
         d.text((40, y), "RIGHT NOW", font=art_font(16, True), fill=ART_MUTED)
