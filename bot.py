@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.27"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.29"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -165,6 +165,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.25", "A screenshot answer names the players, the lines, and the result on the card."),
     ("1.26", "My board shows a profile photo on each slip. Pin and open are separate, so the same name is not listed twice."),
 ("1.27", "A tagged win card is filed under that member even when the long picture read is slow."),
+("1.28", "Several photos in one message are read as separate slips. A tag posts each one, and the reply names every slip."),
+("1.29", "A win card is logged as a win. The stats breakdown stays off a card that already paid."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -177,6 +179,8 @@ MEMBER_NEWS = [
     ("1.25", "A screenshot answer names the players, the lines, and whether the card won or lost."),
     ("1.26", "My board shows a profile photo on each slip, and pinning one is a tap."),
 ("1.27", "Tag someone on a win card and it shows up under their name, even when the picture takes a moment."),
+("1.28", "Send a few slips at once. Each one is read, and a tag puts them under that person."),
+("1.29", "A win card goes on the record as a win, with the amount that was paid."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2488,13 +2492,52 @@ def filed_under(message) -> dict:
 _SLIP_MONEY_UNSURE = {"the amount risked", "the payout", "which app it's from"}
 
 
+def _tag_hole_ok(reason: str) -> bool:
+    """Money can be filled in later. A fuzzy name means that one row was skipped, not that the slip is blank."""
+    text = str(reason)
+    return (text in _SLIP_MONEY_UNSURE or text.startswith("more than one slip")
+            or text.startswith("a player's name near "))
+
+
 def slip_tag_ready(slip: Optional[dict]) -> bool:
     """Legs are enough to post a slip under a tagged member. A missing stake can be filled in later."""
     if not slip or not slip.get("legs"):
         return False
-    holes = [u for u in (slip.get("_unsure") or [])
-             if u not in _SLIP_MONEY_UNSURE and not str(u).startswith("more than one slip")]
+    holes = [u for u in (slip.get("_unsure") or []) if not _tag_hole_ok(u)]
     return not holes
+
+
+def slip_batch_blurb(n: int, slip: dict) -> str:
+    """One slip in a multi-photo reply: the title, the result when the card has one, and the legs."""
+    legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()]
+    title = str(slip.get("description") or "Slip").strip()
+    head = f"**{n}. {title}**"
+    if slip.get("platform"):
+        head += f" · {slip['platform']}"
+    status = slip.get("status") or "open"
+    if status == "win":
+        paid = f" · paid {money(slip['returned'])}" if slip.get("returned") is not None else ""
+        head += f" · Won{paid}"
+    elif status == "loss":
+        head += " · Lost"
+    elif status == "push":
+        head += " · Push"
+    elif slip.get("cost") and slip.get("payout"):
+        head += f" · {money(slip['cost'])} to {money(slip['payout'])}"
+    bits = [head]
+    if legs:
+        shown = legs[:6]
+        extra = len(legs) - len(shown)
+        bits.append(" · ".join(shown) + (f" · +{extra} more" if extra else ""))
+    fuzzy = [u for u in (slip.get("_unsure") or []) if str(u).startswith("a player's name near ")]
+    if fuzzy:
+        bits.append("One row had no clear name, so that row is not on this slip.")
+    return "\n".join(bits)
+
+
+def slip_settled_ready(slip: Optional[dict]) -> bool:
+    """A card that already says win, loss, or push is logged. It does not get a stats breakdown."""
+    return bool(slip and slip.get("legs") and slip.get("status") in ("win", "loss", "push"))
 
 
 def slip_result_ready(slip: Optional[dict]) -> bool:
@@ -3996,6 +4039,13 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
     system += f"\n\nYour voice in this server: {persona_prompt(guild_id)}.\n\n" + REVIEW_RULES
     system += ("\n\nYou can't search the web for this one: base every leg only on the game logs, injury report and "
                "group history in the message. If a leg has no numbers there, say so instead of guessing.")
+    if slip.get("status") in ("win", "loss", "push"):
+        system += ("\n\nThis card is already settled as a " + slip["status"]
+                   + ". Lead with that result and the players on it. Do not say pass, and do not rate it as a bet "
+                   "still to make. A missing game log is one short clause, not the answer.")
+    else:
+        system += ("\n\nUse one mark per leg, not two. If a player has no game log, name them and the line and move on. "
+                   "Do not repeat a no-log sentence for every leg.")
     ctx = {"guild_id": guild_id, "asker_key": key, "chart": None}
     token = ASK_DATA.set(ctx)
     try:
@@ -37381,6 +37431,15 @@ def free_slip_result(full: str) -> tuple[str, Optional[float], bool]:
         win = True
     if re.search(r"(?:^|\n)\s*lost\b", cleaned):
         loss = True
+    # PrizePicks prints a Win or Loss chip on a settled card. "to win" was already removed.
+    if re.search(r"\bwin\b", cleaned):
+        win = True
+    if re.search(r"\bloss\b", cleaned):
+        loss = True
+    paid = re.search(r"\$\s*([\d,]+(?:\.\d{1,2})?)\s*paid\s*\$\s*([\d,]+(?:\.\d{1,2})?)", full or "", re.I)
+    paid_back = as_amount(paid.group(2)) if paid else None
+    if paid and not loss:
+        win = True
     if win and loss:
         return "open", None, True
     if re.search(r"\brefunded\b", cleaned) and not win and not loss:
@@ -37391,7 +37450,7 @@ def free_slip_result(full: str) -> tuple[str, Optional[float], bool]:
             m = re.search(r"(?:^|\n)\s*won\s*\$?\s*([\d,]+\.\d{2})", full, re.I)
         if not m:
             m = re.search(r"(?:^|\n)\s*won\s*(?:\n\s*)\$([\d,]+\.\d{2})", full, re.I)
-        returned = as_amount(m.group(1)) if m else None
+        returned = paid_back if paid_back is not None else (as_amount(m.group(1)) if m else None)
         return "win", returned, False
     if loss:
         return "loss", 0.0, False
@@ -37427,12 +37486,15 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     entry_type = None if has_flex and has_power else ("flex" if has_flex else ("power" if has_power else None))
     m = re.search(r"(\d{1,2})\s*-?\s*pick", low)
     want = int(m.group(1)) if m and 2 <= int(m.group(1)) <= 12 else None
-    # amounts: "$25 to win $450" / "Entry fee ... To Win ... $15 $562.50"
+    # amounts: "$2 paid $3" on a settled card, or "$25 to win $450" on an open entry
     cost = payout = None
-    m = re.search(_FREE_MONEY + r"\s*to\s*(?:win|pay)\s*" + _FREE_MONEY, full, re.I)
+    paid_m = re.search(_FREE_MONEY + r"\s*paid\s*" + _FREE_MONEY, full, re.I)
+    if paid_m:
+        cost, payout = as_amount(paid_m.group(1)), as_amount(paid_m.group(2))
+    m = re.search(_FREE_MONEY + r"\s*to\s*(?:win|pay)\s*" + _FREE_MONEY, full, re.I) if not paid_m else None
     if m:
         cost, payout = as_amount(m.group(1)), as_amount(m.group(2))
-    else:
+    elif not paid_m:
         for k, ln in enumerate(lines):
             if re.search(r"entry\s*fee|wager|stake", ln["text"], re.I):
                 amounts = re.findall(_FREE_MONEY + r"|(?<![\d.])(\d+\.\d{2})(?!\d)",
@@ -38166,15 +38228,15 @@ async def slip_with_card(attachment, slip, reason):
 
 async def read_slip_raced(attachment, budget: float = 18):
     """The short result-card look and the full reader run together.
-    Whichever comes back with legs first is the slip, so a clear win card is not dropped when the long read is slow."""
+    An open read waits for the card look, so a Win chip is not thrown out for a stats pass."""
     best_task = asyncio.create_task(read_slip_best(attachment))
     card_task = asyncio.create_task(read_result_card(attachment))
-    slip, reason, timed_out = None, None, False
+    slip, reason, timed_out, held = None, None, False, None
     pending = {best_task, card_task}
     loop = asyncio.get_running_loop()
     deadline = loop.time() + budget
     try:
-        while pending and not (slip and slip.get("legs")) and loop.time() < deadline:
+        while pending and loop.time() < deadline:
             done, pending = await asyncio.wait(
                 pending, timeout=max(0.05, deadline - loop.time()), return_when=asyncio.FIRST_COMPLETED)
             if not done:
@@ -38202,13 +38264,18 @@ async def read_slip_raced(attachment, budget: float = 18):
                         ready.append((got, None))
             if ready:
                 ready.sort(key=lambda item: 0 if item[0].get("status") in ("win", "loss", "push") else 1)
-                slip, reason = ready[0]
-                break
+                top, why = ready[0]
+                if top.get("status") in ("win", "loss", "push") or not pending:
+                    slip, reason = top, why
+                    break
+                held = (top, why)
     finally:
         for task in (best_task, card_task):
             if not task.done():
                 task.cancel()
         await asyncio.gather(best_task, card_task, return_exceptions=True)
+    if not (slip and slip.get("legs")) and held:
+        slip, reason = held
     if not (slip and slip.get("legs")) and timed_out:
         reason = reason or "that read took too long"
     return slip, reason
@@ -39415,7 +39482,11 @@ async def ask_channel_message(client, message) -> None:
     """A message in the ask channel: screenshots get a breakdown (never logged), words get an answer."""
     images = image_attachments(message)
     if images:
-        await client.review_slip(message, message, images[0])
+        pics = images[:SLIP_MAX_PICS]
+        if len(pics) > 1 and hasattr(client, "review_slips"):
+            await client.review_slips(message, message, pics)
+        else:
+            await client.review_slip(message, message, pics[0])
         return
     ref = message.reference.resolved if getattr(message, "reference", None) else None
     if isinstance(ref, discord.Message) and not ref.author.bot and not client.mentions_me(message):
@@ -43519,7 +43590,11 @@ class PicksBot(discord.Client):
         intent = slip_intent(getattr(message, "content", "")) if images or mentioned else "log"
         if images and (self.is_receipts_channel(message.channel) or mentioned):
             if intent == "ask":
-                await self.review_slip(message, message, images[0])
+                pics = images[:SLIP_MAX_PICS]
+                if len(pics) > 1:
+                    await self.review_slips(message, message, pics)
+                else:
+                    await self.review_slip(message, message, pics[0])
             else:
                 await self.log_slips(message, images)
             return
@@ -43527,10 +43602,14 @@ class PicksBot(discord.Client):
             # "@PIMP-BOT log this" (or "@PIMP-BOT thoughts?") as a reply to someone's screenshot
             ref = message.reference.resolved
             if isinstance(ref, discord.Message) and not ref.author.bot and image_attachments(ref):
+                ref_pics = image_attachments(ref)[:SLIP_MAX_PICS]
                 if intent == "ask":
-                    await self.review_slip(message, ref, image_attachments(ref)[0])
+                    if len(ref_pics) > 1:
+                        await self.review_slips(message, ref, ref_pics)
+                    else:
+                        await self.review_slip(message, ref, ref_pics[0])
                 else:
-                    await self.log_slips(ref, image_attachments(ref))
+                    await self.log_slips(ref, ref_pics)
                 return
         if images and intent == "log" and get_setting(message.guild.id, "receipts_all") == "on":
             await self.log_slips(message, images, quiet=True)
@@ -43726,7 +43805,7 @@ class PicksBot(discord.Client):
             return  # every-channel mode: memes and charts aren't slips, stay out of the way
 
         # A tag posts the slip under that member. A finished win or loss is filed even when the stake did not read.
-        if tagged_slip or (slip is not None and slip_result_ready(slip)):
+        if tagged_slip or (slip is not None and (slip_result_ready(slip) or slip_settled_ready(slip))):
             slip = slip_file_amounts(slip)
             if tagged_slip:
                 slip["placed"] = True
@@ -43785,7 +43864,7 @@ class PicksBot(discord.Client):
                                    bettor=bettor)
 
     async def log_parsed_slip(self, guild_id: int, author, channel, slip: dict, slip_url: str, reply,
-                              bettor=None) -> int:
+                              bettor=None, announce: bool = True) -> int:
         """Log a slip Claude already read, post its card (with the live receipt), and do the extras."""
         owner = bettor or author
         legs = [str(leg).strip() for leg in (slip.get("legs") or []) if str(leg).strip()]
@@ -43819,32 +43898,39 @@ class PicksBot(discord.Client):
         if getattr(owner, "id", None) != getattr(author, "id", None):
             filed = f"Filed under **{owner.display_name}**."
             note = f"{note}\n{filed}" if note else filed
+        short = re.search(r"all (\d+) picks \(I found (\d+)\)", " ".join(str(u) for u in (slip.get("_unsure") or [])))
+        if short and short.group(1) != short.group(2):
+            gap = f"The header said {short.group(1)} picks and {short.group(2)} read."
+            note = f"{note} {gap}" if note else gap
         view = settle_view(pick_id) if p["status"] == "open" else None
         SLIP_STATE["last_ok"] = now_iso()
         logged = voice_line(guild_id, "logged", name=call_name(guild_id, owner.id, owner.display_name))
         content = "\n".join(x for x in (logged, note) if x) or None
         embed, extra = pick_embed(p), {}
-        try:
-            async with channel.typing():
-                f = await receipt_file(self, p)
-            embed.set_image(url=f"attachment://{f.filename}")
-            extra["file"] = f
-        except Exception:
-            log.warning("Receipt image failed for pick %s", pick_id, exc_info=True)
-        if view is not None:
-            extra["view"] = view
-        sent = await reply(content=content, embed=embed, **extra)
+        sent = None
+        if announce:
+            try:
+                async with channel.typing():
+                    f = await receipt_file(self, p)
+                embed.set_image(url=f"attachment://{f.filename}")
+                extra["file"] = f
+            except Exception:
+                log.warning("Receipt image failed for pick %s", pick_id, exc_info=True)
+            if view is not None:
+                extra["view"] = view
+            sent = await reply(content=content, embed=embed, **extra)
         if getattr(sent, "id", None):
             remember_pick_msg(guild_id, pick_id, channel.id, sent.id, receipt="file" in extra)
-        tip = headsup_text(guild_id, str(author.id), pick_id)
-        if tip and not is_quiet(guild_id, author.id):
-            try:
-                await author.send(tip)
-            except Exception:
-                pass
+        if announce:
+            tip = headsup_text(guild_id, str(author.id), pick_id)
+            if tip and not is_quiet(guild_id, author.id):
+                try:
+                    await author.send(tip)
+                except Exception:
+                    pass
+            await voice_say(self, guild_id, f"{call_name(guild_id, author.id, author.display_name)} just logged {p['description']}, "
+                                            f"{money(p['cost'])} to win {money(p['payout'])}.")
         note_slip_read("clean", pick_id, who=author.display_name, title=p["description"], url=slip_url)
-        await voice_say(self, guild_id, f"{call_name(guild_id, author.id, author.display_name)} just logged {p['description']}, "
-                                        f"{money(p['cost'])} to win {money(p['payout'])}.")
         try:
             await announce_stacks(self, guild_id, pick_id, channel)
         except Exception:
@@ -43931,6 +44017,84 @@ class PicksBot(discord.Client):
         await offer_data_picks(message, slip)
         return True
 
+    async def review_slips(self, message: discord.Message, image_message: discord.Message, attachments: list):
+        """Several photos are several slips. A tag posts each readable one, and the reply names every slip."""
+        gate = ask_gate(message.guild.id, message.author.id)
+        if gate:
+            await message.reply(gate, mention_author=False)
+            return
+        pics = [a for a in attachments if (getattr(a, "size", 0) or 0) <= MAX_IMAGE_BYTES][:SLIP_MAX_PICS]
+        if not pics:
+            await message.reply("Those photos are too big to read. Send each slip on its own.", mention_author=False)
+            return
+        sem = asyncio.Semaphore(2)
+
+        async def read_one(att):
+            async with sem:
+                try:
+                    return await read_slip_raced(att, budget=14)
+                except Exception:
+                    log.warning("One photo in a batch failed", exc_info=True)
+                    return None, "that read failed"
+
+        async with message.channel.typing():
+            reads = await asyncio.gather(*(read_one(a) for a in pics))
+        target = await named_bettor(message)
+        tagged = getattr(target, "id", None) not in (None, getattr(message.author, "id", None))
+        lines, posted, missed = [], 0, 0
+        for i, (slip, reason) in enumerate(reads, 1):
+            if not slip or not (slip.get("legs") or slip.get("description")):
+                missed += 1
+                why = f": {reason}" if reason else ""
+                lines.append(f"**{i}.** I couldn't read that photo{why}.")
+                continue
+            blurb = slip_batch_blurb(i, slip)
+            owner = target if tagged else message.author
+            if slip_settled_ready(slip) or (tagged and slip_tag_ready(slip)):
+                ready = slip_file_amounts(dict(slip))
+                ready["placed"] = True
+                try:
+                    dup = find_duplicate(message.guild.id, owner.id, ready)
+                    if dup is not None:
+                        blurb += f"\nAlready on **{getattr(owner, 'display_name', 'them')}** as pick `#{dup['id']}`."
+                    else:
+                        async def _quiet(**kw):
+                            return None
+                        pid = await self.log_parsed_slip(
+                            message.guild.id, message.author, message.channel, ready,
+                            getattr(image_message, "jump_url", "") or "", _quiet, bettor=owner, announce=False)
+                        posted += 1
+                        who_name = getattr(owner, "display_name", None) or "them"
+                        blurb += f"\nPosted under **{who_name}** · pick `#{pid}`."
+                        if ready.get("_cost_blank"):
+                            blurb += f" The stake was blank. Fix it with `/edit pick_id:{pid}`."
+                except Exception:
+                    log.exception("Filing one slip from a batch failed")
+                    blurb += "\nThat one did not post. Try it again on its own."
+            elif tagged:
+                blurb += "\nNot posted. The legs were not clear enough."
+            lines.append(blurb)
+        total = len(pics)
+        if tagged and posted:
+            intro = f"**{posted} of {total}** posted under **{target.display_name}**."
+        elif posted:
+            intro = f"**{posted} of {total}** logged."
+        elif tagged:
+            intro = f"**{total} photos.** None of them posted under **{target.display_name}**."
+        else:
+            intro = f"**{total} slips** in this message."
+        if missed and not tagged:
+            intro += f" {missed} did not read."
+        text = intro + "\n\n" + "\n\n".join(lines)
+        if not tagged and not posted:
+            text += "\n\nTag a member on the photos to put them on a record."
+        chunks = split_message(text)
+        for k, chunk in enumerate(chunks):
+            if k == 0:
+                await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+
     async def review_slip(self, message: discord.Message, image_message: discord.Message, attachment):
         """A screenshot with a question gets a breakdown. Tagging a member posts the slip under their name."""
         gate = ask_gate(message.guild.id, message.author.id)
@@ -43964,6 +44128,26 @@ class PicksBot(discord.Client):
             await message.reply(f"I couldn't read that slip{': ' + reason if reason else ''}. Try a clearer screenshot.",
                                 mention_author=False)
             return
+        if slip_settled_ready(slip):
+            target = await named_bettor(message)
+            owner = target or message.author
+            ready = slip_file_amounts(dict(slip))
+            ready["placed"] = True
+            who = getattr(owner, "display_name", None) or "them"
+            dup = find_duplicate(message.guild.id, getattr(owner, "id", 0), ready)
+            if dup is not None:
+                await message.reply(f"Already on **{who}** as pick `#{dup['id']}`.", mention_author=False)
+                return
+            async def reply(**kw):
+                return await message.reply(mention_author=False, **kw)
+            try:
+                await self.log_parsed_slip(
+                    message.guild.id, message.author, message.channel, ready,
+                    getattr(image_message, "jump_url", "") or "", reply, bettor=owner)
+            except Exception:
+                log.exception("Logging a settled card failed")
+            else:
+                return
         save_slip_draft(message.guild.id, image_message, slip, mention_from=message)
         note_slip_read("unsure" if slip.get("_unsure") else "clean",
                        who=message.author.display_name,
