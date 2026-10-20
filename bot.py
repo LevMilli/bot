@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.21"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.22"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -159,6 +159,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.19", "Restarts show the live board, with open slips, and a refresh button."),
     ("1.20", "The opening screen shows green, yellow, and red feed lights, and the smoke is thicker. Restart pictures leave the slip list off. Staff can switch the board tile to the group total. A name on profit over time highlights that person's picks. Search shows a Discord face and a few stats, a profile has Message, and anyone with a slip gets a card."),
     ("1.21", "The opening screen drops the feed lights. The title is black with a purple glow, and the smoke is a finer, clearer curl."),
+    ("1.22", "Needs attention stays on Staff HQ. Tagging a member files a settled win or loss on their record. A win picture, a loss picture, and an open parlay read as three different slips."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2399,6 +2400,45 @@ def slip_on_behalf(message) -> object:
     return named[0] if named else author
 
 
+def filed_under(message) -> dict:
+    """Staff who @someone: the draft remembers that person so Log files it on their record."""
+    if message is None:
+        return {}
+    who = slip_on_behalf(message)
+    author = getattr(message, "author", None)
+    wid, aid = getattr(who, "id", None), getattr(author, "id", None)
+    if wid and aid and int(wid) != int(aid):
+        return {"for_id": int(wid), "for_name": getattr(who, "display_name", None) or "them"}
+    return {}
+
+
+_SLIP_MONEY_UNSURE = {"the amount risked", "the payout", "which app it's from"}
+
+
+def slip_result_ready(slip: Optional[dict]) -> bool:
+    """A win, loss, or push whose legs read cleanly. A missing stake can be filled in later."""
+    if not slip or not slip.get("legs"):
+        return False
+    if slip.get("status") not in ("win", "loss", "push"):
+        return False
+    holes = [u for u in (slip.get("_unsure") or [])
+             if u not in _SLIP_MONEY_UNSURE and not str(u).startswith("more than one slip")]
+    return not holes
+
+
+def slip_file_amounts(slip: dict) -> dict:
+    """A settled slip can be filed when the stake did not read. The reply says to fix the amount."""
+    out = dict(slip)
+    if out.get("cost") is None:
+        out["cost"] = 0.0
+        out["_cost_blank"] = True
+    if out.get("status") == "loss" and out.get("returned") is None:
+        out["returned"] = 0.0
+    if out.get("status") == "win" and out.get("returned") is not None and out.get("payout") is None:
+        out["payout"] = out["returned"]
+    return out
+
+
 def split_message(text: str, limit: int = 1900) -> list[str]:
     """Split long text into Discord-sized chunks, preferring line breaks."""
     chunks, current = [], ""
@@ -3292,7 +3332,8 @@ async def offer_extra_slips(message, slip) -> None:
             continue
         set_setting(message.guild.id, f"draft:{mid}", json.dumps({
             "slip": extra, "poster": message.author.id, "poster_name": message.author.display_name,
-            "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso(), "typed": False}))
+            "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso(),
+            "typed": False, **filed_under(message)}))
         try:
             await note.edit(embed=slip_draft_embed(extra),
                             view=slip_draft_view(mid, review=ai_enabled(), edit=True))
@@ -3315,17 +3356,20 @@ async def offer_extra_slips(message, slip) -> None:
             continue
         set_setting(message.guild.id, f"draft:{mid}", json.dumps({
             "slip": extra, "poster": message.author.id, "poster_name": message.author.display_name,
-            "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso(), "typed": False}))
+            "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso(),
+            "typed": False, **filed_under(message)}))
         try:
             await note.edit(embed=slip_draft_embed(extra), view=slip_draft_view(mid, review=ai_enabled(), edit=True))
         except Exception:
             log.warning("Couldn't attach the second slip")
 
 
-def save_slip_draft(guild_id: int, message, slip: dict, typed: bool = False) -> None:
-    set_setting(guild_id, f"draft:{message.id}", json.dumps({
+def save_slip_draft(guild_id: int, message, slip: dict, typed: bool = False, mention_from=None) -> None:
+    payload = {
         "slip": slip, "poster": message.author.id, "poster_name": message.author.display_name,
-        "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso(), "typed": typed}))
+        "url": message.jump_url, "channel_id": message.channel.id, "used": None, "at": now_iso(), "typed": typed}
+    payload.update(filed_under(mention_from or message))
+    set_setting(guild_id, f"draft:{message.id}", json.dumps(payload))
 
 
 def get_slip_draft(guild_id: int, message_id: int) -> Optional[dict]:
@@ -3934,8 +3978,12 @@ Entries" view, live progress or a result); false if it is still being built (an 
 "Submit", "Deposit Funds", "Add to betslip", "Not enough balance", empty pick slots)
 }
 
-Use "open" unless the screenshot clearly shows a final result. Numbers must be plain \
-numbers with no currency symbols. Never guess an amount you cannot read.
+Use "open" unless the screenshot clearly shows a final result. A win picture \
+(a won banner, cashed, "you won", or a payout already paid) is "win", and "returned" is that paid amount when it is on the screen. \
+A loss picture (a lost banner, "you lost", entry lost, or busted) is "loss", and "returned" is 0. \
+A parlay still in progress, pending, or waiting on its games is "open". Do not invent a result. \
+"to win" on an entry that is still open is the possible payout, not a win. \
+Numbers must be plain numbers with no currency symbols. Never guess an amount you cannot read.
 
 PrizePicks details: the header reads like "$25 to win $450" (cost 25, payout 450). If a line \
 shows a crossed-out number next to a new number (a discounted or promo line), the leg uses the \
@@ -16395,9 +16443,12 @@ class DraftEditModal(discord.ui.Modal, title="Edit before logging"):
 
         async def reply(**kw):
             return await interaction.followup.send(wait=True, **kw)
+        bettor = None
+        if can_file_for_others(interaction.user, interaction.guild_id) and d.get("for_id"):
+            bettor = _FiledWho(int(d["for_id"]), d.get("for_name") or "them")
         try:
             pid = await interaction.client.log_parsed_slip(interaction.guild_id, interaction.user, interaction.channel,
-                                                           d["slip"], d["url"], reply)
+                                                           d["slip"], d["url"], reply, bettor=bettor)
         except Exception:
             log.exception("Logging an edited draft failed")
             d["used"] = None
@@ -29254,7 +29305,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-111';"
+    "const CACHE='pb-shell-112';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -31120,6 +31171,11 @@ function arrangeHome(el){if(!el)return;const order=homeOrder();
  addEventListener('pointerup',end);addEventListener('pointercancel',end);
  el.addEventListener('touchmove',e=>{if(drag&&drag.moved&&e.cancelable)e.preventDefault()},{passive:false})}
 """
+    html = html.replace(
+        "  d.needs.length?card('✋ Needs attention','needs',String(d.needs.length),h('div',{class:'nlist'},d.needs.map(n=>h('button',{class:'nitem',type:'button',\n"
+        "   disabled:n.id==null,onclick:n.id==null?null:()=>go('#/s/'+n.id)},h('b',{text:n.who}),h('span',{text:n.why}),n.id!=null?h('span',{class:'chip',text:'#'+n.id}):null))),\n"
+        "   h('p',{class:'hint'},'Finish these in Discord with ',h('code',null,'/result'),'. They clear off here once they\u2019re graded.')):null,\n",
+        "", 1)
     html = html.replace("const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};",
                         extra_js + "const TABS={overview:renderOverview,live:renderLive,news:renderNews,open:renderOpen,people:renderPeople,posters:renderPosters,more:renderMore};",
                         1)
@@ -37182,6 +37238,38 @@ def free_pill_num(text: str) -> Optional[str]:
     return m.group(1).translate(str.maketrans("oOsS,", "0055."))
 
 
+def free_slip_result(full: str) -> tuple[str, Optional[float], bool]:
+    """(status, returned, hint). A finished win or loss has to say so. 'to win' on an open entry is not a win.
+    hint is true when the words look like a result but are not clear enough to grade."""
+    low = (full or "").lower()
+    cleaned = re.sub(r"\b(faceoffs?|games?|sets?|maps?)\s+won\b", " ", low)
+    cleaned = re.sub(r"\bto\s+win\b", " ", cleaned)
+    win = bool(re.search(
+        r"\b(you won|entry won|slip won|we won|cashed|winner|payout paid|paid out)\b", cleaned))
+    loss = bool(re.search(
+        r"\b(you lost|entry lost|slip lost|lost entry|did not hit|didn't hit|busted|better luck)\b", cleaned))
+    if re.search(r"(?:^|\n)\s*won\b", cleaned):
+        win = True
+    if re.search(r"(?:^|\n)\s*lost\b", cleaned):
+        loss = True
+    if win and loss:
+        return "open", None, True
+    if re.search(r"\brefunded\b", cleaned) and not win and not loss:
+        return "push", None, False
+    if win:
+        m = re.search(r"(?:you won|cashed|paid out|payout paid)\s*\$?\s*([\d,]+\.\d{2})", full, re.I)
+        if not m:
+            m = re.search(r"(?:^|\n)\s*won\s*\$?\s*([\d,]+\.\d{2})", full, re.I)
+        if not m:
+            m = re.search(r"(?:^|\n)\s*won\s*(?:\n\s*)\$([\d,]+\.\d{2})", full, re.I)
+        returned = as_amount(m.group(1)) if m else None
+        return "win", returned, False
+    if loss:
+        return "loss", 0.0, False
+    hint = bool(re.search(r"\b(won|lost|cashed|busted)\b", cleaned))
+    return "open", None, hint
+
+
 def free_parse(words: list[dict], img, grey) -> Optional[dict]:
     """A slip from the scan's words, in the same shape the AI readers return, plus '_unsure' with the reasons
     when anything didn't read cleanly. None when it doesn't look like a slip at all."""
@@ -37451,11 +37539,16 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
             legs.append(leg)
             used_lines.add(name_at)
             used_rows.add(k)
+    status, returned, result_hint = free_slip_result(full)
+    if status == "win" and returned is not None and payout is None:
+        payout = returned
+        unsure = [u for u in unsure if u != "the payout"]
     if not legs:
-        if platform and (cost or payout):
+        if platform and (cost or payout or status != "open"):
             return {"is_slip": True, "platform": platform, "sport": None, "description": "Slip", "legs": [],
-                    "cost": cost, "payout": payout, "status": "open", "returned": None, "game_date": None,
-                    "entry_type": entry_type, "placed": True, "_unsure": ["the picks"], "_how": "scan"}
+                    "cost": cost, "payout": payout, "status": status, "returned": returned, "game_date": None,
+                    "entry_type": entry_type, "placed": True, "_unsure": ["the picks"], "_how": "scan",
+                    "_result_hint": result_hint}
         return None
     if want and len(legs) != want:
         unsure.append(f"all {want} picks (I found {len(legs)})")
@@ -37474,9 +37567,9 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
         if re.search(rx, full):
             sports.append(label)
     return {"is_slip": True, "platform": platform, "sport": ", ".join(s.title() if s == "SOCCER" else s for s in sports)
-            or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": "open",
-            "returned": None, "game_date": None, "entry_type": entry_type, "placed": placed,
-            "_unsure": unsure, "_how": "scan"}
+            or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": status,
+            "returned": returned, "game_date": None, "entry_type": entry_type, "placed": placed,
+            "_unsure": unsure, "_how": "scan", "_result_hint": result_hint}
 
 
 _FREE_MINOR_UNSURE = ("which app it's from",)
@@ -37659,6 +37752,13 @@ def _free_fill(base: Optional[dict], extra: Optional[dict]) -> Optional[dict]:
         out["entry_type"] = extra["entry_type"]
     if extra.get("sport") and not out.get("sport"):
         out["sport"] = extra["sport"]
+    if extra.get("status") in ("win", "loss", "push") and out.get("status") not in ("win", "loss", "push"):
+        out["status"] = extra["status"]
+        if extra.get("returned") is not None:
+            out["returned"] = extra["returned"]
+        out["_result_hint"] = False
+    elif extra.get("_result_hint") and out.get("status") not in ("win", "loss", "push"):
+        out["_result_hint"] = True
     return out
 
 
@@ -37873,6 +37973,32 @@ async def gemini_see(attachment, prompt: str) -> str:
 
 # ---- the chain ------------------------------------------------------------------------------------
 
+def _merge_vision(scan: Optional[dict], vision: dict) -> dict:
+    """Keep the scan's legs when the picture reader saw fewer, and keep a win or loss either one found."""
+    if not isinstance(scan, dict):
+        return vision
+    out = dict(vision)
+    slegs, vlegs = list(scan.get("legs") or []), list(out.get("legs") or [])
+    if slegs and len(slegs) > len(vlegs):
+        out["legs"] = slegs
+    if out.get("cost") is None and scan.get("cost") is not None:
+        out["cost"] = scan["cost"]
+    if out.get("payout") is None and scan.get("payout") is not None:
+        out["payout"] = scan["payout"]
+    if out.get("returned") is None and scan.get("returned") is not None:
+        out["returned"] = scan["returned"]
+    if out.get("status") not in ("win", "loss", "push") and scan.get("status") in ("win", "loss", "push"):
+        out["status"] = scan["status"]
+    if not out.get("platform") and scan.get("platform"):
+        out["platform"] = scan["platform"]
+    if not out.get("description") and scan.get("description"):
+        out["description"] = scan["description"]
+    if out.get("status") in ("win", "loss", "push"):
+        out.pop("_unsure", None)
+    out.pop("_result_hint", None)
+    return out
+
+
 async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
     """Free scan first, then Gemini, then Claude. Returns (slip or None, why it failed or None). A slip the scan
     wasn't sure about comes back with '_unsure' (reasons) when no AI reader could do better: confirm it by hand."""
@@ -37908,9 +38034,17 @@ async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
                     slip.pop("_unsure", None)
                 return slip, None
             if slip.get("legs"):
-                if not slip.get("_unsure"):
+                if not slip.get("_unsure") or slip_result_ready(slip):
                     free_count("scan")
-                    slip.pop("_unsure", None)
+                    if not slip.get("_unsure"):
+                        slip.pop("_unsure", None)
+                    slip.pop("_result_hint", None)
+                    return slip, None
+                if slip.get("_result_hint") or any(
+                        u in ("the amount risked", "the payout") for u in (slip.get("_unsure") or [])):
+                    unsure_slip = slip
+                    continue
+                slip.pop("_result_hint", None)
                 return slip, None
             unsure_slip = slip
             continue
@@ -37923,7 +38057,8 @@ async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
                 log.warning("Gemini slip read failed: %s", str(exc)[:200])
                 SLIP_STATE["last_error"] = (now_iso(), f"Reading with Gemini: {type(exc).__name__}: {str(exc)[:200]}")
                 continue
-            if slip and slip.get("cost") is not None:
+            if slip and (slip.get("cost") is not None or slip.get("status") in ("win", "loss", "push")):
+                slip = _merge_vision(unsure_slip, slip)
                 free_count("gemini")
                 slip["_how"] = "gemini"
                 return slip, None
@@ -37931,7 +38066,8 @@ async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
             continue
         if reader == "claude" and ai_enabled() and claude_budget_ok(essential=True) and claude_alive():
             slip, why = await read_slip_claude(attachment)
-            if slip is not None and slip.get("cost") is not None:
+            if slip is not None and (slip.get("cost") is not None or slip.get("status") in ("win", "loss", "push")):
+                slip = _merge_vision(unsure_slip, slip)
                 free_count("claude")
                 slip["_how"] = "claude"
                 return slip, None
@@ -43344,11 +43480,13 @@ class PicksBot(discord.Client):
             reason = f"the image is too big ({(attachment.size or 0) // 1024} KB)"
             SLIP_STATE["last_error"] = (now_iso(), f"Image too big to read ({(attachment.size or 0) // 1024} KB)")
 
-        if quiet and (slip is None or slip["cost"] is None or slip.get("_unsure")):
+        if quiet and not slip_result_ready(slip) and (slip is None or slip["cost"] is None or slip.get("_unsure")):
             return  # every-channel mode: memes and charts aren't slips, stay out of the way
 
-        # The free scan read it but wasn't sure of everything: show what it read and let the poster confirm.
-        if slip is not None and slip.get("_unsure") and slip.get("legs"):
+        # A finished win or loss is filed even when the stake did not read. An open parlay still waits for a confirm.
+        if slip is not None and slip_result_ready(slip):
+            slip = slip_file_amounts(slip)
+        elif slip is not None and slip.get("_unsure") and slip.get("legs"):
             await offer_extra_slips(message, slip)
             save_slip_draft(message.guild.id, message, slip)
             free_count("scan_confirm")
@@ -43429,8 +43567,11 @@ class PicksBot(discord.Client):
 
         p = get_pick(guild_id, pick_id)
         note = None
+        if slip.get("_cost_blank"):
+            note = f"I couldn't read the amount risked. Fix it with `/edit pick_id:{pick_id}`."
         if slip["payout"] is None:
-            note = f"I couldn't read the payout. Fix it with `/edit pick_id:{pick_id}`."
+            pay = f"I couldn't read the payout. Fix it with `/edit pick_id:{pick_id}`."
+            note = f"{note} {pay}" if note else pay
         if getattr(owner, "id", None) != getattr(author, "id", None):
             filed = f"Filed under **{owner.display_name}**."
             note = f"{note}\n{filed}" if note else filed
@@ -43547,7 +43688,7 @@ class PicksBot(discord.Client):
         return True
 
     async def review_slip(self, message: discord.Message, image_message: discord.Message, attachment):
-        """'What do you think of this?' with a screenshot: read it, break it down, log nothing."""
+        """A screenshot with a question: break it down. A tagged win or loss is also filed on that person's record."""
         gate = ask_gate(message.guild.id, message.author.id)
         if gate:
             await message.reply(gate, mention_author=False)
@@ -43589,17 +43730,46 @@ class PicksBot(discord.Client):
             return
         if talk_task is not None and not talk_task.done():
             talk_task.cancel()
-        save_slip_draft(message.guild.id, image_message, slip)
+        save_slip_draft(message.guild.id, image_message, slip, mention_from=message)
         note_slip_read("unsure" if slip.get("_unsure") else "clean",
                        who=message.author.display_name,
                        title=str(slip.get("description") or "screenshot"),
                        url=getattr(image_message, "jump_url", "") or "")
+        filed_note = ""
+        target = slip_on_behalf(message)
+        tagged = getattr(target, "id", None) not in (None, getattr(message.author, "id", None))
+        if tagged and slip_result_ready(slip):
+            ready = slip_file_amounts(dict(slip))
+            dup = find_duplicate(message.guild.id, target.id, ready)
+            if dup is not None:
+                filed_note = f"Already on **{target.display_name}**'s record as pick `#{dup['id']}`."
+            else:
+                async def reply(**kw):
+                    return await message.reply(mention_author=False, **kw)
+                try:
+                    pid = await self.log_parsed_slip(
+                        message.guild.id, message.author, message.channel, ready,
+                        getattr(image_message, "jump_url", "") or "", reply, bettor=target)
+                    filed_note = f"Logged under **{target.display_name}** · pick `#{pid}`."
+                    d = get_slip_draft(message.guild.id, image_message.id)
+                    if d is not None:
+                        d["used"] = pid
+                        set_setting(message.guild.id, f"draft:{image_message.id}", json.dumps(d))
+                except Exception:
+                    log.exception("Filing a settled slip under a mention failed")
         question = re.sub(r"<@[!&]?\d+>", " ", getattr(message, "content", "") or "").strip()
         async with message.channel.typing():
             text, xray = await slip_review(self, message.guild.id, message.author, slip, question)
-        if slip.get("_unsure"):
+        if slip.get("_unsure") and not filed_note:
             text = (f"⚠️ I wasn't sure about {', '.join(clip(u, 60) for u in slip['_unsure'][:3])} on this screenshot, "
                     "so double-check the legs below.\n\n" + text)
+        if filed_note:
+            text = text.replace("Not logged. Tap 🧾 to file it. Staff can put it under someone else.", filed_note)
+        else:
+            who = (get_slip_draft(message.guild.id, image_message.id) or {}).get("for_name")
+            if who:
+                text = text.replace("Not logged. Tap 🧾 to file it. Staff can put it under someone else.",
+                                    f"Not logged. Tap 🧾 to file it under **{who}**.")
         logged = db().execute("SELECT id FROM picks WHERE guild_id = ? AND slip_url = ?",
                               (message.guild.id, image_message.jump_url)).fetchone()
         chunks = split_message(text)
@@ -43608,7 +43778,7 @@ class PicksBot(discord.Client):
             extra = {}
             if k == 0 and xray is not None:
                 extra["file"] = xray
-            if k == len(chunks) - 1 and not logged and slip.get("cost") is not None:
+            if k == len(chunks) - 1 and not logged:
                 extra["view"] = slip_draft_view(image_message.id, review=False)
             if k == 0:
                 first = await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none(),
