@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.29"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.30"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -167,6 +167,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
 ("1.27", "A tagged win card is filed under that member even when the long picture read is slow."),
 ("1.28", "Several photos in one message are read as separate slips. A tag posts each one, and the reply names every slip."),
 ("1.29", "A win card is logged as a win. The stats breakdown stays off a card that already paid."),
+    ("1.30", "The opening smoke is a little thicker."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -181,6 +182,7 @@ MEMBER_NEWS = [
 ("1.27", "Tag someone on a win card and it shows up under their name, even when the picture takes a moment."),
 ("1.28", "Send a few slips at once. Each one is read, and a tag puts them under that person."),
 ("1.29", "A win card goes on the record as a win, with the amount that was paid."),
+    ("1.30", "The opening smoke is a little thicker."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -29458,7 +29460,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-113';"
+    "const CACHE='pb-shell-114';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -30643,20 +30645,20 @@ function smokeIntro(){
     const body=rad<.12?1:rad>1.05?0:Math.pow(1-(rad-.12)/.93,1.05);
     let al=Math.max(0,dens-.3)*2.15*body;al=Math.pow(Math.min(1,al),1.55);
     const tone=214+dens*40;
-    const i=(y*sz+x)*4;od[i]=Math.min(255,tone+10);od[i+1]=tone;od[i+2]=Math.max(180,tone-14);od[i+3]=Math.min(196,al*188)|0}}
+    const i=(y*sz+x)*4;od[i]=Math.min(255,tone+10);od[i+1]=tone;od[i+2]=Math.max(180,tone-14);od[i+3]=Math.min(228,al*220)|0}}
   g.putImageData(img,0,0);
   const soft=document.createElement('canvas');soft.width=soft.height=sz;const sg=soft.getContext('2d');
   sg.imageSmoothingEnabled=true;try{sg.imageSmoothingQuality='high'}catch(e){}
-  sg.filter='blur(2.5px)';sg.drawImage(s,0,0);sg.filter='none';sg.globalAlpha=.62;sg.drawImage(s,0,0);return soft};
+  sg.filter='blur(3px)';sg.drawImage(s,0,0);sg.filter='none';sg.globalAlpha=.74;sg.drawImage(s,0,0);return soft};
  const clouds=[puff(360),puff(320),puff(280),puff(248),puff(216),puff(184)];
  const curl=(px,py,sc)=>{const e=8;
   const a=fbm((px+e)*sc,py*sc),b=fbm((px-e)*sc,py*sc),c1=fbm(px*sc,(py+e)*sc),d1=fbm(px*sc,(py-e)*sc);
   return[(c1-d1)*2.4,-(a-b)*2.4]};
- const spawn=(kind)=>{const w=innerWidth,h=innerHeight;const fat=kind==='fog';const hero=fat&&Math.random()<.22;
+ const spawn=(kind)=>{const w=innerWidth,h=innerHeight;const fat=kind==='fog';const hero=fat&&Math.random()<.30;
   return{x:Math.random()*w,y:h*(hero?.38:.62)+Math.random()*h*(hero?.55:.42),
-   r:hero?260+Math.random()*220:(fat?90:14)+Math.random()*(fat?150:32),
+   r:hero?280+Math.random()*240:(fat?110:18)+Math.random()*(fat?170:40),
    vx:(Math.random()-.5)*(fat?.35:.7),vy:-(fat?.42:.95)-Math.random()*(fat?.28:.55),
-   a:(hero?.1:.07)+Math.random()*(hero?.05:.035),
+   a:(hero?.13:.09)+Math.random()*(hero?.06:.045),
    grow:(fat?.22:.06)+Math.random()*(fat?.16:.08),ph:Math.random()*6.3,rot:Math.random()*6.3,
    spin:(Math.random()-.5)*.003,sprite:clouds[(Math.random()*clouds.length)|0],kind:kind,life:.75+Math.random()*.25}};
  const fog=Array.from({length:58},()=>spawn('fog'));
@@ -30666,11 +30668,11 @@ function smokeIntro(){
   const draw=p=>{const fat=p.kind==='fog';const cv=curl(p.x,p.y,fat?.0011:.0024);
    const rise=fat?-0.95:-2.15;
    p.vx+=(cv[0]-p.vx)*.07;p.vy+=((cv[1]+rise)-p.vy)*.08;p.ph+=.01;p.rot+=p.spin+p.vx*.0015;
-   p.x+=p.vx;p.y+=p.vy;p.r+=p.grow;p.life-=fat?.00028:.00055;
+   p.x+=p.vx;p.y+=p.vy;p.r+=p.grow;p.life-=fat?.00022:.00042;
    if(p.y<-p.r*.3||p.life<=0||p.x<-240||p.x>w+240)Object.assign(p,spawn(p.kind));
    const d=p.r*(fat?2.15:1.15);const sh=Math.max(-.4,Math.min(.4,p.vx*.012));
    x.save();x.translate(p.x,p.y);x.rotate(p.rot);x.transform(1,sh*.15,sh,fat?.74:1.12,0,0);
-   x.globalAlpha=Math.min(fat?.42:.26,p.a*p.life*(fat?3.1:2));
+   x.globalAlpha=Math.min(fat?.52:.34,p.a*p.life*(fat?3.4:2.35));
    x.drawImage(p.sprite,-d/2,-d/2,d,d);x.restore()};
   for(const p of fog)draw(p);for(const p of parts)draw(p);x.globalAlpha=1;
   const el=now-start;if(el>1100&&brand)brand.classList.add('on');if(el>7000)o.classList.add('go');
