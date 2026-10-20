@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.20"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.21"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -158,6 +158,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.18", "Staff can file a slip under another person, and the site Who box keeps the name you type."),
     ("1.19", "Restarts show the live board, with open slips, and a refresh button."),
     ("1.20", "The opening screen shows green, yellow, and red feed lights, and the smoke is thicker. Restart pictures leave the slip list off. Staff can switch the board tile to the group total. A name on profit over time highlights that person's picks. Search shows a Discord face and a few stats, a profile has Message, and anyone with a slip gets a card."),
+    ("1.21", "The opening screen drops the feed lights. The title is black with a purple glow, and the smoke is a finer, clearer curl."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -29253,7 +29254,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-110';"
+    "const CACHE='pb-shell-111';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -30341,7 +30342,9 @@ html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 
 #introbrand.on{opacity:1;transform:none}
 #introbrand img,.intrologo{width:min(120px,28vw);height:min(120px,28vw);filter:drop-shadow(0 0 28px #7B3FE4)}
 #introtitle{font:700 clamp(32px,6.8vw,70px)/1.02 "Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"Times New Roman",serif;
- letter-spacing:.03em;color:#d4b4fe;text-align:center;text-shadow:0 2px 0 #5b21b6,0 0 28px #7B3FE4,0 12px 32px #000}
+ letter-spacing:.03em;color:#07070a;text-align:center;
+ text-shadow:0 0 6px #e4d4ff,0 0 16px #7B3FE4,0 0 34px #7B3FE4,0 0 58px #6d28d9,0 0 92px #7B3FE4cc;
+ filter:drop-shadow(0 0 14px #7B3FE4) drop-shadow(0 0 36px #6d28d9)}
 a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{width:100%;height:100%}
 .lookbtn.icon{width:38px;height:38px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;
  place-items:center;cursor:pointer;flex:none;color:var(--gold)}
@@ -30383,14 +30386,6 @@ a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{wid
  .acchip{min-height:44px;height:auto}
  .looktile .sw,.looktile .sw img{height:72px}.lookbox{padding:14px 12px 12px}
  .lookhead{margin:-14px -12px 8px}}
-#introlamps{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:min(760px,92vw);margin-top:8px}
-#introlamps .il{display:inline-flex;align-items:center;gap:7px;color:#f6f3fc;font:700 13px/1 ui-sans-serif,system-ui,sans-serif;
- text-shadow:0 1px 6px #000;background:#0c0814d4;border:1px solid #ffffff33;border-radius:999px;padding:7px 12px}
-#introlamps .lamp{width:12px;height:12px;border-radius:50%;display:inline-block;flex:none}
-#introlamps .lamp.ok,#introlamps .lamp.idle{background:#34d399;box-shadow:0 0 10px 3px #34d399cc}
-#introlamps .lamp.warn,#introlamps .lamp.shaky{background:#f0b429;box-shadow:0 0 12px 3px #f0b429;animation:ilblink .4s linear infinite}
-#introlamps .lamp.down{background:#fb7185;box-shadow:0 0 12px 4px #fb7185}
-@keyframes ilblink{0%,100%{opacity:1}50%{opacity:.15}}
 @media (prefers-reduced-motion:reduce){#intro{display:none}}
 """
 SITE_LOOK_CSS += (
@@ -30419,14 +30414,10 @@ function smokeIntro(){
  const skip=()=>{o.classList.add('skip');o.remove()};
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
- const x=c.getContext('2d');const fit=()=>{c.width=innerWidth;c.height=innerHeight};
+ const x=c.getContext('2d');const dpr=Math.min(2,window.devicePixelRatio||1);
+ const fit=()=>{c.width=Math.round(innerWidth*dpr);c.height=Math.round(innerHeight*dpr);
+  x.imageSmoothingEnabled=true;try{x.imageSmoothingQuality='high'}catch(e){}};
  fit();addEventListener('resize',fit);
- const lamps=$('#introlamps');
- if(lamps){fetch('/api/health.json',{credentials:'same-origin',headers:{Accept:'application/json'}}).then(r=>r.ok?r.json():null).then(d=>{
-  if(!d||!lamps.isConnected)return;const feeds=(d.feeds||[]).filter(f=>f&&f.name).slice(0,8);
-  lamps.replaceChildren(...feeds.map(f=>{const row=document.createElement('span');row.className='il';
-   const i=document.createElement('i');i.className='lamp '+String(f.state||'idle');
-   const b=document.createElement('b');b.textContent=f.name;row.append(i,b);return row}))}).catch(()=>{})}
  const perm=new Uint8Array(512);for(let i=0;i<256;i++)perm[i]=i;
  for(let i=255;i>0;i--){const j=(Math.random()*(i+1))|0;const t=perm[i];perm[i]=perm[j];perm[j]=t}
  for(let i=0;i<256;i++)perm[256+i]=perm[i];
@@ -30446,27 +30437,28 @@ function smokeIntro(){
     const n=fbm((u+wx*.5)*2.8+seed,(v+wy*.5)*2.8),fine=fbm(u*6.5+wx+seed,v*6.5+wy);
     let dens=n*.6+fine*.4;dens=dens*.5+.5;
     const body=rad<.12?1:rad>1.05?0:Math.pow(1-(rad-.12)/.93,1.05);
-    let al=Math.max(0,dens-.16)*1.85*body;al=Math.pow(Math.min(1,al),1.05);
-    const tone=186+dens*58;
-    const i=(y*sz+x)*4;od[i]=tone;od[i+1]=tone-8;od[i+2]=tone-18;od[i+3]=Math.min(255,al*255)|0}}
+    let al=Math.max(0,dens-.3)*2.15*body;al=Math.pow(Math.min(1,al),1.55);
+    const tone=214+dens*40;
+    const i=(y*sz+x)*4;od[i]=Math.min(255,tone+10);od[i+1]=tone;od[i+2]=Math.max(180,tone-14);od[i+3]=Math.min(196,al*188)|0}}
   g.putImageData(img,0,0);
   const soft=document.createElement('canvas');soft.width=soft.height=sz;const sg=soft.getContext('2d');
-  sg.filter='blur(6px)';sg.drawImage(s,0,0);sg.filter='none';sg.globalAlpha=.72;sg.drawImage(s,0,0);return soft};
- const clouds=[puff(220),puff(196),puff(176),puff(156),puff(136),puff(118)];
+  sg.imageSmoothingEnabled=true;try{sg.imageSmoothingQuality='high'}catch(e){}
+  sg.filter='blur(2.5px)';sg.drawImage(s,0,0);sg.filter='none';sg.globalAlpha=.62;sg.drawImage(s,0,0);return soft};
+ const clouds=[puff(360),puff(320),puff(280),puff(248),puff(216),puff(184)];
  const curl=(px,py,sc)=>{const e=8;
   const a=fbm((px+e)*sc,py*sc),b=fbm((px-e)*sc,py*sc),c1=fbm(px*sc,(py+e)*sc),d1=fbm(px*sc,(py-e)*sc);
   return[(c1-d1)*2.4,-(a-b)*2.4]};
- const spawn=(kind)=>{const w=c.width,h=c.height;const fat=kind==='fog';const hero=fat&&Math.random()<.28;
-  return{x:Math.random()*w,y:h*(hero?.34:.58)+Math.random()*h*(hero?.62:.48),
-   r:hero?320+Math.random()*280:(fat?120:20)+Math.random()*(fat?210:48),
-   vx:(Math.random()-.5)*(fat?.4:.8),vy:-(fat?.55:1.2)-Math.random()*(fat?.35:.7),
-   a:(hero?.18:.12)+Math.random()*(hero?.1:.08),
+ const spawn=(kind)=>{const w=innerWidth,h=innerHeight;const fat=kind==='fog';const hero=fat&&Math.random()<.22;
+  return{x:Math.random()*w,y:h*(hero?.38:.62)+Math.random()*h*(hero?.55:.42),
+   r:hero?260+Math.random()*220:(fat?90:14)+Math.random()*(fat?150:32),
+   vx:(Math.random()-.5)*(fat?.35:.7),vy:-(fat?.42:.95)-Math.random()*(fat?.28:.55),
+   a:(hero?.1:.07)+Math.random()*(hero?.05:.035),
    grow:(fat?.22:.06)+Math.random()*(fat?.16:.08),ph:Math.random()*6.3,rot:Math.random()*6.3,
    spin:(Math.random()-.5)*.003,sprite:clouds[(Math.random()*clouds.length)|0],kind:kind,life:.75+Math.random()*.25}};
  const fog=Array.from({length:58},()=>spawn('fog'));
  const parts=Array.from({length:336},()=>spawn('wisp'));
  let start=performance.now();
- (function tick(now){const w=c.width,h=c.height;x.clearRect(0,0,w,h);x.globalCompositeOperation='source-over';
+ (function tick(now){const w=innerWidth,h=innerHeight;x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);x.globalCompositeOperation='source-over';
   const draw=p=>{const fat=p.kind==='fog';const cv=curl(p.x,p.y,fat?.0011:.0024);
    const rise=fat?-0.95:-2.15;
    p.vx+=(cv[0]-p.vx)*.07;p.vy+=((cv[1]+rise)-p.vy)*.08;p.ph+=.01;p.rot+=p.spin+p.vx*.0015;
@@ -30474,7 +30466,7 @@ function smokeIntro(){
    if(p.y<-p.r*.3||p.life<=0||p.x<-240||p.x>w+240)Object.assign(p,spawn(p.kind));
    const d=p.r*(fat?2.15:1.15);const sh=Math.max(-.4,Math.min(.4,p.vx*.012));
    x.save();x.translate(p.x,p.y);x.rotate(p.rot);x.transform(1,sh*.15,sh,fat?.74:1.12,0,0);
-   x.globalAlpha=Math.min(fat?.62:.4,p.a*p.life*(fat?3.6:2.3));
+   x.globalAlpha=Math.min(fat?.42:.26,p.a*p.life*(fat?3.1:2));
    x.drawImage(p.sprite,-d/2,-d/2,d,d);x.restore()};
   for(const p of fog)draw(p);for(const p of parts)draw(p);x.globalAlpha=1;
   const el=now-start;if(el>1100&&brand)brand.classList.add('on');if(el>7000)o.classList.add('go');
@@ -31245,7 +31237,7 @@ addEventListener('load',smokeIntro);
         '<div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>'
         '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">'
         '<img src="' + DASH_FAVICON + '" alt="" width="120" height="120">'
-        '<div id="introtitle">Pimp\'s Dashboard</div><div id="introlamps"></div></div></div>'
+        '<div id="introtitle">Pimp\'s Dashboard</div></div></div>'
         '<noscript><p style="text-align:center">The dashboard needs JavaScript switched on.</p></noscript>',
         1)
     return html
