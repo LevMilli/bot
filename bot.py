@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.23"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.26"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -161,6 +161,9 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.21", "The opening screen drops the feed lights. The title is black with a purple glow, and the smoke is a finer, clearer curl."),
     ("1.22", "Needs attention stays on Staff HQ. Tagging a member files a settled win or loss on their record. A win picture, a loss picture, and an open parlay read as three different slips."),
     ("1.23", "What's new on the board is for the group: the fun features, in plain words."),
+    ("1.24", "Tag a member on a slip and it is posted under their name."),
+    ("1.25", "A screenshot answer names the players, the lines, and the result on the card."),
+    ("1.26", "My board shows a profile photo on each slip. Pin and open are separate, so the same name is not listed twice."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -169,6 +172,9 @@ MEMBER_NEWS = [
     ("1.20", "Tap a name on the profit chart to light up their picks. Search shows a Discord photo and a few stats, a profile has Message, and anyone with a slip gets a card."),
     ("1.21", "The opening title is black with a purple glow, and the smoke curls clearer."),
     ("1.22", "Tag a friend on a screenshot and a win or a loss goes on their record. A cashed ticket and a lost ticket are read that way. A parlay still in play stays open."),
+    ("1.24", "Tag a member on a slip and it shows up under their name."),
+    ("1.25", "A screenshot answer names the players, the lines, and whether the card won or lost."),
+    ("1.26", "My board shows a profile photo on each slip, and pinning one is a tap."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2398,15 +2404,71 @@ class _FiledWho:
         self.display_name = name
 
 
+def _mention_ids(message) -> list[int]:
+    """User ids tagged in the message, from Discord's list and from the raw <@id> text."""
+    ids: list[int] = []
+    for m in getattr(message, "mentions", None) or []:
+        mid = getattr(m, "id", None)
+        if mid:
+            ids.append(int(mid))
+    for mid in getattr(message, "raw_mentions", None) or []:
+        try:
+            ids.append(int(mid))
+        except (TypeError, ValueError):
+            pass
+    for mid in re.findall(r"<@!?(\d+)>", getattr(message, "content", "") or ""):
+        ids.append(int(mid))
+    out: list[int] = []
+    for i in ids:
+        if i not in out:
+            out.append(i)
+    return out
+
+
 def slip_on_behalf(message) -> object:
     """Staff who tag someone in the same message file that screenshot under them."""
-    author = message.author
+    author = getattr(message, "author", None)
     guild = getattr(message, "guild", None)
-    if guild is None or not can_file_for_others(author, getattr(guild, "id", None)):
+    if author is None or guild is None or not can_file_for_others(author, getattr(guild, "id", None)):
         return author
-    named = [m for m in (getattr(message, "mentions", None) or [])
-             if not getattr(m, "bot", False) and getattr(m, "id", None) != author.id]
-    return named[0] if named else author
+    me_id = getattr(getattr(guild, "me", None), "id", None)
+    resolved = {}
+    for m in getattr(message, "mentions", None) or []:
+        if getattr(m, "id", None):
+            resolved[int(m.id)] = m
+    for uid in _mention_ids(message):
+        if uid in (getattr(author, "id", None), me_id):
+            continue
+        member = resolved.get(uid)
+        if member is None and hasattr(guild, "get_member"):
+            member = guild.get_member(uid)
+        if member is not None:
+            if getattr(member, "bot", False):
+                continue
+            return member
+        return _FiledWho(uid, "them")
+    return author
+
+
+async def named_bettor(message):
+    """The tagged member, with a real display name when the server can still look them up."""
+    who = slip_on_behalf(message)
+    author = getattr(message, "author", None)
+    if who is None or getattr(who, "id", None) == getattr(author, "id", None):
+        return author
+    if getattr(who, "display_name", None) not in (None, "", "them"):
+        return who
+    guild = getattr(message, "guild", None)
+    fetch = getattr(guild, "fetch_member", None)
+    if fetch is None:
+        return who
+    try:
+        member = await fetch(int(who.id))
+    except Exception:
+        return who
+    if member is None or getattr(member, "bot", False):
+        return author
+    return member
 
 
 def filed_under(message) -> dict:
@@ -2422,6 +2484,15 @@ def filed_under(message) -> dict:
 
 
 _SLIP_MONEY_UNSURE = {"the amount risked", "the payout", "which app it's from"}
+
+
+def slip_tag_ready(slip: Optional[dict]) -> bool:
+    """Legs are enough to post a slip under a tagged member. A missing stake can be filled in later."""
+    if not slip or not slip.get("legs"):
+        return False
+    holes = [u for u in (slip.get("_unsure") or [])
+             if u not in _SLIP_MONEY_UNSURE and not str(u).startswith("more than one slip")]
+    return not holes
 
 
 def slip_result_ready(slip: Optional[dict]) -> bool:
@@ -3682,28 +3753,49 @@ def weather_place_phrase(question: str) -> Optional[str]:
     return name
 
 
+_GENERIC_TAKE = re.compile(
+    r"can'?t spot the legs|spill '?em|what are the names|break it down together|"
+    r"couldn'?t (?:see|read|spot|make out) the (?:legs|picks|names)",
+    re.I)
+
+
+def take_is_generic(text: str) -> bool:
+    """A shrug that names no line. A real take mentions an over or under, or a paid result."""
+    if not text or len(text.strip()) < 20:
+        return True
+    if _GENERIC_TAKE.search(text) and not re.search(r"\b(over|under)\s+\d", text, re.I):
+        return True
+    return False
+
+
 async def glance_talk(attachment, question: str, guild_id: int, name: str) -> str:
-    """A spoken take when the slip parser came up empty. Skips a dead Claude account."""
+    """A spoken take when the slip parser came up empty. It has to name what is actually on the card."""
     if not ask_enabled():
         return ""
     asked = (question or "").strip() or "What do you think of this?"
     system = (
         "You are in a Discord group chat of friends who track sports picks. "
-        f"Voice: {persona_prompt(guild_id)}. Talk like a person in that chat, two to six sentences. "
-        f"Address {name}. Do not mention API keys, billing, credits, or model names. "
-        "Do not invent a stat, a record, or a result. If you cannot see the legs, say so and ask for the names."
+        f"Voice: {persona_prompt(guild_id)}. Address {name}. "
+        "The picture is the whole question. Name the players and the lines you can read. "
+        "If the card shows Win, Loss, or an amount paid, say that result and the dollars. "
+        "When a row shows the actual stat, say which legs hit and which missed. "
+        "Do not say you cannot see the legs when names are on the card. Do not ask them to retype the picks. "
+        "Do not answer with a pep talk that could fit any screenshot. Two to six sentences. "
+        "Do not invent a player, a stat, or a result that is not on the screen. "
+        "Do not mention API keys, billing, credits, or model names."
     )
     user = f"{name} asked: {asked}"
     if GEMINI_API_KEY and attachment is not None:
         try:
             seen = await gemini_see(attachment, system + "\n\n" + user)
-            if seen and len(seen) > 20:
+            if seen and len(seen) > 20 and not take_is_generic(seen):
                 return seen
         except Exception:
             log.warning("Screenshot talk failed", exc_info=True)
     try:
         text, _ = await asyncio.wait_for(ask_any(system, user, search=False), timeout=8)
-        return (text or "").strip()
+        text = (text or "").strip()
+        return "" if take_is_generic(text) else text
     except Exception:
         log.warning("Chat take failed", exc_info=True)
         return ""
@@ -29314,7 +29406,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-112';"
+    "const CACHE='pb-shell-113';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -30716,10 +30808,25 @@ body.v4 .mkts{display:flex;flex-direction:column;gap:0}body.v4 .mkt{display:grid
 body.v4 .mkt .side{text-align:center;font-size:12px;font-weight:800;color:var(--muted)}
 body.v4 .mkt .side.on{color:var(--up)}body.v4 .mkt .yours{font-size:12px;font-weight:800;text-align:right}
 body.v4 .capline{margin:8px 2px 0;color:var(--muted);font-size:13px}
+body.v4 .wboard{display:flex;flex-direction:column;gap:8px}
+body.v4 .wlab{margin:2px 2px 0;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:800}
 body.v4 .watch{display:flex;gap:10px;overflow:auto;padding:2px 0 8px;scroll-snap-type:x mandatory}
-body.v4 .wchip{flex:0 0 220px;scroll-snap-align:start;background:var(--card2);border:1px solid var(--line);border-radius:16px;
- padding:12px;text-align:left;cursor:pointer;color:inherit;font:inherit;font-weight:800}
-body.v4 .wchip .who{font-size:12px;color:var(--muted);font-weight:600}body.v4 .wchip .what{margin-top:4px;overflow-wrap:anywhere}
+body.v4 .wchip{flex:0 0 268px;scroll-snap-align:start;display:flex;align-items:center;gap:10px;min-height:82px;
+ background:var(--card2);border:1px solid var(--line);border-radius:18px;padding:10px 12px 10px 10px;
+ text-align:left;cursor:pointer;color:inherit;font:inherit}
+body.v4 .wchip.on{border-color:color-mix(in srgb,var(--gold) 55%,transparent);
+ background:linear-gradient(165deg,color-mix(in srgb,var(--brand) 24%,var(--card2)),var(--card2));
+ box-shadow:0 14px 30px -20px color-mix(in srgb,var(--brand) 80%,transparent)}
+body.v4 .wmain{display:flex;align-items:center;gap:10px;flex:1;min-width:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;padding:0}
+body.v4 .wface{flex:none}
+body.v4 .wface img.ava,body.v4 .wface .av{width:46px!important;height:46px!important;min-width:46px;border-radius:50%;object-fit:cover}
+body.v4 .wchip.on .wface img.ava{box-shadow:0 0 0 2px var(--gold)}
+body.v4 .wtxt{min-width:0;flex:1}
+body.v4 .wchip .who{font-size:13.5px;color:var(--text);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.v4 .wchip .what{margin-top:1px;font-size:12.5px;font-weight:650;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.v4 .wchip .meta{margin-top:2px;font-size:11px;font-weight:700;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.v4 .wpin{flex:none;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
+body.v4 .wx{flex:none;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:transparent;color:var(--muted);font:inherit;font-size:16px;line-height:1;cursor:pointer}
 body.v4 .tile .img img{width:100%;height:100%;object-fit:cover;object-position:center center}
 body.v4 .logbox{display:flex;flex-direction:column;gap:6px}
 body.v4 .logbox input{width:100%;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
@@ -31106,12 +31213,23 @@ function watchList(){let ids=[];try{ids=JSON.parse(localStorage.getItem('pb-watc
  if(!Array.isArray(ids))ids=[];
  const open=(S.data&&S.data.open)||[];
  const rows=ids.map(id=>open.find(p=>p.id===id)).filter(Boolean);
- const add=id=>{if(!ids.includes(id))ids.unshift(id);ids=ids.slice(0,20);try{localStorage.setItem('pb-watch',JSON.stringify(ids))}catch(e){}if(S.data)render()};
- return h('div',null,
-  rows.length?h('div',{class:'watch'},rows.map(p=>h('button',{class:'wchip',type:'button',onclick:()=>go('#/s/'+p.id)},
-   h('div',{class:'who',text:p.who||''}),h('div',{class:'what',text:p.what||('#'+p.id)})))):
-   h('p',{class:'muted',text:'Pin an open slip here. Saved on this device only.'}),
-  open.length?h('div',{class:'watch'},open.slice(0,8).map(p=>h('button',{class:'wchip',type:'button',onclick:()=>add(p.id)},'+ '+(p.who||'slip')))):null)}
+ const save=next=>{ids=next.slice(0,12);try{localStorage.setItem('pb-watch',JSON.stringify(ids))}catch(e){}if(S.data)render()};
+ const add=id=>{if(ids.indexOf(id)<0)save([id].concat(ids))};
+ const drop=id=>save(ids.filter(x=>x!==id));
+ const pinned={};rows.forEach(p=>{pinned[p.id]=1});
+ const rest=open.filter(p=>!pinned[p.id]).slice(0,8);
+ const card=(p,on)=>{const pic=h('div',{class:'wface'},face(p.key,p.who||'?'));
+  const meta=[p.platform,p.cost?cash(p.cost):'','#'+p.id].filter(Boolean).join(' · ');
+  const txt=h('div',{class:'wtxt'},h('div',{class:'who',text:p.who||'Member'}),
+   h('div',{class:'what',text:p.what||('Slip #'+p.id)}),meta?h('div',{class:'meta',text:meta}):null);
+  if(on)return h('div',{class:'wchip on'},h('button',{class:'wmain',type:'button',onclick:()=>go('#/s/'+p.id)},pic,txt),
+   h('button',{class:'wx',type:'button','aria-label':'Take off my board',onclick:()=>drop(p.id)},'×'));
+  return h('button',{class:'wchip',type:'button',onclick:()=>add(p.id)},pic,txt,h('div',{class:'wpin',text:'Pin'}))};
+ const bits=[];
+ if(rows.length)bits.push(h('p',{class:'wlab',text:'On your board'}),h('div',{class:'watch'},rows.map(p=>card(p,true))));
+ if(rest.length)bits.push(h('p',{class:'wlab',text:rows.length?'Pin another open slip':'Pin an open slip'}),h('div',{class:'watch'},rest.map(p=>card(p,false))));
+ if(!bits.length)bits.push(h('p',{class:'muted',text:'Pin an open slip here. Saved on this device only.'}));
+ return h('div',{class:'wboard'},bits)}
 function logBox(){return h('form',{class:'logbox',onsubmit:async e=>{e.preventDefault();const f=e.target;
   const r=await fetch('/api/log.json',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
    body:JSON.stringify({who:f.who.value,what:f.what.value,cost:f.cost.value,payout:f.payout.value,platform:f.platform.value})});
@@ -37957,7 +38075,7 @@ async def read_slip_gemini(attachment) -> Optional[dict]:
     return slip
 
 
-async def gemini_see(attachment, prompt: str) -> str:
+async def gemini_see(attachment, prompt: str, temperature: float = 0.5, tokens: int = 420) -> str:
     """One short look at a screenshot. No enlarged slices, so it comes back in a few seconds."""
     if not GEMINI_API_KEY:
         return ""
@@ -37969,7 +38087,7 @@ async def gemini_see(attachment, prompt: str) -> str:
     body = {"contents": [{"parts": [
         {"inline_data": {"mime_type": mt, "data": base64.standard_b64encode(raw).decode()}},
         {"text": prompt},
-    ]}], "generationConfig": {"temperature": 0.5, "maxOutputTokens": 420}}
+    ]}], "generationConfig": {"temperature": temperature, "maxOutputTokens": tokens}}
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
         async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
@@ -37978,6 +38096,69 @@ async def gemini_see(attachment, prompt: str) -> str:
             data = await resp.json(content_type=None)
     return "".join(p.get("text", "") for c in (data.get("candidates") or [])[:1]
                    for p in ((c.get("content") or {}).get("parts") or [])).strip()
+
+
+RESULT_CARD_PROMPT = """This is one bet screenshot. Read the card. Reply with ONLY a JSON object, no other text:
+{
+  "is_slip": true,
+  "platform": "PrizePicks" or the app name,
+  "description": short header such as "5-Pick Flex Play",
+  "legs": ["Player Name over|under LINE stat"],
+  "cost": number risked or null,
+  "payout": possible pay if it is still open, or null,
+  "returned": amount actually paid if the card is already settled, else null,
+  "status": "win" or "loss" or "push" or "open"
+}
+A PrizePicks result card often says "$3 paid $4.50" (cost 3, returned 4.50) with a Win or Loss chip.
+Up arrow means over. Down arrow means under. The line is the number at the right of the row. The number sitting on the colored bar is the result, not the line.
+Each player row is one leg. Include a row even when it says DNP.
+Use "win" when the chip says Win or the header says paid. Use "loss" when the chip says Loss. Use "open" only when the card has no final result.
+Do not invent a player who is not on the screen. "to win" on an entry that is still open is not a win.
+"""
+
+
+async def read_result_card(attachment) -> Optional[dict]:
+    """A second look for a settled result card when the first read found no legs."""
+    if not GEMINI_API_KEY or attachment is None:
+        return None
+    text = await gemini_see(attachment, RESULT_CARD_PROMPT, temperature=0, tokens=900)
+    if not text:
+        return None
+    try:
+        slip = extract_json(text)
+    except Exception:
+        return None
+    legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()]
+    if len(legs) < 1:
+        return None
+    slip["is_slip"] = True
+    slip["legs"] = legs[:12]
+    slip["cost"] = as_amount(slip.get("cost"))
+    slip["payout"] = as_amount(slip.get("payout"))
+    slip["returned"] = as_amount(slip.get("returned"))
+    if slip.get("status") not in ("open", "win", "loss", "push"):
+        slip["status"] = "open"
+    if slip["status"] == "win" and slip.get("returned") is not None and slip.get("payout") is None:
+        slip["payout"] = slip["returned"]
+    slip["placed"] = True
+    slip["_how"] = "card"
+    slip.setdefault("platform", "PrizePicks")
+    slip.setdefault("description", "Slip")
+    return slip
+
+
+async def slip_with_card(attachment, slip, reason):
+    """Keep a read that already has legs. Otherwise try the result-card look once."""
+    if slip and slip.get("legs"):
+        return slip, reason
+    try:
+        rescued = await asyncio.wait_for(read_result_card(attachment), timeout=8)
+    except Exception:
+        log.warning("Result card read failed", exc_info=True)
+        rescued = None
+    if rescued and rescued.get("legs"):
+        return rescued, None
+    return slip, reason
 
 
 # ---- the chain ------------------------------------------------------------------------------------
@@ -43392,7 +43573,8 @@ class PicksBot(discord.Client):
                                    today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
         system += (f"\n\nYour voice in this server: {persona_prompt(message.guild.id)}.\n"
                    "Talk like a person in this group chat, not a help desk. Two to eight sentences unless they asked "
-                   "for a list. Address them by name. "
+                   "for a list. Address them by name. Be specific: name the player, the number, or the game. "
+                   "Do not answer with a pep talk that could fit any question. "
                    "For questions about the group's own results (records, profit, hit rates, who's best at "
                    "something, someone's tendencies), use the group_stats tool and only quote its numbers. "
                    "If group numbers are already in the message, quote those and do not invent a record, a profit, "
@@ -43485,16 +43667,20 @@ class PicksBot(discord.Client):
                     slip, reason = await asyncio.wait_for(read_slip_best(attachment), timeout=8)
                 except asyncio.TimeoutError:
                     reason = "that read took too long"
+                slip, reason = await slip_with_card(attachment, slip, reason)
         elif slip_reader_on():
             reason = f"the image is too big ({(attachment.size or 0) // 1024} KB)"
             SLIP_STATE["last_error"] = (now_iso(), f"Image too big to read ({(attachment.size or 0) // 1024} KB)")
 
-        if quiet and not slip_result_ready(slip) and (slip is None or slip["cost"] is None or slip.get("_unsure")):
+        tagged_slip = bool(filed_under(message)) and slip_tag_ready(slip)
+        if quiet and not tagged_slip and not slip_result_ready(slip) and (slip is None or slip["cost"] is None or slip.get("_unsure")):
             return  # every-channel mode: memes and charts aren't slips, stay out of the way
 
-        # A finished win or loss is filed even when the stake did not read. An open parlay still waits for a confirm.
-        if slip is not None and slip_result_ready(slip):
+        # A tag posts the slip under that member. A finished win or loss is filed even when the stake did not read.
+        if tagged_slip or (slip is not None and slip_result_ready(slip)):
             slip = slip_file_amounts(slip)
+            if tagged_slip:
+                slip["placed"] = True
         elif slip is not None and slip.get("_unsure") and slip.get("legs"):
             await offer_extra_slips(message, slip)
             save_slip_draft(message.guild.id, message, slip)
@@ -43518,7 +43704,7 @@ class PicksBot(discord.Client):
                                 mention_author=False)
             return
 
-        bettor = slip_on_behalf(message)
+        bettor = await named_bettor(message)
         dup = find_duplicate(message.guild.id, bettor.id, slip) if slip.get("placed", True) else None
         if dup is not None:
             if quiet:
@@ -43697,36 +43883,32 @@ class PicksBot(discord.Client):
         return True
 
     async def review_slip(self, message: discord.Message, image_message: discord.Message, attachment):
-        """A screenshot with a question: break it down. A tagged win or loss is also filed on that person's record."""
+        """A screenshot with a question gets a breakdown. Tagging a member posts the slip under their name."""
         gate = ask_gate(message.guild.id, message.author.id)
         if gate:
             await message.reply(gate, mention_author=False)
             return
         slip, reason = None, None
         question = re.sub(r"<@[!&]?\d+>", " ", getattr(message, "content", "") or "").strip()
-        talk_task = None
-        if ask_enabled():
-            talk_task = asyncio.create_task(glance_talk(
-                attachment, question, message.guild.id, message.author.display_name))
         said = ""
         async with message.channel.typing():
             if (attachment.size or 0) <= MAX_IMAGE_BYTES:
                 try:
-                    slip, reason = await asyncio.wait_for(read_slip_best(attachment), timeout=7)
+                    slip, reason = await asyncio.wait_for(read_slip_best(attachment), timeout=8)
                 except asyncio.TimeoutError:
                     reason = "that read took too long"
+                slip, reason = await slip_with_card(attachment, slip, reason)
             if slip is None or not (slip.get("legs") or slip.get("description")):
-                if talk_task is not None:
+                if ask_enabled():
                     try:
-                        said = await asyncio.wait_for(talk_task, timeout=8)
+                        said = await asyncio.wait_for(glance_talk(
+                            attachment, question, message.guild.id, message.author.display_name), timeout=8)
                     except Exception:
                         said = ""
         if slip is None or not (slip.get("legs") or slip.get("description")):
             if said:
                 await message.reply(said, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
                 return
-            if talk_task is not None and not talk_task.done():
-                talk_task.cancel()
             free_count("fail")
             note_slip_read("fail", who=message.author.display_name,
                            title=reason or "couldn't read", url=getattr(image_message, "jump_url", "") or "")
@@ -43737,18 +43919,17 @@ class PicksBot(discord.Client):
             await message.reply(f"I couldn't read that slip{': ' + reason if reason else ''}. Try a clearer screenshot.",
                                 mention_author=False)
             return
-        if talk_task is not None and not talk_task.done():
-            talk_task.cancel()
         save_slip_draft(message.guild.id, image_message, slip, mention_from=message)
         note_slip_read("unsure" if slip.get("_unsure") else "clean",
                        who=message.author.display_name,
                        title=str(slip.get("description") or "screenshot"),
                        url=getattr(image_message, "jump_url", "") or "")
         filed_note = ""
-        target = slip_on_behalf(message)
+        target = await named_bettor(message)
         tagged = getattr(target, "id", None) not in (None, getattr(message.author, "id", None))
-        if tagged and slip_result_ready(slip):
+        if tagged and slip_tag_ready(slip):
             ready = slip_file_amounts(dict(slip))
+            ready["placed"] = True
             dup = find_duplicate(message.guild.id, target.id, ready)
             if dup is not None:
                 filed_note = f"Already on **{target.display_name}**'s record as pick `#{dup['id']}`."
@@ -43759,13 +43940,15 @@ class PicksBot(discord.Client):
                     pid = await self.log_parsed_slip(
                         message.guild.id, message.author, message.channel, ready,
                         getattr(image_message, "jump_url", "") or "", reply, bettor=target)
-                    filed_note = f"Logged under **{target.display_name}** · pick `#{pid}`."
+                    filed_note = f"Posted under **{target.display_name}** · pick `#{pid}`."
                     d = get_slip_draft(message.guild.id, image_message.id)
                     if d is not None:
                         d["used"] = pid
+                        d["for_id"] = int(target.id)
+                        d["for_name"] = target.display_name
                         set_setting(message.guild.id, f"draft:{image_message.id}", json.dumps(d))
                 except Exception:
-                    log.exception("Filing a settled slip under a mention failed")
+                    log.exception("Filing a slip under a mention failed")
         question = re.sub(r"<@[!&]?\d+>", " ", getattr(message, "content", "") or "").strip()
         async with message.channel.typing():
             text, xray = await slip_review(self, message.guild.id, message.author, slip, question)
