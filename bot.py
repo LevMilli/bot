@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.06"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.07"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -144,6 +144,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.04", "Restarts report free disk, open slips, and the scanner. A developer can file a screenshot under someone else and edit any pick. Leftover backup copies are removed."),
     ("1.05", "Replies land faster. Chat answers like a person in the group, and a screenshot still gets a take when the paid reader is out."),
     ("1.06", "A model name in the Grok variable is ignored, so chat stays on Gemini and Groq."),
+    ("1.07", "A Grok key pasted on more than one line still works."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -31087,10 +31088,15 @@ XAI_API_KEY = env("XAI_API_KEY", "")
 XAI_MODEL = env("XAI_MODEL", "grok-3")
 
 
+def xai_key() -> str:
+    """The xAI key with line breaks and spaces removed, so a wrapped paste still sends as one token."""
+    return "".join((XAI_API_KEY or "").split())
+
+
 def xai_ready() -> bool:
     """A real xAI key starts with xai-. A model name such as grok-3 in that variable is not a key."""
-    key = (XAI_API_KEY or "").strip()
-    return key.startswith("xai-") and len(key) > 12
+    key = xai_key()
+    return key.startswith("xai-") and len(key) > 20
 
 
 def ask_enabled() -> bool:
@@ -31268,7 +31274,7 @@ async def ask_chat(url: str, key: str, model: str, system: str, user_text: str, 
 
 async def ask_xai(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
     """Grok, from xAI, when XAI_API_KEY is set on the host. Cursor does not expose a chat API for this."""
-    return await ask_chat("https://api.x.ai/v1/chat/completions", XAI_API_KEY.strip(), XAI_MODEL, system, user_text, "Grok")
+    return await ask_chat("https://api.x.ai/v1/chat/completions", xai_key(), XAI_MODEL, system, user_text, "Grok")
 
 
 async def ask_openrouter(system: str, user_text: str, search: bool = True) -> tuple[str, list[str]]:
