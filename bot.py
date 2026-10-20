@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.07"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.08"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -145,6 +145,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.05", "Replies land faster. Chat answers like a person in the group, and a screenshot still gets a take when the paid reader is out."),
     ("1.06", "A model name in the Grok variable is ignored, so chat stays on Gemini and Groq."),
     ("1.07", "A Grok key pasted on more than one line still works."),
+    ("1.08", "The restart note says what happened, what's new, then disk, open slips, the scanner, and which answer services are on."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -24941,14 +24942,21 @@ def boot_notice(prev_ver: str, gap_sec: Optional[int], planned: bool) -> Optiona
     down = gap_sec is not None and gap_sec >= 180
     if not new and not down:
         return None
-    bits = [f"🛠️ **PIMP-BOT is live · {BOT_VERSION} · update {ROADMAP_NOW}**"]
+    bits = [f"🛠️ **PIMP-BOT is live · {BOT_VERSION}**"]
     if down:
+        bits.append("**What happened**")
         bits.append("Back from an update." if planned else f"Was down about {bot_gap_words(gap_sec)}.")
+    elif new:
+        bits.append("New upload. It was not down long enough to call it an outage.")
     if new:
         notes = bot_update_lines(prev_ver)
-        if notes:
+        show = notes[-3:]
+        if show:
             bits.append("**What's new**")
-            bits.extend(f"• {n}" for n in notes)
+            bits.extend(f"• {n}" for n in show)
+            extra = len(notes) - len(show)
+            if extra:
+                bits.append(f"• {extra} older notes are on the site, under More.")
     return "\n".join(bits)
 
 
@@ -25009,22 +25017,44 @@ async def post_alert(client, text: str, *, ping: bool = False) -> int:
 
 
 def boot_health_lines() -> list[str]:
-    """Facts for the recap note. Only numbers the bot can measure."""
+    """A short status block for the recap note. Only facts the bot can measure."""
     free, total, db_n = disk_bytes()
-    lines = [f"Disk free {free // (1024 * 1024)} MB of {total // (1024 * 1024)} MB. "
-             f"Database {db_n / (1024 * 1024):.1f} MB."]
-    if free and free < 200 * 1024 * 1024:
-        lines.append("Storage is low. Old backup copies were cleared. Add space on the host if this stays low.")
+    free_mb = free // (1024 * 1024)
+    db_mb = db_n / (1024 * 1024)
+    if not total:
+        disk = "could not be measured"
+    elif free < 50 * 1024 * 1024:
+        disk = f"almost full, {free_mb} MB free"
+    elif free < 200 * 1024 * 1024:
+        disk = f"low, {free_mb} MB free"
+    else:
+        disk = f"fine, {free_mb} MB free"
+    lines = ["**Right now**", f"• Disk: {disk}. Picks file {db_mb:.1f} MB."]
     try:
         opens = db().execute("SELECT COUNT(*) AS n FROM picks WHERE status = 'open'").fetchone()["n"]
-        lines.append(f"Open slips right now: {opens}.")
+        start = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+        logged = db().execute("SELECT COUNT(*) AS n FROM picks WHERE created_at >= ?",
+                              (start.isoformat(timespec="seconds"),)).fetchone()["n"]
+        lines.append(f"• Open slips: {opens}. Logged today: {logged}.")
     except Exception:
         pass
     try:
-        if TESSERACT:
-            lines.append("Slip scan: Tesseract is on.")
-        else:
-            lines.append("Slip scan: Tesseract is missing on this host.")
+        lines.append("• Scanner: on." if TESSERACT else "• Scanner: off on this host.")
+    except Exception:
+        pass
+    try:
+        names = []
+        if xai_ready():
+            names.append("Grok")
+        if GROQ_API_KEY:
+            names.append("Groq")
+        if GEMINI_API_KEY:
+            names.append("Gemini")
+        if ai_enabled() and claude_alive():
+            names.append("Claude")
+        elif ai_enabled():
+            names.append("Claude paused")
+        lines.append("• Answers: " + (", ".join(names) if names else "none set") + ".")
     except Exception:
         pass
     try:
@@ -25032,7 +25062,7 @@ def boot_health_lines() -> list[str]:
     except Exception:
         err = None
     if err and len(err) > 1 and err[1]:
-        lines.append("Last scan problem: " + clip(str(err[1]), 140))
+        lines.append("• Last scan problem: " + clip(str(err[1]), 120))
     return lines
 
 
