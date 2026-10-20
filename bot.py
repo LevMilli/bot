@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.08"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.10"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -146,6 +146,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.06", "A model name in the Grok variable is ignored, so chat stays on Gemini and Groq."),
     ("1.07", "A Grok key pasted on more than one line still works."),
     ("1.08", "The restart note says what happened, what's new, then disk, open slips, the scanner, and which answer services are on."),
+    ("1.09", "Restarts and crash notes arrive as a picture, in the same style as Tonight's Board."),
+    ("1.10", "A thin game log is filled from the box score and the league's own feed. When more than one player fits, you pick the name and can go back, and the player page has more stats plus recent averages as the line."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -3550,6 +3552,129 @@ async def glance_talk(attachment, question: str, guild_id: int, name: str) -> st
         return ""
 
 
+async def pull_choice_card(opt: dict) -> tuple[str, Optional[bytes]]:
+    """One player's log, after someone picked them from a list of names. Returns (text, png bytes or None)."""
+    stat = opt.get("stat") or ""
+    if stat not in STATS or not opt.get("id") or not opt.get("path"):
+        return "That name doesn't have a league on file.", None
+    games = await trend_games(opt["path"], str(opt["id"]), need=12)
+    games, src = await deepen_games(opt["path"], str(opt["id"]), opt.get("name") or "", stat, games, fast=False)
+    values = trend_values(games, stat)[:10]
+    line = opt.get("line")
+    if line is None:
+        line = default_line([v for _, v in values])
+    try:
+        line = float(line)
+    except (TypeError, ValueError):
+        line = default_line([v for _, v in values])
+    side = opt.get("side") or "over"
+    shown = [(g["opp"], g["at"], v) for g, v in values][::-1]
+    row = {"text": opt.get("leg") or opt.get("name") or "", "values": shown, "line": line, "side": side,
+           "name": opt.get("name"), "stat": STATS[stat][0],
+           "why": "" if shown else "no recent games on that feed"}
+    bits = [f"**{opt.get('name') or 'Player'}** · {STATS[stat][0]} · {side} {line:g}", src or "ESPN game log"]
+    if not shown:
+        bits.append("No recent games on that feed. Try another name.")
+    png = None
+    if shown:
+        buf = await asyncio.to_thread(locked_render, render_xray, opt.get("name") or "Player", [row],
+                                      "PLAYER LOG", opt.get("path"))
+        png = buf.getvalue()
+    return "\n".join(bits), png
+
+
+class DataPickView(discord.ui.View):
+    """Names that all fit one scanned leg. Pick one to pull that log. Back returns to the list."""
+
+    def __init__(self, owner_id: int, options: list):
+        super().__init__(timeout=900)
+        self.owner_id = owner_id
+        self.options = options[:8]
+        self.frames = [("More than one player fits. Pick a name and I'll pull that log. Back returns to this list.", None)]
+        self._paint()
+
+    def _paint(self):
+        self.clear_items()
+        if len(self.frames) > 1:
+            back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary, row=0)
+            back.callback = self._back
+            self.add_item(back)
+        for i, opt in enumerate(self.options):
+            b = discord.ui.Button(label=(opt.get("label") or opt.get("name") or "Player")[:80],
+                                  style=discord.ButtonStyle.secondary, row=1 + i // 4)
+            b.callback = self._pick(i)
+            self.add_item(b)
+
+    async def _check(self, interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This list is for the person who posted the slip.", ephemeral=True)
+            return False
+        return True
+
+    async def _show(self, interaction, content, png):
+        self._paint()
+        kwargs = {"content": content, "view": self}
+        if png:
+            kwargs["attachments"] = [discord.File(io.BytesIO(png), filename="player-log.png")]
+        else:
+            kwargs["attachments"] = []
+        await interaction.response.edit_message(**kwargs)
+
+    def _back(self):
+        async def cb(interaction):
+            if not await self._check(interaction):
+                return
+            if len(self.frames) > 1:
+                self.frames.pop()
+            content, png = self.frames[-1]
+            await self._show(interaction, content, png)
+        return cb
+
+    def _pick(self, i):
+        async def cb(interaction):
+            if not await self._check(interaction):
+                return
+            try:
+                content, png = await pull_choice_card(self.options[i])
+            except Exception:
+                log.warning("Player pull failed", exc_info=True)
+                content, png = "I couldn't pull that log. Try another name.", None
+            self.frames.append((content, png))
+            await self._show(interaction, content, png)
+        return cb
+
+
+def data_pick_options(slip: dict) -> list:
+    """Players we refused to guess, so the channel can offer them as buttons."""
+    opts, seen = [], set()
+    for x in slip.get("_xray") or []:
+        if x.get("values"):
+            continue
+        for c in x.get("choices") or []:
+            key = (c.get("path"), str(c.get("id")), c.get("stat"))
+            if not c.get("id") or key in seen:
+                continue
+            seen.add(key)
+            row = dict(c)
+            row["leg"] = x.get("text") or row.get("leg") or ""
+            row["line"] = x.get("line")
+            row["side"] = x.get("side") or "over"
+            opts.append(row)
+    return opts[:8]
+
+
+async def offer_data_picks(message, slip: dict) -> None:
+    opts = data_pick_options(slip)
+    if not opts:
+        return
+    try:
+        await message.channel.send(
+            "More than one player fits. Pick a name and I'll pull that log. Back returns to this list.",
+            view=DataPickView(message.author.id, opts))
+    except Exception:
+        log.debug("Data choices skipped", exc_info=True)
+
+
 async def slip_review(client, guild_id: int, asker, slip: dict, question: str) -> tuple[str, Optional[discord.File]]:
     """The written take plus the X-ray image (None when no leg has a game log)."""
     try:
@@ -3562,6 +3687,10 @@ async def slip_review(client, guild_id: int, asker, slip: dict, question: str) -
     except Exception:
         log.warning("Injury check for the breakdown failed", exc_info=True)
         inj = {}
+    try:
+        slip["_xray"] = data
+    except Exception:
+        pass
     text = await slip_review_text(client, guild_id, asker, slip, question, xray_notes(data), data=data, injuries=inj)
     try:
         note_scouted(guild_id, asker.id, [x["name"] for x in data if x.get("values")])
@@ -6630,7 +6759,7 @@ async def espn_search_players(name: str, paths: list[str]) -> list[dict]:
                     out.append(f)
             if any(name_score(name, f["norm"]) for f in out):
                 break
-    _player_cache[key] = (time.monotonic() + 6 * 3600, out)
+    _player_cache[key] = (time.monotonic() + (6 * 3600 if out else 90), out)
     return out
 
 
@@ -15087,10 +15216,239 @@ def hour_label(h: int) -> str:
 
 # ---- slip X-ray --------------------------------------------------------------------------------
 
-async def _xray_one(player: str, stats: list, sport: Optional[str]):
-    """One player's newest games for the first stat that resolves, or why it didn't."""
+def _log_copy(games: list) -> list:
+    return [{**g, "groups": {k: dict(v or {}) for k, v in (g.get("groups") or {}).items()}} for g in (games or [])]
+
+
+def _filled_n(games: list, stat: str) -> int:
+    if not stat or stat not in STATS:
+        return 0
+    return len(trend_values([g for g in games if not g.get("preseason")], stat))
+
+
+def _pull_choice(c: dict, stat: str) -> dict:
+    team = c.get("team") or c.get("team_abbr") or ""
+    pos = c.get("position") or c.get("pos") or ""
+    label = " · ".join(x for x in (c.get("name") or "", team, STATS.get(stat, ("",))[0]) if x)
+    return {"id": str(c.get("id") or ""), "name": c.get("name") or "", "team": team, "pos": pos,
+            "path": c.get("path") or "", "stat": stat, "label": label[:80]}
+
+
+def xref_mlb_game(split: dict, kind: str) -> Optional[dict]:
+    """One MLB Stats API gameLog split, shaped like an ESPN game so the usual stat reader can use it."""
+    stat = split.get("stat") or {}
+    if not isinstance(stat, dict) or not stat:
+        return None
+    opp = split.get("opponent") or {}
+    name = opp.get("abbreviation") or opp.get("name") or "?"
+    if " " in str(name):
+        name = str(name).split()[-1]
+    groups: dict = {}
+    if kind == "hitting":
+        bat = {}
+        for src, dst in (("hits", "hits"), ("runs", "runs"), ("rbi", "rbis"), ("homeRuns", "homeruns"),
+                         ("baseOnBalls", "walks"), ("strikeOuts", "strikeouts")):
+            if isinstance(stat.get(src), (int, float)):
+                bat[dst] = str(stat[src])
+        if bat:
+            groups["batting"] = bat
+    else:
+        pit = {}
+        for src, dst in (("strikeOuts", "strikeouts"), ("hits", "hits"), ("earnedRuns", "earnedruns"),
+                         ("baseOnBalls", "walks")):
+            if isinstance(stat.get(src), (int, float)):
+                pit[dst] = str(stat[src])
+        ip = stat.get("inningsPitched")
+        if ip is not None:
+            pit["innings"] = str(ip)
+        if pit:
+            groups["pitching"] = pit
+    if not groups:
+        return None
+    day = str(split.get("date") or "")
+    return {"id": f"mlb-{day}-{name}", "date": day, "opp": str(name)[:8],
+            "at": "vs" if split.get("isHome") else "@", "result": "", "label": "MLB Stats API",
+            "preseason": False, "groups": groups, "xref": "MLB Stats API"}
+
+
+def xref_nhl_game(row: dict) -> Optional[dict]:
+    """One NHL.com game-log row, shaped like an ESPN game."""
+    if not isinstance(row, dict):
+        return None
+    main = {}
+    for src, dst in (("goals", "goals"), ("assists", "assists"), ("shots", "shotstotal"),
+                     ("hits", "hits"), ("blockedShots", "blockedshots"), ("saves", "saves")):
+        if isinstance(row.get(src), (int, float)):
+            main[dst] = str(row[src])
+    if not main:
+        return None
+    groups = {"main": {k: v for k, v in main.items() if k != "saves"}}
+    if "saves" in main:
+        groups["goalies"] = {"saves": main["saves"]}
+    opp = str(row.get("opponentAbbrev") or "?")[:8]
+    day = str(row.get("gameDate") or "")
+    return {"id": f"nhl-{row.get('gameId') or day}-{opp}", "date": day, "opp": opp,
+            "at": "vs" if str(row.get("homeRoadFlag") or "").upper() == "H" else "@",
+            "result": "", "label": "NHL.com", "preseason": False, "groups": groups, "xref": "NHL.com"}
+
+
+def _mlb_season_year(now: Optional[datetime] = None) -> int:
+    now = now or datetime.now(TZ)
+    return now.year if now.month >= 3 else now.year - 1
+
+
+def _nhl_season_ids(now: Optional[datetime] = None) -> list[str]:
+    now = now or datetime.now(TZ)
+    y = now.year if now.month >= 9 else now.year - 1
+    return [f"{y}{y + 1}", f"{y - 1}{y}"]
+
+
+_PITCH_STATS = {"pitcher_k", "pitching_outs", "earned_runs", "hits_allowed", "walks_allowed"}
+
+
+async def xref_box_fill(path: str, athlete_id: str, name: str, games: list, stat: str, limit: int = 4) -> tuple[list, int]:
+    """Copy box-score columns into games whose log is missing this stat. The cached log is left alone."""
+    games = _log_copy(games)
+    if not stat or stat not in STATS:
+        return games, 0
+    need = []
+    for g in games:
+        if g.get("preseason") or not g.get("id") or str(g.get("id")).startswith(("mlb-", "nhl-")):
+            continue
+        try:
+            missing = stat_value(g.get("groups") or {}, stat) is None
+        except Exception:
+            missing = True
+        if missing:
+            need.append(g)
+        if len(need) >= limit:
+            break
+    if not need:
+        return games, 0
+
+    async def one(g):
+        try:
+            box = await asyncio.wait_for(fetch_summary(path, str(g["id"])), 2.5)
+        except Exception:
+            box = None
+        return g, box
+
+    n, target = 0, norm_name(name or "")
+    for g, box in await asyncio.gather(*(one(g) for g in need)):
+        if not box:
+            continue
+        pl = None
+        for p in box.get("players") or []:
+            if str(p.get("id") or "") == str(athlete_id) or (target and name_score(target, p.get("norm") or "") >= 2):
+                pl = p
+                break
+        if not pl or not pl.get("groups"):
+            continue
+        groups = g.setdefault("groups", {})
+        for gk, vals in pl["groups"].items():
+            slot = groups.setdefault(gk, {})
+            for k, v in (vals or {}).items():
+                slot.setdefault(k, v)
+        try:
+            got = stat_value(groups, stat) is not None
+        except Exception:
+            got = False
+        if got:
+            n += 1
+            g["xref"] = "ESPN box score"
+    return games, n
+
+
+async def xref_official(name: str, path: str, stat: str) -> tuple[list, str]:
+    """The league's own game log for this name. Empty when that feed has nothing, or this sport has no second feed."""
+    name = (name or "").strip()
+    if len(name) < 3 or path not in ("baseball/mlb", "hockey/nhl"):
+        return [], ""
+    try:
+        if path == "baseball/mlb":
+            found = await _alt_get(f"{MLB_API}/people/search", {"names": name, "sportId": 1}, 6 * 3600)
+            people = (found or {}).get("people") if isinstance(found, dict) else []
+            best, pid = 0, None
+            for p in people or []:
+                sc = name_score(norm_name(name), norm_name(p.get("fullName") or ""))
+                if sc > best and p.get("id"):
+                    best, pid = sc, p["id"]
+            if not pid or best < 2:
+                return [], ""
+            kind = "pitching" if stat in _PITCH_STATS else "hitting"
+            year = _mlb_season_year()
+            raw = await _alt_get(
+                f"{MLB_API}/people/{pid}",
+                {"hydrate": f"stats(group=[{kind}],type=[gameLog],season={year})"}, 1800)
+            person = ((raw or {}).get("people") or [{}])[0] if isinstance(raw, dict) else {}
+            games = []
+            for block in person.get("stats") or []:
+                for split in block.get("splits") or []:
+                    g = xref_mlb_game(split, kind)
+                    if g:
+                        games.append(g)
+            games.sort(key=lambda g: g.get("date") or "", reverse=True)
+            return games[:30], "MLB Stats API"
+        rows = await _alt_get("https://search.d3.nhle.com/api/v1/search/player",
+                              {"culture": "en-us", "limit": 6, "q": name}, 6 * 3600)
+        if isinstance(rows, dict):
+            rows = rows.get("results") or rows.get("players") or []
+        best, pid = 0, None
+        for p in rows or []:
+            if not isinstance(p, dict):
+                continue
+            sc = name_score(norm_name(name), norm_name(p.get("name") or ""))
+            if p.get("active") is False:
+                sc = min(sc, 1)
+            if sc > best and p.get("playerId"):
+                best, pid = sc, p["playerId"]
+        if not pid or best < 2:
+            return [], ""
+        games = []
+        for season in _nhl_season_ids():
+            raw = await _alt_get(f"{NHL_WEB}/player/{pid}/game-log/{season}/2", {}, 1800)
+            for row in ((raw or {}).get("gameLog") or []) if isinstance(raw, dict) else []:
+                g = xref_nhl_game(row)
+                if g:
+                    games.append(g)
+            if _filled_n(games, stat) >= 4:
+                break
+        return games[:30], "NHL.com"
+    except Exception:
+        log.debug("League log failed for %s", name, exc_info=True)
+        return [], ""
+
+
+async def deepen_games(path: str, athlete_id: str, name: str, stat: str, games: list, *, fast: bool = False) -> tuple[list, str]:
+    """ESPN's log first. When that stat is thin, fill from the box score, then the league's own feed."""
+    games = list(games or [])
+    sources = ["ESPN game log"] if games else []
+    n0 = _filled_n(games, stat)
+    if stat and n0 < 4 and games:
+        try:
+            filled, n = await xref_box_fill(path, str(athlete_id), name, games, stat, 3 if fast else 6)
+        except Exception:
+            log.debug("Box fill failed", exc_info=True)
+            filled, n = games, 0
+        if n:
+            games, n0 = filled, _filled_n(filled, stat)
+            sources.append("ESPN box score")
+    if stat and n0 < 4 and path in ("baseball/mlb", "hockey/nhl"):
+        try:
+            official, label = await asyncio.wait_for(xref_official(name, path, stat), 2.5 if fast else 6)
+        except Exception:
+            official, label = [], ""
+        if label and _filled_n(official, stat) > n0:
+            games = official
+            sources.append(label)
+    return games, " · ".join(sources)
+
+
+async def _xray_one(player: str, stats: list, sport: Optional[str], *, fast: bool = True):
+    """One player's newest games for the first stat that resolves, or why it didn't.
+    A name that fits several people comes back with those people instead of a guess."""
     sport_paths = [p for p in leagues_for(sport) if p in PROP_PATHS] if sport else []
-    cand, stat, ambiguous = None, None, False
+    cand, stat, ambiguous, pool = None, None, False, []
     for key in stats:
         fam = STATS[key][1]
         paths = [p for p in PROP_PATHS if FAMILY_OF_PATH[p] == fam]
@@ -15104,13 +15462,19 @@ async def _xray_one(player: str, stats: list, sport: Optional[str]):
         if len(cands) == 1:
             cand, stat = cands[0], key
             break
-        ambiguous = ambiguous or len(cands) > 1
+        if len(cands) > 1 and not pool:
+            ambiguous, pool, stat = True, cands, key
     if cand is None:
         why = "more than one player by that name" if ambiguous else "no ESPN game log for this player"
-        return None, None, [], why
+        choices = [_pull_choice(c, stat) for c in pool[:6]] if stat else []
+        return None, stat, [], why, choices, ""
     games = await trend_games(cand["path"], cand["id"], need=10)
+    if _filled_n(games, stat) < 4:
+        games, src = await deepen_games(cand["path"], cand["id"], cand.get("name") or player, stat, games, fast=fast)
+    else:
+        src = "ESPN game log"
     values = trend_values(games, stat)[:10]
-    return cand, stat, values, ""
+    return cand, stat, values, "", [], src
 
 
 def _pair_combo(a: list, b: list) -> list:
@@ -15135,7 +15499,7 @@ def _pair_combo(a: list, b: list) -> list:
     return out
 
 
-async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
+async def xray_leg(leg_text: str, sport: Optional[str] = None, alts: Optional[list] = None) -> dict:
     """The player's last 10 games against this leg's number, or why there isn't a chart."""
     out = {"text": leg_text, "values": [], "line": None, "side": None, "name": None, "stat": None, "why": ""}
     pr = cached_prop(leg_text)
@@ -15147,9 +15511,11 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
     if pr.get("combo"):
         series, names, stat = [], [], None
         for part in pr["combo"]:
-            cand, stat, values, why = await _xray_one(part["player"], part.get("stats") or pr["stats"], sport)
+            cand, stat, values, why, choices, src = await _xray_one(part["player"], part.get("stats") or pr["stats"], sport)
             if cand is None:
                 out["why"] = why
+                out["choices"] = choices
+                out["stat_key"] = stat or ""
                 return out
             names.append(cand["name"])
             series.append(values)
@@ -15161,11 +15527,21 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
         if not paired:
             out["why"] = f"no {label} in recent games"
         return out
-    cand, stat, values, why = await _xray_one(pr["player"], pr["stats"], sport)
+    cand, stat, values, why, choices, src = await _xray_one(pr["player"], pr["stats"], sport)
+    if cand is None and alts:
+        for alt in alts:
+            if norm_name(alt) == norm_name(pr["player"]):
+                continue
+            cand, stat, values, why, choices, src = await _xray_one(alt, pr["stats"], sport)
+            if cand is not None or choices:
+                break
     if cand is None:
         out["why"] = why
+        out["choices"] = choices
+        out["stat_key"] = stat or ""
         return out
-    out.update(name=cand["name"], stat=STATS[stat][0], values=[(g["opp"], g["at"], v) for g, v in values][::-1],
+    out.update(name=cand["name"], stat=STATS[stat][0], stat_key=stat, sources=src,
+               values=[(g["opp"], g["at"], v) for g, v in values][::-1],
                path=cand["path"])
     if not values:
         out["why"] = f"no {STATS[stat][0]} in recent games"
@@ -15174,10 +15550,19 @@ async def xray_leg(leg_text: str, sport: Optional[str] = None) -> dict:
 
 async def slip_xray_data(slip: dict) -> list[dict]:
     legs = [str(x).strip() for x in (slip.get("legs") or []) if str(x).strip()][:8]
+    alts = slip.get("_name_alts") if isinstance(slip.get("_name_alts"), dict) else {}
+
+    def extras(t: str) -> list:
+        out = []
+        low = t.lower()
+        for raw, names in alts.items():
+            if raw and str(raw).lower() in low and isinstance(names, list):
+                out.extend(str(n) for n in names if n)
+        return out[:4]
 
     async def one(t):
         try:
-            return await asyncio.wait_for(xray_leg(t, slip.get("sport")), timeout=6)
+            return await asyncio.wait_for(xray_leg(t, slip.get("sport"), extras(t)), timeout=6)
         except Exception:
             log.warning("X-ray failed for %r", t, exc_info=True)
             return {"text": t, "values": [], "line": None, "side": None, "name": None, "stat": None,
@@ -15216,8 +15601,9 @@ def xray_notes(data: list[dict]) -> list[str]:
             continue
         if h:
             vals = [v for _, _, v in x["values"]]
+            src = f" · {x['sources']}" if x.get("sources") and x.get("sources") != "ESPN game log" else ""
             notes.append(f"- {x['text']}: last {h[1]} games {h[0]}/{h[1]} {x['side']} {x['line']:g} "
-                         f"(avg {sum(vals) / len(vals):.1f}, most recent {', '.join(f'{v:g}' for v in vals[-5:][::-1])})")
+                         f"(avg {sum(vals) / len(vals):.1f}, most recent {', '.join(f'{v:g}' for v in vals[-5:][::-1])}){src}")
     return notes
 
 
@@ -21952,7 +22338,7 @@ def dash_player_keys(path: str) -> list[str]:
     fam = FAMILY_OF_PATH.get(path) or ""
     keys = [k for k in (MAIN_STATS.get(fam) or []) if k in STATS]
     if fam == "football":
-        for k in ("rush_att", "pass_att"):
+        for k in ("rush_att", "pass_att", "targets", "sacks", "tackles", "fg_made", "kick_pts"):
             if k in STATS and k not in keys:
                 keys.append(k)
     return keys
@@ -21967,11 +22353,12 @@ def dash_sheet_keys(path: str, pos: str) -> list[str]:
     fam = FAMILY_OF_PATH.get(path) or ""
     p = (pos or "").strip().lower()
     if fam == "baseball":
-        want = ["pitcher_k", "pitching_outs", "earned_runs"] if p in _PITCH_POS else ["hits", "hrr", "home_runs", "rbis"]
+        want = (["pitcher_k", "pitching_outs", "earned_runs", "hits_allowed", "walks_allowed"] if p in _PITCH_POS
+                else ["hits", "hrr", "home_runs", "rbis", "runs", "walks", "hitter_k"])
         return [k for k in want if k in STATS]
     if fam == "hockey":
         want = (["saves", "nhl_goals_allowed"] if p in _GOALIE_POS else
-                ["goals", "nhl_assists", "sog", "shots", "blocked_shots"])
+                ["goals", "nhl_assists", "nhl_points", "sog", "shots", "blocked_shots", "nhl_hits", "faceoffs"])
         return [k for k in want if k in STATS]
     return dash_player_keys(path)
 
@@ -22523,6 +22910,26 @@ async def dash_api_player_one(request):
     if not name:
         return dash_error(web, request, 404)
     keys = dash_sheet_keys(path, bio.get("pos") or "")
+    xref = ""
+    lead = next((k for k in keys if k != "minutes"), keys[0] if keys else "")
+    if lead:
+        try:
+            games, xref = await deepen_games(path, aid, name, lead, games, fast=False)
+        except Exception:
+            log.debug("Deeper player log skipped", exc_info=True)
+            xref = ""
+        if path in ("baseball/mlb", "hockey/nhl") and lead and "MLB" not in xref and "NHL" not in xref:
+            try:
+                official, label = await asyncio.wait_for(xref_official(name, path, lead), 5)
+                a = [v for _, v in trend_values(games, lead)[:8]]
+                b = [v for _, v in trend_values(official, lead)[:8]]
+                n = min(len(a), len(b))
+                if label and n:
+                    same = sum(1 for i in range(n) if abs(a[i] - b[i]) < 0.2)
+                    extra = f"{label} matches {same} of {n} recent games"
+                    xref = f"{xref} · {extra}".strip(" ·") if xref else extra
+            except Exception:
+                log.debug("Cross-check skipped", exc_info=True)
     pack_keys = keys + [k for k in ("pass_att", "rush_att", "minutes", "targets") if k in STATS and k not in keys]
     packed = dash_pack_games(games, pack_keys, 30)
     stats = dash_pack_stats(packed, keys)
@@ -22545,7 +22952,7 @@ async def dash_api_player_one(request):
         "age": bio.get("age") or "", "photo": photo, "stat": default,
         "stats": stats, "games": packed,
         "next": brief.get("next"), "injuries": brief.get("injuries") or [],
-        "group": brief.get("group"),
+        "group": brief.get("group"), "xref": xref,
     })
 
 
@@ -22646,7 +23053,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-103';"
+    "const CACHE='pb-shell-104';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -24210,10 +24617,12 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
  const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;try{if(d.slug&&d.id)localStorage.setItem('pb-pstat:'+d.slug+'/'+d.id,s.key)}catch(e){}paintPlayer()}},s.label);
  const GROUPS=[['Scoring',['points','pra','pr','pa','threes','fgm','ftm','fantasy','pts50','anytime_td','pass_td','rush_td']],
-  ['Boards',['rebounds','oreb','ra']],['Playmaking',['assists']],['Defense',['steals','blocks','stocks','turnovers']],
+  ['Boards',['rebounds','oreb','ra']],['Playmaking',['assists']],['Defense',['steals','blocks','stocks','turnovers','tackles','sacks']],
   ['Shooting',['threes_att','fga']],  ['Passing',['pass_yds','pass_att']],['Rushing',['rush_yds','rush_rec_yds','rush_att']],
-  ['Receiving',['rec','rec_yds','targets']],['Hitting',['hits','hrr','home_runs','rbis']],['Pitching',['pitcher_k','pitching_outs','earned_runs']],
-  ['Hockey',['goals','nhl_assists','nhl_points','sog','saves','nhl_goals_allowed']]];
+  ['Receiving',['rec','rec_yds','targets']],['Kicking',['fg_made','kick_pts']],
+  ['Hitting',['hits','hrr','home_runs','rbis','runs','walks','hitter_k']],
+  ['Pitching',['pitcher_k','pitching_outs','earned_runs','hits_allowed','walks_allowed']],
+  ['Hockey',['goals','nhl_assists','nhl_points','sog','saves','nhl_goals_allowed','blocked_shots','nhl_hits','faceoffs']]];
  const used={};const groups=[];
  GROUPS.forEach(pair=>{const rows=pair[1].map(k=>stats.find(s=>s.key===k)).filter(Boolean);rows.forEach(s=>{used[s.key]=1});if(rows.length)groups.push([pair[0],rows])});
  const rest=stats.filter(s=>!used[s.key]);if(rest.length)groups.push(['More',rest]);
@@ -24251,11 +24660,16 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const kids=[
   h('div',{class:'plhead'},faceBox(d.photo,d.name,true,d.slug,d.id),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}),
    d.slug&&d.id?h('div',{style:'display:flex;gap:8px;margin-top:6px;flex-wrap:wrap'},
+    (S.stack&&S.stack.length)?h('button',{type:'button',class:'tpause',onclick:()=>{const prev=S.stack.pop();if(!prev||!prev.slug)return;S.restore=prev;go('#/pl/'+prev.slug+'/'+prev.id)}},'Back'):null,
     h('button',{type:'button',class:'tpause',onclick:()=>{const u=location.origin+location.pathname+location.search+'#/pl/'+d.slug+'/'+d.id;if(navigator.clipboard)navigator.clipboard.writeText(u)}},'Copy link'),
     h('button',{type:'button',class:'tpause',onclick:async()=>{const one=await api('/api/player/'+d.slug+'/'+d.id+'.json'+qs('fresh=1'));if(one&&one.name&&String(one.id)===String(d.id)){const keep=S.pstat;S.pl=one;if((one.stats||[]).some(s=>s.key===keep))S.pstat=keep;paintPlayer()}}},'Refresh')):null)),
   chipRows,
   h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:yours?'Your line':lab})),nudge(0.5),nudge(1)),
-   h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 vs this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'})),
+   h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 vs this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'}),
+   h('div',{class:'projl',style:'margin-top:8px'},[['L5 avg',vals.slice(0,5)],['L10 avg',vals.slice(0,10)],['Season',vals]].filter(p=>p[1].length).map(p=>{
+    const n=Math.round(p[1].reduce((a,b)=>a+b,0)/p[1].length*10)/10;
+    return h('button',{class:'pnudge',type:'button',style:'white-space:nowrap',onclick:()=>{S.pline=n;paintPlayer()}},p[0])})),
+   d.xref?h('p',{class:'muted',style:'margin:8px 0 0',text:d.xref}):null),
   h('div',{class:'card'},h('h2',null,'Last '+games.length+(joined?' together':'')+' vs '+fmt(line),h('span',{class:'r'},
    h('span',{class:'seg'},['all','home','away'].map(k=>h('button',{type:'button',class:S.psplit===k?'on':'',onclick:()=>{S.psplit=k;paintPlayer()}},k==='all'?'All':k==='home'?'Home':'Away'))),
    h('span',{class:'seg'},[5,10,0].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},n?('Last '+n):'All'))))),
@@ -24309,8 +24723,12 @@ async function showPlayer(slug,id){openSheet();const box=$('#findpop');if(box)bo
  if(S.playerAc)S.playerAc.abort();S.playerAc=new AbortController();const ac=S.playerAc;
  put($('#sheet-body'),h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'INJURIES'}),h('p',{text:'Still working.'})));
  const d=await api('/api/player/'+slug+'/'+id+'.json'+qs(),{signal:ac.signal});if(ac.signal.aborted||location.hash!=='#/pl/'+slug+'/'+id)return;
- if(!d||!d.name){sheetError('Couldn’t find that player');return}S.pl=d;S.pair=null;S.pstat=d.stat;S.pline=null;S.hi='';
- try{const saved=localStorage.getItem('pb-pstat:'+slug+'/'+id);if(saved&&(d.stats||[]).some(s=>s.key===saved))S.pstat=saved}catch(e){}
+ if(!d||!d.name){sheetError('Couldn’t find that player');return}
+ const back=S.restore;S.restore=null;
+ if(!back&&S.pl&&S.pl.slug&&String(S.pl.id)!==String(id)){(S.stack=S.stack||[]);S.stack.push({slug:S.pl.slug,id:S.pl.id,stat:S.pstat,line:S.pline,split:S.psplit,n:S.pn});if(S.stack.length>8)S.stack.shift()}
+ S.pl=d;S.pair=null;S.pstat=d.stat;S.pline=null;S.hi='';
+ if(back){if(back.stat)S.pstat=back.stat;if(back.line!=null)S.pline=back.line;S.psplit=back.split||'all';S.pn=back.n||0}
+ else{try{const saved=localStorage.getItem('pb-pstat:'+slug+'/'+id);if(saved&&(d.stats||[]).some(s=>s.key===saved))S.pstat=saved}catch(e){}}
  paintPlayer()}
 function paintFind(){const box=$('#findpop');if(!box)return;if(S.findOff){box.hidden=true;return}
  const q=(S.q||'').trim();const digits=/^[0-9]{1,10}$/.test(q);
@@ -24884,7 +25302,18 @@ async def crash_notify(client, kind: str, title: str, why: str) -> None:
     crash_note(kind, title, why)
     if kind in ("ok", "info"):
         return
-    await post_alert(client, f"🚨 **{title}**\n{clip(why, 300)}", ping=True)
+    card = None
+    try:
+        card = status_card({
+            "title": "HEADS UP",
+            "tone": "crash",
+            "happened": title,
+            "news": [clip(why, 180)],
+            "news_label": "DETAILS",
+        })
+    except Exception:
+        log.warning("Crash card failed", exc_info=True)
+    await post_alert(client, f"🚨 **{title}**\n{clip(why, 300)}", ping=True, file=card)
 
 
 def alert_channel_ids(guild_id: int) -> list[int]:
@@ -24973,7 +25402,7 @@ async def _alert_channel(client, cid: int):
         return None
 
 
-async def post_alert(client, text: str, *, ping: bool = False) -> int:
+async def post_alert(client, text: str, *, ping: bool = False, file: Optional[io.BytesIO] = None) -> int:
     """One message per server, recap channel first. Returns how many channels took it."""
     sent = 0
     guilds = list(getattr(client, "guilds", None) or [])
@@ -24987,6 +25416,26 @@ async def post_alert(client, text: str, *, ping: bool = False) -> int:
         body = text + "\n" + " ".join(f"<@{i}>" for i in OWNER_IDS[:4])
         mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
     seen = set()
+
+    def _file():
+        if file is None:
+            return None
+        try:
+            file.seek(0)
+            return discord.File(file, filename="status.png")
+        except Exception:
+            return None
+
+    async def _send(ch):
+        attachment = _file()
+        if attachment is not None:
+            try:
+                await ch.send(body, allowed_mentions=mentions, file=attachment)
+                return
+            except TypeError:
+                pass
+        await ch.send(body, allowed_mentions=mentions)
+
     for gid in gids:
         if gid in seen:
             continue
@@ -24997,7 +25446,7 @@ async def post_alert(client, text: str, *, ping: bool = False) -> int:
             if ch is None:
                 continue
             try:
-                await ch.send(body, allowed_mentions=mentions)
+                await _send(ch)
                 posted, sent = True, sent + 1
                 break
             except Exception:
@@ -25009,15 +25458,15 @@ async def post_alert(client, text: str, *, ping: bool = False) -> int:
         if sysch is None:
             continue
         try:
-            await sysch.send(body, allowed_mentions=mentions)
+            await _send(sysch)
             sent += 1
         except Exception:
             log.warning("Alert failed in system channel guild %s", gid)
     return sent
 
 
-def boot_health_lines() -> list[str]:
-    """A short status block for the recap note. Only facts the bot can measure."""
+def boot_facts() -> list[tuple[str, str]]:
+    """(label, value) pairs for the restart picture. Only facts the bot can measure."""
     free, total, db_n = disk_bytes()
     free_mb = free // (1024 * 1024)
     db_mb = db_n / (1024 * 1024)
@@ -25029,17 +25478,17 @@ def boot_health_lines() -> list[str]:
         disk = f"low, {free_mb} MB free"
     else:
         disk = f"fine, {free_mb} MB free"
-    lines = ["**Right now**", f"• Disk: {disk}. Picks file {db_mb:.1f} MB."]
+    rows = [("Disk", f"{disk}. Picks file {db_mb:.1f} MB.")]
     try:
         opens = db().execute("SELECT COUNT(*) AS n FROM picks WHERE status = 'open'").fetchone()["n"]
         start = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         logged = db().execute("SELECT COUNT(*) AS n FROM picks WHERE created_at >= ?",
                               (start.isoformat(timespec="seconds"),)).fetchone()["n"]
-        lines.append(f"• Open slips: {opens}. Logged today: {logged}.")
+        rows.append(("Open slips", f"{opens}. Logged today: {logged}."))
     except Exception:
         pass
     try:
-        lines.append("• Scanner: on." if TESSERACT else "• Scanner: off on this host.")
+        rows.append(("Scanner", "on." if TESSERACT else "off on this host."))
     except Exception:
         pass
     try:
@@ -25054,7 +25503,7 @@ def boot_health_lines() -> list[str]:
             names.append("Claude")
         elif ai_enabled():
             names.append("Claude paused")
-        lines.append("• Answers: " + (", ".join(names) if names else "none set") + ".")
+        rows.append(("Answers", (", ".join(names) if names else "none set") + "."))
     except Exception:
         pass
     try:
@@ -25062,8 +25511,25 @@ def boot_health_lines() -> list[str]:
     except Exception:
         err = None
     if err and len(err) > 1 and err[1]:
-        lines.append("• Last scan problem: " + clip(str(err[1]), 120))
-    return lines
+        rows.append(("Last scan problem", clip(str(err[1]), 120)))
+    return rows
+
+
+def boot_health_lines() -> list[str]:
+    """A short status block for the recap note. Only facts the bot can measure."""
+    return ["**Right now**"] + [f"• {k}: {v}" for k, v in boot_facts()]
+
+
+def status_card(data: dict) -> Optional[io.BytesIO]:
+    """Tonight's Board style picture for a restart or a crash. None if drawing fails."""
+    try:
+        payload = dict(data)
+        payload.setdefault("when", datetime.now(TZ).strftime("%a %b %-d · %-I:%M %p"))
+        payload.setdefault("rows", boot_facts())
+        return render_status_card(payload)
+    except Exception:
+        log.warning("Status card failed", exc_info=True)
+        return None
 
 
 async def storage_alert(client) -> None:
@@ -25112,8 +25578,18 @@ async def announce_boot(client) -> Optional[str]:
         return None
     crash_note("ok" if planned or prev == BOT_VERSION else "bot", "PIMP-BOT is live",
                clip(note.replace("\n", " · "), 180))
+    happened = ""
+    if gap and gap >= 180:
+        happened = "Back from an update." if planned else f"Was down about {bot_gap_words(gap)}."
+    elif (prev or "") != BOT_VERSION:
+        happened = "New upload. It was not down long enough to call it an outage."
+    elif "Storage is low" in (note or ""):
+        happened = "Storage is low, so this restart is being reported."
+    news = bot_update_lines(prev)[-3:] if (prev or "") != BOT_VERSION else []
+    tone = "down" if gap and gap >= 180 and not planned else "live"
     try:
-        await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned))
+        await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned), file=status_card({
+            "title": "PIMP-BOT IS LIVE", "tone": tone, "happened": happened, "news": news}))
     except Exception:
         log.warning("Boot announce failed")
     return note
@@ -26849,7 +27325,7 @@ async def track_search_raw(query: str, limit: int = 10, sport: Optional[str] = N
         log.warning("ESPN player search failed for %r", query)
         return None
     items = raw.get("items") or []
-    _SEARCH_RAW[key] = (time.monotonic() + 6 * 3600, items)
+    _SEARCH_RAW[key] = (time.monotonic() + (6 * 3600 if items else 90), items)
     if len(_SEARCH_RAW) > 3000:
         for k in list(_SEARCH_RAW)[:1500]:
             _SEARCH_RAW.pop(k, None)
@@ -30876,6 +31352,7 @@ async def free_fix_names(slip: dict) -> None:
     names = list(dict.fromkeys(names))
     looked = dict(zip(names, await asyncio.gather(*(found(n) for n in names)))) if names else {}
     fixed, changed = [], False
+    name_alts: dict = {}
     for leg, m in zip(legs, shapes):
         if not m:
             fixed.append(leg)
@@ -30883,17 +31360,25 @@ async def free_fix_names(slip: dict) -> None:
         raw_name = m.group(1)
         name = dirty.get(raw_name) or raw_name
         items = looked.get(name) or []
-        best, score = None, 0.0
+        ranked = []
         for it in items:
+            if not it:
+                continue
             r = difflib.SequenceMatcher(None, norm_name(name), norm_name(it)).ratio()
-            if r > score:
-                best, score = it, r
+            ranked.append((r, it))
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
+        best, score = (ranked[0][1], ranked[0][0]) if ranked else (None, 0.0)
         if best and score >= 0.8 and norm_name(best) != norm_name(raw_name):
             aliases[norm_name(raw_name)] = best
             name, changed = best, True
         elif isinstance(aliases.get(norm_name(raw_name)), str) and aliases[norm_name(raw_name)] != raw_name:
             name = aliases[norm_name(raw_name)]
+        others = [it for r, it in ranked if r >= 0.55 and norm_name(it) != norm_name(name)][:4]
+        if others:
+            name_alts[name] = others
         fixed.append(f"{name} {m.group(2)} {m.group(3)} {m.group(4)}")
+    if name_alts:
+        slip["_name_alts"] = name_alts
     slip["legs"] = fixed
     if changed:
         try:
@@ -31052,7 +31537,8 @@ HELP_EXTRA.append(("🔎 Reading slips for free", (
     "failed reads on Staff HQ. Scanner **5.0** keeps every card: SOG, Hitter FS, Singles, tennis, darts, cricket, "
     "and table tennis, and the review pulls the game log from the right league. Scanner **5.1** also reads combos, "
     "NBASZN and NFLSZN, and PPG, RPG, APG, BPG, 3PTM, 3PTA, FTM, and 50+ Point Games. The player page groups those "
-    "stats and lets you switch last 5, 10, or 20, and home or away. If it's sure, the slip logs like before; if not, you get a card to check and tap 🧾 "
+    "stats and lets you switch last 5, 10, or 20, and home or away. Scanner **5.2** fills a thin log from the box score "
+    "and the league's own feed, and when more than one player fits you pick the name and can go back. If it's sure, the slip logs like before; if not, you get a card to check and tap 🧾 "
     "**Log this slip** (or ✏️ Edit). A free `GEMINI_API_KEY` on Railway adds a second free reader, and Claude is "
     "only the last resort. `/admin status` shows which reader handled today's slips.")))
 
@@ -34387,6 +34873,54 @@ def render_board(b: dict) -> io.BytesIO:
     return _design_png(img)
 
 
+def render_status_card(b: dict) -> io.BytesIO:
+    """A restart or crash note, drawn like Tonight's Board."""
+    news = [str(x) for x in (b.get("news") or []) if str(x).strip()][:3]
+    rows = list(b.get("rows") or [])[:6]
+    happened = str(b.get("happened") or "").strip()
+    W = 1000
+    H = 230 + (100 if happened else 20) + (56 + 58 * len(news) if news else 0) + (56 + 70 * len(rows) if rows else 0) + 70
+    tone = b.get("tone") or "live"
+    wash = {"crash": (150, 36, 48), "down": (140, 84, 28)}.get(tone, (88, 36, 168))
+    img, d = _design_card(W, H, "stadium", wash, head=210, margin=0, radius=0)
+    d.text((40, 32), b.get("title") or "PIMP-BOT IS LIVE", font=art_font(44, True), fill=ART_TEXT)
+    d.text((42, 96), b.get("when") or "", font=art_font(22, True), fill=(190, 190, 208))
+    ver = BOT_VERSION
+    vf = art_font(18, True)
+    vw = _tw(d, ver, vf) + 28
+    d.rounded_rectangle((40, 146, 40 + vw, 180), 17, fill=(12, 12, 20, 200), outline=(255, 255, 255, 30))
+    d.text((54, 152), ver, font=vf, fill=ART_TEXT)
+    y = 210
+    if happened:
+        d.text((40, y), "WHAT HAPPENED", font=art_font(16, True), fill=ART_MUTED)
+        y += 28
+        d.rounded_rectangle((24, y, W - 24, y + 64), 18, fill=(12, 12, 18, 184), outline=(255, 255, 255, 24))
+        ht, hf = fit_text(d, happened, W - 100, 24, True)
+        d.text((44, y + 16), ht, font=hf, fill=ART_TEXT)
+        y += 80
+    if news:
+        y += 8
+        d.text((40, y), b.get("news_label") or "WHAT'S NEW", font=art_font(16, True), fill=ART_MUTED)
+        y += 28
+        for line in news:
+            d.rounded_rectangle((24, y, W - 24, y + 50), 14, fill=(12, 12, 18, 170), outline=(255, 255, 255, 16))
+            t, f = fit_text(d, line, W - 110, 18, False)
+            d.text((44, y + 14), t, font=f, fill=ART_TEXT)
+            y += 58
+    if rows:
+        y += 8
+        d.text((40, y), "RIGHT NOW", font=art_font(16, True), fill=ART_MUTED)
+        y += 28
+        for label, value in rows:
+            d.rounded_rectangle((24, y, W - 24, y + 58), 16, fill=(12, 12, 18, 184), outline=(255, 255, 255, 20))
+            d.text((44, y + 16), str(label), font=art_font(18, True), fill=ART_MUTED)
+            vt, vf2 = fit_text(d, str(value), 620, 20, True)
+            d.text((W - 48 - _tw(d, vt, vf2), y + 16), vt, font=vf2, fill=ART_TEXT)
+            y += 70
+    brand_sign(img, W - 40, H - 48, "PIMP-BOT", 16)
+    return _design_png(img)
+
+
 def _design_board_slip(img, d, s: dict, y: int, h: int, W: int, art: dict) -> None:
     settled = s.get("status") in ("win", "loss", "push")
     edge = {"win": ART_GREEN, "loss": ART_RED}.get(s.get("status"), (255, 255, 255))
@@ -36341,6 +36875,7 @@ class PicksBot(discord.Client):
         if find_duplicate(message.guild.id, message.author.id, dict(slip, cost=None)) is None:
             add_ghost(message.guild.id, message.author.id, message.author.display_name, message.id, message.channel.id,
                       getattr(first, "id", None), slip)
+        await offer_data_picks(message, slip)
         return True
 
     async def review_slip(self, message: discord.Message, image_message: discord.Message, attachment):
@@ -36416,6 +36951,7 @@ class PicksBot(discord.Client):
         if not logged and image_message.author.id == message.author.id and slip.get("placed") is False:
             add_ghost(message.guild.id, message.author.id, message.author.display_name, image_message.id,
                       message.channel.id, getattr(first, "id", None), slip)
+        await offer_data_picks(message, slip)
 
 
 bot = PicksBot()
