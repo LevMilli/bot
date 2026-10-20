@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.04"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.05"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -142,6 +142,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.02", "The crew page groups the team and the members. Discord photos sit beside names. The smoke plays every time the page opens."),
     ("1.03", "An admin can pin a week note. Overview lists the slate and what is still riding. Your bankroll stays on your card."),
     ("1.04", "Restarts report free disk, open slips, and the scanner. A developer can file a screenshot under someone else and edit any pick. Leftover backup copies are removed."),
+    ("1.05", "Replies land faster. Chat answers like a person in the group, and a screenshot still gets a take when the paid reader is out."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -3512,6 +3513,40 @@ async def xray_injuries(data: list) -> dict:
     return {w["name"]: st[k] for k, w in watch.items() if st.get(k)}
 
 
+def question_needs_search(question: str) -> bool:
+    """Live facts need a lookup. A normal chat does not, so the reply can come back right away."""
+    return bool(re.search(
+        r"\b(tonight|today|tomorrow|injury|injured|lineup|starting|score|scores|news|latest|last night|right now)\b",
+        question or "", re.I))
+
+
+async def glance_talk(attachment, question: str, guild_id: int, name: str) -> str:
+    """A spoken take when the slip parser came up empty. Skips a dead Claude account."""
+    if not ask_enabled():
+        return ""
+    asked = (question or "").strip() or "What do you think of this?"
+    system = (
+        "You are in a Discord group chat of friends who track sports picks. "
+        f"Voice: {persona_prompt(guild_id)}. Talk like a person in that chat, two to six sentences. "
+        f"Address {name}. Do not mention API keys, billing, credits, or model names. "
+        "Do not invent a stat, a record, or a result. If you cannot see the legs, say so and ask for the names."
+    )
+    user = f"{name} asked: {asked}"
+    if GEMINI_API_KEY and attachment is not None:
+        try:
+            seen = await gemini_see(attachment, system + "\n\n" + user)
+            if seen and len(seen) > 20:
+                return seen
+        except Exception:
+            log.warning("Screenshot talk failed", exc_info=True)
+    try:
+        text, _ = await asyncio.wait_for(ask_any(system, user, search=False), timeout=8)
+        return (text or "").strip()
+    except Exception:
+        log.warning("Chat take failed", exc_info=True)
+        return ""
+
+
 async def slip_review(client, guild_id: int, asker, slip: dict, question: str) -> tuple[str, Optional[discord.File]]:
     """The written take plus the X-ray image (None when no leg has a game log)."""
     try:
@@ -3815,7 +3850,7 @@ async def read_slip(attachment: discord.Attachment, model: Optional[str] = None)
         model=model or CLAUDE_MODEL,
         max_tokens=1500,
         messages=[{"role": "user", "content": content}],
-    ), timeout=SEC_CLAUDE_TIMEOUT)
+    ), timeout=12)
     text = "".join(block.text for block in reply.content if block.type == "text")
     slip = extract_json(text)
     if not slip.get("is_slip"):
@@ -3829,11 +3864,36 @@ async def read_slip(attachment: discord.Attachment, model: Optional[str] = None)
     return slip
 
 
+_CLAUDE_DEAD_UNTIL: Optional[float] = None
+
+
+def claude_alive() -> bool:
+    """False for a few hours after Anthropic says the account is out of credits, so we don't wait on it again."""
+    global _CLAUDE_DEAD_UNTIL
+    if _CLAUDE_DEAD_UNTIL is None:
+        try:
+            raw = get_setting(0, "claude_dead_until") or ""
+            _CLAUDE_DEAD_UNTIL = float(raw) if raw else 0.0
+        except Exception:
+            _CLAUDE_DEAD_UNTIL = 0.0
+    return time.time() >= _CLAUDE_DEAD_UNTIL
+
+
+def claude_mark_dead(hours: float = 6) -> None:
+    global _CLAUDE_DEAD_UNTIL
+    _CLAUDE_DEAD_UNTIL = time.time() + hours * 3600
+    try:
+        set_setting(0, "claude_dead_until", str(int(_CLAUDE_DEAD_UNTIL)))
+    except Exception:
+        pass
+
+
 def explain_ai_error(exc: Exception) -> tuple[str, bool]:
     """(plain-English reason, worth retrying with another model?)"""
     name = type(exc).__name__
     text = str(exc).lower()
     if "credit balance" in text or "billing" in text:
+        claude_mark_dead()
         return "the Anthropic account is out of credits (console.anthropic.com → Billing)", False
     if name == "AuthenticationError" or "x-api-key" in text or "authentication" in text:
         return "the Claude key was rejected. Put a working key in `ANTHROPIC_API_KEY` on Railway → Variables", False
@@ -3857,6 +3917,8 @@ def explain_ai_error(exc: Exception) -> tuple[str, bool]:
 async def read_slip_claude(attachment) -> tuple[Optional[dict], Optional[str]]:
     """Read with Claude's fast model; if that fails or misses the amounts, try once more with the stronger one.
     Returns (slip or None, reason it failed or None)."""
+    if not claude_alive():
+        return None, "the Anthropic account is out of credits (console.anthropic.com → Billing)"
     reason = None
     models = [None] + ([ASK_MODEL] if ASK_MODEL and ASK_MODEL != CLAUDE_MODEL else [])
     for i, model in enumerate(models):
@@ -15112,7 +15174,7 @@ async def slip_xray_data(slip: dict) -> list[dict]:
 
     async def one(t):
         try:
-            return await asyncio.wait_for(xray_leg(t, slip.get("sport")), timeout=20)
+            return await asyncio.wait_for(xray_leg(t, slip.get("sport")), timeout=6)
         except Exception:
             log.warning("X-ray failed for %r", t, exc_info=True)
             return {"text": t, "values": [], "line": None, "side": None, "name": None, "stat": None,
@@ -29969,7 +30031,10 @@ def _free_tess(img, psm: int, extra: Optional[list] = None, tsv: bool = True) ->
     buf = io.BytesIO()
     img.save(buf, "PNG")
     args = [TESSERACT, "stdin", "stdout", "--oem", "1", "--psm", str(psm), "-l", "eng"] + (extra or []) + (["tsv"] if tsv else [])
-    r = subprocess.run(args, input=buf.getvalue(), capture_output=True, timeout=FREE_SCAN_TIMEOUT)
+    try:
+        r = subprocess.run(args, input=buf.getvalue(), capture_output=True, timeout=6)
+    except subprocess.TimeoutExpired:
+        return ""
     return r.stdout.decode("utf-8", "replace")
 
 
@@ -29989,23 +30054,8 @@ def _free_word_rows(grey, psm: int) -> list[dict]:
 
 def free_words(grey, psm: int = 4) -> list[dict]:
     """Every word Tesseract saw: {text, conf, x, y, w, h, line} with line = a key shared by words on one line.
-    A thin first pass also tries a block layout and a sparse layout, and keeps the extra words."""
-    words = _free_word_rows(grey, psm)
-    if len(words) >= 12 or psm != 4:
-        return words
-    seen = {(w["text"].lower(), w["x"] // 10, w["y"] // 10) for w in words}
-    for alt in (6, 11):
-        for w in _free_word_rows(grey, alt):
-            if w["conf"] < 45:
-                continue
-            key = (w["text"].lower(), w["x"] // 10, w["y"] // 10)
-            if key in seen:
-                continue
-            seen.add(key)
-            words.append(w)
-        if len(words) >= 12:
-            break
-    return words
+    One layout only. A thin read is retried by the scan budget, not by stacking more passes here."""
+    return _free_word_rows(grey, psm)
 
 
 def free_lines(words: list[dict]) -> list[dict]:
@@ -30542,7 +30592,8 @@ def free_scan(raw: bytes) -> Optional[dict]:
     is kept as-is; extra treatments (other contrast, a tighter crop, a second Tesseract layout) only
     run when that pass missed the slip or left holes, and they may fill those holes — they never
     replace a sure read with a different one. Scanner 3.0 skips those retries when the first pass
-    already has legs and the amount."""
+    already has legs and the amount. The whole scan stops after a few seconds so a chat reply isn't stuck typing."""
+    started = time.monotonic()
     img, grey, _ = free_prepare(raw)
     words = free_words(grey)
     parts = _free_slip_parts(words)
@@ -30562,8 +30613,14 @@ def free_scan(raw: bytes) -> Optional[dict]:
     best = first
     # A first pass that already has legs only re-reads the bands that can fill the holes.
     # A blank first pass still looks at the whole photo.
-    retries = _free_hole_bands(img, grey, first) if first and first.get("legs") else _free_scan_retries(img, grey)
+    deadline = started + 6
+    if time.monotonic() > deadline:
+        return best
+    retries = (_free_hole_bands(img, grey, first, deadline) if first and first.get("legs")
+               else _free_scan_retries(img, grey, deadline))
     for extra in retries:
+        if time.monotonic() - started > 6:
+            break
         best = _free_fill(best, extra)
         best = _free_tidy(best)
         if _free_scan_ready(best):
@@ -30571,7 +30628,7 @@ def free_scan(raw: bytes) -> Optional[dict]:
     return best
 
 
-def _free_hole_bands(img, grey, slip) -> list:
+def _free_hole_bands(img, grey, slip, deadline: float = 0) -> list:
     """Crops for a second pass. Each box is a hole (money, the player list, or the app name), never the whole photo."""
     from PIL import ImageEnhance, ImageOps
     unsure = [str(u) for u in (slip.get("_unsure") or [])]
@@ -30585,6 +30642,8 @@ def _free_hole_bands(img, grey, slip) -> list:
         boxes.append((0, 0, w, max(40, int(h * 0.22))))
     out = []
     for box in boxes:
+        if deadline and time.monotonic() > deadline:
+            break
         bw, bh = box[2] - box[0], box[3] - box[1]
         if bw < 40 or bh < 40 or bw * bh >= w * h * 0.92:
             continue
@@ -30597,16 +30656,20 @@ def _free_hole_bands(img, grey, slip) -> list:
     return [s for s in out if s]
 
 
-def _free_scan_retries(img, grey) -> list:
+def _free_scan_retries(img, grey, deadline: float = 0) -> list:
     """Other looks at the same picture when the first pass wasn't enough. Each is a free_parse result or None."""
     from PIL import ImageEnhance, ImageOps, ImageFilter
     out = []
+    if deadline and time.monotonic() > deadline:
+        return out
     try:
         words6 = free_words(grey, 6)
         if words6:
             out.append(free_parse(words6, img, grey))
     except Exception:
         log.debug("Scan retry psm6 failed", exc_info=True)
+    if deadline and time.monotonic() > deadline:
+        return [s for s in out if s]
     crop = _free_focus(img)
     if crop is not None and crop.size != img.size:
         try:
@@ -30618,6 +30681,8 @@ def _free_scan_retries(img, grey) -> list:
             out.append(free_parse(free_words(cgrey), crop, cgrey))
         except Exception:
             log.debug("Scan retry crop failed", exc_info=True)
+    if deadline and time.monotonic() > deadline:
+        return [s for s in out if s]
     try:
         punch = ImageEnhance.Contrast(grey).enhance(1.85)
         punch = ImageOps.autocontrast(punch, cutoff=2)
@@ -30827,7 +30892,7 @@ async def read_slip_gemini(attachment) -> Optional[dict]:
     parts.append({"text": prompt})
     body = {"contents": [{"parts": parts}], "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
         async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
             if resp.status != 200:
                 text = (await resp.text())[:300]
@@ -30845,6 +30910,29 @@ async def read_slip_gemini(attachment) -> Optional[dict]:
         slip["status"] = "open"
     slip["placed"] = slip.get("placed") is not False
     return slip
+
+
+async def gemini_see(attachment, prompt: str) -> str:
+    """One short look at a screenshot. No enlarged slices, so it comes back in a few seconds."""
+    if not GEMINI_API_KEY:
+        return ""
+    import aiohttp
+    raw = await attachment.read()
+    if len(raw) > MAX_IMAGE_BYTES:
+        return ""
+    mt = sniff_image_type(raw) or "image/jpeg"
+    body = {"contents": [{"parts": [
+        {"inline_data": {"mime_type": mt, "data": base64.standard_b64encode(raw).decode()}},
+        {"text": prompt},
+    ]}], "generationConfig": {"temperature": 0.5, "maxOutputTokens": 420}}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+        async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
+            if resp.status != 200:
+                return ""
+            data = await resp.json(content_type=None)
+    return "".join(p.get("text", "") for c in (data.get("candidates") or [])[:1]
+                   for p in ((c.get("content") or {}).get("parts") or [])).strip()
 
 
 # ---- the chain ------------------------------------------------------------------------------------
@@ -30883,9 +30971,10 @@ async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
                     free_count("scan")
                     slip.pop("_unsure", None)
                 return slip, None
-            if not slip["_unsure"] and slip["legs"]:
-                free_count("scan")
-                slip.pop("_unsure", None)
+            if slip.get("legs"):
+                if not slip.get("_unsure"):
+                    free_count("scan")
+                    slip.pop("_unsure", None)
                 return slip, None
             unsure_slip = slip
             continue
@@ -30904,7 +30993,7 @@ async def read_slip_best(attachment) -> tuple[Optional[dict], Optional[str]]:
                 return slip, None
             reason = "I couldn't make out the amount risked" if slip else reason
             continue
-        if reader == "claude" and ai_enabled() and claude_budget_ok(essential=True):
+        if reader == "claude" and ai_enabled() and claude_budget_ok(essential=True) and claude_alive():
             slip, why = await read_slip_claude(attachment)
             if slip is not None and slip.get("cost") is not None:
                 free_count("claude")
@@ -31014,7 +31103,7 @@ async def ask_groq(system: str, user_text: str, search: bool = True) -> tuple[st
     """(answer, source links) from Groq's free tier. A model that's busy or out of free uses hands off to the next."""
     import aiohttp
     errors = []
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=150)) as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=18 if search else 8)) as session:
         for model, web in groq_models(search):
             body = {"model": model, "temperature": 0.4, "max_completion_tokens": 4096,
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user_text}]}
@@ -31087,7 +31176,7 @@ async def ask_gemini(system: str, user_text: str, search: bool = True) -> tuple[
     if not search:
         body.pop("tools")                                      # the numbers are in the message: save the search quota
     data, text, errors = None, "", []
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=150)) as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=18 if search else 8)) as session:
         for model in gemini_models():
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             mbody, tried_plain, data = body, False, None
@@ -31247,7 +31336,7 @@ async def ask_any(system: str, user_text: str, search: bool = True) -> tuple[str
                 h = ask_error_hint(exc)
                 why.append(h if "Gemini" in h else "Gemini: " + h)
                 log.warning("Gemini answer failed: %s", str(exc)[:300])
-        elif engine == "claude" and ai_enabled() and claude_budget_ok(essential=True):
+        elif engine == "claude" and ai_enabled() and claude_budget_ok(essential=True) and claude_alive():
             try:
                 answer, sources = await ask_claude(system, user_text)
             except Exception as exc:
@@ -35949,7 +36038,8 @@ class PicksBot(discord.Client):
         system = ASK_SYSTEM.format(bot_name=self.user.display_name,
                                    today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
         system += (f"\n\nYour voice in this server: {persona_prompt(message.guild.id)}.\n"
-                   "Talk to the person by the name in the question. "
+                   "Talk like a person in this group chat, not a help desk. Two to eight sentences unless they asked "
+                   "for a list. Address them by name. "
                    "For questions about the group's own results (records, profit, hit rates, who's best at "
                    "something, someone's tendencies), use the group_stats tool and only quote its numbers. "
                    "If group numbers are already in the message, quote those and do not invent a record, a profit, "
@@ -35959,7 +36049,8 @@ class PicksBot(discord.Client):
         token = ASK_DATA.set(ctx)
         try:
             async with message.channel.typing():
-                answer, sources = await ask_any(system, user_text)
+                answer, sources = await asyncio.wait_for(
+                    ask_any(system, user_text, search=question_needs_search(question)), timeout=10)
         except Exception:
             log.exception("Question failed")
             await message.reply("I couldn't get an answer just now. Try again in a minute.",
@@ -36000,7 +36091,10 @@ class PicksBot(discord.Client):
             return
         if slip_reader_on() and (attachment.size or 0) <= MAX_IMAGE_BYTES:
             async with message.channel.typing():
-                slip, reason = await read_slip_best(attachment)
+                try:
+                    slip, reason = await asyncio.wait_for(read_slip_best(attachment), timeout=8)
+                except asyncio.TimeoutError:
+                    reason = "that read took too long"
         elif slip_reader_on():
             reason = f"the image is too big ({(attachment.size or 0) // 1024} KB)"
             SLIP_STATE["last_error"] = (now_iso(), f"Image too big to read ({(attachment.size or 0) // 1024} KB)")
@@ -36213,16 +36307,42 @@ class PicksBot(discord.Client):
             await message.reply(gate, mention_author=False)
             return
         slip, reason = None, None
-        if (attachment.size or 0) <= MAX_IMAGE_BYTES:
-            async with message.channel.typing():
-                slip, reason = await read_slip_best(attachment)
+        question = re.sub(r"<@[!&]?\d+>", " ", getattr(message, "content", "") or "").strip()
+        talk_task = None
+        if ask_enabled():
+            talk_task = asyncio.create_task(glance_talk(
+                attachment, question, message.guild.id, message.author.display_name))
+        said = ""
+        async with message.channel.typing():
+            if (attachment.size or 0) <= MAX_IMAGE_BYTES:
+                try:
+                    slip, reason = await asyncio.wait_for(read_slip_best(attachment), timeout=7)
+                except asyncio.TimeoutError:
+                    reason = "that read took too long"
+            if slip is None or not (slip.get("legs") or slip.get("description")):
+                if talk_task is not None:
+                    try:
+                        said = await asyncio.wait_for(talk_task, timeout=8)
+                    except Exception:
+                        said = ""
         if slip is None or not (slip.get("legs") or slip.get("description")):
+            if said:
+                await message.reply(said, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                return
+            if talk_task is not None and not talk_task.done():
+                talk_task.cancel()
             free_count("fail")
             note_slip_read("fail", who=message.author.display_name,
                            title=reason or "couldn't read", url=getattr(image_message, "jump_url", "") or "")
+            if reason and ("credit" in reason.lower() or "billing" in reason.lower()):
+                await message.reply("I couldn't pull the legs off that screenshot. Type the names and I'll talk it through.",
+                                    mention_author=False)
+                return
             await message.reply(f"I couldn't read that slip{': ' + reason if reason else ''}. Try a clearer screenshot.",
                                 mention_author=False)
             return
+        if talk_task is not None and not talk_task.done():
+            talk_task.cancel()
         save_slip_draft(message.guild.id, image_message, slip)
         note_slip_read("unsure" if slip.get("_unsure") else "clean",
                        who=message.author.display_name,
