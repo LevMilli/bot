@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.51"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.53"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -189,6 +189,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.49", "Muhammad Ali's name plate is torn and burnt along the edges, like the other scraps on the opening page."),
     ("1.50", "Open slips show how many legs are still waiting. Mine stays on after a refresh, and an empty Mine says you have nothing open right now."),
     ("1.51", "Open slips show the slip number, the sport when the title leaves it out, and your open risk above the cards. Mine puts the soonest start first."),
+    ("1.52", "Just settled can be filtered by a win, a loss, or a push. A row shows how many legs hit, and a test slip stays off that list."),
+    ("1.53", "Questions and the live board answer sooner. Staff HQ lists every Discord server and the data feeds that were added. More leagues are on the scoreboards, and a game in play refreshes sooner."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -225,6 +227,8 @@ MEMBER_NEWS = [
     ("1.49", "Muhammad Ali's name plate is ripped and burnt on the edges, like the other scraps."),
     ("1.50", "Open slips show how many legs are still waiting. Mine stays on for this phone, and it says when you have nothing open."),
     ("1.51", "Open slips show the slip number and your open risk. Mine lists the soonest start first."),
+    ("1.52", "Just settled can be filtered by a win, a loss, or a push. A row shows how many legs hit, and a test slip stays off that list."),
+    ("1.53", "Questions and the live board come back sooner. Staff HQ lists every Discord server and the data feeds that were added. More leagues are on the board, and a game in play refreshes sooner."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2578,6 +2582,92 @@ _THOUSAND_SHIPPED = {
     "Open the slip even when the photo file is missing.",
     "Use the same slip id in the card link that the sheet uses.",
     "Leave a little air under the pays line so the card does not feel cramped.",
+    'Add a filter for wins, losses, and pushes above Just settled.',
+    'Keep the pick note to two lines so one long parlay does not cover the next row.',
+    'Use the same photo on the row and on the slip sheet.',
+    'Add yesterday beside today, so a late settle is still easy to find.',
+    'Line the net amounts up in one column.',
+    'Keep the newest settle at the top after a refresh.',
+    'Show how many legs hit when the slip is already settled.',
+    'Use the same name weight on Just settled as on Mine.',
+    'Keep a row up for the Central day it settled.',
+    'Name the book in the note when the title is only the play type.',
+    'Say settled today only on this Central day.',
+    'Open the slip from the whole row, photo included.',
+    'Put the sport at the front of the note when the group mixed sports.',
+    'Clip the note at a word, not in the middle of a name.',
+    'Leave hidden slips and test slips out of this list.',
+    'Name the person who filed it when that person is not the bettor.',
+    'Keep the photo the same circle size as Mine.',
+    'Refresh the note if a leg is corrected after the settle.',
+    'Give a push its own quiet word when the net is zero.',
+    'Keep the slip number on the meta line, after the name.',
+    'Do not flash an empty list while the refresh is still loading.',
+    "Add a one-tap jump from a settled row to that person's week.",
+    'Use color only on the amount.',
+    'Add a chip for the book next to the day, so a mixed day can be sorted.',
+    'Show the stake and the paid amount in the note when both were on the card.',
+    'Add a pushes-only view for days that landed on the number.',
+    'Let a member jump from a settled row to the player who decided it.',
+    'Add a week total under Just settled: count, wins, losses, and net.',
+    'Show the leg that missed, in one line, on a loss.',
+    'Show the leg that cleared it, in one line, on a win.',
+    'Add a filter for one sport on the settled list.',
+    'Show a void as its own word, separate from a loss.',
+    'Add the Central time, quiet, on the right of a row from the last hour.',
+    'Show a parlay that was one leg short of cashing, in plain words, on the loss row.',
+    'Add a short "filed under" line when the logger and the bettor differ.',
+    'Show the flex or power label in the note when it changes the pay.',
+    'Show a rebound: a loss, then a win, for the same person on the same day.',
+    'Add an empty line that names the last settle when today is still empty.',
+    'Keep the photo to the left of the name on every settled row.',
+    'Keep the amount in one weight, green or red, with no second pill.',
+    'Clip the note on a word boundary.',
+    'Keep slip numbers in the same type as the meta line on the sheet.',
+    'Use the same circle size for a photo here and on Mine.',
+    'Keep a push amount in the muted color, not green or red.',
+    'Line the names up even when one photo is still the initial.',
+    'Keep the day word short: today, yesterday, or the date.',
+    'Match the row padding to the injury rows so the lists feel related.',
+    'Keep a long book name from wrapping under the amount.',
+    'Use the play name the sheet uses, not a second shortened title.',
+    'Keep the filter chips on one line when there is room, and wrap them on a phone.',
+    'Hold the photo ring to the same gold weight as search.',
+    'Keep the list from jumping when one note is two lines and the next is one.',
+    'Show the sport word in the same case as the games strip.',
+    'Keep "Just settled" as the title, with the count on the right.',
+    'Leave a little space between the note and the meta line.',
+    'Keep a cashed amount and a lost amount the same distance from the right edge.',
+    'Use one date style, Central, on every row.',
+    'Keep the empty state to one sentence.',
+    'Match the tap highlight to the open cards.',
+    'Keep a multi-leg note from listing every leg. Two is enough.',
+    'Hold the filter you chose while the minute refresh runs.',
+    'Keep the row height even when the name is one word or four.',
+    'Leave the win and loss words off the left side, where the photo sits.',
+    'Sort the newest settle first, and keep that order when two slips share a minute.',
+    'Update the amount if a settle is corrected, without duplicating the row.',
+    'Drop a hidden slip from this list as soon as it is hidden.',
+    'Keep a test slip out even if it settled in the last hour.',
+    'Use the same net the person card uses for that slip.',
+    'Reload the note after an edit without scrolling the list back to the top.',
+    'Match the photo key to the bettor, not to the person who typed the command.',
+    'Keep yesterday in view until the Central day rolls.',
+    'Do not show a slip here while it is still open.',
+    'Fill the note from the title and at most two legs that are not already in the title.',
+    'Hold the list steady if the refresh returns the same rows.',
+    'Open the right slip when two people cashed the same play.',
+    'Keep a push at zero net, not as a win.',
+    'Show the row for the whole Central day, then let it age into the longer history.',
+    'Avoid a blank note. Use the play name when the legs add nothing.',
+    'Keep the filter counts honest after a slip is voided.',
+    'Retry a broken photo once, then show the initial.',
+    'Keep the deep link to the slip the same id the Discord post used.',
+    'Do not reorder rows while a finger is down on the list.',
+    'Leave a settled slip in the list after the member opens it and comes back.',
+    'Keep the week total in the same units as the rows.',
+    'Ignore a duplicate settle post so the list does not show the slip twice.',
+    "Keep the signed-in member's own photo on their row, and everyone else's too.",
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -2656,7 +2746,7 @@ ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 ASK_MODEL = env("ASK_MODEL", "claude-sonnet-5-5")
 ASK_DAILY_LIMIT = env_int("ASK_DAILY_LIMIT", 40)
-ASK_COOLDOWN_SECONDS = env_int("ASK_COOLDOWN_SECONDS", 20)
+ASK_COOLDOWN_SECONDS = env_int("ASK_COOLDOWN_SECONDS", 4)
 MEMBERS_INTENT = env("MEMBERS_INTENT", "") in ("1", "true", "yes", "on")
 DB_PATH = env("DB_PATH", "picks.db")
 
@@ -3512,6 +3602,20 @@ def parse_money(text: str) -> float:
 
 def clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def clip_word(text: str, limit: int) -> str:
+    """Shorten on a space so a name is not cut in half."""
+    text = re.sub(r"\s+", " ", (text or "").replace("\n", " ")).strip()
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    if " " in head:
+        head = head.rsplit(" ", 1)[0]
+    head = head.rstrip(" .,;:-")
+    if len(head) < 8:
+        head = text[:limit].rstrip()
+    return (head or text[:limit].rstrip()) + "…"
 
 
 def local_day(iso: str) -> str:
@@ -6083,6 +6187,20 @@ LEAGUES = [  # (pattern in the pick's sport, ESPN path, extra query params)
     (r"ligue 1", "soccer/fra.1", {}),
     (r"liga ?mx", "soccer/mex.1", {}),
     (r"champions league|\bucl\b", "soccer/uefa.champions", {}),
+    (r"europa league|\buel\b", "soccer/uefa.europa", {}),
+    (r"\bnwsl\b", "soccer/usa.nwsl", {}),
+    (r"\befl\b|english championship", "soccer/eng.2", {}),
+    (r"eredivisie", "soccer/ned.1", {}),
+    (r"liga portugal|\bprimeira\b", "soccer/por.1", {}),
+    (r"scottish premiership|\bspl\b", "soccer/sco.1", {}),
+    (r"\bbrasileir", "soccer/bra.1", {}),
+    (r"\bserie b\b", "soccer/ita.2", {}),
+    (r"ligue 2", "soccer/fra.2", {}),
+    (r"segunda|la ?liga 2", "soccer/esp.2", {}),
+    (r"2\. bundesliga|bundesliga 2", "soccer/ger.2", {}),
+    (r"women'?s college basketball|\bncaaw\b", "basketball/womens-college-basketball", {}),
+    (r"college baseball", "baseball/college-baseball", {}),
+    (r"college hockey", "hockey/mens-college-hockey", {}),
 ]
 NO_FREE_LOOKUP = r"esports|\bcs2?\b|counter|valorant|league of legends|dota|tennis|\bwta\b|\batp\b|golf|ufc|mma|boxing|f1|nascar|politic|crypto"
 DEFAULT_LEAGUES = ["football/nfl", "basketball/nba", "baseball/mlb", "hockey/nhl", "football/college-football"]
@@ -6106,7 +6224,7 @@ def leagues_for(sport: Optional[str]) -> list[str]:
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
            "Chrome/126.0.0.0 Safari/537.36")
 HTTP_RETRIES = 2              # extra tries after the first, on 429 / 5xx / timeouts / dropped connections
-HTTP_HOST_LIMIT = 6           # requests in flight per host
+HTTP_HOST_LIMIT = 10          # requests in flight per host
 _HTTP: dict = {"session": None, "loop": None, "sems": {}}
 DATA_HEALTH: dict[str, dict] = {}   # host -> {ok, fail, streak, status, last_ok, last_fail, fail_since}
 
@@ -6131,10 +6249,10 @@ def _http_session():
     if sess is None or getattr(sess, "closed", False) or _HTTP["loop"] is not loop:
         import aiohttp  # comes with discord.py
         sess = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=12, connect=5, sock_read=10),
+            timeout=aiohttp.ClientTimeout(total=8, connect=3, sock_read=6),
             headers={"User-Agent": HTTP_UA, "Accept": "application/json, text/plain, */*",
                      "Accept-Language": "en-US,en;q=0.9"},
-            connector=aiohttp.TCPConnector(limit=40, ttl_dns_cache=300))
+            connector=aiohttp.TCPConnector(limit=64, ttl_dns_cache=300))
         _HTTP.update(session=sess, loop=loop, sems={})
     return sess
 
@@ -6195,7 +6313,7 @@ async def _http_get_json(url: str, params: dict, session=None) -> dict:
     for attempt in range(HTTP_RETRIES + 1):
         if attempt:
             hint = getattr(last, "retry_after", None)
-            wait = hint if hint is not None and 0 <= hint <= 5 else 0.6 * 2 ** (attempt - 1)
+            wait = hint if hint is not None and 0 <= hint <= 5 else 0.25 * 2 ** (attempt - 1)
             await asyncio.sleep(wait + (attempt * 0.137) % 0.3)
         try:
             async with _http_sem(host):
@@ -6283,26 +6401,26 @@ async def fetch_scoreboard(path: str, day: datetime, params: Optional[dict] = No
         ttl = scoreboard_ttl(events)
     except Exception:
         log.warning("Scoreboard lookup failed for %s %s", path, key[1])
-        events, ttl = [], 180
+        events, ttl = [], 45
     _score_cache[key] = (time.monotonic() + ttl, events)
     return events
 
 
 def scoreboard_ttl(events: list[dict], now: Optional[datetime] = None) -> int:
-    """Seconds to keep a day's scoreboard: 1 minute while a game is on, 2 when one starts within 2 hours (or
+    """Seconds to keep a day's scoreboard: 20s while a game is on, 45s when one starts within 2 hours (or
     should have started), 15 minutes when everything left is later than that, 6 hours once everything is final,
     10 minutes for a day with no games (a game added late, or a feed that answered empty)."""
     now = now or datetime.now(timezone.utc)
     if not events:
         return 600
     if any(e.get("state") == "in" for e in events):
-        return 60
+        return 20
     pending = [e for e in events if not e.get("final")]
     if not pending:
         return 6 * 3600
     starts = [event_time(e) for e in pending]
     if any(t is None or t <= now + timedelta(hours=2) for t in starts):
-        return 120          # starting soon, or should have started (ESPN can lag a few minutes)
+        return 45           # starting soon, or should have started (ESPN can lag a few minutes)
     return 900
 
 
@@ -12372,6 +12490,8 @@ def dashboard_data(guild_id: int) -> dict:
                         "side": clip(p["kalshi_side"] or "", 8)})
     return {"version": BOT_VERSION, "update": ROADMAP_NOW, "season": season["name"] if season else None, "people": dashboard_people(guild_id),
             "settled24": dashboard_recent(guild_id),
+            "settledWeek": dashboard_settled_week(guild_id),
+            "lastSettle": dashboard_last_settle(guild_id),
             "leaderboard": board(season_stats(guild_id, season) if season else compute_stats(guild_id)),
             "alltime": board(compute_stats(guild_id)),
             "series": {k: [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in v] for k, v in series.items()},
@@ -20531,35 +20651,166 @@ def bettor_face_key(p) -> str:
     return key if key.isdigit() else ""
 
 
+_PLAY_ONLY = re.compile(
+    r"^(?:\d+[-\s]*)?(?:flex|power|parlay|slip|entry|picks?|play)(?:\s+(?:flex|power|parlay|play|entry))?$",
+    re.I,
+)
+
+
 def slip_blurb(p) -> str:
-    """A short line for Just settled: the slip title, then a couple of legs."""
+    """The sheet's play name, plus at most two legs that are not already in it."""
     raw = re.sub(r"\s+", " ", (shown_desc(p) or "").replace("\n", " ")).strip()
     if raw.lower() in {"slip", "hidden pick"} or raw.startswith("🔒"):
         raw = ""
     legs = []
     try:
-        for row in get_legs(p["id"])[:4]:
+        for row in get_legs(p["id"]):
             text = re.sub(r"\s+", " ", str(row["text"] or "").replace("\n", " ")).strip()
             if text and text.lower() not in raw.lower():
-                legs.append(clip(text, 36))
+                legs.append(text)
+            if len(legs) >= 2:
+                break
     except Exception:
         legs = []
-    title = clip(raw, 42) if raw else ""
-    if title and legs:
-        return clip(title + " · " + ", ".join(legs[:2]), 88)
-    if legs:
-        return clip(", ".join(legs[:3]), 88)
-    return title
+    if raw:
+        parts = [raw, *legs[:2]]
+    elif legs:
+        parts = legs[:2]
+    else:
+        parts = ["Slip #" + str(p["id"])]
+    book = str(p["platform"] or "").strip()
+    if book and _PLAY_ONLY.match(parts[0] or ""):
+        parts[0] = book + " · " + parts[0]
+    return clip_word(" · ".join(parts), 140) or ("Slip #" + str(p["id"]))
+
+
+def dashboard_settled_week(guild_id: int) -> dict:
+    """Count, wins, losses, and net since Monday, in the same dollars as a settled row."""
+    wins = losses = n = 0
+    net = 0.0
+    try:
+        rows = db().execute(
+            """SELECT status, cost, returned, hidden, revealed_at, test FROM picks
+               WHERE guild_id = ? AND status != 'open' AND settled_at >= ?""",
+            (guild_id, iso(week_start()))).fetchall()
+    except Exception:
+        rows = []
+    for p in rows:
+        if unrevealed_hidden(p) or pick_is_test(p):
+            continue
+        n += 1
+        if p["status"] == "win":
+            wins += 1
+        elif p["status"] == "loss":
+            losses += 1
+        net += pick_net(p)
+    return {"n": n, "wins": wins, "losses": losses, "net": round(net, 2)}
+
+
+def dashboard_last_settle(guild_id: int):
+    """The latest real settle, so an empty today can name it."""
+    try:
+        rows = db().execute(
+            """SELECT id, bettor_name, settled_at, hidden, revealed_at, test FROM picks
+               WHERE guild_id = ? AND status != 'open'
+               ORDER BY settled_at DESC, id DESC LIMIT 8""", (guild_id,)).fetchall()
+    except Exception:
+        return None
+    for p in rows:
+        if unrevealed_hidden(p) or pick_is_test(p):
+            continue
+        return {"id": p["id"], "who": clip(p["bettor_name"] or "", 40),
+                "when": local_day(p["settled_at"]) if p["settled_at"] else "",
+                "stamp": local_stamp(p["settled_at"] or "")}
+    return None
 
 
 def dashboard_recent(guild_id: int) -> list[dict]:
-    day = iso(datetime.now(timezone.utc) - timedelta(hours=24))
-    return [{"id": p["id"], "who": p["bettor_name"], "key": bettor_face_key(p), "status": p["status"],
-             "net": round(pick_net(p), 2), "cost": p["cost"], "payout": p["payout"],
-             "what": "Slip #" + str(p["id"]), "sum": slip_blurb(p)}
-            for p in db().execute("SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ? AND "
-                                  "(hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL) ORDER BY settled_at DESC "
-                                  "LIMIT 12", (guild_id, day))]
+    """Today and yesterday in Central. Hidden and test slips stay off the list."""
+    now = datetime.now(TZ)
+    start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    today = now.strftime("%Y-%m-%d")
+    yday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    rows = db().execute(
+        """SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ?
+           AND (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)
+           AND (test IS NULL OR test = 0)
+           ORDER BY settled_at DESC, id DESC LIMIT 24""",
+        (guild_id, iso(start))).fetchall()
+    names = {}
+    for person in db().execute(
+            "SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND bettor_id IS NOT NULL", (guild_id,)):
+        names[person["bettor_id"]] = person["bettor_name"]
+    ids = [p["id"] for p in rows]
+    legmap: dict[int, list] = {}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        for leg in db().execute(
+                f"SELECT pick_id, status, text FROM legs WHERE pick_id IN ({marks}) ORDER BY idx", ids):
+            legmap.setdefault(int(leg["pick_id"]), []).append((leg["status"] or "", leg["text"] or ""))
+    out = []
+    for p in rows:
+        if pick_is_test(p) or unrevealed_hidden(p):
+            continue
+        legs = legmap.get(int(p["id"])) or []
+        hits = sum(1 for st, _text in legs if st == "hit")
+        miss = next((clip_word(text, 80) for st, text in legs if st == "miss" and str(text).strip()), "")
+        cleared = next((clip_word(text, 80) for st, text in legs if st == "hit" and str(text).strip()), "")
+        player = ""
+        source = miss if p["status"] == "loss" else cleared if p["status"] == "win" else ""
+        if source:
+            try:
+                player = dash_prop_name(source) or ""
+            except Exception:
+                player = ""
+        stamp = local_stamp(p["settled_at"] or "")
+        if stamp == today:
+            day = "today"
+        elif stamp == yday:
+            day = "yesterday"
+        else:
+            day = local_day(p["settled_at"]) if p["settled_at"] else ""
+        clock = ""
+        at = 0
+        try:
+            when = datetime.fromisoformat(p["settled_at"])
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            at = int(when.timestamp())
+            if when >= hour_ago:
+                clock = when.astimezone(TZ).strftime("%I:%M %p").lstrip("0")
+        except Exception:
+            clock = ""
+        logger = int(p["logged_by"] or 0)
+        bettor = int(p["bettor_id"] or 0) if str(p["bettor_id"] or "").isdigit() else 0
+        filer = ""
+        if logger and bettor and logger != bettor:
+            who = names.get(logger) or ""
+            if who and who != p["bettor_name"]:
+                filer = clip(who, 40)
+        blob = shown_desc(p) or ""
+        if re.search(r"\bflex\b", blob, re.I):
+            pay = "Flex"
+        elif re.search(r"\bpower\b", blob, re.I):
+            pay = "Power"
+        else:
+            pay = ""
+        sheet = str(p["bettor_key"] or "")
+        out.append({
+            "id": p["id"], "who": p["bettor_name"],
+            "key": sheet if sheet.isdigit() else bettor_face_key(p),
+            "status": p["status"], "net": round(pick_net(p), 2),
+            "cost": p["cost"], "payout": p["payout"],
+            "what": shown_desc(p) or ("Slip #" + str(p["id"])), "sum": slip_blurb(p),
+            "sport": clip(p["sport"] or "", 24), "book": clip(p["platform"] or "", 24),
+            "stamp": stamp, "day": day, "at": at, "hits": hits, "nlegs": len(legs),
+            "miss": miss if p["status"] == "loss" else "",
+            "cleared": cleared if p["status"] == "win" else "",
+            "player": player, "filer": filer, "clock": clock, "pay": pay,
+            "short": bool(p["status"] == "loss" and len(legs) >= 2 and hits == len(legs) - 1),
+        })
+    return out
 
 
 # ==========================================================================
@@ -24354,6 +24605,7 @@ def dash_game(ev: dict) -> Optional[dict]:
 
 _DASH_LIVE_CACHE: dict = {}
 _BIO_CACHE: dict = {}
+DASH_LIVE_WAIT = 2            # seconds the live board will pause for a cold score lookup
 
 
 async def dash_live(guild_id: int) -> dict:
@@ -24361,17 +24613,24 @@ async def dash_live(guild_id: int) -> dict:
     slips have legs on, with scores. Cached progress only (a few seconds at most). Names, never amounts."""
     now = time.monotonic()
     hit = _DASH_LIVE_CACHE.get(guild_id)
-    if hit and now - hit[0] < 8:
+    if hit and now - hit[0] < 3:
         return hit[1]
     since = iso(datetime.now(timezone.utc) - timedelta(days=AUTOPILOT_DAYS))
     picks = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'open' AND (hidden IS NULL OR hidden = 0) "
                          "AND created_at >= ? ORDER BY id DESC LIMIT ?", (guild_id, since, DASH_TICKER_PICKS)).fetchall()
     if not picks:
         return {"ticker": [], "games": []}
-    # Wait up to 10s, use whatever finished, and let the rest keep running so the next refresh has them.
+    # A warm progress cache answers at once. A cold one waits at most DASH_LIVE_WAIT, then uses whatever
+    # finished. The rest keep running so the next refresh has them.
     # (Cancelling everything on a cold cache used to leave the Live tab empty while slips were on the board.)
+    def _progress_fresh(p) -> bool:
+        cached = _PROGRESS_CACHE.get(p["id"])
+        return bool(cached and cached[0] > time.monotonic())
     tasks = [asyncio.ensure_future(cached_progress(p)) for p in picks]
-    done, _ = await asyncio.wait(tasks, timeout=10)
+    if all(_progress_fresh(p) for p in picks):
+        done = set()
+    else:
+        done, _ = await asyncio.wait(tasks, timeout=DASH_LIVE_WAIT)
     lists = []
     for p, t in zip(picks, tasks):
         if t in done and not t.cancelled() and t.exception() is None:
@@ -32662,7 +32921,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-132';"
+    "const CACHE='pb-shell-134';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -32915,6 +33174,24 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
 .oslip .oshare,.oslip .ohide{border:0;background:transparent;color:var(--faint);font:inherit;font-size:12px;font-weight:700;cursor:pointer;padding:0}
 .orisk{text-align:center;font-weight:700;font-variant-numeric:tabular-nums;margin:0 0 8px}
 .oslip .owait{font-size:12.5px;color:var(--muted)}
+.settlefilters{display:flex;flex-direction:column;gap:6px;margin:0 0 8px}
+.settlebar{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto}
+@media (max-width:720px){.settlebar{flex-wrap:wrap;overflow:visible}}
+.schip{border:1px solid var(--line);background:var(--card2);color:var(--muted);border-radius:999px;padding:4px 10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.schip.on{background:var(--brand);color:#fff;border-color:transparent}
+.row.slip.srow{grid-template-columns:36px minmax(0,1fr) auto;padding:12px 2px;align-items:center}
+.row.slip.srow .sbody{min-width:0}
+.row.slip.srow .nm{font-weight:700;min-height:1.25em}
+.row.slip.srow .snote{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;min-height:2.6em;margin-bottom:4px}
+.row.slip.srow .smeta{margin-top:3px}
+.row.slip.srow .net{white-space:nowrap;text-align:right;font-weight:750}
+.row.slip.srow img.ava,.row.slip.srow .av{width:36px;height:36px;min-width:36px;border-radius:50%;box-shadow:0 0 0 2px var(--gold)}
+.sright{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.stime{color:var(--faint);font-size:12px;font-weight:650}
+.sjumps{display:flex;gap:8px;flex-wrap:wrap}
+.sjump{color:var(--faint);font-weight:700;font-size:12px}
+.sweektot{margin:10px 0 0;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.oslip:active,.row.slip.srow:active{background:color-mix(in srgb,var(--brand) 16%,transparent)}
 .oslip .ophoto{display:flex;flex:none;cursor:pointer}
 .minelab{display:flex;justify-content:center;align-items:center;gap:8px;font-weight:700;margin:2px 0 8px}
 .minelab .mc{font-variant-numeric:tabular-nums;color:var(--muted)}
@@ -33433,13 +33710,96 @@ function renderLive(el,d){
   later.length?card('Later today & finals','',String(later.length),h('div',{class:'glist'},later.map(gameLine))):null,
   L&&L.games.length?card('The /live picture','s6',L.updated?'Updated '+L.updated:null,shot(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
   card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
-  card('Just settled','',null,settled.length?h('div',{class:'rows'},settled.map(settledRow))
-   :empty('Nothing settled in the last day','Fresh results land here.')))}
-function settledRow(p){const note=p.sum||'';const meta='Slip #'+p.id+(p.when?' · '+p.when:' · settled today');
- return h('button',{class:'row slip',type:'button',onclick:()=>go('#/s/'+p.id)},face(p.key,p.who),
-  h('div',{style:'min-width:0'},h('div',{class:'nm',text:p.who||'Slip'}),
-   note?h('div',{class:'sub',text:note}):null,h('div',{class:'sub faint',text:meta})),
-  p.net==null?h('span',{class:'net faint',text:''}):h('span',{class:'net '+tone(p.net)},money(p.net)))}
+  settleCard(d,settled))}
+function clipWord(text,limit){const s=String(text||'').replace(/\s+/g,' ').trim();
+ if(s.length<=limit)return s;let head=s.slice(0,limit);const i=head.lastIndexOf(' ');
+ if(i>12)head=head.slice(0,i);head=head.replace(/[ .,;:-]+$/,'');return (head||s.slice(0,limit))+'…'}
+function settleState(){if(!S.sd)S.sd='all';if(!S.sr)S.sr='all';if(S.ss==null)S.ss='';if(S.sb==null)S.sb='';}
+function settlePick(p,over){settleState();
+ const sd=over&&over.sd!=null?over.sd:S.sd,sr=over&&over.sr!=null?over.sr:S.sr;
+ const ss=over&&over.ss!=null?over.ss:S.ss,sb=over&&over.sb!=null?over.sb:S.sb;
+ if(sd==='today'&&p.day!=='today')return false;
+ if(sd==='yesterday'&&p.day!=='yesterday')return false;
+ if(sr==='win'&&p.status!=='win')return false;
+ if(sr==='loss'&&p.status!=='loss')return false;
+ if(sr==='push'&&p.status!=='push')return false;
+ if(ss&&p.sport!==ss)return false;
+ if(sb&&p.book!==sb)return false;
+ return true}
+function settleChip(on,label,n,fn){return h('button',{type:'button',class:'schip'+(on?' on':''),onclick:fn},
+ label+(n==null?'':' '+n))}
+function settleFilters(rows){settleState();
+ const days=[['all','All'],['today','Today'],['yesterday','Yesterday']];
+ const results=[['all','All'],['win','Wins'],['loss','Losses'],['push','Pushes']];
+ const books=[...new Set(rows.map(p=>p.book).filter(Boolean))];
+ const sports=[...new Set(rows.map(p=>p.sport).filter(Boolean))];
+ const n=over=>rows.filter(p=>settlePick(p,over)).length;
+ return h('div',{class:'settlefilters'},
+  h('div',{class:'settlebar'},days.map(([k,t])=>settleChip(S.sd===k,t,n({sd:k}),()=>{S.sd=k;render()})),
+   books.map(b=>settleChip(S.sb===b,b,n({sb:b}),()=>{S.sb=S.sb===b?'':b;render()}))),
+  h('div',{class:'settlebar'},results.map(([k,t])=>settleChip(S.sr===k,t,n({sr:k}),()=>{S.sr=k;render()})),
+   sports.map(s=>settleChip(S.ss===s,String(s).toUpperCase(),n({ss:s}),()=>{S.ss=S.ss===s?'':s;render()}))))}
+function reboundSet(rows){const by={};
+ for(const p of rows){const k=String(p.key||p.who||'')+'|'+(p.stamp||'');(by[k]=by[k]||[]).push(p)}
+ const ids={};
+ for(const k in by){const xs=by[k].slice().sort((a,b)=>(a.at||0)-(b.at||0)||a.id-b.id);let lost=false;
+  for(const p of xs){if(p.status==='loss')lost=true;else if(p.status==='win'&&lost)ids[p.id]=1}}
+ return ids}
+function settledNote(p,mixed){
+ let note=String(p.sum||p.what||('Slip #'+p.id));
+ if(mixed&&p.sport&&note.toUpperCase().indexOf(String(p.sport).toUpperCase())<0)note=String(p.sport).toUpperCase()+' · '+note;
+ if(p.pay&&note.toLowerCase().indexOf(String(p.pay).toLowerCase())<0)note+=' · '+p.pay;
+ if(p.cost!=null&&p.payout!=null&&+p.payout>0&&note.indexOf('paid ')<0)note+=' · risk '+cash(p.cost)+' · paid '+cash(p.payout);
+ return clipWord(note,150)||('Slip #'+p.id)}
+function settledRow(p,ctx){const mixed=ctx&&ctx.mixed,reb=ctx&&ctx.reb;
+ const note=settledNote(p,mixed);
+ const n=+p.nlegs||0,hits=+p.hits||0;
+ const day=p.day==='today'?'today':p.day==='yesterday'?'yesterday':(p.day||'');
+ const quiet=p.status==='void'?'Void':(p.status==='push'||(+p.net===0&&p.status!=='win'&&p.status!=='loss'&&p.status!=='void'))?'Push':'';
+ const amtClass=p.status==='push'||p.status==='void'?'flat':tone(p.net);
+ const week=/^\d+$/.test(String(p.key||''))?h('span',{class:'sjump',onclick:e=>{e.preventDefault();e.stopPropagation();go('#/p/'+p.key)}},'Week'):null;
+ const player=p.player?h('span',{class:'sjump',onclick:e=>{e.preventDefault();e.stopPropagation();openNamed(p.player)}},p.player):null;
+ return h('button',{class:'row slip srow','data-id':String(p.id),type:'button',onclick:()=>go('#/s/'+p.id)},
+  face(p.key,p.who),
+  h('div',{class:'sbody'},
+   h('div',{class:'nm',text:p.who||'Slip'}),
+   h('div',{class:'sub snote',text:note}),
+   n?h('div',{class:'sub faint',text:hits+' of '+n+' legs hit'}):null,
+   p.status==='loss'&&p.miss?h('div',{class:'sub',text:p.miss}):null,
+   p.status==='win'&&p.cleared?h('div',{class:'sub',text:p.cleared}):null,
+   p.short?h('div',{class:'sub',text:'One leg short of cashing.'}):null,
+   p.filer?h('div',{class:'sub',text:'Filed under '+p.filer}):null,
+   reb&&reb[p.id]?h('div',{class:'sub faint',text:'Rebound'}):null,
+   quiet?h('div',{class:'sub faint',text:quiet}):null,
+   h('div',{class:'sub faint smeta',text:'Slip #'+p.id+(day?' · '+day:'')+(p.book?' · '+p.book:'')}),
+   h('div',{class:'sjumps'},week,player)),
+  h('div',{class:'sright'},p.clock?h('span',{class:'stime',text:p.clock}):null,
+   p.net==null?h('span',{class:'net faint',text:''}):h('span',{class:'net '+amtClass},money(p.net))))}
+function settleWeek(w){if(!w)return null;
+ const win=w.wins===1?'1 win':(w.wins||0)+' wins';
+ const loss=w.losses===1?'1 loss':(w.losses||0)+' losses';
+ return h('p',{class:'sweektot',text:'This week · '+(w.n||0)+' · '+win+' · '+loss+' · '+money(w.net||0)})}
+function settleEmpty(rows){const last=S.data&&S.data.lastSettle;
+ if(!rows.length){
+  if(last&&last.when)return empty('Last settle was '+last.when+(last.who?', '+last.who:'')+'.');
+  return empty('Nothing settled today or yesterday.')}
+ if(S.sd==='today'){
+  if(last&&last.when)return empty('Last settle was '+last.when+(last.who?', '+last.who:'')+'.');
+  return empty('Nothing settled today.')}
+ return empty('Nothing in this filter.')}
+function settleCard(d,rows){rows=rows||[];
+ const shown=rows.filter(p=>settlePick(p));
+ const mixed=new Set(rows.map(p=>p.sport).filter(Boolean)).size>1;
+ const reb=reboundSet(rows);
+ const todayEmpty=!rows.some(p=>p.day==='today');
+ const last=d.lastSettle;
+ const line=todayEmpty&&last&&last.when&&shown.length?h('p',{class:'hint',text:'Last settle was '+last.when+(last.who?', '+last.who:'')+'.'}):null;
+ const body=shown.length?h('div',{class:'rows srows'},shown.map(p=>settledRow(p,{mixed:mixed,reb:reb}))):settleEmpty(rows);
+ return card('Just settled','',String(shown.length),settleFilters(rows),line,body,settleWeek(d.settledWeek))}
+if(!S._sfinger){S._sfinger=1;
+ addEventListener('pointerdown',e=>{if(e.target&&e.target.closest&&e.target.closest('.srows'))S.finger=1});
+ addEventListener('pointerup',()=>{const wait=S.paintWait;S.finger=0;if(wait){S.paintWait=0;render()}});
+ addEventListener('pointercancel',()=>{const wait=S.paintWait;S.finger=0;if(wait){S.paintWait=0;render()}})}
 function crewTile(p,d){const link=/^\d+$/.test(String(p.key||''));
  return h(link?'button':'div',{class:'tile'+(p.role?' team':''),type:link?'button':null,onclick:link?()=>go('#/p/'+p.key):null},
  imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
@@ -33880,7 +34240,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=132') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=134') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -34154,6 +34514,7 @@ body.v4 .iconbtn.x{width:44px;height:44px}
 body.v4 .looktile.on{outline:3px solid var(--gold)}
 body.v4 img.ava{width:36px;height:36px;border-radius:50%;object-fit:cover;display:block;background:var(--card2);box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 45%,transparent)}
 body.v4 .row.slip img.ava,body.v4 .row.slip .av{width:40px;height:40px;border-radius:50%}
+body.v4 .row.slip.srow img.ava,body.v4 .row.slip.srow .av{width:36px;height:36px;min-width:36px;border-radius:50%;box-shadow:0 0 0 2px var(--gold)}
 body.v4 .nrow .nava{width:48px;height:48px;border-radius:14px;box-shadow:none}
 body.v4 .ph img.ava{width:56px;height:56px}
 body.v4 .weeklist{display:flex;flex-direction:column}
@@ -34792,10 +35153,12 @@ function arrangeHome(el){if(!el)return;const order=homeOrder();
         1)
     html = html.replace(
         "function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
-        "function render(){if(!S.data)return;const hold=S.hold;S.hold=0;let id='';"
-        "if(hold){let best=null,dist=1e9;for(const c of document.querySelectorAll('.oslip')){const t=Math.abs(c.getBoundingClientRect().top-96);if(t<dist){dist=t;best=c}}id=best&&best.dataset.id||''}"
+        "function render(){if(!S.data)return;if(S.finger&&S.tab==='live'){S.paintWait=1;return}"
+        "const hold=S.hold;S.hold=0;let id='',kind='';"
+        "if(hold){let best=null,dist=1e9;for(const c of document.querySelectorAll('.oslip,.srow')){const t=Math.abs(c.getBoundingClientRect().top-96);if(t<dist){dist=t;best=c}}"
+        "if(best&&dist<280){id=best.dataset.id||'';kind=best.classList.contains('srow')?'srow':'oslip'}}"
         "renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);if(S.tab==='overview')arrangeHome(el);paintFind();"
-        "if(hold&&id){const back=document.querySelector('.oslip[data-id=\"'+id+'\"]');if(back)window.scrollBy(0,back.getBoundingClientRect().top-96)}}",
+        "if(hold&&id&&kind){const back=document.querySelector('.'+kind+'[data-id=\"'+id+'\"]');if(back)window.scrollBy(0,back.getBoundingClientRect().top-96)}}",
         1)
     html = html.replace(
         "function renderPeople(el,d){\n put(el,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>",
@@ -36043,7 +36406,7 @@ def staff_ops(uid: int) -> dict:
     servers = []
     try:
         health = dash30_health()
-        for f in (health.get("feeds") or [])[:18]:
+        for f in (health.get("feeds") or [])[:48]:
             st = f.get("state") or "idle"
             detail = []
             if f.get("last_ok"):
@@ -36055,7 +36418,7 @@ def staff_ops(uid: int) -> dict:
             if f.get("code"):
                 detail.append("http " + str(f["code"]))
             if st == "idle":
-                detail.append("waiting for a call")
+                detail.append("added · waiting for a call")
             elif st == "down":
                 detail.append("offline")
             elif st in ("shaky", "warn"):
@@ -36070,12 +36433,17 @@ def staff_ops(uid: int) -> dict:
     except Exception:
         pass
     try:
-        for g in list(getattr(bot, "guilds", None) or [])[:12]:
+        guilds = list(getattr(bot, "guilds", None) or [])
+        guilds.sort(key=lambda g: (0 if str(getattr(g, "id", "")) == str(GUILD_ID) else 1,
+                                   (getattr(g, "name", None) or "").lower()))
+        for g in guilds[:48]:
             n = getattr(g, "member_count", None) or len(getattr(g, "members", []) or [])
             chans = len(getattr(g, "text_channels", []) or [])
+            home = str(getattr(g, "id", "")) == str(GUILD_ID) and bool(GUILD_ID)
+            extra = " · home server, commands sync here" if home else ""
             servers.append({"name": clip(getattr(g, "name", None) or str(getattr(g, "id", "")), 40),
                             "state": "ok", "kind": "discord",
-                            "detail": f"{n} members · {chans} text channels · id {g.id}", "ago": ""})
+                            "detail": f"{n} members · {chans} text channels · id {g.id}{extra}", "ago": ""})
     except Exception:
         pass
     try:
@@ -36198,7 +36566,7 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap">
 <section class="card lead" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
- <p class="muted">Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
+ <p class="muted">Every Discord server is listed, and each added feed shows even before the first call. Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
 <div class="g3">
  <section class="card lead"><h2>Screenshot reads · 7 days</h2><div class="reads" id="reads"></div><p class="muted" id="readsnote"></p></section>
  <section class="card lead"><h2>AI pool · today</h2><div id="pool"></div>
@@ -36303,7 +36671,9 @@ async function load(){const r=await fetch('/api/staff.json',{credentials:'same-o
     (s.id?h('a',{href:'/#/s/'+s.id,text:'slip #'+s.id}):h('span',{class:'muted',text:s.how||''})))):
    h('p',{class:'muted',text:'Reads show up here as a line. The picture stays in Discord.'})));
  $('#readsnote').textContent=(R.failed||R.unsure)?'Check the not-sure pile.':'No problem reads lately.';
- put($('#servers'),(d.servers||[]).length?(d.servers||[]).map(s=>h('div',{class:'item'},
+ const feedRows=d.servers||[];const nDisc=feedRows.filter(s=>s.kind==='discord').length,nFeed=feedRows.filter(s=>s.kind==='feed').length;
+ put($('#servers'),h('p',{class:'muted',text:nDisc+' Discord servers · '+nFeed+' data feeds'}),
+  feedRows.length?feedRows.map(s=>h('div',{class:'item'},
   h('i',{class:'lamp '+(s.state||'idle')}),h('div',null,h('b',{text:s.name+(s.kind==='discord'?' · Discord':s.kind==='bot'?' · robot':'')}),
    h('span',{class:'d',text:s.detail||s.ago||s.state||''})))):
   h('p',{class:'muted',text:'Feeds show up once the bot has called them.'}));
@@ -36873,13 +37243,13 @@ def sec_staff_only(fn):
 
 _SEC_BUCKETS: dict[tuple, list] = {}
 SEC_LIMITS = {               # kind: (burst, seconds per refill)
-    "render": (5, 12),       # Pillow / matplotlib images
-    "gallery": (8, 10),      # /art: small stock images, people flip through several in a row
-    "lookup": (8, 6),        # ESPN-heavy lookups
+    "render": (6, 6),        # Pillow / matplotlib images
+    "gallery": (12, 3),      # /art: small stock images, people flip through several in a row
+    "lookup": (12, 3),       # ESPN-heavy lookups
     "claude": (3, 60),       # a paid Claude call per use
     "file": (2, 60),         # exports, imports, data downloads
-    "slip": (10, 30),        # reading a slip (screenshot or typed) with Claude
-    "button": (6, 5),        # refresh buttons anyone can press
+    "slip": (8, 12),         # reading a slip (screenshot or typed) with Claude
+    "button": (10, 2),       # refresh buttons anyone can press
     "report": (3, 300),      # disputes: each one posts in the mod channel
     "post": (3, 60),         # starts something that posts a new public message (a sweat, trivia, a guessing game)
 }
@@ -37741,7 +38111,11 @@ async def track_status_in(leg: dict, path: str, ev: dict, cand: dict, stat_key: 
 
 ESPN_SCORES_HOST = "site.api.espn.com"
 HEALTH_NAMES = {"site.api.espn.com": "ESPN scores", "site.web.api.espn.com": "ESPN search",
-                "sports.core.api.espn.com": "ESPN stats", "api.elections.kalshi.com": "Kalshi"}
+                "sports.core.api.espn.com": "ESPN stats", "api.elections.kalshi.com": "Kalshi",
+                "geocoding-api.open-meteo.com": "Open-Meteo places", "api.open-meteo.com": "Open-Meteo forecast",
+                "liquipedia.net": "Liquipedia", "opentdb.com": "Trivia",
+                "api.groq.com": "Groq", "api.x.ai": "xAI", "openrouter.ai": "OpenRouter",
+                "generativelanguage.googleapis.com": "Gemini", "api.anthropic.com": "Claude"}
 TRACK_DOWN_TEXT = "📡 Live data is down: ESPN isn't answering, slips will catch up when it's back."
 TRACK_BACK_TEXT = "📡 Live data is back: ESPN is answering again and slips are catching up now."
 
@@ -46450,7 +46824,7 @@ def dash30_health() -> dict:
     now = time.time()
     feeds = [{"name": "Dashboard", "state": "ok", "ok": 1, "fail": 0, "last_ok": "just now", "code": None}]
     hosts = list(HEALTH_NAMES) + sorted(h for h in DATA_HEALTH if h not in HEALTH_NAMES)
-    for host in hosts[:20]:
+    for host in hosts[:40]:
         h = DATA_HEALTH.get(host)
         name = clip(HEALTH_NAMES.get(host) or DASH30_HOSTS.get(host) or host, 40)
         if not h:
