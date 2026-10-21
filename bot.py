@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.53"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.54"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -191,6 +191,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.51", "Open slips show the slip number, the sport when the title leaves it out, and your open risk above the cards. Mine puts the soonest start first."),
     ("1.52", "Just settled can be filtered by a win, a loss, or a push. A row shows how many legs hit, and a test slip stays off that list."),
     ("1.53", "Questions and the live board answer sooner. Staff HQ lists every Discord server and the data feeds that were added. More leagues are on the scoreboards, and a game in play refreshes sooner."),
+    ("1.54", "A new upload is posted in the mods-only record channel too, and in a channel named for the hidden record. A channel that missed it gets the note on the next start."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -229,6 +230,7 @@ MEMBER_NEWS = [
     ("1.51", "Open slips show the slip number and your open risk. Mine lists the soonest start first."),
     ("1.52", "Just settled can be filtered by a win, a loss, or a push. A row shows how many legs hit, and a test slip stays off that list."),
     ("1.53", "Questions and the live board come back sooner. Staff HQ lists every Discord server and the data feeds that were added. More leagues are on the board, and a game in play refreshes sooner."),
+    ("1.54", "A new upload shows up in the mods-only record channel, and in a channel named for the hidden record. If one of them missed it, the next start sends the note there."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -32921,7 +32923,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-134';"
+    "const CACHE='pb-shell-135';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -34240,7 +34242,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=134') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=135') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -35590,6 +35592,69 @@ def alert_channel_ids(guild_id: int) -> list[int]:
     return ids
 
 
+def hidden_record_name(name: str) -> bool:
+    """A channel whose name is the hidden record, such as hidden-record or hidden_records."""
+    words = re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).split()
+    return "hidden" in words and any(w.startswith("record") for w in words)
+
+
+def hidden_record_ids(guild) -> list[int]:
+    """Text channels in this server that are named as the hidden record."""
+    ids = []
+    for ch in list(getattr(guild, "text_channels", None) or []):
+        if not hidden_record_name(getattr(ch, "name", "") or ""):
+            continue
+        cid = getattr(ch, "id", None)
+        if cid and int(cid) not in ids:
+            ids.append(int(cid))
+    return ids
+
+
+def boot_channel_ids(guild_id: int, guild=None) -> list[int]:
+    """Where a new upload is posted: recap, the mods-only record, staff tickets, and a hidden-record channel."""
+    ids = list(alert_channel_ids(guild_id))
+    for n in hidden_record_ids(guild):
+        if n not in ids:
+            ids.append(n)
+    return ids
+
+
+def _boot_sent_ids() -> set[int]:
+    """Channel ids that already received this version's upload note. An older upload only reached the recap channel."""
+    raw = get_setting(0, "bot_announced_where") or ""
+    if not raw:
+        if (get_setting(0, "bot_announced") or "") != BOT_VERSION:
+            return set()
+        ids = set()
+        for r in db().execute("SELECT value FROM settings WHERE key = 'recap_channel'"):
+            if r["value"] and str(r["value"]).isdigit():
+                ids.add(int(r["value"]))
+        return ids
+    try:
+        d = json.loads(raw)
+    except Exception:
+        return set()
+    if not isinstance(d, dict) or d.get("version") != BOT_VERSION:
+        return set()
+    ids = set()
+    for x in d.get("ids") or []:
+        try:
+            ids.add(int(x))
+        except (TypeError, ValueError):
+            pass
+    return ids
+
+
+def _boot_mark_sent(ids) -> None:
+    have = _boot_sent_ids()
+    for n in ids or []:
+        try:
+            have.add(int(n))
+        except (TypeError, ValueError):
+            pass
+    set_setting(0, "bot_announced_where", json.dumps({"version": BOT_VERSION, "ids": sorted(have)}))
+
+
 def bot_gap_seconds(since: Optional[str]) -> Optional[int]:
     if not since:
         return None
@@ -35671,14 +35736,17 @@ async def _alert_channel(client, cid: int):
         return None
 
 
-async def post_alert(client, text: str, *, ping: bool = False, file=None, refresh: bool = False) -> int:
-    """One message per server, recap channel first. Returns how many channels took it."""
+async def post_alert(client, text: str, *, ping: bool = False, file=None, refresh: bool = False,
+                     fanout: bool = False, only: Optional[set] = None, landed: Optional[list] = None) -> int:
+    """One message per server, recap channel first. A boot note with fanout also reaches the mods-only record
+    and a hidden-record channel. Returns how many channels took it."""
     sent = 0
     guilds = list(getattr(client, "guilds", None) or [])
     gids = [g.id for g in guilds if getattr(g, "id", None)]
     if not gids:
         gids = [r["guild_id"] for r in db().execute(
             "SELECT DISTINCT guild_id FROM settings WHERE key IN ('recap_channel','audit_channel','ticket_channel')")]
+    by_gid = {getattr(g, "id", None): g for g in guilds}
     body = text
     mentions = discord.AllowedMentions.none()
     if ping and OWNER_IDS:
@@ -35712,25 +35780,35 @@ async def post_alert(client, text: str, *, ping: bool = False, file=None, refres
             continue
         seen.add(gid)
         posted = False
-        for cid in alert_channel_ids(gid):
+        targets = boot_channel_ids(gid, by_gid.get(gid)) if fanout else alert_channel_ids(gid)
+        for cid in targets:
+            if only is not None and int(cid) not in only:
+                continue
             ch = await _alert_channel(client, cid)
             if ch is None:
                 continue
             try:
                 await _send(ch, gid)
                 posted, sent = True, sent + 1
-                break
+                if landed is not None:
+                    landed.append(int(cid))
+                if not fanout:
+                    break
             except Exception:
                 log.warning("Alert failed in channel %s guild %s", cid, gid)
         if posted:
             continue
-        g = next((x for x in guilds if getattr(x, "id", None) == gid), None)
+        if only is not None:
+            continue
+        g = by_gid.get(gid)
         sysch = getattr(g, "system_channel", None) if g is not None else None
         if sysch is None:
             continue
         try:
             await _send(sysch, gid)
             sent += 1
+            if landed is not None and getattr(sysch, "id", None):
+                landed.append(int(sysch.id))
         except Exception:
             log.warning("Alert failed in system channel guild %s", gid)
     return sent
@@ -35972,7 +36050,7 @@ async def storage_alert(client) -> None:
 
 
 async def announce_boot(client) -> Optional[str]:
-    """On process start: tell the recap channel if the version changed or we were gone."""
+    """On process start: tell the recap channel, the mods-only record, and a hidden-record channel."""
     try:
         sweep_storage()
     except Exception:
@@ -35985,13 +36063,39 @@ async def announce_boot(client) -> Optional[str]:
     set_setting(0, "bot_heartbeat", now_iso())
     set_setting(0, "bot_stopping", None)
     set_setting(0, "bot_disconnect_at", None)
+    guilds = list(getattr(client, "guilds", None) or [])
+    by_gid = {getattr(g, "id", None): g for g in guilds}
+    gids = [getattr(g, "id", None) for g in guilds if getattr(g, "id", None)]
+    if not gids:
+        gids = [r["guild_id"] for r in db().execute(
+            "SELECT DISTINCT guild_id FROM settings WHERE key IN ('recap_channel','audit_channel','ticket_channel')")]
+    sent_ids = set() if (prev or "") != BOT_VERSION else _boot_sent_ids()
+    targets = []
+    for gid in gids:
+        for cid in boot_channel_ids(gid, by_gid.get(gid)):
+            if cid not in targets:
+                targets.append(cid)
+    missing = [c for c in targets if c not in sent_ids]
+    catchup = False
     if not note:
         free, _, _ = disk_bytes()
-        if not free or free >= 200 * 1024 * 1024:
+        low = bool(free) and free < 200 * 1024 * 1024
+        if not low and not missing:
             set_setting(0, "bot_announced", BOT_VERSION)
             return None
-        note = (f"🛠️ **PIMP-BOT is live · {BOT_VERSION} · update {ROADMAP_NOW}**\n"
-                "Storage is low, so this restart is being reported.")
+        if missing and not low:
+            catchup = True
+            lines = bot_update_lines(prev)
+            show = lines[-8:] if (prev or "") != BOT_VERSION else (lines[:1] or [])
+            bits = [f"🛠️ **PIMP-BOT is live · {BOT_VERSION}**",
+                    "New upload. The record channel is getting it now."]
+            if show:
+                bits.append("**What's new**")
+                bits.extend(f"• {n}" for n in show)
+            note = "\n".join(bits)
+        else:
+            note = (f"🛠️ **PIMP-BOT is live · {BOT_VERSION} · update {ROADMAP_NOW}**\n"
+                    "Storage is low, so this restart is being reported.")
     health = boot_health_lines()
     if health:
         note = note + "\n" + "\n".join(health)
@@ -36016,8 +36120,12 @@ async def announce_boot(client) -> Optional[str]:
                 "title": "PIMP-BOT IS LIVE", "tone": tone, "happened": happened, "news": list(news),
             })
 
-        sent = await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned),
-                                file=_card, refresh=True)
+        landed = []
+        sent = await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned and not catchup),
+                                file=_card, refresh=True, fanout=True,
+                                only=set(missing) if catchup else None, landed=landed)
+        if landed:
+            _boot_mark_sent(landed)
     except Exception:
         log.warning("Boot announce failed")
     if sent:
