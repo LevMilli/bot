@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.49"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.50"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -187,6 +187,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.47", "Muhammad Ali's name is spelled right on the opening page, with a line from him, and his picture is easier to see. Drew Brees is fully in the frame. Tim Tebow has a line along his picture. Kobe's picture is a little bigger."),
     ("1.48", "Muhammad Ali and Drew Brees now use the same lettering as the other names. Drew Brees is fully in the frame. A Ballon d'Or trophy fills the open corner at the top."),
     ("1.49", "Muhammad Ali's name plate is torn and burnt along the edges, like the other scraps on the opening page."),
+    ("1.50", "Open slips show how many legs are still waiting. Mine stays on after a refresh, and an empty Mine says you have nothing open right now."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -221,6 +222,7 @@ MEMBER_NEWS = [
     ("1.47", "Muhammad Ali's name is spelled right, with a line from him, and his picture is easier to see. Drew Brees is fully in the frame. Tim Tebow has a line along his picture. Kobe's picture is a little bigger."),
     ("1.48", "Muhammad Ali and Drew Brees use the same lettering as the other names. Drew Brees is fully in the frame. A trophy sits in the top corner."),
     ("1.49", "Muhammad Ali's name plate is ripped and burnt on the edges, like the other scraps."),
+    ("1.50", "Open slips show how many legs are still waiting. Mine stays on for this phone, and it says when you have nothing open."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2520,6 +2522,22 @@ Keep this list at one thousand, ten lanes, none of them marked live.
 
 
 BOT_THOUSAND = _build_thousand()
+# Ideas from that list that this upload actually does. The other rows stay unmarked.
+_THOUSAND_SHIPPED = {
+    "Show how many legs are still waiting, right under the play name.",
+    "Remember Mine on this phone, so a refresh still shows only your open slips.",
+    "When Mine is empty, say you have nothing open right now.",
+    "Keep the Mine label centered, with your open count beside it.",
+    "If the payout is missing, show the risk and leave pays blank.",
+    "Let a tap on the photo open that person's card, and a tap on the card open the slip.",
+    "Leave Mine on after a refresh of this phone.",
+    "Do not treat a blank payout as zero. Leave it blank.",
+}
+for _idea in BOT_THOUSAND:
+    if _idea["text"] in _THOUSAND_SHIPPED:
+        _idea["live"] = True
+if sum(1 for _idea in BOT_THOUSAND if _idea.get("live")) != len(_THOUSAND_SHIPPED):
+    raise RuntimeError("a shipped idea is missing from the thousand list")
 
 # Feature modules further down register their background jobs, persistent buttons and help pages here.
 EXTRA_JOBS: list = []      # (name, async fn(client, now_utc)), run every scheduler cycle after the core jobs
@@ -12239,6 +12257,17 @@ def dashboard_data(guild_id: int) -> dict:
                                        AND (future_due IS NULL OR future_due = '')
                                        AND (test IS NULL OR test = 0)
                                        ORDER BY id DESC LIMIT 40""", (guild_id,))]
+    legmap: dict[int, list] = {}
+    if open_:
+        marks = ",".join("?" * len(open_))
+        for leg in db().execute(
+                f"SELECT pick_id, status FROM legs WHERE pick_id IN ({marks})",
+                [row["id"] for row in open_]):
+            legmap.setdefault(int(leg["pick_id"]), []).append(leg["status"] or "open")
+    for row in open_:
+        sts = legmap.get(row["id"]) or []
+        row["nlegs"] = len(sts)
+        row["wait"] = sum(1 for st in sts if st == "open")
     futures = [{"id": p["id"], "who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 90),
                 "due": local_day(p["future_due"]) if p["future_due"] else "",
                 "cost": p["cost"], "payout": p["payout"]}
@@ -32576,7 +32605,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-130';"
+    "const CACHE='pb-shell-131';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -32819,6 +32848,10 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
 .ipager button[disabled]{opacity:.4;cursor:default}
 .oslip .d{color:var(--muted);font-size:13.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .oslip .m{font-size:13px;font-variant-numeric:tabular-nums}
+.oslip .owait{font-size:12.5px;color:var(--muted)}
+.oslip .ophoto{display:flex;flex:none;cursor:pointer}
+.minelab{display:flex;justify-content:center;align-items:center;gap:8px;font-weight:700;margin:2px 0 8px}
+.minelab .mc{font-variant-numeric:tabular-nums;color:var(--muted)}
 /* live games strip */
 .games{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 2px 6px;scrollbar-width:thin;
  -webkit-overflow-scrolling:touch}
@@ -33224,9 +33257,16 @@ function slipRow(p,showWho){const price=[p.cost!=null?'risk '+cash(p.cost):'',p.
   h('div',{style:'min-width:0'},h('div',{class:'nm'},showWho===false?p.what:p.who),
    h('div',{class:'sub'},(showWho===false?'':(p.what||'')+' · ')+(num?num+' · ':'')+(price?price+' · ':'')+(p.when||''))),
   p.net==null?h('span',{class:'net faint',text:p.cost!=null?cash(p.cost):''}):h('span',{class:'net '+tone(p.net)},money(p.net)))}
-function openSlipCard(p){return h('button',{class:'oslip',type:'button',onclick:()=>go('#/s/'+p.id)},
-  h('div',{class:'w'},face(p.key,p.who),h('span',{class:'oname',text:p.who||''}),h('span',{class:'chip',text:p.platform||'Slip'})),h('div',{class:'d',text:p.what}),
-  h('div',{class:'m'},h('span',{class:'muted'},'Risk '),cash(p.cost),h('span',{class:'muted'},'  →  pays '),h('b',null,cash(p.payout))))}
+function openSlipCard(p){const who=p.who||'';
+ const pic=face(p.key,who);
+ const photo=/^[0-9]{2,20}$/.test(String(p.key||''))?h('span',{class:'ophoto',title:'Open their card',onclick:e=>{e.preventDefault();e.stopPropagation();go('#/p/'+p.key)}},pic):pic;
+ const nlegs=+p.nlegs||0,wait=+p.wait||0;
+ const waiting=nlegs?h('div',{class:'owait',text:(wait===1?'1 leg still waiting':wait+' legs still waiting')}):null;
+ const risk=p.cost==null?null:h('span',null,h('span',{class:'muted'},'Risk '),cash(p.cost));
+ const pays=p.payout==null?null:h('span',null,h('span',{class:'muted'},'  →  pays '),h('b',null,cash(p.payout)));
+ return h('button',{class:'oslip',type:'button',onclick:()=>go('#/s/'+p.id)},
+  h('div',{class:'w'},photo,h('span',{class:'oname',text:who}),h('span',{class:'chip',text:p.platform||'Slip'})),
+  h('div',{class:'d',text:p.what||''}),waiting,h('div',{class:'m'},risk,pays))}
 function legDot(l){if(l.status==='hit')return h('span',{class:'lg hit'},'✓');if(l.status==='miss')return h('span',{class:'lg miss'},'✕');
  if(l.status==='push')return h('span',{class:'lg push'},'–');if(l.live==='hit'||l.live==='ahead')return h('span',{class:'lg ahead',title:'Ahead'},'▲');
  if(l.live==='miss'||l.live==='behind')return h('span',{class:'lg behind',title:'Behind'},'▼');
@@ -33379,13 +33419,14 @@ function ideaBoard(rows){
  const p=Math.min(S.ip||0,pages-1);
  const slice=shown.slice(p*size,p*size+size);
  const label=shown.length?(p*size+1)+'\u2013'+Math.min(shown.length,(p+1)*size)+' of '+shown.length:'0';
+ const anyLive=rows.some(r=>r.live);
  return h('div',null,
-  h('p',{class:'muted',style:'margin:0 0 8px'},'None of these are live. Sort by new, refine, or improve, and by lane. Twenty-five at a time.'),
+  h('p',{class:'muted',style:'margin:0 0 8px'},anyLive?'Shipped ideas are marked live. Sort the rest by new, refine, or improve. Twenty-five at a time.':'None of these are live. Sort by new, refine, or improve, and by lane. Twenty-five at a time.'),
   h('div',{class:'nfilt'},seg,chips),
   shown.length?h('div',{class:'imap'},slice.map(r=>h('div',{class:'irow'},
    h('span',{class:'inum',text:String(r.n)}),
    h('span',{class:'ikind '+r.kind,text:ideaKind(r.kind)}),
-   h('div',{style:'min-width:0'},h('div',{class:'rms',text:r.lane}),h('div',{text:r.text}))))):empty('Nothing in this filter','Try All to see the full list.'),
+   h('div',{style:'min-width:0'},h('div',{class:'rms'},r.live?h('span',{class:'rmlive',text:'Live'}):null,r.lane),h('div',{text:r.text}))))):empty('Nothing in this filter','Try All to see the full list.'),
   shown.length?h('div',{class:'ipager'},
    h('button',{type:'button',class:'tpause',disabled:p<=0?true:null,onclick:()=>{if(p<=0)return;S.ip=p-1;render()}},'Prev'),
    h('span',{class:'muted',text:label}),
@@ -33749,7 +33790,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=130') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=131') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -34495,8 +34536,8 @@ function paintFind(){const box=$('#findpop');if(!box)return;if(S.findOff){box.hi
   mates.map(l=>h('button',{class:'nitem',type:'button',onclick:()=>openMate(l)},h('b',{text:l.who}),h('span',{text:l.leg||''}))))}
 function renderKpis(){const el=$('#kpis');if(el)put(el)}
 function loadView(){if(S.viewLoaded)return;S.viewLoaded=1;S.book=S.book||'all';S.sport=S.sport||'all';S.when=S.when||'all';
- try{const v=JSON.parse(localStorage.getItem('pb-view')||'{}');if(v&&typeof v==='object'){S.book=v.book||'all';S.sport=v.sport||'all';S.when=v.when||'all'}}catch(e){}}
-function saveView(){try{localStorage.setItem('pb-view',JSON.stringify({book:S.book,sport:S.sport,when:S.when}))}catch(e){}}
+ try{const v=JSON.parse(localStorage.getItem('pb-view')||'{}');if(v&&typeof v==='object'){S.book=v.book||'all';S.sport=v.sport||'all';S.when=v.when||'all';if(typeof v.mine==='boolean')S.mine=v.mine}}catch(e){}}
+function saveView(){try{localStorage.setItem('pb-view',JSON.stringify({book:S.book,sport:S.sport,when:S.when,mine:!!S.mine}))}catch(e){}}
 function bookOf(p){const x=String(p.platform||'').toLowerCase();if(x.indexOf('kalshi')>=0)return 'kalshi';if(x.indexOf('prize')>=0)return 'prizepicks';return 'other'}
 function ymdCentral(d){try{return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}catch(e){return ''}}
 function whenOk(stamp){if(!S.when||S.when==='all')return true;if(!stamp)return false;const today=ymdCentral(new Date());
@@ -34515,11 +34556,15 @@ function boardBar(d){loadView();
   seg('book',[['all','All books'],['prizepicks','PrizePicks'],['kalshi','Kalshi'],['other','Other']]),
   seg('sport',[['all','All sports'],...sportNames(d).map(s=>[s,s])]),
   seg('when',[['all','Any time'],['today','Today'],['week','This week'],['month','This month']]),
-  h('button',{type:'button',class:'tpause'+(S.mine?' on':''),onclick:()=>{S.mine=!S.mine;render()}},S.mine?'Mine: on':'Mine'))}
+  h('button',{type:'button',class:'tpause'+(S.mine?' on':''),onclick:()=>{S.mine=!S.mine;saveView();render()}},S.mine?'Mine: on':'Mine'))}
 function renderOpen(el,d){const rows=(d.open||[]).filter(p=>boardPick(p,false));
  const futs=d.futures||[];
- put(el,card('Open slips','',String(rows.length),boardBar(d),rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
-  :empty(d.open.length?'Nothing matches that search':'Nothing open',d.open.length?'Clear the search box.':'Log a slip in Discord and it shows up here.')),
+ const mineN=(d.open||[]).filter(p=>d.me&&String(p.key||'')===String(d.me)).length;
+ const mineEmpty=!!S.mine&&!mineN;
+ put(el,card('Open slips','',String(rows.length),boardBar(d),
+  h('div',{class:'minelab'},h('span',{text:'Mine'}),h('span',{class:'mc',text:String(mineN)})),
+  rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
+  :empty(mineEmpty?'You have nothing open right now':(d.open.length?'Nothing matches that search':'Nothing open'),mineEmpty?'Mine is on for this phone. Switch it off to see everyone.':(d.open.length?'Clear the search box.':'Log a slip in Discord and it shows up here.'))),
   futs.length?card('Futures','',String(futs.length),h('div',null,futs.map(p=>h('button',{class:'fut',type:'button',onclick:()=>go('#/s/'+p.id)},
    h('div',{class:'nm',text:p.what||('Slip #'+p.id)}),h('div',{class:'sub',text:(p.who||'')+(p.due?' · settles '+p.due:'')})))))
    :null,
