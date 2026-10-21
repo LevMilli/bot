@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.50"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.51"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -188,6 +188,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.48", "Muhammad Ali and Drew Brees now use the same lettering as the other names. Drew Brees is fully in the frame. A Ballon d'Or trophy fills the open corner at the top."),
     ("1.49", "Muhammad Ali's name plate is torn and burnt along the edges, like the other scraps on the opening page."),
     ("1.50", "Open slips show how many legs are still waiting. Mine stays on after a refresh, and an empty Mine says you have nothing open right now."),
+    ("1.51", "Open slips show the slip number, the sport when the title leaves it out, and your open risk above the cards. Mine puts the soonest start first."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -223,6 +224,7 @@ MEMBER_NEWS = [
     ("1.48", "Muhammad Ali and Drew Brees use the same lettering as the other names. Drew Brees is fully in the frame. A trophy sits in the top corner."),
     ("1.49", "Muhammad Ali's name plate is ripped and burnt on the edges, like the other scraps."),
     ("1.50", "Open slips show how many legs are still waiting. Mine stays on for this phone, and it says when you have nothing open."),
+    ("1.51", "Open slips show the slip number and your open risk. Mine lists the soonest start first."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2532,6 +2534,50 @@ _THOUSAND_SHIPPED = {
     "Let a tap on the photo open that person's card, and a tap on the card open the slip.",
     "Leave Mine on after a refresh of this phone.",
     "Do not treat a blank payout as zero. Leave it blank.",
+    "Keep the Discord photo on the same line as the name, with the book chip on the far side.",
+    "If the photo does not load, show the colored initial without shifting the name.",
+    "Clip a long play name to two lines so the risk line stays on the card.",
+    "Keep the full play name on a wide screen, and two lines on a phone.",
+    "Use one type size for the play name on Mine and on the live rail.",
+    "Keep the book filter, the sport filter, and Mine working at the same time.",
+    "When Mine is on, put the soonest start first.",
+    "Put the slip number in the corner so a screenshot of the card can be matched later.",
+    "Add a sport chip when the title leaves the sport out.",
+    "Show your open risk as one total above the cards.",
+    "Show Kalshi as yes or no when the slip is a contract.",
+    "Show the name of the person who filed it, when that person is not the bettor.",
+    "Add a quiet line when someone else filed this slip under you.",
+    "Put a one-line first leg on a single-player slip.",
+    "Give flex and power their own chip when the title already has the pick count.",
+    "Keep flex and power in the words the book used.",
+    "Line up the risk and pays amounts so a row of cards can be compared.",
+    "Line the pays amount up across cards when the risk widths differ.",
+    "Use a hairline between the title and the risk line.",
+    "Hold your scroll position when the minute refresh redraws the cards.",
+    "When a new slip arrives, do not jump the card you are reading.",
+    "Let a member hide one card on this phone without voiding the slip.",
+    "Offer a share line with the play name and the risk, ready to paste in Discord.",
+    "Retry a failed photo once, then use the initial.",
+    "Avoid a layout shift when the photo replaces the initial.",
+    "Match the photo ring on Mine to the ring on My Board.",
+    "Keep four cards on a wide row and one card on a phone.",
+    "Update the risk total when a slip settles and leaves the rail.",
+    "Use tabular figures for every dollar amount on the rail.",
+    "Keep the Mine label centered when the count beside it grows from one digit to three.",
+    "Place the photo before the name, in the same order as Just settled.",
+    "Keep the tap area as the full card, including the padding.",
+    "Stop a long name from pushing the book chip onto a second line.",
+    "Align every book chip to the right edge of the card.",
+    "Give a missing photo the initial only, with no empty gap.",
+    "Keep the words Risk and pays in the same muted style as the rest of the board.",
+    "Preserve the sport filter when you switch Mine off and on.",
+    "Remember the last book filter on this phone, together with Mine.",
+    "Count only open slips in the Mine count unless futures are included.",
+    "Keep a test slip off the member rail.",
+    "Ignore a hidden slip even if it is still open.",
+    "Open the slip even when the photo file is missing.",
+    "Use the same slip id in the card link that the sheet uses.",
+    "Leave a little air under the pays line so the card does not feel cramped.",
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -12251,6 +12297,9 @@ def dashboard_data(guild_id: int) -> dict:
               "what": shown_desc(p), "platform": p["platform"],
               "sport": clip(p["sport"] or "", 24), "cost": p["cost"], "payout": p["payout"],
               "slate": local_day(p["slate_date"]) if _rg(p, "slate_date") else "",
+              "slate_on": local_stamp(p["slate_date"]) if _rg(p, "slate_date") else "",
+              "side": (_rg(p, "kalshi_side") or "").strip().lower()[:8],
+              "logger": int(p["logged_by"] or 0),
               "player": dash_prop_name(shown_desc(p)) or None}
              for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
                                        AND (hidden IS NULL OR hidden = 0)
@@ -12261,13 +12310,14 @@ def dashboard_data(guild_id: int) -> dict:
     if open_:
         marks = ",".join("?" * len(open_))
         for leg in db().execute(
-                f"SELECT pick_id, status FROM legs WHERE pick_id IN ({marks})",
+                f"SELECT pick_id, status, text FROM legs WHERE pick_id IN ({marks})",
                 [row["id"] for row in open_]):
-            legmap.setdefault(int(leg["pick_id"]), []).append(leg["status"] or "open")
+            legmap.setdefault(int(leg["pick_id"]), []).append((leg["status"] or "open", leg["text"] or ""))
     for row in open_:
         sts = legmap.get(row["id"]) or []
         row["nlegs"] = len(sts)
-        row["wait"] = sum(1 for st in sts if st == "open")
+        row["wait"] = sum(1 for st, _text in sts if st == "open")
+        row["first"] = clip(sts[0][1], 80) if len(sts) == 1 else ""
     futures = [{"id": p["id"], "who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 90),
                 "due": local_day(p["future_due"]) if p["future_due"] else "",
                 "cost": p["cost"], "payout": p["payout"]}
@@ -12281,6 +12331,13 @@ def dashboard_data(guild_id: int) -> dict:
     names = {}
     for p in db().execute("SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND bettor_id IS NOT NULL", (guild_id,)):
         names[p["bettor_id"]] = p["bettor_name"]
+    for row in open_:
+        logger = int(row.pop("logger", 0) or 0)
+        bettor = int(row["key"]) if str(row.get("key") or "").isdigit() else 0
+        if logger and bettor and logger != bettor:
+            who = names.get(logger) or ""
+            if who and who != row.get("who"):
+                row["filer"] = clip(who, 40)
     coins = []
     for u in coins_top(guild_id, 10):
         why = ""
@@ -32605,7 +32662,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-131';"
+    "const CACHE='pb-shell-132';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -32836,8 +32893,11 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
  display:flex;flex-direction:column;gap:6px;transition:transform .18s,border-color .18s;width:100%}
 .oslip:hover{transform:translateY(-2px);border-color:#7B3FE477}
 .oslip .w{display:flex;align-items:center;gap:8px;font-weight:700}.oslip .w .chip{margin-left:auto}
-.oslip .w img.ava,.oslip .w .av{flex:none}
+.oslip .w img.ava,.oslip .w .av{flex:none;width:36px;height:36px;min-width:36px;border-radius:50%;box-shadow:0 0 0 2px var(--gold)}
 .oslip .w .oname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oslip .w .slipno{margin-left:auto;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
+.oslip .w .chip{margin-left:6px}
+@media (min-width:900px){.oslip .play{-webkit-line-clamp:unset;display:block;overflow:visible}}
 .imap .irow{display:grid;grid-template-columns:44px 76px minmax(0,1fr);gap:8px 10px;align-items:start;padding:10px 2px;border-top:1px solid var(--line)}
 .imap .inum{font-variant-numeric:tabular-nums;color:var(--faint);font-size:12px;padding-top:3px}
 .ikind{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:99px;padding:3px 7px;border:1px solid var(--line);justify-self:start}
@@ -32847,7 +32907,13 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
 .ipager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px}
 .ipager button[disabled]{opacity:.4;cursor:default}
 .oslip .d{color:var(--muted);font-size:13.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.oslip .m{font-size:13px;font-variant-numeric:tabular-nums}
+.oslip .m{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-variant-numeric:tabular-nums;
+ border-top:1px solid var(--line);margin-top:2px;padding:6px 0 2px}
+.oslip .m .pays{margin-left:auto;text-align:right}
+.oslip .ofirst,.oslip .ofiler{font-size:12.5px;color:var(--muted)}
+.oslip .otools{display:flex;gap:12px}
+.oslip .oshare,.oslip .ohide{border:0;background:transparent;color:var(--faint);font:inherit;font-size:12px;font-weight:700;cursor:pointer;padding:0}
+.orisk{text-align:center;font-weight:700;font-variant-numeric:tabular-nums;margin:0 0 8px}
 .oslip .owait{font-size:12.5px;color:var(--muted)}
 .oslip .ophoto{display:flex;flex:none;cursor:pointer}
 .minelab{display:flex;justify-content:center;align-items:center;gap:8px;font-weight:700;margin:2px 0 8px}
@@ -33146,8 +33212,10 @@ function hue(s){let x=0;for(const c of String(s))x=(x*31+c.charCodeAt(0))>>>0;re
 function avatar(name){const c=COLORS[hue(name)%COLORS.length];
  return h('div',{class:'av',style:'background:linear-gradient(135deg,'+c+','+c+'aa)','aria-hidden':'true'},(String(name||'?').trim()[0]||'?').toUpperCase())}
 function face(key,name){if(key&&/^[0-9]{2,20}$/.test(String(key))){
- const img=h('img',{class:'ava',alt:'',width:'64',height:'64',decoding:'async'});
- img.addEventListener('error',()=>{const n=avatar(name);if(img.parentNode)img.replaceWith(n)});
+ const img=h('img',{class:'ava',alt:'',width:'36',height:'36',decoding:'async'});
+ let tries=0;
+ img.addEventListener('error',()=>{if(tries<1){tries++;const q=qs();img.src='/img/ava/'+key+'.png'+(q?q+'&':'?')+'r=1';return}
+  const n=avatar(name);if(img.parentNode)img.replaceWith(n)});
  img.src='/img/ava/'+key+'.png'+qs();return img}
  return avatar(name)}
 function robot(){const s=$('#logo svg');return s?s.cloneNode(true):''}
@@ -33257,16 +33325,38 @@ function slipRow(p,showWho){const price=[p.cost!=null?'risk '+cash(p.cost):'',p.
   h('div',{style:'min-width:0'},h('div',{class:'nm'},showWho===false?p.what:p.who),
    h('div',{class:'sub'},(showWho===false?'':(p.what||'')+' · ')+(num?num+' · ':'')+(price?price+' · ':'')+(p.when||''))),
   p.net==null?h('span',{class:'net faint',text:p.cost!=null?cash(p.cost):''}):h('span',{class:'net '+tone(p.net)},money(p.net)))}
+function hiddenIds(){try{const a=JSON.parse(localStorage.getItem('pb-hidecards')||'[]');return Array.isArray(a)?a:[]}catch(e){return []}}
+function hideCard(id,e){if(e){e.preventDefault();e.stopPropagation()}
+ const a=hiddenIds().filter(x=>x!==id);a.unshift(id);
+ try{localStorage.setItem('pb-hidecards',JSON.stringify(a.slice(0,40)))}catch(err){}
+ render()}
+function copyLine(p,e){if(e){e.preventDefault();e.stopPropagation()}
+ const line=(p.what||('Slip #'+p.id))+(p.cost==null?'':' · risk '+cash(p.cost));
+ const done=()=>{e.currentTarget.textContent='Copied'};
+ if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(line).then(done).catch(()=>{});
+ else done()}
 function openSlipCard(p){const who=p.who||'';
  const pic=face(p.key,who);
  const photo=/^[0-9]{2,20}$/.test(String(p.key||''))?h('span',{class:'ophoto',title:'Open their card',onclick:e=>{e.preventDefault();e.stopPropagation();go('#/p/'+p.key)}},pic):pic;
  const nlegs=+p.nlegs||0,wait=+p.wait||0;
  const waiting=nlegs?h('div',{class:'owait',text:(wait===1?'1 leg still waiting':wait+' legs still waiting')}):null;
+ const title=p.what||'';
+ const sport=p.sport&&title.toLowerCase().indexOf(String(p.sport).toLowerCase())<0?h('span',{class:'chip',text:p.sport}):null;
+ const flex=/\bflex\b/i.test(title)&&/\bpick/i.test(title)?h('span',{class:'chip',text:'Flex'}):null;
+ const power=/\bpower\b/i.test(title)&&/\bpick/i.test(title)?h('span',{class:'chip',text:'Power'}):null;
+ const side=/^(yes|no)$/.test(String(p.side||''))?h('span',{class:'chip',text:String(p.side).toUpperCase()}):null;
  const risk=p.cost==null?null:h('span',null,h('span',{class:'muted'},'Risk '),cash(p.cost));
- const pays=p.payout==null?null:h('span',null,h('span',{class:'muted'},'  →  pays '),h('b',null,cash(p.payout)));
- return h('button',{class:'oslip',type:'button',onclick:()=>go('#/s/'+p.id)},
-  h('div',{class:'w'},photo,h('span',{class:'oname',text:who}),h('span',{class:'chip',text:p.platform||'Slip'})),
-  h('div',{class:'d',text:p.what||''}),waiting,h('div',{class:'m'},risk,pays))}
+ const pays=p.payout==null?null:h('span',{class:'pays'},h('span',{class:'muted'},'pays '),h('b',null,cash(p.payout)));
+ const first=nlegs===1&&p.first?h('div',{class:'ofirst',text:p.first}):null;
+ const filer=p.filer?h('div',{class:'ofiler',text:'Filed by '+p.filer}):null;
+ return h('button',{class:'oslip','data-id':String(p.id),type:'button',onclick:()=>go('#/s/'+p.id)},
+  h('div',{class:'w'},photo,h('span',{class:'oname',text:who}),h('span',{class:'slipno',text:'#'+p.id}),
+   side,sport,flex,power,h('span',{class:'chip',text:p.platform||'Slip'})),
+  h('div',{class:'d play',text:title}),first,filer,waiting,
+  h('div',{class:'m'},risk,pays),
+  h('div',{class:'otools'},
+   h('span',{class:'oshare',onclick:e=>copyLine(p,e)},'Copy line'),
+   h('span',{class:'ohide',onclick:e=>hideCard(p.id,e)},'Hide')))}
 function legDot(l){if(l.status==='hit')return h('span',{class:'lg hit'},'✓');if(l.status==='miss')return h('span',{class:'lg miss'},'✕');
  if(l.status==='push')return h('span',{class:'lg push'},'–');if(l.live==='hit'||l.live==='ahead')return h('span',{class:'lg ahead',title:'Ahead'},'▲');
  if(l.live==='miss'||l.live==='behind')return h('span',{class:'lg behind',title:'Behind'},'▼');
@@ -33496,7 +33586,7 @@ async function load(){const seq=++S.seq;const d=await api('/api/data'+qs());
   ($('main')||document.body).prepend(bar);if(S.data)S.data.updated='offline'}return}
  if(seq!==S.seq)return;
  for(const k of ['open','recent','alltime','leaderboard','people','coins','groupparlay','records','needs','ticker','games'])d[k]=d[k]||[];
- S.data=d;S.loadedAt=Date.now();renderMeta(d);renderTicker(d);renderMini();render()}
+ S.data=d;S.loadedAt=Date.now();S.hold=1;renderMeta(d);renderTicker(d);renderMini();render()}
 function skeletonAll(){const kpi=()=>h('div',{class:'card kpi'},h('div',{class:'skl',style:'height:12px;width:50%'}),h('div',{class:'skl',style:'height:22px;width:70%;margin-top:8px'}));
  const slip=()=>h('div',{class:'card'},h('div',{class:'skl',style:'height:14px;width:40%'}),h('div',{class:'skl',style:'height:64px;margin-top:10px'}));
  const row=()=>h('div',{class:'row'},h('div',{class:'skl',style:'height:16px;width:55%'}),h('div',{class:'skl',style:'height:12px;width:30%;margin-top:6px'}));
@@ -33790,7 +33880,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=131') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=132') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -34197,6 +34287,9 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
  body.v4 .capline{font-size:14px}
  body.v4 .findpop{width:min(100vw - 24px,680px);left:12px;right:auto}
  body.v4 a.staffbtn{height:32px;padding:0 10px;font-size:10px;letter-spacing:.08em}}
+@media (min-width:1100px){
+ body.v4 .slips{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));overflow:visible}
+ body.v4 .oslip{flex:none;width:auto}}
 """ + SITE_LOOK_CSS
     html = html.replace("</style>", extra_css + "</style>", 1)
     html = html.replace("<body>", '<body class="v4">', 1)
@@ -34557,14 +34650,23 @@ function boardBar(d){loadView();
   seg('sport',[['all','All sports'],...sportNames(d).map(s=>[s,s])]),
   seg('when',[['all','Any time'],['today','Today'],['week','This week'],['month','This month']]),
   h('button',{type:'button',class:'tpause'+(S.mine?' on':''),onclick:()=>{S.mine=!S.mine;saveView();render()}},S.mine?'Mine: on':'Mine'))}
-function renderOpen(el,d){const rows=(d.open||[]).filter(p=>boardPick(p,false));
+function renderOpen(el,d){const hide=hiddenIds();
+ let rows=(d.open||[]).filter(p=>boardPick(p,false));
+ const matched=rows.length;
+ rows=rows.filter(p=>hide.indexOf(p.id)<0);
+ if(S.mine)rows.sort((a,b)=>{const as=a.slate_on||'9999-99-99',bs=b.slate_on||'9999-99-99';if(as!==bs)return as<bs?-1:1;return (a.id||0)-(b.id||0)});
  const futs=d.futures||[];
- const mineN=(d.open||[]).filter(p=>d.me&&String(p.key||'')===String(d.me)).length;
+ const mineRows=(d.open||[]).filter(p=>d.me&&String(p.key||'')===String(d.me));
+ const mineN=mineRows.length;
  const mineEmpty=!!S.mine&&!mineN;
+ const mineRisk=mineRows.reduce((a,p)=>a+(p.cost==null?0:+p.cost),0);
+ const blank=mineEmpty?'You have nothing open right now':(matched?'Nothing matches that search':'Nothing open');
+ const blankSub=mineEmpty?'Mine is on for this phone. Switch it off to see everyone.':(matched&&!rows.length?'Hidden on this phone. They are still open.':(matched?'Clear the search box.':'Log a slip in Discord and it shows up here.'));
  put(el,card('Open slips','',String(rows.length),boardBar(d),
   h('div',{class:'minelab'},h('span',{text:'Mine'}),h('span',{class:'mc',text:String(mineN)})),
+  d.me?h('div',{class:'orisk',text:'Open risk '+cash(mineRisk)}):null,
   rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
-  :empty(mineEmpty?'You have nothing open right now':(d.open.length?'Nothing matches that search':'Nothing open'),mineEmpty?'Mine is on for this phone. Switch it off to see everyone.':(d.open.length?'Clear the search box.':'Log a slip in Discord and it shows up here.'))),
+  :empty(blank,blankSub)),
   futs.length?card('Futures','',String(futs.length),h('div',null,futs.map(p=>h('button',{class:'fut',type:'button',onclick:()=>go('#/s/'+p.id)},
    h('div',{class:'nm',text:p.what||('Slip #'+p.id)}),h('div',{class:'sub',text:(p.who||'')+(p.due?' · settles '+p.due:'')})))))
    :null,
@@ -34690,7 +34792,10 @@ function arrangeHome(el){if(!el)return;const order=homeOrder();
         1)
     html = html.replace(
         "function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
-        "function render(){if(!S.data)return;renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);if(S.tab==='overview')arrangeHome(el);paintFind()}",
+        "function render(){if(!S.data)return;const hold=S.hold;S.hold=0;let id='';"
+        "if(hold){let best=null,dist=1e9;for(const c of document.querySelectorAll('.oslip')){const t=Math.abs(c.getBoundingClientRect().top-96);if(t<dist){dist=t;best=c}}id=best&&best.dataset.id||''}"
+        "renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);if(S.tab==='overview')arrangeHome(el);paintFind();"
+        "if(hold&&id){const back=document.querySelector('.oslip[data-id=\"'+id+'\"]');if(back)window.scrollBy(0,back.getBoundingClientRect().top-96)}}",
         1)
     html = html.replace(
         "function renderPeople(el,d){\n put(el,card('The crew','',d.people.length?String(d.people.length):null,d.people.length?h('div',{class:'grid'},d.people.map(p=>",
