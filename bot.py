@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.62"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.63"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -200,6 +200,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.60", "A new upload posts an update recap in the recap channel. News can be filtered on this phone, and a row keeps the photo, the team, and the status together."),
     ("1.61", "On a player sheet, you can save a line and a note on this phone. The chart is the last 5, last 10, or last 20, and the next game is the opponent, home or away, and Central time."),
     ("1.62", "On this phone you can save a named look: sport, book, and accent. The intro stays off after you have seen it today, and when the phone asks for reduced motion."),
+    ("1.63", "More shows this week's open count, settled count, and net. About shows the last clean start in Central, and you can search the commands by name."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -247,6 +248,7 @@ MEMBER_NEWS = [
     ("1.60", "A new upload posts an update recap in the recap channel. News can be filtered on this phone, and a row keeps the photo, the team, and the status together."),
     ("1.61", "On a player sheet, you can save a line and a note on this phone. The chart is the last 5, last 10, or last 20, and the next game is the opponent, home or away, and Central time."),
     ("1.62", "On this phone you can save a named look: sport, book, and accent. The intro stays off after you have seen it today, and when the phone asks for reduced motion."),
+    ("1.63", "More shows this week's open count, settled count, and net. About shows the last clean start in Central, and you can search the commands by name."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -3206,6 +3208,74 @@ _THOUSAND_SHIPPED = {
     'Keep a long More page from covering the header.',
     'Do not restart the intro when the minute refresh runs.',
     'Store the scene on this phone, and nowhere else.',
+    'Add a plain week note: open count, settled count, and net, with no advice.',
+    'Keep What\'s new to the newest lines after Got it.',
+    'Keep Staff HQ as the place for feed lights and signed-in devices.',
+    'Leave Needs attention off the member page.',
+    'Keep the commands list grouped the same way help is grouped.',
+    'Mark a staff test slip and leave it out of standings.',
+    'Show who filed a slip when it was filed under someone else.',
+    'Use the group total on the tile when staff has chosen group net.',
+    'Keep the door as Discord plus the daily key.',
+    'Skip a job that just finished clean.',
+    'Keep classic pages linked, on their own look.',
+    'Print the version in the startup log so the upload can be checked.',
+    'Add a member-visible list of the books the scanner already reads.',
+    'Keep coins with the last way they were earned.',
+    'Keep a hidden pick hidden after a refresh.',
+    'Add the last clean restart time on About, in Central, without a slip list.',
+    'Keep the map through r50, and this list under it, as two cards.',
+    'Do not drop a sport to make a page faster.',
+    'Add a staff view of who is signed in, without showing the daily key until the eye is tapped.',
+    'Show the version and the update name on the status card.',
+    'Add a count of photos read today, for staff, with no stored picture.',
+    'Keep the record book from giving advice.',
+    'Add a plain list of jobs and the last time each one finished.',
+    'Let an admin turn the group-net tile on without a redeploy.',
+    'Add a member page that says which sports this upload reads.',
+    'Let the commands page search by the command name.',
+    'Keep the daily key off every member page.',
+    'Show a failed job by its name on the status card.',
+    'Keep one upload as the way a new file goes live.',
+    'Show the door in one sentence when a visitor is signed out.',
+    'Add a note when the scheduler skipped a job because it had just finished.',
+    'Keep What\'s new from repeating a line the member already marked.',
+    'Keep What\'s new in member words.',
+    'Hold Staff HQ off the member tabs.',
+    'Keep the commands in the same groups as help.',
+    'Leave the r50 map in its own card.',
+    'Keep this thousand list in the card under that map.',
+    'Use plain lines in the record book.',
+    'Hold the group-net choice where staff already set it.',
+    'Keep the daily key behind the eye.',
+    'Leave classic pages linked from More.',
+    'Keep coins next to the last reason they moved.',
+    'Show Central on a time of day.',
+    'Hold the week note to counts and a net.',
+    'Keep a test mark off the member board.',
+    'Hold the book list to books we already read.',
+    'Match the status card type to the other cards.',
+    'Leave the owner on a one-file upload.',
+    'Keep the pager on this list to twenty-five rows.',
+    'Show new, refine, and improve as the three sorts.',
+    'Keep a future row from wearing a live mark.',
+    'Keep the restart time, when we show it, to one line.',
+    'Keep a settled win card on the record as a win.',
+    'Leave a test slip out of standings, the chart, and the week note.',
+    'Skip a job that finished clean a moment ago.',
+    'Keep the group-net tile on the total staff chose.',
+    'Show What\'s new again only when a newer line exists.',
+    'Keep the member card free of Needs attention.',
+    'Print the version at startup so the running file can be checked.',
+    'Keep the daily key out of the member payload.',
+    'Do not drop a sport, a command, or a classic page.',
+    'Hold the r50 titles where they are.',
+    'Store a Got it mark on this phone, for this member.',
+    'Name a failed job on the status card.',
+    'Use Central on the restart time and the week note.',
+    'Keep the scanner book list equal to the books we actually read.',
+    'Refresh the status card without posting in the channel.',
+    'Keep a signed-out visitor on the door, not on a member\'s slips.',
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -13133,6 +13203,13 @@ def dash_take_key(candidate: Optional[str]) -> bool:
     return False
 
 
+def central_stamp(when: datetime) -> str:
+    """A time of day labeled Central. No slip list is attached."""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(TZ).strftime("%b %-d, %-I:%M %p") + " Central"
+
+
 def dash_this_week(guild_id: int) -> dict:
     """Open slips, plus what settled since Monday: count, net, and coins earned."""
     now = datetime.now(TZ)
@@ -13340,7 +13417,10 @@ def dashboard_data(guild_id: int) -> dict:
             "netmode": "group" if get_setting(guild_id, "kpi_net") == "group" else "week",
             "groupnet": round(sum(s["net"] for s in compute_stats(guild_id)), 2),
             "h2h": dash_h2h_board(guild_id), "weekplays": dash_week_plays(guild_id),
-            "weekboard": clip(get_setting(guild_id, "week_board") or "", 280)}
+            "weekboard": clip(get_setting(guild_id, "week_board") or "", 280),
+            "booted": central_stamp(STARTED_AT),
+            "books": [name for _pat, name in PLATFORM_WORDS],
+            "sports": list(dict.fromkeys(LEAGUE_NAMES.values()))}
 
 
 DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -19693,6 +19773,7 @@ async def standings_poster_file(client, guild_id: int, period: str = "season", b
 # ---- background job health -----------------------------------------------------------------------------
 
 JOB_HEALTH: dict[str, dict] = {}
+JOB_SKIPS: list[dict] = []
 JOB_ALERT_AFTER = 5
 
 
@@ -19702,6 +19783,13 @@ def job_name(job) -> str:
         names = [n for n in getattr(getattr(job, "__code__", None), "co_names", ()) if n not in ("astimezone",)]
         return names[0] if names else "job"
     return name
+
+
+def note_job_skip(name: str) -> None:
+    """Remember that this cycle left a job alone because it had just finished."""
+    JOB_SKIPS.append({"name": name, "at": now_iso()})
+    if len(JOB_SKIPS) > 12:
+        del JOB_SKIPS[:-12]
 
 
 def job_recently_clean(name: str, within: float = 90) -> bool:
@@ -25430,7 +25518,7 @@ def dash_secure(resp):
 
 DASH_ERRORS = {
     400: ("That link looks off", "Double-check the address, or grab a fresh link with /dashboard in Discord."),
-    403: ("This page is locked", "Ask an admin for the link: /dashboard in Discord."),
+    403: ("Ask an admin for today's access key, then open /dashboard in Discord, because this dashboard is locked.", ""),
     404: ("Nothing here", "That page doesn't exist (or it's private). Head back to the dashboard."),
     405: ("Nothing here", "That page doesn't exist. Head back to the dashboard."),
     429: ("Easy there", "That's a lot of requests. Give it a minute and try again."),
@@ -34006,7 +34094,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-143';"
+    "const CACHE='pb-shell-144';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -34645,7 +34733,7 @@ function rateWait(){if($('#ratewait'))return;
  const bar=h('div',{id:'ratewait',class:'banner',role:'status',text:'Easy there. Give it a minute and try again.'});
  ($('main')||document.body).prepend(bar)}
 function locked(){put(document.body,h('div',{class:'empty',style:'min-height:100vh;justify-content:center'},
- robot(),h('b',{text:'This dashboard is locked'}),h('span',{text:'Ask an admin for the link: /dashboard in Discord.'})))}
+ robot(),h('p',{text:"Ask an admin for today's access key, then open /dashboard in Discord, because this dashboard is locked."})))}
 
 /* images: show the last good copy while the fresh one loads, so refreshes never flash */
 function imgBox(path,extra,emptyTitle,emptySub,alt){
@@ -34805,6 +34893,7 @@ function kpiStrip(d){
  tiles.sort((a,b)=>{const ia=order.indexOf(a[0]),ib=order.indexOf(b[0]);return (ia<0?99:ia)-(ib<0?99:ib)});
  return h('div',{class:'kpis','data-home':'kpis'},
   h('div',{class:'kpihead'},h('span',{text:'This week'}),gripEl()),
+  h('p',{class:'muted weeknote',text:'Open '+w.open+' · Settled '+w.settled+' · Net '+money(netv)+'. Central.'}),
   tiles.map(([id,k,v,s,c])=>h('div',{class:'card kpi','data-kpi':id},gripEl(),
    h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}))))}
 function renderOverview(el,d){
@@ -35038,6 +35127,18 @@ function ideaBoard(rows){
    h('button',{type:'button',class:'tpause',disabled:p<=0?true:null,onclick:()=>{if(p<=0)return;S.ip=p-1;render()}},'Prev'),
    h('span',{class:'muted',text:label}),
    h('button',{type:'button',class:'tpause',disabled:p>=pages-1?true:null,onclick:()=>{if(p>=pages-1)return;S.ip=p+1;render()}},'Next')):null)}
+function commandBoard(rows){
+ if(S.cq==null)S.cq='';
+ const q=String(S.cq||'').trim().toLowerCase().replace(/^\//,'');
+ const hit=c=>{if(!q)return true;const blob=String(c.text||'');const names=[];let i=0;
+  while((i=blob.indexOf('`/',i))>=0){const j=blob.indexOf('`',i+2);if(j<0)break;names.push(blob.slice(i+2,j).toLowerCase());i=j+1}
+  return names.some(name=>name.indexOf(q)>=0)};
+ const shown=(rows||[]).filter(hit);
+ const box=h('input',{type:'search',id:'cmdfind',value:S.cq,placeholder:'Search a command','aria-label':'Search by command name',autocomplete:'off',oninput:e=>{
+  const v=e.target.value,start=e.target.selectionStart;S.cq=v;render();
+  const n=document.getElementById('cmdfind');if(n){n.focus();try{n.setSelectionRange(start,start)}catch(err){}}}});
+ return h('div',null,box,shown.length?h('div',null,shown.map(c=>h('div',{class:'cmdsec'},
+  h('div',{class:'rms',text:c.name}),h('p',{class:'muted',style:'margin:4px 0 12px;white-space:pre-wrap',text:c.text})))):empty('No command by that name.'))}
 function renderMore(el,d){
  const icons={hit:'✅',miss:'❌',push:'➖'};
  const map=(d.roadmap||[]).map(r=>h('div',{class:'rmrow '+(r.state||'')},
@@ -35069,14 +35170,16 @@ function renderMore(el,d){
   healthCard(),
   map.length?card('Roadmap to r50','',null,h('div',{class:'rmap'},map)):null,
   (d.thousand||[]).length?card('A thousand next ideas','',String((d.thousand||[]).length),ideaBoard(d.thousand)):null,
-  (d.commands||[]).length?card('Commands','',String(d.commands.length),h('div',null,(d.commands||[]).map(c=>h('div',{class:'cmdsec'},
-   h('div',{class:'rms',text:c.name}),h('p',{class:'muted',style:'margin:4px 0 12px;white-space:pre-wrap',text:c.text}))))):null,
+  (d.commands||[]).length?card('Commands','',String(d.commands.length),commandBoard(d.commands)):null,
   plan.length?card('Five updates','',((d.plan||[]).filter(r=>r.state==='live').length)+' live',h('div',{class:'rmap'},plan)):null,
   later.length?card('Later five','',((d.later||[]).filter(r=>r.state==='live').length)+' live',h('div',{class:'rmap'},later)):null,
   (d.updates||[]).length?card('Changelog','','Last 20',h('div',null,(d.updates||[]).slice(0,20).map(u=>h('p',{class:'muted',style:'margin:4px 0',text:u.ver+' · '+u.text})))):null,
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
+  (d.books||[]).length?card('Books the scanner reads','',String(d.books.length),h('ul',{class:'clean'},d.books.map(b=>h('li',{text:b})))):null,
+  (d.sports||[]).length?card('Sports this upload reads','',String(d.sports.length),h('ul',{class:'clean'},d.sports.map(s=>h('li',{text:s})))):null,
   card('About','s6',null,h('p',{class:'muted aboutver',style:'margin:0'},'PIMP-BOT ',d.version,' · update ',(d.update||''),'.'),
+   h('p',{class:'muted',style:'margin:8px 0 0',text:'Last clean start: '+(d.booted||'')+'.'}),
    h('p',{class:'muted',style:'margin:8px 0 0'},'The first number is this file. The second is the idea list it is filling. Times are Central. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.'),
    (window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)?h('p',{class:'muted',style:'margin:8px 0 0',text:'Reduced motion is on. The intro stays off.'}):null,
    h('img',{class:'abouticon',width:'180',height:'180',alt:'Home screen icon',src:'/apple-touch-icon.png'})))}
@@ -35518,6 +35621,8 @@ function healthCard(){const H=S.health;
   h('div',{class:'bar'},h('i',{style:'width:'+(r.n/max*100)+'%'}))))};
  const feedTxt=f=>f.state==='idle'?'not used yet':f.state==='down'?'not answering'+(f.code?' ('+f.code+')':''):(f.last_ok?'answered '+f.last_ok:'')+(f.fail?' · '+f.fail+' missed':'');
  const fail=H.jobs.failing;
+ const jobs=H.joblist||[];
+ const skips=H.skipped||[];
  return card('Bot health','',h('span',{class:'faint',text:H.version}),h('div',{class:'hgrid'},
   h('div',{class:'hbox'},h('h3',null,'Data feeds'),H.feeds.map(f=>h('div',{class:'feed'},h('i',{class:'dot '+f.state}),h('b',{text:f.name}),h('span',{text:feedTxt(f)})))),
   h('div',{class:'hbox'},h('h3',null,'Slips read today'),bars(H.reads),h('p',{class:'hint',text:'Readers on, in order: '+(H.readers_on.join(' → ')||'none (the form only)')})),
@@ -35525,7 +35630,9 @@ function healthCard(){const H=S.health;
   h('div',{class:'hbox'},h('h3',null,'Background'),kv('Last cycle',H.cycle.ago||'not yet',H.cycle.ok?'up':'down'),
    kv('Last job',H.last_job||'not yet'),
    kv('Jobs',fail.length?fail.length+' failing':(H.jobs.total?'all '+H.jobs.total+' healthy':'not run yet'),fail.length?'down':'up'),
-   fail.slice(0,4).map(j=>kv(j.name,'failed ×'+j.fails,'down')),kv('Up for',H.uptime),kv('Version',H.version))))}
+   fail.slice(0,4).map(j=>kv(j.name,'failed ×'+j.fails,'down')),kv('Up for',H.uptime),kv('Version',H.version),kv('Update',H.update||'')),
+  jobs.length?h('div',{class:'hbox'},h('h3',null,'Jobs'),jobs.map(j=>kv(j.name,j.when||'not yet'))):null,
+  skips.length?h('div',{class:'hbox'},h('h3',null,'Skipped'),skips.map(j=>h('p',{class:'hint',text:j.note}))):null))}
 function fresh(t){if(t==='live'&&(!S.live||Date.now()-S.liveAt>20000))loadLive();
  if(t==='news'&&(!S.news||Date.now()-S.newsAt>300000))loadNews();if(t==='more'&&(!S.health||Date.now()-S.healthAt>60000))loadHealth()}
 
@@ -35594,7 +35701,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=143') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=144') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -36880,7 +36987,7 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
  </div>
  <form class="panel" id="signin" action="/login" method="post">
   <h2>Sign in</h2>
-  <p class="hint">Ask an admin for today's access key on Staff HQ. Paste it here once — your browser stays signed in on this device. Each key works for one person, then a new one is minted. On iPhone, after you sign in: Share → Add to Home Screen.</p>
+  <p class="hint">Ask an admin for today's access key, then open /dashboard in Discord, because this dashboard is locked.</p>
   <label for="key">Access key</label>
   <input id="key" name="key" type="text" maxlength="128" autocomplete="off" spellcheck="false" required>
   <div class="stay">
@@ -36897,7 +37004,7 @@ footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);f
 </section>
 <footer>
  <span>Private to your Discord. Hidden picks stay hidden until they’re revealed.</span>
- <span>Need the link? Run /dashboard in Discord.</span>
+ <span>Need the link? Run /dashboard in Discord. On iPhone, Share → Add to Home Screen.</span>
 </footer>
 </div>
 <script>
@@ -38168,6 +38275,7 @@ def staff_ops(uid: int) -> dict:
                    "used": int(dash_gate_state().get("used") or 0)},
         "devices": [{"id": r.get("id") or "", "who": r.get("who") or "Browser", "ip": r.get("ip") or "",
                      "when": r.get("when") or ""} for r in dash_devices()],
+        "photos_today": photos_read_today(),
     }
 
 
@@ -38360,6 +38468,7 @@ async function load(){const r=await fetch('/api/staff.json',{credentials:'same-o
   h('div',{class:'rbox'},h('b',{class:'warn',text:String(R.unsure||0)}),h('span',{text:'confirm'})),
   h('div',{class:'rbox'},h('b',{class:'bad',text:String(R.failed||0)}),h('span',{text:'failed'})),
   last?h('p',{text:'Last read: '+(last.title||last.how||'a slip')+' · '+(last.who||'')}):null,
+  h('p',{class:'muted',text:'Photos read today: '+String(+d.photos_today||0)}),
   h('div',{class:'slips'},(R.slips||[]).length?(R.slips||[]).map(s=>h('div',{class:'slip'},
    h('span',null,h('b',{text:s.who||'Slip'}),' ',h('span',{class:'muted',text:s.title||s.how||''})),
    s.url?h('a',{href:s.url,target:'_blank',rel:'noreferrer',text:'screenshot'}):
@@ -48538,6 +48647,33 @@ def _dash30_ago(ts: Optional[float], now: float) -> Optional[str]:
     return None if not ts else _track_ago(ts, now)
 
 
+def _house_when(raw: str) -> str:
+    """Last finish, as a Central time of day. Empty when the job has not finished."""
+    try:
+        when = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return ""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(TZ).strftime("%b %-d, %-I:%M %p") + " Central"
+
+
+def photos_read_today() -> int:
+    """How many slip photos were read today. A count only: no picture is stored for this line."""
+    try:
+        counts = json.loads(get_setting(0, f"slipreads:{datetime.now(TZ).date().isoformat()}") or "{}")
+    except Exception:
+        return 0
+    if not isinstance(counts, dict):
+        return 0
+    total = 0
+    for key in ("scan", "scan_confirm", "gemini", "claude"):
+        val = counts.get(key)
+        if str(val or "").isdigit():
+            total += int(val)
+    return total
+
+
 def dash30_health() -> dict:
     """Data feeds, today's slip reads and questions, the scheduler, the version. Safe to show anyone signed in."""
     now = time.time()
@@ -48581,11 +48717,20 @@ def dash30_health() -> dict:
         ok_at = jh.get("ok_at") or ""
         if ok_at >= best_ok:
             best_ok, last_job = ok_at, jname
-    return {"version": BOT_VERSION, "uptime": f"{up.days}d {up.seconds // 3600}h {(up.seconds // 60) % 60}m",
+    joblist = [{"name": clip(jname, 40), "when": _house_when(jh.get("ok_at") or "") or "not yet"}
+               for jname, jh in JOB_HEALTH.items()]
+    joblist.sort(key=lambda row: row["name"])
+    skipped = []
+    for row in JOB_SKIPS[-8:]:
+        name = clip(str(row.get("name") or "job"), 40)
+        skipped.append({"name": name, "note": f"{name} skipped, it had just finished."})
+    return {"version": BOT_VERSION, "update": ROADMAP_NOW,
+            "uptime": f"{up.days}d {up.seconds // 3600}h {(up.seconds // 60) % 60}m",
             "cycle": {"ago": _dash30_ago(last_ts, now), "ok": bool(last_ts and now - last_ts < 600)},
             "last_job": last_job or "not yet",
             "jobs": {"total": len(JOB_HEALTH), "failing": failing[:8]}, "feeds": feeds, "reads": reads,
-            "questions": questions, "readers_on": on, "claude_today": claude_n}
+            "questions": questions, "readers_on": on, "claude_today": claude_n,
+            "joblist": joblist, "skipped": skipped}
 
 
 # ---- pictures --------------------------------------------------------------------------------------------------
@@ -49306,6 +49451,7 @@ class PicksBot(discord.Client):
                     *[_named_job(name, fn, self) for name, fn in EXTRA_JOBS]):
             name = job_name(job)
             if job_recently_clean(name):
+                note_job_skip(name)
                 continue
             try:
                 await asyncio.wait_for(job(now.astimezone(timezone.utc)), timeout=SEC_JOB_TIMEOUT)
