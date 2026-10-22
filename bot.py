@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.61"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.62"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -199,6 +199,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.59", "On Live, you can star a game and hide finals on this phone. A sport filter stays while the scores refresh. The live dot is only for a game that is in."),
     ("1.60", "A new upload posts an update recap in the recap channel. News can be filtered on this phone, and a row keeps the photo, the team, and the status together."),
     ("1.61", "On a player sheet, you can save a line and a note on this phone. The chart is the last 5, last 10, or last 20, and the next game is the opponent, home or away, and Central time."),
+    ("1.62", "On this phone you can save a named look: sport, book, and accent. The intro stays off after you have seen it today, and when the phone asks for reduced motion."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -245,6 +246,7 @@ MEMBER_NEWS = [
     ("1.59", "On Live, you can star a game and hide finals on this phone. A sport filter stays while the scores refresh. The live dot is only for a game that is in."),
     ("1.60", "A new upload posts an update recap in the recap channel. News can be filtered on this phone, and a row keeps the photo, the team, and the status together."),
     ("1.61", "On a player sheet, you can save a line and a note on this phone. The chart is the last 5, last 10, or last 20, and the next game is the opponent, home or away, and Central time."),
+    ("1.62", "On this phone you can save a named look: sport, book, and accent. The intro stays off after you have seen it today, and when the phone asks for reduced motion."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -3120,6 +3122,90 @@ _THOUSAND_SHIPPED = {
     'Keep the search to a few names.',
     'Show the Central time on the next game.',
     'Refresh the header if the team changes, without clearing the note.',
+    'Keep the title black with the purple glow.',
+    'Leave the smoke a little thick, and keep the curl.',
+    'Let a member save a named look: sport, book, and accent, on this phone.',
+    'Keep the opening collage where it is.',
+    'Turn the intro off when the phone asks for reduced motion.',
+    'Add a home-screen check so Add to Home Screen still opens without the browser bars.',
+    'Keep accent changes on this device only.',
+    'Cache the shell, and always fetch fresh slip numbers.',
+    'Add a quiet first visit: skip the intro after you have seen it today.',
+    'Keep the gold buttons readable on every accent.',
+    'Match loading skeletons to the card they stand in for.',
+    'Let a member pick a denser type size on this phone.',
+    'Keep the phone home bar from covering the last card.',
+    'Stay on the tab you left when you come back.',
+    'Add a high-contrast pair that keeps the purple and the gold.',
+    'Keep posters in their frame, with the name readable.',
+    'Do not flash feed lights on the opening screen.',
+    'Keep section titles in one weight across Mine, news, and More.',
+    'Refresh an open page in place, without a full fade.',
+    'Add a way to turn the ticker slide off without leaving the page.',
+    'Use the same corner and gap on every overview card.',
+    'Add a saved scene that remembers the last tab and the Mine choice.',
+    'Add a paper-light scene that still uses the purple and the gold.',
+    'Let the smoke stay on, with a smaller curl, from one control.',
+    'Keep the opening title in the old-style face.',
+    'Show the home-screen icon in About, at the real size.',
+    'Let a dense type setting stay on this phone.',
+    'Add a little more air on the wide screen without changing the phone.',
+    'Keep the collage from reloading on every tab change.',
+    'Show a reduced-motion note only in About.',
+    'Add a way to reset the look to the group default, on this phone.',
+    'Keep the gold ring on photos at one weight.',
+    'Let the intro brand fade on the same beat it uses now.',
+    'Add a quiet loading bar that does not cover the title.',
+    'Keep the nav labels readable at the denser type size.',
+    'Keep the ticker pause visible when the ticker is on.',
+    'Keep the purple glow on the title, and the title itself black.',
+    'Add a scene that is only type and cards, with no extra art.',
+    'Hold the last tab in the scene you save.',
+    'Keep the About version on one line.',
+    'Add a wider tap on the nav for a thumb.',
+    'Keep the title face the one the group already knows.',
+    'Hold the smoke behind the title, not over it.',
+    'Keep the gold readable on the purple.',
+    'Leave the collage as the opening, not as a page background.',
+    'Hold section titles in the same case.',
+    'Use the same gap between cards on every tab.',
+    'Match the chip height on Mine, news, and settled.',
+    'Leave room for the home bar.',
+    'Keep the intro from returning once it has left.',
+    'Hold the accent on this device.',
+    'Use one muted color for notes.',
+    'Keep the live dot the same red the strip already uses.',
+    'Match the poster frame to the card corner.',
+    'Keep About at the bottom of More.',
+    'Hold the type size the member picked.',
+    'Use tabular figures for money everywhere.',
+    'Keep a skeleton the same shape as the card it replaces.',
+    'Leave the feed lights off the opening screen.',
+    'Hold the Mine label centered.',
+    'Match the filter chips across the board.',
+    'Skip the intro when reduced motion is on.',
+    'Keep the shell cached, and fetch slips fresh.',
+    'Stay on the last tab after a reload.',
+    'Remember Mine, the look, and the dense type on this phone.',
+    'Do not redraw the collage for a small copy change.',
+    'Keep the smoke from starting again when you switch tabs.',
+    'Hold the title color and the glow through a refresh.',
+    'Load photos after the text, so names are not late.',
+    'Keep a failed scene from blanking the page. Use the default.',
+    'Reset one device without touching anyone else\'s look.',
+    'Keep the home-screen launch on the board, not in the browser bars.',
+    'Avoid a fade that hides a card the member was reading.',
+    'Hold the ticker off when they turned the slide off.',
+    'Keep print free of the smoke and the intro.',
+    'Do not show a member the staff lamps on the opening screen.',
+    'Keep a dense type from clipping the pays line.',
+    'Reload the page in place when only numbers changed.',
+    'Keep gold buttons readable if the accent moves.',
+    'Leave classic pages on their own look.',
+    'Cache the icon so Add to Home Screen stays sharp.',
+    'Keep a long More page from covering the header.',
+    'Do not restart the intro when the minute refresh runs.',
+    'Store the scene on this phone, and nowhere else.',
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -33920,7 +34006,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-142';"
+    "const CACHE='pb-shell-143';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -34990,7 +35076,10 @@ function renderMore(el,d){
   (d.updates||[]).length?card('Changelog','','Last 20',h('div',null,(d.updates||[]).slice(0,20).map(u=>h('p',{class:'muted',style:'margin:4px 0',text:u.ver+' · '+u.text})))):null,
   card('Google Sheets','s6',null,h('p',{class:'muted',style:'margin:0'},'Want every pick in a spreadsheet that updates itself? Run ',h('code',null,'/admin sheets'),
    ' in Discord and paste the formula into cell A1.')),
-  card('About','s6',null,h('p',{class:'muted',style:'margin:0'},'PIMP-BOT ',d.version,' · update ',(d.update||''),'. The first number is this file. The second is the idea list it is filling. Times are Central. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.')))}
+  card('About','s6',null,h('p',{class:'muted aboutver',style:'margin:0'},'PIMP-BOT ',d.version,' · update ',(d.update||''),'.'),
+   h('p',{class:'muted',style:'margin:8px 0 0'},'The first number is this file. The second is the idea list it is filling. Times are Central. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.'),
+   (window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)?h('p',{class:'muted',style:'margin:8px 0 0',text:'Reduced motion is on. The intro stays off.'}):null,
+   h('img',{class:'abouticon',width:'180',height:'180',alt:'Home screen icon',src:'/apple-touch-icon.png'})))}
 const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};
 function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}
 function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}
@@ -35035,7 +35124,7 @@ function renderMeta(d){const m=$('#meta');put(m,d.season?h('span',{class:'pill s
  const live=document.querySelector('#nav button[data-t=live]');live.querySelector('.badge')?.remove();
  if(d.ticker.length)live.append(h('span',{class:'badge',text:String(d.ticker.length)}))}
 
-async function load(){const seq=++S.seq;const d=await api('/api/data'+qs());
+async function load(){const seq=++S.seq;const bar=$('#loadbar');if(bar)bar.classList.add('on');const d=await api('/api/data'+qs());if(bar)bar.classList.remove('on');
  if(!d){if(typeof navigator!=='undefined'&&navigator.onLine===false&&!$('#offbanner')){
   const bar=h('div',{id:'offbanner',class:'banner',role:'status',text:'You are offline. This is the saved shell, not a current slip.'});
   ($('main')||document.body).prepend(bar);if(S.data)S.data.updated='offline'}return}
@@ -35505,7 +35594,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=142') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=143') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -35583,10 +35672,12 @@ SITE_SMOKE_JS = r"""
 function smokeIntro(){
  const o=$('#intro');if(!o)return;
  const app=navigator.standalone||matchMedia('(display-mode:standalone)').matches;
- const key=app?'pb-intro-app-r90':'pb-intro-r90';
- void key;
+ const day=new Date().toLocaleDateString('en-CA',{timeZone:'America/Chicago'});
+ const key=(app?'pb-intro-app-':'pb-intro-')+day;
  const skip=()=>{o.classList.add('skip');o.remove()};
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){skip();return}
+ try{if(localStorage.getItem(key)==='1'){skip();return}}catch(e){}
+ try{smokeIntro.small=localStorage.getItem('pb-curl')==='small'}catch(e){smokeIntro.small=false}
  const c=$('#smokecan'),brand=$('#introbrand')||$('#introtitle');if(!c){skip();return}
  const x=c.getContext('2d');const dpr=Math.min(2,window.devicePixelRatio||1);
  const fit=()=>{c.width=Math.round(innerWidth*dpr);c.height=Math.round(innerHeight*dpr);
@@ -35633,7 +35724,7 @@ function smokeIntro(){
  const parts=Array.from({length:336},()=>spawn('wisp'));
  let start=performance.now();
  (function tick(now){const w=innerWidth,h=innerHeight;x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);x.globalCompositeOperation='source-over';
-  const draw=p=>{const fat=p.kind==='fog';const cv=curl(p.x,p.y,fat?.0011:.0024);
+  const draw=p=>{const fat=p.kind==='fog';const small=!!smokeIntro.small;const cv=curl(p.x,p.y,fat?(small?.00055:.0011):(small?.0012:.0024));
    const rise=fat?-0.95:-2.15;
    p.vx+=(cv[0]-p.vx)*.07;p.vy+=((cv[1]+rise)-p.vy)*.08;p.ph+=.01;p.rot+=p.spin+p.vx*.0015;
    p.x+=p.vx;p.y+=p.vy;p.r+=p.grow;p.life-=fat?.00022:.00042;
@@ -35643,7 +35734,7 @@ function smokeIntro(){
    x.globalAlpha=Math.min(fat?.52:.34,p.a*p.life*(fat?3.4:2.35));
    x.drawImage(p.sprite,-d/2,-d/2,d,d);x.restore()};
   for(const p of fog)draw(p);for(const p of parts)draw(p);x.globalAlpha=1;
-  const el=now-start;if(el>1100&&brand)brand.classList.add('on');if(el>7000)o.classList.add('go');
+  const el=now-start;if(el>1100&&brand)brand.classList.add('on');if(el>7000){o.classList.add('go');try{localStorage.setItem(key,'1')}catch(e){}}
   if(el<9200)requestAnimationFrame(tick);else skip()})(start)}
 """
 
@@ -35922,11 +36013,40 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
  body.v4 .img.shot,body.v4 .img.shot img{width:100%}
  body.v4 .capline{font-size:14px}
  body.v4 .findpop{width:min(100vw - 24px,680px);left:12px;right:auto}
- body.v4 a.staffbtn{height:32px;padding:0 10px;font-size:10px;letter-spacing:.08em}}
+ body.v4 a.staffbtn{height:32px;padding:0 10px;font-size:10px;letter-spacing:.08em}
+ body.v4 nav.tabs button{min-height:48px}}
 @media (min-width:1100px){
  body.v4 .slips{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));overflow:visible}
- body.v4 .oslip{flex:none;width:auto}}
-""" + SITE_LOOK_CSS
+ body.v4 .oslip{flex:none;width:auto}
+ body.v4 .tab{gap:20px}}
+""" + SITE_LOOK_CSS + r"""
+html[data-bg=paper],html[data-bg=paper] body,body[data-bg=paper]{background:#f6f3fc!important;background-image:none!important;color:#1d1530;--brand:#7B3FE4;--brand2:#a27bff;--gold:#F5C542;--text:#1d1530;--muted:#5d5475;--bg:#f6f3fc;--card:#fff;--card2:#f6f2fd}
+html[data-bg=paper] body:before,body[data-bg=paper]:before,html[data-bg=paper] header:before{display:none!important;background-image:none!important}
+html[data-bg=paper] body.v4 .card,html[data-bg=paper] .card{background:#fff!important;background-image:none!important;color:#1d1530}
+html[data-bg=contrast],html[data-bg=contrast] body,body[data-bg=contrast]{background:#fff!important;background-image:none!important;color:#000;--brand:#7B3FE4;--brand2:#7B3FE4;--gold:#F5C542;--text:#000;--muted:#222;--bg:#fff;--card:#fff;--card2:#f7f7f7;--line:#111}
+html[data-bg=contrast] body:before,body[data-bg=contrast]:before,html[data-bg=contrast] header:before{display:none!important;background-image:none!important}
+html[data-bg=contrast] header{background:#fff!important;color:#000}
+html[data-bg=contrast] body.v4 .card,html[data-bg=contrast] .card{background:#fff!important;background-image:none!important;color:#000!important;border-color:#111!important}
+html[data-bg=plain],html[data-bg=plain] body,html[data-bg=plain] body.v4,body[data-bg=plain]{background:var(--bg)!important;background-image:none!important}
+html[data-bg=plain] body:before,body[data-bg=plain]:before,html[data-bg=plain] header:before{display:none!important;background-image:none!important;content:none!important}
+html[data-bg=plain] body.v4 .card{background:var(--card)!important;background-image:none!important}
+.looktile[data-bg=paper] .sw{background:#f6f3fc!important;background-image:none!important}
+.looktile[data-bg=contrast] .sw{background:#fff!important;background-image:none!important;box-shadow:inset 0 0 0 2px #111}
+.looktile[data-bg=plain] .sw{background:#241833!important;background-image:none!important}
+body.dense{font-size:13.5px;line-height:1.35}
+body.dense nav.tabs button{font-size:13px}
+body.dense .oslip .m{white-space:normal;overflow:visible;flex-wrap:wrap}
+body.v4 .seg button,body.v4 .settlebar .schip{min-height:36px}
+body.v4 .tile{border-radius:18px}
+.loadbar{height:3px;background:transparent}
+.loadbar.on{background:linear-gradient(90deg,var(--brand),var(--gold))}
+.aboutver{white-space:nowrap;overflow-x:auto}
+.abouticon{width:180px;height:180px;max-width:180px;display:block;margin-top:12px}
+#scenename{flex:1;min-width:140px;height:36px;border-radius:999px;border:1px solid var(--line);background:var(--card2);color:var(--text);padding:0 12px}
+.scenerow{display:flex;gap:8px;align-items:center;margin:6px 0}
+.scenerow .scenego{flex:1;text-align:left;height:36px;border-radius:999px;border:1px solid var(--line);background:var(--card2);color:var(--text);padding:0 12px;font-weight:700;cursor:pointer}
+.scenerow .scenex{width:36px;height:36px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--text);cursor:pointer;font-weight:700}
+"""
     html = html.replace("</style>", extra_css + "</style>", 1)
     html = html.replace("<body>", '<body class="v4">', 1)
     html = html.replace(
@@ -35948,7 +36068,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
         1)
     html = html.replace(
         '<div class="ticker" id="ticker"></div>',
-        '<div class="kpis" id="kpis"></div>\n<div class="ticker" id="ticker"></div>',
+        '<div class="kpis" id="kpis"></div>\n<div class="loadbar" id="loadbar" aria-hidden="true"></div>\n<div class="ticker" id="ticker"></div>',
         1)
     html = html.replace('href="/?v=2">Classic view</a>',
                         'href="/?v=3">Classic view</a><a href="/?v=2">v2</a><a href="/?v=1">v1</a>')
@@ -36561,7 +36681,10 @@ const LOOKS=[["court","Classic court","The original purple court"],["arena","Are
  ["gridiron","Gridiron","Game-night turf"],["vegas","Vegas sunset","Synthwave sun and palms"],
  ["midnight","Midnight","Clean and quiet"],["hardwood","Hardwood","Warm wood floor"],
  ["nightcourt","Night court","Lights on a clear floor"],["tunnel","The tunnel","Walk out under the lights"],
- ["crown","Crown","Gold on purple, easy to see"]];
+ ["crown","Crown","Gold on purple, easy to see"],
+ ["paper","Paper","Light page, purple and gold"],
+ ["contrast","High contrast","Black type, purple and gold"],
+ ["plain","Plain","Type and cards, no extra art"]];
 const ACCENTS=["purple","gold","green","blue","red","pink","teal","orange","ice","black"];
 const GROUP_LOOK={bg:document.documentElement.dataset.bg||(document.body&&document.body.dataset.bg)||'',
  ac:document.documentElement.dataset.accent||(document.body&&document.body.dataset.accent)||''};
@@ -36574,6 +36697,46 @@ function saveLook(bg,ac){const s=readLook();if(bg!==undefined)s.bg=bg;if(ac!==un
  try{if(!s.bg&&!s.accent)localStorage.removeItem('pb-look');else localStorage.setItem('pb-look',JSON.stringify(s))}catch(e){}
  applyLook();paintLook()}
 function resetLook(){try{localStorage.removeItem('pb-look')}catch(e){}applyLook();paintLook()}
+function readScenes(){try{const x=JSON.parse(localStorage.getItem('pb-scenes')||'[]');return Array.isArray(x)?x.filter(s=>s&&typeof s.name==='string'&&s.name).slice(0,8):[]}catch(e){return []}}
+function writeScenes(rows){try{localStorage.setItem('pb-scenes',JSON.stringify((rows||[]).slice(0,8)))}catch(e){}}
+function applyType(){let dense=false;try{dense=localStorage.getItem('pb-type')==='dense'}catch(e){}
+ if(document.body)document.body.classList.toggle('dense',dense);
+ const b=$('#typedense');if(b)b.textContent=dense?'Denser type: on':'Denser type'}
+function applyCurl(){let small=false;try{small=localStorage.getItem('pb-curl')==='small'}catch(e){}
+ smokeIntro.small=small;const b=$('#curlsmall');if(b)b.textContent=small?'Smaller curl: on':'Smaller curl'}
+function sceneApply(s){try{
+ if(!s||typeof s!=='object')throw new Error('scene');
+ const bg=LOOKS.some(x=>x[0]===s.bg)?s.bg:'';const ac=ACCENTS.includes(s.accent)?s.accent:'';
+ if(bg||ac)saveLook(bg,ac);else resetLook();
+ if(typeof loadView==='function')loadView();
+ S.sport=typeof s.sport==='string'&&s.sport?s.sport:'all';
+ S.book=typeof s.book==='string'&&s.book?s.book:'all';
+ S.mine=!!s.mine;
+ try{localStorage.setItem('pb-view',JSON.stringify({book:S.book,sport:S.sport,when:(S.when||'all'),mine:!!S.mine}))}catch(e){}
+ if(s.type==='dense'){try{localStorage.setItem('pb-type','dense')}catch(e){}}
+ else{try{localStorage.removeItem('pb-type')}catch(e){}}
+ applyType();
+ const tab=(typeof TABS!=='undefined'&&TABS[s.tab])?s.tab:'overview';
+ if(typeof show==='function')show(tab);else if(typeof render==='function')render();
+}catch(e){try{resetLook()}catch(e2){}
+ try{localStorage.removeItem('pb-type')}catch(e2){}
+ try{if(document.body)document.body.classList.remove('dense')}catch(e2){}
+ try{if(typeof render==='function')render()}catch(e3){}}}
+function sceneSave(name){const n=String(name||'').trim().slice(0,40);if(!n)return;
+ if(typeof loadView==='function')loadView();
+ const look=readLook();
+ const row={name:n,sport:S.sport||'all',book:S.book||'all',accent:look.accent||'',bg:look.bg||'',
+  tab:S.tab||'overview',mine:!!S.mine,type:document.body&&document.body.classList.contains('dense')?'dense':''};
+ writeScenes([row].concat(readScenes().filter(x=>x.name!==n)));paintScenes()}
+function sceneDrop(name){writeScenes(readScenes().filter(x=>x.name!==name));paintScenes()}
+function paintScenes(){const box=$('#scenelist');if(!box)return;const rows=readScenes();
+ put(box,rows.length?rows.map(s=>h('div',{class:'scenerow'},
+  h('button',{type:'button',class:'scenego','data-scene':s.name,text:s.name}),
+  h('button',{type:'button',class:'scenex','data-drop':s.name,'aria-label':'Remove'},'×'))):h('p',{class:'lookhint',text:'No named look on this phone yet.'}))}
+function resetPhone(){try{localStorage.removeItem('pb-look');localStorage.removeItem('pb-scenes');localStorage.removeItem('pb-type');localStorage.removeItem('pb-curl')}catch(e){}
+ if(document.body)document.body.classList.remove('dense');
+ smokeIntro.small=false;applyLook();applyType();applyCurl();paintLook();paintScenes();
+ if(typeof render==='function'&&S.data)render()}
 const LOOK_SW={court:'radial-gradient(80% 80% at 20% 0,#7B3FE4aa,transparent),#12081c',
  arena:'radial-gradient(40% 100% at 20% 0,#F5C54299,transparent),radial-gradient(40% 100% at 80% 0,#F5C54266,transparent),#12081c',
  neoncity:'linear-gradient(#1a1038,#c45cff33),#12061c',galaxy:'radial-gradient(circle at 70% 30%,#7B3FE4,#070614)',
@@ -36586,12 +36749,13 @@ function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();
   h('i',{class:'sw'},lookImg('/img/look/default.svg')),h('b',{text:'Group default'}),
   h('span',{text:'The group’s court and accent'}),def?h('em',{class:'onpill',text:'ON'}):null),
   LOOKS.map(([id,n,d])=>h('button',{class:'looktile'+(s.bg===id?' on':''),type:'button','data-bg':id},
-  h('i',{class:'sw'},lookImg('/img/look/'+id+'.svg')),h('b',{text:n}),h('span',{text:d}),
+  h('i',{class:'sw',style:id==='paper'?'background:#f6f3fc':id==='contrast'?'background:#fff':id==='plain'?'background:#241833':''},
+   (id==='paper'||id==='contrast'||id==='plain')?null:lookImg('/img/look/'+id+'.svg')),h('b',{text:n}),h('span',{text:d}),
   s.bg===id?h('em',{class:'onpill',text:'ON'}):null)));
  const ACCENT_NAME={purple:'Purple',gold:'Gold',green:'Green',blue:'Blue',red:'Red',pink:'Pink',teal:'Teal',orange:'Orange',ice:'Ice',black:'Black'};
  const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{class:'acchip'+(s.accent===a?' on':''),type:'button','data-ac':a},
   h('i',{class:'acdot'}),h('span',{text:ACCENT_NAME[a]||a}))))}
-applyLook();phoneHomeHint();
+applyLook();applyType();applyCurl();paintScenes();phoneHomeHint();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 let installEvt=null;
 addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;const head=$('header');
@@ -36606,7 +36770,15 @@ if(lookBtn)lookBtn.addEventListener('click',()=>{paintLook();lookSheet.classList
 if(lookSheet){lookSheet.addEventListener('click',e=>{if(e.target.id==='looksheet'||e.target.id==='lookdone'||e.target.id==='lookx')closeLook()});
  $('#lookgrid')&&$('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile');if(!t)return;
   if(t.hasAttribute('data-reset'))resetLook();else saveLook(t.getAttribute('data-bg'),undefined)});
- $('#lookaccents')&&$('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});}
+ $('#lookaccents')&&$('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});
+ const scenes=$('#scenelist');if(scenes)scenes.addEventListener('click',e=>{const drop=e.target.closest('[data-drop]');const go=e.target.closest('[data-scene]');
+  if(drop){sceneDrop(drop.getAttribute('data-drop'));return}if(go){const s=readScenes().find(x=>x.name===go.getAttribute('data-scene'));if(s)sceneApply(s)}});
+ const frm=$('#scenefrm');if(frm)frm.addEventListener('submit',e=>{e.preventDefault();const inp=$('#scenename');sceneSave(inp&&inp.value);if(inp)inp.value=''});
+ const typeBtn=$('#typedense');if(typeBtn)typeBtn.addEventListener('click',()=>{const on=!(document.body&&document.body.classList.contains('dense'));
+  try{if(on)localStorage.setItem('pb-type','dense');else localStorage.removeItem('pb-type')}catch(e){}applyType()});
+ const curlBtn=$('#curlsmall');if(curlBtn)curlBtn.addEventListener('click',()=>{let on=false;try{on=localStorage.getItem('pb-curl')!=='small'}catch(e){}
+  try{if(on)localStorage.setItem('pb-curl','small');else localStorage.removeItem('pb-curl')}catch(e){}applyCurl()});
+ const resetBtn=$('#resetphone');if(resetBtn)resetBtn.addEventListener('click',resetPhone);}
 """ + SITE_SMOKE_JS + r"""
 addEventListener('load',smokeIntro);
 """
@@ -36618,7 +36790,13 @@ addEventListener('load',smokeIntro);
         '<p class="lookhint">Pick the scene behind the page. It\'s saved on this device only.</p>'
         '<div class="lookgrid" id="lookgrid"></div>'
         '<p class="lookhint" style="margin-top:14px">Accent</p><div class="lookaccents" id="lookaccents"></div>'
-        '<div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>'
+        '<p class="lookhint" style="margin-top:14px">Named look</p>'
+        '<form id="scenefrm" class="lookrow"><input id="scenename" maxlength="40" placeholder="Name this look" aria-label="Name this look">'
+        '<button type="submit">Save on this phone</button></form><div id="scenelist"></div>'
+        '<div class="lookrow"><button type="button" id="typedense">Denser type</button>'
+        '<button type="button" id="curlsmall">Smaller curl</button>'
+        '<button type="button" id="resetphone">Reset this phone</button>'
+        '<button type="button" id="lookdone">Done</button></div></div></div>'
         '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">'
         '<img src="' + DASH_FAVICON + '" alt="" width="120" height="120">'
         '<div id="introtitle">Pimp\'s Dashboard</div></div></div>'
