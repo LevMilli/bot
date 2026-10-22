@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.54"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.55"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -192,6 +192,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.52", "Just settled can be filtered by a win, a loss, or a push. A row shows how many legs hit, and a test slip stays off that list."),
     ("1.53", "Questions and the live board answer sooner. Staff HQ lists every Discord server and the data feeds that were added. More leagues are on the scoreboards, and a game in play refreshes sooner."),
     ("1.54", "A new upload is posted in the mods-only record channel too, and in a channel named for the hidden record. A channel that missed it gets the note on the next start."),
+    ("1.55", "On a phone, the top of the main page collapses while you scroll down, and it opens again only at the very top."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -231,6 +232,7 @@ MEMBER_NEWS = [
     ("1.52", "Just settled can be filtered by a win, a loss, or a push. A row shows how many legs hit, and a test slip stays off that list."),
     ("1.53", "Questions and the live board come back sooner. Staff HQ lists every Discord server and the data feeds that were added. More leagues are on the board, and a game in play refreshes sooner."),
     ("1.54", "A new upload shows up in the mods-only record channel, and in a channel named for the hidden record. If one of them missed it, the next start sends the note there."),
+    ("1.55", "On a phone, the top of the main page collapses while you scroll down, and it opens again only at the very top."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -32923,7 +32925,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-135';"
+    "const CACHE='pb-shell-136';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -33029,7 +33031,7 @@ DASHBOARD_HTML_V3 = r"""<!doctype html><html lang="en"><head><meta charset="utf-
  --head:linear-gradient(180deg,#e9defe 0%,#f3eefc 70%,#f6f3fc 100%);--glass:#f6f3fccc;--court:{{COURT_L}}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%;background:var(--bg)}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
- overflow-x:hidden;min-height:100vh;min-height:100dvh;position:relative;overscroll-behavior:none}
+ overflow-x:hidden;min-height:100vh;min-height:100svh;position:relative;overscroll-behavior:none}
 body:before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:var(--court) center 58%/min(1500px,180vw) auto no-repeat;
  -webkit-mask-image:radial-gradient(ellipse at 50% 55%,#000 30%,transparent 78%);mask-image:radial-gradient(ellipse at 50% 55%,#000 30%,transparent 78%)}
 header,main,footer,.ticker{position:relative}
@@ -34242,7 +34244,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=135') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=136') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -34622,7 +34624,7 @@ body.v4 .inj b{display:block;margin-bottom:3px;font-size:14.5px}
 body.v4 .inj p{margin:0;color:var(--muted);font-size:13.5px;line-height:1.45;overflow-wrap:anywhere}
 body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-height:1.4;overflow-wrap:anywhere}
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
- body.v4 header{background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+ body.v4 header{background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);overflow-anchor:none}
  body.v4 .top{padding:8px 12px 8px;gap:10px 8px;align-items:center}
  body.v4 .logo{width:44px;height:44px}
  body.v4 .spacer{display:none}body.v4 .brand{flex:1 1 auto;min-width:0}
@@ -34714,7 +34716,7 @@ function placeFind(){const wrap=document.querySelector('.findwrap'),nav=$('#nav'
  if(!wrap||!nav||!top)return;
  if(matchMedia('(max-width:720px)').matches){if(wrap.previousElementSibling!==nav)nav.after(wrap)}
  else{const spacer=top.querySelector('.spacer');if(wrap.parentElement!==top)top.insertBefore(wrap,spacer||null)}}
-function watchFind(){if(watchFind.ok)return;watchFind.ok=1;let y=0;placeFind();
+function watchFind(){if(watchFind.ok)return;watchFind.ok=1;placeFind();
  addEventListener('resize',placeFind);
  const find=$('#find');if(find)find.addEventListener('focus',()=>{S.findOff=0;paintFind()});
  addEventListener('pointerdown',e=>{const wrap=document.querySelector('.findwrap');const pop=$('#findpop');
@@ -34724,9 +34726,7 @@ function watchFind(){if(watchFind.ok)return;watchFind.ok=1;let y=0;placeFind();
   const now=window.scrollY||0;const wrap=document.querySelector('.findwrap');const pop=$('#findpop');
   const typing=wrap&&(wrap.contains(document.activeElement)||(pop&&!pop.hidden));
   if(typing||now<16)document.body.classList.remove('findaway');
-  else if(now>y+8&&now>56)document.body.classList.add('findaway');
-  else if(now<y-8)document.body.classList.remove('findaway');
-  y=now},{passive:true})}
+  else if(now>160)document.body.classList.add('findaway')},{passive:true})}
 function phoneHomeHint(){watchFind();const stand=matchMedia('(display-mode:standalone)').matches||navigator.standalone;
  if(stand){document.documentElement.classList.add('app');return}
  const find=$('#find');if(find&&matchMedia('(max-width:720px)').matches)find.placeholder='Player, person, or slip';
