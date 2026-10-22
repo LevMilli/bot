@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.55"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.56"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -193,6 +193,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.53", "Questions and the live board answer sooner. Staff HQ lists every Discord server and the data feeds that were added. More leagues are on the scoreboards, and a game in play refreshes sooner."),
     ("1.54", "A new upload is posted in the mods-only record channel too, and in a channel named for the hidden record. A channel that missed it gets the note on the next start."),
     ("1.55", "On a phone, the top of the main page collapses while you scroll down, and it opens again only at the very top."),
+    ("1.56", "People can pin three names on this phone. A card shows this week versus last week, and a filter for who is in profit or still open."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -233,6 +234,7 @@ MEMBER_NEWS = [
     ("1.53", "Questions and the live board come back sooner. Staff HQ lists every Discord server and the data feeds that were added. More leagues are on the board, and a game in play refreshes sooner."),
     ("1.54", "A new upload shows up in the mods-only record channel, and in a channel named for the hidden record. If one of them missed it, the next start sends the note there."),
     ("1.55", "On a phone, the top of the main page collapses while you scroll down, and it opens again only at the very top."),
+    ("1.56", "You can pin three people on this phone. A card shows this week versus last week, and you can filter who is in profit or still open."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2672,6 +2674,83 @@ _THOUSAND_SHIPPED = {
     'Keep the week total in the same units as the rows.',
     'Ignore a duplicate settle post so the list does not show the slip twice.',
     "Keep the signed-in member's own photo on their row, and everyone else's too.",
+    "Add a this-week versus last-week line on the person card.",
+    "Keep the Discord photo and the Message button on the same header.",
+    "Open a person's card from search without losing the letters you typed.",
+    "Show open slips and settled slips in two stacks on the card.",
+    "Give every person with an open slip a card, with the photo first.",
+    "Keep the highlight on the profit chart after you tap a name.",
+    "Use the same record line on the card, the search row, and the leaderboard.",
+    "Load the photo once and reuse it on search, the card, and Mine.",
+    "Let a member pin three people on this phone and see them first.",
+    "Keep Message as a real Discord link, with the name you already show.",
+    "Return to the same person after you close a slip.",
+    "Show each person's best book this month, as a plain net.",
+    "Clip a long display name to one line on the leaderboard and wrap it on the card.",
+    "Keep a person with only open slips visible, even with no settled record yet.",
+    "Add a quiet streak count that does not predict the next result.",
+    "Match the gold ring on search to the ring on the card.",
+    "Do not drop a person from the chart when their net is zero.",
+    "Keep season, month, and week as three taps, with the numbers under them.",
+    "Show the last slip they logged, with the day, under the record.",
+    "Put a role chip under the name when the member has one.",
+    "Keep a signed-out visitor from opening Message.",
+    "Show a person's open risk next to their open count.",
+    "Add a favorite sport, counted from slips, not chosen by hand.",
+    "Let a member write a one-line status on their own card, on this phone.",
+    "Show the longest win run and the longest loss run as two plain numbers.",
+    "Show which book paid them the most this season.",
+    "Show the photo larger on the card than on the leaderboard row.",
+    "Add a jump from the card to Just settled, filtered to that person.",
+    "Let the chart highlight stay on while you scroll the slips.",
+    "Show home-screen friendly initials only when the photo is missing.",
+    "Add a copy line of their record, ready to paste.",
+    "Show the staff role only to staff, and the name to everyone.",
+    "Add a filter on People: everyone, in profit, or with something open.",
+    "Show the week net in the same units as the big tile.",
+    "Add the Central date of their last settle.",
+    "Let a pinned person stay pinned on this phone after a refresh.",
+    "Add a quiet \"new member\" mark for a first slip in the last seven days.",
+    "Keep the photo to the left of the name in search.",
+    "Keep Message on the card, not buried in a menu.",
+    "Clip the record so a long streak chip does not wrap into the net.",
+    "Hold the gold ring even when the photo is the initial.",
+    "Keep season, month, and week in that order.",
+    "Line the nets up on the leaderboard.",
+    "Keep a zero net visible, in the muted color.",
+    "Match the card width to the other sheets on a phone.",
+    "Leave room under the name for a role chip.",
+    "Keep the search box above the results.",
+    "Use the same empty sentence when a search has no person.",
+    "Show at most four search hits before the list asks for more letters.",
+    "Keep the leaderboard medal on the first three, and a number after that.",
+    "Match the photo size in search to the size on a settled row.",
+    "Keep the pin control as one tap.",
+    "Leave the visitor a read of the board without Message.",
+    "Hold the header still while the slip list scrolls.",
+    "Match the people grid gap to the open-card gap.",
+    "Keep the back control returning to People, not to the top of the site.",
+    "Reuse a photo the page has already loaded.",
+    "Keep a person in the list after their only open slip settles, if they have a record.",
+    "Do not lose the search letters when the minute refresh runs.",
+    "Open Message only for a signed-in member.",
+    "Keep the chart highlight in sync with the card you opened.",
+    "Use the bettor id for the photo, not the display name.",
+    "Hold pin choices on this phone, not on the server.",
+    "Return the scroll position when you come back from a slip.",
+    "Keep a hidden slip off the public card.",
+    "Ignore a test slip in the record, the chart, and the streak.",
+    "Match a search of three letters or more, and wait before that.",
+    "Keep two people with the same display name distinct by their photo and id.",
+    "Load the card header before the slip list.",
+    "Do not flash an empty people list during a refresh.",
+    "Hold the last good card if a refresh fails.",
+    "Sort the leaderboard by net, and keep a tie in a stable order.",
+    "Keep Message from showing for a member who has no Discord id.",
+    "Keep the role chip from counting as part of the record.",
+    "Show a just-settled slip on the card in the same minute it posts.",
+    "Use Central dates on the card.",
+    "Avoid a second copy of the photo on the same card.",
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -19671,6 +19750,120 @@ def dash_sport_edges(guild_id: int) -> dict:
     return out
 
 
+def _crew_when(raw: str):
+    if not raw:
+        return None
+    try:
+        when = datetime.fromisoformat(raw)
+    except Exception:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when
+
+
+def _crew_best_book(books: dict):
+    if not books:
+        return None
+    name, net = max(books.items(), key=lambda kv: (kv[1], kv[0]))
+    return {"name": clip(name, 24), "net": round(net, 2)}
+
+
+def dash_crew_bits(guild_id: int) -> dict:
+    """Extra People-card lines. Test slips and unrevealed hidden slips stay out."""
+    now = datetime.now(TZ)
+    week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    prev = week - timedelta(days=7)
+    month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    week_ago = now - timedelta(days=7)
+    season_start = None
+    try:
+        season = current_season(guild_id)
+        raw = season["started_at"] if season else ""
+        if raw:
+            season_start = datetime.fromisoformat(raw)
+            if season_start.tzinfo is None:
+                season_start = season_start.replace(tzinfo=timezone.utc)
+    except Exception:
+        season_start = None
+    try:
+        rows = db().execute(
+            """SELECT * FROM picks WHERE guild_id = ? ORDER BY id""", (guild_id,)).fetchall()
+    except Exception:
+        return {}
+    bag: dict = {}
+    for p in rows:
+        if pick_is_test(p):
+            continue
+        if p["hidden"] and not p["revealed_at"]:
+            continue
+        key = p["bettor_key"]
+        b = bag.setdefault(key, {
+            "lastWeek": 0.0, "lastAt": "", "lastDay": "",
+            "loggedAt": "", "loggedWhat": "", "loggedDay": "", "firstAt": "",
+            "monthBooks": {}, "seasonBooks": {}, "sports": {}, "statuses": [],
+        })
+        created = p["created_at"] or ""
+        if created and (not b["firstAt"] or created < b["firstAt"]):
+            b["firstAt"] = created
+        if created and created >= b["loggedAt"]:
+            b["loggedAt"] = created
+            b["loggedWhat"] = clip(p["description"] or "Slip", 80)
+            b["loggedDay"] = local_day(created) if _crew_when(created) else ""
+        sport = (p["sport"] or "").strip() or "Other"
+        b["sports"][sport] = b["sports"].get(sport, 0) + 1
+        if p["status"] == "open":
+            continue
+        when = _crew_when(p["settled_at"] or p["created_at"] or "")
+        if when is None:
+            continue
+        local = when.astimezone(TZ)
+        net = (p["returned"] or 0.0) - (p["cost"] or 0.0)
+        if prev <= local < week:
+            b["lastWeek"] += net
+        book = (p["platform"] or "").strip() or "Other"
+        if season_start is not None and when >= season_start:
+            b["seasonBooks"][book] = b["seasonBooks"].get(book, 0.0) + net
+        if local >= month:
+            b["monthBooks"][book] = b["monthBooks"].get(book, 0.0) + net
+        raw = p["settled_at"] or ""
+        if raw >= b["lastAt"]:
+            b["lastAt"] = raw
+            b["lastDay"] = local_day(raw) if _crew_when(raw) else ""
+        b["statuses"].append(p["status"])
+    out = {}
+    for key, b in bag.items():
+        fav = None
+        if b["sports"]:
+            name, n = max(b["sports"].items(), key=lambda kv: (kv[1], kv[0]))
+            fav = {"name": clip(name, 24), "n": n}
+        win_best = loss_best = win_run = loss_run = 0
+        for st in b["statuses"]:
+            if st == "win":
+                win_run += 1
+                loss_run = 0
+                win_best = max(win_best, win_run)
+            elif st == "loss":
+                loss_run += 1
+                win_run = 0
+                loss_best = max(loss_best, loss_run)
+            else:
+                win_run = loss_run = 0
+        fresh = False
+        first = _crew_when(b["firstAt"])
+        if first is not None and first.astimezone(TZ) >= week_ago:
+            fresh = True
+        logged = None
+        if b["loggedDay"]:
+            logged = {"what": b["loggedWhat"] or "Slip", "day": b["loggedDay"]}
+        out[key] = {
+            "lastWeek": round(b["lastWeek"], 2), "lastDay": b["lastDay"], "logged": logged,
+            "monthBook": _crew_best_book(b["monthBooks"]), "seasonBook": _crew_best_book(b["seasonBooks"]),
+            "fav": fav, "fresh": fresh, "runs": {"win": win_best, "loss": loss_best},
+        }
+    return out
+
+
 def dash_h2h_board(guild_id: int) -> list[dict]:
     """Settled head-to-head challenges: wins for each side."""
     try:
@@ -19712,15 +19905,20 @@ def dash_dm_on(guild_id: int, key: str) -> bool:
 def dashboard_people(guild_id: int) -> list[dict]:
     windows = dash_person_windows(guild_id)
     edges = dash_sport_edges(guild_id)
+    bits = dash_crew_bits(guild_id)
     blank = {"season": 0.0, "month": 0.0, "week": 0.0}
     out = []
     for s in compute_stats(guild_id):
         if s["wins"] + s["losses"] + s["pushes"] <= 0 and not s["open"]:
             continue
-        out.append({"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
-                    "open": int(s["open"] or 0),
-                    "span": windows.get(s["key"], blank), "edge": edges.get(s["key"]),
-                    "role": dash_crew_role(s["key"], guild_id)})
+        row = {"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
+               "open": int(s["open"] or 0), "risk": round(float(s.get("open_risk") or 0), 2),
+               "span": windows.get(s["key"], blank), "edge": edges.get(s["key"]),
+               "role": dash_crew_role(s["key"], guild_id)}
+        for k, v in (bits.get(s["key"]) or {}).items():
+            if k not in row:
+                row[k] = v
+        out.append(row)
     return out
 
 
@@ -24722,16 +24920,20 @@ def dash_person(guild_id: int, key: str) -> Optional[dict]:
         since = local_day(first["t"]) if first and first["t"] else ""
     except Exception:
         since = ""
-    return {"key": key, "name": clip(s["name"], 60), "record": record_line(s), "wins": s["wins"],
-            "losses": s["losses"], "pushes": s["pushes"], "net": round(s["net"], 2), "roi": round(s["roi"], 1),
-            "streak": current_streak(guild_id, key), "legs_hit": lc["hit"], "legs_graded": lc["hit"] + lc["miss"],
-            "form": form, "best": [dict(slip(p), mult=round((p["returned"] or 0) / p["cost"], 1) if p["cost"] else None)
-                                   for p in wins],
-            "sports": split(lambda p: sport_group(p["sport"]), 6), "apps": split(lambda p: p["platform"] or "Other", 4),
-            "recent": [slip(p) for p in rows[:12]], "open": sum(1 for p in rows if p["status"] == "open"),
-            "since": since, "span": span, "role": dash_crew_role(key, guild_id),
-            "dm": dash_dm_on(guild_id, key),
-            "series": [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in series]}
+    d = {"key": key, "name": clip(s["name"], 60), "record": record_line(s), "wins": s["wins"],
+         "losses": s["losses"], "pushes": s["pushes"], "net": round(s["net"], 2), "roi": round(s["roi"], 1),
+         "streak": current_streak(guild_id, key), "legs_hit": lc["hit"], "legs_graded": lc["hit"] + lc["miss"],
+         "form": form, "best": [dict(slip(p), mult=round((p["returned"] or 0) / p["cost"], 1) if p["cost"] else None)
+                                for p in wins],
+         "sports": split(lambda p: sport_group(p["sport"]), 6), "apps": split(lambda p: p["platform"] or "Other", 4),
+         "recent": [slip(p) for p in rows[:12]], "open": sum(1 for p in rows if p["status"] == "open"),
+         "risk": round(float(s.get("open_risk") or 0), 2),
+         "since": since, "span": span, "role": dash_crew_role(key, guild_id),
+         "dm": dash_dm_on(guild_id, key),
+         "series": [[x.astimezone(TZ).strftime("%Y-%m-%d %H:%M"), round(y, 2)] for x, y in series]}
+    for k, v in (dash_crew_bits(guild_id).get(key) or {}).items():
+        d.setdefault(k, v)
+    return d
 
 
 async def dash_slip(guild_id: int, pick_id: int) -> Optional[dict]:
@@ -32925,7 +33127,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-136';"
+    "const CACHE='pb-shell-137';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -33108,10 +33310,11 @@ main{max-width:1180px;margin:auto;padding:16px 20px 48px}
 .row .nm{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .sub{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .net{font-weight:750;text-align:right;font-variant-numeric:tabular-nums}
+.row .net.flat,.kbox .v.flat{color:var(--muted)}
 .row .roi{font-size:12.5px;text-align:right;min-width:56px;font-variant-numeric:tabular-nums}
 .row.slip{grid-template-columns:48px minmax(0,1fr) auto}
 .row.slip img.ava,.row.slip .av{width:40px;height:40px;border-radius:50%}
-.av{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:#fff;font-size:15px;flex:none}
+.av{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:#fff;font-size:15px;flex:none;box-shadow:0 0 0 2px var(--gold)}
 img.ava{width:36px;height:36px;border-radius:50%;object-fit:cover;display:block;background:var(--card2)}
 .chip{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:99px;
  background:var(--card2);border:1px solid var(--line);color:var(--muted);vertical-align:1px}
@@ -33144,7 +33347,7 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
 .img img{display:block;width:100%;height:auto;opacity:0;transition:opacity .35s}.img img.ok{opacity:1}
 .img.sk{min-height:220px}.img.wide{max-width:760px;margin:0 auto;width:100%}
 .img.shot{border-radius:18px;border:1px solid var(--line)}
-.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
 .tile{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:8px;cursor:pointer;text-align:left;
  transition:transform .18s,box-shadow .18s;display:block;width:100%}
 .tile:hover{transform:translateY(-3px);box-shadow:0 14px 30px -16px #7B3FE4aa}
@@ -33256,9 +33459,13 @@ tr:first-child td{border-top:0}td.n{text-align:right;font-variant-numeric:tabula
  position:relative;animation:pop .28s cubic-bezier(.2,.8,.2,1);box-shadow:0 30px 80px -20px #000}
 @keyframes pop{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:none}}
 .x{position:absolute;top:14px;right:14px}
-.ph{display:flex;align-items:center;gap:14px;margin:0 50px 16px 0}
+.ph{display:flex;align-items:center;gap:14px;margin:0 50px 16px 0;position:sticky;top:0;z-index:5;background:var(--bg);padding-top:8px}
 .ph .av,.ph img.ava{width:56px;height:56px;border-radius:18px;font-size:24px}
-.ph h3{margin:0;font-size:22px;font-weight:800;overflow-wrap:anywhere}.ph .sub{color:var(--muted);font-size:13.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:3px}
+.ph h3{margin:0 0 6px;font-size:22px;font-weight:800;overflow-wrap:anywhere}.ph .sub{color:var(--muted);font-size:13.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:3px}
+.ptaps{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.ptaps button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:96px;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:8px 10px;cursor:pointer;color:inherit}
+.ptaps button.on{border-color:var(--gold)}
+.ptaps button b{font-variant-numeric:tabular-nums}
 .ph a{cursor:pointer;font-weight:700;text-decoration:none}
 .pgrid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:16px}
 .pgrid>div{display:flex;flex-direction:column;gap:16px;min-width:0}
@@ -33492,12 +33699,16 @@ const pct=n=>(n>0?'+':'')+(+n||0).toFixed(1)+'%';
 function hue(s){let x=0;for(const c of String(s))x=(x*31+c.charCodeAt(0))>>>0;return x}
 function avatar(name){const c=COLORS[hue(name)%COLORS.length];
  return h('div',{class:'av',style:'background:linear-gradient(135deg,'+c+','+c+'aa)','aria-hidden':'true'},(String(name||'?').trim()[0]||'?').toUpperCase())}
-function face(key,name){if(key&&/^[0-9]{2,20}$/.test(String(key))){
+const faceCache={};
+function face(key,name){const id=String(key||'');
+ if(faceCache[id])return faceCache[id].cloneNode(true);
+ if(key&&/^[0-9]{2,20}$/.test(id)){
  const img=h('img',{class:'ava',alt:'',width:'36',height:'36',decoding:'async'});
  let tries=0;
- img.addEventListener('error',()=>{if(tries<1){tries++;const q=qs();img.src='/img/ava/'+key+'.png'+(q?q+'&':'?')+'r=1';return}
+ img.addEventListener('error',()=>{if(tries<1){tries++;const q=qs();img.src='/img/ava/'+id+'.png'+(q?q+'&':'?')+'r=1';return}
   const n=avatar(name);if(img.parentNode)img.replaceWith(n)});
- img.src='/img/ava/'+key+'.png'+qs();return img}
+ img.addEventListener('load',()=>{if(img.naturalWidth)faceCache[id]=img});
+ img.src='/img/ava/'+id+'.png'+qs();return img}
  return avatar(name)}
 function robot(){const s=$('#logo svg');return s?s.cloneNode(true):''}
 function empty(title,sub){return h('div',{class:'empty'},robot(),h('b',{text:title}),sub?h('span',{text:sub}):null)}
@@ -33729,6 +33940,7 @@ function settlePick(p,over){settleState();
  if(sr==='push'&&p.status!=='push')return false;
  if(ss&&p.sport!==ss)return false;
  if(sb&&p.book!==sb)return false;
+ if(S.swho&&String(p.key||'')!==String(S.swho))return false;
  return true}
 function settleChip(on,label,n,fn){return h('button',{type:'button',class:'schip'+(on?' on':''),onclick:fn},
  label+(n==null?'':' '+n))}
@@ -33742,7 +33954,8 @@ function settleFilters(rows){settleState();
   h('div',{class:'settlebar'},days.map(([k,t])=>settleChip(S.sd===k,t,n({sd:k}),()=>{S.sd=k;render()})),
    books.map(b=>settleChip(S.sb===b,b,n({sb:b}),()=>{S.sb=S.sb===b?'':b;render()}))),
   h('div',{class:'settlebar'},results.map(([k,t])=>settleChip(S.sr===k,t,n({sr:k}),()=>{S.sr=k;render()})),
-   sports.map(s=>settleChip(S.ss===s,String(s).toUpperCase(),n({ss:s}),()=>{S.ss=S.ss===s?'':s;render()}))))}
+   sports.map(s=>settleChip(S.ss===s,String(s).toUpperCase(),n({ss:s}),()=>{S.ss=S.ss===s?'':s;render()}))),
+  S.swho?h('div',{class:'settlebar'},settleChip(true,S.swhoName||'This person',null,()=>{S.swho='';S.swhoName='';render()})):null)}
 function reboundSet(rows){const by={};
  for(const p of rows){const k=String(p.key||p.who||'')+'|'+(p.stamp||'');(by[k]=by[k]||[]).push(p)}
  const ids={};
@@ -33804,24 +34017,47 @@ if(!S._sfinger){S._sfinger=1;
  addEventListener('pointerdown',e=>{if(e.target&&e.target.closest&&e.target.closest('.srows'))S.finger=1});
  addEventListener('pointerup',()=>{const wait=S.paintWait;S.finger=0;if(wait){S.paintWait=0;render()}});
  addEventListener('pointercancel',()=>{const wait=S.paintWait;S.finger=0;if(wait){S.paintWait=0;render()}})}
+function crewPins(){try{const a=JSON.parse(localStorage.getItem('pb-crew')||'[]');return Array.isArray(a)?a.map(String).filter(Boolean).slice(0,3):[]}catch(e){return []}}
+function toggleCrew(key,e){if(e){e.preventDefault();e.stopPropagation()}
+ let xs=crewPins().filter(x=>x!==String(key));
+ if(xs.length===crewPins().length)xs.unshift(String(key));
+ try{localStorage.setItem('pb-crew',JSON.stringify(xs.slice(0,3)))}catch(err){}
+ render()}
 function crewTile(p,d){const link=/^\d+$/.test(String(p.key||''));
- return h(link?'button':'div',{class:'tile'+(p.role?' team':''),type:link?'button':null,onclick:link?()=>go('#/p/'+p.key):null},
- imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
- h('div',{class:'cap'},h('div',{class:'nmwrap'},h('b',{text:p.name}),h('div',{class:'chips'},String(d.me)===String(p.key)?h('span',{class:'chip you',text:'You'}):null,p.role?h('span',{class:'rolechip',text:p.role}):null)),h('span',{class:tone(p.net)},money(p.net))),
- h('div',{class:'wins'},[['Week',(p.span||{}).week],['Month',(p.span||{}).month],['Season',(p.span||{}).season]].map(([k,n])=>h('span',{class:tone(n||0),text:k+' '+money(n||0)}))),
- p.edge&&p.edge.best?h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:'Best '+(p.edge.best.name||'')}),h('span',{class:tone(p.edge.best.net),text:money(p.edge.best.net)}),h('span',{text:'Worst '+(p.edge.worst&&p.edge.worst.name||'')}),h('span',{class:tone(p.edge.worst&&p.edge.worst.net),text:money((p.edge.worst&&p.edge.worst.net)||0)})):null,
- h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:(p.record||'0-0')+(p.open?' · '+p.open+' open':'')}),link?h('span',{text:'View →'}):null))}
+ const staff=document.body.classList.contains('has-staff');
+ const pinned=crewPins().indexOf(String(p.key))>=0;
+ const openN=+p.open||0;
+ return h('div',{class:'tilewrap'},
+  h(link?'button':'div',{class:'tile'+(p.role&&staff?' team':''),type:link?'button':null,onclick:link?()=>go('#/p/'+p.key):null},
+   face(p.key,p.name),
+   imgBox('card/'+p.key+'.png','','No card yet','',p.name+"'s card"),
+   h('div',{class:'cap'},h('div',{class:'nmwrap'},h('b',{text:p.name}),h('div',{class:'chips'},String(d.me)===String(p.key)?h('span',{class:'chip you',text:'You'}):null,staff&&p.role?h('span',{class:'rolechip',text:p.role}):null,p.fresh?h('span',{class:'chip',text:'New member'}):null)),h('span',{class:tone(p.net)+(p.net?'':' flat')},money(p.net))),
+   h('div',{class:'wins'},[['Season',(p.span||{}).season],['Month',(p.span||{}).month],['Week',(p.span||{}).week]].map(([k,n])=>h('span',{class:tone(n||0),text:k+' '+money(n||0)}))),
+   p.edge&&p.edge.best?h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:'Best '+(p.edge.best.name||'')}),h('span',{class:tone(p.edge.best.net),text:money(p.edge.best.net)}),h('span',{text:'Worst '+(p.edge.worst&&p.edge.worst.name||'')}),h('span',{class:tone(p.edge.worst&&p.edge.worst.net),text:money((p.edge.worst&&p.edge.worst.net)||0)})):null,
+   h('div',{class:'cap muted',style:'padding-top:0'},h('span',{text:(p.record||'0-0')+(openN?' · '+openN+' open · '+cash(p.risk||0):'')}),link?h('span',{text:'View →'}):null)),
+  h('button',{type:'button',class:'tpause',onclick:e=>toggleCrew(p.key,e)},pinned?'Pinned':'Pin'))}
 function renderPeople(el,d){
  if(S.pf!=='team'&&S.pf!=='members')S.pf='all';
+ if(S.pwho!=='up'&&S.pwho!=='open')S.pwho='all';
  const seg=h('div',{class:'seg'},[['all','All'],['team','Team'],['members','Members']].map(([k,t])=>h('button',{type:'button',class:S.pf===k?'on':'',
   onclick:()=>{S.pf=k;render()}},t)));
- const rows=d.people||[];
- const team=rows.filter(p=>p.role),members=rows.filter(p=>!p.role);
+ const who=h('div',{class:'seg'},[['all','Everyone'],['up','In profit'],['open','With something open']].map(([k,t])=>h('button',{type:'button',class:S.pwho===k?'on':'',
+  onclick:()=>{S.pwho=k;render()}},t)));
+ const q=(S.q||'').trim();
+ let rows=d.people||[];
+ if(q.length>=3){const ql=q.toLowerCase();rows=rows.filter(p=>((p.name||'')+' '+(p.record||'')).toLowerCase().includes(ql))}
+ if(S.pwho==='up')rows=rows.filter(p=>+p.net>0);
+ if(S.pwho==='open')rows=rows.filter(p=>+p.open>0);
+ const pins=crewPins();
+ const pinned=pins.map(k=>rows.find(p=>String(p.key)===k)).filter(Boolean);
+ const rest=rows.filter(p=>pins.indexOf(String(p.key))<0);
+ const team=rest.filter(p=>p.role),members=rest.filter(p=>!p.role);
  const block=(title,list)=>list.length?card(title,'',String(list.length),h('div',{class:'grid'},list.map(p=>crewTile(p,d)))):null;
- const groups=S.pf==='team'?[block('The team',team)]:S.pf==='members'?[block('Members',members)]:[block('The team',team),block('Members',members)];
+ const groups=S.pf==='team'?[block('The team',team)]:S.pf==='members'?[block('Members',members)]:[block('Pinned',pinned),block('The team',team),block('Members',members)];
  const shown=groups.filter(Boolean);
- const none=empty(rows.length?'Nobody in that group':'No one on the board yet',rows.length?'Try All.':'Once someone logs a slip, their card shows up here.');
- put(el,card('The crew','',seg,shown.length?null:none),
+ const searched=q.length>=3&&!rows.length;
+ const none=searched?empty('No one by that name.'):empty(rows.length?'Nobody in that group':'No one on the board yet',rows.length?'Try Everyone.':'Once someone logs a slip, their card shows up here.');
+ put(el,card('The crew','',h('div',{class:'crewfilt'},seg,who),shown.length?null:none),
   ...(shown.length?shown:[]),
   (d.h2h||[]).length?card('Head to head','',null,h('div',{class:'rows'},d.h2h.map(x=>{
    const na=(d.people||[]).find(p=>(p.name||'')===x.a),nb=(d.people||[]).find(p=>(p.name||'')===x.b);
@@ -33967,11 +34203,22 @@ function openSheet(){const sh=$('#sheet');document.body.classList.add('sheet-on'
   h('div',{style:'flex:1'},h('div',{class:'skl',style:'height:22px;width:45%'}),h('div',{class:'skl',style:'height:14px;width:30%;margin-top:8px'}))),
   h('div',{class:'kpis'},skel(4,'card')),h('div',{class:'pgrid'},h('div',null,h('div',{class:'img sk',style:'aspect-ratio:5/7'})),h('div',null,skel(6))));$('#close').focus()}
 function closeSheet(){if(S.playerAc){S.playerAc.abort();S.playerAc=null}$('#sheet').classList.remove('on');document.body.classList.remove('sheet-on');document.body.style.overflow=''}
-function closeClick(){if(history.state&&history.state.pb)history.back();else{history.replaceState(null,'',location.pathname+location.search);closeSheet()}}
+function closeClick(){const hash=location.hash||'';
+ if(hash.indexOf('#/s/')===0&&S.backPerson){const key=S.backPerson;history.replaceState({pb:1},'','#/p/'+key);openPerson(key);return}
+ if(hash.indexOf('#/p/')===0){const y=S.peopleScroll||0;S.backPerson='';closeSheet();
+  history.replaceState(null,'','/people'+(location.search||''));show('people');scrollTo(0,y);return}
+ if(history.state&&history.state.pb)history.back();else{history.replaceState(null,'',location.pathname+location.search);closeSheet()}}
 function sheetError(t){put($('#sheet-body'),empty(t,'It may be private, or it was deleted. Close this and try another.'))}
 function kbox(k,v,c){return h('div',{class:'card kbox'},h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}))}
-async function openPerson(key){openSheet();const p=await api('/api/person/'+key+'.json'+qs());if(location.hash!=='#/p/'+key)return;
- if(!p){sheetError('Couldn’t find that person');return}
+async function openPerson(key){
+ if(!document.body.classList.contains('sheet-on'))S.peopleScroll=window.scrollY||0;
+ S.backPerson=String(key);openSheet();
+ const known=(S.data&&S.data.people||[]).find(x=>String(x.key)===String(key));
+ if(known)put($('#sheet-body'),h('div',{class:'ph'},face(known.key,known.name),h('div',{style:'min-width:0;flex:1'},h('h3',{text:known.name}),h('div',{class:'sub',text:(known.record||'')+' record'}))));
+ const p=await api('/api/person/'+key+'.json'+qs());if(location.hash!=='#/p/'+key)return;
+ if(!p){if(S.person&&String(S.person.key)===String(key)){paintPerson(S.person);return}sheetError('Couldn’t find that person');return}
+ S.person=p;if(p.name)S.hiWho=p.name;paintPerson(p)}
+function paintPerson(p){
  let back=false;const cardBox=h('div',{style:'position:relative'});
  const drawCard=()=>{put(cardBox,imgBox('card/'+p.key+'.png',back?'back=1':'','No card yet','',p.name+"'s trading card"),
   h('button',{class:'iconbtn flip',type:'button',title:'Flip the card','aria-label':'Flip the card',onclick:()=>{back=!back;drawCard()}},
@@ -33981,7 +34228,7 @@ async function openPerson(key){openSheet();const p=await api('/api/person/'+key+
  const split=(rows)=>h('div',{class:'split'},rows.map(r=>{const n=r.w+r.l||1;return h('div',{class:'sp'},h('b',{text:r.name}),
   h('span',null,h('span',{class:'muted',text:r.w+'-'+r.l+(r.p?'-'+r.p:'')+'  '}),h('b',{class:tone(r.net)},money(r.net))),
   h('div',{class:'bar'},h('i',{style:'width:'+(r.w/n*100)+'%'}),h('i',{style:'width:'+(r.l/n*100)+'%'})))}));
- const series={};if(p.series.length)series[p.name]=p.series;
+ const series={};if((p.series||[]).length)series[p.name]=p.series;
  const you=S.data&&String(S.data.me)===String(p.key);
  const span=p.span||{};
  const aboutKey='pb-about-'+p.key;
@@ -33996,8 +34243,22 @@ async function openPerson(key){openSheet();const p=await api('/api/person/'+key+
   h('button',{type:'submit',class:'tpause',text:'Save'}),
   h('p',{class:'muted',text:'Stays on this phone. It is not sent to the group.'})):null;
  const roles={developer:1,owner:1,admin:1,mod:1};
+ const staff=document.body.classList.contains('has-staff');
+ const signed=/^\d{2,20}$/.test(String((S.data&&S.data.me)||''));
  const canMsg=/^\d{2,20}$/.test(String(p.key||''));
- const dmLink=canMsg?h('a',{class:'dmlink',href:'https://discord.com/users/'+p.key,target:'_blank',rel:'noopener noreferrer',style:'margin-left:auto'},'Message'):null;
+ const dmLink=signed&&canMsg?h('a',{class:'dmlink',href:'https://discord.com/users/'+p.key,target:'_blank',rel:'noopener noreferrer','aria-label':'Message '+p.name,style:'margin-left:auto'},'Message'):null;
+ const streakN=(String(p.streak||'').match(/(\d+)/)||[])[1];
+ const quietStreak=streakN?h('span',{class:'muted',text:'Streak '+streakN}):null;
+ if(!S.pspan)S.pspan='season';
+ const taps=h('div',{class:'ptaps'},[['season','Season',span.season],['month','Month',span.month],['week','Week',span.week]].map(([k,t,n])=>
+  h('button',{type:'button',class:S.pspan===k?'on':'',onclick:()=>{S.pspan=k;paintPerson(p)}},h('span',{text:t}),h('b',{class:tone(n||0),text:money(n||0)}))));
+ const openRows=(p.recent||[]).filter(r=>r.status==='open');
+ const doneRows=(p.recent||[]).filter(r=>r.status!=='open');
+ const copyRec=h('button',{type:'button',class:'tpause',onclick:ev=>{const line=p.name+' '+p.record+' '+money(p.net);
+  const done=()=>{ev.currentTarget.textContent='Copied'};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(line).then(done).catch(done);else done()}},'Copy record');
+ const jumpSet=h('button',{type:'button',class:'tpause',onclick:()=>{S.swho=String(p.key);S.swhoName=p.name||'';S.backPerson='';
+  closeSheet();history.replaceState(null,'','/live'+(location.search||''));show('live')}},'Just settled');
  const dmForm=you&&roles[p.role]?h('form',{class:'card',style:'margin-top:10px',onsubmit:async ev=>{ev.preventDefault();
   const on=!!ev.target.show.checked;
   const r=await fetch('/api/dm.json'+qs(),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:on})});
@@ -34009,19 +34270,29 @@ async function openPerson(key){openSheet();const p=await api('/api/person/'+key+
   h('p',{class:'muted',text:'People on this board can open your Discord profile from the link.'})):null;
  put($('#sheet-body'),
   h('div',{class:'ph'},face(p.key,p.name),h('div',{style:'min-width:0;flex:1'},h('h3',{text:p.name}),
-   h('div',{class:'sub'},p.record+' record',streakChip(p.streak),p.role?h('span',{class:'rolechip',text:p.role}):null,you?h('span',{class:'chip you',text:'This is your card'}):null)),dmLink),
-  h('div',{class:'kpis'},kbox('This week',money(span.week||0),tone(span.week||0)),kbox('This month',money(span.month||0),tone(span.month||0)),
-   kbox('This season',money(span.season||0),tone(span.season||0)),kbox('Open now',String(p.open||0))),
+   staff&&p.role?h('div',{class:'sub'},h('span',{class:'rolechip',text:p.role})):null,
+   h('div',{class:'sub'},p.record+' record',quietStreak,you?h('span',{class:'chip you',text:'This is your card'}):null),
+   p.logged?h('div',{class:'sub',text:'Last slip · '+p.logged.what+' · '+p.logged.day}):null),dmLink),
+  taps,
+  h('p',{class:'muted',text:'This week '+money(span.week||0)+' versus last week '+money(p.lastWeek||0)}),
+  h('p',{class:'muted',text:(p.open||0)+' open · '+cash(p.risk||0)}),
+  p.lastDay?h('p',{class:'muted',text:'Last settle '+p.lastDay}):null,
+  p.fav?h('p',{class:'muted',text:'Favorite sport · '+p.fav.name+' · '+p.fav.n+' slips'}):null,
+  p.monthBook?h('p',{class:'muted',text:'Best book this month · '+p.monthBook.name+' '+money(p.monthBook.net)}):null,
+  p.seasonBook?h('p',{class:'muted',text:'Paid the most this season · '+p.seasonBook.name+' '+money(p.seasonBook.net)}):null,
+  p.runs?h('p',{class:'muted',text:'Longest win run '+(p.runs.win||0)+' · longest loss run '+(p.runs.loss||0)}):null,
+  p.fresh?h('p',{class:'muted',text:'New member'}):null,
+  h('div',{class:'crewacts'},copyRec,jumpSet),
   p.since?h('p',{class:'muted',text:'Logging since '+p.since}):null,
-  (p.sports&&p.sports[0])?h('p',{class:'muted',text:'Most slips · '+p.sports[0].name}):null,
   note,dmForm,
   h('div',{class:'kpis'},kbox('Record',p.record),kbox('Net',money(p.net),tone(p.net)),kbox('ROI',pct(p.roi),tone(p.roi)),kbox('Legs hit',lr)),
-  h('div',{class:'pgrid'},h('div',null,cardBox,p.form.length?card('Last '+p.form.length,'',null,h('div',{class:'form'},p.form.map(x=>h('i',{class:x,text:x})))):null),
+  h('div',{class:'pgrid'},h('div',null,cardBox,(p.form||[]).length?card('Last '+p.form.length,'',null,h('div',{class:'form'},p.form.map(x=>h('i',{class:x,text:x})))):null),
    h('div',null,card('Profit over time','',null,chart(series,190)),
-    card('Best hits','',null,p.best.length?h('div',{class:'rows'},p.best.map(b=>slipRow(Object.assign({},b,{who:b.what,what:(b.mult?b.mult+'x · ':'')+b.platform}),true)))
+    card('Best hits','',null,(p.best||[]).length?h('div',{class:'rows'},p.best.map(b=>slipRow(Object.assign({},b,{who:b.what,what:(b.mult?b.mult+'x · ':'')+b.platform}),true)))
      :empty('No cashes yet','The first one will look great here.')),
-    p.sports.length?card('By sport','',null,split(p.sports)):null,p.apps.length?card('By app','',null,split(p.apps)):null,
-    card('Recent slips','',null,p.recent.length?h('div',{class:'rows'},p.recent.map(r=>slipRow(r,false))):empty('No slips yet','')))))}
+    (p.sports||[]).length?card('By sport','',null,split(p.sports)):null,(p.apps||[]).length?card('By app','',null,split(p.apps)):null,
+    card('Open slips','',String(openRows.length),openRows.length?h('div',{class:'rows'},openRows.map(r=>slipRow(r,false))):empty('Nothing open','')),
+    card('Settled slips','',String(doneRows.length),doneRows.length?h('div',{class:'rows'},doneRows.map(r=>slipRow(r,false))):empty('No slips yet','')))))}
 function legLine(l){const body=h('div',{style:'min-width:0'},h('div',{class:'t',text:l.text}),
   l.decided?h('div',{class:'s',text:'Decided it'}):null,
   l.sub?h('div',{class:'s',text:l.sub}):null,legBar(l),l.note?h('div',{class:'note'},h('span',{class:'ni','aria-hidden':'true'},'\u{1F4DD}'),h('span',{text:l.note})):null);
@@ -34244,7 +34515,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=136') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=137') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -34966,13 +35237,15 @@ function paintFind(){const box=$('#findpop');if(!box)return;if(S.findOff){box.hi
   box.hidden=false;put(box,h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Pinned'}),
    saved.map(p=>h('button',{class:'nitem',type:'button',onclick:()=>{box.hidden=true;if(p.slug&&p.id)go('#/pl/'+p.slug+'/'+p.id)}},h('b',{text:p.name||'Player'}))));return}
  const d=S.players;const ql=q.toLowerCase();
- const people=(S.data&&S.data.people||[]).filter(p=>(p.name||'').toLowerCase().includes(ql));
+ const peopleAll=(S.data&&S.data.people||[]).filter(p=>(p.name||'').toLowerCase().includes(ql));
+ const people=q.length>3?peopleAll:peopleAll.slice(0,4);
+ const morePeople=peopleAll.length>people.length;
  const slips=[...(S.data&&S.data.open||[]),...(S.data&&S.data.recent||[])].filter(matchQ).slice(0,5);
  const mates=(S.data&&S.data.groupparlay||[]).filter(l=>((l.who||'')+' '+(l.leg||'')).toLowerCase().includes(ql)).slice(0,4);
  const pls=digits?[]:((d&&d.players)||[]);
  const saved=q.length?[]:pins();
  if(!digits&&q.length>=3&&!d&&!people.length&&!slips.length&&!mates.length){box.hidden=false;put(box,h('p',{class:'muted',text:'Looking up “'+q+'”…'}));return}
- if(!pls.length&&!people.length&&!slips.length&&!mates.length&&!saved.length){box.hidden=false;put(box,h('p',{class:'muted',text:'No match for “'+q+'”'}));return}
+ if(!pls.length&&!peopleAll.length&&!slips.length&&!mates.length&&!saved.length){box.hidden=false;put(box,h('p',{class:'muted',text:'No one by that name.'}));return}
  const openMate=l=>{const pop=$('#findpop');if(pop)pop.hidden=true;
   const person=(S.data&&S.data.people||[]).find(p=>(p.name||'').toLowerCase()===(l.who||'').toLowerCase());
   if(person)go('#/p/'+person.key);else show('more')};
@@ -34982,10 +35255,13 @@ function paintFind(){const box=$('#findpop');if(!box)return;if(S.findOff){box.hi
   pls.map(playerCard),
   people.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'In this group'}):null,
   people.map(p=>{const link=/^\d+$/.test(String(p.key||''));const openN=+p.open||0;
-   const sub=(p.record||'0-0')+(openN?(' · '+openN+' open'):'')+(p.role?(' · '+p.role):'');
+   const staff=document.body.classList.contains('has-staff');
+   const sub=(p.record||'0-0')+(openN?(' · '+openN+' open'):'')+(staff&&p.role?(' · '+p.role):'');
    return h('button',{class:'nitem',type:'button',onclick:()=>{box.hidden=true;if(link)go('#/p/'+p.key)}},
     face(p.key,p.name),h('div',{class:'who',style:'min-width:0;flex:1'},h('b',{text:p.name}),h('span',{text:sub})),
     h('b',{class:'net '+tone(p.net||0),text:money(p.net||0)}))}),
+  morePeople?h('p',{class:'muted',style:'margin:8px 4px',text:'Type more letters.'}):null,
+  (!peopleAll.length&&q.length>=3)?h('p',{class:'muted',style:'margin:8px 4px',text:'No one by that name.'}):null,
   slips.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Matching slips'}):null,
   slips.map(p=>slipRow(p)),
   mates.length?h('p',{class:'muted',style:'margin:8px 4px 4px',text:'Teammates'}):null,
