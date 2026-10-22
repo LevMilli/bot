@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.63"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.65"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -201,6 +201,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.61", "On a player sheet, you can save a line and a note on this phone. The chart is the last 5, last 10, or last 20, and the next game is the opponent, home or away, and Central time."),
     ("1.62", "On this phone you can save a named look: sport, book, and accent. The intro stays off after you have seen it today, and when the phone asks for reduced motion."),
     ("1.63", "More shows this week's open count, settled count, and net. About shows the last clean start in Central, and you can search the commands by name."),
+    ("1.64", "Staff can pin a note on the week board, and members can read it. Coins show spent and earned when both exist. A test slip is marked on Staff HQ only."),
+    ("1.65", "Just settled can be printed for today. A tagged slip is filed under that member, and the reply says their name. The export keeps the legs tab."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -249,6 +251,8 @@ MEMBER_NEWS = [
     ("1.61", "On a player sheet, you can save a line and a note on this phone. The chart is the last 5, last 10, or last 20, and the next game is the opponent, home or away, and Central time."),
     ("1.62", "On this phone you can save a named look: sport, book, and accent. The intro stays off after you have seen it today, and when the phone asks for reduced motion."),
     ("1.63", "More shows this week's open count, settled count, and net. About shows the last clean start in Central, and you can search the commands by name."),
+    ("1.64", "Staff can pin a note on the week board, and members can read it. Coins show spent and earned when both exist. A test slip is marked on Staff HQ only."),
+    ("1.65", "Just settled can be printed for today. A tagged slip is filed under that member, and the reply says their name. The export keeps the legs tab."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -3276,6 +3280,24 @@ _THOUSAND_SHIPPED = {
     'Keep the scanner book list equal to the books we actually read.',
     'Refresh the status card without posting in the channel.',
     'Keep a signed-out visitor on the door, not on a member\'s slips.',
+    'Let an admin pin one note on the week board from the site.',
+    'Add a week-board note that members can read and only an admin can change.',
+    'Hold the week board note until an admin changes it.',
+    'Show coins spent and coins earned as two numbers when both exist.',
+    'Add a short "this was a test" mark on Staff HQ only.',
+    'Let staff see a filed-under pair: logger and bettor.',
+    'Let staff download one day of settles.',
+    'Let staff export one person\'s week, legs included, from the page they already use.',
+    'Leave Needs attention on Staff HQ.',
+    'Show coins earned on a settled slip, when that slip earned coins.',
+    'Add a print view of your week: black text, no smoke, one page.',
+    'Add a print of Just settled for the Central day.',
+    'File a tag under that member, and say their name in the reply.',
+    'File a tag under the tagged member, not under the person who posted.',
+    'Let an export include the legs tab the sheet already has.',
+    'Add a quiet audit line for a void, an edit, and a settle.',
+    'Show a void in the audit line with the slip number and the member.',
+    'Match the audit line to the slip number.',
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -13368,6 +13390,18 @@ def dashboard_data(guild_id: int) -> dict:
             if who and who != row.get("who"):
                 row["filer"] = clip(who, 40)
     coins = []
+    coin_split: dict[int, tuple[int, int]] = {}
+    try:
+        for tx in db().execute("SELECT user_id, delta FROM coin_tx WHERE guild_id = ?", (guild_id,)):
+            delta = int(tx["delta"] or 0)
+            earned, spent = coin_split.get(tx["user_id"], (0, 0))
+            if delta > 0:
+                earned += delta
+            elif delta < 0:
+                spent += -delta
+            coin_split[tx["user_id"]] = (earned, spent)
+    except Exception:
+        coin_split = {}
     for u in coins_top(guild_id, 10):
         why = ""
         try:
@@ -13386,7 +13420,9 @@ def dashboard_data(guild_id: int) -> dict:
                 game = clip(((lastp["sport"] or "") + " " + (lastp["description"] or "")).strip(), 48)
         except Exception:
             game = ""
-        coins.append({"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"]), "why": why, "game": game})
+        earned, spent = coin_split.get(u["user_id"], (0, 0))
+        coins.append({"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"]), "why": why, "game": game,
+                      **({"earned": earned, "spent": spent} if earned and spent else {})})
     rec = dash30_safe_records(guild_id, records_embed(guild_id).description or "")
     markets = []
     for p in db().execute(
@@ -21790,6 +21826,17 @@ def dashboard_recent(guild_id: int) -> list[dict]:
         for leg in db().execute(
                 f"SELECT pick_id, status, text FROM legs WHERE pick_id IN ({marks}) ORDER BY idx", ids):
             legmap.setdefault(int(leg["pick_id"]), []).append((leg["status"] or "", leg["text"] or ""))
+    coinmap: dict[int, int] = {}
+    if ids:
+        idset = {int(i) for i in ids}
+        for tx in db().execute(
+                """SELECT ref, delta FROM coin_tx WHERE guild_id = ? AND delta > 0
+                   AND (ref LIKE 'win:%' OR ref LIKE 'parlay:%' OR ref LIKE 'log:%')""",
+                (guild_id,)).fetchall():
+            tail = str(tx["ref"] or "").rsplit(":", 1)[-1]
+            if tail.isdigit() and int(tail) in idset:
+                pid = int(tail)
+                coinmap[pid] = coinmap.get(pid, 0) + int(tx["delta"])
     out = []
     for p in rows:
         if pick_is_test(p) or unrevealed_hidden(p):
@@ -21849,6 +21896,7 @@ def dashboard_recent(guild_id: int) -> list[dict]:
             "miss": miss if p["status"] == "loss" else "",
             "cleared": cleared if p["status"] == "win" else "",
             "player": player, "filer": filer, "clock": clock, "pay": pay,
+            "coins": coinmap.get(int(p["id"]), 0),
             "short": bool(p["status"] == "loss" and len(legs) >= 2 and hits == len(legs) - 1),
         })
     return out
@@ -34094,7 +34142,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-144';"
+    "const CACHE='pb-shell-146';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -34473,7 +34521,17 @@ body.v4 .rmap .rms{margin-left:6px}body.v4 .rmbits{padding-left:28px}
 body.v4 .net{animation:none}
 @media print{
  .ticker,#intro,.findwrap,nav.tabs,.kpis{display:none!important}
- .card,.rmap,.rmbits{background:#fff!important;color:#111!important;box-shadow:none!important}}
+ .card,.rmap,.rmbits{background:#fff!important;color:#111!important;box-shadow:none!important}
+ body.print-week,body.print-settled{color:#000!important;background:#fff!important}
+ body.print-week header,body.print-week footer,body.print-week .ticker,body.print-week nav.tabs,body.print-week .findwrap,body.print-week .tpause{display:none!important}
+ body.print-week .card{display:none!important}
+ body.print-week .kpis{display:grid!important;color:#000!important;background:#fff!important}
+ body.print-week .kpis .card{display:block!important;color:#000!important;background:#fff!important}
+ body.print-week #smokecan,body.print-week #intro,body.print-week::before,body.print-settled #smokecan,body.print-settled #intro,body.print-settled::before{display:none!important}
+ body.print-week main{break-inside:avoid}
+ body.print-settled .srow:not([data-day=today]){display:none!important}
+ body.print-settled .settlefilters,body.print-settled .tpause{display:none!important}
+ body.print-settled .card{color:#000!important;background:#fff!important}}
 footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:var(--faint);font-size:12.5px;display:flex;gap:12px;flex-wrap:wrap}
 footer a{color:var(--faint)}
 @media (max-width:900px){.s4,.s5,.s6,.s7,.s8{grid-column:span 12}.kpi{grid-column:span 6}.pgrid{grid-template-columns:1fr}}
@@ -34883,6 +34941,12 @@ function pinBoard(){const xs=pins().slice(0,10);if(!xs.length)return null;
  return card('Pinned','',String(xs.length),h('div',{class:'watch'},xs.map(p=>h('button',{class:'wchip',type:'button',onclick:()=>{if(p.slug&&p.id)go('#/pl/'+p.slug+'/'+p.id)}},
   h('div',{class:'who',text:p.name||'Player'})))))}
 function gripEl(){return h('button',{type:'button',class:'grip','aria-label':'Move'},'⠿')}
+function printMode(kind){
+ document.body.classList.remove('print-week','print-settled');
+ document.body.classList.add(kind==='settled'?'print-settled':'print-week');
+ const done=()=>{document.body.classList.remove('print-week','print-settled');removeEventListener('afterprint',done)};
+ addEventListener('afterprint',done);
+ print()}
 function kpiStrip(d){
  const w=d.week||{open:(d.open||[]).length,settled:0,net:0,coins:0};
  const group=d.netmode==='group';const netv=group?(+d.groupnet||0):(+w.net||0);
@@ -34894,6 +34958,8 @@ function kpiStrip(d){
  return h('div',{class:'kpis','data-home':'kpis'},
   h('div',{class:'kpihead'},h('span',{text:'This week'}),gripEl()),
   h('p',{class:'muted weeknote',text:'Open '+w.open+' · Settled '+w.settled+' · Net '+money(netv)+'. Central.'}),
+  d.weekboard?h('p',{class:'muted',text:d.weekboard}):null,
+  h('button',{type:'button',class:'tpause',onclick:()=>printMode('week')},'Print week'),
   tiles.map(([id,k,v,s,c])=>h('div',{class:'card kpi','data-kpi':id},gripEl(),
    h('div',{class:'k',text:k}),h('div',{class:'v '+(c||''),text:v}),h('div',{class:'s',text:s}))))}
 function renderOverview(el,d){
@@ -34981,7 +35047,7 @@ function settledRow(p,ctx){const mixed=ctx&&ctx.mixed,reb=ctx&&ctx.reb;
  const amtClass=p.status==='push'||p.status==='void'?'flat':tone(p.net);
  const week=/^\d+$/.test(String(p.key||''))?h('span',{class:'sjump',onclick:e=>{e.preventDefault();e.stopPropagation();go('#/p/'+p.key)}},'Week'):null;
  const player=p.player?h('span',{class:'sjump',onclick:e=>{e.preventDefault();e.stopPropagation();openNamed(p.player)}},p.player):null;
- return h('button',{class:'row slip srow','data-id':String(p.id),type:'button',onclick:()=>go('#/s/'+p.id)},
+ return h('button',{class:'row slip srow','data-id':String(p.id),'data-day':day==='today'?'today':(day==='yesterday'?'yesterday':''),type:'button',onclick:()=>go('#/s/'+p.id)},
   face(p.key,p.who),
   h('div',{class:'sbody'},
    h('div',{class:'nm',text:p.who||'Slip'}),
@@ -34991,6 +35057,7 @@ function settledRow(p,ctx){const mixed=ctx&&ctx.mixed,reb=ctx&&ctx.reb;
    p.status==='win'&&p.cleared?h('div',{class:'sub',text:p.cleared}):null,
    p.short?h('div',{class:'sub',text:'One leg short of cashing.'}):null,
    p.filer?h('div',{class:'sub',text:'Filed under '+p.filer}):null,
+   (+p.coins>0)?h('div',{class:'sub',text:'Coins earned '+p.coins}):null,
    reb&&reb[p.id]?h('div',{class:'sub faint',text:'Rebound'}):null,
    quiet?h('div',{class:'sub faint',text:quiet}):null,
    h('div',{class:'sub faint smeta',text:'Slip #'+p.id+(day?' · '+day:'')+(p.book?' · '+p.book:'')}),
@@ -35017,7 +35084,8 @@ function settleCard(d,rows){rows=rows||[];
  const last=d.lastSettle;
  const line=todayEmpty&&last&&last.when&&shown.length?h('p',{class:'hint',text:'Last settle was '+last.when+(last.who?', '+last.who:'')+'.'}):null;
  const body=shown.length?h('div',{class:'rows srows'},shown.map(p=>settledRow(p,{mixed:mixed,reb:reb}))):settleEmpty(rows);
- return card('Just settled','',String(shown.length),settleFilters(rows),line,body,settleWeek(d.settledWeek))}
+ const printToday=h('button',{type:'button',class:'tpause',onclick:()=>printMode('settled')},'Print today');
+ return card('Just settled','',String(shown.length),printToday,settleFilters(rows),line,body,settleWeek(d.settledWeek))}
 if(!S._sfinger){S._sfinger=1;
  addEventListener('pointerdown',e=>{if(e.target&&e.target.closest&&e.target.closest('.srows,.lgrid,.glist'))S.finger=1});
  addEventListener('scroll',e=>{const t=e.target;if(S._liveSet||!t||!t.classList||!t.classList.contains('lgrid'))return;S.stripHold=1;clearTimeout(S._stripT);S._stripT=setTimeout(()=>{S.stripHold=0;if(S.paintWait){S.paintWait=0;render()}},180)},true);
@@ -35160,7 +35228,7 @@ function renderMore(el,d){
  put(el,
   d.me?card('Wrapped','s4',null,h('p',{class:'muted',style:'margin:0'},'This one is yours. Run /wrapped in Discord. It uses the same net as your card.'),
    h('button',{type:'button',class:'tpause',style:'margin-top:8px',onclick:()=>{const p=(d.people||[]).find(x=>String(x.key)===String(d.me));if(p)go('#/p/'+p.key)}},'Open my card')):null,
-  card('\u{1FA99} Coins','s4',null,d.coins.length?h('table',null,h('tbody',null,d.coins.map((c,i)=>h('tr',null,h('td',{class:'faint',text:String(i+1)}),h('td',null,h('div',{text:c.who}),c.game?h('div',{class:'muted',text:c.game}):null,c.why?h('div',{class:'muted',text:c.why}):null),h('td',{class:'n',text:'\u{1FA99} '+c.coins.toLocaleString()})))))
+  card('\u{1FA99} Coins','s4',null,d.coins.length?h('table',null,h('tbody',null,d.coins.map((c,i)=>h('tr',null,h('td',{class:'faint',text:String(i+1)}),h('td',null,h('div',{text:c.who}),c.game?h('div',{class:'muted',text:c.game}):null,c.why?h('div',{class:'muted',text:c.why}):null,(c.earned&&c.spent)?h('div',{class:'muted',text:'Earned '+Number(c.earned).toLocaleString()+' · Spent '+Number(c.spent).toLocaleString()}):null),h('td',{class:'n',text:'\u{1FA99} '+c.coins.toLocaleString()})))))
    :empty('No coins yet','Play the games in Discord to earn some.')),
   card('Group parlay','s4',null,d.groupparlay.length?h('div',null,
    h('p',{class:'muted',text:(d.groupparlay.filter(l=>!l.status||l.status==='open').length?'Still open this week: '+d.groupparlay.filter(l=>!l.status||l.status==='open').map(l=>l.who).join(', '):'Every leg this week is in.')}),
@@ -35701,7 +35769,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=144') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=146') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -38101,6 +38169,80 @@ def staff_ticket_add(guild_id: int, message) -> None:
     db().commit()
 
 
+def staff_house_bits(gid: int) -> dict:
+    """Week note, test slips, filed-under pairs, today's settles, and one week with legs."""
+    now = datetime.now(TZ)
+    start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    today = now.date()
+    names: dict[int, str] = {}
+    try:
+        for row in db().execute(
+                "SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND bettor_id IS NOT NULL", (gid,)):
+            names[row["bettor_id"]] = row["bettor_name"]
+    except Exception:
+        names = {}
+    tests, pairs, day = [], [], []
+    week: dict[str, list] = {}
+    try:
+        rows = db().execute(
+            "SELECT * FROM picks WHERE guild_id = ? ORDER BY id DESC LIMIT 400", (gid,)).fetchall()
+    except Exception:
+        rows = []
+    for p in rows:
+        if unrevealed_hidden(p):
+            continue
+        test = pick_is_test(p)
+        if test and len(tests) < 8:
+            tests.append({"id": int(p["id"]), "who": clip(p["bettor_name"], 40),
+                          "what": clip(shown_desc(p), 60)})
+        logger = int(p["logged_by"] or 0)
+        bettor = int(p["bettor_id"] or 0)
+        if logger and bettor and logger != bettor and len(pairs) < 12:
+            pairs.append({"id": int(p["id"]),
+                          "logger": clip(names.get(logger) or "Staff", 40),
+                          "bettor": clip(p["bettor_name"], 40)})
+        if test:
+            continue
+        if p["status"] != "open" and len(day) < 40:
+            try:
+                when = datetime.fromisoformat(p["settled_at"] or "")
+            except Exception:
+                when = None
+            if when is not None:
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+                if when.astimezone(TZ).date() == today:
+                    day.append({"id": int(p["id"]), "who": clip(p["bettor_name"], 40),
+                                "what": clip(shown_desc(p), 80), "net": round(pick_net(p), 2)})
+        try:
+            created = datetime.fromisoformat(p["created_at"] or "")
+        except Exception:
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created.astimezone(TZ) < start:
+            continue
+        who = clip(p["bettor_name"], 40) or "Member"
+        if who not in week and len(week) >= 16:
+            continue
+        bucket = week.setdefault(who, [])
+        if len(bucket) >= 15:
+            continue
+        try:
+            legs = " | ".join(clip(leg["text"], 80) for leg in get_legs(p["id"]))
+        except Exception:
+            legs = ""
+        bucket.append({"id": int(p["id"]), "what": clip(shown_desc(p), 80),
+                       "status": p["status"] or "open", "legs": legs})
+    return {
+        "weekboard": clip(get_setting(gid, "week_board") or "", 280),
+        "tests": tests,
+        "pairs": pairs,
+        "daysettles": day,
+        "weekexport": [{"who": name, "rows": items} for name, items in week.items()],
+    }
+
+
 def staff_ops(uid: int) -> dict:
     """Numbers and lists for Staff HQ. Names only; nothing a person typed is marked HTML."""
     gid = staff_gid()
@@ -38276,6 +38418,7 @@ def staff_ops(uid: int) -> dict:
         "devices": [{"id": r.get("id") or "", "who": r.get("who") or "Browser", "ip": r.get("ip") or "",
                      "when": r.get("when") or ""} for r in dash_devices()],
         "photos_today": photos_read_today(),
+        **staff_house_bits(gid),
     }
 
 
@@ -38378,13 +38521,24 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
   <p class="muted">Per role and activity tier. 0 is unlimited. Change here or with /staff quota.</p></section>
 </div>
 <div class="g2">
- <section class="card"><h2>Tickets</h2><div id="tickets"></div>
+ <section class="card"><h2>Tickets</h2><p class="muted">Needs attention</p><div id="tickets"></div>
   <p class="muted">Discord messages in the tickets channel land here, plus slips that need a grade, a payout, or have been open too long. /staff tickets channel picks the channel.</p></section>
  <section class="card"><h2>Blacklist</h2><div id="blacklist"></div>
   <p class="muted">Staff-selected players, teams, or situations. Add here or with /staff blacklist.</p></section>
 </div>
 <section class="card" style="margin-bottom:12px"><h2>Board net</h2><div id="netmode"></div>
  <p class="muted">Week net is since Monday. Group net is the total the crew has made or lost on settled slips, and that is what the member board shows.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Week board</h2><div id="weekboard"></div>
+ <form class="form" id="weekform"><textarea name="text" maxlength="280" placeholder="A note members can read"></textarea>
+  <button type="submit">Pin on the week board</button></form>
+ <p class="muted">Members read this on the week board. Only an admin can change it, and it stays until an admin changes it.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Test slips</h2><div id="tests"></div>
+ <p class="muted">A test slip stays off the member board.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Filed under</h2><div id="pairs"></div></section>
+<section class="card" style="margin-bottom:12px"><h2>One day of settles</h2><div id="daysettles"></div>
+ <p class="muted">Today, Central. The download is this day only.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>One person's week</h2><div id="weekexport"></div>
+ <p class="muted">Legs are included. This is the staff page.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>This upload</h2><div id="upload"></div>
  <p class="muted">The upload is the file on Railway. The update is the idea list that file is filling. r81 was update r69. Both numbers sit on this card and on the member footer.</p></section>
 <section class="card" style="margin-bottom:12px"><h2>Today's access key</h2><div id="access"></div>
@@ -38524,9 +38678,34 @@ async function load(){const r=await fetch('/api/staff.json',{credentials:'same-o
   text:r==='developer'?'⚡ Developer':r==='owner'?'👑 Owner':r==='admin'?'🛡 Admin':'◆ Mod'});
  put($('#roles'),(d.crew||[]).length?(d.crew||[]).map(c=>h('div',{class:'row'},h('span',{text:c.name}),roleChip(c.role))):
   h('p',{class:'muted',text:'Set DEVELOPER_IDS and OWNER_IDS on Railway, then /staff add.'}));
+ const admin=d.me&&(d.me.boss||d.me.role==='admin'||d.me.role==='owner'||d.me.role==='developer');
+ const wf=$('#weekform'); if(wf) wf.hidden=admin?null:true;
+ const note=$('#weekboard'); if(note) put(note,h('p',{text:d.weekboard||'No note on the week board.'}));
+ const tests=$('#tests'); if(tests) put(tests,(d.tests||[]).length?(d.tests||[]).map(t=>h('div',{class:'row'},
+  h('span',null,h('b',{text:'This was a test'}),' · #'+t.id+' · '+(t.who||'')),
+  h('span',{class:'muted',text:t.what||''}))):h('p',{class:'muted',text:'No test slips.'}));
+ const pairs=$('#pairs'); if(pairs) put(pairs,(d.pairs||[]).length?(d.pairs||[]).map(p=>h('div',{class:'row'},
+  h('span',{text:'Logger '+p.logger+' · Bettor '+p.bettor}),
+  h('span',{class:'muted',text:'#'+p.id}))):h('p',{class:'muted',text:'No filed-under pair.'}));
+ const day=$('#daysettles'); if(day){const rows=d.daysettles||[];
+  put(day,h('p',{class:'muted',text:rows.length?rows.length+' settled today':'Nothing settled today'}),
+   h('button',{class:'xbtn',type:'button',text:'Download this day',onclick:()=>saveCsv('settles-today.csv',
+    [['Pick','Who','What','Net']].concat(rows.map(r=>[r.id,r.who,r.what,r.net])))}));}
+ const box=$('#weekexport'); if(box){const people=d.weekexport||[];
+  const sel=h('select',{id:'weekwho'},people.map(p=>h('option',{value:p.who,text:p.who})));
+  put(box,people.length?sel:h('p',{class:'muted',text:'No slips this week.'}),
+   people.length?h('button',{class:'xbtn',type:'button',text:'Download this week',onclick:()=>{
+    const person=people.find(p=>p.who===sel.value); if(!person)return;
+    saveCsv('week.csv',[['Pick','Who','What','Status','Legs']].concat((person.rows||[]).map(r=>[r.id,person.who,r.what,r.status,r.legs||''])));
+   }}):null);}
 }
 $('#annform').addEventListener('submit',e=>{e.preventDefault();const f=e.target;
  staffPost({op:'announce',text:f.text.value,when:f.when.value,channel:f.channel.value}).then(()=>{f.reset();load()})});
+function saveCsv(name, rows){const esc=v=>{const s=String(v==null?'':v);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
+ const text=rows.map(r=>r.map(esc).join(',')).join('\n'); const a=document.createElement('a');
+ a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'})); a.download=name; a.click()}
+const weekform=$('#weekform'); if(weekform) weekform.addEventListener('submit',e=>{e.preventDefault();
+ staffPost({op:'weekboard',text:e.target.text.value}).then(load)});
 const LOOKS=[["court","Classic court"],["arena","Arena lights"],["neoncity","Neon city"],["galaxy","Galaxy"],
  ["goldluxe","Gold luxe"],["aurora","Aurora"],["gridiron","Gridiron"],["vegas","Vegas sunset"],["midnight","Midnight"],["hardwood","Hardwood"],
  ["nightcourt","Night court"],["tunnel","The tunnel"],["crown","Crown"]];
