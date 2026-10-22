@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.57"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.58"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -195,6 +195,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.55", "On a phone, the top of the main page collapses while you scroll down, and it opens again only at the very top."),
     ("1.56", "People can pin three names on this phone. A card shows this week versus last week, and a filter for who is in profit or still open."),
     ("1.57", "A slip sheet shows the original screenshot after one tap. A photo that was already filed is named on one line before it is filed again. Several photos in one message stay separate slips."),
+    ("1.58", "Ask for your week, your open slips, or the weather. The week figure matches your card. Weather is the hourly temperature and rain, and it names the place."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -237,6 +238,7 @@ MEMBER_NEWS = [
     ("1.55", "On a phone, the top of the main page collapses while you scroll down, and it opens again only at the very top."),
     ("1.56", "You can pin three people on this phone. A card shows this week versus last week, and you can filter who is in profit or still open."),
     ("1.57", "Open a slip and tap to see the original screenshot. A photo that was already filed is named on one line. Several photos in one message stay separate slips."),
+    ("1.58", "Ask for your week, your open slips, or the weather. The week figure matches your card. Weather is the hourly temperature and rain, and it names the place."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2801,6 +2803,67 @@ _THOUSAND_SHIPPED = {
     "Use the same settle rules a hand-logged slip uses.",
     "Match the tone of a win reply and a loss reply. Both name the card.",
     "Log a win, a loss, and an open parlay as three different slips when all three are in one message.",
+    "Keep the weather graph to temperature and rain, with those numbers in the reply.",
+    "Answer in the channel where the question was asked.",
+    "Let a question about an open slip use that slip's legs as the subject.",
+    "Lead with the number, then the sentence.",
+    "Keep a daily cap and a cooldown so one chat does not crowd the channel.",
+    "Name the place and the hour on the weather graph.",
+    "Do not invent a temperature. Use the hourly read.",
+    "Let a member ask for their own week in a sentence and get the same net as the card.",
+    "Keep weather to a graph plus a short spoken line.",
+    "Add a what's-on-tonight answer that lists the group's open legs by start.",
+    "Keep the reply short enough for Discord, and split only when it must.",
+    "Say who is listed out when that list is already on the news tab.",
+    "Let a question name a book and get only that book's open slips.",
+    "Answer \"who is questionable\" from the injury list the board already shows.",
+    "Add a rain-only reading when the question is about a delay.",
+    "Show the hourly graph for the city named, not a default city.",
+    "Answer a record question with the same wins, losses, and net as the card.",
+    "Let a question name a sport and get that sport's open slips.",
+    "Keep a weather reply to the next twelve hours unless they ask for more.",
+    "Let a question about coins use the same total the card shows.",
+    "Add the book to a \"what do I have open\" answer.",
+    "Show a missed fact as \"not in yet\" instead of a made-up number.",
+    "Answer a streak question with the count only, and no prediction.",
+    "Let a member ask for the group net and get the tile they see on the board.",
+    "Add the slip number to any answer that is about one slip.",
+    "Let a question compare this week to last week for one person.",
+    "Keep the graph labeled with the hour and the degree.",
+    "Speak the high and the rain chance in the same reply as the picture.",
+    "Use the member's name when the answer is about their slips.",
+    "Keep a missing fact to one line.",
+    "Keep the tonight list in start order.",
+    "Hold the reply to the channel, not a private detour.",
+    "Number the legs when the answer is about one parlay.",
+    "Keep a book filter in the answer when they named a book.",
+    "Say the slip number before the play name.",
+    "Keep a group-net answer to the figure on the tile.",
+    "Keep the graph from covering the spoken line in Discord.",
+    "Use the same words the board uses for open, win, loss, and push.",
+    "Do not draw a graph when the place could not be found. Say that.",
+    "Keep a sports search from running on a weather question.",
+    "Answer from the slip already in the channel before searching the web.",
+    "Keep the daily cap from cutting a reply in half. Refuse before the work.",
+    "Hold a cooldown per member, not per whole server.",
+    "Return the card net, not a second math.",
+    "Keep a failed fact from being replaced with a guess.",
+    "Split a long answer on a line, not in the middle of a name.",
+    "Keep tonight's list to open legs only.",
+    "Keep the voice from changing mid-reply.",
+    "Keep a book answer to slips on that book.",
+    "Do not mention a hidden slip in an answer.",
+    "Use the tagged member when the question says \"their\" after a tag.",
+    "Hold the graph file only for that reply.",
+    "Answer \"what did we just file\" from the slip number just posted.",
+    "Keep a repeat question inside the cooldown from spending another full search.",
+    "Add a plain restatement of the last slip logged in that channel.",
+    "Keep the cooldown sentence short.",
+    "Hold one voice per reply.",
+    "Keep weather from mentioning a slip.",
+    "Lead a record answer with the net.",
+    "Fetch the hour read before drawing the graph.",
+    "Time the reply out cleanly and say it timed out.",
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -6282,6 +6345,233 @@ def build_ask_context(guild_id: int, asker_key: str, question: str) -> str:
     except Exception:
         pass
     return "\n\n".join(parts)
+
+
+_ASK_BOOKS = ("PrizePicks", "Underdog", "FanDuel", "DraftKings", "BetMGM", "Caesars", "Fanatics",
+              "Kalshi", "Sleeper", "Betr", "Hard Rock", "ESPN BET")
+
+
+def _ask_rows(guild_id: int, status: Optional[str] = None) -> list:
+    """Visible slips only. A hidden slip and a test slip stay out of an answer."""
+    sql = "SELECT * FROM picks WHERE guild_id = ?"
+    args: list = [guild_id]
+    if status:
+        sql += " AND status = ?"
+        args.append(status)
+    sql += " ORDER BY id DESC"
+    out = []
+    for p in db().execute(sql, args):
+        if pick_is_test(p) or dash_secret(p):
+            continue
+        out.append(p)
+    return out
+
+
+def _ask_book(question: str) -> Optional[str]:
+    low = (question or "").lower()
+    for name in _ASK_BOOKS:
+        if name.lower() in low:
+            return name
+    return None
+
+
+def _ask_sport(question: str) -> Optional[str]:
+    low = (question or "").lower()
+    for name, pattern in SPORT_NAMES:
+        if re.search(pattern, low):
+            return name
+    return None
+
+
+def _ask_slip_line(p) -> str:
+    status = p["status"] if p["status"] in ("open", "win", "loss", "push") else "open"
+    book = p["platform"] or "the book"
+    what = shown_desc(p) or "Slip"
+    return f"Pick #{p['id']} {what} on {book}. {status}."
+
+
+def _ask_person(guild_id: int, key: str, name: str) -> Optional[dict]:
+    try:
+        card = dash_person(guild_id, str(key))
+    except Exception:
+        log.debug("Card read failed", exc_info=True)
+        return None
+    if card:
+        return card
+    return None
+
+
+def weather_spoken(pack: dict, rain_only: bool = False) -> str:
+    """Place, hour, and the hourly temperature and rain. No slip, no invented number."""
+    hours = list(pack.get("hours") or [])
+    if not hours:
+        return "I couldn't find that place."
+    place = str(pack.get("place") or pack.get("asked") or "That place")
+    hour = str(hours[0].get("label") or "this hour")
+    rains = [float(h.get("rain") or 0) for h in hours]
+    peak = max(rains) if rains else 0
+    if rain_only:
+        return f"{place}, {hour}. Rain chance {peak:.0f}%."
+    temp = float(hours[0].get("temp"))
+    high = max(float(h.get("temp")) for h in hours)
+    return f"{place}, {hour}. {temp:.0f} degrees. High {high:.0f} degrees. Rain chance {peak:.0f}%."
+
+
+def assistant_board_answer(guild_id: int, asker_key: str, asker_name: str, question: str,
+                           channel_id: Optional[int] = None, tagged=None) -> Optional[str]:
+    """A board question answered from the card, the week tile, or the news list. None leaves it to the usual reply."""
+    q = question or ""
+    low = q.lower()
+    if len(low.split()) < 2 and not re.search(r"#\s*\d", q):
+        return None
+    key, name = str(asker_key), asker_name or "You"
+    if tagged is not None and re.search(r"\btheir\b", low):
+        tid = getattr(tagged, "id", None)
+        if tid:
+            key, name = str(tid), getattr(tagged, "display_name", None) or "They"
+
+    def card():
+        return _ask_person(guild_id, key, name)
+
+    def miss():
+        return "Not in yet."
+
+    m = re.search(r"(?:pick\s*#?|#)\s*(\d{1,10})\b", q, re.I)
+    if m or re.search(r"\b(this slip|that slip)\b", low):
+        pick = None
+        if m:
+            pick = get_pick(guild_id, int(m.group(1)))
+            if pick is None or pick_is_test(pick) or dash_secret(pick):
+                return miss()
+        else:
+            for p in _ask_rows(guild_id):
+                url = p["slip_url"] or ""
+                if channel_id and str(channel_id) in url:
+                    pick = p
+                    break
+            if pick is None:
+                rows = _ask_rows(guild_id)
+                pick = rows[0] if rows else None
+        if pick is None:
+            return miss()
+        lines = [_ask_slip_line(pick)]
+        legs = list(get_legs(pick["id"]))
+        for i, leg in enumerate(legs, 1):
+            lines.append(f"{i}. {leg['text']}")
+        return "\n".join(lines)
+
+    if re.search(r"\b(just filed|just file|what did we just)\b", low):
+        rows = _ask_rows(guild_id)
+        if not rows:
+            return miss()
+        return _ask_slip_line(rows[0])
+
+    if re.search(r"\blast slip\b", low):
+        found = None
+        for p in _ask_rows(guild_id):
+            if channel_id and str(channel_id) in (p["slip_url"] or ""):
+                found = p
+                break
+        if found is None:
+            return miss()
+        return _ask_slip_line(found)
+
+    if re.search(r"\bquestionable\b", low):
+        try:
+            rows = dash30_news(guild_id)
+        except Exception:
+            rows = []
+        names = [r["player"] for r in rows if str(r.get("chip") or "") == "questionable"
+                 or str(r.get("status") or "").lower().startswith("questionable")]
+        if not names:
+            return miss()
+        return "Questionable: " + ", ".join(names) + "."
+
+    if re.search(r"\b(listed out|who is out|who'?s out)\b", low):
+        try:
+            rows = dash30_news(guild_id)
+        except Exception:
+            rows = []
+        names = [r["player"] for r in rows if str(r.get("chip") or "") == "out"
+                 or str(r.get("status") or "").lower().startswith("out")]
+        if not names:
+            return miss()
+        return "Out: " + ", ".join(names) + "."
+
+    if re.search(r"\b(my streak|what'?s my streak|what is my streak|their streak)\b", low):
+        person = card()
+        digits = re.search(r"\d+", str((person or {}).get("streak") or ""))
+        if not digits:
+            return miss()
+        return digits.group(0)
+
+    if re.search(r"\b(my record|what'?s my record|what is my record|their record)\b", low):
+        person = card()
+        if not person:
+            return miss()
+        rec = f"{person['wins']}-{person['losses']}"
+        if person.get("pushes"):
+            rec += f"-{person['pushes']}"
+        return f"{signed(person['net'])}. {person['name']} is {rec} on the card."
+
+    if re.search(r"\blast week\b", low) and re.search(r"\bweek\b", low):
+        person = card()
+        if not person:
+            return miss()
+        week = (person.get("span") or {}).get("week") or 0
+        last = person.get("lastWeek") or 0
+        return f"{signed(week)} this week versus {signed(last)} last week."
+
+    if re.search(r"\b(my week|how'?s my week|how is my week|what'?s my week)\b", low):
+        person = card()
+        if not person:
+            return miss()
+        week = (person.get("span") or {}).get("week") or 0
+        return f"{signed(week)}. {person['name']}, this week on your card."
+
+    if re.search(r"\b(group net|week net)\b", low):
+        tile = dash_this_week(guild_id)["net"]
+        return f"{signed(tile)}. Week net on the board, since Monday."
+
+    if re.search(r"\b(my coins|our coins|coins this week|how many coins)\b", low):
+        n = dash_this_week(guild_id)["coins"]
+        return f"{n}. Coins on the week card."
+
+    if re.search(r"\b(tonight|what'?s on|whats on)\b", low):
+        items = []
+        for p in _ask_rows(guild_id, "open"):
+            slate = local_day(p["slate_date"]) if _rg(p, "slate_date") else ""
+            legs = [x for x in get_legs(p["id"]) if (x["status"] or "open") == "open"]
+            if not legs:
+                legs = [{"text": shown_desc(p) or "Slip", "idx": 0}]
+            for leg in legs:
+                items.append((_rg(p, "slate_date") or "9999", p["id"], int(leg["idx"] or 0), slate, p, leg))
+        if not items:
+            return miss()
+        items.sort()
+        lines = ["Open legs, by start."]
+        for _stamp, _pid, _idx, slate, p, leg in items:
+            when = slate or "no start"
+            lines.append(f"{when} · Pick #{p['id']} {leg['text']}")
+        return "\n".join(lines)
+
+    book = _ask_book(q)
+    sport = _ask_sport(q)
+    wants_open = bool(re.search(r"\b(what do i have open|my open|open slips|what am i on|what'?s open)\b", low))
+    named_open = bool(re.search(r"\b(open|slips?)\b", low))
+    if (book and named_open) or (sport and named_open) or wants_open:
+        rows = _ask_rows(guild_id, "open")
+        if book:
+            rows = [p for p in rows if book.lower() in (p["platform"] or "").lower()]
+        if sport:
+            rows = [p for p in rows if sport_group(p["sport"]) == sport]
+        if not rows:
+            return miss()
+        lines = [f"{name}, you have {len(rows)} open."]
+        for p in rows:
+            lines.append(_ask_slip_line(p))
+        return "\n".join(lines)
+    return None
 
 
 async def ask_claude(system: str, user_text: str, max_searches: int = 5) -> tuple[str, list[str]]:
@@ -33263,7 +33553,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-138';"
+    "const CACHE='pb-shell-139';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -34653,7 +34943,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=138') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=139') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -46319,9 +46609,9 @@ def _weather_chips(d, chips: list[str], x: int, y: int, gap: int = 8) -> int:
 
 
 def render_weather_card(pack: dict) -> io.BytesIO:
-    """Hourly temperature, feels-like, and rain, plus the games tied to the city."""
+    """Hourly temperature and rain. The place and the hour stay on the picture."""
     hours = list(pack.get("hours") or [])[:24]
-    games = [str(g) for g in (pack.get("games") or []) if g][:4]
+    games = []
     W = 1080
     H = 760 + 44 * len(games)
     img, d = _design_card(W, H, "stadium", (28, 72, 130), head=250, margin=0, radius=0)
@@ -46335,9 +46625,7 @@ def render_weather_card(pack: dict) -> io.BytesIO:
     place, pf = fit_text(d, str(pack.get("place") or "Forecast"), 980, 28, True)
     d.text((36, 74), place, font=pf, fill=ART_TEXT)
     sub_bits = []
-    if pack.get("game"):
-        sub_bits.append(str(pack["game"]))
-    if pack.get("note"):
+    if pack.get("note") and "slip" not in str(pack.get("note")).lower():
         sub_bits.append(str(pack["note"]))
     sy = 114
     sf = art_font(16, False)
@@ -46345,29 +46633,15 @@ def render_weather_card(pack: dict) -> io.BytesIO:
         d.text((36, sy), line, font=sf, fill=(198, 206, 224))
         sy += 22
     temps = [h["temp"] for h in hours]
-    feels = [_hour_num(h, "feel", h["temp"]) for h in hours]
     rains = [_hour_num(h, "rain") for h in hours]
-    chips, more = [], []
-    if temps:
-        opener = "now" if pack.get("live", True) else (hours[0].get("label") or "start")
-        chips += [f"{opener} {temps[0]:.0f}°F", f"feels {feels[0]:.0f}°", f"high {max(temps):.0f}°", f"low {min(temps):.0f}°"]
+    chips = []
+    if hours and temps:
+        chips.append(f"{hours[0].get('label') or 'hour'} {temps[0]:.0f}°")
+        chips.append(f"high {max(temps):.0f}°")
     if rains:
-        chips.append(f"rain peak {max(rains):.0f}%")
-    if hours:
-        wind = _hour_num(hours[0], "wind")
-        gust = max(_hour_num(h, "gust") for h in hours)
-        more.append(f"wind {wind:.0f} mph" + (f" · gusts {gust:.0f}" if gust >= wind + 5 else ""))
-        hum = hours[0].get("humidity")
-        if isinstance(hum, (int, float)):
-            more.append(f"humidity {hum:.0f}%")
-        wet = sum(_hour_num(h, "precip") for h in hours)
-        if wet >= 0.05:
-            more.append(f"precip {wet:.2f} in")
-    chip_y = 164
-    _weather_chips(d, chips, 36, chip_y)
-    if more:
-        _weather_chips(d, more, 36, chip_y + 40)
-    legend = "Gold is the temperature. White is what it feels like. Blue bars are the chance of rain."
+        chips.append(f"rain {max(rains):.0f}%")
+    _weather_chips(d, chips, 36, 164)
+    legend = "The hour is under the line. Gold is the degree. Blue bars are the chance of rain."
     d.text((36, 246), legend, font=art_font(15, False), fill=ART_MUTED)
     left, right, top, bot = 86, 1036, 286, 520
     kick_at = None
@@ -46381,7 +46655,7 @@ def render_weather_card(pack: dict) -> io.BytesIO:
         if target and target in stamps:
             kick_at = stamps.index(target)
     if len(hours) >= 2 and temps:
-        tmin, tmax = min(min(temps), min(feels)), max(max(temps), max(feels))
+        tmin, tmax = min(temps), max(temps)
         if tmax - tmin < 6:
             mid = (tmax + tmin) / 2
             tmin, tmax = mid - 3, mid + 3
@@ -46427,9 +46701,7 @@ def render_weather_card(pack: dict) -> io.BytesIO:
                 y += 14
             d.text((kx + 6, top + 2), "GAME", font=art_font(13, True), fill=ART_TEXT)
         temp_pts = [(tx(i), ty(t)) for i, t in enumerate(temps)]
-        feel_pts = [(tx(i), ty(t)) for i, t in enumerate(feels)]
         d.polygon([(left, bot), *temp_pts, (right, bot)], fill=(245, 197, 66, 36))
-        d.line(feel_pts, fill=(255, 255, 255, 170), width=2)
         d.line(temp_pts, fill=(245, 197, 66, 255), width=4)
         hi, lo = temps.index(max(temps)), temps.index(min(temps))
         mark = {0, hi, lo, len(temps) - 1}
@@ -48266,6 +48538,54 @@ class PicksBot(discord.Client):
         self.ask_cooldowns[message.author.id] = time.monotonic()
         set_setting(message.guild.id, count_key, str(used + 1))
 
+        tagged = None
+        for member in (getattr(message, "mentions", None) or []):
+            if getattr(member, "bot", False) or getattr(member, "id", None) == getattr(self.user, "id", None):
+                continue
+            tagged = member
+            break
+        try:
+            board = assistant_board_answer(
+                message.guild.id, str(message.author.id), message.author.display_name, question,
+                channel_id=getattr(message.channel, "id", None), tagged=tagged)
+        except Exception:
+            log.exception("Board answer failed")
+            board = None
+        if board:
+            for i, chunk in enumerate(split_message(board)):
+                if i == 0:
+                    await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                else:
+                    await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+            return
+        if question_is_weather(question):
+            pack = None
+            try:
+                pack = await asyncio.wait_for(answer_weather(question), timeout=14)
+            except (asyncio.TimeoutError, TimeoutError):
+                await message.reply("That one timed out.", mention_author=False)
+                return
+            except Exception:
+                log.warning("Weather lookup failed", exc_info=True)
+                pack = None
+            if not pack or not pack.get("hours"):
+                named = weather_place_phrase(question) or "that place"
+                await message.reply(f"I couldn't find {named}.", mention_author=False)
+                return
+            if not re.search(r"\b(more|week|days|24)\b", question, re.I):
+                pack = dict(pack)
+                pack["hours"] = list(pack["hours"])[:12]
+            line = weather_spoken(pack, rain_only=bool(re.search(r"\b(delay|delayed)\b", question, re.I)))
+            weather_file = None
+            try:
+                png = await asyncio.to_thread(locked_render, render_weather_card, pack)
+                weather_file = discord.File(png, filename="weather.png")
+            except Exception:
+                log.exception("Weather chart failed")
+            extra = {"file": weather_file} if weather_file else {}
+            await message.reply(line, mention_author=False, allowed_mentions=discord.AllowedMentions.none(), **extra)
+            return
+
         user_text = f"Question from {message.author.display_name}: {question}"
         ref = message.reference.resolved if message.reference else None
         if isinstance(ref, discord.Message) and ref.author.id == self.user.id and ref.content:
@@ -48316,9 +48636,12 @@ class PicksBot(discord.Client):
                 finally:
                     if token is not None:
                         ASK_DATA.reset(token)
-        except Exception:
+        except Exception as exc:
             log.exception("Question failed")
             failed = True
+            if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+                await message.reply("That one timed out.", mention_author=False)
+                return
         if failed and not weather_pack:
             await message.reply("I couldn't get an answer just now. Try again in a minute.",
                                 mention_author=False)
