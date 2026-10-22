@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.56"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.57"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -194,6 +194,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.54", "A new upload is posted in the mods-only record channel too, and in a channel named for the hidden record. A channel that missed it gets the note on the next start."),
     ("1.55", "On a phone, the top of the main page collapses while you scroll down, and it opens again only at the very top."),
     ("1.56", "People can pin three names on this phone. A card shows this week versus last week, and a filter for who is in profit or still open."),
+    ("1.57", "A slip sheet shows the original screenshot after one tap. A photo that was already filed is named on one line before it is filed again. Several photos in one message stay separate slips."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -235,6 +236,7 @@ MEMBER_NEWS = [
     ("1.54", "A new upload shows up in the mods-only record channel, and in a channel named for the hidden record. If one of them missed it, the next start sends the note there."),
     ("1.55", "On a phone, the top of the main page collapses while you scroll down, and it opens again only at the very top."),
     ("1.56", "You can pin three people on this phone. A card shows this week versus last week, and you can filter who is in profit or still open."),
+    ("1.57", "Open a slip and tap to see the original screenshot. A photo that was already filed is named on one line. Several photos in one message stay separate slips."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2751,6 +2753,54 @@ _THOUSAND_SHIPPED = {
     "Show a just-settled slip on the card in the same minute it posts.",
     "Use Central dates on the card.",
     "Avoid a second copy of the photo on the same card.",
+    "Show the original screenshot on the slip sheet, behind a tap.",
+    "Name the players, the lines, and the result in the reply.",
+    "File a tagged win under that member even when the long read is slow.",
+    "Warn, before filing, when this photo was already logged.",
+    "Read several photos in one message as separate slips.",
+    "Say how many legs the header claimed and how many were read.",
+    "Log a card that already paid, and skip the stats talk on that card.",
+    "Read a flex or power label from the header and store it on the slip.",
+    "Hold a good open read while a second pass is still going.",
+    "Quote the stake and the paid amount from the card, in the reply.",
+    "Accept a tight crop, a dark shot, and an HEIC from an iPhone on the first pass.",
+    "Keep the reply in the channel where the photo was posted.",
+    "File under the tagged name, and say that name in the reply.",
+    "Treat a paid card as settled and an in-play card as open.",
+    "Add a short confirm when the only missing piece is the stake.",
+    "Keep a second pass on the holes, not a full reread of a good photo.",
+    "Cap a burst of photos so the rest wait, then answer with every slip number.",
+    "Lead with what was filed, then the hole if one leg is blank.",
+    "Say the tagged member's name in the first line of the reply.",
+    "Use plain words for a win, a loss, a push, and still open.",
+    "Number each slip when one message had several photos.",
+    "Keep a failed photo as its own line, not a silent skip.",
+    "Keep the second pass shorter than the first.",
+    "Hold the reply in the same channel as the photo.",
+    "Clip a long reply so Discord will take it, without dropping a slip.",
+    "Show the slip number in the reply once it is filed.",
+    "Keep the header count in the reply when it disagrees with the legs.",
+    "Use one confirm style for every book.",
+    "Keep a duplicate warning to one line, with the older slip number.",
+    "Hold the play type in the words flex, power, or the book's own label.",
+    "Say which photo failed when a burst is mixed.",
+    "Keep a staff test file marked, and out of the member reply's cheer.",
+    "File the tagged member even if the photo read finishes a moment later.",
+    "Keep a paid card from being graded again as an open parlay.",
+    "Read the photos in a burst two at a time so a long message still finishes.",
+    "Return every slip number, including one that needs a stake.",
+    "Prefer the paid amount on a win card over a second guess.",
+    "Use the tag on the message over the name printed on the card.",
+    "Store legs in the order they appear on the card.",
+    "Keep an in-play card open until the card itself shows a result.",
+    "Accept HEIC, a dark shot, and a tight crop on the first pass.",
+    "Do not run the long stats talk when the card already shows the result.",
+    "Keep the reply from saying a result the card did not show.",
+    "Cap the burst and queue the rest, then answer once.",
+    "Keep a confirm from filing until someone answers it.",
+    "Use the same settle rules a hand-logged slip uses.",
+    "Match the tone of a win reply and a loss reply. Both name the card.",
+    "Log a win, a loss, and an open parlay as three different slips when all three are in one message.",
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -3992,6 +4042,43 @@ def slip_result_ready(slip: Optional[dict]) -> bool:
     holes = [u for u in (slip.get("_unsure") or [])
              if u not in _SLIP_MONEY_UNSURE and not str(u).startswith("more than one slip")]
     return not holes
+
+
+def stake_only_confirm(slip: Optional[dict]) -> bool:
+    """The legs read, and the stake is the only blank."""
+    if not slip or not slip.get("legs") or slip.get("cost") is not None:
+        return False
+    bits = [str(u) for u in (slip.get("_unsure") or [])]
+    return "the amount risked" in bits and all(u == "the amount risked" for u in bits)
+
+
+def scan_filed_lines(p, slip: dict, owner, author) -> list[str]:
+    """What was filed: the result, the card name, the stake, the paid amount, the legs, then any hole."""
+    status = p["status"] or "open"
+    word = {"win": "Won", "loss": "Lost", "push": "Push"}.get(status, "Still open")
+    title = str(p["description"] or "Slip").strip()
+    stake = "stake blank" if slip.get("_cost_blank") else money(p["cost"])
+    if status in ("win", "push") and p["returned"] is not None:
+        paid = money(p["returned"])
+    elif slip.get("payout") is None:
+        paid = "pays blank"
+    else:
+        paid = money(p["payout"])
+    lines = []
+    if getattr(owner, "id", None) != getattr(author, "id", None):
+        lines.append(f"Filed under **{owner.display_name}**.")
+    lines.append(f"{word}. {title}. {stake} to {paid}. Pick #{p['id']}.")
+    legs = [str(leg["text"]).strip() for leg in get_legs(p["id"]) if str(leg["text"] or "").strip()]
+    if legs:
+        lines.append(" · ".join(legs[:8]))
+    short = re.search(r"all (\d+) picks \(I found (\d+)\)", " ".join(str(u) for u in (slip.get("_unsure") or [])))
+    if short and short.group(1) != short.group(2):
+        lines.append(f"The header said {short.group(1)} picks and {short.group(2)} read.")
+    if slip.get("_cost_blank"):
+        lines.append(f"The stake is blank. Fix it with `/edit pick_id:{p['id']}`.")
+    if slip.get("payout") is None:
+        lines.append(f"The pays line was blank. Fix it with `/edit pick_id:{p['id']}`.")
+    return lines
 
 
 def slip_file_amounts(slip: dict) -> dict:
@@ -5587,6 +5674,14 @@ def slip_shot_stash_path(message_id: int, attachment_id: int) -> str:
 
 def slip_shot_pick_path(pick_id: int) -> str:
     return os.path.join(slip_shot_dir(), f"p{int(pick_id)}.img")
+
+
+def slip_has_shot(pick_id: int) -> bool:
+    """True when the original screenshot was kept for this slip."""
+    try:
+        return os.path.getsize(slip_shot_pick_path(pick_id)) > 0
+    except OSError:
+        return False
 
 
 async def keep_slip_photo(attachment, message_id: int) -> None:
@@ -24962,7 +25057,8 @@ async def dash_slip(guild_id: int, pick_id: int) -> Optional[dict]:
             "status": p["status"], "cost": p["cost"], "payout": p["payout"],
             "net": round(pick_net(p), 2) if p["status"] != "open" else None, "estimated": bool(p["estimated"]),
             "logged": local_day(p["created_at"]), "settled": local_day(p["settled_at"]) if p["settled_at"] else None,
-            "needs": (p["auto_state"] or "").startswith("needs:"), "test": pick_is_test(p), "legs": legs,
+            "needs": (p["auto_state"] or "").startswith("needs:"), "test": pick_is_test(p), "shot": slip_has_shot(p["id"]),
+            "legs": legs,
             "player": next((lg["player"] for lg in legs if lg.get("player")), None) or dash_prop_name(p["description"] or "") or None}
 
 
@@ -33074,6 +33170,46 @@ async def dash_csv_out(request):
     return web.Response(text=dashboard_csv(prm["guild"], kind), content_type="text/csv")
 
 
+async def dash_shot_img(request):
+    """The original screenshot, only for a slip this server can open."""
+    from aiohttp import web
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    try:
+        pid = int(request.match_info["pid"])
+    except (KeyError, ValueError):
+        return dash_error(web, request, 404)
+    p = get_pick(prm["guild"], pid)
+    if p is None or dash_secret(p) or not slip_has_shot(pid):
+        return dash_error(web, request, 404)
+    try:
+        with open(slip_shot_pick_path(pid), "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return dash_error(web, request, 404)
+    if not raw:
+        return dash_error(web, request, 404)
+    if raw.startswith(b"\x89PNG"):
+        kind = "image/png"
+    elif raw.startswith(b"\xff\xd8"):
+        kind = "image/jpeg"
+    elif raw.startswith(b"GIF8"):
+        kind = "image/gif"
+    elif raw.startswith(b"RIFF"):
+        kind = "image/webp"
+    else:
+        try:
+            from PIL import Image, ImageOps
+            im = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=85)
+            raw, kind = buf.getvalue(), "image/jpeg"
+        except Exception:
+            return dash_error(web, request, 404)
+    return web.Response(body=raw, content_type=kind, headers={"Cache-Control": "private, max-age=300"})
+
+
 async def dash_image(request):
     from aiohttp import web
     prm, err = dash_gate(web, request)
@@ -33127,7 +33263,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-137';"
+    "const CACHE='pb-shell-138';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -33194,6 +33330,7 @@ def dash_app(web):
                     web.post("/api/bank.json", dash_api_bank),
                     web.get(r"/img/ava/{uid:[0-9]{1,20}}.png", dash_avatar_img),
                     web.get(r"/api/slip/{pid:\d+}.json", dash_api_slip),
+                    web.get(r"/img/shot/{pid:\d+}.jpg", dash_shot_img),
                     *dash30_routes(web), web.get("/api/{kind}.csv", dash_csv_out), web.get("/img/{kind}.png", dash_image),
                     web.get("/img/{kind}/{arg}.png", dash_image),                     web.get("/favicon.ico", dash_favicon),
                     web.get("/favicon.svg", dash_favicon),
@@ -34306,6 +34443,7 @@ async function openSlip(id){openSheet();const s=await api('/api/slip/'+id+'.json
   h('div',{class:'ph'},face(s.key,s.who),h('div',{style:'min-width:0'},h('h3',null,'Slip #'+s.id,' ',stBadge(s.status)),
    h('div',{class:'sub'},s.key?h('a',{onclick:()=>go('#/p/'+s.key)},s.who):h('b',{text:s.who}),h('span',{class:'chip',text:s.platform}),
     s.sport?h('span',{class:'chip',text:s.sport}):null,h('span',{text:'Logged '+s.logged+(s.settled?' · settled '+s.settled:'')})))),
+  s.shot?h('div',null,h('button',{type:'button',class:'tpause',onclick:function(ev){const box=ev.currentTarget.nextElementSibling;box.hidden=!box.hidden}},'Original screenshot'),h('div',{hidden:true},imgBox('shot/'+s.id+'.jpg','','No screenshot','The photo was not kept with this slip.','Original screenshot'))):null,
   s.player?h('button',{class:'xray',type:'button',onclick:()=>openNamed(s.player)},'X-ray · same as /trend'):null,
   s.needs?h('div',{class:'banner'},'✋ This one can’t grade itself. Finish it in Discord with ',h('code',null,'/result'),'.'):null,
   s.test?h('div',{class:'banner'},'Marked test. Left out of standings.'):null,
@@ -34515,7 +34653,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=137') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=138') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -43694,7 +43832,7 @@ async def ask_channel_message(client, message) -> None:
     """A message in the ask channel: screenshots get a breakdown (never logged), words get an answer."""
     images = image_attachments(message)
     if images:
-        pics = images[:SLIP_MAX_PICS]
+        pics = images
         if len(pics) > 1 and hasattr(client, "review_slips"):
             await client.review_slips(message, message, pics)
         else:
@@ -48024,7 +48162,7 @@ class PicksBot(discord.Client):
         intent = slip_intent(getattr(message, "content", "")) if images or mentioned else "log"
         if images and (self.is_receipts_channel(message.channel) or mentioned):
             if intent == "ask":
-                pics = images[:SLIP_MAX_PICS]
+                pics = images
                 if len(pics) > 1:
                     await self.review_slips(message, message, pics)
                 else:
@@ -48036,7 +48174,7 @@ class PicksBot(discord.Client):
             # "@PIMP-BOT log this" (or "@PIMP-BOT thoughts?") as a reply to someone's screenshot
             ref = message.reference.resolved
             if isinstance(ref, discord.Message) and not ref.author.bot and image_attachments(ref):
-                ref_pics = image_attachments(ref)[:SLIP_MAX_PICS]
+                ref_pics = image_attachments(ref)
                 if intent == "ask":
                     if len(ref_pics) > 1:
                         await self.review_slips(message, ref, ref_pics)
@@ -48258,7 +48396,9 @@ class PicksBot(discord.Client):
             free_count("scan_confirm")
             note_slip_read("unsure", who=message.author.display_name,
                            title=str(slip.get("description") or "screenshot"), url=message.jump_url)
-            await message.reply(free_unsure_note(slip), embed=slip_draft_embed(slip),
+            note = ("The legs read. The stake is the only blank." if stake_only_confirm(slip)
+                    else free_unsure_note(slip))
+            await message.reply(note, embed=slip_draft_embed(slip),
                                 view=slip_draft_view(message.id, review=ai_enabled(), edit=True), mention_author=False)
             return
 
@@ -48282,9 +48422,7 @@ class PicksBot(discord.Client):
                 return
             await offer_extra_slips(message, slip)
             save_slip_draft(message.guild.id, message, slip)
-            await message.reply(f"👀 That looks like pick `#{dup['id']}` (logged "
-                                f"<t:{int(datetime.fromisoformat(dup['created_at']).timestamp())}:R>), so I didn't log it "
-                                "twice. If it's really a second entry, tap below.",
+            await message.reply(f"👀 That looks like pick `#{dup['id']}`, so I didn't log it twice.",
                                 view=slip_draft_view(message.id, review=False), mention_author=False)
             return
 
@@ -48335,23 +48473,23 @@ class PicksBot(discord.Client):
             settle_pick(guild_id, pick_id, slip["status"], slip["returned"])
 
         p = get_pick(guild_id, pick_id)
-        note = None
-        if slip.get("_cost_blank"):
-            note = f"I couldn't read the amount risked. Fix it with `/edit pick_id:{pick_id}`."
-        if slip["payout"] is None:
-            pay = f"I couldn't read the payout. Fix it with `/edit pick_id:{pick_id}`."
-            note = f"{note} {pay}" if note else pay
-        if getattr(owner, "id", None) != getattr(author, "id", None):
-            filed = f"Filed under **{owner.display_name}**."
-            note = f"{note}\n{filed}" if note else filed
-        short = re.search(r"all (\d+) picks \(I found (\d+)\)", " ".join(str(u) for u in (slip.get("_unsure") or [])))
-        if short and short.group(1) != short.group(2):
-            gap = f"The header said {short.group(1)} picks and {short.group(2)} read."
-            note = f"{note} {gap}" if note else gap
+        facts = scan_filed_lines(p, slip, owner, author)
         view = settle_view(pick_id) if p["status"] == "open" else None
         SLIP_STATE["last_ok"] = now_iso()
-        logged = voice_line(guild_id, "logged", name=call_name(guild_id, owner.id, owner.display_name))
-        content = "\n".join(x for x in (logged, note) if x) or None
+        cheer = None if pick_is_test(p) else voice_line(
+            guild_id, "logged", name=call_name(guild_id, owner.id, owner.display_name))
+        tagged = getattr(owner, "id", None) != getattr(author, "id", None)
+        parts = []
+        if tagged and facts:
+            parts.append(facts[0])
+            if cheer:
+                parts.append(cheer)
+            parts.extend(facts[1:])
+        else:
+            if cheer:
+                parts.append(cheer)
+            parts.extend(facts)
+        content = "\n".join(parts) or None
         embed, extra = pick_embed(p), {}
         sent = None
         posted_receipt = False
@@ -48471,7 +48609,7 @@ class PicksBot(discord.Client):
         if gate:
             await message.reply(gate, mention_author=False)
             return
-        pics = [a for a in attachments if (getattr(a, "size", 0) or 0) <= MAX_IMAGE_BYTES][:SLIP_MAX_PICS]
+        pics = [a for a in attachments if (getattr(a, "size", 0) or 0) <= MAX_IMAGE_BYTES]
         if not pics:
             await message.reply("Those photos are too big to read. Send each slip on its own.", mention_author=False)
             return
@@ -48496,7 +48634,7 @@ class PicksBot(discord.Client):
             if not slip or not (slip.get("legs") or slip.get("description")):
                 missed += 1
                 why = f": {reason}" if reason else ""
-                lines.append(f"**{i}.** I couldn't read that photo{why}.")
+                lines.append(f"Photo {i} failed{why}.")
                 continue
             blurb = slip_batch_blurb(i, slip)
             owner = target if tagged else message.author
