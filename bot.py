@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.59"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.61"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -197,6 +197,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.57", "A slip sheet shows the original screenshot after one tap. A photo that was already filed is named on one line before it is filed again. Several photos in one message stay separate slips."),
     ("1.58", "Ask for your week, your open slips, or the weather. The week figure matches your card. Weather is the hourly temperature and rain, and it names the place."),
     ("1.59", "On Live, you can star a game and hide finals on this phone. A sport filter stays while the scores refresh. The live dot is only for a game that is in."),
+    ("1.60", "A new upload posts an update recap in the recap channel. News can be filtered on this phone, and a row keeps the photo, the team, and the status together."),
+    ("1.61", "On a player sheet, you can save a line and a note on this phone. The chart is the last 5, last 10, or last 20, and the next game is the opponent, home or away, and Central time."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -241,6 +243,8 @@ MEMBER_NEWS = [
     ("1.57", "Open a slip and tap to see the original screenshot. A photo that was already filed is named on one line. Several photos in one message stay separate slips."),
     ("1.58", "Ask for your week, your open slips, or the weather. The week figure matches your card. Weather is the hourly temperature and rain, and it names the place."),
     ("1.59", "On Live, you can star a game and hide finals on this phone. A sport filter stays while the scores refresh. The live dot is only for a game that is in."),
+    ("1.60", "A new upload posts an update recap in the recap channel. News can be filtered on this phone, and a row keeps the photo, the team, and the status together."),
+    ("1.61", "On a player sheet, you can save a line and a note on this phone. The chart is the last 5, last 10, or last 20, and the next game is the opponent, home or away, and Central time."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2953,6 +2957,169 @@ _THOUSAND_SHIPPED = {
     "Leave a game with no feed as a start time only.",
     "Sort live games ahead of the soonest start.",
     "Show a leg that just crossed the number, with the player and the value.",
+    'Keep the photo, the team, and the status on one row.',
+    'Filter injuries, reboots, and returns without a reload.',
+    'Open the player sheet from the name when we know the player.',
+    'Use the team we already have before asking for a photo.',
+    'Show every open slip that names that player, not only the first.',
+    'Keep reboot, out, and questionable in the same chip style as the rest of the board.',
+    'Leave hidden slips out of the report.',
+    'Add a sport chip so an NBA note and an NFL note can be separated.',
+    'Crop the headshot to the face.',
+    'Ask for at most a few missing photos at a time.',
+    'Let a member save the injury filter on this phone.',
+    'Put the time on the right, in the same quiet style as Just settled.',
+    'Add a plain line for a reboot: that leg was voided, and the slip can still be open.',
+    'Match the row height to the photo so names do not collide.',
+    'Do not guess a player when two names are close.',
+    'Keep the All count honest when a filter is on.',
+    'Refresh the report on its own, not only with the whole board.',
+    'Add a list of players who came off the report since yesterday.',
+    'Use the status word the feed used, in the sentence under the name.',
+    'Let a tap on the team filter the whole report to that team.',
+    'Show the slip chips under the status, each with the member and the slip number.',
+    'Add a filter for questionable, out, and doubtful when those words are in the feed.',
+    "Let a member watch a team and see only that team's notes.",
+    'Show a return in a different chip from a new injury.',
+    'Add the Central time of the last check, in one quiet line.',
+    'Group reboots in their own stack under the injuries.',
+    'Show the leg text that named the player, clipped to one line.',
+    'Add a "no longer listed" section for players who cleared.',
+    'Let a sport filter sit next to the injury, reboot, and back chips.',
+    'Show a college player with the school, and a pro with the club.',
+    "Add a count of open slips touched by today's report.",
+    'Show a player on two slips as two chips, not one merged line.',
+    'Add a plain reason line when the feed includes a note.',
+    'Let the report start with the players on your slips when Mine is on.',
+    'Show a goalie, a pitcher, or a starter the same way as any other name.',
+    'Add a jump from a reboot chip to the slip that was voided.',
+    "Show the feed's status and our chip as the same word.",
+    'Add an empty line that says the check ran and nobody on a slip was listed.',
+    'Let a member collapse a team that has more than three names.',
+    'Show a probable tag when the feed uses that word.',
+    'Show a WNBA note and an NBA note as two sports, not one basketball pile.',
+    'Keep the face crop on the person, not a sliver of the photo.',
+    'Use one row height when the note is one line or two.',
+    'Keep the team under the name, before the detail.',
+    'Hold the status chip to the right of the name.',
+    'Match the filter chips to the chips on Mine.',
+    'Keep the time in a short ago form.',
+    'Leave a little air between the photo and the name.',
+    'Use the same photo corner on every row.',
+    'Keep a reboot chip in its own color, distinct from out.',
+    'Hold the slip chips to one line, then wrap.',
+    'Keep the section title as Injury and reboot news.',
+    'Show the empty state in one sentence.',
+    'Match the filter count to the rows below it.',
+    'Keep a long detail from covering the time.',
+    'Use sentence case in the line under the name.',
+    'Hold the All chip at the front of the filter.',
+    'Keep the photo from taking the gold ring the Discord faces use.',
+    'Line the names up whether or not a team was found.',
+    'Keep a missing photo as a quiet initial, not a broken icon.',
+    'Use the sport word the rest of the board uses.',
+    'Keep the how-it-works note under the list.',
+    'Hold a filter label to one word where we can.',
+    'Leave hidden slips out of the count in the corner.',
+    'Keep the row tap on the name, and the slip tap on the chip.',
+    'Match the report width to the settled list.',
+    'Ask for a photo only after the row is on screen.',
+    'Do not search the whole sport when the cached team is already clear.',
+    'Keep a close name from attaching the wrong team.',
+    'Refresh the report on its timer, and keep the filter where the member left it.',
+    'Hold the last good rows if a check fails.',
+    'Limit each wave of photo lookups so the page stays quick.',
+    'Skip a player who is not on an open, visible slip.',
+    'Keep a reboot row even when the leg was voided a minute ago.',
+    'Do not call the network from the main board payload for these photos.',
+    'Cache a found team for the next check.',
+    'Leave a miss as no photo, not a guessed player.',
+    'Keep the slip chips in sync when a slip settles and should leave the row.',
+    'Use the same player id the sheet uses, once the name is a clear match.',
+    'Hold a saved filter on this phone.',
+    'Retry a photo once, then show the initial.',
+    'Keep the check from posting a duplicate note for the same status.',
+    'Sort out and doubtful above probable.',
+    "Keep a hidden slip's player off the member report.",
+    'Use Central for the check time.',
+    'Do not stall the rest of the board while photos load.',
+    'Show a team only when one team won the match.',
+    'Keep the feed switch where it is: an admin turns it on.',
+    'Leave the how-it-works text in place under the list.',
+    'Add a home and away split under the last-20 chart.',
+    'Keep the last 5, last 10, and last 20 on the same chart.',
+    'Nudge the line by half a point without leaving the page.',
+    'Show rest days and a back-to-back mark when the schedule has them.',
+    'Put the face, name, team, number, and age on one header.',
+    'Keep the game log under the brief, newest first.',
+    'Show the next game as opponent, home or away, and Central time.',
+    'Let a member save a line they care about on this phone.',
+    'Keep the headshot square, at the size of the box.',
+    'Search returns a few players, and each one opens the sheet.',
+    'Sit the chart under the stat chips.',
+    'Hide preseason on the log unless the member asks for it.',
+    'Keep the number before the label on every chip.',
+    'Return to the same search when the sheet closes.',
+    'Add a note the member can type on a player, stored on this phone.',
+    'Use one chart height so switching stats does not jump the page.',
+    'Load the log after the header, so the name shows first.',
+    "Show the group's open line on that player, next to the chart line.",
+    'Keep college and pro sheets on the same layout.',
+    'Match the sheet to the position: a pitcher, a hitter, or a goalie.',
+    'Add a last-10 rate against the line the member set.',
+    'Add a split for wins and losses of their team, under the chart.',
+    'Add a filter on the log for the last month.',
+    'Let the member set the line and see the games over and under it.',
+    'Show minutes, or innings, on the log when that stat exists.',
+    'Let a saved line stay on this phone for that player.',
+    "Show a goalie's saves and a skater's shots as different first chips.",
+    'Show a college conference only on the college sheet.',
+    'Add a clear empty log: we have the player, and no games yet.',
+    'Let the chart be last 10 or last 20 from one control.',
+    'Show a rest day as rest, not as a zero.',
+    'Show the age and the number as quiet facts, not as stats.',
+    'Add a share line for the sheet: name, team, and next game.',
+    'Show a postponed next game as postponed.',
+    'Add the handedness when the bio already has it.',
+    'Keep the headshot square inside the header.',
+    'Use one chip height for every stat.',
+    'Sit the line control under the chart, easy to tap.',
+    'Keep the log newest first.',
+    'Hold the next game to opponent, home or away, and Central time.',
+    'Match the sheet width to the slip sheet on a phone.',
+    'Keep preseason behind the hide control.',
+    'Use the short team name in the header and the full name once under it.',
+    'Leave a little air between the chips and the chart.',
+    'Keep a long player name to two lines.',
+    'Show the position with the name, not in a second header.',
+    'Hold the saved line on this phone only.',
+    'Keep the search results to a short list.',
+    'Use the same face crop as the news row.',
+    'Match the chart color to the board accent.',
+    'Keep a pitcher sheet from leading with a hitter stat.',
+    'Hold a goalie sheet to goalie stats first.',
+    'Keep college football and pro football on one layout.',
+    'Show the number before the word on a chip.',
+    'Keep the back control on the sheet.',
+    'Use tabular figures on the log.',
+    'Keep the empty log to one sentence.',
+    'Open the header before the log so the name is not late.',
+    'Hide preseason by default, and remember the choice on this phone.',
+    'Return to the same search text when the sheet closes.',
+    'Match a player only when the name is clear.',
+    'Keep a near name from opening the wrong sheet.',
+    'Load the headshot with the header.',
+    'Hold the saved line with the player, on this phone.',
+    'Keep a failed log from wiping the header.',
+    'Retry the log once, then say it did not load.',
+    'Update an open-line mark when that slip settles.',
+    'Do not fetch every stat before the first paint.',
+    'Hold the chart height so the page does not jump.',
+    'Keep a college id and a pro id from sharing one sheet.',
+    'Cache the sheet for a moment so back and forward is instant.',
+    'Keep the search to a few names.',
+    'Show the Central time on the next game.',
+    'Refresh the header if the team changes, without clearing the note.',
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -25732,6 +25899,40 @@ async def dash_api_slip(request):
     return web.json_response(d) if d else dash_error(web, request, 404)
 
 
+def _athlete_hand(ath: dict) -> str:
+    """Bats, throws, or hand, only when the athlete page already has that field."""
+    bits = []
+    for key, label in (("bats", "Bats"), ("throws", "Throws"), ("hand", "Hand")):
+        obj = ath.get(key)
+        val = ""
+        if isinstance(obj, dict):
+            val = str(obj.get("abbreviation") or obj.get("displayValue") or "").strip()
+        elif isinstance(obj, str):
+            val = obj.strip()
+        if not val or val.lower() in {"none", "null"}:
+            continue
+        if key == "hand" and bits:
+            continue
+        bits.append(clip(f"{label} {val}", 20))
+    return " · ".join(bits)
+
+
+def _athlete_conference(path: str, team: dict, ath: dict) -> str:
+    """A conference name only on a college path, and only when the bio already has one."""
+    if "college" not in (path or ""):
+        return ""
+    for src in (team, ath):
+        if not isinstance(src, dict):
+            continue
+        for key in ("conference", "conferenceName"):
+            raw = src.get(key)
+            if isinstance(raw, dict):
+                raw = raw.get("shortName") or raw.get("abbreviation") or raw.get("name") or raw.get("displayName") or ""
+            if isinstance(raw, str) and raw.strip() and raw.strip().lower() not in {"none", "null"}:
+                return clip(raw.strip(), 24)
+    return ""
+
+
 async def espn_athlete_bio(path: str, aid: str) -> dict:
     """Jersey, size, age, home team from ESPN's athlete page. Empty dict when ESPN didn't answer."""
     key = (path, str(aid))
@@ -25757,6 +25958,8 @@ async def espn_athlete_bio(path: str, aid: str) -> dict:
         "pos": clip(str(pos.get("abbreviation") or pos.get("displayName") or ""), 8),
         "team": clip(str(team.get("displayName") or team.get("name") or ""), 40),
         "abbr": clip(str(team.get("abbreviation") or ""), 8),
+        "hand": _athlete_hand(ath),
+        "conference": _athlete_conference(path, team, ath),
     }
     _BIO_CACHE[key] = (time.monotonic() + (600 if out.get("name") else 45), out)
     if len(_BIO_CACHE) > 400:
@@ -25932,18 +26135,23 @@ def dash_last_recap(packed: list, keys: list[str]) -> str:
     return head + "." if head else ""
 
 
-def dash_rest_days(last_iso: str, nxt) -> Optional[int]:
-    """Days off between the last logged game and the next one. None when the schedule has no gap."""
+def dash_schedule_gap(last_iso: str, nxt) -> Optional[int]:
+    """Days between the last logged game and the next one, minus the game day. 0 is a back-to-back."""
     if not last_iso or nxt is None:
         return None
     try:
         last = datetime.fromisoformat(str(last_iso).replace("Z", "+00:00"))
         if last.tzinfo is None:
             last = last.replace(tzinfo=timezone.utc)
-        gap = (nxt.astimezone(TZ).date() - last.astimezone(TZ).date()).days - 1
+        return (nxt.astimezone(TZ).date() - last.astimezone(TZ).date()).days - 1
     except Exception:
         return None
-    return gap if gap >= 1 else None
+
+
+def dash_rest_days(last_iso: str, nxt) -> Optional[int]:
+    """Days off between the last logged game and the next one. None when the schedule has no gap."""
+    gap = dash_schedule_gap(last_iso, nxt)
+    return gap if gap is not None and gap >= 1 else None
 
 
 def dash_team_hit(label: str, team: dict) -> bool:
@@ -26055,10 +26263,17 @@ async def _dash_brief_facts(path: str, name: str, team: str, abbr: str, packed: 
             sub = (sub + " · indoors") if sub else "indoors"
         elif when and v.get("city") and ev.get("state") == "pre":
             weather_task = asyncio.create_task(kickoff_weather(v.get("city") or "", v.get("state") or "", when))
-        nxt = {"line": clip(line, 120), "sub": clip(sub, 90), "opp": opp}
-        rest_n = dash_rest_days((packed[0].get("date") if packed else "") or "", when)
-        if rest_n:
-            nxt["rest"] = "1 rest day" if rest_n == 1 else f"{rest_n} rest days"
+        me = teams[idx] if 0 <= idx < len(teams) else {}
+        ha = "home" if me.get("home") else "away"
+        ct = when.astimezone(TZ).strftime("%a %-I:%M %p") if when else ""
+        postponed = "postpon" in f"{ev.get('detail') or ''} {ev.get('status_name') or ''}".lower()
+        nxt = {"line": clip(line, 120), "sub": clip(sub, 90), "opp": opp,
+               "ha": ha, "ct": ct, "postponed": postponed}
+        gap = dash_schedule_gap((packed[0].get("date") if packed else "") or "", when)
+        if gap == 0:
+            nxt["b2b"] = "Back-to-back"
+        elif gap is not None and gap >= 1:
+            nxt["rest"] = "Rest" if gap == 1 else f"Rest · {gap} days"
         try:
             last_line = await asyncio.wait_for(dash_opp_last(_pth, other), 2)
         except Exception:
@@ -26098,6 +26313,33 @@ async def _dash_brief_facts(path: str, name: str, team: str, abbr: str, packed: 
         tid = ids_by_name.get(norm_name(rec.get("name") or "")) or ""
         shown.append({"name": rec.get("name") or "", "status": str(rec.get("status") or ""), "tid": tid})
     return {"next": nxt, "active_note": active_note, "mates": shown}, weather_task, sub
+
+
+def dash_group_open_line(gid: int, name: str) -> str:
+    """The line on an open, visible slip for this player. Empty once that slip is settled or hidden."""
+    who = norm_name(name or "")
+    if not gid or not who:
+        return ""
+    rows = db().execute(
+        """SELECT l.text FROM legs l JOIN picks p ON p.id = l.pick_id
+           WHERE p.guild_id = ? AND p.status = 'open' AND l.status = 'open'
+             AND COALESCE(p.hidden, 0) = 0 AND COALESCE(p.test, 0) = 0""",
+        (gid,)).fetchall()
+    found: list[float] = []
+    for r in rows:
+        prop = prop_of(r["text"] or "")
+        if not prop or prop.get("kind") != "prop":
+            continue
+        if who not in {norm_name(prop.get("display") or ""), norm_name(prop.get("player") or "")}:
+            continue
+        try:
+            found.append(float(prop.get("line")))
+        except (TypeError, ValueError):
+            continue
+    if not found:
+        return ""
+    best = max(set(found), key=found.count)
+    return f"{best:g}"
 
 
 async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: list,
@@ -26176,7 +26418,13 @@ async def dash_player_brief(path: str, name: str, team: str, abbr: str, games: l
                 group = {"hit": int(g0.get("hit") or 0), "miss": int(g0.get("miss") or 0)}
         except Exception:
             group = None
-    return {"next": nxt, "injuries": injuries, "group": group}
+    open_line = ""
+    if gid and name:
+        try:
+            open_line = dash_group_open_line(gid, name)
+        except Exception:
+            open_line = ""
+    return {"next": nxt, "injuries": injuries, "group": group, "openLine": open_line}
 
 
 def _png_square(png: bytes, size: int) -> bool:
@@ -26274,7 +26522,7 @@ async def dash_team_roster(q: str) -> list[dict]:
                     "jersey": jersey if jersey.isdigit() else "",
                     "height": "", "weight": "", "age": "",
                     "photo": espn_face_url(league_slug, aid), "stats": []})
-        if len(out) >= 8:
+        if len(out) >= 4:
             break
     return out
 
@@ -26332,7 +26580,8 @@ async def dash_api_player(request):
                     "pos": clip(bio.get("pos") or f.get("position") or "", 8),
                     "jersey": clip(bio.get("jersey") or f.get("jersey") or "", 4),
                     "height": bio.get("height") or "", "weight": bio.get("weight") or "",
-                    "age": bio.get("age") or "", "photo": photo, "stats": stats})
+                    "age": bio.get("age") or "", "hand": bio.get("hand") or "",
+                    "conference": bio.get("conference") or "", "photo": photo, "stats": stats})
     if not out:
         try:
             out = await dash_team_roster(q)
@@ -26411,10 +26660,11 @@ async def dash_api_player_one(request):
         "league": clip(path.split("/")[-1].replace("-", " ").upper(), 24),
         "pos": clip(bio.get("pos") or "", 8), "jersey": clip(bio.get("jersey") or "", 4),
         "height": bio.get("height") or "", "weight": bio.get("weight") or "",
-        "age": bio.get("age") or "", "photo": photo, "stat": default,
+        "age": bio.get("age") or "", "hand": bio.get("hand") or "",
+        "conference": bio.get("conference") or "", "photo": photo, "stat": default,
         "stats": stats, "games": packed,
         "next": brief.get("next"), "injuries": brief.get("injuries") or [],
-        "group": brief.get("group"), "xref": xref,
+        "group": brief.get("group"), "openLine": brief.get("openLine") or "", "xref": xref,
     })
 
 
@@ -33670,7 +33920,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-140';"
+    "const CACHE='pb-shell-142';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -34163,23 +34413,30 @@ button.lrow{cursor:pointer}button.lrow:hover .lw b{color:var(--brand2)}
 .gline .gw2{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gpage{border-radius:20px;margin:0 50px 16px 0;overflow:hidden;border:1px solid var(--line)}
 .gpage .prog{margin:0 -18px}.gpage{padding:14px 18px 0}
-.news{display:flex;flex-direction:column}
+.news{display:flex;flex-direction:column;width:100%}
 .nfilt{display:flex;flex-direction:column;gap:8px;margin:2px 0 6px}
+.nfilt .rowf{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .nfilt .seg{flex-wrap:wrap}
 .nfilt .nc{margin-left:6px;opacity:.72;font-variant-numeric:tabular-nums}
 .nchips{display:flex;flex-wrap:wrap;gap:6px}
 .nchips button{border:1px solid var(--line);background:var(--card2);color:var(--muted);border-radius:99px;padding:4px 10px;
  font-size:12px;font-weight:700;cursor:pointer;text-transform:capitalize}
 .nchips button.on{background:var(--brand);border-color:transparent;color:#fff}
-.nrow{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:12px 2px;border-top:1px solid var(--line)}
+.nrow{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:12px 2px;border-top:1px solid var(--line);min-height:72px}
 .news>.nrow:first-child{border-top:0}
+.av.nava,img.nava{box-shadow:none}
 .nava{width:48px;height:48px;border-radius:14px}
 img.nava{object-fit:cover;display:block;background:#1a1028}
-.nh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.nh b{font-size:15px}
+.nh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.nh b,.nh .nm{font-size:15px}
+.nm{border:0;background:none;padding:0;cursor:pointer;color:inherit;font:inherit;text-align:left}
 .nteam{margin-top:2px;color:var(--muted);font-size:12.5px}
-.nd{margin-top:4px;color:var(--muted);font-size:13.5px;overflow-wrap:anywhere}
+.nteam button{border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;text-align:left}
+.nnote{margin-top:4px;color:var(--muted);font-size:13.5px;line-height:1.35;min-height:2.7em;overflow:hidden}
+.nleg{margin-top:2px;color:var(--faint);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nslips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.nslips .chip{cursor:pointer}.nslips .chip:hover{color:var(--brand2)}
-.nt{font-size:12px;white-space:nowrap;color:var(--faint)}
+.nt{font-size:12px;font-weight:650;white-space:nowrap;color:var(--faint)}
+.nteamh{display:flex;align-items:center;gap:8px;margin:12px 0 0}
+.nstack{margin-top:16px}.nstack .rms{margin:0 0 4px}
 .hgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}
 .hbox{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:12px 14px;min-width:0}
 .hbox h3{margin:0 0 8px;font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
@@ -35083,50 +35340,87 @@ const NEWS_TONE={out:'down',suspension:'down',doubtful:'orange',questionable:'wa
 function ago(iso){const t=Date.parse(iso);if(isNaN(t))return '';const s=Math.max(0,(Date.now()-t)/1000);
  return s<60?'just now':s<3600?Math.floor(s/60)+'m ago':s<86400?Math.floor(s/3600)+'h ago':Math.floor(s/86400)+'d ago'}
 async function loadNews(){const d=await api('/api/news.json'+qs());if(!d)return;d.items=d.items||[];S.news=d;S.newsAt=Date.now();if(S.tab==='news')render()}
+function newsWord(n){const raw=String(n.chip||'').toLowerCase();return raw?raw.charAt(0).toUpperCase()+raw.slice(1):''}
+function newsLine(n){if(n.kind==='reboot')return 'That leg was voided, and the slip can still be open.';const w=newsWord(n);return w?('Is '+w.toLowerCase()+'.'):''}
+function newsReason(n){if(n.kind==='reboot')return n.note||'';return n.detail||''}
+function newsSave(){try{localStorage.setItem('pb-news-filt',JSON.stringify({k:S.nf||'all',s:S.ns||'all',p:S.np||'all',t:S.nteam||'',on:S.nteamOn?1:0,f:S.nfold||[]}))}catch(e){}}
+function newsLoad(){if(S.nready)return;S.nready=1;try{const v=JSON.parse(localStorage.getItem('pb-news-filt')||'{}');if(v&&typeof v==='object'){if(v.k)S.nf=v.k;if(v.s)S.ns=v.s;if(v.p)S.np=v.p;if(typeof v.t==='string')S.nteam=v.t;S.nteamOn=!!v.on;S.nfold=Array.isArray(v.f)?v.f:[]}}catch(e){}}
+function newsPickTeam(team){S.nteam=team||'';S.nteamOn=1;newsSave();render()}
+function newsFold(team){S.nfold=S.nfold||[];const i=S.nfold.indexOf(team);if(i>=0)S.nfold.splice(i,1);else S.nfold.push(team);newsSave();render()}
+function newsMine(n){if(!S.mine||!S.data||S.data.me==null||S.data.me==='')return 1;return (n.slips||[]).some(function(x){return String(x.key)===String(S.data.me)})?0:1}
+function newsRank(n){const c=String(n.chip||'').toLowerCase();if(c==='out'||c==='doubtful'||c==='suspension')return 0;if(c==='questionable'||c==='day-to-day')return 1;if(c==='probable'||c==='active')return 2;return 3}
+function newsChecked(iso){const t=Date.parse(iso);if(isNaN(t))return '';try{const s=new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(t));return 'Last check '+s+' CT'}catch(e){return ''}}
+function newsSlipCount(rows){const ids={};rows.forEach(function(n){(n.slips||[]).forEach(function(s){if(s&&s.id!=null&&s.open!==false)ids[s.id]=1})});const n=Object.keys(ids).length;return n?n+' open slips':''}
 function newsPhoto(n){const league=String(n.slug||''),id=String(n.aid||'');
  const ok=/^[a-z0-9-]{2,32}$/.test(league)&&/^[0-9]{1,12}$/.test(id);
  const letter=h('div',{class:'av nava'},(String(n.player||'?').trim().charAt(0)||'?').toUpperCase());
  if(!ok)return letter;
+ const src='https://a.espncdn.com/combiner/i?img=/i/headshots/'+league+'/players/full/'+id+'.png&w=72&h=72&scale=crop';
  const img=h('img',{class:'ava nava',alt:'',width:'48',height:'48',referrerpolicy:'no-referrer',decoding:'async'});
- img.addEventListener('error',()=>{if(img.parentNode)img.replaceWith(letter)});
- img.src='https://a.espncdn.com/combiner/i?img=/i/headshots/'+league+'/players/full/'+id+'.png&w=72&h=72&scale=crop';
- return img}
-function newsRow(n){const chip=n.kind==='reboot'?'REBOOT':n.kind==='off'?'BACK':String(n.status||'').toUpperCase();
- const what=n.kind==='injury'?'is '+String(n.status||'').toLowerCase():n.kind==='off'?'is off the injury report':'didn’t play';
- const team=[n.abbr,n.team].filter(Boolean).join(' · ');
- const open=n.slug&&n.aid?()=>go('#/pl/'+n.slug+'/'+n.aid):null;
+ img.addEventListener('error',function(){if(img.dataset.once!=='1'){img.dataset.once='1';img.src=src+'&r=1';return}if(img.parentNode)img.replaceWith(letter)});
+ img.src=src;return img}
+function newsRow(n){const word=newsWord(n);
+ const open=n.slug&&n.aid?function(){go('#/pl/'+n.slug+'/'+n.aid)}:null;
+ const slip=n.kind==='reboot'&&n.slips&&n.slips[0]?function(){go('#/s/'+n.slips[0].id)}:null;
+ const place=n.place==='school'?'School':n.place==='club'?'Club':'';
+ const team=[place,n.abbr,n.team].filter(Boolean).join(' · ');
+ const reason=newsReason(n);
+ const chip=slip?h('button',{type:'button',class:'sc '+(NEWS_TONE[n.chip]||''),onclick:slip,text:word}):h('span',{class:'sc '+(NEWS_TONE[n.chip]||''),text:word});
  return h('div',{class:'nrow'},newsPhoto(n),h('div',{style:'min-width:0'},
-  h('div',{class:'nh'},open?h('button',{type:'button',class:'nm',style:'border:0;background:none;padding:0;cursor:pointer;color:inherit;font:inherit',onclick:open},h('b',{text:n.player})):h('b',{text:n.player}),
-   h('span',{class:'sc '+(NEWS_TONE[n.chip]||''),text:chip})),
-  team?h('div',{class:'nteam',text:team}):null,
-  h('div',{class:'nd',text:what+(n.detail?' · '+n.detail:'')}),
-  n.slips&&n.slips.length?h('div',{class:'nslips'},n.slips.map(x=>h('button',{class:'chip',type:'button',onclick:()=>go('#/s/'+x.id)},x.who+' · #'+x.id))):null),
+  h('div',{class:'nh'},open?h('button',{type:'button',class:'nm',onclick:open},h('b',{text:n.player})):h('b',{text:n.player}),chip),
+  team?h('div',{class:'nteam'},h('button',{type:'button',onclick:function(){newsPickTeam(n.team||'')}},team)):null,
+  h('div',{class:'nnote'},h('div',{text:newsLine(n)}),reason?h('div',{text:reason}):null),
+  n.leg?h('div',{class:'nleg',text:n.leg}):null,
+  n.slips&&n.slips.length?h('div',{class:'nslips'},n.slips.map(function(x){return h('button',{class:'chip',type:'button',onclick:function(){go('#/s/'+x.id)}},x.who+' · #'+x.id)})):null),
   h('span',{class:'nt',text:ago(n.when)}))}
-function newsFilters(items){const kinds=[['all','All'],['injury','Injuries'],['reboot','Reboots'],['off','Back']];
- const kind=S.nf||'all';
- const seg=h('div',{class:'seg newsf'},kinds.map(([k,t])=>{const n=k==='all'?items.length:items.filter(x=>x.kind===k).length;
-  return h('button',{type:'button',class:kind===k?'on':'',onclick:()=>{S.nf=k;S.ns='all';render()}},t,n?h('span',{class:'nc',text:String(n)}):null)}));
- const pool=kind==='all'?items:items.filter(x=>x.kind===kind);
- const statuses=[...new Set(pool.map(x=>String(x.chip||'').toLowerCase()).filter(c=>c&&c!=='off'&&c!=='reboot'))];
- const chips=statuses.length>1?h('div',{class:'nchips'},['all',...statuses].map(k=>h('button',{type:'button',class:(S.ns||'all')===k?'on':'',
-  onclick:()=>{S.ns=k;render()}},k==='all'?'Any status':k))):null;
- return h('div',{class:'nfilt'},seg,chips)}
+function newsSeg(opts,cur,fn){return h('div',{class:'seg'},opts.map(function(o){const k=o[0],t=o[1],n=o[2];
+ return h('button',{type:'button',class:cur===k?'on':'',onclick:function(){fn(k)}},t,n!=null?h('span',{class:'nc',text:String(n)}):null)}))}
+function newsFilters(items){newsLoad();
+ const kind=S.nf||'all',stat=S.ns||'all',sport=S.np||'all';
+ const kinds=newsSeg([['all','All',items.length],['injury','Injury',null],['reboot','Reboot',null],['off','Back',null]],kind,function(k){S.nf=k;newsSave();render()});
+ const sports=[...new Set(items.map(function(x){return x.sport||''}).filter(Boolean))].sort();
+ const sportSeg=sports.length?newsSeg([['all','All',null]].concat(sports.map(function(s){return [s,s,null]})),sport,function(k){S.np=k;newsSave();render()}):null;
+ const have={};items.forEach(function(x){const c=String(x.chip||'').toLowerCase();if(c)have[c]=1});
+ const want=['out','doubtful','questionable','probable'].filter(function(k){return have[k]});
+ const statSeg=want.length?newsSeg([['all','Any',null]].concat(want.map(function(k){return [k,k.charAt(0).toUpperCase()+k.slice(1),null]})),stat,function(k){S.ns=k;newsSave();render()}):null;
+ const teamOn=S.nteamOn?h('div',{class:'seg'},h('button',{type:'button',class:'on',onclick:function(){S.nteamOn=0;S.nteam='';newsSave();render()}},S.nteam||'Team')):null;
+ return h('div',{class:'nfilt'},h('div',{class:'rowf'},kinds,sportSeg,teamOn),statSeg)}
+function newsOk(x){const kind=S.nf||'all',stat=S.ns||'all',sport=S.np||'all';
+ if(kind!=='all'&&x.kind!==kind)return false;
+ if(stat!=='all'&&String(x.chip||'').toLowerCase()!==stat)return false;
+ if(sport!=='all'&&(x.sport||'')!==sport)return false;
+ if(S.nteamOn&&(x.team||'')!==(S.nteam||''))return false;
+ return true}
+function newsFresh(n,N){if(n.kind!=='off')return false;if(!N||!N.yesterday)return true;const t=Date.parse(n.when),y=Date.parse(N.yesterday);if(isNaN(t)||isNaN(y))return false;return t>=y}
+function newsBody(shown,N){
+ const inj=shown.filter(function(x){return x.kind==='injury'}).slice().sort(function(a,b){return newsMine(a)-newsMine(b)||newsRank(a)-newsRank(b)||String(a.player).localeCompare(String(b.player))});
+ const by=new Map(),order=[];
+ inj.forEach(function(n){const k=n.team||'';if(!by.has(k)){by.set(k,[]);order.push(k)}by.get(k).push(n)});
+ order.sort(function(a,b){const am=(by.get(a)||[]).some(function(n){return newsMine(n)===0})?0:1;const bm=(by.get(b)||[]).some(function(n){return newsMine(n)===0})?0:1;if(am!==bm)return am-bm;return a.localeCompare(b)});
+ const teams=order.map(function(k){const list=by.get(k);const folded=(S.nfold||[]).indexOf(k)>=0&&list.length>3;const rows=folded?list.slice(0,3):list;
+  const fold=list.length>3?h('button',{type:'button',class:'schip',onclick:function(){newsFold(k)}},folded?'More':'Less'):null;
+  const head=k?h('div',{class:'nteamh'},h('button',{type:'button',class:'nm',onclick:function(){newsPickTeam(k)}},k),fold):fold;
+  return h('div',null,head,rows.map(newsRow))});
+ const reb=shown.filter(function(x){return x.kind==='reboot'});
+ const off=shown.filter(function(x){return newsFresh(x,N)});
+ return h('div',{class:'news'},teams,
+  reb.length?h('div',{class:'nstack'},h('div',{class:'rms',text:'Reboots'}),reb.map(newsRow)):null,
+  off.length?h('div',{class:'nstack'},h('div',{class:'rms',text:'No longer listed'}),off.map(newsRow)):null)}
 function newsWithFace(n){const f=S.nface&&S.nface[n.player];if(!f||typeof f!=='object')return n;
  const o=Object.assign({},n);if(f.slug)o.slug=f.slug;if(f.aid)o.aid=String(f.aid);if(f.team&&!o.team)o.team=f.team;if(f.abbr&&!o.abbr)o.abbr=f.abbr;return o}
 async function fillNewsFaces(items){S.nface=S.nface||{};
- const names=[...new Set(items.map(n=>n.player).filter(p=>p&&S.nface[p]===undefined))].slice(0,8);
+ const names=[...new Set(items.map(function(n){return n.player}).filter(function(p){return p&&S.nface[p]===undefined}))].slice(0,8);
  if(!names.length)return;for(const name of names)S.nface[name]=null;
- await Promise.all(names.map(async name=>{const d=await api('/api/newsface.json'+qs('q='+encodeURIComponent(name)));
-  S.nface[name]=d&&(d.slug||d.team)?d:{}}));if(S.tab==='news')render()}
-function renderNews(el,d){const N=S.news;const raw=N&&N.items||[];const items=raw.map(newsWithFace);if(N&&raw.length)fillNewsFaces(raw);
- const kind=S.nf||'all',stat=S.ns||'all';
- const shown=items.filter(x=>(kind==='all'||x.kind===kind)&&(stat==='all'||String(x.chip||'').toLowerCase()===stat));
- put(el,card('Injury & reboot news','',items.length?String(shown.length):null,
-  !N?h('div',null,skel(5)):items.length?h('div',null,newsFilters(items),shown.length?h('div',{class:'news'},shown.map(newsRow))
-   :empty('Nothing in this filter','Try All to see the full report.'))
-  :empty(N.on?'No news yet':'The news feed is off',N.on?'When a player on the group’s slips lands on (or comes off) an injury report, it shows up here.':'An admin can switch it on with /admin askchannel in Discord.')),
+ await Promise.all(names.map(async function(name){const row=items.find(function(n){return n.player===name})||{};
+  let q='q='+encodeURIComponent(name);if(row.sport)q+='&sport='+encodeURIComponent(row.sport);if(row.team)q+='&team='+encodeURIComponent(row.team);
+  const d=await api('/api/newsface.json'+qs(q));S.nface[name]=d&&(d.slug||d.aid)?d:{}}));if(S.tab==='news')render()}
+function renderNews(el,d){newsLoad();const N=S.news;const raw=N&&N.items||[];const items=raw.map(newsWithFace);const shown=items.filter(newsOk);
+ const meta=N?h('div',null,newsChecked(N.checked)?h('p',{class:'hint',text:newsChecked(N.checked)}):null,newsSlipCount(items)?h('p',{class:'hint',text:newsSlipCount(items)}):null):null;
+ const body=!N?h('div',null,skel(5)):items.length?h('div',null,newsFilters(items),meta,shown.length?newsBody(shown,N):empty('Nothing in this filter','')):empty(N.on&&N.checked?'The check ran and nobody on a slip was listed.':(N.on?'No news yet.':'The news feed is off.'),'');
+ put(el,card('Injury and reboot news','',items.length?String(shown.length):null,body),
   card('How it works','',null,h('p',{class:'muted',style:'margin:0'},'The bot checks the injury reports every 10 minutes for players on the group’s open slips, and posts changes in the ask channel. ',
-   h('b',null,'Reboot'),' means a player didn’t play and that leg was voided. Hidden slips never show up here.')))}
+   h('b',null,'Reboot'),' means a player didn’t play and that leg was voided. Hidden slips never show up here.')));
+ if(N&&raw.length)fillNewsFaces(items)}
 async function loadHealth(){const d=await api('/api/health.json'+qs());if(!d)return;S.health=d;S.healthAt=Date.now();if(S.tab==='more')render()}
 function healthCard(){const H=S.health;
  if(!H)return card('Bot health','',null,h('div',{class:'hgrid'},[0,1,2,3].map(()=>h('div',{class:'hbox'},skel(3)))));
@@ -35158,7 +35452,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sheet').classLi
 addEventListener('popstate',route);
 let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(S.data&&S.tab==='overview')render()},250)});
 setInterval(()=>{if(document.visibilityState==='visible')load()},60000);
-setInterval(()=>{if(document.visibilityState!=='visible')return;if(S.tab==='live')loadLive();if(/^#\/g\//.test(location.hash))openGame(location.hash.slice(3),true)},20000);
+setInterval(()=>{if(document.visibilityState!=='visible')return;if(S.tab==='live')loadLive();if(S.tab==='news'&&(!S.newsAt||Date.now()-S.newsAt>60000))loadNews();if(/^#\/g\//.test(location.hash))openGame(location.hash.slice(3),true)},20000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-S.loadedAt>60000)load()});
 try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}
 skeletonAll();show(S.tab);load();route();
@@ -35211,7 +35505,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=140') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=142') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -35393,9 +35687,17 @@ body.v4 .pface .pletter{position:absolute;inset:0;display:grid;place-items:cente
 body.v4 .plhead .pface,body.v4 .pface.lg{width:120px;height:120px;min-width:120px;min-height:120px;max-width:120px;max-height:120px;
  flex:0 0 120px;border-radius:18px}
 body.v4 .plhead{display:flex;align-items:flex-start;gap:14px;margin:0 50px 16px 0}
-body.v4 .plhead h3{margin:0;font-size:22px;font-weight:800;overflow-wrap:anywhere;line-height:1.15}
+body.v4 .plhead h3{margin:0;font-size:22px;font-weight:800;overflow-wrap:anywhere;line-height:1.15;
+ display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 body.v4 .plhead .sub{color:var(--muted);font-size:13.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:3px}
-body.v4 .pchart{display:block;width:100%;height:auto;max-height:240px;margin:6px 0 12px}
+body.v4 .plhead .quiet{color:var(--faint);font-size:12.5px;margin-top:2px}
+body.v4 .pchartbox{height:228px;min-height:228px;max-height:228px}
+body.v4 .pchart{display:block;width:100%;height:228px;min-height:228px;max-height:228px;margin:0}
+body.v4 .pair{margin-top:18px}
+body.v4 .pnote{display:block;margin:0 0 14px}
+body.v4 .pnote textarea{width:100%;min-height:64px;border-radius:12px;border:1px solid var(--line);
+ background:var(--card);color:var(--text);padding:8px 10px;font:inherit;resize:vertical}
+body.v4 .openmark{display:block;margin-top:4px;font-size:12px;font-weight:750;color:var(--gold);letter-spacing:0}
 body.v4 .pcard .pn{font-weight:800;font-size:16px;line-height:1.25;overflow:visible;white-space:normal;overflow-wrap:anywhere}
 body.v4 .pcard .pm{color:var(--muted);font-size:12.5px;margin-top:3px;overflow-wrap:anywhere;white-space:normal}
 body.v4 .pstats{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -35403,7 +35705,7 @@ body.v4 .pstat{background:var(--bg);border:1px solid var(--line);border-radius:1
 body.v4 .pstat b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
 body.v4 .pstat span{display:block;line-height:1.25;font-size:10.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
 body.v4 .pchips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
-body.v4 .pgroups{display:flex;flex-direction:column;gap:8px;margin:0 0 14px}
+body.v4 .pgroups{display:flex;flex-direction:column;gap:8px;margin:0 0 8px}
 body.v4 .pgroup{display:flex;gap:8px;align-items:flex-start}
 body.v4 .pglab{flex:0 0 86px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:8px;font-weight:800}
 body.v4 .pgroup .pchips{margin:0;flex:1}
@@ -35412,7 +35714,8 @@ body.v4 .pmeterbar{flex:1;height:8px;border-radius:99px;background:var(--card2);
 body.v4 .pmeterbar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#fb7185,#34d399)}
 @media (max-width:720px){body.v4 .pgroup{flex-direction:column;gap:4px}body.v4 .pglab{flex:none;padding-top:0}}
 body.v4 .pchip{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:99px;
- padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer}
+ padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+body.v4 .pchip b{font-variant-numeric:tabular-nums;margin-right:4px}
 body.v4 .pchip.on{background:linear-gradient(90deg,var(--brand),var(--brand2));border-color:var(--brand);color:#fff}
 body.v4 .proj{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:14px}
 body.v4 .projl{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
@@ -35433,7 +35736,8 @@ body.v4 .ppg{width:34px;min-height:40px;border-radius:9px;display:grid;place-ite
  color:#fff;font-variant-numeric:tabular-nums}
 body.v4 .ppg.over{background:var(--up)}body.v4 .ppg.under{background:var(--down)}body.v4 .ppg.push{background:var(--flat)}
 body.v4 .plog{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 2px;
- border-top:1px solid var(--line)}
+ border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+body.v4 .plog .net{font-variant-numeric:tabular-nums}
 body.v4 .plog:first-child{border-top:0}
 body.v4 .plog.on{background:color-mix(in srgb,var(--gold) 18%,transparent);border-radius:10px}
 body.v4 .plog .sub{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
@@ -35711,7 +36015,7 @@ function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().revers
  const W=640,H=228,pL=8,pR=40,pT=26,pB=30,iW=W-pL-pR,iH=H-pT-pB;
  const mx=Math.max(line,...rows.map(x=>x.v),1)*1.22;const bw=iW/n;const y=v=>pT+iH-(Math.max(0,v)/mx*iH);const ly=y(line);
  const kids=[sv('line',{x1:String(pL),x2:String(W-pR),y1:String(H-pB),y2:String(H-pB),stroke:'#3a2a55','stroke-width':'1'}),
-  sv('line',{x1:String(pL),x2:String(W-pR),y1:String(ly),y2:String(ly),stroke:'#f4f1fb','stroke-width':'1.6','stroke-dasharray':'5 4'}),
+  sv('line',{x1:String(pL),x2:String(W-pR),y1:String(ly),y2:String(ly),stroke:'var(--brand2)','stroke-width':'1.6','stroke-dasharray':'5 4'}),
   sv('text',{x:String(W-4),y:String(ly-6),'text-anchor':'end','font-size':'11',fill:'#c4b8dc'},fmt(line))];
  rows.forEach((x,i)=>{const hgt=Math.max(4,(Math.max(0,x.v)/mx)*iH);const x0=pL+i*bw+bw*0.18;
   const fill=x.v>line?'#34d399':x.v<line?'#fb7185':'#94a3b8';const cx=pL+i*bw+bw/2;
@@ -35792,17 +36096,81 @@ function playerNotes(d,stat,line,fmt,hits){const notes=[],vals=hits.map(x=>x.v),
   let s='Without '+inj.name+(inj.status?' ('+inj.status+')':'')+': '+inj.ww.without+' in '+inj.ww.wn+' game'+(inj.ww.wn===1?'':'s');
   notes.push(inj.ww.with!=null?s+', '+inj.ww.with+' with '+inj.name+'.':s+'.')}
  return notes}
+function plKey(d){return (d&&d.slug&&d.id)?(d.slug+'/'+d.id):''}
+function loadLine(d,stat){const k=plKey(d);if(!k||!stat)return null;try{const v=localStorage.getItem('pb-pline:'+k+':'+stat);if(v==null||v==='')return null;const n=+v;return isNaN(n)?null:n}catch(e){return null}}
+function saveLine(d,stat,line){const k=plKey(d);if(!k||!stat||line==null||isNaN(+line))return;try{localStorage.setItem('pb-pline:'+k+':'+stat,String(line))}catch(e){}}
+function loadNote(d){const k=plKey(d);if(!k)return '';try{return localStorage.getItem('pb-pnote:'+k)||''}catch(e){return ''}}
+function saveNote(d,text){const k=plKey(d);if(!k)return;try{localStorage.setItem('pb-pnote:'+k,String(text||''))}catch(e){}}
+function preOn(){if(typeof S.hidePre==='boolean')return S.hidePre;try{const v=localStorage.getItem('pb-pre');S.hidePre=v==null?true:v==='1'}catch(e){S.hidePre=true}return S.hidePre}
+function savePre(){try{localStorage.setItem('pb-pre',S.hidePre?'1':'0')}catch(e){}}
+function sheetLead(d,stats){const pos=String(d.pos||'').toLowerCase();const path=String(d.path||'').toLowerCase();
+ const find=k=>stats.find(s=>s.key===k);const goalie=pos==='g'||pos==='gk';
+ const pitcher=['p','sp','rp','cp','lhp','rhp'].indexOf(pos)>=0;const hockey=path.indexOf('hockey')>=0;
+ if(goalie&&find('saves'))return find('saves');
+ if(hockey&&!goalie&&find('sog'))return find('sog');
+ const pitchKeys=['pitcher_k','pitching_outs','earned_runs','hits_allowed','walks_allowed'];
+ const pool=(pitcher?stats.filter(s=>pitchKeys.indexOf(s.key)>=0):stats.filter(s=>s.key!=='minutes')).slice();
+ pool.sort((a,b)=>(b.n||0)-(a.n||0));return pool[0]||stats[0]||null}
+function nextSheetLine(n){if(!n)return '';if(n.postponed)return 'Postponed';
+ const opp=n.opp||'';const ha=n.ha==='home'?'home':n.ha==='away'?'away':'';
+ let ct=n.ct||'';if(ct&&String(ct).indexOf('CT')<0)ct=ct+' CT';
+ return [opp,ha,ct].filter(Boolean).join(' · ')}
+function restSheet(n){if(!n)return '';if(n.b2b)return 'Back-to-back';
+ const s=String(n.rest||'');if(!s)return '';
+ if(s==='0'||s==='0 rest day'||s==='0 rest days')return 'Rest';return s}
+function lastMeet(d){const opp=(d.next&&d.next.opp||'').toLowerCase();if(!opp)return null;
+ const rows=(d.games||[]).filter(g=>(g.opp||'').toLowerCase()===opp);
+ rows.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));return rows[0]||null}
+function inMonth(g){const t=Date.parse(g&&g.date||'');if(isNaN(t))return false;return Date.now()-t<=31*86400000}
+function logTime(g){const v=(g&&g.vals)||{};
+ if(v.minutes!=null&&!isNaN(+v.minutes))return logNum(v.minutes)+' min';
+ if(v.pitching_outs!=null&&!isNaN(+v.pitching_outs))return logNum(+v.pitching_outs/3)+' inn';return ''}
+function clearPlayer(pls,q){const ql=String(q||'').trim().toLowerCase();
+ const rows=(pls||[]).filter(p=>p&&p.slug&&p.id);
+ const exact=rows.filter(p=>(p.name||'').toLowerCase()===ql);
+ if(exact.length===1)return exact[0];if(exact.length>1)return null;
+ if(rows.length===1)return rows[0];return null}
+function knownPlayer(slug,id){const lists=[(S.players&&S.players.players)||[],(typeof pins==='function'?pins():[])];
+ for(const xs of lists){const hit=(xs||[]).find(p=>p&&p.slug===slug&&String(p.id)===String(id)&&p.name);if(hit)return hit}
+ if(S.pl&&S.pl.slug===slug&&String(S.pl.id)===String(id)&&S.pl.name)return S.pl;return null}
+function sheetGet(slug,id){const box=S.sheets;if(!box)return null;const hit=box[slug+'/'+id];
+ if(!hit||Date.now()-hit.at>60000)return null;const d=hit.d;
+ if(!d||d.slug!==slug||String(d.id)!==String(id))return null;return d}
+function sheetPut(slug,id,d){if(!d||!d.name||d.slug!==slug||String(d.id)!==String(id))return;
+ (S.sheets||(S.sheets={}))[slug+'/'+id]={at:Date.now(),d:d}}
+function paintHead(seed,note){const d=seed||{};const name=d.name||'';
+ const title=[name,d.pos||''].filter(Boolean).join(' · ')||'Player';
+ const shortName=d.abbr||'';const full=d.team||'';
+ const quiet=[d.jersey?'#'+d.jersey:'',d.age?d.age+' yrs':'',d.hand||'',d.conference||''].filter(Boolean).join(' · ');
+ put($('#sheet-body'),h('div',{class:'plhead'},faceBox(d.photo,name,true,d.slug,d.id),
+  h('div',{style:'min-width:0'},h('h3',{text:title}),
+   shortName?h('div',{class:'sub',text:shortName}):null,
+   (full&&full!==shortName)?h('div',{class:'sub',text:full}):(!shortName&&full?h('div',{class:'sub',text:full}):null),
+   quiet?h('div',{class:'quiet',text:quiet}):null)),
+  note?h('p',{class:'muted',text:note}):null)}
+async function pullSheet(slug,id,ac){const url='/api/player/'+slug+'/'+id+'.json'+qs();
+ let d=await api(url,{signal:ac.signal});if(ac.signal.aborted)return null;
+ if(!d||!d.name)d=await api(url,{signal:ac.signal});
+ if(ac.signal.aborted)return null;return d}
+function finishPlayer(d,slug,id){const back=S.restore;S.restore=null;
+ if(!back&&S.pl&&S.pl.slug&&String(S.pl.id)!==String(id)){(S.stack=S.stack||[]);S.stack.push({slug:S.pl.slug,id:S.pl.id,stat:S.pstat,line:S.pline,split:S.psplit,n:S.pn});if(S.stack.length>8)S.stack.shift()}
+ S.pl=d;S.pair=null;S.hi='';
+ if(back){if(back.stat)S.pstat=back.stat;S.pline=back.line!=null?back.line:loadLine(d,S.pstat||d.stat);S.psplit=back.split||'all';S.pn=(back.n===5||back.n===10||back.n===20)?back.n:20}
+ else{S.pstat=d.stat;try{const saved=localStorage.getItem('pb-pstat:'+slug+'/'+id);if(saved&&(d.stats||[]).some(s=>s.key===saved))S.pstat=saved}catch(e){}S.pline=loadLine(d,S.pstat)}
+ paintPlayer()}
 function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const stat=stats.some(s=>s.key===S.pstat)?S.pstat:(d.stat||(stats[0]&&stats[0].key)||'');S.pstat=stat;
  const hits=playerHits(stat),vals=hits.map(x=>x.v),fmt=v=>v==null||isNaN(+v)?'':String(Math.round(+v*10)/10);
- if(S.pline==null)S.pline=defaultLine(vals.slice(0,10));const line=+S.pline;
+ if(S.pline==null){const saved=loadLine(d,stat);S.pline=saved==null?defaultLine(vals.slice(0,10)):saved}
+ const line=+S.pline;
  if(S.psplit!=='home'&&S.psplit!=='away')S.psplit='all';
  const view=S.psplit==='home'?hits.filter(x=>x.g.at!=='@'):S.psplit==='away'?hits.filter(x=>x.g.at==='@'):hits;
  const viewVals=view.map(x=>x.v);
  const base=defaultLine(vals.slice(0,10));const yours=Math.abs(line-base)>0.05;
  const lab=(stats.find(s=>s.key===stat)||{}).label||'Line';
- const bits=[d.team,d.pos,d.jersey?'#'+d.jersey:'',d.league,d.height,d.weight,d.age?d.age+' yrs':''].filter(Boolean);
- const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;try{if(d.slug&&d.id)localStorage.setItem('pb-pstat:'+d.slug+'/'+d.id,s.key)}catch(e){}paintPlayer()}},s.label);
+ const shortName=d.abbr||'';const full=d.team||'';
+ const quiet=[d.jersey?'#'+d.jersey:'',d.age?d.age+' yrs':'',d.hand||'',d.conference||''].filter(Boolean).join(' · ');
+ const chip=s=>h('button',{class:'pchip'+(s.key===stat?' on':''),type:'button',onclick:()=>{S.pstat=s.key;S.pline=null;try{if(d.slug&&d.id)localStorage.setItem('pb-pstat:'+d.slug+'/'+d.id,s.key)}catch(e){}paintPlayer()}},h('b',{text:fmt(s.last)}),' '+(s.label||''));
  const GROUPS=[['Scoring',['points','pra','pr','pa','threes','fgm','ftm','fantasy','pts50','anytime_td','pass_td','rush_td']],
   ['Boards',['rebounds','oreb','ra']],['Playmaking',['assists']],['Defense',['steals','blocks','stocks','turnovers','tackles','sacks']],
   ['Shooting',['threes_att','fga']],  ['Passing',['pass_yds','pass_att']],['Rushing',['rush_yds','rush_rec_yds','rush_att']],
@@ -35810,14 +36178,17 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
   ['Hitting',['hits','hrr','home_runs','rbis','runs','walks','hitter_k']],
   ['Pitching',['pitcher_k','pitching_outs','earned_runs','hits_allowed','walks_allowed']],
   ['Hockey',['goals','nhl_assists','nhl_points','sog','saves','nhl_goals_allowed','blocked_shots','nhl_hits','faceoffs']]];
- const used={};const groups=[];
+ const used={};let groups=[];
  GROUPS.forEach(pair=>{const rows=pair[1].map(k=>stats.find(s=>s.key===k)).filter(Boolean);rows.forEach(s=>{used[s.key]=1});if(rows.length)groups.push([pair[0],rows])});
  const rest=stats.filter(s=>!used[s.key]);if(rest.length)groups.push(['More',rest]);
+ const lead=sheetLead(d,stats);
+ if(lead){groups.forEach(g=>{g[1]=g[1].filter(s=>s.key!==lead.key)});groups=groups.filter(g=>g[1].length);groups.unshift(['Now',[lead]])}
  const chipRows=h('div',{class:'pgroups'},groups.map(g=>h('div',{class:'pgroup'},h('div',{class:'pglab',text:g[0]}),h('div',{class:'pchips'},g[1].map(chip)))));
- const nudge=x=>h('button',{class:'pnudge',type:'button',onclick:()=>{S.pline=Math.max(0,Math.round((line+x)*10)/10);paintPlayer()}},(x>0?'+':'')+String(x));
+ const setLine=n=>{S.pline=Math.max(0,Math.round((+n)*10)/10);saveLine(d,stat,S.pline);paintPlayer()};
+ const nudge=x=>h('button',{class:'pnudge',type:'button',onclick:()=>setLine(line+x)},(x>0?'+':'')+String(x));
  const box=(t,w)=>w?kbox(t,w.o+'/'+w.n+'  '+w.pct+'%',w.pct>=60?'up':w.pct<=40?'down':''):kbox(t,'–');
- if(S.pn!==5&&S.pn!==10)S.pn=0;
- const take=S.pn||view.length;
+ if(S.pn!==5&&S.pn!==10&&S.pn!==20)S.pn=20;
+ const take=S.pn;
  const mate=S.pair&&String(S.pair.id)!==String(d.id)?S.pair:null;
  const mateHits=mate?statHits(mate.games,stat).filter(x=>S.psplit==='home'?x.g.at!=='@':S.psplit==='away'?x.g.at==='@':true):[];
  const joined=mate&&mateHits.length?togetherGames(view,mateHits,take):null;
@@ -35828,6 +36199,8 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
   return {n:part.length,o,pct:Math.round(o/part.length*100),avg:Math.round(part.reduce((a,b)=>a+b,0)/part.length*10)/10}};
  const L5=win(5),L10=win(10),L20=win(20);
  const home=hits.filter(x=>x.g.at!=='@').map(x=>x.v),away=hits.filter(x=>x.g.at==='@').map(x=>x.v);
+ const teamW=hits.filter(x=>String(x.g.result||'').toUpperCase().startsWith('W')).map(x=>x.v);
+ const teamL=hits.filter(x=>String(x.g.result||'').toUpperCase().startsWith('L')).map(x=>x.v);
  const opp=(d.next&&d.next.opp||'').toLowerCase();
  const vs=opp?hits.filter(x=>(x.g.opp||'').toLowerCase()===opp).map(x=>x.v):[];
  const pos=String(d.pos||'').toUpperCase();
@@ -35838,91 +36211,103 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  else if(pos==='PG'||pos==='SG'||pos==='G')addRole('minutes','Minutes');
  else{addRole('rush_att','Carries');addRole('pass_att','Pass attempts')}
  const splits=[];
- if(home.length)splits.push(srow('🏠','Home',splitBit(home,line,fmt)));
- if(away.length)splits.push(srow('✈️','Away',splitBit(away,line,fmt)));
  if(vs.length)splits.push(srow('vs','vs '+(d.next.opp||'').toUpperCase(),splitBit(vs,line,fmt)));
- role.forEach(pair=>splits.push(srow('⏱️',pair[0],pair[1])));
- if(d.group&&(d.group.hit||d.group.miss))splits.push(srow('👥','The group on him',(d.group.hit||0)+' hit · '+(d.group.miss||0)+' missed'));
+ role.forEach(pair=>splits.push(srow('',pair[0],pair[1])));
+ if(d.group&&(d.group.hit||d.group.miss))splits.push(srow('','The group on him',(d.group.hit||0)+' hit · '+(d.group.miss||0)+' missed'));
+ const under=[];
+ if(home.length)under.push(srow('','Home',splitBit(home,line,fmt)));
+ if(away.length)under.push(srow('','Away',splitBit(away,line,fmt)));
+ if(teamW.length)under.push(srow('','Wins',splitBit(teamW,line,fmt)));
+ if(teamL.length)under.push(srow('','Losses',splitBit(teamL,line,fmt)));
  const notes=playerNotes(d,stat,line,fmt,view);
+ const chart=games.length?playerChart(games,line,fmt):null;
+ const lineBox=h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:yours?'Your line':lab}),d.openLine?h('span',{class:'openmark',text:'Open '+d.openLine}):null),nudge(0.5),nudge(1)),
+  h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 vs this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'}),
+  h('div',{class:'projl pavgs',style:'margin-top:10px'},[['Last 5 Avg.',vals.slice(0,5)],['Last 10 Avg.',vals.slice(0,10)],['Season Avg.',vals]].filter(p=>p[1].length).map(p=>{
+   const n=Math.round(p[1].reduce((a,b)=>a+b,0)/p[1].length*10)/10;
+   return h('button',{class:'pavg',type:'button',onclick:()=>setLine(n)},h('span',{text:p[0]}),h('b',{text:fmt(n)}))})),
+  d.xref?h('p',{class:'muted',style:'margin:8px 0 0',text:d.xref}):null);
+ const titleName=[d.name,d.pos||''].filter(Boolean).join(' · ');
+ const hidePre=preOn();
  const kids=[
-  h('div',{class:'plhead'},faceBox(d.photo,d.name,true,d.slug,d.id),h('div',{style:'min-width:0'},h('h3',{text:d.name}),h('div',{class:'sub',text:bits.join(' · ')}),
+  h('div',{class:'plhead'},faceBox(d.photo,d.name,true,d.slug,d.id),h('div',{style:'min-width:0'},h('h3',{text:titleName}),
+   shortName?h('div',{class:'sub',text:shortName}):null,
+   (full&&full!==shortName)?h('div',{class:'sub',text:full}):(!shortName&&full?h('div',{class:'sub',text:full}):null),
+   quiet?h('div',{class:'quiet',text:quiet}):null,
    d.slug&&d.id?h('div',{style:'display:flex;gap:8px;margin-top:6px;flex-wrap:wrap'},
-    (S.stack&&S.stack.length)?h('button',{type:'button',class:'tpause',onclick:()=>{const prev=S.stack.pop();if(!prev||!prev.slug)return;S.restore=prev;go('#/pl/'+prev.slug+'/'+prev.id)}},'Back'):null,
+    h('button',{type:'button',class:'tpause',onclick:()=>{if(S.stack&&S.stack.length){const prev=S.stack.pop();if(!prev||!prev.slug)return;S.restore=prev;go('#/pl/'+prev.slug+'/'+prev.id);return}closeClick()}},'Back'),
+    h('button',{type:'button',class:'tpause',onclick:()=>{const lineText=nextSheetLine(d.next);const text=[d.name,d.team||d.abbr||'',lineText].filter(Boolean).join(' · ');if(navigator.clipboard&&text)navigator.clipboard.writeText(text)}},'Share'),
     h('button',{type:'button',class:'tpause',onclick:()=>{const u=location.origin+location.pathname+location.search+'#/pl/'+d.slug+'/'+d.id;if(navigator.clipboard)navigator.clipboard.writeText(u)}},'Copy link'),
-    h('button',{type:'button',class:'tpause',onclick:async()=>{const one=await api('/api/player/'+d.slug+'/'+d.id+'.json'+qs('fresh=1'));if(one&&one.name&&String(one.id)===String(d.id)){const keep=S.pstat;S.pl=one;if((one.stats||[]).some(s=>s.key===keep))S.pstat=keep;paintPlayer()}}},'Refresh')):null)),
+    h('button',{type:'button',class:'tpause',onclick:async()=>{const one=await api('/api/player/'+d.slug+'/'+d.id+'.json'+qs('fresh=1'));if(one&&one.name&&String(one.id)===String(d.id)&&one.slug===d.slug){const keep=S.pstat;const keepLine=S.pline;S.pl=one;if((one.stats||[]).some(s=>s.key===keep))S.pstat=keep;S.pline=keepLine;sheetPut(one.slug,one.id,one);paintPlayer()}}},'Refresh')):null)),
+  h('label',{class:'pnote'},h('span',{class:'kicker',text:'NOTE'}),h('textarea',{maxlength:'240',rows:'2',placeholder:'A note on this phone',oninput:e=>saveNote(d,e.target.value)},loadNote(d))),
   chipRows,
-  h('div',{class:'proj'},h('div',{class:'projl'},nudge(-1),nudge(-0.5),h('div',{class:'projn'},h('b',{text:fmt(line)}),h('span',{text:yours?'Your line':lab})),nudge(0.5),nudge(1)),
-   h('p',{class:'muted',style:'margin:8px 0 0',text:'Last 20 vs this number — same read as /trend. Green cleared it, red did not. Past games, not a prediction.'}),
-   h('div',{class:'projl pavgs',style:'margin-top:10px'},[['Last 5 Avg.',vals.slice(0,5)],['Last 10 Avg.',vals.slice(0,10)],['Season Avg.',vals]].filter(p=>p[1].length).map(p=>{
-    const n=Math.round(p[1].reduce((a,b)=>a+b,0)/p[1].length*10)/10;
-    return h('button',{class:'pavg',type:'button',onclick:()=>{S.pline=n;paintPlayer()}},h('span',{text:p[0]}),h('b',{text:fmt(n)}))})),
-   d.xref?h('p',{class:'muted',style:'margin:8px 0 0',text:d.xref}):null),
-  h('div',{class:'card'},h('h2',null,'Last '+games.length+(joined?' together':'')+' vs '+fmt(line)),
+  h('div',{class:'card pair'},h('h2',null,'Last '+games.length+(joined?' together':'')+' vs '+fmt(line)),
    h('div',{class:'pctrls'},
     h('div',{class:'seg'},['all','home','away'].map(k=>h('button',{type:'button',class:S.psplit===k?'on':'',onclick:()=>{S.psplit=k;paintPlayer()}},k==='all'?'All':k==='home'?'Home':'Away'))),
-    h('div',{class:'seg'},[5,10,0].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},n?('Last '+n):'All')))),
+    h('div',{class:'seg'},[5,10,20].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},'Last '+n)))),
    stat==='pts50'?h('p',{class:'muted',style:'margin:0 0 6px',text:'Each bar is one game. 1 means 50 or more points that night.'}):null,
-   games.length?playerChart(games,line,fmt):null,
+   h('div',{class:'pchartbox'},chart),
+   lineBox,
+   under.length?h('div',{class:'split'},under):null,
    games.length?h('div',{class:'pmeter'},h('div',{class:'pmeterbar'},h('i',{style:'width:'+Math.round(games.filter(x=>x.v>line).length/games.length*100)+'%'})),
-    h('span',{class:'muted',text:games.filter(x=>x.v>line).length+' of '+games.length+' cleared this line'})) :null,
+    h('span',{class:'muted',text:games.filter(x=>x.v>line).length+' of '+games.length+' cleared this line'})):null,
    games.length?h('div',{class:'pp20'},games.map(x=>h('span',{class:'ppg '+(x.v>line?'over':x.v<line?'under':'push'),
     title:(x.label||((x.g.when||'')+' '+x.g.at+' '+x.g.opp))+' · '+fmt(x.v),text:fmt(x.v)}))):h('p',{class:'muted',text:'No recent game log yet.'}),
    joined?h('p',{class:'muted',style:'margin:8px 0 0',text:'Each bar is '+(d.name||'this player')+' plus '+(mate.name||'the second player')+' for that game. Green cleared the line, red did not.'}):
     (mate?h('p',{class:'muted',style:'margin:8px 0 0',text:(mate.name||'That player')+' has no '+lab+' in these games.'}):null),
    h('form',{class:'logbox',style:'margin-top:10px',onsubmit:async e=>{e.preventDefault();const name=(e.target.who.value||'').trim();if(name.length<3)return;
-    const found=await api('/api/player.json'+qs('q='+encodeURIComponent(name)));const pls=(found&&found.players)||[];const ql=name.toLowerCase();
-    const hit=pls.find(p=>(p.name||'').toLowerCase()===ql&&p.slug&&p.id)||pls.find(p=>p.slug&&p.id);if(!hit)return;
-    const one=await api('/api/player/'+hit.slug+'/'+hit.id+'.json'+qs());if(one&&one.name){S.pair={id:one.id,name:one.name,games:one.games||[]};paintPlayer()}}},
+    const found=await api('/api/player.json'+qs('q='+encodeURIComponent(name)));
+    const hit=clearPlayer((found&&found.players)||[],name);if(!hit)return;
+    const one=await api('/api/player/'+hit.slug+'/'+hit.id+'.json'+qs());if(one&&one.name&&one.slug===hit.slug&&String(one.id)===String(hit.id)){S.pair={id:one.id,name:one.name,games:one.games||[]};paintPlayer()}}},
     h('input',{name:'who',placeholder:'Second player',maxlength:'40',required:true}),
     h('button',{type:'submit',text:mate?'Swap':'Add'})),
    mate?h('button',{type:'button',class:'tpause',onclick:()=>{S.pair=null;paintPlayer()}},'Clear the second player'):null),
   h('div',{class:'kpis'},box('Last 5',L5),box('Last 10',L10),box('Last 20',L20),kbox('Recent',L10?String(L10.avg):'–'),kbox('Season',seasonVals.length?String(Math.round(seasonVals.reduce((a,b)=>a+b,0)/seasonVals.length*10)/10):'–'))];
- if(d.next&&d.next.line)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'NEXT GAME'}),
-  h('div',{class:'nm',text:d.next.line}),
-  d.next.rest?h('div',{class:'sub',text:d.next.rest}):null,
-  d.next.opp_last?h('div',{class:'sub',text:d.next.opp_last}):null,
-  d.next.sub?h('div',{class:'sub',text:d.next.sub}):null));
+ const nxtLine=nextSheetLine(d.next);const met=lastMeet(d);const restBit=restSheet(d.next);
+ if(d.next&&(nxtLine||restBit||met))kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'NEXT GAME'}),
+  nxtLine?h('div',{class:'nm',text:nxtLine}):null,
+  restBit?h('div',{class:'sub',text:restBit}):null,
+  met?h('div',{class:'sub',text:'Last time '+(met.when||'')+' '+(met.at||'')+' '+(met.opp||'')+(met.result?' · '+met.result:'')}):null));
  if(splits.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'SPLITS AND ROLE'}),...splits));
  if((d.injuries||[]).length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'INJURIES'}),
-  ...(d.injuries||[]).map((x,i)=>{const full=x.note||'';const key=(x.name||'')+'#'+i;const open=S.noteOpen===key;const long=full.length>140;
-   const text=long&&!open?full.slice(0,140)+'…':full;
+  ...(d.injuries||[]).map((x,i)=>{const fullNote=x.note||'';const key=(x.name||'')+'#'+i;const open=S.noteOpen===key;const long=fullNote.length>140;
+   const text=long&&!open?fullNote.slice(0,140)+'…':fullNote;
    return h('div',{class:'inj'},h('b',{text:x.status?x.name+' ('+x.status+')':x.name}),
     h('p',{text:text}),long?h('button',{type:'button',class:'tpause',onclick:()=>{S.noteOpen=open?'':key;paintPlayer()}},open?'Less':'More'):null)})));
  if(notes.length)kids.push(h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'WHAT THE NUMBERS SHOW'}),
   h('ul',{class:'nlist'},notes.map(n=>h('li',{text:n})))));
  const logRows=(rows,who)=>rows.length?h('div',null,rows.map(g=>{const v=g.vals&&g.vals[stat]!=null&&!g.dnp?+g.vals[stat]:null;const dnp=v==null;
   const mark=dnp?'DNP':(g.ot?fmt(v)+' OT':fmt(v));const on=S.hi&&g.date&&g.date===S.hi;
-  const gap=dnp?'':logGap(v,line);const mates=dnp?'':logMates(stat,g.vals);
+  const gap=dnp?'':logGap(v,line);const mates=dnp?'':logMates(stat,g.vals);const played=dnp?'':logTime(g);
   const score=g.score?String(g.score):'';
   const place=(g.opp_name&&g.opp_name!==g.opp)?((g.at==='@'?'at ':'vs ')+g.opp_name):'';
-  const detail=dnp?'Did not play':[gap,score,place].filter(Boolean).join(' · ');
+  const detail=dnp?'Did not play':[gap,played,score,place].filter(Boolean).join(' · ');
   return h('div',{class:'plog'+(on?' on':''),id:on?'loghit':''},
    h('span',{class:'ppg '+(dnp?'push':v>line?'over':v<line?'under':'push'),text:dnp?'–':v>line?'▲':v<line?'▼':'–'}),
    h('div',{style:'min-width:0'},h('div',{class:'nm',text:(who?who+' · ':'')+(g.when||'')+' '+g.at+' '+g.opp+(g.result?' · '+g.result:'')+(g.pre?' · preseason':'')+(g.ot?' · OT':'')}),
     detail?h('div',{class:'sub',text:detail}):null,
     mates?h('div',{class:'sub',text:mates}):null),h('span',{class:'net '+(dnp?'flat':v>line?'up':v<line?'down':'flat'),text:mark}))})):
-  empty('No games on file','ESPN has not posted a game log for this player yet.');
- const logged=(d.games||[]).filter(g=>!(S.hidePre&&g.pre)).slice(0,S.pn||30);
- const mineLog=h('div',{class:'card'},h('h2',null,'Game log',h('button',{type:'button',class:'tpause',onclick:()=>{S.hidePre=!S.hidePre;paintPlayer()}},S.hidePre?'Show preseason':'Hide preseason')),logRows(logged,''));
- const mateLogged=mate?(mate.games||[]).filter(g=>!(S.hidePre&&g.pre)).slice(0,S.pn||30):[];
+  (!who&&d.name&&!(d.games||[]).length)?h('p',{class:'muted',text:'We have the player, and no games yet.'}):h('p',{class:'muted',text:'Nothing in that filter.'});
+ const logged=(d.games||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).filter(g=>!(hidePre&&g.pre)&&(S.logMonth?inMonth(g):true)).slice(0,30);
+ const mineLog=h('div',{class:'card'},h('h2',null,'Game log',
+  h('button',{type:'button',class:'tpause',onclick:()=>{S.hidePre=!hidePre;savePre();paintPlayer()}},hidePre?'Show preseason':'Hide preseason'),
+  h('button',{type:'button',class:'tpause',onclick:()=>{S.logMonth=!S.logMonth;paintPlayer()}},S.logMonth?'All games':'Last month')),logRows(logged,''));
+ const mateLogged=mate?(mate.games||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).filter(g=>!(hidePre&&g.pre)&&(S.logMonth?inMonth(g):true)).slice(0,30):[];
  const mateLog=mate?h('div',{class:'card'},h('h2',null,(mate.name||'Second player')+' log'),logRows(mateLogged,mate.name||'')):null;
  kids.push(mateLog?h('div',{class:'twolog'},mineLog,mateLog):mineLog);
  put($('#sheet-body'),...kids);const hitRow=$('#loghit');if(hitRow)hitRow.scrollIntoView({block:'nearest'})}
 async function openNamed(name){const q=String(name||'').trim();if(q.length<3)return;
- const d=await api('/api/player.json'+qs('q='+encodeURIComponent(q)));const pls=(d&&d.players)||[];const ql=q.toLowerCase();
- const hit=pls.find(p=>(p.name||'').toLowerCase()===ql&&p.slug&&p.id)||pls.find(p=>p.slug&&p.id);
- if(hit)go('#/pl/'+hit.slug+'/'+hit.id)}
+ const d=await api('/api/player.json'+qs('q='+encodeURIComponent(q)));
+ const hit=clearPlayer((d&&d.players)||[],q);if(hit)go('#/pl/'+hit.slug+'/'+hit.id)}
 async function showPlayer(slug,id){openSheet();const box=$('#findpop');if(box)box.hidden=true;
  if(S.playerAc)S.playerAc.abort();S.playerAc=new AbortController();const ac=S.playerAc;
- put($('#sheet-body'),h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'INJURIES'}),h('p',{text:'Still working.'})));
- const d=await api('/api/player/'+slug+'/'+id+'.json'+qs(),{signal:ac.signal});if(ac.signal.aborted||location.hash!=='#/pl/'+slug+'/'+id)return;
- if(!d||!d.name){sheetError('Couldn’t find that player');return}
- const back=S.restore;S.restore=null;
- if(!back&&S.pl&&S.pl.slug&&String(S.pl.id)!==String(id)){(S.stack=S.stack||[]);S.stack.push({slug:S.pl.slug,id:S.pl.id,stat:S.pstat,line:S.pline,split:S.psplit,n:S.pn});if(S.stack.length>8)S.stack.shift()}
- S.pl=d;S.pair=null;S.pstat=d.stat;S.pline=null;S.hi='';
- if(back){if(back.stat)S.pstat=back.stat;if(back.line!=null)S.pline=back.line;S.psplit=back.split||'all';S.pn=back.n||0}
- else{try{const saved=localStorage.getItem('pb-pstat:'+slug+'/'+id);if(saved&&(d.stats||[]).some(s=>s.key===saved))S.pstat=saved}catch(e){}}
- paintPlayer()}
+ const cached=sheetGet(slug,id);if(cached){finishPlayer(cached,slug,id);return}
+ const seed=knownPlayer(slug,id);
+ if(seed&&seed.name)paintHead(seed,'Still working.');
+ else put($('#sheet-body'),h('div',{class:'card pbrief'},h('p',{class:'kicker',text:'INJURIES'}),h('p',{text:'Still working.'})));
+ const d=await pullSheet(slug,id,ac);if(ac.signal.aborted||location.hash!=='#/pl/'+slug+'/'+id)return;
+ if(!d||!d.name){if(seed&&seed.name)paintHead(seed,'The log did not load.');else sheetError('Couldn’t find that player');return}
+ sheetPut(slug,id,d);finishPlayer(d,slug,id)}
 function paintFind(){const box=$('#findpop');if(!box)return;if(S.findOff){box.hidden=true;return}
  const q=(S.q||'').trim();const digits=/^[0-9]{1,10}$/.test(q);
  if(q.length<3&&!digits){const saved=pins();
@@ -35938,7 +36323,7 @@ function paintFind(){const box=$('#findpop');if(!box)return;if(S.findOff){box.hi
  const morePeople=peopleAll.length>people.length;
  const slips=[...(S.data&&S.data.open||[]),...(S.data&&S.data.recent||[])].filter(matchQ).slice(0,5);
  const mates=(S.data&&S.data.groupparlay||[]).filter(l=>((l.who||'')+' '+(l.leg||'')).toLowerCase().includes(ql)).slice(0,4);
- const pls=digits?[]:((d&&d.players)||[]);
+ const pls=digits?[]:((d&&d.players)||[]).slice(0,4);
  const saved=q.length?[]:pins();
  if(!digits&&q.length>=3&&!d&&!people.length&&!slips.length&&!mates.length){box.hidden=false;put(box,h('p',{class:'muted',text:'Looking up “'+q+'”…'}));return}
  if(!pls.length&&!peopleAll.length&&!slips.length&&!mates.length&&!saved.length){box.hidden=false;put(box,h('p',{class:'muted',text:'No one by that name.'}));return}
@@ -36674,6 +37059,30 @@ def bot_update_lines(prev: str) -> list[str]:
     return [line for ver, line in BOT_UPDATES if ver.lower() == cur]
 
 
+def fit_alert(text: str, limit: int = 1900) -> str:
+    """Keep a channel post under Discord's message cap. The recap stays at the top."""
+    body = text or ""
+    if len(body) <= limit:
+        return body
+    tail = "\n• More of this update is on More."
+    return body[: max(0, limit - len(tail))].rstrip() + tail
+
+
+def _recap_lines(prev: str, limit: int = 8) -> list[str]:
+    """This upload's line first, then the other new lines, newest first."""
+    notes = bot_update_lines(prev)
+    cur = _ver_token(BOT_VERSION)
+    current = [line for ver, line in BOT_UPDATES if ver.lower() == cur]
+    rest = [n for n in reversed(notes) if n not in current]
+    out = []
+    for line in current + rest:
+        if line and line not in out:
+            out.append(line)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def boot_notice(prev_ver: str, gap_sec: Optional[int], planned: bool) -> Optional[str]:
     """The recap-channel note for a new upload and/or a real outage. None when nothing to say."""
     new = (prev_ver or "") != BOT_VERSION
@@ -36686,12 +37095,15 @@ def boot_notice(prev_ver: str, gap_sec: Optional[int], planned: bool) -> Optiona
         bits.append("Back from an update." if planned else f"Was down about {bot_gap_words(gap_sec)}.")
     elif new:
         bits.append("New upload. It was not down long enough to call it an outage.")
-    notes = bot_update_lines(prev_ver) if new else (bot_update_lines(prev_ver)[:1] if down else [])
-    show = notes[-8:]
+    full = bot_update_lines(prev_ver) if new else []
+    show = _recap_lines(prev_ver) if new else (bot_update_lines(prev_ver)[:1] if down else [])
+    if new:
+        bits.append("**Update recap**")
+        bits.append(f"This upload is {BOT_VERSION}.")
     if show:
         bits.append("**What's new**")
         bits.extend(f"• {n}" for n in show)
-        extra = len(notes) - len(show)
+        extra = max(0, len(full) - len(show)) if new else 0
         if extra:
             bits.append(f"• {extra} earlier notes from this update are on More.")
     return "\n".join(bits)
@@ -36721,10 +37133,10 @@ async def post_alert(client, text: str, *, ping: bool = False, file=None, refres
         gids = [r["guild_id"] for r in db().execute(
             "SELECT DISTINCT guild_id FROM settings WHERE key IN ('recap_channel','audit_channel','ticket_channel')")]
     by_gid = {getattr(g, "id", None): g for g in guilds}
-    body = text
+    body = fit_alert(text, 1700 if ping else 1900)
     mentions = discord.AllowedMentions.none()
     if ping and OWNER_IDS:
-        body = text + "\n" + " ".join(f"<@{i}>" for i in OWNER_IDS[:4])
+        body = fit_alert(text + "\n" + " ".join(f"<@{i}>" for i in OWNER_IDS[:4]), 1900)
         mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
     seen = set()
 
@@ -36747,6 +37159,8 @@ async def post_alert(client, text: str, *, ping: bool = False, file=None, refres
                 return
             except TypeError:
                 pass
+            except Exception:
+                log.warning("Alert picture failed in channel %s guild %s", getattr(ch, "id", None), gid)
         await ch.send(body, allowed_mentions=mentions)
 
     for gid in gids:
@@ -37059,9 +37473,10 @@ async def announce_boot(client) -> Optional[str]:
             return None
         if missing and not low:
             catchup = True
-            lines = bot_update_lines(prev)
-            show = lines[-8:] if (prev or "") != BOT_VERSION else (lines[:1] or [])
+            show = _recap_lines(prev) if (prev or "") != BOT_VERSION else (bot_update_lines(prev)[:1] or [])
             bits = [f"🛠️ **PIMP-BOT is live · {BOT_VERSION}**",
+                    "**Update recap**",
+                    f"This upload is {BOT_VERSION}.",
                     "New upload. The record channel is getting it now."]
             if show:
                 bits.append("**What's new**")
@@ -37073,6 +37488,7 @@ async def announce_boot(client) -> Optional[str]:
     health = boot_health_lines()
     if health:
         note = note + "\n" + "\n".join(health)
+    note = fit_alert(note)
     if not note:
         return None
     crash_note("ok" if planned or prev == BOT_VERSION else "bot", "PIMP-BOT is live",
@@ -37085,7 +37501,7 @@ async def announce_boot(client) -> Optional[str]:
     elif "Storage is low" in (note or ""):
         happened = "Storage is low, so this restart is being reported."
     fresh = bot_update_lines(prev)
-    news = fresh[-8:] if (prev or "") != BOT_VERSION else fresh[:1]
+    news = _recap_lines(prev) if (prev or "") != BOT_VERSION else fresh[:1]
     tone = "down" if gap and gap >= 180 and not planned else "live"
     sent = 0
     try:
@@ -37095,9 +37511,28 @@ async def announce_boot(client) -> Optional[str]:
             })
 
         landed = []
+        miss = set(missing)
         sent = await post_alert(client, note, ping=bool(gap and gap >= 180 and not planned and not catchup),
                                 file=_card, refresh=True, fanout=True,
-                                only=set(missing) if catchup else None, landed=landed)
+                                only=miss if catchup else None, landed=landed)
+        for gid in gids:
+            raw_recap = get_setting(gid, "recap_channel")
+            if not raw_recap or not str(raw_recap).isdigit():
+                continue
+            recap_id = int(raw_recap)
+            if recap_id in landed:
+                continue
+            if catchup and recap_id not in miss:
+                continue
+            ch = await _alert_channel(client, recap_id)
+            if ch is None:
+                continue
+            try:
+                await ch.send(note, allowed_mentions=discord.AllowedMentions.none())
+                landed.append(recap_id)
+                sent += 1
+            except Exception:
+                log.warning("Update recap failed in channel %s", recap_id)
         if landed:
             _boot_mark_sent(landed)
     except Exception:
@@ -47829,21 +48264,36 @@ async def dash30_one_game(gid: int, eid: str):
 # ---- the news feed (what the ask channel has posted), newest first --------------------------------------------
 
 def _dash30_players(gid: int, hidden: bool) -> dict[str, dict]:
-    """{player key: {name, slips: [(who, pick id)]}} for the recent slips that are still secret (hidden=True: open, or settled but
-    not revealed yet), or for the open public ones."""
+    """{player key: name, sport, place, leg, slips} for open public slips, or for slips that are still secret."""
     since = iso(datetime.now(timezone.utc) - timedelta(days=AUTOPILOT_DAYS))
     cond = ("hidden = 1 AND (status = 'open' OR revealed_at IS NULL)" if hidden
             else "status = 'open' AND (hidden IS NULL OR hidden = 0)")
     out: dict = {}
-    for p in db().execute(f"SELECT id, bettor_name, description FROM picks WHERE guild_id = ? AND created_at >= ? "
-                          f"AND {cond} ORDER BY id DESC LIMIT 80", (gid, since)).fetchall():
+    for p in db().execute(
+            f"SELECT id, bettor_name, bettor_id, description, sport FROM picks WHERE guild_id = ? AND created_at >= ? "
+            f"AND {cond} ORDER BY id DESC LIMIT 80", (gid, since)).fetchall():
         legs = get_legs(p["id"])
+        board = _news_board_sport(p["sport"])
+        place = _news_place(p["sport"])
+        who_key = str(p["bettor_id"]) if p["bettor_id"] else ""
         for text in ([x["text"] for x in legs] or [p["description"]]):
             leg = prop_of(text or "")
             for part in ((leg or {}).get("combo") or ([leg] if leg else [])):
-                w = out.setdefault(part["player"], {"name": part.get("display") or part["player"].title(), "slips": []})
-                if (p["bettor_name"], p["id"]) not in w["slips"]:
-                    w["slips"].append((p["bettor_name"], p["id"]))
+                if not part or not part.get("player"):
+                    continue
+                w = out.setdefault(part["player"], {
+                    "name": part.get("display") or part["player"].title(),
+                    "slips": [], "sport": "", "place": "", "leg": "",
+                })
+                if board and not w["sport"]:
+                    w["sport"] = board
+                if place and not w["place"]:
+                    w["place"] = place
+                if text and not w["leg"]:
+                    w["leg"] = clip(text, 90)
+                if not any(s["id"] == p["id"] for s in w["slips"]):
+                    w["slips"].append({"id": p["id"], "who": p["bettor_name"] or "", "key": who_key,
+                                       "leg": clip(text or "", 90)})
     return out
 
 
@@ -47863,26 +48313,28 @@ def dash30_news(gid: int) -> list[dict]:
         return hit
     c = news_db()
     public = _dash30_players(gid, hidden=False)
-    secret = _dash30_players(gid, hidden=True)
     out = []
     for r in c.execute("SELECT key, status, detail, posted_at FROM news_seen WHERE guild_id = ? AND posted_at IS NOT NULL "
                        "ORDER BY posted_at DESC LIMIT 80", (gid,)).fetchall():
         key = r["key"] or ""
         if key.startswith("inj:"):
             player = key[4:]
-            if player in secret and player not in public:
+            if player not in public:
                 continue
             st = r["status"]
-            w = public.get(player) or {"name": player.title(), "slips": []}
+            w = public[player]
+            slips = [{"id": s["id"], "who": clip(s["who"], 30), "key": s.get("key") or "", "open": True}
+                     for s in w["slips"]]
             out.append({"kind": "injury" if st else "off", "player": clip(w["name"], 60),
-                        "status": clip(st or "Off the report", 30), "chip": _dash30_chip(st) if st else "off",
+                        "status": clip(st or "Off", 30), "chip": _dash30_chip(st) if st else "off",
                         "detail": clip(r["detail"] or "", 240) if st else "",
-                        "slips": [{"id": pid, "who": clip(who, 30)} for who, pid in w["slips"][:4]],
-                        "when": r["posted_at"]})
+                        "leg": clip(w.get("leg") or "", 90), "sport": w.get("sport") or "",
+                        "place": w.get("place") or "",
+                        "slips": slips, "when": r["posted_at"]})
         elif key.startswith("dnp:"):
             m = re.fullmatch(r"dnp:(\d{1,10}):(\d{1,3})", key)
             p = get_pick(gid, int(m.group(1))) if m else None
-            if p is None or p["hidden"]:
+            if p is None or p["hidden"] or p["status"] != "open":
                 continue
             leg = db().execute("SELECT text, note FROM legs WHERE pick_id = ? AND idx = ?",
                                (p["id"], int(m.group(2)))).fetchone()
@@ -47890,8 +48342,13 @@ def dash30_news(gid: int) -> list[dict]:
             name = (prop or {}).get("display") or (leg_label(leg["text"]) if leg else "A leg")
             out.append({"kind": "reboot", "player": clip(name, 60),
                         "status": "Reboot", "chip": "reboot",
-                        "detail": clip((leg["note"] if leg and leg["note"] else "Didn't play") + ". The leg is voided.", 240),
-                        "slips": [{"id": p["id"], "who": clip(p["bettor_name"], 30)}], "when": r["posted_at"]})
+                        "detail": "That leg was voided, and the slip can still be open.",
+                        "note": clip(leg["note"], 160) if leg and leg["note"] else "",
+                        "leg": clip(leg["text"], 90) if leg else "",
+                        "sport": _news_board_sport(p["sport"]), "place": _news_place(p["sport"]),
+                        "slips": [{"id": p["id"], "who": clip(p["bettor_name"], 30),
+                                   "key": str(p["bettor_id"]) if p["bettor_id"] else "", "open": True}],
+                        "when": r["posted_at"]})
         if len(out) >= 40:
             break
     return _dash30_keep(("news", gid), out)
@@ -48047,15 +48504,59 @@ async def dash30_api_game(request):
     return web.json_response(d) if d else dash_error(web, request, 404)
 
 
+_NEWS_PATHS = {
+    "NBA": ["basketball/nba"], "WNBA": ["basketball/wnba"],
+    "College BB": ["basketball/mens-college-basketball"],
+    "NFL": ["football/nfl"], "College FB": ["football/college-football"],
+    "MLB": ["baseball/mlb"], "NHL": ["hockey/nhl"],
+}
+
+
+def _news_board_sport(sport: Optional[str]) -> str:
+    """The sport word the rest of the board uses. WNBA stays WNBA, not a basketball pile."""
+    if not sport:
+        return ""
+    name = sport_group(sport)
+    return "" if not name or name == "No sport" else name
+
+
+def _news_place(sport: Optional[str]) -> str:
+    """School for a college player, club for a pro. Blank when the slip has no sport."""
+    raw = (sport or "").lower()
+    if not raw:
+        return ""
+    if "college" in raw or "ncaa" in raw:
+        return "school"
+    name = _news_board_sport(sport)
+    if not name:
+        return ""
+    return "school" if name.lower().startswith("college") else "club"
+
+
+def _news_paths(sport: str) -> list[str]:
+    if sport in _NEWS_PATHS:
+        return list(_NEWS_PATHS[sport])
+    return list(_NEWS_PATHS.get(_news_board_sport(sport)) or [])
+
+
 def news_cached_team(name: str) -> str:
-    """Team from an injury report already loaded in this process. No network."""
+    """Team from an injury report already loaded in this process. No network.
+    An exact cached name returns before the rest of that report is scanned. A tie stays blank."""
     key = norm_name(name or "")
     if len(key) < 3:
         return ""
+    reports = []
     for cached in _injury_cache.values():
         report = cached[1] if isinstance(cached, tuple) and len(cached) > 1 else None
-        if not isinstance(report, dict):
-            continue
+        if isinstance(report, dict):
+            reports.append(report)
+    for report in reports:
+        hit = report.get(key)
+        if isinstance(hit, dict) and not hit.get("ambiguous"):
+            team = str(hit.get("team") or "")
+            if team:
+                return clip(team, 40)
+    for report in reports:
         best, team, ambiguous = 0, "", False
         for k, v in report.items():
             if not isinstance(v, dict):
@@ -48063,6 +48564,8 @@ def news_cached_team(name: str) -> str:
             sc = name_score(key, str(k))
             if sc > best:
                 best, team, ambiguous = sc, str(v.get("team") or ""), bool(v.get("ambiguous"))
+            elif sc and sc == best:
+                ambiguous = True
         if best >= 2 and team and not ambiguous:
             return clip(team, 40)
     return ""
@@ -48076,10 +48579,15 @@ async def dash30_api_news(request):
     gid = prm["guild"]
     items = [dict(x) for x in dash30_news(gid)]
     for it in items:
+        if it.get("team"):
+            continue
         team = news_cached_team(it.get("player") or "")
-        if team and not it.get("team"):
+        if team:
             it["team"] = team
-    return web.json_response({"items": items, "on": bool(ask_channel_id(gid)) and server_on(gid, "newsfeed")})
+    checked = get_setting(gid, "news_checked") or ""
+    yesterday = (datetime.now(TZ) - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return web.json_response({"items": items, "on": bool(ask_channel_id(gid)) and server_on(gid, "newsfeed"),
+                              "checked": checked, "yesterday": yesterday.isoformat()})
 
 
 async def dash30_api_newsface(request):
@@ -48091,12 +48599,27 @@ async def dash30_api_newsface(request):
     if not dash_rate(dash_client_ip(request), "newsface", 40, 60):
         return dash_error(web, request, 429)
     q = clip(str(request.query.get("q") or "").strip(), 40)
+    sport = clip(str(request.query.get("sport") or "").strip(), 40)
+    team = clip(str(request.query.get("team") or "").strip(), 40)
     if len(q) < 3:
         return web.json_response({})
+    paths = _news_paths(sport)
+    if team and not paths:
+        return web.json_response({})
+    if not paths:
+        paths = list(PROP_PATHS)
     try:
-        found = await resolve_player(q, list(PROP_PATHS))
+        found = await resolve_player(q, paths)
     except Exception:
         found = []
+    if team:
+        want = norm_name(team)
+        kept = []
+        for f in found:
+            ft = norm_name(str(f.get("team") or ""))
+            if want and ft and (ft == want or want in ft or ft in want or name_score(want, ft) >= 2):
+                kept.append(f)
+        found = kept
     if len(found) != 1 or name_score(norm_name(q), found[0].get("norm") or "") < 2:
         return web.json_response({})
     f = found[0]
