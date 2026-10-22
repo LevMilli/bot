@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.58"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.59"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -196,6 +196,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.56", "People can pin three names on this phone. A card shows this week versus last week, and a filter for who is in profit or still open."),
     ("1.57", "A slip sheet shows the original screenshot after one tap. A photo that was already filed is named on one line before it is filed again. Several photos in one message stay separate slips."),
     ("1.58", "Ask for your week, your open slips, or the weather. The week figure matches your card. Weather is the hourly temperature and rain, and it names the place."),
+    ("1.59", "On Live, you can star a game and hide finals on this phone. A sport filter stays while the scores refresh. The live dot is only for a game that is in."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -239,6 +240,7 @@ MEMBER_NEWS = [
     ("1.56", "You can pin three people on this phone. A card shows this week versus last week, and you can filter who is in profit or still open."),
     ("1.57", "Open a slip and tap to see the original screenshot. A photo that was already filed is named on one line. Several photos in one message stay separate slips."),
     ("1.58", "Ask for your week, your open slips, or the weather. The week figure matches your card. Weather is the hourly temperature and rain, and it names the place."),
+    ("1.59", "On Live, you can star a game and hide finals on this phone. A sport filter stays while the scores refresh. The live dot is only for a game that is in."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -2864,6 +2866,93 @@ _THOUSAND_SHIPPED = {
     "Lead a record answer with the net.",
     "Fetch the hour read before drawing the graph.",
     "Time the reply out cleanly and say it timed out.",
+    "Add a follow star on a game so that game stays at the front of the strip.",
+    "Keep in-play legs on the ticker with the photo of the bettor.",
+    "Refresh the score on a game that is in, and rest a game that has not started.",
+    "Show the group's open legs under a game tile when you tap it.",
+    "Use one live dot for a game in progress and a quiet word for a final.",
+    "Keep the ticker pause on this phone.",
+    "Add the Central start on every tile that has not tipped.",
+    "Match the tile colors to the colors already on the score.",
+    "Let a member hide finished games on this phone.",
+    "Keep the ahead and behind marks the same on the ticker and the slip.",
+    "Do not redraw the strip while you are scrolling it.",
+    "Add a sport filter on the strip.",
+    "Clip a long team name before it covers the score.",
+    "Hold the last good score if a refresh comes back empty.",
+    "Show how many of the group's legs sit inside that game.",
+    "Keep finals in a muted style so live games read first.",
+    "Add a your-legs chip on a tile that contains one of your slips.",
+    "Use the same start line the sheet uses, in Central.",
+    "Let a member hide finished games without hiding a game that is still in.",
+    "Add a quarter, period, or inning on the tile when the feed has it.",
+    "Keep the live label readable on a narrow phone.",
+    "Stop the ticker from covering the first card.",
+    "Show the network, or the channel, only when the feed already has it.",
+    "Add a tap on a tile that opens every slip in that game.",
+    "Show the inning or the period beside the score, not instead of it.",
+    'Add a "starts in" word on a tile inside two hours.',
+    "Let the strip remember the sport filter on this phone.",
+    "Show a delayed start as delayed, when the feed says so.",
+    "Add the group's names, as photos, on a tile with their legs.",
+    "Add a baseball count only when the feed has balls and strikes.",
+    "Add an empty strip line that says when the next group game starts.",
+    "Show overtime or extra innings as their own short word.",
+    "Add a filter for games the group has a leg in.",
+    "Show the home team second, in the same order as the sheet.",
+    "Add a quiet mark when a game is in a weather delay.",
+    "Let the ticker name the player, not only the slip.",
+    "Show a national broadcast mark only when we already have it.",
+    "Add a jump from a tile to the player sheet of a logged leg.",
+    "Keep a postponed game out of the live dot.",
+    "Show the series game number when the feed has it for baseball.",
+    "Add a college and pro split on the sport filter.",
+    "Show a shootout as its own word in hockey.",
+    "Add the court or the park only when it fits on a wide tile.",
+    "Let a followed game stay first even after it goes final, until the member clears it.",
+    "Keep the live dot to games that are actually in.",
+    "Use one score size on every tile.",
+    "Clip both team names the same way.",
+    "Keep the start time in Central, with the zone written once.",
+    "Hold the strip to a sideways scroll on a phone.",
+    "Keep a final from using the live color.",
+    "Leave a little air between tiles.",
+    "Keep the pause control on the ticker, not on each tile.",
+    "Use the same ahead and behind marks as the slip.",
+    "Hold a long team nickname to the short name when the tile is narrow.",
+    "Keep the sport filter chips in the same style as the news filters.",
+    "Show the leg count as a number, not a sentence, on the tile.",
+    "Keep a hidden slip's leg off the public tile.",
+    "Keep the ticker from duplicating a leg that is also on the tile you opened.",
+    "Hold the follow star to one tap.",
+    "Keep a delayed word in the muted color.",
+    "Match the empty state to the other empty states.",
+    "Keep the inning, period, or quarter in one short form.",
+    "Keep a your-legs chip from covering the score.",
+    "Use tabular figures for the score.",
+    "Hold the strip height steady when one tile has an extra line.",
+    "Keep the ticker speed tied to how many legs are in it.",
+    "Refresh a live game on a short beat, and a later game on a slow one.",
+    "Keep the last score when a refresh fails.",
+    "Do not mark a game live before the feed says it is in.",
+    "Drop a postponed game from the live dot and say postponed.",
+    "Update the leg value on the ticker from the same read as the slip.",
+    "Keep a pause where the member left it.",
+    "Hold the scroll position of the strip across a refresh.",
+    "Hide a finished game on this phone only, and bring it back from the filter.",
+    "Keep a followed game from being dropped by a refresh.",
+    "Use the sheet's start line so the tile and the sheet agree.",
+    "Keep a weather delay from looking like a final.",
+    "Show a crossed line on the ticker once, not on every refresh.",
+    "Keep a hidden leg off the tile.",
+    "Rest a game that has not started instead of polling it every few seconds.",
+    "Keep the sport filter from clearing when a score updates.",
+    "Keep the member's follow list on this phone.",
+    "Do not cover the Mine cards with the ticker.",
+    "Retry a failed score once, then keep the last good one.",
+    "Leave a game with no feed as a start time only.",
+    "Sort live games ahead of the soonest start.",
+    "Show a leg that just crossed the number, with the player and the value.",
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -6843,6 +6932,24 @@ def simplify_events(raw: dict) -> list[dict]:
                                     "name": ath["displayName"]})
         if len(teams) == 2:
             venue = comp.get("venue") or {}
+            sit = comp.get("situation") or {}
+            balls, strikes = sit.get("balls"), sit.get("strikes")
+            count = ""
+            if balls is not None and strikes is not None and str(balls).isdigit() and str(strikes).isdigit():
+                count = f"{int(balls)}-{int(strikes)}"
+            broadcast, national = "", False
+            for cast in comp.get("broadcasts") or []:
+                names = [str(n) for n in (cast.get("names") or []) if n]
+                if not names:
+                    continue
+                if not broadcast:
+                    broadcast = names[0]
+                if str(cast.get("market") or "").lower() == "national":
+                    broadcast, national = names[0], True
+                    break
+            series = comp.get("series") or {}
+            summary = " ".join(str(series.get(k) or "") for k in ("summary", "title"))
+            found = re.search(r"\bgame\s+(\d{1,2})\b", summary, re.I)
             events.append({"period": (ev.get("status") or comp.get("status") or {}).get("period") or 0,
                            "leaders": leaders, "venue": {"name": venue.get("fullName") or "",
                                                          "city": (venue.get("address") or {}).get("city") or "",
@@ -6853,7 +6960,9 @@ def simplify_events(raw: dict) -> list[dict]:
                            "week": (ev.get("week") or {}).get("number"),
                            "detail": status.get("shortDetail") or "",
                            "season_type": (ev.get("season") or {}).get("type"),
-                           "season": (ev.get("season") or {}).get("year")})
+                           "season": (ev.get("season") or {}).get("year"),
+                           "count": count, "broadcast": broadcast, "national": national,
+                           "series": found.group(1) if found else ""})
     return events
 
 
@@ -6869,6 +6978,10 @@ async def fetch_scoreboard(path: str, day: datetime, params: Optional[dict] = No
         ttl = scoreboard_ttl(events)
     except Exception:
         log.warning("Scoreboard lookup failed for %s %s", path, key[1])
+        prev = _score_cache.get(key)
+        if prev and prev[1]:
+            _score_cache[key] = (time.monotonic() + 45, prev[1])
+            return prev[1]
         events, ttl = [], 45
     _score_cache[key] = (time.monotonic() + ttl, events)
     return events
@@ -25248,6 +25361,10 @@ async def dash_live(guild_id: int) -> dict:
             num = e.get("num") or {}
             ticker.append({"id": p["id"], "who": clip(p["bettor_name"], 40), "leg": clip(e.get("text") or "", 80),
                            "label": clip(leg_label(e.get("text") or ""), 30),
+                           "player": dash_prop_name(e.get("text") or ""),
+                           "key": p["bettor_key"] if str(p["bettor_key"] or "").isdigit() else "",
+                           "gid": clip(str(ev.get("id") or ""), 24) if isinstance(ev, dict) else "",
+                           "n": e.get("n"),
                            "value": num.get("value"), "line": num.get("line"), "side": num.get("side"),
                            "sub": clip(e.get("sub") or "", 60), "live": e.get("live")})
     order = {"in": 0, "pre": 1, "post": 2}
@@ -33553,7 +33670,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-139';"
+    "const CACHE='pb-shell-140';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -33960,6 +34077,29 @@ button.game:hover{transform:translateY(-2px);border-color:#7B3FE477}
 .gcard{background:var(--card);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);overflow:hidden;min-width:0;
  display:flex;flex-direction:column}
 .gcard.in{border-color:#e11d4840}
+.gcard.post{border-color:var(--line)}
+.gcard.post .scr,.gcard.post .clk,.gline.post{color:var(--muted)}
+.gcard{min-height:220px}
+.tn2 b,.tn2 span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:8.5em}
+.per{font-size:12px;font-weight:750;color:var(--muted);margin-left:8px;font-variant-numeric:tabular-nums}
+.gstar{margin-left:auto;cursor:pointer;color:var(--muted);font-size:18px;line-height:1;padding:0 2px}
+.gstar.on{color:var(--gold)}
+.ychip{font-size:11px;font-weight:800;padding:1px 7px;border-radius:99px;background:#7B3FE422;color:var(--brand2);border:1px solid #7B3FE455;white-space:nowrap}
+.gfaces{display:flex;align-items:center;gap:4px}
+.gfaces .ava,.gfaces .av{width:22px;height:22px;border-radius:50%}
+.gnum{font-variant-numeric:tabular-nums;font-weight:800;font-size:16px;color:var(--text)}
+.livebar{grid-column:span 12}
+.venue{display:none}
+.pill2.mute{background:var(--card2);color:var(--muted);border-color:var(--line)}
+.ticker .it .ava,.ticker .it .av{width:22px;height:22px;border-radius:50%}
+.lgrid,.slips{position:relative;z-index:2}
+@media(min-width:980px){.gmeta .venue{display:inline;font-weight:650;letter-spacing:0;text-transform:none}}
+@media(max-width:720px){
+ .lgrid{display:flex;overflow-x:auto;gap:12px;scroll-snap-type:x mandatory;padding-bottom:8px;-webkit-overflow-scrolling:touch}
+ .lgrid>.gcard{flex:0 0 min(86vw,360px);scroll-snap-align:start}
+ .gcard .tn2 span{display:none}
+ .pill2.live{font-size:11px;color:#fff;white-space:nowrap}
+}
 .gtop,.gpage{--ca:#7B3FE4;--ch:#7B3FE4;display:block;width:100%;border:0;text-align:left;color:var(--text);padding:12px 16px 0;
  background:var(--card2);background:linear-gradient(105deg,color-mix(in srgb,var(--ca) 26%,var(--card2)) 0%,var(--card2) 44%,
  var(--card2) 56%,color-mix(in srgb,var(--ch) 26%,var(--card2)) 100%)}
@@ -34344,12 +34484,18 @@ function renderOverview(el,d){
 const wide=b=>{b.classList.add('wide');return b};
 const shot=b=>{b.classList.add('shot');return b};
 function renderLive(el,d){
- const L=S.live,settled=d.settled24||[],later=L?[...L.later,...L.finals]:[];
- const next=L&&L.later.length?'Next up: '+L.later[0].away.abbr+' @ '+L.later[0].home.abbr+' at '+startTime(L.later[0])+'.':'';
+ const L=S.live,settled=d.settled24||[];
+ const pool=L?[...L.games,...L.later,...L.finals]:[];
+ const sport=liveSport(),hide=liveHide(),follow=liveFollow();
+ const shown=pool.filter(g=>gameOk(g,sport,hide)).sort(liveSort);
+ const strip=shown.filter(g=>g.state==='in'||follow.has(String(g.id)));
+ const rest=shown.filter(g=>!(g.state==='in'||follow.has(String(g.id))));
+ const next=nextLine(L);
  put(el,
-  !L?h('div',{class:'lgrid'},[0,1].map(skelGame)):L.games.length?h('div',{class:'lgrid'},L.games.map(gameCard))
-   :card('In play','',null,empty('Nothing in play right now',(next?next+' ':'')+'When a game the group is on tips off, it shows up here with every leg.')),
-  later.length?card('Later today & finals','',String(later.length),h('div',{class:'glist'},later.map(gameLine))):null,
+  L?liveFilterBar(pool):null,
+  !L?h('div',{class:'lgrid'},[0,1].map(skelGame)):strip.length?h('div',{class:'lgrid'},strip.map(gameCard))
+   :card('In play','',null,empty('Nothing in play right now','When a game the group is on tips off, it shows up here with every leg.'),next?h('p',{class:'hint',text:next}):null),
+  rest.length?card('Later today & finals','',String(rest.length),h('div',{class:'glist'},rest.map(gameLine))):null,
   L&&L.games.length?card('The /live picture','s6',L.updated?'Updated '+L.updated:null,shot(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
   card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
   settleCard(d,settled))}
@@ -34441,7 +34587,8 @@ function settleCard(d,rows){rows=rows||[];
  const body=shown.length?h('div',{class:'rows srows'},shown.map(p=>settledRow(p,{mixed:mixed,reb:reb}))):settleEmpty(rows);
  return card('Just settled','',String(shown.length),settleFilters(rows),line,body,settleWeek(d.settledWeek))}
 if(!S._sfinger){S._sfinger=1;
- addEventListener('pointerdown',e=>{if(e.target&&e.target.closest&&e.target.closest('.srows'))S.finger=1});
+ addEventListener('pointerdown',e=>{if(e.target&&e.target.closest&&e.target.closest('.srows,.lgrid,.glist'))S.finger=1});
+ addEventListener('scroll',e=>{const t=e.target;if(S._liveSet||!t||!t.classList||!t.classList.contains('lgrid'))return;S.stripHold=1;clearTimeout(S._stripT);S._stripT=setTimeout(()=>{S.stripHold=0;if(S.paintWait){S.paintWait=0;render()}},180)},true);
  addEventListener('pointerup',()=>{const wait=S.paintWait;S.finger=0;if(wait){S.paintWait=0;render()}});
  addEventListener('pointercancel',()=>{const wait=S.paintWait;S.finger=0;if(wait){S.paintWait=0;render()}})}
 function crewPins(){try{const a=JSON.parse(localStorage.getItem('pb-crew')||'[]');return Array.isArray(a)?a.map(String).filter(Boolean).slice(0,3):[]}catch(e){return []}}
@@ -34593,11 +34740,35 @@ function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-t
  document.querySelectorAll('#nav button').forEach(b=>{b.classList.toggle('on',b.dataset.t===t);b.setAttribute('aria-current',b.dataset.t===t?'page':'false')});
  document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id==='tab-'+t));render();if(innerWidth<=640)scrollTo({top:0});fresh(t)}
 function tickPaused(){try{return localStorage.getItem('pb-tick')==='0'}catch(e){return false}}
-function renderTicker(d){const el=$('#ticker');if(!el)return;if(!d.ticker.length){el.classList.remove('on');put(el,);return}
- const items=()=>d.ticker.map(t=>h('button',{class:'it',type:'button',onclick:()=>go('#/s/'+t.id)},
-  h('span',{class:t.live==='hit'||t.live==='ahead'?'up':t.live==='miss'||t.live==='behind'?'down':'faint'},'●'),h('b',{text:t.who}),
-  h('span',{text:t.label||t.leg}),t.value!=null?h('span',{class:'v',text:t.value+'/'+t.line}):null,t.sub?h('span',{class:'faint',text:t.sub}):null));
- const track=h('div',{class:'track',style:'--dur:'+Math.max(20,d.ticker.length*7)+'s'},h('span',{class:'copy'},items()),h('span',{class:'copy','aria-hidden':'true'},items()));
+function tickMark(t){const word={ahead:'AHEAD',behind:'BEHIND',hit:'HIT',miss:'MISS'}[t.live];
+ if(!word)return h('span',{class:'faint'},'●');
+ const up=t.live==='ahead'||t.live==='hit',down=t.live==='behind'||t.live==='miss';
+ return h('span',{class:'sc '+(up?'up':down?'down':'')},word)}
+function crossedLine(t){const id=String(t.id)+':'+String(t.n!=null?t.n:(t.label||''));
+ if(S.tickHold&&S.tickHold[id])return h('span',{class:'sc up',text:S.tickHold[id]});
+ if(!S.tickVals)S.tickVals={};
+ if(!S.tickTold){try{S.tickTold=JSON.parse(localStorage.getItem('pb-cross')||'{}')}catch(e){S.tickTold={}}}
+ const prev=S.tickVals[id];
+ const val=t.value==null?null:+t.value,line=t.line==null?null:+t.line;
+ if(val!=null)S.tickVals[id]=val;
+ if(prev==null||val==null||line==null||S.tickTold[id])return null;
+ const under=t.side==='under',was=under?prev>line:prev<line,now=under?val<=line:val>=line;
+ if(!(was&&now))return null;
+ const who=t.player||t.label||'';
+ const phrase='Crossed '+(who?who+' ':'')+nfmt(val);
+ S.tickTold[id]=1;S.tickHold[id]=phrase;
+ const keys=Object.keys(S.tickTold);if(keys.length>80){for(const k of keys.slice(0,keys.length-80))delete S.tickTold[k]}
+ try{localStorage.setItem('pb-cross',JSON.stringify(S.tickTold))}catch(e){}
+ return h('span',{class:'sc up',text:phrase})}
+function renderTicker(d){const el=$('#ticker');if(!el)return;
+ const openG=(location.hash.match(/^#\/g\/([A-Za-z0-9]{1,24})$/)||[])[1]||'';
+ const rows=(d.ticker||[]).filter(t=>!(openG&&t.gid&&String(t.gid)===openG));
+ if(!rows.length){el.classList.remove('on');put(el,);return}
+ S.tickHold={};
+ const items=()=>rows.map(t=>h('button',{class:'it',type:'button',onclick:()=>go('#/s/'+t.id)},
+  t.key?face(t.key,t.who):avatar(t.who),tickMark(t),h('b',{text:t.who}),
+  h('span',{text:t.player||t.label||t.leg}),crossedLine(t),t.value!=null?h('span',{class:'v',text:t.value+'/'+t.line}):null,t.sub?h('span',{class:'faint',text:t.sub}):null));
+ const track=h('div',{class:'track',style:'--dur:'+Math.max(20,rows.length*7)+'s'},h('span',{class:'copy'},items()),h('span',{class:'copy','aria-hidden':'true'},items()));
  const pause=h('button',{type:'button',class:'tpause',onclick:()=>{try{localStorage.setItem('pb-tick',tickPaused()?'1':'0')}catch(e){}renderTicker(S.data||d)}},tickPaused()?'Play':'Pause');
  put(el,h('div',{class:'tk'},h('span',{class:'lbl'},h('i'),'LIVE'),pause,h('div',{class:'rail'},track)));
  el.classList.add('on');el.classList.toggle('paused',tickPaused())}
@@ -34750,19 +34921,95 @@ function route(){const m=location.hash.match(/^#\/(p|s|g)\/([A-Za-z0-9]{1,24})$/
 const HEX=/^#[0-9a-f]{6}$/i,col=c=>HEX.test(c||'')?c:'#7B3FE4';
 const nfmt=v=>v==null||isNaN(+v)?'':String(Math.round(+v*10)/10);
 const LV_TONE={cleared:'up',dead:'down',close:'warn',live:'info',ahead:'up',behind:'down'};
-function startTime(g){const t=Date.parse(g.start);return isNaN(t)?(g.status||'Soon'):new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+function liveSport(){try{return localStorage.getItem('pb-live-sport')||'all'}catch(e){return 'all'}}
+function liveHide(){try{return localStorage.getItem('pb-hide-finals')==='1'}catch(e){return false}}
+function liveFollow(){try{const a=JSON.parse(localStorage.getItem('pb-follow')||'[]');return new Set((Array.isArray(a)?a:[]).map(String))}catch(e){return new Set()}}
+function toggleFollow(id,e){if(e){e.preventDefault();e.stopPropagation()}
+ const s=String(id),xs=[...liveFollow()],i=xs.indexOf(s);
+ if(i>=0)xs.splice(i,1);else xs.unshift(s);
+ try{localStorage.setItem('pb-follow',JSON.stringify(xs.slice(0,40)))}catch(err){}
+ render()}
+function collegeGame(g){return /college|ncaa/i.test(g.league||'')}
+function gameNote(g){
+ if(g.note==='postponed'||g.note==='weather'||g.note==='delayed')return g.note;
+ const s=((g.status||'')+' '+(g.detail||'')).toLowerCase();
+ if(s.indexOf('postpon')>=0)return 'postponed';
+ if(s.indexOf('weather')>=0||s.indexOf('rain')>=0)return 'weather';
+ if(s.indexOf('delay')>=0)return 'delayed';
+ return ''}
+function sportOk(g,sport){
+ if(sport==='Legs')return (g.rows||[]).length+(g.more||0)>0;
+ if(sport==='College')return collegeGame(g);
+ if(sport==='Pro')return !collegeGame(g);
+ if(sport&&sport!=='all')return (g.league||'')===sport;
+ return true}
+function gameOk(g,sport,hide){if(g.state==='in')return sportOk(g,sport);if(hide&&g.state==='post')return false;return sportOk(g,sport)}
+function liveSort(a,b){
+ const f=liveFollow();
+ const d=(f.has(String(a.id))?0:1)-(f.has(String(b.id))?0:1);
+ if(d)return d;
+ const rank=s=>s==='in'?0:s==='pre'?1:2;
+ const r=rank(a.state)-rank(b.state);if(r)return r;
+ return (Date.parse(a.start)||0)-(Date.parse(b.start)||0)}
+function nextLine(L){const g=L&&L.later&&L.later[0];if(!g)return '';
+ return 'Next up: '+g.away.abbr+' @ '+g.home.abbr+' at '+startTime(g)+'.'}
+function liveFilterBar(pool){
+ const sport=liveSport(),hide=liveHide();
+ const leagues=[...new Set(pool.map(g=>g.league).filter(Boolean))];
+ const keys=['all','Legs','College','Pro'].concat(leagues);
+ return h('div',{class:'nchips livebar'},
+  keys.map(k=>h('button',{type:'button',class:sport===k?'on':'',onclick:()=>{try{localStorage.setItem('pb-live-sport',k)}catch(e){}render()}},k==='all'?'All':k)),
+  h('button',{type:'button',class:hide?'on':'',onclick:()=>{try{localStorage.setItem('pb-hide-finals',hide?'0':'1')}catch(e){}render()}},hide?'Show finals':'Hide finals'))}
+function periodWord(g){
+ if(g.state!=='in'||gameNote(g))return '';
+ const d=String(g.detail||g.status||'').trim();
+ if(!d||/^(live|in progress|final)$/i.test(d))return '';
+ const low=d.toLowerCase();
+ if(low.indexOf('shootout')>=0)return 'Shootout';
+ if(/\bot\b/.test(low)||low.indexOf('overtime')>=0)return 'OT';
+ if(low.indexOf('extra')>=0)return 'Extras';
+ return d.length>18?d.slice(0,18):d}
+function startsIn(g){
+ if(!g||g.state!=='pre')return '';
+ const t=Date.parse(g.start);if(isNaN(t))return '';
+ const m=Math.round((t-Date.now())/60000);
+ if(m<0||m>120)return '';
+ return 'starts in '+Math.max(1,m)+' min'}
+function clkText(g){
+ const n=gameNote(g);
+ if(n==='postponed')return 'Postponed';
+ if(n==='weather')return 'Weather delay';
+ if(n==='delayed')return 'Delayed';
+ if(g.state==='post')return 'Final';
+ if(g.state==='in')return '\u00a0';
+ const soon=startsIn(g),at=startTime(g);
+ return soon?soon+' · '+at:at}
+function startTime(g){
+ const t=Date.parse(g&&g.start);
+ if(isNaN(t))return (g&&g.status)||'Soon';
+ let s='';
+ try{s=new Date(t).toLocaleTimeString('en-US',{timeZone:'America/Chicago',hour:'numeric',minute:'2-digit'})}
+ catch(e){s=new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+ return s+' CT'}
 function teamLogo(t){const box=h('span',{class:'tlogo',style:'--c:'+col(t.color)});
  const fb=()=>{box.classList.add('fb');put(box,h('b',{text:(t.abbr||'?').slice(0,4)}))};
  if(t.logo&&/^\/img\/logo\/[A-Za-z0-9]{1,24}\/[ah]\.png$/.test(t.logo)){const i=h('img',{alt:'',decoding:'async'});i.onerror=fb;i.src=t.logo+qs();box.append(i)}
  else fb();return box}
-function statusPill(g){return g.state==='in'?h('span',{class:'pill2 live'},h('i'),'LIVE')
- :h('span',{class:'pill2',text:g.state==='post'?'FINAL':'LATER'})}
+function statusPill(g){const n=gameNote(g);
+ if(n==='postponed')return h('span',{class:'pill2 mute',text:'Postponed'});
+ if(n==='weather')return h('span',{class:'pill2 mute',text:'Weather delay'});
+ if(n==='delayed')return h('span',{class:'pill2 mute',text:'Delayed'});
+ if(g.state==='in')return h('span',{class:'pill2 live'},h('i'),'LIVE');
+ if(g.state==='post')return h('span',{class:'pill2 mute',text:'Final'});
+ return h('span',{class:'pill2',text:'Later'})}
 function scoreboard(g,big){const lead=(a,b)=>g.state!=='pre'&&a.score!=null&&b.score!=null&&a.score>b.score;
  const side=(t,o,r)=>h('div',{class:'st2'+(r?' r':'')+(lead(t,o)?' lead':'')},teamLogo(t),h('div',{class:'tn2'},h('b',{text:t.abbr}),h('span',{text:t.name})));
+ const per=periodWord(g);
  const scr=g.state==='pre'?h('div',{class:'scr'},h('i',null,'@'))
-  :h('div',{class:'scr'},h('span',{class:lead(g.away,g.home)?'lead':'',text:nfmt(g.away.score)||'0'}),h('i',null,'–'),h('span',{class:lead(g.home,g.away)?'lead':'',text:nfmt(g.home.score)||'0'}));
+  :h('div',{class:'scr'},h('span',{class:lead(g.away,g.home)?'lead':'',text:nfmt(g.away.score)||'0'}),h('i',null,'–'),h('span',{class:lead(g.home,g.away)?'lead':'',text:nfmt(g.home.score)||'0'}),per?h('span',{class:'per',text:per}):null);
+ const count=g.state==='in'&&g.count&&/^\d-\d$/.test(String(g.count))?h('div',{class:'clk',text:String(g.count)}):null;
  return h('div',{class:'sb '+g.state+(big?' big':'')},side(g.away,g.home),
-  h('div',{class:'mid'},scr,h('div',{class:'clk',text:g.state==='in'?g.status:g.state==='post'?'Final':startTime(g)})),side(g.home,g.away,true))}
+  h('div',{class:'mid'},scr,count,h('div',{class:'clk',text:clkText(g)})),side(g.home,g.away,true))}
 function progress(g){if(g.state==='pre')return null;const p=g.state==='post'?1:g.elapsed;
  return h('div',{class:'prog',title:p==null?'In progress':Math.round(p*100)+'% played'},h('i',{class:p==null?'unk':null,style:'width:'+(p==null?100:Math.max(2,p*100))+'%'}))}
 function paceBar(r){if(r.value==null||!r.line)return null;
@@ -34777,26 +35024,47 @@ function paceText(r){if(r.state==='cleared')return h('span',{class:'up'},'Cleare
  if(r.pace!=null){const on=r.side==='under'?r.pace<=r.line:r.pace>r.line;return h('span',null,'On pace for ',h('b',{class:on?'up':'down',text:nfmt(r.pace)}))}
  if(r.value!=null&&r.line&&r.side!=='under'&&r.value<r.line)return h('span',{text:nfmt(r.line-r.value)+' to go'});
  if(r.state==='waiting')return h('span',{class:'faint',text:'Not started'});return h('span')}
-function legRow(r){return h('button',{class:'lrow',type:'button',onclick:()=>go('#/s/'+r.pid)},avatar(r.who),
- h('div',{class:'lm'},h('div',{class:'lw'},h('b',{text:r.who}),h('span',{class:'faint',text:' · '}),h('span',{text:r.label||r.text})),h('div',{class:'lt',text:r.text})),
+function legRow(r){const name=r.player?h('span',{class:'sjump',onclick:e=>{e.preventDefault();e.stopPropagation();openNamed(r.player)}},r.player):h('span',{text:r.label||r.text});
+ return h('button',{class:'lrow',type:'button',onclick:()=>go('#/s/'+r.pid)},avatar(r.who),
+ h('div',{class:'lm'},h('div',{class:'lw'},h('b',{text:r.who}),h('span',{class:'faint',text:' · '}),name),h('div',{class:'lt',text:r.text})),
  h('div',{class:'lv'},r.value!=null?h('b',{text:nfmt(r.value)}):null,r.line!=null?h('span',{class:'faint',text:(r.side==='under'?'under ':'of ')+nfmt(r.line)}):null),
  h('div',{class:'lp'},paceBar(r),h('div',{class:'lcap'},paceText(r),h('span',{class:'sc '+(LV_TONE[r.state]||'')+(r.state==='close'?' pulse':''),text:r.chip||'SOON'}))))}
 function legsWord(n){return n+(n===1?' leg':' legs')}
 function gameCard(g){const rows=g.rows||[],c=g.counts||{};
  const tally=[c.cleared?c.cleared+' cleared':'',c.dead?c.dead+' dead':''].filter(Boolean).join(' · ');
- return h('article',{class:'gcard '+g.state},
-  h('button',{class:'gtop',type:'button',style:'--ca:'+col(g.away.color)+';--ch:'+col(g.home.color),onclick:()=>go('#/g/'+g.id),'aria-label':'Open the game page: '+g.away.abbr+' at '+g.home.abbr},
-   h('div',{class:'gmeta'},statusPill(g),g.league?h('span',{text:g.league.toUpperCase()}):null,h('span',{class:'open',text:'Game card →'})),scoreboard(g),progress(g)),
+ const n=rows.length+(g.more||0);
+ const mine=String((S.data&&S.data.me)||'');
+ const yours=!!mine&&rows.some(r=>String(r.key||'')===mine);
+ const on=liveFollow().has(String(g.id));
+ const seen={},faces=[];
+ for(const r of rows){const k=String(r.key||r.who||'');if(seen[k])continue;seen[k]=1;faces.push(face(r.key,r.who));if(faces.length>=4)break}
+ const net=g.broadcast?h('span',{text:g.national?'National · '+g.broadcast:g.broadcast}):null;
+ const series=/mlb|baseball/i.test(g.league||'')&&g.series?h('span',{text:'Game '+g.series}):null;
+ const park=g.venue?h('span',{class:'venue',text:g.venue}):null;
+ return h('article',{class:'gcard '+g.state,style:'--ca:'+col(g.away.color)+';--ch:'+col(g.home.color)},
+  h('button',{class:'gtop',type:'button',onclick:()=>go('#/g/'+g.id),'aria-label':'Open the game page: '+g.away.abbr+' at '+g.home.abbr},
+   h('div',{class:'gmeta'},statusPill(g),g.league?h('span',{text:g.league.toUpperCase()}):null,yours?h('span',{class:'ychip',text:'Yours'}):null,net,series,park,
+    h('span',{class:'gstar'+(on?' on':''),role:'button','aria-label':'Follow this game',onclick:e=>toggleFollow(g.id,e)},on?'★':'☆'),
+    h('span',{class:'open',text:'Game card →'})),scoreboard(g),progress(g)),
   rows.length?h('div',{class:'lrows'},rows.map(legRow)):h('div',{class:'empty sm'},h('span',{text:'No open legs left on this one.'})),
-  h('div',{class:'gfoot'},h('span',{text:legsWord(rows.length+(g.more||0))+' · '+g.people+(g.people===1?' person':' people')}),tally?h('span',{text:tally}):null))}
+  h('div',{class:'gfoot'},h('span',{class:'gfaces'},faces),h('b',{class:'gnum','aria-label':String(n),text:String(n)}),tally?h('span',{text:tally}):null))}
 function gameLine(g){const sc=t=>g.state==='pre'||t.score==null?'':' '+nfmt(t.score);const names=[...new Set(g.rows.map(r=>r.who))];
- return h('button',{class:'gline',type:'button',onclick:()=>go('#/g/'+g.id)},h('span',{class:'gt',text:g.state==='post'?'Final':startTime(g)}),
+ return h('button',{class:'gline '+g.state,type:'button',onclick:()=>go('#/g/'+g.id)},h('span',{class:'gt',text:g.state==='post'?'Final':startTime(g)}),
   h('span',{class:'tms'},teamLogo(g.away),h('span',{text:g.away.abbr+sc(g.away)}),h('span',{class:'faint',text:g.state==='pre'?'@':'–'}),h('span',{text:g.home.abbr+sc(g.home)}),teamLogo(g.home)),
   h('span',{class:'gw2',text:legsWord(g.rows.length)+(names.length?' · '+names.slice(0,3).join(', '):'')}),h('span',{class:'faint arr',text:'→'}))}
 function skelGame(){return h('div',{class:'gcard'},h('div',{class:'gtop',style:'padding-bottom:14px'},h('div',{class:'skl',style:'height:14px;width:35%'}),
  h('div',{class:'skl',style:'height:50px;margin-top:14px'})),h('div',{class:'lrows'},skel(3)))}
-async function loadLive(){const d=await api('/api/live.json'+qs());if(!d)return;for(const k of ['games','later','finals'])d[k]=d[k]||[];
- S.live=d;S.liveAt=Date.now();renderMini();if(S.tab==='live')render()}
+function keepScores(prev,d){if(!prev)return d;const old={};
+ for(const g of [...(prev.games||[]),...(prev.later||[]),...(prev.finals||[])])if(g&&g.id)old[g.id]=g;
+ for(const k of ['games','later','finals'])d[k]=(d[k]||[]).map(g=>{const o=old[g.id];if(!o)return g;const copy=Object.assign({},g);
+  for(const side of ['away','home']){if(copy[side]&&o[side]&&(copy[side].score==null||copy[side].score==='')&&o[side].score!=null)copy[side]=Object.assign({},copy[side],{score:o[side].score})}
+  return copy});
+ return d}
+async function loadLive(){let d=await api('/api/live.json'+qs());if(!d)d=await api('/api/live.json'+qs());if(!d)return;
+ for(const k of ['games','later','finals'])d[k]=d[k]||[];
+ const had=S.live&&((S.live.games||[]).length||(S.live.later||[]).length||(S.live.finals||[]).length);
+ if(!d.games.length&&!d.later.length&&!d.finals.length&&had)return;
+ S.live=keepScores(S.live,d);S.liveAt=Date.now();renderMini();if(S.tab==='live')render()}
 function renderMini(){const el=$('#mini');let src=[];
  if(S.live&&Date.now()-S.liveAt<120000)src=S.live.games.map(g=>({id:g.id,a:g.away.abbr,as:g.away.score,b:g.home.abbr,bs:g.home.score,c:g.status}));
  else if(S.data)src=S.data.games.filter(g=>g.state==='in').map(g=>({id:g.id,a:g.away.name,as:g.away.score,b:g.home.name,bs:g.home.score,c:g.clock}));
@@ -34943,7 +35211,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=139') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=140') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -35859,11 +36127,13 @@ function arrangeHome(el){if(!el)return;const order=homeOrder();
         1)
     html = html.replace(
         "function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
-        "function render(){if(!S.data)return;if(S.finger&&S.tab==='live'){S.paintWait=1;return}"
+        "function render(){if(!S.data)return;if((S.finger||S.stripHold)&&S.tab==='live'){S.paintWait=1;return}"
         "const hold=S.hold;S.hold=0;let id='',kind='';"
+        "const liveX=(()=>{const n=document.querySelector('.lgrid');return n?n.scrollLeft:0})();"
         "if(hold){let best=null,dist=1e9;for(const c of document.querySelectorAll('.oslip,.srow')){const t=Math.abs(c.getBoundingClientRect().top-96);if(t<dist){dist=t;best=c}}"
         "if(best&&dist<280){id=best.dataset.id||'';kind=best.classList.contains('srow')?'srow':'oslip'}}"
         "renderKpis(S.data);const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data);if(S.tab==='overview')arrangeHome(el);paintFind();"
+        "if(S.tab==='live'){const n=document.querySelector('.lgrid');if(n&&liveX){S._liveSet=1;n.scrollLeft=liveX;S._liveSet=0}}"
         "if(hold&&id&&kind){const back=document.querySelector('.'+kind+'[data-id=\"'+id+'\"]');if(back)window.scrollBy(0,back.getBoundingClientRect().top-96)}}",
         1)
     html = html.replace(
@@ -47462,11 +47732,26 @@ def _dash30_num(x):
 def dash30_row(r: dict) -> dict:
     """One leg for the web: who, the leg, the number, the line, where it's headed, and its state. No money."""
     n = r.get("num") or {}
+    uid = r.get("uid")
+    key = str(uid) if uid and str(uid).isdigit() else ""
     return {"pid": r["pid"], "n": r.get("n"), "who": clip(r.get("who") or "", 40), "text": clip(r.get("text") or "", 120),
-            "label": clip(leg_label(r.get("text") or ""), 40), "state": r.get("state") or "waiting",
+            "label": clip(leg_label(r.get("text") or ""), 40), "player": dash_prop_name(r.get("text") or ""),
+            "key": key, "state": r.get("state") or "waiting",
             "chip": LV_LABEL.get(r.get("state") or "", "SOON"), "value": _dash30_num(n.get("value")),
             "line": _dash30_num(n.get("line")), "side": n.get("side") if n.get("side") in ("over", "under") else None,
             "pace": _dash30_num(r.get("pace")), "slip_open": bool(r.get("slip_open"))}
+
+
+def _dash_live_note(ev: dict) -> str:
+    """postponed, weather, or delayed, only when the feed's own words say so."""
+    blob = f"{ev.get('detail') or ''} {ev.get('status_name') or ''}".lower()
+    if "postpon" in blob:
+        return "postponed"
+    if "rain" in blob or "weather" in blob:
+        return "weather"
+    if "delay" in blob:
+        return "delayed"
+    return ""
 
 
 def dash30_game(g: dict) -> dict:
@@ -47494,8 +47779,13 @@ def dash30_game(g: dict) -> dict:
                 "logo": f"/img/logo/{eid}/{key}.png" if t.get("logo") and _DASH30_EID.fullmatch(eid) else None}
     out_rows = [dash30_row(r) for r in rows[:DASH30_ROWS]]
     when = event_time(ev)
+    venue = ev.get("venue") if isinstance(ev.get("venue"), dict) else {}
     out = {"id": eid, "league": LEAGUE_NAMES.get(g["path"] or "", ""), "state": state,
            "status": clip(lv_status_text(dict(ev, final=final)), 30), "elapsed": _dash30_num(el),
+           "detail": clip(ev.get("detail") or "", 24), "note": _dash_live_note(ev),
+           "count": (ev.get("count") or "") if state == "in" else "",
+           "broadcast": clip(ev.get("broadcast") or "", 20), "national": bool(ev.get("national") and ev.get("broadcast")),
+           "series": ev.get("series") or "", "venue": clip(venue.get("name") or "", 40),
            "start": when.isoformat() if when else "", "away": side(away, ac, "a"), "home": side(home, hc, "h"),
            "rows": out_rows, "more": max(0, len(rows) - DASH30_ROWS), "people": len({r["who"] for r in out_rows}),
            "counts": lv_counts(rows)}
