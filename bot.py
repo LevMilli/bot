@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.71"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.73"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -209,6 +209,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.69", "Anyone whose question cap is unlimited can ask again right away."),
     ("1.70", "Pimp answers a sports question in his own voice, and says it out loud when he is in the channel."),
     ("1.71", "Say Hey Pimp, Hey bot, or PIMP-BOT, and he answers. In a voice channel he says it out loud."),
+    ("1.72", "Hi Pimp, Yo bot, and Ok bot wake him the same way Hey Pimp does."),
+    ("1.73", "A wake phrase from a voice channel brings him in, and he says the answer out loud."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -265,6 +267,8 @@ MEMBER_NEWS = [
     ("1.69", "Anyone whose question cap is unlimited can ask again right away."),
     ("1.70", "Pimp answers a sports question in his own voice, and says it out loud when he is in the channel."),
     ("1.71", "Say Hey Pimp, Hey bot, or PIMP-BOT, and he answers. In a voice channel he says it out loud."),
+    ("1.72", "Hi Pimp, Yo bot, and Ok bot wake him the same way Hey Pimp does."),
+    ("1.73", "A wake phrase from a voice channel brings him in, and he says the answer out loud."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -18601,7 +18605,7 @@ def tts_to_file(text: str) -> str:
         import edge_tts
 
         async def _go():
-            await edge_tts.Communicate(text, neural).save(path)
+            await asyncio.wait_for(edge_tts.Communicate(text, neural).save(path), timeout=12)
         asyncio.run(_go())
         if os.path.getsize(path) > 0:
             return path
@@ -18620,7 +18624,11 @@ def tts_to_file(text: str) -> str:
             _sh.rmtree(folder, ignore_errors=True)
             raise RuntimeError("no text-to-speech available (install gTTS or espeak-ng)")
         path = os.path.join(folder, "say.wav")
-        subprocess.run([exe, "-s", "165", "-w", path, text.lstrip("- ") or "."], check=True, timeout=30)
+        spoken = text.lstrip("- ") or "."
+        try:
+            subprocess.run([exe, "-v", "en-us+m3", "-s", "150", "-w", path, spoken], check=True, timeout=30)
+        except Exception:
+            subprocess.run([exe, "-s", "150", "-w", path, spoken], check=True, timeout=30)
         return path
 
 
@@ -18660,17 +18668,17 @@ async def _voice_worker(gid: int):
     while st is not None:
         text = await st["queue"].get()
         vc = st["vc"]
-        for _ in range(10):   # ride out a voice reconnect instead of going silent for good
+        for _ in range(40):   # ride out a voice reconnect instead of going silent for good
             if vc and vc.is_connected():
                 break
-            await asyncio.sleep(3)
+            await asyncio.sleep(0.25)
         if not vc or not vc.is_connected():
             st = VOICE.get(gid)
             continue
         path = None
         try:
             _TTS_PICK.set(st.get("tts") or TTS_VOICES["default"])
-            path = await asyncio.to_thread(tts_to_file, text)
+            path = await asyncio.wait_for(asyncio.to_thread(tts_to_file, text), timeout=25)
             done = asyncio.Event()
             loop = asyncio.get_running_loop()
             vc.play(discord.FFmpegPCMAudio(path), after=lambda e: loop.call_soon_threadsafe(done.set))
@@ -18697,7 +18705,7 @@ async def voice_join(guild_id: int, channel) -> str:
         if st and st["vc"].is_connected():
             await st["vc"].move_to(channel)
         else:
-            vc = await channel.connect(self_deaf=True)
+            vc = await channel.connect(self_deaf=True, self_mute=False)
             st = {"vc": vc, "queue": asyncio.Queue(), "joined": time.monotonic(), "last": time.monotonic()}
             VOICE[guild_id] = st
             st["task"] = asyncio.create_task(_voice_worker(guild_id))
@@ -18720,9 +18728,24 @@ async def voice_leave(guild_id: int) -> bool:
     return True
 
 
+async def pull_up(message) -> str:
+    """Join the author's voice channel so the next line can be said. Empty string when he is in."""
+    guild = getattr(message, "guild", None)
+    if guild is None:
+        return "no server"
+    channel = getattr(getattr(getattr(message, "author", None), "voice", None), "channel", None)
+    if channel is not None:
+        return await voice_join(guild.id, channel)
+    st = VOICE.get(guild.id)
+    vc = st.get("vc") if st else None
+    if vc is not None and vc.is_connected():
+        return ""
+    return "not in a voice channel"
+
+
 async def voice_say(client, guild_id: int, text: str) -> bool:
     st = VOICE.get(guild_id)
-    if not st or not st["vc"] or not st["vc"].is_connected():
+    if not st or not st.get("vc"):
         return False
     line = speakable(text)
     if not line:
@@ -49386,19 +49409,38 @@ def dash30_safe_records(guild_id: int, text: str) -> str:
 # The bot
 # --------------------------------------------------------------------------
 
-_WAKE = re.compile(
-    r"^\s*(?:(?:hey|ok|okay)[,!.\s]+pimp[\s-]*bot|(?:hey|ok|okay)[,!.\s]+(?:pimp|bot)|pimp[\s-]*bot|pimpbot)\b[\s,!:.\-]*",
-    re.I)
+WAKE_PHRASES = (
+    "hey pimp bot", "hi pimp bot", "yo pimp bot", "ok pimp bot", "okay pimp bot",
+    "hey pimp", "hey bot", "hi pimp", "hi bot", "yo pimp", "yo bot",
+    "ok pimp", "ok bot", "okay pimp", "okay bot",
+    "pimp bot", "pimpbot",
+)
 WAKE_ACKS = ("Yeah. What do you need?", "I'm here. What's the question?", "Go ahead.")
 
 
+def _wake_piece(phrase: str) -> str:
+    words = [w for w in re.split(r"[\s-]+", phrase.strip().lower()) if w]
+    return r"[\s,!.\-]+".join(re.escape(w) for w in words)
+
+
+_WAKE = re.compile(
+    r"^\s*(?:" + "|".join(sorted((_wake_piece(p) for p in WAKE_PHRASES), key=len, reverse=True)) + r")\b[\s,!:.\-]*",
+    re.I)
+
+
 def wake_hit(text: str) -> bool:
-    """True when the message starts with Hey Pimp, Hey bot, or PIMP-BOT."""
+    """True when the message starts with a wake phrase, such as Hey Pimp or PIMP-BOT."""
     return bool(_WAKE.match(text or ""))
 
 
 def wake_strip(text: str) -> str:
     return _WAKE.sub("", text or "", count=1).strip()
+
+
+HELP_EXTRA.append(("👋 Wake phrases", (
+    "Start a message with Hey Pimp, Hey bot, Hi Pimp, Hi bot, Yo Pimp, Yo bot, Ok Pimp, Okay bot, or PIMP-BOT. "
+    "He answers the same way as an @mention. The phrase alone gets a short reply. Put the question after it. "
+    "If he is already in a voice channel, he says the answer out loud.")))
 
 
 class PicksBot(discord.Client):
@@ -50018,6 +50060,35 @@ class PicksBot(discord.Client):
         return (isinstance(ref, discord.Message) and ref.author.id == self.user.id
                 and not ref.embeds and not ref.components and bool(ref.content))
 
+    async def say_aloud(self, message, text: str, *, woke: bool = False, **extra) -> None:
+        """Reply, and say it in the author's voice channel when they are in one."""
+        why = "not in a voice channel"
+        try:
+            why = await pull_up(message)
+        except Exception:
+            log.warning("Couldn't join voice to answer", exc_info=True)
+            why = "voice join failed"
+        in_room = why == ""
+        kwargs = {"mention_author": False, "allowed_mentions": discord.AllowedMentions.none()}
+        kwargs.update(extra)
+        if woke and not in_room:
+            kwargs["tts"] = True
+        try:
+            await message.reply(text, **kwargs)
+        except Exception:
+            if not kwargs.get("tts"):
+                raise
+            kwargs.pop("tts", None)
+            await message.reply(text, **kwargs)
+        if in_room and getattr(message, "guild", None) is not None:
+            await voice_answer(self, message.guild.id, text)
+        elif woke and why not in ("", "not in a voice channel", "no server"):
+            try:
+                await message.channel.send("I couldn't speak in voice. " + why, mention_author=False,
+                                           allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                pass
+
     async def handle_ask(self, message: discord.Message):
         question = re.sub(rf"<@!?{self.user.id}>", "", message.content)
         for role_id in self.bot_role_ids(message):
@@ -50027,9 +50098,7 @@ class PicksBot(discord.Client):
         if not question:
             if woke:
                 line = _random.choice(WAKE_ACKS)
-                await message.reply(line, mention_author=False)
-                if getattr(message, "guild", None) is not None:
-                    await voice_answer(self, message.guild.id, line)
+                await self.say_aloud(message, line, woke=True)
                 return
             await message.reply(
                 "Ask me anything, a player, a score, the weather, or a regular question. "
@@ -50060,12 +50129,10 @@ class PicksBot(discord.Client):
             log.exception("Board answer failed")
             board = None
         if board:
-            for i, chunk in enumerate(split_message(board)):
-                if i == 0:
-                    await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                else:
-                    await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
-            await voice_answer(self, message.guild.id, board)
+            chunks = split_message(board)
+            await self.say_aloud(message, chunks[0], woke=woke)
+            for chunk in chunks[1:]:
+                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
             return
         if question_is_weather(question):
             pack = None
@@ -50092,8 +50159,7 @@ class PicksBot(discord.Client):
             except Exception:
                 log.exception("Weather chart failed")
             extra = {"file": weather_file} if weather_file else {}
-            await message.reply(line, mention_author=False, allowed_mentions=discord.AllowedMentions.none(), **extra)
-            await voice_answer(self, message.guild.id, line)
+            await self.say_aloud(message, line, woke=woke, **extra)
             return
 
         user_text = f"Question from {message.author.display_name}: {question}"
@@ -50182,16 +50248,13 @@ class PicksBot(discord.Client):
         if sources:
             answer += "\n\n-# Sources: " + " · ".join(f"<{u}>" for u in sources)
         reply_file = weather_file or chart_file
-        for i, chunk in enumerate(split_message(answer or "I came up empty on that one.")):
-            if i == 0:
-                extra = {"file": reply_file} if reply_file else {}
-                await message.reply(chunk, mention_author=False,
-                                    allowed_mentions=discord.AllowedMentions.none(), **extra)
-            else:
-                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+        chunks = split_message(answer or "I came up empty on that one.")
+        first = {"file": reply_file} if reply_file else {}
+        await self.say_aloud(message, chunks[0], woke=woke, **first)
+        for chunk in chunks[1:]:
+            await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
         if weather_file and chart_file:
             await message.channel.send(file=chart_file, allowed_mentions=discord.AllowedMentions.none())
-        await voice_answer(self, message.guild.id, answer or "")
 
     async def handle_slip(self, message: discord.Message, attachment: discord.Attachment, quiet: bool = False):
         if quiet and not slip_reader_on():
@@ -55017,7 +55080,7 @@ async def voice_join_cmd(interaction: discord.Interaction):
         await interaction.followup.send(err)
         return
     await voice_say(interaction.client, interaction.guild_id, GREETINGS[persona(interaction.guild_id)])
-    await interaction.followup.send(f"🎙️ In **{vs.channel.name}**. Type Hey Pimp, Hey bot, or PIMP-BOT, then the question, and I'll say the answer out loud. "
+    await interaction.followup.send(f"🎙️ In **{vs.channel.name}**. I just said hello there. Type Hey Pimp and a question, and I'll answer out loud. "
                                     "`/voice leave` when you're done (I also leave when the channel empties).")
 
 
