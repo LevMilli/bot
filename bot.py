@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.65"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.69"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -203,6 +203,10 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.63", "More shows this week's open count, settled count, and net. About shows the last clean start in Central, and you can search the commands by name."),
     ("1.64", "Staff can pin a note on the week board, and members can read it. Coins show spent and earned when both exist. A test slip is marked on Staff HQ only."),
     ("1.65", "Just settled can be printed for today. A tagged slip is filed under that member, and the reply says their name. The export keeps the legs tab."),
+    ("1.66", "Open slips mark a slip logged today, and a future sits on its own row. Demon and goblin show when the book printed them."),
+    ("1.67", "Just settled keeps today and yesterday, and older days sit behind another chip. A one-pick slip uses its own layout. An empty open rail stays as tall as one card."),
+    ("1.68", "About shows the version, and the other pages leave that stamp off. Photo rings stay round. The shell refresh is a normal reload."),
+    ("1.69", "Anyone whose question cap is unlimited can ask again right away."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -253,6 +257,10 @@ MEMBER_NEWS = [
     ("1.63", "More shows this week's open count, settled count, and net. About shows the last clean start in Central, and you can search the commands by name."),
     ("1.64", "Staff can pin a note on the week board, and members can read it. Coins show spent and earned when both exist. A test slip is marked on Staff HQ only."),
     ("1.65", "Just settled can be printed for today. A tagged slip is filed under that member, and the reply says their name. The export keeps the legs tab."),
+    ("1.66", "Open slips mark a slip logged today, and a future sits on its own row. Demon and goblin show when the book printed them."),
+    ("1.67", "Just settled keeps today and yesterday, and older days sit behind another chip. A one-pick slip uses its own layout. An empty open rail stays as tall as one card."),
+    ("1.68", "About shows the version, and the other pages leave that stamp off. Photo rings stay round. The shell refresh is a normal reload."),
+    ("1.69", "Anyone whose question cap is unlimited can ask again right away."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -3298,6 +3306,36 @@ _THOUSAND_SHIPPED = {
     'Add a quiet audit line for a void, an edit, and a settle.',
     'Show a void in the audit line with the slip number and the member.',
     'Match the audit line to the slip number.',
+    'Add a new-today dot for a slip logged after midnight Central.',
+    'Use the Central day for the word today on the card.',
+    'Split futures onto their own row, and mark each one future.',
+    'Show demon and goblin labels when the book printed them on the slip.',
+    'Keep the photo circular and the same height as the name line.',
+    'Show the book name in full when the card is wide enough.',
+    'Stop a long name from pushing the book chip onto a second line.',
+    'Keep a tagged slip under the tagged person, with their photo, on the rail.',
+    'Load the photo with the card, not a moment later.',
+    'Skip a second request for a photo this page already has.',
+    'Keep the pays figure the same number the slip sheet shows.',
+    'Add a quiet note when the header count and the leg count differ.',
+    'Keep the signed-in door: a visitor does not get another member\'s photo.',
+    'Let yesterday and today stay as two chips, with older days behind a third chip.',
+    'Give a one-pick slip a layout that does not mimic a six-pick.',
+    'Keep an empty rail the same height as one card so the page does not jump.',
+    'Give the hover lift the same distance as the poster tiles.',
+    'Match the card corner to the settled rows so the page feels like one board.',
+    'Use the same chip color for a book on Mine and on the slip sheet.',
+    'Keep the gold ring on the photo the same weight as My Board.',
+    'Match the Mine title weight to the other section titles.',
+    'Use sentence case for a play name the book printed in capitals.',
+    'Show the version in About, and keep the member pages free of a stamp.',
+    'Keep the photo rings round.',
+    'Show the shell refresh as a normal reload, not a new design.',
+    'Match the nav height on a phone and on a wide screen.',
+    'Use one corner on cards, tiles, and rows.',
+    'Show the empty Mine line in the same voice as the other empty lines.',
+    'Soften the border so a row of cards does not look heavier than the header.',
+    'Leave the score on the right of the team name.',
 }
 for _idea in BOT_THOUSAND:
     if _idea["text"] in _THOUSAND_SHIPPED:
@@ -5667,8 +5705,53 @@ def slip_draft_view(message_id: int, review: bool = True, log_it: bool = True, e
     return v
 
 
+def ask_activity(guild_id: int, user_id: int) -> int:
+    """Slips this person logged or is on, test slips left out. That count picks their question tier."""
+    try:
+        row = db().execute(
+            "SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND (test IS NULL OR test = 0) "
+            "AND (bettor_id = ? OR logged_by = ?)",
+            (guild_id, int(user_id), int(user_id))).fetchone()
+        return int(row["n"] if row else 0)
+    except Exception:
+        return 0
+
+
+def ask_tier_id(guild_id: int, user_id: int) -> str:
+    """Staff use the mods-and-owners cap. Everyone else follows how many slips they have."""
+    if crew_at_least(int(user_id), "mod", guild_id):
+        return "staff"
+    n = ask_activity(guild_id, user_id)
+    if n >= 40:
+        return "core"
+    if n >= 15:
+        return "active"
+    if n >= 5:
+        return "regular"
+    return "new"
+
+
+def ask_allowance(guild_id: int, user_id: int) -> int:
+    """Questions a day for this person. 0 means unlimited."""
+    tier = ask_tier_id(guild_id, user_id)
+    for row in staff_quota_rows(guild_id):
+        if row["id"] == tier:
+            try:
+                return max(0, int(row["n"]))
+            except (TypeError, ValueError):
+                break
+    return ASK_DAILY_LIMIT
+
+
+def ask_unlimited(guild_id: int, user_id: int) -> bool:
+    return ask_allowance(guild_id, user_id) == 0
+
+
 def ask_gate(guild_id: int, user_id: int) -> Optional[str]:
-    """Shares the @mention question limits. Returns why not, or None and counts the question."""
+    """Shares the @mention question limits. Returns why not, or None and counts the question.
+    A person whose cap is unlimited skips the pause and the daily count."""
+    if ask_unlimited(guild_id, user_id):
+        return None
     wait = bot.ask_cooldowns.get(user_id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
     if wait > 0:
         return f"Give me {int(wait) + 1}s before the next question."
@@ -13347,6 +13430,7 @@ def dashboard_data(guild_id: int) -> dict:
     open_ = [{"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
               "what": shown_desc(p), "platform": p["platform"],
               "sport": clip(p["sport"] or "", 24), "cost": p["cost"], "payout": p["payout"],
+              "logged": local_stamp(p["created_at"] or ""),
               "slate": local_day(p["slate_date"]) if _rg(p, "slate_date") else "",
               "slate_on": local_stamp(p["slate_date"]) if _rg(p, "slate_date") else "",
               "side": (_rg(p, "kalshi_side") or "").strip().lower()[:8],
@@ -13369,6 +13453,11 @@ def dashboard_data(guild_id: int) -> dict:
         row["nlegs"] = len(sts)
         row["wait"] = sum(1 for st, _text in sts if st == "open")
         row["first"] = clip(sts[0][1], 80) if len(sts) == 1 else ""
+        blob = " ".join([str(row.get("what") or "")] + [text for _st, text in sts]).lower()
+        if re.search(r"\bdemon\b", blob):
+            row["demon"] = 1
+        if re.search(r"\bgoblin\b", blob):
+            row["goblin"] = 1
     futures = [{"id": p["id"], "who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 90),
                 "due": local_day(p["future_due"]) if p["future_due"] else "",
                 "cost": p["cost"], "payout": p["payout"]}
@@ -21803,9 +21892,9 @@ def dashboard_last_settle(guild_id: int):
 
 
 def dashboard_recent(guild_id: int) -> list[dict]:
-    """Today and yesterday in Central. Hidden and test slips stay off the list."""
+    """Today, yesterday, and the two weeks before that, in Central. Hidden and test slips stay off the list."""
     now = datetime.now(TZ)
-    start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = (now - timedelta(days=14)).replace(hour=0, minute=0, second=0, microsecond=0)
     today = now.strftime("%Y-%m-%d")
     yday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
     hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -21813,7 +21902,7 @@ def dashboard_recent(guild_id: int) -> list[dict]:
         """SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND settled_at >= ?
            AND (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)
            AND (test IS NULL OR test = 0)
-           ORDER BY settled_at DESC, id DESC LIMIT 24""",
+           ORDER BY settled_at DESC, id DESC LIMIT 40""",
         (guild_id, iso(start))).fetchall()
     names = {}
     for person in db().execute(
@@ -21858,7 +21947,7 @@ def dashboard_recent(guild_id: int) -> list[dict]:
         elif stamp == yday:
             day = "yesterday"
         else:
-            day = local_day(p["settled_at"]) if p["settled_at"] else ""
+            day = "older"
         clock = ""
         at = 0
         try:
@@ -34142,7 +34231,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-146';"
+    "const CACHE='pb-shell-149';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -34276,7 +34365,7 @@ header:before{content:"";position:absolute;inset:-40% -10% auto auto;width:520px
 .iconbtn:hover{transform:translateY(-1px)}.iconbtn svg{width:18px;height:18px}
 nav.tabs{max-width:1180px;margin:auto;padding:0 20px;display:flex;gap:4px;position:relative}
 nav.tabs button{display:flex;align-items:center;gap:7px;background:none;border:0;padding:10px 14px 12px;cursor:pointer;
- color:var(--muted);font-weight:650;border-radius:12px 12px 0 0;position:relative}
+ color:var(--muted);font-weight:650;border-radius:12px 12px 0 0;position:relative;min-height:48px}
 nav.tabs button svg{width:17px;height:17px}
 nav.tabs button.on{color:var(--text);background:var(--bg)}
 nav.tabs button.on:after{content:"";position:absolute;left:14px;right:14px;top:0;height:3px;border-radius:0 0 3px 3px;background:var(--brand)}
@@ -34318,7 +34407,7 @@ main{max-width:1180px;margin:auto;padding:16px 20px 48px}
 /* rows */
 .rows{display:flex;flex-direction:column}
 .row{display:grid;grid-template-columns:26px 36px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 6px;
- border:0;border-top:1px solid var(--line);background:none;text-align:left;cursor:pointer;border-radius:12px;
+ border:0;border-top:1px solid var(--line);background:none;text-align:left;cursor:pointer;border-radius:18px;
  transition:background .15s;width:100%}
 .rows>.row:first-child{border-top-color:transparent}
 .row:hover{background:var(--card2)}.row:focus-visible,.it:focus-visible,.tile:focus-visible{outline:2px solid var(--brand2);outline-offset:2px}
@@ -34364,22 +34453,27 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
 .img.sk{min-height:220px}.img.wide{max-width:760px;margin:0 auto;width:100%}
 .img.shot{border-radius:18px;border:1px solid var(--line)}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
-.tile{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:8px;cursor:pointer;text-align:left;
+.tile{background:var(--card2);border:1px solid var(--line);border-radius:18px;padding:8px;cursor:pointer;text-align:left;
  transition:transform .18s,box-shadow .18s;display:block;width:100%}
 .tile:hover{transform:translateY(-3px);box-shadow:0 14px 30px -16px #7B3FE4aa}
 .tile .img{aspect-ratio:5/7;border-radius:10px}.tile .img.sk{min-height:0}
 .tile .cap{display:flex;justify-content:space-between;gap:8px;padding:8px 4px 2px;font-size:13.5px}
 .tile .cap b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.tile .cap span{white-space:nowrap;flex:none}
 .slips{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
-.oslip{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:12px 14px;cursor:pointer;text-align:left;
- display:flex;flex-direction:column;gap:6px;transition:transform .18s,border-color .18s;width:100%}
-.oslip:hover{transform:translateY(-2px);border-color:#7B3FE477}
+.oslip{background:var(--card2);border:1px solid color-mix(in srgb,var(--line) 40%,transparent);border-radius:18px;padding:12px 14px;cursor:pointer;text-align:left;
+ display:flex;flex-direction:column;gap:6px;transition:transform .18s,border-color .18s;width:100%;min-height:168px}
+.oslip:hover,.poster:hover{transform:translateY(-2px)}
+.oslip:hover{border-color:#7B3FE477}
+.oslip.solo .owait{display:none}
+.oslip.solo .ofirst{color:var(--text);font-size:15px;font-weight:650}
+.empty.railempty{min-height:168px;justify-content:center}
 .oslip .w{display:flex;align-items:center;gap:8px;font-weight:700}.oslip .w .chip{margin-left:auto}
 .oslip .w img.ava,.oslip .w .av{flex:none;width:36px;height:36px;min-width:36px;border-radius:50%;box-shadow:0 0 0 2px var(--gold)}
-.oslip .w .oname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oslip .w .oname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:36px;line-height:36px}
+.oslip .ndot{width:8px;height:8px;border-radius:50%;background:var(--gold);flex:none;display:inline-block}
 .oslip .w .slipno{margin-left:auto;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
 .oslip .w .chip{margin-left:6px}
-@media (min-width:900px){.oslip .play{-webkit-line-clamp:unset;display:block;overflow:visible}}
+@media (min-width:900px){.oslip .play{-webkit-line-clamp:unset;display:block;overflow:visible}.oslip .w .chip.bookchip{flex:none;white-space:nowrap;overflow:visible;text-overflow:clip}}
 .imap .irow{display:grid;grid-template-columns:44px 76px minmax(0,1fr);gap:8px 10px;align-items:start;padding:10px 2px;border-top:1px solid var(--line)}
 .imap .inum{font-variant-numeric:tabular-nums;color:var(--faint);font-size:12px;padding-top:3px}
 .ikind{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:99px;padding:3px 7px;border:1px solid var(--line);justify-self:start}
@@ -34416,7 +34510,7 @@ code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--ca
 .sweektot{margin:10px 0 0;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
 .oslip:active,.row.slip.srow:active{background:color-mix(in srgb,var(--brand) 16%,transparent)}
 .oslip .ophoto{display:flex;flex:none;cursor:pointer}
-.minelab{display:flex;justify-content:center;align-items:center;gap:8px;font-weight:700;margin:2px 0 8px}
+.minelab{display:flex;justify-content:center;align-items:center;gap:8px;font-weight:750;margin:2px 0 8px}
 .minelab .mc{font-variant-numeric:tabular-nums;color:var(--muted)}
 /* live games strip */
 .games{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 2px 6px;scrollbar-width:thin;
@@ -34476,7 +34570,7 @@ tr:first-child td{border-top:0}td.n{text-align:right;font-variant-numeric:tabula
 @keyframes pop{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:none}}
 .x{position:absolute;top:14px;right:14px}
 .ph{display:flex;align-items:center;gap:14px;margin:0 50px 16px 0;position:sticky;top:0;z-index:5;background:var(--bg);padding-top:8px}
-.ph .av,.ph img.ava{width:56px;height:56px;border-radius:18px;font-size:24px}
+.ph .av,.ph img.ava{width:56px;height:56px;border-radius:50%;font-size:24px}
 .ph h3{margin:0 0 6px;font-size:22px;font-weight:800;overflow-wrap:anywhere}.ph .sub{color:var(--muted);font-size:13.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:3px}
 .ptaps{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
 .ptaps button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:96px;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:8px 10px;cursor:pointer;color:inherit}
@@ -34883,23 +34977,32 @@ function copyLine(p,e){if(e){e.preventDefault();e.stopPropagation()}
  const done=()=>{e.currentTarget.textContent='Copied'};
  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(line).then(done).catch(()=>{});
  else done()}
+function sentenceCase(s){const t=String(s||'').trim();
+ if(t.length<2||t!==t.toUpperCase()||!/[A-Z]/.test(t))return t;
+ const low=t.toLowerCase();return low.charAt(0).toUpperCase()+low.slice(1)}
+function railEmpty(title,sub){const n=empty(title,sub);if(n&&n.classList)n.classList.add('railempty');return n}
 function openSlipCard(p){const who=p.who||'';
  const pic=face(p.key,who);
  const photo=/^[0-9]{2,20}$/.test(String(p.key||''))?h('span',{class:'ophoto',title:'Open their card',onclick:e=>{e.preventDefault();e.stopPropagation();go('#/p/'+p.key)}},pic):pic;
- const nlegs=+p.nlegs||0,wait=+p.wait||0;
+ const nlegs=+p.nlegs||0,wait=+p.wait||0,solo=nlegs===1;
  const waiting=nlegs?h('div',{class:'owait',text:(wait===1?'1 leg still waiting':wait+' legs still waiting')}):null;
- const title=p.what||'';
+ const title=sentenceCase(p.what||'');
+ const centralToday=ymdCentral(new Date());
+ const fresh=p.logged&&p.logged===centralToday?h('span',{class:'ndot',title:'Logged after midnight Central','aria-label':'New today'}):null;
+ const todayWord=p.slate_on&&p.slate_on===centralToday?h('span',{class:'chip',text:'Today'}):null;
  const sport=p.sport&&title.toLowerCase().indexOf(String(p.sport).toLowerCase())<0?h('span',{class:'chip',text:p.sport}):null;
  const flex=/\bflex\b/i.test(title)&&/\bpick/i.test(title)?h('span',{class:'chip',text:'Flex'}):null;
  const power=/\bpower\b/i.test(title)&&/\bpick/i.test(title)?h('span',{class:'chip',text:'Power'}):null;
+ const demon=p.demon?h('span',{class:'chip',text:'Demon'}):null;
+ const goblin=p.goblin?h('span',{class:'chip',text:'Goblin'}):null;
  const side=/^(yes|no)$/.test(String(p.side||''))?h('span',{class:'chip',text:String(p.side).toUpperCase()}):null;
  const risk=p.cost==null?null:h('span',null,h('span',{class:'muted'},'Risk '),cash(p.cost));
  const pays=p.payout==null?null:h('span',{class:'pays'},h('span',{class:'muted'},'pays '),h('b',null,cash(p.payout)));
- const first=nlegs===1&&p.first?h('div',{class:'ofirst',text:p.first}):null;
+ const first=solo&&p.first?h('div',{class:'ofirst',text:sentenceCase(p.first)}):null;
  const filer=p.filer?h('div',{class:'ofiler',text:'Filed by '+p.filer}):null;
- return h('button',{class:'oslip','data-id':String(p.id),type:'button',onclick:()=>go('#/s/'+p.id)},
-  h('div',{class:'w'},photo,h('span',{class:'oname',text:who}),h('span',{class:'slipno',text:'#'+p.id}),
-   side,sport,flex,power,h('span',{class:'chip',text:p.platform||'Slip'})),
+ return h('button',{class:'oslip'+(solo?' solo':''),'data-id':String(p.id),type:'button',onclick:()=>go('#/s/'+p.id)},
+  h('div',{class:'w'},photo,h('span',{class:'oname',text:who}),fresh,h('span',{class:'slipno',text:'#'+p.id}),
+   side,sport,flex,power,demon,goblin,todayWord,h('span',{class:'chip bookchip',text:p.platform||'Slip'})),
   h('div',{class:'d play',text:title}),first,filer,waiting,
   h('div',{class:'m'},risk,pays),
   h('div',{class:'otools'},
@@ -34995,7 +35098,7 @@ function renderLive(el,d){
    :card('In play','',null,empty('Nothing in play right now','When a game the group is on tips off, it shows up here with every leg.'),next?h('p',{class:'hint',text:next}):null),
   rest.length?card('Later today & finals','',String(rest.length),h('div',{class:'glist'},rest.map(gameLine))):null,
   L&&L.games.length?card('The /live picture','s6',L.updated?'Updated '+L.updated:null,shot(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
-  card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):empty('Nothing open','Log a slip in Discord and it shows up here.')),
+  card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):railEmpty('Nothing open','Log a slip in Discord and it shows up here.')),
   settleCard(d,settled))}
 function clipWord(text,limit){const s=String(text||'').replace(/\s+/g,' ').trim();
  if(s.length<=limit)return s;let head=s.slice(0,limit);const i=head.lastIndexOf(' ');
@@ -35006,6 +35109,7 @@ function settlePick(p,over){settleState();
  const ss=over&&over.ss!=null?over.ss:S.ss,sb=over&&over.sb!=null?over.sb:S.sb;
  if(sd==='today'&&p.day!=='today')return false;
  if(sd==='yesterday'&&p.day!=='yesterday')return false;
+ if(sd==='older'&&p.day!=='older')return false;
  if(sr==='win'&&p.status!=='win')return false;
  if(sr==='loss'&&p.status!=='loss')return false;
  if(sr==='push'&&p.status!=='push')return false;
@@ -35016,7 +35120,7 @@ function settlePick(p,over){settleState();
 function settleChip(on,label,n,fn){return h('button',{type:'button',class:'schip'+(on?' on':''),onclick:fn},
  label+(n==null?'':' '+n))}
 function settleFilters(rows){settleState();
- const days=[['all','All'],['today','Today'],['yesterday','Yesterday']];
+ const days=[['all','All'],['today','Today'],['yesterday','Yesterday'],['older','Older']];
  const results=[['all','All'],['win','Wins'],['loss','Losses'],['push','Pushes']];
  const books=[...new Set(rows.map(p=>p.book).filter(Boolean))];
  const sports=[...new Set(rows.map(p=>p.sport).filter(Boolean))];
@@ -35291,7 +35395,7 @@ function renderTicker(d){const el=$('#ticker');if(!el)return;
  el.classList.add('on');el.classList.toggle('paused',tickPaused())}
 function renderMeta(d){const m=$('#meta');put(m,d.season?h('span',{class:'pill season',text:d.season}):null,
  h('span',{class:'pill'},h('span',{class:'dot'}),'Updated '+(d.updated||new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}))));
- $('#ver').textContent='PIMP-BOT '+d.version+(d.update?' · update '+d.update:'');
+ const ver=$('#ver');if(ver)ver.textContent='';
  const live=document.querySelector('#nav button[data-t=live]');live.querySelector('.badge')?.remove();
  if(d.ticker.length)live.append(h('span',{class:'badge',text:String(d.ticker.length)}))}
 
@@ -35769,7 +35873,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=146') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=149') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
@@ -36091,7 +36195,7 @@ body.v4 .crewstrip .mini{flex:0 0 132px;border:0;background:none;color:inherit;t
 body.v4 .crewstrip .mini b{display:block;margin-top:6px;font-size:13px;white-space:normal}
 body.v4 .crewstrip .img{aspect-ratio:5/7;border-radius:12px;overflow:hidden}
 body.v4 nav.tabs button.on:after{height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--gold),var(--brand2))}
-body.v4 .oslip{border-radius:16px}
+body.v4 .oslip{border-radius:18px}
 body.v4 .oslip .w img.ava,body.v4 .oslip .w .av{flex:none}
 a.staffbtn{display:none}
 body.has-staff a.staffbtn{display:inline-flex;align-items:center;height:38px;padding:0 14px;border-radius:12px;
@@ -36681,9 +36785,9 @@ function renderOpen(el,d){const hide=hiddenIds();
   h('div',{class:'minelab'},h('span',{text:'Mine'}),h('span',{class:'mc',text:String(mineN)})),
   d.me?h('div',{class:'orisk',text:'Open risk '+cash(mineRisk)}):null,
   rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
-  :empty(blank,blankSub)),
+  :railEmpty(blank,blankSub)),
   futs.length?card('Futures','',String(futs.length),h('div',null,futs.map(p=>h('button',{class:'fut',type:'button',onclick:()=>go('#/s/'+p.id)},
-   h('div',{class:'nm',text:p.what||('Slip #'+p.id)}),h('div',{class:'sub',text:(p.who||'')+(p.due?' · settles '+p.due:'')})))))
+   h('div',{class:'nm'},h('span',{text:p.what||('Slip #'+p.id)}),h('span',{class:'chip',text:'Future'})),h('div',{class:'sub',text:(p.who||'')+(p.due?' · settles '+p.due:'')})))))
    :null,
   d.games.length?card('Games we’re on','',gamesCount(d),gamesStrip(d.games)):null)}
 function ticketCard(p){return h('div',{class:'tixwrap'},
@@ -36931,7 +37035,8 @@ function paintLook(){const box=$('#lookgrid');if(!box)return;const s=readLook();
  const ac=$('#lookaccents');if(ac)put(ac,ACCENTS.map(a=>h('button',{class:'acchip'+(s.accent===a?' on':''),type:'button','data-ac':a},
   h('i',{class:'acdot'}),h('span',{text:ACCENT_NAME[a]||a}))))}
 applyLook();applyType();applyCurl();paintScenes();phoneHomeHint();
-if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});
+ navigator.serviceWorker.addEventListener('controllerchange',function(){if(window.__pbReloaded)return;window.__pbReloaded=1;location.reload()});}
 let installEvt=null;
 addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;const head=$('header');
  if(!head||$('#installapp')||matchMedia('(display-mode:standalone)').matches)return;
@@ -49840,19 +49945,10 @@ class PicksBot(discord.Client):
             await message.reply("Questions aren't switched on yet: add a free `GROQ_API_KEY` (console.groq.com) or "
                                 "`GEMINI_API_KEY` (or an `ANTHROPIC_API_KEY`) variable to the bot on Railway.", mention_author=False)
             return
-        wait = self.ask_cooldowns.get(message.author.id, 0) + ASK_COOLDOWN_SECONDS - time.monotonic()
-        if wait > 0:
-            await message.reply(f"Give me {int(wait) + 1}s before the next question.",
-                                mention_author=False)
+        gate = ask_gate(message.guild.id, message.author.id)
+        if gate:
+            await message.reply(gate, mention_author=False)
             return
-        count_key = f"asks:{datetime.now(TZ).date().isoformat()}"
-        used = int(get_setting(message.guild.id, count_key) or 0)
-        if used >= ASK_DAILY_LIMIT:
-            await message.reply(f"That's the server's {ASK_DAILY_LIMIT} questions for today. "
-                                "Back tomorrow.", mention_author=False)
-            return
-        self.ask_cooldowns[message.author.id] = time.monotonic()
-        set_setting(message.guild.id, count_key, str(used + 1))
 
         tagged = None
         for member in (getattr(message, "mentions", None) or []):
