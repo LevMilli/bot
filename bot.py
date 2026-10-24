@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.73"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.75"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -211,6 +211,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.71", "Say Hey Pimp, Hey bot, or PIMP-BOT, and he answers. In a voice channel he says it out loud."),
     ("1.72", "Hi Pimp, Yo bot, and Ok bot wake him the same way Hey Pimp does."),
     ("1.73", "A wake phrase from a voice channel brings him in, and he says the answer out loud."),
+    ("1.74", "He leaves the voice channel shortly after the last person does, and he speaks with the deafen off."),
+    ("1.75", "Say Hey Pimp, Hey bot, or PIMP-BOT out loud in the call, and he answers."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -269,6 +271,8 @@ MEMBER_NEWS = [
     ("1.71", "Say Hey Pimp, Hey bot, or PIMP-BOT, and he answers. In a voice channel he says it out loud."),
     ("1.72", "Hi Pimp, Yo bot, and Ok bot wake him the same way Hey Pimp does."),
     ("1.73", "A wake phrase from a voice channel brings him in, and he says the answer out loud."),
+    ("1.74", "He leaves the voice channel shortly after the last person does, and he speaks with the deafen off."),
+    ("1.75", "Say Hey Pimp, Hey bot, or PIMP-BOT out loud in the call, and he answers."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -18605,12 +18609,12 @@ def tts_to_file(text: str) -> str:
         import edge_tts
 
         async def _go():
-            await asyncio.wait_for(edge_tts.Communicate(text, neural).save(path), timeout=12)
+            await asyncio.wait_for(edge_tts.Communicate(text, neural).save(path), timeout=8)
         asyncio.run(_go())
         if os.path.getsize(path) > 0:
             return path
     except Exception:
-        log.debug("Neural voice failed", exc_info=True)
+        log.warning("Neural voice failed; using the local voice")
     try:
         from gtts import gTTS
         gTTS(text=text, lang="en", tld=tld or "us").save(path)
@@ -18681,14 +18685,27 @@ async def _voice_worker(gid: int):
             path = await asyncio.wait_for(asyncio.to_thread(tts_to_file, text), timeout=25)
             done = asyncio.Event()
             loop = asyncio.get_running_loop()
-            vc.play(discord.FFmpegPCMAudio(path), after=lambda e: loop.call_soon_threadsafe(done.set))
+            failed = []
+
+            def _after(err):
+                if err:
+                    failed.append(err)
+                loop.call_soon_threadsafe(done.set)
+
+            if vc.is_playing():
+                vc.stop()
+            vc.play(discord.FFmpegPCMAudio(path), after=_after)
             try:
                 await asyncio.wait_for(done.wait(), timeout=90)
             except asyncio.TimeoutError:
                 vc.stop()
+            if failed:
+                raise failed[0]
         except Exception:
             log.warning("Voice line failed", exc_info=True)
         finally:
+            if VOICE.get(gid) is st:
+                st["quiet_until"] = time.monotonic() + 0.8
             if path:
                 import shutil
                 shutil.rmtree(os.path.dirname(path), ignore_errors=True)
@@ -18696,7 +18713,360 @@ async def _voice_worker(gid: int):
         st = VOICE.get(gid)
 
 
-async def voice_join(guild_id: int, channel) -> str:
+def heard_command(text: str) -> Optional[tuple[str, str]]:
+    """('wake', question) when a spoken line starts with a wake phrase. None when it does not."""
+    t = " ".join((text or "").split())
+    if not t or not wake_hit(t):
+        return None
+    return ("wake", wake_strip(t))
+
+
+def hear_mode() -> str:
+    """'on' when this install can hear the call, 'key' when a speech key is missing, 'package' otherwise."""
+    try:
+        from discord.ext import voice_recv  # noqa: F401
+    except Exception:
+        return "package"
+    if not (GROQ_API_KEY or GEMINI_API_KEY):
+        return "key"
+    return "on"
+
+
+def pcm_seconds(pcm: bytes) -> float:
+    return len(pcm) / (48000 * 2 * 2)
+
+
+def pcm_loud(pcm: bytes) -> bool:
+    """True when the clip is speech, not a quiet room. Quiet audio makes a transcriber invent words."""
+    if len(pcm) < 4000:
+        return False
+    step = max(2, (len(pcm) // 8000) * 2)
+    acc = n = 0
+    for i in range(0, len(pcm) - 1, step):
+        v = int.from_bytes(pcm[i:i + 2], "little", signed=True)
+        acc += v * v
+        n += 1
+    return n > 0 and (acc / n) ** 0.5 > 300
+
+
+def pcm_wav(pcm: bytes) -> bytes:
+    import wave
+    bio = io.BytesIO()
+    with wave.open(bio, "wb") as handle:
+        handle.setnchannels(2)
+        handle.setsampwidth(2)
+        handle.setframerate(48000)
+        handle.writeframes(pcm)
+    return bio.getvalue()
+
+
+_DAVE_HEAR = False
+
+
+def install_dave_hear() -> bool:
+    """Open call audio before it is turned into sound. Without this, he can talk and still hear nothing."""
+    global _DAVE_HEAR
+    if _DAVE_HEAR:
+        return True
+    try:
+        import davey
+        from discord.ext.voice_recv import opus as vr_opus
+        from discord.ext.voice_recv.rtp import OPUS_SILENCE
+        orig = vr_opus.PacketDecoder._decode_packet
+    except Exception:
+        log.warning("Voice hearing isn't available on this install")
+        return False
+    fails = {"n": 0}
+    media = getattr(getattr(davey, "MediaType", None), "audio", None)
+
+    def _decode(self, packet):
+        if packet and len(getattr(packet, "decrypted_data", b"") or b"") > 3 and media is not None:
+            vc = getattr(getattr(self, "sink", None), "voice_client", None)
+            state = getattr(vc, "_connection", None)
+            session = getattr(state, "dave_session", None)
+            version = getattr(state, "dave_protocol_version", 0) or 0
+            if session is not None and version > 0:
+                user_id = getattr(self, "_cached_id", None)
+                if not user_id and hasattr(vc, "_get_id_from_ssrc"):
+                    try:
+                        user_id = vc._get_id_from_ssrc(self.ssrc)
+                    except Exception:
+                        user_id = None
+                try:
+                    if not user_id:
+                        raise LookupError("no speaker")
+                    packet.decrypted_data = session.decrypt(int(user_id), media, packet.decrypted_data)
+                except Exception as exc:
+                    packet.decrypted_data = OPUS_SILENCE
+                    fails["n"] += 1
+                    if fails["n"] % 50 == 1:
+                        log.warning("Voice decrypt missed a packet (%s)", type(exc).__name__)
+        return orig(self, packet)
+
+    vr_opus.PacketDecoder._decode_packet = _decode
+    _DAVE_HEAR = True
+    return True
+
+
+class HearEar:
+    """Keeps a few seconds of each person's speech. The clip is dropped after it is read."""
+
+    def __init__(self, gid: int):
+        self.gid = gid
+        self.lock = threading.Lock()
+        self.bufs: dict[int, bytearray] = {}
+        self.last: dict[int, float] = {}
+        self.names: dict[int, str] = {}
+
+    def write(self, user, data) -> None:
+        if user is None or getattr(user, "bot", False):
+            return
+        pcm = getattr(data, "pcm", None)
+        if not pcm:
+            return
+        st = VOICE.get(self.gid) or {}
+        now = time.monotonic()
+        if now < st.get("quiet_until", 0):
+            return
+        vc = st.get("vc")
+        if vc is not None and getattr(vc, "is_playing", lambda: False)():
+            return
+        uid = getattr(user, "id", None)
+        if not uid:
+            return
+        name = getattr(user, "display_name", None) or getattr(user, "name", None) or "there"
+        with self.lock:
+            buf = self.bufs.setdefault(int(uid), bytearray())
+            if pcm_seconds(buf) > 8:
+                keep = int(48000 * 2 * 2 * 6)
+                del buf[:-keep]
+            buf.extend(pcm)
+            self.last[int(uid)] = now
+            self.names[int(uid)] = name
+
+    def take_ready(self) -> list[tuple[int, str, bytes]]:
+        now = time.monotonic()
+        ready = []
+        with self.lock:
+            for uid, buf in list(self.bufs.items()):
+                if now - self.last.get(uid, now) < 0.7:
+                    continue
+                pcm = bytes(buf)
+                self.bufs.pop(uid, None)
+                if pcm_seconds(pcm) < 0.45 or not pcm_loud(pcm):
+                    continue
+                ready.append((uid, self.names.get(uid) or "there", pcm))
+        return ready
+
+
+async def _hear_groq(wav: bytes) -> str:
+    import aiohttp
+    form = aiohttp.FormData()
+    form.add_field("file", wav, filename="ear.wav", content_type="audio/wav")
+    form.add_field("model", "whisper-large-v3-turbo")
+    form.add_field("language", "en")
+    form.add_field("response_format", "json")
+    form.add_field("temperature", "0")
+    timeout = aiohttp.ClientTimeout(total=12)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post("https://api.groq.com/openai/v1/audio/transcriptions", data=form,
+                                headers={"Authorization": f"Bearer {GROQ_API_KEY}"}) as resp:
+            if resp.status != 200:
+                log.warning("Hearing transcription failed: HTTP %s", resp.status)
+                return ""
+            data = await resp.json(content_type=None)
+    return " ".join(str((data or {}).get("text") or "").split())
+
+
+async def _hear_gemini(wav: bytes) -> str:
+    import aiohttp
+    body = {"contents": [{"parts": [
+        {"text": "Transcribe the English speech. Reply with only the words spoken."},
+        {"inline_data": {"mime_type": "audio/wav", "data": base64.standard_b64encode(wav).decode()}},
+    ]}]}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    timeout = aiohttp.ClientTimeout(total=14)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(url, json=body, headers={"x-goog-api-key": GEMINI_API_KEY}) as resp:
+            if resp.status != 200:
+                log.warning("Hearing transcription failed: HTTP %s", resp.status)
+                return ""
+            data = await resp.json(content_type=None)
+    parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+    return " ".join(str(p.get("text") or "") for p in parts if isinstance(p, dict)).strip()
+
+
+async def hear_text(pcm: bytes) -> str:
+    """Turn one spoken clip into words, then drop the clip. Nothing is saved."""
+    if not pcm_loud(pcm):
+        return ""
+    wav = pcm_wav(pcm)
+    if GROQ_API_KEY:
+        try:
+            text = await _hear_groq(wav)
+            if text:
+                return text
+        except Exception:
+            log.warning("Hearing transcription failed", exc_info=True)
+    if GEMINI_API_KEY:
+        try:
+            return await _hear_gemini(wav)
+        except Exception:
+            log.warning("Hearing transcription failed", exc_info=True)
+    return ""
+
+
+def _voice_listen(guild_id: int, st: dict) -> bool:
+    """Start hearing this call. Speaking still works when this returns False."""
+    vc = st.get("vc")
+    if vc is None or not hasattr(vc, "listen") or st.get("ear"):
+        return bool(st.get("ear"))
+    if hear_mode() != "on" or not install_dave_hear():
+        return False
+    try:
+        from discord.ext import voice_recv
+        ear = HearEar(guild_id)
+        st["ear"] = ear
+        vc.listen(voice_recv.BasicSink(ear.write))
+        if st.get("hear") is None or st["hear"].done():
+            st["hear"] = asyncio.create_task(_hear_watch(guild_id))
+        log.info("Voice hearing is on in guild %s", guild_id)
+        return True
+    except Exception:
+        log.warning("Joined voice, but hearing failed", exc_info=True)
+        st.pop("ear", None)
+        return False
+
+
+async def _say_in_room(guild_id: int, text: str) -> None:
+    channel = (VOICE.get(guild_id) or {}).get("text")
+    if channel is None or not text:
+        return
+    try:
+        chunks = split_message(text)
+        for chunk in chunks[:3]:
+            await channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+    except Exception:
+        log.warning("Couldn't post the spoken answer")
+
+
+async def answer_spoken(client, guild_id: int, user, question: str) -> None:
+    """Answer a question spoken in the call, and say it out loud."""
+    name = getattr(user, "display_name", None) or getattr(user, "name", None) or "there"
+    uid = int(getattr(user, "id", 0) or 0)
+    question = (question or "").strip()
+    if not question:
+        await voice_say(client, guild_id, _random.choice(WAKE_ACKS))
+        return
+    if not ask_enabled():
+        await voice_say(client, guild_id, "Questions aren't switched on yet.")
+        return
+    gate = ask_gate(guild_id, uid) if uid else None
+    if gate:
+        await voice_say(client, guild_id, gate)
+        return
+    channel = (VOICE.get(guild_id) or {}).get("text")
+    answer = None
+    try:
+        answer = assistant_board_answer(
+            guild_id, str(uid), name, question, channel_id=getattr(channel, "id", None))
+    except Exception:
+        log.exception("Board answer failed")
+        answer = None
+    if not answer and question_is_weather(question):
+        try:
+            pack = await asyncio.wait_for(answer_weather(question), timeout=14)
+        except Exception:
+            pack = None
+        if pack and pack.get("hours"):
+            answer = weather_spoken(pack, rain_only=bool(re.search(r"\b(delay|delayed)\b", question, re.I)))
+        else:
+            answer = "I couldn't find that place."
+    if not answer:
+        user_text = f"Question from {name}: {question}"
+        try:
+            context = build_ask_context(guild_id, str(uid), question)
+        except Exception:
+            log.warning("Spoken context failed", exc_info=True)
+            context = ""
+        if context:
+            user_text += "\n\nThe group's own data:\n" + context
+        bot_name = getattr(getattr(client, "user", None), "display_name", None) or "Pimp"
+        system = ASK_SYSTEM.format(bot_name=bot_name, today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
+        system += "\n\n" + pimp_voice_block(guild_id) + "\n"
+        system += ("They asked out loud in the voice channel. Two to six sentences. Address them by name. "
+                   "On a sports question, name the player, the number, or the game.")
+        ctx = {"guild_id": guild_id, "asker_key": str(uid), "chart": None}
+        token = ASK_DATA.set(ctx)
+        try:
+            searching = question_needs_search(question)
+            got, sources = await asyncio.wait_for(
+                ask_any(system, user_text, search=searching), timeout=18 if searching else 12)
+            answer = got
+            if sources and answer:
+                answer += "\n\n-# Sources: " + " · ".join(f"<{u}>" for u in sources)
+        except Exception:
+            log.exception("Spoken question failed")
+            answer = "I couldn't get an answer just now. Try again in a minute."
+        finally:
+            ASK_DATA.reset(token)
+    spoken = spoken_take(answer or "")
+    if spoken:
+        await voice_say(client, guild_id, spoken)
+    if answer:
+        await _say_in_room(guild_id, f"**{name}:** {question}\n\n{answer}")
+
+
+async def _hear_utterance(gid: int, uid: int, name: str, pcm: bytes) -> None:
+    st = VOICE.get(gid)
+    if not st or st.get("hearing"):
+        return
+    st["hearing"] = True
+    try:
+        text = await hear_text(pcm)
+        st = VOICE.get(gid)
+        if not st or not text:
+            return
+        cmd = heard_command(text)
+        opens = st.setdefault("open_ears", {})
+        if cmd is None:
+            if time.monotonic() > opens.get(uid, 0):
+                return
+            question = text
+            opens.pop(uid, None)
+        else:
+            question = cmd[1]
+            if not question:
+                opens[uid] = time.monotonic() + 12
+                await voice_say(st.get("client"), gid, _random.choice(WAKE_ACKS))
+                return
+            opens.pop(uid, None)
+        log.info("Heard a wake phrase from %s", name)
+        user = type("Speaker", (), {"id": uid, "display_name": name, "bot": False})()
+        await answer_spoken(st.get("client"), gid, user, question)
+    except Exception:
+        log.warning("Hearing a line failed", exc_info=True)
+    finally:
+        live = VOICE.get(gid)
+        if live is not None:
+            live["hearing"] = False
+
+
+async def _hear_watch(gid: int) -> None:
+    try:
+        while gid in VOICE:
+            await asyncio.sleep(0.3)
+            st = VOICE.get(gid)
+            ear = st.get("ear") if st else None
+            if ear is None:
+                continue
+            for uid, name, pcm in ear.take_ready():
+                asyncio.create_task(_hear_utterance(gid, uid, name, pcm))
+    except asyncio.CancelledError:
+        return
+
+
+async def voice_join(guild_id: int, channel, text=None, client=None) -> str:
     ok, why = voice_ready()
     if not ok:
         return f"I can't talk in voice on this install: {why}."
@@ -18705,10 +19075,24 @@ async def voice_join(guild_id: int, channel) -> str:
         if st and st["vc"].is_connected():
             await st["vc"].move_to(channel)
         else:
-            vc = await channel.connect(self_deaf=True, self_mute=False)
+            recv_cls = None
+            try:
+                from discord.ext import voice_recv
+                recv_cls = voice_recv.VoiceRecvClient
+            except Exception:
+                pass
+            kwargs = {"self_deaf": False, "self_mute": False}
+            if recv_cls is not None:
+                kwargs["cls"] = recv_cls
+            vc = await channel.connect(**kwargs)
             st = {"vc": vc, "queue": asyncio.Queue(), "joined": time.monotonic(), "last": time.monotonic()}
             VOICE[guild_id] = st
             st["task"] = asyncio.create_task(_voice_worker(guild_id))
+        if text is not None:
+            st["text"] = text
+        if client is not None:
+            st["client"] = client
+        _voice_listen(guild_id, st)
     except Exception as exc:
         log.exception("Voice connect failed")
         return f"I couldn't join voice ({type(exc).__name__}). Check I can Connect and Speak in that channel."
@@ -18719,26 +19103,39 @@ async def voice_leave(guild_id: int) -> bool:
     st = VOICE.pop(guild_id, None)
     if not st:
         return False
+    for key in ("hear", "task"):
+        job = st.get(key)
+        if job:
+            job.cancel()
+    vc = st.get("vc")
     try:
-        if st.get("task"):
-            st["task"].cancel()
-        await st["vc"].disconnect(force=True)
+        if vc is not None and hasattr(vc, "stop_listening"):
+            vc.stop_listening()
+    except Exception:
+        pass
+    try:
+        if vc is not None:
+            await vc.disconnect(force=True)
     except Exception:
         pass
     return True
 
 
-async def pull_up(message) -> str:
+async def pull_up(message, client=None) -> str:
     """Join the author's voice channel so the next line can be said. Empty string when he is in."""
     guild = getattr(message, "guild", None)
     if guild is None:
         return "no server"
     channel = getattr(getattr(getattr(message, "author", None), "voice", None), "channel", None)
     if channel is not None:
-        return await voice_join(guild.id, channel)
+        return await voice_join(guild.id, channel, text=getattr(message, "channel", None), client=client)
     st = VOICE.get(guild.id)
     vc = st.get("vc") if st else None
     if vc is not None and vc.is_connected():
+        if st is not None and getattr(message, "channel", None) is not None:
+            st["text"] = message.channel
+        if st is not None and client is not None:
+            st["client"] = client
         return ""
     return "not in a voice channel"
 
@@ -18758,16 +19155,34 @@ async def voice_say(client, guild_id: int, text: str) -> bool:
     return True
 
 
+def voice_humans(vc) -> list:
+    """People in his voice channel. Bots, including him, do not count."""
+    channel = getattr(vc, "channel", None)
+    me = getattr(getattr(vc, "guild", None), "me", None)
+    my_id = getattr(me, "id", None)
+    out = []
+    for m in list(getattr(channel, "members", []) or []):
+        if getattr(m, "bot", False) or (my_id and getattr(m, "id", None) == my_id):
+            continue
+        their = getattr(getattr(m, "voice", None), "channel", None)
+        if their is not None and their is not channel:
+            continue
+        out.append(m)
+    return out
+
+
 async def voice_idle(client: discord.Client, now: Optional[datetime] = None) -> None:
+    """Leave once the channel has been empty of people for a short moment, or the shift is over."""
     for gid, st in list(VOICE.items()):
         vc = st["vc"]
-        humans = [m for m in getattr(getattr(vc, "channel", None), "members", []) if not getattr(m, "bot", False)]
-        if humans:
+        if not vc.is_connected() or time.monotonic() - st["joined"] > VOICE_MAX_HOURS * 3600:
+            await voice_leave(gid)
+            continue
+        if voice_humans(vc):
             st.pop("empty_since", None)
-        else:
-            st.setdefault("empty_since", time.monotonic())
-        if (not vc.is_connected() or time.monotonic() - st.get("empty_since", time.monotonic()) > 300
-                or time.monotonic() - st["joined"] > VOICE_MAX_HOURS * 3600):
+            continue
+        st.setdefault("empty_since", time.monotonic())
+        if time.monotonic() - st["empty_since"] > 20:
             await voice_leave(gid)
 
 
@@ -49440,7 +49855,7 @@ def wake_strip(text: str) -> str:
 HELP_EXTRA.append(("👋 Wake phrases", (
     "Start a message with Hey Pimp, Hey bot, Hi Pimp, Hi bot, Yo Pimp, Yo bot, Ok Pimp, Okay bot, or PIMP-BOT. "
     "He answers the same way as an @mention. The phrase alone gets a short reply. Put the question after it. "
-    "If he is already in a voice channel, he says the answer out loud.")))
+    "In the call, say the same phrase out loud and he answers there too.")))
 
 
 class PicksBot(discord.Client):
@@ -49957,6 +50372,22 @@ class PicksBot(discord.Client):
         except Exception:
             log.warning("Couldn't close the dashboard for a removed member")
 
+    async def on_voice_state_update(self, member, before, after):
+        """Leave a few seconds after the last person does. Stay while anyone is still in the channel."""
+        guild = getattr(member, "guild", None)
+        if guild is None or guild.id not in VOICE:
+            return
+        if self.user is not None and getattr(member, "id", None) == self.user.id:
+            return
+        gid = guild.id
+        await asyncio.sleep(12)
+        st = VOICE.get(gid)
+        if not st:
+            return
+        vc = st.get("vc")
+        if vc is None or not vc.is_connected() or not voice_humans(vc):
+            await voice_leave(gid)
+
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
@@ -50064,7 +50495,7 @@ class PicksBot(discord.Client):
         """Reply, and say it in the author's voice channel when they are in one."""
         why = "not in a voice channel"
         try:
-            why = await pull_up(message)
+            why = await pull_up(message, self)
         except Exception:
             log.warning("Couldn't join voice to answer", exc_info=True)
             why = "voice join failed"
@@ -55075,12 +55506,19 @@ async def voice_join_cmd(interaction: discord.Interaction):
         await interaction.response.send_message("Hop in a voice channel first, then run this.", ephemeral=True)
         return
     await interaction.response.defer(thinking=True)
-    err = await voice_join(interaction.guild_id, vs.channel)
+    err = await voice_join(interaction.guild_id, vs.channel, text=interaction.channel, client=interaction.client)
     if err:
         await interaction.followup.send(err)
         return
     await voice_say(interaction.client, interaction.guild_id, GREETINGS[persona(interaction.guild_id)])
-    await interaction.followup.send(f"🎙️ In **{vs.channel.name}**. I just said hello there. Type Hey Pimp and a question, and I'll answer out loud. "
+    mode = hear_mode()
+    if mode == "on":
+        how = "Say Hey Pimp, Hey bot, or PIMP-BOT out loud, or type it."
+    elif mode == "key":
+        how = "Type Hey Pimp and a question. Hearing the mic needs GROQ_API_KEY or GEMINI_API_KEY on Railway."
+    else:
+        how = "Type Hey Pimp and a question. Hearing the mic needs the new requirements.txt uploaded with this bot."
+    await interaction.followup.send(f"🎙️ In **{vs.channel.name}**. I just said hello there. {how} "
                                     "`/voice leave` when you're done (I also leave when the channel empties).")
 
 
