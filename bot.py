@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.69"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.71"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -207,6 +207,8 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.67", "Just settled keeps today and yesterday, and older days sit behind another chip. A one-pick slip uses its own layout. An empty open rail stays as tall as one card."),
     ("1.68", "About shows the version, and the other pages leave that stamp off. Photo rings stay round. The shell refresh is a normal reload."),
     ("1.69", "Anyone whose question cap is unlimited can ask again right away."),
+    ("1.70", "Pimp answers a sports question in his own voice, and says it out loud when he is in the channel."),
+    ("1.71", "Say Hey Pimp, Hey bot, or PIMP-BOT, and he answers. In a voice channel he says it out loud."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -261,6 +263,8 @@ MEMBER_NEWS = [
     ("1.67", "Just settled keeps today and yesterday, and older days sit behind another chip. A one-pick slip uses its own layout. An empty open rail stays as tall as one card."),
     ("1.68", "About shows the version, and the other pages leave that stamp off. Photo rings stay round. The shell refresh is a normal reload."),
     ("1.69", "Anyone whose question cap is unlimited can ask again right away."),
+    ("1.70", "Pimp answers a sports question in his own voice, and says it out loud when he is in the channel."),
+    ("1.71", "Say Hey Pimp, Hey bot, or PIMP-BOT, and he answers. In a voice channel he says it out loud."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -6154,7 +6158,7 @@ async def slip_review_text(client, guild_id: int, asker, slip: dict, question: s
         return numbers_breakdown(data or [], injuries, group_notes) + "\n-# Not logged. Tap 🧾 to file it. Staff can put it under someone else."
     system = ASK_SYSTEM.format(bot_name=getattr(getattr(client, "user", None), "display_name", "PIMP-BOT"),
                                today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
-    system += f"\n\nYour voice in this server: {persona_prompt(guild_id)}.\n\n" + REVIEW_RULES
+    system += "\n\n" + pimp_voice_block(guild_id) + "\n\n" + REVIEW_RULES
     system += ("\n\nYou can't search the web for this one: base every leg only on the game logs, injury report and "
                "group history in the message. If a leg has no numbers there, say so instead of guessing.")
     if slip.get("status") in ("win", "loss", "push"):
@@ -17420,8 +17424,31 @@ def persona(guild_id: int) -> str:
     return p if p in PERSONAS else "default"
 
 
+PIMP_CHARACTER = """You are Pimp. You are in this group chat as one of the guys, the one who actually watches the games.
+
+How you sound:
+- Short and specific. Lead with the answer. Use their name. Two to eight sentences unless they asked for a list.
+- Dry humor is fine. You do not lecture, and you do not sound like a help desk.
+- No markdown headings.
+
+Sports questions are your home. Scores, who plays, schedules, injuries, form, matchups, and the weather at the game.
+- Name the player, the team, the opponent, and the time in Central when you have it.
+- Use this group's notes and records when they are in the message, and say that they came from the group.
+- If a fact is missing, say so. Never invent a stat, a score, a lineup, or a start time.
+- Never call a pick a lock, a sure thing, or guaranteed. Never tell them to bet more, to chase, or to raise a stake. Leave odds and line movement out.
+
+Any other question still gets a straight answer, in the same voice, without dragging a game into it.
+When you are speaking out loud, the same answer has to make sense with no links and no symbols."""
+
+
 def persona_prompt(guild_id: int) -> str:
-    return PERSONAS[persona(guild_id)][1]
+    mood = PERSONAS[persona(guild_id)][1]
+    return f"Pimp, one of the guys in this group. Mood: {mood}"
+
+
+def pimp_voice_block(guild_id: int) -> str:
+    """The character, plus the server's mood. The mood changes the energy, not the facts."""
+    return PIMP_CHARACTER + f"\n\nMood tonight: {PERSONAS[persona(guild_id)][1]}. You are still Pimp."
 
 
 def voice_line(guild_id: int, kind: str, **kw) -> Optional[str]:
@@ -18521,12 +18548,21 @@ async def post_show(client, guild_id: int, channel, now: Optional[datetime] = No
 # ---- voice ------------------------------------------------------------------------------------------------
 
 VOICE: dict[int, dict] = {}
-GREETINGS = {"default": "PIMP-BOT is in the building. Let's sweat.",
+GREETINGS = {"default": "Pimp is in. Ask me about the games.",
              "hype": "LET'S GOOO! PIMP-BOT IS IN THE BUILDING! Who's cashing tonight?",
              "analyst": "PIMP-BOT connected. Monitoring open positions.",
              "trash": "Alright, I'm here. Try not to embarrass yourselves.",
              "announcer": "Good evening and welcome to tonight's sweat, brought to you by PIMP-BOT!"}
 VOICE_MAX_HOURS = 8
+# Neural voice, then a gTTS accent if that voice is unavailable. One male voice per mood.
+TTS_VOICES = {
+    "default": ("en-US-ChristopherNeural", "us"),
+    "hype": ("en-US-GuyNeural", "com.au"),
+    "analyst": ("en-GB-RyanNeural", "co.uk"),
+    "trash": ("en-US-EricNeural", "ca"),
+    "announcer": ("en-US-AndrewNeural", "ie"),
+}
+_TTS_PICK: contextvars.ContextVar = contextvars.ContextVar("tts_pick", default=TTS_VOICES["default"])
 
 
 def voice_ready() -> tuple[bool, str]:
@@ -18556,13 +18592,24 @@ def voice_ready() -> tuple[bool, str]:
 
 
 def tts_to_file(text: str) -> str:
-    """Speak text into a temp audio file: Google TTS (free), or espeak-ng if that's unavailable.
+    """Speak text into a temp audio file. Pimp's neural voice first, then Google TTS, then espeak-ng.
     The caller deletes the file's folder."""
     folder = tempfile.mkdtemp()
+    neural, tld = _TTS_PICK.get()
+    path = os.path.join(folder, "say.mp3")
+    try:
+        import edge_tts
+
+        async def _go():
+            await edge_tts.Communicate(text, neural).save(path)
+        asyncio.run(_go())
+        if os.path.getsize(path) > 0:
+            return path
+    except Exception:
+        log.debug("Neural voice failed", exc_info=True)
     try:
         from gtts import gTTS
-        path = os.path.join(folder, "say.mp3")
-        gTTS(text=text, lang="en", tld="us").save(path)
+        gTTS(text=text, lang="en", tld=tld or "us").save(path)
         return path
     except Exception:
         import shutil
@@ -18586,6 +18633,28 @@ def speakable(text: str) -> str:
     return " ".join(t.split())[:300]
 
 
+def spoken_take(text: str) -> str:
+    """The first two sentences, cleaned for the voice channel."""
+    raw = re.sub(r"(?im)^-#.*$|sources:.*$", "", text or "")
+    t = speakable(raw)
+    bits = [b.strip() for b in re.split(r"(?<=[.!?])\s+", t) if b.strip()]
+    out, n = [], 0
+    for b in bits:
+        out.append(b)
+        n += len(b)
+        if len(out) >= 2 or n > 220:
+            break
+    return " ".join(out)[:280]
+
+
+async def voice_answer(client, guild_id: int, text: str) -> bool:
+    """Say the answer out loud when Pimp is already in this server's voice channel."""
+    line = spoken_take(text)
+    if not line:
+        return False
+    return await voice_say(client, guild_id, line)
+
+
 async def _voice_worker(gid: int):
     st = VOICE.get(gid)
     while st is not None:
@@ -18600,6 +18669,7 @@ async def _voice_worker(gid: int):
             continue
         path = None
         try:
+            _TTS_PICK.set(st.get("tts") or TTS_VOICES["default"])
             path = await asyncio.to_thread(tts_to_file, text)
             done = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -18657,6 +18727,7 @@ async def voice_say(client, guild_id: int, text: str) -> bool:
     line = speakable(text)
     if not line:
         return False
+    st["tts"] = TTS_VOICES.get(persona(guild_id), TTS_VOICES["default"])
     if st.get("task") is None or st["task"].done():
         st["task"] = asyncio.create_task(_voice_worker(guild_id))
     if st["queue"].qsize() < 6:
@@ -49315,6 +49386,21 @@ def dash30_safe_records(guild_id: int, text: str) -> str:
 # The bot
 # --------------------------------------------------------------------------
 
+_WAKE = re.compile(
+    r"^\s*(?:(?:hey|ok|okay)[,!.\s]+pimp[\s-]*bot|(?:hey|ok|okay)[,!.\s]+(?:pimp|bot)|pimp[\s-]*bot|pimpbot)\b[\s,!:.\-]*",
+    re.I)
+WAKE_ACKS = ("Yeah. What do you need?", "I'm here. What's the question?", "Go ahead.")
+
+
+def wake_hit(text: str) -> bool:
+    """True when the message starts with Hey Pimp, Hey bot, or PIMP-BOT."""
+    return bool(_WAKE.match(text or ""))
+
+
+def wake_strip(text: str) -> str:
+    return _WAKE.sub("", text or "", count=1).strip()
+
+
 class PicksBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -49851,7 +49937,7 @@ class PicksBot(discord.Client):
             await ask_channel_message(self, message)
             return
         images = image_attachments(message)
-        mentioned = self.user is not None and self.mentions_me(message)
+        mentioned = self.user is not None and (self.mentions_me(message) or wake_hit(getattr(message, "content", "") or ""))
         intent = slip_intent(getattr(message, "content", "")) if images or mentioned else "log"
         if images and (self.is_receipts_channel(message.channel) or mentioned):
             if intent == "ask":
@@ -49880,7 +49966,7 @@ class PicksBot(discord.Client):
             await self.log_slips(message, images, quiet=True)
             return
         if mentioned and not images:
-            words = text_slip_words(message)
+            words = wake_strip(text_slip_words(message))
             route = text_route(words)
             if route == "status":
                 await self.slip_status(message)
@@ -49926,6 +50012,8 @@ class PicksBot(discord.Client):
         Replies to pick cards don't count, so "nice hit" doesn't spend a question."""
         if re.search(rf"<@!?{self.user.id}>", message.content) or self.bot_role_ids(message):
             return True
+        if wake_hit(getattr(message, "content", "") or ""):
+            return True
         ref = message.reference.resolved if message.reference else None
         return (isinstance(ref, discord.Message) and ref.author.id == self.user.id
                 and not ref.embeds and not ref.components and bool(ref.content))
@@ -49934,11 +50022,19 @@ class PicksBot(discord.Client):
         question = re.sub(rf"<@!?{self.user.id}>", "", message.content)
         for role_id in self.bot_role_ids(message):
             question = question.replace(f"<@&{role_id}>", "")
-        question = question.strip()
+        woke = wake_hit(message.content or "")
+        question = wake_strip(question).strip()
         if not question:
+            if woke:
+                line = _random.choice(WAKE_ACKS)
+                await message.reply(line, mention_author=False)
+                if getattr(message, "guild", None) is not None:
+                    await voice_answer(self, message.guild.id, line)
+                return
             await message.reply(
-                "Ask me anything, a player, a score, the weather, or a regular question, like "
-                f"`@{self.user.display_name} how has donk played on LAN lately?`",
+                "Ask me anything, a player, a score, the weather, or a regular question. "
+                "Start with Hey Pimp, Hey bot, or PIMP-BOT, or @"
+                f"{self.user.display_name}.",
                 mention_author=False)
             return
         if not ask_enabled():
@@ -49969,6 +50065,7 @@ class PicksBot(discord.Client):
                     await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
                 else:
                     await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+            await voice_answer(self, message.guild.id, board)
             return
         if question_is_weather(question):
             pack = None
@@ -49996,6 +50093,7 @@ class PicksBot(discord.Client):
                 log.exception("Weather chart failed")
             extra = {"file": weather_file} if weather_file else {}
             await message.reply(line, mention_author=False, allowed_mentions=discord.AllowedMentions.none(), **extra)
+            await voice_answer(self, message.guild.id, line)
             return
 
         user_text = f"Question from {message.author.display_name}: {question}"
@@ -50007,8 +50105,8 @@ class PicksBot(discord.Client):
             user_text += "\n\nThe group's own data:\n" + context
         system = ASK_SYSTEM.format(bot_name=self.user.display_name,
                                    today=datetime.now(TZ).strftime("%A, %B %d, %Y"))
-        system += (f"\n\nYour voice in this server: {persona_prompt(message.guild.id)}.\n"
-                   "Talk like a person in this group chat, not a help desk. Two to eight sentences unless they asked "
+        system += "\n\n" + pimp_voice_block(message.guild.id) + "\n"
+        system += ("Talk like a person in this group chat, not a help desk. Two to eight sentences unless they asked "
                    "for a list. Address them by name. Be specific to what they asked. On a sports question, "
                    "name the player, the number, or the game. On any other question, answer it straight and "
                    "do not drag in a player, a pick, or a game they did not ask about. "
@@ -50093,6 +50191,7 @@ class PicksBot(discord.Client):
                 await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
         if weather_file and chart_file:
             await message.channel.send(file=chart_file, allowed_mentions=discord.AllowedMentions.none())
+        await voice_answer(self, message.guild.id, answer or "")
 
     async def handle_slip(self, message: discord.Message, attachment: discord.Attachment, quiet: bool = False):
         if quiet and not slip_reader_on():
@@ -54901,7 +55000,7 @@ async def show_cmd(interaction: discord.Interaction):
     await interaction.followup.send(embed=e, **kwargs)
 
 
-voice_group = app_commands.Group(name="voice", description="Have the bot call cashes out loud in a voice channel",
+voice_group = app_commands.Group(name="voice", description="Pimp joins voice, calls cashes, and says sports answers out loud",
                                  guild_only=True)
 _say_cooldown: dict[int, float] = {}
 
@@ -54918,8 +55017,8 @@ async def voice_join_cmd(interaction: discord.Interaction):
         await interaction.followup.send(err)
         return
     await voice_say(interaction.client, interaction.guild_id, GREETINGS[persona(interaction.guild_id)])
-    await interaction.followup.send(f"🎙️ In **{vs.channel.name}**. I'll call out cashes, one-leg sweats and big wins. "
-                                    "`/voice leave` to send me away (I also leave when the channel empties).")
+    await interaction.followup.send(f"🎙️ In **{vs.channel.name}**. Type Hey Pimp, Hey bot, or PIMP-BOT, then the question, and I'll say the answer out loud. "
+                                    "`/voice leave` when you're done (I also leave when the channel empties).")
 
 
 @voice_group.command(name="leave", description="Leave the voice channel")
