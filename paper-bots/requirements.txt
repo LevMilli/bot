@@ -1,0 +1,2 @@
+requests>=2.28   # used by memecoin-paper/bot.py (everything else uses only the Python standard library)
+tzdata>=2023.3   # time-zone data for zoneinfo (needed on Windows; harmless elsewhere)
