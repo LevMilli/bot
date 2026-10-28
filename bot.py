@@ -24,6 +24,9 @@ Ask
     (needs ANTHROPIC_API_KEY)
 
 Setup is in README.md.
+
+Copyright (c) 2026 the owner of PIMP-BOT. All rights reserved.
+See LICENSE. No right to copy, change, or run a second copy without permission.
 """
 
 from __future__ import annotations
@@ -54,7 +57,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.75"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.78"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -213,6 +216,9 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.73", "A wake phrase from a voice channel brings him in, and he says the answer out loud."),
     ("1.74", "He leaves the voice channel shortly after the last person does, and he speaks with the deafen off."),
     ("1.75", "Say Hey Pimp, Hey bot, or PIMP-BOT out loud in the call, and he answers."),
+    ("1.76", "The call greeting plays out loud, and a failed line tells you why."),
+    ("1.77", "Every game in the last 30 shows as a bar on the player chart."),
+    ("1.78", "The bot carries a license, and /help states it tracks picks and is not a sportsbook."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -273,6 +279,9 @@ MEMBER_NEWS = [
     ("1.73", "A wake phrase from a voice channel brings him in, and he says the answer out loud."),
     ("1.74", "He leaves the voice channel shortly after the last person does, and he speaks with the deafen off."),
     ("1.75", "Say Hey Pimp, Hey bot, or PIMP-BOT out loud in the call, and he answers."),
+    ("1.76", "The call greeting plays out loud, and a failed line tells you why."),
+    ("1.77", "Every game in the last 30 shows as a bar on the player chart."),
+    ("1.78", "The bot carries a license, and /help states it tracks picks and is not a sportsbook."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -6600,6 +6609,9 @@ two or three facts that matter most. Short bullets are fine; no headings.
 - Focus on players, form and matchups. Don't narrate line or odds movements unless asked.
 - Be straight about uncertainty and thin information. Never call anything a lock or \
 promise an outcome.
+- You track picks the group already made. You do not take bets, and you do not tell \
+anyone to place a bet, to bet more, or to chase. A breakdown of a slip they already \
+have is fine. It is not a recommendation to wager. Past results are not a prediction.
 - The group's own scouting notes and records are included below when relevant. Use them, \
 and say when you're relying on them.
 - Sports questions of every kind are in scope: scores, who plays, schedules, injuries, form, and weather. \
@@ -16754,11 +16766,19 @@ class RolePicker(discord.ui.View):
         return cb
 
 
+LEGAL_NOTE = (
+    "PIMP-BOT only tracks picks this group already made. It is not a sportsbook, "
+    "it does not take bets or hold money, and nothing it says is betting advice. "
+    "Past results are not a prediction. PIMP Coins are play money. "
+    "Be 21 or older where the law requires it, and follow the law where you live."
+)
+
 WELCOME_TEXT = ("👋 Welcome to the server! I'm PIMP-BOT, the group's pick tracker.\n"
                 "• Post your slip screenshots in the receipts channel and I'll log them.\n"
                 "• New? Run `/start` in the server: a one-minute tour made for you.\n"
                 "• `/inbox` shows anything waiting on you, `/help` everything I do.\n"
                 "• `/me roles` to pick the sports you follow, `/me bio` to set up your profile card.\n"
+                + LEGAL_NOTE + "\n"
                 "Bet what you can afford to lose. Have fun. 🤝")
 
 
@@ -17444,6 +17464,7 @@ Sports questions are your home. Scores, who plays, schedules, injuries, form, ma
 - Use this group's notes and records when they are in the message, and say that they came from the group.
 - If a fact is missing, say so. Never invent a stat, a score, a lineup, or a start time.
 - Never call a pick a lock, a sure thing, or guaranteed. Never tell them to bet more, to chase, or to raise a stake. Leave odds and line movement out.
+- You track picks this group already made. You do not take bets. A breakdown of a slip they already have is fine. It is not a recommendation to wager.
 
 Any other question still gets a straight answer, in the same voice, without dragging a game into it.
 When you are speaking out loud, the same answer has to make sense with no links and no symbols."""
@@ -18599,8 +18620,30 @@ def voice_ready() -> tuple[bool, str]:
     return True, ""
 
 
+def espeak_file(text: str, folder: str) -> str:
+    """A local male voice. Empty string when espeak is not installed."""
+    import subprocess
+    exe = shutil.which("espeak-ng") or shutil.which("espeak")
+    if not exe:
+        return ""
+    path = os.path.join(folder, "say.wav")
+    spoken = (text or ".").lstrip("- ") or "."
+    try:
+        subprocess.run([exe, "-v", "en-us+m3", "-s", "150", "-w", path, spoken], check=True, timeout=20,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        try:
+            subprocess.run([exe, "-s", "150", "-w", path, spoken], check=True, timeout=20,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            return ""
+    if os.path.isfile(path) and os.path.getsize(path) > 44:
+        return path
+    return ""
+
+
 def tts_to_file(text: str) -> str:
-    """Speak text into a temp audio file. Pimp's neural voice first, then Google TTS, then espeak-ng.
+    """Speak text into a temp audio file. Neural voice first, then the local voice, then Google TTS.
     The caller deletes the file's folder."""
     folder = tempfile.mkdtemp()
     neural, tld = _TTS_PICK.get()
@@ -18609,31 +18652,102 @@ def tts_to_file(text: str) -> str:
         import edge_tts
 
         async def _go():
-            await asyncio.wait_for(edge_tts.Communicate(text, neural).save(path), timeout=8)
+            await asyncio.wait_for(edge_tts.Communicate(text, neural).save(path), timeout=5)
         asyncio.run(_go())
-        if os.path.getsize(path) > 0:
+        if os.path.isfile(path) and os.path.getsize(path) > 1000:
             return path
     except Exception:
         log.warning("Neural voice failed; using the local voice")
+    local = espeak_file(text, folder)
+    if local:
+        return local
     try:
         from gtts import gTTS
         gTTS(text=text, lang="en", tld=tld or "us").save(path)
-        return path
+        if os.path.isfile(path) and os.path.getsize(path) > 1000:
+            return path
     except Exception:
-        import shutil
-        import subprocess
-        exe = shutil.which("espeak-ng") or shutil.which("espeak")
-        if not exe:
-            import shutil as _sh
-            _sh.rmtree(folder, ignore_errors=True)
-            raise RuntimeError("no text-to-speech available (install gTTS or espeak-ng)")
-        path = os.path.join(folder, "say.wav")
-        spoken = text.lstrip("- ") or "."
+        log.warning("Google voice failed", exc_info=True)
+    shutil.rmtree(folder, ignore_errors=True)
+    raise RuntimeError("no text-to-speech available (install espeak-ng or gTTS)")
+
+
+def pcm_source(path: str):
+    """Audio ffmpeg will actually play. -nostdin keeps it from waiting on a keyboard that isn't there."""
+    import subprocess
+    try:
+        return discord.FFmpegPCMAudio(path, before_options="-nostdin", options="-vn", stderr=subprocess.DEVNULL)
+    except TypeError:
+        return discord.FFmpegPCMAudio(path)
+
+
+def _stop_audio(vc) -> None:
+    """Stop the current clip. Leave the microphone open when the hearing client has its own stop."""
+    if vc is None or not getattr(vc, "is_playing", lambda: False)():
+        return
+    fn = getattr(vc, "stop_playing", None) or getattr(vc, "stop", None)
+    if not fn:
+        return
+    try:
+        fn()
+    except Exception:
+        pass
+
+
+def _voice_finish(fut, err: str, st=None) -> None:
+    if st is not None:
+        st["last_error"] = err or ""
+    if fut is not None and not getattr(fut, "done", lambda: True)():
+        fut.set_result(err or "")
+
+
+async def _wait_encrypt(vc) -> str:
+    """Wait until call audio is sealed. Unsealed packets never reach the room."""
+    state = getattr(vc, "_connection", None)
+    if state is None or not hasattr(state, "can_encrypt"):
+        return ""
+    for _ in range(32):
         try:
-            subprocess.run([exe, "-v", "en-us+m3", "-s", "150", "-w", path, spoken], check=True, timeout=30)
+            if state.can_encrypt:
+                return ""
         except Exception:
-            subprocess.run([exe, "-s", "150", "-w", path, spoken], check=True, timeout=30)
-        return path
+            return ""
+        await asyncio.sleep(0.25)
+    try:
+        if state.can_encrypt:
+            return ""
+    except Exception:
+        return ""
+    return "Discord has not finished the call encryption, so the room cannot hear me yet."
+
+
+async def _play_path(vc, path: str) -> str:
+    why = await _wait_encrypt(vc)
+    if why:
+        return why
+    done = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    failed = []
+
+    def _after(err):
+        if err:
+            failed.append(err)
+        loop.call_soon_threadsafe(done.set)
+
+    _stop_audio(vc)
+    try:
+        vc.play(pcm_source(path), after=_after)
+    except Exception as exc:
+        return f"The player failed ({type(exc).__name__}: {exc})"[:220]
+    try:
+        await asyncio.wait_for(done.wait(), timeout=90)
+    except asyncio.TimeoutError:
+        _stop_audio(vc)
+        return "The audio ran too long and was stopped."
+    if failed:
+        err = failed[0]
+        return f"Playback failed ({type(err).__name__}: {err})"[:220]
+    return ""
 
 
 def speakable(text: str) -> str:
@@ -18670,46 +18784,48 @@ async def voice_answer(client, guild_id: int, text: str) -> bool:
 async def _voice_worker(gid: int):
     st = VOICE.get(gid)
     while st is not None:
-        text = await st["queue"].get()
+        item = await st["queue"].get()
+        if isinstance(item, tuple):
+            text, fut = item
+        else:
+            text, fut = item, None
         vc = st["vc"]
         for _ in range(40):   # ride out a voice reconnect instead of going silent for good
             if vc and vc.is_connected():
                 break
             await asyncio.sleep(0.25)
         if not vc or not vc.is_connected():
+            _voice_finish(fut, "I was in the channel, but the call dropped before I could speak.", st)
             st = VOICE.get(gid)
             continue
-        path = None
+        paths = []
+        err = ""
         try:
             _TTS_PICK.set(st.get("tts") or TTS_VOICES["default"])
-            path = await asyncio.wait_for(asyncio.to_thread(tts_to_file, text), timeout=25)
-            done = asyncio.Event()
-            loop = asyncio.get_running_loop()
-            failed = []
-
-            def _after(err):
-                if err:
-                    failed.append(err)
-                loop.call_soon_threadsafe(done.set)
-
-            if vc.is_playing():
-                vc.stop()
-            vc.play(discord.FFmpegPCMAudio(path), after=_after)
-            try:
-                await asyncio.wait_for(done.wait(), timeout=90)
-            except asyncio.TimeoutError:
-                vc.stop()
-            if failed:
-                raise failed[0]
-        except Exception:
+            path = await asyncio.wait_for(asyncio.to_thread(tts_to_file, text), timeout=20)
+            paths.append(path)
+            err = await _play_path(vc, path)
+            if err:
+                log.warning("Voice line failed: %s", err)
+                folder = tempfile.mkdtemp()
+                wav = await asyncio.to_thread(espeak_file, text, folder)
+                if wav and wav != path:
+                    paths.append(wav)
+                    err = await _play_path(vc, wav)
+                    if err:
+                        log.warning("Local voice failed too: %s", err)
+        except Exception as exc:
             log.warning("Voice line failed", exc_info=True)
+            err = f"The audio failed ({type(exc).__name__})."
         finally:
             if VOICE.get(gid) is st:
                 st["quiet_until"] = time.monotonic() + 0.8
-            if path:
-                import shutil
-                shutil.rmtree(os.path.dirname(path), ignore_errors=True)
-        st["last"] = time.monotonic()
+            for path in paths:
+                if path and os.path.dirname(path) not in ("", "/", "/dev"):
+                    shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        _voice_finish(fut, err, st)
+        if VOICE.get(gid) is st:
+            st["last"] = time.monotonic()
         st = VOICE.get(gid)
 
 
@@ -19066,25 +19182,65 @@ async def _hear_watch(gid: int) -> None:
         return
 
 
+def voice_missing(channel) -> str:
+    """Connect or Speak missing on this channel. Empty string when the role can talk, or when we cannot tell."""
+    guild = getattr(channel, "guild", None)
+    me = getattr(guild, "me", None) if guild is not None else None
+    if me is None or not hasattr(channel, "permissions_for"):
+        return ""
+    try:
+        perms = channel.permissions_for(me)
+    except Exception:
+        return ""
+    missing = []
+    if not getattr(perms, "connect", True):
+        missing.append("Connect")
+    if not getattr(perms, "speak", True):
+        missing.append("Speak")
+    if not missing:
+        return ""
+    return ("I need " + " and ".join(missing) + " on my role in this channel. "
+            "Channel settings, Permissions, PIMP-BOT, turn those on.")
+
+
+def voice_muted(channel) -> str:
+    me = getattr(getattr(channel, "guild", None), "me", None)
+    vs = getattr(me, "voice", None)
+    if getattr(vs, "mute", False):
+        return "I'm in the channel, but Discord has me muted. Right-click PIMP-BOT in the call and unmute me."
+    return ""
+
+
+async def _channel_connect(channel):
+    """Join able to talk. Hearing is extra, and a hearing failure still leaves him in the call."""
+    base = {"self_deaf": False, "self_mute": False}
+    recv_cls = None
+    try:
+        from discord.ext import voice_recv
+        recv_cls = voice_recv.VoiceRecvClient
+    except Exception:
+        recv_cls = None
+    if recv_cls is not None:
+        try:
+            return await channel.connect(cls=recv_cls, **base)
+        except Exception:
+            log.warning("Hearing connect failed; joining so I can still talk", exc_info=True)
+    return await channel.connect(**base)
+
+
 async def voice_join(guild_id: int, channel, text=None, client=None) -> str:
     ok, why = voice_ready()
     if not ok:
         return f"I can't talk in voice on this install: {why}."
+    missing = voice_missing(channel)
+    if missing:
+        return missing
     st = VOICE.get(guild_id)
     try:
         if st and st["vc"].is_connected():
             await st["vc"].move_to(channel)
         else:
-            recv_cls = None
-            try:
-                from discord.ext import voice_recv
-                recv_cls = voice_recv.VoiceRecvClient
-            except Exception:
-                pass
-            kwargs = {"self_deaf": False, "self_mute": False}
-            if recv_cls is not None:
-                kwargs["cls"] = recv_cls
-            vc = await channel.connect(**kwargs)
+            vc = await _channel_connect(channel)
             st = {"vc": vc, "queue": asyncio.Queue(), "joined": time.monotonic(), "last": time.monotonic()}
             VOICE[guild_id] = st
             st["task"] = asyncio.create_task(_voice_worker(guild_id))
@@ -19092,10 +19248,22 @@ async def voice_join(guild_id: int, channel, text=None, client=None) -> str:
             st["text"] = text
         if client is not None:
             st["client"] = client
+        kind = str(getattr(getattr(channel, "type", None), "name", "") or "")
+        me = getattr(getattr(channel, "guild", None), "me", None)
+        if "stage" in kind and me is not None and hasattr(me, "request_to_speak"):
+            try:
+                await me.request_to_speak()
+            except Exception:
+                log.warning("Couldn't ask to speak on the stage")
         _voice_listen(guild_id, st)
     except Exception as exc:
         log.exception("Voice connect failed")
-        return f"I couldn't join voice ({type(exc).__name__}). Check I can Connect and Speak in that channel."
+        detail = f"{type(exc).__name__}: {exc}"
+        return ("I couldn't join voice (" + detail[:160] + "). "
+                "I need Connect and Speak on my role in that channel.")
+    muted = voice_muted(channel)
+    if muted:
+        return muted
     return ""
 
 
@@ -19103,6 +19271,9 @@ async def voice_leave(guild_id: int) -> bool:
     st = VOICE.pop(guild_id, None)
     if not st:
         return False
+    fut = st.get("last_fut")
+    if fut is not None and not fut.done():
+        fut.set_result("I left the call.")
     for key in ("hear", "task"):
         job = st.get(key)
         if job:
@@ -19150,9 +19321,26 @@ async def voice_say(client, guild_id: int, text: str) -> bool:
     st["tts"] = TTS_VOICES.get(persona(guild_id), TTS_VOICES["default"])
     if st.get("task") is None or st["task"].done():
         st["task"] = asyncio.create_task(_voice_worker(guild_id))
-    if st["queue"].qsize() < 6:
-        st["queue"].put_nowait(line)
+    if st["queue"].qsize() >= 6:
+        return False
+    fut = asyncio.get_running_loop().create_future()
+    st["last_fut"] = fut
+    st["queue"].put_nowait((line, fut))
     return True
+
+
+async def voice_wait(guild_id: int, timeout: float = 22) -> str:
+    """Empty string when the latest line finished. Otherwise the reason the room heard nothing."""
+    st = VOICE.get(guild_id)
+    if not st:
+        return "I'm not in the call."
+    fut = st.get("last_fut")
+    if fut is None:
+        return st.get("last_error") or ""
+    try:
+        return await asyncio.wait_for(asyncio.shield(fut), timeout)
+    except asyncio.TimeoutError:
+        return "The audio did not finish. I need Speak on my role in that channel."
 
 
 def voice_humans(vc) -> list:
@@ -34740,7 +34928,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-149';"
+    "const CACHE='pb-shell-151';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -35860,6 +36048,7 @@ function renderMore(el,d){
   (d.books||[]).length?card('Books the scanner reads','',String(d.books.length),h('ul',{class:'clean'},d.books.map(b=>h('li',{text:b})))):null,
   (d.sports||[]).length?card('Sports this upload reads','',String(d.sports.length),h('ul',{class:'clean'},d.sports.map(s=>h('li',{text:s})))):null,
   card('About','s6',null,h('p',{class:'muted aboutver',style:'margin:0'},'PIMP-BOT ',d.version,' · update ',(d.update||''),'.'),
+   h('p',{class:'muted',style:'margin:8px 0 0',text:'Tracks picks only. Not a sportsbook, not betting advice, and it does not take bets or hold money. Past games are not a prediction. PIMP Coins are play money. Be 21 or older where the law requires it.'}),
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last clean start: '+(d.booted||'')+'.'}),
    h('p',{class:'muted',style:'margin:8px 0 0'},'The first number is this file. The second is the idea list it is filling. Times are Central. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.'),
    (window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)?h('p',{class:'muted',style:'margin:8px 0 0',text:'Reduced motion is on. The intro stays off.'}):null,
@@ -36919,7 +37108,7 @@ function phoneHomeHint(){watchFind();const stand=matchMedia('(display-mode:stand
 function defaultLine(vals){if(!vals.length)return 0.5;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;return Math.max(0.5,Math.floor(avg)+0.5)}
 function mean(xs){if(!xs||!xs.length)return null;return Math.round(xs.reduce((a,b)=>a+b,0)/xs.length*10)/10}
 function playerHits(stat){return (S.pl&&S.pl.games||[]).map(g=>g.vals&&g.vals[stat]!=null&&!g.dnp&&!g.pre?{g,v:+g.vals[stat]}:null).filter(Boolean)}
-function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().reverse();const n=rows.length;if(!n)return null;
+function playerChart(games,line,fmt){const rows=games.slice().reverse();const n=rows.length;if(!n)return null;
  const W=640,H=228,pL=8,pR=40,pT=26,pB=30,iW=W-pL-pR,iH=H-pT-pB;
  const mx=Math.max(line,...rows.map(x=>x.v),1)*1.22;const bw=iW/n;const y=v=>pT+iH-(Math.max(0,v)/mx*iH);const ly=y(line);
  const kids=[sv('line',{x1:String(pL),x2:String(W-pR),y1:String(H-pB),y2:String(H-pB),stroke:'#3a2a55','stroke-width':'1'}),
@@ -36929,8 +37118,8 @@ function playerChart(games,line,fmt){const rows=games.slice(0,20).slice().revers
   const fill=x.v>line?'#34d399':x.v<line?'#fb7185':'#94a3b8';const cx=pL+i*bw+bw/2;
   const rect=sv('rect',{x:String(x0),y:String(y(Math.max(0,x.v))),width:String(Math.max(5,bw*0.64)),height:String(hgt),rx:'3',fill:fill});
   rect.style.cursor='pointer';rect.addEventListener('click',()=>{S.hi=(x.g&&x.g.date)||'';paintPlayer()});kids.push(rect);
-  kids.push(sv('text',{x:String(cx),y:String(y(Math.max(0,x.v))-5),'text-anchor':'middle','font-size':n>14?'7':'8.5',fill:'#e8dff8'},fmt(x.v)));
-  kids.push(sv('text',{x:String(cx),y:String(H-10),'text-anchor':'middle','font-size':n>14?'7':'9',fill:'#a59cbc'},
+  kids.push(sv('text',{x:String(cx),y:String(y(Math.max(0,x.v))-5),'text-anchor':'middle','font-size':n>24?'6':n>14?'7':'8.5',fill:'#e8dff8'},fmt(x.v)));
+  kids.push(sv('text',{x:String(cx),y:String(H-10),'text-anchor':'middle','font-size':n>24?'6':n>14?'7':'9',fill:'#a59cbc'},
    x.label||((x.g.at==='@'?'@':'v')+(x.g.opp||''))))});
  return sv('svg',{class:'pchart',viewBox:'0 0 '+W+' '+H,width:'100%',role:'img','aria-label':'Last '+n+' games vs '+fmt(line)},...kids)}
 function logNum(n){const x=Math.round(+n*10)/10;return x===Math.round(x)?String(Math.round(x)):String(x)}
@@ -37063,7 +37252,7 @@ async function pullSheet(slug,id,ac){const url='/api/player/'+slug+'/'+id+'.json
 function finishPlayer(d,slug,id){const back=S.restore;S.restore=null;
  if(!back&&S.pl&&S.pl.slug&&String(S.pl.id)!==String(id)){(S.stack=S.stack||[]);S.stack.push({slug:S.pl.slug,id:S.pl.id,stat:S.pstat,line:S.pline,split:S.psplit,n:S.pn});if(S.stack.length>8)S.stack.shift()}
  S.pl=d;S.pair=null;S.hi='';
- if(back){if(back.stat)S.pstat=back.stat;S.pline=back.line!=null?back.line:loadLine(d,S.pstat||d.stat);S.psplit=back.split||'all';S.pn=(back.n===5||back.n===10||back.n===20)?back.n:20}
+ if(back){if(back.stat)S.pstat=back.stat;S.pline=back.line!=null?back.line:loadLine(d,S.pstat||d.stat);S.psplit=back.split||'all';S.pn=(back.n===5||back.n===10||back.n===30)?back.n:30}
  else{S.pstat=d.stat;try{const saved=localStorage.getItem('pb-pstat:'+slug+'/'+id);if(saved&&(d.stats||[]).some(s=>s.key===saved))S.pstat=saved}catch(e){}S.pline=loadLine(d,S.pstat)}
  paintPlayer()}
 function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
@@ -37095,7 +37284,7 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
  const setLine=n=>{S.pline=Math.max(0,Math.round((+n)*10)/10);saveLine(d,stat,S.pline);paintPlayer()};
  const nudge=x=>h('button',{class:'pnudge',type:'button',onclick:()=>setLine(line+x)},(x>0?'+':'')+String(x));
  const box=(t,w)=>w?kbox(t,w.o+'/'+w.n+'  '+w.pct+'%',w.pct>=60?'up':w.pct<=40?'down':''):kbox(t,'–');
- if(S.pn!==5&&S.pn!==10&&S.pn!==20)S.pn=20;
+ if(S.pn!==5&&S.pn!==10&&S.pn!==30)S.pn=30;
  const take=S.pn;
  const mate=S.pair&&String(S.pair.id)!==String(d.id)?S.pair:null;
  const mateHits=mate?statHits(mate.games,stat).filter(x=>S.psplit==='home'?x.g.at!=='@':S.psplit==='away'?x.g.at==='@':true):[];
@@ -37152,7 +37341,7 @@ function paintPlayer(){const d=S.pl;if(!d)return;const stats=d.stats||[];
   h('div',{class:'card pair'},h('h2',null,'Last '+games.length+(joined?' together':'')+' vs '+fmt(line)),
    h('div',{class:'pctrls'},
     h('div',{class:'seg'},['all','home','away'].map(k=>h('button',{type:'button',class:S.psplit===k?'on':'',onclick:()=>{S.psplit=k;paintPlayer()}},k==='all'?'All':k==='home'?'Home':'Away'))),
-    h('div',{class:'seg'},[5,10,20].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},'Last '+n)))),
+    h('div',{class:'seg'},[5,10,30].map(n=>h('button',{type:'button',class:S.pn===n?'on':'',onclick:()=>{S.pn=n;paintPlayer()}},n===30?'All':'Last '+n)))),
    stat==='pts50'?h('p',{class:'muted',style:'margin:0 0 6px',text:'Each bar is one game. 1 means 50 or more points that night.'}):null,
    h('div',{class:'pchartbox'},chart),
    lineBox,
@@ -50491,6 +50680,25 @@ class PicksBot(discord.Client):
         return (isinstance(ref, discord.Message) and ref.author.id == self.user.id
                 and not ref.embeds and not ref.components and bool(ref.content))
 
+    async def _voice_fallback(self, message, line: str, fut) -> None:
+        """When the call audio fails, Discord reads the line and the channel gets the reason."""
+        try:
+            err = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
+        except asyncio.TimeoutError:
+            err = "The audio did not finish."
+        if not err:
+            return
+        try:
+            await message.channel.send(line or "I couldn't play audio in the call.", tts=True,
+                                       allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            pass
+        try:
+            await message.channel.send("I couldn't play audio in the call. " + err,
+                                       allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning("Couldn't report the voice failure")
+
     async def say_aloud(self, message, text: str, *, woke: bool = False, **extra) -> None:
         """Reply, and say it in the author's voice channel when they are in one."""
         why = "not in a voice channel"
@@ -50512,7 +50720,11 @@ class PicksBot(discord.Client):
             kwargs.pop("tts", None)
             await message.reply(text, **kwargs)
         if in_room and getattr(message, "guild", None) is not None:
-            await voice_answer(self, message.guild.id, text)
+            spoke = await voice_answer(self, message.guild.id, text)
+            st = VOICE.get(message.guild.id) or {}
+            fut = st.get("last_fut") if spoke else None
+            if fut is not None:
+                asyncio.create_task(self._voice_fallback(message, spoken_take(text), fut))
         elif woke and why not in ("", "not in a voice channel", "no server"):
             try:
                 await message.channel.send("I couldn't speak in voice. " + why, mention_author=False,
@@ -51958,7 +52170,8 @@ HELP_START = (
     "• Or type it: `@PIMP-BOT log Tatum o22.5 PRA, Brown o20.5 pts, $10 to win $30`\n"
     "• Ask first: `@PIMP-BOT thoughts?` with a screenshot or typed legs gets a breakdown + X-ray, nothing logged\n"
     "• `@PIMP-BOT how's my slip doing?` · `/card` · `/board` · `/scout` · `/leaderboard`\n\n"
-    "Pick a section below for everything else.")
+    "Pick a section below for everything else.\n\n"
+    "**Not a sportsbook.** " + LEGAL_NOTE)
 
 
 class HelpSelect(discord.ui.Select):
@@ -52414,7 +52627,8 @@ def guide_embeds() -> list[discord.Embed]:
         "**The 30-second version**\n"
         "1. Log a bet with `/pick`, or post your slip screenshot in the receipts channel.\n"
         "2. When it's over, tap **Win**, **Loss** or **Push** on the pick card.\n"
-        "3. Check `/record` for your stats and `/leaderboard` for who's up."))
+        "3. Check `/record` for your stats and `/leaderboard` for who's up.\n\n"
+        "**Not a sportsbook.** " + LEGAL_NOTE))
     picks = discord.Embed(title="📝 Logging and settling picks", color=BRAND, description=(
         "`/pick` log a bet. **Cost** is what you paid, **payout** is the total you get back if it hits "
         "(stake included). Put parlay legs in **legs**, separated by `;`, and fill in **sport** "
@@ -55511,6 +55725,15 @@ async def voice_join_cmd(interaction: discord.Interaction):
         await interaction.followup.send(err)
         return
     await voice_say(interaction.client, interaction.guild_id, GREETINGS[persona(interaction.guild_id)])
+    played = await voice_wait(interaction.guild_id, 22)
+    if played:
+        await interaction.followup.send(f"I'm in **{vs.channel.name}**, but the room cannot hear me. {played}")
+        try:
+            await interaction.channel.send(GREETINGS[persona(interaction.guild_id)], tts=True,
+                                           allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            pass
+        return
     mode = hear_mode()
     if mode == "on":
         how = "Say Hey Pimp, Hey bot, or PIMP-BOT out loud, or type it."
