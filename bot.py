@@ -25,8 +25,8 @@ Ask
 
 Setup is in README.md.
 
-Copyright (c) 2026 the owner of PIMP-BOT. All rights reserved.
-See LICENSE. No right to copy, change, or run a second copy without permission.
+Copyright (c) 2026 Levi Robert Milliken. All rights reserved.
+See LICENSE. No right to copy, change, or run a second copy without permission from Levi Robert Milliken.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.78"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-10-16 1.79"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -219,6 +219,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.76", "The call greeting plays out loud, and a failed line tells you why."),
     ("1.77", "Every game in the last 30 shows as a bar on the player chart."),
     ("1.78", "The bot carries a license, and /help states it tracks picks and is not a sportsbook."),
+    ("1.79", "Staff HQ shows when the head admin leaves, and a ban signs that person out of the dashboard."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -282,6 +283,7 @@ MEMBER_NEWS = [
     ("1.76", "The call greeting plays out loud, and a failed line tells you why."),
     ("1.77", "Every game in the last 30 shows as a bar on the player chart."),
     ("1.78", "The bot carries a license, and /help states it tracks picks and is not a sportsbook."),
+    ("1.79", "Staff HQ shows when the head admin leaves, and a ban signs that person out of the dashboard."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -9435,7 +9437,10 @@ def backup_files(guild_id: int) -> list:
     files = []
     if os.path.getsize(path) <= 9 * 1024 * 1024:
         files.append(discord.File(path, filename=f"picks_backup_{stamp}.db"))
-    files.append(discord.File(build_workbook(guild_id), filename=f"picks_backup_{stamp}.xlsx"))
+    try:
+        files.append(discord.File(build_workbook(guild_id), filename=f"picks_backup_{stamp}.xlsx"))
+    except Exception:
+        log.warning("Spreadsheet copy skipped; the database file is still included", exc_info=True)
     return files
 
 
@@ -38012,6 +38017,314 @@ def crew_revoke(uid: int, gid: Optional[int] = None) -> str:
     return "ok"
 
 
+HEAD_ROLE_NAME = "Head Admin"
+_DEPARTED_AT: dict[int, float] = {}
+
+
+def depart_alerts(gid: Optional[int] = None) -> list:
+    try:
+        raw = json.loads(get_setting(staff_gid(gid), "depart_alerts") or "[]")
+    except Exception:
+        raw = []
+    return [x for x in raw if isinstance(x, dict)][:16]
+
+
+def depart_save(rows: list, gid: Optional[int] = None) -> None:
+    set_setting(staff_gid(gid), "depart_alerts", json.dumps(rows[:16]))
+
+
+def depart_open(gid: Optional[int] = None) -> list:
+    return [x for x in depart_alerts(gid) if not x.get("cleared")]
+
+
+def head_admin_id(gid: Optional[int] = None) -> int:
+    raw = get_setting(staff_gid(gid), "head_admin") or ""
+    if str(raw).isdigit() and int(raw) in crew_ids("admin", gid) + crew_ids("owner", gid):
+        return int(raw)
+    admins = crew_ids("admin", gid)
+    return admins[0] if admins else 0
+
+
+def _depart_first(uid: int) -> bool:
+    now_t = time.time()
+    prev = _DEPARTED_AT.get(int(uid), 0)
+    _DEPARTED_AT[int(uid)] = now_t
+    return now_t - prev > 45
+
+
+def recovery_recent(key: str) -> bool:
+    raw = get_setting(0, "recovery_sent") or ""
+    if not raw.startswith(key + "|"):
+        return False
+    try:
+        return time.time() - float(raw.split("|", 1)[1]) < 3600
+    except Exception:
+        return False
+
+
+def recovery_mark(key: str) -> None:
+    set_setting(0, "recovery_sent", f"{key}|{time.time()}")
+
+
+async def send_owner_recovery(client, reason: str) -> int:
+    """DM the developers and owners their own database copy. The token stays in Railway."""
+    key = clip(reason, 80)
+    if recovery_recent(key):
+        return 0
+    ids: list[int] = []
+    for i in list(DEVELOPER_IDS) + list(OWNER_IDS):
+        if i not in ids:
+            ids.append(i)
+    gid = staff_gid()
+    note = (
+        "Failsafe\n"
+        f"{clip(reason, 400)}\n"
+        f"Version {BOT_VERSION}. Developers stay on the ladder.\n"
+        "The files are the picks database and the spreadsheet. The Discord token stays in Railway. "
+        "If a second copy is using it, reset the token in the Discord developer portal and paste the new one into Railway. "
+        "Run one copy."
+    )
+    sent = 0
+    for i in ids:
+        files = []
+        try:
+            files = backup_files(gid) if gid else []
+            user = await client.fetch_user(int(i))
+            await user.send(note, files=files or None)
+            sent += 1
+        except Exception:
+            log.warning("Recovery note could not be delivered to %s", i, exc_info=True)
+        finally:
+            release_backup_folders()
+    if sent:
+        recovery_mark(key)
+        try:
+            staff_log_add(gid, "warn", f"Failsafe packet sent to {sent}", "robot")
+        except Exception:
+            pass
+    return sent
+
+
+def _guild_for(gid: Optional[int]):
+    try:
+        return bot.get_guild(int(gid or staff_gid() or 0))
+    except Exception:
+        return None
+
+
+def discord_role_rows(gid: Optional[int] = None) -> list:
+    guild = _guild_for(gid)
+    if guild is None:
+        return []
+    out = []
+    for role in getattr(guild, "roles", []) or []:
+        name = (getattr(role, "name", None) or "").strip()
+        if not name or name == "@everyone" or getattr(role, "managed", False):
+            continue
+        if getattr(role, "is_default", lambda: False)():
+            continue
+        n = None
+        if MEMBERS_INTENT:
+            n = len(getattr(role, "members", []) or [])
+        out.append({"id": int(role.id), "name": clip(name, 40), "n": n,
+                    "head": name.lower() == HEAD_ROLE_NAME.lower()})
+    out.sort(key=lambda r: (0 if r["head"] else 1, r["name"].lower()))
+    return out[:40]
+
+
+def desk_members(gid: Optional[int] = None) -> list:
+    guild = _guild_for(gid)
+    rows = []
+    seen = set()
+    if guild is not None and MEMBERS_INTENT:
+        for m in getattr(guild, "members", []) or []:
+            if getattr(m, "bot", False):
+                continue
+            rows.append({"id": int(m.id), "name": clip(getattr(m, "display_name", None) or str(m.id), 40)})
+            seen.add(int(m.id))
+    for kind in ("owner", "admin", "mod"):
+        for i in crew_ids(kind, gid):
+            if i in seen:
+                continue
+            rows.append({"id": int(i), "name": crew_display_name(i, gid)})
+            seen.add(int(i))
+    rows.sort(key=lambda r: r["name"].lower())
+    return rows[:200]
+
+
+def staff_desk(uid: int, gid: Optional[int] = None) -> Optional[dict]:
+    if not crew_at_least(uid, "owner", gid):
+        return None
+    hid = head_admin_id(gid)
+    open_alerts = depart_open(gid)
+    left = next((a for a in open_alerts if a.get("seat") == "Head admin"), None)
+    head_open = bool(left) or not hid
+    return {
+        "open": True,
+        "developer": crew_at_least(uid, "developer", gid),
+        "members_intent": MEMBERS_INTENT,
+        "head": {"id": hid, "name": (crew_display_name(hid, gid) if hid else (left or {}).get("name") or ""),
+                 "open": head_open},
+        "roles": discord_role_rows(gid),
+        "members": desk_members(gid),
+        "alerts": open_alerts,
+    }
+
+
+def resolve_desk_person(gid: int, raw: str) -> tuple[Optional[int], str]:
+    text = (raw or "").strip()
+    if not text:
+        return None, ""
+    ids = parse_snowflakes(text)
+    if ids and (text.isdigit() or text.startswith("<@")):
+        uid = ids[0]
+        return uid, crew_display_name(uid, gid)
+    guild = _guild_for(gid)
+    want = text.casefold()
+    if guild is not None:
+        for m in getattr(guild, "members", []) or []:
+            names = [getattr(m, "display_name", "") or "", getattr(m, "name", "") or ""]
+            if any(n.casefold() == want for n in names if n):
+                return int(m.id), clip(getattr(m, "display_name", None) or str(m.id), 40)
+    for row in desk_members(gid):
+        if row["name"].casefold() == want:
+            return int(row["id"]), row["name"]
+    return None, ""
+
+
+async def assign_discord_role(gid: int, role_id: int, uid: int, replace: bool) -> str:
+    guild = _guild_for(gid)
+    if guild is None:
+        return "Saved on the crew ladder. The Discord role waits until the bot can see the server."
+    role = guild.get_role(int(role_id)) if role_id else None
+    if role is None or not (getattr(role, "name", None) or "").strip():
+        return "That Discord role is gone. Pick another one."
+    me = getattr(guild, "me", None)
+    if me is not None and getattr(role, "position", 0) >= getattr(getattr(me, "top_role", None), "position", 0):
+        return "Saved on the crew ladder. Move the bot's role above that Discord role, then try again."
+    if replace:
+        for m in list(getattr(role, "members", []) or []):
+            if int(m.id) == int(uid):
+                continue
+            try:
+                await m.remove_roles(role, reason="PIMP-BOT role replace")
+            except Exception:
+                log.warning("Could not clear role %s from %s", role.id, m.id)
+    try:
+        member = guild.get_member(int(uid))
+        if member is None:
+            member = await guild.fetch_member(int(uid))
+        await member.add_roles(role, reason="PIMP-BOT role desk")
+    except discord.NotFound:
+        return "Saved on the crew ladder. That person is not in the server, so the Discord role was not added."
+    except discord.Forbidden:
+        return "Saved on the crew ladder. The bot needs Manage Roles, above that role."
+    except Exception:
+        log.warning("Role assign failed", exc_info=True)
+        return "Saved on the crew ladder. Discord did not take the role change."
+    return f"Discord role {role.name} is on them."
+
+
+async def ensure_head_role(gid: int, uid: int) -> str:
+    guild = _guild_for(gid)
+    if guild is None:
+        return "Saved on the crew ladder. The Discord role waits until the bot can see the server."
+    role = None
+    for r in getattr(guild, "roles", []) or []:
+        if (getattr(r, "name", None) or "").strip().lower() == HEAD_ROLE_NAME.lower():
+            role = r
+            break
+    if role is None:
+        try:
+            role = await guild.create_role(name=HEAD_ROLE_NAME, colour=discord.Colour(0xF0B429),
+                                           reason="Head admin seat")
+        except discord.Forbidden:
+            return "Saved on the crew ladder. The bot needs Manage Roles to create Head Admin."
+        except Exception:
+            log.warning("Head Admin role was not created", exc_info=True)
+            return "Saved on the crew ladder. Discord did not create Head Admin."
+    return await assign_discord_role(gid, int(role.id), uid, True)
+
+
+async def member_departed(guild, uid: int, name: str, how: str) -> None:
+    """A leave or a ban. Bans also drop dashboard cookies and today's access key."""
+    uid = int(uid)
+    gid = int(getattr(guild, "id", None) or staff_gid() or 0)
+    name = clip(name or crew_display_name(uid, gid), 40)
+    role = crew_role_name(uid, gid)
+    hid = head_admin_id(gid)
+    seat = "Head admin" if uid == hid else {"owner": "Owner", "admin": "Admin", "mod": "Mod",
+                                            "developer": "Developer"}.get(role, "")
+    first = _depart_first(uid)
+    try:
+        dash_note_kick(uid, True)
+    except Exception:
+        log.warning("Couldn't close the dashboard for a removed member")
+    if how == "banned":
+        try:
+            dash_kick_sessions()
+            dash_gate_rotate()
+        except Exception:
+            log.warning("Couldn't sign the dashboard out after a ban")
+    if not first:
+        return
+    if seat:
+        rows = depart_alerts(gid)
+        rows.insert(0, {"id": uid, "name": name, "seat": seat, "how": how, "at": now_iso(), "cleared": False})
+        depart_save(rows, gid)
+        staff_log_add(gid, "warn", f"{seat} {how}: {name}", "robot")
+    if role and role != "developer" and uid not in OWNER_IDS:
+        crew_revoke(uid, gid)
+    if uid == hid:
+        set_setting(staff_gid(gid), "head_admin", None)
+    if seat in ("Head admin", "Owner"):
+        try:
+            await send_owner_recovery(
+                bot, f"{name} {how}. {seat} is open. The failsafe developers are still on the ladder.")
+        except Exception:
+            log.warning("Recovery packet failed", exc_info=True)
+
+
+async def staff_seat(actor: int, gid: int, body: dict) -> tuple[bool, str]:
+    mode = "replace" if str(body.get("mode") or "") == "replace" else "add"
+    kind = str(body.get("role") or "head")
+    uid, name = resolve_desk_person(gid, str(body.get("who") or ""))
+    if uid is None:
+        return False, "Pick a person who is still in the server, or paste their Discord ID."
+    if mode == "replace" or kind == "head":
+        if not crew_at_least(actor, "owner", gid):
+            return False, "Owner or developer only."
+        old = head_admin_id(gid)
+        if old and old != uid and old not in OWNER_IDS and old not in crew_ids("developer", gid):
+            crew_revoke(old, gid)
+        st = crew_grant("admin", uid, name, gid)
+        if st == "dev":
+            return False, "That person is a developer. They already have the failsafe."
+        set_setting(staff_gid(gid), "head_admin", str(uid))
+        rows = depart_alerts(gid)
+        for row in rows:
+            if row.get("seat") == "Head admin":
+                row["cleared"] = True
+        depart_save(rows, gid)
+        note = await ensure_head_role(gid, uid)
+        staff_log_add(gid, "ok", f"Head admin is {name}", crew_display_name(actor, gid))
+        return True, note
+    if kind == "owner" and not crew_at_least(actor, "developer", gid):
+        return False, "Only a developer can add an owner."
+    if kind not in ("owner", "admin", "mod"):
+        return False, "Pick Head admin, owner, admin, or mod."
+    st = crew_grant(kind, uid, name, gid)
+    if st == "dev":
+        return False, "That person is a developer. They already have the failsafe."
+    note = f"{name} is {kind}."
+    role_id = str(body.get("discord_role") or "")
+    if role_id.isdigit():
+        extra = await assign_discord_role(gid, int(role_id), uid, False)
+        note = note + " " + extra
+    staff_log_add(gid, "ok", note, crew_display_name(actor, gid))
+    return True, note
+
+
 def owner_claim(uid: int, gid: Optional[int] = None) -> bool:
     """True when this person is (or just became) an owner. Developers may always claim a vacant owner slot."""
     if uid in crew_ids("owner", gid):
@@ -38757,6 +39070,8 @@ def staff_pass_ok(token: Optional[str]) -> Optional[int]:
     want = staff_pass(uid)
     if len(want) != len(token) or not hmac.compare_digest(want.encode(), token.encode()):
         return None
+    if uid in dash_kicked_ids() and uid not in DEVELOPER_IDS and uid not in OWNER_IDS:
+        return None
     return uid if staff_web_ok(uid) else None
 
 
@@ -39207,6 +39522,8 @@ def staff_ops(uid: int) -> dict:
         crashes = []
     return {
         "me": {"id": uid, "role": crew_role_name(uid, gid) or "staff", "boss": crew_at_least(uid, "owner", gid)},
+        "alerts": depart_open(gid),
+        "desk": staff_desk(uid, gid),
         "reads": {"clean": clean, "unsure": unsure, "failed": failed, "slips": [x for x in slog if isinstance(x, dict)][:18]},
         "pool": pool, "quota": quota, "asks": asks, "servers": servers, "channels": staff_channels(gid),
         "tickets": {"channel": ch_label, "closed": int(closed or 0), "open": tickets[:12]},
@@ -39285,6 +39602,9 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .form input,.form select,.form textarea{height:36px;border-radius:10px;border:1px solid var(--line);background:#110c1b;
  color:var(--text);padding:0 10px;font:inherit;min-width:0}
 .form textarea{height:64px;padding:8px 10px;flex:1 1 100%}
+.alert{background:#3a1420;border:1px solid #fb7185;border-radius:14px;padding:12px 14px;margin:0 0 10px}
+.alert b{color:#fb7185}
+.seatopen{color:var(--gold);font-weight:800}
 .form button,.xbtn{height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--brand);
  color:#fff;font-weight:700;cursor:pointer;font:inherit}
 .xbtn{background:#110c1b;color:var(--muted);font-size:12px}
@@ -39314,6 +39634,9 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <a class="navchip" href="/">Dashboard</a>
 <a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap">
+<section class="card" id="departcard" style="margin-bottom:12px"><h2>People who left</h2><div id="depart"></div></section>
+<section class="card" id="deskcard" style="margin-bottom:12px" hidden><h2>Roles</h2><div id="desk"></div>
+ <p class="muted">Developer and owner only. Add someone to a group, or replace Head admin. The Discord role updates when the bot can manage roles.</p></section>
 <section class="card lead" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
  <p class="muted">Every Discord server is listed, and each added feed shows even before the first call. Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
 <div class="g3">
@@ -39407,6 +39730,42 @@ try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.accent){document.documentElement.dataset.accent=s.accent;if(document.body)document.body.dataset.accent=s.accent}}catch(e){}
 async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
+function paintDesk(desk){const card=$('#deskcard');if(!card)return;
+ card.hidden=!(desk&&desk.open);
+ if(!desk||!desk.open)return;
+ const head=desk.head||{};
+ const people=desk.members||[];
+ const roles=desk.roles||[];
+ const person=h('select',{name:'who'},[h('option',{value:'',text:'Pick a person'})].concat(people.map(p=>h('option',{value:String(p.id),text:p.name}))));
+ const typed=h('input',{name:'typed',placeholder:'Or paste a Discord ID'});
+ const group=h('select',{name:'role'},[h('option',{value:'head',text:'Head admin'}),
+  desk.developer?h('option',{value:'owner',text:'Owner'}):null,
+  h('option',{value:'admin',text:'Admin'}),h('option',{value:'mod',text:'Mod'})]);
+ const roleOpts=[h('option',{value:'',text:'Discord role (optional)'})];
+ roles.forEach(r=>roleOpts.push(h('option',{value:String(r.id),text:r.name+(r.n!=null?' · '+r.n:'')})));
+ const rolePick=h('select',{name:'discord_role'},roleOpts);
+ const note=h('p',{id:'desknote',class:'muted',text:''});
+ put($('#desk'),
+  head.open?h('div',{class:'alert'},h('b',{text:'Head admin seat is open'}),
+   h('div',{text:head.name?head.name+' — the seat is open. Pick who replaces them.':'Nobody is Head admin yet.'})):
+   h('div',{class:'row'},h('span',{text:'Head admin'}),h('b',{text:head.name||'Open'})),
+  roles.length?h('div',null,roles.slice(0,12).map(r=>h('div',{class:'row'},
+   h('span',{text:r.name}),h('span',{class:'muted',text:r.n==null?'':(r.n?String(r.n)+' people':'empty')})))):
+   h('p',{class:'muted',text:'No Discord roles yet.'}),
+  desk.members_intent?null:h('p',{class:'muted',text:'Paste a Discord ID if the name list is empty. Server Members Intent, with MEMBERS_INTENT=1 on Railway, fills that list.'}),
+  h('form',{class:'form',onsubmit:e=>{e.preventDefault();const f=e.target;
+   const who=f.typed.value.trim()||f.who.value;
+   seatPost({op:'seat',mode:'add',role:f.role.value,who:who,discord_role:f.discord_role.value})}},
+   person,typed,group,rolePick,
+   h('button',{type:'submit',text:'Add'}),
+   h('button',{type:'button',text:'Replace head admin',onclick:e=>{const f=e.target.form;
+    seatPost({op:'seat',mode:'replace',role:'head',who:f.typed.value.trim()||f.who.value,discord_role:f.discord_role.value})}})),
+  note)}
+async function seatPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
+ headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const d=await r.json().catch(()=>({}));
+ const note=$('#desknote');if(note)note.textContent=(d&&(d.note||d.error))||(r.ok?'Saved':'Could not save');
+ if(r.ok)load()}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
  const up=$('#upload');if(up)put(up,
   h('div',{class:'row'},h('span',{text:'Upload'}),h('b',{text:d.version||''})),
@@ -39479,8 +39838,18 @@ async function load(){const r=await fetch('/api/staff.json',{credentials:'same-o
   h('span',{class:'muted',text:l.at?String(l.at).slice(11,16):''}))):h('p',{class:'muted',text:'Quiet so far.'}));
  const roleChip=r=>h('span',{class:'badge '+(r==='developer'?'dev':r==='owner'?'own':r==='admin'?'adm':'mod'),
   text:r==='developer'?'⚡ Developer':r==='owner'?'👑 Owner':r==='admin'?'🛡 Admin':'◆ Mod'});
- put($('#roles'),(d.crew||[]).length?(d.crew||[]).map(c=>h('div',{class:'row'},h('span',{text:c.name}),roleChip(c.role))):
+ const gone=new Set((d.alerts||[]).map(a=>String(a.id)));
+ put($('#roles'),(d.crew||[]).length?(d.crew||[]).map(c=>h('div',{class:'row'},
+  h('span',null,h('span',{text:c.name}),gone.has(String(c.id))?h('span',{class:'seatopen',text:' · left the server'}):null),
+  roleChip(c.role))):
   h('p',{class:'muted',text:'Set DEVELOPER_IDS and OWNER_IDS on Railway, then /staff add.'}));
+ const dep=$('#depart');
+ if(dep){const alerts=d.alerts||[];
+  put(dep,alerts.length?alerts.map(a=>h('div',{class:'alert'},
+   h('b',{text:(a.seat||'Someone')+' '+(a.how==='banned'?'was banned':'left')}),
+   h('div',{text:(a.name||'A member')+' · '+(a.at||'').replace('T',' ').slice(0,16)}))):
+   h('p',{class:'muted',text:'Nobody on the crew has left.'}));}
+ paintDesk(d.desk);
  const admin=d.me&&(d.me.boss||d.me.role==='admin'||d.me.role==='owner'||d.me.role==='developer');
  const wf=$('#weekform'); if(wf) wf.hidden=admin?null:true;
  const note=$('#weekboard'); if(note) put(note,h('p',{text:d.weekboard||'No note on the week board.'}));
@@ -39719,6 +40088,13 @@ async def dash_api_staff_post(request):
         if dash_revoke_device(str(body.get("id") or "")):
             staff_log_add(gid, "ok", "Signed one browser out of the dashboard", who)
         return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "seat":
+        if not crew_at_least(uid, "owner", gid):
+            return web.json_response({"ok": False, "error": "Owner or developer only."}, status=403)
+        ok, note = await staff_seat(uid, gid, body)
+        if not ok:
+            return web.json_response({"ok": False, "error": note}, status=400)
+        return web.json_response({"ok": True, "note": note, **staff_ops(uid)})
     return web.json_response({"ok": False}, status=400)
 
 
@@ -50106,6 +50482,10 @@ class PicksBot(discord.Client):
                  len(self.receipt_channels))
         if alerted:
             await self._say_reconnected()
+        reason = getattr(self, "_recovery_reason", None)
+        if reason:
+            self._recovery_reason = None
+            asyncio.create_task(send_owner_recovery(self, reason))
         if not getattr(self, "_boot_said", False):
             try:
                 landed = await announce_boot(self)
@@ -50135,6 +50515,20 @@ class PicksBot(discord.Client):
             set_setting(0, "bot_disconnect_at", now_iso())
         except Exception:
             pass
+        code = getattr(getattr(self, "ws", None), "close_code", None)
+        now_t = time.time()
+        drops = [t for t in getattr(self, "_drop_times", []) if now_t - t < 120]
+        drops.append(now_t)
+        self._drop_times = drops
+        if code == 4004:
+            self._recovery_reason = (
+                "Discord refused the bot token. Reset it in the developer portal, put the new token in Railway, "
+                "and run one copy. Developers still have the failsafe.")
+        elif len(drops) >= 3:
+            self._recovery_reason = (
+                "The connection dropped three times in two minutes. A second copy using this token does that. "
+                "If you did not just restart, reset the token in the developer portal and put the new one in Railway. "
+                "Developers still have the failsafe.")
         self._gateway_up = False
         crash_note("bot", "Robot disconnected", "Lost the Discord websocket. It will try to reconnect.")
         gen = getattr(self, "_disc_gen", 0) + 1
@@ -50556,10 +50950,37 @@ class PicksBot(discord.Client):
     async def on_member_remove(self, member):
         if member.bot:
             return
-        try:
-            dash_note_kick(member.id, True)
-        except Exception:
-            log.warning("Couldn't close the dashboard for a removed member")
+        await member_departed(member.guild, member.id, getattr(member, "display_name", None) or str(member.id), "left")
+
+    async def on_raw_member_remove(self, payload):
+        """Leaves still arrive when the member list intent is off."""
+        user = getattr(payload, "user", None)
+        if user is not None and getattr(user, "bot", False):
+            return
+        uid = getattr(user, "id", None)
+        if not uid:
+            return
+        guild = self.get_guild(getattr(payload, "guild_id", 0) or 0)
+        how = "left"
+        if guild is not None:
+            try:
+                async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
+                    if getattr(entry.target, "id", None) == uid:
+                        created = entry.created_at
+                        if created.tzinfo is None:
+                            created = created.replace(tzinfo=timezone.utc)
+                        if (datetime.now(timezone.utc) - created).total_seconds() < 40:
+                            how = "banned"
+                            break
+            except Exception:
+                pass
+        name = getattr(user, "display_name", None) or getattr(user, "name", None) or str(uid)
+        await member_departed(guild, int(uid), name, how)
+
+    async def on_member_ban(self, guild, user):
+        if getattr(user, "bot", False):
+            return
+        await member_departed(guild, user.id, getattr(user, "name", None) or str(user.id), "banned")
 
     async def on_voice_state_update(self, member, before, after):
         """Leave a few seconds after the last person does. Stay while anyone is still in the channel."""
