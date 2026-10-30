@@ -40185,7 +40185,7 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .eqk{margin:0;color:#9aa1ab;font-size:13px;font-weight:650}
 .eqv{margin:2px 0 0;font:700 48px/1.02 ui-sans-serif,system-ui,sans-serif;letter-spacing:-.04em;
  font-variant-numeric:tabular-nums;color:#d7dbe2}
-.eqv.up{color:#00c805}.eqv.down{color:#ff4d4d}.eqv.flat{color:#d7dbe2}
+.eqv.up{color:#00c805}.eqv.down{color:#ff4d4d}.eqv.flat{color:#d7dbe2}.eqv.live{color:#f0b429}
 .eqsub{margin:6px 0 0;color:#8b939e;font-size:14px;font-weight:650}
 .eqplot{position:relative;height:320px;margin-top:6px;touch-action:pan-y;user-select:none}
 .eqplot svg{width:100%;height:100%;display:block}
@@ -40196,6 +40196,15 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .eqtip span{display:block;color:#aeb6c2;font-size:12px;font-weight:600}
 .eqtip b{display:block;font-size:14px;font-variant-numeric:tabular-nums}
 .eqaxis{fill:#8b939e;font:600 11px ui-sans-serif,system-ui,sans-serif}
+.eqranges{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0}
+.eqranges button{appearance:none;background:transparent;color:#8b939e;border:1px solid #2c313a;border-radius:8px;
+ height:28px;padding:0 10px;font:700 12px ui-sans-serif,system-ui,sans-serif;cursor:pointer}
+.eqranges button[aria-pressed="true"]{color:#f4f6f8;background:#1a1e25;border-color:#3d4450}
+.eqkey{display:flex;flex-wrap:wrap;gap:8px 14px;margin:0 0 8px;color:#8b939e;font-size:12px;font-weight:650}
+.eqswatch{display:inline-block;width:16px;height:0;border-top:2.5px solid #c5ccd6;margin:0 6px 0 0;vertical-align:middle}
+.eqswatch.up{border-top-color:#00c805}.eqswatch.down{border-top-color:#ff4d4d}.eqswatch.flat{border-top-color:#c5ccd6}
+.eqswatch.live{border-top:2px dashed #f0b429}
+.eqlive{fill:#f0b429;font:700 11px ui-sans-serif,system-ui,sans-serif}
 .eqspike{font:700 13px ui-sans-serif,system-ui,sans-serif}
 .eqhint{margin:0 0 8px;color:#8b939e;font-size:13px}
 .eqslips{margin:0 0 10px}
@@ -40313,7 +40322,15 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
  <p class="eqk" id="pimpeqk">Paper P/L</p>
  <p class="eqv flat" id="pimpeqv">$0.00</p>
  <p class="eqsub" id="pimpeqsub">No settled paper trades yet.</p>
+ <div class="eqranges" id="eqranges" role="group" aria-label="Paper chart range">
+  <button type="button" data-range="ytd" aria-pressed="true">YTD</button>
+  <button type="button" data-range="3m" aria-pressed="false">3M</button>
+  <button type="button" data-range="6m" aria-pressed="false">6M</button>
+  <button type="button" data-range="9m" aria-pressed="false">9M</button>
+  <button type="button" data-range="12m" aria-pressed="false">12M</button>
+ </div>
  <div class="eqplot" id="pimpchart" role="img" aria-label="No settled paper trades yet. The chart is empty."></div>
+ <p class="eqkey" id="eqkey"></p>
  <p class="eqhint" id="pimpeqhint" hidden>Click a point or drag across a stretch to see those paper slips.</p>
  <div id="pimpslips" class="eqslips" hidden aria-live="polite"></div>
 </section>
@@ -40704,6 +40721,7 @@ function previewLimits(){const f=$('#pimpform'), box=$('#pimppreview'); if(!f||!
 const CT_ZONE='America/Chicago';
 const EQ_COLOR={up:'#00c805',down:'#ff4d4d',flat:'#c5ccd6'};
 let pimpCurve=[], pimpPts=[], pimpBox={w:0,h:0}, pimpHead={v:0,today:0,has:false}, pimpGuide=null, pimpSpikes=[], pimpPick=null, pimpDrag=null, pimpCurveKey='';
+let pimpLive=null, pimpRange='ytd', pimpChart={ranges:[],open_line:{n:0,opens:[],settled:false,label:'Live · not settled'}};
 function eqTone(v){return v>0?'up':v<0?'down':'flat'}
 function ctDayKey(ms){return new Intl.DateTimeFormat('en-CA',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ms))}
 function ctLabel(ms, dayOnly){if(!Number.isFinite(ms)) return 'Time unknown';
@@ -40751,17 +40769,151 @@ function paintSlips(){const box=$('#pimpslips'), hint=$('#pimpeqhint');
  box.hidden=false;
  put(box, h('div',{class:'eqslipbar'}, head,
   h('button',{class:'xbtn',type:'button',text:'Clear',onclick:()=>{pimpPick=null; paintSlips(); drawEquity()}})), cards)}
+function chartRange(){
+ const rows=(pimpChart&&pimpChart.ranges)||[];
+ const found=rows.find(r=>r&&r.id===pimpRange);
+ if(found&&found.start&&found.end) return found;
+ const labels={ytd:'YTD','3m':'3M','6m':'6M','9m':'9M','12m':'12M'};
+ const now=Date.now();
+ const parts=new Intl.DateTimeFormat('en-US',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(now));
+ const g={}; parts.forEach(p=>{if(p.type!=='literal') g[p.type]=p.value});
+ const y=+g.year, m=+g.month, d=+g.day, hh=+g.hour, mi=+g.minute, ss=+g.second;
+ function wall(yy,mm,dd,h,minute,second){
+  let utc=Date.UTC(yy,mm-1,dd,h,minute,second);
+  for(let i=0;i<4;i++){
+   const bits=new Intl.DateTimeFormat('en-US',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(utc));
+   const q={}; bits.forEach(p=>{if(p.type!=='literal') q[p.type]=p.value});
+   utc+=Date.UTC(yy,mm-1,dd,h,minute,second)-Date.UTC(+q.year,+q.month-1,+q.day,+q.hour,+q.minute,+q.second)}
+  return utc}
+ let start;
+ if(pimpRange==='ytd') start=wall(y,1,1,0,0,0);
+ else {const n=pimpRange==='12m'?12:pimpRange==='9m'?9:pimpRange==='6m'?6:3;
+  let mm=m-n, yy=y; while(mm<=0){mm+=12; yy-=1}
+  let day=d;
+  while(day>28){const got=+new Intl.DateTimeFormat('en-US',{timeZone:CT_ZONE,day:'2-digit'}).format(new Date(wall(yy,mm,day,hh,mi,ss)));
+   if(got===day) break; day-=1}
+  start=wall(yy,mm,Math.max(1,day),hh,mi,ss)}
+ return {id:pimpRange, label:labels[pimpRange]||'YTD', start:new Date(start).toISOString(), end:new Date(now).toISOString()}}
+function eqEmptyCopy(){const hasAny=(pimpCurve||[]).some(p=>p&&Number.isFinite(Number(p.v)));
+ return hasAny?'No settled paper trades in this range.':'No settled paper trades yet.'}
+function liveKeyText(){
+ const line=(pimpChart&&pimpChart.open_line)||{};
+ const opens=Array.isArray(line.opens)?line.opens.filter(row=>row&&typeof row==='object'):[];
+ const n=Number(line.n)||opens.length;
+ if(n===1){const one=opens[0]||{};
+  const name=one.name||'Open paper trade';
+  const stake=(one.stake==null||one.stake==='')?'':' · stake '+usd(one.stake);
+  return 'Live · not settled · '+name+stake}
+ if(n>1) return 'Live · not settled · '+n+' open paper trades';
+ return line.label||'Live · not settled'}
+function eqRestText(){const label=(chartRange().label)||'YTD';
+ const openN=Number(((pimpChart&&pimpChart.open_line)||{}).n)||0;
+ if(!pimpHead.has) return label+' · '+eqEmptyCopy()+(openN>0?' · '+liveKeyText():'');
+ return label+' · Settled paper P/L · Today '+pnl(pimpHead.today||0)+(openN>0?' · Live line is not settled':'')}
+function paintEqKey(liveOn){const box=$('#eqkey'); if(!box) return;
+ const openN=Number(((pimpChart&&pimpChart.open_line)||{}).n)||0;
+ const tone=pimpHead.has&&pimpPts.length?eqTone(pimpPts[pimpPts.length-1].v):'flat';
+ const bits=[];
+ if(pimpHead.has) bits.push(h('span',null,h('i',{class:'eqswatch '+tone}),'Settled paper P/L'));
+ if(liveOn) bits.push(h('span',null,h('i',{class:'eqswatch live'}),liveKeyText()));
+ else if(openN>0) bits.push(h('span',{text:'Open paper trades are live and not settled.'}));
+ put(box, bits)}
+function bindRanges(){const box=$('#eqranges'); if(!box||box.dataset.bound) return; box.dataset.bound='1';
+ box.addEventListener('click', e=>{const btn=e.target.closest('button[data-range]'); if(!btn) return;
+  pimpRange=btn.getAttribute('data-range')||'ytd';
+  box.querySelectorAll('button[data-range]').forEach(b=>b.setAttribute('aria-pressed', b===btn?'true':'false'));
+  pimpPick=null; const host=$('#pimpchart'); if(host) delete host.dataset.scrub; drawEquity()})}
+function eqOnLive(x){if(!pimpLive) return false;
+ if(!pimpPts.length) return true;
+ const near=pimpPts[eqNearest(x).index]; return Math.abs(pimpLive.x-x)<Math.abs(near.x-x)}
+function drawLiveOnly(host, startMs, endMs){
+ const w=Math.max(280, Math.round(host.clientWidth));
+ const hgt=Math.max(160, Math.round(host.clientHeight||320));
+ const padL=8, padR=8, padT=28, padB=28;
+ const plotW=Math.max(1,w-padL-padR), plotH=Math.max(1,hgt-padT-padB);
+ const min=-1, max=1, span=max-min;
+ const bound0=Number.isFinite(startMs)?startMs:(Date.now()-1);
+ const bound1=Number.isFinite(endMs)&&endMs>bound0?endMs:(bound0+1);
+ const opens=(((pimpChart&&pimpChart.open_line)||{}).opens)||[];
+ let lineStart=null, anyBefore=false;
+ const marksAt=[];
+ (Array.isArray(opens)?opens:[]).forEach(row=>{
+  if(!row||typeof row!=='object') return;
+  const ms=Date.parse(row.t||'');
+  if(!Number.isFinite(ms)) return;
+  if(ms>bound1) return;
+  if(ms<bound0){anyBefore=true; return}
+  marksAt.push(ms)});
+ if(anyBefore) lineStart=bound0;
+ else if(marksAt.length) lineStart=Math.min.apply(null, marksAt);
+ let t0=lineStart!=null?lineStart:bound0;
+ let t1=bound1;
+ if(!(t1>t0)) t1=t0+60000;
+ const sameDay=ctDayKey(t0)===ctDayKey(t1);
+ const xAtMs=ms=>padL+((ms-t0)/(t1-t0))*plotW;
+ const yAt=v=>padT+(1-(v-min)/span)*plotH;
+ const y0=yAt(0);
+ host.dataset.t0=new Date(t0).toISOString();
+ host.dataset.t1=new Date(t1).toISOString();
+ const x2=xAtMs(t1);
+ const liveNodes=[];
+ if(lineStart!=null) liveNodes.push(sv('line',{x1:xAtMs(lineStart).toFixed(1),y1:y0.toFixed(1),x2:x2.toFixed(1),y2:y0.toFixed(1),
+  stroke:'#f0b429','stroke-width':'2','stroke-dasharray':'5 4','stroke-linecap':'round'}));
+ marksAt.forEach(ms=>{const x=xAtMs(ms), s=5;
+  liveNodes.push(sv('polygon',{points:[x,y0-s,x+s,y0,x,y0+s,x-s,y0].map(n=>Number(n).toFixed(1)).join(' '),fill:'#f0b429'}))});
+ liveNodes.push(sv('circle',{cx:x2.toFixed(1),cy:y0.toFixed(1),r:'5.5',fill:'none',stroke:'#f0b429','stroke-width':'2'}));
+ const labelX=Math.max(28, Math.min(w-8, x2));
+ liveNodes.push(sv('text',{class:'eqlive',x:labelX.toFixed(1),y:Math.max(14, y0-12).toFixed(1),'text-anchor':'end'},'Live'));
+ pimpBox={w:w,h:hgt};
+ pimpLive={x:x2, y:y0, v:0, label:liveKeyText()+' · '+ctLabel(t1, false)};
+ const axisMarks=host.clientWidth<520?[0,1]:[0,0.5,1];
+ const axis=axisMarks.map((frac,i)=>{const ms=t0+frac*(t1-t0);
+  const anchor=i===0?'start':(i===axisMarks.length-1?'end':'middle');
+  const x=padL+frac*plotW;
+  return sv('text',{class:'eqaxis',x:x.toFixed(1),y:hgt-8,'text-anchor':anchor}, ctAxis(ms, sameDay)||'')});
+ const rule=sv('line',{x1:0,y1:padT,x2:0,y2:padT+plotH,stroke:'#f0b429','stroke-opacity':'0.45','stroke-dasharray':'3 4',opacity:'0'});
+ pimpGuide={rule:rule,dot:null,color:'#f0b429'};
+ const tip=h('div',{class:'eqtip',id:'eqtip',hidden:true},h('span',{id:'eqtiptime',text:''}),h('b',{id:'eqtipval',text:''}));
+ put(host,
+  sv('svg',{viewBox:'0 0 '+w+' '+hgt,width:'100%',height:'100%','aria-hidden':'true'},
+   sv('line',{x1:padL,y1:y0,x2:padL+plotW,y2:y0,stroke:'#ffffff','stroke-opacity':'0.16'}),
+   ...liveNodes, ...axis, rule),
+  tip);
+ paintEqKey(true)}
 function drawEquity(){const host=$('#pimpchart'); if(!host) return;
- const points=(pimpCurve||[]).filter(p=>p&&Number.isFinite(Number(p.v)));
+ const range=chartRange();
+ const startMs=Date.parse(range.start||''), endMs=Date.parse(range.end||'');
+ const indexed=[];
+ (pimpCurve||[]).forEach((p,orig)=>{
+  if(!p||!Number.isFinite(Number(p.v))) return;
+  const ms=Date.parse(p.t||'');
+  if(!Number.isFinite(ms)) return;
+  if(Number.isFinite(startMs)&&ms<startMs) return;
+  if(Number.isFinite(endMs)&&ms>endMs) return;
+  indexed.push({p:p, orig:orig, ms:ms})});
+ const points=indexed.map(item=>item.p);
+ const at={}; indexed.forEach((item,i)=>{at[item.orig]=i});
  pimpHead.has=!!points.length;
  const last=points.length?Number(points[points.length-1].v):0;
  const tone=points.length?eqTone(last):'flat';
- const rest=points.length?('Today '+pnl(pimpHead.today||0)):'No settled paper trades yet.';
- if(!host.dataset.scrub) paintEqHead(last, rest, tone);
- host.setAttribute('role', points.length?'group':'img');
- host.setAttribute('aria-label', points.length?('Paper P/L '+pnl(last)+'. Click a point or drag a stretch. Times are America/Chicago.'):'No settled paper trades yet. The chart is empty.');
- host.style.cursor=points.length?'crosshair':'default';
- if(!points.length){put(host, h('p',{class:'eqempty',text:'No settled paper trades yet.'})); pimpPts=[]; pimpGuide=null; pimpPick=null; paintSlips(); return}
+ const openN=Number(((pimpChart&&pimpChart.open_line)||{}).n)||0;
+ const label=range.label||'YTD';
+ if(!host.dataset.scrub) paintEqHead(last, eqRestText(), tone);
+ host.dataset.range=pimpRange;
+ host.dataset.start=range.start||'';
+ host.dataset.end=range.end||'';
+ host.dataset.points=String(points.length);
+ host.dataset.live=String(openN);
+ host.setAttribute('role', (points.length||openN)?'group':'img');
+ const liveNote=openN>0?(points.length?' Live line is open paper trades and is not settled.':' The gold line is open paper trades and is not settled.'):'';
+ host.setAttribute('aria-label', points.length?('Paper P/L '+pnl(last)+'. Range '+label+'. Settled paper P/L only.'+liveNote+' Click a point or drag a stretch. Times are America/Chicago.'):(eqEmptyCopy()+' Range '+label+'.'+liveNote));
+ host.style.cursor=(points.length||openN)?'crosshair':'default';
+ if(!points.length && !openN){put(host, h('p',{class:'eqempty',text:eqEmptyCopy()})); pimpPts=[]; pimpGuide=null; pimpLive=null; pimpPick=null; paintSlips(); paintEqKey(false); return}
+ if(!points.length){pimpPts=[]; pimpGuide=null; pimpPick=null;
+  if(host.clientWidth<40){const n=Number(host.dataset.tries||0);
+   if(n<8){host.dataset.tries=String(n+1); requestAnimationFrame(drawEquity)} return}
+  host.dataset.tries='0';
+  drawLiveOnly(host, startMs, endMs); paintSlips(); return}
  if(pimpPick && (Math.min(pimpPick.lo,pimpPick.hi)<0 || Math.max(pimpPick.lo,pimpPick.hi)>=points.length)) pimpPick=null;
  if(host.clientWidth<40){const n=Number(host.dataset.tries||0);
   if(n<8){host.dataset.tries=String(n+1); requestAnimationFrame(drawEquity)} return}
@@ -40775,17 +40927,26 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
  if(min===max){min-=1; max+=1}
  const yPad=(max-min)*0.14; min-=yPad; max+=yPad;
  const span=(max-min)||1;
- const times=points.map(p=>Date.parse(p.t||''));
- const finite=times.filter(t=>Number.isFinite(t));
- const useTime=finite.length===points.length && points.length>=2 && finite[finite.length-1]>finite[0];
- const t0=useTime?finite[0]:0, t1=useTime?finite[finite.length-1]:1;
- const sameDay=useTime && finite.every(t=>ctDayKey(t)===ctDayKey(finite[0]));
- const xAt=i=>{if(points.length===1) return padL+plotW/2;
-  if(useTime) return padL+((times[i]-t0)/(t1-t0))*plotW;
-  return padL+(i/(points.length-1))*plotW};
+ const t0=indexed[0].ms;
+ const lastMs=indexed[indexed.length-1].ms;
+ let t1=lastMs;
+ if(openN>0 && Number.isFinite(endMs) && endMs>t1) t1=endMs;
+ if(!(t1>t0)) t1=t0+60000;
+ host.dataset.t0=new Date(t0).toISOString();
+ host.dataset.t1=new Date(t1).toISOString();
+ const sameDay=ctDayKey(t0)===ctDayKey(t1);
+ const dataMs=Math.max(1, lastMs-t0);
+ const liveMs=Math.max(0, t1-lastMs);
+ const natural=liveMs/(dataMs+liveMs);
+ const liveFrac=openN>0?Math.max(natural, 0.16):0;
+ const xAtMs=ms=>{
+  if(liveFrac<=0) return padL+((ms-t0)/Math.max(1, t1-t0))*plotW;
+  const dataW=plotW*(1-liveFrac);
+  if(ms<=lastMs) return padL+((ms-t0)/dataMs)*dataW;
+  return padL+dataW+((ms-lastMs)/Math.max(1, liveMs))*plotW*liveFrac;};
  const yAt=v=>padT+(1-(v-min)/span)*plotH;
- pimpPts=points.map((p,i)=>{const ms=times[i];
-  return {x:xAt(i), y:yAt(Number(p.v)), v:Number(p.v), label:ctLabel(ms, !!p.day), ms:ms,
+ pimpPts=indexed.map(item=>{const p=item.p, ms=item.ms;
+  return {x:xAtMs(ms), y:yAt(Number(p.v)), v:Number(p.v), label:ctLabel(ms, !!p.day), ms:ms,
    day:!!p.day, when:p.when||'', name:p.name||'', stake:p.stake==null?null:Number(p.stake),
    payout:p.payout==null?null:Number(p.payout), pnl:p.pnl==null?null:Number(p.pnl)}});
  pimpBox={w:w,h:hgt};
@@ -40795,13 +40956,13 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
   ' L'+pimpPts[0].x.toFixed(1)+' '+(padT+plotH).toFixed(1)+' Z':'';
  const rawMin=Math.min.apply(null,vals), rawMax=Math.max.apply(null,vals);
  const zeroY=yAt(0);
- const marks=points.length<2?[]:(host.clientWidth<520?[0,1]:[0,0.5,1]);
- const axis=marks.map((frac,i)=>{const ms=useTime?t0+frac*(t1-t0):times[Math.round(frac*(points.length-1))];
+ const marks=host.clientWidth<520?[0,1]:[0,0.5,1];
+ const axis=marks.map((frac,i)=>{const ms=t0+frac*(t1-t0);
   const anchor=i===0?'start':(i===marks.length-1?'end':'middle');
-  const x=padL+frac*plotW;
+  const x=xAtMs(ms);
   return sv('text',{class:'eqaxis',x:x.toFixed(1),y:hgt-8,'text-anchor':anchor}, ctAxis(ms, sameDay)||'')});
  const spikes=(pimpSpikes||[]).map(sp=>{
-  const i0=Number(sp.from), i1=Number(sp.to);
+  const i0=at[Number(sp.from)], i1=at[Number(sp.to)];
   if(!Number.isInteger(i0)||!Number.isInteger(i1)||i0<0||i1>=pimpPts.length||i0>=i1) return null;
   const a=pimpPts[i0], b=pimpPts[i1], up=Number(sp.dollars)>=0;
   const midX=Math.max(72, Math.min(w-72, (a.x+b.x)/2));
@@ -40820,6 +40981,14 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
  const rule=sv('line',{x1:0,y1:padT,x2:0,y2:padT+plotH,stroke:color,'stroke-opacity':'0.45','stroke-dasharray':'3 4',opacity:'0'});
  const dot=sv('circle',{cx:pimpPts[pimpPts.length-1].x,cy:pimpPts[pimpPts.length-1].y,r:'4.5',fill:color,stroke:'#0c0e12','stroke-width':'2'});
  pimpGuide={rule:rule,dot:dot,color:color};
+ pimpLive=null; const liveNodes=[];
+ if(openN>0){const lastPt=pimpPts[pimpPts.length-1]; const x2=xAtMs(t1); const yLive=lastPt.y;
+  if(t1>lastPt.ms+1000) liveNodes.push(sv('line',{x1:lastPt.x.toFixed(1),y1:yLive.toFixed(1),x2:x2.toFixed(1),y2:yLive.toFixed(1),
+   stroke:'#f0b429','stroke-width':'2','stroke-dasharray':'5 4','stroke-linecap':'round'}));
+  liveNodes.push(sv('circle',{cx:x2.toFixed(1),cy:yLive.toFixed(1),r:'5.5',fill:'none',stroke:'#f0b429','stroke-width':'2'}));
+  const labelX=Math.max(28, Math.min(w-8, x2));
+  liveNodes.push(sv('text',{class:'eqlive',x:labelX.toFixed(1),y:Math.max(14, yLive-12).toFixed(1),'text-anchor':'end'},'Live'));
+  pimpLive={x:x2, y:yLive, v:lastPt.v, label:liveKeyText()+' · '+ctLabel(t1, false)}}
  const tip=h('div',{class:'eqtip',id:'eqtip',hidden:true},h('span',{id:'eqtiptime',text:''}),h('b',{id:'eqtipval',text:''}));
  put(host,
   sv('svg',{viewBox:'0 0 '+w+' '+hgt,width:'100%',height:'100%','aria-hidden':'true'},
@@ -40827,9 +40996,9 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
    rawMin<0&&rawMax>0?sv('line',{x1:padL,y1:zeroY,x2:padL+plotW,y2:zeroY,stroke:'#ffffff','stroke-opacity':'0.16'}):null,
    area?sv('path',{d:area,fill:'url(#eqfill)',stroke:'none'}):null,
    pimpPts.length>1?sv('path',{d:d,fill:'none',stroke:color,'stroke-width':'2.5','stroke-linejoin':'round','stroke-linecap':'round'}):null,
-   ...axis, ...rings, ...spikes, rule, dot),
+   ...liveNodes, ...axis, ...rings, ...spikes, rule, dot),
   tip);
- paintSlips()}
+ paintEqKey(!!pimpLive); paintSlips()}
 function eqX(e){const host=$('#pimpchart'); const rect=host.getBoundingClientRect();
  return (e.clientX-rect.left)*(pimpBox.w/Math.max(rect.width,1))}
 function eqNearest(x){let best=0, dist=Infinity;
@@ -40845,8 +41014,19 @@ function eqWindow(x0, x1){const lo=Math.min(x0,x1), hi=Math.max(x0,x1), hits=[];
  if(hits.length) return {lo:hits[0], hi:hits[hits.length-1]};
  return eqHit((lo+hi)/2)}
 function samePick(a, b){return !!(a&&b&&a.lo===b.lo&&a.hi===b.hi)}
-function eqScrub(e){const host=$('#pimpchart'); if(!host||!pimpPts.length) return;
- const x=eqX(e); const best=pimpPts[eqNearest(x).index];
+function eqScrub(e){const host=$('#pimpchart'); if(!host||(!pimpPts.length&&!pimpLive)) return;
+ const x=eqX(e);
+ if(eqOnLive(x)){host.dataset.scrub='1';
+  paintEqHead(pimpLive.v, pimpLive.label, 'live');
+  const tip=$('#eqtip'); if(tip){tip.hidden=false;
+   const left=Math.max(64, Math.min(pimpBox.w-64, pimpLive.x));
+   tip.style.left=left+'px'; tip.style.top=pimpLive.y+'px';
+   const time=$('#eqtiptime'); if(time) time.textContent=pimpLive.label;
+   const val=$('#eqtipval'); if(val){val.textContent=pnl(pimpLive.v); val.style.color='#f0b429'}}
+  if(pimpGuide){pimpGuide.rule.setAttribute('x1',pimpLive.x); pimpGuide.rule.setAttribute('x2',pimpLive.x);
+   pimpGuide.rule.setAttribute('opacity','1'); pimpGuide.rule.setAttribute('stroke','#f0b429')}
+  return}
+ const best=pimpPts[eqNearest(x).index];
  host.dataset.scrub='1';
  paintEqHead(best.v, best.label, eqTone(best.v));
  const tip=$('#eqtip'); if(tip){tip.hidden=false;
@@ -40861,28 +41041,29 @@ function eqScrub(e){const host=$('#pimpchart'); if(!host||!pimpPts.length) retur
 function eqClear(){const host=$('#pimpchart'); if(host) delete host.dataset.scrub;
  const tip=$('#eqtip'); if(tip) tip.hidden=true;
  const last=pimpPts.length?pimpPts[pimpPts.length-1]:null;
- if(pimpGuide&&last){pimpGuide.rule.setAttribute('opacity','0');
-  pimpGuide.dot.setAttribute('cx',last.x); pimpGuide.dot.setAttribute('cy',last.y);
+ if(pimpGuide&&pimpGuide.rule) pimpGuide.rule.setAttribute('opacity','0');
+ if(pimpGuide&&pimpGuide.dot&&last){pimpGuide.dot.setAttribute('cx',last.x); pimpGuide.dot.setAttribute('cy',last.y);
   pimpGuide.dot.setAttribute('r','4.5'); pimpGuide.dot.setAttribute('fill',EQ_COLOR[pimpHead.has?eqTone(last.v):'flat'])}
- paintEqHead(last?last.v:0, pimpHead.has?('Today '+pnl(pimpHead.today||0)):'No settled paper trades yet.', pimpHead.has&&last?eqTone(last.v):'flat')}
-function eqDown(e){if(!pimpPts.length) return; if(e.pointerType==='mouse' && e.button!==0) return;
+ paintEqHead(last?last.v:0, eqRestText(), pimpHead.has&&last?eqTone(last.v):'flat')}
+function eqDown(e){if(!pimpPts.length&&!pimpLive) return; if(e.pointerType==='mouse' && e.button!==0) return;
  const host=$('#pimpchart');
  pimpDrag={x:eqX(e), px:e.clientX, py:e.clientY, id:e.pointerId, moved:false, type:e.pointerType||'mouse'};
  if(pimpDrag.type==='mouse'){try{host.setPointerCapture(e.pointerId)}catch(err){}}
  eqScrub(e)}
-function eqMove(e){if(!pimpPts.length) return;
+function eqMove(e){if(!pimpPts.length&&!pimpLive) return;
  if(!pimpDrag || e.pointerId!==pimpDrag.id){if(!pimpDrag) eqScrub(e); return}
  const dx=e.clientX-pimpDrag.px, dy=e.clientY-pimpDrag.py;
  if(!pimpDrag.moved && (Math.abs(dx)>8 || Math.abs(dy)>8)){
   if(pimpDrag.type!=='mouse' && Math.abs(dy)>Math.abs(dx)+4){pimpDrag=null; return}
   pimpDrag.moved=true;
   if(pimpDrag.type!=='mouse'){try{$('#pimpchart').setPointerCapture(e.pointerId)}catch(err){}}}
- if(pimpDrag && pimpDrag.moved){pimpPick=eqWindow(pimpDrag.x, eqX(e)); drawEquity()}
+ if(pimpDrag && pimpDrag.moved && pimpPts.length){pimpPick=eqWindow(pimpDrag.x, eqX(e)); drawEquity()}
  eqScrub(e)}
 function eqUp(e){if(!pimpDrag || (e.pointerId!=null && e.pointerId!==pimpDrag.id)) return;
- const drag=pimpDrag; pimpDrag=null; if(!pimpPts.length){paintSlips(); return}
- if(!drag.moved){const hit=eqHit(eqX(e)); pimpPick=samePick(pimpPick, hit)?null:hit}
- else pimpPick=eqWindow(drag.x, eqX(e));
+ const drag=pimpDrag; pimpDrag=null; if(!pimpPts.length){pimpPick=null; paintSlips(); return}
+ if(eqOnLive(eqX(e)) && !drag.moved){pimpPick=null}
+ else if(!drag.moved){const hit=eqHit(eqX(e)); pimpPick=samePick(pimpPick, hit)?null:hit}
+ else if(!eqOnLive(eqX(e))) pimpPick=eqWindow(drag.x, eqX(e));
  drawEquity()}
 function bindEquity(){const host=$('#pimpchart'); if(!host||host.dataset.bound) return; host.dataset.bound='1';
  host.addEventListener('pointerdown', eqDown);
@@ -40972,6 +41153,7 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    h('p',{class:'muted',text:'No limit changes yet.'}),
   d.live_switch?h('p',{class:'muted',text:d.live_switch.needs||''}):null);
  pimpHead.today=Number(desk.today)||0;
+ pimpChart=(desk.chart&&typeof desk.chart==='object')?desk.chart:pimpChart;
  const nextCurve=Array.isArray(desk.curve)?desk.curve:[];
  const nextKey=nextCurve.map(p=>((p&&p.t)||'')+':'+((p&&p.v)||'')).join('|');
  if(nextKey!==pimpCurveKey) pimpPick=null;
@@ -41060,6 +41242,7 @@ addEventListener('keydown',e=>{if((e.key!=='r'&&e.key!=='R')||e.metaKey||e.ctrlK
  const tag=(e.target&&e.target.tagName)||''; if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT') return;
  if($('#pimp')&&!$('#pimp').hidden){e.preventDefault(); loadPimp()}});
 addEventListener('popstate',()=>showPanel(panelName(),false));
+bindRanges();
 load();
 let pimpStart=panelName();
 try{ if(pimpStart==='hq' && localStorage.getItem('pb-staff-panel')==='pimp') pimpStart='pimp'; }catch(e){}
