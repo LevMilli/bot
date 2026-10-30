@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 quote_cache.json
+paper_account.json

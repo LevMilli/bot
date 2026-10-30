@@ -39871,6 +39871,7 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <h1 class="pimph">PIMP-TRADING</h1>
 <p class="todaybig" id="pimptoday"></p>
 <p id="pimpstatus"></p>
+<p id="pimppace"></p>
 <p class="muted" id="pimpstake"></p>
 <section class="card" style="margin-bottom:12px"><h2>Desk</h2><div id="pimpdesk"></div>
  <div class="form">
@@ -39887,16 +39888,17 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
   <label>At 80% or higher, from $<input class="numin" name="stake_hi_min" type="number" min="10" max="30" step="0.01" value="10" required></label>
   <label>to $<input class="numin" name="stake_hi_max" type="number" min="10" max="30" step="0.01" value="30" required></label>
   <label>Below 80%, under $<input class="numin" name="stake_lo_max" type="number" min="0.01" max="9.99" step="0.01" value="9.99" required></label>
-  <label>Daily loss stop $<input class="numin" name="daily_loss_stop" type="number" min="1" max="100000" step="1" value="50" required></label>
+  <label>Daily loss stop $<input class="numin" name="daily_loss_stop" type="number" min="1" max="100000" step="1" value="150" required></label>
   <label>Max open risk $<input class="numin" name="max_open_risk" type="number" min="1" max="1000000" step="1" value="100" required></label>
-  <label>Max open positions <input class="numin" name="max_open_positions" type="number" min="1" max="50" step="1" value="4" required></label>
+  <label>Max open positions <input class="numin" name="max_open_positions" type="number" min="1" max="50" step="1" value="12" required></label>
+  <label>Edge bar <input class="numin" name="min_edge" type="number" min="0" max="0.2" step="0.01" value="0.04" required></label>
   <label>Week goal $<input class="numin" name="week_goal" type="number" min="0" max="1000000" step="1" value="25"></label>
   <label>Quiet from <input class="numin" name="quiet_start" type="time" value="22:00"></label>
   <label>until <input class="numin" name="quiet_end" type="time" value="07:00"></label>
   <button type="submit">Save paper limits</button>
  </form>
  <p class="muted" id="pimpnote" role="status"></p>
- <p class="muted">Saved in paper-bots/pimp-trading.json on this machine. The picks database is left alone. Quiet hours hold trade alerts. The nightly recap still posts. Owner or developer can save. The before and after numbers sit above the form.</p></section>
+ <p class="muted">Saved in paper-bots/pimp-trading.json on this machine. The picks database is left alone. Quiet hours hold trade alerts. The nightly recap still posts. Owner or developer can save. The before and after numbers sit above the form. Old paper defaults: edge bar 0.08, max open positions 4, daily loss stop $50. New paper defaults: edge bar 0.04, max open positions 12, daily loss stop $150. The daily loss stop stays on.</p></section>
 <div class="pimpgrid" id="pimpbots"></div>
 </div>
 <div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">
@@ -40166,18 +40168,21 @@ async function pimpPost(body){if(pimpBusy)return; pimpBusy=true;
 let pimpLimits=null, pimpArmed=false, pimpQuery={q:'',filter:'all',page:1};
 function limitNums(f){return {stake_hi_min:f.stake_hi_min.value,stake_hi_max:f.stake_hi_max.value,
  stake_lo_max:f.stake_lo_max.value,daily_loss_stop:f.daily_loss_stop.value,max_open_risk:f.max_open_risk.value,
- max_open_positions:f.max_open_positions.value,week_goal:f.week_goal?f.week_goal.value:'',
+ max_open_positions:f.max_open_positions.value,min_edge:f.min_edge?f.min_edge.value:'',
+ week_goal:f.week_goal?f.week_goal.value:'',
  quiet_start:f.quiet_start?f.quiet_start.value:'',quiet_end:f.quiet_end?f.quiet_end.value:''}}
 function fillLimits(lim){const f=$('#pimpform'); if(!f||!lim)return;
  if(f.contains(document.activeElement))return;
- ['stake_hi_min','stake_hi_max','stake_lo_max','daily_loss_stop','max_open_risk','max_open_positions','week_goal','quiet_start','quiet_end'].forEach(k=>{
+ ['stake_hi_min','stake_hi_max','stake_lo_max','daily_loss_stop','max_open_risk','max_open_positions','min_edge','week_goal','quiet_start','quiet_end'].forEach(k=>{
   if(f[k]&&lim[k]!=null) f[k].value=String(lim[k])})}
 function previewLimits(){const f=$('#pimpform'), box=$('#pimppreview'); if(!f||!box)return;
  const before=pimpLimits||{}, next=limitNums(f);
  box.textContent='Before: 80% stake $'+before.stake_hi_min+' to $'+before.stake_hi_max+', under $'+before.stake_lo_max+
-  ', daily loss stop $'+before.daily_loss_stop+', open risk $'+before.max_open_risk+', week goal $'+before.week_goal+
+  ', daily loss stop $'+before.daily_loss_stop+', open risk $'+before.max_open_risk+
+  ', max open '+before.max_open_positions+', edge '+before.min_edge+', week goal $'+before.week_goal+
   '. After: 80% stake $'+next.stake_hi_min+' to $'+next.stake_hi_max+', under $'+next.stake_lo_max+
-  ', daily loss stop $'+next.daily_loss_stop+', open risk $'+next.max_open_risk+', week goal $'+next.week_goal+
+  ', daily loss stop $'+next.daily_loss_stop+', open risk $'+next.max_open_risk+
+  ', max open '+next.max_open_positions+', edge '+next.min_edge+', week goal $'+next.week_goal+
   (pimpArmed?'. Save again to keep this.':'.');}
 const CT_ZONE='America/Chicago';
 const EQ_COLOR={up:'#00c805',down:'#ff4d4d',flat:'#c5ccd6'};
@@ -40393,14 +40398,21 @@ function openCard(p, fresh){const game=p.game||p.ticker||p.team||'';
   fact('Model probability', p.prob==null?null:pctProb(p.prob)),
   fact('Score at entry', p.score),
   fact('Why it opened', p.why_open||p.why),
+  fact('Risk', p.risk==null?null:usd(p.risk)),
+  fact('Reward', p.reward==null?null:usd(p.reward)),
+  fact('Risk/reward', p.risk_reward==null?null:Number(p.risk_reward).toFixed(2)),
   fact('Price source', p.source),
   fact('Price time', p.priced_central||p.priced_at))}
-function closedHead(){return h('tr',null,['Bot','Close time','Ticker or game','Exit reason','Payout','P/L'].map(name=>h('th',{text:name})))}
+function closedHead(){return h('tr',null,['Bot','Close time','Ticker or game','Why','Risk','Reward','Risk/reward','Exit reason','Payout','P/L'].map(name=>h('th',{text:name})))}
 function closedRow(t, fresh){const game=t.game||t.ticker||t.what||t.title||'';
  return h('tr',{class:fresh?'fresh':''},
   h('td',{text:t.name||t.bot||'unknown'}),
   h('td',{text:t.closed_at||t.when||'unknown'}),
   h('td',{text:game||'unknown'}),
+  h('td',{text:t.why_open||t.why||'unknown'}),
+  h('td',{class:'num',text:t.risk==null?'unknown':usd(t.risk)}),
+  h('td',{class:'num',text:t.reward==null?'unknown':usd(t.reward)}),
+  h('td',{class:'num',text:t.risk_reward==null?'unknown':Number(t.risk_reward).toFixed(2)}),
   h('td',{text:t.exit_reason||'unknown'}),
   h('td',{class:'num',text:t.payout==null?'unknown':usd(t.payout)}),
   h('td',{class:'num',text:t.pnl==null?'unknown':pnl(t.pnl)}))}
@@ -40409,6 +40421,7 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
  const stake=$('#pimpstake'); if(stake) stake.textContent=d.limits_text||'';
  const today=$('#pimptoday'); if(today) today.textContent="Today's paper P/L "+pnl(desk.today||0);
  const status=$('#pimpstatus'); if(status) status.textContent=desk.status_line||'';
+ const paceEl=$('#pimppace'); if(paceEl) paceEl.textContent=desk.pace_line?(desk.pace_line+(desk.pace_note?'. '+desk.pace_note:'')):'';
  fillLimits(lim); previewLimits();
  const runBtn=$('#pimprun'); if(runBtn) runBtn.hidden=!access.run;
  const pauseBtn=$('#pimppause'); if(pauseBtn){ pauseBtn.hidden=!access.save;

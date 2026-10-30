@@ -1,11 +1,14 @@
 {
-  "_comment": "Dashboard-owned paper limits. Paper only. This file is not the picks database.",
+  "_comment": "Dashboard-owned paper limits. Paper only. This file is not the picks database. Old defaults: edge bar 0.08 after the fee, max open positions 4, daily loss stop $50. New defaults: edge bar 0.04 after the fee, max open positions 12, daily loss stop $150. The daily loss stop stays. A bad paper day still ends. Hourly paper pace: minimum 6, target 12. Under 12 this hour, a timer check may paper-buy without the strict edge. Loosening stops at 12.",
   "paper_only": true,
   "stake_hi_min": 10.0,
   "stake_hi_max": 30.0,
   "stake_hi_prob": 0.8,
   "stake_lo_max": 9.99,
-  "daily_loss_stop": 50.0,
+  "daily_loss_stop": 150.0,
   "max_open_risk": 100.0,
-  "max_open_positions": 4
+  "max_open_positions": 12,
+  "min_edge": 0.04,
+  "pace_min": 6,
+  "pace_target": 12
 }

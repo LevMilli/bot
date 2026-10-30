@@ -49,18 +49,39 @@ RUN_ROLES = {"developer"}
 # A live-order switch is not built. Two people would have to confirm any future one.
 LIVE_SWITCH_BUILT = False
 
+# Shipped paper defaults.
+# Old: edge bar 0.08 after the fee, max open positions 4, daily loss stop $50.
+# New: edge bar 0.04 after the fee, max open positions 12, daily loss stop $150.
+# The daily loss stop stays. A bad paper day still ends.
+# While this hour has fewer than 12 paper trades, a timer check may buy without that edge.
+PACE_MIN = 6
+PACE_TARGET = 12
+LEARN_MIN_SETTLES = 8
+LEARN_HIT_RATE = 0.40
+
 DEFAULTS = {
     "paper_only": True,
     "stake_hi_min": 10.0,
     "stake_hi_max": 30.0,
     "stake_hi_prob": 0.8,
     "stake_lo_max": 9.99,
-    "daily_loss_stop": 50.0,
+    "daily_loss_stop": 150.0,
     "max_open_risk": 100.0,
-    "max_open_positions": 4,
+    "max_open_positions": 12,
+    "min_edge": 0.04,
+    "pace_min": PACE_MIN,
+    "pace_target": PACE_TARGET,
     "week_goal": WEEK_GOAL,
     "quiet_start": QUIET_START,
     "quiet_end": QUIET_END,
+}
+
+# Starting paper cash. Written once, on the first run, and never used to invent trades.
+ACCOUNT_FILES = {
+    "sports-gap": "state.json",
+    "kalshi-sp": "paper_state.json",
+    "btc15m": "paper_account.json",
+    "memecoin": "positions.json",
 }
 
 # Fixed commands. Nothing from the request is concatenated onto these.
@@ -129,11 +150,11 @@ BOTS = (
         "name": "BTC 15m signal",
         "folder": "btc15m-signal",
         "script": "btc15m_signal.py",
-        "blurb": "Prints BUY or SKIP from public prices. It keeps no paper position and places nothing.",
-        "state": "",
+        "blurb": "BTC 15-minute paper account. A timer check can paper-buy. It places nothing.",
+        "state": "paper_account.json",
         "kind": "btc",
         "log": "",
-        "empty": "Signal only. There is no cash file and no trade log.",
+        "empty": "No paper account yet. A check writes paper_account.json.",
     },
     {
         "id": "memecoin",
@@ -330,9 +351,12 @@ def parse_settings(raw: dict):
         loss = float(raw.get("daily_loss_stop"))
         risk = float(raw.get("max_open_risk"))
         positions = int(float(raw.get("max_open_positions")))
+        edge = float(raw.get("min_edge", DEFAULTS["min_edge"]))
+        pace_min = int(float(raw.get("pace_min", DEFAULTS["pace_min"])))
+        pace_target = int(float(raw.get("pace_target", DEFAULTS["pace_target"])))
     except (TypeError, ValueError):
         return None, "Enter a number in every limit."
-    if not all(math.isfinite(n) for n in (hi_min, hi_max, lo_max, loss, risk)):
+    if not all(math.isfinite(n) for n in (hi_min, hi_max, lo_max, loss, risk, edge)):
         return None, "Enter finite numbers."
     if hi_min < 10 or hi_max > 30 or hi_min > hi_max:
         return None, "At 80% or higher, the paper stake stays between $10 and $30."
@@ -346,6 +370,10 @@ def parse_settings(raw: dict):
         return None, "Max open risk stays between $1 and $1000000."
     if not (1 <= positions <= 50):
         return None, "Max open positions stays between 1 and 50."
+    if not (0.0 <= edge <= 0.20):
+        return None, "The edge bar stays between 0 and 0.20."
+    if not (1 <= pace_min <= pace_target <= 48):
+        return None, "The paper pace stays between 1 and 48, and the target is at least the minimum."
     try:
         goal = float(raw.get("week_goal", DEFAULTS["week_goal"]))
     except (TypeError, ValueError):
@@ -365,6 +393,9 @@ def parse_settings(raw: dict):
         "daily_loss_stop": round(loss, 2),
         "max_open_risk": round(risk, 2),
         "max_open_positions": positions,
+        "min_edge": round(edge, 4),
+        "pace_min": pace_min,
+        "pace_target": pace_target,
         "week_goal": round(goal, 2),
         "quiet_start": quiet_start,
         "quiet_end": quiet_end,
@@ -393,9 +424,12 @@ def limits_text(cfg: dict) -> str:
     return (
         f"At a model probability of 80% or higher, a paper stake stays between ${hi_min:.2f} and ${hi_max:.2f}. "
         f"Below that, it stays under ${lo_max:.2f}. "
-        f"Daily loss stop ${cfg['daily_loss_stop']:.2f}. "
+        f"Daily loss stop ${cfg['daily_loss_stop']:.2f} (the old default was $50.00). The stop stays on. "
         f"Max open risk ${cfg['max_open_risk']:.2f}. "
-        f"Max open positions {cfg['max_open_positions']}. "
+        f"Max open positions {cfg['max_open_positions']} (the old default was 4). "
+        f"Edge bar {float(cfg.get('min_edge') or 0):.2f} after the fee (the old default was 0.08). "
+        f"Paper pace is {int(cfg.get('pace_min') or PACE_MIN)} to {int(cfg.get('pace_target') or PACE_TARGET)} trades an hour. "
+        "Under that target, a timer check may paper-buy without the strict edge. "
         "These limits gate a new entry check. Each bot still sizes with the paper rule in its own script. "
         "Realized P/L is closed paper trades in the local files. Past paper results stay in the past."
     )
@@ -548,10 +582,14 @@ def _fill_row(pos: dict, title: str, detail: str, cost: float, when: str) -> dic
     if prob in (None, "") and pos.get("model_entry") not in (None, ""):
         prob = pos.get("model_entry")
     gap = _num(pos.get("gap_at_entry"))
-    if gap is None:
+    stored_why = _clean(pos.get("why") or "", 180)
+    if stored_why:
+        why = stored_why
+    elif gap is None:
         why = "The reason was not stored with this trade."
     else:
         why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
+    terms = _trade_terms(pos, cost)
     contracts = pos.get("contracts")
     if contracts in (None, "") and pos.get("tokens") not in (None, ""):
         contracts = pos.get("tokens")
@@ -579,6 +617,9 @@ def _fill_row(pos: dict, title: str, detail: str, cost: float, when: str) -> dic
         "when": _clean(when, 40),
         "why": why,
         "why_open": why,
+        "risk": terms["risk"],
+        "reward": terms["reward"],
+        "risk_reward": terms["risk_reward"],
         "payout": None,
         "exit_reason": "",
         "closed_at": "",
@@ -788,11 +829,31 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     if spec["kind"] == "btc":
         summary = str(run.get("summary") or "")
         view["skip"] = _btc_skip(summary)
-        view["empty"] = spec["empty"]
-        view["why"] = plain_reason(view["skip"]) if view["skip"] else ""
         view["warning"] = _btc_calendar_warning(summary)
         if run.get("at"):
             view["last_check"] = str(run.get("at"))
+        state_path = _under(root, spec["folder"], spec["state"]) if spec.get("state") else ""
+        state, _problem = _read_state(state_path) if state_path else (None, "")
+        if isinstance(state, dict):
+            positions, trades, realized, today, risk, count, history = _sports_positions(state, day)
+            view["has_state"] = True
+            view["empty"] = ""
+            view["cash"] = _num(state.get("cash"))
+            if view["cash"] is not None:
+                view["cash"] = round(view["cash"], 2)
+            view["positions"] = positions
+            view["trades"] = trades
+            view["history"] = history
+            view["realized"] = realized
+            view["today"] = today
+            view["open_risk"] = risk
+            view["open_count"] = count
+            view["last_epoch"] = _mtime(state_path) or 0
+            if not view["last_check"]:
+                view["last_check"] = _fmt_epoch(view["last_epoch"])
+        else:
+            view["empty"] = spec["empty"]
+        view["why"] = card_copy(summary) if summary.strip() else ""
         return _finish_bot(view, spec, root)
     state_path = _under(root, spec["folder"], spec["state"])
     stamp = _mtime(state_path) or 0
@@ -853,7 +914,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     view["open_risk"] = risk
     view["open_count"] = count
     summary = str(run.get("summary") or "")
-    view["why"] = plain_reason(summary) if summary.strip() else ""
+    view["why"] = card_copy(summary) if summary.strip() else ""
     view["outside"] = _outside(root, spec["id"], stamp)
     _save_good_bot(root, spec["id"], view)
     return _finish_bot(view, spec, root)
@@ -919,6 +980,7 @@ def entry_gate(root: str | None = None, bots: list | None = None) -> str:
 
 def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int = 1) -> dict:
     root = _root(root)
+    ensure_paper_accounts(root)
     cfg = load_settings(root)
     runs = _load_runs(root)
     day = _today()
@@ -981,6 +1043,7 @@ def _paper_ok(root: str, bot_id: str) -> str:
 def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: bool = False,
             stake=None, prob=None) -> dict:
     root = _root(root)
+    ensure_paper_accounts(root)
     spec = ACTIONS.get(bot_id, {}).get(action or "run")
     folder = next((b["folder"] for b in BOTS if b["id"] == bot_id), "")
     if not spec or not folder:
@@ -1164,6 +1227,7 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
     place a live order.
     """
     root = _root(root)
+    ensure_paper_accounts(root)
     if now is None:
         now = dt.datetime.now(dt.timezone.utc)
     elif now.tzinfo is None:
@@ -1407,6 +1471,371 @@ def edge_after_fee(fair, ask):
     if fair_n is None or ask_n is None:
         return None
     return round(fair_n - ask_n - kalshi_fee(ask_n), 4)
+
+
+def _account_body(bot_id: str) -> dict:
+    if bot_id == "sports-gap":
+        return {"cash": 14.0, "open": [], "closed": [], "runs": 0, "paper_only": True}
+    if bot_id == "kalshi-sp":
+        return {
+            "bankroll": 500.0,
+            "open": [],
+            "closed": [],
+            "halted": False,
+            "created": dt.datetime.now().isoformat(timespec="seconds"),
+            "paper_only": True,
+        }
+    if bot_id == "btc15m":
+        return {"cash": 100.0, "open": [], "closed": [], "paper_only": True}
+    if bot_id == "memecoin":
+        return {
+            "cash_usd": 100.0,
+            "open": [],
+            "cooldown": {},
+            "realized_pnl_usd": 0.0,
+            "paper_only": True,
+        }
+    return {"paper_only": True}
+
+
+def ensure_paper_accounts(root: str | None = None) -> list:
+    """Write each bot's starting paper account once. Never overwrite, never invent trades."""
+    root = _root(root)
+    made = []
+    for spec in BOTS:
+        name = ACCOUNT_FILES.get(spec["id"])
+        if not name or not _folder_ok(root, spec["folder"], spec["script"]):
+            continue
+        path = _under(root, spec["folder"], name)
+        if os.path.exists(path):
+            continue
+        _write_json(path, _account_body(spec["id"]))
+        made.append(spec["id"])
+    return made
+
+
+def risk_reward(stake, max_payout) -> dict:
+    """Risk is the stake. Reward is max payout minus stake. Ratio is reward / risk."""
+    risk = _num(stake)
+    payout = _num(max_payout)
+    if risk is None:
+        return {"risk": None, "reward": None, "risk_reward": None}
+    risk = round(risk, 2)
+    if payout is None:
+        return {"risk": risk, "reward": None, "risk_reward": None}
+    reward = round(payout - risk, 2)
+    ratio = None if risk <= 0 else round(reward / risk, 4)
+    return {"risk": risk, "reward": reward, "risk_reward": ratio}
+
+
+def _trade_terms(pos: dict, cost) -> dict:
+    stored = risk_reward(pos.get("risk"), None)
+    risk = stored["risk"]
+    if risk is None:
+        risk = _num(cost)
+        if risk is not None:
+            risk = round(risk, 2)
+    reward = _num(pos.get("reward"))
+    if reward is None and risk is not None and not pos.get("mint") and "cost_usd" not in pos:
+        contracts = _num(pos.get("contracts"))
+        ask = _num(pos.get("ask"))
+        if ask is None:
+            ask = _num(pos.get("entry_price"))
+        if contracts is not None and contracts > 0 and ask is not None and 0 < ask < 1:
+            reward = round(contracts * 1.0 - risk, 2)
+    ratio = _num(pos.get("risk_reward"))
+    if ratio is None and reward is not None and risk is not None and risk > 0:
+        ratio = round(reward / risk, 4)
+    return {
+        "risk": risk,
+        "reward": None if reward is None else round(reward, 2),
+        "risk_reward": None if ratio is None else round(ratio, 4),
+    }
+
+
+def prob_bucket(prob) -> str:
+    """Ten-point probability bucket, such as 0.6-0.7. Blank when the probability was not stored."""
+    value = _num(prob)
+    if value is None:
+        return ""
+    value = min(max(value, 0.0), 0.999999)
+    lo = math.floor(value * 10) / 10
+    hi = round(lo + 0.1, 1)
+    return f"{lo:.1f}-{hi:.1f}"
+
+
+def learning_path(root: str | None = None) -> str:
+    return _under(root, "pimp-learning.json")
+
+
+def load_learning(root: str | None = None) -> list:
+    data = _read_json(learning_path(root)) or {}
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def record_learning(root: str | None, row: dict) -> None:
+    """Append one real settle. A missing result, market, or bucket is not invented."""
+    if not isinstance(row, dict):
+        return
+    result = str(row.get("result") or "")
+    if result not in ("hit", "miss"):
+        return
+    market = _clean(row.get("market"), 40)
+    bucket = _clean(row.get("bucket") or prob_bucket(row.get("prob")), 16)
+    stake = _num(row.get("stake"))
+    if not market or not bucket or stake is None:
+        return
+    fill_id = _clean(row.get("fill_id"), 80)
+    with _FILE_LOCK:
+        rows = load_learning(root)
+        if fill_id and any(str(item.get("fill_id") or "") == fill_id for item in rows):
+            return
+        rows.append({
+            "at": _clean(row.get("at") or central_text(), 40),
+            "result": result,
+            "market": market,
+            "bucket": bucket,
+            "stake": round(stake, 2),
+            "fill_id": fill_id,
+        })
+        _write_json(learning_path(root), {"paper_only": True, "rows": rows[-2000:]})
+
+
+def learning_skip(rows, market, bucket) -> str:
+    """Skip a paper bucket that is under 40% hits after at least 8 settles. This is a count, not a smarter model."""
+    market = _clean(market, 40)
+    bucket = _clean(bucket, 16)
+    if not market or not bucket or not isinstance(rows, list):
+        return ""
+    same = [
+        row for row in rows
+        if isinstance(row, dict) and row.get("market") == market and row.get("bucket") == bucket
+        and row.get("result") in ("hit", "miss")
+    ]
+    if len(same) < LEARN_MIN_SETTLES:
+        return ""
+    hits = sum(1 for row in same if row.get("result") == "hit")
+    if (hits / len(same)) + 1e-12 >= LEARN_HIT_RATE:
+        return ""
+    return (
+        f"Skipping {market} in the {bucket} probability bucket. "
+        f"That paper bucket has {hits} hits out of {len(same)} settles, which is under 40%. "
+        "This is only a count of paper settles."
+    )
+
+
+def _hour_window(now: dt.datetime | None = None):
+    local = (now or dt.datetime.now(CT)).astimezone(CT)
+    start = local.replace(minute=0, second=0, microsecond=0)
+    return start, start + dt.timedelta(hours=1)
+
+
+def _in_hour(text, start, end) -> bool:
+    when = _ct_when(text)
+    if when is None:
+        return False
+    return start <= when < end
+
+
+def hour_trade_count(root: str | None = None, now: dt.datetime | None = None) -> int:
+    """Paper trades opened or settled in this Chicago hour. One trade counts once. Nothing is invented."""
+    root = _root(root)
+    start, end = _hour_window(now)
+    seen = set()
+
+    def take(key, opened, closed):
+        if not key:
+            return
+        if _in_hour(opened, start, end) or _in_hour(closed, start, end):
+            seen.add(key)
+
+    for bot_id, filename in (
+        ("sports-gap", "state.json"),
+        ("kalshi-sp", "paper_state.json"),
+        ("btc15m", "paper_account.json"),
+    ):
+        folder = next((spec["folder"] for spec in BOTS if spec["id"] == bot_id), "")
+        if not folder:
+            continue
+        try:
+            state, _problem = _read_state(_under(root, folder, filename))
+        except RuntimeError:
+            continue
+        if not isinstance(state, dict):
+            continue
+        for pos in list(state.get("open") or []) + list(state.get("closed") or []):
+            if not isinstance(pos, dict):
+                continue
+            key = str(pos.get("fill_id") or "") or f"{bot_id}|{pos.get('ticker')}|{pos.get('opened') or pos.get('entry_time')}"
+            take(
+                key,
+                pos.get("opened") or pos.get("entry_time") or "",
+                pos.get("closed") or pos.get("settled_at") or "",
+            )
+    try:
+        meme_path = _under(root, "memecoin-paper", "trades.csv")
+    except RuntimeError:
+        meme_path = ""
+    for raw in _csv_tail(meme_path, 5000) if meme_path else []:
+        if not isinstance(raw, dict):
+            continue
+        side = str(raw.get("side") or "").upper()
+        if side not in ("BUY", "SELL"):
+            continue
+        if not _in_hour(raw.get("ts") or "", start, end):
+            continue
+        seen.add("meme:" + str(raw.get("mint") or raw.get("symbol") or raw.get("ts") or ""))
+    return len(seen)
+
+
+def edge_for_hour(count, saved_edge, pace_min=PACE_MIN, pace_target=PACE_TARGET):
+    """Under the hourly target, waive the strict edge so a timer check can paper-buy.
+
+    At the target, loosening stops and the saved edge bar applies again.
+    """
+    saved = round(float(saved_edge), 4)
+    if int(count) >= int(pace_target):
+        return saved, False
+    return 0.0, True
+
+
+def hour_pace(root: str | None = None, now: dt.datetime | None = None, cfg: dict | None = None) -> dict:
+    cfg = cfg or load_settings(root)
+    count = hour_trade_count(root, now)
+    target = int(cfg.get("pace_target") or PACE_TARGET)
+    minimum = int(cfg.get("pace_min") or PACE_MIN)
+    saved = float(cfg.get("min_edge") if cfg.get("min_edge") is not None else DEFAULTS["min_edge"])
+    edge, loose = edge_for_hour(count, saved, minimum, target)
+    if loose and count < minimum:
+        note = (
+            f"This hour has {count} paper trades, under {minimum}. "
+            "The timer can paper-buy without the strict edge. "
+            f"Loosening stops once this hour has {target}."
+        )
+    elif loose:
+        note = (
+            f"This hour has {count} of {target} paper trades. "
+            "The timer can still paper-buy without the strict edge."
+        )
+    else:
+        note = (
+            f"This hour has {count} paper trades. "
+            f"The edge bar stays at {saved:.2f}. Loosening is off."
+        )
+    return {
+        "count": count,
+        "target": target,
+        "minimum": minimum,
+        "line": f"{count} of {target} this hour",
+        "edge": edge,
+        "loosened": loose,
+        "saved_edge": round(saved, 4),
+        "note": note,
+    }
+
+
+_ISO_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+_RUN_ID = re.compile(r"\brun\s+[0-9a-f]{6,}\b", re.I)
+
+
+def _raw_card(text: str) -> bool:
+    raw = str(text or "")
+    low = raw.lower()
+    if _ISO_STAMP.search(raw) or _RUN_ID.search(raw):
+        return True
+    if "managing open" in low or "scanning for candidates" in low or "solana tokens" in low:
+        return True
+    stripped = raw.strip()
+    return stripped.startswith("{") or stripped.startswith("[")
+
+
+def _meme_card(text: str) -> str:
+    raw = str(text or "")
+    low = raw.lower()
+    if "solana" not in low and "paper entries" not in low and "managing open paper positions" not in low:
+        return ""
+    checked = None
+    found = re.search(r"tokens checked:\s*(\d+)", low)
+    if found:
+        checked = int(found.group(1))
+    else:
+        nums = [int(n) for n in re.findall(r"(\d+)\s+solana tokens", low)]
+        if nums:
+            checked = nums[0]
+    if checked is None:
+        first = "Checked Solana tokens."
+    else:
+        word = "token" if checked == 1 else "tokens"
+        first = f"Checked {checked} Solana {word}."
+    buys = re.findall(r"PAPER BUY\s+([A-Za-z0-9]+)", raw)
+    entries = re.search(r"paper entries:\s*(\d+)", low)
+    n_entries = int(entries.group(1)) if entries else len(buys)
+    if n_entries <= 0 and not buys:
+        second = "No paper buy."
+    elif len(buys) == 1:
+        second = f"Paper buy {buys[0]}."
+    elif buys:
+        second = f"{len(buys)} paper buys."
+    elif n_entries == 1:
+        second = "Paper buy."
+    else:
+        second = f"{n_entries} paper buys."
+    return f"{first} {second}"
+
+
+def _sports_card(text: str) -> str:
+    raw = str(text or "")
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        return ""
+    try:
+        data = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(data, dict) or "live_games" not in data and "trades" not in data:
+        return ""
+    trades = data.get("trades") or []
+    if trades:
+        word = "trade" if len(trades) == 1 else "trades"
+        return f"Paper buy. {len(trades)} paper {word} this check."
+    if data.get("live_games") == 0:
+        return "No live games, so this check bought nothing."
+    return "No paper buy."
+
+
+def _btc_card(text: str) -> str:
+    low = str(text or "").lower()
+    if "btc" not in low and "signal:" not in low and "kxbtc" not in low:
+        return ""
+    if "paper buy" in low:
+        return "Checked the BTC 15-minute market. Paper buy."
+    if "signal:" in low or "skip:" in low or "no open kxbtc" in low:
+        return "Checked the BTC 15-minute market. No paper buy."
+    return ""
+
+
+def card_copy(text: str) -> str:
+    """One or two plain sentences for a bot card. No run id and no ISO timestamp."""
+    raw = str(text or "")
+    if not raw.strip():
+        return ""
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("CARD: "):
+            return _clean(stripped[6:], 220)
+        if stripped.startswith("Skipping "):
+            return _clean(stripped, 220)
+    for builder in (_meme_card, _sports_card, _btc_card):
+        sentence = builder(raw)
+        if sentence:
+            return sentence
+    reason = plain_reason(raw)
+    if _raw_card(reason):
+        return "The check finished. No paper buy."
+    return reason
 
 
 def _confidence(prob) -> str:
@@ -2302,6 +2731,7 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
     central = _central_from_text(last_check)
     curve = _equity_curve(bots)
     spikes = _equity_spikes(curve)
+    pace = hour_pace(root, cfg=cfg)
     return {
         "cash": None if not cashes else round(sum(cashes), 2),
         "realized": None if not realized_rows else round(sum(realized_rows), 2),
@@ -2326,6 +2756,11 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         "spikes": spikes,
         "news": news_calendar(root),
         "paused_all": bool(_load_pause(root).get("all")),
+        "pace_line": pace["line"],
+        "pace_count": pace["count"],
+        "pace_target": pace["target"],
+        "pace_loosened": pace["loosened"],
+        "pace_note": pace["note"],
     }
 
 
@@ -2457,8 +2892,8 @@ def _xlsx_cell(value) -> str:
 def export_xlsx(root: str | None = None) -> bytes:
     """A real xlsx workbook of the paper book. Excel opens it. No live orders."""
     snap = snapshot(root)
-    header = ["Book", "State", "Ticker or game", "Side", "Contracts", "Stake", "Entry price", "Fee",
-              "Model probability", "Score at entry", "Why it opened", "Price source", "Price time",
+    header = ["Book", "State", "Ticker or game", "Side", "Contracts", "Stake", "Risk", "Reward", "Risk/reward",
+              "Entry price", "Fee", "Model probability", "Score at entry", "Why it opened", "Price source", "Price time",
               "Close time", "Exit reason", "Payout", "P/L"]
     table = [header]
 
@@ -2474,6 +2909,9 @@ def export_xlsx(root: str | None = None) -> bytes:
             _cell(row.get("side")),
             _cell(row.get("contracts")),
             _cell(row.get("cost")),
+            _cell(row.get("risk")),
+            _cell(row.get("reward")),
+            _cell(row.get("risk_reward")),
             _cell(row.get("ask")),
             _cell(row.get("fee")),
             _cell(row.get("prob")),
@@ -2487,7 +2925,7 @@ def export_xlsx(root: str | None = None) -> bytes:
             "" if row.get("pnl") is None else row.get("pnl"),
         ])
     if len(table) == 1:
-        table.append(["", "", "No paper trades yet.", "", "", "", "", "", "", "", "No edge.", "", "", "", "", "", ""])
+        table.append(["", "", "No paper trades yet.", "", "", "", "", "", "", "", "", "", "", "No edge.", "", "", "", "", "", ""])
     sheet_rows = []
     for index, row in enumerate(table, start=1):
         cells = "".join(f'{_xlsx_cell(value)}' for value in row)

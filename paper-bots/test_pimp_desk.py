@@ -89,15 +89,25 @@ class PimpDeskTests(unittest.TestCase):
         sized = snap["bots"][-1]
         self.assertFalse(sized["present"])
         self.assertEqual(sized["actions"], [])
+        expected_cash = {"sports-gap": 14.0, "kalshi-sp": 500.0, "btc15m": 100.0, "memecoin": 100.0}
         for bot in snap["bots"][:-1]:
             self.assertTrue(bot["present"], bot["id"])
-            self.assertFalse(bot["has_state"], bot["id"])
+            self.assertTrue(bot["has_state"], bot["id"])
+            self.assertEqual(bot["cash"], expected_cash[bot["id"]], bot["id"])
             self.assertEqual(bot["positions"], [])
             self.assertEqual(bot["trades"], [])
+        self.assertEqual(snap["desk"]["curve"], [])
+        self.assertEqual(snap["desk"]["equity"], [])
+        self.assertEqual(snap["desk"]["pace_line"], "0 of 12 this hour")
+        self.assertTrue(snap["desk"]["pace_loosened"])
+        self.assertEqual(snap["desk"]["cash"], 714.0)
         self.assertIn("Run one check", [a["label"] for a in snap["bots"][0]["actions"]])
         self.assertIn("Morning brief", [a["label"] for a in snap["bots"][1]["actions"]])
         self.assertIn("10.00", snap["limits_text"])
         self.assertIn("30.00", snap["limits_text"])
+        self.assertIn("150.00", snap["limits_text"])
+        self.assertIn("0.04", snap["limits_text"])
+        self.assertIn("0.08", snap["limits_text"])
 
     def test_reads_state_and_blocks_entry_without_running(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -105,7 +115,7 @@ class PimpDeskTests(unittest.TestCase):
             _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
                 "cash": 11.0,
                 "open": [{"contracts": 1, "team": "Bills", "ticker": "KX", "game": "Bills at Chiefs",
-                          "cost": 3, "opened": "2026-10-30 12:00:00 CT"}] * 4,
+                          "cost": 3, "opened": "2026-10-30 12:00:00 CT"}] * pimp_desk.DEFAULTS["max_open_positions"],
                 "closed": [{"team": "Bills", "game": "old", "exit": "settled", "pnl": -2.5,
                             "closed": "2026-10-30 13:00:00 CT"}],
             }))
@@ -117,9 +127,9 @@ class PimpDeskTests(unittest.TestCase):
             sports = snap["bots"][0]
             self.assertTrue(sports["has_state"])
             self.assertEqual(sports["cash"], 11.0)
-            self.assertEqual(sports["open_count"], 4)
+            self.assertEqual(sports["open_count"], pimp_desk.DEFAULTS["max_open_positions"])
             self.assertEqual(sports["realized"], -2.5)
-            self.assertEqual(len(sports["positions"]), 4)
+            self.assertEqual(len(sports["positions"]), pimp_desk.DEFAULTS["max_open_positions"])
             self.assertTrue(sports["trades"])
             self.assertTrue(snap["desk"]["gate"])
             blocked = pimp_desk.run_bot("sports-gap", "run", tmp)
@@ -271,7 +281,7 @@ class PimpDeskTests(unittest.TestCase):
             _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
                 "cash": 11.0,
                 "open": [{"contracts": 1, "team": "Bills", "ticker": "KX", "game": "Bills at Chiefs",
-                          "cost": 3, "opened": "2026-10-30 12:00:00 CT"}] * 4,
+                          "cost": 3, "opened": "2026-10-30 12:00:00 CT"}] * pimp_desk.DEFAULTS["max_open_positions"],
                 "closed": [],
             }))
             noon = dt.datetime(2026, 10, 30, 12, 30, tzinfo=pimp_desk.CT)
@@ -440,6 +450,9 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(pos["prob"], 0.62)
             self.assertEqual(pos["score"], "7-3 Q2")
             self.assertIn("Paper buy", pos["why_open"])
+            self.assertEqual(pos["risk"], 1.5)
+            self.assertEqual(pos["reward"], 0.5)
+            self.assertEqual(pos["risk_reward"], 0.3333)
             self.assertIn("kalshi.com", pos["source"])
             self.assertIn("Central", pos["priced_central"])
             closed = sports["history"][0]
@@ -447,6 +460,9 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(closed["exit_reason"], "settled")
             self.assertEqual(closed["payout"], 0)
             self.assertEqual(closed["pnl"], -1.02)
+            self.assertEqual(closed["risk"], 1.0)
+            self.assertEqual(closed["reward"], 0)
+            self.assertEqual(closed["risk_reward"], 0)
             self.assertEqual(sports["warning"], "No news calendar on this bot.")
             self.assertNotIn("bought nothing", sports.get("why") or "")
             self.assertNotIn("bought nothing", pimp_desk.plain_reason("No news calendar on this bot."))
@@ -546,6 +562,11 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("America/Chicago", script)
         self.assertIn("spikeText", script)
         self.assertLess(script.find("function slipCard"), script.find("</script>"))
+        self.assertIn("function eqScrub", text)
+        self.assertIn("function bindEquity", text)
+        self.assertIn("function drawEquity", text)
+        self.assertIn("Risk/reward", text)
+        self.assertIn('id="pimppace"', text)
         brand = text.split('<a class="brand" href="/" title="Dashboard">', 1)[1].split("</a>", 1)[0]
         self.assertEqual(brand, "PIMP<b>-</b>BOT · STAFF")
         self.assertIn(">PIMP<b>-</b>BOT · STAFF · TRADING</a>", text)
@@ -594,6 +615,128 @@ class PimpDeskTests(unittest.TestCase):
             self.assertIn("Central", curve[2]["when"])
             self.assertEqual(desk["spikes"], [{"from": 1, "to": 2, "dollars": 18.0, "pct": 1200.0}])
             self.assertTrue(all(point["t"] for point in curve))
+
+    def test_four_opens_stay_under_the_new_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), QUIET)
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 11.0,
+                "open": [{"contracts": 1, "team": "Bills", "ticker": "KX", "game": "Bills at Chiefs",
+                          "cost": 3, "opened": "2026-10-30 12:00:00 CT", "fill_id": f"open-{i}"} for i in range(4)],
+                "closed": [],
+            }))
+            snap = pimp_desk.snapshot(tmp)
+            self.assertEqual(snap["bots"][0]["open_count"], 4)
+            self.assertEqual(snap["desk"]["gate"], "")
+            allowed = pimp_desk.run_bot("sports-gap", "run", tmp)
+            self.assertTrue(allowed["ok"], allowed)
+            self.assertFalse(allowed.get("blocked"))
+
+    def test_risk_reward_and_learning_skip(self):
+        row = pimp_desk.risk_reward(1.5, 2.0)
+        self.assertEqual(row, {"risk": 1.5, "reward": 0.5, "risk_reward": 0.3333})
+        self.assertIsNone(pimp_desk.risk_reward(0, 1.0)["risk_reward"])
+        self.assertIsNone(pimp_desk.risk_reward(None, 1.0)["risk"])
+
+        def rows(hits, misses):
+            made = [{"market": "NFL", "bucket": "0.6-0.7", "result": "hit", "stake": 1} for _ in range(hits)]
+            made += [{"market": "NFL", "bucket": "0.6-0.7", "result": "miss", "stake": 1} for _ in range(misses)]
+            return made
+
+        skip = pimp_desk.learning_skip(rows(3, 5), "NFL", "0.6-0.7")
+        self.assertIn("under 40%", skip)
+        self.assertNotIn("smarter", skip.lower())
+        self.assertEqual(pimp_desk.learning_skip(rows(4, 4), "NFL", "0.6-0.7"), "")
+        self.assertEqual(pimp_desk.learning_skip(rows(0, 7), "NFL", "0.6-0.7"), "")
+        self.assertEqual(pimp_desk.learning_skip(rows(4, 6), "NFL", "0.6-0.7"), "")
+        self.assertEqual(pimp_desk.prob_bucket(0.60), "0.6-0.7")
+        self.assertEqual(pimp_desk.edge_for_hour(0, 0.04), (0.0, True))
+        self.assertEqual(pimp_desk.edge_for_hour(4, 0.04), (0.0, True))
+        self.assertEqual(pimp_desk.edge_for_hour(12, 0.04), (0.04, False))
+
+    def test_hour_pace_counts_this_chicago_hour_only(self):
+        now = dt.datetime(2026, 10, 30, 16, 15, tzinfo=pimp_desk.CT)
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, QUIET)
+            self.assertEqual(pimp_desk.hour_pace(tmp, now)["line"], "0 of 12 this hour")
+            self.assertTrue(pimp_desk.hour_pace(tmp, now)["loosened"])
+            self.assertEqual(pimp_desk.hour_pace(tmp, now)["edge"], 0.0)
+            self.assertEqual(pimp_desk.snapshot(tmp)["desk"]["curve"], [])
+            opens = []
+            for i in range(4):
+                opens.append({
+                    "ticker": f"T{i}", "fill_id": f"hour-{i}", "cost": 1, "contracts": 1,
+                    "opened": "2026-10-30 16:05:00 CT",
+                })
+            opens.append({
+                "ticker": "OLD", "fill_id": "old-1", "cost": 1, "contracts": 1,
+                "opened": "2026-10-30 15:05:00 CT",
+            })
+            closed = [{
+                "ticker": "T0", "fill_id": "hour-0", "cost": 1, "contracts": 1,
+                "opened": "2026-10-30 16:05:00 CT", "closed": "2026-10-30 16:20:00 CT", "pnl": 1,
+            }]
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 14, "open": opens, "closed": closed,
+            }))
+            pace = pimp_desk.hour_pace(tmp, now)
+            self.assertEqual(pace["line"], "4 of 12 this hour")
+            self.assertTrue(pace["loosened"])
+            self.assertEqual(pace["count"], 4)
+            full = []
+            for i in range(12):
+                full.append({
+                    "ticker": f"F{i}", "fill_id": f"full-{i}", "cost": 1, "contracts": 1,
+                    "opened": "2026-10-30 16:10:00 CT",
+                })
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 14, "open": full, "closed": [],
+            }))
+            done = pimp_desk.hour_pace(tmp, now)
+            self.assertEqual(done["count"], 12)
+            self.assertFalse(done["loosened"])
+            self.assertEqual(done["edge"], 0.04)
+
+    def test_card_copy_is_plain_and_accounts_keep_cash(self):
+        raw = (
+            "No news calendar on this bot.\n"
+            "run d5166c8a @ 2026-10-30T21:09:16+00:00 cash $100.00 open 0 "
+            "1) managing open paper positions 2) scanning for candidates "
+            "source profiles: 26 solana tokens"
+        )
+        text = pimp_desk.card_copy(raw)
+        self.assertEqual(text, "Checked 26 Solana tokens. No paper buy.")
+        self.assertNotIn("d5166c8a", text)
+        self.assertNotIn("2026-10-30T21:09:16", text)
+        self.assertEqual(pimp_desk.card_copy("No news calendar on this bot."), "")
+        preferred = pimp_desk.card_copy("tokens checked: 3\nsource profiles: 9 solana tokens")
+        self.assertEqual(preferred, "Checked 3 Solana tokens. No paper buy.")
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, QUIET)
+            made = pimp_desk.ensure_paper_accounts(tmp)
+            self.assertEqual(set(made), {"sports-gap", "kalshi-sp", "btc15m", "memecoin"})
+            snap = pimp_desk.snapshot(tmp)
+            by_id = {bot["id"]: bot for bot in snap["bots"]}
+            self.assertEqual(by_id["sports-gap"]["cash"], 14.0)
+            self.assertEqual(by_id["kalshi-sp"]["cash"], 500.0)
+            self.assertEqual(by_id["btc15m"]["cash"], 100.0)
+            self.assertEqual(by_id["memecoin"]["cash"], 100.0)
+            self.assertEqual(snap["desk"]["curve"], [])
+            self.assertEqual(by_id["sports-gap"]["positions"], [])
+            path = os.path.join(tmp, "sports-gap-paper", "state.json")
+            with open(path, encoding="utf-8") as handle:
+                state = json.load(handle)
+            state["cash"] = 20
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(state, handle)
+            self.assertEqual(pimp_desk.ensure_paper_accounts(tmp), [])
+            self.assertEqual(pimp_desk.snapshot(tmp)["bots"][0]["cash"], 20.0)
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), "{")
+            broken = pimp_desk.snapshot(tmp)["bots"][0]
+            self.assertIn("half-written", broken["read_error"])
+        with tempfile.TemporaryDirectory() as bare:
+            self.assertEqual(pimp_desk.ensure_paper_accounts(bare), [])
+            self.assertEqual(pimp_desk.snapshot(bare)["desk"]["curve"], [])
 
 
 if __name__ == "__main__":

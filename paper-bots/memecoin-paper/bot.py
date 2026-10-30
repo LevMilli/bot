@@ -161,6 +161,18 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
                fee_usd=round(fee, 4), impact_pct=round(imp * 100, 3), pnl_usd=round(pnl, 4),
                liquidity_usd=liq))
     print(f"  PAPER SELL {pos['symbol']}: {reason} -> ${proceeds:.2f} (pnl ${pnl:+.2f})")
+    if full:
+        try:
+            desk = _desk()
+            desk.record_learning(os.path.dirname(BASE), {
+                "result": "hit" if pnl > 0 else "miss",
+                "market": pos.get("symbol") or "",
+                "prob": pos.get("confidence"),
+                "stake": pos.get("cost_usd"),
+                "fill_id": f"{pos.get('mint')}|{pos.get('entry_iso')}",
+            })
+        except Exception:
+            pass
 
 
 def manage(st):
@@ -419,6 +431,13 @@ def scan(st, stats):
             gate_reason = f"daily loss halt (realized today ${pnl_today:.2f})"
         elif st["cash_usd"] < C.TICKET_USD:
             gate_reason = f"paper cash ${st['cash_usd']:.2f} < ticket"
+        else:
+            try:
+                desk = _desk()
+                gate_reason = desk.learning_skip(
+                    desk.load_learning(os.path.dirname(BASE)), row.get("symbol") or "", desk.prob_bucket(conf)) or None
+            except Exception:
+                gate_reason = None
         row["risk_gates_ok"] = "PASS" if not gate_reason else "FAIL"
         if gate_reason:
             record("SKIP", gate_reason)
@@ -428,7 +447,9 @@ def scan(st, stats):
         st["cash_usd"] -= C.TICKET_USD
         pos = dict(mint=mint, symbol=row["symbol"], pair=p["pairAddress"], entry_ts=NOW, entry_iso=now_iso(),
                    entry_market_price=price, entry_fill_price=fill, entry_liq=liq, tokens=tokens,
-                   tokens_left=tokens, cost_usd=C.TICKET_USD, peak_price=price, ladder_done=[],
+                   tokens_left=tokens, cost_usd=C.TICKET_USD, risk=C.TICKET_USD,
+                   why=f"Paper buy. Confidence {conf}.",
+                   peak_price=price, ladder_done=[],
                    confidence=conf, url=p.get("url"))
         st["open"].append(pos)
         open_mints.add(mint)
@@ -442,12 +463,22 @@ def scan(st, stats):
         print(f"  PAPER BUY {row['symbol']} ${C.TICKET_USD} @ {price} conf {conf}")
 
 
+def _desk():
+    root = os.path.dirname(BASE)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    import pimp_desk
+    return pimp_desk
+
+
 def main():
     if not C.PAPER:
         sys.exit("PAPER is False. This desk is paper-only and has no wallet. Refusing to run.")
     from collections import Counter
     stats = Counter()
     st = load_state()
+    if not os.path.exists(P_POS):
+        save_state(st)
     print(f"run {RUN_ID} @ {now_iso()}  cash ${st['cash_usd']:.2f}  open {len(st['open'])}")
     print("1) managing open paper positions")
     manage(st)
@@ -462,6 +493,15 @@ def main():
     print(f"  all FACTS passed: {stats['facts_pass']}, confidence>= {C.MIN_CONFIDENCE}: {stats['confidence_pass']}, paper entries: {stats['entries']}")
     print(f"  cash ${st['cash_usd']:.2f}, open {len(st['open'])}, realized pnl ${st['realized_pnl_usd']:+.2f}")
     print(f"  data sources: {STATUS}")
+    checked = int(stats.get("checked") or 0)
+    entries = int(stats.get("entries") or 0)
+    word = "token" if checked == 1 else "tokens"
+    if entries <= 0:
+        print(f"CARD: Checked {checked} Solana {word}. No paper buy.")
+    elif entries == 1:
+        print(f"CARD: Checked {checked} Solana {word}. Paper buy.")
+    else:
+        print(f"CARD: Checked {checked} Solana {word}. {entries} paper buys.")
 
 
 if __name__ == "__main__":

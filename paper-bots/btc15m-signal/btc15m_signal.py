@@ -12,8 +12,8 @@ What it does (one run):
      a probability p = Phi(cushion / sigma), and compares p with the ask + Kalshi fee.
   5. Checks the US high-impact news calendar (ForexFactory) and prints BUY or SKIP with the reason.
 
-What it does NOT do: it places no orders, needs no login, no API key, no account, no wallet.
-It only prints numbers. Not financial advice.
+What it does NOT do: it places no real orders, needs no login, no API key, and no wallet.
+It keeps a paper account and can paper-buy on the desk timer. Not financial advice.
 
 Run:  python3 btc15m_signal.py
 """
@@ -44,7 +44,159 @@ TAKE_PROFIT_ADD, TAKE_PROFIT_CAP = 0.15, 0.99
 DVOL_FAIL_MULT = 1.2         # if DVOL fails: use realized sigma * 1.2
 
 
-_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quote_cache.json")
+HERE = os.path.dirname(os.path.abspath(__file__))
+DESK_ROOT = os.path.dirname(HERE)
+ACCOUNT = os.path.join(HERE, "paper_account.json")
+_CACHE = os.path.join(HERE, "quote_cache.json")
+PAPER_CASH = 100.0
+
+
+def load_account():
+    if os.path.exists(ACCOUNT):
+        try:
+            with open(ACCOUNT, encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                data.setdefault("cash", PAPER_CASH)
+                data.setdefault("open", [])
+                data.setdefault("closed", [])
+                data["paper_only"] = True
+                return data
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {"cash": PAPER_CASH, "open": [], "closed": [], "paper_only": True}
+
+
+def save_account(state):
+    tmp = ACCOUNT + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=2)
+        handle.write("\n")
+    os.replace(tmp, ACCOUNT)
+
+
+def _desk():
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import pimp_desk
+    return pimp_desk
+
+
+def settle_account(state):
+    """Settle a paper BTC position only when Kalshi has published yes or no. Never guess."""
+    still = []
+    now = dt.datetime.now(dt.timezone.utc)
+    for pos in list(state.get("open") or []):
+        close = str(pos.get("close_time") or "")
+        try:
+            when = dt.datetime.fromisoformat(close.replace("Z", "+00:00"))
+        except ValueError:
+            still.append(pos)
+            continue
+        if when > now:
+            still.append(pos)
+            continue
+        try:
+            payload = get_json(f"{KALSHI}/markets/{pos.get('ticker')}")
+        except Exception:
+            still.append(pos)
+            continue
+        market = payload.get("market") if isinstance(payload, dict) else None
+        if not isinstance(market, dict):
+            market = payload if isinstance(payload, dict) else {}
+        result = market.get("result")
+        if result not in ("yes", "no"):
+            still.append(pos)
+            continue
+        won = (result == "yes" and pos.get("side") == "YES") or (result == "no" and pos.get("side") == "NO")
+        payout = float(pos.get("contracts") or 0) * (1.0 if won else 0.0)
+        pnl = round(payout - float(pos.get("cost") or 0), 2)
+        state["cash"] = round(float(state.get("cash") or 0) + payout, 2)
+        pos.update({
+            "closed": now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "pnl": pnl,
+            "payout": round(payout, 2),
+            "exit": "settled",
+        })
+        state.setdefault("closed", []).append(pos)
+        try:
+            desk = _desk()
+            desk.record_learning(DESK_ROOT, {
+                "result": "hit" if pnl > 0 else "miss",
+                "market": "BTC",
+                "prob": pos.get("fair_at_entry"),
+                "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+                "fill_id": pos.get("fill_id") or "",
+                "at": pos["closed"],
+            })
+        except Exception:
+            pass
+    state["open"] = still
+
+
+def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
+    """Paper fill only. No order is sent. Returns a one-line card sentence."""
+    if ask is None or not (0.05 <= float(ask) <= 0.95):
+        return "Checked the BTC 15-minute market. No paper buy."
+    if any(isinstance(pos, dict) and pos.get("ticker") == ticker for pos in state.get("open") or []):
+        return "Checked the BTC 15-minute market. No paper buy."
+    force = True
+    skip = ""
+    try:
+        desk = _desk()
+        cfg = desk.load_settings(DESK_ROOT)
+        pace = desk.hour_pace(DESK_ROOT, cfg=cfg)
+        force = bool(pace.get("loosened"))
+        skip = desk.learning_skip(desk.load_learning(DESK_ROOT), "BTC", desk.prob_bucket(prob))
+    except Exception:
+        pace = {"count": 0, "target": 12}
+    if skip:
+        return skip
+    if not signal_buy and not force:
+        return "Checked the BTC 15-minute market. No paper buy."
+    per = float(ask) + float(fee or 0)
+    stake = 1.0
+    contracts = int(stake // per) if per > 0 else 0
+    if contracts < 1:
+        contracts = 1
+    cost = round(contracts * per, 2)
+    cash = float(state.get("cash") or 0)
+    if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:
+        return "Checked the BTC 15-minute market. No paper buy."
+    state["cash"] = round(cash - cost, 2)
+    reward = round(contracts * 1.0 - cost, 2)
+    if signal_buy:
+        why = "Paper buy. The BTC 15-minute signal cleared its checks."
+    else:
+        why = (
+            f"Paper buy. This hour had {int(pace.get('count') or 0)} paper trades, "
+            f"under {int(pace.get('target') or 12)}, so the timer took this side without the strict signal."
+        )
+    opened = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    state.setdefault("open", []).append({
+        "ticker": ticker,
+        "team": ticker,
+        "game": "BTC 15-minute",
+        "side": side,
+        "contracts": contracts,
+        "ask": round(float(ask), 4),
+        "fee": round(float(fee or 0), 4),
+        "cost": cost,
+        "risk": cost,
+        "reward": reward,
+        "risk_reward": round(reward / cost, 4) if cost else None,
+        "max_payout": round(contracts * 1.0, 2),
+        "why": why,
+        "fair_at_entry": None if prob is None else round(float(prob), 4),
+        "opened": opened,
+        "close_time": close_time.isoformat() if hasattr(close_time, "isoformat") else str(close_time or ""),
+        "fill_id": f"{ticker}|{opened}",
+        "price_source": KALSHI,
+        "price_at": opened,
+        "paper_only": True,
+    })
+    save_account(state)
+    return "Checked the BTC 15-minute market. Paper buy."
 
 
 def _cached(url):
@@ -198,15 +350,28 @@ def usd_high_impact_near(block_start, block_end):
 
 
 # ---------------- main ----------------
+def _card(sentence):
+    print("CARD: " + sentence)
+    return 0
+
+
 def main():
     now = dt.datetime.now(dt.timezone.utc)
-    print(f"BTC 15-min Kalshi signal  (SIGNAL ONLY, no orders)  {now:%Y-%m-%d %H:%M:%S} UTC")
+    account = load_account()
+    if not os.path.exists(ACCOUNT):
+        save_account(account)
+    try:
+        settle_account(account)
+        save_account(account)
+    except Exception:
+        pass
+    print(f"BTC 15-min Kalshi paper check  (no real orders)  {now:%Y-%m-%d %H:%M:%S} UTC")
     print(f"Price source https://api.elections.kalshi.com/trade-api/v2 at {now:%Y-%m-%dT%H:%M:%SZ}\n")
 
     m = kalshi_market()
     if not m or m["target"] is None:
         print("SKIP: no open KXBTC15M market with a target right now (between blocks?). Try again in a minute.")
-        return 0
+        return _card("Checked the BTC 15-minute market. No paper buy.")
     min_left = (m["close_time"] - now).total_seconds() / 60
     print(f"Market {m['ticker']}  target ${m['target']:,.2f}  closes {m['close_time']:%H:%M} UTC "
           f"({min_left:.1f} min left)")
@@ -215,7 +380,7 @@ def main():
     spots = spot_prices()
     if not spots:
         print("SKIP: no BTC spot price available from any source.")
-        return 0
+        return _card("Checked the BTC 15-minute market. No paper buy.")
     price = statistics.mean(spots.values())
     print("Spot: " + ", ".join(f"{k} ${v:,.2f}" for k, v in spots.items()) + f"  -> avg ${price:,.2f}")
     coinbase_only = list(spots) == ["coinbase"]
@@ -246,7 +411,7 @@ def main():
         sigma = realized * DVOL_FAIL_MULT
     else:
         print("SKIP: could not compute sigma (no DVOL and no candles).")
-        return 0
+        return _card("Checked the BTC 15-minute market. No paper buy.")
     print(f"Sigma: DVOL {dvol if dvol else 'n/a'} -> ${sig_dvol:,.2f}" if sig_dvol else "Sigma: DVOL n/a", end="")
     print(f" | realized ${realized:,.2f}" if realized is not None else " | realized n/a", end="")
     print(f" | used ${sigma:,.2f}")
@@ -268,7 +433,7 @@ def main():
         print(f"  orderbook failed: {e}")
     if ask is None or bid is None:
         print("SKIP: missing bid/ask for the chosen side.")
-        return 0
+        return _card("Checked the BTC 15-minute market. No paper buy.")
     fee = fee_per_contract(ask)
     spread = ask - bid
     need = ask + fee + EDGE_BUFFER
@@ -307,14 +472,16 @@ def main():
     if news: reasons.append("USD high-impact news near this block")
 
     print()
+    signal_buy = not reasons
     if reasons:
         print("SIGNAL: SKIP -> " + "; ".join(reasons))
     else:
         tp = min(round(ask + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
         print(f"SIGNAL: BUY {side} on {m['ticker']} at <= {ask:.2f} (fee {fee:.2f}). "
               f"Suggested take-profit {tp:.2f} (fill + 0.15, max 0.99).")
-    print("(Signal only. Nothing was ordered. Not financial advice.)")
-    return 0
+    sentence = paper_buy(account, m["ticker"], side, ask, fee, p, m["close_time"], signal_buy)
+    print("(Paper only. Nothing was ordered.)")
+    return _card(sentence)
 
 
 if __name__ == "__main__":
