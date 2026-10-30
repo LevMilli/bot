@@ -38193,6 +38193,242 @@ def _guild_for(gid: Optional[int]):
         return None
 
 
+try:
+    ROLE_TZ = ZoneInfo("America/Chicago")
+except Exception:
+    ROLE_TZ = TZ
+
+_ROLE_ACTOR: dict[tuple, tuple] = {}
+
+
+def role_mark(name: str) -> str:
+    """Two letters so a role row can be scanned. Not a picture."""
+    parts = [p for p in re.split(r"[\s_\-]+", name or "") if any(c.isalnum() for c in p)]
+    chars = []
+    for part in parts:
+        for ch in part:
+            if ch.isalnum():
+                chars.append(ch.upper())
+                break
+        if len(chars) == 2:
+            break
+    if len(chars) >= 2:
+        return "".join(chars[:2])
+    letters = "".join(c for c in (parts[0] if parts else "") if c.isalnum()).upper()
+    return letters[:2] or "•"
+
+
+def role_hex(role) -> str:
+    color = getattr(role, "color", None)
+    if color is None:
+        color = getattr(role, "colour", None)
+    try:
+        value = int(getattr(color, "value", 0) or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value <= 0:
+        return ""
+    return f"#{value:06x}"
+
+
+def role_labels_map(gid: Optional[int] = None) -> dict:
+    try:
+        raw = json.loads(get_setting(staff_gid(gid), "role_labels") or "{}")
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for key, val in raw.items():
+        if str(key).isdigit() and isinstance(val, str) and val.strip():
+            out[str(int(key))] = clip(val.strip(), 40)
+    return out
+
+
+def role_labels_save(labels: dict, gid: Optional[int] = None) -> None:
+    clean = {}
+    for key, val in labels.items():
+        if str(key).isdigit() and isinstance(val, str) and val.strip():
+            clean[str(int(key))] = clip(val.strip(), 40)
+    set_setting(staff_gid(gid), "role_labels", json.dumps(clean) if clean else None)
+
+
+def role_desk_label(gid: Optional[int], role) -> str:
+    name = clip((getattr(role, "name", None) or "").strip(), 40)
+    custom = role_labels_map(gid).get(str(int(getattr(role, "id", 0) or 0))) or ""
+    return custom or name
+
+
+def role_label_set(gid: int, role_id, label) -> tuple[bool, str]:
+    """Rename the label this desk shows. Discord's role name stays."""
+    if not str(role_id).isdigit():
+        return False, "Pick a Discord role."
+    guild = _guild_for(gid)
+    role = guild.get_role(int(role_id)) if guild is not None else None
+    if role is None or not (getattr(role, "name", None) or "").strip():
+        return False, "That Discord role is gone."
+    text = re.sub(r"\s+", " ", str(label or "")).strip()
+    if len(text) > 40:
+        return False, "Keep the label to 40 characters."
+    labels = role_labels_map(gid)
+    key = str(int(role_id))
+    discord_name = (role.name or "").strip()
+    if not text or text.casefold() == discord_name.casefold():
+        labels.pop(key, None)
+        role_labels_save(labels, gid)
+        return True, "The desk uses the Discord name again."
+    labels[key] = text
+    role_labels_save(labels, gid)
+    return True, f"This desk calls it {text}."
+
+
+def bot_manage_note(guild) -> str:
+    """A standing reason when no role on this server can be changed."""
+    if guild is None:
+        return "The bot cannot see this server, so a role change here will not reach Discord."
+    me = getattr(guild, "me", None)
+    if me is None:
+        return "The bot is not in this server, so a role change here will not reach Discord."
+    perms = getattr(me, "guild_permissions", None)
+    if perms is None or not getattr(perms, "manage_roles", False):
+        return "The bot does not have Manage Roles, so a role change here will not reach Discord."
+    return ""
+
+
+def role_block_reason(guild, role) -> str:
+    """Empty when Discord will accept a change to this role."""
+    if guild is None:
+        return "The bot cannot see this server."
+    me = getattr(guild, "me", None)
+    if me is None:
+        return "The bot is not in this server."
+    perms = getattr(me, "guild_permissions", None)
+    if perms is None or not getattr(perms, "manage_roles", False):
+        return "The bot does not have Manage Roles."
+    if getattr(role, "managed", False):
+        return "Discord manages that role, so the bot cannot change it."
+    top = getattr(me, "top_role", None)
+    if top is None or getattr(role, "position", 0) >= getattr(top, "position", 0):
+        return "The bot's role is not above this one."
+    return ""
+
+
+def role_people(role) -> Optional[list]:
+    if not MEMBERS_INTENT:
+        return None
+    rows = []
+    for member in getattr(role, "members", []) or []:
+        if getattr(member, "bot", False):
+            continue
+        rows.append({"id": int(member.id),
+                     "name": clip(getattr(member, "display_name", None) or str(member.id), 40)})
+    rows.sort(key=lambda r: r["name"].lower())
+    return rows
+
+
+def role_clock(when: Optional[datetime] = None) -> str:
+    """ISO timestamp in America/Chicago, including the offset."""
+    when = when or datetime.now(ROLE_TZ)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=ROLE_TZ)
+    else:
+        when = when.astimezone(ROLE_TZ)
+    return when.isoformat(timespec="seconds")
+
+
+def role_change_when(raw: str) -> str:
+    try:
+        when = datetime.fromisoformat(raw or "")
+    except Exception:
+        return raw or ""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=ROLE_TZ)
+    return when.astimezone(ROLE_TZ).strftime("%b %-d, %-I:%M %p") + " Central"
+
+
+def role_log_load(gid: Optional[int] = None) -> list:
+    try:
+        raw = json.loads(get_setting(staff_gid(gid), "role_log") or "[]")
+    except Exception:
+        raw = []
+    return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+
+
+def role_log_save(rows: list, gid: Optional[int] = None) -> None:
+    set_setting(staff_gid(gid), "role_log", json.dumps(rows[:80]) if rows else None)
+
+
+def role_log_add(gid: int, role_id: int, role_name: str, uid: int, who: str, act: str,
+                 by: str = "", by_id: int = 0) -> None:
+    """One add or remove. A second report of the same change in a few seconds updates the name."""
+    act = "remove" if act == "remove" else "add"
+    rows = role_log_load(gid)
+    now = datetime.now(ROLE_TZ)
+    for row in rows[:12]:
+        if int(row.get("role") or 0) != int(role_id) or int(row.get("uid") or 0) != int(uid):
+            continue
+        if row.get("act") != act:
+            continue
+        try:
+            prev = datetime.fromisoformat(row.get("at") or "")
+            if prev.tzinfo is None:
+                prev = prev.replace(tzinfo=ROLE_TZ)
+            if abs((now - prev.astimezone(ROLE_TZ)).total_seconds()) <= 25:
+                if by and not row.get("by"):
+                    row["by"] = clip(by, 40)
+                    if by_id:
+                        row["by_id"] = int(by_id)
+                    role_log_save(rows, gid)
+                return
+        except Exception:
+            continue
+    rows.insert(0, {
+        "role": int(role_id),
+        "role_name": clip(role_name or "", 40),
+        "uid": int(uid),
+        "who": clip(who or str(uid), 40),
+        "act": act,
+        "by": clip(by, 40) if by else "",
+        "by_id": int(by_id or 0),
+        "at": role_clock(now),
+    })
+    role_log_save(rows, gid)
+
+
+def role_changes_public(gid: Optional[int] = None) -> list:
+    out = []
+    for row in role_log_load(gid)[:40]:
+        out.append({
+            "role": int(row.get("role") or 0),
+            "name": row.get("role_name") or "",
+            "act": "remove" if row.get("act") == "remove" else "add",
+            "who": row.get("who") or "",
+            "by": row.get("by") or "",
+            "when": role_change_when(str(row.get("at") or "")),
+        })
+    return out
+
+
+def role_note_warn(note: str) -> bool:
+    text = note or ""
+    return any(part in text for part in ("not changed", "was not", "did not", "Could not", "cannot"))
+
+
+def role_actor_stash(gid: int, uid: int, role_id: int, act: str, by: str, by_id: int) -> None:
+    _ROLE_ACTOR[(int(gid), int(uid), int(role_id), act)] = (clip(by, 40) if by else "", int(by_id or 0), time.monotonic())
+
+
+def role_actor_clear(gid: int, uid: int, role_id: int, act: str) -> None:
+    _ROLE_ACTOR.pop((int(gid), int(uid), int(role_id), act), None)
+
+
+def role_actor_stash_get(gid: int, uid: int, role_id: int, act: str) -> tuple[str, int]:
+    row = _ROLE_ACTOR.get((int(gid), int(uid), int(role_id), act))
+    if not row or time.monotonic() - row[2] > 60:
+        return "", 0
+    return row[0], int(row[1] or 0)
+
+
 def discord_role_rows(gid: Optional[int] = None) -> list:
     guild = _guild_for(gid)
     if guild is None:
@@ -38204,12 +38440,22 @@ def discord_role_rows(gid: Optional[int] = None) -> list:
             continue
         if getattr(role, "is_default", lambda: False)():
             continue
-        n = None
-        if MEMBERS_INTENT:
-            n = len(getattr(role, "members", []) or [])
-        out.append({"id": int(role.id), "name": clip(name, 40), "n": n,
-                    "head": name.lower() == HEAD_ROLE_NAME.lower()})
-    out.sort(key=lambda r: (0 if r["head"] else 1, r["name"].lower()))
+        people = role_people(role)
+        shown = people[:40] if people is not None else None
+        label = role_desk_label(gid, role)
+        out.append({
+            "id": int(role.id),
+            "name": clip(name, 40),
+            "label": label,
+            "mark": role_mark(label or name),
+            "color": role_hex(role),
+            "n": None if people is None else len(people),
+            "more": 0 if people is None else max(0, len(people) - 40),
+            "people": shown,
+            "head": name.lower() == HEAD_ROLE_NAME.lower(),
+            "block": role_block_reason(guild, role),
+        })
+    out.sort(key=lambda r: (0 if r["head"] else 1, (r.get("label") or r["name"]).lower()))
     return out[:40]
 
 
@@ -38249,6 +38495,8 @@ def staff_desk(uid: int, gid: Optional[int] = None) -> Optional[dict]:
         "roles": discord_role_rows(gid),
         "members": desk_members(gid),
         "alerts": open_alerts,
+        "changes": role_changes_public(gid),
+        "manage": bot_manage_note(_guild_for(gid)),
     }
 
 
@@ -38273,58 +38521,190 @@ def resolve_desk_person(gid: int, raw: str) -> tuple[Optional[int], str]:
     return None, ""
 
 
-async def assign_discord_role(gid: int, role_id: int, uid: int, replace: bool) -> str:
+async def audit_role_actor(guild, uid: int, role_id: int, act: str) -> tuple[str, int]:
+    """Who Discord says made this role change, when the audit log is readable."""
+    me = getattr(guild, "me", None)
+    perms = getattr(me, "guild_permissions", None) if me is not None else None
+    if perms is None or not getattr(perms, "view_audit_log", False):
+        return "", 0
+    try:
+        async for entry in guild.audit_logs(limit=8, action=discord.AuditLogAction.member_role_update):
+            target = getattr(entry, "target", None)
+            if target is None or int(getattr(target, "id", 0) or 0) != int(uid):
+                continue
+            created = getattr(entry, "created_at", None)
+            if created is not None:
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - created).total_seconds() > 30:
+                    continue
+            diff = entry.before if act == "remove" else entry.after
+            roles = getattr(diff, "roles", None) or []
+            if not any(int(getattr(item, "id", 0) or 0) == int(role_id) for item in roles):
+                continue
+            user = getattr(entry, "user", None)
+            if user is None:
+                return "", 0
+            name = getattr(user, "display_name", None) or getattr(user, "name", None) or ""
+            return clip(str(name), 40), int(user.id)
+    except Exception:
+        log.warning("Role audit log was not readable", exc_info=True)
+    return "", 0
+
+
+async def observe_role_change(guild, member, role, act: str) -> None:
+    gid = int(getattr(guild, "id", 0) or 0)
+    uid = int(getattr(member, "id", 0) or 0)
+    role_id = int(getattr(role, "id", 0) or 0)
+    if not gid or not uid or not role_id:
+        return
+    name = (getattr(role, "name", None) or "").strip()
+    if not name or name == "@everyone":
+        return
+    by, by_id = role_actor_stash_get(gid, uid, role_id, act)
+    if not by:
+        by, by_id = await audit_role_actor(guild, uid, role_id, act)
+    who = clip(getattr(member, "display_name", None) or getattr(member, "name", None) or str(uid), 40)
+    role_log_add(gid, role_id, name, uid, who, act, by, by_id)
+
+
+async def note_member_role_edits(before, after) -> None:
+    """Role adds and removes the gateway actually delivered."""
+    if getattr(after, "bot", False):
+        return
+    guild = getattr(after, "guild", None)
+    if guild is None:
+        return
+    old = {}
+    for role in getattr(before, "roles", None) or []:
+        rid = getattr(role, "id", None)
+        if rid:
+            old[int(rid)] = role
+    new = {}
+    for role in getattr(after, "roles", None) or []:
+        rid = getattr(role, "id", None)
+        if rid:
+            new[int(rid)] = role
+    for rid, role in new.items():
+        if rid not in old:
+            await observe_role_change(guild, after, role, "add")
+    for rid, role in old.items():
+        if rid not in new:
+            await observe_role_change(guild, after, role, "remove")
+
+
+async def switch_discord_role(gid: int, role_id: int, uid: int, add: bool, actor: int = 0) -> tuple[bool, str]:
+    """Give or take one Discord role. Ok is true only when Discord already matches, or the call succeeded."""
     guild = _guild_for(gid)
     if guild is None:
-        return "Saved on the crew ladder. The Discord role waits until the bot can see the server."
+        return False, "The bot cannot see this server, so the role was not changed."
     role = guild.get_role(int(role_id)) if role_id else None
-    if role is None or not (getattr(role, "name", None) or "").strip():
-        return "That Discord role is gone. Pick another one."
-    me = getattr(guild, "me", None)
-    if me is not None and getattr(role, "position", 0) >= getattr(getattr(me, "top_role", None), "position", 0):
-        return "Saved on the crew ladder. Move the bot's role above that Discord role, then try again."
-    if replace:
-        for m in list(getattr(role, "members", []) or []):
-            if int(m.id) == int(uid):
-                continue
-            try:
-                await m.remove_roles(role, reason="PIMP-BOT role replace")
-            except Exception:
-                log.warning("Could not clear role %s from %s", role.id, m.id)
+    if role is None or not (getattr(role, "name", None) or "").strip() or getattr(role, "name", "") == "@everyone":
+        return False, "That Discord role is gone, so nothing was changed."
+    block = role_block_reason(guild, role)
+    if block:
+        return False, block + " The role was not changed."
+    label = role_desk_label(gid, role)
     try:
         member = guild.get_member(int(uid))
         if member is None:
             member = await guild.fetch_member(int(uid))
-        await member.add_roles(role, reason="PIMP-BOT role desk")
     except discord.NotFound:
-        return "Saved on the crew ladder. That person is not in the server, so the Discord role was not added."
+        return False, "That person is not in the server, so the role was not changed."
     except discord.Forbidden:
-        return "Saved on the crew ladder. The bot needs Manage Roles, above that role."
+        return False, "The bot cannot see that person, so the role was not changed."
     except Exception:
-        log.warning("Role assign failed", exc_info=True)
-        return "Saved on the crew ladder. Discord did not take the role change."
-    return f"Discord role {role.name} is on them."
+        log.warning("Could not load member %s", uid, exc_info=True)
+        return False, "Discord did not answer, so the role was not changed."
+    if getattr(member, "bot", False):
+        return False, "That account is a bot, so the role was not changed."
+    has = any(int(getattr(item, "id", 0) or 0) == int(role.id) for item in (getattr(member, "roles", None) or []))
+    who = clip(getattr(member, "display_name", None) or str(uid), 40)
+    if add and has:
+        return True, f"{who} already has {label}."
+    if (not add) and (not has):
+        return True, f"{who} does not have {label}."
+    act = "add" if add else "remove"
+    by = crew_display_name(actor, gid) if actor else ""
+    role_actor_stash(gid, uid, int(role.id), act, by, actor)
+    try:
+        if add:
+            await member.add_roles(role, reason="Staff HQ")
+        else:
+            await member.remove_roles(role, reason="Staff HQ")
+    except discord.Forbidden:
+        role_actor_clear(gid, uid, int(role.id), act)
+        fresh = role_block_reason(guild, role)
+        return False, (fresh + " The role was not changed.") if fresh else "Discord refused the change. The role was not changed."
+    except discord.NotFound:
+        role_actor_clear(gid, uid, int(role.id), act)
+        return False, "That person is not in the server, so the role was not changed."
+    except Exception:
+        role_actor_clear(gid, uid, int(role.id), act)
+        log.warning("Role change failed", exc_info=True)
+        return False, "Discord did not take the change. The role was not changed."
+    try:
+        await observe_role_change(guild, member, role, act)
+    except Exception:
+        log.warning("Role change was not recorded", exc_info=True)
+    if add:
+        return True, f"{label} is on {who}."
+    return True, f"{label} is off {who}."
 
 
-async def ensure_head_role(gid: int, uid: int) -> str:
+async def assign_discord_role(gid: int, role_id: int, uid: int, replace: bool, actor: int = 0) -> str:
+    if not replace:
+        _ok, note = await switch_discord_role(gid, role_id, uid, True, actor)
+        return note
     guild = _guild_for(gid)
     if guild is None:
-        return "Saved on the crew ladder. The Discord role waits until the bot can see the server."
+        return "The bot cannot see this server, so the role was not changed."
+    role = guild.get_role(int(role_id)) if role_id else None
+    if role is None or not (getattr(role, "name", None) or "").strip():
+        return "That Discord role is gone, so nothing was changed."
+    block = role_block_reason(guild, role)
+    if block:
+        return block + " The role was not changed."
+    if not MEMBERS_INTENT:
+        _ok, note = await switch_discord_role(gid, role_id, uid, True, actor)
+        if not _ok:
+            return note
+        return note + " The bot cannot see every member, so other people were left as they are."
+    missed = 0
+    for member in list(getattr(role, "members", []) or []):
+        if int(member.id) == int(uid) or getattr(member, "bot", False):
+            continue
+        ok, _note = await switch_discord_role(gid, int(role.id), int(member.id), False, actor)
+        if not ok:
+            missed += 1
+    _ok, note = await switch_discord_role(gid, int(role.id), int(uid), True, actor)
+    if not _ok:
+        return note
+    if missed:
+        word = "person" if missed == 1 else "people"
+        return note + f" Could not take it off {missed} other {word}."
+    return note
+
+
+async def ensure_head_role(gid: int, uid: int, actor: int = 0) -> str:
+    guild = _guild_for(gid)
+    if guild is None:
+        return "The bot cannot see this server, so the role was not changed."
     role = None
-    for r in getattr(guild, "roles", []) or []:
-        if (getattr(r, "name", None) or "").strip().lower() == HEAD_ROLE_NAME.lower():
-            role = r
+    for item in getattr(guild, "roles", []) or []:
+        if (getattr(item, "name", None) or "").strip().lower() == HEAD_ROLE_NAME.lower():
+            role = item
             break
     if role is None:
         try:
             role = await guild.create_role(name=HEAD_ROLE_NAME, colour=discord.Colour(0xF0B429),
                                            reason="Head admin seat")
         except discord.Forbidden:
-            return "Saved on the crew ladder. The bot needs Manage Roles to create Head Admin."
+            return "The bot does not have Manage Roles, so Head Admin was not created and the role was not changed."
         except Exception:
             log.warning("Head Admin role was not created", exc_info=True)
-            return "Saved on the crew ladder. Discord did not create Head Admin."
-    return await assign_discord_role(gid, int(role.id), uid, True)
+            return "Discord did not create Head Admin, so the role was not changed."
+    return await assign_discord_role(gid, int(role.id), uid, True, actor)
 
 
 async def member_departed(guild, uid: int, name: str, how: str) -> None:
@@ -38374,7 +38754,7 @@ async def staff_seat(actor: int, gid: int, body: dict) -> tuple[bool, str]:
         return False, "Pick a person who is still in the server, or paste their Discord ID."
     if mode == "replace" or kind == "head":
         if not crew_at_least(actor, "owner", gid):
-            return False, "Owner or developer only."
+            return False, "Developer and owner only."
         old = head_admin_id(gid)
         if old and old != uid and old not in OWNER_IDS and old not in crew_ids("developer", gid):
             crew_revoke(old, gid)
@@ -38387,9 +38767,10 @@ async def staff_seat(actor: int, gid: int, body: dict) -> tuple[bool, str]:
             if row.get("seat") == "Head admin":
                 row["cleared"] = True
         depart_save(rows, gid)
-        note = await ensure_head_role(gid, uid)
-        staff_log_add(gid, "ok", f"Head admin is {name}", crew_display_name(actor, gid))
-        return True, note
+        note = await ensure_head_role(gid, uid, actor)
+        full = f"{name} is Head admin on the desk. {note}"
+        staff_log_add(gid, "warn" if role_note_warn(full) else "ok", full, crew_display_name(actor, gid))
+        return True, full
     if kind == "owner" and not crew_at_least(actor, "developer", gid):
         return False, "Only a developer can add an owner."
     if kind not in ("owner", "admin", "mod"):
@@ -38400,9 +38781,9 @@ async def staff_seat(actor: int, gid: int, body: dict) -> tuple[bool, str]:
     note = f"{name} is {kind}."
     role_id = str(body.get("discord_role") or "")
     if role_id.isdigit():
-        extra = await assign_discord_role(gid, int(role_id), uid, False)
+        extra = await assign_discord_role(gid, int(role_id), uid, False, actor)
         note = note + " " + extra
-    staff_log_add(gid, "ok", note, crew_display_name(actor, gid))
+    staff_log_add(gid, "warn" if role_note_warn(note) else "ok", note, crew_display_name(actor, gid))
     return True, note
 
 
@@ -39665,6 +40046,18 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .badge.own{background:#14003A;color:#F5C542;border:1px solid #F5C542;box-shadow:0 0 14px #F5C54244}
 .badge.adm{background:linear-gradient(90deg,#D62834,#7B3FE4);color:#fff}
 .badge.mod{background:#7B3FE433;color:#c4a6ff;border:1px solid #7B3FE488}
+.rolelist{max-height:420px;overflow:auto;margin:0 0 4px}
+.rolerow{display:flex;align-items:center;flex-wrap:wrap;gap:10px;width:100%;text-align:left;min-height:44px;
+ padding:8px 6px;border:0;border-top:1px solid var(--line);background:transparent;color:inherit;
+ font:inherit;cursor:pointer;border-radius:10px}
+.rolerow:hover,.rolerow.on{background:#7B3FE422}
+.rolemark{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex:none;
+ font-size:11px;font-weight:850;letter-spacing:.02em}
+.rolemain{display:flex;flex-direction:column;min-width:0;gap:2px}
+.rolemain b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.roleblock{color:var(--down);font-size:12px;font-weight:650;white-space:normal}
+.rolemeta{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;flex:none}
+.roledetail{background:#110c1b;border:1px solid #7B3FE455;border-radius:14px;padding:12px;margin:0 0 8px}
 .slips{max-height:280px;overflow:auto}.slip{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
 .slip:first-child{border-top:0}.slip a{color:#c4a6ff;font-weight:700}
 .sv{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
@@ -39798,7 +40191,7 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <div class="wrap" id="hq">
 <section class="card" id="departcard" style="margin-bottom:12px"><h2>People who left</h2><div id="depart"></div></section>
 <section class="card" id="deskcard" style="margin-bottom:12px" hidden><h2>Roles</h2><div id="desk"></div>
- <p class="muted">Developer and owner only. Add someone to a group, or replace Head admin. The Discord role updates when the bot can manage roles.</p></section>
+ <p class="muted">Developer and owner only. Give or take a Discord role, rename the desk label, or replace Head admin. Discord updates only when the bot has Manage Roles and its role sits above that one.</p></section>
 <section class="card lead" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
  <p class="muted">Every Discord server is listed, and each added feed shows even before the first call. Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
 <div class="g3">
@@ -39947,42 +40340,97 @@ try{const s=JSON.parse(localStorage.getItem('pb-look')||'{}');
  if(s.accent){document.documentElement.dataset.accent=s.accent;if(document.body)document.body.dataset.accent=s.accent}}catch(e){}
 async function staffPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok}
+let deskRole='',deskWho='',deskTyped='';
+function roleInk(hex){const n=parseInt(String(hex||'').slice(1),16);
+ if(!n&&n!==0)return '#fff';
+ const r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+ return (r*299+g*587+b*114)/1000>150?'#14003A':'#fff'}
 function paintDesk(desk){const card=$('#deskcard');if(!card)return;
  card.hidden=!(desk&&desk.open);
  if(!desk||!desk.open)return;
  const head=desk.head||{};
  const people=desk.members||[];
  const roles=desk.roles||[];
- const person=h('select',{name:'who'},[h('option',{value:'',text:'Pick a person'})].concat(people.map(p=>h('option',{value:String(p.id),text:p.name}))));
- const typed=h('input',{name:'typed',placeholder:'Or paste a Discord ID'});
+ const changes=desk.changes||[];
+ const person=h('select',{name:'who',onchange:e=>{deskWho=e.target.value}},[h('option',{value:'',text:'Pick a person'})].concat(people.map(p=>h('option',{value:String(p.id),text:p.name}))));
+ if(deskWho)person.value=deskWho;
+ const typed=h('input',{name:'typed',value:deskTyped,placeholder:'Or paste a Discord ID',autocomplete:'off',oninput:e=>{deskTyped=e.target.value}});
  const group=h('select',{name:'role'},[h('option',{value:'head',text:'Head admin'}),
   desk.developer?h('option',{value:'owner',text:'Owner'}):null,
   h('option',{value:'admin',text:'Admin'}),h('option',{value:'mod',text:'Mod'})]);
- const roleOpts=[h('option',{value:'',text:'Discord role (optional)'})];
- roles.forEach(r=>roleOpts.push(h('option',{value:String(r.id),text:r.name+(r.n!=null?' · '+r.n:'')})));
+ const roleOpts=[h('option',{value:'',text:'Discord role'})];
+ roles.forEach(r=>roleOpts.push(h('option',{value:String(r.id),text:(r.label||r.name)+(r.n!=null?' · '+r.n:'')})));
  const rolePick=h('select',{name:'discord_role'},roleOpts);
- const note=h('p',{id:'desknote',class:'muted',text:''});
+ if(deskRole)rolePick.value=deskRole;
+ const note=h('p',{id:'desknote',class:'muted',role:'status',text:''});
+ function whoFrom(f){return (f.typed.value||'').trim()||f.who.value}
+ function roleLines(){
+  if(!roles.length)return h('p',{class:'muted',text:'No Discord roles yet.'});
+  return h('div',{class:'rolelist'},roles.map(r=>{
+   const id=String(r.id);const on=deskRole===id;const color=r.color||'#7B3FE4';
+   const recent=changes.filter(c=>String(c.role)===id);
+   const same=desk.manage&&r.block&&desk.manage.indexOf(r.block)===0;
+   const row=h('button',{type:'button',class:'rolerow'+(on?' on':''),'aria-expanded':on?'true':'false',
+    onclick:()=>{deskRole=on?'':id;paintDesk(desk)}},
+    h('span',{class:'rolemark',style:'background:'+color+';color:'+roleInk(color),text:r.mark||'•','aria-hidden':'true'}),
+    h('span',{class:'rolemain'},
+     h('b',{text:r.label||r.name}),
+     (r.label&&r.name&&r.label!==r.name)?h('span',{class:'muted',text:r.name}):null,
+     (r.block&&!same)?h('span',{class:'roleblock',text:r.block}):null),
+    h('span',{class:'rolemeta'},
+     r.head?h('span',{class:'chip warnc',text:'seat'}):null,
+     r.block?h('span',{class:'chip ban',text:'locked'}):null,
+     h('span',{text:r.n==null?'':(r.n?(String(r.n)+(r.n===1?' person':' people')):'empty')}),
+     recent.length?h('span',{text:recent.length+' recent'}):null));
+   if(!on)return row;
+   const folks=r.people;
+   const detail=h('div',{class:'roledetail'},
+    r.block?h('p',{class:'bad',text:r.block+' A change from here will not reach Discord.'}):
+     h('p',{class:'muted',text:'The bot can change this role in Discord.'}),
+    h('form',{class:'form',onsubmit:e=>{e.preventDefault();
+     seatPost({op:'role',mode:'label',role:id,label:e.target.label.value})}},
+     h('input',{name:'label',value:(r.label&&r.label!==r.name)?r.label:'',maxlength:'40',placeholder:'Desk label',autocomplete:'off'}),
+     h('button',{type:'submit',text:'Save label'})),
+    h('p',{class:'muted',text:'The label is only on this desk. Discord still calls it '+(r.name||'this role')+'.'}),
+    h('p',{class:'muted',text:'On this role'}),
+    folks==null?h('p',{class:'muted',text:'The bot cannot list who has this role until Server Members Intent is on.'}):
+     (folks.length?folks.map(p=>h('div',{class:'row'},h('span',{text:p.name}),
+      h('button',{class:'xbtn',type:'button',text:'Take role',onclick:()=>seatPost({op:'role',mode:'remove',role:id,who:String(p.id)})}))):
+      h('p',{class:'muted',text:'Nobody is on this role.'})),
+    (folks!=null&&r.more)?h('p',{class:'muted',text:String(r.more)+' more people are not listed here.'}):null,
+    h('p',{class:'muted',text:'Recent Discord changes'}),
+    recent.length?recent.slice(0,8).map(c=>h('div',{class:'row'},
+     h('span',{text:(c.act==='remove'?'Removed ':'Added ')+(c.who||'someone')+(c.by?' by '+c.by:'')}),
+     h('span',{class:'muted',text:c.when||''}))):
+     h('p',{class:'muted',text:'No Discord role changes seen yet.'}));
+   return h('div',null,row,detail)}))}
  put($('#desk'),
   head.open?h('div',{class:'alert'},h('b',{text:'Head admin seat is open'}),
    h('div',{text:head.name?head.name+' — the seat is open. Pick who replaces them.':'Nobody is Head admin yet.'})):
    h('div',{class:'row'},h('span',{text:'Head admin'}),h('b',{text:head.name||'Open'})),
-  roles.length?h('div',null,roles.slice(0,12).map(r=>h('div',{class:'row'},
-   h('span',{text:r.name}),h('span',{class:'muted',text:r.n==null?'':(r.n?String(r.n)+' people':'empty')})))):
-   h('p',{class:'muted',text:'No Discord roles yet.'}),
-  desk.members_intent?null:h('p',{class:'muted',text:'Paste a Discord ID if the name list is empty. Server Members Intent, with MEMBERS_INTENT=1 on Railway, fills that list.'}),
+  desk.manage?h('p',{class:'bad',text:desk.manage}):null,
+  roleLines(),
+  desk.members_intent?null:h('p',{class:'muted',text:'Paste a Discord ID if the name list is empty. Server Members Intent, with MEMBERS_INTENT=1 on Railway, fills that list and who is on each role.'}),
   h('form',{class:'form',onsubmit:e=>{e.preventDefault();const f=e.target;
-   const who=f.typed.value.trim()||f.who.value;
-   seatPost({op:'seat',mode:'add',role:f.role.value,who:who,discord_role:f.discord_role.value})}},
-   person,typed,group,rolePick,
-   h('button',{type:'submit',text:'Add'}),
+   seatPost({op:'role',mode:'add',role:f.discord_role.value,who:whoFrom(f)})}},
+   person,typed,rolePick,
+   h('button',{type:'submit',text:'Give role'}),
+   h('button',{type:'button',text:'Take role',onclick:e=>{const f=e.target.form;
+    seatPost({op:'role',mode:'remove',role:f.discord_role.value,who:whoFrom(f)})}}),
+   h('span',{style:'flex-basis:100%;height:0'}),
+   group,
+   h('button',{type:'button',text:'Add',onclick:e=>{const f=e.target.form;
+    seatPost({op:'seat',mode:'add',role:f.role.value,who:whoFrom(f)})}}),
    h('button',{type:'button',text:'Replace head admin',onclick:e=>{const f=e.target.form;
-    seatPost({op:'seat',mode:'replace',role:'head',who:f.typed.value.trim()||f.who.value,discord_role:f.discord_role.value})}})),
+    seatPost({op:'seat',mode:'replace',role:'head',who:whoFrom(f)})}})),
   note)}
 async function seatPost(body){const r=await fetch('/api/staff.json',{method:'POST',credentials:'same-origin',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
  const d=await r.json().catch(()=>({}));
- const note=$('#desknote');if(note)note.textContent=(d&&(d.note||d.error))||(r.ok?'Saved':'Could not save');
- if(r.ok)load()}
+ const msg=(d&&(d.note||d.error))||(r.ok?'Done':'That did not save.');
+ if(r.ok)await load();
+ const note=$('#desknote');
+ if(note){note.textContent=msg;note.className=(r.ok&&!d.warn)?'muted':'bad'}}
 async function load(){const r=await fetch('/api/staff.json',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();
  const up=$('#upload');if(up)put(up,
   h('div',{class:'row'},h('span',{text:'Upload'}),h('b',{text:d.version||''})),
@@ -40730,13 +41178,39 @@ async def dash_api_staff_post(request):
         if dash_revoke_device(str(body.get("id") or "")):
             staff_log_add(gid, "ok", "Signed one browser out of the dashboard", who)
         return web.json_response({"ok": True, **staff_ops(uid)})
+    if op == "role":
+        if not crew_at_least(uid, "owner", gid):
+            return web.json_response({"ok": False, "error": "Developer and owner only."}, status=403)
+        mode = str(body.get("mode") or "")
+        if mode == "label":
+            ok, note = role_label_set(gid, body.get("role"), body.get("label"))
+            if not ok:
+                return web.json_response({"ok": False, "error": note}, status=400)
+            staff_log_add(gid, "ok", note, crew_display_name(uid, gid))
+            return web.json_response({"ok": True, "note": note, **staff_ops(uid)})
+        if mode not in ("add", "remove"):
+            return web.json_response({"ok": False, "error": "Pick give or take."}, status=400)
+        person, _name = resolve_desk_person(gid, str(body.get("who") or ""))
+        if person is None:
+            return web.json_response(
+                {"ok": False, "error": "Pick a person who is still in the server, or paste their Discord ID."},
+                status=400)
+        role_raw = str(body.get("role") or "")
+        if not role_raw.isdigit():
+            return web.json_response({"ok": False, "error": "Pick a Discord role."}, status=400)
+        ok, note = await switch_discord_role(gid, int(role_raw), person, mode == "add", uid)
+        if not ok:
+            return web.json_response({"ok": False, "error": note, "warn": True}, status=400)
+        if " is on " in note or " is off " in note:
+            staff_log_add(gid, "ok", note, crew_display_name(uid, gid))
+        return web.json_response({"ok": True, "note": note, **staff_ops(uid)})
     if op == "seat":
         if not crew_at_least(uid, "owner", gid):
-            return web.json_response({"ok": False, "error": "Owner or developer only."}, status=403)
+            return web.json_response({"ok": False, "error": "Developer and owner only."}, status=403)
         ok, note = await staff_seat(uid, gid, body)
         if not ok:
             return web.json_response({"ok": False, "error": note}, status=400)
-        return web.json_response({"ok": True, "note": note, **staff_ops(uid)})
+        return web.json_response({"ok": True, "note": note, "warn": role_note_warn(note), **staff_ops(uid)})
     return web.json_response({"ok": False}, status=400)
 
 
@@ -51926,6 +52400,12 @@ class PicksBot(discord.Client):
         if getattr(user, "bot", False):
             return
         await member_departed(guild, user.id, getattr(user, "name", None) or str(user.id), "banned")
+
+    async def on_member_update(self, before, after):
+        try:
+            await note_member_role_edits(before, after)
+        except Exception:
+            log.warning("Role change was not recorded", exc_info=True)
 
     async def on_voice_state_update(self, member, before, after):
         """Leave a few seconds after the last person does. Stay while anyone is still in the channel."""
