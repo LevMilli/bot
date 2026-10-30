@@ -404,7 +404,8 @@ Whichever host you use:
 2. Add `DISCORD_TOKEN`, `GUILD_ID` and (optionally) `ANTHROPIC_API_KEY` as
    environment variables in the host's settings. These replace the `.env` file.
 3. Attach a persistent volume mounted at `/data` (1 GB is plenty). The bot keeps
-   `picks.db` there. **Without the volume, every redeploy wipes your picks.**
+   `picks.db` there, and closed paper settlements in `/data/paper-bots`.
+   **Without the volume, every redeploy wipes your picks and your closed paper trades.**
 4. Run exactly **one** copy of the bot. Two copies would both answer every slip.
 
 Two hosts that fit:
@@ -420,7 +421,8 @@ every night, so even a lost volume costs you at most a day.
 ## Good to know
 
 - **All data lives in `picks.db`**: next to `bot.py` on your own computer, or in
-  `/data` on a cloud host. Back that file up and you've backed up everything.
+  `/data` on a cloud host. Closed paper settlements on a host are kept under
+  `/data/paper-bots` on that same volume. Back that disk up and you've backed up everything.
 - **"Max payout" means the total you get back if it wins**, stake included. A $10 entry
   that pays $50 is cost 10, payout 50, net +$40.
 - **Slip reading costs a fraction of a cent per screenshot** on the default model, billed

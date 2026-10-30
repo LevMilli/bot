@@ -54,6 +54,9 @@ def load_state(path=STATE_PATH):
 
 
 def save_state(state, path=STATE_PATH):
+    if os.path.islink(path):
+        path = os.path.realpath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     json.dump(state, open(tmp, "w"), indent=1)
     os.replace(tmp, path)      # atomic write so a crash can't corrupt the file

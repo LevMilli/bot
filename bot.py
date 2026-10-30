@@ -41521,6 +41521,10 @@ def pimp_mod():
     mod = importlib.util.module_from_spec(spec)
     sys.modules["pimp_desk"] = mod
     spec.loader.exec_module(mod)
+    try:
+        mod.keep_closed_settlements()
+    except Exception:
+        log.exception("paper settlements")
     _PIMP = mod
     return mod
 

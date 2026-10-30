@@ -68,11 +68,15 @@ def load_account():
 
 
 def save_account(state):
-    tmp = ACCOUNT + ".tmp"
+    path = ACCOUNT
+    if os.path.islink(path):
+        path = os.path.realpath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2)
         handle.write("\n")
-    os.replace(tmp, ACCOUNT)
+    os.replace(tmp, path)
 
 
 def _desk():
