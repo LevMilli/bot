@@ -89,7 +89,7 @@ class PimpDeskTests(unittest.TestCase):
         sized = snap["bots"][-1]
         self.assertFalse(sized["present"])
         self.assertEqual(sized["actions"], [])
-        expected_cash = {"sports-gap": 14.0, "kalshi-sp": 500.0, "btc15m": 100.0, "memecoin": 100.0}
+        expected_cash = {"sports-gap": 100.0, "kalshi-sp": 500.0, "btc15m": 100.0, "memecoin": 100.0}
         for bot in snap["bots"][:-1]:
             self.assertTrue(bot["present"], bot["id"])
             self.assertTrue(bot["has_state"], bot["id"])
@@ -100,7 +100,7 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(snap["desk"]["equity"], [])
         self.assertEqual(snap["desk"]["pace_line"], "0 of 12 this hour")
         self.assertTrue(snap["desk"]["pace_loosened"])
-        self.assertEqual(snap["desk"]["cash"], 714.0)
+        self.assertEqual(snap["desk"]["cash"], 800.0)
         self.assertIn("Run one check", [a["label"] for a in snap["bots"][0]["actions"]])
         self.assertIn("Morning brief", [a["label"] for a in snap["bots"][1]["actions"]])
         self.assertIn("20.00", snap["limits_text"])
@@ -361,10 +361,47 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual((n, cost), (28, 19.32))
         self.assertGreater(n, 1)
         self.assertEqual(pimp_desk.contracts_for_stake(5, 1), 0)
+        starter = {"cash": 14, "open": [], "closed": []}
+        self.assertTrue(pimp_desk.lift_sports_starter(starter))
+        self.assertEqual(starter["cash"], 100.0)
+        kept = {"cash": 14, "open": [], "closed": [{"pnl": -1}]}
+        self.assertFalse(pimp_desk.lift_sports_starter(kept))
+        self.assertEqual(kept["cash"], 14)
+        other = {"cash": 20, "open": [], "closed": []}
+        self.assertFalse(pimp_desk.lift_sports_starter(other))
+        self.assertEqual(other["cash"], 20)
         strong = pimp_desk.contracts_for_stake(per, 100)
         self.assertGreater(strong, 1)
         self.assertLessEqual(round(strong * per, 2), 100)
         self.assertGreater(round(strong * per, 2), 100 - per)
+
+    def test_sports_model_stake_lands_near_twenty(self):
+        import importlib.util
+        path = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
+        spec = importlib.util.spec_from_file_location("gap_bot_stake", path)
+        gap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gap)
+        self.assertEqual(gap.START_BANKROLL, 100.0)
+        self.assertNotIn("stake_for_gap", gap.__dict__)
+        self.assertEqual(gap.stake_for_model(0.657, pimp_desk), 20.0)
+        self.assertEqual(gap.stake_for_model(0.80, pimp_desk), 20.0)
+        self.assertEqual(gap.stake_for_model(0.90, pimp_desk), 60.0)
+        self.assertEqual(gap.stake_for_model(1, pimp_desk), 100.0)
+        per = 0.55 + gap.fee(0.55)
+        count = pimp_desk.contracts_for_stake(per, gap.stake_for_model(0.62, pimp_desk))
+        cost = round(count * per, 2)
+        self.assertGreater(count, 1)
+        self.assertLessEqual(cost, 20.0)
+        self.assertGreater(cost, 20.0 - per)
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, QUIET)
+            account = os.path.join(tmp, "sports-gap-paper", "state.json")
+            _write(account, json.dumps({"cash": 14, "open": [], "closed": [], "runs": 2}))
+            pimp_desk.ensure_paper_accounts(tmp)
+            with open(account, encoding="utf-8") as handle:
+                lifted = json.load(handle)
+            self.assertEqual(lifted["cash"], 100.0)
+            self.assertEqual(lifted["closed"], [])
 
     def test_prices_are_ask_fee_and_unknown(self):
         self.assertEqual(pimp_desk.paper_fill(0.40, 0.42), 0.42)
@@ -740,7 +777,7 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(set(made), {"sports-gap", "kalshi-sp", "btc15m", "memecoin"})
             snap = pimp_desk.snapshot(tmp)
             by_id = {bot["id"]: bot for bot in snap["bots"]}
-            self.assertEqual(by_id["sports-gap"]["cash"], 14.0)
+            self.assertEqual(by_id["sports-gap"]["cash"], 100.0)
             self.assertEqual(by_id["kalshi-sp"]["cash"], 500.0)
             self.assertEqual(by_id["btc15m"]["cash"], 100.0)
             self.assertEqual(by_id["memecoin"]["cash"], 100.0)
