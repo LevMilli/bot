@@ -2649,11 +2649,128 @@ def _curve_clock(row: dict, raw: str, day: bool) -> str:
     return _clean(clock, 80)
 
 
+def _chart_now(now: dt.datetime | None = None) -> dt.datetime:
+    if now is None:
+        now = dt.datetime.now(CT)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    else:
+        now = now.astimezone(CT)
+    return now.replace(microsecond=0)
+
+
+def _months_back(when: dt.datetime, months: int) -> dt.datetime:
+    """The same Chicago clock time, N calendar months earlier. No extra day is invented."""
+    month = when.month - int(months)
+    year = when.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    day = when.day
+    while day >= 1:
+        try:
+            return when.replace(year=year, month=month, day=day)
+        except ValueError:
+            day -= 1
+    raise ValueError("no calendar day")
+
+
+def chart_windows(now: dt.datetime | None = None) -> list:
+    """YTD, 3M, 6M, 9M, and 12M. Starts and ends are America/Chicago."""
+    now = _chart_now(now)
+    ytd = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    specs = [("ytd", "YTD", ytd)]
+    for count, key, label in ((3, "3m", "3M"), (6, "6m", "6M"), (9, "9m", "9M"), (12, "12m", "12M")):
+        specs.append((key, label, _months_back(now, count)))
+    end = now.isoformat(timespec="seconds")
+    return [{
+        "id": key,
+        "label": label,
+        "start": start.isoformat(timespec="seconds"),
+        "end": end,
+    } for key, label, start in specs]
+
+
+def curve_in_window(points: list, start: str, end: str) -> list:
+    """Settled points whose real timestamps fall in the window. Untimed points stay out."""
+    start_at = _ct_when(start)
+    end_at = _ct_when(end)
+    if start_at is None or end_at is None:
+        return []
+    chosen = []
+    for point in points or []:
+        if not isinstance(point, dict):
+            continue
+        when = _ct_when(point.get("t"))
+        if when is None:
+            continue
+        if start_at <= when <= end_at:
+            chosen.append(point)
+    return chosen
+
+
+def _open_line(bots: list) -> dict:
+    """Open paper trades only. No settled P/L, and no made-up path."""
+    opens = []
+    for bot in bots:
+        for pos in bot.get("positions") or []:
+            if not isinstance(pos, dict):
+                continue
+            raw = str(pos.get("when") or "")
+            when = _ct_when(raw)
+            stake = _num(pos.get("cost"))
+            title = _clean(pos.get("title") or "", 120)
+            opens.append({
+                "t": when.isoformat(timespec="seconds") if when is not None else "",
+                "name": title or _curve_name(pos),
+                "stake": None if stake is None else round(stake, 2),
+            })
+    return {
+        "label": "Live · not settled",
+        "settled": False,
+        "n": len(opens),
+        "opens": opens,
+    }
+
+
+def _thin_curve(points: list) -> list:
+    """Keep real settles. A long book keeps each older Chicago day at its last settle."""
+    if len(points) <= 2000:
+        return points
+    timed = []
+    untimed = []
+    for point in points:
+        when = _ct_when(point.get("t"))
+        if when is None:
+            untimed.append(point)
+        else:
+            timed.append((when, point))
+    if not timed:
+        return points[-2000:]
+    last = timed[-1][0]
+    floor = _months_back(last, 12)
+    recent_cut = last - dt.timedelta(days=21)
+    recent = []
+    daily = {}
+    order = []
+    for when, point in timed:
+        if when < floor:
+            continue
+        if when >= recent_cut:
+            recent.append(point)
+            continue
+        day = when.astimezone(CT).date().isoformat()
+        if day not in daily:
+            order.append(day)
+        daily[day] = point
+    return [daily[day] for day in order] + recent[-1600:] + untimed
+
+
 def _equity_curve(bots: list) -> list:
     """Cumulative settled paper P/L. No point is invented when nothing has settled.
 
     Each point is one settled paper slip. The chart can name that slip without
-    adding a dot that was not a trade.
+    adding a dot that was not a trade. Open trades are not on this line.
     """
     rows = [row for row in _flatten(bots) if row.get("state") == "settled" and _num(row.get("pnl")) is not None]
     keyed = []
@@ -2679,7 +2796,7 @@ def _equity_curve(bots: list) -> list:
             "payout": None if payout is None else round(payout, 2),
             "pnl": round(float(row["pnl"]), 2),
         })
-    return points[-180:]
+    return _thin_curve(points)
 
 
 def _stretch_pct(points: list, start_at: int, end_at: int, dollars: float, start: float):
@@ -2799,6 +2916,7 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
     curve = _equity_curve(bots)
     spikes = _equity_spikes(curve)
     pace = hour_pace(root, cfg=cfg)
+    now = _chart_now()
     return {
         "cash": None if not cashes else round(sum(cashes), 2),
         "realized": None if not realized_rows else round(sum(realized_rows), 2),
@@ -2820,6 +2938,12 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         "streak": _streak(bots),
         "equity": [point["v"] for point in curve][-40:],
         "curve": curve,
+        "chart": {
+            "zone": "America/Chicago",
+            "default": "ytd",
+            "ranges": chart_windows(now),
+            "open_line": _open_line(bots),
+        },
         "spikes": spikes,
         "news": news_calendar(root),
         "paused_all": bool(_load_pause(root).get("all")),

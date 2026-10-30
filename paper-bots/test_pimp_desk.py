@@ -603,6 +603,17 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(curve[0]["when"], "October 28, 2026, 2:00 PM Central")
             self.assertEqual(len(curve), 2)
             self.assertEqual(desk["spikes"], [{"from": 0, "to": 1, "dollars": 4.0, "pct": 160.0}])
+            line = desk["chart"]["open_line"]
+            self.assertEqual(desk["chart"]["zone"], "America/Chicago")
+            self.assertEqual(desk["chart"]["default"], "ytd")
+            self.assertEqual([row["id"] for row in desk["chart"]["ranges"]], ["ytd", "3m", "6m", "9m", "12m"])
+            self.assertFalse(line["settled"])
+            self.assertEqual(line["label"], "Live · not settled")
+            self.assertEqual(line["n"], 1)
+            self.assertNotIn("pnl", line["opens"][0])
+            self.assertNotIn("v", line["opens"][0])
+            self.assertTrue(line["opens"][0]["t"].startswith("2026-10-30T12:00:00"))
+            self.assertNotIn("Bills", " ".join(point.get("name") or "" for point in curve))
         page = os.path.join(os.path.dirname(ROOT), "bot.py")
         with open(page, encoding="utf-8") as handle:
             text = handle.read()
@@ -615,8 +626,17 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(spots, sorted(spots))
         self.assertNotIn("innerHTML", chunk)
         self.assertIn('id="pimpslips"', chunk)
+        self.assertIn('id="eqranges"', chunk)
+        self.assertIn('data-range="ytd" aria-pressed="true"', chunk)
+        for key in ("3m", "6m", "9m", "12m"):
+            self.assertIn(f'data-range="{key}"', chunk)
+        ranges = chunk[chunk.find('id="eqranges"'):chunk.find('id="pimpchart"')]
+        self.assertNotIn("navchip", ranges)
         self.assertNotIn(".navchip{", chunk.replace(" ", ""))
         self.assertNotIn(".pill{", chunk.replace(" ", ""))
+        self.assertIn("No settled paper trades in this range.", text)
+        self.assertIn("Live · not settled", text)
+        self.assertIn("Settled paper P/L", text)
         script = text[end:]
         self.assertIn("function slipCard", script)
         self.assertIn("America/Chicago", script)
@@ -632,6 +652,101 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn(">PIMP<b>-</b>BOT · STAFF · TRADING</a>", text)
         self.assertIn("function paintWordmark", text)
         self.assertIn("BOT · STAFF · TRADING", text)
+
+    def test_chart_ranges_are_chicago_and_do_not_invent_points(self):
+        now = dt.datetime(2026, 10, 30, 18, 0, tzinfo=pimp_desk.CT)
+        rows = pimp_desk.chart_windows(now)
+        self.assertEqual([row["label"] for row in rows], ["YTD", "3M", "6M", "9M", "12M"])
+        by = {row["id"]: row for row in rows}
+        self.assertEqual(by["ytd"]["start"], "2026-01-01T00:00:00-06:00")
+        self.assertEqual(by["3m"]["start"], "2026-07-30T18:00:00-05:00")
+        self.assertEqual(by["6m"]["start"], "2026-04-30T18:00:00-05:00")
+        self.assertEqual(by["9m"]["start"], "2026-01-30T18:00:00-06:00")
+        self.assertEqual(by["12m"]["start"], "2025-10-30T18:00:00-05:00")
+        self.assertTrue(all(row["end"] == "2026-10-30T18:00:00-05:00" for row in rows))
+        march = dt.datetime(2026, 3, 31, 15, 30, tzinfo=pimp_desk.CT)
+        self.assertTrue(pimp_desk.chart_windows(march)[1]["start"].startswith("2025-12-31T15:30:00"))
+        points = [
+            {"t": "2025-03-01T12:00:00-06:00", "v": 1},
+            {"t": "2026-01-15T12:00:00-06:00", "v": -5},
+            {"t": "2026-09-15T12:00:00-05:00", "v": 3},
+            {"t": "", "v": 9},
+        ]
+        self.assertEqual([p["v"] for p in pimp_desk.curve_in_window(points, by["ytd"]["start"], by["ytd"]["end"])], [-5, 3])
+        self.assertEqual([p["v"] for p in pimp_desk.curve_in_window(points, by["3m"]["start"], by["3m"]["end"])], [3])
+        self.assertEqual([p["v"] for p in pimp_desk.curve_in_window(points, by["12m"]["start"], by["12m"]["end"])], [-5, 3])
+        self.assertEqual(pimp_desk.curve_in_window([{"t": "", "v": 9}], by["ytd"]["start"], by["ytd"]["end"]), [])
+        self.assertEqual(pimp_desk.curve_in_window(
+            [{"t": "2025-03-01T12:00:00-06:00", "v": 1}], by["ytd"]["start"], by["ytd"]["end"]), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), QUIET)
+            start = dt.date(2026, 4, 14)
+            closed = [{
+                "team": f"Day {i}", "pnl": 1, "closed": f"{(start + dt.timedelta(days=i)).isoformat()} 12:00:00 CT",
+                "fill_id": f"day-{i}",
+            } for i in range(200)]
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({"cash": 10, "open": [], "closed": closed}))
+            curve = pimp_desk.snapshot(tmp)["desk"]["curve"]
+            self.assertEqual(len(curve), 200)
+            self.assertTrue(curve[0]["t"].startswith("2026-04-14"))
+            self.assertEqual(curve[-1]["v"], 200)
+
+    def test_open_trade_draws_without_waiting_for_a_settle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "btc15m-signal", "btc15m_signal.py"), QUIET)
+            _write(os.path.join(tmp, "btc15m-signal", "paper_account.json"), json.dumps({
+                "cash": 51.28,
+                "open": [{
+                    "ticker": "KXBTC15M", "team": "KXBTC15M", "game": "BTC 15-minute",
+                    "side": "YES", "contracts": 56, "cost": 48.72,
+                    "opened": "2026-10-30 18:00:00 UTC", "fill_id": "open-btc", "paper_only": True,
+                }],
+                "closed": [{
+                    "ticker": "KXBTC15M-OLD", "team": "KXBTC15M-OLD", "game": "BTC 15-minute",
+                    "side": "YES", "contracts": 10, "cost": 4.0, "payout": 10.0, "pnl": 6.0,
+                    "exit": "settled", "closed": "2026-09-15 16:00:00 UTC",
+                    "fill_id": "closed-btc", "paper_only": True,
+                }],
+            }))
+            desk = pimp_desk.snapshot(tmp)["desk"]
+            curve = desk["curve"]
+            self.assertEqual([point["v"] for point in curve], [6.0])
+            self.assertEqual(curve[0]["pnl"], 6.0)
+            self.assertNotIn("48.72", json.dumps(curve))
+            self.assertNotIn("KXBTC15M", curve[0]["name"])
+            line = desk["chart"]["open_line"]
+            self.assertEqual(line["n"], 1)
+            self.assertFalse(line["settled"])
+            self.assertEqual(line["opens"][0]["name"], "56 YES KXBTC15M")
+            self.assertEqual(line["opens"][0]["stake"], 48.72)
+            self.assertNotIn("pnl", line["opens"][0])
+            self.assertNotIn("v", line["opens"][0])
+            self.assertTrue(line["opens"][0]["t"].startswith("2026-10-30T13:00:00"))
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "btc15m-signal", "btc15m_signal.py"), QUIET)
+            _write(os.path.join(tmp, "btc15m-signal", "paper_account.json"), json.dumps({
+                "cash": 51.28,
+                "open": [{
+                    "ticker": "KXBTC15M", "team": "KXBTC15M", "game": "BTC 15-minute",
+                    "side": "YES", "contracts": 56, "cost": 48.72,
+                    "opened": "2026-08-15 18:00:00 UTC", "fill_id": "open-btc", "paper_only": True,
+                }],
+                "closed": [],
+            }))
+            desk = pimp_desk.snapshot(tmp)["desk"]
+            self.assertEqual(desk["curve"], [])
+            line = desk["chart"]["open_line"]
+            self.assertEqual(line["n"], 1)
+            self.assertEqual(line["opens"][0]["name"], "56 YES KXBTC15M")
+            self.assertEqual(line["opens"][0]["stake"], 48.72)
+            self.assertNotIn("v", line["opens"][0])
+        page = os.path.join(os.path.dirname(ROOT), "bot.py")
+        with open(page, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn("if(!points.length && !openN)", text)
+        self.assertIn("function drawLiveOnly", text)
+        self.assertIn("host.dataset.live", text)
+        self.assertNotIn("if(!points.length){put(host, h('p',{class:'eqempty'", text)
 
     def test_spikes_are_percent_and_slips_stay_real(self):
         quiet = [
