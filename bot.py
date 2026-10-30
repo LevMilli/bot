@@ -36660,16 +36660,19 @@ a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{wid
 SITE_LOOK_CSS += (
     ".looktile .sw img{width:100%;height:86px;object-fit:cover;display:block;background:#110818}"
 )
+# A fixed ::before at z-index -1 paints over the words once any bar uses backdrop-filter.
+# The scene stays a real background, so the letters sit on top of the art.
 SITE_LOOK_CSS += "".join(
-    f"html[data-bg={k}]{{background:#0b0714!important}}"
-    f"html[data-bg={k}] body,body[data-bg={k}]{{background-color:transparent!important;background-image:none!important}}"
-    f"html[data-bg={k}] body:before,body[data-bg={k}]:before{{content:\"\"!important;position:fixed;inset:0;z-index:-1;"
-    f"pointer-events:none;background-image:linear-gradient(#0b071424,#0b071448),url('/img/look/{k}.svg')!important;"
-    f"background-repeat:no-repeat!important;background-position:center top!important;background-size:100% auto!important;"
-    f"-webkit-mask-image:linear-gradient(#000 0%,#000 78%,transparent 100%)!important;"
-    f"mask-image:linear-gradient(#000 0%,#000 78%,transparent 100%)!important}}"
-    f"@media (max-width:720px){{html[data-bg={k}] body:before,body[data-bg={k}]:before{{"
-    f"background-size:auto 68vh!important}}}}"
+    f"html[data-bg={k}]{{background-color:#0b0714!important}}"
+    f"html[data-bg={k}] body,body[data-bg={k}]{{background-color:#0b0714!important;"
+    f"background-image:linear-gradient(180deg,rgba(11,7,20,0) 0%,rgba(11,7,20,0) 70%,#0b0714 100%),"
+    f"linear-gradient(#0b071424,#0b071448),url('/img/look/{k}.svg')!important;"
+    f"background-repeat:no-repeat!important;background-position:center top!important;"
+    f"background-size:100% 100%,100% auto,100% auto!important;background-attachment:fixed!important}}"
+    f"html[data-bg={k}] body:before,body[data-bg={k}]:before{{content:none!important;display:none!important;"
+    f"background:none!important}}"
+    f"@media (max-width:720px){{html[data-bg={k}] body,body[data-bg={k}]{{"
+    f"background-size:100% 100%,auto 68vh,auto 68vh!important}}}}"
     f".looktile[data-bg={k}] .sw{{background-image:url('/img/look/{k}.svg')}}"
     for k in LOOK_IDS
 )
@@ -39644,7 +39647,14 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .paperban{background:#2a2108;border:1px solid var(--gold);border-radius:14px;padding:12px 14px;margin:0 0 12px;font-weight:750}
 .paperban b{color:var(--gold);letter-spacing:.08em}
 .pimph{margin:0 0 8px;font-size:22px;letter-spacing:.14em}
-.pimpgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.pimpgrid{display:grid;align-items:start;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px}
+.pimpgrid>details.card,.pimpgrid>section.card{overflow:visible;height:auto;max-height:none;min-height:0}
+.pimpgrid>details.card[open]>section.card{display:block;overflow:visible;height:auto;max-height:none}
+.warn{color:var(--gold)}
+.poscard .fact{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-top:1px solid var(--line);font-size:13px}
+.poscard .fact span:first-child{color:var(--muted);flex:none}
+.poscard .fact span:last-child{text-align:right;min-width:0;overflow-wrap:anywhere}
+.scroll{overflow-x:auto;max-width:100%}
 .paperban{position:sticky;top:64px;z-index:30;padding:6px 10px;font-size:13px}
 .pimpstick{position:sticky;top:108px;z-index:29;display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;
  background:#120b1ccc;border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin:0 0 12px;
@@ -39671,6 +39681,8 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
  .todaybig{font-size:22px}
  .booktable{display:block;overflow-x:auto}
  .pimpstick{top:0}
+ #pimp .form input,#pimp .form button,#pimp .form label,#pimp .form select{flex:1 1 100%;width:100%;max-width:100%}
+ #pimp .numin{width:100%}
 }
 @media print{
  .top,.form,.xbtn,#looksheet,#intro,.nav,button{display:none!important}
@@ -40082,6 +40094,33 @@ function statusChip(status){const map={running:['run','running'],skipped:['skip'
 function tone(row){const kind=row&&row.result==='won'?'win':row&&row.result==='lost'?'loss':'open';
  const word=row&&row.result==='won'?'won':row&&row.result==='lost'?'lost':row&&row.state==='open'?'open':(row&&row.result)||'';
  return h('span',{class:kind,text:word})}
+function unk(v){return v==null||v===''?'unknown':String(v)}
+function pctProb(v){const n=Number(v); if(!Number.isFinite(n)) return 'unknown'; return (n*100).toFixed(1)+'%'}
+function fact(label, value){return h('div',{class:'fact'},h('span',{text:label}),h('span',{text:unk(value)}))}
+function openCard(p, fresh){const game=p.game||p.ticker||p.team||'';
+ return h('div',{class:'poscard'+(fresh?' fresh':'')},
+  h('b',{text:p.title||game||'Open paper trade'}),h('span',{class:'open',text:' open'}),
+  fact('Bot', p.name||p.bot),
+  fact('Ticker or game', game),
+  fact('Side', p.side),
+  fact('Contracts', p.contracts),
+  fact('Stake', p.cost==null?null:usd(p.cost)),
+  fact('Entry price', p.ask==null?null:usd(p.ask)),
+  fact('Fee', p.fee==null?null:usd(p.fee)),
+  fact('Model probability', p.prob==null?null:pctProb(p.prob)),
+  fact('Score at entry', p.score),
+  fact('Why it opened', p.why_open||p.why),
+  fact('Price source', p.source),
+  fact('Price time', p.priced_central||p.priced_at))}
+function closedHead(){return h('tr',null,['Bot','Close time','Ticker or game','Exit reason','Payout','P/L'].map(name=>h('th',{text:name})))}
+function closedRow(t, fresh){const game=t.game||t.ticker||t.what||t.title||'';
+ return h('tr',{class:fresh?'fresh':''},
+  h('td',{text:t.name||t.bot||'unknown'}),
+  h('td',{text:t.closed_at||t.when||'unknown'}),
+  h('td',{text:game||'unknown'}),
+  h('td',{text:t.exit_reason||'unknown'}),
+  h('td',{class:'num',text:t.payout==null?'unknown':usd(t.payout)}),
+  h('td',{class:'num',text:t.pnl==null?'unknown':pnl(t.pnl)}))}
 function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; const access=d.access||{};
  pimpLimits=lim; const fresh=!!(d.changes&&d.changes.changed);
  const stake=$('#pimpstake'); if(stake) stake.textContent=d.limits_text||'';
@@ -40120,13 +40159,15 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    h('p',{class:'muted',text:'No limit changes yet.'}),
   d.live_switch?h('p',{class:'muted',text:d.live_switch.needs||''}):null);
  const book=d.book||{}; const rows=book.rows||[];
+ const openRows=rows.filter(row=>row.state==='open');
+ const closedRows=rows.filter(row=>row.state!=='open');
  put($('#pimpbook'),
-  rows.length?h('table',{class:'booktable'},h('thead',null,h('tr',null,['Book','When','What','Result','P/L','Ask','Fee'].map(name=>h('th',{text:name})))),
-   h('tbody',null,rows.map(row=>h('tr',{class:fresh&&row.state!=='open'?'fresh':''},
-    h('td',{text:row.name||''}),h('td',{text:row.when||''}),h('td',{text:row.what||row.title||''}),
-    h('td',null,tone(row)),h('td',{class:'num',text:row.pnl==null?'':pnl(row.pnl)}),
-    h('td',{class:'num',text:row.price_label||'unknown'}),h('td',{class:'num',text:row.fee_label||'unknown'}))))):
-   h('p',{text:'No paper trades yet. Last check '+(desk.central_check||'no check yet')+'. No edge.'}),
+  !rows.length?h('p',{text:'No paper trades yet. Last check '+(desk.central_check||'no check yet')+'. No edge.'}):null,
+  rows.length&&!openRows.length?h('p',{text:'No open paper trades.'}):null,
+  openRows.map(row=>openCard(row, fresh)),
+  closedRows.length?h('div',{class:'scroll'},h('table',{class:'booktable'},h('thead',null,closedHead()),
+   h('tbody',null,closedRows.map(row=>closedRow(row, fresh&&row.state!=='open'))))):
+   (rows.length?h('p',{class:'muted',text:'No closed paper trades.'}):null),
   h('p',{class:'muted',text:'Page '+String(book.page||1)+' of '+String(book.pages||1)}),
   h('div',{class:'form'},
    book.page>1?h('button',{class:'xbtn',type:'button',text:'Previous page',onclick:()=>{pimpQuery.page=Math.max(1,(book.page||1)-1); loadPimp()}}):null,
@@ -40138,6 +40179,7 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    statusChip(b.status),
    b.paused?h('span',{class:'chip skip',text:'paused'}):null,
    idle&&b.idle_copy?h('p',{text:b.idle_copy}):(b.empty?h('p',{class:'muted',text:b.empty}):null),
+   b.warning?h('p',{class:'warn',text:b.warning}):null,
    b.why?h('p',{text:b.why}):null,
    b.present?h('div',{class:'row'},h('span',{text:'Paper cash'}),h('b',{class:'num',text:b.cash==null?'No account file':usd(b.cash)})):null,
    b.present?h('div',{class:'row'},h('span',{text:'Open risk'}),h('b',{class:'num',text:usd(b.open_risk||0)})):null,
@@ -40147,19 +40189,13 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    (b.would_have||[]).length?h('h2',{text:'Would have bought',style:'margin-top:14px'}):null,
    (b.would_have||[]).map(row=>h('p',{text:(row.what||'unknown')+' — '+(row.why||'')})),
    (b.positions||[]).length?h('h2',{text:'Open paper positions',style:'margin-top:14px'}):null,
-   (b.positions||[]).map(p=>h('div',{class:'poscard'+(fresh?' fresh':'')},
-    h('b',{text:p.title||''}),h('span',{class:'open',text:' open'}),
-    h('p',{class:'muted',text:p.detail||''}),
-    h('p',{text:'Stake '+usd(p.cost)+' · edge '+(p.edge==null?'unknown':String(p.edge))+' · fee '+(p.fee_label||'unknown')}),
-    h('p',{class:'muted',text:(p.source_line||'Source unknown.')+(p.stale?' · price older than 30 seconds':'')}),
-    h('p',{text:p.why||''}),
+   (b.positions||[]).map(p=>h('div',null,openCard(p, fresh),
     p.confidence?h('span',{class:'chip',text:p.confidence}):null,
     p.stake_compare?h('p',{text:p.stake_compare}):null,
-    p.score?h('p',{class:'muted',text:'Score at entry: '+p.score}):null)),
-   (b.trades||[]).length?h('h2',{text:'Past paper trades',style:'margin-top:14px'}):null,
-   (b.trades||[]).length?h('table',{class:'booktable'},h('tbody',null,(b.trades||[]).map(t=>h('tr',{class:fresh?'fresh':''},
-    h('td',{text:t.what||'Trade'}),h('td',{text:t.when||''}),h('td',null,tone(t)),
-    h('td',{class:'num',text:t.pnl==null?'':pnl(t.pnl)}))))):null,
+    p.stale?h('p',{class:'muted',text:'Price older than 30 seconds.'}):null)),
+   (b.history||[]).length?h('h2',{text:'Past paper trades',style:'margin-top:14px'}):null,
+   (b.history||[]).length?h('div',{class:'scroll'},h('table',{class:'booktable'},h('thead',null,closedHead()),
+    h('tbody',null,(b.history||[]).map(t=>closedRow(t, fresh))))):null,
    access.save?h('form',{class:'form',onsubmit:e=>{e.preventDefault(); const f=e.target;
     pimpPost({op:'note',bot:b.id,trade:f.trade.value,note:f.note.value,skipped:f.skipped.checked,stake_idea:f.stake_idea.value})}},
     h('input',{name:'trade',placeholder:'Ticker or team'}),

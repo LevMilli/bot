@@ -292,7 +292,7 @@ def main():
     except Exception as e:
         news = []
         print(f"  news calendar failed ({e}); treating as unknown")
-        reasons.append("news calendar unavailable")
+        print("News calendar did not load. The paper check still runs.")
 
     zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
     if min_left < MIN_MINUTES_LEFT: reasons.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
