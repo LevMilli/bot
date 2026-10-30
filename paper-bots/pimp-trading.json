@@ -1,0 +1,11 @@
+{
+  "_comment": "Dashboard-owned paper limits. Paper only. This file is not the picks database.",
+  "paper_only": true,
+  "stake_hi_min": 10.0,
+  "stake_hi_max": 30.0,
+  "stake_hi_prob": 0.8,
+  "stake_lo_max": 9.99,
+  "daily_loss_stop": 50.0,
+  "max_open_risk": 100.0,
+  "max_open_positions": 4
+}
