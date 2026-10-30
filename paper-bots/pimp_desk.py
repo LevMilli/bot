@@ -552,6 +552,10 @@ def _fill_row(pos: dict, title: str, detail: str, cost: float, when: str) -> dic
         why = "The reason was not stored with this trade."
     else:
         why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
+    contracts = pos.get("contracts")
+    if contracts in (None, "") and pos.get("tokens") not in (None, ""):
+        contracts = pos.get("tokens")
+    priced_at = _clean(pos.get("price_at") or pos.get("entry_iso") or "", 40)
     return {
         "title": title,
         "detail": detail,
@@ -561,15 +565,23 @@ def _fill_row(pos: dict, title: str, detail: str, cost: float, when: str) -> dic
         "fee": None if _num(fee) is None else round(_num(fee), 4),
         "fill": paper_fill(bid, ask),
         "source": _clean(pos.get("price_source") or "", 180),
-        "priced_at": _clean(pos.get("price_at") or "", 40),
+        "priced_at": priced_at,
+        "priced_central": _central_from_text(priced_at) if priced_at else "",
         "prob": None if _num(prob) is None else round(_num(prob), 4),
         "prob_exit": None if _num(pos.get("fair_at_exit")) is None else round(_num(pos.get("fair_at_exit")), 4),
         "score": _clean(pos.get("score_at_entry") or "", 80),
         "fill_id": _clean(pos.get("fill_id") or "", 80),
-        "ticker": _clean(pos.get("ticker") or "", 40),
+        "ticker": _clean(pos.get("ticker") or pos.get("symbol") or "", 40),
+        "game": _clean(pos.get("game") or pos.get("event") or "", 120),
+        "side": _clean(pos.get("side") or "", 24),
+        "contracts": None if contracts in (None, "") else contracts,
         "team": _clean(pos.get("team") or pos.get("symbol") or "", 60),
         "when": _clean(when, 40),
         "why": why,
+        "why_open": why,
+        "payout": None,
+        "exit_reason": "",
+        "closed_at": "",
         "confidence": _confidence(_num(prob)),
         "edge": edge_after_fee(prob, ask),
     }
@@ -593,10 +605,19 @@ def _closed_row(pos: dict, when: str, what: str) -> dict:
         why = "Paper trade settled flat."
         result = "flat"
     row = _fill_row(pos, what, exit_why, _num(pos.get("cost")) or _num(pos.get("cost_usd")) or 0.0, when)
+    payout = _num(pos.get("payout"))
+    if payout is None:
+        payout = _num(pos.get("payout_usd"))
+    closed_at = _central_from_text(when) if str(when or "").strip() else ""
     row["what"] = what
     row["pnl"] = None if pnl is None else round(pnl, 2)
     row["why"] = why
     row["result"] = result
+    row["exit_reason"] = exit_why or "unknown"
+    row["payout"] = None if payout is None else round(payout, 2)
+    row["closed_at"] = closed_at
+    if closed_at:
+        row["when"] = closed_at
     if pos.get("fair_at_exit") not in (None, ""):
         row["prob_exit"] = None if _num(pos.get("fair_at_exit")) is None else round(_num(pos.get("fair_at_exit")), 4)
     return row
@@ -627,7 +648,6 @@ def _sports_positions(state: dict, day: dt.date):
         title = _clean(f"{pos.get('contracts') or '?'} YES {pos.get('team') or pos.get('ticker') or 'contract'}")
         detail = _clean(f"{pos.get('game') or ''} · cost ${cost:.2f} · {pos.get('opened') or ''}")
         open_rows.append(_fill_row(pos, title, detail, cost, str(pos.get("opened") or "")))
-    open_rows = open_rows[:20]
     closed = _dedupe_pos([pos for pos in (state.get("closed") or []) if isinstance(pos, dict)])
     for pos in closed:
         pnl = _num(pos.get("pnl"))
@@ -655,7 +675,6 @@ def _kalshi_positions(state: dict, day: dt.date):
         title = _clean(f"{pos.get('contracts') or '?'} {pos.get('side') or ''} {pos.get('ticker') or 'contract'}")
         detail = _clean(f"ask {ask if ask not in (None, '') else 'unknown'} · cost ${cost:.2f} · {pos.get('day') or ''}")
         open_rows.append(_fill_row(pos, title, detail, cost, str(pos.get("entry_time") or pos.get("day") or "")))
-    open_rows = open_rows[:20]
     closed = _dedupe_pos([pos for pos in (state.get("closed") or []) if isinstance(pos, dict)])
     for pos in closed:
         when = str(pos.get("settled_at") or pos.get("day") or "")
@@ -680,13 +699,20 @@ def _meme_positions(state: dict, trades_path: str, day: dt.date):
         title = _clean(f"{pos.get('symbol') or 'token'} · ${cost:.2f}")
         detail = _clean(f"{pos.get('mint') or ''} · {pos.get('entry_iso') or ''}")
         row = _fill_row(pos, title, detail, cost, str(pos.get("entry_iso") or ""))
-        if row["ask"] is None and _num(pos.get("fill_price_usd")) is None and _num(pos.get("market_price_usd")) is None:
-            row["ask"] = None
+        if row["ask"] is None and _num(pos.get("entry_fill_price")) is not None:
+            row["ask"] = round(_num(pos.get("entry_fill_price")), 4)
+            row["fill"] = row["ask"]
         elif row["ask"] is None and _num(pos.get("fill_price_usd")) is not None:
             row["ask"] = round(_num(pos.get("fill_price_usd")), 4)
             row["fill"] = row["ask"]
+        if not row["side"]:
+            row["side"] = "buy"
+        if not row["source"]:
+            row["source"] = "https://api.dexscreener.com"
+        if row["why_open"] == "The reason was not stored with this trade." and pos.get("confidence") not in (None, ""):
+            row["why_open"] = f"Paper buy. Confidence {pos.get('confidence')}."
+            row["why"] = row["why_open"]
         open_rows.append(row)
-    open_rows = open_rows[:20]
     all_rows = _csv_tail(trades_path, 5000)
     today = 0.0
     pnl_rows = []
@@ -696,13 +722,16 @@ def _meme_positions(state: dict, trades_path: str, day: dt.date):
         row = _closed_row({
             "pnl": raw.get("pnl_usd"),
             "reason": raw.get("reason"),
+            "exit": raw.get("reason"),
             "cost_usd": raw.get("usd"),
+            "payout": raw.get("usd") if side.upper() == "SELL" else None,
             "ask": raw.get("fill_price_usd"),
             "fee": raw.get("fee_usd"),
-            "price_source": raw.get("source") or "",
+            "price_source": raw.get("source") or "https://api.dexscreener.com",
             "price_at": raw.get("ts") or "",
             "ticker": raw.get("symbol") or "",
             "symbol": raw.get("symbol") or "",
+            "side": side,
             "fill_id": f"{raw.get('ts')}|{raw.get('symbol')}|{side}|{raw.get('usd')}",
         }, str(raw.get("ts") or ""), what)
         history.append(row)
@@ -757,9 +786,11 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         return _finish_bot(view, spec, root)
     run = view["last_run"] or {}
     if spec["kind"] == "btc":
-        view["skip"] = _btc_skip(str(run.get("summary") or ""))
+        summary = str(run.get("summary") or "")
+        view["skip"] = _btc_skip(summary)
         view["empty"] = spec["empty"]
-        view["why"] = plain_reason(view["skip"])
+        view["why"] = plain_reason(view["skip"]) if view["skip"] else ""
+        view["warning"] = _btc_calendar_warning(summary)
         if run.get("at"):
             view["last_check"] = str(run.get("at"))
         return _finish_bot(view, spec, root)
@@ -792,20 +823,17 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         return _finish_bot(view, spec, root)
     if state is None:
         view["empty"] = spec["empty"]
+        view["warning"] = _calendar_warning(root, spec["id"])
         if spec["kind"] == "kalshi":
             view["skip"] = _kalshi_skip(root, None)
-        elif spec["kind"] == "sports":
-            view["skip"] = "No news calendar on this bot. Skip lines land in the log after a check."
-        else:
-            view["skip"] = "No news calendar on this bot."
-        view["why"] = plain_reason(view["skip"])
+        view["why"] = plain_reason(view["skip"]) if view["skip"] else ""
         return _finish_bot(view, spec, root)
     view["has_state"] = True
     view["empty"] = ""
+    view["warning"] = _calendar_warning(root, spec["id"])
     if spec["kind"] == "sports":
         positions, trades, realized, today, risk, count, history = _sports_positions(state, day)
         view["cash"] = _num(state.get("cash"))
-        view["skip"] = "No news calendar on this bot. The log lines are the skip record."
     elif spec["kind"] == "kalshi":
         positions, trades, realized, today, risk, count, history = _kalshi_positions(state, day)
         view["cash"] = _num(state.get("bankroll"))
@@ -815,7 +843,6 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         cap_log(trades_path)
         positions, trades, realized, today, risk, count, history = _meme_positions(state, trades_path, day)
         view["cash"] = _num(state.get("cash_usd"))
-        view["skip"] = "No news calendar on this bot. Rug skips are in the last run summary."
     if view["cash"] is not None:
         view["cash"] = round(view["cash"], 2)
     view["positions"] = positions
@@ -825,7 +852,8 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     view["today"] = today
     view["open_risk"] = risk
     view["open_count"] = count
-    view["why"] = plain_reason(str(run.get("summary") or "") or view["skip"])
+    summary = str(run.get("summary") or "")
+    view["why"] = plain_reason(summary) if summary.strip() else ""
     view["outside"] = _outside(root, spec["id"], stamp)
     _save_good_bot(root, spec["id"], view)
     return _finish_bot(view, spec, root)
@@ -967,13 +995,8 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         return {"ok": False, "error": refused}
     if bot_paused(root, bot_id):
         return {"ok": False, "error": "Paused.", "blocked": True, "summary": "Paused."}
+    warning = _calendar_warning(root, bot_id) if spec["entry"] or bot_id == "btc15m" else ""
     if spec["entry"]:
-        news = _calendar_block(root, bot_id)
-        if news:
-            row = {"at": _now(), "ok": False, "blocked": True, "summary": news, "exit": None, "action": action,
-                   "would_have": [{"what": "unknown", "why": news, "bot": bot_id}]}
-            _save_run(root, bot_id, row)
-            return {"ok": False, "error": news, "blocked": True, "summary": news, "would_have": row["would_have"]}
         gate = entry_gate(root)
         if gate:
             would = [{"what": "unknown", "why": gate, "bot": bot_id}]
@@ -1017,7 +1040,8 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         if timed_out:
             summary = _clip_out(f"Stopped after {spec['timeout']}s.\n{summary}")
         ok = (not timed_out) and proc.returncode == 0
-        row = {"at": _now(), "ok": ok, "summary": summary, "exit": proc.returncode, "action": action}
+        row = {"at": _now(), "ok": ok, "summary": summary, "exit": proc.returncode, "action": action,
+               "warning": warning}
         _save_run(root, bot_id, row)
         if not summary:
             summary = "The script finished with no output."
@@ -1027,7 +1051,7 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
             _mark_manual(root, bot_id)
         spec_row = next(b for b in BOTS if b["id"] == bot_id)
         _note_state_mtime(root, bot_id, spec_row["folder"], spec_row.get("state") or "")
-        return {"ok": ok, "error": error, "summary": summary, "exit": proc.returncode}
+        return {"ok": ok, "error": error, "summary": summary, "exit": proc.returncode, "warning": warning}
     finally:
         lock.release()
 
@@ -1285,6 +1309,14 @@ def _central_from_text(text: str) -> str:
         return "no check yet"
     if "Central" in raw:
         return raw
+    if raw.endswith(" CT"):
+        wall = raw[:-3].strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                when = dt.datetime.strptime(wall, fmt).replace(tzinfo=CT)
+            except ValueError:
+                continue
+            return central_text(when)
     for fmt in ("%Y-%m-%d %H:%M:%S UTC", "%Y-%m-%d %H:%M UTC", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z"):
         try:
             when = dt.datetime.strptime(raw.replace("+00:00", "Z") if raw.endswith("Z") else raw, fmt)
@@ -1398,16 +1430,24 @@ def public_get(url: str, opener, tries: int = 3, sleep=None):
     return None, last or "failed"
 
 
+def _only_calendar_note(low: str) -> bool:
+    """A missing calendar is a warning. It is not a reason the check bought nothing."""
+    if "news calendar" not in low and "no news calendar" not in low and "news window" not in low:
+        return False
+    outcomes = ("no live", "no edge", "no trade", "gap <", "signal:", "paper buy", "max open", "loss stop", "data error")
+    return not any(mark in low for mark in outcomes)
+
+
 def plain_reason(text: str) -> str:
     low = str(text or "").lower()
     if not low.strip():
         return "No check yet, so there is no trade to explain."
+    if _only_calendar_note(low):
+        return ""
     if "half-written" in low or "could not be read" in low or "data error" in low:
         return "A data error stopped this check. Nothing was guessed."
     if "no live" in low:
         return "No live games, so this check bought nothing."
-    if "news" in low and ("calendar" in low or "window" in low or "unavailable" in low):
-        return "The news window did not load, so this check bought nothing."
     if "max open" in low:
         return "The open-position limit blocked a new paper buy."
     if "loss stop" in low or "daily loss" in low:
@@ -1667,19 +1707,29 @@ def annotate(root: str | None, bot_id: str, trade_id: str, note: str = "", skipp
     return {"ok": True, "error": "", "note": row}
 
 
-def _calendar_block(root: str, bot_id: str) -> str:
-    if bot_id != "kalshi-sp":
+def _calendar_warning(root: str, bot_id: str) -> str:
+    """Missing calendar is shown on the card. It does not stop the paper check."""
+    if bot_id == "kalshi-sp":
+        path = _under(root, "kalshi-sp500-paper", "calendar.json")
+        if not os.path.isfile(path):
+            return "News calendar did not load."
+        try:
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return "News calendar did not load."
+        if not isinstance(data, dict):
+            return "News calendar did not load."
         return ""
-    path = _under(root, "kalshi-sp500-paper", "calendar.json")
-    if not os.path.isfile(path):
-        return "News calendar did not load. Entry stays off."
-    try:
-        with open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return "News calendar did not load. Entry stays off."
-    if not isinstance(data, dict):
-        return "News calendar did not load. Entry stays off."
+    if bot_id in ("sports-gap", "memecoin"):
+        return "No news calendar on this bot."
+    return ""
+
+
+def _btc_calendar_warning(summary: str) -> str:
+    low = str(summary or "").lower()
+    if "news calendar failed" in low or "news calendar unavailable" in low or "news calendar did not load" in low:
+        return "News calendar did not load."
     return ""
 
 
@@ -1861,9 +1911,19 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
     else:
         status = "skipped"
     view["status"] = status
-    view["positions"] = [_apply_notes(root, spec["id"], _quote_flags(row, now)) for row in (view.get("positions") or [])]
-    view["trades"] = [_apply_notes(root, spec["id"], _quote_flags(row, now)) for row in (view.get("trades") or [])]
-    view["history"] = [_apply_notes(root, spec["id"], _quote_flags(row, now)) for row in (view.get("history") or [])]
+    def _named(rows):
+        named = []
+        for row in rows or []:
+            row = dict(row)
+            row["bot"] = spec["id"]
+            row["name"] = spec["name"]
+            if row.get("priced_at") and not row.get("priced_central"):
+                row["priced_central"] = _central_from_text(row["priced_at"])
+            named.append(_apply_notes(root, spec["id"], _quote_flags(row, now)))
+        return named
+    view["positions"] = _named(view.get("positions"))
+    view["trades"] = _named(view.get("trades"))
+    view["history"] = _named(view.get("history"))
     would = list((run.get("would_have") or []))
     for line in view.get("log") or []:
         low = line.lower()
@@ -1874,8 +1934,10 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         view["idle_copy"] = f"No paper trades yet. Last check {view['central_check']}. No edge."
     else:
         view["idle_copy"] = ""
-    if not view.get("why"):
+    if not view.get("why") and view.get("skip"):
         view["why"] = plain_reason(view.get("skip") or "")
+    if not view.get("warning") and spec.get("id") == "btc15m":
+        view["warning"] = _btc_calendar_warning(str((view.get("last_run") or {}).get("summary") or ""))
     summary = str(run.get("summary") or "")
     if view.get("data_error"):
         view["feed"] = "api down"
@@ -1912,29 +1974,49 @@ def _flatten(bots: list) -> list:
     return rows
 
 
-def _book(bots: list, q: str = "", filt: str = "all", page: int = 1) -> dict:
-    rows = _flatten(bots)
-    needle = str(q or "").strip().lower()
-    if needle:
-        rows = [row for row in rows if needle in " ".join(
-            str(row.get(key) or "") for key in ("team", "ticker", "what", "title", "when", "name")).lower()]
-    kind = str(filt or "all").lower()
-    if kind == "open":
-        rows = [row for row in rows if row.get("state") == "open"]
-    elif kind == "settled":
-        rows = [row for row in rows if row.get("state") == "settled"]
-    elif kind == "wins":
-        rows = [row for row in rows if row.get("result") == "won"]
-    elif kind == "losses":
-        rows = [row for row in rows if row.get("result") == "lost"]
+def _page_window(rows: list, page: int):
     try:
         page_n = max(1, int(page))
     except (TypeError, ValueError):
         page_n = 1
     total = len(rows)
     pages = max(1, math.ceil(total / PAGE_SIZE)) if total else 1
+    if page_n > pages:
+        page_n = pages
     start = (page_n - 1) * PAGE_SIZE
-    return {"rows": rows[start:start + PAGE_SIZE], "page": page_n, "pages": pages, "total": total, "filter": kind, "q": needle}
+    return rows[start:start + PAGE_SIZE], page_n, pages, total
+
+
+def _book(bots: list, q: str = "", filt: str = "all", page: int = 1) -> dict:
+    rows = _flatten(bots)
+    needle = str(q or "").strip().lower()
+    if needle:
+        rows = [row for row in rows if needle in " ".join(
+            str(row.get(key) or "") for key in ("team", "ticker", "game", "what", "title", "when", "name")).lower()]
+    kind = str(filt or "all").lower()
+    if kind == "open":
+        chosen = [row for row in rows if row.get("state") == "open"]
+        return {"rows": chosen, "page": 1, "pages": 1, "total": len(chosen), "filter": kind, "q": needle}
+    if kind == "settled":
+        chosen = [row for row in rows if row.get("state") == "settled"]
+    elif kind == "wins":
+        chosen = [row for row in rows if row.get("result") == "won"]
+    elif kind == "losses":
+        chosen = [row for row in rows if row.get("result") == "lost"]
+    else:
+        opens = [row for row in rows if row.get("state") == "open"]
+        closed = [row for row in rows if row.get("state") != "open"]
+        window, page_n, pages, _total = _page_window(closed, page)
+        return {
+            "rows": opens + window,
+            "page": page_n,
+            "pages": pages,
+            "total": len(opens) + len(closed),
+            "filter": kind,
+            "q": needle,
+        }
+    window, page_n, pages, total = _page_window(chosen, page)
+    return {"rows": window, "page": page_n, "pages": pages, "total": total, "filter": kind, "q": needle}
 
 
 def _week_pnl(bots: list, day: dt.date) -> tuple:
@@ -2200,22 +2282,37 @@ def _xlsx_cell(value) -> str:
 def export_xlsx(root: str | None = None) -> bytes:
     """A real xlsx workbook of the paper book. Excel opens it. No live orders."""
     snap = snapshot(root)
-    header = ["Book", "When", "What", "Result", "P/L", "Stake", "Ask", "Fee", "Why"]
+    header = ["Book", "State", "Ticker or game", "Side", "Contracts", "Stake", "Entry price", "Fee",
+              "Model probability", "Score at entry", "Why it opened", "Price source", "Price time",
+              "Close time", "Exit reason", "Payout", "P/L"]
     table = [header]
+
+    def _cell(value, missing="unknown"):
+        return missing if value in (None, "") else value
+
     for row in _flatten(snap["bots"]):
+        game = row.get("game") or row.get("ticker") or row.get("what") or row.get("title") or ""
         table.append([
             row.get("name") or "",
-            row.get("when") or "",
-            row.get("what") or row.get("title") or "",
-            row.get("result") or row.get("state") or "",
+            row.get("state") or row.get("result") or "",
+            _cell(game),
+            _cell(row.get("side")),
+            _cell(row.get("contracts")),
+            _cell(row.get("cost")),
+            _cell(row.get("ask")),
+            _cell(row.get("fee")),
+            _cell(row.get("prob")),
+            _cell(row.get("score")),
+            _cell(row.get("why_open") or row.get("why")),
+            _cell(row.get("source")),
+            _cell(row.get("priced_central") or row.get("priced_at")),
+            _cell(row.get("closed_at")) if row.get("state") != "open" else "",
+            _cell(row.get("exit_reason")) if row.get("state") != "open" else "",
+            _cell(row.get("payout")) if row.get("state") != "open" else "",
             "" if row.get("pnl") is None else row.get("pnl"),
-            "" if row.get("cost") is None else row.get("cost"),
-            "unknown" if row.get("ask") is None else row.get("ask"),
-            "unknown" if row.get("fee") is None else row.get("fee"),
-            row.get("why") or "",
         ])
     if len(table) == 1:
-        table.append(["", "", "No paper trades yet.", "", "", "", "unknown", "unknown", "No edge."])
+        table.append(["", "", "No paper trades yet.", "", "", "", "", "", "", "", "No edge.", "", "", "", "", "", ""])
     sheet_rows = []
     for index, row in enumerate(table, start=1):
         cells = "".join(f'{_xlsx_cell(value)}' for value in row)

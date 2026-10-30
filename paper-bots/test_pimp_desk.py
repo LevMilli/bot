@@ -384,10 +384,11 @@ class PimpDeskTests(unittest.TestCase):
             self.assertIn("No edge", sports["idle_copy"])
             _write(os.path.join(tmp, "kalshi-sp500-paper", "bot.py"), QUIET)
             _write(os.path.join(tmp, "kalshi-sp500-paper", "config.json"), json.dumps({"paper_mode": True}))
-            blocked = pimp_desk.run_bot("kalshi-sp", "run", tmp)
-            self.assertTrue(blocked.get("blocked"))
-            self.assertIn("News calendar", blocked["error"])
-            self.assertFalse(os.path.exists(os.path.join(tmp, "kalshi-sp500-paper", "ran")))
+            ran = pimp_desk.run_bot("kalshi-sp", "run", tmp)
+            self.assertFalse(ran.get("blocked"))
+            self.assertIn("News calendar", ran.get("warning") or "")
+            self.assertTrue(ran.get("ok"), ran)
+            self.assertTrue(os.path.exists(os.path.join(tmp, "kalshi-sp500-paper", "ran")))
             blob = pimp_desk.export_xlsx(tmp)
             self.assertTrue(blob.startswith(b"PK"))
             cfg, err = pimp_desk.save_settings({
@@ -402,6 +403,94 @@ class PimpDeskTests(unittest.TestCase):
             self.assertTrue(any("limits" in str(row.get("what")).lower() for row in rows))
             self.assertIn("status_line", snap["desk"])
             self.assertIn("Last check", snap["desk"]["status_line"])
+
+    def test_open_cards_and_closed_rows_keep_every_fact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), QUIET)
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 10,
+                "open": [{
+                    "contracts": 2, "team": "Bills", "ticker": "KXNFL-BILLS", "game": "Bills at Chiefs",
+                    "side": "home", "cost": 1.5, "ask": 0.42, "bid": 0.40, "fee": 0.02,
+                    "fair_at_entry": 0.62, "gap_at_entry": 0.12, "score_at_entry": "7-3 Q2",
+                    "opened": "2026-10-30 14:00:00 CT",
+                    "price_source": "https://api.elections.kalshi.com/trade-api/v2",
+                    "price_at": "2026-10-30T19:00:00Z", "fill_id": "KXNFL-BILLS|1",
+                }],
+                "closed": [{
+                    "contracts": 1, "team": "Chiefs", "ticker": "KXNFL-KC", "game": "Bills at Chiefs",
+                    "side": "away", "cost": 1.0, "ask": 0.55, "fee": 0.02, "payout": 0, "pnl": -1.02,
+                    "exit": "settled", "closed": "2026-10-30 16:00:00 CT", "fair_at_entry": 0.40,
+                    "score_at_entry": "14-14 H",
+                    "price_source": "https://api.elections.kalshi.com/trade-api/v2",
+                    "price_at": "2026-10-30T18:00:00Z", "fill_id": "KXNFL-KC|1",
+                }],
+            }))
+            snap = pimp_desk.snapshot(tmp)
+            sports = snap["bots"][0]
+            pos = sports["positions"][0]
+            self.assertEqual(pos["name"], "Sports gap")
+            self.assertEqual(pos["ticker"], "KXNFL-BILLS")
+            self.assertEqual(pos["game"], "Bills at Chiefs")
+            self.assertEqual(pos["side"], "home")
+            self.assertEqual(pos["contracts"], 2)
+            self.assertEqual(pos["cost"], 1.5)
+            self.assertEqual(pos["ask"], 0.42)
+            self.assertEqual(pos["fee"], 0.02)
+            self.assertEqual(pos["prob"], 0.62)
+            self.assertEqual(pos["score"], "7-3 Q2")
+            self.assertIn("Paper buy", pos["why_open"])
+            self.assertIn("kalshi.com", pos["source"])
+            self.assertIn("Central", pos["priced_central"])
+            closed = sports["history"][0]
+            self.assertIn("Central", closed["closed_at"])
+            self.assertEqual(closed["exit_reason"], "settled")
+            self.assertEqual(closed["payout"], 0)
+            self.assertEqual(closed["pnl"], -1.02)
+            self.assertEqual(sports["warning"], "No news calendar on this bot.")
+            self.assertNotIn("bought nothing", sports.get("why") or "")
+            self.assertNotIn("bought nothing", pimp_desk.plain_reason("No news calendar on this bot."))
+            self.assertNotIn("bought nothing", pimp_desk.plain_reason("News calendar did not load. Entry stays off."))
+            book = snap["book"]["rows"]
+            self.assertTrue(any(row.get("state") == "open" for row in book))
+            self.assertTrue(any(row.get("state") == "settled" and row.get("closed_at") for row in book))
+            sparse = pimp_desk._fill_row({"ticker": "T", "cost": 1, "fill_id": "sparse"}, "T", "", 1, "")
+            self.assertIsNone(sparse["prob"])
+            self.assertEqual(sparse["score"], "")
+            self.assertEqual(sparse["side"], "")
+            self.assertEqual(sparse["source"], "")
+
+    def test_every_open_trade_stays_on_the_book(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), QUIET)
+            opens = [{
+                "contracts": 1, "team": f"Team {i}", "ticker": f"T{i}", "game": f"Game {i}",
+                "side": "home", "cost": 1, "ask": 0.4, "fee": 0.01, "fair_at_entry": 0.6,
+                "gap_at_entry": 0.1, "score_at_entry": "0-0", "opened": "2026-10-30 14:00:00 CT",
+                "price_source": "https://api.elections.kalshi.com/trade-api/v2",
+                "price_at": "2026-10-30T19:00:00Z", "fill_id": f"open-{i}",
+            } for i in range(25)]
+            closed = [{
+                "contracts": 1, "team": f"Old {i}", "ticker": f"C{i}", "game": f"Old game {i}",
+                "side": "away", "cost": 1, "ask": 0.5, "fee": 0.01, "payout": 0, "pnl": -1,
+                "exit": "settled", "closed": "2026-10-30 16:00:00 CT", "fill_id": f"closed-{i}",
+            } for i in range(25)]
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 10, "open": opens, "closed": closed,
+            }))
+            snap = pimp_desk.snapshot(tmp)
+            self.assertEqual(len(snap["bots"][0]["positions"]), 25)
+            book = snap["book"]
+            open_rows = [row for row in book["rows"] if row.get("state") == "open"]
+            closed_rows = [row for row in book["rows"] if row.get("state") != "open"]
+            self.assertEqual(len(open_rows), 25)
+            self.assertEqual(len(closed_rows), pimp_desk.PAGE_SIZE)
+            self.assertTrue(all(row.get("closed_at") for row in closed_rows))
+            page2 = pimp_desk.snapshot(tmp, page=2)["book"]
+            self.assertEqual(len([row for row in page2["rows"] if row.get("state") == "open"]), 25)
+            self.assertEqual(len([row for row in page2["rows"] if row.get("state") != "open"]), 5)
+        with tempfile.TemporaryDirectory() as bare:
+            self.assertEqual(pimp_desk.snapshot(bare)["book"]["rows"], [])
 
 
 if __name__ == "__main__":
