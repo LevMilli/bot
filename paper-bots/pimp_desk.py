@@ -54,6 +54,7 @@ LIVE_SWITCH_BUILT = False
 # New: edge bar 0.04 after the fee, max open positions 12, daily loss stop $150.
 # The daily loss stop stays. A bad paper day still ends.
 # While this hour has fewer than 12 paper trades, a timer check may buy without that edge.
+# Under 80%, a paper fill risks about $20. At 80% or higher, it risks $20 to $100.
 PACE_MIN = 6
 PACE_TARGET = 12
 LEARN_MIN_SETTLES = 8
@@ -61,10 +62,10 @@ LEARN_HIT_RATE = 0.40
 
 DEFAULTS = {
     "paper_only": True,
-    "stake_hi_min": 10.0,
-    "stake_hi_max": 30.0,
+    "stake_hi_min": 20.0,
+    "stake_hi_max": 100.0,
     "stake_hi_prob": 0.8,
-    "stake_lo_max": 9.99,
+    "stake_lo_max": 20.0,
     "daily_loss_stop": 150.0,
     "max_open_risk": 100.0,
     "max_open_positions": 12,
@@ -358,10 +359,10 @@ def parse_settings(raw: dict):
         return None, "Enter a number in every limit."
     if not all(math.isfinite(n) for n in (hi_min, hi_max, lo_max, loss, risk, edge)):
         return None, "Enter finite numbers."
-    if hi_min < 10 or hi_max > 30 or hi_min > hi_max:
-        return None, "At 80% or higher, the paper stake stays between $10 and $30."
-    if not (0 < lo_max < 10):
-        return None, "Below 80%, the paper stake stays under $10."
+    if hi_min < 20 or hi_max > 100 or hi_min > hi_max:
+        return None, "At 80% or higher, the paper stake stays between $20 and $100."
+    if round(lo_max, 2) != 20 or lo_max > hi_min:
+        return None, "Below 80%, the paper stake stays near $20."
     if loss == 0:
         return None, "A daily loss stop of zero is refused."
     if not (1 <= loss <= 100000):
@@ -423,14 +424,15 @@ def limits_text(cfg: dict) -> str:
     lo_max = cfg["stake_lo_max"]
     return (
         f"At a model probability of 80% or higher, a paper stake stays between ${hi_min:.2f} and ${hi_max:.2f}. "
-        f"Below that, it stays under ${lo_max:.2f}. "
+        f"Below that, a paper stake is about ${lo_max:.2f}, and the fill buys enough contracts to land near that amount. "
         f"Daily loss stop ${cfg['daily_loss_stop']:.2f} (the old default was $50.00). The stop stays on. "
         f"Max open risk ${cfg['max_open_risk']:.2f}. "
         f"Max open positions {cfg['max_open_positions']} (the old default was 4). "
         f"Edge bar {float(cfg.get('min_edge') or 0):.2f} after the fee (the old default was 0.08). "
         f"Paper pace is {int(cfg.get('pace_min') or PACE_MIN)} to {int(cfg.get('pace_target') or PACE_TARGET)} trades an hour. "
         "Under that target, a timer check may paper-buy without the strict edge. "
-        "These limits gate a new entry check. Each bot still sizes with the paper rule in its own script. "
+        "The BTC 15-minute check uses these dollar stakes and buys whole contracts near that amount. "
+        "These limits also gate a new entry check. "
         "Realized P/L is closed paper trades in the local files. Past paper results stay in the past."
     )
 
@@ -1988,6 +1990,45 @@ def confirm_reset(text: str) -> str:
     if str(text or "") != CONFIRM:
         return "Type RESET PAPER to delete the paper account."
     return ""
+
+
+def paper_stake_dollars(prob, cfg: dict | None = None) -> float:
+    """Paper dollars for one fill. Under 80% this is about $20.
+
+    At 80% or higher the stake scales from the saved minimum ($20) to the
+    saved maximum ($100). Nothing here places an order.
+    """
+    cfg = cfg or DEFAULTS
+    lo = float(cfg.get("stake_lo_max") if cfg.get("stake_lo_max") is not None else DEFAULTS["stake_lo_max"])
+    hi_min = float(cfg.get("stake_hi_min") if cfg.get("stake_hi_min") is not None else DEFAULTS["stake_hi_min"])
+    hi_max = float(cfg.get("stake_hi_max") if cfg.get("stake_hi_max") is not None else DEFAULTS["stake_hi_max"])
+    bar = float(cfg.get("stake_hi_prob") if cfg.get("stake_hi_prob") is not None else DEFAULTS["stake_hi_prob"])
+    chance = _num(prob)
+    if chance is None or chance + 1e-12 < bar:
+        return round(lo, 2)
+    if hi_max < hi_min:
+        hi_max = hi_min
+    span = 1.0 - bar
+    if span <= 0:
+        return round(hi_max, 2)
+    t = (float(chance) - bar) / span
+    if t < 0:
+        t = 0.0
+    elif t > 1:
+        t = 1.0
+    return round(hi_min + t * (hi_max - hi_min), 2)
+
+
+def contracts_for_stake(per, dollars) -> int:
+    """Whole contracts whose cost lands near `dollars` without going over.
+
+    A budget that cannot buy one contract returns 0. It does not pad up to 1.
+    """
+    price = _num(per)
+    budget = _num(dollars)
+    if price is None or budget is None or price <= 0 or budget <= 0:
+        return 0
+    return max(int(math.floor((budget + 1e-9) / price)), 0)
 
 
 def stake_allowed(amount, prob, cfg: dict | None = None) -> str:

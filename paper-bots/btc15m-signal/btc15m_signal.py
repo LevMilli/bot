@@ -155,10 +155,16 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
     if not signal_buy and not force:
         return "Checked the BTC 15-minute market. No paper buy."
     per = float(ask) + float(fee or 0)
-    stake = 1.0
-    contracts = int(stake // per) if per > 0 else 0
+    try:
+        desk = _desk()
+        cfg = desk.load_settings(DESK_ROOT)
+        stake = desk.paper_stake_dollars(prob, cfg)
+        contracts = desk.contracts_for_stake(per, stake)
+    except Exception:
+        stake = 20.0
+        contracts = int(stake // per) if per > 0 else 0
     if contracts < 1:
-        contracts = 1
+        return "Checked the BTC 15-minute market. No paper buy."
     cost = round(contracts * per, 2)
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:
