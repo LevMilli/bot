@@ -35000,6 +35000,52 @@ async def dash_not_found(request):
     return dash_error(web, request, 404)
 
 
+def slip_history_sources(guild_id: int) -> list[dict]:
+    """Stored slips for the history page. Hidden and test slips stay off it."""
+    if not guild_id:
+        return []
+    rows = db().execute(
+        """SELECT * FROM picks WHERE guild_id = ?
+           ORDER BY COALESCE(NULLIF(settled_at, ''), created_at) DESC, id DESC""",
+        (guild_id,)).fetchall()
+    kept = [p for p in rows if not dash_secret(p) and not pick_is_test(p)]
+    ids = [int(p["id"]) for p in kept]
+    legs_by: dict[int, list] = {}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        for leg in db().execute(
+                f"SELECT * FROM legs WHERE pick_id IN ({marks}) ORDER BY idx", ids):
+            legs_by.setdefault(int(leg["pick_id"]), []).append({k: leg[k] for k in leg.keys()})
+    out = []
+    for p in kept:
+        item = {k: p[k] for k in p.keys()}
+        text = item.get("legs")
+        item["leg_text"] = text if isinstance(text, str) else ""
+        item["legs"] = legs_by.get(int(p["id"]), [])
+        out.append(item)
+    return out
+
+
+async def dash_slip_history(request):
+    """Past slips, on the same board as the picks list: a table, then one slip."""
+    from aiohttp import web
+    from slip_history import render_slip_history_page
+    prm, err = dash_gate(web, request)
+    if err is not None:
+        return err
+    raw_page = request.query.get("page") or "1"
+    raw_slip = str(request.query.get("slip") or "").strip()
+    try:
+        page = int(raw_page)
+    except (TypeError, ValueError):
+        page = 1
+    slip_id = int(raw_slip) if raw_slip.isdigit() else None
+    page_html = render_slip_history_page(
+        slip_history_sources(prm["guild"]), filt=request.query.get("filter") or "all",
+        page=page, slip_id=slip_id)
+    return dash_html(web, page_html)
+
+
 def dash_app(web):
     """The aiohttp app: every route goes through dash_guard."""
     @web.middleware
@@ -35009,6 +35055,7 @@ def dash_app(web):
     app = web.Application(middlewares=[guard], client_max_size=64 * 1024)
     app.add_routes([web.get("/", dash_index), web.get("/login", dash_index), web.get("/app", dash_index),
                     web.get("/live", dash_index), web.get("/news", dash_index), web.get("/open", dash_index),
+                    web.get("/history", dash_slip_history),
                     web.get("/people", dash_index), web.get("/posters", dash_index), web.get("/more", dash_index),
                     web.get("/api/data", dash_api_data), web.get("/api/player.json", dash_api_player),
                     web.get(r"/api/player/{league:[a-z0-9-]{2,28}}/{aid:[0-9]{1,12}}.json", dash_api_player_one),
@@ -35807,7 +35854,7 @@ function renderOverview(el,d){
   card('Profit over time','',null,chart(d.series)),
   card(S.lb==='season'&&d.season?'Leaderboard · '+d.season:'Leaderboard','s7',d.season?seg:null,
    board.length?h('div',{class:'rows'},board.map(personRow)):empty('No results yet','Settle a slip and the race is on.')),
-  card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}
+  card('Recent results','s5',h('a',{href:'/history',text:'Past slips'}),d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}
 const wide=b=>{b.classList.add('wide');return b};
 const shot=b=>{b.classList.add('shot');return b};
 function renderLive(el,d){
@@ -35824,7 +35871,7 @@ function renderLive(el,d){
    :card('In play','',null,empty('Nothing in play right now','When a game the group is on tips off, it shows up here with every leg.'),next?h('p',{class:'hint',text:next}):null),
   rest.length?card('Later today & finals','',String(rest.length),h('div',{class:'glist'},rest.map(gameLine))):null,
   L&&L.games.length?card('The /live picture','s6',L.updated?'Updated '+L.updated:null,shot(imgBox('live.png','','Nothing in play','The picture shows up when a game the group is on is live.','The live picture'))):null,
-  card('Open slips','',String(d.open.length),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):railEmpty('Nothing open','Log a slip in Discord and it shows up here.')),
+  card('Open slips','',h('span',null,String(d.open.length),' · ',h('a',{href:'/history',text:'Past slips'})),d.open.length?h('div',{class:'slips'},d.open.map(openSlipCard)):railEmpty('Nothing open','Log a slip in Discord and it shows up here.')),
   settleCard(d,settled))}
 function clipWord(text,limit){const s=String(text||'').replace(/\s+/g,' ').trim();
  if(s.length<=limit)return s;let head=s.slice(0,limit);const i=head.lastIndexOf(' ');
@@ -35915,7 +35962,7 @@ function settleCard(d,rows){rows=rows||[];
  const line=todayEmpty&&last&&last.when&&shown.length?h('p',{class:'hint',text:'Last settle was '+last.when+(last.who?', '+last.who:'')+'.'}):null;
  const body=shown.length?h('div',{class:'rows srows'},shown.map(p=>settledRow(p,{mixed:mixed,reb:reb}))):settleEmpty(rows);
  const printToday=h('button',{type:'button',class:'tpause',onclick:()=>printMode('settled')},'Print today');
- return card('Just settled','',String(shown.length),printToday,settleFilters(rows),line,body,settleWeek(d.settledWeek))}
+ return card('Just settled','',h('span',null,String(shown.length),' · ',h('a',{href:'/history',text:'Past slips'})),printToday,settleFilters(rows),line,body,settleWeek(d.settledWeek))}
 if(!S._sfinger){S._sfinger=1;
  addEventListener('pointerdown',e=>{if(e.target&&e.target.closest&&e.target.closest('.srows,.lgrid,.glist'))S.finger=1});
  addEventListener('scroll',e=>{const t=e.target;if(S._liveSet||!t||!t.classList||!t.classList.contains('lgrid'))return;S.stripHold=1;clearTimeout(S._stripT);S._stripT=setTimeout(()=>{S.stripHold=0;if(S.paintWait){S.paintWait=0;render()}},180)},true);
@@ -36237,8 +36284,8 @@ function paintPerson(p){
     card('Best hits','',null,(p.best||[]).length?h('div',{class:'rows'},p.best.map(b=>slipRow(Object.assign({},b,{who:b.what,what:(b.mult?b.mult+'x · ':'')+b.platform}),true)))
      :empty('No cashes yet','The first one will look great here.')),
     (p.sports||[]).length?card('By sport','',null,split(p.sports)):null,(p.apps||[]).length?card('By app','',null,split(p.apps)):null,
-    card('Open slips','',String(openRows.length),openRows.length?h('div',{class:'rows'},openRows.map(r=>slipRow(r,false))):empty('Nothing open','')),
-    card('Settled slips','',String(doneRows.length),doneRows.length?h('div',{class:'rows'},doneRows.map(r=>slipRow(r,false))):empty('No slips yet','')))))}
+    card('Open slips','',h('span',null,String(openRows.length),' · ',h('a',{href:'/history',text:'Past slips'})),openRows.length?h('div',{class:'rows'},openRows.map(r=>slipRow(r,false))):empty('Nothing open','')),
+    card('Settled slips','',h('span',null,String(doneRows.length),' · ',h('a',{href:'/history',text:'Past slips'})),doneRows.length?h('div',{class:'rows'},doneRows.map(r=>slipRow(r,false))):empty('No slips yet','')))))}
 function legLine(l){const body=h('div',{style:'min-width:0'},h('div',{class:'t',text:l.text}),
   l.decided?h('div',{class:'s',text:'Decided it'}):null,
   l.sub?h('div',{class:'s',text:l.sub}):null,legBar(l),l.note?h('div',{class:'note'},h('span',{class:'ni','aria-hidden':'true'},'\u{1F4DD}'),h('span',{text:l.note})):null);
@@ -37055,6 +37102,10 @@ body.v4 .tile{border-radius:18px}
 .scenerow{display:flex;gap:8px;align-items:center;margin:6px 0}
 .scenerow .scenego{flex:1;text-align:left;height:36px;border-radius:999px;border:1px solid var(--line);background:var(--card2);color:var(--text);padding:0 12px;font-weight:700;cursor:pointer}
 .scenerow .scenex{width:36px;height:36px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--text);cursor:pointer;font-weight:700}
+body.v4 nav.tabs a.historylink{display:flex;align-items:center;gap:7px;padding:10px 14px 12px;color:var(--muted);
+ font-weight:650;text-decoration:none;min-height:48px;border-radius:12px 12px 0 0}
+body.v4 nav.tabs a.historylink svg{width:17px;height:17px}
+body.v4 nav.tabs a.historylink:hover{color:var(--text)}
 """
     html = html.replace("</style>", extra_css + "</style>", 1)
     html = html.replace("<body>", '<body class="v4">', 1)
@@ -37069,7 +37120,10 @@ body.v4 .tile{border-radius:18px}
         '  <button type="button" data-t="people">',
         '  <button type="button" data-t="open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
         'stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h10M4 17h7"/></svg>'
-        '<span>Open</span></button>\n  <button type="button" data-t="people">',
+        '<span>Open</span></button>\n'
+        '  <a class="historylink" href="/history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2" stroke-linecap="round"><path d="M4 19V5M4 19h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/></svg>'
+        '<span>History</span></a>\n  <button type="button" data-t="people">',
         1)
     html = html.replace(
         ' <section class="tab" id="tab-people"></section>',
@@ -37511,7 +37565,7 @@ function renderOpen(el,d){const hide=hiddenIds();
  const mineRisk=mineRows.reduce((a,p)=>a+(p.cost==null?0:+p.cost),0);
  const blank=mineEmpty?'You have nothing open right now':(matched?'Nothing matches that search':'Nothing open');
  const blankSub=mineEmpty?'Mine is on for this phone. Switch it off to see everyone.':(matched&&!rows.length?'Hidden on this phone. They are still open.':(matched?'Clear the search box.':'Log a slip in Discord and it shows up here.'));
- put(el,card('Open slips','',String(rows.length),boardBar(d),
+ put(el,card('Open slips','',h('span',null,String(rows.length),' · ',h('a',{href:'/history',text:'Past slips'})),boardBar(d),
   h('div',{class:'minelab'},h('span',{text:'Mine'}),h('span',{class:'mc',text:String(mineN)})),
   d.me?h('div',{class:'orisk',text:'Open risk '+cash(mineRisk)}):null,
   rows.length?h('div',{class:'slips'},rows.map(openSlipCard))
@@ -37630,14 +37684,14 @@ function arrangeHome(el){if(!el)return;const order=homeOrder();
                         extra_js + "const TABS={overview:renderOverview,live:renderLive,news:renderNews,open:renderOpen,people:renderPeople,posters:renderPosters,more:renderMore};",
                         1)
     html = html.replace(
-        "  card('Recent results','s5',null,d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
+        "  card('Recent results','s5',h('a',{href:'/history',text:'Past slips'}),d.recent.length?h('div',{class:'rows'},d.recent.slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
         "  (d.tickets&&d.tickets.length)?card('Open tickets','',String(d.tickets.length),h('div',{class:'tickets'},d.tickets.map(ticketCard))):null,\n"
         "  (d.markets&&d.markets.length)?card('Kalshi tickets','',String(d.markets.length),h('div',{class:'mkts'},d.markets.map(marketRow))):null,\n"
         "  card('My board','',null,watchList()),\n"
         "  card('Log a slip','',null,logBox()),\n"
         "  card('Tonight’s board','s6',null,wide(imgBox('board.png','','No board yet','The board fills in from open slips.','Tonight’s board'))),\n"
         "  (d.weekplays&&d.weekplays.length)?card('Logged this week','',String(d.weekplays.length),h('div',{class:'weeklist'},d.weekplays.map(weekRow))):null,\n"
-        "  card('Recent results','s5',null,boardBar(d),d.recent.filter(p=>boardPick(p,true)).length?h('div',{class:'rows'},d.recent.filter(p=>boardPick(p,true)).slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
+        "  card('Recent results','s5',h('a',{href:'/history',text:'Past slips'}),boardBar(d),d.recent.filter(p=>boardPick(p,true)).length?h('div',{class:'rows'},d.recent.filter(p=>boardPick(p,true)).slice(0,10).map(p=>slipRow(p))):empty('Nothing settled yet','Results land here the moment slips cash or miss.')))}",
         1)
     html = html.replace(
         "function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}",
