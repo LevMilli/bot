@@ -746,6 +746,8 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("if(!points.length && !openN)", text)
         self.assertIn("function drawLiveOnly", text)
         self.assertIn("host.dataset.live", text)
+        self.assertIn("const t0=indexed[0].ms;", text)
+        self.assertIn("if(openN>0 && Number.isFinite(endMs) && endMs>t1) t1=endMs;", text)
         self.assertNotIn("if(!points.length){put(host, h('p',{class:'eqempty'", text)
 
     def test_spikes_are_percent_and_slips_stay_real(self):

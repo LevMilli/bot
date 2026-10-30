@@ -40832,12 +40832,8 @@ function drawLiveOnly(host, startMs, endMs){
  const padL=8, padR=8, padT=28, padB=28;
  const plotW=Math.max(1,w-padL-padR), plotH=Math.max(1,hgt-padT-padB);
  const min=-1, max=1, span=max-min;
- const t0=Number.isFinite(startMs)?startMs:(Date.now()-1);
- const t1=Number.isFinite(endMs)&&endMs>t0?endMs:(t0+1);
- const sameDay=ctDayKey(t0)===ctDayKey(t1);
- const xAtMs=ms=>padL+((ms-t0)/(t1-t0))*plotW;
- const yAt=v=>padT+(1-(v-min)/span)*plotH;
- const y0=yAt(0);
+ const bound0=Number.isFinite(startMs)?startMs:(Date.now()-1);
+ const bound1=Number.isFinite(endMs)&&endMs>bound0?endMs:(bound0+1);
  const opens=(((pimpChart&&pimpChart.open_line)||{}).opens)||[];
  let lineStart=null, anyBefore=false;
  const marksAt=[];
@@ -40845,11 +40841,20 @@ function drawLiveOnly(host, startMs, endMs){
   if(!row||typeof row!=='object') return;
   const ms=Date.parse(row.t||'');
   if(!Number.isFinite(ms)) return;
-  if(ms>t1) return;
-  if(ms<t0){anyBefore=true; return}
+  if(ms>bound1) return;
+  if(ms<bound0){anyBefore=true; return}
   marksAt.push(ms)});
- if(anyBefore) lineStart=t0;
+ if(anyBefore) lineStart=bound0;
  else if(marksAt.length) lineStart=Math.min.apply(null, marksAt);
+ let t0=lineStart!=null?lineStart:bound0;
+ let t1=bound1;
+ if(!(t1>t0)) t1=t0+60000;
+ const sameDay=ctDayKey(t0)===ctDayKey(t1);
+ const xAtMs=ms=>padL+((ms-t0)/(t1-t0))*plotW;
+ const yAt=v=>padT+(1-(v-min)/span)*plotH;
+ const y0=yAt(0);
+ host.dataset.t0=new Date(t0).toISOString();
+ host.dataset.t1=new Date(t1).toISOString();
  const x2=xAtMs(t1);
  const liveNodes=[];
  if(lineStart!=null) liveNodes.push(sv('line',{x1:xAtMs(lineStart).toFixed(1),y1:y0.toFixed(1),x2:x2.toFixed(1),y2:y0.toFixed(1),
@@ -40922,10 +40927,23 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
  if(min===max){min-=1; max+=1}
  const yPad=(max-min)*0.14; min-=yPad; max+=yPad;
  const span=(max-min)||1;
- const t0=Number.isFinite(startMs)?startMs:indexed[0].ms;
- const t1=Number.isFinite(endMs)&&endMs>t0?endMs:t0+1;
+ const t0=indexed[0].ms;
+ const lastMs=indexed[indexed.length-1].ms;
+ let t1=lastMs;
+ if(openN>0 && Number.isFinite(endMs) && endMs>t1) t1=endMs;
+ if(!(t1>t0)) t1=t0+60000;
+ host.dataset.t0=new Date(t0).toISOString();
+ host.dataset.t1=new Date(t1).toISOString();
  const sameDay=ctDayKey(t0)===ctDayKey(t1);
- const xAtMs=ms=>padL+((ms-t0)/(t1-t0))*plotW;
+ const dataMs=Math.max(1, lastMs-t0);
+ const liveMs=Math.max(0, t1-lastMs);
+ const natural=liveMs/(dataMs+liveMs);
+ const liveFrac=openN>0?Math.max(natural, 0.16):0;
+ const xAtMs=ms=>{
+  if(liveFrac<=0) return padL+((ms-t0)/Math.max(1, t1-t0))*plotW;
+  const dataW=plotW*(1-liveFrac);
+  if(ms<=lastMs) return padL+((ms-t0)/dataMs)*dataW;
+  return padL+dataW+((ms-lastMs)/Math.max(1, liveMs))*plotW*liveFrac;};
  const yAt=v=>padT+(1-(v-min)/span)*plotH;
  pimpPts=indexed.map(item=>{const p=item.p, ms=item.ms;
   return {x:xAtMs(ms), y:yAt(Number(p.v)), v:Number(p.v), label:ctLabel(ms, !!p.day), ms:ms,
@@ -40941,7 +40959,7 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
  const marks=host.clientWidth<520?[0,1]:[0,0.5,1];
  const axis=marks.map((frac,i)=>{const ms=t0+frac*(t1-t0);
   const anchor=i===0?'start':(i===marks.length-1?'end':'middle');
-  const x=padL+frac*plotW;
+  const x=xAtMs(ms);
   return sv('text',{class:'eqaxis',x:x.toFixed(1),y:hgt-8,'text-anchor':anchor}, ctAxis(ms, sameDay)||'')});
  const spikes=(pimpSpikes||[]).map(sp=>{
   const i0=at[Number(sp.from)], i1=at[Number(sp.to)];
