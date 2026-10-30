@@ -35,6 +35,7 @@ def _tree(tmp, script):
     _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), script)
     _write(os.path.join(tmp, "kalshi-sp500-paper", "bot.py"), script)
     _write(os.path.join(tmp, "kalshi-sp500-paper", "config.json"), json.dumps({"paper_mode": True}))
+    _write(os.path.join(tmp, "kalshi-sp500-paper", "calendar.json"), "{}\n")
     _write(os.path.join(tmp, "btc15m-signal", "btc15m_signal.py"), script)
     _write(os.path.join(tmp, "memecoin-paper", "bot.py"), script)
     _write(os.path.join(tmp, "memecoin-paper", "config.py"), "PAPER = True\n")
@@ -296,6 +297,111 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(sorted((row["bot"], row["ok"]) for row in rows),
                              [("btc15m", False), ("sports-gap", False)])
             self.assertTrue(all(not row["blocked"] for row in rows))
+
+
+    def test_new_gates_stake_stop_and_staff(self):
+        over, err = pimp_desk.parse_settings({
+            "stake_hi_min": 10, "stake_hi_max": 31, "stake_lo_max": 9,
+            "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
+        })
+        self.assertIsNone(over)
+        self.assertTrue(err)
+        zero, err = pimp_desk.parse_settings({
+            "stake_hi_min": 10, "stake_hi_max": 30, "stake_lo_max": 9,
+            "daily_loss_stop": 0, "max_open_risk": 100, "max_open_positions": 4,
+        })
+        self.assertIsNone(zero)
+        self.assertIn("zero", err.lower())
+        cfg, err = pimp_desk.parse_settings({
+            "stake_hi_min": 10, "stake_hi_max": 30, "stake_lo_max": 9.99,
+            "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
+        })
+        self.assertIsNone(err)
+        self.assertIn("saved max", pimp_desk.stake_allowed(31, 0.9, cfg))
+        self.assertIn("saved max", pimp_desk.stake_allowed(10, 0.5, cfg))
+        self.assertEqual(pimp_desk.stake_allowed(9, 0.5, cfg), "")
+        self.assertFalse(pimp_desk.role_can("", "view"))
+        self.assertFalse(pimp_desk.role_can("mod", "run"))
+        self.assertFalse(pimp_desk.role_can("admin", "save"))
+        self.assertFalse(pimp_desk.role_can("owner", "run"))
+        self.assertTrue(pimp_desk.role_can("owner", "save"))
+        self.assertTrue(pimp_desk.role_can("developer", "run"))
+        self.assertTrue(pimp_desk.role_can("mod", "view"))
+        self.assertIn("Staff only", pimp_desk.auth_error("guest", "view"))
+        self.assertIn("Developer", pimp_desk.auth_error("mod", "run"))
+        self.assertTrue(pimp_desk.confirm_reset("nope"))
+        self.assertEqual(pimp_desk.confirm_reset("RESET PAPER"), "")
+        self.assertFalse(pimp_desk.live_switch_status()["built"])
+
+    def test_prices_are_ask_fee_and_unknown(self):
+        self.assertEqual(pimp_desk.paper_fill(0.40, 0.42), 0.42)
+        self.assertIsNone(pimp_desk.paper_fill(0.40, None))
+        self.assertNotEqual(pimp_desk.paper_fill(0.40, 0.50), 0.45)
+        edge = pimp_desk.edge_after_fee(0.60, 0.50)
+        self.assertLess(edge, 0.60 - 0.50)
+        self.assertEqual(pimp_desk.price_age_flag(""), "unknown")
+        old = "2020-01-01T00:00:00+00:00"
+        self.assertEqual(pimp_desk.price_age_flag(old), "stale")
+        self.assertEqual(pimp_desk.disagree_flag(0.70, 0.40), "ESPN and Kalshi disagree")
+        self.assertEqual(pimp_desk.disagree_flag(None, 0.40), "")
+        self.assertEqual(pimp_desk.settle_call("in", 1, 0), "wait")
+        self.assertEqual(pimp_desk.settle_call("final", 1, 1), "hold")
+        self.assertEqual(pimp_desk.settle_call("final", 2, 1), "settle")
+        self.assertEqual(pimp_desk.source_status(0, ""), "no games")
+        self.assertEqual(pimp_desk.source_status(0, "down"), "api down")
+        calls = {"n": 0}
+
+        def opener(_url):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise TimeoutError("nope")
+            return {"ok": True}
+
+        data, err = pimp_desk.public_get("https://example.test/quote", opener, tries=3)
+        self.assertEqual(data, {"ok": True})
+        self.assertEqual(err, "")
+        self.assertEqual(calls["n"], 3)
+        data, err = pimp_desk.public_get("https://example.test/quote", lambda _url: None, tries=2)
+        self.assertIsNone(data)
+        self.assertEqual(err, "failed")
+        self.assertNotIn("example.test", err)
+        night = dt.datetime(2026, 10, 30, 23, 30, tzinfo=pimp_desk.CT)
+        day = dt.datetime(2026, 10, 30, 12, 0, tzinfo=pimp_desk.CT)
+        self.assertTrue(pimp_desk.in_quiet(night))
+        self.assertFalse(pimp_desk.in_quiet(day))
+        self.assertIn("Central", pimp_desk.central_text(day))
+        self.assertFalse(pimp_desk.page_has_key("PAPER ONLY. There is no wallet connect on this desk."))
+        self.assertTrue(pimp_desk.page_has_key("api_key = 'secret-value'"))
+
+    def test_half_written_state_calendar_and_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), "print('x')\n")
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), "{")
+            snap = pimp_desk.snapshot(tmp)
+            sports = snap["bots"][0]
+            self.assertIn("half-written", sports["read_error"])
+            self.assertIn("No paper trades yet", sports["idle_copy"])
+            self.assertIn("No edge", sports["idle_copy"])
+            _write(os.path.join(tmp, "kalshi-sp500-paper", "bot.py"), QUIET)
+            _write(os.path.join(tmp, "kalshi-sp500-paper", "config.json"), json.dumps({"paper_mode": True}))
+            blocked = pimp_desk.run_bot("kalshi-sp", "run", tmp)
+            self.assertTrue(blocked.get("blocked"))
+            self.assertIn("News calendar", blocked["error"])
+            self.assertFalse(os.path.exists(os.path.join(tmp, "kalshi-sp500-paper", "ran")))
+            blob = pimp_desk.export_xlsx(tmp)
+            self.assertTrue(blob.startswith(b"PK"))
+            cfg, err = pimp_desk.save_settings({
+                "stake_hi_min": "10", "stake_hi_max": "20", "stake_lo_max": "5",
+                "daily_loss_stop": "25", "max_open_risk": "40", "max_open_positions": "2",
+            }, tmp, who="Ada")
+            self.assertIsNone(err, err)
+            mode = os.stat(pimp_desk.config_path(tmp)).st_mode & 0o777
+            self.assertEqual(mode, 0o600)
+            rows = pimp_desk.audit_rows(tmp)
+            self.assertTrue(any(row.get("who") == "Ada" for row in rows))
+            self.assertTrue(any("limits" in str(row.get("what")).lower() for row in rows))
+            self.assertIn("status_line", snap["desk"])
+            self.assertIn("Last check", snap["desk"]["status_line"])
 
 
 if __name__ == "__main__":

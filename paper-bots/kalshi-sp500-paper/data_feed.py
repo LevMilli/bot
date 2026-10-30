@@ -26,6 +26,7 @@ Key ideas a beginner needs:
     historical one automatically.
 """
 import json
+import os
 import time
 import urllib.request
 import urllib.error
@@ -36,14 +37,52 @@ CT = ZoneInfo("America/Chicago")
 _CONFIG = json.load(open(__file__.replace("data_feed.py", "config.json")))
 BASE = _CONFIG["api_base"]
 PAUSE = _CONFIG.get("request_pause_seconds", 0.05)
+_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quote_cache.json")
+_CACHE_TTL = 60
+
+
+def _cache_load():
+    try:
+        with open(_CACHE_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _cache_get(path):
+    row = _cache_load().get(path)
+    if not isinstance(row, dict):
+        return None
+    try:
+        if time.time() - float(row.get("at") or 0) > _CACHE_TTL:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return row.get("body")
+
+
+def _cache_put(path, body):
+    data = _cache_load()
+    data[path] = {"at": time.time(), "body": body}
+    if len(data) > 40:
+        newest = sorted(data.items(), key=lambda item: float((item[1] or {}).get("at") or 0))[-40:]
+        data = dict(newest)
+    tmp = _CACHE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    os.replace(tmp, _CACHE_PATH)
 
 
 def get_json(path, retries=5):
     """GET one public API path (e.g. '/markets?...') and return parsed JSON.
 
     Retries with a growing wait if Kalshi is busy (HTTP 429) or the network
-    hiccups. Returns {} (empty) on a 404 "not found" so callers can fall back.
+    hiccups. A price is reused for one minute. Returns {} on a 404.
     """
+    hit = _cache_get(path)
+    if hit is not None:
+        return hit
     url = BASE + path
     last_err = None
     for attempt in range(retries):
@@ -51,7 +90,9 @@ def get_json(path, retries=5):
             req = urllib.request.Request(url, headers={"User-Agent": "paper-bot/1.0 (read-only)"})
             with urllib.request.urlopen(req, timeout=30) as resp:
                 time.sleep(PAUSE)            # be polite to the public API
-                return json.load(resp)
+                body = json.load(resp)
+            _cache_put(path, body)
+            return body
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return {}
@@ -60,7 +101,8 @@ def get_json(path, retries=5):
         except Exception as e:               # timeouts, connection resets
             last_err = e
             time.sleep(1.5 * (attempt + 1))
-    raise RuntimeError(f"Kalshi API read failed after {retries} tries: {url} ({last_err})")
+    kind = type(last_err).__name__ if last_err else "failed"
+    raise RuntimeError(f"Kalshi API read failed after {retries} tries ({kind})")
 
 
 def dollars(x):

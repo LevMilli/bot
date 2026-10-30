@@ -1,4 +1,5 @@
 state.json
 paper_trades.md
+quote_cache.json
 __pycache__/
 *.pyc

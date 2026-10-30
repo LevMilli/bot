@@ -64,8 +64,11 @@ def open_position(state, day, event_ticker, pick, contracts, entry_time_iso):
     fee = taker_fee(contracts, pick["ask"])
     cost = round(contracts * pick["ask"], 4)
     pos = {"day": str(day), "event": event_ticker, "ticker": pick["ticker"], "side": pick["side"],
-           "strike": pick.get("strike"), "ask": pick["ask"], "contracts": contracts,
-           "cost": cost, "fee": fee, "entry_time": entry_time_iso, "status": "open"}
+           "strike": pick.get("strike"), "bid": pick.get("bid"), "ask": pick["ask"], "contracts": contracts,
+           "cost": cost, "fee": fee, "entry_time": entry_time_iso, "status": "open",
+           "price_source": "https://api.elections.kalshi.com/trade-api/v2",
+           "price_at": entry_time_iso,
+           "fill_id": f"{pick.get('ticker')}|{entry_time_iso}"}
     state["bankroll"] = round(state["bankroll"] - cost - fee, 4)
     state["open"].append(pos)
     return pos
