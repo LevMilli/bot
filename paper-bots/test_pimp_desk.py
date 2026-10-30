@@ -1,5 +1,6 @@
 """Paper desk checks. No network, no Discord, no live orders."""
 
+import datetime as dt
 import json
 import os
 import sys
@@ -24,6 +25,27 @@ if '--reset' in sys.argv:
     if os.path.exists('paper_trades.md'):
         os.remove('paper_trades.md')
 """
+QUIET = """import sys
+open('ran', 'a').write(' '.join(sys.argv[1:]) + '\\n')
+print('no trade')
+"""
+
+
+def _tree(tmp, script):
+    _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), script)
+    _write(os.path.join(tmp, "kalshi-sp500-paper", "bot.py"), script)
+    _write(os.path.join(tmp, "kalshi-sp500-paper", "config.json"), json.dumps({"paper_mode": True}))
+    _write(os.path.join(tmp, "btc15m-signal", "btc15m_signal.py"), script)
+    _write(os.path.join(tmp, "memecoin-paper", "bot.py"), script)
+    _write(os.path.join(tmp, "memecoin-paper", "config.py"), "PAPER = True\n")
+
+
+def _ran(tmp, folder):
+    path = os.path.join(tmp, folder, "ran")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
 
 
 def _write(path, text):
@@ -154,6 +176,126 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(loaded["max_open_positions"], 2)
             self.assertFalse(pimp_desk.run_bot("nope", "run", tmp)["ok"])
             self.assertFalse(pimp_desk.reset_bot("kalshi-sized", tmp)["ok"])
+
+    def test_schedule_stays_on_paper_actions(self):
+        for slot in pimp_desk.AUTO:
+            action = pimp_desk.ACTIONS[slot["id"]][slot["action"]]
+            self.assertNotIn("--any-time", action["argv"])
+            blob = " ".join(action["argv"]).lower()
+            for word in ("api_key", "wallet", "order"):
+                self.assertNotIn(word, blob)
+        sports = next(s for s in pimp_desk.AUTO if s["id"] == "sports-gap")
+        btc = next(s for s in pimp_desk.AUTO if s["id"] == "btc15m")
+        self.assertEqual(sports["every_sec"], 300)
+        self.assertEqual(btc["every_sec"], 300)
+        brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")
+        scan = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run")
+        settle = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle")
+        self.assertEqual((brief["at_ct"], scan["at_ct"], settle["at_ct"]), ("08:00", "12:30", "16:00"))
+        self.assertEqual(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["argv"], ("bot.py", "brief", "--dry-run"))
+        self.assertFalse(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["entry"])
+        self.assertTrue(pimp_desk.ACTIONS["kalshi-sp"]["run"]["entry"])
+        self.assertEqual([s["at_ct"] for s in pimp_desk.AUTO if s["id"] == "memecoin"],
+                         ["09:00", "15:00", "21:00"])
+        text = pimp_desk.timer_text().lower()
+        self.assertIn("every 5 minutes", text)
+        self.assertIn("8:00", text)
+        self.assertIn("12:30", text)
+        self.assertIn("dry run", text)
+        self.assertNotIn("guarantee", text)
+        with tempfile.TemporaryDirectory() as tmp:
+            def names(when):
+                return [(s["id"], s["action"], s.get("at_ct")) for s in pimp_desk.due_slots(when, tmp)]
+            morning = dt.datetime(2026, 10, 30, 8, 5, tzinfo=pimp_desk.CT)
+            noon = dt.datetime(2026, 10, 30, 12, 30, tzinfo=pimp_desk.CT)
+            late = dt.datetime(2026, 10, 30, 14, 56, tzinfo=pimp_desk.CT)
+            night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
+            saturday = dt.datetime(2026, 10, 31, 12, 30, tzinfo=pimp_desk.CT)
+            self.assertIn(("kalshi-sp", "brief", "08:00"), names(morning))
+            self.assertNotIn(("kalshi-sp", "run", "12:30"), names(morning))
+            self.assertIn(("kalshi-sp", "run", "12:30"), names(noon))
+            self.assertNotIn(("kalshi-sp", "brief", "08:00"), names(noon))
+            self.assertIn(("memecoin", "run", "09:00"), names(noon))
+            self.assertNotIn(("kalshi-sp", "run", "12:30"), names(late))
+            self.assertEqual([row[0] for row in names(night)], ["sports-gap", "btc15m"])
+            self.assertIn(("kalshi-sp", "run", "12:30"), names(saturday))
+        snap = pimp_desk.snapshot(ROOT)
+        self.assertIn("PAPER ONLY", snap["banner"])
+        self.assertIn("timer", snap["banner"].lower())
+        self.assertIn("every 5 minutes", snap["timer"].lower())
+
+    def test_scheduler_once_places_no_orders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, QUIET)
+            noon = dt.datetime(2026, 10, 30, 12, 30, tzinfo=pimp_desk.CT)
+            rows = pimp_desk.run_scheduled(noon, tmp)
+            by = {(row["bot"], row["action"]): row for row in rows}
+            self.assertEqual(set(by), {
+                ("sports-gap", "run"), ("btc15m", "run"), ("kalshi-sp", "run"), ("memecoin", "run"),
+            })
+            for row in rows:
+                self.assertTrue(row["ok"], row)
+                self.assertFalse(row["blocked"])
+                self.assertIn("no trade", row["summary"])
+            self.assertEqual(_ran(tmp, "sports-gap-paper"), "\n")
+            self.assertEqual(_ran(tmp, "btc15m-signal"), "\n")
+            self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
+            self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
+            for folder in ("sports-gap-paper", "btc15m-signal", "kalshi-sp500-paper", "memecoin-paper"):
+                text = _ran(tmp, folder).lower()
+                for word in ("order", "wallet", "api_key", "any-time", "live"):
+                    self.assertNotIn(word, text, folder)
+            self.assertEqual(pimp_desk.run_scheduled(noon, tmp), [])
+            self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
+            later = dt.datetime(2026, 10, 30, 12, 35, tzinfo=pimp_desk.CT)
+            more = pimp_desk.run_scheduled(later, tmp)
+            self.assertEqual({(row["bot"], row["action"]) for row in more},
+                             {("sports-gap", "run"), ("btc15m", "run")})
+            self.assertTrue(all(row["ok"] for row in more))
+            self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
+            self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
+            self.assertEqual(_ran(tmp, "sports-gap-paper"), "\n\n")
+
+    def test_morning_brief_is_dry_run_and_limits_skip_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, QUIET)
+            morning = dt.datetime(2026, 10, 30, 8, 5, tzinfo=pimp_desk.CT)
+            rows = pimp_desk.run_scheduled(morning, tmp)
+            kalshi = [row for row in rows if row["bot"] == "kalshi-sp"]
+            self.assertEqual([row["action"] for row in kalshi], ["brief"])
+            self.assertTrue(kalshi[0]["ok"], kalshi[0])
+            self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "brief --dry-run\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, QUIET)
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 11.0,
+                "open": [{"contracts": 1, "team": "Bills", "ticker": "KX", "game": "Bills at Chiefs",
+                          "cost": 3, "opened": "2026-10-30 12:00:00 CT"}] * 4,
+                "closed": [],
+            }))
+            noon = dt.datetime(2026, 10, 30, 12, 30, tzinfo=pimp_desk.CT)
+            rows = pimp_desk.run_scheduled(noon, tmp)
+            by = {(row["bot"], row["action"]): row for row in rows}
+            self.assertTrue(by[("sports-gap", "run")]["blocked"])
+            self.assertTrue(by[("kalshi-sp", "run")]["blocked"])
+            self.assertTrue(by[("memecoin", "run")]["blocked"])
+            self.assertTrue(by[("btc15m", "run")]["ok"])
+            self.assertFalse(by[("btc15m", "run")]["blocked"])
+            self.assertIn("Max open", by[("sports-gap", "run")]["error"])
+            self.assertIsNone(_ran(tmp, "sports-gap-paper"))
+            self.assertIsNone(_ran(tmp, "kalshi-sp500-paper"))
+            self.assertIsNone(_ran(tmp, "memecoin-paper"))
+            self.assertEqual(_ran(tmp, "btc15m-signal"), "\n")
+            self.assertEqual(pimp_desk.run_scheduled(noon, tmp), [])
+
+    def test_scheduler_keeps_a_crashed_script_a_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, "import sys\nsys.exit(1)\n")
+            night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
+            rows = pimp_desk.run_scheduled(night, tmp)
+            self.assertEqual(sorted((row["bot"], row["ok"]) for row in rows),
+                             [("btc15m", False), ("sports-gap", False)])
+            self.assertTrue(all(not row["blocked"] for row in rows))
 
 
 if __name__ == "__main__":
