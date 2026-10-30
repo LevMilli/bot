@@ -66,19 +66,19 @@ class PimpDeskTests(unittest.TestCase):
 
     def test_limits_reject_live_sized_stakes(self):
         bad, err = pimp_desk.parse_settings({
-            "stake_hi_min": 5, "stake_hi_max": 40, "stake_lo_max": 10,
+            "stake_hi_min": 5, "stake_hi_max": 150, "stake_lo_max": 10,
             "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
         })
         self.assertIsNone(bad)
         self.assertTrue(err)
         cfg, err = pimp_desk.parse_settings({
-            "stake_hi_min": 10, "stake_hi_max": 30, "stake_lo_max": 9.5,
+            "stake_hi_min": 20, "stake_hi_max": 80, "stake_lo_max": 20,
             "daily_loss_stop": 40, "max_open_risk": 80, "max_open_positions": 3,
         })
         self.assertIsNone(err)
         self.assertTrue(cfg["paper_only"])
         self.assertEqual(cfg["stake_hi_prob"], 0.8)
-        self.assertEqual(cfg["stake_lo_max"], 9.5)
+        self.assertEqual(cfg["stake_lo_max"], 20)
 
     def test_checkout_snapshot_is_empty_and_paper(self):
         snap = pimp_desk.snapshot(ROOT)
@@ -103,8 +103,9 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(snap["desk"]["cash"], 714.0)
         self.assertIn("Run one check", [a["label"] for a in snap["bots"][0]["actions"]])
         self.assertIn("Morning brief", [a["label"] for a in snap["bots"][1]["actions"]])
-        self.assertIn("10.00", snap["limits_text"])
-        self.assertIn("30.00", snap["limits_text"])
+        self.assertIn("20.00", snap["limits_text"])
+        self.assertIn("100.00", snap["limits_text"])
+        self.assertIn("6 to 12", snap["limits_text"])
         self.assertIn("150.00", snap["limits_text"])
         self.assertIn("0.04", snap["limits_text"])
         self.assertIn("0.08", snap["limits_text"])
@@ -172,7 +173,7 @@ class PimpDeskTests(unittest.TestCase):
     def test_save_roundtrip_and_unknown_bot(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg, err = pimp_desk.save_settings({
-                "stake_hi_min": "12", "stake_hi_max": "25", "stake_lo_max": "8",
+                "stake_hi_min": "25", "stake_hi_max": "80", "stake_lo_max": "20",
                 "daily_loss_stop": "20", "max_open_risk": "60", "max_open_positions": "2",
                 "paper_only": False, "api_key": "nope",
             }, tmp)
@@ -183,7 +184,7 @@ class PimpDeskTests(unittest.TestCase):
             self.assertNotIn("api_key", saved)
             self.assertTrue(saved["paper_only"])
             loaded = pimp_desk.load_settings(tmp)
-            self.assertEqual(loaded["stake_hi_min"], 12)
+            self.assertEqual(loaded["stake_hi_min"], 25)
             self.assertEqual(loaded["max_open_positions"], 2)
             self.assertFalse(pimp_desk.run_bot("nope", "run", tmp)["ok"])
             self.assertFalse(pimp_desk.reset_bot("kalshi-sized", tmp)["ok"])
@@ -311,25 +312,26 @@ class PimpDeskTests(unittest.TestCase):
 
     def test_new_gates_stake_stop_and_staff(self):
         over, err = pimp_desk.parse_settings({
-            "stake_hi_min": 10, "stake_hi_max": 31, "stake_lo_max": 9,
+            "stake_hi_min": 10, "stake_hi_max": 101, "stake_lo_max": 9,
             "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
         })
         self.assertIsNone(over)
         self.assertTrue(err)
         zero, err = pimp_desk.parse_settings({
-            "stake_hi_min": 10, "stake_hi_max": 30, "stake_lo_max": 9,
+            "stake_hi_min": 20, "stake_hi_max": 100, "stake_lo_max": 20,
             "daily_loss_stop": 0, "max_open_risk": 100, "max_open_positions": 4,
         })
         self.assertIsNone(zero)
         self.assertIn("zero", err.lower())
         cfg, err = pimp_desk.parse_settings({
-            "stake_hi_min": 10, "stake_hi_max": 30, "stake_lo_max": 9.99,
+            "stake_hi_min": 20, "stake_hi_max": 100, "stake_lo_max": 20,
             "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
         })
         self.assertIsNone(err)
-        self.assertIn("saved max", pimp_desk.stake_allowed(31, 0.9, cfg))
-        self.assertIn("saved max", pimp_desk.stake_allowed(10, 0.5, cfg))
-        self.assertEqual(pimp_desk.stake_allowed(9, 0.5, cfg), "")
+        self.assertIn("saved max", pimp_desk.stake_allowed(101, 0.9, cfg))
+        self.assertIn("saved max", pimp_desk.stake_allowed(20.01, 0.5, cfg))
+        self.assertEqual(pimp_desk.stake_allowed(20, 0.5, cfg), "")
+        self.assertEqual(pimp_desk.stake_allowed(100, 0.95, cfg), "")
         self.assertFalse(pimp_desk.role_can("", "view"))
         self.assertFalse(pimp_desk.role_can("mod", "run"))
         self.assertFalse(pimp_desk.role_can("admin", "save"))
@@ -342,6 +344,27 @@ class PimpDeskTests(unittest.TestCase):
         self.assertTrue(pimp_desk.confirm_reset("nope"))
         self.assertEqual(pimp_desk.confirm_reset("RESET PAPER"), "")
         self.assertFalse(pimp_desk.live_switch_status()["built"])
+
+    def test_under_eighty_buys_near_twenty_not_one_contract(self):
+        self.assertEqual(pimp_desk.DEFAULTS["pace_min"], 6)
+        self.assertEqual(pimp_desk.DEFAULTS["pace_target"], 12)
+        self.assertEqual(pimp_desk.PACE_MIN, 6)
+        self.assertEqual(pimp_desk.PACE_TARGET, 12)
+        self.assertEqual(pimp_desk.paper_stake_dollars(0.657), 20.0)
+        self.assertEqual(pimp_desk.paper_stake_dollars(0.799), 20.0)
+        self.assertEqual(pimp_desk.paper_stake_dollars(0.80), 20.0)
+        self.assertEqual(pimp_desk.paper_stake_dollars(0.90), 60.0)
+        self.assertEqual(pimp_desk.paper_stake_dollars(1), 100.0)
+        per = 0.67 + 0.02
+        n = pimp_desk.contracts_for_stake(per, pimp_desk.paper_stake_dollars(0.657))
+        cost = round(n * per, 2)
+        self.assertEqual((n, cost), (28, 19.32))
+        self.assertGreater(n, 1)
+        self.assertEqual(pimp_desk.contracts_for_stake(5, 1), 0)
+        strong = pimp_desk.contracts_for_stake(per, 100)
+        self.assertGreater(strong, 1)
+        self.assertLessEqual(round(strong * per, 2), 100)
+        self.assertGreater(round(strong * per, 2), 100 - per)
 
     def test_prices_are_ask_fee_and_unknown(self):
         self.assertEqual(pimp_desk.paper_fill(0.40, 0.42), 0.42)
@@ -402,7 +425,7 @@ class PimpDeskTests(unittest.TestCase):
             blob = pimp_desk.export_xlsx(tmp)
             self.assertTrue(blob.startswith(b"PK"))
             cfg, err = pimp_desk.save_settings({
-                "stake_hi_min": "10", "stake_hi_max": "20", "stake_lo_max": "5",
+                "stake_hi_min": "20", "stake_hi_max": "60", "stake_lo_max": "20",
                 "daily_loss_stop": "25", "max_open_risk": "40", "max_open_positions": "2",
             }, tmp, who="Ada")
             self.assertIsNone(err, err)

@@ -40278,9 +40278,9 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <section class="card" style="margin-bottom:12px"><h2>Paper limits</h2>
  <p class="muted" id="pimppreview"></p>
  <form class="form" id="pimpform">
-  <label>At 80% or higher, from $<input class="numin" name="stake_hi_min" type="number" min="10" max="30" step="0.01" value="10" required></label>
-  <label>to $<input class="numin" name="stake_hi_max" type="number" min="10" max="30" step="0.01" value="30" required></label>
-  <label>Below 80%, under $<input class="numin" name="stake_lo_max" type="number" min="0.01" max="9.99" step="0.01" value="9.99" required></label>
+  <label>At 80% or higher, from $<input class="numin" name="stake_hi_min" type="number" min="20" max="100" step="0.01" value="20" required></label>
+  <label>to $<input class="numin" name="stake_hi_max" type="number" min="20" max="100" step="0.01" value="100" required></label>
+  <label>Below 80%, about $<input class="numin" name="stake_lo_max" type="number" min="20" max="20" step="0.01" value="20" required></label>
   <label>Daily loss stop $<input class="numin" name="daily_loss_stop" type="number" min="1" max="100000" step="1" value="150" required></label>
   <label>Max open risk $<input class="numin" name="max_open_risk" type="number" min="1" max="1000000" step="1" value="100" required></label>
   <label>Max open positions <input class="numin" name="max_open_positions" type="number" min="1" max="50" step="1" value="12" required></label>
@@ -40625,10 +40625,10 @@ function fillLimits(lim){const f=$('#pimpform'); if(!f||!lim)return;
   if(f[k]&&lim[k]!=null) f[k].value=String(lim[k])})}
 function previewLimits(){const f=$('#pimpform'), box=$('#pimppreview'); if(!f||!box)return;
  const before=pimpLimits||{}, next=limitNums(f);
- box.textContent='Before: 80% stake $'+before.stake_hi_min+' to $'+before.stake_hi_max+', under $'+before.stake_lo_max+
+ box.textContent='Before: 80% stake $'+before.stake_hi_min+' to $'+before.stake_hi_max+', about $'+before.stake_lo_max+
   ', daily loss stop $'+before.daily_loss_stop+', open risk $'+before.max_open_risk+
   ', max open '+before.max_open_positions+', edge '+before.min_edge+', week goal $'+before.week_goal+
-  '. After: 80% stake $'+next.stake_hi_min+' to $'+next.stake_hi_max+', under $'+next.stake_lo_max+
+  '. After: 80% stake $'+next.stake_hi_min+' to $'+next.stake_hi_max+', about $'+next.stake_lo_max+
   ', daily loss stop $'+next.daily_loss_stop+', open risk $'+next.max_open_risk+
   ', max open '+next.max_open_positions+', edge '+next.min_edge+', week goal $'+next.week_goal+
   (pimpArmed?'. Save again to keep this.':'.');}
