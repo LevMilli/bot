@@ -9,7 +9,7 @@ NO real orders are ever placed. There is no API key, no wallet, no login.
 Only public GET requests are made.
 
 Usage:  python3 gap_bot.py            # one check
-        python3 gap_bot.py --reset    # wipe paper state (back to $14)
+        python3 gap_bot.py --reset    # wipe paper state (back to $100)
 """
 import json, math, os, sys, time, urllib.request, urllib.error
 from datetime import datetime, timezone
@@ -24,7 +24,8 @@ CT = ZoneInfo("America/Chicago")
 ET = ZoneInfo("America/New_York")
 
 # ---------------- settings (edit freely) ----------------
-START_BANKROLL = 14.00
+START_BANKROLL = 100.00
+OLD_BANKROLL = 14.00
 # The desk file is the source of these limits. Old defaults: 8 points of edge, 3 open positions.
 # New defaults: 4 points of edge, 12 open positions. Under 12 trades this hour, the timer
 # may paper-buy without that edge. The desk daily loss stop still ends a bad paper day.
@@ -36,11 +37,29 @@ CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this ban
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
 PRICE_BOUNDS = (0.05, 0.95)     # don't buy near-certain / near-worthless contracts
 
-def stake_for_gap(gap):
-    """$1 default, $2 for big gaps, $3 for huge gaps."""
-    if gap >= 0.16: return 3.0
-    if gap >= 0.12: return 2.0
-    return 1.0
+def stake_for_model(fair, desk=None, cfg=None):
+    """Paper dollars for one sports fill. Under 80% this is about $20.
+
+    At 80% or higher it scales from $20 to $100. No real order is sent.
+    """
+    if desk is not None:
+        try:
+            return float(desk.paper_stake_dollars(fair, cfg))
+        except Exception:
+            pass
+    try:
+        chance = float(fair)
+    except (TypeError, ValueError):
+        chance = 0.0
+    if chance + 1e-12 < 0.8:
+        return 20.0
+    span = 0.2
+    t = (chance - 0.8) / span
+    if t < 0:
+        t = 0.0
+    elif t > 1:
+        t = 1.0
+    return round(20.0 + t * 80.0, 2)
 
 # sport key -> (espn path, kalshi series, fair-value source)
 SPORTS = {
@@ -117,11 +136,35 @@ def now_ct():
     return datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S CT")
 
 # ---------------- state + log ----------------
+def _lift_old_starter(state):
+    """Raise the empty $14 paper starter to $100. Any other cash stays put."""
+    if not isinstance(state, dict):
+        return False
+    if state.get("open") or state.get("closed"):
+        return False
+    try:
+        cash = float(state.get("cash"))
+    except (TypeError, ValueError):
+        return False
+    if abs(cash - OLD_BANKROLL) > 0.001:
+        return False
+    state["cash"] = START_BANKROLL
+    state["paper_only"] = True
+    return True
+
+
 def load_state():
     if os.path.exists(STATE):
         with open(STATE) as f:
-            return json.load(f)
-    return {"cash": START_BANKROLL, "open": [], "closed": [], "runs": 0}
+            state = json.load(f)
+        try:
+            lifted = _desk().lift_sports_starter(state)
+        except Exception:
+            lifted = _lift_old_starter(state)
+        if lifted:
+            save_state(state)
+        return state
+    return {"cash": START_BANKROLL, "open": [], "closed": [], "runs": 0, "paper_only": True}
 
 def save_state(s):
     tmp = STATE + ".tmp"
@@ -445,9 +488,15 @@ def run():
                     summary_out["skips"].append(skip)
             if reason:
                 lines.append(row + gtxt + f" | {reason} |"); continue
-            stake = stake_for_gap(gap)
+            stake = stake_for_model(fair, desk, cfg)
             per = ask + fee(ask)
-            n = int(stake // per)
+            if desk is not None:
+                try:
+                    n = desk.contracts_for_stake(per, stake)
+                except Exception:
+                    n = int(stake // per) if per > 0 else 0
+            else:
+                n = int(stake // per) if per > 0 else 0
             if n < 1 or n * per > s["cash"] + 1e-9:
                 lines.append(row + gtxt + " | not enough paper cash |"); continue
             cost = round(n * per, 2)

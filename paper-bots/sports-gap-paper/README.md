@@ -1,6 +1,6 @@
 # Sports "gap" bot for Kalshi: PAPER ONLY
 
-This is a practice bot. It **never places real orders**. It has no API key, no wallet and no login, and it only reads free public data. The money is pretend: a $14 paper bankroll.
+This is a practice bot. It **never places real orders**. It has no API key, no wallet and no login, and it only reads free public data. The money is pretend: a $100 paper bankroll.
 
 ## What it does (one run)
 1. Asks ESPN's free scoreboard which games are **in progress** (NFL, college football, NBA, WNBA, MLB, NHL).
@@ -18,7 +18,7 @@ This is a practice bot. It **never places real orders**. It has no API key, no w
    - there is enough paper cash
    - the paper learning log is not skipping that sport and probability bucket
 
-   Trade size depends on the gap: **$1** normally, **$2** for 12+ points, **$3** for 16+ points.
+   Trade size follows the model probability. Under 80% the paper stake is about **$20**. At 80% or higher it scales from **$20 to $100**. The fill buys enough contracts to land near that stake. It does not place a real order.
 6. Exits a paper position in one of two ways:
    - **Sells at the bid** once the gap has closed (the bid minus the fee is at or above fair value).
    - **Settles** when ESPN shows the game as final: $1 per contract if the team won, $0 if it lost.
@@ -30,7 +30,7 @@ Everything is written to:
 ## Run it
 ```bash
 python3 gap_bot.py          # one check
-python3 gap_bot.py --reset  # start over at $14
+python3 gap_bot.py --reset  # start over at $100
 ```
 During games, run it about every 5 minutes, using cron or a scheduled routine.
 

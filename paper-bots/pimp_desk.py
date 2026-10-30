@@ -431,7 +431,7 @@ def limits_text(cfg: dict) -> str:
         f"Edge bar {float(cfg.get('min_edge') or 0):.2f} after the fee (the old default was 0.08). "
         f"Paper pace is {int(cfg.get('pace_min') or PACE_MIN)} to {int(cfg.get('pace_target') or PACE_TARGET)} trades an hour. "
         "Under that target, a timer check may paper-buy without the strict edge. "
-        "The BTC 15-minute check uses these dollar stakes and buys whole contracts near that amount. "
+        "The BTC 15-minute check and the sports gap check use these dollar stakes and buy whole contracts near that amount. "
         "These limits also gate a new entry check. "
         "Realized P/L is closed paper trades in the local files. Past paper results stay in the past."
     )
@@ -1475,9 +1475,27 @@ def edge_after_fee(fair, ask):
     return round(fair_n - ask_n - kalshi_fee(ask_n), 4)
 
 
+SPORTS_CASH = 100.0
+OLD_SPORTS_CASH = 14.0
+
+
+def lift_sports_starter(state: dict) -> bool:
+    """Raise the empty $14 sports starter to $100. Any other paper cash stays."""
+    if not isinstance(state, dict):
+        return False
+    if state.get("open") or state.get("closed"):
+        return False
+    cash = _num(state.get("cash"))
+    if cash is None or abs(cash - OLD_SPORTS_CASH) > 0.001:
+        return False
+    state["cash"] = SPORTS_CASH
+    state["paper_only"] = True
+    return True
+
+
 def _account_body(bot_id: str) -> dict:
     if bot_id == "sports-gap":
-        return {"cash": 14.0, "open": [], "closed": [], "runs": 0, "paper_only": True}
+        return {"cash": SPORTS_CASH, "open": [], "closed": [], "runs": 0, "paper_only": True}
     if bot_id == "kalshi-sp":
         return {
             "bankroll": 500.0,
@@ -1501,7 +1519,11 @@ def _account_body(bot_id: str) -> dict:
 
 
 def ensure_paper_accounts(root: str | None = None) -> list:
-    """Write each bot's starting paper account once. Never overwrite, never invent trades."""
+    """Write each bot's starting paper account once. Never invent trades.
+
+    An existing account is left alone, except the empty $14 sports starter,
+    which is raised to $100 so a paper buy can land near $20.
+    """
     root = _root(root)
     made = []
     for spec in BOTS:
@@ -1510,6 +1532,10 @@ def ensure_paper_accounts(root: str | None = None) -> list:
             continue
         path = _under(root, spec["folder"], name)
         if os.path.exists(path):
+            if spec["id"] == "sports-gap":
+                state, problem = _read_state(path)
+                if isinstance(state, dict) and not problem and lift_sports_starter(state):
+                    _write_json(path, state)
             continue
         _write_json(path, _account_body(spec["id"]))
         made.append(spec["id"])
