@@ -493,6 +493,7 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(pimp_desk.snapshot(bare)["book"]["rows"], [])
             self.assertEqual(pimp_desk.snapshot(bare)["desk"]["curve"], [])
             self.assertEqual(pimp_desk.snapshot(bare)["desk"]["equity"], [])
+            self.assertEqual(pimp_desk.snapshot(bare)["desk"]["spikes"], [])
 
     def test_equity_curve_is_chicago_time_and_blank_without_settles(self):
         october = pimp_desk._ct_when("October 30, 2026, 4:00 PM Central")
@@ -514,12 +515,18 @@ class PimpDeskTests(unittest.TestCase):
                     {"team": "Earlier", "pnl": -2.5, "closed": "2026-10-28 14:00:00 CT", "fill_id": "a"},
                 ],
             }))
-            curve = pimp_desk.snapshot(tmp)["desk"]["curve"]
+            desk = pimp_desk.snapshot(tmp)["desk"]
+            curve = desk["curve"]
             self.assertEqual([point["v"] for point in curve], [-2.5, 1.5])
             self.assertEqual(curve[0]["t"], "2026-10-28T14:00:00-05:00")
             self.assertEqual(curve[1]["t"], "2026-11-02T15:00:00-06:00")
             self.assertFalse(any(point.get("day") for point in curve))
-            self.assertEqual(pimp_desk.snapshot(tmp)["desk"]["equity"], [-2.5, 1.5])
+            self.assertEqual(desk["equity"], [-2.5, 1.5])
+            self.assertEqual(curve[0]["name"], "Earlier")
+            self.assertEqual(curve[0]["pnl"], -2.5)
+            self.assertEqual(curve[0]["when"], "October 28, 2026, 2:00 PM Central")
+            self.assertEqual(len(curve), 2)
+            self.assertEqual(desk["spikes"], [{"from": 0, "to": 1, "dollars": 4.0, "pct": 160.0}])
         page = os.path.join(os.path.dirname(ROOT), "bot.py")
         with open(page, encoding="utf-8") as handle:
             text = handle.read()
@@ -531,6 +538,62 @@ class PimpDeskTests(unittest.TestCase):
         self.assertTrue(all(spot >= 0 for spot in spots), spots)
         self.assertEqual(spots, sorted(spots))
         self.assertNotIn("innerHTML", chunk)
+        self.assertIn('id="pimpslips"', chunk)
+        self.assertNotIn(".navchip{", chunk.replace(" ", ""))
+        self.assertNotIn(".pill{", chunk.replace(" ", ""))
+        script = text[end:]
+        self.assertIn("function slipCard", script)
+        self.assertIn("America/Chicago", script)
+        self.assertIn("spikeText", script)
+        self.assertLess(script.find("function slipCard"), script.find("</script>"))
+        brand = text.split('<a class="brand" href="/" title="Dashboard">', 1)[1].split("</a>", 1)[0]
+        self.assertEqual(brand, "PIMP<b>-</b>BOT · STAFF")
+        self.assertIn(">PIMP<b>-</b>BOT · STAFF · TRADING</a>", text)
+        self.assertIn("function paintWordmark", text)
+        self.assertIn("BOT · STAFF · TRADING", text)
+
+    def test_spikes_are_percent_and_slips_stay_real(self):
+        quiet = [
+            {"v": 10, "stake": 2, "pnl": 0.4},
+            {"v": 10.4, "stake": 2, "pnl": 0.4},
+            {"v": 10.1, "stake": 2, "pnl": -0.3},
+            {"v": 10.5, "stake": 2, "pnl": 0.4},
+        ]
+        self.assertEqual(pimp_desk._equity_spikes(quiet), [])
+        self.assertEqual(pimp_desk._equity_spikes([]), [])
+        self.assertEqual(pimp_desk._equity_spikes([{"v": 3, "stake": 3, "pnl": 3}]), [])
+        zero = [
+            {"v": 0, "stake": 10, "pnl": 0},
+            {"v": 5, "stake": 10, "pnl": 5},
+        ]
+        self.assertEqual(pimp_desk._equity_spikes(zero), [{"from": 0, "to": 1, "dollars": 5.0, "pct": 50.0}])
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), QUIET)
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 40,
+                "open": [],
+                "closed": [
+                    {"team": "A", "ticker": "AAA", "game": "A at B", "cost": 10, "payout": 0, "pnl": -2.5,
+                     "closed": "2026-10-28 14:00:00 CT", "fill_id": "a"},
+                    {"team": "C", "ticker": "CCC", "game": "C at D", "cost": 5, "payout": 9, "pnl": 4.0,
+                     "closed": "November 2, 2026, 3:00 PM Central", "fill_id": "b"},
+                    {"team": "E", "ticker": "EEE", "game": "E at F", "cost": 8, "payout": 26, "pnl": 18.0,
+                     "closed": "2026-11-03 15:30:00 CT", "fill_id": "c"},
+                    {"team": "G", "ticker": "GGG", "game": "G at H", "cost": 4, "payout": 3, "pnl": -1.0,
+                     "closed": "2026-11-04 11:00:00 CT", "fill_id": "d"},
+                ],
+            }))
+            desk = pimp_desk.snapshot(tmp)["desk"]
+            curve = desk["curve"]
+            self.assertEqual([point["v"] for point in curve], [-2.5, 1.5, 19.5, 18.5])
+            self.assertEqual(len(curve), 4)
+            self.assertEqual(curve[2]["name"], "E at F")
+            self.assertEqual(curve[2]["stake"], 8)
+            self.assertEqual(curve[2]["payout"], 26)
+            self.assertEqual(curve[2]["pnl"], 18)
+            self.assertIn("Central", curve[2]["when"])
+            self.assertEqual(desk["spikes"], [{"from": 1, "to": 2, "dollars": 18.0, "pct": 1200.0}])
+            self.assertTrue(all(point["t"] for point in curve))
 
 
 if __name__ == "__main__":

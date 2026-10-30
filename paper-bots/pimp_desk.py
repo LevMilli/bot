@@ -2128,8 +2128,37 @@ def _streak(bots: list) -> dict:
     return {"kind": "flat", "n": 0, "text": "The last paper trade was flat."}
 
 
+def _curve_name(row: dict) -> str:
+    for key in ("game", "ticker", "team", "symbol", "what", "title"):
+        text = _clean(row.get(key) or "", 120)
+        if text:
+            return text
+    return ""
+
+
+def _curve_clock(row: dict, raw: str, day: bool) -> str:
+    """Chicago time already stored on the slip. A date-only slip does not grow a clock."""
+    if day:
+        try:
+            stamp = dt.date.fromisoformat(str(raw or "").strip())
+        except ValueError:
+            return _clean(raw, 40)
+        return f"{stamp.strftime('%B')} {stamp.day}, {stamp.year}"
+    clock = _clean(row.get("closed_at") or "", 80)
+    if clock and clock != "no check yet":
+        return clock
+    clock = _central_from_text(raw) if raw else ""
+    if clock in ("", "no check yet"):
+        return ""
+    return _clean(clock, 80)
+
+
 def _equity_curve(bots: list) -> list:
-    """Cumulative settled paper P/L. No point is invented when nothing has settled."""
+    """Cumulative settled paper P/L. No point is invented when nothing has settled.
+
+    Each point is one settled paper slip. The chart can name that slip without
+    adding a dot that was not a trade.
+    """
     rows = [row for row in _flatten(bots) if row.get("state") == "settled" and _num(row.get("pnl")) is not None]
     keyed = []
     for index, row in enumerate(rows):
@@ -2141,12 +2170,85 @@ def _equity_curve(bots: list) -> list:
     for _rank, _ts, _index, row, when in keyed:
         total = round(total + float(row["pnl"]), 2)
         raw = str(row.get("when") or "")
+        day = _date_only(raw)
+        stake = _num(row.get("cost"))
+        payout = _num(row.get("payout"))
         points.append({
             "t": when.isoformat(timespec="seconds") if when is not None else "",
             "v": total,
-            "day": _date_only(raw),
+            "day": day,
+            "when": _curve_clock(row, raw, day),
+            "name": _curve_name(row),
+            "stake": None if stake is None else round(stake, 2),
+            "payout": None if payout is None else round(payout, 2),
+            "pnl": round(float(row["pnl"]), 2),
         })
     return points[-180:]
+
+
+def _stretch_pct(points: list, start_at: int, end_at: int, dollars: float, start: float):
+    """Percent move over a stretch. A zero start uses the stakes in the stretch."""
+    base = abs(start)
+    if base >= 0.01:
+        return round(dollars / base * 100.0, 1)
+    stake = 0.0
+    saw = False
+    for point in points[start_at + 1:end_at + 1]:
+        number = _num(point.get("stake"))
+        if number is None:
+            continue
+        saw = True
+        stake += abs(number)
+    if saw and stake >= 0.01:
+        return round(dollars / stake * 100.0, 1)
+    return None
+
+
+def _equity_spikes(points: list) -> list:
+    """Sharp up or down stretches on the settled curve. Does not add points.
+
+    A step is sharp when it dwarfs the typical step on this curve. Neighboring
+    sharp steps that move the same way are one stretch. Percent is the dollar
+    move divided by the equity at the start of that stretch.
+    """
+    vals = []
+    for point in points or []:
+        number = _num(point.get("v") if isinstance(point, dict) else None)
+        if number is None:
+            return []
+        vals.append(number)
+    if len(vals) < 2:
+        return []
+    steps = []
+    for index in range(1, len(vals)):
+        delta = round(vals[index] - vals[index - 1], 2)
+        if abs(delta) < 0.005:
+            continue
+        steps.append((index - 1, index, delta))
+    if not steps:
+        return []
+    magnitudes = sorted(abs(delta) for _a, _b, delta in steps)
+    median = magnitudes[len(magnitudes) // 2]
+    span = max(vals) - min(vals)
+    bar = 0.01 if len(steps) == 1 else max(median * 1.8, span * 0.22, 0.01)
+    chosen = [step for step in steps if abs(step[2]) + 1e-9 >= bar]
+    merged = []
+    for start_at, end_at, dollars in chosen:
+        if merged and merged[-1][1] == start_at and (merged[-1][2] > 0) == (dollars > 0):
+            prev_from, _prev_to, prev_dollars = merged[-1]
+            merged[-1] = (prev_from, end_at, round(prev_dollars + dollars, 2))
+        else:
+            merged.append((start_at, end_at, dollars))
+    spikes = []
+    for start_at, end_at, dollars in merged:
+        start = vals[start_at]
+        spikes.append({
+            "from": start_at,
+            "to": end_at,
+            "dollars": dollars,
+            "pct": _stretch_pct(points, start_at, end_at, dollars, start),
+        })
+    return spikes
 
 
 def _digest(bots: list) -> str:
@@ -2199,6 +2301,7 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
             nxt = text
     central = _central_from_text(last_check)
     curve = _equity_curve(bots)
+    spikes = _equity_spikes(curve)
     return {
         "cash": None if not cashes else round(sum(cashes), 2),
         "realized": None if not realized_rows else round(sum(realized_rows), 2),
@@ -2220,6 +2323,7 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         "streak": _streak(bots),
         "equity": [point["v"] for point in curve][-40:],
         "curve": curve,
+        "spikes": spikes,
         "news": news_calendar(root),
         "paused_all": bool(_load_pause(root).get("all")),
     }
