@@ -256,15 +256,16 @@ class StaffRoleTests(unittest.TestCase):
             rows = bot.discord_role_rows(42)
         self.assertTrue(ok)
         self.assertEqual(role.name, "PIMPIN LEVI")
-        self.assertEqual(rows[0]["label"], "Levi's chair")
+        self.assertEqual(rows[0]["label"], "PIMPIN LEVI")
         self.assertEqual(rows[0]["name"], "PIMPIN LEVI")
-        self.assertEqual(rows[0]["mark"], "LC")
+        self.assertEqual(rows[0]["mark"], "PL")
         self.assertEqual(rows[0]["color"], "#7b3fe4")
+        self.assertNotEqual(rows[0]["name"], "Levi's chair")
         with patch.object(bot, "_guild_for", return_value=guild):
             cleared, _note = bot.role_label_set(42, 10, "")
             rows = bot.discord_role_rows(42)
         self.assertTrue(cleared)
-        self.assertEqual(rows[0]["label"], "PIMPIN LEVI")
+        self.assertEqual(rows[0]["name"], "PIMPIN LEVI")
 
     def test_gateway_records_add_and_remove_with_the_audit_name(self):
         role = Role(11, "pimpin lawyer", position=3)
@@ -309,12 +310,78 @@ class StaffRoleTests(unittest.TestCase):
         page = bot.STAFF_HTML
         self.assertIn("Give role", page)
         self.assertIn("Take role", page)
-        self.assertIn("Save label", page)
         self.assertIn("rolemark", page)
         self.assertIn("Recent Discord changes", page)
         self.assertIn("Replace head admin", page)
         self.assertIn("Developer and owner only", page)
+        self.assertIn("data-id", page)
+        self.assertIn("head.role", page)
+        self.assertIn("locked", page)
+        self.assertNotIn("Save label", page)
+        self.assertNotIn("Desk label", page)
         self.assertNotIn("Saved on the crew ladder", page)
+
+    def test_roles_follow_discord_order_and_head_hides_the_id(self):
+        hid = 612529332191100938
+        everyone = Role(1, "@everyone", position=0)
+        lawyer = Role(12, "pimpin lawyer", position=2)
+        botrole = Role(3, "PIMP-BOT", position=6, managed=True)
+        head = Role(10, "Head Admin", position=8, color=0xF0B429)
+        long_name = "A" * 50
+        long_role = Role(14, long_name, position=9)
+        legend = Role(9, "PIMPIN_LEGEND", position=40)
+        member = Member(hid, "Pimpin Levi", [head])
+        head.members = [member]
+        me = SimpleNamespace(top_role=Role(2, "bot", position=20), guild_permissions=Perms(True))
+        guild = Guild([lawyer, everyone, legend, head, botrole, long_role], [member], me)
+        self.store.set(42, "crew_admins", str(hid))
+        self.store.set(42, "head_admin", str(hid))
+        with patch.object(bot, "_guild_for", return_value=guild), \
+                patch.object(bot, "crew_at_least", return_value=True), \
+                patch.object(bot, "MEMBERS_INTENT", True), \
+                patch.object(bot, "crew_display_name", lambda uid, gid=None: str(int(uid))):
+            rows = bot.discord_role_rows(42)
+            desk = bot.staff_desk(7, 42)
+        self.assertEqual([row["name"] for row in rows], [
+            "PIMPIN_LEGEND", long_name, "Head Admin", "PIMP-BOT", "pimpin lawyer", "@everyone"])
+        self.assertEqual(rows[0]["block"], "The bot's role is not above this one.")
+        managed = next(row for row in rows if row["name"] == "PIMP-BOT")
+        self.assertIn("cannot change", managed["block"])
+        self.assertTrue(rows[-1]["block"])
+        head_role = next(row for row in rows if row["name"] == "Head Admin")
+        self.assertEqual(head_role["block"], "")
+        self.assertEqual(head_role["people"][0]["name"], "Pimpin Levi")
+        self.assertEqual(head_role["people"][0]["id"], hid)
+        self.assertEqual(desk["head"]["name"], "Pimpin Levi")
+        self.assertEqual(desk["head"]["role"], "Head Admin")
+        self.assertEqual(desk["head"]["id"], hid)
+        self.assertNotIn(str(hid), desk["head"]["name"])
+
+    def test_head_admin_fetches_a_display_name_instead_of_the_id(self):
+        hid = 612529332191100938
+        role = Role(10, "Head Admin", position=4)
+        me = SimpleNamespace(top_role=Role(2, "bot", position=20), guild_permissions=Perms(True))
+        guild = Guild([role], [], me)
+        remote = Member(hid, "Pimpin Levi", [role])
+
+        async def fetch(uid):
+            self.assertEqual(int(uid), hid)
+            return remote
+
+        guild.fetch_member = fetch
+        self.store.set(42, "crew_admins", str(hid))
+        self.store.set(42, "head_admin", str(hid))
+        with patch.object(bot, "_guild_for", return_value=guild), \
+                patch.object(bot, "crew_at_least", return_value=True), \
+                patch.object(bot, "crew_display_name", lambda uid, gid=None: str(int(uid))):
+            desk = bot.staff_desk(7, 42)
+            self.assertEqual(desk["head"]["name"], "")
+            self.assertEqual(desk["head"]["role"], "Head Admin")
+            fresh = asyncio.run(bot.freshen_head_name(42, desk["head"]))
+        self.assertEqual(fresh["name"], "Pimpin Levi")
+        self.assertEqual(fresh["role"], "Head Admin")
+        self.assertEqual(fresh["id"], hid)
+        self.assertNotIn(str(hid), fresh["name"])
 
     def test_api_refuses_when_discord_will_not_and_when_the_caller_is_not_owner(self):
         role = Role(10, "Head Admin", position=5)

@@ -38302,6 +38302,9 @@ def role_block_reason(guild, role) -> str:
     me = getattr(guild, "me", None)
     if me is None:
         return "The bot is not in this server."
+    name = (getattr(role, "name", None) or "").strip()
+    if name == "@everyone" or getattr(role, "is_default", lambda: False)():
+        return "Discord manages that role, so the bot cannot change it."
     perms = getattr(me, "guild_permissions", None)
     if perms is None or not getattr(perms, "manage_roles", False):
         return "The bot does not have Manage Roles."
@@ -38313,6 +38316,65 @@ def role_block_reason(guild, role) -> str:
     return ""
 
 
+def readable_name(text, uid: int = 0) -> str:
+    """A name a person can read. A Discord id is not a label."""
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    if raw.isdigit() and ((uid and int(raw) == int(uid)) or len(raw) >= 16):
+        return ""
+    return raw
+
+
+def member_display_name(guild, uid: int) -> str:
+    if guild is None or not uid:
+        return ""
+    member = None
+    getter = getattr(guild, "get_member", None)
+    if callable(getter):
+        try:
+            member = getter(int(uid))
+        except Exception:
+            member = None
+    if member is None:
+        for item in getattr(guild, "members", []) or []:
+            if int(getattr(item, "id", 0) or 0) == int(uid):
+                member = item
+                break
+    if member is None:
+        return ""
+    for attr in ("display_name", "global_name", "name"):
+        shown = readable_name(getattr(member, attr, None), uid)
+        if shown:
+            return shown
+    return ""
+
+
+def discord_head_role_name(guild) -> str:
+    if guild is not None:
+        for role in getattr(guild, "roles", []) or []:
+            name = (getattr(role, "name", None) or "").strip()
+            if name.lower() == HEAD_ROLE_NAME.lower():
+                return name
+    return HEAD_ROLE_NAME
+
+
+def head_admin_row(gid: Optional[int], hid: int, head_open: bool, left: Optional[dict]) -> dict:
+    """Head admin: the member's display name and the Discord role name. Never the numeric id."""
+    guild = _guild_for(gid)
+    shown = ""
+    if hid:
+        shown = member_display_name(guild, hid) or readable_name(crew_display_name(hid, gid), hid)
+    if not shown and left:
+        shown = readable_name(left.get("name"), hid)
+    return {
+        "id": int(hid or 0),
+        "name": shown,
+        "role": discord_head_role_name(guild),
+        "open": bool(head_open),
+    }
+
+
 def role_people(role) -> Optional[list]:
     if not MEMBERS_INTENT:
         return None
@@ -38320,8 +38382,13 @@ def role_people(role) -> Optional[list]:
     for member in getattr(role, "members", []) or []:
         if getattr(member, "bot", False):
             continue
-        rows.append({"id": int(member.id),
-                     "name": clip(getattr(member, "display_name", None) or str(member.id), 40)})
+        uid = int(member.id)
+        shown = ""
+        for attr in ("display_name", "global_name", "name"):
+            shown = readable_name(getattr(member, attr, None), uid)
+            if shown:
+                break
+        rows.append({"id": uid, "name": shown})
     rows.sort(key=lambda r: r["name"].lower())
     return rows
 
@@ -38430,24 +38497,26 @@ def role_actor_stash_get(gid: int, uid: int, role_id: int, act: str) -> tuple[st
 
 
 def discord_role_rows(gid: Optional[int] = None) -> list:
+    """This server's Discord roles, highest first, under the names Discord uses."""
     guild = _guild_for(gid)
     if guild is None:
         return []
-    out = []
+    roles = []
     for role in getattr(guild, "roles", []) or []:
         name = (getattr(role, "name", None) or "").strip()
-        if not name or name == "@everyone" or getattr(role, "managed", False):
-            continue
-        if getattr(role, "is_default", lambda: False)():
-            continue
+        if name:
+            roles.append(role)
+    roles.sort(key=lambda role: int(getattr(role, "position", 0) or 0), reverse=True)
+    out = []
+    for role in roles:
+        name = (getattr(role, "name", None) or "").strip()
         people = role_people(role)
         shown = people[:40] if people is not None else None
-        label = role_desk_label(gid, role)
         out.append({
             "id": int(role.id),
-            "name": clip(name, 40),
-            "label": label,
-            "mark": role_mark(label or name),
+            "name": name,
+            "label": name,
+            "mark": role_mark(name),
             "color": role_hex(role),
             "n": None if people is None else len(people),
             "more": 0 if people is None else max(0, len(people) - 40),
@@ -38455,8 +38524,7 @@ def discord_role_rows(gid: Optional[int] = None) -> list:
             "head": name.lower() == HEAD_ROLE_NAME.lower(),
             "block": role_block_reason(guild, role),
         })
-    out.sort(key=lambda r: (0 if r["head"] else 1, (r.get("label") or r["name"]).lower()))
-    return out[:40]
+    return out
 
 
 def desk_members(gid: Optional[int] = None) -> list:
@@ -38467,13 +38535,14 @@ def desk_members(gid: Optional[int] = None) -> list:
         for m in getattr(guild, "members", []) or []:
             if getattr(m, "bot", False):
                 continue
-            rows.append({"id": int(m.id), "name": clip(getattr(m, "display_name", None) or str(m.id), 40)})
+            shown = readable_name(getattr(m, "display_name", None) or getattr(m, "name", None), int(m.id))
+            rows.append({"id": int(m.id), "name": shown})
             seen.add(int(m.id))
     for kind in ("owner", "admin", "mod"):
         for i in crew_ids(kind, gid):
             if i in seen:
                 continue
-            rows.append({"id": int(i), "name": crew_display_name(i, gid)})
+            rows.append({"id": int(i), "name": readable_name(crew_display_name(i, gid), i)})
             seen.add(int(i))
     rows.sort(key=lambda r: r["name"].lower())
     return rows[:200]
@@ -38490,8 +38559,7 @@ def staff_desk(uid: int, gid: Optional[int] = None) -> Optional[dict]:
         "open": True,
         "developer": crew_at_least(uid, "developer", gid),
         "members_intent": MEMBERS_INTENT,
-        "head": {"id": hid, "name": (crew_display_name(hid, gid) if hid else (left or {}).get("name") or ""),
-                 "open": head_open},
+        "head": head_admin_row(gid, hid, head_open, left),
         "roles": discord_role_rows(gid),
         "members": desk_members(gid),
         "alerts": open_alerts,
@@ -38604,7 +38672,7 @@ async def switch_discord_role(gid: int, role_id: int, uid: int, add: bool, actor
     block = role_block_reason(guild, role)
     if block:
         return False, block + " The role was not changed."
-    label = role_desk_label(gid, role)
+    label = (getattr(role, "name", None) or "").strip()
     try:
         member = guild.get_member(int(uid))
         if member is None:
@@ -40054,7 +40122,7 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .rolemark{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex:none;
  font-size:11px;font-weight:850;letter-spacing:.02em}
 .rolemain{display:flex;flex-direction:column;min-width:0;gap:2px}
-.rolemain b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rolemain b{overflow-wrap:anywhere;white-space:normal}
 .roleblock{color:var(--down);font-size:12px;font-weight:650;white-space:normal}
 .rolemeta{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;flex:none}
 .roledetail{background:#110c1b;border:1px solid #7B3FE455;border-radius:14px;padding:12px;margin:0 0 8px}
@@ -40191,7 +40259,7 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <div class="wrap" id="hq">
 <section class="card" id="departcard" style="margin-bottom:12px"><h2>People who left</h2><div id="depart"></div></section>
 <section class="card" id="deskcard" style="margin-bottom:12px" hidden><h2>Roles</h2><div id="desk"></div>
- <p class="muted">Developer and owner only. Give or take a Discord role, rename the desk label, or replace Head admin. Discord updates only when the bot has Manage Roles and its role sits above that one.</p></section>
+ <p class="muted">Developer and owner only. Give or take a Discord role, or replace Head admin. Discord updates only when the bot has Manage Roles and its role sits above that one.</p></section>
 <section class="card lead" style="margin-bottom:12px"><h2>Servers &amp; feeds</h2><div class="sv" id="servers"></div>
  <p class="muted">Every Discord server is listed, and each added feed shows even before the first call. Solid red = offline. Rapid yellow blink = caution. Green slowly brightens when healthy. Last ping and fail counts sit under each name.</p></section>
 <div class="g3">
@@ -40352,30 +40420,32 @@ function paintDesk(desk){const card=$('#deskcard');if(!card)return;
  const people=desk.members||[];
  const roles=desk.roles||[];
  const changes=desk.changes||[];
- const person=h('select',{name:'who',onchange:e=>{deskWho=e.target.value}},[h('option',{value:'',text:'Pick a person'})].concat(people.map(p=>h('option',{value:String(p.id),text:p.name}))));
+ const person=h('select',{name:'who',onchange:e=>{deskWho=e.target.value}},[h('option',{value:'',text:'Pick a person'})].concat(people.filter(p=>faceName(p.name,p.id)).map(p=>h('option',{value:String(p.id),'data-id':String(p.id),text:faceName(p.name,p.id)}))));
  if(deskWho)person.value=deskWho;
  const typed=h('input',{name:'typed',value:deskTyped,placeholder:'Or paste a Discord ID',autocomplete:'off',oninput:e=>{deskTyped=e.target.value}});
  const group=h('select',{name:'role'},[h('option',{value:'head',text:'Head admin'}),
   desk.developer?h('option',{value:'owner',text:'Owner'}):null,
   h('option',{value:'admin',text:'Admin'}),h('option',{value:'mod',text:'Mod'})]);
  const roleOpts=[h('option',{value:'',text:'Discord role'})];
- roles.forEach(r=>roleOpts.push(h('option',{value:String(r.id),text:(r.label||r.name)+(r.n!=null?' · '+r.n:'')})));
+ roles.forEach(r=>roleOpts.push(h('option',{value:String(r.id),'data-id':String(r.id),text:(r.name||'')+(r.n!=null?' · '+r.n:'')})));
  const rolePick=h('select',{name:'discord_role'},roleOpts);
  if(deskRole)rolePick.value=deskRole;
  const note=h('p',{id:'desknote',class:'muted',role:'status',text:''});
  function whoFrom(f){return (f.typed.value||'').trim()||f.who.value}
+ function faceName(name,id){const text=String(name||'').trim();
+  if(!text||/^\d{16,}$/.test(text)||(id&&text===String(id)))return '';
+  return text}
  function roleLines(){
   if(!roles.length)return h('p',{class:'muted',text:'No Discord roles yet.'});
   return h('div',{class:'rolelist'},roles.map(r=>{
    const id=String(r.id);const on=deskRole===id;const color=r.color||'#7B3FE4';
    const recent=changes.filter(c=>String(c.role)===id);
    const same=desk.manage&&r.block&&desk.manage.indexOf(r.block)===0;
-   const row=h('button',{type:'button',class:'rolerow'+(on?' on':''),'aria-expanded':on?'true':'false',
+   const row=h('button',{type:'button',class:'rolerow'+(on?' on':''),'data-id':id,'aria-expanded':on?'true':'false',
     onclick:()=>{deskRole=on?'':id;paintDesk(desk)}},
     h('span',{class:'rolemark',style:'background:'+color+';color:'+roleInk(color),text:r.mark||'•','aria-hidden':'true'}),
     h('span',{class:'rolemain'},
-     h('b',{text:r.label||r.name}),
-     (r.label&&r.name&&r.label!==r.name)?h('span',{class:'muted',text:r.name}):null,
+     h('b',{text:r.name||''}),
      (r.block&&!same)?h('span',{class:'roleblock',text:r.block}):null),
     h('span',{class:'rolemeta'},
      r.head?h('span',{class:'chip warnc',text:'seat'}):null,
@@ -40387,14 +40457,9 @@ function paintDesk(desk){const card=$('#deskcard');if(!card)return;
    const detail=h('div',{class:'roledetail'},
     r.block?h('p',{class:'bad',text:r.block+' A change from here will not reach Discord.'}):
      h('p',{class:'muted',text:'The bot can change this role in Discord.'}),
-    h('form',{class:'form',onsubmit:e=>{e.preventDefault();
-     seatPost({op:'role',mode:'label',role:id,label:e.target.label.value})}},
-     h('input',{name:'label',value:(r.label&&r.label!==r.name)?r.label:'',maxlength:'40',placeholder:'Desk label',autocomplete:'off'}),
-     h('button',{type:'submit',text:'Save label'})),
-    h('p',{class:'muted',text:'The label is only on this desk. Discord still calls it '+(r.name||'this role')+'.'}),
     h('p',{class:'muted',text:'On this role'}),
     folks==null?h('p',{class:'muted',text:'The bot cannot list who has this role until Server Members Intent is on.'}):
-     (folks.length?folks.map(p=>h('div',{class:'row'},h('span',{text:p.name}),
+     (folks.length?folks.map(p=>h('div',{class:'row','data-id':String(p.id)},h('span',{text:faceName(p.name,p.id)}),
       h('button',{class:'xbtn',type:'button',text:'Take role',onclick:()=>seatPost({op:'role',mode:'remove',role:id,who:String(p.id)})}))):
       h('p',{class:'muted',text:'Nobody is on this role.'})),
     (folks!=null&&r.more)?h('p',{class:'muted',text:String(r.more)+' more people are not listed here.'}):null,
@@ -40404,10 +40469,14 @@ function paintDesk(desk){const card=$('#deskcard');if(!card)return;
      h('span',{class:'muted',text:c.when||''}))):
      h('p',{class:'muted',text:'No Discord role changes seen yet.'}));
    return h('div',null,row,detail)}))}
+ const face=faceName(head.name,head.id);
+ const roleName=head.role||'Head Admin';
+ const headId=head.id?String(head.id):null;
  put($('#desk'),
-  head.open?h('div',{class:'alert'},h('b',{text:'Head admin seat is open'}),
-   h('div',{text:head.name?head.name+' — the seat is open. Pick who replaces them.':'Nobody is Head admin yet.'})):
-   h('div',{class:'row'},h('span',{text:'Head admin'}),h('b',{text:head.name||'Open'})),
+  head.open?h('div',{class:'alert','data-id':headId},h('b',{text:'Head admin seat is open'}),
+   h('div',{text:face?face+' — '+roleName+' is open. Pick who replaces them.':
+    (headId?roleName+' is open. Pick who replaces them.':'Nobody is Head admin yet.')})):
+   h('div',{class:'row','data-id':headId},h('span',{text:face||'Head admin'}),h('b',{text:roleName})),
   desk.manage?h('p',{class:'bad',text:desk.manage}):null,
   roleLines(),
   desk.members_intent?null:h('p',{class:'muted',text:'Paste a Discord ID if the name list is empty. Server Members Intent, with MEMBERS_INTENT=1 on Railway, fills that list and who is on each role.'}),
@@ -41046,12 +41115,50 @@ async def dash_staff(request):
     return dash_html(web, dash_paint_look(staff_page_html(uid)))
 
 
+async def freshen_head_name(gid: int, head: dict) -> dict:
+    """Fill the Head admin display name from Discord when the cache only had the id."""
+    head = dict(head or {})
+    hid = int(head.get("id") or 0)
+    head["name"] = readable_name(head.get("name"), hid)
+    guild = _guild_for(gid)
+    head["role"] = discord_head_role_name(guild)
+    if head["name"] or not hid or guild is None:
+        return head
+    fetch = getattr(guild, "fetch_member", None)
+    if not callable(fetch):
+        return head
+    try:
+        member = fetch(int(hid))
+        if asyncio.iscoroutine(member):
+            member = await member
+    except Exception:
+        return head
+    if member is None:
+        return head
+    shown = ""
+    for attr in ("display_name", "global_name", "name"):
+        shown = readable_name(getattr(member, attr, None), hid)
+        if shown:
+            break
+    if shown:
+        head["name"] = shown
+    return head
+
+
+async def staff_payload(uid: int) -> dict:
+    data = staff_ops(uid)
+    desk = data.get("desk") if isinstance(data, dict) else None
+    if isinstance(desk, dict) and isinstance(desk.get("head"), dict):
+        desk["head"] = await freshen_head_name(staff_gid(), desk["head"])
+    return data
+
+
 async def dash_api_staff(request):
     from aiohttp import web
     uid = staff_uid_from_request(request)
     if uid is None:
         return dash_error(web, request, 403)
-    return web.json_response(staff_ops(uid))
+    return web.json_response(await staff_payload(uid))
 
 
 async def _req_json(request) -> dict:
@@ -41113,7 +41220,7 @@ async def dash_api_staff_post(request):
                          (now_iso(), int(tid[1:]), gid))
             db().commit()
             staff_log_add(gid, "ok", f"Closed ticket {tid}", staff_rec(uid, gid).get("name") or str(uid))
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "ban":
         name = clip(str(body.get("name") or ""), 40)
         if name:
@@ -41125,7 +41232,7 @@ async def dash_api_staff_post(request):
                              "action": clip(str(body.get("action") or "staff alert"), 40)})
             staff_blacklist_save(gid, items)
             staff_log_add(gid, "ban", f"Blacklisted {name}", staff_rec(uid, gid).get("name") or str(uid))
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "unban":
         name = clip(str(body.get("name") or ""), 40)
         try:
@@ -41134,10 +41241,10 @@ async def dash_api_staff_post(request):
         except Exception:
             items = []
         staff_blacklist_save(gid, items)
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "quota" and crew_at_least(uid, "owner", gid):
         staff_quota_save(gid, str(body.get("id") or ""), body.get("n"))
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "announce":
         due = parse_due(str(body.get("when") or ""))
         text = clip(str(body.get("text") or ""), 1800)
@@ -41155,29 +41262,29 @@ async def dash_api_staff_post(request):
             (gid, cid, text, iso(due), uid, now_iso()))
         db().commit()
         staff_log_add(gid, "ok", "Scheduled an announcement", staff_rec(uid, gid).get("name") or str(uid))
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "netmode" and crew_at_least(uid, "admin", gid):
         mode = "group" if str(body.get("mode") or "") == "group" else None
         set_setting(gid, "kpi_net", mode)
         staff_log_add(gid, "ok", "Switched the board tile to group net" if mode else "Switched the board tile to week net",
                       staff_rec(uid, gid).get("name") or str(uid))
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "weekboard" and crew_at_least(uid, "admin", gid):
         text = clip(str(body.get("text") or ""), 280)
         set_setting(gid, "week_board", text or None)
         staff_log_add(gid, "ok", "Pinned the week board" if text else "Cleared the week board",
                       staff_rec(uid, gid).get("name") or str(uid))
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "kick":
         dash_kick_sessions()
         staff_log_add(gid, "ok", "Signed everyone out of the dashboard",
                       staff_rec(uid, gid).get("name") or str(uid))
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "revoke":
         who = staff_rec(uid, gid).get("name") or str(uid)
         if dash_revoke_device(str(body.get("id") or "")):
             staff_log_add(gid, "ok", "Signed one browser out of the dashboard", who)
-        return web.json_response({"ok": True, **staff_ops(uid)})
+        return web.json_response({"ok": True, **await staff_payload(uid)})
     if op == "role":
         if not crew_at_least(uid, "owner", gid):
             return web.json_response({"ok": False, "error": "Developer and owner only."}, status=403)
@@ -41187,7 +41294,7 @@ async def dash_api_staff_post(request):
             if not ok:
                 return web.json_response({"ok": False, "error": note}, status=400)
             staff_log_add(gid, "ok", note, crew_display_name(uid, gid))
-            return web.json_response({"ok": True, "note": note, **staff_ops(uid)})
+            return web.json_response({"ok": True, "note": note, **await staff_payload(uid)})
         if mode not in ("add", "remove"):
             return web.json_response({"ok": False, "error": "Pick give or take."}, status=400)
         person, _name = resolve_desk_person(gid, str(body.get("who") or ""))
@@ -41203,14 +41310,14 @@ async def dash_api_staff_post(request):
             return web.json_response({"ok": False, "error": note, "warn": True}, status=400)
         if " is on " in note or " is off " in note:
             staff_log_add(gid, "ok", note, crew_display_name(uid, gid))
-        return web.json_response({"ok": True, "note": note, **staff_ops(uid)})
+        return web.json_response({"ok": True, "note": note, **await staff_payload(uid)})
     if op == "seat":
         if not crew_at_least(uid, "owner", gid):
             return web.json_response({"ok": False, "error": "Developer and owner only."}, status=403)
         ok, note = await staff_seat(uid, gid, body)
         if not ok:
             return web.json_response({"ok": False, "error": note}, status=400)
-        return web.json_response({"ok": True, "note": note, "warn": role_note_warn(note), **staff_ops(uid)})
+        return web.json_response({"ok": True, "note": note, "warn": role_note_warn(note), **await staff_payload(uid)})
     return web.json_response({"ok": False}, status=400)
 
 
