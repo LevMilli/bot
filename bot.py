@@ -40183,6 +40183,13 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .spark{width:100%;height:36px;display:block}
 .eqcard{background:#0c0e12;border:1px solid #23262d;border-radius:18px;padding:18px 16px 8px;margin:0 0 14px}
 .eqk{margin:0;color:#9aa1ab;font-size:13px;font-weight:650}
+.eqtop{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap}
+.eqwl{display:inline-flex;align-items:stretch;border:1px solid #3d4450;border-radius:999px;overflow:hidden;background:#14181e}
+.eqwl button{appearance:none;background:transparent;border:0;height:28px;padding:0 12px;cursor:pointer;
+ font:700 12px ui-sans-serif,system-ui,sans-serif}
+.eqwl button+button{border-left:1px solid #3d4450}
+.eqwl button[aria-pressed="true"]{background:#1c2430}
+.eqresults{margin:10px 0 2px;max-height:440px;overflow:auto}
 .eqv{margin:2px 0 0;font:700 48px/1.02 ui-sans-serif,system-ui,sans-serif;letter-spacing:-.04em;
  font-variant-numeric:tabular-nums;color:#d7dbe2}
 .eqv.up{color:#00c805}.eqv.down{color:#ff4d4d}.eqv.flat{color:#d7dbe2}.eqv.live{color:#f0b429}
@@ -40319,9 +40326,16 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <div class="wrap" id="pimp" hidden>
 <div class="paperban" role="status"><b>PAPER ONLY.</b> This desk does not trade real money. There is no Kalshi API key, no wallet connect, and no live-order switch. Any future switch would need two people to confirm. The same paper checks also run on a timer.</div>
 <section class="eqcard" id="pimpequity" aria-labelledby="pimpeqk">
- <p class="eqk" id="pimpeqk">Paper P/L</p>
+ <div class="eqtop">
+  <p class="eqk" id="pimpeqk">Paper P/L</p>
+  <div class="eqwl" id="eqwl" role="group" aria-label="Paper wins and losses">
+   <button type="button" data-side="win" aria-pressed="false" aria-expanded="false">0 wins</button>
+   <button type="button" data-side="loss" aria-pressed="false" aria-expanded="false">0 losses</button>
+  </div>
+ </div>
  <p class="eqv flat" id="pimpeqv">$0.00</p>
  <p class="eqsub" id="pimpeqsub">No settled paper trades yet.</p>
+ <div id="eqresults" class="eqresults" hidden></div>
  <div class="eqranges" id="eqranges" role="group" aria-label="Paper chart range">
   <button type="button" data-range="ytd" aria-pressed="true">YTD</button>
   <button type="button" data-range="3m" aria-pressed="false">3M</button>
@@ -40722,6 +40736,7 @@ const CT_ZONE='America/Chicago';
 const EQ_COLOR={up:'#00c805',down:'#ff4d4d',flat:'#c5ccd6'};
 let pimpCurve=[], pimpPts=[], pimpBox={w:0,h:0}, pimpHead={v:0,today:0,has:false}, pimpGuide=null, pimpSpikes=[], pimpPick=null, pimpDrag=null, pimpCurveKey='';
 let pimpLive=null, pimpRange='ytd', pimpChart={ranges:[],open_line:{n:0,opens:[],settled:false,label:'Live · not settled'}};
+let pimpBooks=[], pimpSide='';
 function eqTone(v){return v>0?'up':v<0?'down':'flat'}
 function ctDayKey(ms){return new Intl.DateTimeFormat('en-CA',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ms))}
 function ctLabel(ms, dayOnly){if(!Number.isFinite(ms)) return 'Time unknown';
@@ -40733,6 +40748,55 @@ function ctAxis(ms, sameDay){if(!Number.isFinite(ms)) return '';
  return new Intl.DateTimeFormat('en-US',opts).format(new Date(ms))}
 function paintEqHead(v, sub, tone){const el=$('#pimpeqv'); if(el){el.textContent=pimpHead.has?pnl(v):'$0.00'; el.className='eqv '+(tone||'flat')}
  const subEl=$('#pimpeqsub'); if(subEl) subEl.textContent=sub||''}
+function resultMs(row){const raw=String((row&&(row.closed_at||row.when))||'').replace(/\s+(Central|CT)$/i,'').trim();
+ const ms=Date.parse(raw); return Number.isFinite(ms)?ms:NaN}
+function settledResults(){const rows=[];
+ (pimpBooks||[]).forEach(bot=>{
+  (bot.history||[]).forEach(row=>{
+   if(!row||typeof row!=='object') return;
+   const n=Number(row.pnl);
+   if(!Number.isFinite(n)||n===0) return;
+   rows.push(Object.assign({}, row, {name:row.name||bot.name||bot.id||'unknown', bot:row.bot||bot.id||''}))})});
+ rows.sort((a,b)=>{const am=resultMs(a), bm=resultMs(b);
+  const af=Number.isFinite(am), bf=Number.isFinite(bm);
+  if(af&&bf&&am!==bm) return bm-am;
+  if(af!==bf) return af?-1:1;
+  return 0});
+ return rows}
+function resultCard(t){const n=Number(t.pnl);
+ const game=t.game||t.ticker||t.team||t.what||t.title||'';
+ return h('article',{class:'eqslip'},
+  h('div',{class:'fact'},h('span',{text:'Bot'}),h('span',{text:t.name||t.bot||'unknown'})),
+  h('div',{class:'fact'},h('span',{text:'Close time'}),h('span',{text:t.closed_at||t.when||'unknown'})),
+  h('div',{class:'fact'},h('span',{text:'Ticker or game'}),h('span',{text:game||'unknown'})),
+  h('div',{class:'fact'},h('span',{text:'Side'}),h('span',{text:t.side||'unknown'})),
+  h('div',{class:'fact'},h('span',{text:'Stake'}),h('span',{text:t.cost==null?'unknown':usd(t.cost)})),
+  h('div',{class:'fact'},h('span',{text:'Why'}),h('span',{text:t.why||'unknown'})),
+  h('div',{class:'fact'},h('span',{text:'Risk'}),h('span',{text:t.risk==null?'unknown':usd(t.risk)})),
+  h('div',{class:'fact'},h('span',{text:'Reward'}),h('span',{text:t.reward==null?'unknown':usd(t.reward)})),
+  h('div',{class:'fact'},h('span',{text:'Risk/reward'}),h('span',{text:t.risk_reward==null?'unknown':Number(t.risk_reward).toFixed(2)})),
+  h('div',{class:'fact'},h('span',{text:'Exit reason'}),h('span',{text:t.exit_reason||'unknown'})),
+  h('div',{class:'fact'},h('span',{text:'Payout'}),h('span',{text:t.payout==null?'unknown':usd(t.payout)})),
+  h('div',{class:'fact'},h('span',{text:'P/L'}),h('span',{class:'num '+(n>0?'win':n<0?'loss':''),text:Number.isFinite(n)?pnl(n):'unknown'})))}
+function sideBtn(side, n, pressed){const word=side==='win'?(n===1?'win':'wins'):(n===1?'loss':'losses');
+ return h('button',{type:'button','data-side':side,'aria-pressed':pressed?'true':'false','aria-expanded':pressed?'true':'false',
+  class:side==='win'?'win':'loss'}, h('b',{text:String(n)}), ' '+word)}
+function paintResults(){const box=$('#eqwl'), list=$('#eqresults');
+ const rows=settledResults();
+ const wins=rows.filter(row=>Number(row.pnl)>0), losses=rows.filter(row=>Number(row.pnl)<0);
+ if(box) put(box, sideBtn('win', wins.length, pimpSide==='win'), sideBtn('loss', losses.length, pimpSide==='loss'));
+ if(!list) return;
+ if(pimpSide!=='win'&&pimpSide!=='loss'){list.hidden=true; put(list); return}
+ const shown=pimpSide==='win'?wins:losses;
+ list.hidden=false;
+ put(list,
+  h('div',{class:'eqslipbar'}, h('p',{class:'eqsliphead',text:pimpSide==='win'?'Wins':'Losses'}),
+   h('button',{class:'xbtn',type:'button',text:'Close',onclick:()=>{pimpSide=''; paintResults()}})),
+  shown.length?shown.map(resultCard):h('p',{class:'muted',text:pimpSide==='win'?'No paper wins yet.':'No paper losses yet.'}))}
+function bindResults(){const box=$('#eqwl'); if(!box||box.dataset.bound) return; box.dataset.bound='1';
+ box.addEventListener('click', e=>{const btn=e.target.closest('button[data-side]'); if(!btn) return;
+  const side=btn.getAttribute('data-side')||'';
+  pimpSide=pimpSide===side?'':side; paintResults()})}
 function pctText(pct){const v=Number(pct); if(!Number.isFinite(v)) return '';
  const abs=Math.abs(v); const body=Math.abs(abs-Math.round(abs))<0.05?String(Math.round(abs)):abs.toFixed(1);
  const sign=v>0?'+':v<0?'−':''; return sign+body+'%'}
@@ -41072,8 +41136,10 @@ function bindEquity(){const host=$('#pimpchart'); if(!host||host.dataset.bound) 
  host.addEventListener('pointercancel', eqUp);
  host.addEventListener('pointerleave', e=>{if(pimpDrag) return; if(!e.pointerType||e.pointerType==='mouse') eqClear()});
  addEventListener('resize', ()=>{if($('#pimp')&&!$('#pimp').hidden) drawEquity()});
- addEventListener('keydown', e=>{if(e.key!=='Escape'||!pimpPick) return;
+ addEventListener('keydown', e=>{if(e.key!=='Escape') return;
   const tag=(e.target&&e.target.tagName)||''; if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT') return;
+  if(pimpSide){pimpSide=''; paintResults()}
+  if(!pimpPick) return;
   pimpPick=null; paintSlips(); drawEquity()})}
 function statusChip(status){const map={running:['run','running'],skipped:['skip','skipped'],blocked:['block','blocked'],error:['err','error']};
  const pair=map[status]||['skip','skipped']; return h('span',{class:'chip '+pair[0],text:pair[1]})}
@@ -41160,6 +41226,8 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
  pimpCurveKey=nextKey;
  pimpCurve=nextCurve;
  pimpSpikes=Array.isArray(desk.spikes)?desk.spikes:[];
+ pimpBooks=d.bots||[];
+ bindResults(); paintResults();
  bindEquity(); drawEquity();
  const needle=(pimpQuery.q||'').trim().toLowerCase();
  const openCards=[];
@@ -41243,6 +41311,7 @@ addEventListener('keydown',e=>{if((e.key!=='r'&&e.key!=='R')||e.metaKey||e.ctrlK
  if($('#pimp')&&!$('#pimp').hidden){e.preventDefault(); loadPimp()}});
 addEventListener('popstate',()=>showPanel(panelName(),false));
 bindRanges();
+bindResults();
 load();
 let pimpStart=panelName();
 try{ if(pimpStart==='hq' && localStorage.getItem('pb-staff-panel')==='pimp') pimpStart='pimp'; }catch(e){}
