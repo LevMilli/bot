@@ -29,8 +29,16 @@ import logger
 import alerts
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+DESK_ROOT = os.path.dirname(HERE)
 CFG = json.load(open(os.path.join(HERE, "config.json")))
 CT = ZoneInfo(CFG["timezone"])
+
+
+def _desk():
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import pimp_desk
+    return pimp_desk
 
 
 def live_quotes(event_ticker):
@@ -117,6 +125,15 @@ def step_scan(args, state, day):
     if not pick:
         print(alerts.format_skip_note(day, "chosen contract moved out of the band on the order-book re-check"))
         return
+    try:
+        desk = _desk()
+        skip = desk.learning_skip(
+            desk.load_learning(DESK_ROOT), "S&P", desk.prob_bucket(pick["ask"]))
+    except Exception:
+        skip = ""
+    if skip:
+        print(skip)
+        return
     n = risk_manager.stake_contracts(pick["ask"], bankroll=state["bankroll"])
     fee = paper_sim.taker_fee(n, pick["ask"])
     preview = {"ticker": pick["ticker"], "side": pick["side"], "ask": pick["ask"], "contracts": n,
@@ -153,6 +170,17 @@ def step_settle(args, state, day):
             continue
         paper_sim.settle_position(state, pos, m["result"])
         paper_sim.save_state(state)
+        try:
+            desk = _desk()
+            desk.record_learning(DESK_ROOT, {
+                "result": "hit" if (pos.get("pnl") or 0) > 0 else "miss",
+                "market": "S&P",
+                "prob": pos.get("ask"),
+                "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+                "fill_id": pos.get("fill_id") or "",
+            })
+        except Exception:
+            pass
         logger.ledger_settle(pos, state["bankroll"])
         logger.learn(f"Settled {pos['ticker']} {pos['side']} @ {pos['ask']:.2f}: {pos['status']} {pos['pnl']:+.2f}", "settle")
         print(alerts.format_settle_note(pos, state["bankroll"]))
@@ -173,7 +201,10 @@ def main():
     day = dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(CT).date()
     if not args.dry_run:
         logger.ensure_files()
+    existed = os.path.exists(paper_sim.STATE_PATH)
     state = paper_sim.load_state()
+    if not existed and not args.dry_run:
+        paper_sim.save_state(state)
     {"brief": step_brief, "scan": step_scan, "settle": step_settle}[args.step](args, state, day)
 
 

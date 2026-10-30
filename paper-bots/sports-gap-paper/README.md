@@ -7,15 +7,16 @@ This is a practice bot. It **never places real orders**. It has no API key, no w
 2. Finds the matching Kalshi game-winner market. The series are `KXNFLGAME`, `KXNCAAFGAME`, `KXNBAGAME`, `KXWNBAGAME`, `KXMLBGAME` and `KXNHLGAME`. A market only counts as a match if it has the same date and both teams.
 3. Gets a "fair" win probability:
    - **NFL, NCAAF, NBA, WNBA, MLB:** ESPN's live win probability, taken from `summary?event=ID` → `winprobability`.
-   - **NHL:** ESPN doesn't publish one, so the bot uses its own simple model. It treats goals as random (Poisson), uses the time left and the score, and gets team strength from the pre-game betting line. Because this model is cruder, it needs a bigger gap (10 points).
+   - **NHL:** ESPN doesn't publish one, so the bot uses its own simple model. It treats goals as random (Poisson), uses the time left and the score, and gets team strength from the pre-game betting line. Because this model is cruder, its saved gap is 2 points higher than the other sports (6 points when the saved bar is 4).
 4. Works out the **gap**: fair probability − Kalshi YES ask − Kalshi taker fee. The fee is `ceil(0.07 × P × (1−P) × 100) / 100` per contract.
 5. Makes a **paper buy** only if all of these are true:
-   - the gap is **8 points or more** (10 for NHL)
-   - the game is **not close** (the home team's fair probability is not between 40% and 60%)
+   - the gap is **4 points or more** after the fee (6 for the NHL model). The old bar was 8 points (10 for NHL).
+   - while this Chicago hour has fewer than 12 paper trades, the timer waives that gap and the close-game filter so a check can paper-buy without a strict edge. Loosening stops at 12. The minimum pace shown on the desk is 6.
    - the bid/ask spread is 5¢ or less
    - the price is between 5¢ and 95¢
-   - fewer than 3 positions are open, and the bot doesn't already hold this game
+   - fewer than 12 positions are open (the old cap was 3 in this script and 4 on the desk), and the bot doesn't already hold this game
    - there is enough paper cash
+   - the paper learning log is not skipping that sport and probability bucket
 
    Trade size depends on the gap: **$1** normally, **$2** for 12+ points, **$3** for 16+ points.
 6. Exits a paper position in one of two ways:

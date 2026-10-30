@@ -63,9 +63,16 @@ def open_position(state, day, event_ticker, pick, contracts, entry_time_iso):
     """Record a simulated buy. Cash is reserved (cost + fee) immediately."""
     fee = taker_fee(contracts, pick["ask"])
     cost = round(contracts * pick["ask"], 4)
+    stake = round(cost + fee, 4)
+    max_payout = float(contracts)
+    reward = round(max_payout - stake, 4)
     pos = {"day": str(day), "event": event_ticker, "ticker": pick["ticker"], "side": pick["side"],
            "strike": pick.get("strike"), "bid": pick.get("bid"), "ask": pick["ask"], "contracts": contracts,
-           "cost": cost, "fee": fee, "entry_time": entry_time_iso, "status": "open",
+           "cost": cost, "fee": fee, "risk": stake, "reward": reward,
+           "risk_reward": round(reward / stake, 4) if stake else None,
+           "max_payout": max_payout,
+           "why": "Paper buy. The ask was in the 80 to 90 cent band.",
+           "entry_time": entry_time_iso, "status": "open",
            "price_source": "https://api.elections.kalshi.com/trade-api/v2",
            "price_at": entry_time_iso,
            "fill_id": f"{pick.get('ticker')}|{entry_time_iso}"}
