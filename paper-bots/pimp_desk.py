@@ -1303,6 +1303,65 @@ def central_text(when: dt.datetime | None = None) -> str:
     return f"{when.strftime('%B')} {when.day}, {when.year}, {hour}:{when.strftime('%M %p')} Central"
 
 
+_CENTRAL_WHEN = re.compile(
+    r"^(January|February|March|April|May|June|July|August|September|October|November|December)"
+    r" (\d{1,2}), (\d{4}), (\d{1,2}):(\d{2}) (AM|PM) Central$"
+)
+_MONTH_NUM = {
+    name: number for number, name in enumerate(
+        ("January", "February", "March", "April", "May", "June",
+         "July", "August", "September", "October", "November", "December"),
+        1,
+    )
+}
+
+
+def _ct_when(text: str):
+    """Parse a desk timestamp into America/Chicago. Unknown text stays unknown."""
+    raw = str(text or "").strip()
+    if not raw or raw == "no check yet":
+        return None
+    if raw.endswith(" CT"):
+        wall = raw[:-3].strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return dt.datetime.strptime(wall, fmt).replace(tzinfo=CT)
+            except ValueError:
+                continue
+    match = _CENTRAL_WHEN.match(raw)
+    if match:
+        hour = int(match.group(4)) % 12
+        if match.group(6) == "PM":
+            hour += 12
+        try:
+            return dt.datetime(
+                int(match.group(3)), _MONTH_NUM[match.group(1)], int(match.group(2)),
+                hour, int(match.group(5)), tzinfo=CT,
+            )
+        except ValueError:
+            return None
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        try:
+            day = dt.date.fromisoformat(raw)
+        except ValueError:
+            return None
+        return dt.datetime(day.year, day.month, day.day, tzinfo=CT)
+    stamp = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    parsed = _parsed(stamp)
+    if parsed is not None:
+        return parsed.astimezone(CT)
+    for fmt in ("%Y-%m-%d %H:%M:%S UTC", "%Y-%m-%d %H:%M UTC"):
+        try:
+            return dt.datetime.strptime(raw, fmt).replace(tzinfo=dt.timezone.utc).astimezone(CT)
+        except ValueError:
+            continue
+    return None
+
+
+def _date_only(text: str) -> bool:
+    return re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(text or "").strip()) is not None
+
+
 def _central_from_text(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
@@ -2069,15 +2128,25 @@ def _streak(bots: list) -> dict:
     return {"kind": "flat", "n": 0, "text": "The last paper trade was flat."}
 
 
-def _equity(bots: list) -> list:
+def _equity_curve(bots: list) -> list:
+    """Cumulative settled paper P/L. No point is invented when nothing has settled."""
     rows = [row for row in _flatten(bots) if row.get("state") == "settled" and _num(row.get("pnl")) is not None]
-    rows.sort(key=lambda row: str(row.get("when") or ""))
+    keyed = []
+    for index, row in enumerate(rows):
+        when = _ct_when(row.get("when"))
+        keyed.append((0 if when is not None else 1, when.timestamp() if when is not None else 0.0, index, row, when))
+    keyed.sort(key=lambda item: (item[0], item[1], item[2]))
     total = 0.0
     points = []
-    for row in rows:
+    for _rank, _ts, _index, row, when in keyed:
         total = round(total + float(row["pnl"]), 2)
-        points.append(total)
-    return points[-40:]
+        raw = str(row.get("when") or "")
+        points.append({
+            "t": when.isoformat(timespec="seconds") if when is not None else "",
+            "v": total,
+            "day": _date_only(raw),
+        })
+    return points[-180:]
 
 
 def _digest(bots: list) -> str:
@@ -2129,6 +2198,7 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         if text and text != "Paused" and (not nxt or text < nxt):
             nxt = text
     central = _central_from_text(last_check)
+    curve = _equity_curve(bots)
     return {
         "cash": None if not cashes else round(sum(cashes), 2),
         "realized": None if not realized_rows else round(sum(realized_rows), 2),
@@ -2148,7 +2218,8 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         "goal": goal,
         "goal_bar": bar,
         "streak": _streak(bots),
-        "equity": _equity(bots),
+        "equity": [point["v"] for point in curve][-40:],
+        "curve": curve,
         "news": news_calendar(root),
         "paused_all": bool(_load_pause(root).get("all")),
     }

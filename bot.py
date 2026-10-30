@@ -39666,6 +39666,23 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .goalbar{height:8px;background:#241833;border-radius:99px;overflow:hidden;margin-top:6px}
 .goalbar i{display:block;height:100%;background:linear-gradient(90deg,#7B3FE4,#f0b429)}
 .spark{width:100%;height:36px;display:block}
+.eqcard{background:#0c0e12;border:1px solid #23262d;border-radius:18px;padding:18px 16px 8px;margin:0 0 14px}
+.eqk{margin:0;color:#9aa1ab;font-size:13px;font-weight:650}
+.eqv{margin:2px 0 0;font:700 48px/1.02 ui-sans-serif,system-ui,sans-serif;letter-spacing:-.04em;
+ font-variant-numeric:tabular-nums;color:#d7dbe2}
+.eqv.up{color:#00c805}.eqv.down{color:#ff4d4d}.eqv.flat{color:#d7dbe2}
+.eqsub{margin:6px 0 0;color:#8b939e;font-size:14px;font-weight:650}
+.eqplot{position:relative;height:320px;margin-top:6px;touch-action:pan-y;user-select:none}
+.eqplot svg{width:100%;height:100%;display:block}
+.eqempty{margin:0;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;color:#8b939e;padding:0 18px}
+.eqtip{position:absolute;z-index:3;pointer-events:none;transform:translate(-50%,calc(-100% - 12px));
+ background:#1c2128;border:1px solid #343b46;border-radius:10px;padding:7px 10px;color:#f4f6f8;
+ box-shadow:0 10px 28px #000a;white-space:nowrap}
+.eqtip span{display:block;color:#aeb6c2;font-size:12px;font-weight:600}
+.eqtip b{display:block;font-size:14px;font-variant-numeric:tabular-nums}
+.eqaxis{fill:#8b939e;font:600 11px ui-sans-serif,system-ui,sans-serif}
+#pimp .pimpstick{position:static;top:auto}
+#pimpbook .booktable{display:table;min-width:720px}
 .booktable{width:100%;border-collapse:collapse;font-size:13px}
 .booktable th,.booktable td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 .booktable td.num,.booktable th.num{text-align:right}
@@ -39679,6 +39696,9 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
  .pimpgrid{grid-template-columns:1fr}
  .paperban,.pimpstick{top:auto;position:sticky}
  .todaybig{font-size:22px}
+ .eqv{font-size:36px}
+ .eqplot{height:220px}
+ .eqcard{padding:14px 12px 6px}
  .booktable{display:block;overflow-x:auto}
  .pimpstick{top:0}
  #pimp .form input,#pimp .form button,#pimp .form label,#pimp .form select{flex:1 1 100%;width:100%;max-width:100%}
@@ -39765,6 +39785,23 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 </div>
 <div class="wrap" id="pimp" hidden>
 <div class="paperban" role="status"><b>PAPER ONLY.</b> This desk does not trade real money. There is no Kalshi API key, no wallet connect, and no live-order switch. Any future switch would need two people to confirm. The same paper checks also run on a timer.</div>
+<section class="eqcard" id="pimpequity" aria-labelledby="pimpeqk">
+ <p class="eqk" id="pimpeqk">Paper P/L</p>
+ <p class="eqv flat" id="pimpeqv">$0.00</p>
+ <p class="eqsub" id="pimpeqsub">No settled paper trades yet.</p>
+ <div class="eqplot" id="pimpchart" role="img" aria-label="No settled paper trades yet. The chart is empty."></div>
+</section>
+<section class="card" id="pimpopenwrap" style="margin-bottom:12px"><h2>Open trades</h2><div id="pimpopen"></div></section>
+<section class="card" id="pimpbookwrap" style="margin-bottom:12px"><h2>History</h2>
+ <form class="form" id="pimpfind">
+  <input name="q" id="pimpq" placeholder="Team, ticker, or date">
+  <select name="filter" id="pimpfilter">
+   <option value="all">All</option><option value="open">Open</option><option value="settled">Settled</option>
+   <option value="wins">Wins</option><option value="losses">Losses</option>
+  </select>
+  <button type="submit">Search</button>
+ </form>
+ <div id="pimpbook"></div></section>
 <div class="pimpstick" id="pimpstick" aria-live="polite"></div>
 <h1 class="pimph">PIMP-TRADING</h1>
 <p class="todaybig" id="pimptoday"></p>
@@ -39795,16 +39832,6 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
  </form>
  <p class="muted" id="pimpnote" role="status"></p>
  <p class="muted">Saved in paper-bots/pimp-trading.json on this machine. The picks database is left alone. Quiet hours hold trade alerts. The nightly recap still posts. Owner or developer can save. The before and after numbers sit above the form.</p></section>
-<section class="card" style="margin-bottom:12px"><h2>Paper book</h2>
- <form class="form" id="pimpfind">
-  <input name="q" id="pimpq" placeholder="Team, ticker, or date">
-  <select name="filter" id="pimpfilter">
-   <option value="all">All</option><option value="open">Open</option><option value="settled">Settled</option>
-   <option value="wins">Wins</option><option value="losses">Losses</option>
-  </select>
-  <button type="submit">Search</button>
- </form>
- <div id="pimpbook"></div></section>
 <div class="pimpgrid" id="pimpbots"></div>
 </div>
 <div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">
@@ -40083,12 +40110,109 @@ function previewLimits(){const f=$('#pimpform'), box=$('#pimppreview'); if(!f||!
   '. After: 80% stake $'+next.stake_hi_min+' to $'+next.stake_hi_max+', under $'+next.stake_lo_max+
   ', daily loss stop $'+next.daily_loss_stop+', open risk $'+next.max_open_risk+', week goal $'+next.week_goal+
   (pimpArmed?'. Save again to keep this.':'.');}
-function spark(points){if(!points||!points.length) return h('p',{class:'muted',text:'No paper equity yet.'});
- const w=280,hgt=36,min=Math.min(0,...points),max=Math.max(0,...points),span=(max-min)||1;
- const d=points.map((n,i)=>{const x=points.length===1?0:(i/(points.length-1))*w;
-  const y=hgt-((n-min)/span)*(hgt-4)-2; return (i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)}).join(' ');
- return sv('svg',{class:'spark',viewBox:'0 0 '+w+' '+hgt,'aria-hidden':'true'},
-  sv('path',{d:d,fill:'none',stroke:'#c4a6ff','stroke-width':'2'}))}
+const CT_ZONE='America/Chicago';
+const EQ_COLOR={up:'#00c805',down:'#ff4d4d',flat:'#c5ccd6'};
+let pimpCurve=[], pimpPts=[], pimpBox={w:0,h:0}, pimpHead={v:0,today:0,has:false}, pimpGuide=null;
+function eqTone(v){return v>0?'up':v<0?'down':'flat'}
+function ctDayKey(ms){return new Intl.DateTimeFormat('en-CA',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ms))}
+function ctLabel(ms, dayOnly){if(!Number.isFinite(ms)) return 'Time unknown';
+ const opts=dayOnly?{timeZone:CT_ZONE,month:'short',day:'numeric',year:'numeric'}
+  :{timeZone:CT_ZONE,month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'};
+ return new Intl.DateTimeFormat('en-US',opts).format(new Date(ms))+' CT'}
+function ctAxis(ms, sameDay){if(!Number.isFinite(ms)) return '';
+ const opts=sameDay?{timeZone:CT_ZONE,hour:'numeric',minute:'2-digit'}:{timeZone:CT_ZONE,month:'short',day:'numeric'};
+ return new Intl.DateTimeFormat('en-US',opts).format(new Date(ms))}
+function paintEqHead(v, sub, tone){const el=$('#pimpeqv'); if(el){el.textContent=pimpHead.has?pnl(v):'$0.00'; el.className='eqv '+(tone||'flat')}
+ const subEl=$('#pimpeqsub'); if(subEl) subEl.textContent=sub||''}
+function drawEquity(){const host=$('#pimpchart'); if(!host) return;
+ const points=(pimpCurve||[]).filter(p=>p&&Number.isFinite(Number(p.v)));
+ pimpHead.has=!!points.length;
+ const last=points.length?Number(points[points.length-1].v):0;
+ const tone=points.length?eqTone(last):'flat';
+ const rest=points.length?('Today '+pnl(pimpHead.today||0)):'No settled paper trades yet.';
+ if(!host.dataset.scrub) paintEqHead(last, rest, tone);
+ host.setAttribute('aria-label', points.length?('Paper P/L '+pnl(last)+'. Times are Central.'):'No settled paper trades yet. The chart is empty.');
+ host.style.cursor=points.length?'crosshair':'default';
+ if(!points.length){put(host, h('p',{class:'eqempty',text:'No settled paper trades yet.'})); pimpPts=[]; pimpGuide=null; return}
+ if(host.clientWidth<40){const n=Number(host.dataset.tries||0);
+  if(n<8){host.dataset.tries=String(n+1); requestAnimationFrame(drawEquity)} return}
+ host.dataset.tries='0';
+ const w=Math.max(280, Math.round(host.clientWidth));
+ const hgt=Math.max(160, Math.round(host.clientHeight||320));
+ const padL=8, padR=8, padT=18, padB=28;
+ const plotW=Math.max(1,w-padL-padR), plotH=Math.max(1,hgt-padT-padB);
+ const vals=points.map(p=>Number(p.v));
+ let min=Math.min.apply(null,vals), max=Math.max.apply(null,vals);
+ if(min===max){min-=1; max+=1}
+ const yPad=(max-min)*0.14; min-=yPad; max+=yPad;
+ const span=(max-min)||1;
+ const times=points.map(p=>Date.parse(p.t||''));
+ const finite=times.filter(t=>Number.isFinite(t));
+ const useTime=finite.length===points.length && points.length>=2 && finite[finite.length-1]>finite[0];
+ const t0=useTime?finite[0]:0, t1=useTime?finite[finite.length-1]:1;
+ const sameDay=useTime && finite.every(t=>ctDayKey(t)===ctDayKey(finite[0]));
+ const xAt=i=>{if(points.length===1) return padL+plotW/2;
+  if(useTime) return padL+((times[i]-t0)/(t1-t0))*plotW;
+  return padL+(i/(points.length-1))*plotW};
+ const yAt=v=>padT+(1-(v-min)/span)*plotH;
+ pimpPts=points.map((p,i)=>{const ms=times[i];
+  return {x:xAt(i), y:yAt(Number(p.v)), v:Number(p.v), label:ctLabel(ms, !!p.day), ms:ms}});
+ pimpBox={w:w,h:hgt};
+ const color=EQ_COLOR[tone]||EQ_COLOR.flat;
+ let d=''; pimpPts.forEach((p,i)=>{d+=(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixed(1)+' '});
+ const area=pimpPts.length>1?d+'L'+pimpPts[pimpPts.length-1].x.toFixed(1)+' '+(padT+plotH).toFixed(1)+
+  ' L'+pimpPts[0].x.toFixed(1)+' '+(padT+plotH).toFixed(1)+' Z':'';
+ const rawMin=Math.min.apply(null,vals), rawMax=Math.max.apply(null,vals);
+ const zeroY=yAt(0);
+ const marks=points.length<2?[]:(host.clientWidth<520?[0,1]:[0,0.5,1]);
+ const axis=marks.map((frac,i)=>{const ms=useTime?t0+frac*(t1-t0):times[Math.round(frac*(points.length-1))];
+  const anchor=i===0?'start':(i===marks.length-1?'end':'middle');
+  const x=padL+frac*plotW;
+  return sv('text',{class:'eqaxis',x:x.toFixed(1),y:hgt-8,'text-anchor':anchor}, ctAxis(ms, sameDay)||'')});
+ const grad=sv('linearGradient',{id:'eqfill',x1:'0',y1:'0',x2:'0',y2:'1'},
+  sv('stop',{offset:'0%','stop-color':color,'stop-opacity':'0.28'}),
+  sv('stop',{offset:'100%','stop-color':color,'stop-opacity':'0'}));
+ const rule=sv('line',{x1:0,y1:padT,x2:0,y2:padT+plotH,stroke:color,'stroke-opacity':'0.45','stroke-dasharray':'3 4',opacity:'0'});
+ const dot=sv('circle',{cx:pimpPts[pimpPts.length-1].x,cy:pimpPts[pimpPts.length-1].y,r:'4.5',fill:color,stroke:'#0c0e12','stroke-width':'2'});
+ pimpGuide={rule:rule,dot:dot,color:color};
+ const tip=h('div',{class:'eqtip',id:'eqtip',hidden:true},h('span',{id:'eqtiptime',text:''}),h('b',{id:'eqtipval',text:''}));
+ put(host,
+  sv('svg',{viewBox:'0 0 '+w+' '+hgt,width:'100%',height:'100%','aria-hidden':'true'},
+   sv('defs',null,grad),
+   rawMin<0&&rawMax>0?sv('line',{x1:padL,y1:zeroY,x2:padL+plotW,y2:zeroY,stroke:'#ffffff','stroke-opacity':'0.16'}):null,
+   area?sv('path',{d:area,fill:'url(#eqfill)',stroke:'none'}):null,
+   pimpPts.length>1?sv('path',{d:d,fill:'none',stroke:color,'stroke-width':'2.5','stroke-linejoin':'round','stroke-linecap':'round'}):null,
+   ...axis, rule, dot),
+  tip)}
+function eqScrub(e){const host=$('#pimpchart'); if(!host||!pimpPts.length) return;
+ const rect=host.getBoundingClientRect();
+ const x=(e.clientX-rect.left)*(pimpBox.w/Math.max(rect.width,1));
+ let best=pimpPts[0], dist=Infinity;
+ pimpPts.forEach(p=>{const dd=Math.abs(p.x-x); if(dd<dist){dist=dd; best=p}});
+ host.dataset.scrub='1';
+ paintEqHead(best.v, best.label, eqTone(best.v));
+ const tip=$('#eqtip'); if(tip){tip.hidden=false;
+  const left=Math.max(64, Math.min(pimpBox.w-64, best.x));
+  tip.style.left=left+'px'; tip.style.top=best.y+'px';
+  const time=$('#eqtiptime'); if(time) time.textContent=best.label;
+  const val=$('#eqtipval'); if(val){val.textContent=pnl(best.v); val.style.color=EQ_COLOR[eqTone(best.v)]}}
+ if(pimpGuide){pimpGuide.rule.setAttribute('x1',best.x); pimpGuide.rule.setAttribute('x2',best.x);
+  pimpGuide.rule.setAttribute('opacity','1'); pimpGuide.rule.setAttribute('stroke',EQ_COLOR[eqTone(best.v)]);
+  pimpGuide.dot.setAttribute('cx',best.x); pimpGuide.dot.setAttribute('cy',best.y);
+  pimpGuide.dot.setAttribute('fill',EQ_COLOR[eqTone(best.v)]); pimpGuide.dot.setAttribute('r','5.5')}}
+function eqClear(){const host=$('#pimpchart'); if(host) delete host.dataset.scrub;
+ const tip=$('#eqtip'); if(tip) tip.hidden=true;
+ const last=pimpPts.length?pimpPts[pimpPts.length-1]:null;
+ if(pimpGuide&&last){pimpGuide.rule.setAttribute('opacity','0');
+  pimpGuide.dot.setAttribute('cx',last.x); pimpGuide.dot.setAttribute('cy',last.y);
+  pimpGuide.dot.setAttribute('r','4.5'); pimpGuide.dot.setAttribute('fill',EQ_COLOR[pimpHead.has?eqTone(last.v):'flat'])}
+ paintEqHead(last?last.v:0, pimpHead.has?('Today '+pnl(pimpHead.today||0)):'No settled paper trades yet.', pimpHead.has&&last?eqTone(last.v):'flat')}
+function bindEquity(){const host=$('#pimpchart'); if(!host||host.dataset.bound) return; host.dataset.bound='1';
+ host.addEventListener('pointermove', eqScrub);
+ host.addEventListener('pointerdown', eqScrub);
+ host.addEventListener('pointerleave', e=>{if(!e.pointerType||e.pointerType==='mouse') eqClear()});
+ host.addEventListener('pointercancel', eqClear);
+ addEventListener('resize', ()=>{if($('#pimp')&&!$('#pimp').hidden) drawEquity()})}
 function statusChip(status){const map={running:['run','running'],skipped:['skip','skipped'],blocked:['block','blocked'],error:['err','error']};
  const pair=map[status]||['skip','skipped']; return h('span',{class:'chip '+pair[0],text:pair[1]})}
 function tone(row){const kind=row&&row.result==='won'?'win':row&&row.result==='lost'?'loss':'open';
@@ -40145,7 +40269,7 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
   h('div',{class:'row'},h('span',{text:'Realized P/L'}),h('b',{class:'num '+(desk.realized>0?'win':desk.realized<0?'loss':''),text:desk.realized==null?'unknown':pnl(desk.realized)})),
   h('div',{class:'row'},h('span',{text:'Streak'}),h('span',{text:(desk.streak&&desk.streak.text)||'No settled paper trades yet.'})),
   h('div',{class:'row'},h('span',{text:'Health'}),h('span',null,h('i',{class:'dot'+(health.alive?' on':'')}),' ',health.detail||'')),
-  goal, spark(desk.equity||[]),
+  goal,
   d.changes?h('p',{text:d.changes.text}):null,
   d.changes?h('button',{class:'xbtn',type:'button',text:'This is what I last saw',onclick:()=>pimpPost({op:'seen'})}):null,
   d.timer?h('p',{class:'muted',text:d.timer}):null,
@@ -40158,16 +40282,27 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
   (d.audit||[]).length?(d.audit||[]).map(row=>h('div',{class:'row'},h('span',{text:(row.who||'unknown')+' · '+(row.what||'')}),h('span',{class:'muted',text:row.at||''}))):
    h('p',{class:'muted',text:'No limit changes yet.'}),
   d.live_switch?h('p',{class:'muted',text:d.live_switch.needs||''}):null);
+ pimpHead.today=Number(desk.today)||0;
+ pimpCurve=Array.isArray(desk.curve)?desk.curve:[];
+ bindEquity(); drawEquity();
+ const needle=(pimpQuery.q||'').trim().toLowerCase();
+ const openCards=[];
+ (d.bots||[]).forEach(b=>{(b.positions||[]).forEach(p=>{
+  const blob=[p.team,p.ticker,p.game,p.what,p.title,p.when,p.name,p.bot].join(' ').toLowerCase();
+  if(needle && blob.indexOf(needle)<0) return;
+  openCards.push(h('div',null,openCard(p, fresh),
+   p.confidence?h('span',{class:'chip',text:p.confidence}):null,
+   p.stake_compare?h('p',{text:p.stake_compare}):null,
+   p.stale?h('p',{class:'muted',text:'Price older than 30 seconds.'}):null))})});
+ const openBox=$('#pimpopen');
+ if(openBox) put(openBox, openCards.length?openCards:h('p',{text:needle?'No open paper trades match this search.':'No open paper trades.'}));
  const book=d.book||{}; const rows=book.rows||[];
- const openRows=rows.filter(row=>row.state==='open');
  const closedRows=rows.filter(row=>row.state!=='open');
  put($('#pimpbook'),
-  !rows.length?h('p',{text:'No paper trades yet. Last check '+(desk.central_check||'no check yet')+'. No edge.'}):null,
-  rows.length&&!openRows.length?h('p',{text:'No open paper trades.'}):null,
-  openRows.map(row=>openCard(row, fresh)),
   closedRows.length?h('div',{class:'scroll'},h('table',{class:'booktable'},h('thead',null,closedHead()),
    h('tbody',null,closedRows.map(row=>closedRow(row, fresh&&row.state!=='open'))))):
-   (rows.length?h('p',{class:'muted',text:'No closed paper trades.'}):null),
+   h('p',{text:!rows.length?'No closed paper trades. Last check '+(desk.central_check||'no check yet')+'.':
+    (pimpQuery.filter==='open'?'Open trades are listed above.':'No closed paper trades.')}),
   h('p',{class:'muted',text:'Page '+String(book.page||1)+' of '+String(book.pages||1)}),
   h('div',{class:'form'},
    book.page>1?h('button',{class:'xbtn',type:'button',text:'Previous page',onclick:()=>{pimpQuery.page=Math.max(1,(book.page||1)-1); loadPimp()}}):null,
@@ -40188,14 +40323,6 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    b.data_error?h('p',{class:'warn',text:b.data_error}):null,
    (b.would_have||[]).length?h('h2',{text:'Would have bought',style:'margin-top:14px'}):null,
    (b.would_have||[]).map(row=>h('p',{text:(row.what||'unknown')+' — '+(row.why||'')})),
-   (b.positions||[]).length?h('h2',{text:'Open paper positions',style:'margin-top:14px'}):null,
-   (b.positions||[]).map(p=>h('div',null,openCard(p, fresh),
-    p.confidence?h('span',{class:'chip',text:p.confidence}):null,
-    p.stake_compare?h('p',{text:p.stake_compare}):null,
-    p.stale?h('p',{class:'muted',text:'Price older than 30 seconds.'}):null)),
-   (b.history||[]).length?h('h2',{text:'Past paper trades',style:'margin-top:14px'}):null,
-   (b.history||[]).length?h('div',{class:'scroll'},h('table',{class:'booktable'},h('thead',null,closedHead()),
-    h('tbody',null,(b.history||[]).map(t=>closedRow(t, fresh))))):null,
    access.save?h('form',{class:'form',onsubmit:e=>{e.preventDefault(); const f=e.target;
     pimpPost({op:'note',bot:b.id,trade:f.trade.value,note:f.note.value,skipped:f.skipped.checked,stake_idea:f.stake_idea.value})}},
     h('input',{name:'trade',placeholder:'Ticker or team'}),
