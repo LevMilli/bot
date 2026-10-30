@@ -39681,6 +39681,15 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .eqtip span{display:block;color:#aeb6c2;font-size:12px;font-weight:600}
 .eqtip b{display:block;font-size:14px;font-variant-numeric:tabular-nums}
 .eqaxis{fill:#8b939e;font:600 11px ui-sans-serif,system-ui,sans-serif}
+.eqspike{font:700 13px ui-sans-serif,system-ui,sans-serif}
+.eqhint{margin:0 0 8px;color:#8b939e;font-size:13px}
+.eqslips{margin:0 0 10px}
+.eqslipbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 0 6px}
+.eqsliphead{margin:0;color:#e7ebf0;font-size:14px;font-weight:750}
+.eqslip{background:#14181e;border:1px solid #2a3038;border-radius:12px;padding:8px 10px;margin:0 0 8px}
+.eqslip .fact{display:flex;justify-content:space-between;gap:12px;padding:3px 0;font-size:13px}
+.eqslip .fact span:first-child{color:#8b939e;flex:none}
+.eqslip .fact span:last-child{text-align:right;min-width:0;overflow-wrap:anywhere}
 #pimp .pimpstick{position:static;top:auto}
 #pimpbook .booktable{display:table;min-width:720px}
 .booktable{width:100%;border-collapse:collapse;font-size:13px}
@@ -39790,6 +39799,8 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
  <p class="eqv flat" id="pimpeqv">$0.00</p>
  <p class="eqsub" id="pimpeqsub">No settled paper trades yet.</p>
  <div class="eqplot" id="pimpchart" role="img" aria-label="No settled paper trades yet. The chart is empty."></div>
+ <p class="eqhint" id="pimpeqhint" hidden>Click a point or drag across a stretch to see those paper slips.</p>
+ <div id="pimpslips" class="eqslips" hidden aria-live="polite"></div>
 </section>
 <section class="card" id="pimpopenwrap" style="margin-bottom:12px"><h2>Open trades</h2><div id="pimpopen"></div></section>
 <section class="card" id="pimpbookwrap" style="margin-bottom:12px"><h2>History</h2>
@@ -40076,10 +40087,14 @@ function resultText(row){if(!row)return '';
  if(row.result==='flat')return 'flat';
  return row.result||''}
 function panelName(){return location.pathname.replace(/\/+$/,'')==='/pimp-trading'?'pimp':'hq'}
+function paintWordmark(on){const brand=$('a.brand'); if(!brand) return;
+ brand.replaceChildren(document.createTextNode('PIMP'), h('b',{text:'-'}),
+  document.createTextNode(on?'BOT · STAFF · TRADING':'BOT · STAFF'))}
 function showPanel(name, push){const on=name==='pimp';
  const hq=$('#hq'), box=$('#pimp'), btn=$('#pimpbtn');
  if(hq) hq.hidden=on; if(box) box.hidden=!on;
  if(btn) btn.setAttribute('aria-pressed', on?'true':'false');
+ paintWordmark(on);
  document.title=on?'PIMP-TRADING · PIMP-BOT':'Staff HQ · PIMP-BOT';
  try{localStorage.setItem('pb-staff-panel', on?'pimp':'hq')}catch(e){}
  if(push){const url=on?'/pimp-trading':'/staff'; if(location.pathname.replace(/\/+$/,'')!==url) history.pushState({panel:name},'',url)}
@@ -40112,7 +40127,7 @@ function previewLimits(){const f=$('#pimpform'), box=$('#pimppreview'); if(!f||!
   (pimpArmed?'. Save again to keep this.':'.');}
 const CT_ZONE='America/Chicago';
 const EQ_COLOR={up:'#00c805',down:'#ff4d4d',flat:'#c5ccd6'};
-let pimpCurve=[], pimpPts=[], pimpBox={w:0,h:0}, pimpHead={v:0,today:0,has:false}, pimpGuide=null;
+let pimpCurve=[], pimpPts=[], pimpBox={w:0,h:0}, pimpHead={v:0,today:0,has:false}, pimpGuide=null, pimpSpikes=[], pimpPick=null, pimpDrag=null, pimpCurveKey='';
 function eqTone(v){return v>0?'up':v<0?'down':'flat'}
 function ctDayKey(ms){return new Intl.DateTimeFormat('en-CA',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ms))}
 function ctLabel(ms, dayOnly){if(!Number.isFinite(ms)) return 'Time unknown';
@@ -40124,6 +40139,42 @@ function ctAxis(ms, sameDay){if(!Number.isFinite(ms)) return '';
  return new Intl.DateTimeFormat('en-US',opts).format(new Date(ms))}
 function paintEqHead(v, sub, tone){const el=$('#pimpeqv'); if(el){el.textContent=pimpHead.has?pnl(v):'$0.00'; el.className='eqv '+(tone||'flat')}
  const subEl=$('#pimpeqsub'); if(subEl) subEl.textContent=sub||''}
+function pctText(pct){const v=Number(pct); if(!Number.isFinite(v)) return '';
+ const abs=Math.abs(v); const body=Math.abs(abs-Math.round(abs))<0.05?String(Math.round(abs)):abs.toFixed(1);
+ const sign=v>0?'+':v<0?'−':''; return sign+body+'%'}
+function spikeText(dollars, pct){const p=pctText(pct); const money=pnl(dollars); return p?(p+' · '+money):money}
+function slipWhen(p){if(!p) return 'Time unknown';
+ if(p.day){const day=p.when||(Number.isFinite(p.ms)?new Intl.DateTimeFormat('en-US',{timeZone:CT_ZONE,month:'long',day:'numeric',year:'numeric'}).format(new Date(p.ms)):'');
+  return day?(day.indexOf('Chicago')>=0?day:day+' · America/Chicago'):'Time unknown'}
+ if(Number.isFinite(p.ms)) return new Intl.DateTimeFormat('en-US',{timeZone:CT_ZONE,month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(p.ms))+' America/Chicago';
+ if(p.when) return (p.when.indexOf('Chicago')>=0||p.when.indexOf('Central')>=0)?p.when:p.when+' America/Chicago';
+ return 'Time unknown'}
+function slipCard(p){const n=Number(p.pnl);
+ return h('div',{class:'eqslip'},
+  h('div',{class:'fact'},h('span',{text:'Time'}),h('span',{text:slipWhen(p)})),
+  h('div',{class:'fact'},h('span',{text:'Ticker or game'}),h('span',{text:p.name||'unknown'})),
+  h('div',{class:'fact'},h('span',{text:'Stake'}),h('span',{text:p.stake==null?'unknown':usd(p.stake)})),
+  h('div',{class:'fact'},h('span',{text:'Payout'}),h('span',{text:p.payout==null?'unknown':usd(p.payout)})),
+  h('div',{class:'fact'},h('span',{text:'P/L'}),h('span',{class:'num '+(n>0?'win':n<0?'loss':''),text:p.pnl==null?'unknown':pnl(p.pnl)})))}
+function stretchOf(lo, hi){const start=pimpPts[lo].v, end=pimpPts[hi].v, dollars=Math.round((end-start)*100)/100;
+ let pct=null; const base=Math.abs(start);
+ if(base>=0.01) pct=Math.round(dollars/base*1000)/10;
+ else {let stake=0, saw=false; for(let i=lo+1;i<=hi;i++){const s=Number(pimpPts[i].stake);
+  if(Number.isFinite(s)){saw=true; stake+=Math.abs(s)}}
+  if(saw&&stake>=0.01) pct=Math.round(dollars/stake*1000)/10}
+ return {dollars:dollars, pct:pct}}
+function paintSlips(){const box=$('#pimpslips'), hint=$('#pimpeqhint');
+ if(hint) hint.hidden=!pimpPts.length||!!pimpPick;
+ if(!box) return;
+ if(!pimpPick||!pimpPts.length){box.hidden=true; put(box); return}
+ const lo=Math.max(0, Math.min(pimpPick.lo, pimpPick.hi));
+ const hi=Math.min(pimpPts.length-1, Math.max(pimpPick.lo, pimpPick.hi));
+ const cards=[]; for(let i=lo;i<=hi;i++) cards.push(slipCard(pimpPts[i]));
+ const head=hi>lo?h('p',{class:'eqsliphead',text:'This stretch '+spikeText(stretchOf(lo,hi).dollars, stretchOf(lo,hi).pct)}):
+  h('p',{class:'eqsliphead',text:cards.length===1?'Paper slip':'Paper slips'});
+ box.hidden=false;
+ put(box, h('div',{class:'eqslipbar'}, head,
+  h('button',{class:'xbtn',type:'button',text:'Clear',onclick:()=>{pimpPick=null; paintSlips(); drawEquity()}})), cards)}
 function drawEquity(){const host=$('#pimpchart'); if(!host) return;
  const points=(pimpCurve||[]).filter(p=>p&&Number.isFinite(Number(p.v)));
  pimpHead.has=!!points.length;
@@ -40131,15 +40182,17 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
  const tone=points.length?eqTone(last):'flat';
  const rest=points.length?('Today '+pnl(pimpHead.today||0)):'No settled paper trades yet.';
  if(!host.dataset.scrub) paintEqHead(last, rest, tone);
- host.setAttribute('aria-label', points.length?('Paper P/L '+pnl(last)+'. Times are Central.'):'No settled paper trades yet. The chart is empty.');
+ host.setAttribute('role', points.length?'group':'img');
+ host.setAttribute('aria-label', points.length?('Paper P/L '+pnl(last)+'. Click a point or drag a stretch. Times are America/Chicago.'):'No settled paper trades yet. The chart is empty.');
  host.style.cursor=points.length?'crosshair':'default';
- if(!points.length){put(host, h('p',{class:'eqempty',text:'No settled paper trades yet.'})); pimpPts=[]; pimpGuide=null; return}
+ if(!points.length){put(host, h('p',{class:'eqempty',text:'No settled paper trades yet.'})); pimpPts=[]; pimpGuide=null; pimpPick=null; paintSlips(); return}
+ if(pimpPick && (Math.min(pimpPick.lo,pimpPick.hi)<0 || Math.max(pimpPick.lo,pimpPick.hi)>=points.length)) pimpPick=null;
  if(host.clientWidth<40){const n=Number(host.dataset.tries||0);
   if(n<8){host.dataset.tries=String(n+1); requestAnimationFrame(drawEquity)} return}
  host.dataset.tries='0';
  const w=Math.max(280, Math.round(host.clientWidth));
  const hgt=Math.max(160, Math.round(host.clientHeight||320));
- const padL=8, padR=8, padT=18, padB=28;
+ const padL=8, padR=8, padT=28, padB=28;
  const plotW=Math.max(1,w-padL-padR), plotH=Math.max(1,hgt-padT-padB);
  const vals=points.map(p=>Number(p.v));
  let min=Math.min.apply(null,vals), max=Math.max.apply(null,vals);
@@ -40156,7 +40209,9 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
   return padL+(i/(points.length-1))*plotW};
  const yAt=v=>padT+(1-(v-min)/span)*plotH;
  pimpPts=points.map((p,i)=>{const ms=times[i];
-  return {x:xAt(i), y:yAt(Number(p.v)), v:Number(p.v), label:ctLabel(ms, !!p.day), ms:ms}});
+  return {x:xAt(i), y:yAt(Number(p.v)), v:Number(p.v), label:ctLabel(ms, !!p.day), ms:ms,
+   day:!!p.day, when:p.when||'', name:p.name||'', stake:p.stake==null?null:Number(p.stake),
+   payout:p.payout==null?null:Number(p.payout), pnl:p.pnl==null?null:Number(p.pnl)}});
  pimpBox={w:w,h:hgt};
  const color=EQ_COLOR[tone]||EQ_COLOR.flat;
  let d=''; pimpPts.forEach((p,i)=>{d+=(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixed(1)+' '});
@@ -40169,6 +40224,20 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
   const anchor=i===0?'start':(i===marks.length-1?'end':'middle');
   const x=padL+frac*plotW;
   return sv('text',{class:'eqaxis',x:x.toFixed(1),y:hgt-8,'text-anchor':anchor}, ctAxis(ms, sameDay)||'')});
+ const spikes=(pimpSpikes||[]).map(sp=>{
+  const i0=Number(sp.from), i1=Number(sp.to);
+  if(!Number.isInteger(i0)||!Number.isInteger(i1)||i0<0||i1>=pimpPts.length||i0>=i1) return null;
+  const a=pimpPts[i0], b=pimpPts[i1], up=Number(sp.dollars)>=0;
+  const midX=Math.max(72, Math.min(w-72, (a.x+b.x)/2));
+  let y=up?Math.min(a.y,b.y)-12:Math.max(a.y,b.y)+16;
+  y=Math.max(14, Math.min(hgt-padB-4, y));
+  return sv('text',{class:'eqspike',x:midX.toFixed(1),y:y.toFixed(1),'text-anchor':'middle',fill:up?EQ_COLOR.up:EQ_COLOR.down,
+   stroke:'#0c0e12','stroke-width':'4','paint-order':'stroke'}, spikeText(sp.dollars, sp.pct))});
+ let band=null; const rings=[];
+ if(pimpPick){const lo=Math.max(0, Math.min(pimpPick.lo, pimpPick.hi)), hi=Math.min(pimpPts.length-1, Math.max(pimpPick.lo, pimpPick.hi));
+  if(hi>lo){const x=Math.min(pimpPts[lo].x, pimpPts[hi].x), width=Math.max(2, Math.abs(pimpPts[hi].x-pimpPts[lo].x));
+   band=sv('rect',{x:x.toFixed(1),y:String(padT),width:width.toFixed(1),height:String(plotH),fill:'#ffffff','fill-opacity':'0.08'})}
+  for(let i=lo;i<=hi;i++) rings.push(sv('circle',{cx:pimpPts[i].x.toFixed(1),cy:pimpPts[i].y.toFixed(1),r:'7',fill:'none',stroke:'#ffffff','stroke-width':'1.5'}))}
  const grad=sv('linearGradient',{id:'eqfill',x1:'0',y1:'0',x2:'0',y2:'1'},
   sv('stop',{offset:'0%','stop-color':color,'stop-opacity':'0.28'}),
   sv('stop',{offset:'100%','stop-color':color,'stop-opacity':'0'}));
@@ -40178,17 +40247,30 @@ function drawEquity(){const host=$('#pimpchart'); if(!host) return;
  const tip=h('div',{class:'eqtip',id:'eqtip',hidden:true},h('span',{id:'eqtiptime',text:''}),h('b',{id:'eqtipval',text:''}));
  put(host,
   sv('svg',{viewBox:'0 0 '+w+' '+hgt,width:'100%',height:'100%','aria-hidden':'true'},
-   sv('defs',null,grad),
+   sv('defs',null,grad), band,
    rawMin<0&&rawMax>0?sv('line',{x1:padL,y1:zeroY,x2:padL+plotW,y2:zeroY,stroke:'#ffffff','stroke-opacity':'0.16'}):null,
    area?sv('path',{d:area,fill:'url(#eqfill)',stroke:'none'}):null,
    pimpPts.length>1?sv('path',{d:d,fill:'none',stroke:color,'stroke-width':'2.5','stroke-linejoin':'round','stroke-linecap':'round'}):null,
-   ...axis, rule, dot),
-  tip)}
+   ...axis, ...rings, ...spikes, rule, dot),
+  tip);
+ paintSlips()}
+function eqX(e){const host=$('#pimpchart'); const rect=host.getBoundingClientRect();
+ return (e.clientX-rect.left)*(pimpBox.w/Math.max(rect.width,1))}
+function eqNearest(x){let best=0, dist=Infinity;
+ pimpPts.forEach((p,i)=>{const dd=Math.abs(p.x-x); if(dd<dist){dist=dd; best=i}});
+ return {index:best, dist:dist}}
+function eqHit(x){const near=eqNearest(x); const tol=Math.max(18, pimpBox.w*0.04);
+ if(near.dist<=tol||pimpPts.length<2) return {lo:near.index, hi:near.index};
+ for(let i=0;i<pimpPts.length-1;i++){const left=Math.min(pimpPts[i].x, pimpPts[i+1].x), right=Math.max(pimpPts[i].x, pimpPts[i+1].x);
+  if(x>=left && x<=right) return {lo:i, hi:i+1}}
+ return {lo:near.index, hi:near.index}}
+function eqWindow(x0, x1){const lo=Math.min(x0,x1), hi=Math.max(x0,x1), hits=[];
+ pimpPts.forEach((p,i)=>{if(p.x>=lo-0.5 && p.x<=hi+0.5) hits.push(i)});
+ if(hits.length) return {lo:hits[0], hi:hits[hits.length-1]};
+ return eqHit((lo+hi)/2)}
+function samePick(a, b){return !!(a&&b&&a.lo===b.lo&&a.hi===b.hi)}
 function eqScrub(e){const host=$('#pimpchart'); if(!host||!pimpPts.length) return;
- const rect=host.getBoundingClientRect();
- const x=(e.clientX-rect.left)*(pimpBox.w/Math.max(rect.width,1));
- let best=pimpPts[0], dist=Infinity;
- pimpPts.forEach(p=>{const dd=Math.abs(p.x-x); if(dd<dist){dist=dd; best=p}});
+ const x=eqX(e); const best=pimpPts[eqNearest(x).index];
  host.dataset.scrub='1';
  paintEqHead(best.v, best.label, eqTone(best.v));
  const tip=$('#eqtip'); if(tip){tip.hidden=false;
@@ -40207,12 +40289,35 @@ function eqClear(){const host=$('#pimpchart'); if(host) delete host.dataset.scru
   pimpGuide.dot.setAttribute('cx',last.x); pimpGuide.dot.setAttribute('cy',last.y);
   pimpGuide.dot.setAttribute('r','4.5'); pimpGuide.dot.setAttribute('fill',EQ_COLOR[pimpHead.has?eqTone(last.v):'flat'])}
  paintEqHead(last?last.v:0, pimpHead.has?('Today '+pnl(pimpHead.today||0)):'No settled paper trades yet.', pimpHead.has&&last?eqTone(last.v):'flat')}
+function eqDown(e){if(!pimpPts.length) return; if(e.pointerType==='mouse' && e.button!==0) return;
+ const host=$('#pimpchart');
+ pimpDrag={x:eqX(e), px:e.clientX, py:e.clientY, id:e.pointerId, moved:false, type:e.pointerType||'mouse'};
+ if(pimpDrag.type==='mouse'){try{host.setPointerCapture(e.pointerId)}catch(err){}}
+ eqScrub(e)}
+function eqMove(e){if(!pimpPts.length) return;
+ if(!pimpDrag || e.pointerId!==pimpDrag.id){if(!pimpDrag) eqScrub(e); return}
+ const dx=e.clientX-pimpDrag.px, dy=e.clientY-pimpDrag.py;
+ if(!pimpDrag.moved && (Math.abs(dx)>8 || Math.abs(dy)>8)){
+  if(pimpDrag.type!=='mouse' && Math.abs(dy)>Math.abs(dx)+4){pimpDrag=null; return}
+  pimpDrag.moved=true;
+  if(pimpDrag.type!=='mouse'){try{$('#pimpchart').setPointerCapture(e.pointerId)}catch(err){}}}
+ if(pimpDrag && pimpDrag.moved){pimpPick=eqWindow(pimpDrag.x, eqX(e)); drawEquity()}
+ eqScrub(e)}
+function eqUp(e){if(!pimpDrag || (e.pointerId!=null && e.pointerId!==pimpDrag.id)) return;
+ const drag=pimpDrag; pimpDrag=null; if(!pimpPts.length){paintSlips(); return}
+ if(!drag.moved){const hit=eqHit(eqX(e)); pimpPick=samePick(pimpPick, hit)?null:hit}
+ else pimpPick=eqWindow(drag.x, eqX(e));
+ drawEquity()}
 function bindEquity(){const host=$('#pimpchart'); if(!host||host.dataset.bound) return; host.dataset.bound='1';
- host.addEventListener('pointermove', eqScrub);
- host.addEventListener('pointerdown', eqScrub);
- host.addEventListener('pointerleave', e=>{if(!e.pointerType||e.pointerType==='mouse') eqClear()});
- host.addEventListener('pointercancel', eqClear);
- addEventListener('resize', ()=>{if($('#pimp')&&!$('#pimp').hidden) drawEquity()})}
+ host.addEventListener('pointerdown', eqDown);
+ host.addEventListener('pointermove', eqMove);
+ host.addEventListener('pointerup', eqUp);
+ host.addEventListener('pointercancel', eqUp);
+ host.addEventListener('pointerleave', e=>{if(pimpDrag) return; if(!e.pointerType||e.pointerType==='mouse') eqClear()});
+ addEventListener('resize', ()=>{if($('#pimp')&&!$('#pimp').hidden) drawEquity()});
+ addEventListener('keydown', e=>{if(e.key!=='Escape'||!pimpPick) return;
+  const tag=(e.target&&e.target.tagName)||''; if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT') return;
+  pimpPick=null; paintSlips(); drawEquity()})}
 function statusChip(status){const map={running:['run','running'],skipped:['skip','skipped'],blocked:['block','blocked'],error:['err','error']};
  const pair=map[status]||['skip','skipped']; return h('span',{class:'chip '+pair[0],text:pair[1]})}
 function tone(row){const kind=row&&row.result==='won'?'win':row&&row.result==='lost'?'loss':'open';
@@ -40283,7 +40388,12 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    h('p',{class:'muted',text:'No limit changes yet.'}),
   d.live_switch?h('p',{class:'muted',text:d.live_switch.needs||''}):null);
  pimpHead.today=Number(desk.today)||0;
- pimpCurve=Array.isArray(desk.curve)?desk.curve:[];
+ const nextCurve=Array.isArray(desk.curve)?desk.curve:[];
+ const nextKey=nextCurve.map(p=>((p&&p.t)||'')+':'+((p&&p.v)||'')).join('|');
+ if(nextKey!==pimpCurveKey) pimpPick=null;
+ pimpCurveKey=nextKey;
+ pimpCurve=nextCurve;
+ pimpSpikes=Array.isArray(desk.spikes)?desk.spikes:[];
  bindEquity(); drawEquity();
  const needle=(pimpQuery.q||'').trim().toLowerCase();
  const openCards=[];
@@ -40385,6 +40495,8 @@ def staff_page_html(uid: int, panel: str = "hq") -> str:
         html = html.replace('<div class="wrap" id="pimp" hidden>', '<div class="wrap" id="pimp">', 1)
         html = html.replace('id="pimpbtn" type="button" aria-pressed="false"',
                             'id="pimpbtn" type="button" aria-pressed="true"', 1)
+        html = html.replace(">PIMP<b>-</b>BOT · STAFF</a>",
+                            ">PIMP<b>-</b>BOT · STAFF · TRADING</a>", 1)
     return html
 
 
