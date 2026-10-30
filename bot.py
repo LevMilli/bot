@@ -35011,8 +35011,11 @@ def dash_app(web):
                     web.get("/sw.js", dash_sw),
                     web.post("/api/log.json", dash_api_log),
                     web.get("/logout", dash_logout),
-                    web.get("/staff", dash_staff), web.get("/api/staff.json", dash_api_staff),
+                    web.get("/staff", dash_staff), web.get("/pimp-trading", dash_pimp),
+                    web.get("/api/staff.json", dash_api_staff),
                     web.post("/api/staff.json", dash_api_staff_post),
+                    web.get("/api/pimp-trading.json", dash_api_pimp),
+                    web.post("/api/pimp-trading.json", dash_api_pimp_post),
                     web.get("/account", dash_account), web.post("/account", dash_account_post),
                     web.post("/login", dash_login_post),
                     web.get("/{tail:.*}", dash_not_found)])
@@ -39616,6 +39619,15 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
  display:grid;place-items:center;border-radius:10px}
 .eyebtn:hover,.eyebtn:focus-visible{color:#fff;background:#ffffff14}
 .eyebtn svg{width:22px;height:22px;display:block}
+#pimpbtn[aria-pressed="true"]{color:#fff;border-color:var(--gold)}
+.paperban{background:#2a2108;border:1px solid var(--gold);border-radius:14px;padding:12px 14px;margin:0 0 12px;font-weight:750}
+.paperban b{color:var(--gold);letter-spacing:.08em}
+.pimph{margin:0 0 8px;font-size:22px;letter-spacing:.14em}
+.pimpgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:700}
+.numin{width:120px}
+.pre{white-space:pre-wrap;word-break:break-word;background:#110c1b;border-radius:12px;padding:10px;margin:8px 0 0;
+ font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:220px;overflow:auto}
 @media (max-width:900px){.g3,.g2{grid-template-columns:1fr}.nav{margin-left:0;width:100%}}
 @media (max-width:720px){
  .sv{grid-template-columns:1fr}.sv .item{padding:14px 16px}.lamp{width:16px;height:16px}
@@ -39632,8 +39644,9 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 <button class="navchip" id="lookbtn" type="button">Background</button>
 <a class="navchip" href="/account">Account</a>
 <a class="navchip" href="/">Dashboard</a>
+<button class="navchip" id="pimpbtn" type="button" aria-pressed="false" aria-controls="pimp">PIMP-TRADING</button>
 <a class="navchip" href="/logout">Sign out</a></div></div>
-<div class="wrap">
+<div class="wrap" id="hq">
 <section class="card" id="departcard" style="margin-bottom:12px"><h2>People who left</h2><div id="depart"></div></section>
 <section class="card" id="deskcard" style="margin-bottom:12px" hidden><h2>Roles</h2><div id="desk"></div>
  <p class="muted">Developer and owner only. Add someone to a group, or replace Head admin. The Discord role updates when the bot can manage roles.</p></section>
@@ -39683,6 +39696,27 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
  <section class="card"><h2>Mod log</h2><div id="modlog"></div></section>
  <section class="card"><h2>Roles &amp; badges</h2><div id="roles"></div></section>
 </div>
+</div>
+<div class="wrap" id="pimp" hidden>
+<div class="paperban" role="status"><b>PAPER ONLY.</b> This desk does not trade real money. There is no Kalshi API key, no wallet, and no control here that sends an order.</div>
+<h1 class="pimph">PIMP-TRADING</h1>
+<p class="muted" id="pimpstake"></p>
+<section class="card" style="margin-bottom:12px"><h2>Desk</h2><div id="pimpdesk"></div>
+ <button class="xbtn" id="pimprefresh" type="button">Refresh</button>
+ <p class="muted">Cash, realized P/L, and open risk come from the local paper files. Realized P/L counts closed paper trades. Past paper results stay in the past.</p></section>
+<section class="card" style="margin-bottom:12px"><h2>Paper limits</h2>
+ <form class="form" id="pimpform">
+  <label>At 80% or higher, from $<input class="numin" name="stake_hi_min" type="number" min="10" max="30" step="0.01" value="10" required></label>
+  <label>to $<input class="numin" name="stake_hi_max" type="number" min="10" max="30" step="0.01" value="30" required></label>
+  <label>Below 80%, under $<input class="numin" name="stake_lo_max" type="number" min="0.01" max="9.99" step="0.01" value="9.99" required></label>
+  <label>Daily loss stop $<input class="numin" name="daily_loss_stop" type="number" min="1" max="100000" step="1" value="50" required></label>
+  <label>Max open risk $<input class="numin" name="max_open_risk" type="number" min="1" max="1000000" step="1" value="100" required></label>
+  <label>Max open positions <input class="numin" name="max_open_positions" type="number" min="1" max="50" step="1" value="4" required></label>
+  <button type="submit">Save paper limits</button>
+ </form>
+ <p class="muted" id="pimpnote" role="status"></p>
+ <p class="muted">Saved in paper-bots/pimp-trading.json on this machine. The picks database is left alone. Each bot still uses the paper size in its own script. These numbers gate a new entry check.</p></section>
+<div class="pimpgrid" id="pimpbots"></div>
 </div>
 <div class="looksheet" id="looksheet"><div class="lookbox" role="dialog" aria-label="Background">
 <div class="lookhead"><h3>Background</h3><button type="button" class="lookx" id="lookx" aria-label="Close">×</button></div>
@@ -39912,7 +39946,86 @@ $('#lookgrid').addEventListener('click',e=>{const t=e.target.closest('.looktile'
 $('#lookaccents').addEventListener('click',e=>{const t=e.target.closest('[data-ac]');if(t)saveLook(undefined,t.getAttribute('data-ac'))});
 function smokeIntro(){const o=$('#intro');if(o)o.remove()}
 addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
-load();smokeIntro();
+function usd(n){const v=Number(n);if(!Number.isFinite(v))return '—';
+ return '$'+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+function pnl(n){const v=Number(n);if(!Number.isFinite(v))return '—';
+ const sign=v>0?'+':v<0?'−':'';
+ return sign+'$'+Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+function panelName(){return location.pathname.replace(/\/+$/,'')==='/pimp-trading'?'pimp':'hq'}
+function showPanel(name, push){const on=name==='pimp';
+ const hq=$('#hq'), box=$('#pimp'), btn=$('#pimpbtn');
+ if(hq) hq.hidden=on; if(box) box.hidden=!on;
+ if(btn) btn.setAttribute('aria-pressed', on?'true':'false');
+ document.title=on?'PIMP-TRADING · PIMP-BOT':'Staff HQ · PIMP-BOT';
+ if(push){const url=on?'/pimp-trading':'/staff'; if(location.pathname.replace(/\/+$/,'')!==url) history.pushState({panel:name},'',url)}
+ if(on) loadPimp()}
+let pimpBusy=false;
+async function pimpPost(body){if(pimpBusy)return; pimpBusy=true;
+ const note=$('#pimpnote'); if(note) note.textContent='Working…';
+ try{const r=await fetch('/api/pimp-trading.json',{method:'POST',credentials:'same-origin',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json().catch(()=>({}));
+  if(note) note.textContent=d.error||(r.ok?'Saved.':'Could not save.');
+  if(d&&d.bots) paintPimp(d); else loadPimp();
+ }catch(e){if(note) note.textContent='The desk did not answer.';}
+ finally{pimpBusy=false}}
+function fillLimits(lim){const f=$('#pimpform'); if(!f||!lim)return;
+ if(f.contains(document.activeElement))return;
+ ['stake_hi_min','stake_hi_max','stake_lo_max','daily_loss_stop','max_open_risk','max_open_positions'].forEach(k=>{
+  if(f[k]&&lim[k]!=null) f[k].value=String(lim[k])})}
+function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{};
+ const stake=$('#pimpstake'); if(stake) stake.textContent=d.limits_text||'';
+ fillLimits(lim);
+ const gate=desk.gate||'';
+ put($('#pimpdesk'),
+  h('div',{class:'row'},h('span',{text:'Paper cash'}),h('b',{text:desk.cash==null?'No paper account yet':usd(desk.cash)})),
+  h('div',{class:'row'},h('span',{text:'Realized P/L'}),h('b',{class:desk.realized>0?'ok':desk.realized<0?'bad':'',text:desk.realized==null?'—':pnl(desk.realized)})),
+  h('div',{class:'row'},h('span',{text:"Today's realized"}),h('b',{class:desk.today>0?'ok':desk.today<0?'bad':'',text:pnl(desk.today||0)})),
+  h('div',{class:'row'},h('span',{text:'Open risk'}),h('b',{text:usd(desk.open_risk||0)+' · '+(desk.open_count||0)+' open'})),
+  h('div',{class:'row'},h('span',{text:'Last check'}),h('b',{text:desk.last_check||'No check yet'})),
+  gate?h('p',{class:'warn',text:gate}):null);
+ put($('#pimpbots'),(d.bots||[]).map(b=>h('section',{class:'card'},
+  h('h2',{text:b.name||'Bot'}),
+  h('p',{class:'muted',text:b.blurb||''}),
+  b.empty?h('p',{class:'muted',text:b.empty}):null,
+  b.present?h('div',{class:'row'},h('span',{text:'Paper cash'}),h('b',{text:b.cash==null?'No account file':usd(b.cash)})):null,
+  b.present?h('div',{class:'row'},h('span',{text:'Realized P/L'}),h('b',{class:b.realized>0?'ok':b.realized<0?'bad':'',text:b.realized==null?'—':pnl(b.realized)})):null,
+  b.present?h('div',{class:'row'},h('span',{text:'Open risk'}),h('b',{text:usd(b.open_risk||0)+' · '+(b.open_count||0)+' open'})):null,
+  b.present?h('div',{class:'row'},h('span',{text:'Last check'}),h('b',{text:b.last_check||'No check yet'})):null,
+  b.skip?h('p',{text:b.skip}):null,
+  b.present?h('h2',{text:'Open paper positions',style:'margin-top:14px'}):null,
+  b.present?((b.positions||[]).length?(b.positions||[]).map(p=>h('div',{class:'row'},
+    h('span',null,h('b',{text:p.title||''}),' ',h('span',{class:'muted',text:p.detail||''})),
+    h('span',{text:usd(p.cost)}))):h('p',{class:'muted',text:'No open paper positions.'})):null,
+  b.present?h('h2',{text:'Past paper trades',style:'margin-top:14px'}):null,
+  b.present?((b.trades||[]).length?(b.trades||[]).map(t=>h('div',{class:'row'},
+    h('span',null,h('b',{text:t.what||'Trade'}),' ',h('span',{class:'muted',text:t.when||''})),
+    h('b',{class:t.pnl>0?'ok':t.pnl<0?'bad':'',text:t.pnl==null?'':pnl(t.pnl)}))):h('p',{class:'muted',text:'No past paper trades.'})):null,
+  b.present&&(b.log||[]).length?h('h2',{text:'Recent log',style:'margin-top:14px'}):null,
+  b.present?(b.log||[]).map(line=>h('div',{class:'row'},h('span',{text:line}))):null,
+  b.present?h('h2',{text:'Last run',style:'margin-top:14px'}):null,
+  b.present?h('p',{class:'muted',text:(b.last_run&&b.last_run.at)?(b.last_run.at+(b.last_run.ok?' · finished':' · stopped')):'No run from this desk yet.'}):null,
+  b.present?h('pre',{class:'pre',text:(b.last_run&&b.last_run.summary)||'Run one check to see the script output.'}):null,
+  (b.actions||[]).length?h('div',{class:'form'},(b.actions||[]).filter(a=>!a.confirm).map(a=>h('button',{type:'button',text:a.label,onclick:()=>pimpAct(b,a)}))):null,
+  (b.actions||[]).some(a=>a.confirm)?h('button',{class:'xbtn',type:'button',text:'Reset paper state',style:'margin-top:8px',onclick:()=>{
+    const act=(b.actions||[]).find(a=>a.confirm); if(act) pimpAct(b,act)}}):null)));
+}
+async function pimpAct(b,a){if(a.confirm){
+  if(!confirm('Reset the paper account for '+b.name+'? This deletes the local paper files for this bot. Real money is not involved.')) return;
+  await pimpPost({op:'reset',bot:b.id,confirm:'RESET PAPER'}); return}
+ await pimpPost({op:'run',bot:b.id,action:a.id||'run'})}
+async function loadPimp(){const note=$('#pimpnote');
+ try{const r=await fetch('/api/pimp-trading.json',{credentials:'same-origin'});
+  if(!r.ok){if(note) note.textContent='Staff only.'; return}
+  paintPimp(await r.json())}catch(e){if(note) note.textContent='The desk did not answer.'}}
+const pimpForm=$('#pimpform'); if(pimpForm) pimpForm.addEventListener('submit',e=>{e.preventDefault(); const f=e.target;
+ pimpPost({op:'save',settings:{stake_hi_min:f.stake_hi_min.value,stake_hi_max:f.stake_hi_max.value,
+  stake_lo_max:f.stake_lo_max.value,daily_loss_stop:f.daily_loss_stop.value,max_open_risk:f.max_open_risk.value,
+  max_open_positions:f.max_open_positions.value}})});
+const pimpBtn=$('#pimpbtn'); if(pimpBtn) pimpBtn.addEventListener('click',()=>showPanel($('#pimp')&&$('#pimp').hidden?'pimp':'hq',true));
+const pimpRefresh=$('#pimprefresh'); if(pimpRefresh) pimpRefresh.addEventListener('click',()=>loadPimp());
+addEventListener('popstate',()=>showPanel(panelName(),false));
+load();showPanel(panelName(),false);smokeIntro();
 </script>
 </body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
 STAFF_HTML = STAFF_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
@@ -39921,8 +40034,14 @@ if "innerHTML" in STAFF_HTML:
     raise RuntimeError("staff page used innerHTML")
 
 
-def staff_page_html(uid: int) -> str:
-    return STAFF_HTML
+def staff_page_html(uid: int, panel: str = "hq") -> str:
+    html = STAFF_HTML
+    if panel == "pimp":
+        html = html.replace('<div class="wrap" id="hq">', '<div class="wrap" id="hq" hidden>', 1)
+        html = html.replace('<div class="wrap" id="pimp" hidden>', '<div class="wrap" id="pimp">', 1)
+        html = html.replace('id="pimpbtn" type="button" aria-pressed="false"',
+                            'id="pimpbtn" type="button" aria-pressed="true"', 1)
+    return html
 
 
 async def dash_staff(request):
@@ -40096,6 +40215,96 @@ async def dash_api_staff_post(request):
             return web.json_response({"ok": False, "error": note}, status=400)
         return web.json_response({"ok": True, "note": note, **staff_ops(uid)})
     return web.json_response({"ok": False}, status=400)
+
+
+_PIMP = None
+
+
+def pimp_mod():
+    """Load the paper desk without importing it at startup. Paper scripts stay out of the Discord process."""
+    global _PIMP
+    if _PIMP is not None:
+        return _PIMP
+    import importlib.util
+    import sys
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper-bots", "pimp_desk.py")
+    spec = importlib.util.spec_from_file_location("pimp_desk", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("paper desk missing")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["pimp_desk"] = mod
+    spec.loader.exec_module(mod)
+    _PIMP = mod
+    return mod
+
+
+async def dash_pimp(request):
+    from aiohttp import web
+    if staff_uid_from_request(request) is None:
+        return dash_page(web, 403, "Staff only", "This page is for staff. Everyone else stays on the dashboard.")
+    return dash_html(web, dash_paint_look(staff_page_html(0, "pimp")))
+
+
+async def dash_api_pimp(request):
+    from aiohttp import web
+    if staff_uid_from_request(request) is None:
+        return dash_error(web, request, 403)
+    try:
+        body = pimp_mod().snapshot()
+    except Exception:
+        log.exception("pimp snapshot")
+        return web.json_response({"ok": False, "error": "Could not read the paper desk."}, status=500)
+    return web.json_response(body)
+
+
+async def dash_api_pimp_post(request):
+    from aiohttp import web
+    uid = staff_uid_from_request(request)
+    if uid is None:
+        return dash_error(web, request, 403)
+    gid = staff_gid()
+    who = staff_rec(uid, gid).get("name") or str(uid)
+    body = await _req_json(request)
+    op = str(body.get("op") or "")
+    try:
+        desk = pimp_mod()
+    except Exception:
+        log.exception("pimp desk")
+        return web.json_response({"ok": False, "error": "The paper desk is not on this checkout."}, status=500)
+    loop = asyncio.get_running_loop()
+    try:
+        if op == "save":
+            raw = body.get("settings") if isinstance(body.get("settings"), dict) else {}
+            cfg, err = desk.save_settings(raw)
+            snap = desk.snapshot()
+            if err:
+                return web.json_response({"ok": False, "error": err, **snap}, status=400)
+            staff_log_add(gid, "ok", "Saved paper desk limits", who)
+            return web.json_response({"ok": True, **snap, "limits": cfg})
+        if op == "run":
+            bot_id = str(body.get("bot") or "")
+            action = str(body.get("action") or "run")
+            result = await loop.run_in_executor(None, desk.run_bot, bot_id, action)
+            if result.get("ok"):
+                staff_log_add(gid, "ok", f"Paper check {bot_id} {action}", who)
+            snap = desk.snapshot()
+            status = 200 if result.get("ok") else (409 if result.get("blocked") else 400)
+            return web.json_response({"ok": bool(result.get("ok")), "error": result.get("error") or "", **snap}, status=status)
+        if op == "reset":
+            if str(body.get("confirm") or "") != "RESET PAPER":
+                snap = desk.snapshot()
+                return web.json_response({"ok": False, "error": "Confirm the reset to delete the paper account.", **snap}, status=400)
+            bot_id = str(body.get("bot") or "")
+            result = await loop.run_in_executor(None, desk.reset_bot, bot_id)
+            if result.get("ok"):
+                staff_log_add(gid, "ok", f"Reset paper state {bot_id}", who)
+            snap = desk.snapshot()
+            status = 200 if result.get("ok") else 400
+            return web.json_response({"ok": bool(result.get("ok")), "error": result.get("error") or result.get("summary") or "", **snap}, status=status)
+    except Exception:
+        log.exception("pimp desk")
+        return web.json_response({"ok": False, "error": "The paper desk could not finish that."}, status=500)
+    return web.json_response({"ok": False, "error": "Unknown action."}, status=400)
 
 
 ACCOUNT_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">

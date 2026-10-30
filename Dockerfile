@@ -13,6 +13,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py .
+COPY paper-bots ./paper-bots
 
 # The picks database lives in /data. Attach a persistent volume at /data on your
 # host, otherwise the picks are wiped every time the bot is redeployed.
