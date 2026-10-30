@@ -25999,9 +25999,9 @@ def look_svg(name: str) -> str:
             '<rect x="40" y="160" width="70" height="180"/><rect x="130" y="90" width="90" height="250"/>'
             '<rect x="240" y="140" width="60" height="200"/><rect x="430" y="70" width="100" height="270"/>'
             '<rect x="550" y="120" width="80" height="220"/><rect x="650" y="40" width="90" height="300"/></g>'
-            '<g fill="#ff46be" opacity=".85"><rect x="150" y="120" width="8" height="8"/><rect x="470" y="100" width="8" height="8"/>'
-            '<rect x="670" y="70" width="8" height="8"/></g>'
-            '<g fill="#5af5ff" opacity=".8"><rect x="70" y="190" width="6" height="6"/><rect x="580" y="150" width="6" height="6"/></g>'
+            '<g fill="#ff46be" opacity=".85"><rect x="2" y="88" width="8" height="8"/><rect x="2" y="112" width="8" height="8"/>'
+            '<rect x="790" y="88" width="8" height="8"/></g>'
+            '<g fill="#5af5ff" opacity=".8"><rect x="4" y="140" width="6" height="6"/><rect x="792" y="120" width="6" height="6"/></g>'
             '<path d="M0 400 Q200 340 400 400 T800 400" fill="none" stroke="#ff46be" stroke-width="3"/>'),
         "galaxy": (
             '<rect width="800" height="500" fill="#070614"/>'
