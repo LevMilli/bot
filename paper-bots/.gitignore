@@ -1,3 +1,14 @@
 pimp-runs.json
 pimp-auto.json
+pimp-audit.json
+pimp-pause.json
+pimp-notes.json
+pimp-heartbeat.json
+pimp-good.json
+pimp-backup.json
+pimp-seen.json
+pimp-manual.json
+pimp-watch.json
+pimp-alerts.json
+pimp-recap.json
 *.tmp

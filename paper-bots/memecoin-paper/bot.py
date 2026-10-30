@@ -49,8 +49,8 @@ def get_json(url, source, pause):
                 continue
             STATUS.setdefault(source, "ok")
             return r.json()
-        except Exception as e:  # network / JSON errors
-            last = f"{type(e).__name__}: {e}"
+        except Exception as exc:  # network / JSON errors; keep the URL out of the log
+            last = type(exc).__name__
     STATUS[source + " (last error)"] = last
     return None
 

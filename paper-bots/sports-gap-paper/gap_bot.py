@@ -54,15 +54,59 @@ def fee(p):
     """Kalshi taker fee per contract: ceil(0.07*P*(1-P)*100)/100."""
     return math.ceil(round(0.07 * p * (1 - p) * 100, 6)) / 100
 
+CACHE = os.path.join(HERE, "quote_cache.json")
+CACHE_TTL = 60
+
+
+def _cache_load():
+    try:
+        with open(CACHE, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _cache_get(url):
+    row = _cache_load().get(url)
+    if not isinstance(row, dict):
+        return None
+    try:
+        age = time.time() - float(row.get("at") or 0)
+    except (TypeError, ValueError):
+        return None
+    if age > CACHE_TTL:
+        return None
+    return row.get("body")
+
+
+def _cache_put(url, body):
+    data = _cache_load()
+    data[url] = {"at": time.time(), "body": body}
+    if len(data) > 40:
+        newest = sorted(data.items(), key=lambda item: float((item[1] or {}).get("at") or 0))[-40:]
+        data = dict(newest)
+    tmp = CACHE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    os.replace(tmp, CACHE)
+
+
 def get(url, tries=3):
+    """Public GET with a one-minute cache and a retry. A failure stays a failure."""
+    hit = _cache_get(url)
+    if hit is not None:
+        return hit
     for i in range(tries):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=20) as r:
-                return json.load(r)
-        except Exception as e:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (paper)"})
+            with urllib.request.urlopen(req, timeout=20) as response:
+                body = json.load(response)
+            _cache_put(url, body)
+            return body
+        except Exception:
             if i == tries - 1:
-                raise
+                raise RuntimeError("public GET failed")
             time.sleep(1.5)
 
 def now_ct():
@@ -76,23 +120,50 @@ def load_state():
     return {"cash": START_BANKROLL, "open": [], "closed": [], "runs": 0}
 
 def save_state(s):
-    with open(STATE, "w") as f:
-        json.dump(s, f, indent=2)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as handle:
+        json.dump(s, handle, indent=2)
+        handle.flush()
+    os.replace(tmp, STATE)
 
 def log(lines):
+    if os.path.exists(LOG) and os.path.getsize(LOG) > 256 * 1024:
+        with open(LOG, "rb") as handle:
+            handle.seek(-128 * 1024, os.SEEK_END)
+            tail = handle.read().decode("utf-8", "replace").split("\n", 1)[-1]
+        with open(LOG, "w", encoding="utf-8") as handle:
+            handle.write("# Paper log capped.\n" + tail)
     new = not os.path.exists(LOG)
-    with open(LOG, "a") as f:
+    with open(LOG, "a", encoding="utf-8") as handle:
         if new:
-            f.write("# Paper trades & checks (PAPER ONLY - no real money)\n\n")
-        for l in lines:
-            f.write(l + "\n")
+            handle.write("# Paper trades & checks (PAPER ONLY - no real money)\n\n")
+        for line in lines:
+            handle.write(line + "\n")
 
 # ---------------- ESPN ----------------
-def espn_games(path):
+def league_url(path):
     url = f"{ESPN}/{path}/scoreboard"
     if "college-football" in path:
         url += "?groups=80&limit=300"   # all FBS games, not just top 25
-    d = get(url)
+    return url
+
+
+def league_cached_idle(path):
+    """A league with no live games stays cached for a minute, so we do not fetch it again."""
+    body = _cache_get(league_url(path))
+    if not isinstance(body, dict):
+        return False
+    for event in body.get("events") or []:
+        try:
+            if event["status"]["type"]["state"] == "in":
+                return False
+        except Exception:
+            continue
+    return True
+
+
+def espn_games(path):
+    d = get(league_url(path))
     out = []
     for e in d.get("events", []):
         c = e["competitions"][0]
@@ -220,6 +291,9 @@ def px(m, k):
 # ---------------- main ----------------
 def run():
     s = load_state()
+    before_book = json.dumps(
+        {"cash": s.get("cash"), "open": s.get("open"), "closed": s.get("closed")},
+        sort_keys=True, default=str)
     s["runs"] += 1
     ts = now_ct()
     lines = [f"\n## Check {ts} (run #{s['runs']})", "",
@@ -230,17 +304,24 @@ def run():
     live_info = {}  # game_key -> dict for exits
 
     for league, (path, series, src) in SPORTS.items():
+        if league_cached_idle(path):
+            summary_out["leagues"][league] = "no live games"
+            continue
         try:
             games = espn_games(path)
-        except Exception as e:
-            lines.append(f"| {ts} | {league} | - | ESPN error: {e} | | | | | skip |"); continue
+        except Exception:
+            lines.append(f"| {ts} | {league} | - | data error: ESPN down | | | | | data error |")
+            summary_out.setdefault("data_errors", []).append({"league": league, "source": "ESPN", "error": "failed"})
+            continue
         relevant = [g for g in games if g["state"] == "in" or f"{league}:{g['id']}" in open_by_game]
         if not relevant:
             summary_out["leagues"][league] = "no live games"; continue
         try:
             markets = kalshi_markets(series)
-        except Exception as e:
-            lines.append(f"| {ts} | {league} | - | Kalshi error: {e} | | | | | skip |"); continue
+        except Exception:
+            lines.append(f"| {ts} | {league} | - | data error: Kalshi down | | | | | data error |")
+            summary_out.setdefault("data_errors", []).append({"league": league, "source": "Kalshi", "error": "failed"})
+            continue
         summary_out["leagues"][league] = f"{sum(g['state']=='in' for g in relevant)} live, series {series} ({len(markets)} open mkts)"
         for g in relevant:
             key = f"{league}:{g['id']}"
@@ -295,9 +376,12 @@ def run():
             cost = round(n * per, 2)
             s["cash"] = round(s["cash"] - cost, 2)
             pos = {"game_key": key, "league": league, "game": name, "ticker": m["ticker"], "team": m.get("yes_sub_title"),
-                   "side": side, "contracts": n, "entry_price": ask, "entry_fee": fee(ask), "cost": cost,
-                   "fair_at_entry": round(fair, 4), "gap_at_entry": round(gap, 4), "opened": ts, "score_at_entry": score,
-                   "espn_id": g["id"], "espn_path": path}
+                   "side": side, "contracts": n, "entry_price": ask, "bid": bid, "ask": ask, "entry_fee": fee(ask),
+                   "fee": fee(ask), "cost": cost, "fair_at_entry": round(fair, 4), "gap_at_entry": round(gap, 4),
+                   "opened": ts, "score_at_entry": score, "espn_id": g["id"], "espn_path": path,
+                   "price_source": f"{KALSHI}/markets?series_ticker={series}",
+                   "price_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                   "fill_id": f"{m['ticker']}|{ts}"}
             s["open"].append(pos); open_by_game[key] = pos
             lines.append(row + gtxt + f" | **PAPER BUY** {n} YES {m.get('yes_sub_title')} @ {ask:.2f} (+fee {fee(ask):.2f}) = ${cost:.2f} |")
             summary_out["trades"].append(f"BUY {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")
@@ -339,7 +423,8 @@ def run():
                 proceeds = round(p["contracts"] * (bid - fee(bid)), 2)
                 pnl = round(proceeds - p["cost"], 2)
                 s["cash"] = round(s["cash"] + proceeds, 2)
-                p.update({"closed": ts, "exit": "gap closed - sold at bid", "exit_price": bid, "payout": proceeds, "pnl": pnl})
+                p.update({"closed": ts, "exit": "gap closed - sold at bid", "exit_price": bid, "payout": proceeds,
+                          "pnl": pnl, "fair_at_exit": round(fair, 4)})
                 s["closed"].append(p)
                 lines.append(f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | **PAPER SELL** {p['contracts']} @ bid {bid:.2f} (gap closed), P&L ${pnl:+.2f} |")
                 summary_out["closes"].append(f"SELL {p['ticker']} pnl {pnl:+.2f}")
@@ -353,9 +438,15 @@ def run():
     lines.append(f"Paper cash ${s['cash']:.2f} | open positions {len(s['open'])} (cost ${equity_open:.2f}) | realized P&L ${realized:+.2f}")
     if summary_out["live_games"] == 0:
         lines.append("No live games found this check (see rows above for any data errors).")
+    after_book = json.dumps(
+        {"cash": s.get("cash"), "open": s.get("open"), "closed": s.get("closed")},
+        sort_keys=True, default=str)
+    summary_out.update({"cash": s["cash"], "open": [f"{p['contracts']}x {p['ticker']} @ {p['entry_price']}" for p in s["open"]], "realized_pnl": realized})
+    if before_book == after_book:
+        print(json.dumps(summary_out, indent=2))
+        return
     log(lines)
     save_state(s)
-    summary_out.update({"cash": s["cash"], "open": [f"{p['contracts']}x {p['ticker']} @ {p['entry_price']}" for p in s["open"]], "realized_pnl": realized})
     print(json.dumps(summary_out, indent=2))
 
 if __name__ == "__main__":

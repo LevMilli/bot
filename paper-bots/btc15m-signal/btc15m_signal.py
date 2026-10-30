@@ -20,6 +20,7 @@ Run:  python3 btc15m_signal.py
 import datetime as dt
 import json
 import math
+import os
 import statistics
 import sys
 import time
@@ -43,17 +44,54 @@ TAKE_PROFIT_ADD, TAKE_PROFIT_CAP = 0.15, 0.99
 DVOL_FAIL_MULT = 1.2         # if DVOL fails: use realized sigma * 1.2
 
 
+_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quote_cache.json")
+
+
+def _cached(url):
+    try:
+        with open(_CACHE, encoding="utf-8") as handle:
+            data = json.load(handle)
+        row = data.get(url) if isinstance(data, dict) else None
+        if not isinstance(row, dict) or time.time() - float(row.get("at") or 0) > 60:
+            return None
+        return row.get("body")
+    except Exception:
+        return None
+
+
+def _store(url, body):
+    try:
+        with open(_CACHE, encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    data[url] = {"at": time.time(), "body": body}
+    if len(data) > 30:
+        data = dict(list(data.items())[-30:])
+    tmp = _CACHE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    os.replace(tmp, _CACHE)
+
+
 def get_json(url, headers=None, tries=3):
+    hit = _cached(url)
+    if hit is not None:
+        return hit
     err = None
     for i in range(tries):
         try:
             req = urllib.request.Request(url, headers=headers or UA)
             with urllib.request.urlopen(req, timeout=15) as r:
-                return json.load(r)
-        except Exception as e:  # network hiccup -> retry
+                body = json.load(r)
+            _store(url, body)
+            return body
+        except Exception as e:  # network hiccup -> retry, then mark it failed
             err = e
             time.sleep(1 + i)
-    raise RuntimeError(f"{url} failed: {err}")
+    raise RuntimeError("public GET failed")
 
 
 def phi(z):
@@ -162,7 +200,8 @@ def usd_high_impact_near(block_start, block_end):
 # ---------------- main ----------------
 def main():
     now = dt.datetime.now(dt.timezone.utc)
-    print(f"BTC 15-min Kalshi signal  (SIGNAL ONLY, no orders)  {now:%Y-%m-%d %H:%M:%S} UTC\n")
+    print(f"BTC 15-min Kalshi signal  (SIGNAL ONLY, no orders)  {now:%Y-%m-%d %H:%M:%S} UTC")
+    print(f"Price source https://api.elections.kalshi.com/trade-api/v2 at {now:%Y-%m-%dT%H:%M:%SZ}\n")
 
     m = kalshi_market()
     if not m or m["target"] is None:
