@@ -491,6 +491,46 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(len([row for row in page2["rows"] if row.get("state") != "open"]), 5)
         with tempfile.TemporaryDirectory() as bare:
             self.assertEqual(pimp_desk.snapshot(bare)["book"]["rows"], [])
+            self.assertEqual(pimp_desk.snapshot(bare)["desk"]["curve"], [])
+            self.assertEqual(pimp_desk.snapshot(bare)["desk"]["equity"], [])
+
+    def test_equity_curve_is_chicago_time_and_blank_without_settles(self):
+        october = pimp_desk._ct_when("October 30, 2026, 4:00 PM Central")
+        self.assertEqual(october.astimezone(pimp_desk.CT).hour, 16)
+        self.assertEqual(october.utcoffset(), dt.timedelta(hours=-5))
+        noon = pimp_desk._ct_when("2026-10-30T17:00:00Z")
+        self.assertEqual(noon.astimezone(pimp_desk.CT).hour, 12)
+        self.assertIsNone(pimp_desk._ct_when(""))
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), QUIET)
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 20,
+                "open": [{
+                    "contracts": 1, "team": "Bills", "ticker": "OPEN", "game": "Bills at Chiefs",
+                    "cost": 3, "opened": "2026-10-30 12:00:00 CT", "fill_id": "open-1",
+                }],
+                "closed": [
+                    {"team": "Later", "pnl": 4.0, "closed": "November 2, 2026, 3:00 PM Central", "fill_id": "b"},
+                    {"team": "Earlier", "pnl": -2.5, "closed": "2026-10-28 14:00:00 CT", "fill_id": "a"},
+                ],
+            }))
+            curve = pimp_desk.snapshot(tmp)["desk"]["curve"]
+            self.assertEqual([point["v"] for point in curve], [-2.5, 1.5])
+            self.assertEqual(curve[0]["t"], "2026-10-28T14:00:00-05:00")
+            self.assertEqual(curve[1]["t"], "2026-11-02T15:00:00-06:00")
+            self.assertFalse(any(point.get("day") for point in curve))
+            self.assertEqual(pimp_desk.snapshot(tmp)["desk"]["equity"], [-2.5, 1.5])
+        page = os.path.join(os.path.dirname(ROOT), "bot.py")
+        with open(page, encoding="utf-8") as handle:
+            text = handle.read()
+        start = text.find('<div class="wrap" id="pimp"')
+        end = text.find('<div class="looksheet"', start)
+        chunk = text[start:end]
+        order = ["paperban", 'id="pimpchart"', 'id="pimpopen"', 'id="pimpbook"', 'id="pimpdesk"']
+        spots = [chunk.find(token) for token in order]
+        self.assertTrue(all(spot >= 0 for spot in spots), spots)
+        self.assertEqual(spots, sorted(spots))
+        self.assertNotIn("innerHTML", chunk)
 
 
 if __name__ == "__main__":
