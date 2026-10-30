@@ -45248,10 +45248,12 @@ def free_parse(words: list[dict], img, grey) -> Optional[dict]:
                       ("Cricket", r"\bCRICKET\b"), ("Table Tennis", r"(?<![A-Za-z])TT(?![A-Za-z])")):
         if re.search(rx, full):
             sports.append(label)
-    return {"is_slip": True, "platform": platform, "sport": ", ".join(s.title() if s == "SOCCER" else s for s in sports)
+    slip = {"is_slip": True, "platform": platform, "sport": ", ".join(s.title() if s == "SOCCER" else s for s in sports)
             or None, "description": desc, "legs": legs, "cost": cost, "payout": payout, "status": status,
             "returned": returned, "game_date": None, "entry_type": entry_type, "placed": placed,
             "_unsure": unsure, "_how": "scan", "_result_hint": result_hint}
+    apply_scan_bijan_fix(slip)
+    return slip
 
 
 _FREE_MINOR_UNSURE = ("which app it's from",)
@@ -45522,11 +45524,66 @@ def free_apply_edits(slip: dict) -> None:
         slip["legs"] = legs
 
 
+# Tesseract reads "Bijan" as "Brian". Only an NFL slip, and only Brian Robinson or a bare
+# Brian next to ATL / the Falcons or on a rush-yards line. Brian Burns, Brian Thomas, and
+# every other Brian stay as read.
+_SCAN_NFL = re.compile(r"\bnfl(?:szn)?\b", re.I)
+_SCAN_FALCONS = re.compile(r"\b(?:atl|atlanta|falcons)\b", re.I)
+_SCAN_BRIAN_ROBINSON = re.compile(r"\bBrian\s+Robinson(?:\s+(?:Jr\.?|Junior))?(?!\w)", re.I)
+_SCAN_OTHER_BRIAN = re.compile(
+    r"\bBrian\s+(?!(?:Robinson\b|over\b|under\b|more\b|less\b|[ou]\s*\d))[A-Za-z]", re.I)
+_SCAN_BARE_BRIAN = re.compile(
+    r"\bBrian\b(?=\s+(?:[ou]\s*\d|over\b|under\b|more\b|less\b)|$)", re.I)
+_SCAN_RUSH = re.compile(r"\brush(?:ing)?\s*(?:yds|yards)\b", re.I)
+
+
+def correct_scanned_brian(line: str, sport: str = "", context: str = "") -> str:
+    """One scanned slip line. 'Brian Robinson' or 'Brian o72.5 rush yds' on an NFL slip
+    (or next to ATL / Falcons) becomes Bijan Robinson. A different last name is not Bijan."""
+    text = "" if line is None else str(line)
+    sport = "" if sport is None else str(sport)
+    context = "" if context is None else str(context)
+    if not text:
+        return text
+    blob = " ".join((text, sport, context))
+    if not (_SCAN_NFL.search(blob) or _SCAN_FALCONS.search(blob)):
+        return text
+    if _SCAN_OTHER_BRIAN.search(text):
+        return text
+    if _SCAN_BRIAN_ROBINSON.search(text):
+        return _SCAN_BRIAN_ROBINSON.sub("Bijan Robinson", text, count=1)
+    around = f"{text} {context}"
+    bare_hit = bool(_SCAN_BARE_BRIAN.search(text)) and (
+        _SCAN_RUSH.search(text) or _SCAN_FALCONS.search(around) or re.search(r"\brobinson\b", context, re.I))
+    if bare_hit:
+        return _SCAN_BARE_BRIAN.sub("Bijan Robinson", text, count=1)
+    return text
+
+
+def apply_scan_bijan_fix(slip: dict) -> None:
+    """Rewrite Bijan-as-Brian on this scanned slip. Other players on the same slip stay."""
+    if not isinstance(slip, dict):
+        return
+    sport = str(slip.get("sport") or "")
+    desc = str(slip.get("description") or "")
+    legs = [str(x) for x in (slip.get("legs") or [])]
+    context = " ".join([sport, desc, *legs])
+    fixed = [correct_scanned_brian(leg, sport=sport, context=context) for leg in legs]
+    if fixed == legs:
+        return
+    slip["legs"] = fixed
+    if desc and desc in legs:
+        slip["description"] = fixed[legs.index(desc)]
+
+
 async def free_fix_names(slip: dict) -> None:
     """'Julian Quifiones' -> 'Julián Quiñones' when ESPN has one clear match (best effort, a few seconds).
     Scanner 4.0 also remembers a match in scan_alias so the next screenshot of the same OCR typo is instant.
-    An earlier Edit correction is applied first."""
+    An earlier Edit correction is applied first.
+    A scanned Brian on an NFL slip, in context of Robinson or ATL or the Falcons, is Bijan Robinson.
+    That correction is applied again after the ESPN match so a 0.93 'Brian Robinson' hit cannot put Bijan back."""
     free_apply_edits(slip)
+    apply_scan_bijan_fix(slip)
     try:
         aliases = json.loads(get_setting(0, "scan_alias") or "{}")
     except Exception:
@@ -45540,6 +45597,8 @@ async def free_fix_names(slip: dict) -> None:
         except Exception:
             return []
     legs = slip.get("legs") or []
+    sport = str(slip.get("sport") or "")
+    scan_context = " ".join([sport, str(slip.get("description") or ""), *[str(x) for x in legs]])
     shapes = [re.match(r"^(.+?) (over|under) ([\d.]+) (.+)$", leg) for leg in legs]
     names, dirty = [], {}
     for m in shapes:
@@ -45574,6 +45633,12 @@ async def free_fix_names(slip: dict) -> None:
             name, changed = best, True
         elif isinstance(aliases.get(norm_name(raw_name)), str) and aliases[norm_name(raw_name)] != raw_name:
             name = aliases[norm_name(raw_name)]
+        # ESPN scores "Brian Robinson" against "Bijan Robinson" at 0.93, so a hit on the real
+        # Brian would undo the scan correction. Put Bijan back and remember that spelling.
+        fixed_name = correct_scanned_brian(name, sport=sport, context=f"{scan_context} {leg}")
+        if fixed_name != name:
+            aliases[norm_name(raw_name)] = fixed_name
+            name, changed = fixed_name, True
         others = [it for r, it in ranked if r >= 0.55 and norm_name(it) != norm_name(name)][:4]
         if others:
             name_alts[name] = others
@@ -45581,6 +45646,7 @@ async def free_fix_names(slip: dict) -> None:
     if name_alts:
         slip["_name_alts"] = name_alts
     slip["legs"] = fixed
+    apply_scan_bijan_fix(slip)
     if changed:
         try:
             keep = {k: aliases[k] for k in list(aliases)[-80:] if isinstance(aliases.get(k), str)}
