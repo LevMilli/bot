@@ -3,6 +3,10 @@
 PAPER ONLY. Reads local files the paper bots already write, saves desk limits in
 pimp-trading.json, and runs the existing one-shot scripts. No API keys, no wallet,
 no order endpoint, and no live-trading switch.
+
+run_scheduled() is one pass of the timer the Discord bot calls. It does not
+contain strategy. It calls run_bot, which already applies the saved desk limits.
+A script that exits 0 with no trade is a finished check.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ import csv
 import datetime as dt
 import io
 import json
+import logging
 import math
 import os
 import re
@@ -18,6 +23,8 @@ import subprocess
 import sys
 import threading
 from zoneinfo import ZoneInfo
+
+log = logging.getLogger("pimpdesk")
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CT = ZoneInfo("America/Chicago")
@@ -51,6 +58,26 @@ ACTIONS = {
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 120, "label": "Run one check"},
     },
 }
+
+# One automatic pass. Intervals are seconds. Clock times are America/Chicago.
+# Daily slots run once per Chicago day, the first time the process is up inside
+# the window. The Kalshi scan uses the desk's paper scan (no --any-time) and
+# only starts from 12:30 to 14:55 CT, the script's own entry window. An earlier
+# scan would exit without a paper fill. The morning brief stays the desk's dry run.
+# Settle is the desk's paper settle, once at 4:00 PM CT, after the 3:00 PM
+# contract time, so a closed paper trade can land in the state file.
+# Memecoin runs three times a day. Stake size stays inside each script.
+AUTO_RETRY_SEC = 900
+AUTO = (
+    {"id": "sports-gap", "action": "run", "every_sec": 300},
+    {"id": "btc15m", "action": "run", "every_sec": 300},
+    {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
+    {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
+    {"id": "memecoin", "action": "run", "at_ct": "09:00", "until_ct": "14:59"},
+    {"id": "memecoin", "action": "run", "at_ct": "15:00", "until_ct": "20:59"},
+    {"id": "memecoin", "action": "run", "at_ct": "21:00", "until_ct": "23:59"},
+)
 
 BOTS = (
     {
@@ -100,6 +127,7 @@ BOTS = (
 )
 
 _LOCKS: dict[str, threading.Lock] = {}
+_BUSY = "A check is already running for this bot."
 _ENV_KEEP = {
     "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TEMP", "TMP",
     "USER", "LOGNAME", "SYSTEMROOT", "WINDIR", "PATHEXT", "PYTHONPATH", "PYTHONHOME",
@@ -648,7 +676,7 @@ def snapshot(root: str | None = None) -> dict:
         public.append(row)
     return {
         "paper_only": True,
-        "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order.",
+        "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
         "limits": cfg,
         "limits_text": limits_text(cfg),
         "desk": {
@@ -660,6 +688,7 @@ def snapshot(root: str | None = None) -> dict:
             "last_check": last_check,
             "gate": entry_gate(root, bots),
         },
+        "timer": timer_text(),
         "bots": public,
     }
 
@@ -696,12 +725,12 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None) -> dict:
     if spec["entry"]:
         gate = entry_gate(root)
         if gate:
-            row = {"at": _now(), "ok": False, "summary": gate, "exit": None, "action": action}
+            row = {"at": _now(), "ok": False, "blocked": True, "summary": gate, "exit": None, "action": action}
             _save_run(root, bot_id, row)
             return {"ok": False, "error": gate, "blocked": True, "summary": gate}
     lock = _lock(bot_id)
     if not lock.acquire(blocking=False):
-        return {"ok": False, "error": "A check is already running for this bot."}
+        return {"ok": False, "error": _BUSY}
     try:
         cwd = _under(root, folder)
         script = os.path.join(cwd, spec["argv"][0])
@@ -739,6 +768,144 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None) -> dict:
         lock.release()
 
 
+def timer_text() -> str:
+    """Plain schedule for the desk. No forecast and no profit language."""
+    return (
+        "On a timer, America/Chicago. Sports gap about every 5 minutes. "
+        "BTC 15-minute signal about every 5 minutes. "
+        "Kalshi morning brief once at 8:00 AM, dry run. "
+        "Kalshi paper scan once at 12:30 PM, inside that bot's own window. "
+        "Kalshi paper settle once at 4:00 PM. "
+        "Memecoin at 9:00 AM, 3:00 PM, and 9:00 PM. "
+        "No edge is a finished check with zero paper trades."
+    )
+
+
+def _slot_key(slot: dict) -> str:
+    if "every_sec" in slot:
+        return f"{slot['id']}:{slot['action']}"
+    return f"{slot['id']}:{slot['action']}:{slot['at_ct']}"
+
+
+def _hhmm(text: str) -> dt.time:
+    hour, minute = str(text).split(":")
+    return dt.time(int(hour), int(minute))
+
+
+def _window_open(now_ct: dt.datetime, slot: dict) -> bool:
+    day = now_ct.date()
+    start = dt.datetime.combine(day, _hhmm(slot["at_ct"]), CT)
+    end = dt.datetime.combine(day, _hhmm(slot["until_ct"]), CT)
+    return start <= now_ct <= end
+
+
+def auto_path(root: str | None = None) -> str:
+    return _under(root, "pimp-auto.json")
+
+
+def _load_auto(root: str) -> dict:
+    data = _read_json(auto_path(root)) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def _iso(when: dt.datetime) -> str:
+    return when.astimezone(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def _parsed(text: str):
+    try:
+        when = dt.datetime.fromisoformat(str(text))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return when
+
+
+def due_slots(now: dt.datetime, root: str) -> list:
+    """Paper checks that should run at `now`. Does not start a script."""
+    now_ct = now.astimezone(CT)
+    saved = _load_auto(root)
+    day = now_ct.date().isoformat()
+    due = []
+    for slot in AUTO:
+        key = _slot_key(slot)
+        if "every_sec" in slot:
+            prev = _parsed(saved.get(key) or "")
+            if prev is not None and (now - prev).total_seconds() < float(slot["every_sec"]):
+                continue
+            due.append(slot)
+            continue
+        if not _window_open(now_ct, slot):
+            continue
+        if saved.get(key) == day:
+            continue
+        prev = _parsed(saved.get(key + ":retry") or "")
+        if prev is not None and (now - prev).total_seconds() < AUTO_RETRY_SEC:
+            continue
+        due.append(slot)
+    return due
+
+
+def _remember(saved: dict, slot: dict, now: dt.datetime, result: dict) -> None:
+    if result.get("error") == _BUSY:
+        return
+    key = _slot_key(slot)
+    if "every_sec" in slot:
+        saved[key] = _iso(now)
+        return
+    if result.get("ok"):
+        saved[key] = now.astimezone(CT).date().isoformat()
+        saved.pop(key + ":retry", None)
+        return
+    saved[key + ":retry"] = _iso(now)
+
+
+def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> list:
+    """Run each paper check that is due, then return. One call does not loop.
+
+    Uses run_bot, so the saved daily-loss, max-open, and stake settings stay
+    in one place and the commands stay the paper scripts. A script that exits 0
+    is a finished check, including a check that found no edge. This does not
+    place a live order.
+    """
+    root = _root(root)
+    if now is None:
+        now = dt.datetime.now(dt.timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    slots = due_slots(now, root)
+    if not slots:
+        return []
+    saved = _load_auto(root)
+    results = []
+    for slot in slots:
+        bot_id = slot["id"]
+        action = slot["action"]
+        result = run_bot(bot_id, action, root)
+        _remember(saved, slot, now, result)
+        row = {
+            "bot": bot_id,
+            "action": action,
+            "ok": bool(result.get("ok")),
+            "blocked": bool(result.get("blocked")),
+            "error": result.get("error") or "",
+            "summary": result.get("summary") or "",
+        }
+        results.append(row)
+        head = _clean(row["summary"] or row["error"], 180)
+        if result.get("error") == _BUSY:
+            log.info("paper timer %s %s still running", bot_id, action)
+        elif row["blocked"]:
+            log.info("paper timer %s %s skipped, desk limit already hit: %s", bot_id, action, head)
+        elif row["ok"]:
+            log.info("paper timer %s %s finished: %s", bot_id, action, head or "no output")
+        else:
+            log.warning("paper timer %s %s did not finish: %s", bot_id, action, head or "no output")
+    _atomic_write(auto_path(root), json.dumps(saved, indent=2) + "\n")
+    return results
+
+
 def _unlink(path: str) -> bool:
     if not os.path.isfile(path):
         return False
@@ -755,7 +922,7 @@ def reset_bot(bot_id: str, root: str | None = None) -> dict:
         return {"ok": False, "error": "That script is not on this checkout."}
     lock = _lock(bot_id)
     if not lock.acquire(blocking=False):
-        return {"ok": False, "error": "A check is already running for this bot."}
+        return {"ok": False, "error": _BUSY}
     try:
         removed = []
         if bot_id == "sports-gap":

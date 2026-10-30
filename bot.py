@@ -39698,7 +39698,7 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 </div>
 </div>
 <div class="wrap" id="pimp" hidden>
-<div class="paperban" role="status"><b>PAPER ONLY.</b> This desk does not trade real money. There is no Kalshi API key, no wallet, and no control here that sends an order.</div>
+<div class="paperban" role="status"><b>PAPER ONLY.</b> This desk does not trade real money. There is no Kalshi API key, no wallet, and no control here that sends an order. The same paper checks also run on a timer.</div>
 <h1 class="pimph">PIMP-TRADING</h1>
 <p class="muted" id="pimpstake"></p>
 <section class="card" style="margin-bottom:12px"><h2>Desk</h2><div id="pimpdesk"></div>
@@ -39983,6 +39983,7 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{};
   h('div',{class:'row'},h('span',{text:"Today's realized"}),h('b',{class:desk.today>0?'ok':desk.today<0?'bad':'',text:pnl(desk.today||0)})),
   h('div',{class:'row'},h('span',{text:'Open risk'}),h('b',{text:usd(desk.open_risk||0)+' · '+(desk.open_count||0)+' open'})),
   h('div',{class:'row'},h('span',{text:'Last check'}),h('b',{text:desk.last_check||'No check yet'})),
+  d.timer?h('p',{class:'muted',text:d.timer}):null,
   gate?h('p',{class:'warn',text:gate}):null);
  put($('#pimpbots'),(d.bots||[]).map(b=>h('section',{class:'card'},
   h('h2',{text:b.name||'Bot'}),
@@ -40004,7 +40005,7 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{};
   b.present&&(b.log||[]).length?h('h2',{text:'Recent log',style:'margin-top:14px'}):null,
   b.present?(b.log||[]).map(line=>h('div',{class:'row'},h('span',{text:line}))):null,
   b.present?h('h2',{text:'Last run',style:'margin-top:14px'}):null,
-  b.present?h('p',{class:'muted',text:(b.last_run&&b.last_run.at)?(b.last_run.at+(b.last_run.ok?' · finished':' · stopped')):'No run from this desk yet.'}):null,
+  b.present?h('p',{class:'muted',text:(b.last_run&&b.last_run.at)?(b.last_run.at+(b.last_run.ok?' · finished':(b.last_run.blocked?' · skipped':' · stopped'))):'No run from this desk yet.'}):null,
   b.present?h('pre',{class:'pre',text:(b.last_run&&b.last_run.summary)||'Run one check to see the script output.'}):null,
   (b.actions||[]).length?h('div',{class:'form'},(b.actions||[]).filter(a=>!a.confirm).map(a=>h('button',{type:'button',text:a.label,onclick:()=>pimpAct(b,a)}))):null,
   (b.actions||[]).some(a=>a.confirm)?h('button',{class:'xbtn',type:'button',text:'Reset paper state',style:'margin-top:8px',onclick:()=>{
@@ -50667,6 +50668,7 @@ class PicksBot(discord.Client):
         else:
             await self.tree.sync()  # global: can take up to an hour to appear
         self.scheduler_task = asyncio.create_task(self.scheduler())
+        self.paper_timer_task = asyncio.create_task(self.paper_timer())
 
     def _silence_disconnect_alert(self) -> bool:
         """Cancel a pending dropout note. Returns whether a heads-up was already posted."""
@@ -50786,6 +50788,21 @@ class PicksBot(discord.Client):
         except Exception:
             log.info("Couldn't post going-down note")
         await super().close()
+
+    # ---- paper desk timer --------------------------------------------------
+
+    async def paper_timer(self) -> None:
+        """Run the paper desk checks on a timer. Paper only. No live orders."""
+        await self.wait_until_ready()
+        log.info("Paper timer on. Same checks as the PIMP-TRADING desk, paper only.")
+        await asyncio.sleep(45)
+        while not self.is_closed():
+            try:
+                desk = pimp_mod()
+                await asyncio.get_running_loop().run_in_executor(None, desk.run_scheduled)
+            except Exception:
+                log.exception("Paper timer failed")
+            await asyncio.sleep(60)
 
     # ---- scheduled posts ---------------------------------------------------
 
