@@ -8239,6 +8239,14 @@ def chart_series(guild_id: int, days: int, bettor_key: Optional[str] = None) -> 
     return out
 
 
+def dashboard_profit_series(series: dict) -> dict:
+    """Picks-dashboard group profit lines. The display name Lelouch is left off this graph."""
+    return {
+        name: pts for name, pts in series.items()
+        if str(name or "").strip().casefold() != "lelouch"
+    }
+
+
 def render_chart(series: dict[str, list], title: str) -> io.BytesIO:
     import matplotlib
     matplotlib.use("Agg")
@@ -13455,7 +13463,7 @@ def dashboard_data(guild_id: int) -> dict:
         return [{"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
                  "roi": round(s["roi"], 1), "streak": current_streak(guild_id, s["key"]), "open": s["open"]}
                 for s in stats if s["wins"] + s["losses"] + s["pushes"] > 0]
-    series = chart_series(guild_id, 3650)
+    series = dashboard_profit_series(chart_series(guild_id, 3650))
     recent = [{"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
                "what": shown_desc(p), "platform": p["platform"],
                "sport": clip(p["sport"] or "", 24), "status": p["status"], "net": round(pick_net(p), 2),
