@@ -40183,10 +40183,14 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
 .spark{width:100%;height:36px;display:block}
 .eqcard{background:#0c0e12;border:1px solid #23262d;border-radius:18px;padding:18px 16px 8px;margin:0 0 14px}
 .eqk{margin:0;color:#9aa1ab;font-size:13px;font-weight:650}
-.eqtop{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap}
-.eqwl{display:inline-flex;align-items:stretch;border:1px solid #3d4450;border-radius:999px;overflow:hidden;background:#14181e}
-.eqwl button{appearance:none;background:transparent;border:0;height:28px;padding:0 12px;cursor:pointer;
- font:700 12px ui-sans-serif,system-ui,sans-serif}
+.eqtop{display:flex;align-items:flex-end;justify-content:space-between;gap:12px 16px;flex-wrap:wrap}
+.eqmoney{min-width:0}
+.eqrec{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none}
+.eqwl{display:inline-flex;align-items:stretch;border:1px solid #3d4450;border-radius:16px;overflow:hidden;background:#14181e}
+.eqwl button{appearance:none;background:transparent;border:0;min-width:76px;padding:8px 14px 7px;cursor:pointer;
+ display:flex;flex-direction:column;align-items:center;gap:2px}
+.eqwl button b{font:700 28px/1 ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums}
+.eqwl button small{font:700 11px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#8b939e}
 .eqwl button+button{border-left:1px solid #3d4450}
 .eqwl button[aria-pressed="true"]{background:#1c2430}
 .eqresults{margin:10px 0 2px;max-height:440px;overflow:auto}
@@ -40327,13 +40331,18 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <div class="paperban" role="status"><b>PAPER ONLY.</b> This desk does not trade real money. There is no Kalshi API key, no wallet connect, and no live-order switch. Any future switch would need two people to confirm. The same paper checks also run on a timer.</div>
 <section class="eqcard" id="pimpequity" aria-labelledby="pimpeqk">
  <div class="eqtop">
-  <p class="eqk" id="pimpeqk">Paper P/L</p>
-  <div class="eqwl" id="eqwl" role="group" aria-label="Paper wins and losses">
-   <button type="button" data-side="win" aria-pressed="false" aria-expanded="false">0 wins</button>
-   <button type="button" data-side="loss" aria-pressed="false" aria-expanded="false">0 losses</button>
+  <div class="eqmoney">
+   <p class="eqk" id="pimpeqk">Paper P/L</p>
+   <p class="eqv flat" id="pimpeqv">$0.00</p>
+  </div>
+  <div class="eqrec">
+   <p class="eqk">Record</p>
+   <div class="eqwl" id="eqwl" role="group" aria-label="Paper wins and losses">
+    <button type="button" class="win" data-side="win" aria-pressed="false" aria-expanded="false" aria-label="0 wins"><b>0</b><small>wins</small></button>
+    <button type="button" class="loss" data-side="loss" aria-pressed="false" aria-expanded="false" aria-label="0 losses"><b>0</b><small>losses</small></button>
+   </div>
   </div>
  </div>
- <p class="eqv flat" id="pimpeqv">$0.00</p>
  <p class="eqsub" id="pimpeqsub">No settled paper trades yet.</p>
  <div id="eqresults" class="eqresults" hidden></div>
  <div class="eqranges" id="eqranges" role="group" aria-label="Paper chart range">
@@ -40780,7 +40789,7 @@ function resultCard(t){const n=Number(t.pnl);
   h('div',{class:'fact'},h('span',{text:'P/L'}),h('span',{class:'num '+(n>0?'win':n<0?'loss':''),text:Number.isFinite(n)?pnl(n):'unknown'})))}
 function sideBtn(side, n, pressed){const word=side==='win'?(n===1?'win':'wins'):(n===1?'loss':'losses');
  return h('button',{type:'button','data-side':side,'aria-pressed':pressed?'true':'false','aria-expanded':pressed?'true':'false',
-  class:side==='win'?'win':'loss'}, h('b',{text:String(n)}), ' '+word)}
+  'aria-label':String(n)+' '+word,class:side==='win'?'win':'loss'}, h('b',{text:String(n)}), h('small',{text:word}))}
 function paintResults(){const box=$('#eqwl'), list=$('#eqresults');
  const rows=settledResults();
  const wins=rows.filter(row=>Number(row.pnl)>0), losses=rows.filter(row=>Number(row.pnl)<0);

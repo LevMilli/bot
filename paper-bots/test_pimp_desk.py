@@ -638,6 +638,7 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("Live · not settled", text)
         self.assertIn("Settled paper P/L", text)
         self.assertIn('id="eqwl"', chunk)
+        self.assertIn('>Record</p>', chunk)
         self.assertIn('aria-label="Paper wins and losses"', chunk)
         self.assertIn('data-side="win"', chunk)
         self.assertIn('data-side="loss"', chunk)
