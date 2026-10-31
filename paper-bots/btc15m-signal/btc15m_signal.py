@@ -13,7 +13,7 @@ What it does (one run):
   5. Checks the US high-impact news calendar (ForexFactory) and prints BUY or SKIP with the reason.
 
 What it does NOT do: it places no real orders, needs no login, no API key, and no wallet.
-It keeps a paper account and can paper-buy on the desk timer. Not financial advice.
+It keeps a paper account and paper-buys only when the signal clears the edge after fees. Not financial advice.
 
 Run:  python3 btc15m_signal.py
 """
@@ -135,24 +135,20 @@ def settle_account(state):
 
 
 def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
-    """Paper fill only. No order is sent. Returns a one-line card sentence."""
+    """Paper fill only when the signal cleared the edge after fees. No order is sent."""
     if ask is None or not (0.05 <= float(ask) <= 0.95):
         return "Checked the BTC 15-minute market. No paper buy."
     if any(isinstance(pos, dict) and pos.get("ticker") == ticker for pos in state.get("open") or []):
         return "Checked the BTC 15-minute market. No paper buy."
-    force = True
     skip = ""
     try:
         desk = _desk()
-        cfg = desk.load_settings(DESK_ROOT)
-        pace = desk.hour_pace(DESK_ROOT, cfg=cfg)
-        force = bool(pace.get("loosened"))
         skip = desk.learning_skip(desk.load_learning(DESK_ROOT), "BTC", desk.prob_bucket(prob))
     except Exception:
-        pace = {"count": 0, "target": 12}
+        pass
     if skip:
         return skip
-    if not signal_buy and not force:
+    if not signal_buy:
         return "Checked the BTC 15-minute market. No paper buy."
     per = float(ask) + float(fee or 0)
     try:
@@ -171,13 +167,7 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
         return "Checked the BTC 15-minute market. No paper buy."
     state["cash"] = round(cash - cost, 2)
     reward = round(contracts * 1.0 - cost, 2)
-    if signal_buy:
-        why = "Paper buy. The BTC 15-minute signal cleared its checks."
-    else:
-        why = (
-            f"Paper buy. This hour had {int(pace.get('count') or 0)} paper trades, "
-            f"under {int(pace.get('target') or 12)}, so the timer took this side without the strict signal."
-        )
+    why = "Paper buy. The BTC 15-minute signal cleared its checks."
     opened = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     state.setdefault("open", []).append({
         "ticker": ticker,
