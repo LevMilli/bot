@@ -15,8 +15,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY bot.py .
 COPY paper-bots ./paper-bots
 
-# The picks database lives in /data. Attach a persistent volume at /data on your
-# host, otherwise the picks are wiped every time the bot is redeployed.
+# The picks database lives in /data. When /data is a mounted volume, closed paper
+# settlements are kept in /data/paper-bots. Attach a persistent volume at /data
+# on your host, otherwise picks and closed paper trades are wiped on redeploy.
 RUN mkdir -p /data
 ENV DB_PATH=/data/picks.db \
     PYTHONUNBUFFERED=1

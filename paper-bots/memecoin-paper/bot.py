@@ -72,10 +72,14 @@ def load_state():
 
 
 def save_state(st):
-    tmp = P_POS + ".tmp"
+    path = P_POS
+    if os.path.islink(path):
+        path = os.path.realpath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(st, f, indent=2)
-    os.replace(tmp, P_POS)
+    os.replace(tmp, path)
 
 
 TRADE_COLS = ["ts", "run_id", "side", "mint", "symbol", "pair", "reason", "market_price_usd",

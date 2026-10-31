@@ -85,6 +85,23 @@ ACCOUNT_FILES = {
     "memecoin": "positions.json",
 }
 
+# Closed paper settlements and the logs that record them. These are the files a
+# new image would otherwise replace with the empty copies from git. They are
+# bound to the host volume at startup. A file already on that volume wins.
+SETTLEMENT_FILES = (
+    "sports-gap-paper/state.json",
+    "sports-gap-paper/paper_trades.md",
+    "btc15m-signal/paper_account.json",
+    "kalshi-sp500-paper/paper_state.json",
+    "kalshi-sp500-paper/Trade_Ledger.md",
+    "kalshi-sp500-paper/Learning.md",
+    "memecoin-paper/positions.json",
+    "memecoin-paper/trades.csv",
+    "memecoin-paper/checks.csv",
+    "pimp-learning.json",
+    "pimp-good.json",
+)
+
 # Fixed commands. Nothing from the request is concatenated onto these.
 ACTIONS = {
     "sports-gap": {
@@ -172,6 +189,8 @@ BOTS = (
 
 _LOCKS: dict[str, threading.Lock] = {}
 _FILE_LOCK = threading.RLock()
+# realpath(desk root) -> realpath(volume directory) once settlements are bound.
+_BOUND_DURABLE: dict[str, str] = {}
 _BUSY = "A check is already running for this bot."
 _HHMM = re.compile(r"^(\d{2}):(\d{2})$")
 _ENV_KEEP = {
@@ -196,7 +215,19 @@ def _root(root: str | None) -> str:
 
 def _under(root: str, *parts: str) -> str:
     base = _root(root)
-    path = os.path.realpath(os.path.join(base, *parts))
+    for part in parts:
+        if not part or part in (".", "..") or part != os.path.basename(part):
+            raise RuntimeError("path escapes the paper desk")
+    joined = os.path.abspath(os.path.join(base, *parts))
+    if joined != base and not joined.startswith(base + os.sep):
+        raise RuntimeError("path escapes the paper desk")
+    if os.path.islink(joined):
+        target = os.path.realpath(joined)
+        allowed = _allowed_durable(base)
+        if allowed and (target == allowed or target.startswith(allowed + os.sep)):
+            return joined
+        raise RuntimeError("path escapes the paper desk")
+    path = os.path.realpath(joined)
     if path != base and not path.startswith(base + os.sep):
         raise RuntimeError("path escapes the paper desk")
     return path
@@ -228,8 +259,26 @@ def _read_json(path: str):
     return data if isinstance(data, dict) else None
 
 
-def _atomic_write(path: str, text: str) -> None:
+def _follow_link(path: str) -> str:
+    if path and os.path.islink(path):
+        return os.path.realpath(path)
+    return path
+
+
+def _durable_target(path: str) -> str:
+    """Follow a settlement symlink so a save updates the volume, not the link."""
+    if not path or not os.path.islink(path):
+        return path
+    path = os.path.realpath(path)
     folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    return path
+
+
+def _atomic_write(path: str, text: str) -> None:
+    path = _durable_target(path)
+    folder = os.path.dirname(path) or "."
     with _FILE_LOCK:
         os.makedirs(folder, exist_ok=True)
         tmp = path + ".tmp"
@@ -237,6 +286,160 @@ def _atomic_write(path: str, text: str) -> None:
             handle.write(text)
             handle.flush()
         os.replace(tmp, path)
+
+
+def _mount_points() -> set[str]:
+    found = set()
+    try:
+        with open("/proc/mounts", encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return found
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        raw = parts[1]
+        raw = (
+            raw.replace("\\040", " ")
+            .replace("\\011", "\t")
+            .replace("\\012", "\n")
+            .replace("\\134", "\\")
+        )
+        try:
+            found.add(os.path.realpath(raw))
+        except OSError:
+            continue
+    return found
+
+
+def settlement_dir() -> str | None:
+    """Where closed paper settlements survive a new image.
+
+    PAPER_DATA_DIR wins when it is set. Otherwise a real mount at /data is
+    used. A /data directory created inside the image is not a mount, and
+    keeping files there would lose them on the next deploy.
+    """
+    explicit = os.environ.get("PAPER_DATA_DIR", "").strip()
+    if explicit:
+        return explicit
+    if os.path.realpath("/data") in _mount_points():
+        return "/data/paper-bots"
+    return None
+
+
+def _allowed_durable(base: str) -> str:
+    bound = _BOUND_DURABLE.get(os.path.realpath(base)) or ""
+    if bound:
+        return bound
+    if os.path.realpath(base) != os.path.realpath(ROOT):
+        return ""
+    if os.environ.get("PAPER_KEEP_SETTLEMENTS") == "0":
+        return ""
+    durable = settlement_dir()
+    if not durable:
+        return ""
+    try:
+        return os.path.realpath(durable)
+    except OSError:
+        return ""
+
+
+def _path_inside(path: str, parent: str) -> bool:
+    try:
+        path = os.path.realpath(path)
+        parent = os.path.realpath(parent)
+    except OSError:
+        return False
+    return path == parent or path.startswith(parent + os.sep)
+
+
+def _same_settlement_link(local: str, remote: str) -> bool:
+    if not os.path.islink(local):
+        return False
+    try:
+        return os.path.realpath(local) == os.path.realpath(remote)
+    except OSError:
+        return False
+
+
+def _point_settlement(local: str, remote: str) -> None:
+    os.makedirs(os.path.dirname(remote), exist_ok=True)
+    folder = os.path.dirname(local)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    if _same_settlement_link(local, remote):
+        return
+    if os.path.lexists(local):
+        os.remove(local)
+    os.symlink(os.path.abspath(remote), local)
+
+
+def _copy_settlement(src: str, dest: str) -> None:
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".keep"
+    shutil.copy2(src, tmp)
+    os.replace(tmp, dest)
+
+
+def _bind_settlement(local: str, remote: str) -> None:
+    remote_ready = os.path.isfile(remote) and not os.path.islink(remote)
+    local_file = os.path.isfile(local) and not os.path.islink(local)
+    if remote_ready:
+        _point_settlement(local, remote)
+        return
+    if local_file:
+        _copy_settlement(local, remote)
+        _point_settlement(local, remote)
+        return
+    _point_settlement(local, remote)
+
+
+def keep_closed_settlements(root: str | None = None, durable: str | None = None) -> list:
+    """Keep closed paper settlements on the volume so a push cannot wipe them.
+
+    The copy already on the volume wins. The empty file shipped in a new image
+    is replaced with a symlink to that copy. A desk root other than this
+    checkout is left alone unless the caller passes durable, so a unit test
+    cannot retarget the real accounts.
+    """
+    root = _root(root)
+    with _FILE_LOCK:
+        if durable is None:
+            if os.path.realpath(root) != os.path.realpath(ROOT):
+                return []
+            if os.environ.get("PAPER_KEEP_SETTLEMENTS") == "0":
+                return []
+            durable = settlement_dir()
+        if not durable:
+            return []
+        durable = os.path.abspath(durable)
+        if _path_inside(durable, root):
+            return []
+        try:
+            os.makedirs(durable, exist_ok=True)
+            bound = os.path.realpath(durable)
+        except OSError:
+            log.exception("paper settlement folder")
+            return []
+        if _path_inside(bound, root):
+            return []
+        _BOUND_DURABLE[os.path.realpath(root)] = bound
+        linked = []
+        for rel in SETTLEMENT_FILES:
+            if not rel or rel.startswith(("/", "\\")) or ".." in rel.split("/"):
+                continue
+            local = os.path.join(root, *rel.split("/"))
+            remote = os.path.join(bound, *rel.split("/"))
+            if _path_inside(os.path.dirname(remote), root):
+                continue
+            try:
+                _bind_settlement(local, remote)
+            except OSError:
+                log.exception("paper settlement %s", rel)
+                continue
+            linked.append(rel)
+        return linked
 
 
 def _now() -> str:
@@ -981,6 +1184,7 @@ def entry_gate(root: str | None = None, bots: list | None = None) -> str:
 
 def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int = 1) -> dict:
     root = _root(root)
+    keep_closed_settlements(root)
     ensure_paper_accounts(root)
     cfg = load_settings(root)
     runs = _load_runs(root)
@@ -1044,6 +1248,7 @@ def _paper_ok(root: str, bot_id: str) -> str:
 def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: bool = False,
             stake=None, prob=None) -> dict:
     root = _root(root)
+    keep_closed_settlements(root)
     ensure_paper_accounts(root)
     spec = ACTIONS.get(bot_id, {}).get(action or "run")
     folder = next((b["folder"] for b in BOTS if b["id"] == bot_id), "")
@@ -1228,6 +1433,7 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
     place a live order.
     """
     root = _root(root)
+    keep_closed_settlements(root)
     ensure_paper_accounts(root)
     if now is None:
         now = dt.datetime.now(dt.timezone.utc)
@@ -1286,6 +1492,13 @@ def run_due(root: str | None = None, now: dt.datetime | None = None) -> dict:
 
 
 def _unlink(path: str) -> bool:
+    """Delete a paper file. A settlement symlink and the volume file both go."""
+    if os.path.islink(path):
+        target = os.path.realpath(path)
+        os.remove(path)
+        if target and os.path.isfile(target):
+            os.remove(target)
+        return True
     if not os.path.isfile(path):
         return False
     os.remove(path)
@@ -2117,6 +2330,7 @@ def audit_rows(root: str | None) -> list:
 
 
 def _read_state(path: str):
+    path = _follow_link(path)
     tmp = path + ".tmp"
     if not os.path.isfile(path):
         if os.path.isfile(tmp):

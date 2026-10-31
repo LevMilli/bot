@@ -55,6 +55,19 @@ def _write(path, text):
         handle.write(text)
 
 
+def _checkout_snapshot():
+    """Read this checkout without binding it to a host volume."""
+    previous = os.environ.get("PAPER_KEEP_SETTLEMENTS")
+    os.environ["PAPER_KEEP_SETTLEMENTS"] = "0"
+    try:
+        return pimp_desk.snapshot(ROOT)
+    finally:
+        if previous is None:
+            os.environ.pop("PAPER_KEEP_SETTLEMENTS", None)
+        else:
+            os.environ["PAPER_KEEP_SETTLEMENTS"] = previous
+
+
 class PimpDeskTests(unittest.TestCase):
     def test_allowlist_is_paper_scripts_only(self):
         with open(pimp_desk.__file__, encoding="utf-8") as handle:
@@ -81,7 +94,7 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(cfg["stake_lo_max"], 20)
 
     def test_checkout_snapshot_is_empty_and_paper(self):
-        snap = pimp_desk.snapshot(ROOT)
+        snap = _checkout_snapshot()
         self.assertTrue(snap["paper_only"])
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertEqual([b["id"] for b in snap["bots"]],
@@ -233,7 +246,7 @@ class PimpDeskTests(unittest.TestCase):
             self.assertNotIn(("kalshi-sp", "run", "12:30"), names(late))
             self.assertEqual([row[0] for row in names(night)], ["sports-gap", "btc15m"])
             self.assertIn(("kalshi-sp", "run", "12:30"), names(saturday))
-        snap = pimp_desk.snapshot(ROOT)
+        snap = _checkout_snapshot()
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertIn("timer", snap["banner"].lower())
         self.assertIn("every 5 minutes", snap["timer"].lower())
@@ -969,6 +982,121 @@ class PimpDeskTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as bare:
             self.assertEqual(pimp_desk.ensure_paper_accounts(bare), [])
             self.assertEqual(pimp_desk.snapshot(bare)["desk"]["curve"], [])
+
+    def test_closed_settlements_survive_an_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            volume = os.path.join(tmp, "volume")
+            root = os.path.join(tmp, "app", "paper-bots")
+            _tree(root, QUIET)
+            state_path = os.path.join(root, "sports-gap-paper", "state.json")
+            log_path = os.path.join(root, "sports-gap-paper", "paper_trades.md")
+            _write(state_path, json.dumps({
+                "cash": 90.08,
+                "open": [],
+                "closed": [{
+                    "team": "Bills",
+                    "game": "Bills at Chiefs",
+                    "exit": "settled",
+                    "pnl": 9.92,
+                    "cost": 19.5,
+                    "closed": "2026-10-30 17:33:00 CT",
+                }],
+                "runs": 1,
+                "paper_only": True,
+            }))
+            _write(log_path, "settled bill 9.92\n")
+            linked = pimp_desk.keep_closed_settlements(root, durable=volume)
+            self.assertIn("sports-gap-paper/state.json", linked)
+            self.assertIn("sports-gap-paper/paper_trades.md", linked)
+            self.assertTrue(os.path.islink(state_path))
+            self.assertTrue(os.path.islink(log_path))
+            snap = pimp_desk.snapshot(root)
+            self.assertEqual([point["v"] for point in snap["desk"]["curve"]], [9.92])
+            # A push replaces the working tree with the empty file from the image.
+            os.remove(state_path)
+            os.remove(log_path)
+            _write(state_path, json.dumps({
+                "cash": 100, "open": [], "closed": [], "runs": 0, "paper_only": True,
+            }))
+            _write(log_path, "fresh image\n")
+            self.assertFalse(os.path.islink(state_path))
+            again = pimp_desk.keep_closed_settlements(root, durable=volume)
+            self.assertIn("sports-gap-paper/state.json", again)
+            with open(state_path, encoding="utf-8") as handle:
+                restored = json.load(handle)
+            self.assertEqual(restored["closed"][0]["pnl"], 9.92)
+            with open(log_path, encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "settled bill 9.92\n")
+            with open(os.path.join(volume, "sports-gap-paper", "state.json"), encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle)["closed"][0]["pnl"], 9.92)
+            snap = pimp_desk.snapshot(root)
+            self.assertEqual([point["v"] for point in snap["desk"]["curve"]], [9.92])
+            self.assertEqual(pimp_desk.keep_closed_settlements(root), [])
+            self.assertEqual(pimp_desk.keep_closed_settlements(root, durable=os.path.join(root, "inside")), [])
+            pimp_desk._atomic_write(state_path, json.dumps({
+                "cash": 1,
+                "open": [],
+                "closed": [{"team": "Bills", "pnl": 9.92, "closed": "2026-10-30 17:33:00 CT"}],
+                "paper_only": True,
+            }))
+            self.assertTrue(os.path.islink(state_path))
+            with open(os.path.join(volume, "sports-gap-paper", "state.json"), encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle)["cash"], 1)
+            self.assertFalse(os.path.exists(state_path + ".tmp"))
+
+    def test_reset_clears_the_durable_settlement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            volume = os.path.join(tmp, "volume")
+            root = os.path.join(tmp, "root")
+            _write(os.path.join(root, "kalshi-sp500-paper", "bot.py"), STUB)
+            _write(os.path.join(root, "kalshi-sp500-paper", "config.json"), json.dumps({"paper_mode": True}))
+            _write(os.path.join(root, "kalshi-sp500-paper", "paper_state.json"), json.dumps({
+                "bankroll": 500,
+                "open": [],
+                "closed": [{"pnl": 3, "ticker": "KX", "settled_at": "2026-10-30"}],
+                "paper_only": True,
+            }))
+            _write(os.path.join(root, "kalshi-sp500-paper", "Trade_Ledger.md"), "row\n")
+            pimp_desk.keep_closed_settlements(root, durable=volume)
+            durable = os.path.join(volume, "kalshi-sp500-paper", "paper_state.json")
+            self.assertTrue(os.path.isfile(durable))
+            result = pimp_desk.reset_bot("kalshi-sp", root)
+            self.assertTrue(result["ok"], result)
+            self.assertFalse(os.path.exists(durable))
+            snap = pimp_desk.snapshot(root)
+            kalshi = next(bot for bot in snap["bots"] if bot["id"] == "kalshi-sp")
+            self.assertEqual(kalshi["trades"], [])
+            self.assertEqual(snap["desk"]["curve"], [])
+
+    def test_settlement_save_follows_the_symlink(self):
+        import importlib.util
+        modules = (
+            ("gap_save", os.path.join(ROOT, "sports-gap-paper", "gap_bot.py"), "STATE", "save_state",
+             {"cash": 1, "open": [], "closed": [{"pnl": 9.92}], "paper_only": True}),
+            ("btc_save", os.path.join(ROOT, "btc15m-signal", "btc15m_signal.py"), "ACCOUNT", "save_account",
+             {"cash": 1, "open": [], "closed": [{"pnl": 4}], "paper_only": True}),
+            ("kalshi_save", os.path.join(ROOT, "kalshi-sp500-paper", "paper_sim.py"), "STATE_PATH", "save_state",
+             {"bankroll": 500, "open": [], "closed": [{"pnl": 2}], "paper_only": True}),
+        )
+        for name, path, attr, fn, payload in modules:
+            spec = importlib.util.spec_from_file_location(name, path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            with tempfile.TemporaryDirectory() as tmp:
+                remote = os.path.join(tmp, "account.json")
+                local = os.path.join(tmp, "link.json")
+                _write(remote, "{}\n")
+                os.symlink(remote, local)
+                setattr(mod, attr, local)
+                if name == "kalshi_save":
+                    mod.save_state(payload, local)
+                else:
+                    getattr(mod, fn)(payload)
+                self.assertTrue(os.path.islink(local), name)
+                with open(remote, encoding="utf-8") as handle:
+                    saved = json.load(handle)
+                self.assertEqual(saved["closed"][0]["pnl"], payload["closed"][0]["pnl"], name)
+                self.assertFalse(os.path.exists(local + ".tmp"), name)
 
 
 if __name__ == "__main__":

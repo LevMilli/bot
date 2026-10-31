@@ -167,11 +167,15 @@ def load_state():
     return {"cash": START_BANKROLL, "open": [], "closed": [], "runs": 0, "paper_only": True}
 
 def save_state(s):
-    tmp = STATE + ".tmp"
+    path = STATE
+    if os.path.islink(path):
+        path = os.path.realpath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
     with open(tmp, "w") as handle:
         json.dump(s, handle, indent=2)
         handle.flush()
-    os.replace(tmp, STATE)
+    os.replace(tmp, path)
 
 def log(lines):
     if os.path.exists(LOG) and os.path.getsize(LOG) > 256 * 1024:
@@ -595,6 +599,12 @@ def run():
 if __name__ == "__main__":
     if "--reset" in sys.argv:
         for f in (STATE, LOG):
-            if os.path.exists(f): os.remove(f)
+            if os.path.islink(f):
+                target = os.path.realpath(f)
+                os.remove(f)
+                if os.path.isfile(target):
+                    os.remove(target)
+            elif os.path.exists(f):
+                os.remove(f)
         print("Paper state reset to $%.2f" % START_BANKROLL); sys.exit()
     run()
