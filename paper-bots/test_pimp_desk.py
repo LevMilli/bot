@@ -99,13 +99,15 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(snap["desk"]["curve"], [])
         self.assertEqual(snap["desk"]["equity"], [])
         self.assertEqual(snap["desk"]["pace_line"], "0 of 12 this hour")
-        self.assertTrue(snap["desk"]["pace_loosened"])
+        self.assertFalse(snap["desk"]["pace_loosened"])
+        self.assertIn("does not waive", snap["desk"]["pace_note"])
         self.assertEqual(snap["desk"]["cash"], 800.0)
         self.assertIn("Run one check", [a["label"] for a in snap["bots"][0]["actions"]])
         self.assertIn("Morning brief", [a["label"] for a in snap["bots"][1]["actions"]])
         self.assertIn("20.00", snap["limits_text"])
         self.assertIn("100.00", snap["limits_text"])
-        self.assertIn("6 to 12", snap["limits_text"])
+        self.assertIn("do not waive", snap["limits_text"])
+        self.assertNotIn("without the strict edge", snap["limits_text"])
         self.assertIn("150.00", snap["limits_text"])
         self.assertIn("0.04", snap["limits_text"])
         self.assertIn("0.08", snap["limits_text"])
@@ -841,8 +843,9 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(pimp_desk.learning_skip(rows(0, 7), "NFL", "0.6-0.7"), "")
         self.assertEqual(pimp_desk.learning_skip(rows(4, 6), "NFL", "0.6-0.7"), "")
         self.assertEqual(pimp_desk.prob_bucket(0.60), "0.6-0.7")
-        self.assertEqual(pimp_desk.edge_for_hour(0, 0.04), (0.0, True))
-        self.assertEqual(pimp_desk.edge_for_hour(4, 0.04), (0.0, True))
+        self.assertEqual(pimp_desk.edge_for_hour(0, 0.04), (0.04, False))
+        self.assertEqual(pimp_desk.edge_for_hour(4, 0.04), (0.04, False))
+        self.assertEqual(pimp_desk.edge_for_hour(11, 0.04), (0.04, False))
         self.assertEqual(pimp_desk.edge_for_hour(12, 0.04), (0.04, False))
 
     def test_hour_pace_counts_this_chicago_hour_only(self):
@@ -850,8 +853,9 @@ class PimpDeskTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _tree(tmp, QUIET)
             self.assertEqual(pimp_desk.hour_pace(tmp, now)["line"], "0 of 12 this hour")
-            self.assertTrue(pimp_desk.hour_pace(tmp, now)["loosened"])
-            self.assertEqual(pimp_desk.hour_pace(tmp, now)["edge"], 0.0)
+            self.assertFalse(pimp_desk.hour_pace(tmp, now)["loosened"])
+            self.assertEqual(pimp_desk.hour_pace(tmp, now)["edge"], 0.04)
+            self.assertNotIn("without the strict edge", pimp_desk.hour_pace(tmp, now)["note"])
             self.assertEqual(pimp_desk.snapshot(tmp)["desk"]["curve"], [])
             opens = []
             for i in range(4):
@@ -872,7 +876,8 @@ class PimpDeskTests(unittest.TestCase):
             }))
             pace = pimp_desk.hour_pace(tmp, now)
             self.assertEqual(pace["line"], "4 of 12 this hour")
-            self.assertTrue(pace["loosened"])
+            self.assertFalse(pace["loosened"])
+            self.assertEqual(pace["edge"], 0.04)
             self.assertEqual(pace["count"], 4)
             full = []
             for i in range(12):
@@ -887,6 +892,42 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(done["count"], 12)
             self.assertFalse(done["loosened"])
             self.assertEqual(done["edge"], 0.04)
+
+    def test_short_hour_does_not_waive_the_edge(self):
+        for count in (0, 4, 11, 12):
+            edge, loose = pimp_desk.edge_for_hour(count, 0.04)
+            self.assertEqual((edge, loose), (0.04, False))
+        sports = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
+        with open(sports, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertNotIn("loosened", text)
+        self.assertNotIn("without the strict", text)
+        self.assertIn("gap < need", text)
+        import importlib.util
+        path = os.path.join(ROOT, "btc15m-signal", "btc15m_signal.py")
+        spec = importlib.util.spec_from_file_location("btc15m_edge_gate", path)
+        btc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(btc)
+        with tempfile.TemporaryDirectory() as tmp:
+            btc.ACCOUNT = os.path.join(tmp, "paper_account.json")
+            state = {"cash": 100.0, "open": [], "closed": [], "paper_only": True}
+            quiet = btc.paper_buy(
+                state, "KXBTC15M-TEST", "YES", 0.70, 0.02, 0.71, "2026-10-31T16:00:00Z", False,
+            )
+            self.assertEqual(quiet, "Checked the BTC 15-minute market. No paper buy.")
+            self.assertEqual(state["open"], [])
+            self.assertEqual(state["cash"], 100.0)
+            self.assertFalse(os.path.exists(btc.ACCOUNT))
+            bought = btc.paper_buy(
+                state, "KXBTC15M-TEST", "YES", 0.70, 0.02, 0.80, "2026-10-31T16:00:00Z", True,
+            )
+            self.assertEqual(bought, "Checked the BTC 15-minute market. Paper buy.")
+            self.assertEqual(len(state["open"]), 1)
+            cost = state["open"][0]["cost"]
+            self.assertGreaterEqual(cost, 19)
+            self.assertLessEqual(cost, 20)
+            self.assertNotIn("without the strict", state["open"][0]["why"])
+            self.assertTrue(state["open"][0]["paper_only"])
 
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (

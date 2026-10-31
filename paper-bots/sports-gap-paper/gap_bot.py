@@ -27,8 +27,8 @@ ET = ZoneInfo("America/New_York")
 START_BANKROLL = 100.00
 OLD_BANKROLL = 14.00
 # The desk file is the source of these limits. Old defaults: 8 points of edge, 3 open positions.
-# New defaults: 4 points of edge, 12 open positions. Under 12 trades this hour, the timer
-# may paper-buy without that edge. The desk daily loss stop still ends a bad paper day.
+# New defaults: 4 points of edge, 12 open positions. A paper buy needs that edge after the fee.
+# The hourly count does not waive it. The desk daily loss stop still ends a bad paper day.
 MAX_OPEN = 12
 MIN_GAP = 0.04            # saved edge bar AFTER the taker fee (old bar was 0.08)
 MIN_GAP_MODEL = 0.06      # NHL model stays 2 points stricter (old bar was 0.10)
@@ -344,20 +344,17 @@ def _desk():
 
 
 def _paper_limits():
-    """Desk limits for this check. Paper only. A missing desk falls back to the new defaults."""
+    """Desk limits for this check. Paper only. A missing desk keeps the saved edge."""
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
-        pace = desk.hour_pace(DESK_ROOT, cfg=cfg)
-        return desk, cfg, pace
+        return desk, cfg
     except Exception:
         return None, {
             "min_edge": MIN_GAP,
             "max_open_positions": MAX_OPEN,
             "daily_loss_stop": 150.0,
-            "pace_target": 12,
-            "pace_min": 6,
-        }, {"edge": 0.0, "loosened": True, "count": 0, "target": 12}
+        }
 
 
 def _card_line(summary_out):
@@ -378,12 +375,9 @@ def run():
     s = load_state()
     if not existed:
         save_state(s)
-    desk, cfg, pace = _paper_limits()
-    force = bool(pace.get("loosened"))
-    need_edge = float(pace.get("edge") if pace.get("edge") is not None else cfg.get("min_edge") or MIN_GAP)
+    desk, cfg = _paper_limits()
+    need_edge = float(cfg.get("min_edge") if cfg.get("min_edge") is not None else MIN_GAP)
     max_open = int(cfg.get("max_open_positions") or MAX_OPEN)
-    room = max(0, int(pace.get("target") or 12) - int(pace.get("count") or 0))
-    opened_now = 0
     day = datetime.now(CT).strftime("%Y-%m-%d")
     today_pnl = 0.0
     for pos in s.get("closed") or []:
@@ -469,9 +463,9 @@ def run():
                 reason = entries_off
             elif key in open_by_game:
                 reason = "already holding this game"
-            elif (not force) and CLOSE_GAME_BAND[0] <= fair_home <= CLOSE_GAME_BAND[1]:
+            elif CLOSE_GAME_BAND[0] <= fair_home <= CLOSE_GAME_BAND[1]:
                 reason = "close game - skip"
-            elif (not force) and gap < need:
+            elif gap < need:
                 reason = f"gap < {need*100:.0f} - no trade"
             elif ask - bid > MAX_SPREAD:
                 reason = "spread too wide - skip"
@@ -479,8 +473,6 @@ def run():
                 reason = "price too extreme - skip"
             elif len(s["open"]) >= max_open:
                 reason = "max open positions"
-            elif force and opened_now >= room:
-                reason = "This hour already has 12 paper trades, so the timer is not adding another."
             elif desk is not None:
                 skip = desk.learning_skip(desk.load_learning(DESK_ROOT), league, desk.prob_bucket(fair))
                 if skip:
@@ -504,14 +496,7 @@ def run():
             max_payout = round(n * 1.0, 2)
             reward = round(max_payout - cost, 2)
             ratio = round(reward / cost, 4) if cost else None
-            if force and gap < float(cfg.get("min_edge") or MIN_GAP):
-                why = (
-                    f"Paper buy. This hour had {int(pace.get('count') or 0)} paper trades, "
-                    f"under {int(pace.get('target') or 12)}, so the timer took this side "
-                    f"without waiting for the strict edge. Fair versus ask was {gap * 100:.1f} points after the fee."
-                )
-            else:
-                why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
+            why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
             pos = {"game_key": key, "league": league, "game": name, "ticker": m["ticker"], "team": m.get("yes_sub_title"),
                    "side": side, "contracts": n, "entry_price": ask, "bid": bid, "ask": ask, "entry_fee": fee(ask),
                    "fee": fee(ask), "cost": cost, "risk": cost, "reward": reward, "risk_reward": ratio,
@@ -521,7 +506,6 @@ def run():
                    "price_source": f"{KALSHI}/markets?series_ticker={series}",
                    "price_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                    "fill_id": f"{m['ticker']}|{ts}"}
-            opened_now += 1
             s["open"].append(pos); open_by_game[key] = pos
             lines.append(row + gtxt + f" | **PAPER BUY** {n} YES {m.get('yes_sub_title')} @ {ask:.2f} (+fee {fee(ask):.2f}) = ${cost:.2f} |")
             summary_out["trades"].append(f"BUY {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")

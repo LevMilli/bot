@@ -53,7 +53,7 @@ LIVE_SWITCH_BUILT = False
 # Old: edge bar 0.08 after the fee, max open positions 4, daily loss stop $50.
 # New: edge bar 0.04 after the fee, max open positions 12, daily loss stop $150.
 # The daily loss stop stays. A bad paper day still ends.
-# While this hour has fewer than 12 paper trades, a timer check may buy without that edge.
+# A paper buy needs the edge after the fee. The hourly count does not waive it.
 # Under 80%, a paper fill risks about $20. At 80% or higher, it risks $20 to $100.
 PACE_MIN = 6
 PACE_TARGET = 12
@@ -429,8 +429,7 @@ def limits_text(cfg: dict) -> str:
         f"Max open risk ${cfg['max_open_risk']:.2f}. "
         f"Max open positions {cfg['max_open_positions']} (the old default was 4). "
         f"Edge bar {float(cfg.get('min_edge') or 0):.2f} after the fee (the old default was 0.08). "
-        f"Paper pace is {int(cfg.get('pace_min') or PACE_MIN)} to {int(cfg.get('pace_target') or PACE_TARGET)} trades an hour. "
-        "Under that target, a timer check may paper-buy without the strict edge. "
+        "A paper buy needs that edge. The trades counted this hour do not waive it. "
         "The BTC 15-minute check and the sports gap check use these dollar stakes and buy whole contracts near that amount. "
         "These limits also gate a new entry check. "
         "Realized P/L is closed paper trades in the local files. Past paper results stay in the past."
@@ -1720,14 +1719,12 @@ def hour_trade_count(root: str | None = None, now: dt.datetime | None = None) ->
 
 
 def edge_for_hour(count, saved_edge, pace_min=PACE_MIN, pace_target=PACE_TARGET):
-    """Under the hourly target, waive the strict edge so a timer check can paper-buy.
+    """Saved edge after fees. An hour under the pace target does not waive it.
 
-    At the target, loosening stops and the saved edge bar applies again.
+    count, pace_min, and pace_target stay so older callers keep working.
+    They do not change the bar.
     """
-    saved = round(float(saved_edge), 4)
-    if int(count) >= int(pace_target):
-        return saved, False
-    return 0.0, True
+    return round(float(saved_edge), 4), False
 
 
 def hour_pace(root: str | None = None, now: dt.datetime | None = None, cfg: dict | None = None) -> dict:
@@ -1737,22 +1734,11 @@ def hour_pace(root: str | None = None, now: dt.datetime | None = None, cfg: dict
     minimum = int(cfg.get("pace_min") or PACE_MIN)
     saved = float(cfg.get("min_edge") if cfg.get("min_edge") is not None else DEFAULTS["min_edge"])
     edge, loose = edge_for_hour(count, saved, minimum, target)
-    if loose and count < minimum:
-        note = (
-            f"This hour has {count} paper trades, under {minimum}. "
-            "The timer can paper-buy without the strict edge. "
-            f"Loosening stops once this hour has {target}."
-        )
-    elif loose:
-        note = (
-            f"This hour has {count} of {target} paper trades. "
-            "The timer can still paper-buy without the strict edge."
-        )
-    else:
-        note = (
-            f"This hour has {count} paper trades. "
-            f"The edge bar stays at {saved:.2f}. Loosening is off."
-        )
+    note = (
+        f"This hour has {count} paper trades. "
+        f"The edge bar stays at {saved:.2f} after the fee. "
+        "The hour count does not waive it."
+    )
     return {
         "count": count,
         "target": target,
