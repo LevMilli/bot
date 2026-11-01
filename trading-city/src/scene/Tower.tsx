@@ -11,6 +11,8 @@ type Props = {
   position: [number, number, number]
   selected: boolean
   onSelect: (id: string) => void
+  /** Window vista: same towers, no plaza lights (those don't scale and flood the room). */
+  vista?: boolean
 }
 
 function WindowInstances({
@@ -69,7 +71,7 @@ function WindowInstances({
   )
 }
 
-export function Tower({ bot, index, position, selected, onSelect }: Props) {
+export function Tower({ bot, index, position, selected, onSelect, vista = false }: Props) {
   const beamGroup = useRef<Group>(null)
   const beamCore = useRef<Mesh>(null)
   const color = BEAM_COLORS[index % BEAM_COLORS.length]
@@ -110,16 +112,28 @@ export function Tower({ bot, index, position, selected, onSelect }: Props) {
       <mesh
         position={[0, height / 2, 0]}
         castShadow
-        onClick={(e) => {
-          e.stopPropagation()
-          onSelect(bot.id)
-        }}
-        onPointerOver={() => {
-          document.body.style.cursor = 'pointer'
-        }}
-        onPointerOut={() => {
-          document.body.style.cursor = 'default'
-        }}
+        onClick={
+          vista
+            ? undefined
+            : (e) => {
+                e.stopPropagation()
+                onSelect(bot.id)
+              }
+        }
+        onPointerOver={
+          vista
+            ? undefined
+            : () => {
+                document.body.style.cursor = 'pointer'
+              }
+        }
+        onPointerOut={
+          vista
+            ? undefined
+            : () => {
+                document.body.style.cursor = 'default'
+              }
+        }
       >
         <boxGeometry args={[width, height, width]} />
         <meshStandardMaterial
@@ -179,12 +193,14 @@ export function Tower({ bot, index, position, selected, onSelect }: Props) {
         )}
       </group>
 
-      <pointLight
-        position={[0, height + 2.2, 0]}
-        intensity={offline ? 0.15 : hero ? 2.4 : 1.8}
-        color={color}
-        distance={12}
-      />
+      {!vista && (
+        <pointLight
+          position={[0, height + 2.2, 0]}
+          intensity={offline ? 0.15 : hero ? 2.4 : 1.8}
+          color={color}
+          distance={12}
+        />
+      )}
 
     </group>
   )

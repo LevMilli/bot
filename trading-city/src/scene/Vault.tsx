@@ -21,7 +21,7 @@ function Crystal({ position, scale = 1 }: { position: [number, number, number]; 
   )
 }
 
-export function Vault() {
+export function Vault({ lights = true }: { lights?: boolean }) {
   const dome = useRef<Mesh>(null)
   const glow = useRef<Mesh>(null)
 
@@ -94,8 +94,12 @@ export function Vault() {
         <meshBasicMaterial color="#ffe9a0" transparent opacity={0.28} depthWrite={false} />
       </mesh>
 
-      <pointLight position={[0, 2.6, 0]} intensity={3.2} color="#fff0b0" distance={22} />
-      <pointLight position={[0, 1.2, 1.5]} intensity={1.4} color="#ffe08a" distance={10} />
+      {lights && (
+        <>
+          <pointLight position={[0, 2.6, 0]} intensity={3.2} color="#fff0b0" distance={22} />
+          <pointLight position={[0, 1.2, 1.5]} intensity={1.4} color="#ffe08a" distance={10} />
+        </>
+      )}
 
       {crystals.map((p, i) => (
         <Crystal key={i} position={p} scale={0.85 + (i % 3) * 0.12} />
