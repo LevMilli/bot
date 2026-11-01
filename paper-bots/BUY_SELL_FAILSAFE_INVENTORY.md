@@ -30,7 +30,8 @@ Helpers: `paper_stake_dollars()`, `contracts_for_stake()`, `learning_skip()` (�
 2. Desk open_count ≥ `max_open_positions` (12)
 3. Desk open_risk ≥ `max_open_risk` ($100)
 
-Settle and the morning brief still run when the gate is hit. **BTC `run` does not.**
+Kalshi **scan** is hard-blocked when the gate is hit; settle/brief still run.  
+Sports / BTC / memecoin **still run** with `DESK_BLOCK_ENTRIES=1` so exits/settles can free risk; only new paper buys stay off.
 
 ### Pause / pace / other
 - **Pause:** `pimp-pause.json` — per-bot or `all`; `run_bot` returns blocked; timer skips paused slots.
