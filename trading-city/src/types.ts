@@ -35,6 +35,15 @@ export type TradeOrHistory = {
   [key: string]: unknown
 }
 
+export type BotPlans = {
+  buy?: string[]
+  sell?: string[]
+  failsafes?: string[]
+  exit_quality?: 'strong' | 'partial' | 'weak' | 'absent' | 'none' | string
+  entry_gated?: boolean
+  stake?: string
+}
+
 export type BotRow = {
   id: string
   name: string
@@ -61,6 +70,8 @@ export type BotRow = {
   would_have?: unknown[]
   has_state?: boolean
   blurb?: string
+  plans?: BotPlans
+  gates_hit?: string[]
 }
 
 export type Desk = {
@@ -87,6 +98,12 @@ export type Desk = {
   pace_line?: string
   pace_loosened?: boolean
   paused_all?: boolean
+  ops?: {
+    entry_gate?: string
+    entry_gated_bots?: string[]
+    strong_exits?: string[]
+    weak_exits?: string[]
+  }
   chart?: {
     zone?: string
     default?: string

@@ -41274,10 +41274,18 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    (book.page||1)<(book.pages||1)?h('button',{class:'xbtn',type:'button',text:'Next page',onclick:()=>{pimpQuery.page=(book.page||1)+1; loadPimp()}}):null));
  put($('#pimpbots'),(d.bots||[]).map(b=>{
   const idle=!((b.positions||[]).length||(b.trades||[]).length);
+  const plans=b.plans||{};
+  const planLine=(title,rows)=> (rows&&rows.length)?h('p',{class:'muted',text:title+': '+rows.slice(0,3).join(' · ')+(rows.length>3?' …':'')}):null;
   const body=[
    h('p',{class:'muted',text:b.blurb||''}),
    statusChip(b.status),
    b.paused?h('span',{class:'chip skip',text:'paused'}):null,
+   plans.exit_quality?h('span',{class:'chip',text:'exits '+plans.exit_quality}):null,
+   plans.entry_gated===false?h('span',{class:'chip skip',text:'not desk-entry-gated'}):null,
+   (b.gates_hit||[]).length?h('p',{class:'warn',text:'Gates: '+(b.gates_hit||[]).join(' · ')}):null,
+   planLine('Buy', plans.buy),
+   planLine('Sell', plans.sell),
+   planLine('Failsafes', plans.failsafes),
    idle&&b.idle_copy?h('p',{text:b.idle_copy}):(b.empty?h('p',{class:'muted',text:b.empty}):null),
    b.warning?h('p',{class:'warn',text:b.warning}):null,
    b.why?h('p',{text:b.why}):null,

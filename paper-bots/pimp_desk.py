@@ -187,6 +187,160 @@ BOTS = (
     },
 )
 
+# Normalized buy / sell / failsafe copy for snapshot consumers (city + staff).
+# Keep thresholds in sync with each bot script and desk DEFAULTS.
+BOT_PLANS = {
+    "sports-gap": {
+        "buy": [
+            "Live ESPN game matched to a Kalshi series",
+            "Edge after fee ≥ desk min_edge (NHL +0.02)",
+            "Home fair outside close-game band 0.40–0.60",
+            "Spread ≤ 0.05; ask in 0.05–0.95",
+            "Desk stake curve; learning skip clear",
+        ],
+        "sell": [
+            "Gap closed: bid − fee ≥ fair → sell at bid",
+            "Game final → settle $1 / $0 (ties wait)",
+        ],
+        "failsafes": [
+            "Desk entry_gate (daily loss / max open / open risk)",
+            "Bot daily loss stop (desk daily_loss_stop)",
+            "Max open / cash / learning skip / API skip league",
+            "Pause file",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "desk-curve",
+    },
+    "kalshi-sp": {
+        "buy": [
+            "Once per day 12:30–14:55 CT",
+            "Safest YES/NO ask in the 80–90¢ band",
+            "Stake floor($25 / ask); learning skip clear",
+        ],
+        "sell": [
+            "Hold to 3 PM CT Kalshi settlement only",
+            "Bid under 50¢ → invalidation log only (no stop)",
+        ],
+        "failsafes": [
+            "Desk entry_gate on scan (not settle/brief)",
+            "Weekend + news/holiday calendar",
+            "Max 1 trade/day; bot daily loss −$50",
+            "Kill switch bankroll ≤ $400; paper_mode required",
+            "Pause file",
+        ],
+        "exit_quality": "weak",
+        "entry_gated": True,
+        "stake": "fixed-25",
+    },
+    "btc15m": {
+        "buy": [
+            "Nearest open KXBTC15M; p ≥ ask + fee + 0.05",
+            "≥10 min left; cushion ≥ $40; z ≥ 0.5 (0.6 Coinbase-only)",
+            "Ask 65–85¢; spread ≤ 3¢; depth ≥ 5",
+            "Last 5×1m candles not toward target; no USD high news ±30m",
+            "Desk stake curve; learning skip clear",
+        ],
+        "sell": [
+            "Settle only when Kalshi resolves yes/no",
+            "Suggested TP fill+15¢ is printed only — not executed",
+        ],
+        "failsafes": [
+            "Full signal checklist (no spot/σ → skip)",
+            "Cash / hardcoded max 12 opens / learning skip",
+            "Pause file",
+            "Not under desk entry_gate (run is entry:false)",
+        ],
+        "exit_quality": "weak",
+        "entry_gated": False,
+        "stake": "desk-curve",
+    },
+    "memecoin": {
+        "buy": [
+            "RugCheck facts fail-closed + scorer ≥ 0.7",
+            "Flat $25 ticket; max 4 open / 6 entries per day",
+            "24h cooldown after close; learning skip clear",
+        ],
+        "sell": [
+            "Liq drop ≥ 40% from entry → full out",
+            "Hard stop ≤ −35% from entry → full out",
+            "Ladder +100% sell 50%, +200% sell 25% of original",
+            "Trail 30% off peak after first ladder",
+            "Time stop: ≥6h and < +20% → out",
+        ],
+        "failsafes": [
+            "Desk entry_gate + pause",
+            "Bot daily halt −$50; PAPER must be True",
+            "Max open 4 / cooldown / facts fail-closed",
+        ],
+        "exit_quality": "strong",
+        "entry_gated": True,
+        "stake": "fixed-25",
+    },
+    "kalshi-sized": {
+        "buy": ["Not on this checkout — no buy plan until the bot lands on main."],
+        "sell": ["Not on this checkout — no sell plan."],
+        "failsafes": ["Desk stake bounds are saved for when this bot is present."],
+        "exit_quality": "absent",
+        "entry_gated": False,
+        "stake": "none",
+    },
+}
+
+
+def bot_plans(bot_id: str, cfg: dict | None = None) -> dict:
+    """Stable plan block for one bot id. Optional cfg annotates live desk thresholds."""
+    base = BOT_PLANS.get(bot_id) or {
+        "buy": [],
+        "sell": [],
+        "failsafes": [],
+        "exit_quality": "none",
+        "entry_gated": False,
+        "stake": "unknown",
+    }
+    plans = {
+        "buy": list(base["buy"]),
+        "sell": list(base["sell"]),
+        "failsafes": list(base["failsafes"]),
+        "exit_quality": base["exit_quality"],
+        "entry_gated": bool(base["entry_gated"]),
+        "stake": base["stake"],
+    }
+    if cfg and bot_id == "sports-gap":
+        edge = cfg.get("min_edge", DEFAULTS["min_edge"])
+        plans["buy"] = [
+            line.replace("desk min_edge (NHL +0.02)", f"desk min_edge {edge:g} (NHL +0.02)")
+            if "desk min_edge" in line else line
+            for line in plans["buy"]
+        ]
+        loss = cfg.get("daily_loss_stop", DEFAULTS["daily_loss_stop"])
+        plans["failsafes"] = [
+            line.replace("desk daily_loss_stop", f"${float(loss):.0f} desk daily_loss_stop")
+            if "desk daily_loss_stop" in line else line
+            for line in plans["failsafes"]
+        ]
+    return plans
+
+
+def bot_gates_hit(view: dict, desk_gate: str = "") -> list:
+    """Live gate labels for this bot row (not invented fills)."""
+    hits = []
+    if view.get("present") is False:
+        hits.append("absent")
+    if view.get("paused"):
+        hits.append("paused")
+    if view.get("read_error"):
+        hits.append("state read error")
+    if (view.get("last_run") or {}).get("blocked"):
+        hits.append("run blocked")
+    if view.get("skip"):
+        hits.append("skip")
+    plans = view.get("plans") or {}
+    if desk_gate and plans.get("entry_gated"):
+        hits.append("desk entry gate")
+    return hits
+
+
 _LOCKS: dict[str, threading.Lock] = {}
 _FILE_LOCK = threading.RLock()
 # realpath(desk root) -> realpath(volume directory) once settlements are bound.
@@ -1125,7 +1279,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
 
 
 def _sized_view() -> dict:
-    return {
+    view = {
         "id": "kalshi-sized",
         "name": "Sized Kalshi",
         "blurb": "The sized Kalshi paper bot is not in this checkout, so this panel has no script to run for it.",
@@ -1155,7 +1309,10 @@ def _sized_view() -> dict:
         "status": "skipped",
         "next_run": "",
         "paused": False,
+        "plans": bot_plans("kalshi-sized"),
     }
+    view["gates_hit"] = bot_gates_hit(view)
+    return view
 
 
 def entry_gate(root: str | None = None, bots: list | None = None) -> str:
@@ -1191,6 +1348,9 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     day = _today()
     bots = [_bot_view(spec, root, runs, day) for spec in BOTS]
     bots.append(_sized_view())
+    gate = entry_gate(root, bots)
+    for bot in bots:
+        bot["gates_hit"] = bot_gates_hit(bot, gate)
     cashes = [b["cash"] for b in bots if b.get("cash") is not None]
     realized_rows = [b["realized"] for b in bots if b.get("realized") is not None]
     last_epoch = max((b.get("last_epoch") or 0) for b in bots)
@@ -1203,7 +1363,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         row = dict(bot)
         row.pop("last_epoch", None)
         public.append(row)
-    desk_row = _desk_row(public, cashes, realized_rows, last_check, entry_gate(root, bots), cfg, root)
+    desk_row = _desk_row(public, cashes, realized_rows, last_check, gate, cfg, root)
     book = _book(public, q=q, filt=filt, page=page)
     changes = _changes(root, public)
     return {
@@ -2700,6 +2860,8 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         view["feed"] = "no games"
     else:
         view["feed"] = source_status(1 if view.get("positions") else 0, view.get("data_error") or "")
+    view["plans"] = bot_plans(spec["id"], load_settings(root))
+    view["gates_hit"] = bot_gates_hit(view)
     return view
 
 
@@ -3152,6 +3314,22 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         "pace_target": pace["target"],
         "pace_loosened": pace["loosened"],
         "pace_note": pace["note"],
+        "ops": {
+            "entry_gate": gate,
+            "entry_gated_bots": [
+                b["id"] for b in bots
+                if (b.get("plans") or {}).get("entry_gated") and b.get("present")
+            ],
+            "strong_exits": [
+                b["id"] for b in bots
+                if (b.get("plans") or {}).get("exit_quality") == "strong"
+            ],
+            "weak_exits": [
+                b["id"] for b in bots
+                if (b.get("plans") or {}).get("exit_quality") in ("weak", "partial")
+                and b.get("present")
+            ],
+        },
     }
 
 
