@@ -1,11 +1,11 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-// Production is served under /pimp-city/ by bot.py (staff-gated).
+// Production is served under /signal-city/ by bot.py (staff-gated).
 // Dev proxies snapshot to the localhost bridge (bridge.py).
 export default defineConfig({
   plugins: [react()],
-  base: '/pimp-city/',
+  base: '/signal-city/',
   server: {
     host: '127.0.0.1',
     port: 5173,

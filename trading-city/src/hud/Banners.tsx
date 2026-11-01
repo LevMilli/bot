@@ -7,9 +7,18 @@ type Props = {
   roi?: RoiSystem | null
   health?: Snapshot['health'] | null
   lastCheck?: string | null
+  onConnect?: () => void
 }
 
-export function Banners({ mode, paperBanner, error, roi, health, lastCheck }: Props) {
+export function Banners({
+  mode,
+  paperBanner,
+  error,
+  roi,
+  health,
+  lastCheck,
+  onConnect,
+}: Props) {
   const paper =
     paperBanner && paperBanner.length > 110
       ? 'PAPER ONLY. No real money, no Kalshi key, no wallet, no live orders.'
@@ -23,6 +32,7 @@ export function Banners({ mode, paperBanner, error, roi, health, lastCheck }: Pr
       : roiText
   const gaps = (roi?.compliance || []).filter((c) => c && c.ok === false)
   const timerDead = mode === 'live' && health && health.alive === false
+  const needsStaff = Boolean(error && /→ 40[13]/.test(error))
   return (
     <div className="banners">
       <div className="banner paper">{paper}</div>
@@ -39,8 +49,8 @@ export function Banners({ mode, paperBanner, error, roi, health, lastCheck }: Pr
       {timerDead && (
         <div className="banner offline">
           Paper timer is not looping
-          {health?.detail ? ` (${health.detail})` : ''}.
-          Cash and open counts only move while the Discord bot paper timer is alive
+          {health?.detail ? ` (${health.detail})` : ''}. Cash and open counts only move while the
+          Discord bot paper timer is alive
           {lastCheck ? ` · last check ${lastCheck}` : ''}.
         </div>
       )}
@@ -48,6 +58,18 @@ export function Banners({ mode, paperBanner, error, roi, health, lastCheck }: Pr
         <div className="banner offline">
           Offline demo — live snapshot unreachable
           {error ? ` (${error})` : ''}. Fixture only; not inventing fills.
+          {needsStaff && (
+            <div className="banner-actions">
+              {onConnect && (
+                <button type="button" onClick={onConnect}>
+                  Show live desk
+                </button>
+              )}
+              <a href="/staff" target="_blank" rel="noreferrer">
+                Staff sign-in
+              </a>
+            </div>
+          )}
         </div>
       )}
     </div>

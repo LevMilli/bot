@@ -16,18 +16,18 @@ export function Skyline({ z = -26, width = 78 }: { z?: number; width?: number })
       const h = 2.2 + rand(i + 7) * 11
       const d = 0.7 + rand(i + 3) * 1.8
       const windows: [number, number, number][] = []
-      for (let wy = 0.45; wy < h - 0.3; wy += 0.55) {
+      for (let wy = 0.35; wy < h - 0.25; wy += 0.42) {
         for (let side = -1; side <= 1; side += 2) {
-          if (rand(i * 17 + wy * 3 + side) > 0.42) {
+          if (rand(i * 17 + wy * 3 + side) > 0.35) {
             windows.push([(w / 2 - 0.08) * side, wy - h / 2, d / 2 + 0.02])
           }
         }
-        if (rand(i * 9 + wy) > 0.5) {
+        if (rand(i * 9 + wy) > 0.42) {
           windows.push([(rand(i + wy) - 0.5) * (w - 0.3), wy - h / 2, d / 2 + 0.02])
         }
       }
       out.push({ x: x + w / 2, h, w, d, windows })
-      x += w + 0.12 + rand(i + 5) * 0.35
+      x += w + 0.1 + rand(i + 5) * 0.3
       i += 1
     }
     return out
@@ -43,8 +43,8 @@ export function Skyline({ z = -26, width = 78 }: { z?: number; width?: number })
           </mesh>
           {b.windows.map((p, wi) => (
             <mesh key={wi} position={p}>
-              <boxGeometry args={[0.11, 0.11, 0.04]} />
-              <meshBasicMaterial color={rand(i + wi) > 0.7 ? '#39ff14' : '#f9c80e'} />
+              <boxGeometry args={[0.1, 0.1, 0.04]} />
+              <meshBasicMaterial color={rand(i + wi) > 0.72 ? '#39ff14' : '#f9c80e'} />
             </mesh>
           ))}
         </group>
@@ -53,13 +53,13 @@ export function Skyline({ z = -26, width = 78 }: { z?: number; width?: number })
   )
 }
 
-export function Starfield({ count = 500 }: { count?: number }) {
+export function Starfield({ count = 900 }: { count?: number }) {
   const positions = useMemo(() => {
     const arr = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
-      arr[i * 3] = (Math.random() - 0.5) * 120
-      arr[i * 3 + 1] = 8 + Math.random() * 40
-      arr[i * 3 + 2] = -20 - Math.random() * 60
+      arr[i * 3] = (Math.random() - 0.5) * 140
+      arr[i * 3 + 1] = 6 + Math.random() * 48
+      arr[i * 3 + 2] = -8 - Math.random() * 70
     }
     return arr
   }, [count])
@@ -69,7 +69,7 @@ export function Starfield({ count = 500 }: { count?: number }) {
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
-      <pointsMaterial color="#e8f0ff" size={0.08} sizeAttenuation transparent opacity={0.85} />
+      <pointsMaterial color="#e8f0ff" size={0.055} sizeAttenuation transparent opacity={0.9} />
     </points>
   )
 }
@@ -77,20 +77,44 @@ export function Starfield({ count = 500 }: { count?: number }) {
 export function SkyEquityLine() {
   const curve = useMemo(() => {
     const pts = [
-      new THREE.Vector3(-22, 9, -24),
-      new THREE.Vector3(-12, 11, -24),
-      new THREE.Vector3(-4, 8.5, -24),
-      new THREE.Vector3(2, 12, -24),
-      new THREE.Vector3(8, 10, -24),
-      new THREE.Vector3(14, 14, -24),
-      new THREE.Vector3(22, 11, -24),
+      new THREE.Vector3(-28, 10.5, -21),
+      new THREE.Vector3(-20, 12.2, -21),
+      new THREE.Vector3(-12, 9.4, -21),
+      new THREE.Vector3(-5, 13.5, -21),
+      new THREE.Vector3(1, 11.2, -21),
+      new THREE.Vector3(7, 15.2, -21),
+      new THREE.Vector3(14, 12.8, -21),
+      new THREE.Vector3(22, 16.4, -21),
+      new THREE.Vector3(28, 13.6, -21),
     ]
     return new THREE.CatmullRomCurve3(pts)
   }, [])
-  const geom = useMemo(() => new THREE.TubeGeometry(curve, 64, 0.045, 6, false), [curve])
+  const geom = useMemo(() => new THREE.TubeGeometry(curve, 96, 0.055, 8, false), [curve])
+  const soft = useMemo(() => new THREE.TubeGeometry(curve, 96, 0.14, 8, false), [curve])
   return (
-    <mesh geometry={geom}>
-      <meshBasicMaterial color="#f4f7ff" transparent opacity={0.75} />
-    </mesh>
+    <group>
+      <mesh geometry={soft}>
+        <meshBasicMaterial color="#c8d8ff" transparent opacity={0.18} depthWrite={false} />
+      </mesh>
+      <mesh geometry={geom}>
+        <meshBasicMaterial color="#f4f7ff" transparent opacity={0.92} />
+      </mesh>
+    </group>
+  )
+}
+
+/** Soft purple horizon wash behind the skyline. */
+export function PurpleHorizon() {
+  return (
+    <group>
+      <mesh position={[0, 14, -40]}>
+        <planeGeometry args={[180, 55]} />
+        <meshBasicMaterial color="#1c0642" transparent opacity={0.7} depthWrite={false} />
+      </mesh>
+      <mesh position={[0, 4, -38]}>
+        <planeGeometry args={[180, 18]} />
+        <meshBasicMaterial color="#3a1280" transparent opacity={0.35} depthWrite={false} />
+      </mesh>
+    </group>
   )
 }

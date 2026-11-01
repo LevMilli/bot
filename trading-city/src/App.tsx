@@ -3,14 +3,13 @@ import { Suspense, useMemo, useState } from 'react'
 import { useSnapshot } from './data/useSnapshot'
 import { Banners } from './hud/Banners'
 import { CityHologramLayer } from './hud/Holograms'
-import { Monitors } from './hud/Monitors'
 import { Ticker } from './hud/Ticker'
 import { CityScene } from './scene/CityScene'
 import { OfficeScene } from './scene/OfficeScene'
 import type { BotRow } from './types'
 
 export default function App() {
-  const { snap, mode, error, loading, updatedAt } = useSnapshot()
+  const { snap, mode, error, loading, updatedAt, connectLive } = useSnapshot()
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const bots = snap?.bots || []
@@ -30,7 +29,7 @@ export default function App() {
         >
           <Suspense fallback={null}>
             {office && selected ? (
-              <OfficeScene bot={selected} />
+              <OfficeScene bot={selected} desk={snap?.desk} />
             ) : (
               <CityScene bots={bots} selectedId={selectedId} onSelect={setSelectedId} />
             )}
@@ -39,7 +38,7 @@ export default function App() {
 
         <header className="chrome-top">
           <div className="brand-block">
-            <h1 className="brand">PIMP-CITY</h1>
+            <h1 className="brand">SIGNAL-CITY</h1>
             <p className="tagline">Neon paper desk · five towers · live snapshot</p>
           </div>
           <div className="chrome-actions">
@@ -72,6 +71,7 @@ export default function App() {
           roi={snap?.roi_system}
           health={snap?.health}
           lastCheck={snap?.desk?.central_check || snap?.desk?.last_check}
+          onConnect={() => void connectLive()}
         />
 
         {!office && (
@@ -84,7 +84,6 @@ export default function App() {
               <strong>{selected.name}</strong>
               <span>{selected.id}</span>
             </div>
-            <Monitors bot={selected} desk={snap?.desk} />
           </div>
         )}
 

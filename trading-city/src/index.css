@@ -39,7 +39,7 @@ a {
 
 .app {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   min-height: 100dvh;
 }
@@ -142,6 +142,26 @@ a {
   border-color: var(--magenta);
   color: #ffc0d3;
   animation: pulse-border 2.4s ease-in-out infinite;
+  pointer-events: auto;
+}
+
+.banner-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-top: 0.35rem;
+}
+
+.banner-actions button,
+.banner-actions a {
+  font: inherit;
+  font-size: 0.72rem;
+  color: #ffe9a8;
+  background: transparent;
+  border: 1px solid rgba(249, 200, 14, 0.55);
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+  text-decoration: none;
 }
 
 .banner.roi {
@@ -174,6 +194,10 @@ a {
   display: block;
   width: 100% !important;
   height: 100% !important;
+  /* One-finger orbit + two-finger pinch zoom (handled in CityOrbitCamera). */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .day-strip {
@@ -247,6 +271,64 @@ a {
   font-family: var(--font-mono);
   animation: holo-float 3.6s ease-in-out infinite;
   border-radius: 2px;
+}
+
+/* 3D-anchored Html holograms (Tower / Vault) */
+.holo.html-holo {
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none !important;
+  min-width: 10.5rem;
+  max-width: 13rem;
+  white-space: normal;
+  animation: none;
+}
+
+.monitor-glass {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: rgba(2, 8, 18, 0.92);
+  border: 1px solid rgba(57, 255, 20, 0.45);
+  box-shadow: inset 0 0 18px rgba(45, 226, 230, 0.08);
+}
+
+.monitor.glass {
+  min-height: 0;
+  height: 100%;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  backdrop-filter: none;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.62rem;
+}
+
+.monitor.glass header {
+  font-size: 0.55rem;
+}
+
+.monitor.glass .why,
+.monitor.glass .warn,
+.monitor.glass .risk,
+.monitor.glass .stat-row,
+.monitor.glass .last-trade,
+.monitor.glass .chips {
+  font-size: 0.6rem;
+}
+
+.monitor.glass .big-pnl {
+  font-size: 0.85rem;
+}
+
+.monitor.glass .spark,
+.monitor.glass .spark-empty {
+  height: 4.2rem;
+}
+
+.monitor.glass .pos-list {
+  max-height: 4.5rem;
 }
 
 @keyframes holo-float {

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { BotPlans, BotRow, Desk } from '../types'
 import { equitySeries, money, pnlTone, statusLabel } from '../data/format'
 
@@ -61,102 +62,121 @@ function planStake(plans?: BotPlans): string {
   return `stake: ${plans.stake}`
 }
 
-export function Monitors({ bot, desk }: Props) {
-  const positions = bot.positions || []
-  const closedPool = [...(bot.history || []), ...(bot.trades || [])].filter((t) => {
+function closedTrades(bot: BotRow) {
+  return [...(bot.history || []), ...(bot.trades || [])].filter((t) => {
     const side = String(t.side || '').toLowerCase()
     const exit = String(t.exit_reason || t.exit || t.result || '')
     if (side === 'buy') return false
     if (t.pnl != null) return true
     return Boolean(exit) && !/^buy\b/i.test(String(t.what || t.title || ''))
   })
+}
+
+/** Live monitor panel bodies — used as Html overlays on 3D screens. */
+export function MonitorPanels({ bot, desk }: Props): {
+  left: ReactNode
+  center: ReactNode
+  right: ReactNode
+} {
+  const positions = bot.positions || []
+  const closedPool = closedTrades(bot)
   const last = closedPool.length ? closedPool[closedPool.length - 1] : null
   const series = equitySeries(bot, desk?.curve || desk?.equity)
   const offline = bot.present === false
   const plans = bot.plans
   const gates = bot.gates_hit || []
 
+  const left = (
+    <section className="monitor left glass">
+      <header>
+        <span>{bot.status || 'status'}</span>
+        <span>{bot.paused ? 'paused' : bot.feed || 'feed'}</span>
+      </header>
+      <p className="why">{statusLabel(bot)}</p>
+      {bot.warning && <p className="warn">{bot.warning}</p>}
+      <div className="risk">
+        open {bot.open_count ?? 0} · risk {money(bot.open_risk)} · cash {money(bot.cash)}
+      </div>
+      {gates.length > 0 && <div className="gates-hit">gates: {gates.join(' · ')}</div>}
+      <PlanList title="Buy plan" lines={plans?.buy} />
+      <ul className="pos-list">
+        {offline && <li className="muted">{bot.empty || 'Not on this checkout.'}</li>}
+        {!offline && positions.length === 0 && <li className="muted">No open paper positions</li>}
+        {positions.slice(0, 8).map((p, i) => (
+          <li key={i}>
+            <strong>{p.what || p.title || p.team || p.ticker || 'position'}</strong>
+            <span>{p.detail || p.game || ''}</span>
+            <span>
+              {p.side || ''} {money(p.cost)}{' '}
+              {p.fill != null ? `@ ${p.fill}` : p.ask != null ? `ask ${p.ask}` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+
+  const center = (
+    <section className="monitor center glass">
+      <header>
+        <span>
+          {(bot.positions && bot.positions[0]?.ticker) ||
+            (bot.positions && bot.positions[0]?.team) ||
+            bot.name}{' '}
+          · equity
+        </span>
+        <span>{bot.central_check || bot.last_check || '—'}</span>
+      </header>
+      <Sparkline points={series} />
+      <div className="chips">
+        <span>history {bot.history?.length ?? 0}</span>
+        <span>exits {plans?.exit_quality || '—'}</span>
+        <span>{planStake(plans)}</span>
+        {plans?.entry_gated ? <span>desk entry_gate</span> : null}
+        {desk?.ops?.roi_ok === false ? <span className="chip-warn">roi gaps</span> : null}
+      </div>
+      <PlanList title="Sell plan" lines={plans?.sell} />
+    </section>
+  )
+
+  const right = (
+    <section className="monitor right glass">
+      <header>
+        <span>stats · failsafes</span>
+        <span>{bot.next_run || ''}</span>
+      </header>
+      <div className={`big-pnl tone-${pnlTone(bot.today)}`}>today {money(bot.today, true)}</div>
+      <div className="stat-row">realized {money(bot.realized, true)}</div>
+      <div className="stat-row">bankroll {money(bot.cash)}</div>
+      {desk?.gate && <div className="warn desk-gate">{desk.gate}</div>}
+      <PlanList title="Failsafes" lines={plans?.failsafes} />
+      <div className="last-trade">
+        <strong>Last settled</strong>
+        {last ? (
+          <>
+            <span>{last.what || last.title || last.team || last.ticker || 'trade'}</span>
+            <span className={`tone-${pnlTone(last.pnl)}`}>{money(last.pnl, true)}</span>
+            <span>{last.result || last.exit_reason || last.exit || ''}</span>
+            <span>{last.when || last.closed_at || last.closed || ''}</span>
+          </>
+        ) : (
+          <span className="muted">No closed paper trades yet</span>
+        )}
+      </div>
+    </section>
+  )
+
+  return { left, center, right }
+}
+
+/** Flat HUD fallback (not used when panels are pinned to 3D monitors). */
+export function Monitors({ bot, desk }: Props) {
+  const panels = MonitorPanels({ bot, desk })
   return (
     <div className="monitors">
-      <section className="monitor left">
-        <header>
-          <span>{bot.status || 'status'}</span>
-          <span>{bot.paused ? 'paused' : bot.feed || 'feed'}</span>
-        </header>
-        <p className="why">{statusLabel(bot)}</p>
-        {bot.warning && <p className="warn">{bot.warning}</p>}
-        <div className="risk">
-          open {bot.open_count ?? 0} · risk {money(bot.open_risk)} · cash {money(bot.cash)}
-        </div>
-        {gates.length > 0 && (
-          <div className="gates-hit">gates: {gates.join(' · ')}</div>
-        )}
-        <PlanList title="Buy plan" lines={plans?.buy} />
-        <ul className="pos-list">
-          {offline && <li className="muted">{bot.empty || 'Not on this checkout.'}</li>}
-          {!offline && positions.length === 0 && (
-            <li className="muted">No open paper positions</li>
-          )}
-          {positions.slice(0, 6).map((p, i) => (
-            <li key={i}>
-              <strong>{p.what || p.title || p.team || p.ticker || 'position'}</strong>
-              <span>{p.detail || p.game || ''}</span>
-              <span>
-                {p.side || ''} {money(p.cost)}{' '}
-                {p.fill != null ? `@ ${p.fill}` : p.ask != null ? `ask ${p.ask}` : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="monitor center">
-        <header>
-          <span>
-            {(bot.positions && bot.positions[0]?.ticker) ||
-              (bot.positions && bot.positions[0]?.team) ||
-              bot.name}{' '}
-            · equity
-          </span>
-          <span>{bot.central_check || bot.last_check || '—'}</span>
-        </header>
-        <Sparkline points={series} />
-        <div className="chips">
-          <span>history {bot.history?.length ?? 0}</span>
-          <span>exits {plans?.exit_quality || '—'}</span>
-          <span>{planStake(plans)}</span>
-          {plans?.entry_gated ? <span>desk entry_gate</span> : null}
-          {desk?.ops?.roi_ok === false ? <span className="chip-warn">roi gaps</span> : null}
-        </div>
-        <PlanList title="Sell plan" lines={plans?.sell} />
-      </section>
-
-      <section className="monitor right">
-        <header>
-          <span>stats · failsafes</span>
-          <span>{bot.next_run || ''}</span>
-        </header>
-        <div className={`big-pnl tone-${pnlTone(bot.today)}`}>
-          today {money(bot.today, true)}
-        </div>
-        <div className="stat-row">realized {money(bot.realized, true)}</div>
-        <div className="stat-row">bankroll {money(bot.cash)}</div>
-        {desk?.gate && <div className="warn desk-gate">{desk.gate}</div>}
-        <PlanList title="Failsafes" lines={plans?.failsafes} />
-        <div className="last-trade">
-          <strong>Last settled</strong>
-          {last ? (
-            <>
-              <span>{last.what || last.title || last.team || last.ticker || 'trade'}</span>
-              <span className={`tone-${pnlTone(last.pnl)}`}>{money(last.pnl, true)}</span>
-              <span>{last.result || last.exit_reason || last.exit || ''}</span>
-              <span>{last.when || last.closed_at || last.closed || ''}</span>
-            </>
-          ) : (
-            <span className="muted">No closed paper trades yet</span>
-          )}
-        </div>
-      </section>
+      {panels.left}
+      {panels.center}
+      {panels.right}
     </div>
   )
 }

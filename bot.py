@@ -26355,18 +26355,62 @@ def dash_csp(html: str) -> str:
             "worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
-def dash_secure(resp):
+def pimp_city_csp() -> str:
+    """CSP for the SIGNAL-CITY bundle.
+
+    The fallback dashboard policy is default-src 'none'. That blocks the Vite
+    module and its stylesheet, so /signal-city/ stays a blank dark page (the
+    browser's color-scheme canvas, with no scene and no chrome). frame-ancestors
+    * lets a Home Assistant panel iframe the shell. Live trades stay on the
+    staff-only /api/pimp-trading.json route.
+    """
+    return (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'; "
+        "worker-src 'self' blob:; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors *"
+    )
+
+
+def _pimp_city_path(path: str) -> bool:
+    # SIGNAL-CITY is the staff display name; /pimp-city stays as a legacy alias.
+    return (
+        path == "/signal-city" or path.startswith("/signal-city/")
+        or path == "/pimp-city" or path.startswith("/pimp-city/")
+    )
+
+
+def dash_secure(resp, path: str = ""):
     h = resp.headers
-    if "Content-Security-Policy" not in h:
-        h["Content-Security-Policy"] = ("default-src 'none'; img-src 'self' data: https://a.espncdn.com https://a1.espncdn.com https://a2.espncdn.com https://a3.espncdn.com https://a4.espncdn.com; style-src 'unsafe-inline'; "
-                                        "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-    h["X-Frame-Options"] = "DENY"
+    city = _pimp_city_path(path or "")
+    if city:
+        # X-Frame-Options DENY and CORP same-origin both leave a cross-origin
+        # iframe blank (Home Assistant's SIGNAL-CITY view). CSP frame-ancestors
+        # is what allows that panel to show the shell.
+        h["Content-Security-Policy"] = pimp_city_csp()
+        if "X-Frame-Options" in h:
+            del h["X-Frame-Options"]
+        h["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+        h["Cross-Origin-Resource-Policy"] = "cross-origin"
+        h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), storage-access=(self)"
+    else:
+        if "Content-Security-Policy" not in h:
+            h["Content-Security-Policy"] = ("default-src 'none'; img-src 'self' data: https://a.espncdn.com https://a1.espncdn.com https://a2.espncdn.com https://a3.espncdn.com https://a4.espncdn.com; style-src 'unsafe-inline'; "
+                                            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+        h["X-Frame-Options"] = "DENY"
+        h["Cross-Origin-Opener-Policy"] = "same-origin"
+        h["Cross-Origin-Resource-Policy"] = "same-origin"
+        h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     h["X-Content-Type-Options"] = "nosniff"
     h["Referrer-Policy"] = "no-referrer"
-    h["Cross-Origin-Opener-Policy"] = "same-origin"
-    h["Cross-Origin-Resource-Policy"] = "same-origin"
     h["Strict-Transport-Security"] = "max-age=15552000"
-    h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if "Cache-Control" not in h:
         h["Cache-Control"] = "private, no-store"
     return resp
@@ -26424,7 +26468,7 @@ async def dash_guard(request, handler):
     """Wraps every request: rate limit, no stack traces out, security headers on whatever goes back."""
     from aiohttp import web
     if request.path != "/health" and not dash_rate(dash_client_ip(request), "all", *DASH_RATE):
-        return dash_secure(dash_error(web, request, 429))
+        return dash_secure(dash_error(web, request, 429), request.path or "")
     try:
         resp = await handler(request)
     except web.HTTPException as e:
@@ -26433,7 +26477,7 @@ async def dash_guard(request, handler):
         log.exception("Dashboard request failed: %s", (request.path or "")[:80])
         resp = dash_error(web, request, 500)
     path = request.path or ""
-    if path.startswith(("/staff", "/pimp-trading", "/pimp-city", "/api/staff", "/api/pimp-trading")):
+    if path.startswith(("/staff", "/pimp-trading", "/signal-city", "/pimp-city", "/api/staff", "/api/pimp-trading")):
         try:
             uid = staff_uid_from_request(request)
         except Exception:
@@ -26444,7 +26488,7 @@ async def dash_guard(request, handler):
                                 httponly=True, secure=True, samesite="Lax")
             except Exception:
                 pass
-    return dash_secure(resp)
+    return dash_secure(resp, path)
 
 
 def dash_gate(web, request):
@@ -35088,6 +35132,9 @@ def dash_app(web):
                     web.post("/api/log.json", dash_api_log),
                     web.get("/logout", dash_logout),
                     web.get("/staff", dash_staff), web.get("/pimp-trading", dash_pimp),
+                    web.get("/signal-city", dash_pimp_city),
+                    web.get("/signal-city/", dash_pimp_city),
+                    web.get(r"/signal-city/{tail:.*}", dash_pimp_city),
                     web.get("/pimp-city", dash_pimp_city),
                     web.get("/pimp-city/", dash_pimp_city),
                     web.get(r"/pimp-city/{tail:.*}", dash_pimp_city),
@@ -40286,7 +40333,7 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <a class="navchip" href="/account">Account</a>
 <a class="navchip" href="/">Dashboard</a>
 <button class="navchip" id="pimpbtn" type="button" aria-pressed="false" aria-controls="pimp">PIMP-TRADING</button>
-<a class="navchip" id="citybtn" href="/pimp-city/">PIMP-CITY</a>
+<a class="navchip" id="citybtn" href="/signal-city/">SIGNAL-CITY</a>
 <a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap" id="hq">
 <section class="card" id="departcard" style="margin-bottom:12px"><h2>People who left</h2><div id="depart"></div></section>
@@ -40381,7 +40428,7 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
  </form>
  <div id="pimpbook"></div></section>
 <div class="pimpstick" id="pimpstick" aria-live="polite"></div>
-<h1 class="pimph">PIMP-TRADING <a class="navchip" href="/pimp-city/" style="display:inline-flex;margin-left:10px;vertical-align:middle;font-size:12px;letter-spacing:.08em">PIMP-CITY</a></h1>
+<h1 class="pimph">PIMP-TRADING <a class="navchip" href="/signal-city/" style="display:inline-flex;margin-left:10px;vertical-align:middle;font-size:12px;letter-spacing:.08em">SIGNAL-CITY</a></h1>
 <p class="todaybig" id="pimptoday"></p>
 <p id="pimpstatus"></p>
 <p id="pimppace"></p>
@@ -41663,22 +41710,26 @@ async def dash_pimp(request):
 
 
 def pimp_city_root() -> str:
-    """Built Vite bundle for PIMP-CITY (trading-city/dist)."""
+    """Built Vite bundle for SIGNAL-CITY (trading-city/dist)."""
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading-city", "dist")
 
 
 async def dash_pimp_city(request):
-    """Staff-only neon city SPA. Live data still comes from /api/pimp-trading.json → snapshot()."""
+    """Neon city shell. Live trades stay staff-only on /api/pimp-trading.json.
+
+    The HTML is not staff-gated: a Home Assistant iframe does not send the
+    Lax staff cookie, and a 403 here is what left the SIGNAL-CITY view blank.
+    Logged-out viewers get the offline fixture. A staff session still gets
+    the live snapshot.
+    """
     from aiohttp import web
     import mimetypes
 
-    if staff_uid_from_request(request) is None:
-        return dash_page(web, 403, "Staff only", "PIMP-CITY is for staff. Everyone else stays on the dashboard.")
     root = os.path.realpath(pimp_city_root())
     index = os.path.join(root, "index.html")
     if not os.path.isfile(index):
         return dash_page(
-            web, 503, "PIMP-CITY not built",
+            web, 503, "SIGNAL-CITY not built",
             "Build the city UI with: cd trading-city && npm ci && npm run build",
         )
     tail = (request.match_info.get("tail") or "").lstrip("/")
