@@ -1,0 +1,38 @@
+{
+  "_comment": "PAPER ONLY. No API keys, no login, no wallet, no live orders. Public GET requests only. Stake and risk numbers below are the defaults documented in README.md.",
+  "paper_only": true,
+  "api_base": "https://api.elections.kalshi.com/trade-api/v2",
+  "series_ticker": "KXBTCD",
+  "timezone": "America/Chicago",
+  "starting_bankroll": 100.0,
+  "halt_below_bankroll": 80.0,
+
+  "high_prob": 0.80,
+  "min_model_prob": 0.55,
+  "stake_high_min": 10.0,
+  "stake_high_max": 30.0,
+  "stake_low_cap": 10.0,
+  "stake_low_min": 2.0,
+
+  "daily_loss_stop": 20.0,
+  "max_open_risk": 40.0,
+  "max_open_positions": 1,
+
+  "edge_buffer": 0.03,
+  "taker_fee_rate": 0.07,
+  "max_spread": 0.05,
+  "min_ask": 0.05,
+  "max_ask": 0.85,
+  "min_minutes_left": 20,
+  "max_minutes_left": 240,
+  "min_sigma_frac_per_sqrt_hour": 0.004,
+  "thin_spot_sigma_mult": 1.2,
+
+  "news_url": "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+  "news_country": "USD",
+  "news_impacts": ["High"],
+
+  "state_file": "state.json",
+  "log_file": "paper_trades.md",
+  "request_pause_seconds": 0.05
+}

@@ -1,6 +1,6 @@
 # Trading bots (paper / signal-only) — starter pack
 
-Four small Python programs for practicing with prediction markets and crypto **without risking money**.
+Small Python programs for practicing with prediction markets and crypto **without risking money**.
 Every one of them is **paper-only or signal-only**: they read **free public data** (no sign-up, no API key),
 **place no real trades, need no login, and never connect a wallet**. They just print numbers and keep a
 pretend ("paper") account in local files.
@@ -20,6 +20,7 @@ pretend ("paper") account in local files.
 | `sports-gap-paper/` | Live sports "gap" paper bot: compares ESPN's live win probability with Kalshi game prices, paper-buys big gaps | ESPN scoreboard, Kalshi public API |
 | `memecoin-paper/` | Solana meme-coin paper bot: strict rug-pull filter, paper buys at real prices, stop/ladder/trailing exits | DexScreener, RugCheck |
 | `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **signal** script. Prints BUY or SKIP with the reason. Nothing else | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
+| `kalshi-sized-paper/` | Sized Kalshi **paper** bot for BTC level markets (`KXBTCD`). Stake follows the bot's own probability. At most one open paper position | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
 | `TEAM_ROLES.md` | How the "desk" of helper bots was organized, and the safety rules | — |
 
 ## Install (once)
@@ -54,6 +55,11 @@ cd ..
 # 4) Meme-coin paper bot
 cd memecoin-paper
 python bot.py                      # one scan; creates checks.csv, positions.json, trades.csv
+cd ..
+
+# 5) Sized Kalshi paper bot (BTC level markets; records a pretend fill only)
+cd kalshi-sized-paper
+python sized_bot.py                # one check; creates state.json + paper_trades.md
 cd ..
 ```
 Each bot's own README / docstring explains the rules and settings. Every bot starts with a fresh,
