@@ -2,6 +2,7 @@ import { Canvas } from '@react-three/fiber'
 import { Suspense, useMemo, useState } from 'react'
 import { useSnapshot } from './data/useSnapshot'
 import { Banners } from './hud/Banners'
+import { CityHologramLayer } from './hud/Holograms'
 import { Ticker } from './hud/Ticker'
 import { CityScene } from './scene/CityScene'
 import { OfficeScene } from './scene/OfficeScene'
@@ -30,12 +31,7 @@ export default function App() {
             {office && selected ? (
               <OfficeScene bot={selected} desk={snap?.desk} />
             ) : (
-              <CityScene
-                bots={bots}
-                desk={snap?.desk}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-              />
+              <CityScene bots={bots} selectedId={selectedId} onSelect={setSelectedId} />
             )}
           </Suspense>
         </Canvas>
@@ -63,6 +59,10 @@ export default function App() {
         </header>
 
         <Banners mode={mode} paperBanner={snap?.banner} error={error} />
+
+        {!office && (
+          <CityHologramLayer bots={bots} desk={snap?.desk} onSelect={setSelectedId} />
+        )}
 
         {office && selected && (
           <div className="office-hud">

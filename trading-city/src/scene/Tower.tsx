@@ -1,10 +1,9 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
-import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Group, InstancedMesh, Mesh } from 'three'
 import type { BotRow } from '../types'
-import { BEAM_COLORS, hologramPnl, money, statusLabel } from '../data/format'
+import { BEAM_COLORS } from '../data/format'
 
 type Props = {
   bot: BotRow
@@ -12,7 +11,6 @@ type Props = {
   position: [number, number, number]
   selected: boolean
   onSelect: (id: string) => void
-  showLabel?: boolean
 }
 
 function WindowInstances({
@@ -71,7 +69,7 @@ function WindowInstances({
   )
 }
 
-export function Tower({ bot, index, position, selected, onSelect, showLabel = true }: Props) {
+export function Tower({ bot, index, position, selected, onSelect }: Props) {
   const beamGroup = useRef<Group>(null)
   const beamCore = useRef<Mesh>(null)
   const color = BEAM_COLORS[index % BEAM_COLORS.length]
@@ -144,21 +142,27 @@ export function Tower({ bot, index, position, selected, onSelect, showLabel = tr
       {/* neon beam + halo rings */}
       <group ref={beamGroup} position={[0, height + 0.2, 0]}>
         <mesh ref={beamCore} position={[0, hero ? 6.4 : 5.6, 0]}>
-          <cylinderGeometry args={[hero ? 0.38 : 0.26, hero ? 0.58 : 0.46, hero ? 12.5 : 11, 24]} />
-          <meshBasicMaterial color={color} transparent opacity={offline ? 0.12 : 0.88} depthWrite={false} />
+          <cylinderGeometry args={[hero ? 0.42 : 0.32, hero ? 0.62 : 0.52, hero ? 12.5 : 11, 24]} />
+          <meshBasicMaterial color={color} transparent opacity={offline ? 0.18 : 1} depthWrite={false} toneMapped={false} />
         </mesh>
         <mesh position={[0, hero ? 6.4 : 5.6, 0]}>
-          <cylinderGeometry args={[hero ? 0.14 : 0.09, hero ? 0.2 : 0.15, hero ? 12.8 : 11.2, 12]} />
-          <meshBasicMaterial color="#ffffff" transparent opacity={offline ? 0.1 : 0.98} depthWrite={false} />
+          <cylinderGeometry args={[hero ? 0.16 : 0.11, hero ? 0.22 : 0.17, hero ? 12.8 : 11.2, 12]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={offline ? 0.14 : 1} depthWrite={false} toneMapped={false} />
         </mesh>
         <mesh position={[0, hero ? 6.4 : 5.6, 0]}>
-          <cylinderGeometry args={[hero ? 0.55 : 0.4, hero ? 0.85 : 0.68, hero ? 12.2 : 10.6, 24]} />
-          <meshBasicMaterial color={color} transparent opacity={offline ? 0.04 : 0.28} depthWrite={false} />
+          <cylinderGeometry args={[hero ? 0.62 : 0.48, hero ? 0.92 : 0.78, hero ? 12.2 : 10.6, 24]} />
+          <meshBasicMaterial color={color} transparent opacity={offline ? 0.06 : 0.35} depthWrite={false} toneMapped={false} />
         </mesh>
         {[0, 1, 2, 3, 4, 5].map((i) => (
           <mesh key={i} rotation={[Math.PI / 2, 0, 0]} position={[0, 1.1 + i * 1.4, 0]}>
-            <torusGeometry args={[0.58 + i * 0.05 + (hero ? 0.12 : 0), 0.035, 8, 40]} />
-            <meshBasicMaterial color={i === 5 && hero ? '#ffffff' : color} transparent opacity={offline ? 0.08 : 0.85} depthWrite={false} />
+            <torusGeometry args={[0.62 + i * 0.06 + (hero ? 0.14 : 0), 0.05, 8, 40]} />
+            <meshBasicMaterial
+              color={i % 2 === 0 ? '#ffffff' : color}
+              transparent
+              opacity={offline ? 0.1 : 0.95}
+              depthWrite={false}
+              toneMapped={false}
+            />
           </mesh>
         ))}
         {hero && (
@@ -182,35 +186,6 @@ export function Tower({ bot, index, position, selected, onSelect, showLabel = tr
         distance={12}
       />
 
-      {showLabel && (
-        <Html
-          position={[0, height + 2.8, 0]}
-          center
-          distanceFactor={14}
-          style={{ pointerEvents: 'auto' }}
-          zIndexRange={[20, 0]}
-        >
-          <button
-            type="button"
-            className={`holo tower-holo html-holo ${offline ? 'offline' : ''}`}
-            style={{
-              borderColor: color,
-              boxShadow: `0 0 18px ${color}55`,
-            }}
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelect(bot.id)
-            }}
-          >
-            <strong>{bot.name}</strong>
-            <span className="holo-status">{statusLabel(bot)}</span>
-            <span className={`holo-pnl tone-${offline ? 'flat' : 'up'}`}>{hologramPnl(bot)}</span>
-            {!offline && bot.cash != null && (
-              <span className="holo-cash">cash {money(bot.cash)}</span>
-            )}
-          </button>
-        </Html>
-      )}
     </group>
   )
 }

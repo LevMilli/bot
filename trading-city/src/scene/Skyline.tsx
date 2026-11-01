@@ -106,9 +106,15 @@ export function SkyEquityLine() {
 /** Soft purple horizon wash behind the skyline. */
 export function PurpleHorizon() {
   return (
-    <mesh position={[0, 8, -36]} rotation={[0, 0, 0]}>
-      <planeGeometry args={[160, 40]} />
-      <meshBasicMaterial color="#2a0a58" transparent opacity={0.55} depthWrite={false} />
-    </mesh>
+    <group>
+      <mesh position={[0, 14, -40]}>
+        <planeGeometry args={[180, 55]} />
+        <meshBasicMaterial color="#1c0642" transparent opacity={0.7} depthWrite={false} />
+      </mesh>
+      <mesh position={[0, 4, -38]}>
+        <planeGeometry args={[180, 18]} />
+        <meshBasicMaterial color="#3a1280" transparent opacity={0.35} depthWrite={false} />
+      </mesh>
+    </group>
   )
 }

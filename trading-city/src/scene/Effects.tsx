@@ -6,13 +6,13 @@ export function NeonBloom({ strength = 1 }: { strength?: number }) {
   return (
     <EffectComposer multisampling={0} enableNormalPass={false}>
       <Bloom
-        intensity={1.15 * strength}
-        luminanceThreshold={0.18}
-        luminanceSmoothing={0.4}
+        intensity={0.95 * strength}
+        luminanceThreshold={0.22}
+        luminanceSmoothing={0.35}
         mipmapBlur
-        radius={0.72}
+        radius={0.65}
       />
-      <Vignette offset={0.22} darkness={0.55} blendFunction={BlendFunction.NORMAL} />
+      <Vignette offset={0.28} darkness={0.48} blendFunction={BlendFunction.NORMAL} />
     </EffectComposer>
   )
 }

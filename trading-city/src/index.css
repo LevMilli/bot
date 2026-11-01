@@ -242,9 +242,13 @@ a {
 /* 3D-anchored Html holograms (Tower / Vault) */
 .holo.html-holo {
   position: relative;
-  transform: none;
-  min-width: 10rem;
+  left: auto;
+  top: auto;
+  transform: none !important;
+  min-width: 10.5rem;
+  max-width: 13rem;
   white-space: normal;
+  animation: none;
 }
 
 .monitor-glass {

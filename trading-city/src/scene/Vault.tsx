@@ -1,38 +1,29 @@
 import { useRef } from 'react'
-import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import type { Mesh } from 'three'
-import type { Desk, BotRow } from '../types'
-import { money, workersOnShift } from '../data/format'
 
 function Crystal({ position, scale = 1 }: { position: [number, number, number]; scale?: number }) {
   return (
     <group position={position} scale={scale}>
       <mesh>
-        <coneGeometry args={[0.22, 0.85, 4]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.88} />
+        <coneGeometry args={[0.28, 1.05, 4]} />
+        <meshBasicMaterial color="#2de2e6" transparent opacity={0.95} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.05, 0]}>
-        <coneGeometry args={[0.12, 0.55, 4]} />
-        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.55} depthWrite={false} />
+      <mesh position={[0, 0.08, 0]}>
+        <coneGeometry args={[0.14, 0.7, 4]} />
+        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.65} depthWrite={false} toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.35, 0]}>
-        <cylinderGeometry args={[0.05, 0.05, 0.22, 6]} />
+      <mesh position={[0, -0.42, 0]}>
+        <cylinderGeometry args={[0.06, 0.06, 0.28, 6]} />
         <meshBasicMaterial color="#0a4a66" />
       </mesh>
     </group>
   )
 }
 
-type Props = {
-  desk?: Desk
-  bots?: BotRow[]
-}
-
-export function Vault({ desk, bots }: Props) {
+export function Vault() {
   const dome = useRef<Mesh>(null)
   const glow = useRef<Mesh>(null)
-  const workers = workersOnShift(bots)
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
@@ -109,19 +100,6 @@ export function Vault({ desk, bots }: Props) {
       {crystals.map((p, i) => (
         <Crystal key={i} position={p} scale={0.85 + (i % 3) * 0.12} />
       ))}
-
-      <Html position={[0, 3.5, 0]} center distanceFactor={16} style={{ pointerEvents: 'none' }} zIndexRange={[18, 0]}>
-        <div className="holo vault-holo html-holo">
-          <strong>THE VAULT</strong>
-          <span className="holo-pnl tone-up">
-            realized {money(desk?.realized, true)} · today {money(desk?.today, true)}
-          </span>
-          <span>
-            cash {money(desk?.cash)} · {workers} worker{workers === 1 ? '' : 's'} on shift
-          </span>
-          {desk?.pace_line && <span className="holo-pace">{desk.pace_line}</span>}
-        </div>
-      </Html>
     </group>
   )
 }

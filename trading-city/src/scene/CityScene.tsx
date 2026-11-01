@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react'
 import { PerspectiveCamera } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import type { PerspectiveCamera as Cam } from 'three'
-import type { BotRow, Desk } from '../types'
+import type { BotRow } from '../types'
 import { NeonBloom } from './Effects'
 import { GridFloor } from './GridFloor'
 import { PurpleHorizon, SkyEquityLine, Skyline, Starfield } from './Skyline'
@@ -13,7 +13,6 @@ export const RING_R = 7.6
 
 type Props = {
   bots: BotRow[]
-  desk?: Desk
   selectedId: string | null
   onSelect: (id: string) => void
 }
@@ -23,7 +22,7 @@ function rand(seed: number) {
   return x - Math.floor(x)
 }
 
-export function CityScene({ bots, desk, selectedId, onSelect }: Props) {
+export function CityScene({ bots, selectedId, onSelect }: Props) {
   const cam = useRef<Cam>(null)
 
   const slots = useMemo(() => {
@@ -84,7 +83,7 @@ export function CityScene({ bots, desk, selectedId, onSelect }: Props) {
   return (
     <>
       <color attach="background" args={['#0c0424']} />
-      <fog attach="fog" args={['#1a0740', 22, 58]} />
+      <fog attach="fog" args={['#1a0740', 28, 72]} />
       <PerspectiveCamera ref={cam} makeDefault fov={42} near={0.1} far={200} position={[0, 17, 15]} />
       <ambientLight intensity={0.22} />
       <directionalLight position={[6, 18, 8]} intensity={0.45} color="#a8c8ff" />
@@ -99,7 +98,7 @@ export function CityScene({ bots, desk, selectedId, onSelect }: Props) {
       <Skyline z={-22} width={72} />
       <Skyline z={-30} width={88} />
       <SkyEquityLine />
-      <Vault desk={desk} bots={bots} />
+      <Vault />
 
       {fillers.map((f, i) => (
         <FillerTower key={`f-${i}`} {...f} />
