@@ -7,7 +7,7 @@ type Props = {
   onSelect: (id: string) => void
 }
 
-/** Screen-space city holograms (DOM). Ring angles match CityScene towers. */
+/** Screen-space city holograms. Angles match CityScene ring (+0.12 offset). */
 export function CityHologramLayer({ bots, desk, onSelect }: Props) {
   const n = Math.max(bots.length, 5)
   const workers = workersOnShift(bots)
@@ -15,9 +15,11 @@ export function CityHologramLayer({ bots, desk, onSelect }: Props) {
   return (
     <div className="holo-layer" aria-label="City holograms">
       {bots.map((bot, i) => {
-        const a = -Math.PI / 2 + (i / n) * Math.PI * 2
-        const x = 50 + Math.cos(a) * 32
-        const y = 42 + Math.sin(a) * 28
+        const a = -Math.PI / 2 + (i / n) * Math.PI * 2 + 0.12
+        // Project ring into the tighter high-angle frame.
+        // Push labels slightly outward from beams so text stays readable.
+        const x = 50 + Math.cos(a) * 30
+        const y = 30 + Math.sin(a) * 24
         const offline = bot.present === false
         return (
           <button
@@ -28,6 +30,7 @@ export function CityHologramLayer({ bots, desk, onSelect }: Props) {
               left: `${x}%`,
               top: `${y}%`,
               borderColor: BEAM_COLORS[i % BEAM_COLORS.length],
+              boxShadow: `0 0 18px ${BEAM_COLORS[i % BEAM_COLORS.length]}55`,
             }}
             onClick={() => onSelect(bot.id)}
           >
@@ -41,7 +44,7 @@ export function CityHologramLayer({ bots, desk, onSelect }: Props) {
         )
       })}
 
-      <div className="holo vault-holo" style={{ left: '50%', top: '68%' }}>
+      <div className="holo vault-holo" style={{ left: '50%', top: '78%' }}>
         <strong>THE VAULT</strong>
         <span>
           realized {money(desk?.realized, true)} · today {money(desk?.today, true)}

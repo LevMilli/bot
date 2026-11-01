@@ -22,32 +22,12 @@ export default function App() {
 
   return (
     <div className={`app ${office ? 'office' : 'city'}`}>
-      <header className="chrome-top">
-        <div className="brand-block">
-          <h1 className="brand">PIMP-CITY</h1>
-          <p className="tagline">Neon paper desk · five towers · live snapshot</p>
-        </div>
-        <div className="chrome-actions">
-          {office ? (
-            <button type="button" className="back-btn" onClick={() => setSelectedId(null)}>
-              ← Back to city
-            </button>
-          ) : (
-            <a className="back-btn ghost" href="/pimp-trading">
-              PIMP-TRADING
-            </a>
-          )}
-          <span className="meta">
-            {loading && !snap ? 'loading…' : mode === 'live' ? 'live desk' : 'offline demo'}
-            {updatedAt ? ` · ${new Date(updatedAt).toLocaleTimeString()}` : ''}
-          </span>
-        </div>
-      </header>
-
-      <Banners mode={mode} paperBanner={snap?.banner} error={error} />
-
       <div className="stage">
-        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }}>
+        <Canvas
+          dpr={[1, 1.75]}
+          gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
+          camera={{ position: [0, 12, 14], fov: 46 }}
+        >
           <Suspense fallback={null}>
             {office && selected ? (
               <OfficeScene bot={selected} />
@@ -56,6 +36,30 @@ export default function App() {
             )}
           </Suspense>
         </Canvas>
+
+        <header className="chrome-top">
+          <div className="brand-block">
+            <h1 className="brand">PIMP-CITY</h1>
+            <p className="tagline">Neon paper desk · five towers · live snapshot</p>
+          </div>
+          <div className="chrome-actions">
+            {office ? (
+              <button type="button" className="back-btn" onClick={() => setSelectedId(null)}>
+                ← Back to city
+              </button>
+            ) : (
+              <a className="back-btn ghost" href="/pimp-trading">
+                PIMP-TRADING
+              </a>
+            )}
+            <span className="meta">
+              {loading && !snap ? 'loading…' : mode === 'live' ? 'live desk' : 'offline demo'}
+              {updatedAt ? ` · ${new Date(updatedAt).toLocaleTimeString()}` : ''}
+            </span>
+          </div>
+        </header>
+
+        <Banners mode={mode} paperBanner={snap?.banner} error={error} />
 
         {!office && (
           <CityHologramLayer bots={bots} desk={snap?.desk} onSelect={setSelectedId} />

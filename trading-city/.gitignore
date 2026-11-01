@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 dist-ssr
 *.local
+__pycache__/
+*.pyc
 # dist/ is committed so the staff bot can serve /pimp-city/ without a Node build step.
 
 # Editor directories and files

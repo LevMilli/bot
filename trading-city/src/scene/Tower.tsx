@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Mesh } from 'three'
+import type { Group, Mesh } from 'three'
 import type { BotRow } from '../types'
 import { BEAM_COLORS } from '../data/format'
 
@@ -13,31 +13,43 @@ type Props = {
 }
 
 export function Tower({ bot, index, position, selected, onSelect }: Props) {
-  const beam = useRef<Mesh>(null)
+  const beamGroup = useRef<Group>(null)
+  const beamCore = useRef<Mesh>(null)
   const color = BEAM_COLORS[index % BEAM_COLORS.length]
   const offline = bot.present === false
-  const height = offline ? 4.2 : 6 + (index % 3) * 0.7
+  const height = offline ? 5.2 : 7.2 + (index % 3) * 1.1
+  const width = 1.85 + (index % 2) * 0.25
 
   const windows = useMemo(() => {
     const pts: [number, number, number][] = []
-    for (let y = 0.6; y < height - 0.4; y += 0.55) {
-      for (let side = 0; side < 4; side++) {
-        const along = ((y * 3 + side * 7 + index) % 5) / 5
-        if (along > 0.45) continue
-        const x = side % 2 === 0 ? (side === 0 ? 0.82 : -0.82) : (along - 0.2) * 1.4
-        const z = side % 2 === 1 ? (side === 1 ? 0.82 : -0.82) : (along - 0.2) * 1.4
-        pts.push([x, y, z])
+    for (let y = 0.55; y < height - 0.35; y += 0.48) {
+      for (let col = -2; col <= 2; col++) {
+        if ((y * 10 + col * 3 + index * 7) % 5 === 0) continue
+        const x = col * 0.28
+        pts.push([x, y, width / 2 + 0.02])
+        pts.push([x, y, -width / 2 - 0.02])
+        pts.push([width / 2 + 0.02, y, col * 0.28])
+        pts.push([-width / 2 - 0.02, y, col * 0.28])
       }
     }
     return pts
-  }, [height, index])
+  }, [height, index, width])
 
   useFrame(({ clock }) => {
-    if (!beam.current) return
-    const pulse = offline ? 0.08 : 0.55 + Math.sin(clock.getElapsedTime() * 2.2 + index) * 0.25
-    const mat = beam.current.material as { opacity?: number; emissiveIntensity?: number }
-    if (mat.opacity != null) mat.opacity = pulse
-    if (mat.emissiveIntensity != null) mat.emissiveIntensity = pulse
+    const t = clock.getElapsedTime()
+    const pulse = offline ? 0.12 : 0.65 + Math.sin(t * 2.4 + index) * 0.3
+    if (beamCore.current) {
+      const mat = beamCore.current.material as { opacity?: number }
+      if (mat.opacity != null) mat.opacity = pulse
+    }
+    if (beamGroup.current) {
+      beamGroup.current.children.forEach((child, i) => {
+        if (i === 0) return
+        child.position.y = 1.2 + ((t * 1.4 + i * 1.1 + index) % 5.5)
+        const s = 0.7 + Math.sin(t * 3 + i) * 0.15
+        child.scale.set(s, 1, s)
+      })
+    }
   })
 
   return (
@@ -56,39 +68,58 @@ export function Tower({ bot, index, position, selected, onSelect }: Props) {
           document.body.style.cursor = 'default'
         }}
       >
-        <boxGeometry args={[1.6, height, 1.6]} />
+        <boxGeometry args={[width, height, width]} />
         <meshStandardMaterial
-          color={offline ? '#0a0614' : '#0b0a18'}
-          emissive={selected ? color : '#10102a'}
-          emissiveIntensity={selected ? 0.35 : offline ? 0.05 : 0.12}
-          roughness={0.7}
-          metalness={0.25}
+          color={offline ? '#07060e' : '#08070f'}
+          emissive={selected ? color : '#0a0a18'}
+          emissiveIntensity={selected ? 0.28 : offline ? 0.04 : 0.08}
+          roughness={0.78}
+          metalness={0.2}
         />
       </mesh>
+
       {windows.map((p, i) => (
         <mesh key={i} position={p}>
-          <boxGeometry args={[0.12, 0.12, 0.12]} />
-          <meshBasicMaterial color={offline ? '#334' : '#f4f0c8'} />
+          <boxGeometry args={[0.1, 0.1, 0.05]} />
+          <meshBasicMaterial color={offline ? '#2a3348' : '#f2f0d8'} />
         </mesh>
       ))}
-      <mesh ref={beam} position={[0, height + 4.5, 0]}>
-        <cylinderGeometry args={[0.18, 0.32, 8.5, 16]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={offline ? 0.12 : 1.35}
-          transparent
-          opacity={offline ? 0.18 : 0.85}
-        />
+
+      {/* roof cap */}
+      <mesh position={[0, height + 0.08, 0]}>
+        <boxGeometry args={[width + 0.2, 0.16, width + 0.2]} />
+        <meshStandardMaterial color="#101018" emissive={color} emissiveIntensity={0.55} />
       </mesh>
-      <mesh position={[0, height + 4.5, 0]}>
-        <cylinderGeometry args={[0.06, 0.1, 8.6, 8]} />
-        <meshBasicMaterial color={color} transparent opacity={offline ? 0.2 : 0.95} />
-      </mesh>
-      <mesh position={[0, height + 0.05, 0]}>
-        <boxGeometry args={[1.75, 0.12, 1.75]} />
-        <meshStandardMaterial color="#111" emissive={color} emissiveIntensity={0.4} />
-      </mesh>
+
+      {/* neon beam + halo rings */}
+      <group ref={beamGroup} position={[0, height + 0.2, 0]}>
+        <mesh ref={beamCore} position={[0, 5.4, 0]}>
+          <cylinderGeometry args={[0.28, 0.48, 10.5, 22]} />
+          <meshBasicMaterial color={color} transparent opacity={offline ? 0.14 : 0.82} depthWrite={false} />
+        </mesh>
+        <mesh position={[0, 5.4, 0]}>
+          <cylinderGeometry args={[0.1, 0.16, 10.7, 12]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={offline ? 0.12 : 0.95} depthWrite={false} />
+        </mesh>
+        {/* soft outer glow shell */}
+        <mesh position={[0, 5.4, 0]}>
+          <cylinderGeometry args={[0.42, 0.7, 10.2, 22]} />
+          <meshBasicMaterial color={color} transparent opacity={offline ? 0.05 : 0.22} depthWrite={false} />
+        </mesh>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <mesh key={i} rotation={[Math.PI / 2, 0, 0]} position={[0, 1.2 + i * 1.55, 0]}>
+            <torusGeometry args={[0.62 + i * 0.06, 0.04, 8, 36]} />
+            <meshBasicMaterial color={color} transparent opacity={offline ? 0.1 : 0.75} depthWrite={false} />
+          </mesh>
+        ))}
+      </group>
+
+      <pointLight
+        position={[0, height + 2, 0]}
+        intensity={offline ? 0.2 : 1.6}
+        color={color}
+        distance={10}
+      />
     </group>
   )
 }
