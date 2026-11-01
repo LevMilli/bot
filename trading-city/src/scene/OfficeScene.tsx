@@ -8,18 +8,20 @@ import {
   leftMonitorTexture,
   rightMonitorTexture,
 } from '../hud/monitorTextures'
+import { botPose } from '../data/botPose'
 import { NeonBloom } from './Effects'
 import { BotFigure } from './BotFigure'
 import { CityGlass } from './WindowCity'
+import { WallStockChart } from './WallCharts'
 
 type Props = {
   bot: BotRow
   desk?: Desk
 }
 
-const FRAME = '#243044'
-const WALL = '#2c3548'
-const TRIM = '#8ea0b8'
+const FRAME = '#3a2a68'
+const WALL = '#241848'
+const TRIM = '#7ec8d8'
 
 function MonitorFrame({
   position,
@@ -85,12 +87,12 @@ function Ceiling() {
     <group>
       <mesh position={[0, 3.38, 0.7]} rotation={[Math.PI / 2, 0, 0]}>
         <planeGeometry args={[16, 8.2]} />
-        <meshStandardMaterial color="#1a1e28" roughness={0.92} />
+        <meshStandardMaterial color="#1a1230" roughness={0.92} />
       </mesh>
       {tiles.map(([x, z]) => (
         <mesh key={`${x}-${z}`} position={[x, 3.36, z]} rotation={[Math.PI / 2, 0, 0]}>
           <planeGeometry args={[1.42, 1.18]} />
-          <meshStandardMaterial color="#222733" roughness={0.85} metalness={0.04} />
+          <meshStandardMaterial color="#261848" roughness={0.85} metalness={0.04} />
         </mesh>
       ))}
       {/* troffer lights */}
@@ -330,16 +332,16 @@ function OfficeFloor() {
     <group>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0.7]}>
         <planeGeometry args={[16, 8.3]} />
-        <meshStandardMaterial color="#1a2230" roughness={0.72} metalness={0.12} />
+        <meshStandardMaterial color="#12082a" roughness={0.72} metalness={0.12} />
       </mesh>
-      <gridHelper args={[8, 16, '#1a6a78', '#142033']} position={[0, 0.012, 0.55]} />
+      <gridHelper args={[8, 16, '#2de2e6', '#2a1060']} position={[0, 0.012, 0.55]} />
     </group>
   )
 }
 
 export function OfficeScene({ bot, desk }: Props) {
   const cam = useRef<Cam>(null)
-  const celebrating = Number(bot.today || 0) > 0 || Number(bot.realized || 0) > 0 || bot.present !== false
+  const pose = useMemo(() => botPose(bot), [bot])
 
   const maps = useMemo(() => {
     const left = leftMonitorTexture(bot)
@@ -374,21 +376,24 @@ export function OfficeScene({ bot, desk }: Props) {
 
   return (
     <>
-      <color attach="background" args={['#070b14']} />
+      <color attach="background" args={['#12082a']} />
+      <fog attach="fog" args={['#1a0a38', 12, 28]} />
       <PerspectiveCamera ref={cam} makeDefault fov={46} near={0.1} far={80} />
-      <ambientLight intensity={0.62} color="#d5deee" />
-      <directionalLight position={[1.5, 4.2, 2]} intensity={0.7} color="#f2f6ff" />
-      <pointLight position={[-1.15, 3.15, 0.4]} intensity={0.7} color="#e7f4ff" distance={8} />
-      <pointLight position={[1.15, 3.15, 0.4]} intensity={0.7} color="#e7f4ff" distance={8} />
-      <pointLight position={[0, 1.9, -2.4]} intensity={0.45} color="#7ef9ff" distance={7} />
+      <ambientLight intensity={0.55} color="#c8b8ff" />
+      <directionalLight position={[1.5, 4.2, 2]} intensity={0.65} color="#f2e8ff" />
+      <pointLight position={[-1.15, 3.15, 0.4]} intensity={0.75} color="#7ef9ff" distance={8} />
+      <pointLight position={[1.15, 3.15, 0.4]} intensity={0.75} color="#b967ff" distance={8} />
+      <pointLight position={[0, 1.9, -2.4]} intensity={0.55} color="#2de2e6" distance={7} />
 
       <OfficeFloor />
       <Ceiling />
       <SideWall x={-7.9} rot={Math.PI / 2} />
       <SideWall x={7.9} rot={-Math.PI / 2} />
+      <WallStockChart bot={bot} desk={desk} side="left" />
+      <WallStockChart bot={bot} desk={desk} side="right" />
       <mesh position={[0, 1.69, 4.8]} rotation={[0, Math.PI, 0]}>
         <planeGeometry args={[16, 3.38]} />
-        <meshStandardMaterial color="#10141c" roughness={0.92} />
+        <meshStandardMaterial color="#160e2c" roughness={0.92} />
       </mesh>
       <Door />
       <Credenza />
@@ -400,8 +405,8 @@ export function OfficeScene({ bot, desk }: Props) {
       <MonitorFrame position={[0.02, 1.4, -0.88]} rotation={[-0.08, 0, 0]} size={[1.22, 0.72]} edge="#2de2e6" map={maps.center} />
       <MonitorFrame position={[1.58, 1.28, -0.62]} rotation={[0, -0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.right} />
 
-      <BotFigure celebrating={celebrating} />
-      <NeonBloom strength={0.42} />
+      <BotFigure pose={pose} />
+      <NeonBloom strength={0.48} />
     </>
   )
 }

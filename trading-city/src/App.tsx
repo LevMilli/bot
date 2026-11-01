@@ -38,7 +38,7 @@ export default function App() {
 
         <header className="chrome-top">
           <div className="brand-block">
-            <h1 className="brand">PIMP-CITY</h1>
+            <h1 className="brand">SIGNAL-CITY</h1>
             <p className="tagline">Neon paper desk · five towers · live snapshot</p>
           </div>
           <div className="chrome-actions">

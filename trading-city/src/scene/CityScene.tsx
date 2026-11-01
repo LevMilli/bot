@@ -1,13 +1,11 @@
-import { useMemo, useRef } from 'react'
-import { PerspectiveCamera } from '@react-three/drei'
-import { useFrame } from '@react-three/fiber'
-import type { PerspectiveCamera as Cam } from 'three'
+import { useMemo } from 'react'
 import type { BotRow } from '../types'
 import { NeonBloom } from './Effects'
 import { GridFloor } from './GridFloor'
 import { PurpleHorizon, SkyEquityLine, Skyline, Starfield } from './Skyline'
 import { Vault } from './Vault'
 import { FillerTower, Tower } from './Tower'
+import { CityOrbitCamera } from './CityControls'
 
 export const RING_R = 7.6
 
@@ -47,19 +45,19 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
   })
 
   const fillers: FillerSlot[] = []
-  for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * Math.PI * 2 + 0.35
-    const r = 2.8 + rand(i + 2) * 1.6
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2 + 0.35
+    const r = 2.6 + rand(i + 2) * 1.8
     fillers.push({
       position: [Math.cos(a) * r, 0, Math.sin(a) * r - 0.6],
-      height: 3.2 + rand(i + 9) * 4.5,
-      width: 0.85 + rand(i + 4) * 0.7,
+      height: 3.4 + rand(i + 9) * 5.2,
+      width: 0.8 + rand(i + 4) * 0.85,
       seed: i + 20,
     })
   }
-  for (let i = 0; i < 16; i++) {
-    const a = (i / 16) * Math.PI * 2 + 0.08
-    const r = 9.4 + rand(i + 1) * 1.4
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2 + 0.08
+    const r = 9.2 + rand(i + 1) * 1.8
     const nearBot = slots.some((s) => {
       const dx = s.position[0] - Math.cos(a) * r
       const dz = s.position[2] - (Math.sin(a) * r - 1)
@@ -68,32 +66,37 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
     if (nearBot) continue
     fillers.push({
       position: [Math.cos(a) * r, 0, Math.sin(a) * r - 1],
-      height: 2.8 + rand(i + 11) * 5.2,
-      width: 0.7 + rand(i + 6) * 1.1,
+      height: 2.8 + rand(i + 11) * 5.8,
+      width: 0.65 + rand(i + 6) * 1.2,
       seed: i + 40,
+    })
+  }
+  // Mid-ring dense cluster for a solid 3D city read
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + 0.5
+    const r = 5.2 + rand(i + 3) * 1.4
+    const nearBot = slots.some((s) => {
+      const dx = s.position[0] - Math.cos(a) * r
+      const dz = s.position[2] - (Math.sin(a) * r - 0.8)
+      return dx * dx + dz * dz < 3.2
+    })
+    if (nearBot) continue
+    fillers.push({
+      position: [Math.cos(a) * r, 0, Math.sin(a) * r - 0.8],
+      height: 4.0 + rand(i + 15) * 4.8,
+      width: 0.75 + rand(i + 8) * 0.9,
+      seed: i + 60,
     })
   }
   return { slots, fillers }
 }
 
 export function CityScene({ bots, selectedId, onSelect }: Props) {
-  const cam = useRef<Cam>(null)
-
-  useFrame((_, dt) => {
-    if (!cam.current) return
-    // High-angle plaza shot matching the city overview reference.
-    const target = { x: 0, y: 15.2, z: 15.2 }
-    cam.current.position.x += (target.x - cam.current.position.x) * Math.min(1, dt * 1.8)
-    cam.current.position.y += (target.y - cam.current.position.y) * Math.min(1, dt * 1.8)
-    cam.current.position.z += (target.z - cam.current.position.z) * Math.min(1, dt * 1.8)
-    cam.current.lookAt(0, 0.4, -0.5)
-  })
-
   return (
     <>
-      <color attach="background" args={['#0c0424']} />
-      <fog attach="fog" args={['#1a0740', 28, 72]} />
-      <PerspectiveCamera ref={cam} makeDefault fov={42} near={0.1} far={200} position={[0, 17, 15]} />
+      <color attach="background" args={['#0a0320']} />
+      <fog attach="fog" args={['#1a0740', 26, 70]} />
+      <CityOrbitCamera />
       <CityContents bots={bots} selectedId={selectedId} onSelect={onSelect} />
       <NeonBloom />
     </>
@@ -113,15 +116,15 @@ export function CityContents({
   const { slots, fillers } = useMemo(() => layoutCity(bots), [bots])
   return (
     <>
-      <ambientLight intensity={0.22} />
-      <directionalLight position={[6, 18, 8]} intensity={0.45} color="#a8c8ff" />
-      <pointLight position={[0, 6, 6]} intensity={1.6} color="#ffe9a0" distance={28} />
-      <pointLight position={[-8, 5, -4]} intensity={1.05} color="#ff2a6d" distance={30} />
-      <pointLight position={[8, 5, -4]} intensity={0.85} color="#2de2e6" distance={30} />
-      <pointLight position={[0, 10, -8]} intensity={0.55} color="#b967ff" distance={40} />
+      <ambientLight intensity={0.24} />
+      <directionalLight position={[6, 18, 8]} intensity={0.5} color="#a8c8ff" />
+      <pointLight position={[0, 6, 6]} intensity={1.7} color="#ffe9a0" distance={28} />
+      <pointLight position={[-8, 5, -4]} intensity={1.15} color="#ff2a6d" distance={30} />
+      <pointLight position={[8, 5, -4]} intensity={0.95} color="#2de2e6" distance={30} />
+      <pointLight position={[0, 10, -8]} intensity={0.65} color="#b967ff" distance={40} />
 
       <PurpleHorizon />
-      <Starfield />
+      <Starfield count={1200} />
       <GridFloor />
       <Skyline z={-22} width={72} />
       <Skyline z={-30} width={88} />
