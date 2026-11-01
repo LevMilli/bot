@@ -13,3 +13,4 @@ pimp-alerts.json
 pimp-recap.json
 pimp-learning.json
 *.tmp
+__pycache__/

@@ -30,12 +30,13 @@ OLD_BANKROLL = 14.00
 # New defaults: 4 points of edge, 12 open positions. A paper buy needs that edge after the fee.
 # The hourly count does not waive it. The desk daily loss stop still ends a bad paper day.
 MAX_OPEN = 12
-MIN_GAP = 0.04            # saved edge bar AFTER the taker fee (old bar was 0.08)
-MIN_GAP_MODEL = 0.06      # NHL model stays 2 points stricter (old bar was 0.10)
+MIN_GAP = 0.06            # safer desk edge bar AFTER the taker fee
+MIN_GAP_MODEL = 0.08      # NHL model stays 2 points stricter
+MIN_FAIR_PROB = 0.80      # only paper-buy when selected-side fair ≥ 80%
 DESK_ROOT = os.path.dirname(HERE)
 CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this band
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
-PRICE_BOUNDS = (0.05, 0.95)     # don't buy near-certain / near-worthless contracts
+PRICE_BOUNDS = (0.05, 0.92)     # avoid near-worthless / near-locked contracts
 
 def stake_for_model(fair, desk=None, cfg=None):
     """Paper dollars for one sports fill. Under 80% this is about $20.
@@ -476,6 +477,8 @@ def run():
                 reason = "already holding this game"
             elif CLOSE_GAME_BAND[0] <= fair_home <= CLOSE_GAME_BAND[1]:
                 reason = "close game - skip"
+            elif fair + 1e-12 < MIN_FAIR_PROB:
+                reason = f"fair {fair:.0%} < safer floor {MIN_FAIR_PROB:.0%} - skip"
             elif gap < need:
                 reason = f"gap < {need*100:.0f} - no trade"
             elif ask - bid > MAX_SPREAD:

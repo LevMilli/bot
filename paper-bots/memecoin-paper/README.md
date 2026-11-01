@@ -43,7 +43,7 @@ If any number is missing, that check **fails** and the token is skipped. Prices 
 | `FACTS.min_liquidity_usd` = 30000 | Pool must have ≥ $30k liquidity. |
 | `FACTS.max_ticket_share` = 0.01 | Your $25 must be ≤ 1% of the pool. |
 | `FACTS.min_age_min` / `max_age_hours` | Token must be 30 min – 72 h old. |
-| `MIN_CONFIDENCE` = 0.7 | Scorer's confidence (0-1) must be ≥ 0.7 to buy. |
+| `MIN_CONFIDENCE` = 0.8 | Scorer's confidence (0-1) must be ≥ 0.8 to buy. |
 | `EXIT.stop_pct` = -35 | Down 35% from entry → sell everything. |
 | `EXIT.ladder` | +100% → sell half; +200% → sell another quarter. |
 | `EXIT.trail_pct` = 30 | After the first ladder sale, the rest sells if price drops 30% from its peak. |

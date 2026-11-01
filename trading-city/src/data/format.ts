@@ -30,9 +30,17 @@ export function statusLabel(bot: BotRow): string {
   return bits[0] || bot.status || 'idle'
 }
 
+/** Primary PnL figure shown on a tower hologram (today if nonzero, else realized). */
+export function hologramPnlValue(bot: BotRow): number | null {
+  if (bot.present === false) return null
+  if (bot.today != null && bot.today !== 0) return Number(bot.today)
+  if (bot.realized != null) return Number(bot.realized)
+  return null
+}
+
 export function hologramPnl(bot: BotRow): string {
   if (bot.present === false) return 'offline'
-  const raw = bot.today != null && bot.today !== 0 ? bot.today : bot.realized
+  const raw = hologramPnlValue(bot)
   if (raw == null) return money(bot.cash)
   const label = bot.today != null && bot.today !== 0 ? 'today' : 'realized'
   return `${label} ${money(raw, true)}`
@@ -42,10 +50,10 @@ export function workersOnShift(bots: BotRow[] | undefined): number {
   return (bots || []).filter((b) => b.present && !b.paused).length
 }
 
-export function tradeLine(row: TradeOrHistory, botName?: string): string {
+export function tradeLine(row: TradeOrHistory, botName?: string, includePnl = true): string {
   const when = row.when || row.closed_at || row.closed || ''
   const what = row.what || row.title || row.team || row.ticker || row.game || 'trade'
-  const pnl = row.pnl != null ? money(row.pnl, true) : ''
+  const pnl = includePnl && row.pnl != null ? money(row.pnl, true) : ''
   const result = row.result || row.exit_reason || row.exit || ''
   return [botName, when, what, pnl, result].filter(Boolean).join(' · ')
 }
@@ -60,7 +68,8 @@ export function flattenTicker(
     const pool = [...(bot.history || []), ...(bot.trades || [])]
     for (const t of pool) {
       rows.push({
-        text: tradeLine(t, bot.name),
+        // PnL rendered separately so the ticker can color red/green.
+        text: tradeLine(t, bot.name, false),
         pnl: typeof t.pnl === 'number' ? t.pnl : null,
         sort: String(t.when || t.closed_at || t.closed || ''),
       })
