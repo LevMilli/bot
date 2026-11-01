@@ -29,7 +29,7 @@ export default function App() {
         >
           <Suspense fallback={null}>
             {office && selected ? (
-              <OfficeScene bot={selected} bots={bots} desk={snap?.desk} />
+              <OfficeScene bot={selected} desk={snap?.desk} />
             ) : (
               <CityScene bots={bots} selectedId={selectedId} onSelect={setSelectedId} />
             )}

@@ -14,7 +14,6 @@ import { CityGlass } from './WindowCity'
 
 type Props = {
   bot: BotRow
-  bots: BotRow[]
   desk?: Desk
 }
 
@@ -226,7 +225,7 @@ function OfficeChair() {
   )
 }
 
-function WindowWall({ bots, exceptId }: { bots: BotRow[]; exceptId: string }) {
+function WindowWall() {
   return (
     <group position={[0, 0, -3.55]}>
       {/* opaque surround */}
@@ -269,12 +268,12 @@ function WindowWall({ bots, exceptId }: { bots: BotRow[]; exceptId: string }) {
         </mesh>
       ))}
 
-      {/* glass: eye-level street outside, other towers and the rest of the crew */}
+      {/* glass: eye-level street outside, neighboring towers, no other bots */}
       <mesh position={[0, 1.95, 0.02]} raycast={() => null}>
         <planeGeometry args={[6.82, 2.26]} />
         <meshBasicMaterial toneMapped={false}>
           <RenderTexture attach="map" width={1536} height={512} anisotropy={8}>
-            <CityGlass bots={bots} exceptId={exceptId} />
+            <CityGlass />
           </RenderTexture>
         </meshBasicMaterial>
       </mesh>
@@ -338,7 +337,7 @@ function OfficeFloor() {
   )
 }
 
-export function OfficeScene({ bot, bots, desk }: Props) {
+export function OfficeScene({ bot, desk }: Props) {
   const cam = useRef<Cam>(null)
   const celebrating = Number(bot.today || 0) > 0 || Number(bot.realized || 0) > 0 || bot.present !== false
 
@@ -393,7 +392,7 @@ export function OfficeScene({ bot, bots, desk }: Props) {
       </mesh>
       <Door />
       <Credenza />
-      <WindowWall bots={bots} exceptId={bot.id} />
+      <WindowWall />
       <Desk />
       <OfficeChair />
 
