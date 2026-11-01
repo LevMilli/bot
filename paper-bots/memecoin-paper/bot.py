@@ -487,6 +487,11 @@ def main():
     print("1) managing open paper positions")
     manage(st)
     save_state(st)
+    if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
+        print("2) scanning skipped — desk entry_gate blocked new paper buys (exits above still ran)")
+        print(f"CARD: Managed open paper positions. Desk gate blocked new buys ({len(st['open'])} still open).")
+        print(f"  cash ${st['cash_usd']:.2f}, open {len(st['open'])}, realized pnl ${st['realized_pnl_usd']:+.2f}")
+        return
     print("2) scanning for candidates")
     scan(st, stats)
     save_state(st)

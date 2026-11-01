@@ -170,10 +170,12 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(len(sports["positions"]), pimp_desk.DEFAULTS["max_open_positions"])
             self.assertTrue(sports["trades"])
             self.assertTrue(snap["desk"]["gate"])
-            blocked = pimp_desk.run_bot("sports-gap", "run", tmp)
-            self.assertFalse(blocked["ok"])
-            self.assertTrue(blocked.get("blocked"))
-            self.assertFalse(os.path.exists(os.path.join(tmp, "sports-gap-paper", "ran")))
+            # Sports still runs exits when the desk gate is hit; new buys stay off.
+            managed = pimp_desk.run_bot("sports-gap", "run", tmp)
+            self.assertTrue(managed["ok"])
+            self.assertTrue(managed.get("entries_blocked"))
+            self.assertFalse(managed.get("blocked"))
+            self.assertTrue(os.path.exists(os.path.join(tmp, "sports-gap-paper", "ran")))
             settled = pimp_desk.run_bot("kalshi-sp", "settle", tmp)
             self.assertTrue(settled["ok"])
             with open(os.path.join(tmp, "kalshi-sp500-paper", "ran"), encoding="utf-8") as handle:
@@ -325,18 +327,21 @@ class PimpDeskTests(unittest.TestCase):
             noon = dt.datetime(2026, 10, 30, 12, 30, tzinfo=pimp_desk.CT)
             rows = pimp_desk.run_scheduled(noon, tmp)
             by = {(row["bot"], row["action"]): row for row in rows}
-            self.assertTrue(by[("sports-gap", "run")]["blocked"])
+            # Kalshi scan stays hard-blocked. Sports/BTC/memecoin still run exits
+            # with DESK_BLOCK_ENTRIES=1 so a full book can unwind.
             self.assertTrue(by[("kalshi-sp", "run")]["blocked"])
-            self.assertTrue(by[("memecoin", "run")]["blocked"])
-            # ROI system: BTC run is an entry action — desk max-open gate applies.
-            self.assertTrue(by[("btc15m", "run")]["blocked"])
-            self.assertFalse(by[("btc15m", "run")]["ok"])
-            self.assertIn("Max open", by[("sports-gap", "run")]["error"])
-            self.assertIn("Max open", by[("btc15m", "run")]["error"])
-            self.assertIsNone(_ran(tmp, "sports-gap-paper"))
+            self.assertFalse(by[("sports-gap", "run")].get("blocked"))
+            self.assertTrue(by[("sports-gap", "run")]["ok"])
+            self.assertTrue(by[("sports-gap", "run")].get("entries_blocked"))
+            self.assertFalse(by[("memecoin", "run")].get("blocked"))
+            self.assertTrue(by[("memecoin", "run")]["ok"])
+            self.assertTrue(by[("btc15m", "run")]["ok"])
+            self.assertTrue(by[("btc15m", "run")].get("entries_blocked"))
+            self.assertIn("entry_gate", by[("sports-gap", "run")]["summary"].lower())
+            self.assertIsNotNone(_ran(tmp, "sports-gap-paper"))
             self.assertIsNone(_ran(tmp, "kalshi-sp500-paper"))
-            self.assertIsNone(_ran(tmp, "memecoin-paper"))
-            self.assertIsNone(_ran(tmp, "btc15m-signal"))
+            self.assertIsNotNone(_ran(tmp, "memecoin-paper"))
+            self.assertIsNotNone(_ran(tmp, "btc15m-signal"))
             self.assertEqual(pimp_desk.run_scheduled(noon, tmp), [])
 
     def test_scheduler_keeps_a_crashed_script_a_failure(self):

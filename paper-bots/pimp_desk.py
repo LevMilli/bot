@@ -992,11 +992,17 @@ def _save_run(root: str, bot_id: str, row: dict) -> None:
         _atomic_write(runs_path(root), json.dumps(runs, indent=2) + "\n")
 
 
-def _child_env() -> dict:
+# Combined manage+buy scripts still run when the desk gate hits, with entries off.
+_MANAGE_WHEN_GATED = frozenset({"sports-gap", "memecoin", "btc15m"})
+
+
+def _child_env(block_entries: bool = False) -> dict:
     env = {key: os.environ[key] for key in _ENV_KEEP if os.environ.get(key)}
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PAPER_ONLY"] = "1"
+    if block_entries:
+        env["DESK_BLOCK_ENTRIES"] = "1"
     return env
 
 
@@ -1560,15 +1566,22 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
     if bot_paused(root, bot_id):
         return {"ok": False, "error": "Paused.", "blocked": True, "summary": "Paused."}
     warning = _calendar_warning(root, bot_id) if spec["entry"] or bot_id == "btc15m" else ""
+    block_entries = False
+    gate_note = ""
     if spec["entry"]:
         gate = entry_gate(root)
         if gate:
-            would = [{"what": "unknown", "why": gate, "bot": bot_id}]
-            row = {"at": _now(), "ok": False, "blocked": True, "summary": gate, "exit": None, "action": action,
-                   "would_have": would}
-            _save_run(root, bot_id, row)
-            return {"ok": False, "error": gate, "blocked": True, "summary": gate, "would_have": would}
-        if stake not in (None, ""):
+            if bot_id in _MANAGE_WHEN_GATED:
+                # Exits/settles still run; scripts honor DESK_BLOCK_ENTRIES for new buys.
+                block_entries = True
+                gate_note = gate
+            else:
+                would = [{"what": "unknown", "why": gate, "bot": bot_id}]
+                row = {"at": _now(), "ok": False, "blocked": True, "summary": gate, "exit": None, "action": action,
+                       "would_have": would}
+                _save_run(root, bot_id, row)
+                return {"ok": False, "error": gate, "blocked": True, "summary": gate, "would_have": would}
+        if stake not in (None, "") and not block_entries:
             refused_stake = stake_allowed(stake, prob, load_settings(root))
             if refused_stake:
                 return {"ok": False, "error": refused_stake, "blocked": True}
@@ -1585,7 +1598,7 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
             proc = subprocess.Popen(
                 [sys.executable, script, *spec["argv"][1:]],
                 cwd=cwd,
-                env=_child_env(),
+                env=_child_env(block_entries=block_entries),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -1603,9 +1616,13 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         summary = _clip_out(out or "")
         if timed_out:
             summary = _clip_out(f"Stopped after {spec['timeout']}s.\n{summary}")
+        if block_entries and gate_note:
+            summary = _clip_out(
+                f"Desk entry_gate blocked new paper buys; exits still ran.\n{gate_note}\n{summary}"
+            )
         ok = (not timed_out) and proc.returncode == 0
         row = {"at": _now(), "ok": ok, "summary": summary, "exit": proc.returncode, "action": action,
-               "warning": warning}
+               "warning": warning, "entries_blocked": bool(block_entries)}
         _save_run(root, bot_id, row)
         if not summary:
             summary = "The script finished with no output."
@@ -1615,7 +1632,10 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
             _mark_manual(root, bot_id)
         spec_row = next(b for b in BOTS if b["id"] == bot_id)
         _note_state_mtime(root, bot_id, spec_row["folder"], spec_row.get("state") or "")
-        return {"ok": ok, "error": error, "summary": summary, "exit": proc.returncode, "warning": warning}
+        return {
+            "ok": ok, "error": error, "summary": summary, "exit": proc.returncode,
+            "warning": warning, "entries_blocked": bool(block_entries),
+        }
     finally:
         lock.release()
 
@@ -1753,6 +1773,7 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
             "action": action,
             "ok": bool(result.get("ok")),
             "blocked": bool(result.get("blocked")),
+            "entries_blocked": bool(result.get("entries_blocked")),
             "error": result.get("error") or "",
             "summary": result.get("summary") or "",
         }
@@ -2459,8 +2480,11 @@ def plain_reason(text: str) -> str:
         return "A data error stopped this check. Nothing was guessed."
     if "no live" in low:
         return "No live games, so this check bought nothing."
-    if "max open" in low:
-        return "The open-position limit blocked a new paper buy."
+    if "max open" in low or "open risk" in low:
+        return (
+            "Book is full — new paper buys are off until an open position exits. "
+            "Stops, ladders, and settles still run."
+        )
     if "loss stop" in low or "daily loss" in low:
         return "The daily loss stop blocked a new paper buy."
     if "gap <" in low or "no trade" in low or "no edge" in low:
@@ -2987,9 +3011,22 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         view["idle_copy"] = ""
     if not view.get("why") and view.get("skip"):
         view["why"] = plain_reason(view.get("skip") or "")
-    if not view.get("warning") and spec.get("id") == "btc15m":
-        view["warning"] = _btc_calendar_warning(str((view.get("last_run") or {}).get("summary") or ""))
     summary = str(run.get("summary") or "")
+    # Full book / desk gate: prefer a clear "waiting on exits" line over a dead BLOCKED look.
+    if int(view.get("open_count") or 0) > 0 and (
+        run.get("entries_blocked")
+        or "max open" in summary.lower()
+        or "open risk" in summary.lower()
+        or "max_open" in (view.get("skip") or "").lower()
+    ):
+        view["why"] = (
+            f"Holding {int(view.get('open_count') or 0)} open paper position(s); "
+            "new buys stay off until an exit frees risk. Sell plan still runs each check."
+        )
+        if run.get("ok") and not view.get("paused") and not view.get("read_error"):
+            view["status"] = "running"
+    if not view.get("warning") and spec.get("id") == "btc15m":
+        view["warning"] = _btc_calendar_warning(summary)
     if view.get("data_error"):
         view["feed"] = "api down"
     elif "no live games" in summary.lower():

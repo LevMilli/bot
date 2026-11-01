@@ -152,6 +152,8 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
         pass
     if skip:
         return skip
+    if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
+        return "Desk entry_gate blocked a new paper buy. Settles still run."
     if not signal_buy:
         return "Checked the BTC 15-minute market. No paper buy."
     per = float(ask) + float(fee or 0)

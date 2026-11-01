@@ -394,6 +394,10 @@ def run():
     stop = float(cfg.get("daily_loss_stop") or 150)
     if today_pnl <= -stop:
         entries_off = f"Daily loss stop is hit (${abs(today_pnl):.2f} against ${stop:.2f})."
+    if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
+        entries_off = entries_off or (
+            "Desk entry_gate blocked new paper buys. Exits and settles still run."
+        )
     before_book = json.dumps(
         {"cash": s.get("cash"), "open": s.get("open"), "closed": s.get("closed")},
         sort_keys=True, default=str)

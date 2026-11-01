@@ -63,10 +63,14 @@ function planStake(plans?: BotPlans): string {
 
 export function Monitors({ bot, desk }: Props) {
   const positions = bot.positions || []
-  const last =
-    (bot.trades && bot.trades[bot.trades.length - 1]) ||
-    (bot.history && bot.history[bot.history.length - 1]) ||
-    null
+  const closedPool = [...(bot.history || []), ...(bot.trades || [])].filter((t) => {
+    const side = String(t.side || '').toLowerCase()
+    const exit = String(t.exit_reason || t.exit || t.result || '')
+    if (side === 'buy') return false
+    if (t.pnl != null) return true
+    return Boolean(exit) && !/^buy\b/i.test(String(t.what || t.title || ''))
+  })
+  const last = closedPool.length ? closedPool[closedPool.length - 1] : null
   const series = equitySeries(bot, desk?.curve || desk?.equity)
   const offline = bot.present === false
   const plans = bot.plans
