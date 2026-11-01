@@ -14,6 +14,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py .
 COPY paper-bots ./paper-bots
+# Staff PIMP-CITY SPA (built Vite bundle). Rebuild with: cd trading-city && npm ci && npm run build
+COPY trading-city/dist ./trading-city/dist
+COPY trading-city/bridge.py ./trading-city/bridge.py
+COPY trading-city/README.md ./trading-city/README.md
 
 # The picks database lives in /data. When /data is a mounted volume, closed paper
 # settlements are kept in /data/paper-bots. Attach a persistent volume at /data
