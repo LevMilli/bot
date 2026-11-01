@@ -26355,18 +26355,58 @@ def dash_csp(html: str) -> str:
             "worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
-def dash_secure(resp):
+def pimp_city_csp() -> str:
+    """CSP for the PIMP-CITY bundle.
+
+    The fallback dashboard policy is default-src 'none'. That blocks the Vite
+    module and its stylesheet, so /pimp-city/ stays a blank dark page (the
+    browser's color-scheme canvas, with no scene and no chrome). frame-ancestors
+    * lets a Home Assistant panel iframe the shell. Live trades stay on the
+    staff-only /api/pimp-trading.json route.
+    """
+    return (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'; "
+        "worker-src 'self' blob:; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors *"
+    )
+
+
+def _pimp_city_path(path: str) -> bool:
+    return path == "/pimp-city" or path.startswith("/pimp-city/")
+
+
+def dash_secure(resp, path: str = ""):
     h = resp.headers
-    if "Content-Security-Policy" not in h:
-        h["Content-Security-Policy"] = ("default-src 'none'; img-src 'self' data: https://a.espncdn.com https://a1.espncdn.com https://a2.espncdn.com https://a3.espncdn.com https://a4.espncdn.com; style-src 'unsafe-inline'; "
-                                        "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-    h["X-Frame-Options"] = "DENY"
+    city = _pimp_city_path(path or "")
+    if city:
+        # X-Frame-Options DENY and CORP same-origin both leave a cross-origin
+        # iframe blank (Home Assistant's PIMP-CITY view). CSP frame-ancestors
+        # is what allows that panel to show the shell.
+        h["Content-Security-Policy"] = pimp_city_csp()
+        if "X-Frame-Options" in h:
+            del h["X-Frame-Options"]
+        h["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+        h["Cross-Origin-Resource-Policy"] = "cross-origin"
+        h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), storage-access=(self)"
+    else:
+        if "Content-Security-Policy" not in h:
+            h["Content-Security-Policy"] = ("default-src 'none'; img-src 'self' data: https://a.espncdn.com https://a1.espncdn.com https://a2.espncdn.com https://a3.espncdn.com https://a4.espncdn.com; style-src 'unsafe-inline'; "
+                                            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+        h["X-Frame-Options"] = "DENY"
+        h["Cross-Origin-Opener-Policy"] = "same-origin"
+        h["Cross-Origin-Resource-Policy"] = "same-origin"
+        h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     h["X-Content-Type-Options"] = "nosniff"
     h["Referrer-Policy"] = "no-referrer"
-    h["Cross-Origin-Opener-Policy"] = "same-origin"
-    h["Cross-Origin-Resource-Policy"] = "same-origin"
     h["Strict-Transport-Security"] = "max-age=15552000"
-    h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if "Cache-Control" not in h:
         h["Cache-Control"] = "private, no-store"
     return resp
@@ -26424,7 +26464,7 @@ async def dash_guard(request, handler):
     """Wraps every request: rate limit, no stack traces out, security headers on whatever goes back."""
     from aiohttp import web
     if request.path != "/health" and not dash_rate(dash_client_ip(request), "all", *DASH_RATE):
-        return dash_secure(dash_error(web, request, 429))
+        return dash_secure(dash_error(web, request, 429), request.path or "")
     try:
         resp = await handler(request)
     except web.HTTPException as e:
@@ -26444,7 +26484,7 @@ async def dash_guard(request, handler):
                                 httponly=True, secure=True, samesite="Lax")
             except Exception:
                 pass
-    return dash_secure(resp)
+    return dash_secure(resp, path)
 
 
 def dash_gate(web, request):
@@ -41652,12 +41692,16 @@ def pimp_city_root() -> str:
 
 
 async def dash_pimp_city(request):
-    """Staff-only neon city SPA. Live data still comes from /api/pimp-trading.json → snapshot()."""
+    """Neon city shell. Live trades stay staff-only on /api/pimp-trading.json.
+
+    The HTML is not staff-gated: a Home Assistant iframe does not send the
+    Lax staff cookie, and a 403 here is what left the PIMP-CITY view blank.
+    Logged-out viewers get the offline fixture. A staff session still gets
+    the live snapshot.
+    """
     from aiohttp import web
     import mimetypes
 
-    if staff_uid_from_request(request) is None:
-        return dash_page(web, 403, "Staff only", "PIMP-CITY is for staff. Everyone else stays on the dashboard.")
     root = os.path.realpath(pimp_city_root())
     index = os.path.join(root, "index.html")
     if not os.path.isfile(index):

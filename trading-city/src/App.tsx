@@ -9,7 +9,7 @@ import { OfficeScene } from './scene/OfficeScene'
 import type { BotRow } from './types'
 
 export default function App() {
-  const { snap, mode, error, loading, updatedAt } = useSnapshot()
+  const { snap, mode, error, loading, updatedAt, connectLive } = useSnapshot()
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const bots = snap?.bots || []
@@ -58,7 +58,7 @@ export default function App() {
           </div>
         </header>
 
-        <Banners mode={mode} paperBanner={snap?.banner} error={error} />
+        <Banners mode={mode} paperBanner={snap?.banner} error={error} onConnect={() => void connectLive()} />
 
         {!office && (
           <CityHologramLayer bots={bots} desk={snap?.desk} onSelect={setSelectedId} />
