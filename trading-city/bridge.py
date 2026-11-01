@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Localhost-only read bridge for PIMP-CITY.
+"""Localhost-only read bridge for SIGNAL-CITY.
 
 Serves GET /api/pimp-trading.json from paper-bots.pimp_desk.snapshot() only.
 Binds to 127.0.0.1 so live paper state is not exposed on the LAN.
@@ -97,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Localhost bridge for PIMP-CITY snapshot")
+    parser = argparse.ArgumentParser(description="Localhost bridge for SIGNAL-CITY snapshot")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="Bind port (default 8765)")
     args = parser.parse_args()
@@ -107,7 +107,7 @@ def main() -> None:
     os.chdir(ROOT)
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     sys.stderr.write(
-        f"PIMP-CITY bridge on http://{args.host}:{args.port}/api/pimp-trading.json\n"
+        f"SIGNAL-CITY bridge on http://{args.host}:{args.port}/api/pimp-trading.json\n"
         f"  source: pimp_desk.snapshot({PAPER})\n"
     )
     try:

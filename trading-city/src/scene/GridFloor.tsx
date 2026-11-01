@@ -1,42 +1,14 @@
 import { useMemo } from 'react'
+import { PlazaRailroad, PlazaTrain } from './PlazaTrain'
 
-function PlazaRail({ radius = 12.4, y = 0.28 }: { radius?: number; y?: number }) {
-  const lights = useMemo(() => {
-    const pts: [number, number, number][] = []
-    const n = 48
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2
-      pts.push([Math.cos(a) * radius, y + 0.08, Math.sin(a) * radius - 1])
-    }
-    return pts
-  }, [radius, y])
+export const PLAZA_RAIL_R = 12.4
 
+function PlazaRail({ radius = PLAZA_RAIL_R }: { radius?: number }) {
   return (
     <group>
-      {/* Double elevated rail */}
-      <mesh position={[0, y, -1]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.035, 10, 128]} />
-        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.95} />
-      </mesh>
-      <mesh position={[0, y + 0.22, -1]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.028, 10, 128]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.88} />
-      </mesh>
-      <mesh position={[0, y + 0.11, -1]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius - 0.08, 0.012, 8, 128]} />
-        <meshBasicMaterial color="#c8f7ff" transparent opacity={0.45} />
-      </mesh>
-      {/* Soft ground projection of the rail */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, -1]}>
-        <ringGeometry args={[radius - 0.12, radius + 0.18, 96]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.22} depthWrite={false} />
-      </mesh>
-      {lights.map((p, i) => (
-        <mesh key={i} position={p}>
-          <sphereGeometry args={[0.07, 10, 10]} />
-          <meshBasicMaterial color={i % 3 === 0 ? '#ffffff' : '#7ef9ff'} />
-        </mesh>
-      ))}
+      <PlazaRailroad radius={radius} y={0.06} />
+      {/* Train rides the rail centerline just above the ties */}
+      <PlazaTrain radius={radius} y={0.16} />
     </group>
   )
 }
@@ -98,6 +70,15 @@ export function GridFloor({
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, -1]}>
             <ringGeometry args={[4.2, 4.45, 64]} />
             <meshBasicMaterial color="#2de2e6" transparent opacity={0.4} />
+          </mesh>
+          {/* Inner radar rings */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.038, -1]}>
+            <ringGeometry args={[6.8, 6.95, 64]} />
+            <meshBasicMaterial color="#7ef9ff" transparent opacity={0.28} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, -1]}>
+            <ringGeometry args={[9.6, 9.75, 96]} />
+            <meshBasicMaterial color="#2de2e6" transparent opacity={0.22} />
           </mesh>
         </>
       )}

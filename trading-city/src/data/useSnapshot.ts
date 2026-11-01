@@ -4,7 +4,7 @@ import type { Snapshot, SnapshotState } from '../types'
 const POLL_MS = 8_000
 const LIVE_URL =
   (import.meta.env.VITE_SNAPSHOT_URL as string | undefined) || '/api/pimp-trading.json'
-// Vite base is /pimp-city/. A root-absolute fixture 404s next to the bundle,
+// Vite base is /signal-city/. A root-absolute fixture 404s next to the bundle,
 // so the offline city never gets towers when the live desk is gated.
 const FIXTURE_URL = `${import.meta.env.BASE_URL}fixture-snapshot.json`
 
