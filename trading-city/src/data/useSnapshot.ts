@@ -4,7 +4,7 @@ import type { Snapshot, SnapshotState } from '../types'
 const POLL_MS = 8_000
 const LIVE_URL =
   (import.meta.env.VITE_SNAPSHOT_URL as string | undefined) || '/api/pimp-trading.json'
-const FIXTURE_URL = '/fixture-snapshot.json'
+const FIXTURE_URL = import.meta.env.BASE_URL + 'fixture-snapshot.json'
 
 async function fetchJson(url: string, init?: RequestInit): Promise<Snapshot> {
   const res = await fetch(url, init)
