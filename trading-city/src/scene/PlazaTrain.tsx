@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import type { Group } from 'three'
 
 const RAIL_R = 12.4
-const RAIL_Y = 0.16
+const RAIL_Y = 0.2
 const Z_OFF = -1
 /** Distance between inner and outer rail centers (gauge) — wide enough to read from the plaza cam. */
 export const RAIL_GAUGE = 0.85
@@ -15,27 +15,31 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+/** Arc-length spacing behind the loco so each car sits on the circle (not a chord). */
+const CAR_ARCS = [0, 1.32, 2.55, 3.78] as const
+const CAR_COLORS = ['#ff2a6d', '#2de2e6', '#b967ff', '#39ff14'] as const
+
 function CarBody({
-  offset,
   color,
   loco = false,
 }: {
-  offset: number
   color: string
   loco?: boolean
 }) {
-  const len = loco ? 1.35 : 1.15
+  // Slightly narrower than RAIL_GAUGE so the body reads between the dual rails.
+  const len = loco ? 1.2 : 1.05
   const half = len / 2
+  const bodyZ = 0.48
   return (
-    <group position={[offset, 0, 0]}>
+    <group>
       {/* Chassis / underframe */}
       <mesh position={[0, 0.12, 0]} castShadow>
-        <boxGeometry args={[len, 0.12, 0.62]} />
+        <boxGeometry args={[len, 0.12, bodyZ + 0.04]} />
         <meshStandardMaterial color="#12161e" metalness={0.55} roughness={0.4} />
       </mesh>
       {/* Body */}
       <mesh position={[0, 0.4, 0]} castShadow>
-        <boxGeometry args={[len - 0.08, 0.48, 0.56]} />
+        <boxGeometry args={[len - 0.08, 0.48, bodyZ]} />
         <meshStandardMaterial
           color={color}
           emissive={color}
@@ -45,27 +49,27 @@ function CarBody({
         />
       </mesh>
       {/* Roof */}
-      <mesh position={[loco ? 0.18 : 0, 0.68, 0]}>
-        <boxGeometry args={[loco ? 0.62 : len - 0.2, 0.14, 0.5]} />
+      <mesh position={[loco ? 0.16 : 0, 0.68, 0]}>
+        <boxGeometry args={[loco ? 0.55 : len - 0.18, 0.14, bodyZ - 0.06]} />
         <meshStandardMaterial color="#0a0e18" metalness={0.35} roughness={0.5} />
       </mesh>
       {/* Roof light strip */}
       <mesh position={[0, 0.78, 0]}>
-        <boxGeometry args={[len - 0.35, 0.04, 0.16]} />
+        <boxGeometry args={[len - 0.3, 0.04, 0.14]} />
         <meshBasicMaterial color="#7ef9ff" toneMapped={false} />
       </mesh>
       {/* Side windows */}
       {([-1, 1] as const).map((side) => (
-        <mesh key={side} position={[loco ? 0.18 : 0, 0.44, side * 0.29]}>
-          <boxGeometry args={[loco ? 0.48 : len - 0.35, 0.16, 0.03]} />
+        <mesh key={side} position={[loco ? 0.16 : 0, 0.44, side * (bodyZ / 2 + 0.01)]}>
+          <boxGeometry args={[loco ? 0.42 : len - 0.3, 0.16, 0.03]} />
           <meshBasicMaterial color="#c8f7ff" transparent opacity={0.9} toneMapped={false} />
         </mesh>
       ))}
       {loco && (
         <>
-          {/* Nose */}
-          <mesh position={[-half + 0.12, 0.28, 0]} castShadow>
-            <boxGeometry args={[0.36, 0.28, 0.52]} />
+          {/* Nose — local −X is forward along the circle */}
+          <mesh position={[-half + 0.1, 0.28, 0]} castShadow>
+            <boxGeometry args={[0.32, 0.28, bodyZ - 0.02]} />
             <meshStandardMaterial
               color="#f9c80e"
               emissive="#f9c80e"
@@ -74,43 +78,39 @@ function CarBody({
               roughness={0.3}
             />
           </mesh>
-          {/* Cowcatcher */}
-          <mesh position={[-half - 0.05, 0.1, 0]} rotation={[0, 0, -0.4]}>
-            <boxGeometry args={[0.22, 0.08, 0.58]} />
+          <mesh position={[-half - 0.04, 0.1, 0]} rotation={[0, 0, -0.4]}>
+            <boxGeometry args={[0.2, 0.08, bodyZ + 0.04]} />
             <meshStandardMaterial color="#2a2430" metalness={0.5} roughness={0.45} />
           </mesh>
-          {/* Headlight */}
-          <mesh position={[-half - 0.08, 0.36, 0]}>
-            <sphereGeometry args={[0.08, 12, 12]} />
+          <mesh position={[-half - 0.06, 0.36, 0]}>
+            <sphereGeometry args={[0.07, 12, 12]} />
             <meshBasicMaterial color="#fff8d8" toneMapped={false} />
           </mesh>
-          <pointLight position={[-half - 0.25, 0.38, 0]} intensity={1.8} distance={6} color="#ffe9a0" />
-          {/* Cab marker */}
-          <mesh position={[0.35, 0.8, 0]}>
-            <boxGeometry args={[0.2, 0.05, 0.14]} />
+          <pointLight position={[-half - 0.22, 0.38, 0]} intensity={1.8} distance={6} color="#ffe9a0" />
+          <mesh position={[0.3, 0.8, 0]}>
+            <boxGeometry args={[0.18, 0.05, 0.12]} />
             <meshBasicMaterial color="#ff2a6d" toneMapped={false} />
           </mesh>
         </>
       )}
-      {/* Wheels on dual rails */}
-      {([-half + 0.25, half - 0.25] as const).map((x) =>
+      {/* Wheels centered on the dual rails */}
+      {([-half + 0.22, half - 0.22] as const).map((x) =>
         ([-RAIL_GAUGE / 2, RAIL_GAUGE / 2] as const).map((z) => (
           <mesh key={`${x}-${z}`} position={[x, 0.09, z]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.1, 0.1, 0.07, 12]} />
+            <cylinderGeometry args={[0.09, 0.09, 0.06, 12]} />
             <meshStandardMaterial color="#1a1e28" metalness={0.75} roughness={0.3} />
           </mesh>
         )),
       )}
-      {/* Coupler */}
       <mesh position={[half + 0.02, 0.16, 0]}>
-        <boxGeometry args={[0.1, 0.06, 0.06]} />
+        <boxGeometry args={[0.08, 0.05, 0.05]} />
         <meshStandardMaterial color="#3a4050" metalness={0.6} roughness={0.4} />
       </mesh>
     </group>
   )
 }
 
-/** Locomotive + cars that orbit the plaza railroad forever. */
+/** Locomotive + cars that orbit the plaza railroad forever — each car on the rail centerline. */
 export function PlazaTrain({
   radius = RAIL_R,
   y = RAIL_Y,
@@ -120,31 +120,41 @@ export function PlazaTrain({
   y?: number
   speed?: number
 }) {
-  const group = useRef<Group>(null)
+  const carRefs = useRef<(Group | null)[]>([])
   const reduced = useMemo(() => prefersReducedMotion(), [])
-  const angle = useRef(0)
+  const angle = useRef(0.35)
 
   useFrame((_, dt) => {
-    if (!group.current || reduced) return
+    if (reduced) return
     angle.current = (angle.current + dt * speed) % (Math.PI * 2)
-    const a = angle.current
-    group.current.position.set(Math.cos(a) * radius, y, Math.sin(a) * radius + Z_OFF)
-    group.current.rotation.y = -a + Math.PI / 2
+    const a0 = angle.current
+    for (let i = 0; i < CAR_ARCS.length; i++) {
+      const g = carRefs.current[i]
+      if (!g) continue
+      // Arc distance behind the loco → own angle so cars follow the curve.
+      const a = a0 - CAR_ARCS[i] / radius
+      g.position.set(Math.cos(a) * radius, y, Math.sin(a) * radius + Z_OFF)
+      g.rotation.y = -a + Math.PI / 2
+    }
   })
 
-  const a0 = 0.35
-  const rest: [number, number, number] = [
-    Math.cos(a0) * radius,
-    y,
-    Math.sin(a0) * radius + Z_OFF,
-  ]
-
   return (
-    <group ref={group} position={rest} rotation={[0, -a0 + Math.PI / 2, 0]} raycast={() => null}>
-      <CarBody offset={0} color="#ff2a6d" loco />
-      <CarBody offset={1.4} color="#2de2e6" />
-      <CarBody offset={2.7} color="#b967ff" />
-      <CarBody offset={4.0} color="#39ff14" />
+    <group raycast={() => null}>
+      {CAR_ARCS.map((arc, i) => {
+        const a = 0.35 - arc / radius
+        return (
+          <group
+            key={i}
+            ref={(el) => {
+              carRefs.current[i] = el
+            }}
+            position={[Math.cos(a) * radius, y, Math.sin(a) * radius + Z_OFF]}
+            rotation={[0, -a + Math.PI / 2, 0]}
+          >
+            <CarBody color={CAR_COLORS[i]} loco={i === 0} />
+          </group>
+        )
+      })}
     </group>
   )
 }

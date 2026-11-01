@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import type { BotRow } from '../types'
+import type { BotRow, Desk } from '../types'
+import { workersOnShift } from '../data/format'
 import { NeonBloom } from './Effects'
 import { GridFloor } from './GridFloor'
 import { PurpleHorizon, SkyEquityLine, Skyline, Starfield } from './Skyline'
@@ -8,9 +9,17 @@ import { FillerTower, Tower } from './Tower'
 import { CityOrbitCamera } from './CityControls'
 
 export const RING_R = 7.6
+/** Matches <Vault position={[0,0,5.2]} /> pad (~3.45r) plus building half-width. */
+export const VAULT_XZ = { x: 0, z: 5.2 }
+export const VAULT_CLEAR_R = 4.55
+/** Keep fillers within this distance of a trade tower as “linked”. */
+const TRADE_LINK_R = 3.4
+/** Drop this fraction of unlinked fillers (15–20%). */
+const UNLINKED_DROP = 0.18
 
 type Props = {
   bots: BotRow[]
+  desk?: Desk
   selectedId: string | null
   onSelect: (id: string) => void
 }
@@ -33,6 +42,27 @@ function rand(seed: number) {
   return x - Math.floor(x)
 }
 
+function hitsVault(x: number, z: number, halfW: number) {
+  const dx = x - VAULT_XZ.x
+  const dz = z - VAULT_XZ.z
+  const clear = VAULT_CLEAR_R + halfW
+  return dx * dx + dz * dz < clear * clear
+}
+
+function nearTrade(
+  x: number,
+  z: number,
+  slots: CitySlot[],
+  linkR = TRADE_LINK_R,
+) {
+  const r2 = linkR * linkR
+  return slots.some((s) => {
+    const dx = s.position[0] - x
+    const dz = s.position[2] - z
+    return dx * dx + dz * dz < r2
+  })
+}
+
 /** Same plaza layout the city camera uses, so the office window matches the live city. */
 export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: FillerSlot[] } {
   const n = Math.max(bots.length, 5)
@@ -44,60 +74,77 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
     return { bot, index: i, position: [x, 0, z] as [number, number, number] }
   })
 
-  const fillers: FillerSlot[] = []
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2 + 0.35
-    const r = 2.6 + rand(i + 2) * 1.8
-    fillers.push({
-      position: [Math.cos(a) * r, 0, Math.sin(a) * r - 0.6],
+  const candidates: FillerSlot[] = []
+
+  // Inner cluster — keep behind the vault (not on the pad toward camera).
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + 0.35
+    const r = 2.8 + rand(i + 2) * 1.5
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r - 0.6
+    const width = 0.8 + rand(i + 4) * 0.85
+    if (hitsVault(x, z, width * 0.55)) continue
+    candidates.push({
+      position: [x, 0, z],
       height: 3.4 + rand(i + 9) * 5.2,
-      width: 0.8 + rand(i + 4) * 0.85,
+      width,
       seed: i + 20,
     })
   }
-  for (let i = 0; i < 22; i++) {
-    const a = (i / 22) * Math.PI * 2 + 0.08
+
+  // Outer ring around the plaza rail
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2 + 0.08
     const r = 9.2 + rand(i + 1) * 1.8
-    const nearBot = slots.some((s) => {
-      const dx = s.position[0] - Math.cos(a) * r
-      const dz = s.position[2] - (Math.sin(a) * r - 1)
-      return dx * dx + dz * dz < 4.5
-    })
-    if (nearBot) continue
-    fillers.push({
-      position: [Math.cos(a) * r, 0, Math.sin(a) * r - 1],
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r - 1
+    const width = 0.65 + rand(i + 6) * 1.2
+    if (hitsVault(x, z, width * 0.55)) continue
+    candidates.push({
+      position: [x, 0, z],
       height: 2.8 + rand(i + 11) * 5.8,
-      width: 0.65 + rand(i + 6) * 1.2,
+      width,
       seed: i + 40,
     })
   }
-  // Mid-ring dense cluster for a solid 3D city read
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2 + 0.5
+
+  // Mid-ring density
+  for (let i = 0; i < 11; i++) {
+    const a = (i / 11) * Math.PI * 2 + 0.5
     const r = 5.2 + rand(i + 3) * 1.4
-    const nearBot = slots.some((s) => {
-      const dx = s.position[0] - Math.cos(a) * r
-      const dz = s.position[2] - (Math.sin(a) * r - 0.8)
-      return dx * dx + dz * dz < 3.2
-    })
-    if (nearBot) continue
-    fillers.push({
-      position: [Math.cos(a) * r, 0, Math.sin(a) * r - 0.8],
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r - 0.8
+    const width = 0.75 + rand(i + 8) * 0.9
+    if (hitsVault(x, z, width * 0.55)) continue
+    candidates.push({
+      position: [x, 0, z],
       height: 4.0 + rand(i + 15) * 4.8,
-      width: 0.75 + rand(i + 8) * 0.9,
+      width,
       seed: i + 60,
     })
   }
-  return { slots, fillers }
+
+  const linked: FillerSlot[] = []
+  const unlinked: FillerSlot[] = []
+  for (const f of candidates) {
+    const [x, , z] = f.position
+    if (nearTrade(x, z, slots)) linked.push(f)
+    else unlinked.push(f)
+  }
+
+  // Drop ~18% of fillers that aren’t near a trade tower.
+  const keepUnlinked = unlinked.filter((_, i) => rand(i + 77) > UNLINKED_DROP)
+
+  return { slots, fillers: [...linked, ...keepUnlinked] }
 }
 
-export function CityScene({ bots, selectedId, onSelect }: Props) {
+export function CityScene({ bots, desk, selectedId, onSelect }: Props) {
   return (
     <>
       <color attach="background" args={['#0a0320']} />
       <fog attach="fog" args={['#1a0740', 26, 70]} />
       <CityOrbitCamera />
-      <CityContents bots={bots} selectedId={selectedId} onSelect={onSelect} />
+      <CityContents bots={bots} desk={desk} selectedId={selectedId} onSelect={onSelect} />
       <NeonBloom />
     </>
   )
@@ -106,14 +153,17 @@ export function CityScene({ bots, selectedId, onSelect }: Props) {
 /** Plaza, towers, vault, and sky for the city camera. The office window uses its own street view. */
 export function CityContents({
   bots,
+  desk,
   selectedId,
   onSelect,
 }: {
   bots: BotRow[]
+  desk?: Desk
   selectedId: string | null
   onSelect: (id: string) => void
 }) {
   const { slots, fillers } = useMemo(() => layoutCity(bots), [bots])
+  const workers = workersOnShift(bots)
   return (
     <>
       <ambientLight intensity={0.24} />
@@ -129,7 +179,7 @@ export function CityContents({
       <Skyline z={-22} width={72} />
       <Skyline z={-30} width={88} />
       <SkyEquityLine />
-      <Vault />
+      <Vault desk={desk} workers={workers} />
 
       {fillers.map((f, i) => (
         <FillerTower key={`f-${i}`} {...f} />
