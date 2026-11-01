@@ -103,6 +103,8 @@ export type Desk = {
     entry_gated_bots?: string[]
     strong_exits?: string[]
     weak_exits?: string[]
+    roi_ok?: boolean
+    roi_version?: number
   }
   chart?: {
     zone?: string
@@ -111,12 +113,36 @@ export type Desk = {
   }
 }
 
+export type RoiCompliance = {
+  bot?: string
+  ok?: boolean
+  exit_quality?: string
+  target_exit_quality?: string
+  entry_gated?: boolean
+  waivers?: string[]
+  gaps?: string[]
+}
+
+export type RoiSystem = {
+  name?: string
+  version?: number
+  paper_only?: boolean
+  banner?: string
+  ok?: boolean
+  rules?: { id?: string; text?: string }[]
+  risk?: Record<string, unknown>
+  exit_ladder?: Record<string, string>
+  waivers?: Record<string, string[]>
+  compliance?: RoiCompliance[]
+}
+
 export type Snapshot = {
   paper_only?: boolean
   banner?: string
   desk?: Desk
   bots?: BotRow[]
   limits?: Record<string, unknown>
+  roi_system?: RoiSystem
   ok?: boolean
   error?: string
 }

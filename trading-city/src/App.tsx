@@ -59,7 +59,12 @@ export default function App() {
           </div>
         </header>
 
-        <Banners mode={mode} paperBanner={snap?.banner} error={error} />
+        <Banners
+          mode={mode}
+          paperBanner={snap?.banner}
+          error={error}
+          roi={snap?.roi_system}
+        />
 
         {!office && (
           <CityHologramLayer bots={bots} desk={snap?.desk} onSelect={setSelectedId} />

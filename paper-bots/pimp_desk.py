@@ -113,7 +113,8 @@ ACTIONS = {
         "brief": {"argv": ("bot.py", "brief", "--dry-run"), "entry": False, "timeout": 75, "label": "Morning brief"},
     },
     "btc15m": {
-        "run": {"argv": ("btc15m_signal.py",), "entry": False, "timeout": 75, "label": "Run one check"},
+        # entry:True — ROI system: desk daily loss / max open / open risk gate paper buys.
+        "run": {"argv": ("btc15m_signal.py",), "entry": True, "timeout": 75, "label": "Run one check"},
     },
     "memecoin": {
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 120, "label": "Run one check"},
@@ -246,13 +247,13 @@ BOT_PLANS = {
             "Suggested TP fill+15¢ is printed only — not executed",
         ],
         "failsafes": [
+            "Desk entry_gate (daily loss / max open / open risk)",
             "Full signal checklist (no spot/σ → skip)",
             "Cash / hardcoded max 12 opens / learning skip",
             "Pause file",
-            "Not under desk entry_gate (run is entry:false)",
         ],
         "exit_quality": "weak",
-        "entry_gated": False,
+        "entry_gated": True,
         "stake": "desk-curve",
     },
     "memecoin": {
@@ -339,6 +340,131 @@ def bot_gates_hit(view: dict, desk_gate: str = "") -> list:
     if desk_gate and plans.get("entry_gated"):
         hits.append("desk entry gate")
     return hits
+
+
+# Desk-wide ROI operating system. Paper only — protects bankroll and edge habits.
+ROI_POLICY = {
+    "name": "desk-roi-system",
+    "version": 1,
+    "paper_only": True,
+    "banner": (
+        "ROI SYSTEM (paper). Enter only on edge after costs, inside desk risk budget, "
+        "with an exit plan. Pace never waives edge. Learning skip cuts cold buckets."
+    ),
+    "rules": [
+        {"id": "R1", "text": "Paper only — no live keys, wallets, or real orders."},
+        {"id": "R2", "text": "Edge after fees/slippage must clear the desk (or bot) bar."},
+        {"id": "R3", "text": "Desk entry_gate blocks new entries on daily loss / max opens / open risk."},
+        {"id": "R4", "text": "Stake from desk curve unless a documented fixed ticket applies."},
+        {"id": "R5", "text": "Exit plan exists before entry (settle and/or stop/trail/time/liq)."},
+        {"id": "R6", "text": "Learning skip on cold market×bucket (≥8 settles, <40% hits)."},
+        {"id": "R7", "text": "Pause file is honored."},
+        {"id": "R8", "text": "Quiet hours hold alerts only — not a trade halt."},
+        {"id": "R9", "text": "Pace never waives edge."},
+        {"id": "R10", "text": "One position key — no duplicate game/ticker/mint."},
+        {"id": "R11", "text": "City/staff read snapshot only — never re-parse bot files."},
+        {"id": "R12", "text": "Absent Tower 5 stays offline — no substitute bot."},
+    ],
+    "risk": {
+        "daily_loss_stop": DEFAULTS["daily_loss_stop"],
+        "max_open_positions": DEFAULTS["max_open_positions"],
+        "max_open_risk": DEFAULTS["max_open_risk"],
+        "min_edge": DEFAULTS["min_edge"],
+        "stake_lo_max": DEFAULTS["stake_lo_max"],
+        "stake_hi_min": DEFAULTS["stake_hi_min"],
+        "stake_hi_max": DEFAULTS["stake_hi_max"],
+        "stake_hi_prob": DEFAULTS["stake_hi_prob"],
+        "learn_min_settles": LEARN_MIN_SETTLES,
+        "learn_hit_rate": LEARN_HIT_RATE,
+    },
+    "exit_ladder": {
+        "strong": "Active stop + scale-out + trail/time/liq",
+        "partial": "Pre-settle exit path (e.g. gap-close) + settle",
+        "weak": "Settle-only with hard entry filters",
+        "absent": "No script on this checkout",
+    },
+    "waivers": {
+        "kalshi-sp": ["settle_only_inx", "fixed_ticket_25"],
+        "btc15m": ["settle_only_btc15m", "tp_print_only"],
+        "memecoin": ["fixed_ticket_25"],
+    },
+    "target_exit_quality": {
+        "sports-gap": "partial",
+        "kalshi-sp": "weak",
+        "btc15m": "weak",
+        "memecoin": "strong",
+        "kalshi-sized": "absent",
+    },
+}
+
+
+def bot_roi_compliance(bot_id: str, plans: dict | None = None) -> dict:
+    """Grade one bot against ROI_POLICY targets (structural, not live P&L)."""
+    plans = plans or bot_plans(bot_id)
+    target = (ROI_POLICY.get("target_exit_quality") or {}).get(bot_id, "partial")
+    quality = plans.get("exit_quality") or "none"
+    order = {"strong": 3, "partial": 2, "weak": 1, "absent": 0, "none": -1}
+    ok_exit = order.get(quality, -1) >= order.get(target, 2)
+    entry_ok = bool(plans.get("entry_gated")) or bot_id == "kalshi-sized"
+    # Sized placeholder is compliant when absent.
+    if bot_id == "kalshi-sized":
+        entry_ok = True
+        ok_exit = quality == "absent"
+    has_buy = bool(plans.get("buy"))
+    has_sell = bool(plans.get("sell"))
+    has_fail = bool(plans.get("failsafes"))
+    waivers = list((ROI_POLICY.get("waivers") or {}).get(bot_id) or [])
+    ok = ok_exit and entry_ok and has_buy and has_sell and has_fail
+    return {
+        "bot": bot_id,
+        "ok": ok,
+        "exit_quality": quality,
+        "target_exit_quality": target,
+        "entry_gated": bool(plans.get("entry_gated")),
+        "waivers": waivers,
+        "gaps": [
+            *([] if ok_exit else [f"exit_quality {quality} below target {target}"]),
+            *([] if entry_ok else ["entry_gated required by ROI system"]),
+            *([] if has_buy else ["missing buy plan"]),
+            *([] if has_sell else ["missing sell plan"]),
+            *([] if has_fail else ["missing failsafes"]),
+        ],
+    }
+
+
+def roi_system(cfg: dict | None = None, bots: list | None = None) -> dict:
+    """Public ROI system block for snapshot consumers."""
+    cfg = cfg or DEFAULTS
+    risk = dict(ROI_POLICY["risk"])
+    risk.update({
+        "daily_loss_stop": cfg.get("daily_loss_stop", risk["daily_loss_stop"]),
+        "max_open_positions": cfg.get("max_open_positions", risk["max_open_positions"]),
+        "max_open_risk": cfg.get("max_open_risk", risk["max_open_risk"]),
+        "min_edge": cfg.get("min_edge", risk["min_edge"]),
+        "stake_lo_max": cfg.get("stake_lo_max", risk["stake_lo_max"]),
+        "stake_hi_min": cfg.get("stake_hi_min", risk["stake_hi_min"]),
+        "stake_hi_max": cfg.get("stake_hi_max", risk["stake_hi_max"]),
+    })
+    compliance = []
+    for bot_id in list(BOT_PLANS.keys()):
+        plans = None
+        if bots:
+            row = next((b for b in bots if b.get("id") == bot_id), None)
+            if row:
+                plans = row.get("plans")
+        compliance.append(bot_roi_compliance(bot_id, plans))
+    return {
+        "name": ROI_POLICY["name"],
+        "version": ROI_POLICY["version"],
+        "paper_only": True,
+        "banner": ROI_POLICY["banner"],
+        "rules": list(ROI_POLICY["rules"]),
+        "risk": risk,
+        "exit_ladder": dict(ROI_POLICY["exit_ladder"]),
+        "waivers": {k: list(v) for k, v in (ROI_POLICY.get("waivers") or {}).items()},
+        "compliance": compliance,
+        "ok": all(row.get("ok") for row in compliance),
+    }
 
 
 _LOCKS: dict[str, threading.Lock] = {}
@@ -1324,17 +1450,17 @@ def entry_gate(root: str | None = None, bots: list | None = None) -> str:
     if today <= -float(cfg["daily_loss_stop"]):
         return (
             f"Daily loss stop is hit (${abs(today):.2f} against ${cfg['daily_loss_stop']:.2f}). "
-            "Entry checks stay off until the next Chicago day. Settle, the morning brief, and the BTC signal still run."
+            "Entry checks stay off until the next Chicago day. Settle and the morning brief still run."
         )
     if open_count >= int(cfg["max_open_positions"]):
         return (
             f"Max open positions is reached ({open_count} of {cfg['max_open_positions']}). "
-            "Entry checks stay off. Settle, the morning brief, and the BTC signal still run."
+            "Entry checks stay off. Settle and the morning brief still run."
         )
     if open_risk >= float(cfg["max_open_risk"]) - 1e-9:
         return (
             f"Max open risk is reached (${open_risk:.2f} of ${cfg['max_open_risk']:.2f}). "
-            "Entry checks stay off. Settle, the morning brief, and the BTC signal still run."
+            "Entry checks stay off. Settle and the morning brief still run."
         )
     return ""
 
@@ -1366,9 +1492,16 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     desk_row = _desk_row(public, cashes, realized_rows, last_check, gate, cfg, root)
     book = _book(public, q=q, filt=filt, page=page)
     changes = _changes(root, public)
+    roi = roi_system(cfg, public)
+    desk_row["ops"] = {
+        **(desk_row.get("ops") or {}),
+        "roi_ok": bool(roi.get("ok")),
+        "roi_version": roi.get("version"),
+    }
     return {
         "paper_only": True,
         "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
+        "roi_system": roi,
         "limits": cfg,
         "limits_text": limits_text(cfg),
         "desk": desk_row,

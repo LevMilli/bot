@@ -1,6 +1,149 @@
 {
   "paper_only": true,
   "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
+  "roi_system": {
+    "name": "desk-roi-system",
+    "version": 1,
+    "paper_only": true,
+    "banner": "ROI SYSTEM (paper). Enter only on edge after costs, inside desk risk budget, with an exit plan. Pace never waives edge. Learning skip cuts cold buckets.",
+    "ok": true,
+    "rules": [
+      {
+        "id": "R1",
+        "text": "Paper only \u2014 no live keys, wallets, or real orders."
+      },
+      {
+        "id": "R2",
+        "text": "Edge after fees/slippage must clear the desk (or bot) bar."
+      },
+      {
+        "id": "R3",
+        "text": "Desk entry_gate blocks new entries on daily loss / max opens / open risk."
+      },
+      {
+        "id": "R4",
+        "text": "Stake from desk curve unless a documented fixed ticket applies."
+      },
+      {
+        "id": "R5",
+        "text": "Exit plan exists before entry (settle and/or stop/trail/time/liq)."
+      },
+      {
+        "id": "R6",
+        "text": "Learning skip on cold market\u00d7bucket (\u22658 settles, <40% hits)."
+      },
+      {
+        "id": "R7",
+        "text": "Pause file is honored."
+      },
+      {
+        "id": "R8",
+        "text": "Quiet hours hold alerts only \u2014 not a trade halt."
+      },
+      {
+        "id": "R9",
+        "text": "Pace never waives edge."
+      },
+      {
+        "id": "R10",
+        "text": "One position key \u2014 no duplicate game/ticker/mint."
+      },
+      {
+        "id": "R11",
+        "text": "City/staff read snapshot only \u2014 never re-parse bot files."
+      },
+      {
+        "id": "R12",
+        "text": "Absent Tower 5 stays offline \u2014 no substitute bot."
+      }
+    ],
+    "risk": {
+      "daily_loss_stop": 150.0,
+      "max_open_positions": 12,
+      "max_open_risk": 100.0,
+      "min_edge": 0.04,
+      "stake_lo_max": 20.0,
+      "stake_hi_min": 20.0,
+      "stake_hi_max": 100.0,
+      "stake_hi_prob": 0.8,
+      "learn_min_settles": 8,
+      "learn_hit_rate": 0.4
+    },
+    "exit_ladder": {
+      "strong": "Active stop + scale-out + trail/time/liq",
+      "partial": "Pre-settle exit path (e.g. gap-close) + settle",
+      "weak": "Settle-only with hard entry filters",
+      "absent": "No script on this checkout"
+    },
+    "waivers": {
+      "kalshi-sp": [
+        "settle_only_inx",
+        "fixed_ticket_25"
+      ],
+      "btc15m": [
+        "settle_only_btc15m",
+        "tp_print_only"
+      ],
+      "memecoin": [
+        "fixed_ticket_25"
+      ]
+    },
+    "compliance": [
+      {
+        "bot": "sports-gap",
+        "ok": true,
+        "exit_quality": "partial",
+        "target_exit_quality": "partial",
+        "entry_gated": true,
+        "waivers": [],
+        "gaps": []
+      },
+      {
+        "bot": "kalshi-sp",
+        "ok": true,
+        "exit_quality": "weak",
+        "target_exit_quality": "weak",
+        "entry_gated": true,
+        "waivers": [
+          "settle_only_inx",
+          "fixed_ticket_25"
+        ],
+        "gaps": []
+      },
+      {
+        "bot": "btc15m",
+        "ok": true,
+        "exit_quality": "weak",
+        "target_exit_quality": "weak",
+        "entry_gated": true,
+        "waivers": [
+          "settle_only_btc15m",
+          "tp_print_only"
+        ],
+        "gaps": []
+      },
+      {
+        "bot": "memecoin",
+        "ok": true,
+        "exit_quality": "strong",
+        "target_exit_quality": "strong",
+        "entry_gated": true,
+        "waivers": [
+          "fixed_ticket_25"
+        ],
+        "gaps": []
+      },
+      {
+        "bot": "kalshi-sized",
+        "ok": true,
+        "exit_quality": "absent",
+        "target_exit_quality": "absent",
+        "entry_gated": false,
+        "waivers": [],
+        "gaps": []
+      }
+    ]
+  },
   "desk": {
     "cash": 800.0,
     "realized": 0.0,
@@ -9,14 +152,13 @@
     "open_count": 0,
     "last_check": "2026-11-01 01:56 UTC",
     "central_check": "October 31, 2026, 8:56 PM Central",
-    "next_check": "November 1, 2026, 12:15 AM Central",
+    "next_check": "November 1, 2026, 12:22 AM Central",
     "trades_today": 0,
-    "status_line": "Last check October 31, 2026, 8:56 PM Central. Next check November 1, 2026, 12:15 AM Central. Trades today 0.",
+    "status_line": "Last check October 31, 2026, 8:56 PM Central. Next check November 1, 2026, 12:22 AM Central. Trades today 0.",
     "gate": "",
     "week": 0.0,
     "week_wins": 0,
     "week_losses": 0,
-    "biggest_swing": null,
     "goal": 25.0,
     "goal_bar": 0,
     "streak": {
@@ -26,60 +168,15 @@
     },
     "equity": [],
     "curve": [],
-    "chart": {
-      "zone": "America/Chicago",
-      "default": "ytd",
-      "ranges": [
-        {
-          "id": "ytd",
-          "label": "YTD",
-          "start": "2026-01-01T00:00:00-06:00",
-          "end": "2026-11-01T00:15:54-05:00"
-        },
-        {
-          "id": "3m",
-          "label": "3M",
-          "start": "2026-08-01T00:15:54-05:00",
-          "end": "2026-11-01T00:15:54-05:00"
-        },
-        {
-          "id": "6m",
-          "label": "6M",
-          "start": "2026-05-01T00:15:54-05:00",
-          "end": "2026-11-01T00:15:54-05:00"
-        },
-        {
-          "id": "9m",
-          "label": "9M",
-          "start": "2026-02-01T00:15:54-06:00",
-          "end": "2026-11-01T00:15:54-05:00"
-        },
-        {
-          "id": "12m",
-          "label": "12M",
-          "start": "2025-11-01T00:15:54-05:00",
-          "end": "2026-11-01T00:15:54-05:00"
-        }
-      ],
-      "open_line": {
-        "label": "Live \u00b7 not settled",
-        "settled": false,
-        "n": 0,
-        "opens": []
-      }
-    },
-    "spikes": [],
-    "paused_all": false,
     "pace_line": "0 of 12 this hour",
-    "pace_count": 0,
-    "pace_target": 12,
     "pace_loosened": false,
-    "pace_note": "This hour has 0 paper trades. The edge bar stays at 0.04 after the fee. The hour count does not waive it.",
+    "paused_all": false,
     "ops": {
       "entry_gate": "",
       "entry_gated_bots": [
         "sports-gap",
         "kalshi-sp",
+        "btc15m",
         "memecoin"
       ],
       "strong_exits": [
@@ -89,7 +186,9 @@
         "sports-gap",
         "kalshi-sp",
         "btc15m"
-      ]
+      ],
+      "roi_ok": true,
+      "roi_version": 1
     }
   },
   "bots": [
@@ -110,13 +209,15 @@
       "idle_copy": "No paper trades yet. Last check October 31, 2026, 8:56 PM Central. No edge.",
       "empty": "",
       "last_check": "2026-11-01 01:56 UTC",
+      "central_check": "October 31, 2026, 8:56 PM Central",
+      "next_run": "November 1, 2026, 12:22 AM Central",
       "warning": "No news calendar on this bot.",
       "positions": [],
       "trades": [],
       "history": [],
       "would_have": [],
       "has_state": true,
-      "next_run": "November 1, 2026, 12:15 AM Central",
+      "blurb": "ESPN live win probability against Kalshi game prices. One run paper-fills or skips.",
       "plans": {
         "buy": [
           "Live ESPN game matched to a Kalshi series",
@@ -139,9 +240,7 @@
         "entry_gated": true,
         "stake": "desk-curve"
       },
-      "gates_hit": [],
-      "central_check": "October 31, 2026, 8:56 PM Central",
-      "actions": []
+      "gates_hit": []
     },
     {
       "id": "kalshi-sp",
@@ -160,13 +259,15 @@
       "idle_copy": "No paper trades yet. Last check October 31, 2026, 8:56 PM Central. No edge.",
       "empty": "",
       "last_check": "2026-11-01 01:56 UTC",
+      "central_check": "October 31, 2026, 8:56 PM Central",
+      "next_run": "November 1, 2026, 8:00 AM Central",
       "warning": "",
       "positions": [],
       "trades": [],
       "history": [],
       "would_have": [],
       "has_state": true,
-      "next_run": "November 1, 2026, 8:00 AM Central",
+      "blurb": "Daily KXINXU paper bot. Scan paper-fills inside its own clock window. Brief is read-only.",
       "plans": {
         "buy": [
           "Once per day 12:30\u201314:55 CT",
@@ -190,9 +291,7 @@
       },
       "gates_hit": [
         "skip"
-      ],
-      "central_check": "October 31, 2026, 8:56 PM Central",
-      "actions": []
+      ]
     },
     {
       "id": "btc15m",
@@ -211,13 +310,15 @@
       "idle_copy": "No paper trades yet. Last check October 31, 2026, 8:56 PM Central. No edge.",
       "empty": "",
       "last_check": "2026-11-01 01:56 UTC",
+      "central_check": "October 31, 2026, 8:56 PM Central",
+      "next_run": "November 1, 2026, 12:22 AM Central",
       "warning": "",
       "positions": [],
       "trades": [],
       "history": [],
       "would_have": [],
       "has_state": true,
-      "next_run": "November 1, 2026, 12:15 AM Central",
+      "blurb": "BTC 15-minute paper account. A timer check can paper-buy. It places nothing.",
       "plans": {
         "buy": [
           "Nearest open KXBTC15M; p \u2265 ask + fee + 0.05",
@@ -231,20 +332,18 @@
           "Suggested TP fill+15\u00a2 is printed only \u2014 not executed"
         ],
         "failsafes": [
+          "Desk entry_gate (daily loss / max open / open risk)",
           "Full signal checklist (no spot/\u03c3 \u2192 skip)",
           "Cash / hardcoded max 12 opens / learning skip",
-          "Pause file",
-          "Not under desk entry_gate (run is entry:false)"
+          "Pause file"
         ],
         "exit_quality": "weak",
-        "entry_gated": false,
+        "entry_gated": true,
         "stake": "desk-curve"
       },
       "gates_hit": [
         "skip"
-      ],
-      "central_check": "October 31, 2026, 8:56 PM Central",
-      "actions": []
+      ]
     },
     {
       "id": "memecoin",
@@ -263,13 +362,15 @@
       "idle_copy": "No paper trades yet. Last check October 31, 2026, 8:56 PM Central. No edge.",
       "empty": "",
       "last_check": "2026-11-01 01:56 UTC",
+      "central_check": "October 31, 2026, 8:56 PM Central",
+      "next_run": "November 1, 2026, 9:00 AM Central",
       "warning": "No news calendar on this bot.",
       "positions": [],
       "trades": [],
       "history": [],
       "would_have": [],
       "has_state": true,
-      "next_run": "November 1, 2026, 9:00 AM Central",
+      "blurb": "Solana meme-coin paper desk. Public DexScreener and RugCheck reads, paper fills only.",
       "plans": {
         "buy": [
           "RugCheck facts fail-closed + scorer \u2265 0.7",
@@ -292,9 +393,7 @@
         "entry_gated": true,
         "stake": "fixed-25"
       },
-      "gates_hit": [],
-      "central_check": "October 31, 2026, 8:56 PM Central",
-      "actions": []
+      "gates_hit": []
     },
     {
       "id": "kalshi-sized",
@@ -313,13 +412,15 @@
       "idle_copy": null,
       "empty": "Not on this checkout. Desk stake bounds are saved here for when that bot is on main.",
       "last_check": "",
+      "central_check": null,
+      "next_run": "",
       "warning": null,
       "positions": [],
       "trades": [],
       "history": [],
       "would_have": [],
       "has_state": false,
-      "next_run": "",
+      "blurb": "The sized Kalshi paper bot is not in this checkout, so this panel has no script to run for it.",
       "plans": {
         "buy": [
           "Not on this checkout \u2014 no buy plan until the bot lands on main."
@@ -336,9 +437,7 @@
       },
       "gates_hit": [
         "absent"
-      ],
-      "central_check": null,
-      "actions": []
+      ]
     }
   ]
 }

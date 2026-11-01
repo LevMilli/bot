@@ -121,6 +121,8 @@ export function Monitors({ bot, desk }: Props) {
           <span>history {bot.history?.length ?? 0}</span>
           <span>exits {plans?.exit_quality || '—'}</span>
           <span>{planStake(plans)}</span>
+          {plans?.entry_gated ? <span>desk entry_gate</span> : null}
+          {desk?.ops?.roi_ok === false ? <span className="chip-warn">roi gaps</span> : null}
         </div>
         <PlanList title="Sell plan" lines={plans?.sell} />
       </section>

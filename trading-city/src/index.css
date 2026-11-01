@@ -144,6 +144,16 @@ a {
   animation: pulse-border 2.4s ease-in-out infinite;
 }
 
+.banner.roi {
+  border-color: rgba(45, 226, 230, 0.5);
+  color: #b8f7f9;
+}
+
+.banner.roi.roi-warn {
+  border-color: rgba(249, 200, 14, 0.65);
+  color: #ffe9a8;
+}
+
 @keyframes pulse-border {
   0%,
   100% {
@@ -476,8 +486,13 @@ a {
 
 .chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   color: var(--muted);
+}
+
+.chips .chip-warn {
+  color: #ffe9a8;
 }
 
 .last-trade {

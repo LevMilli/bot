@@ -41202,6 +41202,7 @@ function closedRow(t, fresh){const game=t.game||t.ticker||t.what||t.title||'';
   h('td',{class:'num',text:t.payout==null?'unknown':usd(t.payout)}),
   h('td',{class:'num',text:t.pnl==null?'unknown':pnl(t.pnl)}))}
 function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; const access=d.access||{};
+ const roi=d.roi_system||{};
  pimpLimits=lim; const fresh=!!(d.changes&&d.changes.changed);
  const stake=$('#pimpstake'); if(stake) stake.textContent=d.limits_text||'';
  const today=$('#pimptoday'); if(today) today.textContent="Today's paper P/L "+pnl(desk.today||0);
@@ -41215,11 +41216,13 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
  put($('#pimpstick'),
   h('span',null,'Cash ',money(desk.cash==null?'No paper account yet':usd(desk.cash))),
   h('span',null,'Open risk ',money(usd(desk.open_risk||0))),
-  h('span',null,'Open ',money(String(desk.open_count||0))));
+  h('span',null,'Open ',money(String(desk.open_count||0))),
+  roi.ok===false?h('span',{class:'warn',text:'ROI gaps'}):(roi.version?h('span',{class:'muted',text:'ROI v'+String(roi.version)}):null));
  const health=d.health||{};
  const goal=h('div',null,h('span',{text:'Week paper P/L '+pnl(desk.week||0)+' of goal '+usd(desk.goal||0)}),
   h('div',{class:'goalbar'},h('i',{style:'width:'+String(desk.goal_bar||0)+'%'})));
  const legend=d.legend||{};
+ const roiGaps=(roi.compliance||[]).filter(c=>c&&c.ok===false);
  put($('#pimpdesk'),
   (d.books||[]).map(book=>h('div',{class:'row'},h('span',{text:book.name}),
    h('b',{class:'num',text:(book.cash==null?'No account':usd(book.cash))+' · today '+pnl(book.today||0)}))),
@@ -41227,6 +41230,8 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
   h('div',{class:'row'},h('span',{text:'Streak'}),h('span',{text:(desk.streak&&desk.streak.text)||'No settled paper trades yet.'})),
   h('div',{class:'row'},h('span',{text:'Health'}),h('span',null,h('i',{class:'dot'+(health.alive?' on':'')}),' ',health.detail||'')),
   goal,
+  roi.banner?h('p',{class:roi.ok===false?'warn':'muted',text:roi.banner+(roi.ok===false?' · compliance gaps':(roi.ok?' · compliance ok':''))}):null,
+  roiGaps.length?h('p',{class:'warn',text:'ROI gaps: '+roiGaps.map(c=>c.bot+((c.gaps&&c.gaps[0])?(' ('+c.gaps[0]+')'):'')).join(' · ')}):null,
   d.changes?h('p',{text:d.changes.text}):null,
   d.changes?h('button',{class:'xbtn',type:'button',text:'This is what I last saw',onclick:()=>pimpPost({op:'seen'})}):null,
   d.timer?h('p',{class:'muted',text:d.timer}):null,
@@ -41281,7 +41286,9 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    statusChip(b.status),
    b.paused?h('span',{class:'chip skip',text:'paused'}):null,
    plans.exit_quality?h('span',{class:'chip',text:'exits '+plans.exit_quality}):null,
-   plans.entry_gated===false?h('span',{class:'chip skip',text:'not desk-entry-gated'}):null,
+   plans.entry_gated?h('span',{class:'chip',text:'desk entry_gate'}):h('span',{class:'chip skip',text:'not desk-entry-gated'}),
+   (function(){const c=(roi.compliance||[]).find(x=>x&&x.bot===b.id); return c?
+     h('span',{class:'chip'+(c.ok?'':' skip'),text:c.ok?'roi ok':'roi gap'}):null})(),
    (b.gates_hit||[]).length?h('p',{class:'warn',text:'Gates: '+(b.gates_hit||[]).join(' · ')}):null,
    planLine('Buy', plans.buy),
    planLine('Sell', plans.sell),
