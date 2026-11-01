@@ -57,9 +57,10 @@ export default function App() {
     <div className={`app ${view !== 'city' ? 'office' : 'city'}`}>
       <div className="stage">
         <Canvas
-          dpr={[1, 1.75]}
-          gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
+          dpr={[1, 1.25]}
+          gl={{ antialias: false, alpha: false, powerPreference: 'high-performance' }}
           camera={{ position: [0, 12, 14], fov: 46 }}
+          performance={{ min: 0.5 }}
         >
           <Suspense fallback={null}>
             {view === 'office' && selected ? (
