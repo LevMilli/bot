@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { BotRow, Desk } from '../types'
 import { equitySeries, money, pnlTone, statusLabel } from '../data/format'
 
@@ -26,12 +27,25 @@ function Sparkline({ points }: { points: { x: number; y: number }[] }) {
   return (
     <svg className="spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
       <path d={d} fill="none" stroke="#f4f7ff" strokeWidth="2.2" />
-      <line x1="0" y1={h - 8 - ((0 - min) / span) * (h - 16)} x2={w} y2={h - 8 - ((0 - min) / span) * (h - 16)} stroke="#f9c80e" strokeOpacity="0.5" strokeWidth="1" />
+      <line
+        x1="0"
+        y1={h - 8 - ((0 - min) / span) * (h - 16)}
+        x2={w}
+        y2={h - 8 - ((0 - min) / span) * (h - 16)}
+        stroke="#f9c80e"
+        strokeOpacity="0.5"
+        strokeWidth="1"
+      />
     </svg>
   )
 }
 
-export function Monitors({ bot, desk }: Props) {
+/** Live monitor panel bodies — used as Html overlays on 3D screens. */
+export function MonitorPanels({ bot, desk }: Props): {
+  left: ReactNode
+  center: ReactNode
+  right: ReactNode
+} {
   const positions = bot.positions || []
   const last =
     (bot.trades && bot.trades[bot.trades.length - 1]) ||
@@ -40,77 +54,89 @@ export function Monitors({ bot, desk }: Props) {
   const series = equitySeries(bot, desk?.curve || desk?.equity)
   const offline = bot.present === false
 
+  const left = (
+    <section className="monitor left glass">
+      <header>
+        <span>{bot.status || 'status'}</span>
+        <span>{bot.paused ? 'paused' : bot.feed || 'feed'}</span>
+      </header>
+      <p className="why">{statusLabel(bot)}</p>
+      {bot.warning && <p className="warn">{bot.warning}</p>}
+      <div className="risk">
+        open {bot.open_count ?? 0} · risk {money(bot.open_risk)} · cash {money(bot.cash)}
+      </div>
+      <ul className="pos-list">
+        {offline && <li className="muted">{bot.empty || 'Not on this checkout.'}</li>}
+        {!offline && positions.length === 0 && <li className="muted">No open paper positions</li>}
+        {positions.slice(0, 8).map((p, i) => (
+          <li key={i}>
+            <strong>{p.what || p.title || p.team || p.ticker || 'position'}</strong>
+            <span>{p.detail || p.game || ''}</span>
+            <span>
+              {p.side || ''} {money(p.cost)}{' '}
+              {p.fill != null ? `@ ${p.fill}` : p.ask != null ? `ask ${p.ask}` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+
+  const center = (
+    <section className="monitor center glass">
+      <header>
+        <span>
+          {(bot.positions && bot.positions[0]?.ticker) ||
+            (bot.positions && bot.positions[0]?.team) ||
+            bot.name}{' '}
+          · equity
+        </span>
+        <span>{bot.central_check || bot.last_check || '—'}</span>
+      </header>
+      <Sparkline points={series} />
+      <div className="chips">
+        <span>history {bot.history?.length ?? 0}</span>
+        <span>VWAP/EMA cosmetic</span>
+      </div>
+    </section>
+  )
+
+  const right = (
+    <section className="monitor right glass">
+      <header>
+        <span>stats</span>
+        <span>{bot.next_run || ''}</span>
+      </header>
+      <div className={`big-pnl tone-${pnlTone(bot.today)}`}>today {money(bot.today, true)}</div>
+      <div className="stat-row">realized {money(bot.realized, true)}</div>
+      <div className="stat-row">bankroll {money(bot.cash)}</div>
+      <div className="last-trade">
+        <strong>Last settled</strong>
+        {last ? (
+          <>
+            <span>{last.what || last.title || last.team || last.ticker || 'trade'}</span>
+            <span className={`tone-${pnlTone(last.pnl)}`}>{money(last.pnl, true)}</span>
+            <span>{last.result || last.exit_reason || last.exit || ''}</span>
+            <span>{last.when || last.closed_at || last.closed || ''}</span>
+          </>
+        ) : (
+          <span className="muted">No closed paper trades yet</span>
+        )}
+      </div>
+    </section>
+  )
+
+  return { left, center, right }
+}
+
+/** Flat HUD fallback (not used when panels are pinned to 3D monitors). */
+export function Monitors({ bot, desk }: Props) {
+  const panels = MonitorPanels({ bot, desk })
   return (
     <div className="monitors">
-      <section className="monitor left">
-        <header>
-          <span>{bot.status || 'status'}</span>
-          <span>{bot.paused ? 'paused' : bot.feed || 'feed'}</span>
-        </header>
-        <p className="why">{statusLabel(bot)}</p>
-        {bot.warning && <p className="warn">{bot.warning}</p>}
-        <div className="risk">
-          open {bot.open_count ?? 0} · risk {money(bot.open_risk)} · cash {money(bot.cash)}
-        </div>
-        <ul className="pos-list">
-          {offline && <li className="muted">{bot.empty || 'Not on this checkout.'}</li>}
-          {!offline && positions.length === 0 && (
-            <li className="muted">No open paper positions</li>
-          )}
-          {positions.slice(0, 8).map((p, i) => (
-            <li key={i}>
-              <strong>{p.what || p.title || p.team || p.ticker || 'position'}</strong>
-              <span>{p.detail || p.game || ''}</span>
-              <span>
-                {p.side || ''} {money(p.cost)}{' '}
-                {p.fill != null ? `@ ${p.fill}` : p.ask != null ? `ask ${p.ask}` : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="monitor center">
-        <header>
-          <span>
-            {(bot.positions && bot.positions[0]?.ticker) ||
-              (bot.positions && bot.positions[0]?.team) ||
-              bot.name}{' '}
-            · equity
-          </span>
-          <span>{bot.central_check || bot.last_check || '—'}</span>
-        </header>
-        <Sparkline points={series} />
-        <div className="chips">
-          <span>history {bot.history?.length ?? 0}</span>
-          <span>VWAP/EMA cosmetic</span>
-        </div>
-      </section>
-
-      <section className="monitor right">
-        <header>
-          <span>stats</span>
-          <span>{bot.next_run || ''}</span>
-        </header>
-        <div className={`big-pnl tone-${pnlTone(bot.today)}`}>
-          today {money(bot.today, true)}
-        </div>
-        <div className="stat-row">realized {money(bot.realized, true)}</div>
-        <div className="stat-row">bankroll {money(bot.cash)}</div>
-        <div className="last-trade">
-          <strong>Last settled</strong>
-          {last ? (
-            <>
-              <span>{last.what || last.title || last.team || last.ticker || 'trade'}</span>
-              <span className={`tone-${pnlTone(last.pnl)}`}>{money(last.pnl, true)}</span>
-              <span>{last.result || last.exit_reason || last.exit || ''}</span>
-              <span>{last.when || last.closed_at || last.closed || ''}</span>
-            </>
-          ) : (
-            <span className="muted">No closed paper trades yet</span>
-          )}
-        </div>
-      </section>
+      {panels.left}
+      {panels.center}
+      {panels.right}
     </div>
   )
 }
