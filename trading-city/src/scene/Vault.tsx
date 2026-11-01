@@ -1,6 +1,8 @@
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import type { Mesh } from 'three'
+import type { Desk } from '../types'
+import { VaultHologram } from '../hud/Holograms'
 
 function Crystal({ position, scale = 1 }: { position: [number, number, number]; scale?: number }) {
   return (
@@ -24,10 +26,16 @@ function Crystal({ position, scale = 1 }: { position: [number, number, number]; 
 export function Vault({
   lights = true,
   position = [0, 0, 5.2],
+  desk,
+  workers = 0,
+  showHolo = true,
 }: {
   lights?: boolean
   /** Plaza keeps the vault toward the overview camera. The office window places it down the street. */
   position?: [number, number, number]
+  desk?: Desk
+  workers?: number
+  showHolo?: boolean
 }) {
   const dome = useRef<Mesh>(null)
   const glow = useRef<Mesh>(null)
@@ -111,6 +119,8 @@ export function Vault({
       {crystals.map((p, i) => (
         <Crystal key={i} position={p} scale={0.85 + (i % 3) * 0.12} />
       ))}
+
+      {showHolo && <VaultHologram desk={desk} workers={workers} />}
     </group>
   )
 }

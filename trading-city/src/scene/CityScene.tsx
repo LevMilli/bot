@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import type { BotRow } from '../types'
+import type { BotRow, Desk } from '../types'
+import { workersOnShift } from '../data/format'
 import { NeonBloom } from './Effects'
 import { GridFloor } from './GridFloor'
 import { PurpleHorizon, SkyEquityLine, Skyline, Starfield } from './Skyline'
@@ -18,6 +19,7 @@ const UNLINKED_DROP = 0.18
 
 type Props = {
   bots: BotRow[]
+  desk?: Desk
   selectedId: string | null
   onSelect: (id: string) => void
 }
@@ -136,13 +138,13 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
   return { slots, fillers: [...linked, ...keepUnlinked] }
 }
 
-export function CityScene({ bots, selectedId, onSelect }: Props) {
+export function CityScene({ bots, desk, selectedId, onSelect }: Props) {
   return (
     <>
       <color attach="background" args={['#0a0320']} />
       <fog attach="fog" args={['#1a0740', 26, 70]} />
       <CityOrbitCamera />
-      <CityContents bots={bots} selectedId={selectedId} onSelect={onSelect} />
+      <CityContents bots={bots} desk={desk} selectedId={selectedId} onSelect={onSelect} />
       <NeonBloom />
     </>
   )
@@ -151,14 +153,17 @@ export function CityScene({ bots, selectedId, onSelect }: Props) {
 /** Plaza, towers, vault, and sky for the city camera. The office window uses its own street view. */
 export function CityContents({
   bots,
+  desk,
   selectedId,
   onSelect,
 }: {
   bots: BotRow[]
+  desk?: Desk
   selectedId: string | null
   onSelect: (id: string) => void
 }) {
   const { slots, fillers } = useMemo(() => layoutCity(bots), [bots])
+  const workers = workersOnShift(bots)
   return (
     <>
       <ambientLight intensity={0.24} />
@@ -174,7 +179,7 @@ export function CityContents({
       <Skyline z={-22} width={72} />
       <Skyline z={-30} width={88} />
       <SkyEquityLine />
-      <Vault />
+      <Vault desk={desk} workers={workers} />
 
       {fillers.map((f, i) => (
         <FillerTower key={`f-${i}`} {...f} />

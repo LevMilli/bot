@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import type { Group, InstancedMesh, Mesh } from 'three'
 import type { BotRow } from '../types'
 import { BEAM_COLORS } from '../data/format'
+import { TowerHologram } from '../hud/Holograms'
 
 type Props = {
   bot: BotRow
@@ -202,6 +203,9 @@ export function Tower({ bot, index, position, selected, onSelect, vista = false 
         />
       )}
 
+      {!vista && (
+        <TowerHologram bot={bot} index={index} height={height} onSelect={onSelect} />
+      )}
     </group>
   )
 }

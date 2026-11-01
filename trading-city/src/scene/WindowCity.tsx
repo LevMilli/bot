@@ -136,7 +136,7 @@ export function CityGlass() {
       <GridFloor plaza={false} size={70} />
       <Skyline z={-26} width={64} />
       <Skyline z={-34} width={78} />
-      <Vault lights={false} position={[0, 0, -15.5]} />
+      <Vault lights={false} showHolo={false} position={[0, 0, -15.5]} />
       {BLOCKS.map((block, i) => (
         <StreetBlock key={`${block.x}-${block.z}`} index={i} block={block} />
       ))}
