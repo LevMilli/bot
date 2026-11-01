@@ -35,6 +35,8 @@ Optional: `VITE_SNAPSHOT_URL=http://127.0.0.1:8765/api/pimp-trading.json` if not
 
 Never invent fills or P&L when live data is present. Tower 5 (`kalshi-sized`) shows the live offline/absent desk row.
 
+Desk ROI rules and per-bot buy/sell/failsafe inventory live in the paper pack: `../paper-bots/DESK_ROI_SYSTEM.md`, `../paper-bots/BUY_SELL_FAILSAFE_INVENTORY.md`. The city surfaces `snapshot.roi_system` + `bot.plans` only — it does not re-parse bot scripts.
+
 ## Scripts
 
 | Script | What |
