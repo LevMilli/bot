@@ -10,7 +10,7 @@ import { CityOrbitCamera } from './CityControls'
 export const RING_R = 7.6
 /** Matches <Vault position={[0,0,5.2]} /> pad (~3.45r) plus building half-width. */
 export const VAULT_XZ = { x: 0, z: 5.2 }
-export const VAULT_CLEAR_R = 4.25
+export const VAULT_CLEAR_R = 4.55
 /** Keep fillers within this distance of a trade tower as “linked”. */
 const TRADE_LINK_R = 3.4
 /** Drop this fraction of unlinked fillers (15–20%). */

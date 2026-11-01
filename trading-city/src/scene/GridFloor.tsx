@@ -8,7 +8,8 @@ function PlazaRail({ radius = PLAZA_RAIL_R }: { radius?: number }) {
     <group>
       <PlazaRailroad radius={radius} y={0.06} />
       {/* Train rides the rail centerline just above the ties */}
-      <PlazaTrain radius={radius} y={0.16} />
+      {/* y chosen so wheel bottoms sit on the rail torus */}
+      <PlazaTrain radius={radius} y={0.2} />
     </group>
   )
 }

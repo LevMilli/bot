@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import type { Group } from 'three'
 
 const RAIL_R = 12.4
-const RAIL_Y = 0.16
+const RAIL_Y = 0.2
 const Z_OFF = -1
 /** Distance between inner and outer rail centers (gauge) — wide enough to read from the plaza cam. */
 export const RAIL_GAUGE = 0.85
