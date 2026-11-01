@@ -128,17 +128,16 @@ ACTIONS = {
 # scan would exit without a paper fill. The morning brief stays the desk's dry run.
 # Settle is the desk's paper settle, once at 4:00 PM CT, after the 3:00 PM
 # contract time, so a closed paper trade can land in the state file.
-# Memecoin runs three times a day. Stake size stays inside each script.
+# Memecoin manages open exits about every 10 minutes (same script still scans
+# for new tickets). Three daily slots were too sparse for stop/ladder/time exits.
 AUTO_RETRY_SEC = 900
 AUTO = (
     {"id": "sports-gap", "action": "run", "every_sec": 300},
     {"id": "btc15m", "action": "run", "every_sec": 300},
+    {"id": "memecoin", "action": "run", "every_sec": 600},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
-    {"id": "memecoin", "action": "run", "at_ct": "09:00", "until_ct": "14:59"},
-    {"id": "memecoin", "action": "run", "at_ct": "15:00", "until_ct": "20:59"},
-    {"id": "memecoin", "action": "run", "at_ct": "21:00", "until_ct": "23:59"},
 )
 
 BOTS = (
@@ -1648,8 +1647,9 @@ def timer_text() -> str:
         "Kalshi morning brief once at 8:00 AM, dry run. "
         "Kalshi paper scan once at 12:30 PM, inside that bot's own window. "
         "Kalshi paper settle once at 4:00 PM. "
-        "Memecoin at 9:00 AM, 3:00 PM, and 9:00 PM. "
-        "No edge is a finished check with zero paper trades."
+        "Memecoin about every 10 minutes (manage exits, then scan). "
+        "No edge is a finished check with zero paper trades. "
+        "Numbers only move while the Discord bot paper timer is alive."
     )
 
 

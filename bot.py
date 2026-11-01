@@ -41235,6 +41235,7 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
   d.changes?h('p',{text:d.changes.text}):null,
   d.changes?h('button',{class:'xbtn',type:'button',text:'This is what I last saw',onclick:()=>pimpPost({op:'seen'})}):null,
   d.timer?h('p',{class:'muted',text:d.timer}):null,
+  health&&health.alive===false?h('p',{class:'warn',text:'Paper timer is not looping'+(health.detail?(' — '+health.detail):'')+'. Cash and fills only move while the Discord bot paper timer is alive.'}):null,
   d.quiet?h('p',{class:'muted',text:'Quiet hours. Trade alerts wait until morning.'}):null,
   desk.gate?h('p',{class:'warn',text:desk.gate}):null,
   h('div',{class:'legend'},h('span',{text:'Gap: '+(legend.gap||'')}),h('span',{text:'Fee: '+(legend.fee||'')}),h('span',{text:'Fair: '+(legend.fair||'')})),

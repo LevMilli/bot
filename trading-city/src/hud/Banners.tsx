@@ -1,13 +1,15 @@
-import type { DataMode, RoiSystem } from '../types'
+import type { DataMode, RoiSystem, Snapshot } from '../types'
 
 type Props = {
   mode: DataMode
   paperBanner?: string
   error?: string | null
   roi?: RoiSystem | null
+  health?: Snapshot['health'] | null
+  lastCheck?: string | null
 }
 
-export function Banners({ mode, paperBanner, error, roi }: Props) {
+export function Banners({ mode, paperBanner, error, roi, health, lastCheck }: Props) {
   const paper =
     paperBanner && paperBanner.length > 110
       ? 'PAPER ONLY. No real money, no Kalshi key, no wallet, no live orders.'
@@ -20,6 +22,7 @@ export function Banners({ mode, paperBanner, error, roi }: Props) {
       ? 'ROI SYSTEM (paper). Edge after costs · desk risk budget · exit plan before entry.'
       : roiText
   const gaps = (roi?.compliance || []).filter((c) => c && c.ok === false)
+  const timerDead = mode === 'live' && health && health.alive === false
   return (
     <div className="banners">
       <div className="banner paper">{paper}</div>
@@ -31,6 +34,14 @@ export function Banners({ mode, paperBanner, error, roi }: Props) {
             : roi.ok
               ? ' · compliance ok'
               : ''}
+        </div>
+      )}
+      {timerDead && (
+        <div className="banner offline">
+          Paper timer is not looping
+          {health?.detail ? ` (${health.detail})` : ''}.
+          Cash and open counts only move while the Discord bot paper timer is alive
+          {lastCheck ? ` · last check ${lastCheck}` : ''}.
         </div>
       )}
       {mode === 'offline' && (

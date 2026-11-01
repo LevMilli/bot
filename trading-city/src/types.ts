@@ -136,6 +136,13 @@ export type RoiSystem = {
   compliance?: RoiCompliance[]
 }
 
+export type TimerHealth = {
+  alive?: boolean
+  detail?: string
+  age?: number | null
+  alert?: string
+}
+
 export type Snapshot = {
   paper_only?: boolean
   banner?: string
@@ -143,6 +150,8 @@ export type Snapshot = {
   bots?: BotRow[]
   limits?: Record<string, unknown>
   roi_system?: RoiSystem
+  health?: TimerHealth
+  timer?: string
   ok?: boolean
   error?: string
 }

@@ -53,7 +53,13 @@ export default function App() {
               </a>
             )}
             <span className="meta">
-              {loading && !snap ? 'loading…' : mode === 'live' ? 'live desk' : 'offline demo'}
+              {loading && !snap
+                ? 'loading…'
+                : mode === 'offline'
+                  ? 'offline demo'
+                  : snap?.health?.alive
+                    ? 'live desk · timer on'
+                    : 'live desk · timer off'}
               {updatedAt ? ` · ${new Date(updatedAt).toLocaleTimeString()}` : ''}
             </span>
           </div>
@@ -64,6 +70,8 @@ export default function App() {
           paperBanner={snap?.banner}
           error={error}
           roi={snap?.roi_system}
+          health={snap?.health}
+          lastCheck={snap?.desk?.central_check || snap?.desk?.last_check}
         />
 
         {!office && (
