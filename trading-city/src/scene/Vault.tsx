@@ -129,8 +129,7 @@ export function Vault({
 
       {lights && (
         <>
-          <pointLight position={[0, 2.6, 0]} intensity={3.2} color="#fff0b0" distance={22} />
-          <pointLight position={[0, 1.2, 1.5]} intensity={1.4} color="#ffe08a" distance={10} />
+          <pointLight position={[0, 2.6, 0]} intensity={2.2} color="#fff0b0" distance={18} />
         </>
       )}
 

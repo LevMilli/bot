@@ -21,38 +21,51 @@ function WindowInstances({
   width,
   seed,
   offline,
+  sparse = false,
 }: {
   height: number
   width: number
   seed: number
   offline: boolean
+  /** Filler towers: fewer rows/faces so the plaza stays interactive. */
+  sparse?: boolean
 }) {
   const mesh = useRef<InstancedMesh>(null)
+  const yStep = sparse ? 0.62 : 0.36
+  const colMin = sparse ? -2 : -3
+  const colMax = sparse ? 2 : 3
+  const facesPer = sparse ? 2 : 4
+
   const count = useMemo(() => {
     let n = 0
-    for (let y = 0.35; y < height - 0.25; y += 0.28) {
-      for (let col = -3; col <= 3; col++) {
+    for (let y = 0.35; y < height - 0.25; y += yStep) {
+      for (let col = colMin; col <= colMax; col++) {
         if (((y * 17 + col * 5 + seed * 11) | 0) % 7 === 0) continue
-        n += 4
+        n += facesPer
       }
     }
-    return n
-  }, [height, seed])
+    return Math.max(n, 1)
+  }, [height, seed, yStep, colMin, colMax, facesPer])
 
   useLayoutEffect(() => {
     if (!mesh.current) return
     const dummy = new THREE.Object3D()
     let i = 0
-    for (let y = 0.35; y < height - 0.25; y += 0.28) {
-      for (let col = -3; col <= 3; col++) {
+    for (let y = 0.35; y < height - 0.25; y += yStep) {
+      for (let col = colMin; col <= colMax; col++) {
         if (((y * 17 + col * 5 + seed * 11) | 0) % 7 === 0) continue
         const x = col * 0.22
-        const faces: [number, number, number][] = [
-          [x, y, width / 2 + 0.015],
-          [x, y, -width / 2 - 0.015],
-          [width / 2 + 0.015, y, x],
-          [-width / 2 - 0.015, y, x],
-        ]
+        const faces: [number, number, number][] = sparse
+          ? [
+              [x, y, width / 2 + 0.015],
+              [width / 2 + 0.015, y, x],
+            ]
+          : [
+              [x, y, width / 2 + 0.015],
+              [x, y, -width / 2 - 0.015],
+              [width / 2 + 0.015, y, x],
+              [-width / 2 - 0.015, y, x],
+            ]
         for (const p of faces) {
           dummy.position.set(p[0], p[1], p[2])
           dummy.updateMatrix()
@@ -62,7 +75,7 @@ function WindowInstances({
     }
     mesh.current.count = i
     mesh.current.instanceMatrix.needsUpdate = true
-  }, [count, height, seed, width])
+  }, [count, height, seed, width, yStep, colMin, colMax, sparse])
 
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
@@ -195,15 +208,6 @@ export function Tower({ bot, index, position, selected, onSelect, vista = false 
       </group>
 
       {!vista && (
-        <pointLight
-          position={[0, height + 2.2, 0]}
-          intensity={offline ? 0.15 : hero ? 2.4 : 1.8}
-          color={color}
-          distance={12}
-        />
-      )}
-
-      {!vista && (
         <TowerHologram bot={bot} index={index} height={height} onSelect={onSelect} />
       )}
     </group>
@@ -228,7 +232,7 @@ export function FillerTower({
         <boxGeometry args={[width, height, width]} />
         <meshStandardMaterial color="#04030a" roughness={0.9} metalness={0.08} />
       </mesh>
-      <WindowInstances height={height} width={width} seed={seed} offline={false} />
+      <WindowInstances height={height} width={width} seed={seed} offline={false} sparse />
     </group>
   )
 }

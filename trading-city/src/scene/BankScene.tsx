@@ -18,7 +18,6 @@ type Props = {
 const MARBLE = '#e8e0d0'
 const BRASS = '#c9a227'
 const INK = '#12161e'
-const CYAN = '#2de2e6'
 
 function TellerStation({
   bot,
@@ -164,11 +163,9 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <color attach="background" args={['#0c0818']} />
       <fog attach="fog" args={['#160e28', 10, 28]} />
       <PerspectiveCamera ref={cam} makeDefault fov={42} near={0.1} far={80} position={[0, 2.6, 5.8]} />
-      <ambientLight intensity={0.35} />
-      <directionalLight position={[4, 8, 3]} intensity={0.55} color="#ffe9c8" />
-      <pointLight position={[0, 3.2, 1]} intensity={1.4} color="#fff0b0" distance={16} />
-      <pointLight position={[-4, 2.5, 2]} intensity={0.7} color={CYAN} distance={12} />
-      <pointLight position={[4, 2.5, 2]} intensity={0.55} color="#ff2a6d" distance={12} />
+      <ambientLight intensity={0.5} />
+      <directionalLight position={[4, 8, 3]} intensity={0.7} color="#ffe9c8" />
+      <pointLight position={[0, 3.2, 1]} intensity={1.2} color="#fff0b0" distance={14} />
 
       {/* floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0.4]} receiveShadow>
