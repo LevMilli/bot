@@ -52,13 +52,27 @@ export default function App() {
               </a>
             )}
             <span className="meta">
-              {loading && !snap ? 'loading…' : mode === 'live' ? 'live desk' : 'offline demo'}
+              {loading && !snap
+                ? 'loading…'
+                : mode === 'offline'
+                  ? 'offline demo'
+                  : snap?.health?.alive
+                    ? 'live desk · timer on'
+                    : 'live desk · timer off'}
               {updatedAt ? ` · ${new Date(updatedAt).toLocaleTimeString()}` : ''}
             </span>
           </div>
         </header>
 
-        <Banners mode={mode} paperBanner={snap?.banner} error={error} onConnect={() => void connectLive()} />
+        <Banners
+          mode={mode}
+          paperBanner={snap?.banner}
+          error={error}
+          roi={snap?.roi_system}
+          health={snap?.health}
+          lastCheck={snap?.desk?.central_check || snap?.desk?.last_check}
+          onConnect={() => void connectLive()}
+        />
 
         {!office && (
           <CityHologramLayer bots={bots} desk={snap?.desk} onSelect={setSelectedId} />

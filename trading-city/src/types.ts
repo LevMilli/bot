@@ -35,6 +35,15 @@ export type TradeOrHistory = {
   [key: string]: unknown
 }
 
+export type BotPlans = {
+  buy?: string[]
+  sell?: string[]
+  failsafes?: string[]
+  exit_quality?: 'strong' | 'partial' | 'weak' | 'absent' | 'none' | string
+  entry_gated?: boolean
+  stake?: string
+}
+
 export type BotRow = {
   id: string
   name: string
@@ -61,6 +70,8 @@ export type BotRow = {
   would_have?: unknown[]
   has_state?: boolean
   blurb?: string
+  plans?: BotPlans
+  gates_hit?: string[]
 }
 
 export type Desk = {
@@ -87,11 +98,49 @@ export type Desk = {
   pace_line?: string
   pace_loosened?: boolean
   paused_all?: boolean
+  ops?: {
+    entry_gate?: string
+    entry_gated_bots?: string[]
+    strong_exits?: string[]
+    weak_exits?: string[]
+    roi_ok?: boolean
+    roi_version?: number
+  }
   chart?: {
     zone?: string
     default?: string
     ranges?: { id: string; label: string; start: string; end: string }[]
   }
+}
+
+export type RoiCompliance = {
+  bot?: string
+  ok?: boolean
+  exit_quality?: string
+  target_exit_quality?: string
+  entry_gated?: boolean
+  waivers?: string[]
+  gaps?: string[]
+}
+
+export type RoiSystem = {
+  name?: string
+  version?: number
+  paper_only?: boolean
+  banner?: string
+  ok?: boolean
+  rules?: { id?: string; text?: string }[]
+  risk?: Record<string, unknown>
+  exit_ladder?: Record<string, string>
+  waivers?: Record<string, string[]>
+  compliance?: RoiCompliance[]
+}
+
+export type TimerHealth = {
+  alive?: boolean
+  detail?: string
+  age?: number | null
+  alert?: string
 }
 
 export type Snapshot = {
@@ -100,6 +149,9 @@ export type Snapshot = {
   desk?: Desk
   bots?: BotRow[]
   limits?: Record<string, unknown>
+  roi_system?: RoiSystem
+  health?: TimerHealth
+  timer?: string
   ok?: boolean
   error?: string
 }

@@ -135,6 +135,11 @@ def step_scan(args, state, day):
         print(skip)
         return
     n = risk_manager.stake_contracts(pick["ask"], bankroll=state["bankroll"])
+    if n < 1:
+        print(alerts.format_skip_note(day, "not enough paper bankroll for 1 contract after fee"))
+        if not args.dry_run:
+            logger.learn(f"{day}: no trade - bankroll too small after fee", "skip")
+        return
     fee = paper_sim.taker_fee(n, pick["ask"])
     preview = {"ticker": pick["ticker"], "side": pick["side"], "ask": pick["ask"], "contracts": n,
                "cost": round(n * pick["ask"], 2), "fee": fee}

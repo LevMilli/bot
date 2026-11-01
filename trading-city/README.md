@@ -26,6 +26,8 @@ Live trades still come from staff-gated `/api/pimp-trading.json` (`pimp_desk.sna
 | Live | `/api/pimp-trading.json` |
 | Offline fallback | `/signal-city/fixture-snapshot.json` + clear **Offline demo** banner |
 
+Desk ROI rules and per-bot buy/sell/failsafe inventory live in the paper pack: `../paper-bots/DESK_ROI_SYSTEM.md`, `../paper-bots/BUY_SELL_FAILSAFE_INVENTORY.md`. The city surfaces `snapshot.roi_system` + `bot.plans` only — it does not re-parse bot scripts.
+
 ## Scripts
 
 | Command | Purpose |

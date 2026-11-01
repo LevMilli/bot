@@ -11,15 +11,17 @@ This is a practice bot. It **never places real orders**. It has no API key, no w
 4. Works out the **gap**: fair probability − Kalshi YES ask − Kalshi taker fee. The fee is `ceil(0.07 × P × (1−P) × 100) / 100` per contract.
 5. Makes a **paper buy** only if all of these are true:
    - the gap is **4 points or more** after the fee (6 for the NHL model). The old bar was 8 points (10 for NHL).
-   - while this Chicago hour has fewer than 12 paper trades, the timer waives that gap and the close-game filter so a check can paper-buy without a strict edge. Loosening stops at 12. The minimum pace shown on the desk is 6.
+   - the desk pace line (6–12 trades/hour) is **display only** — it does **not** waive the edge bar or the close-game filter (`edge_for_hour` keeps the saved min_edge).
    - the bid/ask spread is 5¢ or less
    - the price is between 5¢ and 95¢
    - fewer than 12 positions are open (the old cap was 3 in this script and 4 on the desk), and the bot doesn't already hold this game
    - there is enough paper cash
    - the paper learning log is not skipping that sport and probability bucket
+   - open count and open risk stay inside desk caps after any sells this check
+   - when started from the PIMP desk, the desk `entry_gate` is also clear (daily loss / max open / open risk)
 
    Trade size follows the model probability. Under 80% the paper stake is about **$20**. At 80% or higher it scales from **$20 to $100**. The fill buys enough contracts to land near that stake. It does not place a real order.
-6. Exits a paper position in one of two ways:
+6. Each check **sells/settles first**, then paper-buys. Exits a paper position in one of two ways:
    - **Sells at the bid** once the gap has closed (the bid minus the fee is at or above fair value).
    - **Settles** when ESPN shows the game as final: $1 per contract if the team won, $0 if it lost.
 

@@ -113,7 +113,8 @@ ACTIONS = {
         "brief": {"argv": ("bot.py", "brief", "--dry-run"), "entry": False, "timeout": 75, "label": "Morning brief"},
     },
     "btc15m": {
-        "run": {"argv": ("btc15m_signal.py",), "entry": False, "timeout": 75, "label": "Run one check"},
+        # entry:True — ROI system: desk daily loss / max open / open risk gate paper buys.
+        "run": {"argv": ("btc15m_signal.py",), "entry": True, "timeout": 75, "label": "Run one check"},
     },
     "memecoin": {
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 120, "label": "Run one check"},
@@ -127,17 +128,16 @@ ACTIONS = {
 # scan would exit without a paper fill. The morning brief stays the desk's dry run.
 # Settle is the desk's paper settle, once at 4:00 PM CT, after the 3:00 PM
 # contract time, so a closed paper trade can land in the state file.
-# Memecoin runs three times a day. Stake size stays inside each script.
+# Memecoin manages open exits about every 10 minutes (same script still scans
+# for new tickets). Three daily slots were too sparse for stop/ladder/time exits.
 AUTO_RETRY_SEC = 900
 AUTO = (
     {"id": "sports-gap", "action": "run", "every_sec": 300},
     {"id": "btc15m", "action": "run", "every_sec": 300},
+    {"id": "memecoin", "action": "run", "every_sec": 600},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
-    {"id": "memecoin", "action": "run", "at_ct": "09:00", "until_ct": "14:59"},
-    {"id": "memecoin", "action": "run", "at_ct": "15:00", "until_ct": "20:59"},
-    {"id": "memecoin", "action": "run", "at_ct": "21:00", "until_ct": "23:59"},
 )
 
 BOTS = (
@@ -186,6 +186,287 @@ BOTS = (
         "empty": "No positions.json yet. A check writes positions.json, trades.csv, and checks.csv.",
     },
 )
+
+# Normalized buy / sell / failsafe copy for snapshot consumers (city + staff).
+# Keep thresholds in sync with each bot script and desk DEFAULTS.
+BOT_PLANS = {
+    "sports-gap": {
+        "buy": [
+            "Live ESPN game matched to a Kalshi series",
+            "Edge after fee ≥ desk min_edge (NHL +0.02)",
+            "Home fair outside close-game band 0.40–0.60",
+            "Spread ≤ 0.05; ask in 0.05–0.95",
+            "Desk stake curve; learning skip clear",
+        ],
+        "sell": [
+            "Gap closed: bid − fee ≥ fair → sell at bid",
+            "Game final → settle $1 / $0 (ties wait)",
+        ],
+        "failsafes": [
+            "Desk entry_gate (daily loss / max open / open risk)",
+            "Bot daily loss stop (desk daily_loss_stop)",
+            "Intra-check max open risk + max open / cash / learning skip",
+            "Sells/settles before new paper buys each check",
+            "Pause file",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "desk-curve",
+    },
+    "kalshi-sp": {
+        "buy": [
+            "Once per day 12:30–14:55 CT",
+            "Safest YES/NO ask in the 80–90¢ band",
+            "Stake floor($25 / ask); learning skip clear",
+        ],
+        "sell": [
+            "Hold to 3 PM CT Kalshi settlement only",
+            "Bid under 50¢ → invalidation log only (no stop)",
+        ],
+        "failsafes": [
+            "Desk entry_gate on scan (not settle/brief)",
+            "Weekend + news/holiday calendar",
+            "Max 1 trade/day; bot daily loss −$50",
+            "Kill switch bankroll ≤ $400; paper_mode required",
+            "Pause file",
+        ],
+        "exit_quality": "weak",
+        "entry_gated": True,
+        "stake": "fixed-25",
+    },
+    "btc15m": {
+        "buy": [
+            "Nearest open KXBTC15M; p ≥ ask + fee + 0.05",
+            "≥10 min left; cushion ≥ $40; z ≥ 0.5 (0.6 Coinbase-only)",
+            "Ask 65–85¢; spread ≤ 3¢; depth ≥ 5",
+            "Last 5×1m candles not toward target; no USD high news ±30m",
+            "Desk stake curve; learning skip clear",
+        ],
+        "sell": [
+            "Settle only when Kalshi resolves yes/no",
+            "Suggested TP fill+15¢ is printed only — not executed",
+        ],
+        "failsafes": [
+            "Desk entry_gate (daily loss / max open / open risk)",
+            "Full signal checklist (no spot/σ → skip)",
+            "News calendar fail-closed (unavailable = skip BUY)",
+            "Cash / hardcoded max 12 opens / learning skip",
+            "Pause file",
+        ],
+        "exit_quality": "weak",
+        "entry_gated": True,
+        "stake": "desk-curve",
+    },
+    "memecoin": {
+        "buy": [
+            "RugCheck facts fail-closed + scorer ≥ 0.7",
+            "Flat $25 ticket; max 4 open / 6 entries per day",
+            "24h cooldown after close; learning skip clear",
+        ],
+        "sell": [
+            "Liq drop ≥ 40% from entry → full out",
+            "Hard stop ≤ −35% from entry → full out",
+            "Ladder +100% sell 50%, +200% sell 25% of original",
+            "Trail 30% off peak after first ladder",
+            "Time stop: ≥6h and < +20% → out",
+        ],
+        "failsafes": [
+            "Desk entry_gate + pause",
+            "Bot daily halt −$50; PAPER must be True",
+            "Max open 4 / cooldown / facts fail-closed",
+        ],
+        "exit_quality": "strong",
+        "entry_gated": True,
+        "stake": "fixed-25",
+    },
+    "kalshi-sized": {
+        "buy": ["Not on this checkout — no buy plan until the bot lands on main."],
+        "sell": ["Not on this checkout — no sell plan."],
+        "failsafes": ["Desk stake bounds are saved for when this bot is present."],
+        "exit_quality": "absent",
+        "entry_gated": False,
+        "stake": "none",
+    },
+}
+
+
+def bot_plans(bot_id: str, cfg: dict | None = None) -> dict:
+    """Stable plan block for one bot id. Optional cfg annotates live desk thresholds."""
+    base = BOT_PLANS.get(bot_id) or {
+        "buy": [],
+        "sell": [],
+        "failsafes": [],
+        "exit_quality": "none",
+        "entry_gated": False,
+        "stake": "unknown",
+    }
+    plans = {
+        "buy": list(base["buy"]),
+        "sell": list(base["sell"]),
+        "failsafes": list(base["failsafes"]),
+        "exit_quality": base["exit_quality"],
+        "entry_gated": bool(base["entry_gated"]),
+        "stake": base["stake"],
+    }
+    if cfg and bot_id == "sports-gap":
+        edge = cfg.get("min_edge", DEFAULTS["min_edge"])
+        plans["buy"] = [
+            line.replace("desk min_edge (NHL +0.02)", f"desk min_edge {edge:g} (NHL +0.02)")
+            if "desk min_edge" in line else line
+            for line in plans["buy"]
+        ]
+        loss = cfg.get("daily_loss_stop", DEFAULTS["daily_loss_stop"])
+        plans["failsafes"] = [
+            line.replace("desk daily_loss_stop", f"${float(loss):.0f} desk daily_loss_stop")
+            if "desk daily_loss_stop" in line else line
+            for line in plans["failsafes"]
+        ]
+    return plans
+
+
+def bot_gates_hit(view: dict, desk_gate: str = "") -> list:
+    """Live gate labels for this bot row (not invented fills)."""
+    hits = []
+    if view.get("present") is False:
+        hits.append("absent")
+    if view.get("paused"):
+        hits.append("paused")
+    if view.get("read_error"):
+        hits.append("state read error")
+    if (view.get("last_run") or {}).get("blocked"):
+        hits.append("run blocked")
+    if view.get("skip"):
+        hits.append("skip")
+    plans = view.get("plans") or {}
+    if desk_gate and plans.get("entry_gated"):
+        hits.append("desk entry gate")
+    return hits
+
+
+# Desk-wide ROI operating system. Paper only — protects bankroll and edge habits.
+ROI_POLICY = {
+    "name": "desk-roi-system",
+    "version": 1,
+    "paper_only": True,
+    "banner": (
+        "ROI SYSTEM (paper). Enter only on edge after costs, inside desk risk budget, "
+        "with an exit plan. Pace never waives edge. Learning skip cuts cold buckets."
+    ),
+    "rules": [
+        {"id": "R1", "text": "Paper only — no live keys, wallets, or real orders."},
+        {"id": "R2", "text": "Edge after fees/slippage must clear the desk (or bot) bar."},
+        {"id": "R3", "text": "Desk entry_gate blocks new entries on daily loss / max opens / open risk."},
+        {"id": "R4", "text": "Stake from desk curve unless a documented fixed ticket applies."},
+        {"id": "R5", "text": "Exit plan exists before entry (settle and/or stop/trail/time/liq)."},
+        {"id": "R6", "text": "Learning skip on cold market×bucket (≥8 settles, <40% hits)."},
+        {"id": "R7", "text": "Pause file is honored."},
+        {"id": "R8", "text": "Quiet hours hold alerts only — not a trade halt."},
+        {"id": "R9", "text": "Pace never waives edge."},
+        {"id": "R10", "text": "One position key — no duplicate game/ticker/mint."},
+        {"id": "R11", "text": "City/staff read snapshot only — never re-parse bot files."},
+        {"id": "R12", "text": "Absent Tower 5 stays offline — no substitute bot."},
+    ],
+    "risk": {
+        "daily_loss_stop": DEFAULTS["daily_loss_stop"],
+        "max_open_positions": DEFAULTS["max_open_positions"],
+        "max_open_risk": DEFAULTS["max_open_risk"],
+        "min_edge": DEFAULTS["min_edge"],
+        "stake_lo_max": DEFAULTS["stake_lo_max"],
+        "stake_hi_min": DEFAULTS["stake_hi_min"],
+        "stake_hi_max": DEFAULTS["stake_hi_max"],
+        "stake_hi_prob": DEFAULTS["stake_hi_prob"],
+        "learn_min_settles": LEARN_MIN_SETTLES,
+        "learn_hit_rate": LEARN_HIT_RATE,
+    },
+    "exit_ladder": {
+        "strong": "Active stop + scale-out + trail/time/liq",
+        "partial": "Pre-settle exit path (e.g. gap-close) + settle",
+        "weak": "Settle-only with hard entry filters",
+        "absent": "No script on this checkout",
+    },
+    "waivers": {
+        "kalshi-sp": ["settle_only_inx", "fixed_ticket_25"],
+        "btc15m": ["settle_only_btc15m", "tp_print_only"],
+        "memecoin": ["fixed_ticket_25"],
+    },
+    "target_exit_quality": {
+        "sports-gap": "partial",
+        "kalshi-sp": "weak",
+        "btc15m": "weak",
+        "memecoin": "strong",
+        "kalshi-sized": "absent",
+    },
+}
+
+
+def bot_roi_compliance(bot_id: str, plans: dict | None = None) -> dict:
+    """Grade one bot against ROI_POLICY targets (structural, not live P&L)."""
+    plans = plans or bot_plans(bot_id)
+    target = (ROI_POLICY.get("target_exit_quality") or {}).get(bot_id, "partial")
+    quality = plans.get("exit_quality") or "none"
+    order = {"strong": 3, "partial": 2, "weak": 1, "absent": 0, "none": -1}
+    ok_exit = order.get(quality, -1) >= order.get(target, 2)
+    entry_ok = bool(plans.get("entry_gated")) or bot_id == "kalshi-sized"
+    # Sized placeholder is compliant when absent.
+    if bot_id == "kalshi-sized":
+        entry_ok = True
+        ok_exit = quality == "absent"
+    has_buy = bool(plans.get("buy"))
+    has_sell = bool(plans.get("sell"))
+    has_fail = bool(plans.get("failsafes"))
+    waivers = list((ROI_POLICY.get("waivers") or {}).get(bot_id) or [])
+    ok = ok_exit and entry_ok and has_buy and has_sell and has_fail
+    return {
+        "bot": bot_id,
+        "ok": ok,
+        "exit_quality": quality,
+        "target_exit_quality": target,
+        "entry_gated": bool(plans.get("entry_gated")),
+        "waivers": waivers,
+        "gaps": [
+            *([] if ok_exit else [f"exit_quality {quality} below target {target}"]),
+            *([] if entry_ok else ["entry_gated required by ROI system"]),
+            *([] if has_buy else ["missing buy plan"]),
+            *([] if has_sell else ["missing sell plan"]),
+            *([] if has_fail else ["missing failsafes"]),
+        ],
+    }
+
+
+def roi_system(cfg: dict | None = None, bots: list | None = None) -> dict:
+    """Public ROI system block for snapshot consumers."""
+    cfg = cfg or DEFAULTS
+    risk = dict(ROI_POLICY["risk"])
+    risk.update({
+        "daily_loss_stop": cfg.get("daily_loss_stop", risk["daily_loss_stop"]),
+        "max_open_positions": cfg.get("max_open_positions", risk["max_open_positions"]),
+        "max_open_risk": cfg.get("max_open_risk", risk["max_open_risk"]),
+        "min_edge": cfg.get("min_edge", risk["min_edge"]),
+        "stake_lo_max": cfg.get("stake_lo_max", risk["stake_lo_max"]),
+        "stake_hi_min": cfg.get("stake_hi_min", risk["stake_hi_min"]),
+        "stake_hi_max": cfg.get("stake_hi_max", risk["stake_hi_max"]),
+    })
+    compliance = []
+    for bot_id in list(BOT_PLANS.keys()):
+        plans = None
+        if bots:
+            row = next((b for b in bots if b.get("id") == bot_id), None)
+            if row:
+                plans = row.get("plans")
+        compliance.append(bot_roi_compliance(bot_id, plans))
+    return {
+        "name": ROI_POLICY["name"],
+        "version": ROI_POLICY["version"],
+        "paper_only": True,
+        "banner": ROI_POLICY["banner"],
+        "rules": list(ROI_POLICY["rules"]),
+        "risk": risk,
+        "exit_ladder": dict(ROI_POLICY["exit_ladder"]),
+        "waivers": {k: list(v) for k, v in (ROI_POLICY.get("waivers") or {}).items()},
+        "compliance": compliance,
+        "ok": all(row.get("ok") for row in compliance),
+    }
+
 
 _LOCKS: dict[str, threading.Lock] = {}
 _FILE_LOCK = threading.RLock()
@@ -710,11 +991,17 @@ def _save_run(root: str, bot_id: str, row: dict) -> None:
         _atomic_write(runs_path(root), json.dumps(runs, indent=2) + "\n")
 
 
-def _child_env() -> dict:
+# Combined manage+buy scripts still run when the desk gate hits, with entries off.
+_MANAGE_WHEN_GATED = frozenset({"sports-gap", "memecoin", "btc15m"})
+
+
+def _child_env(block_entries: bool = False) -> dict:
     env = {key: os.environ[key] for key in _ENV_KEEP if os.environ.get(key)}
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PAPER_ONLY"] = "1"
+    if block_entries:
+        env["DESK_BLOCK_ENTRIES"] = "1"
     return env
 
 
@@ -1125,7 +1412,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
 
 
 def _sized_view() -> dict:
-    return {
+    view = {
         "id": "kalshi-sized",
         "name": "Sized Kalshi",
         "blurb": "The sized Kalshi paper bot is not in this checkout, so this panel has no script to run for it.",
@@ -1155,7 +1442,10 @@ def _sized_view() -> dict:
         "status": "skipped",
         "next_run": "",
         "paused": False,
+        "plans": bot_plans("kalshi-sized"),
     }
+    view["gates_hit"] = bot_gates_hit(view)
+    return view
 
 
 def entry_gate(root: str | None = None, bots: list | None = None) -> str:
@@ -1167,17 +1457,17 @@ def entry_gate(root: str | None = None, bots: list | None = None) -> str:
     if today <= -float(cfg["daily_loss_stop"]):
         return (
             f"Daily loss stop is hit (${abs(today):.2f} against ${cfg['daily_loss_stop']:.2f}). "
-            "Entry checks stay off until the next Chicago day. Settle, the morning brief, and the BTC signal still run."
+            "Entry checks stay off until the next Chicago day. Settle and the morning brief still run."
         )
     if open_count >= int(cfg["max_open_positions"]):
         return (
             f"Max open positions is reached ({open_count} of {cfg['max_open_positions']}). "
-            "Entry checks stay off. Settle, the morning brief, and the BTC signal still run."
+            "Entry checks stay off. Settle and the morning brief still run."
         )
     if open_risk >= float(cfg["max_open_risk"]) - 1e-9:
         return (
             f"Max open risk is reached (${open_risk:.2f} of ${cfg['max_open_risk']:.2f}). "
-            "Entry checks stay off. Settle, the morning brief, and the BTC signal still run."
+            "Entry checks stay off. Settle and the morning brief still run."
         )
     return ""
 
@@ -1191,6 +1481,9 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     day = _today()
     bots = [_bot_view(spec, root, runs, day) for spec in BOTS]
     bots.append(_sized_view())
+    gate = entry_gate(root, bots)
+    for bot in bots:
+        bot["gates_hit"] = bot_gates_hit(bot, gate)
     cashes = [b["cash"] for b in bots if b.get("cash") is not None]
     realized_rows = [b["realized"] for b in bots if b.get("realized") is not None]
     last_epoch = max((b.get("last_epoch") or 0) for b in bots)
@@ -1203,12 +1496,19 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         row = dict(bot)
         row.pop("last_epoch", None)
         public.append(row)
-    desk_row = _desk_row(public, cashes, realized_rows, last_check, entry_gate(root, bots), cfg, root)
+    desk_row = _desk_row(public, cashes, realized_rows, last_check, gate, cfg, root)
     book = _book(public, q=q, filt=filt, page=page)
     changes = _changes(root, public)
+    roi = roi_system(cfg, public)
+    desk_row["ops"] = {
+        **(desk_row.get("ops") or {}),
+        "roi_ok": bool(roi.get("ok")),
+        "roi_version": roi.get("version"),
+    }
     return {
         "paper_only": True,
         "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
+        "roi_system": roi,
         "limits": cfg,
         "limits_text": limits_text(cfg),
         "desk": desk_row,
@@ -1265,15 +1565,22 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
     if bot_paused(root, bot_id):
         return {"ok": False, "error": "Paused.", "blocked": True, "summary": "Paused."}
     warning = _calendar_warning(root, bot_id) if spec["entry"] or bot_id == "btc15m" else ""
+    block_entries = False
+    gate_note = ""
     if spec["entry"]:
         gate = entry_gate(root)
         if gate:
-            would = [{"what": "unknown", "why": gate, "bot": bot_id}]
-            row = {"at": _now(), "ok": False, "blocked": True, "summary": gate, "exit": None, "action": action,
-                   "would_have": would}
-            _save_run(root, bot_id, row)
-            return {"ok": False, "error": gate, "blocked": True, "summary": gate, "would_have": would}
-        if stake not in (None, ""):
+            if bot_id in _MANAGE_WHEN_GATED:
+                # Exits/settles still run; scripts honor DESK_BLOCK_ENTRIES for new buys.
+                block_entries = True
+                gate_note = gate
+            else:
+                would = [{"what": "unknown", "why": gate, "bot": bot_id}]
+                row = {"at": _now(), "ok": False, "blocked": True, "summary": gate, "exit": None, "action": action,
+                       "would_have": would}
+                _save_run(root, bot_id, row)
+                return {"ok": False, "error": gate, "blocked": True, "summary": gate, "would_have": would}
+        if stake not in (None, "") and not block_entries:
             refused_stake = stake_allowed(stake, prob, load_settings(root))
             if refused_stake:
                 return {"ok": False, "error": refused_stake, "blocked": True}
@@ -1290,7 +1597,7 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
             proc = subprocess.Popen(
                 [sys.executable, script, *spec["argv"][1:]],
                 cwd=cwd,
-                env=_child_env(),
+                env=_child_env(block_entries=block_entries),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -1308,9 +1615,13 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         summary = _clip_out(out or "")
         if timed_out:
             summary = _clip_out(f"Stopped after {spec['timeout']}s.\n{summary}")
+        if block_entries and gate_note:
+            summary = _clip_out(
+                f"Desk entry_gate blocked new paper buys; exits still ran.\n{gate_note}\n{summary}"
+            )
         ok = (not timed_out) and proc.returncode == 0
         row = {"at": _now(), "ok": ok, "summary": summary, "exit": proc.returncode, "action": action,
-               "warning": warning}
+               "warning": warning, "entries_blocked": bool(block_entries)}
         _save_run(root, bot_id, row)
         if not summary:
             summary = "The script finished with no output."
@@ -1320,7 +1631,10 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
             _mark_manual(root, bot_id)
         spec_row = next(b for b in BOTS if b["id"] == bot_id)
         _note_state_mtime(root, bot_id, spec_row["folder"], spec_row.get("state") or "")
-        return {"ok": ok, "error": error, "summary": summary, "exit": proc.returncode, "warning": warning}
+        return {
+            "ok": ok, "error": error, "summary": summary, "exit": proc.returncode,
+            "warning": warning, "entries_blocked": bool(block_entries),
+        }
     finally:
         lock.release()
 
@@ -1333,8 +1647,9 @@ def timer_text() -> str:
         "Kalshi morning brief once at 8:00 AM, dry run. "
         "Kalshi paper scan once at 12:30 PM, inside that bot's own window. "
         "Kalshi paper settle once at 4:00 PM. "
-        "Memecoin at 9:00 AM, 3:00 PM, and 9:00 PM. "
-        "No edge is a finished check with zero paper trades."
+        "Memecoin about every 10 minutes (manage exits, then scan). "
+        "No edge is a finished check with zero paper trades. "
+        "Numbers only move while the Discord bot paper timer is alive."
     )
 
 
@@ -1458,6 +1773,7 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
             "action": action,
             "ok": bool(result.get("ok")),
             "blocked": bool(result.get("blocked")),
+            "entries_blocked": bool(result.get("entries_blocked")),
             "error": result.get("error") or "",
             "summary": result.get("summary") or "",
         }
@@ -1547,7 +1863,8 @@ def reset_bot(bot_id: str, root: str | None = None, who: str = "") -> dict:
                 if _unlink(_under(root, folder, name)):
                     removed.append(name)
         elif bot_id == "btc15m":
-            removed.append("no account file")
+            if _unlink(_under(root, folder, "paper_account.json")):
+                removed.append("paper_account.json")
         else:
             return {"ok": False, "error": "That bot is not on this desk."}
         runs = _load_runs(root)
@@ -2163,8 +2480,11 @@ def plain_reason(text: str) -> str:
         return "A data error stopped this check. Nothing was guessed."
     if "no live" in low:
         return "No live games, so this check bought nothing."
-    if "max open" in low:
-        return "The open-position limit blocked a new paper buy."
+    if "max open" in low or "open risk" in low:
+        return (
+            "Book is full — new paper buys are off until an open position exits. "
+            "Stops, ladders, and settles still run."
+        )
     if "loss stop" in low or "daily loss" in low:
         return "The daily loss stop blocked a new paper buy."
     if "gap <" in low or "no trade" in low or "no edge" in low:
@@ -2691,15 +3011,30 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         view["idle_copy"] = ""
     if not view.get("why") and view.get("skip"):
         view["why"] = plain_reason(view.get("skip") or "")
-    if not view.get("warning") and spec.get("id") == "btc15m":
-        view["warning"] = _btc_calendar_warning(str((view.get("last_run") or {}).get("summary") or ""))
     summary = str(run.get("summary") or "")
+    # Full book / desk gate: prefer a clear "waiting on exits" line over a dead BLOCKED look.
+    if int(view.get("open_count") or 0) > 0 and (
+        run.get("entries_blocked")
+        or "max open" in summary.lower()
+        or "open risk" in summary.lower()
+        or "max_open" in (view.get("skip") or "").lower()
+    ):
+        view["why"] = (
+            f"Holding {int(view.get('open_count') or 0)} open paper position(s); "
+            "new buys stay off until an exit frees risk. Sell plan still runs each check."
+        )
+        if run.get("ok") and not view.get("paused") and not view.get("read_error"):
+            view["status"] = "running"
+    if not view.get("warning") and spec.get("id") == "btc15m":
+        view["warning"] = _btc_calendar_warning(summary)
     if view.get("data_error"):
         view["feed"] = "api down"
     elif "no live games" in summary.lower():
         view["feed"] = "no games"
     else:
         view["feed"] = source_status(1 if view.get("positions") else 0, view.get("data_error") or "")
+    view["plans"] = bot_plans(spec["id"], load_settings(root))
+    view["gates_hit"] = bot_gates_hit(view)
     return view
 
 
@@ -3152,6 +3487,22 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         "pace_target": pace["target"],
         "pace_loosened": pace["loosened"],
         "pace_note": pace["note"],
+        "ops": {
+            "entry_gate": gate,
+            "entry_gated_bots": [
+                b["id"] for b in bots
+                if (b.get("plans") or {}).get("entry_gated") and b.get("present")
+            ],
+            "strong_exits": [
+                b["id"] for b in bots
+                if (b.get("plans") or {}).get("exit_quality") == "strong"
+            ],
+            "weak_exits": [
+                b["id"] for b in bots
+                if (b.get("plans") or {}).get("exit_quality") in ("weak", "partial")
+                and b.get("present")
+            ],
+        },
     }
 
 

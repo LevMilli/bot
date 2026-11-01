@@ -173,10 +173,15 @@ export function rightMonitorTexture(bot: BotRow): THREE.CanvasTexture {
   ctx.fillText(`realized ${money(bot.realized, true)}`, 18, 130)
   ctx.fillText(`bankroll ${money(bot.cash)}`, 18, 160)
 
-  const last =
-    (bot.trades && bot.trades[bot.trades.length - 1]) ||
-    (bot.history && bot.history[bot.history.length - 1]) ||
-    null
+  // Prefer closed/settled rows — open buys are not "last settled".
+  const closedPool = [...(bot.history || []), ...(bot.trades || [])].filter((t) => {
+    const side = String(t.side || '').toLowerCase()
+    const exit = String(t.exit_reason || t.exit || t.result || '')
+    if (side === 'buy') return false
+    if (t.pnl != null) return true
+    return Boolean(exit) && !/^buy\b/i.test(String(t.what || t.title || ''))
+  })
+  const last = closedPool.length ? closedPool[closedPool.length - 1] : null
   ctx.fillStyle = '#9aa3c7'
   ctx.font = '16px monospace'
   ctx.fillText('Last settled', 18, 210)
