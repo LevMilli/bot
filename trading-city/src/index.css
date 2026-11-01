@@ -359,8 +359,18 @@ a {
 }
 
 .holo-pnl {
-  color: var(--lime);
+  color: var(--muted);
   font-size: 0.7rem;
+}
+
+.holo-pnl.tone-up,
+.tone-up {
+  color: var(--lime);
+}
+
+.holo-pnl.tone-down,
+.tone-down {
+  color: #ff3b3b;
 }
 
 .holo-cash {
@@ -539,12 +549,6 @@ a {
   margin: 0.3rem 0;
 }
 
-.tone-up {
-  color: var(--lime);
-}
-.tone-down {
-  color: var(--magenta);
-}
 .tone-flat {
   color: var(--muted);
 }

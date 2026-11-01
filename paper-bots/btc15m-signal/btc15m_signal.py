@@ -33,10 +33,11 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 # ---- rule settings (edit here) ----
 MIN_MINUTES_LEFT = 10        # need at least 10 minutes before close
 EDGE_BUFFER = 0.05           # p must beat ask + fee by 5 points
-MIN_CUSHION_USD = 40         # BTC must be at least $40 away from the target
-MIN_Z = 0.5                  # cushion / sigma
-MIN_Z_COINBASE_ONLY = 0.6    # stricter if only Coinbase spot worked
-ASK_MIN, ASK_MAX = 0.65, 0.85
+MIN_MODEL_PROB = 0.80        # safer desk: model Φ(z) must be ≥ 80%
+MIN_CUSHION_USD = 50         # BTC must be at least $50 away from the target
+MIN_Z = 0.7                  # cushion / sigma
+MIN_Z_COINBASE_ONLY = 0.85   # stricter if only Coinbase spot worked
+ASK_MIN, ASK_MAX = 0.75, 0.90  # only buy high-probability priced contracts
 MAX_SPREAD = 0.03
 MIN_DEPTH = 5                # contracts offered at or below the ask
 NEWS_WINDOW_MIN = 30         # USD high-impact event within 30 min of the block -> skip
@@ -462,6 +463,7 @@ def main():
 
     zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
     if min_left < MIN_MINUTES_LEFT: reasons.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
+    if p < MIN_MODEL_PROB: reasons.append(f"p {p:.3f} < safer floor {MIN_MODEL_PROB:.2f}")
     if p < need: reasons.append(f"p {p:.3f} < ask+fee+{EDGE_BUFFER:.2f} = {need:.3f}")
     if cushion < MIN_CUSHION_USD: reasons.append(f"cushion ${cushion:.2f} < ${MIN_CUSHION_USD}")
     if z < zmin: reasons.append(f"z {z:.2f} < {zmin}")

@@ -144,7 +144,7 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("do not waive", snap["limits_text"])
         self.assertNotIn("without the strict edge", snap["limits_text"])
         self.assertIn("150.00", snap["limits_text"])
-        self.assertIn("0.04", snap["limits_text"])
+        self.assertIn("0.06", snap["limits_text"])
         self.assertIn("0.08", snap["limits_text"])
 
     def test_reads_state_and_blocks_entry_without_running(self):
@@ -898,7 +898,7 @@ class PimpDeskTests(unittest.TestCase):
             _tree(tmp, QUIET)
             self.assertEqual(pimp_desk.hour_pace(tmp, now)["line"], "0 of 12 this hour")
             self.assertFalse(pimp_desk.hour_pace(tmp, now)["loosened"])
-            self.assertEqual(pimp_desk.hour_pace(tmp, now)["edge"], 0.04)
+            self.assertEqual(pimp_desk.hour_pace(tmp, now)["edge"], 0.06)
             self.assertNotIn("without the strict edge", pimp_desk.hour_pace(tmp, now)["note"])
             self.assertEqual(pimp_desk.snapshot(tmp)["desk"]["curve"], [])
             opens = []
@@ -921,7 +921,7 @@ class PimpDeskTests(unittest.TestCase):
             pace = pimp_desk.hour_pace(tmp, now)
             self.assertEqual(pace["line"], "4 of 12 this hour")
             self.assertFalse(pace["loosened"])
-            self.assertEqual(pace["edge"], 0.04)
+            self.assertEqual(pace["edge"], 0.06)
             self.assertEqual(pace["count"], 4)
             full = []
             for i in range(12):
@@ -935,7 +935,7 @@ class PimpDeskTests(unittest.TestCase):
             done = pimp_desk.hour_pace(tmp, now)
             self.assertEqual(done["count"], 12)
             self.assertFalse(done["loosened"])
-            self.assertEqual(done["edge"], 0.04)
+            self.assertEqual(done["edge"], 0.06)
 
     def test_short_hour_does_not_waive_the_edge(self):
         for count in (0, 4, 11, 12):

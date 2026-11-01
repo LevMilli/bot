@@ -51,7 +51,7 @@ LIVE_SWITCH_BUILT = False
 
 # Shipped paper defaults.
 # Old: edge bar 0.08 after the fee, max open positions 4, daily loss stop $50.
-# New: edge bar 0.04 after the fee, max open positions 12, daily loss stop $150.
+# Safer desk: edge bar 0.06 after the fee, max open positions 12, daily loss stop $150.
 # The daily loss stop stays. A bad paper day still ends.
 # A paper buy needs the edge after the fee. The hourly count does not waive it.
 # Under 80%, a paper fill risks about $20. At 80% or higher, it risks $20 to $100.
@@ -69,7 +69,7 @@ DEFAULTS = {
     "daily_loss_stop": 150.0,
     "max_open_risk": 100.0,
     "max_open_positions": 12,
-    "min_edge": 0.04,
+    "min_edge": 0.06,
     "pace_min": PACE_MIN,
     "pace_target": PACE_TARGET,
     "week_goal": WEEK_GOAL,
@@ -349,8 +349,8 @@ ROI_POLICY = {
     "version": 1,
     "paper_only": True,
     "banner": (
-        "ROI SYSTEM (paper). Enter only on edge after costs, inside desk risk budget, "
-        "with an exit plan. Pace never waives edge. Learning skip cuts cold buckets."
+        "ROI SYSTEM (paper). Prefer ≥80% model/confidence entries, edge after costs, "
+        "inside desk risk budget, with an exit plan. Pace never waives edge."
     ),
     "rules": [
         {"id": "R1", "text": "Paper only — no live keys, wallets, or real orders."},

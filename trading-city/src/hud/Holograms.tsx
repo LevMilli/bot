@@ -1,6 +1,13 @@
 import { Html } from '@react-three/drei'
 import type { BotRow, Desk } from '../types'
-import { BEAM_COLORS, hologramPnl, money, statusLabel } from '../data/format'
+import {
+  BEAM_COLORS,
+  hologramPnl,
+  hologramPnlValue,
+  money,
+  pnlTone,
+  statusLabel,
+} from '../data/format'
 
 /**
  * Trade labels anchored to each tower.
@@ -19,6 +26,7 @@ export function TowerHologram({
 }) {
   const offline = bot.present === false
   const color = BEAM_COLORS[index % BEAM_COLORS.length]
+  const pnlToneClass = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
 
   return (
     <Html
@@ -43,7 +51,7 @@ export function TowerHologram({
       >
         <strong>{bot.name}</strong>
         <span className="holo-status">{statusLabel(bot)}</span>
-        <span className={`holo-pnl tone-${offline ? 'flat' : 'up'}`}>{hologramPnl(bot)}</span>
+        <span className={`holo-pnl tone-${pnlToneClass}`}>{hologramPnl(bot)}</span>
         {!offline && bot.cash != null && (
           <span className="holo-cash">cash {money(bot.cash)}</span>
         )}
@@ -54,6 +62,8 @@ export function TowerHologram({
 
 /** Desk vault card — world-anchored above the pad, always screen-facing. */
 export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number }) {
+  const todayTone = pnlTone(desk?.today)
+  const realizedTone = pnlTone(desk?.realized)
   return (
     <Html
       position={[0, 3.4, 0]}
@@ -65,8 +75,10 @@ export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number 
     >
       <div className="holo html-holo vault-holo">
         <strong>THE VAULT</strong>
-        <span className="holo-pnl tone-up">
-          realized {money(desk?.realized, true)} · today {money(desk?.today, true)}
+        <span className="holo-pnl">
+          <span className={`tone-${realizedTone}`}>realized {money(desk?.realized, true)}</span>
+          {' · '}
+          <span className={`tone-${todayTone}`}>today {money(desk?.today, true)}</span>
         </span>
         <span>
           cash {money(desk?.cash)} · {workers} worker{workers === 1 ? '' : 's'} on shift
