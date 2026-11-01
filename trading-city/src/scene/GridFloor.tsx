@@ -1,57 +1,14 @@
 import { useMemo } from 'react'
-import { PlazaTrain, RailPosts } from './PlazaTrain'
+import { PlazaRailroad, PlazaTrain } from './PlazaTrain'
 
 export const PLAZA_RAIL_R = 12.4
 
-function PlazaRail({ radius = PLAZA_RAIL_R, y = 0.28 }: { radius?: number; y?: number }) {
-  const lights = useMemo(() => {
-    const pts: [number, number, number][] = []
-    const n = 48
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2
-      pts.push([Math.cos(a) * radius, y + 0.08, Math.sin(a) * radius - 1])
-    }
-    return pts
-  }, [radius, y])
-
+function PlazaRail({ radius = PLAZA_RAIL_R }: { radius?: number }) {
   return (
     <group>
-      {/* Track bed */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, y - 0.06, -1]}>
-        <ringGeometry args={[radius - 0.28, radius + 0.28, 128]} />
-        <meshStandardMaterial color="#060a16" metalness={0.35} roughness={0.55} />
-      </mesh>
-      {/* Double elevated rail */}
-      <mesh position={[0, y, -1]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.04, 10, 128]} />
-        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.95} />
-      </mesh>
-      <mesh position={[0, y + 0.22, -1]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.032, 10, 128]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.9} />
-      </mesh>
-      <mesh position={[0, y + 0.11, -1]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius - 0.1, 0.014, 8, 128]} />
-        <meshBasicMaterial color="#c8f7ff" transparent opacity={0.5} />
-      </mesh>
-      {/* Outer guide rail */}
-      <mesh position={[0, y + 0.12, -1]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius + 0.22, 0.018, 8, 128]} />
-        <meshBasicMaterial color="#b967ff" transparent opacity={0.55} />
-      </mesh>
-      {/* Soft ground projection of the rail */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, -1]}>
-        <ringGeometry args={[radius - 0.12, radius + 0.18, 96]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.22} depthWrite={false} />
-      </mesh>
-      <RailPosts radius={radius} y={y} />
-      {lights.map((p, i) => (
-        <mesh key={i} position={p} raycast={() => null}>
-          <sphereGeometry args={[0.07, 10, 10]} />
-          <meshBasicMaterial color={i % 3 === 0 ? '#ffffff' : '#7ef9ff'} />
-        </mesh>
-      ))}
-      <PlazaTrain radius={radius} y={y + 0.14} />
+      <PlazaRailroad radius={radius} y={0.06} />
+      {/* Train rides the rail centerline just above the ties */}
+      <PlazaTrain radius={radius} y={0.16} />
     </group>
   )
 }
