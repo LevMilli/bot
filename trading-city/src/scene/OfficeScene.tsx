@@ -226,7 +226,7 @@ function OfficeChair() {
   )
 }
 
-function WindowWall({ bots }: { bots: BotRow[] }) {
+function WindowWall({ bots, exceptId }: { bots: BotRow[]; exceptId: string }) {
   return (
     <group position={[0, 0, -3.55]}>
       {/* opaque surround */}
@@ -269,12 +269,12 @@ function WindowWall({ bots }: { bots: BotRow[] }) {
         </mesh>
       ))}
 
-      {/* glass: live city overlook */}
+      {/* glass: eye-level street outside, other towers and the rest of the crew */}
       <mesh position={[0, 1.95, 0.02]} raycast={() => null}>
         <planeGeometry args={[6.82, 2.26]} />
         <meshBasicMaterial toneMapped={false}>
           <RenderTexture attach="map" width={1536} height={512} anisotropy={8}>
-            <CityGlass bots={bots} />
+            <CityGlass bots={bots} exceptId={exceptId} />
           </RenderTexture>
         </meshBasicMaterial>
       </mesh>
@@ -393,7 +393,7 @@ export function OfficeScene({ bot, bots, desk }: Props) {
       </mesh>
       <Door />
       <Credenza />
-      <WindowWall bots={bots} />
+      <WindowWall bots={bots} exceptId={bot.id} />
       <Desk />
       <OfficeChair />
 

@@ -28,20 +28,34 @@ function Grip() {
   )
 }
 
-function Arm({ side, celebrating }: { side: -1 | 1; celebrating: boolean }) {
+function Arm({ side, pose }: { side: -1 | 1; pose: 'celebrate' | 'work' }) {
   const ref = useRef<Group>(null)
+  const fore = useRef<Group>(null)
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
-    const lift = celebrating ? Math.sin(t * 2.05 + side) * 0.045 : Math.sin(t * 0.8) * 0.02
     if (!ref.current) return
-    // Built along +Y. Positive Z spin swings +Y toward screen-left (camera looks from +Z).
+    if (pose === 'work') {
+      // Pitch past horizontal so the hands rest on the console instead of beside the helmet.
+      const type = Math.sin(t * 6.2 + side * 1.7) * 0.04
+      ref.current.rotation.z = -side * 0.12
+      ref.current.rotation.x = -2.15
+      if (fore.current) fore.current.rotation.x = -0.08 + type
+      return
+    }
+    const lift = Math.sin(t * 2.05 + side) * 0.045
     ref.current.rotation.z = -side * 1.05 + -side * lift
     ref.current.rotation.x = -0.38
+    if (fore.current) fore.current.rotation.x = -0.42
   })
 
+  const working = pose === 'work'
   return (
-    <group ref={ref} position={[side * 0.46, 0.98, 0]} rotation={[-0.38, 0, -side * 1.05]}>
+    <group
+      ref={ref}
+      position={[side * 0.46, 0.98, 0]}
+      rotation={[working ? -2.15 : -0.38, 0, working ? -side * 0.12 : -side * 1.05]}
+    >
       <mesh position={[0, 0.2, 0]}>
         <cylinderGeometry args={[0.075, 0.085, 0.38, 14]} />
         <meshStandardMaterial {...skinMaterial(0.32)} />
@@ -54,7 +68,7 @@ function Arm({ side, celebrating }: { side: -1 | 1; celebrating: boolean }) {
         <torusGeometry args={[0.095, 0.016, 8, 18]} />
         <meshStandardMaterial color="#0c3044" metalness={0.5} roughness={0.35} />
       </mesh>
-      <group position={[0, 0.4, 0]} rotation={[-0.42, 0, side * 0.12]}>
+      <group ref={fore} position={[0, 0.4, 0]} rotation={[working ? -0.08 : -0.42, 0, side * 0.08]}>
         <mesh position={[0, 0.2, 0]}>
           <cylinderGeometry args={[0.06, 0.072, 0.38, 14]} />
           <meshStandardMaterial {...skinMaterial(0.32)} />
@@ -73,20 +87,38 @@ function Arm({ side, celebrating }: { side: -1 | 1; celebrating: boolean }) {
 
 /**
  * Desk bot seen from behind: dome helmet, yellow ear disks, antenna bulb,
- * black back panel with a white cross and green side bars, arms in a V.
+ * black back panel with a white cross and green side bars.
+ * `celebrate` holds the arms in a V. `work` reaches them toward a console.
+ * `seated` parks the figure in the desk chair; otherwise it stands on y=0.
  */
-export function BotFigure({ celebrating = true }: { celebrating?: boolean }) {
+export function BotFigure({
+  celebrating = true,
+  pose = 'celebrate',
+  seated = true,
+}: {
+  celebrating?: boolean
+  pose?: 'celebrate' | 'work'
+  seated?: boolean
+}) {
   const body = useRef<Group>(null)
   const bulb = useRef<MeshStandardMaterial>(null)
+  // Seated y stays at 0: the frame loop has always parked the desk bot there, above the chair base.
+  const anchor: [number, number, number] = seated ? [0, 0, 0.42] : [0, 0.22, 0]
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
-    if (body.current) body.current.position.y = Math.sin(t * 1.5) * 0.012
+    if (body.current) {
+      const bob =
+        pose === 'work'
+          ? Math.sin(t * 1.2) * 0.006
+          : Math.sin(t * 1.5) * (celebrating ? 0.012 : 0.004)
+      body.current.position.y = anchor[1] + bob
+    }
     if (bulb.current) bulb.current.emissiveIntensity = 1.4 + Math.sin(t * 3.2) * 0.35
   })
 
   return (
-    <group ref={body} position={[0, 0.55, 0.42]}>
+    <group ref={body} position={anchor}>
       <mesh position={[0, 0.14, 0]}>
         <sphereGeometry args={[0.22, 18, 14]} />
         <meshStandardMaterial {...skinMaterial(0.2)} />
@@ -155,8 +187,8 @@ export function BotFigure({ celebrating = true }: { celebrating?: boolean }) {
         </group>
       ))}
 
-      <Arm side={-1} celebrating={celebrating} />
-      <Arm side={1} celebrating={celebrating} />
+      <Arm side={-1} pose={pose} />
+      <Arm side={1} pose={pose} />
 
       {([-0.14, 0.14] as const).map((x) => (
         <mesh key={x} position={[x, -0.02, 0.08]} rotation={[0.7, 0, x > 0 ? -0.08 : 0.08]}>

@@ -100,7 +100,7 @@ export function CityScene({ bots, selectedId, onSelect }: Props) {
   )
 }
 
-/** Plaza, towers, vault, and sky — shared by the city camera and the office window. */
+/** Plaza, towers, vault, and sky for the city camera. The office window uses its own street view. */
 export function CityContents({
   bots,
   selectedId,

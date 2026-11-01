@@ -21,7 +21,14 @@ function Crystal({ position, scale = 1 }: { position: [number, number, number]; 
   )
 }
 
-export function Vault({ lights = true }: { lights?: boolean }) {
+export function Vault({
+  lights = true,
+  position = [0, 0, 5.2],
+}: {
+  lights?: boolean
+  /** Plaza keeps the vault toward the overview camera. The office window places it down the street. */
+  position?: [number, number, number]
+}) {
   const dome = useRef<Mesh>(null)
   const glow = useRef<Mesh>(null)
 
@@ -46,7 +53,7 @@ export function Vault({ lights = true }: { lights?: boolean }) {
   }
 
   return (
-    <group position={[0, 0, 5.2]}>
+    <group position={position}>
       {/* raised pad */}
       <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[3.35, 64]} />
