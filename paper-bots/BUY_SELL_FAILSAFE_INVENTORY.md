@@ -65,10 +65,10 @@ Buy when all pass:
 ### Exit / SELL
 1. **Gap closed:** bid − fee ≥ fair → sell at bid  
 2. **Settle:** ESPN final; $1/contract if side wins else $0; ties wait  
-No stop / trail / TP ladder.
+No stop / trail / TP ladder. Each check **runs exits before new paper buys**.
 
 ### Failsafes
-Bot-local: close-game band, spread, price bounds, max open, cash, daily loss, learning skip, public GET fail → skip league. Desk: `entry_gate` on timer/manual run; pause; stake curve; min_edge override.
+Bot-local: close-game band, spread, price bounds, max open, **intra-check max open risk**, cash, daily loss, learning skip, public GET fail → skip league. Desk: `entry_gate` on timer/manual run; pause; stake curve; min_edge override.
 
 ### State written
 - `sports-gap-paper/state.json` — cash ($100 start), open, closed, runs  
@@ -90,7 +90,7 @@ Reads `load_settings` for min_edge, max_open, daily_loss_stop, stake. Subject to
 - Series `KXINXU`, settle **15:00 CT**
 - Among YES/NO sides with ask in **[0.80, 0.90]**, pick highest ask (tie: tighter spread, YES, ticker)
 - Re-confirm order book still in band
-- Stake: `floor($25 / ask)` contracts (`max_stake_dollars: 25`), bankroll-capped
+- Stake: `floor($25 / ask)` contracts (`max_stake_dollars: 25`), bankroll-capped **after taker fee**; `n < 1` → skip
 - Desk `learning_skip("S&P", bucket(ask))`
 
 ### Exit / SELL
@@ -135,7 +135,7 @@ Hard skips if any fail:
 | Spread | ≤ **0.03** |
 | Depth at/below ask | ≥ **5** contracts |
 | Last 5×1m candles | must **not** move toward target; unknown → skip |
-| USD High news | ForexFactory ±**30** min of block → skip |
+| USD High news | ForexFactory ±**30** min of block → skip; calendar **fail-closed** if unavailable |
 | Paper ask | **[0.05, 0.95]**; one open per ticker; open count &lt; **12** (hardcoded); cash; desk stake; learning_skip("BTC", …) |
 
 σ = max(DVOL-implied, realized); if DVOL fails → realized × **1.2**.
