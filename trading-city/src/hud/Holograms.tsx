@@ -74,7 +74,7 @@ export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number 
       style={{ pointerEvents: 'none' }}
     >
       <div className="holo html-holo vault-holo">
-        <strong>THE VAULT</strong>
+        <strong>THE VAULT · click to enter</strong>
         <span className="holo-pnl">
           <span className={`tone-${realizedTone}`}>realized {money(desk?.realized, true)}</span>
           {' · '}

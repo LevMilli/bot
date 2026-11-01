@@ -204,3 +204,41 @@ export function rightMonitorTexture(bot: BotRow): THREE.CanvasTexture {
   tex.needsUpdate = true
   return tex
 }
+
+/** Wide bank lobby board — desk net profit / cash / pace. */
+export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
+  const { canvas, ctx, w, h } = makeCanvas(1024, 220)
+  ctx.fillStyle = '#050812'
+  ctx.fillRect(0, 0, w, h)
+  ctx.strokeStyle = 'rgba(201,162,39,0.55)'
+  ctx.lineWidth = 3
+  ctx.strokeRect(6, 6, w - 12, h - 12)
+
+  ctx.fillStyle = '#f9c80e'
+  ctx.font = 'bold 28px monospace'
+  ctx.fillText('SIGNAL-CITY TRUST  ·  NET DESK', 28, 42)
+
+  const realized = Number(desk?.realized || 0)
+  const today = Number(desk?.today || 0)
+  ctx.fillStyle = realized >= 0 ? '#39ff14' : '#ff3b3b'
+  ctx.font = 'bold 54px monospace'
+  ctx.fillText(`realized ${money(desk?.realized, true)}`, 28, 110)
+
+  ctx.fillStyle = today >= 0 ? '#39ff14' : '#ff3b3b'
+  ctx.font = 'bold 36px monospace'
+  ctx.fillText(`today ${money(desk?.today, true)}`, 28, 160)
+
+  ctx.fillStyle = '#7ef9ff'
+  ctx.font = '22px monospace'
+  ctx.fillText(`cash ${money(desk?.cash)}`, 28, 198)
+  if (desk?.pace_line) {
+    const pace = String(desk.pace_line).slice(0, 36)
+    ctx.fillStyle = '#9aa3c7'
+    ctx.fillText(pace, w - 28 - ctx.measureText(pace).width, 198)
+  }
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.needsUpdate = true
+  return tex
+}

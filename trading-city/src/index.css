@@ -429,6 +429,37 @@ a {
   font-size: 0.78rem;
 }
 
+.teller-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+  pointer-events: auto;
+  max-width: min(92vw, 52rem);
+}
+
+.teller-chip {
+  pointer-events: auto;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 0.28rem 0.55rem;
+  border: 1px solid var(--cyan);
+  background: rgba(4, 8, 20, 0.82);
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.teller-chip.active {
+  background: rgba(45, 226, 230, 0.16);
+  box-shadow: 0 0 14px rgba(45, 226, 230, 0.25);
+  color: #fff;
+}
+
+.bank-hud .office-title strong {
+  color: var(--amber);
+}
+
 .monitors {
   display: grid;
   grid-template-columns: 1fr 1.3fr 1fr;

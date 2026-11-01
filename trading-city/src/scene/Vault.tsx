@@ -29,6 +29,7 @@ export function Vault({
   desk,
   workers = 0,
   showHolo = true,
+  onOpen,
 }: {
   lights?: boolean
   /** Plaza keeps the vault toward the overview camera. The office window places it down the street. */
@@ -36,6 +37,8 @@ export function Vault({
   desk?: Desk
   workers?: number
   showHolo?: boolean
+  /** Enter the bank lobby when the vault pad / dome is clicked. */
+  onOpen?: () => void
 }) {
   const dome = useRef<Mesh>(null)
   const glow = useRef<Mesh>(null)
@@ -60,14 +63,29 @@ export function Vault({
     crystals.push([Math.cos(a) * r, 0.42, Math.sin(a) * r])
   }
 
+  const clickProps = onOpen
+    ? {
+        onClick: (e: { stopPropagation: () => undefined }) => {
+          e.stopPropagation()
+          onOpen()
+        },
+        onPointerOver: () => {
+          document.body.style.cursor = 'pointer'
+        },
+        onPointerOut: () => {
+          document.body.style.cursor = 'default'
+        },
+      }
+    : {}
+
   return (
     <group position={position}>
       {/* raised pad */}
-      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} {...clickProps}>
         <circleGeometry args={[3.35, 64]} />
         <meshStandardMaterial color="#08061a" emissive="#1a6cff" emissiveIntensity={0.25} />
       </mesh>
-      <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]} {...clickProps}>
         <ringGeometry args={[3.2, 3.45, 64]} />
         <meshBasicMaterial color="#f9c80e" transparent opacity={0.92} />
       </mesh>
@@ -76,7 +94,7 @@ export function Vault({
         <meshBasicMaterial color="#2de2e6" transparent opacity={0.55} />
       </mesh>
 
-      <mesh ref={dome} position={[0, 0.05, 0]} scale={[1, 1.38, 1]}>
+      <mesh ref={dome} position={[0, 0.05, 0]} scale={[1, 1.38, 1]} {...clickProps}>
         <sphereGeometry args={[2.55, 48, 24, 0, Math.PI * 2, 0, Math.PI / 2]} />
         <meshStandardMaterial
           color="#efe6c4"
