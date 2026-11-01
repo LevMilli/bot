@@ -17,10 +17,11 @@ This is a practice bot. It **never places real orders**. It has no API key, no w
    - fewer than 12 positions are open (the old cap was 3 in this script and 4 on the desk), and the bot doesn't already hold this game
    - there is enough paper cash
    - the paper learning log is not skipping that sport and probability bucket
-   - the desk `entry_gate` is clear (daily loss / max open / open risk)
+   - open count and open risk stay inside desk caps after any sells this check
+   - when started from the PIMP desk, the desk `entry_gate` is also clear (daily loss / max open / open risk)
 
    Trade size follows the model probability. Under 80% the paper stake is about **$20**. At 80% or higher it scales from **$20 to $100**. The fill buys enough contracts to land near that stake. It does not place a real order.
-6. Exits a paper position in one of two ways:
+6. Each check **sells/settles first**, then paper-buys. Exits a paper position in one of two ways:
    - **Sells at the bid** once the gap has closed (the bid minus the fee is at or above fair value).
    - **Settles** when ESPN shows the game as final: $1 per contract if the team won, $0 if it lost.
 

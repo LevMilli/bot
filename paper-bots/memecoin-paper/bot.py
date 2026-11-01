@@ -170,7 +170,7 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
             desk = _desk()
             desk.record_learning(os.path.dirname(BASE), {
                 "result": "hit" if pnl > 0 else "miss",
-                "market": pos.get("symbol") or "",
+                "market": pos.get("mint") or pos.get("symbol") or "",
                 "prob": pos.get("confidence"),
                 "stake": pos.get("cost_usd"),
                 "fill_id": f"{pos.get('mint')}|{pos.get('entry_iso')}",
@@ -439,7 +439,7 @@ def scan(st, stats):
             try:
                 desk = _desk()
                 gate_reason = desk.learning_skip(
-                    desk.load_learning(os.path.dirname(BASE)), row.get("symbol") or "", desk.prob_bucket(conf)) or None
+                    desk.load_learning(os.path.dirname(BASE)), mint or row.get("symbol") or "", desk.prob_bucket(conf)) or None
             except Exception:
                 gate_reason = None
         row["risk_gates_ok"] = "PASS" if not gate_reason else "FAIL"

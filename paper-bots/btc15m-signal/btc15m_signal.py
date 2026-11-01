@@ -449,15 +449,14 @@ def main():
         toward = (move < 0) if side == "YES" else (move > 0)
         print(f"Last 5 one-minute candles: {move:+,.2f} USD ({'TOWARD' if toward else 'away from'} target)")
 
-    # news
+    # news — fail closed: unknown calendar must not clear a BUY
+    news = None
     try:
         start = m["open_time"] or (m["close_time"] - dt.timedelta(minutes=15))
         news = usd_high_impact_near(start, m["close_time"])
         print("News (USD High, +/-30 min): " + ("; ".join(news) if news else "none"))
     except Exception as e:
-        news = []
-        print(f"  news calendar failed ({e}); treating as unknown")
-        print("News calendar did not load. The paper check still runs.")
+        print(f"  news calendar failed ({e}); skipping BUY until calendar loads")
 
     zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
     if min_left < MIN_MINUTES_LEFT: reasons.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
@@ -469,7 +468,10 @@ def main():
     if depth < MIN_DEPTH: reasons.append(f"only {depth:.0f} contracts at/below ask (< {MIN_DEPTH})")
     if toward is None: reasons.append("candle trend unknown")
     elif toward: reasons.append("last 5 candles moving toward target")
-    if news: reasons.append("USD high-impact news near this block")
+    if news is None:
+        reasons.append("news calendar unavailable")
+    elif news:
+        reasons.append("USD high-impact news near this block")
 
     print()
     signal_buy = not reasons

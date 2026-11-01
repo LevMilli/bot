@@ -206,7 +206,8 @@ BOT_PLANS = {
         "failsafes": [
             "Desk entry_gate (daily loss / max open / open risk)",
             "Bot daily loss stop (desk daily_loss_stop)",
-            "Max open / cash / learning skip / API skip league",
+            "Intra-check max open risk + max open / cash / learning skip",
+            "Sells/settles before new paper buys each check",
             "Pause file",
         ],
         "exit_quality": "partial",
@@ -249,6 +250,7 @@ BOT_PLANS = {
         "failsafes": [
             "Desk entry_gate (daily loss / max open / open risk)",
             "Full signal checklist (no spot/σ → skip)",
+            "News calendar fail-closed (unavailable = skip BUY)",
             "Cash / hardcoded max 12 opens / learning skip",
             "Pause file",
         ],
@@ -1840,7 +1842,8 @@ def reset_bot(bot_id: str, root: str | None = None, who: str = "") -> dict:
                 if _unlink(_under(root, folder, name)):
                     removed.append(name)
         elif bot_id == "btc15m":
-            removed.append("no account file")
+            if _unlink(_under(root, folder, "paper_account.json")):
+                removed.append("paper_account.json")
         else:
             return {"ok": False, "error": "That bot is not on this desk."}
         runs = _load_runs(root)

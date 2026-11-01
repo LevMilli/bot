@@ -405,6 +405,9 @@ def run():
     summary_out = {"time": ts, "live_games": 0, "matched": 0, "leagues": {}, "trades": [], "closes": [], "skips": []}
     open_by_game = {p["game_key"]: p for p in s["open"]}
     live_info = {}  # game_key -> dict for exits
+    # ROI loop: gather candidates first, sell/settle next, then paper-buy inside open-risk.
+    buy_candidates = []
+    max_open_risk = float(cfg.get("max_open_risk") if cfg.get("max_open_risk") is not None else 100)
 
     for league, (path, series, src) in SPORTS.items():
         if league_cached_idle(path):
@@ -475,8 +478,6 @@ def run():
                 reason = "spread too wide - skip"
             elif not (PRICE_BOUNDS[0] <= ask <= PRICE_BOUNDS[1]):
                 reason = "price too extreme - skip"
-            elif len(s["open"]) >= max_open:
-                reason = "max open positions"
             elif desk is not None:
                 skip = desk.learning_skip(desk.load_learning(DESK_ROOT), league, desk.prob_bucket(fair))
                 if skip:
@@ -484,37 +485,13 @@ def run():
                     summary_out["skips"].append(skip)
             if reason:
                 lines.append(row + gtxt + f" | {reason} |"); continue
-            stake = stake_for_model(fair, desk, cfg)
-            per = ask + fee(ask)
-            if desk is not None:
-                try:
-                    n = desk.contracts_for_stake(per, stake)
-                except Exception:
-                    n = int(stake // per) if per > 0 else 0
-            else:
-                n = int(stake // per) if per > 0 else 0
-            if n < 1 or n * per > s["cash"] + 1e-9:
-                lines.append(row + gtxt + " | not enough paper cash |"); continue
-            cost = round(n * per, 2)
-            s["cash"] = round(s["cash"] - cost, 2)
-            max_payout = round(n * 1.0, 2)
-            reward = round(max_payout - cost, 2)
-            ratio = round(reward / cost, 4) if cost else None
-            why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
-            pos = {"game_key": key, "league": league, "game": name, "ticker": m["ticker"], "team": m.get("yes_sub_title"),
-                   "side": side, "contracts": n, "entry_price": ask, "bid": bid, "ask": ask, "entry_fee": fee(ask),
-                   "fee": fee(ask), "cost": cost, "risk": cost, "reward": reward, "risk_reward": ratio,
-                   "max_payout": max_payout, "why": why,
-                   "fair_at_entry": round(fair, 4), "gap_at_entry": round(gap, 4),
-                   "opened": ts, "score_at_entry": score, "espn_id": g["id"], "espn_path": path,
-                   "price_source": f"{KALSHI}/markets?series_ticker={series}",
-                   "price_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                   "fill_id": f"{m['ticker']}|{ts}"}
-            s["open"].append(pos); open_by_game[key] = pos
-            lines.append(row + gtxt + f" | **PAPER BUY** {n} YES {m.get('yes_sub_title')} @ {ask:.2f} (+fee {fee(ask):.2f}) = ${cost:.2f} |")
-            summary_out["trades"].append(f"BUY {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")
+            buy_candidates.append({
+                "key": key, "league": league, "name": name, "m": m, "side": side, "fair": fair,
+                "bid": bid, "ask": ask, "gap": gap, "score": score, "path": path, "g": g,
+                "series": series, "row": row, "gtxt": gtxt,
+            })
 
-    # ---- exits / settlement ----
+    # ---- exits / settlement (before new paper buys) ----
     still = []
     for p in s["open"]:
         info = live_info.get(p["game_key"])
@@ -577,6 +554,53 @@ def run():
                 continue
         still.append(p)
     s["open"] = still
+    open_by_game = {p["game_key"]: p for p in s["open"]}
+
+    # ---- paper buys after exits, capped by desk open risk ----
+    for c in buy_candidates:
+        key, m, fair, ask, bid, gap = c["key"], c["m"], c["fair"], c["ask"], c["bid"], c["gap"]
+        row, gtxt = c["row"], c["gtxt"]
+        reason = None
+        if key in open_by_game:
+            reason = "already holding this game"
+        elif len(s["open"]) >= max_open:
+            reason = "max open positions"
+        open_risk = sum(float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0) for p in s["open"])
+        stake = stake_for_model(fair, desk, cfg)
+        per = ask + fee(ask)
+        if desk is not None:
+            try:
+                n = desk.contracts_for_stake(per, stake)
+            except Exception:
+                n = int(stake // per) if per > 0 else 0
+        else:
+            n = int(stake // per) if per > 0 else 0
+        cost = round(n * per, 2) if n >= 1 else 0.0
+        if reason is None and (n < 1 or cost > s["cash"] + 1e-9):
+            reason = "not enough paper cash"
+        if reason is None and open_risk + cost > max_open_risk + 1e-9:
+            reason = f"max open risk (${open_risk:.2f} + ${cost:.2f} > ${max_open_risk:.2f})"
+        if reason:
+            lines.append(row + gtxt + f" | {reason} |")
+            continue
+        s["cash"] = round(s["cash"] - cost, 2)
+        max_payout = round(n * 1.0, 2)
+        reward = round(max_payout - cost, 2)
+        ratio = round(reward / cost, 4) if cost else None
+        why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
+        pos = {"game_key": key, "league": c["league"], "game": c["name"], "ticker": m["ticker"], "team": m.get("yes_sub_title"),
+               "side": c["side"], "contracts": n, "entry_price": ask, "bid": bid, "ask": ask, "entry_fee": fee(ask),
+               "fee": fee(ask), "cost": cost, "risk": cost, "reward": reward, "risk_reward": ratio,
+               "max_payout": max_payout, "why": why,
+               "fair_at_entry": round(fair, 4), "gap_at_entry": round(gap, 4),
+               "opened": ts, "score_at_entry": c["score"], "espn_id": c["g"]["id"], "espn_path": c["path"],
+               "price_source": f"{KALSHI}/markets?series_ticker={c['series']}",
+               "price_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+               "fill_id": f"{m['ticker']}|{ts}"}
+        s["open"].append(pos)
+        open_by_game[key] = pos
+        lines.append(row + gtxt + f" | **PAPER BUY** {n} YES {m.get('yes_sub_title')} @ {ask:.2f} (+fee {fee(ask):.2f}) = ${cost:.2f} |")
+        summary_out["trades"].append(f"BUY {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")
 
     equity_open = sum(p["cost"] for p in s["open"])
     realized = round(sum(p["pnl"] for p in s["closed"]), 2)

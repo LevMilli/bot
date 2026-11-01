@@ -19,7 +19,7 @@ pretend ("paper") account in local files.
 | `kalshi-sp500-paper/` | Kalshi S&P 500 daily paper bot: once a day buys (on paper) the safest 80–90¢ contract on the 3 PM CT close, skips big-news days, plus a full backtester | Kalshi public API |
 | `sports-gap-paper/` | Live sports "gap" paper bot: compares ESPN's live win probability with Kalshi game prices, paper-buys big gaps | ESPN scoreboard, Kalshi public API |
 | `memecoin-paper/` | Solana meme-coin paper bot: strict rug-pull filter, paper buys at real prices, stop/ladder/trailing exits | DexScreener, RugCheck |
-| `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **signal** script. Prints BUY or SKIP with the reason. Nothing else | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
+| `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **paper** bot. Prints BUY or SKIP, and paper-fills into `paper_account.json` when the checklist clears (TP print-only) | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
 | `TEAM_ROLES.md` | How the "desk" of helper bots was organized, and the safety rules | — |
 | `DESK_ROI_SYSTEM.md` | Desk-wide ROI rules every present bot must follow (paper only) | — |
 | `BUY_SELL_FAILSAFE_INVENTORY.md` | Per-bot buy / sell / failsafe thresholds + entry_gate map | — |
@@ -34,7 +34,7 @@ pretend ("paper") account in local files.
 
 ## Run each one once
 ```
-# 1) Bitcoin 15-min signal (prints numbers + BUY/SKIP). Safe to run any time.
+# 1) Bitcoin 15-min paper check (prints BUY/SKIP; may write paper_account.json).
 cd btc15m-signal
 python btc15m_signal.py
 cd ..

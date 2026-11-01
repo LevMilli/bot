@@ -8,7 +8,8 @@ Rules (Market_Context.md + Strategy.md):
   3. Daily loss limit $50: once today's realised loss reaches $50, stop for the day.
   4. Kill switch: if the paper bankroll is at or below $400, halt everything
      until a human reviews it.
-  5. Stake: floor($25 / ask) contracts, and never more than you can afford.
+  5. Stake: floor($25 / ask) contracts, and never more than you can afford
+     after Kalshi's taker fee (cost + fee ≤ bankroll). Zero contracts = no trade.
 """
 import json
 import math
@@ -41,12 +42,24 @@ def news_skip_reason(day):
     return "+".join(r) if r else None
 
 
+def _taker_fee(contracts, price, rate=None):
+    """Kalshi taker fee rounded up to the cent (matches paper_sim.taker_fee)."""
+    rate = CFG.get("taker_fee_rate", 0.07) if rate is None else rate
+    raw = rate * contracts * price * (1 - price)
+    return math.ceil(raw * 100 - 1e-12) / 100.0
+
+
 def stake_contracts(ask, max_stake=None, bankroll=None):
-    """floor(max_stake / ask), capped so cost never exceeds the bankroll."""
+    """floor(max_stake / ask), capped so cost + fee never exceeds the bankroll."""
+    if ask is None or ask <= 0:
+        return 0
     max_stake = CFG["max_stake_dollars"] if max_stake is None else max_stake
     n = math.floor(max_stake / ask + 1e-9)
     if bankroll is not None:
-        n = min(n, math.floor(max(bankroll, 0) / ask + 1e-9))
+        while n >= 1:
+            if n * ask + _taker_fee(n, ask) <= float(bankroll) + 1e-9:
+                break
+            n -= 1
     return max(n, 0)
 
 
@@ -72,6 +85,9 @@ if __name__ == "__main__":
     assert news_skip_reason(dt.date(2026, 10, 27)) is None
     assert news_skip_reason(dt.date(2026, 10, 31)) == "WEEKEND"
     assert stake_contracts(0.85) == 29 and stake_contracts(0.80) == 31 and stake_contracts(0.90) == 27
+    # Fee-aware cap: 29 @ 0.85 needs 24.65 + 0.26 = 24.91; bankroll 24.80 → shrink.
+    assert stake_contracts(0.85, bankroll=24.80) == 28
+    assert stake_contracts(0.85, bankroll=0.50) == 0
     assert check_can_trade(dt.date(2026, 10, 27), 399, 0, 0)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 1, 0)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, -50)[0] is False
