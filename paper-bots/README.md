@@ -21,6 +21,8 @@ pretend ("paper") account in local files.
 | `memecoin-paper/` | Solana meme-coin paper bot: strict rug-pull filter, paper buys at real prices, stop/ladder/trailing exits | DexScreener, RugCheck |
 | `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **signal** script. Prints BUY or SKIP with the reason. Nothing else | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
 | `TEAM_ROLES.md` | How the "desk" of helper bots was organized, and the safety rules | — |
+| `DESK_ROI_SYSTEM.md` | Desk-wide ROI rules every present bot must follow (paper only) | — |
+| `BUY_SELL_FAILSAFE_INVENTORY.md` | Per-bot buy / sell / failsafe thresholds + entry_gate map | — |
 
 ## Install (once)
 1. Install **Python 3.10 or newer** (https://www.python.org/downloads/). On Windows tick "Add Python to PATH".
@@ -69,7 +71,8 @@ empty paper account: no trade history or saved state is included in this pack.
 - **BUY only if all are true:** ≥10 min left; p ≥ ask + fee + 0.05; cushion ≥ $40; z ≥ 0.5 (0.6 if only
   Coinbase worked); ask 65–85¢; spread ≤ 3¢; ≥5 contracts offered at the ask; last 5 one-minute candles not
   moving toward the target; no USD high-impact news within 30 min of the block. Otherwise **SKIP** + reason.
-- Suggested take-profit if you were filled: fill + 15¢, capped at 99¢.
+- Suggested take-profit if you were filled: fill + 15¢, capped at 99¢ (print-only — not executed).
+- On the PIMP desk, BTC `run` is an **entry** action: desk daily loss / max open / open risk gate it like the other towers. See `DESK_ROI_SYSTEM.md`.
 
 ## Notes
 - All times are shown in US Central (CT) or UTC as labeled.
