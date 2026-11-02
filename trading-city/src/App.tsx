@@ -5,6 +5,7 @@ import { useSnapshot } from './data/useSnapshot'
 import { Banners } from './hud/Banners'
 import { Monitors } from './hud/Monitors'
 import { Ticker } from './hud/Ticker'
+import { TowerRail } from './hud/TowerRail'
 import { BEAM_COLORS } from './data/format'
 import { CityScene } from './scene/CityScene'
 import { OfficeScene } from './scene/OfficeScene'
@@ -199,10 +200,13 @@ export default function App() {
         )}
 
         {view === 'city' && (
-          <div className="day-strip" aria-hidden={false}>
-            <span>{snap?.desk?.central_check || 'Central clock pending'}</span>
-            <span>{snap?.desk?.status_line || ''}</span>
-          </div>
+          <>
+            <TowerRail bots={bots} onSelect={openTower} />
+            <div className="day-strip" aria-hidden={false}>
+              <span>{snap?.desk?.central_check || 'Central clock pending'}</span>
+              <span>{snap?.desk?.status_line || ''}</span>
+            </div>
+          </>
         )}
       </div>
 
