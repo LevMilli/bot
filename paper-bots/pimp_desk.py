@@ -137,6 +137,7 @@ SETTLEMENT_FILES = (
     "memecoin-paper/positions.json",
     "memecoin-paper/trades.csv",
     "memecoin-paper/checks.csv",
+    "kalshi_tape.json",
     "pimp-learning.json",
     "pimp-good.json",
 )
@@ -158,7 +159,8 @@ ACTIONS = {
     },
     "btc15m": {
         # entry:True — ROI system: desk daily loss / max open / open risk gate paper buys.
-        "run": {"argv": ("btc15m_signal.py",), "entry": True, "timeout": 75, "label": "Run one check"},
+        # Timeout 120s: scores every open KXBTC15M window + tape sync in one check.
+        "run": {"argv": ("btc15m_signal.py",), "entry": True, "timeout": 120, "label": "Run one check"},
     },
     "memecoin": {
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 120, "label": "Run one check"},
@@ -177,7 +179,8 @@ ACTIONS = {
 AUTO_RETRY_SEC = 900
 AUTO = (
     {"id": "sports-gap", "action": "run", "every_sec": 300},
-    {"id": "btc15m", "action": "run", "every_sec": 300},
+    # BTC is the busiest Kalshi series — poll every 90s; guidelines unchanged, bid every fit.
+    {"id": "btc15m", "action": "run", "every_sec": 90},
     {"id": "memecoin", "action": "run", "every_sec": 600},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
@@ -297,11 +300,12 @@ BOT_PLANS = {
     },
     "btc15m": {
         "buy": [
-            "Nearest open KXBTC15M; p ≥ ask + fee + venue kalshi_btc15m",
-            "≥10 min left; cushion ≥ $50; z ≥ 0.7 (0.85 Coinbase-only)",
+            "Every open KXBTC15M window that clears gates (not nearest-only); tape synced",
+            "p ≥ ask + fee + venue kalshi_btc15m; model p ≥ 80%",
+            "≥10 min left; cushion ≥ $40; z ≥ 0.65 (0.80 Coinbase-only)",
             "Ask 75–90¢; spread ≤ 3¢; depth ≥ 5",
             "Last 5×1m candles not toward target; no USD high news ±30m",
-            "Kelly-lite stake; correlation + learning clear",
+            "Kelly-lite stake; correlation + learning clear; desk open-risk cap",
         ],
         "sell": [
             "Model-flip: side flips or fair collapses by δ → paper sell at bid",
@@ -1943,6 +1947,17 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     }
     desk_row["capital"] = capital
     desk_row["shadow_leaderboard"] = shadow_rows
+    try:
+        import kalshi_tape
+        desk_row["kalshi_tape"] = kalshi_tape.tape_summary(root)
+    except Exception as exc:  # noqa: BLE001 — snapshot must never fail closed on tape
+        desk_row["kalshi_tape"] = {
+            "paper_only": True,
+            "error": type(exc).__name__,
+            "tracked_series": [],
+            "trade_count": 0,
+            "recent": [],
+        }
     return {
         "paper_only": True,
         "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
@@ -2096,7 +2111,8 @@ def timer_text() -> str:
     """Plain schedule for the desk. No forecast and no profit language."""
     return (
         "On a timer, America/Chicago. Sports gap about every 5 minutes. "
-        "BTC 15-minute signal about every 5 minutes. "
+        "BTC 15-minute signal about every 90 seconds — scores every open KXBTC15M window "
+        "and syncs the Kalshi public trade tape for desk series. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
         "Kalshi paper scan once at 12:30 PM, inside that bot's own window. "
         "Kalshi paper settle once at 4:00 PM. "
@@ -2852,10 +2868,10 @@ def _btc_card(text: str) -> str:
     low = str(text or "").lower()
     if "btc" not in low and "signal:" not in low and "kxbtc" not in low:
         return ""
-    if "paper buy" in low:
-        return "Checked the BTC 15-minute market. Paper buy."
-    if "signal:" in low or "skip:" in low or "no open kxbtc" in low:
-        return "Checked the BTC 15-minute market. No paper buy."
+    if "paper buy" in low and "no paper buy" not in low:
+        return "Checked all open BTC 15-minute markets. Paper buy."
+    if "paper buy" in low or "signal:" in low or "skip:" in low or "no open kxbtc" in low:
+        return "Checked all open BTC 15-minute markets. No paper buy."
     return ""
 
 

@@ -96,7 +96,19 @@ def step_brief(args, state, day):
     return text
 
 
+def _sync_kalshi_tape():
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import kalshi_tape
+        tape = kalshi_tape.sync_tape(DESK_ROOT, series=("KXINXU", "KXBTC15M"))
+        print(f"Kalshi tape: +{tape.get('last_added') or 0} new prints (kept {len(tape.get('trades') or [])})")
+    except Exception as exc:
+        print(f"Kalshi tape sync skipped: {type(exc).__name__}")
+
+
 def step_scan(args, state, day):
+    _sync_kalshi_tape()
     now = dt.datetime.now(CT)
     if not args.any_time:
         start = dt.datetime.combine(day, dt.time.fromisoformat(CFG["entry_time_ct"]), CT)

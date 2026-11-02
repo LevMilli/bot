@@ -3,14 +3,17 @@
 btc15m_signal.py - SIGNAL ONLY helper for Kalshi's "BTC price up in next 15 mins?" markets (KXBTC15M).
 
 What it does (one run):
-  1. Reads the open KXBTC15M market from Kalshi's free public API (target = floor_strike,
-     yes/no bid/ask, close time) and its order book.
-  2. Averages BTC spot from Coinbase, Kraken Futures (PF_XBTUSD) and Bitstamp.
-  3. Estimates how far BTC can move before the close (sigma) from Deribit's DVOL and from the
+  1. Reads ALL open KXBTC15M markets from Kalshi's free public API (target = floor_strike,
+     yes/no bid/ask, close time) and each order book — not only the nearest close.
+  2. Syncs the public trade tape for desk-watched Kalshi series (see kalshi_tape.py).
+  3. Averages BTC spot from Coinbase, Kraken Futures (PF_XBTUSD) and Bitstamp.
+  4. Estimates how far BTC can move before each close (sigma) from Deribit's DVOL and from the
      last 60 one-minute Coinbase candles, and uses the larger one.
-  4. Picks the side BTC is currently on (YES if price > target, else NO), turns the cushion into
-     a probability p = Phi(cushion / sigma), and compares p with the ask + Kalshi fee.
-  5. Checks the US high-impact news calendar (ForexFactory) and prints BUY or SKIP with the reason.
+  5. For every open window: picks the side BTC is currently on (YES if price > target, else NO),
+     turns the cushion into a probability p = Phi(cushion / sigma), and compares p with ask + fee.
+  6. Checks the US high-impact news calendar (ForexFactory) and paper-buys EVERY window that
+     clears the same guideline gates (confidence, edge, cushion, z, ask band, spread, depth,
+     candle direction, news). Desk entry_gate / open-risk / correlation still apply.
 
 What it does NOT do: it places no real orders, needs no login, no API key, and no wallet.
 It keeps a paper account and paper-buys only when the signal clears the edge after fees. Not financial advice.
@@ -195,11 +198,17 @@ def paper_sell(state, pos, bid, fee, reason):
     return pnl
 
 
-def manage_model_flips(state, side_now, prob_now, bid, fee, delta):
-    """Exit open BTC paper when the live model flips against the held side."""
+def manage_model_flips(state, side_now, prob_now, bid, fee, delta, ticker=None):
+    """Exit open BTC paper when the live model flips against the held side.
+
+    When `ticker` is set, only positions on that market are evaluated (multi-window runs).
+    """
     still = []
     sold = []
     for pos in list(state.get("open") or []):
+        if ticker and pos.get("ticker") != ticker:
+            still.append(pos)
+            continue
         held = str(pos.get("side") or "").upper()
         fair_entry = pos.get("fair_at_entry")
         flip = False
@@ -227,10 +236,11 @@ def manage_model_flips(state, side_now, prob_now, bid, fee, delta):
 
 def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None):
     """Paper fill only when the signal cleared the edge after fees. No order is sent."""
+    none_msg = "Checked all open BTC 15-minute markets. No paper buy."
     if ask is None or not (0.05 <= float(ask) <= 0.95):
-        return "Checked the BTC 15-minute market. No paper buy."
+        return none_msg
     if any(isinstance(pos, dict) and pos.get("ticker") == ticker for pos in state.get("open") or []):
-        return "Checked the BTC 15-minute market. No paper buy."
+        return none_msg
     skip = ""
     try:
         desk = _desk()
@@ -242,7 +252,7 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1" and not IS_SHADOW:
         return "Desk entry_gate blocked a new paper buy. Settles still run."
     if not signal_buy:
-        return "Checked the BTC 15-minute market. No paper buy."
+        return none_msg
     edge_val = edge
     if edge_val is None and prob is not None and ask is not None:
         edge_val = float(prob) - float(ask) - float(fee or 0)
@@ -270,14 +280,14 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         stake = 20.0
         contracts = int(stake // per) if per > 0 else 0
     if contracts < 1:
-        return "Checked the BTC 15-minute market. No paper buy."
+        return none_msg
     cost = round(contracts * per, 2)
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:
-        return "Checked the BTC 15-minute market. No paper buy."
+        return none_msg
     state["cash"] = round(cash - cost, 2)
     reward = round(contracts * 1.0 - cost, 2)
-    why = "Paper buy. The BTC 15-minute signal cleared its checks."
+    why = "Paper buy. The BTC 15-minute signal cleared its checks on this window."
     opened = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     try:
         import desk_profit
@@ -310,7 +320,7 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "shadow": IS_SHADOW,
     })
     save_account(state)
-    return "Checked the BTC 15-minute market. Paper buy."
+    return "Checked all open BTC 15-minute markets. Paper buy."
 
 
 def _cached(url):
@@ -381,13 +391,9 @@ def fnum(x):
 
 
 # ---------------- data ----------------
-def kalshi_market():
-    d = get_json(f"{KALSHI}/markets?series_ticker=KXBTC15M&status=open")
-    now = dt.datetime.now(dt.timezone.utc)
-    ms = [m for m in d.get("markets", []) if m.get("close_time") and parse_ts(m["close_time"]) > now]
-    if not ms:
+def _market_row(m):
+    if not m.get("close_time"):
         return None
-    m = min(ms, key=lambda m: parse_ts(m["close_time"]))
     return {
         "ticker": m["ticker"],
         "target": fnum(m.get("floor_strike")),
@@ -396,6 +402,36 @@ def kalshi_market():
         "open_time": parse_ts(m["open_time"]) if m.get("open_time") else None,
         "close_time": parse_ts(m["close_time"]),
     }
+
+
+def kalshi_markets():
+    """Every still-open KXBTC15M window with a target, nearest close first."""
+    now = dt.datetime.now(dt.timezone.utc)
+    out = []
+    cursor = ""
+    while True:
+        url = f"{KALSHI}/markets?series_ticker=KXBTC15M&status=open&limit=200"
+        if cursor:
+            url += f"&cursor={cursor}"
+        d = get_json(url)
+        for raw in d.get("markets", []) or []:
+            row = _market_row(raw)
+            if not row or row["close_time"] <= now or row["target"] is None:
+                continue
+            out.append(row)
+        cursor = d.get("cursor") or ""
+        if not cursor or not d.get("markets"):
+            break
+        if len(out) >= 500:
+            break
+    out.sort(key=lambda row: row["close_time"])
+    return out
+
+
+def kalshi_market():
+    """Nearest open KXBTC15M (compat helper)."""
+    ms = kalshi_markets()
+    return ms[0] if ms else None
 
 
 def book_for_side(ticker, side):
@@ -469,6 +505,138 @@ def _card(sentence):
     return 0
 
 
+def _sigma_for(price, min_left, closes, dvol):
+    """Return (sigma, realized, sig_dvol) for this window's minutes-left."""
+    realized = None
+    if closes:
+        last = closes[-61:]
+        rets = [math.log(b / a) for a, b in zip(last, last[1:]) if a > 0]
+        if len(rets) >= 10:
+            realized = statistics.stdev(rets) * price * math.sqrt(max(min_left, 0))
+    sig_dvol = (
+        price * dvol / 100 * math.sqrt(max(min_left, 0) / 525600) if dvol else None
+    )
+    if sig_dvol is not None and realized is not None:
+        sigma = max(sig_dvol, realized)
+    elif sig_dvol is not None:
+        sigma = sig_dvol
+    elif realized is not None:
+        sigma = realized * DVOL_FAIL_MULT
+    else:
+        sigma = None
+    return sigma, realized, sig_dvol
+
+
+def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf):
+    """Apply the same guideline gates to one open KXBTC15M window.
+
+    Returns dict with reasons, side, p, ask, bid, fee, depth, edge, min_left.
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    min_left = (m["close_time"] - now).total_seconds() / 60
+    sigma, realized, sig_dvol = _sigma_for(price, min_left, closes, dvol)
+    out = {
+        "ticker": m["ticker"],
+        "min_left": min_left,
+        "sigma": sigma,
+        "realized": realized,
+        "sig_dvol": sig_dvol,
+        "reasons": [],
+        "side": None,
+        "p": None,
+        "ask": None,
+        "bid": None,
+        "fee": None,
+        "depth": 0.0,
+        "edge": None,
+        "toward": None,
+        "news": None,
+    }
+    if sigma is None:
+        out["reasons"].append("could not compute sigma")
+        return out
+
+    side = "YES" if price > m["target"] else "NO"
+    cushion = abs(price - m["target"])
+    z = cushion / sigma if sigma > 0 else 0
+    p = phi(z)
+    ask = m["yes_ask"] if side == "YES" else m["no_ask"]
+    bid = m["yes_bid"] if side == "YES" else m["no_bid"]
+    depth = 0.0
+    try:
+        b_bid, b_ask, depth = book_for_side(m["ticker"], side)
+        if b_ask is not None:
+            ask = b_ask
+        if b_bid is not None:
+            bid = b_bid
+    except Exception as e:
+        out["reasons"].append(f"orderbook failed ({e})")
+        return out
+    if ask is None or bid is None:
+        out["reasons"].append("missing bid/ask")
+        return out
+
+    fee = fee_per_contract(ask)
+    spread = ask - bid
+    need = ask + fee + edge_buf
+    toward = None
+    if len(closes) >= 6:
+        move = closes[-1] - closes[-6]
+        toward = (move < 0) if side == "YES" else (move > 0)
+    news = None
+    try:
+        start = m["open_time"] or (m["close_time"] - dt.timedelta(minutes=15))
+        news = usd_high_impact_near(start, m["close_time"])
+    except Exception:
+        news = None
+
+    reasons = []
+    zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
+    if min_left < MIN_MINUTES_LEFT:
+        reasons.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
+    if p < MIN_MODEL_PROB:
+        reasons.append(f"p {p:.3f} < safer floor {MIN_MODEL_PROB:.2f}")
+    if p < need:
+        reasons.append(f"p {p:.3f} < ask+fee+{edge_buf:.2f} = {need:.3f}")
+    if cushion < MIN_CUSHION_USD:
+        reasons.append(f"cushion ${cushion:.2f} < ${MIN_CUSHION_USD}")
+    if z < zmin:
+        reasons.append(f"z {z:.2f} < {zmin}")
+    if not (ASK_MIN <= ask <= ASK_MAX):
+        reasons.append(f"ask {ask:.2f} outside {ASK_MIN:.2f}-{ASK_MAX:.2f}")
+    if spread > MAX_SPREAD + 1e-9:
+        reasons.append(f"spread {spread:.2f} > {MAX_SPREAD:.2f}")
+    if depth < MIN_DEPTH:
+        reasons.append(f"only {depth:.0f} contracts at/below ask (< {MIN_DEPTH})")
+    if toward is None:
+        reasons.append("candle trend unknown")
+    elif toward:
+        reasons.append("last 5 candles moving toward target")
+    if news is None:
+        reasons.append("news calendar unavailable")
+    elif news:
+        reasons.append("USD high-impact news near this block")
+
+    out.update({
+        "reasons": reasons,
+        "side": side,
+        "p": p,
+        "ask": ask,
+        "bid": bid,
+        "fee": fee,
+        "depth": depth,
+        "edge": float(p) - float(ask) - float(fee),
+        "toward": toward,
+        "news": news,
+        "cushion": cushion,
+        "z": z,
+        "need": need,
+        "spread": spread,
+        "dvol": dvol,
+    })
+    return out
+
+
 def main():
     now = dt.datetime.now(dt.timezone.utc)
     account = load_account()
@@ -493,33 +661,43 @@ def main():
     print(f"BTC 15-min Kalshi paper check  ({tag}no real orders)  {now:%Y-%m-%d %H:%M:%S} UTC")
     print(f"Price source https://api.elections.kalshi.com/trade-api/v2 at {now:%Y-%m-%dT%H:%M:%SZ}\n")
 
-    m = kalshi_market()
-    if not m or m["target"] is None:
+    markets = kalshi_markets()
+    # Track public tape for desk series (BTC + INX + sports). Shadow runs skip disk writes
+    # on the shared tape only if DESK_SHADOW — still OK to read; sync once on live.
+    if not IS_SHADOW:
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import kalshi_tape
+            tape = kalshi_tape.sync_tape(
+                DESK_ROOT,
+                tickers=[m["ticker"] for m in markets],
+            )
+            print(
+                f"Kalshi tape: +{tape.get('last_added') or 0} new prints "
+                f"(kept {len(tape.get('trades') or [])}; "
+                f"{len(markets)} open KXBTC15M window(s))"
+            )
+            if tape.get("last_error"):
+                print(f"  tape note: {tape['last_error']}")
+        except Exception as e:
+            print(f"  kalshi tape sync failed: {e}")
+
+    if not markets:
         print("SKIP: no open KXBTC15M market with a target right now (between blocks?). Try again in a minute.")
-        return _card("Checked the BTC 15-minute market. No paper buy.")
-    min_left = (m["close_time"] - now).total_seconds() / 60
-    print(f"Market {m['ticker']}  target ${m['target']:,.2f}  closes {m['close_time']:%H:%M} UTC "
-          f"({min_left:.1f} min left)")
-    print(f"  listing quotes (can lag): YES bid/ask {m['yes_bid']}/{m['yes_ask']}   NO bid/ask {m['no_bid']}/{m['no_ask']}")
+        return _card("Checked all open BTC 15-minute markets. No paper buy.")
 
     spots = spot_prices()
     if not spots:
         print("SKIP: no BTC spot price available from any source.")
-        return _card("Checked the BTC 15-minute market. No paper buy.")
+        return _card("Checked all open BTC 15-minute markets. No paper buy.")
     price = statistics.mean(spots.values())
     print("Spot: " + ", ".join(f"{k} ${v:,.2f}" for k, v in spots.items()) + f"  -> avg ${price:,.2f}")
     coinbase_only = list(spots) == ["coinbase"]
 
-    reasons = []
-    # sigma
-    realized = None
     closes = []
     try:
         closes = [c for _, c in candles_1m()]
-        last = closes[-61:]
-        rets = [math.log(b / a) for a, b in zip(last, last[1:])]
-        if len(rets) >= 10:
-            realized = statistics.stdev(rets) * price * math.sqrt(max(min_left, 0))
     except Exception as e:
         print(f"  candles failed: {e}")
     dvol = None
@@ -527,99 +705,83 @@ def main():
         dvol = dvol_latest()
     except Exception as e:
         print(f"  DVOL failed: {e}")
-    sig_dvol = price * dvol / 100 * math.sqrt(max(min_left, 0) / 525600) if dvol else None
-    if sig_dvol is not None and realized is not None:
-        sigma = max(sig_dvol, realized)
-    elif sig_dvol is not None:
-        sigma = sig_dvol
-    elif realized is not None:
-        sigma = realized * DVOL_FAIL_MULT
-    else:
-        print("SKIP: could not compute sigma (no DVOL and no candles).")
-        return _card("Checked the BTC 15-minute market. No paper buy.")
-    print(f"Sigma: DVOL {dvol if dvol else 'n/a'} -> ${sig_dvol:,.2f}" if sig_dvol else "Sigma: DVOL n/a", end="")
-    print(f" | realized ${realized:,.2f}" if realized is not None else " | realized n/a", end="")
-    print(f" | used ${sigma:,.2f}")
 
-    side = "YES" if price > m["target"] else "NO"
-    cushion = abs(price - m["target"])
-    z = cushion / sigma if sigma > 0 else 0
-    p = phi(z)
-    ask = m["yes_ask"] if side == "YES" else m["no_ask"]
-    bid = m["yes_bid"] if side == "YES" else m["no_bid"]
-    depth = 0.0
-    try:  # the order book is fresher than the market listing; prefer it
-        b_bid, b_ask, depth = book_for_side(m["ticker"], side)
-        if b_ask is not None:
-            ask = b_ask
-        if b_bid is not None:
-            bid = b_bid
-    except Exception as e:
-        print(f"  orderbook failed: {e}")
-    if ask is None or bid is None:
-        print("SKIP: missing bid/ask for the chosen side.")
-        return _card("Checked the BTC 15-minute market. No paper buy.")
-    fee = fee_per_contract(ask)
-    spread = ask - bid
-    need = ask + fee + edge_buf
-    print(f"Side {side}: cushion ${cushion:,.2f}  z {z:.2f}  p {p:.3f}  ask {ask:.2f}  fee {fee:.2f}  "
-          f"need p >= {need:.3f}  spread {spread:.2f}  (venue edge {edge_buf:.2f})")
+    print(f"Open KXBTC15M windows to score: {len(markets)} (guidelines unchanged; bid every fit)\n")
 
-    print(f"Depth offered at or below ask: {depth:,.0f} contracts")
+    buys = 0
+    skips = 0
+    last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
 
-    # Model-flip exits before new buys (and before settle-only wait).
-    if flip_on and account.get("open"):
-        # For held positions, evaluate fair on their own side when possible.
-        sold = manage_model_flips(account, side, p, bid, fee_per_contract(bid) if bid else 0, flip_delta)
-        if sold:
-            save_account(account)
-            for line in sold:
-                print(f"MODEL-FLIP SELL: {line}")
+    for m in markets:
+        min_left = (m["close_time"] - now).total_seconds() / 60
+        print(f"--- {m['ticker']}  target ${m['target']:,.2f}  closes {m['close_time']:%H:%M} UTC "
+              f"({min_left:.1f} min left)")
+        print(f"  listing quotes (can lag): YES bid/ask {m['yes_bid']}/{m['yes_ask']}   "
+              f"NO bid/ask {m['no_bid']}/{m['no_ask']}")
 
-    # last 5 candles moving toward target?
-    toward = None
-    if len(closes) >= 6:
-        move = closes[-1] - closes[-6]
-        toward = (move < 0) if side == "YES" else (move > 0)
-        print(f"Last 5 one-minute candles: {move:+,.2f} USD ({'TOWARD' if toward else 'away from'} target)")
+        ev = evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf)
+        if ev["sigma"] is not None:
+            print(
+                f"  Sigma: DVOL {ev.get('dvol') if ev.get('dvol') else 'n/a'}"
+                + (f" -> ${ev['sig_dvol']:,.2f}" if ev.get("sig_dvol") else "")
+                + (f" | realized ${ev['realized']:,.2f}" if ev.get("realized") is not None else " | realized n/a")
+                + f" | used ${ev['sigma']:,.2f}"
+            )
+        if ev["side"] and ev["ask"] is not None:
+            print(
+                f"  Side {ev['side']}: cushion ${ev.get('cushion', 0):,.2f}  z {ev.get('z', 0):.2f}  "
+                f"p {ev['p']:.3f}  ask {ev['ask']:.2f}  fee {ev['fee']:.2f}  "
+                f"need p >= {ev.get('need', 0):.3f}  spread {ev.get('spread', 0):.2f}  "
+                f"(venue edge {edge_buf:.2f})"
+            )
+            print(f"  Depth offered at or below ask: {ev['depth']:,.0f} contracts")
 
-    # news — fail closed: unknown calendar must not clear a BUY
-    news = None
-    try:
-        start = m["open_time"] or (m["close_time"] - dt.timedelta(minutes=15))
-        news = usd_high_impact_near(start, m["close_time"])
-        print("News (USD High, +/-30 min): " + ("; ".join(news) if news else "none"))
-    except Exception as e:
-        print(f"  news calendar failed ({e}); skipping BUY until calendar loads")
+        # Per-window model-flip before considering a new buy on this ticker.
+        if flip_on and account.get("open") and ev["side"] and ev["bid"] is not None and ev["p"] is not None:
+            sold = manage_model_flips(
+                account,
+                ev["side"],
+                ev["p"],
+                ev["bid"],
+                fee_per_contract(ev["bid"]) if ev["bid"] else 0,
+                flip_delta,
+                ticker=m["ticker"],
+            )
+            if sold:
+                save_account(account)
+                for line in sold:
+                    print(f"  MODEL-FLIP SELL: {line}")
 
-    zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
-    if min_left < MIN_MINUTES_LEFT: reasons.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
-    if p < MIN_MODEL_PROB: reasons.append(f"p {p:.3f} < safer floor {MIN_MODEL_PROB:.2f}")
-    if p < need: reasons.append(f"p {p:.3f} < ask+fee+{edge_buf:.2f} = {need:.3f}")
-    if cushion < MIN_CUSHION_USD: reasons.append(f"cushion ${cushion:.2f} < ${MIN_CUSHION_USD}")
-    if z < zmin: reasons.append(f"z {z:.2f} < {zmin}")
-    if not (ASK_MIN <= ask <= ASK_MAX): reasons.append(f"ask {ask:.2f} outside {ASK_MIN:.2f}-{ASK_MAX:.2f}")
-    if spread > MAX_SPREAD + 1e-9: reasons.append(f"spread {spread:.2f} > {MAX_SPREAD:.2f}")
-    if depth < MIN_DEPTH: reasons.append(f"only {depth:.0f} contracts at/below ask (< {MIN_DEPTH})")
-    if toward is None: reasons.append("candle trend unknown")
-    elif toward: reasons.append("last 5 candles moving toward target")
-    if news is None:
-        reasons.append("news calendar unavailable")
-    elif news:
-        reasons.append("USD high-impact news near this block")
+        reasons = list(ev.get("reasons") or [])
+        if reasons:
+            print("  SIGNAL: SKIP -> " + "; ".join(reasons))
+            skips += 1
+            last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
+        else:
+            tp = min(round(ev["ask"] + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
+            print(
+                f"  SIGNAL: BUY {ev['side']} on {m['ticker']} at <= {ev['ask']:.2f} "
+                f"(fee {ev['fee']:.2f}). Suggested take-profit {tp:.2f} (fill + 0.15, max 0.99)."
+            )
+            last_sentence = paper_buy(
+                account, m["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
+                m["close_time"], True, edge=ev.get("edge"),
+            )
+            if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
+                buys += 1
+            else:
+                skips += 1
+                print(f"  desk/account blocked fill: {last_sentence}")
+        print()
 
-    print()
-    signal_buy = not reasons
-    edge_now = float(p) - float(ask) - float(fee)
-    if reasons:
-        print("SIGNAL: SKIP -> " + "; ".join(reasons))
-    else:
-        tp = min(round(ask + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
-        print(f"SIGNAL: BUY {side} on {m['ticker']} at <= {ask:.2f} (fee {fee:.2f}). "
-              f"Suggested take-profit {tp:.2f} (fill + 0.15, max 0.99).")
-    sentence = paper_buy(account, m["ticker"], side, ask, fee, p, m["close_time"], signal_buy, edge=edge_now)
+    print(f"Windows scored: {len(markets)}  paper buys: {buys}  skips/blocks: {skips}")
     print("(Paper only. Nothing was ordered.)")
-    return _card(sentence)
+    if buys:
+        return _card(
+            f"Checked {len(markets)} open BTC 15-minute markets. "
+            f"{buys} paper buy{'s' if buys != 1 else ''}."
+        )
+    return _card(last_sentence if last_sentence else "Checked all open BTC 15-minute markets. No paper buy.")
 
 
 if __name__ == "__main__":

@@ -144,6 +144,10 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(snap["limits"]["sizing"], "kelly_lite")
         btc = next(b for b in snap["bots"] if b["id"] == "btc15m")
         self.assertEqual(btc["plans"]["exit_quality"], "partial")
+        self.assertTrue(any("Every open KXBTC15M" in line for line in btc["plans"]["buy"]))
+        self.assertIn("kalshi_tape", snap["desk"])
+        self.assertTrue(snap["desk"]["kalshi_tape"].get("paper_only"))
+        self.assertIn("KXBTC15M", snap["desk"]["kalshi_tape"].get("tracked_series") or [])
         self.assertIn("expectancy_n", btc)
         self.assertIn("starved", btc)
         self.assertEqual(btc["sizing_mode"], "kelly_lite")
@@ -260,7 +264,7 @@ class PimpDeskTests(unittest.TestCase):
         btc = next(s for s in pimp_desk.AUTO if s["id"] == "btc15m")
         meme = next(s for s in pimp_desk.AUTO if s["id"] == "memecoin")
         self.assertEqual(sports["every_sec"], 300)
-        self.assertEqual(btc["every_sec"], 300)
+        self.assertEqual(btc["every_sec"], 90)
         self.assertEqual(meme["every_sec"], 600)
         brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")
         scan = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run")
@@ -272,6 +276,8 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual([s for s in pimp_desk.AUTO if s["id"] == "memecoin" and "at_ct" in s], [])
         text = pimp_desk.timer_text().lower()
         self.assertIn("every 5 minutes", text)
+        self.assertIn("90 seconds", text)
+        self.assertIn("trade tape", text)
         self.assertIn("10 minutes", text)
         self.assertIn("8:00", text)
         self.assertIn("12:30", text)
@@ -988,14 +994,14 @@ class PimpDeskTests(unittest.TestCase):
             quiet = btc.paper_buy(
                 state, "KXBTC15M-TEST", "YES", 0.70, 0.02, 0.71, "2026-10-31T16:00:00Z", False,
             )
-            self.assertEqual(quiet, "Checked the BTC 15-minute market. No paper buy.")
+            self.assertEqual(quiet, "Checked all open BTC 15-minute markets. No paper buy.")
             self.assertEqual(state["open"], [])
             self.assertEqual(state["cash"], 100.0)
             self.assertFalse(os.path.exists(btc.ACCOUNT))
             bought = btc.paper_buy(
                 state, "KXBTC15M-TEST", "YES", 0.70, 0.02, 0.80, "2026-10-31T16:00:00Z", True,
             )
-            self.assertEqual(bought, "Checked the BTC 15-minute market. Paper buy.")
+            self.assertEqual(bought, "Checked all open BTC 15-minute markets. Paper buy.")
             self.assertEqual(len(state["open"]), 1)
             cost = state["open"][0]["cost"]
             self.assertGreaterEqual(cost, 19)
