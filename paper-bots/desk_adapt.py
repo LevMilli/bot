@@ -353,7 +353,12 @@ def adapt_stake(
         vol = desk_more.apply_series_vol_prior(vol, series_key)
     except Exception:
         pass
-    perf = performance_from_history(history, window_days=window_days)
+    # Phase 2: proven_80 from calm+elevated (and untagged) settles only.
+    try:
+        import desk_phase2
+        perf = desk_phase2.proven_80_regime_aware(history, window_days=window_days)
+    except Exception:
+        perf = performance_from_history(history, window_days=window_days)
     plan = size_multiplier(vol=vol, perf=perf)
     try:
         base = float(base_stake)

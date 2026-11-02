@@ -655,7 +655,39 @@ def run():
             fair = info["fair_home"] if p["side"] == "home" else 1 - info["fair_home"]
             bid = px(m, "yes_bid_dollars")
             exit_reason = None
-            if flip_on and desk is not None:
+            # Phase 2: gap-decay — tip edge that died mid-game frees risk.
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_phase2
+                live_ask = px(m, "yes_ask_dollars")
+                if live_ask is not None:
+                    gap_now = float(fair) - float(live_ask) - fee(live_ask)
+                else:
+                    gap_now = float(fair) - float(p.get("entry_price") or 0)
+                mins = None
+                try:
+                    from datetime import datetime, timezone
+                    opened = str(p.get("opened") or "")
+                    if opened.endswith("Z"):
+                        opened = opened[:-1] + "+00:00"
+                    mins = (datetime.now(timezone.utc) - datetime.fromisoformat(opened)).total_seconds() / 60.0
+                except Exception:
+                    mins = None
+                decay = desk_phase2.sports_gap_decay_exit(
+                    gap_at_entry=p.get("gap_at_entry"),
+                    gap_now=gap_now,
+                    minutes_since_open=mins,
+                    live=True,
+                )
+                if decay.get("exit"):
+                    exit_reason = decay.get("reason") or "gap-decay"
+                    desk_phase2.remember_gap_decay(DESK_ROOT, {
+                        "ticker": p.get("ticker"), "league": p.get("league"), **decay,
+                    })
+            except Exception:
+                pass
+            if exit_reason is None and flip_on and desk is not None:
                 try:
                     import desk_profit
                     if desk_profit.model_flip_adverse(

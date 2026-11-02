@@ -273,7 +273,7 @@ class PimpDeskTests(unittest.TestCase):
         sports = next(s for s in pimp_desk.AUTO if s["id"] == "sports-gap")
         btc = next(s for s in pimp_desk.AUTO if s["id"] == "btc15m")
         meme = next(s for s in pimp_desk.AUTO if s["id"] == "memecoin")
-        self.assertEqual(sports["every_sec"], 300)
+        self.assertEqual(sports["every_sec"], 180)  # Phase 2 tip-soon cadence
         self.assertEqual(btc["every_sec"], 90)
         self.assertEqual(meme["every_sec"], 600)
         brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")

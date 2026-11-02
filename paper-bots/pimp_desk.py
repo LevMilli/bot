@@ -160,6 +160,8 @@ SETTLEMENT_FILES = (
     "desk_sports_clv.json",
     "desk_top25_state.json",
     "desk_maker_taker_study.json",
+    "desk_phase2_state.json",
+    "desk_adapt_ab_ledger.json",
     "btc15m-signal/paper_parlays.json",
     "pimp-learning.json",
     "pimp-good.json",
@@ -206,10 +208,11 @@ ACTIONS = {
 # for new tickets). Three daily slots were too sparse for stop/ladder/time exits.
 AUTO_RETRY_SEC = 900
 AUTO = (
-    {"id": "sports-gap", "action": "run", "every_sec": 300},
+    # Phase 2: tip-soon sports wakes every 3m; commodity 90s with crypto.
+    {"id": "sports-gap", "action": "run", "every_sec": 180},
     # BTC is the busiest Kalshi series — poll every 90s; guidelines unchanged, bid every fit.
     {"id": "btc15m", "action": "run", "every_sec": 90},
-    {"id": "commodity-15m", "action": "run", "every_sec": 120},
+    {"id": "commodity-15m", "action": "run", "every_sec": 90},
     {"id": "memecoin", "action": "run", "every_sec": 600},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
@@ -1943,6 +1946,27 @@ def stake_dollars_for(
                     adapted = 0.0
         except Exception:
             pass
+        # Phase 2: adapt A/B ledger — what stake would have been without adapt.
+        try:
+            import desk_phase2
+            plan = dict(plan)
+            plan["stake_flat"] = round(float(base), 2)
+            plan["stake_adapt"] = round(float(adapted), 2)
+            if root is not None:
+                desk_phase2.record_adapt_ab(
+                    root,
+                    bot=bot_id,
+                    ticker=str((vol_kwargs or {}).get("ticker") or ""),
+                    stake_flat=float(base),
+                    stake_adapt=float(adapted),
+                    mult=float(plan.get("mult") or 1.0),
+                    regime=str((plan.get("vol") or {}).get("regime") or ""),
+                    play_safe=bool(plan.get("play_safe")),
+                    play_big=bool(plan.get("play_big")),
+                    fill_id=str((vol_kwargs or {}).get("fill_id") or ""),
+                )
+        except Exception:
+            pass
         if return_plan:
             return float(adapted), plan
         return float(adapted)
@@ -2243,6 +2267,11 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     except Exception as exc:  # noqa: BLE001
         desk_row["top25"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["gate_b"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_phase2
+        desk_row["phase2"] = desk_phase2.phase2_summary(root)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["phase2"] = {"paper_only": True, "error": type(exc).__name__}
     # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
     tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
     gate_rows = []
