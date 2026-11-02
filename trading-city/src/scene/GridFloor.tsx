@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { CityCar } from './CityCar'
+import { AvenueTraffic } from './CityCar'
 import { PlazaRailroad, PlazaTrain } from './PlazaTrain'
 import {
   BACK_ROAD_HALF_LEN,
@@ -212,31 +212,7 @@ function BackAvenueBridge() {
         </mesh>
       ))}
 
-      <CityCar
-        position={[-10.5, deckY, BACK_ROAD_Z]}
-        rotation={0}
-        color="#ff2a6d"
-        accent="#ff6b9d"
-        occupancy="family"
-        castHeadlight
-      />
-      <CityCar
-        position={[9.2, deckY, BACK_ROAD_Z]}
-        rotation={Math.PI}
-        color="#2de2e6"
-        accent="#7ef9ff"
-        occupancy="couple"
-        castHeadlight
-      />
-      <CityCar
-        position={[0.8, deckY, BACK_ROAD_Z]}
-        rotation={0}
-        color="#f9c80e"
-        accent="#ffe08a"
-        occupancy="driver"
-        castHeadlight
-        wheelYaw={0.12}
-      />
+      <AvenueTraffic deckY={deckY} />
     </group>
   )
 }
@@ -312,21 +288,6 @@ function PlazaExtras() {
         </group>
       ))}
 
-      {/* Ground-level cars parked clear of rail / avenue */}
-      <CityCar
-        position={[-14.5, 0, 4.5]}
-        rotation={Math.PI / 2}
-        color="#b967ff"
-        accent="#d4a0ff"
-        occupancy="couple"
-      />
-      <CityCar
-        position={[13.8, 0, 2.2]}
-        rotation={-Math.PI / 2}
-        color="#39ff14"
-        accent="#9dff9a"
-        occupancy="driver"
-      />
     </group>
   )
 }
