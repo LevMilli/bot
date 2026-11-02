@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
+import { CityCar } from './CityCar'
 import { PlazaRailroad, PlazaTrain } from './PlazaTrain'
 import {
   BACK_ROAD_HALF_LEN,
@@ -37,21 +38,6 @@ function StreetLamp({ position }: { position: [number, number, number] }) {
   )
 }
 
-function Pedestrian({ position, hue }: { position: [number, number, number]; hue: string }) {
-  return (
-    <group position={position}>
-      <mesh position={[0, 0.28, 0]}>
-        <cylinderGeometry args={[0.07, 0.08, 0.36, 5]} />
-        <meshBasicMaterial color={hue} />
-      </mesh>
-      <mesh position={[0, 0.55, 0]}>
-        <sphereGeometry args={[0.08, 6, 6]} />
-        <meshBasicMaterial color="#e8d4b8" />
-      </mesh>
-    </group>
-  )
-}
-
 function ParkBlock({ position, size }: { position: [number, number, number]; size: [number, number] }) {
   const [w, d] = size
   return (
@@ -80,29 +66,6 @@ function ParkBlock({ position, size }: { position: [number, number, number]; siz
           </mesh>
         </group>
       ))}
-    </group>
-  )
-}
-
-function Car({
-  position,
-  rotation = 0,
-  color,
-}: {
-  position: [number, number, number]
-  rotation?: number
-  color: string
-}) {
-  return (
-    <group position={position} rotation={[0, rotation, 0]}>
-      <mesh position={[0, 0.18, 0]}>
-        <boxGeometry args={[0.85, 0.28, 0.42]} />
-        <meshBasicMaterial color={color} />
-      </mesh>
-      <mesh position={[0.05, 0.36, 0]}>
-        <boxGeometry args={[0.45, 0.2, 0.38]} />
-        <meshBasicMaterial color="#0e1218" />
-      </mesh>
     </group>
   )
 }
@@ -249,9 +212,121 @@ function BackAvenueBridge() {
         </mesh>
       ))}
 
-      <Car position={[-10.5, deckY, BACK_ROAD_Z]} rotation={0} color="#ff2a6d" />
-      <Car position={[9.2, deckY, BACK_ROAD_Z]} rotation={Math.PI} color="#2de2e6" />
-      <Car position={[0.8, deckY, BACK_ROAD_Z]} rotation={0} color="#f9c80e" />
+      <CityCar
+        position={[-10.5, deckY, BACK_ROAD_Z]}
+        rotation={0}
+        color="#ff2a6d"
+        accent="#ff6b9d"
+        occupancy="family"
+        castHeadlight
+      />
+      <CityCar
+        position={[9.2, deckY, BACK_ROAD_Z]}
+        rotation={Math.PI}
+        color="#2de2e6"
+        accent="#7ef9ff"
+        occupancy="couple"
+        castHeadlight
+      />
+      <CityCar
+        position={[0.8, deckY, BACK_ROAD_Z]}
+        rotation={0}
+        color="#f9c80e"
+        accent="#ffe08a"
+        occupancy="driver"
+        castHeadlight
+        wheelYaw={0.12}
+      />
+    </group>
+  )
+}
+
+/** Plaza props that sit clear of the rail band — benches, neon kiosks, blend pads. */
+function PlazaExtras() {
+  const benches = useMemo(
+    () =>
+      [
+        [4.2, 0, 2.4],
+        [-4.8, 0, 1.8],
+        [3.5, 0, -6.5],
+        [-5.2, 0, -5.8],
+      ] as [number, number, number][],
+    [],
+  )
+
+  const kiosks = useMemo(
+    () =>
+      [
+        { p: [6.2, 0, 0.8] as [number, number, number], c: '#2de2e6' },
+        { p: [-6.5, 0, -2.2] as [number, number, number], c: '#ff2a6d' },
+        { p: [1.2, 0, -7.4] as [number, number, number], c: '#b967ff' },
+      ] as const,
+    [],
+  )
+
+  return (
+    <group>
+      {/* Soft sidewalk ring inside the rails — fades so it blends, never stacks on ballast */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, -1]}>
+        <ringGeometry args={[RAIL_R - 2.6, RAIL_R - 2.05, 48]} />
+        <meshBasicMaterial color="#1c2230" transparent opacity={0.55} depthWrite={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.018, -1]}>
+        <ringGeometry args={[RAIL_R - 2.08, RAIL_R - 1.95, 48]} />
+        <meshBasicMaterial color="#2de2e6" transparent opacity={0.18} depthWrite={false} />
+      </mesh>
+
+      {/* plaza plaza tiles near vault — soft blend pad */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 5.2]}>
+        <circleGeometry args={[4.2, 32]} />
+        <meshBasicMaterial color="#12161f" transparent opacity={0.65} depthWrite={false} />
+      </mesh>
+
+      {benches.map((p, i) => (
+        <group key={`bench-${i}`} position={p}>
+          <mesh position={[0, 0.22, 0]}>
+            <boxGeometry args={[0.7, 0.06, 0.22]} />
+            <meshBasicMaterial color="#2a2438" />
+          </mesh>
+          <mesh position={[0, 0.12, -0.08]}>
+            <boxGeometry args={[0.7, 0.2, 0.05]} />
+            <meshBasicMaterial color="#1a1624" />
+          </mesh>
+        </group>
+      ))}
+
+      {kiosks.map((k, i) => (
+        <group key={`kiosk-${i}`} position={k.p}>
+          <mesh position={[0, 0.45, 0]}>
+            <boxGeometry args={[0.55, 0.9, 0.4]} />
+            <meshBasicMaterial color="#141820" />
+          </mesh>
+          <mesh position={[0, 0.7, 0.22]}>
+            <boxGeometry args={[0.48, 0.32, 0.04]} />
+            <meshBasicMaterial color={k.c} toneMapped={false} />
+          </mesh>
+          <mesh position={[0, 0.95, 0]}>
+            <boxGeometry args={[0.5, 0.04, 0.36]} />
+            <meshBasicMaterial color="#0a0e16" />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Ground-level cars parked clear of rail / avenue */}
+      <CityCar
+        position={[-14.5, 0, 4.5]}
+        rotation={Math.PI / 2}
+        color="#b967ff"
+        accent="#d4a0ff"
+        occupancy="couple"
+      />
+      <CityCar
+        position={[13.8, 0, 2.2]}
+        rotation={-Math.PI / 2}
+        color="#39ff14"
+        accent="#9dff9a"
+        occupancy="driver"
+      />
     </group>
   )
 }
@@ -274,19 +349,6 @@ function PlazaDressing() {
     [],
   )
 
-  const people = useMemo(
-    () =>
-      [
-        { p: [2.2, 0, 3.2] as [number, number, number], h: '#2de2e6' },
-        { p: [-3.1, 0, 2.8] as [number, number, number], h: '#ff2a6d' },
-        { p: [6.4, 0, -8.2] as [number, number, number], h: '#f9c80e' },
-        { p: [-7.0, 0, -3.2] as [number, number, number], h: '#b967ff' },
-        { p: [4.0, 0, -15.5] as [number, number, number], h: '#39ff14' },
-        { p: [-5.5, 0, -15.2] as [number, number, number], h: '#7ef9ff' },
-      ] as const,
-    [],
-  )
-
   const parks = useMemo(
     () =>
       [
@@ -305,14 +367,12 @@ function PlazaDressing() {
   return (
     <group>
       <BackAvenueBridge />
+      <PlazaExtras />
       {parks.map((pk, i) => (
         <ParkBlock key={i} position={pk.p} size={pk.s} />
       ))}
       {lamps.map((p, i) => (
         <StreetLamp key={i} position={p} />
-      ))}
-      {people.map((p, i) => (
-        <Pedestrian key={i} position={p.p} hue={p.h} />
       ))}
     </group>
   )
