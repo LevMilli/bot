@@ -49,11 +49,14 @@ const HALL_HEIGHT = 4.55
 const HOME_POS: [number, number, number] = [0, 2.7, 5.45]
 const HOME_TARGET: [number, number, number] = [0, 1.35, -2.2]
 /** Half-width of each teller's private rope channel (local X). */
-const LANE_HALF = 0.68
-/** Rope mouth toward the aisle (local +Z) — open, no front gate. */
-const LANE_Z_MOUTH = 1.35
-/** Rear posts only — clear of the counter lip. */
-const LANE_Z_BACK = 0.62
+const LANE_HALF = 0.7
+/** Mouth posts toward the aisle (local +Z) — open entry, no front crossbar. */
+const LANE_Z_MOUTH = 2.15
+/** Mid posts keep the long side-ropes from reading as stubs. */
+const LANE_Z_MID = 1.35
+/** Rear posts near the counter lip. */
+const LANE_Z_BACK = 0.55
+const ROPE_Y = 0.82
 /** Dolly distance along the focused lane (far → near). */
 const ZOOM_DIST_FAR = 7.2
 const ZOOM_DIST_NEAR = 3.55
@@ -247,10 +250,10 @@ function TellerPod({
         <BotFigure pose={away && !recalling ? 'waiting' : pose} seated={false} />
       </group>
 
-      {/* approach halo */}
+      {/* approach halo at the rope mouth — matches the lane entrance */}
       <mesh
         ref={halo}
-        position={[0, 0.02, 1.15]}
+        position={[0, 0.021, LANE_Z_MOUTH + 0.08]}
         rotation={[-Math.PI / 2, 0, 0]}
         onClick={select}
         onPointerOver={() => bot && (document.body.style.cursor = 'pointer')}
@@ -258,12 +261,12 @@ function TellerPod({
           document.body.style.cursor = 'default'
         }}
       >
-        <ringGeometry args={[focused ? 0.4 : 0.45, focused ? 0.68 : 0.6, 40]} />
-        <meshBasicMaterial color={color} transparent opacity={focused ? 0.92 : 0.62} toneMapped={false} />
+        <ringGeometry args={[focused ? 0.42 : 0.48, focused ? 0.72 : 0.64, 40]} />
+        <meshBasicMaterial color={color} transparent opacity={focused ? 0.95 : 0.7} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.015, 1.15]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0.016, LANE_Z_MOUTH + 0.08]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[0.4, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={focused ? 0.28 : 0.12} />
+        <meshBasicMaterial color={color} transparent opacity={focused ? 0.3 : 0.14} />
       </mesh>
       {away && !recalling && (
         <Html position={[0, 2.15, -0.2]} center distanceFactor={9} style={{ pointerEvents: 'none' }}>
@@ -814,55 +817,112 @@ function Warden() {
   )
 }
 
-function FloorGlowPaths({ tellers }: { tellers: (BotRow | null)[] }) {
+/**
+ * Soft lane carpet under each pod (local space — parent faces the aisle).
+ * Guides the eye from the aisle mouth to the counter.
+ */
+function LaneFloorGuide({ color }: { color: string }) {
+  const len = LANE_Z_MOUTH - 0.15
+  const midZ = (LANE_Z_MOUTH + 0.15) / 2
   return (
     <group>
-      {tellers.map((bot, i) => {
-        const pose = slotPose(i)
-        // Stripe from aisle center toward the pod (along world X).
-        return (
-          <mesh
-            key={bot?.id || i}
-            position={[pose.side * (AISLE_HALF * 0.42), 0.012, pose.z]}
-            rotation={[-Math.PI / 2, 0, Math.PI / 2]}
-          >
-            <planeGeometry args={[0.07, AISLE_HALF * 0.7]} />
-            <meshBasicMaterial
-              color={beamColorFor(bot?.id, i)}
-              transparent
-              opacity={0.26}
-              depthWrite={false}
-              toneMapped={false}
-            />
-          </mesh>
-        )
-      })}
+      <mesh position={[0, 0.014, midZ]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[LANE_HALF * 1.55, len]} />
+        <meshBasicMaterial color={color} transparent opacity={0.14} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0.016, midZ]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.08, len]} />
+        <meshBasicMaterial color={color} transparent opacity={0.55} depthWrite={false} toneMapped={false} />
+      </mesh>
+      {/* Mouth welcome ring on the aisle edge */}
+      <mesh position={[0, 0.018, LANE_Z_MOUTH + 0.08]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.32, 0.48, 28]} />
+        <meshBasicMaterial color={color} transparent opacity={0.7} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0.017, LANE_Z_MOUTH + 0.08]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.3, 28]} />
+        <meshBasicMaterial color={color} transparent opacity={0.16} depthWrite={false} toneMapped={false} />
+      </mesh>
+    </group>
+  )
+}
+
+/** Neon rope span with a slight sag so the lane reads finished, not stubby. */
+function RopeSpan({
+  x,
+  z0,
+  z1,
+  color,
+}: {
+  x: number
+  z0: number
+  z1: number
+  color: string
+}) {
+  const len = Math.abs(z1 - z0)
+  const midZ = (z0 + z1) / 2
+  const sag = 0.055
+  return (
+    <group>
+      {/* Main neon tube */}
+      <mesh position={[x, ROPE_Y - sag * 0.35, midZ]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.018, 0.018, len, 8]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
+      </mesh>
+      {/* Soft glow shell */}
+      <mesh position={[x, ROPE_Y - sag * 0.35, midZ]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.032, 0.032, len * 0.98, 8]} />
+        <meshBasicMaterial color={color} transparent opacity={0.28} depthWrite={false} toneMapped={false} />
+      </mesh>
+      {/* Center dip — sells a draped rope instead of a rigid pipe */}
+      <mesh position={[x, ROPE_Y - sag, midZ]}>
+        <sphereGeometry args={[0.022, 8, 8]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
+      </mesh>
     </group>
   )
 }
 
 /**
- * Local-space queue channel for one pod (parent already faces the aisle).
- * Side ropes only — open mouth toward the customer, no front gate.
+ * Full queue channel for one pod (parent already faces the aisle).
+ * Colored side ropes lead from the aisle mouth to the desk — open entry, no front gate bar.
  */
 function QueueLane({ color }: { color: string }) {
-  const ropeLen = LANE_Z_MOUTH - LANE_Z_BACK
-  const ropeMidZ = (LANE_Z_MOUTH + LANE_Z_BACK) / 2
   return (
     <group>
+      <LaneFloorGuide color={color} />
       {([-LANE_HALF, LANE_HALF] as const).map((x) => (
         <group key={x}>
           <Stanchion position={[x, 0, LANE_Z_BACK]} color={color} />
-          <mesh position={[x, 0.78, ropeMidZ]} rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[0.012, 0.012, ropeLen, 6]} />
-            <meshBasicMaterial color={color} toneMapped={false} />
-          </mesh>
-          <mesh position={[x, 0.78, LANE_Z_MOUTH]}>
-            <sphereGeometry args={[0.028, 8, 8]} />
-            <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.3} emissive={color} emissiveIntensity={0.15} />
-          </mesh>
+          <Stanchion position={[x, 0, LANE_Z_MID]} color={color} />
+          <Stanchion position={[x, 0, LANE_Z_MOUTH]} color={color} />
+          <RopeSpan x={x} z0={LANE_Z_BACK} z1={LANE_Z_MID} color={color} />
+          <RopeSpan x={x} z0={LANE_Z_MID} z1={LANE_Z_MOUTH} color={color} />
         </group>
       ))}
+    </group>
+  )
+}
+
+/** World-space aisle ribbons that echo each teller's color toward their bay. */
+function FloorGlowPaths({ tellers }: { tellers: (BotRow | null)[] }) {
+  return (
+    <group>
+      {tellers.map((bot, i) => {
+        const pose = slotPose(i)
+        const color = beamColorFor(bot?.id, i)
+        // Short center-aisle tick pointing at this bay.
+        return (
+          <mesh
+            key={bot?.id || i}
+            position={[pose.side * 0.55, 0.013, pose.z]}
+            rotation={[-Math.PI / 2, 0, Math.PI / 2]}
+          >
+            <planeGeometry args={[0.05, 0.95]} />
+            <meshBasicMaterial color={color} transparent opacity={0.4} depthWrite={false} toneMapped={false} />
+          </mesh>
+        )
+      })}
     </group>
   )
 }
@@ -952,16 +1012,25 @@ function Stanchion({ position, color }: { position: [number, number, number]; co
   return (
     <group position={position}>
       <mesh position={[0, 0.42, 0]}>
-        <cylinderGeometry args={[0.032, 0.038, 0.84, 10]} />
+        <cylinderGeometry args={[0.034, 0.04, 0.84, 10]} />
         <meshStandardMaterial color="#1a1424" metalness={0.45} roughness={0.4} />
       </mesh>
-      <mesh position={[0, 0.86, 0]}>
-        <sphereGeometry args={[0.055, 12, 12]} />
-        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={0.18} />
+      {/* Colored collar under the brass knob — reads as a finished queue post */}
+      <mesh position={[0, 0.78, 0]}>
+        <cylinderGeometry args={[0.045, 0.04, 0.08, 10]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, ROPE_Y + 0.06, 0]}>
+        <sphereGeometry args={[0.062, 12, 12]} />
+        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={0.42} />
       </mesh>
       <mesh position={[0, 0.04, 0]}>
-        <cylinderGeometry args={[0.09, 0.11, 0.05, 10]} />
+        <cylinderGeometry args={[0.1, 0.12, 0.05, 10]} />
         <meshStandardMaterial color="#121018" roughness={0.55} />
+      </mesh>
+      <mesh position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.11, 0.14, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.55} toneMapped={false} />
       </mesh>
     </group>
   )
