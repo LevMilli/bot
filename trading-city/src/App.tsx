@@ -99,7 +99,7 @@ export default function App() {
             <h1 className="brand">APEX-CITY</h1>
             <p className="tagline">
               {view === 'bank'
-                ? 'Neon paper trust · five tellers · desk board'
+                ? 'Neon paper trust · T-hall · twelve tellers · desk board'
                 : view === 'office' && fromBank
                   ? 'Teller desk · paper trades · switch windows'
                   : 'Neon paper desk · five towers · live snapshot'}
