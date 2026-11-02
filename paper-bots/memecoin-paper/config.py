@@ -6,12 +6,12 @@ PAPER = True                # week one: fake fills at real prices. bot.py refuse
 
 TICKET_USD = 25             # default ticket; desk Kelly-lite may size down to cash
 MIN_TICKET_USD = 10         # still trade when cash is thin but edge clears
-MAX_OPEN = 4                # 4 x $25 = $100 in the market, max
-MAX_ENTRIES_PER_DAY = 6
+MAX_OPEN = 6                # more concurrent paper tickets per tower
+MAX_ENTRIES_PER_DAY = 12    # more fills per Chicago day when edge clears
 # Align with desk daily_loss_stop so a −$50 meme day does not idle the whole teller
 # while sports/BTC still have desk risk budget.
 DAILY_LOSS_HALT_USD = 150
-COOLDOWN_HOURS = 24         # no re-entry into a token you just left
+COOLDOWN_HOURS = 12         # half-day cooldown so the tower can re-enter winners faster
 
 FACTS = {                   # the rug filter. code only, no model
     "max_risk_score": 40,       # rugcheck score_normalised, 0-100, higher = riskier
@@ -25,7 +25,10 @@ FACTS = {                   # the rug filter. code only, no model
     "max_age_hours": 72,
 }
 
-MIN_CONFIDENCE = 0.80       # margin goal: ≥80% confidence + facts + fee-aware venue edge
+# Dual lanes: accurate (high conf) + speed (lower conf, still facts-gated).
+MIN_CONFIDENCE_ACCURATE = 0.80
+MIN_CONFIDENCE_SPEED = 0.72
+MIN_CONFIDENCE = MIN_CONFIDENCE_ACCURATE  # legacy alias
 
 EXIT = {
     "stop_pct": -35,                        # hard stop from entry

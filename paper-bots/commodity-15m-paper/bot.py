@@ -46,12 +46,15 @@ YAHOO = {
     "KXPLATINUM15M": "PL=F",
 }
 
-MIN_MINUTES_LEFT = 10
-MIN_MODEL_PROB = 0.80
-MIN_Z = 0.65
-ASK_MIN, ASK_MAX = 0.75, 0.90
-MAX_SPREAD = 0.04
-MIN_DEPTH = 3
+MIN_MINUTES_LEFT = 8
+MIN_MODEL_ACCURATE = 0.80
+MIN_MODEL_SPEED = 0.75
+MIN_MODEL_PROB = MIN_MODEL_ACCURATE
+SPEED_EDGE_EXTRA = 0.02
+MIN_Z = 0.60
+ASK_MIN, ASK_MAX = 0.70, 0.92
+MAX_SPREAD = 0.05
+MIN_DEPTH = 2
 EDGE_BUFFER = 0.05
 # Relative cushion floors (fraction of spot) — commodities have different scales.
 MIN_CUSHION_FRAC = {
@@ -306,8 +309,15 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
         reasons.append(f"cushion {cushion:.5f} < {min_cush:.5f}")
     if z + 1e-12 < MIN_Z:
         reasons.append(f"z {z:.2f} < {MIN_Z}")
-    if p + 1e-12 < MIN_MODEL_PROB:
-        reasons.append(f"p {p:.3f} < {MIN_MODEL_PROB}")
+    lane = "accurate"
+    need_edge = 0.0
+    if p + 1e-12 >= MIN_MODEL_ACCURATE:
+        lane = "accurate"
+    elif p + 1e-12 >= MIN_MODEL_SPEED:
+        lane = "speed"
+        need_edge = SPEED_EDGE_EXTRA
+    else:
+        reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED}")
     if not (ASK_MIN - 1e-12 <= float(ask) <= ASK_MAX + 1e-12):
         reasons.append(f"ask {ask:.3f} outside band")
     if spread is not None and spread > MAX_SPREAD + 1e-12:
@@ -315,8 +325,8 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     if depth < MIN_DEPTH:
         reasons.append(f"depth {depth} < {MIN_DEPTH}")
     edge = float(p) - float(ask) - float(fee) - float(edge_buf)
-    if edge + 1e-12 < 0:
-        reasons.append(f"edge {edge:.3f} < 0")
+    if edge + 1e-12 < need_edge:
+        reasons.append(f"edge {edge:.3f} < {need_edge:.3f} ({lane})")
     return {
         "side": side,
         "ask": ask,
@@ -329,6 +339,7 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
         "spread": spread,
         "depth": depth,
         "edge": round(edge, 4),
+        "lane": lane,
         "min_left": round(minutes_left, 2),
         "reasons": reasons,
         "ticker": m["ticker"],
@@ -525,6 +536,12 @@ def main() -> int:
             buys += 1
     save_account(account)
     print(f"Done. paper buys={buys} open={len(account.get('open') or [])}")
+    if buys <= 0:
+        print("CARD: Checked commodity 15m markets. No paper buy.")
+    elif buys == 1:
+        print("CARD: Checked commodity 15m markets. Paper buy.")
+    else:
+        print(f"CARD: Checked commodity 15m markets. {buys} paper buys.")
     return 0
 
 

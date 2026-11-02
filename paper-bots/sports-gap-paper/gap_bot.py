@@ -32,12 +32,17 @@ OLD_BANKROLL = 14.00
 MAX_OPEN = 12
 MIN_GAP = 0.06            # fee-aware edge floor AFTER the taker fee (desk venue can raise)
 MIN_GAP_MODEL = 0.08      # NHL model stays 2 points stricter
-MIN_FAIR_PROB = 0.80      # margin goal: ≥80% fair + fee-aware edge (not 82% alone)
+# Dual lanes on one tower: accurate (high fair) + speed (lower fair, extra edge).
+MIN_FAIR_ACCURATE = 0.80
+MIN_FAIR_SPEED = 0.72
+MIN_GAP_SPEED_EXTRA = 0.02   # speed lane needs +2¢ edge after fee vs desk venue
+MIN_FAIR_PROB = MIN_FAIR_ACCURATE  # legacy name used in logs
 DESK_ROOT = os.path.dirname(HERE)
 CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this band
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
 PRICE_BOUNDS = (0.05, 0.92)     # avoid near-worthless / near-locked contracts
-PREGAME_WINDOW_MIN = 90   # also scan tip-soon books so Sunday nights are not one-trade desks
+PREGAME_WINDOW_MIN = 180  # tip-soon window (3h) so Monday/weekday books fill earlier
+MAX_BUYS_PER_CHECK = 4    # more than one paper fill per timer tick when risk allows
 
 def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None, spread=None, ticker=None):
     """Paper dollars for one sports fill — Kelly-lite + shared vol/learn adapt."""
@@ -427,9 +432,9 @@ def _card_line(summary_out):
     if trades:
         word = "trade" if len(trades) == 1 else "trades"
         return f"CARD: Paper buy. {len(trades)} paper {word} this check."
-    if summary_out.get("live_games") == 0:
-        return "CARD: No live games, so this check bought nothing."
-    return "CARD: No paper buy."
+    if summary_out.get("live_games") == 0 and not summary_out.get("matched"):
+        return "CARD: No live or tip-soon games, so this check bought nothing."
+    return "CARD: No paper buy (lanes clear, no fee-aware edge)."
 
 
 def run():
@@ -556,23 +561,32 @@ def run():
                 lines.append(row + " | no prices - skip |"); continue
             gap, side, m, fair, bid, ask = max(cands, key=lambda c: c[0])
             gtxt = f"{gap*100:+.1f} pts on {m.get('yes_sub_title')} (fair {fair:.1%} vs ask {ask:.2f})"
-            need = need_edge if src == "espn" else round(need_edge + 0.02, 4)
+            base_need = need_edge if src == "espn" else round(need_edge + 0.02, 4)
             reason = None
+            lane = "accurate"
+            need = base_need
             if entries_off:
                 reason = entries_off
             elif key in open_by_game:
                 reason = "already holding this game"
             elif CLOSE_GAME_BAND[0] <= fair_home <= CLOSE_GAME_BAND[1]:
                 reason = "close game - skip"
-            elif fair + 1e-12 < MIN_FAIR_PROB:
-                reason = f"fair {fair:.0%} < safer floor {MIN_FAIR_PROB:.0%} - skip"
-            elif gap < need:
-                reason = f"gap < {need*100:.0f} - no trade"
-            elif ask - bid > MAX_SPREAD:
+            elif fair + 1e-12 >= MIN_FAIR_ACCURATE:
+                lane = "accurate"
+                need = base_need
+            elif fair + 1e-12 >= MIN_FAIR_SPEED:
+                # Speed lane: take the fill only with extra fee-aware edge.
+                lane = "speed"
+                need = round(base_need + MIN_GAP_SPEED_EXTRA, 4)
+            else:
+                reason = f"fair {fair:.0%} < speed floor {MIN_FAIR_SPEED:.0%} - skip"
+            if reason is None and gap < need:
+                reason = f"gap < {need*100:.0f} ({lane}) - no trade"
+            elif reason is None and ask - bid > MAX_SPREAD:
                 reason = "spread too wide - skip"
-            elif not (PRICE_BOUNDS[0] <= ask <= PRICE_BOUNDS[1]):
+            elif reason is None and not (PRICE_BOUNDS[0] <= ask <= PRICE_BOUNDS[1]):
                 reason = "price too extreme - skip"
-            elif desk is not None:
+            elif reason is None and desk is not None:
                 skip = desk.learning_skip(desk.load_learning(DESK_ROOT), league, desk.prob_bucket(fair))
                 if skip:
                     reason = skip
@@ -582,7 +596,7 @@ def run():
             buy_candidates.append({
                 "key": key, "league": league, "name": name, "m": m, "side": side, "fair": fair,
                 "bid": bid, "ask": ask, "gap": gap, "score": score, "path": path, "g": g,
-                "series": series, "row": row, "gtxt": gtxt,
+                "series": series, "row": row, "gtxt": gtxt, "lane": lane, "need": need,
             })
 
     # ---- exits / settlement (before new paper buys) ----
@@ -677,11 +691,14 @@ def run():
         desk_brain = None
         buy_candidates = sorted(buy_candidates, key=lambda c: -float(c.get("gap") or 0))
 
+    buys_this_check = 0
     for c in buy_candidates:
         key, m, fair, ask, bid, gap = c["key"], c["m"], c["fair"], c["ask"], c["bid"], c["gap"]
         row, gtxt = c["row"], c["gtxt"]
         reason = None
-        if key in open_by_game:
+        if buys_this_check >= MAX_BUYS_PER_CHECK:
+            reason = f"max buys this check ({MAX_BUYS_PER_CHECK})"
+        elif key in open_by_game:
             reason = "already holding this game"
         elif len(s["open"]) >= max_open:
             reason = "max open positions"
@@ -733,7 +750,11 @@ def run():
         max_payout = round(n * 1.0, 2)
         reward = round(max_payout - cost, 2)
         ratio = round(reward / cost, 4) if cost else None
-        why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
+        lane = str(c.get("lane") or "accurate")
+        why = (
+            f"Paper buy ({lane} lane). The fair price beat the ask by "
+            f"{gap * 100:.1f} points after the fee."
+        )
         try:
             import desk_profit
             risk_factor = desk_profit.risk_factor_for("sports-gap", c["side"])
@@ -742,7 +763,7 @@ def run():
         pos = {"game_key": key, "league": c["league"], "game": c["name"], "ticker": m["ticker"], "team": m.get("yes_sub_title"),
                "side": c["side"], "contracts": n, "entry_price": ask, "bid": bid, "ask": ask, "entry_fee": fee(ask),
                "fee": fee(ask), "cost": cost, "risk": cost, "reward": reward, "risk_reward": ratio,
-               "max_payout": max_payout, "why": why,
+               "max_payout": max_payout, "why": why, "lane": lane,
                "fair_at_entry": round(fair, 4), "gap_at_entry": round(gap, 4),
                "risk_factor": risk_factor,
                "opened": ts, "score_at_entry": c["score"], "espn_id": c["g"]["id"], "espn_path": c["path"],
@@ -751,8 +772,13 @@ def run():
                "fill_id": f"{m['ticker']}|{ts}"}
         s["open"].append(pos)
         open_by_game[key] = pos
-        lines.append(row + gtxt + f" | **PAPER BUY** {n} YES {m.get('yes_sub_title')} @ {ask:.2f} (+fee {fee(ask):.2f}) = ${cost:.2f} |")
-        summary_out["trades"].append(f"BUY {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")
+        buys_this_check += 1
+        lines.append(
+            row + gtxt
+            + f" | **PAPER BUY** [{lane}] {n} YES {m.get('yes_sub_title')} @ {ask:.2f} "
+            + f"(+fee {fee(ask):.2f}) = ${cost:.2f} |"
+        )
+        summary_out["trades"].append(f"BUY [{lane}] {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")
         if desk_brain is not None:
             try:
                 note = desk_brain.explain_buy(
