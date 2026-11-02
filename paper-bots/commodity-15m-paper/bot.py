@@ -48,10 +48,12 @@ YAHOO = {
 
 MIN_MINUTES_LEFT = 8
 MIN_MODEL_ACCURATE = 0.80
-MIN_MODEL_SPEED = 0.75
+MIN_MODEL_SPEED = 0.72       # match sports/BTC speed lane; needs SPEED_EDGE_EXTRA
 MIN_MODEL_PROB = MIN_MODEL_ACCURATE
 SPEED_EDGE_EXTRA = 0.02
 MIN_Z = 0.60
+MIN_Z_SPEED = 0.55           # speed lane near-miss z when extra edge clears
+MAX_BUYS_PER_CHECK = 3
 ASK_MIN, ASK_MAX = 0.70, 0.92
 MAX_SPREAD = 0.05
 MIN_DEPTH = 2
@@ -318,8 +320,6 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     spread, depth = book_depth(str(m["ticker"]), side, ask)
     if cushion + 1e-12 < min_cush:
         reasons.append(f"cushion {cushion:.5f} < {min_cush:.5f}")
-    if z + 1e-12 < z_floor:
-        reasons.append(f"z {z:.2f} < {z_floor}")
     lane = "accurate"
     need_edge = 0.0
     if p + 1e-12 >= MIN_MODEL_ACCURATE:
@@ -327,8 +327,11 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     elif p + 1e-12 >= MIN_MODEL_SPEED:
         lane = "speed"
         need_edge = SPEED_EDGE_EXTRA
+        z_floor = min(float(z_floor), MIN_Z_SPEED)
     else:
         reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED}")
+    if z + 1e-12 < z_floor:
+        reasons.append(f"z {z:.2f} < {z_floor}")
     if not (ASK_MIN - 1e-12 <= float(ask) <= ASK_MAX + 1e-12):
         reasons.append(f"ask {ask:.3f} outside band")
     if spread is not None and spread > MAX_SPREAD + 1e-12:
@@ -540,6 +543,9 @@ def main() -> int:
     except Exception:
         ranked = candidates
     for row in ranked:
+        if buys >= MAX_BUYS_PER_CHECK:
+            print(f"  → skip: max buys this check ({MAX_BUYS_PER_CHECK})")
+            break
         ev = row.get("_ev") or row
         msg = paper_buy(account, ev)
         print(f"  → {msg}")

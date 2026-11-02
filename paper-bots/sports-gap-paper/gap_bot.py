@@ -682,7 +682,9 @@ def run():
                     gap_now = float(fair) - float(p.get("entry_price") or 0)
                 mins = None
                 try:
-                    from datetime import datetime, timezone
+                    # Use module-level datetime — a local import here shadows it for
+                    # the whole run() and crashed every check after tape sync
+                    # (UnboundLocalError on datetime.now(CT) for the day stamp).
                     opened = str(p.get("opened") or "")
                     if opened.endswith("Z"):
                         opened = opened[:-1] + "+00:00"
@@ -915,4 +917,11 @@ if __name__ == "__main__":
             elif os.path.exists(f):
                 os.remove(f)
         print("Paper state reset to $%.2f" % START_BANKROLL); sys.exit()
-    run()
+    try:
+        run()
+    except Exception as exc:
+        # Never leave the desk card as a raw Traceback — exits still matter next tick.
+        import traceback
+        traceback.print_exc()
+        print(f"CARD: Sports check error ({type(exc).__name__}). Buys skipped this tick.")
+        sys.exit(1)
