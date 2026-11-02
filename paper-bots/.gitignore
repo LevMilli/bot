@@ -15,6 +15,8 @@ pimp-learning.json
 kalshi_tape.json
 kalshi_crypto_history.json
 desk_brain_journal.json
+desk_adapt_state.json
 btc15m-signal/paper_parlays.json
+commodity-15m-paper/paper_account.json
 *.tmp
 __pycache__/

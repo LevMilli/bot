@@ -24,6 +24,14 @@ WATCH_SERIES = (
     "KXBTC15M",
     "KXETH15M",
     "KXBTCD",
+    "KXPALLADIUM15M",
+    "KXNATGAS15M",
+    "KXCOPPER15M",
+    "KXBRENT15M",
+    "KXWTI15M",
+    "KXSILVER15M",
+    "KXGOLD15M",
+    "KXPLATINUM15M",
     "KXINXU",
     "KXNFLGAME",
     "KXNCAAFGAME",
@@ -32,6 +40,33 @@ WATCH_SERIES = (
     "KXMLBGAME",
     "KXNHLGAME",
 )
+
+# Per-family budgets so sports/crypto/commodity tape sync stays inside ACTION timeouts.
+FAMILY_BUDGETS = {
+    "sports": {
+        "series": ("KXNFLGAME", "KXNCAAFGAME", "KXNBAGAME", "KXWNBAGAME", "KXMLBGAME", "KXNHLGAME"),
+        "max_markets_per_series": 25,
+        "per_ticker_limit": 50,
+    },
+    "crypto15m": {
+        "series": ("KXBTC15M", "KXETH15M", "KXBTCD"),
+        "max_markets_per_series": 20,
+        "per_ticker_limit": 50,
+    },
+    "commodity15m": {
+        "series": (
+            "KXPALLADIUM15M", "KXNATGAS15M", "KXCOPPER15M", "KXBRENT15M",
+            "KXWTI15M", "KXSILVER15M", "KXGOLD15M", "KXPLATINUM15M",
+        ),
+        "max_markets_per_series": 12,
+        "per_ticker_limit": 40,
+    },
+    "inx": {
+        "series": ("KXINXU",),
+        "max_markets_per_series": 10,
+        "per_ticker_limit": 30,
+    },
+}
 
 TAPE_NAME = "kalshi_tape.json"
 MAX_TRADES_KEPT = 4000
@@ -197,6 +232,30 @@ def _soonest_markets(markets: list[dict], limit: int) -> list[dict]:
 
     ordered = sorted(markets, key=_close_key)
     return ordered[:limit]
+
+
+def sync_tape_family(
+    root: str | None,
+    family: str,
+    *,
+    tickers: Iterable[str] | None = None,
+    expand_open: bool = True,
+    **overrides,
+) -> dict:
+    """Sync only one family under its market/trade caps (prevents 75s timeout class bugs)."""
+    cfg = FAMILY_BUDGETS.get(str(family) or "")
+    if not cfg:
+        raise KeyError(f"unknown tape family: {family}")
+    return sync_tape(
+        root,
+        series=tuple(overrides.get("series") or cfg["series"]),
+        tickers=tickers,
+        per_ticker_limit=int(overrides.get("per_ticker_limit") or cfg["per_ticker_limit"]),
+        max_markets_per_series=int(
+            overrides.get("max_markets_per_series") or cfg["max_markets_per_series"]
+        ),
+        expand_open=expand_open,
+    )
 
 
 def sync_tape(

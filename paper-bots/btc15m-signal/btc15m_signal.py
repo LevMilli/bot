@@ -239,7 +239,7 @@ def manage_model_flips(state, side_now, prob_now, bid, fee, delta, ticker=None):
     return sold
 
 
-def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None):
+def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None, vol_kwargs=None):
     """Paper fill only when the signal cleared the edge after fees. No order is sent."""
     none_msg = "Checked all open BTC 15-minute markets. No paper buy."
     if ask is None or not (0.05 <= float(ask) <= 0.95):
@@ -277,12 +277,17 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
-        stake = desk.stake_dollars_for(
-            "btc15m", prob, edge=edge_val, cfg=cfg, open_risk_used=open_risk, ask=ask, root=DESK_ROOT
+        vk = dict(vol_kwargs or {})
+        vk.setdefault("ask", ask)
+        vk.setdefault("ticker", ticker)
+        stake, adapt_plan = desk.stake_dollars_for(
+            "btc15m", prob, edge=edge_val, cfg=cfg, open_risk_used=open_risk, ask=ask,
+            root=DESK_ROOT, vol_kwargs=vk, return_plan=True,
         )
         contracts = desk.contracts_for_stake(per, stake)
     except Exception:
         stake = 20.0
+        adapt_plan = {}
         contracts = int(stake // per) if per > 0 else 0
     if contracts < 1:
         return none_msg
@@ -299,6 +304,8 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         risk_factor = desk_profit.risk_factor_for("btc15m", side)
     except Exception:
         risk_factor = ""
+    vol = (adapt_plan or {}).get("vol") or {}
+    perf = (adapt_plan or {}).get("perf") or {}
     state.setdefault("open", []).append({
         "ticker": ticker,
         "team": ticker,
@@ -323,6 +330,19 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "price_at": opened,
         "paper_only": True,
         "shadow": IS_SHADOW,
+        # Prove-it drawer fields (city reads snapshot only).
+        "cushion": vk.get("cushion"),
+        "sigma": vk.get("sigma"),
+        "adapt_mult": (adapt_plan or {}).get("mult"),
+        "adapt_notes": list((adapt_plan or {}).get("notes") or [])[:6],
+        "play_safe": bool((adapt_plan or {}).get("play_safe")),
+        "play_big": bool((adapt_plan or {}).get("play_big")),
+        "vol_regime": vol.get("regime"),
+        "vol_score": vol.get("score"),
+        "history_n": perf.get("n"),
+        "history_hit": perf.get("hit_rate"),
+        "history_ci_low": perf.get("hit_ci_low"),
+        "fill_tax": 0.01,
     })
     save_account(state)
     return "Checked all open BTC 15-minute markets. Paper buy."
@@ -794,12 +814,8 @@ def main():
                 sys.path.insert(0, DESK_ROOT)
             import kalshi_tape
             tickers = [m["ticker"] for m in markets] + [m["ticker"] for m in eth_markets]
-            tape = kalshi_tape.sync_tape(
-                DESK_ROOT,
-                series=("KXBTC15M", "KXETH15M", "KXBTCD"),
-                tickers=tickers,
-                max_markets_per_series=20,
-                per_ticker_limit=50,
+            tape = kalshi_tape.sync_tape_family(
+                DESK_ROOT, "crypto15m", tickers=tickers,
             )
             print(
                 f"Kalshi tape: +{tape.get('last_added') or 0} new prints "
@@ -831,6 +847,22 @@ def main():
     except Exception as e:
         print(f"  DVOL failed: {e}")
 
+    if not IS_SHADOW:
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import kalshi_history
+            try:
+                settled = kalshi_history.settle_open_windows(DESK_ROOT, limit=30)
+                if settled.get("settled"):
+                    print(f"History settle harness: labeled {settled['settled']} window(s)")
+            except Exception as exc:
+                print(f"  history settle harness skipped: {type(exc).__name__}")
+            n15 = kalshi_history.snapshot_open_15m_series(DESK_ROOT)
+            if n15:
+                print(f"15m series history: recorded {n15} open markets (crypto/metals/energy)")
+        except Exception as e:
+            print(f"  15m history sweep failed: {e}")
     if not IS_SHADOW and price is not None:
         n_ladder = snapshot_btcd_ladder(DESK_ROOT, price)
         if n_ladder:
@@ -1056,6 +1088,11 @@ def main():
         last_sentence = paper_buy(
             account, ev["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
             ev.get("close_time") or m.get("close_time"), True, edge=ev.get("edge"),
+            vol_kwargs={
+                "cushion": ev.get("cushion"), "sigma": ev.get("sigma"),
+                "spread": ev.get("spread"), "minutes_left": ev.get("min_left"),
+                "ask": ev.get("ask"), "ticker": ev.get("ticker"),
+            },
         )
         if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
             buys += 1
@@ -1138,6 +1175,11 @@ def main():
             sentence = paper_buy(
                 account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
                 ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
+                vol_kwargs={
+                    "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
+                    "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
+                    "ask": ev_early.get("ask"), "ticker": m["ticker"],
+                },
             )
             print(f"  ETH early: {sentence}")
             if "Paper buy" in sentence and "No paper buy" not in sentence:

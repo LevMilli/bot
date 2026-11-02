@@ -76,6 +76,19 @@ class KalshiTapeTests(unittest.TestCase):
         kept = kalshi_tape._soonest_markets(rows, 2)
         self.assertEqual([m["ticker"] for m in kept], ["B", "C"])
 
+    def test_family_budgets(self):
+        self.assertIn("sports", kalshi_tape.FAMILY_BUDGETS)
+        self.assertIn("crypto15m", kalshi_tape.FAMILY_BUDGETS)
+        self.assertIn("commodity15m", kalshi_tape.FAMILY_BUDGETS)
+        self.assertIn("inx", kalshi_tape.FAMILY_BUDGETS)
+        self.assertLessEqual(kalshi_tape.FAMILY_BUDGETS["sports"]["max_markets_per_series"], 25)
+        self.assertLessEqual(kalshi_tape.FAMILY_BUDGETS["commodity15m"]["max_markets_per_series"], 15)
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(kalshi_tape, "list_open_markets", return_value=[]), \
+                 mock.patch.object(kalshi_tape, "fetch_trades_for_ticker", return_value=[]):
+                state = kalshi_tape.sync_tape_family(tmp, "crypto15m")
+            self.assertTrue(state.get("paper_only"))
+
     def test_self_check(self):
         kalshi_tape.self_check()
 

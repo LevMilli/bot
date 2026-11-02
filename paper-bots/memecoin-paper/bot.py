@@ -504,9 +504,24 @@ def ticket_for(st, conf) -> float:
         cfg = desk.load_settings(os.path.dirname(BASE))
         edge = max(0.0, float(conf) - 0.5)  # residual confidence above coin-flip
         open_risk = sum(float(p.get("cost_usd") or 0) for p in (st.get("open") or []))
+        # Adapt: high 5m % move ⇒ safer size; proven ≥80% hit ⇒ bigger.
+        m5 = None
+        try:
+            raw = (pair.get("priceChange") or {}).get("m5")
+            if raw is None:
+                raw = pair.get("priceChange", {}).get("h1") if isinstance(pair.get("priceChange"), dict) else None
+            m5 = abs(float(raw)) / 100.0 if raw is not None else None  # percent → fraction
+        except (TypeError, ValueError, AttributeError):
+            m5 = None
         dollars = float(desk.stake_dollars_for(
             "memecoin", conf, edge=edge, cfg=cfg, open_risk_used=open_risk,
             ask=None, root=os.path.dirname(BASE),
+            vol_kwargs={
+                "ticker": str((pair.get("baseToken") or {}).get("symbol") or "meme"),
+                "recent_range": m5,
+                "spot": 1.0 if m5 is not None else None,
+                "minutes_left": 30,
+            },
         ))
     except Exception:
         pass
