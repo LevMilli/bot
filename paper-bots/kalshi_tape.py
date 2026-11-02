@@ -184,15 +184,33 @@ def _norm_trade(row: dict) -> dict | None:
     }
 
 
+def _soonest_markets(markets: list[dict], limit: int) -> list[dict]:
+    """Keep the soonest-closing open markets so tape sync stays inside bot timeouts."""
+    if limit <= 0 or len(markets) <= limit:
+        return markets
+
+    def _close_key(m):
+        raw = m.get("close_time") or m.get("expected_expiration_time") or ""
+        return str(raw)
+
+    ordered = sorted(markets, key=_close_key)
+    return ordered[:limit]
+
+
 def sync_tape(
     root: str | None = None,
     series: Iterable[str] | None = None,
     tickers: Iterable[str] | None = None,
     per_ticker_limit: int = 100,
+    max_markets_per_series: int = 40,
+    expand_open: bool = True,
 ) -> dict:
     """
     Pull new public trades for watched open markets (and any extra tickers).
     Idempotent on trade_id. Returns updated tape state (also saved).
+
+    Caps open-market expansion per series so a sports/BTC check cannot spend
+    minutes paging hundreds of KXINXU / NCAAF books (that caused 75s kills).
     """
     state = load_tape(root)
     watched = tuple(series) if series is not None else WATCH_SERIES
@@ -202,15 +220,25 @@ def sync_tape(
     errors: list[str] = []
 
     want_tickers: set[str] = set(str(t) for t in (tickers or []) if t)
-    for s in watched:
-        try:
-            markets = list_open_markets(s)
-            open_markets[s] = [m.get("ticker") for m in markets if m.get("ticker")]
-            for m in markets:
-                if m.get("ticker"):
-                    want_tickers.add(str(m["ticker"]))
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{s} markets: {type(exc).__name__}")
+    if expand_open:
+        for s in watched:
+            try:
+                markets = _soonest_markets(list_open_markets(s), int(max_markets_per_series))
+                open_markets[s] = [m.get("ticker") for m in markets if m.get("ticker")]
+                for m in markets:
+                    if m.get("ticker"):
+                        want_tickers.add(str(m["ticker"]))
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{s} markets: {type(exc).__name__}")
+    else:
+        # Still record known tickers under their series for the summary board.
+        for ticker in list(want_tickers):
+            ser = series_of_ticker(ticker)
+            if not ser:
+                continue
+            open_markets.setdefault(ser, [])
+            if ticker not in open_markets[ser]:
+                open_markets[ser].append(ticker)
 
     watermarks = dict(state.get("min_ts_by_ticker") or {})
     for ticker in sorted(want_tickers):

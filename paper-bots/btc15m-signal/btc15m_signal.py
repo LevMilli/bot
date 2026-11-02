@@ -721,7 +721,10 @@ def main():
             import kalshi_tape
             tape = kalshi_tape.sync_tape(
                 DESK_ROOT,
+                series=("KXBTC15M",),
                 tickers=[m["ticker"] for m in markets],
+                max_markets_per_series=20,
+                per_ticker_limit=50,
             )
             print(
                 f"Kalshi tape: +{tape.get('last_added') or 0} new prints "

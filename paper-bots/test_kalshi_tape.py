@@ -67,6 +67,15 @@ class KalshiTapeTests(unittest.TestCase):
             self.assertEqual(summary["by_series"]["KXBTC15M"]["count"], 2)
             self.assertTrue(os.path.exists(os.path.join(tmp, "kalshi_tape.json")))
 
+    def test_soonest_markets_cap(self):
+        rows = [
+            {"ticker": "A", "close_time": "2099-01-03T00:00:00Z"},
+            {"ticker": "B", "close_time": "2099-01-01T00:00:00Z"},
+            {"ticker": "C", "close_time": "2099-01-02T00:00:00Z"},
+        ]
+        kept = kalshi_tape._soonest_markets(rows, 2)
+        self.assertEqual([m["ticker"] for m in kept], ["B", "C"])
+
     def test_self_check(self):
         kalshi_tape.self_check()
 
