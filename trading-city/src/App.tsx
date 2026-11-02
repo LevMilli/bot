@@ -95,7 +95,7 @@ export default function App() {
 
         <header className="chrome-top">
           <div className="brand-block">
-            <h1 className="brand">SIGNAL-CITY</h1>
+            <h1 className="brand">APEX-CITY</h1>
             <p className="tagline">
               {view === 'bank'
                 ? 'Neon paper trust · five tellers · desk board'
@@ -192,7 +192,7 @@ export default function App() {
         {view === 'bank' && (
           <div className="office-hud bank-hud">
             <div className="office-title">
-              <strong>SIGNAL-CITY TRUST</strong>
+              <strong>APEX-CITY TRUST</strong>
               <span>click a teller for trades · screens match the office theme</span>
             </div>
           </div>

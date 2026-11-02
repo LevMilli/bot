@@ -26,7 +26,7 @@ type Props = {
 const POSES: BotPose[] = ['waiting', 'researching', 'trading', 'winning']
 
 /**
- * Reusable SIGNAL-CITY street car (procedural R3F model).
+ * Reusable APEX-CITY street car (procedural R3F model).
  * Forward = local −X. Headlights / cones aim that way.
  */
 export function CityCar({

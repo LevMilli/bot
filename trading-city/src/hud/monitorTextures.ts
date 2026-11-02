@@ -223,7 +223,7 @@ export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
 
   ctx.fillStyle = '#f9c80e'
   ctx.font = 'bold 28px monospace'
-  ctx.fillText('SIGNAL-CITY TRUST  ·  NET DESK', 28, 42)
+  ctx.fillText('APEX-CITY TRUST  ·  NET DESK', 28, 42)
 
   const realized = Number(desk?.realized || 0)
   const today = Number(desk?.today || 0)
