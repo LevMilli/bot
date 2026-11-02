@@ -38,7 +38,8 @@ const TELLER_COUNT = 5
 const TELLER_SPACING = 3.05
 /** Half-width of each teller's private rope channel (gap between neighbors = spacing − 2×half). */
 const LANE_HALF = 0.72
-const LANE_Z_FRONT = 2.05
+/** Front posts sit mid-aisle — mouth stays open (no crossbar). */
+const LANE_Z_FRONT = 1.72
 /** Keep rear posts in the aisle — clear of the counter lip. */
 const LANE_Z_BACK = 0.88
 /** Dolly distance along the focused lane (far → near). */
@@ -235,29 +236,30 @@ function ProfitBoard({ desk }: { desk?: Desk }) {
   useFrame(() => {
     map.needsUpdate = true
   })
-  // High on the back wall — readable, not covering teller heads.
+  // Back wall, large face — readable from default lobby distance; clear of ceiling neon.
+  // Slightly lower so primary rows sit under the chrome banner stack.
   return (
-    <group position={[0, 3.62, -2.92]}>
+    <group position={[0, 3.22, -2.98]}>
       <mesh>
-        <boxGeometry args={[5.2, 0.92, 0.12]} />
+        <boxGeometry args={[7.0, 1.55, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.5} roughness={0.28} />
       </mesh>
-      <mesh position={[0, 0, 0.07]}>
-        <planeGeometry args={[4.85, 0.74]} />
+      <mesh position={[0, 0, 0.08]}>
+        <planeGeometry args={[6.55, 1.32]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.49, 0.04]}>
-        <boxGeometry args={[5.3, 0.035, 0.06]} />
+      <mesh position={[0, 0.81, 0.05]}>
+        <boxGeometry args={[7.1, 0.04, 0.07]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.49, 0.04]}>
-        <boxGeometry args={[5.3, 0.035, 0.06]} />
+      <mesh position={[0, -0.81, 0.05]}>
+        <boxGeometry args={[7.1, 0.04, 0.07]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
-      {([-2.4, 2.4] as const).map((x) =>
-        ([-0.32, 0.32] as const).map((y) => (
-          <mesh key={`${x}-${y}`} position={[x, y, 0.08]}>
-            <cylinderGeometry args={[0.035, 0.035, 0.03, 10]} />
+      {([-3.25, 3.25] as const).map((x) =>
+        ([-0.58, 0.58] as const).map((y) => (
+          <mesh key={`${x}-${y}`} position={[x, y, 0.09]}>
+            <cylinderGeometry args={[0.04, 0.04, 0.035, 10]} />
             <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.2} />
           </mesh>
         )),
@@ -282,8 +284,9 @@ function HeroVaultDoor() {
     const a = (i / 14) * Math.PI * 2
     return [Math.cos(a) * 1.05, Math.sin(a) * 1.05] as const
   })
+  // Behind NET DESK / flank boards — cyan ring must not arc through board faces.
   return (
-    <group position={[0, 1.55, -2.98]}>
+    <group position={[0, 1.35, -3.28]} scale={0.92}>
       <mesh position={[0, 0, -0.06]}>
         <cylinderGeometry args={[1.45, 1.45, 0.18, 48]} />
         <meshStandardMaterial color="#0a0614" metalness={0.6} roughness={0.32} />
@@ -326,8 +329,8 @@ function HeroVaultDoor() {
         </mesh>
       </group>
       <mesh ref={ring} position={[0, 0, 0.1]}>
-        <ringGeometry args={[1.28, 1.42, 48]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.3} depthWrite={false} toneMapped={false} />
+        <ringGeometry args={[1.15, 1.28, 48]} />
+        <meshBasicMaterial color="#2de2e6" transparent opacity={0.26} depthWrite={false} toneMapped={false} />
       </mesh>
       <pointLight position={[0, 0, 0.6]} intensity={0.55} color="#fff0b0" distance={5} />
     </group>
@@ -366,12 +369,13 @@ function TrustSeal({ workers }: { workers: number }) {
     const t = clock.getElapsedTime()
     if (core.current) {
       core.current.rotation.y = t * 0.7
-      core.current.position.y = 0.28 + Math.sin(t * 1.9) * 0.04
+      core.current.position.y = 0.22 + Math.sin(t * 1.9) * 0.03
     }
     if (spin.current) spin.current.rotation.z = -t * 0.3
   })
+  // Sit in the lobby entrance — not inside queue lanes (that read as closed mouths).
   return (
-    <group position={[0, 0.02, 1.7]}>
+    <group position={[0, 0.02, 3.55]} scale={0.72}>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[1.45, 1.62, 64]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
@@ -388,7 +392,6 @@ function TrustSeal({ workers }: { workers: number }) {
         <ringGeometry args={[0.58, 0.66, 40]} />
         <meshBasicMaterial color="#b967ff" transparent opacity={0.8} toneMapped={false} />
       </mesh>
-      {/* extruded brand marks — geometry, not floating HTML */}
       {Array.from({ length: 8 }).map((_, i) => {
         const a = (i / 8) * Math.PI * 2
         return (
@@ -522,20 +525,26 @@ function SideScreen({
   useFrame(() => {
     map.needsUpdate = true
   })
-  // Against the side walls, raised and back — clear of outer teller pods.
+  // Flank NET DESK on the back wall — inside default lobby FOV, clear of teller heads.
+  // Left = DESK LEDGER, right = COMPLIANCE BAY.
+  const accent = side < 0 ? '#f9c80e' : '#39ff14'
   return (
-    <group position={[side * 6.45, 3.05, -1.15]} rotation={[0, -side * 0.55, 0]}>
+    <group position={[side * 5.25, 2.85, -2.95]} rotation={[0, -side * 0.1, 0]}>
       <mesh>
-        <boxGeometry args={[1.75, 1.1, 0.07]} />
+        <boxGeometry args={[2.85, 1.95, 0.1]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
       </mesh>
-      <mesh position={[0, 0, 0.045]}>
-        <planeGeometry args={[1.58, 0.92]} />
+      <mesh position={[0, 0, 0.06]}>
+        <planeGeometry args={[2.62, 1.72]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.58, 0.035]}>
-        <boxGeometry args={[1.8, 0.03, 0.04]} />
-        <meshBasicMaterial color="#2de2e6" toneMapped={false} />
+      <mesh position={[0, 1.01, 0.045]}>
+        <boxGeometry args={[2.9, 0.045, 0.05]} />
+        <meshBasicMaterial color={accent} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, -1.01, 0.045]}>
+        <boxGeometry args={[2.9, 0.035, 0.04]} />
+        <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
     </group>
   )
@@ -552,21 +561,23 @@ function CeilingHall() {
       </mesh>
       {beamXs.map((x) => (
         <group key={x}>
-          <mesh position={[x, 4.08, -0.15]}>
-            <boxGeometry args={[0.18, 0.14, 7.2]} />
+          <mesh position={[x, 4.12, 0.15]}>
+            <boxGeometry args={[0.18, 0.14, 6.2]} />
             <meshStandardMaterial color="#1a1428" roughness={0.7} metalness={0.2} />
           </mesh>
-          <mesh position={[x, 4.0, -0.15]}>
-            <boxGeometry args={[0.32, 0.045, 5.6]} />
+          {/* Stop short of the NET DESK face so neon never clips the board. */}
+          <mesh position={[x, 4.05, 0.35]}>
+            <boxGeometry args={[0.32, 0.045, 5.0]} />
             <meshBasicMaterial color="#e7f6ff" toneMapped={false} />
           </mesh>
         </group>
       ))}
-      <mesh position={[0, 4.0, -3.0]}>
+      <mesh position={[0, 4.12, -3.05]}>
         <boxGeometry args={[15, 0.12, 0.2]} />
         <meshStandardMaterial color={TRIM} metalness={0.4} roughness={0.4} />
       </mesh>
-      <mesh position={[0, 3.85, -2.7]}>
+      {/* Cyan trim behind/above NET DESK — never across the board face. */}
+      <mesh position={[0, 4.22, -3.05]}>
         <boxGeometry args={[13.5, 0.04, 0.04]} />
         <meshBasicMaterial color="#2de2e6" toneMapped={false} />
       </mesh>
@@ -645,7 +656,7 @@ function FloorGlowPaths() {
 
 /**
  * Per-teller queue channel: accent ropes down both sides only.
- * No front/rear crossbars — the lane mouth stays open to the desk.
+ * Open mouth toward the lobby — no front or rear crossbar (avoids a closed U).
  * Posts are inset (not shared), so neighboring lanes never cross or stack colors.
  */
 function QueueLanes() {
@@ -662,10 +673,11 @@ function QueueLanes() {
           <group key={`lane-${i}`}>
             {([left, right] as const).map((x) => (
               <group key={x}>
+                {/* Mouth post + desk post on each side — never a spanning front rope. */}
                 <Stanchion position={[x, 0, LANE_Z_FRONT]} color={color} />
                 <Stanchion position={[x, 0, LANE_Z_BACK]} color={color} />
                 <mesh position={[x, 0.78, ropeMidZ]} rotation={[Math.PI / 2, 0, 0]}>
-                  <cylinderGeometry args={[0.016, 0.016, ropeLen, 6]} />
+                  <cylinderGeometry args={[0.014, 0.014, ropeLen, 6]} />
                   <meshBasicMaterial color={color} toneMapped={false} />
                 </mesh>
               </group>
@@ -678,9 +690,9 @@ function QueueLanes() {
 }
 
 function CompliancePillar() {
-  // Park against the left wall, forward of the queue mouths — never in a teller sightline.
+  // Forward of the ledger plaque — never in a teller sightline.
   return (
-    <group position={[-6.55, 0, 3.55]}>
+    <group position={[-6.7, 0, 4.45]}>
       <mesh position={[0, 0.9, 0]}>
         <boxGeometry args={[0.55, 1.75, 0.55]} />
         <meshStandardMaterial color="#1a1230" roughness={0.65} metalness={0.25} />
@@ -720,9 +732,9 @@ function NightDeposit() {
     const mat = slot.current.material as { emissiveIntensity?: number }
     if (mat.emissiveIntensity != null) mat.emissiveIntensity = 0.45 + Math.sin(clock.getElapsedTime() * 2.2) * 0.25
   })
-  // Mirror of compliance — right wall, clear of outer-lane zooms.
+  // Mirror of compliance — forward of the compliance plaque.
   return (
-    <group position={[6.55, 0.95, 3.55]} rotation={[0, -0.9, 0]}>
+    <group position={[6.7, 0.95, 4.45]} rotation={[0, -0.9, 0]}>
       <mesh>
         <boxGeometry args={[0.85, 1.3, 0.32]} />
         <meshStandardMaterial color="#16101f" roughness={0.6} metalness={0.28} />
@@ -1019,8 +1031,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <Warden />
       <CompliancePillar />
       <NightDeposit />
-      <WaitingBench x={-5.2} />
-      <WaitingBench x={5.2} />
+      <WaitingBench x={-4.0} />
+      <WaitingBench x={4.0} />
       <DataMotes />
 
       <QueueLanes />
