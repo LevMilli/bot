@@ -153,7 +153,7 @@ export default function App() {
             <div className="office-title">
               <strong>{fromBank ? `Teller · ${selected.name}` : selected.name}</strong>
               <span>{selected.id}</span>
-              <span className="screen-hint">click a screen for the trades</span>
+              <span className="screen-hint">drag · scroll · right-drag pan · click a screen for trades</span>
             </div>
             {fromBank && (
               <div className="teller-switch" role="tablist" aria-label="Switch teller">

@@ -127,11 +127,38 @@ function Ceiling() {
           <meshStandardMaterial color="#261848" roughness={0.85} metalness={0.04} side={DoubleSide} />
         </mesh>
       ))}
-      {/* troffer lights */}
-      {([-1.15, 1.15] as const).map((x) => (
-        <mesh key={x} position={[x, 3.34, 0.35]}>
-          <boxGeometry args={[0.28, 0.04, 2.6]} />
-          <meshBasicMaterial color="#e7f6ff" toneMapped={false} />
+      {/* troffer lights across the bay */}
+      {([-1.15, 1.15] as const).map((x) =>
+        ([-1.1, 0.35, 1.8] as const).map((z) => (
+          <mesh key={`${x}-${z}`} position={[x, 3.34, z]}>
+            <boxGeometry args={[0.28, 0.04, 1.15]} />
+            <meshBasicMaterial color="#e7f6ff" toneMapped={false} />
+          </mesh>
+        )),
+      )}
+      {/* HVAC vents + cable tray for whole-room reads */}
+      {([-2.4, 2.4] as const).map((x) => (
+        <group key={`vent-${x}`} position={[x, 3.32, -0.8]}>
+          <mesh>
+            <boxGeometry args={[0.9, 0.04, 0.55]} />
+            <meshStandardMaterial color="#2a3344" metalness={0.5} roughness={0.4} />
+          </mesh>
+          {([-0.16, -0.05, 0.06, 0.17] as const).map((z) => (
+            <mesh key={z} position={[0, -0.02, z]}>
+              <boxGeometry args={[0.78, 0.01, 0.035]} />
+              <meshStandardMaterial color="#0c1018" roughness={0.7} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      <mesh position={[0, 3.3, 2.55]}>
+        <boxGeometry args={[10.5, 0.06, 0.18]} />
+        <meshStandardMaterial color="#141820" metalness={0.55} roughness={0.35} />
+      </mesh>
+      {([-3.5, -1.5, 0.5, 2.5] as const).map((x) => (
+        <mesh key={`tray-${x}`} position={[x, 3.22, 2.55]}>
+          <boxGeometry args={[0.08, 0.12, 0.08]} />
+          <meshStandardMaterial color="#2de2e6" emissive="#2de2e6" emissiveIntensity={0.35} />
         </mesh>
       ))}
     </group>
@@ -352,6 +379,17 @@ function WindowWall() {
         <boxGeometry args={[7.2, 0.06, 0.28]} />
         <meshStandardMaterial color="#0e1218" metalness={0.4} roughness={0.45} />
       </mesh>
+      {/* interior blind rails — depth when you orbit the window wall */}
+      {([-2.4, -0.8, 0.8, 2.4] as const).map((x) => (
+        <mesh key={`blind-${x}`} position={[x, 2.85, 0.12]}>
+          <boxGeometry args={[0.04, 0.55, 0.04]} />
+          <meshStandardMaterial color="#8b95a8" metalness={0.6} roughness={0.3} />
+        </mesh>
+      ))}
+      <mesh position={[0, 3.05, 0.14]}>
+        <boxGeometry args={[6.6, 0.04, 0.05]} />
+        <meshStandardMaterial color="#c5ccd8" metalness={0.7} roughness={0.28} />
+      </mesh>
     </group>
   )
 }
@@ -418,6 +456,200 @@ function OfficeFloor() {
 
 const HOME_POS: [number, number, number] = [0.15, 1.78, 3.35]
 const HOME_TARGET: [number, number, number] = [0, 1.42, 0.05]
+
+/** Extra room dressing for whole-room look-around. Adds only — keeps the desk kit intact. */
+function RoomDressing() {
+  return (
+    <group>
+      {/* Left bookshelf — fills the wall when you orbit past the chart */}
+      <group position={[-3.9, 0, 1.85]}>
+        <mesh position={[0, 1.15, 0]}>
+          <boxGeometry args={[0.42, 2.2, 1.35]} />
+          <meshStandardMaterial color="#12151c" metalness={0.25} roughness={0.55} />
+        </mesh>
+        {([-0.75, -0.25, 0.25, 0.75] as const).map((z, row) => (
+          <group key={z} position={[0.02, 0.45 + row * 0.42, z * 0.05]}>
+            <mesh position={[0, 0, 0]}>
+              <boxGeometry args={[0.36, 0.03, 1.2]} />
+              <meshStandardMaterial color="#1c2433" roughness={0.5} />
+            </mesh>
+            {([-0.4, -0.15, 0.1, 0.35] as const).map((bz, i) => (
+              <mesh key={bz} position={[0.08, 0.14, bz]}>
+                <boxGeometry args={[0.18, 0.24, 0.12]} />
+                <meshStandardMaterial
+                  color={i % 2 ? '#1a3a55' : '#2a1848'}
+                  emissive={i === 1 ? '#2de2e6' : '#000'}
+                  emissiveIntensity={i === 1 ? 0.15 : 0}
+                  roughness={0.65}
+                />
+              </mesh>
+            ))}
+          </group>
+        ))}
+      </group>
+
+      {/* Filing cabinets by the door */}
+      <group position={[-6.4, 0.5, 0.15]}>
+        {([0, 0.55] as const).map((z) => (
+          <group key={z} position={[0, 0, z]}>
+            <mesh>
+              <boxGeometry args={[0.55, 1.0, 0.48]} />
+              <meshStandardMaterial color="#161b26" metalness={0.35} roughness={0.45} />
+            </mesh>
+            {([-0.22, 0.05, 0.32] as const).map((y) => (
+              <mesh key={y} position={[0.28, y, 0]}>
+                <boxGeometry args={[0.02, 0.04, 0.22]} />
+                <meshStandardMaterial color="#c5ccd8" metalness={0.8} roughness={0.25} />
+              </mesh>
+            ))}
+          </group>
+        ))}
+      </group>
+
+      {/* Blinky rack in the far right corner — plant-free tech prop */}
+      <group position={[5.6, 0, 2.4]}>
+        <mesh position={[0, 0.95, 0]}>
+          <boxGeometry args={[0.7, 1.9, 0.55]} />
+          <meshStandardMaterial color="#0a0c12" metalness={0.55} roughness={0.35} />
+        </mesh>
+        {Array.from({ length: 10 }, (_, i) => (
+          <mesh key={i} position={[0.32, 0.25 + i * 0.16, 0]}>
+            <boxGeometry args={[0.04, 0.06, 0.42]} />
+            <meshBasicMaterial
+              color={i % 3 === 0 ? '#39ff14' : i % 3 === 1 ? '#2de2e6' : '#f9c80e'}
+              toneMapped={false}
+            />
+          </mesh>
+        ))}
+        <pointLight position={[0.2, 1.2, 0.4]} intensity={0.35} color="#2de2e6" distance={3.5} />
+      </group>
+
+      {/* Neighbor empty desk bay — foreshadows a walkable office floor */}
+      <group position={[4.2, 0, -0.35]}>
+        <mesh position={[0, 0.76, 0]}>
+          <boxGeometry args={[2.2, 0.07, 1.1]} />
+          <meshStandardMaterial color="#16345e" metalness={0.4} roughness={0.4} />
+        </mesh>
+        {([-0.9, 0.9] as const).map((x) => (
+          <mesh key={x} position={[x, 0.38, 0.1]}>
+            <boxGeometry args={[0.07, 0.68, 0.9]} />
+            <meshStandardMaterial color="#1a1f2a" roughness={0.55} />
+          </mesh>
+        ))}
+        <mesh position={[0, 1.15, -0.35]}>
+          <boxGeometry args={[0.85, 0.5, 0.04]} />
+          <meshStandardMaterial color="#0c1018" metalness={0.4} roughness={0.4} />
+        </mesh>
+        <mesh position={[0, 1.15, -0.32]}>
+          <planeGeometry args={[0.72, 0.4]} />
+          <meshBasicMaterial color="#061018" toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 1.32, -0.31]}>
+          <boxGeometry args={[0.78, 0.02, 0.02]} />
+          <meshBasicMaterial color="#7a849f" toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0.015, 0.55]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.55, 20]} />
+          <meshStandardMaterial color="#140e2a" roughness={0.9} />
+        </mesh>
+        {/* vacant chair silhouette */}
+        <mesh position={[0, 0.55, 0.7]}>
+          <boxGeometry args={[0.55, 0.08, 0.5]} />
+          <meshStandardMaterial color="#12151c" roughness={0.7} />
+        </mesh>
+        <mesh position={[0, 0.95, 0.92]}>
+          <boxGeometry args={[0.5, 0.7, 0.06]} />
+          <meshStandardMaterial color="#0a0c12" roughness={0.55} />
+        </mesh>
+      </group>
+
+      {/* Under-desk PC + cable run */}
+      <group position={[-1.35, 0.28, 0.05]}>
+        <mesh>
+          <boxGeometry args={[0.28, 0.48, 0.42]} />
+          <meshStandardMaterial color="#0c1018" metalness={0.5} roughness={0.4} />
+        </mesh>
+        <mesh position={[0.145, 0.1, 0]}>
+          <boxGeometry args={[0.02, 0.08, 0.08]} />
+          <meshBasicMaterial color="#39ff14" toneMapped={false} />
+        </mesh>
+        <mesh position={[0.145, -0.05, 0.08]}>
+          <boxGeometry args={[0.02, 0.04, 0.04]} />
+          <meshBasicMaterial color="#2de2e6" toneMapped={false} />
+        </mesh>
+      </group>
+      <mesh position={[-0.4, 0.03, 0.55]} rotation={[0, 0.4, 0]}>
+        <boxGeometry args={[1.6, 0.02, 0.04]} />
+        <meshStandardMaterial color="#1a2433" roughness={0.6} />
+      </mesh>
+
+      {/* Neon wall strip + APEX plaque on the back wall */}
+      <mesh position={[0, 2.85, 4.72]}>
+        <boxGeometry args={[8.5, 0.04, 0.04]} />
+        <meshBasicMaterial color="#2de2e6" toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 2.55, 4.7]}>
+        <boxGeometry args={[1.6, 0.35, 0.05]} />
+        <meshStandardMaterial color="#0a0c12" metalness={0.4} roughness={0.4} />
+      </mesh>
+      <mesh position={[0, 2.55, 4.74]}>
+        <boxGeometry args={[1.45, 0.22, 0.02]} />
+        <meshBasicMaterial color="#f9c80e" toneMapped={false} />
+      </mesh>
+
+      {/* Whiteboard / sticky wall by left chart */}
+      <group position={[-3.4, 1.7, -1.55]} rotation={[0, 0.35, 0]}>
+        <mesh>
+          <boxGeometry args={[1.4, 0.95, 0.04]} />
+          <meshStandardMaterial color="#d7e6ff" roughness={0.55} />
+        </mesh>
+        <mesh position={[0, 0, 0.025]}>
+          <planeGeometry args={[1.28, 0.82]} />
+          <meshBasicMaterial color="#eef4ff" toneMapped={false} />
+        </mesh>
+        {([-0.35, 0, 0.35] as const).map((x, i) => (
+          <mesh key={x} position={[x, 0.2 - i * 0.05, 0.03]}>
+            <boxGeometry args={[0.22, 0.18, 0.01]} />
+            <meshStandardMaterial
+              color={i === 0 ? '#39ff14' : i === 1 ? '#f9c80e' : '#ff2a6d'}
+              emissive={i === 0 ? '#1a6a44' : '#000'}
+              emissiveIntensity={0.2}
+            />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Corner floor LEDs so orbit reads room bounds */}
+      {([
+        [-6.5, 3.5],
+        [6.5, 3.5],
+        [-6.5, -2.2],
+        [6.5, -2.2],
+      ] as const).map(([x, z]) => (
+        <mesh key={`${x}-${z}`} position={[x, 0.04, z]}>
+          <boxGeometry args={[0.35, 0.03, 0.08]} />
+          <meshBasicMaterial color="#b967ff" toneMapped={false} />
+        </mesh>
+      ))}
+
+      {/* Door surround + exit glow (keeps the existing Door mesh visible) */}
+      <mesh position={[-7.85, 2.45, 1.35]}>
+        <boxGeometry args={[0.35, 0.12, 0.08]} />
+        <meshBasicMaterial color="#39ff14" toneMapped={false} />
+      </mesh>
+      <mesh position={[-7.86, 2.35, 1.35]} rotation={[0, Math.PI / 2, 0]}>
+        <boxGeometry args={[1.28, 0.08, 0.1]} />
+        <meshStandardMaterial color="#2a3344" metalness={0.4} roughness={0.45} />
+      </mesh>
+      {([-0.58, 0.58] as const).map((z) => (
+        <mesh key={z} position={[-7.86, 1.15, 1.35 + z]} rotation={[0, Math.PI / 2, 0]}>
+          <boxGeometry args={[0.1, 2.35, 0.1]} />
+          <meshStandardMaterial color="#2a3344" metalness={0.4} roughness={0.45} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
 
 function DeskKit() {
   const mouse = useRef<Group>(null)
@@ -573,21 +805,26 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
   return (
     <>
       <color attach="background" args={['#0a0418']} />
-      <fog attach="fog" args={['#100628', 14, 58]} />
-      <PerspectiveCamera makeDefault fov={46} near={0.08} far={80} position={HOME_POS} />
+      <fog attach="fog" args={['#100628', 18, 72]} />
+      <PerspectiveCamera makeDefault fov={48} near={0.08} far={100} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault
         target={HOME_TARGET}
         enableDamping
         dampingFactor={0.08}
-        enablePan={false}
-        minDistance={1.45}
-        maxDistance={3.6}
-        minPolarAngle={1.02}
-        maxPolarAngle={1.75}
-        minAzimuthAngle={-1.4}
-        maxAzimuthAngle={1.4}
+        enablePan
+        screenSpacePanning
+        minDistance={1.15}
+        maxDistance={11}
+        minPolarAngle={0.28}
+        maxPolarAngle={1.55}
+        // Full yaw so the whole room is readable; home still opens OTS at the desk.
+        minAzimuthAngle={-Infinity}
+        maxAzimuthAngle={Infinity}
+        panSpeed={0.7}
+        rotateSpeed={0.72}
+        zoomSpeed={0.9}
       />
       <ambientLight intensity={0.55} color="#c8b8ff" />
       <directionalLight position={[1.5, 4.2, 2]} intensity={0.65} color="#f2e8ff" />
@@ -595,6 +832,8 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
       <pointLight position={[1.15, 3.15, 0.4]} intensity={0.75} color="#b967ff" distance={8} />
       <pointLight position={[0, 1.9, -2.4]} intensity={0.55} color="#2de2e6" distance={7} />
       <pointLight position={[0, 5.5, -10]} intensity={0.7} color="#9ecbff" distance={14} />
+      <pointLight position={[-5.5, 2.4, 2.2]} intensity={0.4} color="#b967ff" distance={7} />
+      <pointLight position={[5.2, 2.2, 1.5]} intensity={0.4} color="#7ef9ff" distance={7} />
 
       <OfficeFloor />
       <Ceiling />
@@ -606,8 +845,22 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
         <planeGeometry args={[16, 3.38]} />
         <meshStandardMaterial color="#160e2c" roughness={0.92} side={DoubleSide} />
       </mesh>
+      {/* Back-wall wainscot + crown so the rear reads when you spin around */}
+      <mesh position={[0, 0.55, 4.75]}>
+        <boxGeometry args={[15.8, 1.1, 0.05]} />
+        <meshStandardMaterial color="#1b212e" roughness={0.82} />
+      </mesh>
+      <mesh position={[0, 1.12, 4.76]}>
+        <boxGeometry args={[15.8, 0.04, 0.04]} />
+        <meshStandardMaterial color={TRIM} metalness={0.35} roughness={0.45} />
+      </mesh>
+      <mesh position={[0, 3.25, 4.76]}>
+        <boxGeometry args={[15.8, 0.05, 0.05]} />
+        <meshStandardMaterial color="#2a1848" metalness={0.25} roughness={0.5} />
+      </mesh>
       <Door />
       <Credenza />
+      <RoomDressing />
       <WindowWall />
       <StreetCity bots={bots && bots.length ? bots : [bot]} desk={desk} />
       <Desk />
