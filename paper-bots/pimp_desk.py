@@ -376,7 +376,8 @@ BOT_PLANS = {
         "buy": [
             "RugCheck facts fail-closed + scorer ≥ 0.8",
             "Desk Kelly-lite ticket ($10–$25) capped by cash; max 4 open / 6 entries per day",
-            "Broke-cash paper reload when flat; 24h cooldown; learning skip clear",
+            "Midnight broke reload (Chicago): out-of-ammo towers reset P&L + cash; winners left alone",
+            "24h cooldown after close; learning skip clear",
             "Adapt: high 5m move → safer size; ≥80% settled hit → size-up",
         ],
         "sell": [
@@ -389,7 +390,8 @@ BOT_PLANS = {
         ],
         "failsafes": [
             "Desk entry_gate + pause",
-            "Bot daily halt −$50; PAPER must be True",
+            "Bot daily halt aligned to desk daily_loss_stop; PAPER must be True",
+            "Midnight broke reload when flat + out of ammo (winners left alone)",
             "Max open 4 / cooldown / facts fail-closed / starve",
         ],
         "exit_quality": "strong",
@@ -512,6 +514,7 @@ ROI_POLICY = {
         {"id": "R15", "text": "Model-flip exits fire before hard stops / settle-only waits."},
         {"id": "R16", "text": "Expectancy starve throttles losers after enough settles."},
         {"id": "R17", "text": "Shadow bots spend no desk cash; promote only after expectancy gates."},
+        {"id": "R18", "text": "Midnight (CT): out-of-ammo flat towers reload cash + reset P&L + log/learn; winners untouched."},
     ],
     "risk": {
         "daily_loss_stop": DEFAULTS["daily_loss_stop"],
@@ -2433,9 +2436,11 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
     elif now.tzinfo is None:
         now = now.replace(tzinfo=dt.timezone.utc)
     touch_heartbeat(root, now)
+    # Broke towers only: once per Chicago day in the early window, reload ammo + reset P&L.
+    # Winners and towers with open paper stay untouched.
+    results = list(run_midnight_broke_reload(root, now))
     slots = due_slots(now, root)
     saved = _load_auto(root)
-    results = []
     saved_lock = threading.Lock()
 
     def _one(slot: dict) -> dict:
@@ -2742,6 +2747,281 @@ def lift_memecoin_broke(state: dict) -> bool:
     state["reloaded_from"] = round(cash, 2)
     state["reloaded_at"] = central_text()
     return True
+
+
+# Starter cash / minimum “ammo” for midnight broke-tower reloads (Chicago day).
+TOWER_STARTER_CASH = {
+    "sports-gap": 100.0,
+    "btc15m": 100.0,
+    "commodity-15m": 100.0,
+    "memecoin": 100.0,
+    "kalshi-sp": 500.0,
+    "kalshi-sized": 500.0,
+}
+TOWER_MIN_AMMO = {
+    "sports-gap": 10.0,
+    "btc15m": 10.0,
+    "commodity-15m": 10.0,
+    "memecoin": 10.0,
+    "kalshi-sp": 20.0,
+    "kalshi-sized": 20.0,
+}
+
+
+def midnight_path(root: str | None = None) -> str:
+    return _under(root, "pimp-midnight.json")
+
+
+def tower_doing_good(bot: dict) -> bool:
+    """Winners / healthy towers stay untouched at midnight.
+
+    A mid-day cash top-up does not count as “doing good” if the book is still
+    underwater — those towers get a full P&L reset at Chicago midnight.
+    """
+    if not isinstance(bot, dict) or not bot.get("present"):
+        return True
+    bot_id = str(bot.get("id") or "")
+    starter = float(TOWER_STARTER_CASH.get(bot_id) or 100.0)
+    min_ammo = float(TOWER_MIN_AMMO.get(bot_id) or 10.0)
+    if int(bot.get("open_count") or 0) > 0:
+        return True
+    cash = _num(bot.get("cash"))
+    if cash is None:
+        return True
+    today = float(bot.get("today") or 0.0)
+    realized = _num(bot.get("realized"))
+    if realized is None:
+        realized = 0.0
+    # Green book with at least starter cash (or better).
+    if cash + 1e-9 >= starter and realized >= -1e-9 and today >= -1e-9:
+        return True
+    # Still armed and not underwater — leave the working bankroll alone.
+    if cash + 1e-9 >= min_ammo and realized >= -1e-9 and today >= -1e-9:
+        return True
+    return False
+
+
+def tower_needs_midnight_reload(bot: dict) -> bool:
+    """Out of ammo and/or blew the paper book — flat towers only."""
+    if not isinstance(bot, dict) or not bot.get("present"):
+        return False
+    if int(bot.get("open_count") or 0) > 0:
+        return False
+    if tower_doing_good(bot):
+        return False
+    bot_id = str(bot.get("id") or "")
+    starter = float(TOWER_STARTER_CASH.get(bot_id) or 100.0)
+    min_ammo = float(TOWER_MIN_AMMO.get(bot_id) or 10.0)
+    cash = _num(bot.get("cash"))
+    if cash is None:
+        return False
+    today = float(bot.get("today") or 0.0)
+    realized = _num(bot.get("realized"))
+    if realized is None:
+        realized = 0.0
+    if cash + 1e-9 < min_ammo:
+        return True
+    # Underwater after a losing day/book — even if cash was topped up mid-day.
+    if (realized < -1e-9 or today < -1e-9) and cash + 1e-9 <= starter + 1e-9:
+        return True
+    if cash + 1e-9 < starter * 0.5 and realized < -1e-9:
+        return True
+    return False
+
+
+def _learn_tower_before_midnight(root: str, bot: dict, day: str) -> int:
+    """Push closed P&L into desk learning so the next bankroll can skip cold buckets."""
+    bot_id = str(bot.get("id") or "")
+    n = 0
+    for idx, row in enumerate(list(bot.get("history") or [])[-80:]):
+        if not isinstance(row, dict):
+            continue
+        pnl = _num(row.get("pnl"))
+        if pnl is None:
+            continue
+        fill = _clean(row.get("fill_id") or row.get("when") or row.get("closed_at") or str(idx), 80)
+        record_learning(root, {
+            "result": "hit" if pnl > 0 else "miss",
+            "market": bot_id,
+            "prob": row.get("prob") or row.get("ask") or row.get("prob_exit") or 0.5,
+            "stake": abs(pnl) if abs(pnl) >= 0.01 else 1.0,
+            "fill_id": f"midnight-learn:{bot_id}:{day}:{fill}",
+            "at": central_text(),
+        })
+        n += 1
+    today = float(bot.get("today") or 0.0)
+    realized = _num(bot.get("realized"))
+    if realized is None:
+        realized = today
+    record_learning(root, {
+        "result": "hit" if (today >= 0 and realized >= 0) else "miss",
+        "market": bot_id,
+        "prob": 0.5,
+        "stake": max(1.0, abs(float(realized or 0.0)), abs(today)),
+        "fill_id": f"midnight-dayroll:{bot_id}:{day}",
+        "at": central_text(),
+    })
+    return n + 1
+
+
+def _archive_tower_file(root: str, folder: str, name: str, day: str) -> str:
+    """Move a paper file aside (keep evidence) before a fresh account write."""
+    src = _under(root, folder, name)
+    if not os.path.isfile(src) and not os.path.islink(src):
+        return ""
+    arch_dir = os.path.join(_root(root), "midnight-archive", day)
+    os.makedirs(arch_dir, exist_ok=True)
+    safe = f"{folder.replace(os.sep, '_')}__{name}"
+    dest = os.path.join(arch_dir, safe)
+    # Prefer rename; fall back to copy+unlink for cross-device volumes.
+    try:
+        os.replace(src, dest)
+    except OSError:
+        import shutil
+        shutil.copy2(src, dest)
+        _unlink(src)
+    return dest
+
+
+def reload_broke_tower(root: str, bot: dict, day: str, who: str = "midnight") -> dict:
+    """Archive P&L files, learn, reload starter cash — one tower only."""
+    root = _root(root)
+    bot_id = str(bot.get("id") or "")
+    spec = next((b for b in BOTS if b["id"] == bot_id), None)
+    if not spec:
+        return {"ok": False, "bot": bot_id, "error": "unknown bot"}
+    folder = spec["folder"]
+    before_cash = _num(bot.get("cash"))
+    before_today = float(bot.get("today") or 0.0)
+    before_realized = _num(bot.get("realized"))
+    learned = _learn_tower_before_midnight(root, bot, day)
+    archived = []
+    state_name = ACCOUNT_FILES.get(bot_id) or spec.get("state") or ""
+    extras = {
+        "sports-gap": ("paper_trades.md",),
+        "kalshi-sp": ("Trade_Ledger.md",),
+        "kalshi-sized": ("Trade_Ledger.md",),
+        "memecoin": ("trades.csv", "checks.csv"),
+        "btc15m": (),
+        "commodity-15m": (),
+    }.get(bot_id, ())
+    for name in (state_name, *extras):
+        if not name:
+            continue
+        dest = _archive_tower_file(root, folder, name, day)
+        if dest:
+            archived.append(os.path.basename(dest))
+    # Fresh starter account (P&L zeroed). Learning rows stay in pimp-learning.json.
+    body = _account_body(bot_id)
+    body["paper_only"] = True
+    body["midnight_reloaded_at"] = central_text()
+    body["midnight_reloaded_day"] = day
+    body["midnight_reloaded_from_cash"] = before_cash
+    path = _under(root, folder, state_name)
+    _write_json(path, body)
+    after_cash = (
+        _num(body.get("cash"))
+        or _num(body.get("bankroll"))
+        or _num(body.get("cash_usd"))
+        or float(TOWER_STARTER_CASH.get(bot_id) or 0)
+    )
+    note = (
+        f"Midnight reload {bot_id}: cash {before_cash} → {after_cash}, "
+        f"today {before_today:+.2f}, realized {before_realized}, learned {learned}, "
+        f"archived {len(archived)} file(s)."
+    )
+    audit(
+        root,
+        who or "midnight",
+        note[:120],
+        before={"cash": before_cash, "today": before_today, "realized": before_realized},
+        after={"cash": after_cash, "day": day, "archived": archived},
+    )
+    return {
+        "ok": True,
+        "bot": bot_id,
+        "error": "",
+        "summary": note,
+        "before_cash": before_cash,
+        "after_cash": after_cash,
+        "learned": learned,
+        "archived": archived,
+    }
+
+
+def run_midnight_broke_reload(root: str | None = None, now: dt.datetime | None = None) -> list:
+    """Once per Chicago day (00:00–06:00 CT): reload broke towers only; leave winners alone."""
+    root = _root(root)
+    if now is None:
+        now = dt.datetime.now(dt.timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    now_ct = now.astimezone(CT)
+    if not (0 <= now_ct.hour < 6):
+        return []
+    day = now_ct.date().isoformat()
+    marker = _read_json(midnight_path(root)) or {}
+    if isinstance(marker, dict) and marker.get("day") == day:
+        return []
+    ensure_paper_accounts(root)
+    runs = _load_runs(root)
+    bots = [_bot_view(spec, root, runs, now_ct.date()) for spec in BOTS]
+    if not any(b.get("id") == "kalshi-sized" for b in bots):
+        bots.append(_sized_view())
+    reloaded = []
+    left_alone = []
+    waiting_open = []
+    rows = []
+    for bot in bots:
+        bot_id = str(bot.get("id") or "")
+        if not bot.get("present"):
+            left_alone.append(bot_id)
+            continue
+        if int(bot.get("open_count") or 0) > 0 and not tower_doing_good(bot):
+            # Flat required before a P&L wipe — open books wait for the next day.
+            waiting_open.append(bot_id)
+            left_alone.append(bot_id)
+            continue
+        if tower_doing_good(bot):
+            left_alone.append(bot_id)
+            continue
+        if not tower_needs_midnight_reload(bot):
+            left_alone.append(bot_id)
+            continue
+        result = reload_broke_tower(root, bot, day, who="midnight")
+        reloaded.append(bot_id)
+        rows.append({
+            "bot": bot_id,
+            "action": "midnight-reload",
+            "ok": bool(result.get("ok")),
+            "blocked": False,
+            "entries_blocked": False,
+            "error": result.get("error") or "",
+            "summary": result.get("summary") or "",
+        })
+        log.info("midnight reload %s: %s", bot_id, _clean(result.get("summary") or "", 180))
+    _write_json(midnight_path(root), {
+        "day": day,
+        "at": central_text(now_ct),
+        "reloaded": reloaded,
+        "left_alone": left_alone,
+        "waiting_open": waiting_open,
+        "paper_only": True,
+    })
+    if not rows and left_alone:
+        rows.append({
+            "bot": "desk",
+            "action": "midnight-reload",
+            "ok": True,
+            "blocked": False,
+            "entries_blocked": False,
+            "error": "",
+            "summary": (
+                f"Midnight pass {day}: no broke towers to reload "
+                f"(left alone {len(left_alone)}; waiting open {len(waiting_open)})."
+            ),
+        })
+    return rows
 
 
 def _account_body(bot_id: str) -> dict:
