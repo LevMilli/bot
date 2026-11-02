@@ -71,6 +71,7 @@ export type BotRow = {
   feed?: string | null
   why?: string
   skip?: string
+  skip_board?: { code?: string; n?: number }[]
   idle_copy?: string | null
   empty?: string
   last_check?: string
@@ -145,10 +146,13 @@ export type Desk = {
   }
   more?: {
     skip_leaderboard?: {
-      top?: { code?: string; n?: number }[]
+      top?: { code?: string; n?: number; stable?: string }[]
+      stable_top?: { code?: string; n?: number }[]
+      taxonomy?: string[]
       weekend_n?: number
       weekday_n?: number
       note?: string
+      by_bot?: Record<string, Record<string, number>>
     }
     tower_budgets?: Record<string, number>
     sticky_count?: number

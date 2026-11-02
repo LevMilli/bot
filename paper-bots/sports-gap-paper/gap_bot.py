@@ -44,6 +44,9 @@ PRICE_BOUNDS = (0.05, 0.92)     # avoid near-worthless / near-locked contracts
 PREGAME_WINDOW_MIN = 180  # tip-soon window (3h) so Monday/weekday books fill earlier
 TIP_ALARM_WINDOWS_MIN = (15, 5)  # force-priority refresh bands before tip
 MAX_BUYS_PER_CHECK = 4    # more than one paper fill per timer tick when risk allows
+# E1 #112 — mid-game scale-out when fair moves +8¢ in our favor (fee still on sell).
+SCALE_OUT_FAIR_MOVE = 0.08
+SCALE_OUT_FRAC = 0.50
 
 def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None, spread=None, ticker=None):
     """Paper dollars for one sports fill — Kelly-lite + shared vol/learn adapt."""
@@ -743,6 +746,45 @@ def run():
                     pass
             if exit_reason is None and bid is not None and bid > 0 and bid - fee(bid) >= fair:
                 exit_reason = "gap closed - sold at bid"
+            # Scale-out 50% when fair moved +8¢ since entry (keep runner; free risk).
+            if (
+                exit_reason is None
+                and bid is not None
+                and bid > 0
+                and not p.get("scaled_out")
+                and p.get("fair_at_entry") is not None
+                and float(fair) + 1e-12 >= float(p["fair_at_entry"]) + SCALE_OUT_FAIR_MOVE
+            ):
+                contracts = int(p.get("contracts") or 0)
+                if contracts >= 2:
+                    clip = max(1, int(round(contracts * SCALE_OUT_FRAC)))
+                    clip = min(clip, contracts - 1)
+                    px_net = bid - fee(bid)
+                    proceeds = round(clip * px_net, 2)
+                    cost_full = float(p.get("cost") or 0)
+                    cost_clip = round(cost_full * clip / contracts, 2)
+                    pnl = round(proceeds - cost_clip, 2)
+                    s["cash"] = round(s["cash"] + proceeds, 2)
+                    p["contracts"] = contracts - clip
+                    p["cost"] = round(cost_full - cost_clip, 2)
+                    if p.get("risk") is not None:
+                        try:
+                            p["risk"] = round(float(p["risk"]) * (contracts - clip) / contracts, 2)
+                        except (TypeError, ValueError):
+                            pass
+                    p["scaled_out"] = True
+                    p["scale_out_at"] = ts
+                    p["scale_out_fair"] = round(float(fair), 4)
+                    reason = f"scale-out +{SCALE_OUT_FAIR_MOVE*100:.0f}¢ fair (50%)"
+                    lines.append(
+                        f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | "
+                        f"**PAPER SELL** {clip} @ bid {bid:.2f} ({reason}), P&L ${pnl:+.2f}; "
+                        f"{p['contracts']} runner left |"
+                    )
+                    summary_out["closes"].append(f"SCALE {p.get('ticker')} pnl {pnl:+.2f}")
+                    still.append(p)
+                    continue
+                exit_reason = f"scale-out +{SCALE_OUT_FAIR_MOVE*100:.0f}¢ fair (full)"
             if exit_reason and bid is not None and bid > 0:
                 proceeds = round(p["contracts"] * (bid - fee(bid)), 2)
                 pnl = round(proceeds - p["cost"], 2)

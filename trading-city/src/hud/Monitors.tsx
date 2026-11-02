@@ -105,6 +105,15 @@ export function MonitorPanels({ bot, desk }: Props): {
         {bot.shadow?.active ? ` · SHADOW ${bot.shadow.variant_id || ''}` : ''}
       </div>
       {gates.length > 0 && <div className="gates-hit">gates: {gates.join(' · ')}</div>}
+      {(bot.skip_board?.length ?? 0) > 0 && (
+        <div className="gates-hit">
+          skips{' '}
+          {(bot.skip_board || [])
+            .slice(0, 5)
+            .map((s) => `${s.code}×${s.n}`)
+            .join(' · ')}
+        </div>
+      )}
       <PlanList title="Buy plan" lines={plans?.buy} />
       <ul className="pos-list">
         {offline && <li className="muted">{bot.empty || 'Not on this checkout.'}</li>}

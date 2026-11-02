@@ -38,8 +38,59 @@ SKIP_CODES = (
     "ask_band",
     "close_game",
     "already_holding",
+    "calendar",
+    "data",
+    "budget",
     "other",
 )
+
+# Plan E1 #129 — stable public taxonomy (uppercase) mapped from internal codes.
+SKIP_TAXONOMY_STABLE = (
+    "EDGE",
+    "Z",
+    "P",
+    "DEPTH",
+    "NEWS",
+    "WEEKEND",
+    "CORR",
+    "BUDGET",
+    "LEARN",
+    "CALENDAR",
+    "DATA",
+)
+_SKIP_TO_STABLE = {
+    "edge": "EDGE",
+    "cushion": "EDGE",
+    "z": "Z",
+    "fair": "P",
+    "ask_band": "P",
+    "close_game": "P",
+    "depth": "DEPTH",
+    "news": "NEWS",
+    "WEEKEND": "WEEKEND",
+    "correlation": "CORR",
+    "open_risk": "BUDGET",
+    "max_open": "BUDGET",
+    "entry_gate": "BUDGET",
+    "budget": "BUDGET",
+    "vol_safe": "BUDGET",
+    "cash": "BUDGET",
+    "learning": "LEARN",
+    "calendar": "CALENDAR",
+    "data": "DATA",
+    "already_holding": "DATA",
+    "other": "DATA",
+}
+
+
+def stable_skip_code(code: str | None) -> str:
+    """Map internal skip code → stable taxonomy label (EDGE/Z/P/…)."""
+    raw = str(code or "").strip()
+    if not raw:
+        return "DATA"
+    if raw in SKIP_TAXONOMY_STABLE:
+        return raw
+    return _SKIP_TO_STABLE.get(raw, _SKIP_TO_STABLE.get(raw.lower(), "DATA"))
 
 # Soft per-tower share of desk max_open_risk (must sum ≤ 1.0).
 DEFAULT_TOWER_BUDGET_SHARE = {
@@ -240,6 +291,12 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         return "learning"
     if "news" in text or "blackout" in text or "fomc" in text or "cpi" in text:
         return "news"
+    if "calendar" in text or "forexfactory" in text or "ff event" in text:
+        return "calendar"
+    if "data" in text and ("error" in text or "missing" in text or "unavailable" in text):
+        return "data"
+    if "tower budget" in text or "budget full" in text or "budget" in text and "left" in text:
+        return "budget"
     if "cushion" in text:
         return "cushion"
     if " z " in f" {text} " or text.startswith("z ") or "thin cushion vs" in text or "coinbase-only" in text:
@@ -339,10 +396,17 @@ def skip_leaderboard(root: str | None = None, *, day: str | None = None, top: in
     weekend_n = int(day_row.get("weekend_n") or 0)
     weekday_n = int(day_row.get("weekday_n") or 0)
     total = weekend_n + weekday_n
+    stable_counts: dict[str, int] = {}
+    for code, n in by_code.items():
+        key = stable_skip_code(code)
+        stable_counts[key] = int(stable_counts.get(key) or 0) + int(n)
+    stable_top = sorted(stable_counts.items(), key=lambda kv: -kv[1])[: int(top)]
     return {
         "paper_only": True,
         "day": day_key,
-        "top": [{"code": c, "n": n} for c, n in ranked],
+        "top": [{"code": c, "n": n, "stable": stable_skip_code(c)} for c, n in ranked],
+        "stable_top": [{"code": c, "n": n} for c, n in stable_top],
+        "taxonomy": list(SKIP_TAXONOMY_STABLE),
         "weekend_n": weekend_n,
         "weekday_n": weekday_n,
         "total": total,
@@ -737,6 +801,11 @@ def self_check() -> None:
     assert classify_skip("WEEKEND — equity closed", weekday=6) == "WEEKEND"
     assert classify_skip("correlation veto vs btc", weekday=1) == "correlation"
     assert classify_skip("cushion $20 < $40", weekday=2) == "cushion"
+    assert stable_skip_code("edge") == "EDGE"
+    assert stable_skip_code("correlation") == "CORR"
+    assert stable_skip_code("fair") == "P"
+    assert classify_skip("forexfactory calendar closed", weekday=2) == "calendar"
+    assert classify_skip("tower budget left $0", weekday=2) == "budget"
     assert depth_adjusted_edge(0.10, 5, need=10) == round(0.05, 6)
     assert depth_adjusted_edge(0.10, 20, need=10) == round(0.10, 6)
     assert opportunity_score_v2(0.10, 0.8, 5, need=10) < opportunity_score_v2(0.10, 0.8, 20, need=10)
