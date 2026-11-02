@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { DoubleSide, type Group, type Texture } from 'three'
@@ -15,12 +15,18 @@ import { BotFigure } from './BotFigure'
 import { StreetCity } from './WindowCity'
 import { KEY_TOP, MOUSE_TOP, mouseHand } from './deskReach'
 import { WallStockChart } from './WallCharts'
+import { OfficeFloorPlan } from './OfficeFloorPlan'
+
+type FloorFocus = 'suite' | 'hall' | 'boss'
 
 type Props = {
   bot: BotRow
   bots?: BotRow[]
   desk?: Desk
   onOpenScreens?: () => void
+  onEnterBoss?: () => void
+  onSelectBot?: (id: string) => void
+  floorFocus?: FloorFocus
 }
 
 const FRAME = '#3a2a68'
@@ -456,6 +462,10 @@ function OfficeFloor() {
 
 const HOME_POS: [number, number, number] = [0.15, 1.78, 3.35]
 const HOME_TARGET: [number, number, number] = [0, 1.42, 0.05]
+const HALL_POS: [number, number, number] = [0.2, 2.4, 2.2]
+const HALL_TARGET: [number, number, number] = [0, 1.4, 12]
+const BOSS_POS: [number, number, number] = [0.3, 2.6, 18]
+const BOSS_TARGET: [number, number, number] = [0, 1.5, 26]
 
 /** Extra room dressing for whole-room look-around. Adds only — keeps the desk kit intact. */
 function RoomDressing() {
@@ -583,20 +593,6 @@ function RoomDressing() {
         <meshStandardMaterial color="#1a2433" roughness={0.6} />
       </mesh>
 
-      {/* Neon wall strip + APEX plaque on the back wall */}
-      <mesh position={[0, 2.85, 4.72]}>
-        <boxGeometry args={[8.5, 0.04, 0.04]} />
-        <meshBasicMaterial color="#2de2e6" toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 2.55, 4.7]}>
-        <boxGeometry args={[1.6, 0.35, 0.05]} />
-        <meshStandardMaterial color="#0a0c12" metalness={0.4} roughness={0.4} />
-      </mesh>
-      <mesh position={[0, 2.55, 4.74]}>
-        <boxGeometry args={[1.45, 0.22, 0.02]} />
-        <meshBasicMaterial color="#f9c80e" toneMapped={false} />
-      </mesh>
-
       {/* Whiteboard / sticky wall by left chart */}
       <group position={[-3.4, 1.7, -1.55]} rotation={[0, 0.35, 0]}>
         <mesh>
@@ -703,26 +699,66 @@ function DeskKit() {
           <meshStandardMaterial color="#39ff14" emissive="#39ff14" emissiveIntensity={0.6} />
         </mesh>
       </group>
-      {/* lamp over the right corner */}
-      <group position={[1.42, 0.8, -0.42]}>
+      {/* Lamp in the gap between left + center monitors, shade aimed at the desk (not a screen). */}
+      <group position={[-0.72, 0.8, -0.28]}>
         <mesh position={[0, 0.02, 0]}>
           <cylinderGeometry args={[0.08, 0.1, 0.03, 16]} />
           <meshStandardMaterial color="#1c222e" metalness={0.6} roughness={0.35} />
         </mesh>
-        <mesh position={[0, 0.28, 0]}>
-          <cylinderGeometry args={[0.015, 0.015, 0.48, 8]} />
+        <mesh position={[0, 0.26, 0]}>
+          <cylinderGeometry args={[0.015, 0.015, 0.42, 8]} />
           <meshStandardMaterial color="#c5ccd8" metalness={0.8} roughness={0.25} />
         </mesh>
-        <mesh position={[-0.16, 0.5, 0.08]} rotation={[0.4, 0, 0.9]}>
-          <cylinderGeometry args={[0.012, 0.012, 0.36, 8]} />
+        <mesh position={[0.02, 0.42, 0.2]} rotation={[1.05, 0.1, 0]}>
+          <cylinderGeometry args={[0.012, 0.012, 0.28, 8]} />
           <meshStandardMaterial color="#c5ccd8" metalness={0.8} roughness={0.25} />
         </mesh>
-        <mesh position={[-0.28, 0.42, 0.16]}>
+        <mesh position={[0.02, 0.34, 0.34]} rotation={[1.25, 0, 0]}>
           <coneGeometry args={[0.09, 0.08, 16, 1, true]} />
           <meshStandardMaterial color="#f4e2a8" emissive="#f9c80e" emissiveIntensity={0.55} side={DoubleSide} />
         </mesh>
       </group>
-      <pointLight position={[1.05, 1.15, -0.05]} intensity={0.45} color="#ffe2a0" distance={2.4} />
+      <pointLight position={[-0.55, 1.15, 0.15]} intensity={0.5} color="#ffe2a0" distance={2.6} />
+      {/* Extra desk clutter — headphones, phone pad, sticky stack, pen cup */}
+      <group position={[-0.95, 0.84, 0.28]}>
+        <mesh rotation={[0.2, 0.4, 0]}>
+          <torusGeometry args={[0.08, 0.015, 8, 20]} />
+          <meshStandardMaterial color="#1c222e" metalness={0.5} roughness={0.4} />
+        </mesh>
+        <mesh position={[0.08, 0, 0]} rotation={[1.2, 0, 0.3]}>
+          <boxGeometry args={[0.04, 0.06, 0.03]} />
+          <meshStandardMaterial color="#2de2e6" emissive="#2de2e6" emissiveIntensity={0.25} />
+        </mesh>
+      </group>
+      <mesh position={[1.15, 0.805, 0.35]} rotation={[-Math.PI / 2, 0, 0.2]}>
+        <circleGeometry args={[0.09, 16]} />
+        <meshStandardMaterial color="#10141c" roughness={0.7} />
+      </mesh>
+      <mesh position={[1.15, 0.82, 0.35]}>
+        <boxGeometry args={[0.07, 0.012, 0.12]} />
+        <meshStandardMaterial color="#1a2433" metalness={0.4} roughness={0.4} />
+      </mesh>
+      {([0, 1, 2] as const).map((i) => (
+        <mesh key={i} position={[1.35, 0.812 + i * 0.008, 0.05]} rotation={[-0.05, 0.15 * i, 0]}>
+          <boxGeometry args={[0.1, 0.006, 0.1]} />
+          <meshStandardMaterial
+            color={i === 0 ? '#39ff14' : i === 1 ? '#f9c80e' : '#ff2a6d'}
+            roughness={0.7}
+          />
+        </mesh>
+      ))}
+      <group position={[-1.55, 0.84, 0.35]}>
+        <mesh>
+          <cylinderGeometry args={[0.045, 0.04, 0.08, 12]} />
+          <meshStandardMaterial color="#1a2433" roughness={0.55} />
+        </mesh>
+        {([-0.015, 0.015] as const).map((x) => (
+          <mesh key={x} position={[x, 0.08, 0]} rotation={[0.15, 0, x * 4]}>
+            <cylinderGeometry args={[0.006, 0.006, 0.14, 6]} />
+            <meshStandardMaterial color="#c5ccd8" metalness={0.6} roughness={0.35} />
+          </mesh>
+        ))}
+      </group>
       {/* mug and notebook */}
       <group position={[0.92, 0.84, 0.22]}>
         <mesh>
@@ -774,9 +810,18 @@ function DeskKit() {
   )
 }
 
-export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
+export function OfficeScene({
+  bot,
+  bots,
+  desk,
+  onOpenScreens,
+  onEnterBoss,
+  onSelectBot,
+  floorFocus = 'suite',
+}: Props) {
   const controls = useRef<OrbitControlsImpl>(null)
   const pose = useMemo(() => botPose(bot), [bot])
+  const [doorOpen, setDoorOpen] = useState(false)
 
   const maps = useMemo(() => {
     const left = leftMonitorTexture(bot)
@@ -797,16 +842,26 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
     const orbit = controls.current
     const cam = orbit?.object
     if (!orbit || !cam) return
-    cam.position.set(...HOME_POS)
-    orbit.target.set(...HOME_TARGET)
+    if (floorFocus === 'boss') {
+      cam.position.set(...BOSS_POS)
+      orbit.target.set(...BOSS_TARGET)
+      setDoorOpen(true)
+    } else if (floorFocus === 'hall') {
+      cam.position.set(...HALL_POS)
+      orbit.target.set(...HALL_TARGET)
+      setDoorOpen(true)
+    } else {
+      cam.position.set(...HOME_POS)
+      orbit.target.set(...HOME_TARGET)
+    }
     orbit.update()
-  }, [bot.id])
+  }, [bot.id, floorFocus])
 
   return (
     <>
       <color attach="background" args={['#0a0418']} />
-      <fog attach="fog" args={['#100628', 18, 72]} />
-      <PerspectiveCamera makeDefault fov={48} near={0.08} far={100} position={HOME_POS} />
+      <fog attach="fog" args={['#100628', 22, 90]} />
+      <PerspectiveCamera makeDefault fov={48} near={0.08} far={140} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault
@@ -815,16 +870,16 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
         dampingFactor={0.08}
         enablePan
         screenSpacePanning
-        minDistance={1.05}
-        maxDistance={14}
-        minPolarAngle={0.12}
-        maxPolarAngle={1.58}
-        // Full yaw so the whole room is readable; home still opens OTS at the desk.
+        minDistance={0.95}
+        maxDistance={28}
+        minPolarAngle={0.08}
+        maxPolarAngle={Math.PI - 0.08}
+        // True 360° look-around of the suite + hallway beyond the glass.
         minAzimuthAngle={-Infinity}
         maxAzimuthAngle={Infinity}
-        panSpeed={0.7}
+        panSpeed={0.75}
         rotateSpeed={0.72}
-        zoomSpeed={0.9}
+        zoomSpeed={0.95}
       />
       <ambientLight intensity={0.55} color="#c8b8ff" />
       <directionalLight position={[1.5, 4.2, 2]} intensity={0.65} color="#f2e8ff" />
@@ -841,23 +896,6 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
       <SideWall x={7.9} rot={-Math.PI / 2} />
       <WallStockChart bot={bot} desk={desk} side="left" />
       <WallStockChart bot={bot} desk={desk} side="right" />
-      <mesh position={[0, 1.69, 4.8]} rotation={[0, Math.PI, 0]}>
-        <planeGeometry args={[16, 3.38]} />
-        <meshStandardMaterial color="#160e2c" roughness={0.92} side={DoubleSide} />
-      </mesh>
-      {/* Back-wall wainscot + crown so the rear reads when you spin around */}
-      <mesh position={[0, 0.55, 4.75]}>
-        <boxGeometry args={[15.8, 1.1, 0.05]} />
-        <meshStandardMaterial color="#1b212e" roughness={0.82} />
-      </mesh>
-      <mesh position={[0, 1.12, 4.76]}>
-        <boxGeometry args={[15.8, 0.04, 0.04]} />
-        <meshStandardMaterial color={TRIM} metalness={0.35} roughness={0.45} />
-      </mesh>
-      <mesh position={[0, 3.25, 4.76]}>
-        <boxGeometry args={[15.8, 0.05, 0.05]} />
-        <meshStandardMaterial color="#2a1848" metalness={0.25} roughness={0.5} />
-      </mesh>
       <Door />
       <Credenza />
       <RoomDressing />
@@ -872,6 +910,33 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
       <MonitorFrame position={[1.58, 1.28, -0.62]} rotation={[0, -0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.right} onOpen={onOpenScreens} />
 
       <BotFigure pose={pose} deskWork />
+
+      <OfficeFloorPlan
+        bots={bots && bots.length ? bots : [bot]}
+        desk={desk}
+        activeId={bot.id}
+        doorOpen={doorOpen}
+        onToggleDoor={() => setDoorOpen((v) => !v)}
+        onEnterHall={() => {
+          const orbit = controls.current
+          const cam = orbit?.object
+          if (!orbit || !cam) return
+          cam.position.set(...HALL_POS)
+          orbit.target.set(...HALL_TARGET)
+          orbit.update()
+        }}
+        onEnterBoss={() => {
+          const orbit = controls.current
+          const cam = orbit?.object
+          if (orbit && cam) {
+            cam.position.set(...BOSS_POS)
+            orbit.target.set(...BOSS_TARGET)
+            orbit.update()
+          }
+          onEnterBoss?.()
+        }}
+        onEnterSuite={(id) => onSelectBot?.(id)}
+      />
       <NeonBloom strength={0.58} />
     </>
   )

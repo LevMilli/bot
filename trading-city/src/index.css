@@ -871,6 +871,246 @@ a {
   }
 }
 
+.floor-switch {
+  max-width: min(96vw, 64rem);
+}
+
+.boss-dash {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 4.6rem 0.75rem 2.4rem;
+  background: rgba(4, 2, 16, 0.72);
+  pointer-events: auto;
+}
+
+.boss-dash-panel {
+  width: min(1100px, 96vw);
+  max-height: 100%;
+  overflow: auto;
+  border: 1px solid rgba(45, 226, 230, 0.35);
+  background: linear-gradient(165deg, rgba(12, 8, 28, 0.96), rgba(8, 14, 32, 0.94));
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+  padding: 0.9rem 1rem 1.1rem;
+  color: #d7e6ff;
+}
+
+.boss-dash-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 0.7rem;
+}
+
+.boss-dash-head strong {
+  display: block;
+  font-family: var(--font-display);
+  letter-spacing: 0.1em;
+  color: #f9c80e;
+  font-size: 1.15rem;
+}
+
+.boss-dash-head span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.boss-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.boss-tabs button {
+  pointer-events: auto;
+  border: 1px solid rgba(154, 163, 199, 0.3);
+  background: rgba(20, 16, 40, 0.8);
+  color: #9aa3c7;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.boss-tabs button.active {
+  color: #061018;
+  background: #2de2e6;
+  border-color: #2de2e6;
+}
+
+.boss-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(14rem, 0.9fr);
+  gap: 0.85rem;
+}
+
+.boss-table-wrap {
+  overflow: auto;
+  max-height: min(58vh, 28rem);
+}
+
+.boss-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.boss-table th,
+.boss-table td {
+  text-align: left;
+  padding: 0.4rem 0.45rem;
+  border-bottom: 1px solid rgba(154, 163, 199, 0.18);
+}
+
+.boss-table th {
+  color: #7ec8d8;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: rgba(10, 8, 24, 0.95);
+}
+
+.boss-table tr {
+  cursor: pointer;
+}
+
+.boss-table tr.selected,
+.boss-table tr:hover {
+  background: rgba(45, 226, 230, 0.08);
+}
+
+.boss-side {
+  border: 1px solid rgba(154, 163, 199, 0.22);
+  padding: 0.65rem 0.7rem;
+  background: rgba(8, 10, 22, 0.65);
+}
+
+.boss-side h3 {
+  margin: 0 0 0.2rem;
+  color: #2de2e6;
+  font-size: 1rem;
+}
+
+.boss-side h4,
+.boss-learn h4,
+.boss-history h3 {
+  margin: 0.55rem 0 0.35rem;
+  color: #f9c80e;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.boss-block p,
+.boss-muted {
+  color: #9aa3c7;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  margin: 0.25rem 0;
+}
+
+.boss-note {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.65rem;
+  font-size: 0.72rem;
+  color: #7ec8d8;
+}
+
+.boss-note textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4rem;
+  background: #060812;
+  color: #d7e6ff;
+  border: 1px solid rgba(45, 226, 230, 0.3);
+  padding: 0.4rem;
+  font: inherit;
+}
+
+.boss-mini {
+  border: 1px solid rgba(45, 226, 230, 0.45);
+  background: transparent;
+  color: #2de2e6;
+  font-size: 0.68rem;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+}
+
+.boss-history ul,
+.boss-learn ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.boss-history li {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr auto;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(154, 163, 199, 0.14);
+  font-size: 0.75rem;
+}
+
+.boss-history .up {
+  color: #39ff14;
+}
+
+.boss-history .down {
+  color: #ff2a6d;
+}
+
+.boss-learn-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.7rem;
+}
+
+.boss-toggle {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  color: #d7e6ff;
+  font-size: 0.8rem;
+}
+
+.boss-learn-cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.boss-learn-cols section {
+  border: 1px solid rgba(154, 163, 199, 0.2);
+  padding: 0.55rem 0.65rem;
+  background: rgba(8, 10, 22, 0.55);
+}
+
+.boss-learn-cols li {
+  font-size: 0.72rem;
+  color: #c5d0e0;
+  margin: 0.35rem 0;
+  line-height: 1.4;
+}
+
+.boss-side a {
+  color: #2de2e6;
+}
+
+@media (max-width: 860px) {
+  .boss-grid,
+  .boss-learn-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ticker-track,
   .banner.offline,

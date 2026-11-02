@@ -146,6 +146,16 @@ export type Desk = {
     default?: string
     ranges?: { id: string; label: string; start: string; end: string }[]
   }
+  /** desk_adapt.adapt_summary() — study / learn / size layer */
+  adapt?: {
+    paper_only?: boolean
+    version?: number
+    series_15m?: string[]
+    by_bot?: Record<string, Record<string, unknown>>
+    recent_vol?: unknown[]
+    rules?: Record<string, number>
+    error?: string
+  }
 }
 
 export type RoiCompliance = {

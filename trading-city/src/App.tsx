@@ -10,9 +10,11 @@ import { beamColorFor } from './data/format'
 import { CityScene } from './scene/CityScene'
 import { OfficeScene } from './scene/OfficeScene'
 import { BankScene } from './scene/BankScene'
+import { BossDashboard } from './hud/BossDashboard'
 import type { BotRow } from './types'
 
 type View = 'city' | 'bank' | 'office'
+type FloorFocus = 'suite' | 'hall' | 'boss'
 
 export default function App() {
   const { snap, mode, error, loading, updatedAt, connectLive } = useSnapshot()
@@ -20,6 +22,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [fromBank, setFromBank] = useState(false)
   const [screensOpen, setScreensOpen] = useState(false)
+  const [floorFocus, setFloorFocus] = useState<FloorFocus>('suite')
+  const [bossOpen, setBossOpen] = useState(false)
 
   const bots = snap?.bots || []
   const selected: BotRow | null = useMemo(
@@ -36,12 +40,16 @@ export default function App() {
   const openTeller = (id: string) => {
     setSelectedId(id)
     setFromBank(true)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('office')
   }
 
   const openTower = (id: string) => {
     setSelectedId(id)
     setFromBank(false)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('office')
   }
 
@@ -52,12 +60,16 @@ export default function App() {
   const backToCity = () => {
     setSelectedId(null)
     setFromBank(false)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('city')
   }
 
   const backToBank = () => {
     setSelectedId(null)
     setFromBank(true)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('bank')
   }
 
@@ -78,7 +90,17 @@ export default function App() {
                 bot={selected}
                 bots={bots}
                 desk={snap?.desk}
+                floorFocus={floorFocus}
                 onOpenScreens={() => setScreensOpen(true)}
+                onEnterBoss={() => {
+                  setFloorFocus('boss')
+                  setBossOpen(true)
+                }}
+                onSelectBot={(id) => {
+                  setSelectedId(id)
+                  setFloorFocus('suite')
+                  setBossOpen(false)
+                }}
               />
             ) : view === 'bank' ? (
               <BankScene bots={bots} desk={snap?.desk} onSelectTeller={openTeller} />
@@ -153,26 +175,83 @@ export default function App() {
             <div className="office-title">
               <strong>{fromBank ? `Teller · ${selected.name}` : selected.name}</strong>
               <span>{selected.id}</span>
-              <span className="screen-hint">drag · scroll · right-drag pan · click a screen for trades</span>
+              <span className="screen-hint">
+                360° drag · scroll · pan · glass door → hall · boss board
+              </span>
             </div>
-            {fromBank && (
-              <div className="teller-switch" role="tablist" aria-label="Switch teller">
-                {bots.map((bot, i) => (
-                  <button
-                    key={bot.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={bot.id === selected.id}
-                    className={`teller-chip ${bot.id === selected.id ? 'active' : ''}`}
-                    style={{ borderColor: beamColorFor(bot.id, i) }}
-                    onClick={() => openTeller(bot.id)}
-                  >
-                    {bot.name}
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="teller-switch floor-switch" role="tablist" aria-label="Floor navigation">
+              <button
+                type="button"
+                role="tab"
+                className={`teller-chip ${floorFocus === 'suite' ? 'active' : ''}`}
+                aria-selected={floorFocus === 'suite'}
+                onClick={() => {
+                  setFloorFocus('suite')
+                  setBossOpen(false)
+                }}
+              >
+                Suite
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`teller-chip ${floorFocus === 'hall' ? 'active' : ''}`}
+                aria-selected={floorFocus === 'hall'}
+                onClick={() => {
+                  setFloorFocus('hall')
+                  setBossOpen(false)
+                }}
+              >
+                Hallway
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`teller-chip ${floorFocus === 'boss' || bossOpen ? 'active' : ''}`}
+                aria-selected={floorFocus === 'boss' || bossOpen}
+                onClick={() => {
+                  setFloorFocus('boss')
+                  setBossOpen(true)
+                }}
+              >
+                Boss office
+              </button>
+              {bots.map((bot, i) => (
+                <button
+                  key={bot.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={bot.id === selected.id && floorFocus === 'suite'}
+                  className={`teller-chip ${bot.id === selected.id && floorFocus === 'suite' ? 'active' : ''}`}
+                  style={{ borderColor: beamColorFor(bot.id, i) }}
+                  onClick={() => {
+                    if (fromBank) openTeller(bot.id)
+                    else openTower(bot.id)
+                  }}
+                >
+                  {bot.name}
+                </button>
+              ))}
+            </div>
           </div>
+        )}
+
+        {view === 'office' && bossOpen && (
+          <BossDashboard
+            bots={bots}
+            desk={snap?.desk}
+            roi={snap?.roi_system}
+            snap={snap}
+            onClose={() => {
+              setBossOpen(false)
+              setFloorFocus('hall')
+            }}
+            onFocusBot={(id) => {
+              setSelectedId(id)
+              setBossOpen(false)
+              setFloorFocus('suite')
+            }}
+          />
         )}
 
         {view === 'office' && selected && screensOpen && (
