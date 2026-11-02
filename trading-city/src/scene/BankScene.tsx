@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Html, OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import { DoubleSide, type Group, type Mesh } from 'three'
+import { DoubleSide, MathUtils, type Group, type Mesh } from 'three'
 import type { BotRow, Desk } from '../types'
 import { BEAM_COLORS, money, workersOnShift } from '../data/format'
 import { botPose } from '../data/botPose'
@@ -33,15 +33,33 @@ const FLOOR = '#0e061c'
 const HOME_POS: [number, number, number] = [0, 2.55, 6.4]
 const HOME_TARGET: [number, number, number] = [0, 1.45, -0.6]
 
+/** Wide enough that nameplates / glass fins never collide while bots sway. */
+const TELLER_COUNT = 5
+const TELLER_SPACING = 2.72
+const LANE_Z_FRONT = 2.05
+const LANE_Z_BACK = 0.52
+
+function tellerX(index: number) {
+  return (index - (TELLER_COUNT - 1) / 2) * TELLER_SPACING
+}
+
+function postX(post: number) {
+  return (post - TELLER_COUNT / 2) * TELLER_SPACING
+}
+
 function TellerPod({
   bot,
   index,
-  x,
+  focused,
+  away,
+  recalling,
   onSelect,
 }: {
   bot: BotRow | null
   index: number
-  x: number
+  focused: boolean
+  away: boolean
+  recalling: boolean
   onSelect: (id: string) => void
 }) {
   const color = BEAM_COLORS[index % BEAM_COLORS.length]
@@ -50,19 +68,34 @@ function TellerPod({
   const plate = useMemo(() => tellerPlateTexture(bot, index, color), [bot, index, color])
   const lamp = useRef<Mesh>(null)
   const halo = useRef<Mesh>(null)
+  const botRoot = useRef<Group>(null)
+  const walk = useRef({ z: 0, x: 0 })
 
   useEffect(() => () => plate.dispose(), [plate])
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, dt) => {
     const t = clock.getElapsedTime()
     if (lamp.current) {
       const mat = lamp.current.material as { emissiveIntensity?: number }
       if (mat.emissiveIntensity != null) {
-        mat.emissiveIntensity = offline ? 0.2 : 0.65 + Math.sin(t * 2.6 + index) * 0.22
+        mat.emissiveIntensity = offline ? 0.2 : (focused ? 0.85 : 0.55) + Math.sin(t * 2.4 + index) * 0.18
       }
     }
     if (halo.current) {
-      const s = 1 + Math.sin(t * 1.8 + index) * 0.04
+      const pulse = focused ? 0.08 : 0.035
+      const s = 1 + Math.sin(t * 1.9 + index) * pulse
       halo.current.scale.set(s, 1, s)
+    }
+    // Step clearly into the customer aisle when away; walk back when recalled.
+    const targetZ = recalling ? 0 : away ? 1.05 : 0
+    const targetX = recalling ? 0 : away ? (index % 2 === 0 ? -1.05 : 1.05) : 0
+    walk.current.z = MathUtils.damp(walk.current.z, targetZ, 5.5, dt)
+    walk.current.x = MathUtils.damp(walk.current.x, targetX, 5.5, dt)
+    if (botRoot.current) {
+      botRoot.current.position.x = walk.current.x
+      botRoot.current.position.z = -0.38 + walk.current.z
+      // Always face the customer (+Z). BotFigure's back-plate lives on local +Z,
+      // so Y=π puts the face toward the lobby camera.
+      botRoot.current.rotation.y = Math.PI
     }
   })
 
@@ -71,58 +104,61 @@ function TellerPod({
     if (bot) onSelect(bot.id)
   }
 
+  const x = tellerX(index)
+  const podW = 1.52
+
   return (
     <group position={[x, 0, -0.05]}>
       {/* open trading pod — low counter so the full bot reads */}
       <mesh position={[0, 0.42, -0.15]}>
-        <boxGeometry args={[1.7, 0.84, 0.7]} />
+        <boxGeometry args={[podW, 0.84, 0.7]} />
         <meshStandardMaterial color="#14101c" roughness={0.72} metalness={0.22} />
       </mesh>
       <mesh position={[0, 0.86, 0.18]} castShadow>
-        <boxGeometry args={[1.78, 0.08, 0.95]} />
+        <boxGeometry args={[podW + 0.06, 0.08, 0.95]} />
         <meshStandardMaterial color="#d8d0c0" roughness={0.28} metalness={0.22} />
       </mesh>
       <mesh position={[0, 0.83, 0.64]}>
-        <boxGeometry args={[1.78, 0.025, 0.03]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.7} toneMapped={false} />
+        <boxGeometry args={[podW + 0.06, 0.025, 0.03]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={focused ? 0.95 : 0.65} toneMapped={false} />
       </mesh>
       <mesh position={[0, 0.87, 0.66]}>
-        <boxGeometry args={[1.78, 0.03, 0.045]} />
+        <boxGeometry args={[podW + 0.06, 0.03, 0.045]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
 
-      {/* side glass fins only — open sightline to the bot */}
-      {([-0.86, 0.86] as const).map((sx) => (
+      {/* side glass fins — inset so neighboring pods never clip */}
+      {([-0.74, 0.74] as const).map((sx) => (
         <group key={sx}>
           <mesh position={[sx, 1.45, -0.05]}>
-            <boxGeometry args={[0.04, 1.15, 0.7]} />
+            <boxGeometry args={[0.035, 1.15, 0.65]} />
             <meshStandardMaterial color="#7ef9ff" transparent opacity={0.1} metalness={0.3} roughness={0.08} />
           </mesh>
           <mesh position={[sx, 2.05, -0.05]}>
-            <boxGeometry args={[0.06, 0.05, 0.72]} />
+            <boxGeometry args={[0.05, 0.05, 0.68]} />
             <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.28} />
           </mesh>
         </group>
       ))}
 
       {/* desk terminal + lamp */}
-      <mesh position={[-0.45, 1.05, 0.28]} rotation={[-0.4, 0.12, 0]}>
-        <boxGeometry args={[0.48, 0.3, 0.03]} />
+      <mesh position={[-0.38, 1.05, 0.28]} rotation={[-0.4, 0.12, 0]}>
+        <boxGeometry args={[0.42, 0.28, 0.03]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
       </mesh>
-      <mesh position={[-0.45, 1.05, 0.3]} rotation={[-0.4, 0.12, 0]}>
-        <planeGeometry args={[0.4, 0.24]} />
+      <mesh position={[-0.38, 1.05, 0.3]} rotation={[-0.4, 0.12, 0]}>
+        <planeGeometry args={[0.36, 0.22]} />
         <meshBasicMaterial color={offline ? '#2a1830' : color} transparent opacity={0.55} toneMapped={false} />
       </mesh>
-      <mesh position={[0.55, 0.95, 0.15]}>
+      <mesh position={[0.48, 0.95, 0.15]}>
         <cylinderGeometry args={[0.03, 0.04, 0.08, 10]} />
         <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
-      <mesh position={[0.55, 1.12, 0.15]}>
+      <mesh position={[0.48, 1.12, 0.15]}>
         <cylinderGeometry args={[0.01, 0.01, 0.22, 8]} />
         <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
-      <mesh ref={lamp} position={[0.55, 1.24, 0.26]} rotation={[0.55, 0, 0]}>
+      <mesh ref={lamp} position={[0.48, 1.24, 0.26]} rotation={[0.55, 0, 0]}>
         <coneGeometry args={[0.08, 0.11, 12, 1, true]} />
         <meshStandardMaterial
           color="#1a1420"
@@ -134,18 +170,25 @@ function TellerPod({
       </mesh>
 
       {/* sharp canvas nameplate */}
-      <mesh position={[0, 1.72, 0.42]} onClick={select} onPointerOver={() => bot && (document.body.style.cursor = 'pointer')} onPointerOut={() => (document.body.style.cursor = 'default')}>
-        <boxGeometry args={[1.35, 0.42, 0.05]} />
-        <meshStandardMaterial color={INK} metalness={0.35} roughness={0.4} />
+      <mesh
+        position={[0, 1.72, 0.42]}
+        onClick={select}
+        onPointerOver={() => bot && (document.body.style.cursor = 'pointer')}
+        onPointerOut={() => {
+          document.body.style.cursor = 'default'
+        }}
+      >
+        <boxGeometry args={[1.22, 0.4, 0.05]} />
+        <meshStandardMaterial color={INK} metalness={0.35} roughness={0.4} emissive={focused ? color : '#000'} emissiveIntensity={focused ? 0.25 : 0} />
       </mesh>
       <mesh position={[0, 1.72, 0.45]} onClick={select}>
-        <planeGeometry args={[1.25, 0.36]} />
+        <planeGeometry args={[1.12, 0.34]} />
         <meshBasicMaterial map={plate} toneMapped={false} />
       </mesh>
 
-      {/* standing teller — full silhouette like the office bot */}
-      <group position={[0, 0.02, -0.42]} scale={0.88}>
-        <BotFigure pose={pose} seated={false} />
+      {/* standing teller facing the customer (+Z / camera) */}
+      <group ref={botRoot} position={[0, 0.02, -0.38]} rotation={[0, Math.PI, 0]} scale={0.88}>
+        <BotFigure pose={away && !recalling ? 'waiting' : pose} seated={false} />
       </group>
 
       {/* approach halo */}
@@ -155,16 +198,32 @@ function TellerPod({
         rotation={[-Math.PI / 2, 0, 0]}
         onClick={select}
         onPointerOver={() => bot && (document.body.style.cursor = 'pointer')}
-        onPointerOut={() => (document.body.style.cursor = 'default')}
+        onPointerOut={() => {
+          document.body.style.cursor = 'default'
+        }}
       >
-        <ringGeometry args={[0.45, 0.62, 40]} />
-        <meshBasicMaterial color={color} transparent opacity={0.7} toneMapped={false} />
+        <ringGeometry args={[focused ? 0.4 : 0.45, focused ? 0.68 : 0.6, 40]} />
+        <meshBasicMaterial color={color} transparent opacity={focused ? 0.92 : 0.62} toneMapped={false} />
       </mesh>
       <mesh position={[0, 0.015, 1.15]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[0.42, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={0.14} />
+        <circleGeometry args={[0.4, 32]} />
+        <meshBasicMaterial color={color} transparent opacity={focused ? 0.28 : 0.12} />
       </mesh>
-      <pointLight position={[0, 2.2, 0.2]} intensity={offline ? 0.15 : 0.35} color={color} distance={4.5} />
+      {away && !recalling && (
+        <Html position={[0, 2.15, -0.2]} center distanceFactor={9} style={{ pointerEvents: 'none' }}>
+          <div
+            style={{
+              fontFamily: 'Share Tech Mono, monospace',
+              fontSize: '10px',
+              color: '#9aa3c7',
+              letterSpacing: '0.08em',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            stepped away
+          </div>
+        </Html>
+      )}
     </group>
   )
 }
@@ -552,7 +611,7 @@ function DataMotes() {
 
 function Warden() {
   return (
-    <group position={[3.4, 0.05, -2.05]} rotation={[0, -0.4, 0]} scale={0.92}>
+    <group position={[3.55, 0.05, -2.05]} rotation={[0, Math.PI * 0.85, 0]} scale={0.92}>
       <BotFigure pose="waiting" seated={false} />
       <mesh position={[0, 2.15, 0.05]}>
         <boxGeometry args={[0.9, 0.14, 0.04]} />
@@ -569,18 +628,71 @@ function Warden() {
 function FloorGlowPaths() {
   return (
     <group>
-      {([-2, -1, 0, 1, 2] as const).map((i) => (
-        <mesh key={i} position={[i * 1.25, 0.012, 0.4]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[0.06, 2.4]} />
+      {Array.from({ length: TELLER_COUNT }).map((_, i) => (
+        <mesh key={i} position={[tellerX(i), 0.012, 0.55]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.07, 2.6]} />
           <meshBasicMaterial
-            color={BEAM_COLORS[(i + 2) % BEAM_COLORS.length]}
+            color={BEAM_COLORS[i % BEAM_COLORS.length]}
             transparent
-            opacity={0.28}
+            opacity={0.26}
             depthWrite={false}
             toneMapped={false}
           />
         </mesh>
       ))}
+    </group>
+  )
+}
+
+/** Queue posts + ropes on BOTH sides of every teller lane (shared posts between neighbors). */
+function QueueLanes() {
+  const posts = TELLER_COUNT + 1
+  const ropeLen = LANE_Z_FRONT - LANE_Z_BACK
+  const ropeMidZ = (LANE_Z_FRONT + LANE_Z_BACK) / 2
+  return (
+    <group>
+      {Array.from({ length: posts }).map((_, p) => {
+        const x = postX(p)
+        const leftLane = Math.max(0, p - 1)
+        const rightLane = Math.min(TELLER_COUNT - 1, p)
+        const laneColor = BEAM_COLORS[rightLane % BEAM_COLORS.length]
+        const leftColor = BEAM_COLORS[leftLane % BEAM_COLORS.length]
+        return (
+          <group key={`post-${p}`}>
+            <Stanchion position={[x, 0, LANE_Z_FRONT]} color={laneColor} />
+            <Stanchion position={[x, 0, LANE_Z_BACK]} color={laneColor} />
+            {/* dual rope heights so each lane wall reads clearly from the lobby */}
+            <mesh position={[x, 0.72, ropeMidZ]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.018, 0.018, ropeLen, 6]} />
+              <meshBasicMaterial color={leftColor} toneMapped={false} />
+            </mesh>
+            <mesh position={[x, 0.88, ropeMidZ]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.014, 0.014, ropeLen, 6]} />
+              <meshBasicMaterial color={laneColor} toneMapped={false} />
+            </mesh>
+          </group>
+        )
+      })}
+      {/* front mouth + rear gate so each lane is a closed channel */}
+      {Array.from({ length: TELLER_COUNT }).map((_, i) => {
+        const color = BEAM_COLORS[i % BEAM_COLORS.length]
+        const left = postX(i)
+        const right = postX(i + 1)
+        const mid = (left + right) / 2
+        const width = right - left
+        return (
+          <group key={`mouth-${i}`}>
+            <mesh position={[mid, 0.8, LANE_Z_FRONT]} rotation={[0, 0, Math.PI / 2]}>
+              <cylinderGeometry args={[0.014, 0.014, width * 0.78, 6]} />
+              <meshBasicMaterial color={color} toneMapped={false} />
+            </mesh>
+            <mesh position={[mid, 0.8, LANE_Z_BACK]} rotation={[0, 0, Math.PI / 2]}>
+              <cylinderGeometry args={[0.012, 0.012, width * 0.78, 6]} />
+              <meshBasicMaterial color={color} transparent opacity={0.7} toneMapped={false} />
+            </mesh>
+          </group>
+        )
+      })}
     </group>
   )
 }
@@ -688,10 +800,19 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
   const controls = useRef<OrbitControlsImpl>(null)
   const tellers = useMemo(() => {
     const list: (BotRow | null)[] = [...bots]
-    while (list.length < 5) list.push(null)
-    return list.slice(0, 5)
+    while (list.length < TELLER_COUNT) list.push(null)
+    return list.slice(0, TELLER_COUNT)
   }, [bots])
   const workers = workersOnShift(bots)
+  const [focus, setFocus] = useState(2)
+  const [awayIndex, setAwayIndex] = useState<number | null>(null)
+  const [recalling, setRecalling] = useState(false)
+  const recallTimer = useRef<number | null>(null)
+
+  const presentIndexes = useMemo(
+    () => tellers.map((b, i) => (b && b.present !== false ? i : -1)).filter((i) => i >= 0),
+    [tellers],
+  )
 
   useEffect(() => {
     const orbit = controls.current
@@ -701,6 +822,78 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     orbit.target.set(...HOME_TARGET)
     orbit.update()
   }, [])
+
+  // Cycle one present teller stepping away — light life without extra lights.
+  useEffect(() => {
+    if (!presentIndexes.length) {
+      setAwayIndex(null)
+      return
+    }
+    const pick = () => {
+      setRecalling(false)
+      setAwayIndex(presentIndexes[Math.floor(Math.random() * presentIndexes.length)] ?? null)
+    }
+    pick()
+    const id = window.setInterval(pick, 14000)
+    return () => window.clearInterval(id)
+  }, [presentIndexes])
+
+  const requestTeller = (id: string, index: number) => {
+    if (awayIndex === index && !recalling) {
+      setRecalling(true)
+      if (recallTimer.current != null) window.clearTimeout(recallTimer.current)
+      recallTimer.current = window.setTimeout(() => {
+        setAwayIndex(null)
+        setRecalling(false)
+        onSelectTeller(id)
+      }, 900)
+      return
+    }
+    onSelectTeller(id)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (recallTimer.current != null) window.clearTimeout(recallTimer.current)
+    }
+  }, [])
+
+  // WASD / arrows move focus across tellers; Enter / Space opens the focused desk.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const key = e.key.toLowerCase()
+      if (key === 'arrowleft' || key === 'a') {
+        e.preventDefault()
+        setFocus((f) => Math.max(0, f - 1))
+      } else if (key === 'arrowright' || key === 'd') {
+        e.preventDefault()
+        setFocus((f) => Math.min(TELLER_COUNT - 1, f + 1))
+      } else if (key === 'arrowup' || key === 'w' || key === 'arrowdown' || key === 's') {
+        // Keep vertical keys from scrolling the page; focus stays on the teller row.
+        e.preventDefault()
+      } else if (key === 'enter' || key === ' ') {
+        const bot = tellers[focus]
+        if (bot) {
+          e.preventDefault()
+          requestTeller(bot.id, focus)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tellers, focus, awayIndex, recalling])
+
+  useFrame((_, dt) => {
+    const orbit = controls.current
+    if (!orbit) return
+    const tx = tellerX(focus)
+    orbit.target.x = MathUtils.damp(orbit.target.x, tx * 0.35, 3.5, dt)
+    const cam = orbit.object
+    cam.position.x = MathUtils.damp(cam.position.x, HOME_POS[0] + tx * 0.22, 3.2, dt)
+  })
 
   return (
     <>
@@ -718,15 +911,15 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         maxDistance={9.5}
         minPolarAngle={0.85}
         maxPolarAngle={1.45}
-        minAzimuthAngle={-0.85}
-        maxAzimuthAngle={0.85}
+        minAzimuthAngle={-0.95}
+        maxAzimuthAngle={0.95}
       />
 
       <ambientLight intensity={0.42} color="#c8b8ff" />
       <directionalLight position={[3.2, 7.2, 2.8]} intensity={0.55} color="#ffe9c8" />
-      <pointLight position={[0, 3.5, 0.6]} intensity={1.1} color="#fff0b0" distance={14} />
-      <pointLight position={[-2.4, 3.0, -0.4]} intensity={0.4} color="#7ef9ff" distance={9} />
-      <pointLight position={[2.4, 3.0, -0.4]} intensity={0.4} color="#b967ff" distance={9} />
+      <pointLight position={[0, 3.5, 0.6]} intensity={1.05} color="#fff0b0" distance={14} />
+      <pointLight position={[-2.4, 3.0, -0.4]} intensity={0.35} color="#7ef9ff" distance={9} />
+      <pointLight position={[2.4, 3.0, -0.4]} intensity={0.35} color="#b967ff" distance={9} />
 
       {/* floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0.35]} receiveShadow>
@@ -734,32 +927,32 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         <meshStandardMaterial color={FLOOR} roughness={0.55} metalness={0.28} side={DoubleSide} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.006, 0.2]}>
-        <planeGeometry args={[11.5, 6.2]} />
+        <planeGeometry args={[12.5, 6.2]} />
         <meshStandardMaterial color="#160e2c" roughness={0.4} metalness={0.35} />
       </mesh>
-      <gridHelper args={[10, 20, '#2de2e6', '#2a1060']} position={[0, 0.012, 0.25]} />
+      <gridHelper args={[12, 24, '#2de2e6', '#2a1060']} position={[0, 0.012, 0.25]} />
       <FloorGlowPaths />
 
       {/* shell */}
       <mesh position={[0, 2.15, -3.2]}>
-        <boxGeometry args={[14.5, 4.5, 0.25]} />
+        <boxGeometry args={[15.5, 4.5, 0.25]} />
         <meshStandardMaterial color={WALL} roughness={0.88} />
       </mesh>
       <mesh position={[0, 0.55, -3.05]}>
-        <boxGeometry args={[14.5, 1.15, 0.1]} />
+        <boxGeometry args={[15.5, 1.15, 0.1]} />
         <meshStandardMaterial color={WAINSCOT} roughness={0.8} />
       </mesh>
       <mesh position={[0, 1.12, -3.02]}>
-        <boxGeometry args={[14.5, 0.04, 0.05]} />
+        <boxGeometry args={[15.5, 0.04, 0.05]} />
         <meshStandardMaterial color={TRIM} metalness={0.4} roughness={0.4} />
       </mesh>
       {([-1, 1] as const).map((side) => (
         <group key={side}>
-          <mesh position={[side * 6.9, 2.15, 0]} rotation={[0, -side * (Math.PI / 2), 0]}>
+          <mesh position={[side * 7.4, 2.15, 0]} rotation={[0, -side * (Math.PI / 2), 0]}>
             <planeGeometry args={[9.2, 4.5]} />
             <meshStandardMaterial color={WALL_DEEP} roughness={0.9} side={DoubleSide} />
           </mesh>
-          <mesh position={[side * 6.82, 0.55, 0]} rotation={[0, -side * (Math.PI / 2), 0]}>
+          <mesh position={[side * 7.32, 0.55, 0]} rotation={[0, -side * (Math.PI / 2), 0]}>
             <planeGeometry args={[9.2, 1.15]} />
             <meshStandardMaterial color={WAINSCOT} roughness={0.8} side={DoubleSide} />
           </mesh>
@@ -767,10 +960,10 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       ))}
 
       <CeilingHall />
-      <Column x={-4.5} z={-2.4} />
-      <Column x={4.5} z={-2.4} />
-      <Column x={-4.5} z={1.5} />
-      <Column x={4.5} z={1.5} />
+      <Column x={-5.2} z={-2.4} />
+      <Column x={5.2} z={-2.4} />
+      <Column x={-5.2} z={1.5} />
+      <Column x={5.2} z={1.5} />
 
       <HeroVaultDoor />
       <ProfitBoard desk={desk} />
@@ -782,36 +975,28 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <Warden />
       <CompliancePillar />
       <NightDeposit />
-      <WaitingBench x={-2.3} />
-      <WaitingBench x={2.3} />
+      <WaitingBench x={-2.6} />
+      <WaitingBench x={2.6} />
       <DataMotes />
 
-      {tellers.map((_, i) => {
-        const x = (i - 2) * 2.25
-        const color = BEAM_COLORS[i % BEAM_COLORS.length]
-        return (
-          <group key={`stanchion-${i}`}>
-            <Stanchion position={[x, 0, 1.85]} color={color} />
-            <Stanchion position={[x, 0, 1.0]} color={color} />
-            <mesh position={[x, 0.78, 1.42]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.016, 0.016, 0.85, 6]} />
-              <meshBasicMaterial color={color} toneMapped={false} />
-            </mesh>
-          </group>
-        )
-      })}
+      <QueueLanes />
 
       {tellers.map((bot, i) => (
         <TellerPod
           key={bot?.id || `empty-${i}`}
           bot={bot}
           index={i}
-          x={(i - 2) * 2.25}
-          onSelect={onSelectTeller}
+          focused={focus === i}
+          away={awayIndex === i}
+          recalling={recalling && awayIndex === i}
+          onSelect={(id) => {
+            setFocus(i)
+            requestTeller(id, i)
+          }}
         />
       ))}
 
-      <Html position={[0, 0.1, 3.5]} center distanceFactor={12} style={{ pointerEvents: 'none' }}>
+      <Html position={[0, 0.1, 3.55]} center distanceFactor={12} style={{ pointerEvents: 'none' }}>
         <div
           style={{
             fontFamily: 'Share Tech Mono, monospace',
@@ -821,7 +1006,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
             letterSpacing: '0.06em',
           }}
         >
-          drag to look · cash {money(desk?.cash)} · click a teller pad
+          A/D or ←→ switch teller · Enter open · drag to look · cash {money(desk?.cash)}
         </div>
       </Html>
 
