@@ -15,6 +15,7 @@ import {
 } from '../hud/monitorTextures'
 import { NeonBloom } from './Effects'
 import { BotFigure } from './BotFigure'
+import { clampBankWalk } from '../data/bankWalk'
 
 type Props = {
   bots: BotRow[]
@@ -1070,7 +1071,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     }
   }, [])
 
-  // A/D · ←/→ briefly snap to teller; W/S · ↑/↓ free-roam dolly; Enter / Space opens.
+  // A/D · ←/→ snap to teller; W/S · ↑/↓ walk aisle with collision; Enter / Space opens.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -1097,23 +1098,34 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         const orbit = controls.current
         if (!orbit) return
         const cam = orbit.object
-        const dx = cam.position.x - orbit.target.x
-        const dy = cam.position.y - orbit.target.y
-        const dz = cam.position.z - orbit.target.z
-        const dist = Math.hypot(dx, dy, dz) || 1
-        const pose = slotPose(focus)
-        orbit.target.x = MathUtils.lerp(orbit.target.x, pose.x * 0.4, 0.18)
-        orbit.target.z = MathUtils.lerp(orbit.target.z, pose.z, 0.18)
-        const nx = dx / dist
-        const ny = dy / dist
-        const nz = dz / dist
-        const step = key === 'arrowup' || key === 'w' ? -0.38 : 0.38
-        const nextDist = MathUtils.clamp(dist + step, ZOOM_DIST_NEAR - 0.15, ZOOM_DIST_FAR + 4.8)
-        cam.position.set(
-          orbit.target.x + nx * nextDist,
-          orbit.target.y + ny * nextDist,
-          orbit.target.z + nz * nextDist,
+        // Look vector on the floor: camera → target (into the hall).
+        const lx = orbit.target.x - cam.position.x
+        const lz = orbit.target.z - cam.position.z
+        const len = Math.hypot(lx, lz) || 1
+        const dir = key === 'arrowup' || key === 'w' ? 1 : -1
+        const step = 0.42 * dir
+        const nx = lx / len
+        const nz = lz / len
+        const nextTarget = clampBankWalk(
+          orbit.target.x + nx * step,
+          orbit.target.z + nz * step,
+          { aisleHalf: AISLE_HALF, laneHalf: LANE_HALF, zBack: Z_BACK, zFront: Z_FRONT },
         )
+        const ox = orbit.target.x
+        const oz = orbit.target.z
+        orbit.target.x = nextTarget.x
+        orbit.target.z = nextTarget.z
+        cam.position.x += nextTarget.x - ox
+        cam.position.z += nextTarget.z - oz
+        // Keep camera XZ inside a slightly wider aisle envelope.
+        const camClamp = clampBankWalk(cam.position.x, cam.position.z, {
+          aisleHalf: AISLE_HALF + 0.55,
+          laneHalf: LANE_HALF,
+          zBack: Z_BACK,
+          zFront: Z_FRONT,
+        })
+        cam.position.x = camClamp.x
+        cam.position.z = camClamp.z
         orbit.update()
       } else if (key === 'enter' || key === ' ') {
         const bot = tellers[focus]
@@ -1233,7 +1245,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
             letterSpacing: '0.06em',
           }}
         >
-          A/D · ←→ snap · W/S · ↑↓ zoom free · Enter open · drag to look · cash {money(desk?.cash)}
+          A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look · cash {money(desk?.cash)}
         </div>
       </Html>
 

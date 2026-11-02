@@ -228,6 +228,25 @@ export default function App() {
                 ))}
               </div>
             )}
+            {fromBank && (
+              <div className="teller-dialogue" role="status" aria-label="Teller dialogue">
+                <p className="td-line">
+                  {selected.why?.trim() ||
+                    selected.idle_copy?.trim() ||
+                    selected.blurb?.trim() ||
+                    'No CARD why on this teller yet — waiting on the next paper check.'}
+                </p>
+                <div className="td-meta">
+                  <span>skip · {selected.skip?.trim() || 'none'}</span>
+                  <span>next · {selected.next_run?.trim() || '—'}</span>
+                  <span>
+                    today ·{' '}
+                    {selected.today == null ? '—' : `$${Number(selected.today).toFixed(2)}`}
+                  </span>
+                  <span>open · {selected.open_count ?? 0}</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -251,7 +270,7 @@ export default function App() {
           <div className="office-hud bank-hud">
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
-              <span>A/D · ←→ snap · W/S · ↑↓ zoom free · Enter open · drag to look</span>
+              <span>A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look</span>
             </div>
             <div className="vault-board" aria-label="Desk vault board">
               <div className="vault-board-row">
@@ -287,6 +306,29 @@ export default function App() {
                   })()}
                   {snap?.desk?.gate_a?.any_ready ? ' · Gate A ready' : ''}
                   {snap?.desk?.gate_b?.any_ready ? ' · Gate B ready' : ''}
+                </span>
+              </div>
+              <div className="vault-board-row">
+                <span className="vb-label">tip</span>
+                <span>
+                  {snap?.desk?.sports_tip?.active
+                    ? `T−${snap.desk.sports_tip.band} force ${snap.desk.sports_tip.force_sec || 45}s` +
+                      (snap.desk.sports_tip.sample ? ` · ${snap.desk.sports_tip.sample}` : '')
+                    : 'no tip-force · sports on normal cadence'}
+                </span>
+              </div>
+              <div className="vault-board-row">
+                <span className="vb-label">bleed</span>
+                <span>
+                  {(() => {
+                    const sb = snap?.desk?.master?.stopbleed
+                    if (!sb) return 'memecoin measure pending'
+                    return (
+                      `stop×${sb.stop_exits ?? 0} · flip×${sb.model_flip_exits ?? 0}` +
+                      (sb.red_day_locked ? ' · RED LOCK' : '') +
+                      (sb.expand_volume ? ' · volume ok' : ' · no volume expand')
+                    )
+                  })()}
                 </span>
               </div>
               <div className="vault-board-row tax-edu">
