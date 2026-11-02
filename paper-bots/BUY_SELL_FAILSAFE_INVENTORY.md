@@ -198,9 +198,9 @@ entry_gate / pause. Own limits ($50 daily, 4 open) usually tighter than desk. No
 
 ---
 
-## 5. kalshi-sized placeholder (`_sized_view`)
+## 5. kalshi-sized (`kalshi-sized-paper/bot.py`)
 
-In `pimp_desk.py` `_sized_view()`: id `kalshi-sized`, **`present: False`**, empty actions, no script. Panel only — “not in this checkout.” Desk stake bounds saved “for when that bot is on main.” No BUY/SELL/FAILSAFE logic.
+Live Tower 5: KXINXU with desk **Kelly-lite** stake (84–92¢ band), model-flip sell under 50¢, settle on result. Fallback `_sized_view()` only if the folder is missing from a checkout.
 
 ---
 
@@ -225,4 +225,4 @@ In `pimp_desk.py` `_sized_view()`: id `kalshi-sized`, **`present: False`**, empt
 | kalshi-sp scan | Yes | No ($25) | Yes ($50) | 1/day | Weak (settle only) |
 | btc15m | **Yes** | Yes | No | Hardcoded 12 | Weak (settle; TP print-only) |
 | memecoin | Yes | No ($25 flat) | Yes ($50) | 4 | Strong |
-| kalshi-sized | N/A | N/A | N/A | N/A | Absent |
+| kalshi-sized | Kelly-lite KXINXU 84–92¢ | Model-flip &lt;50¢ / settle | Calendar + desk gate + kill | Partial |

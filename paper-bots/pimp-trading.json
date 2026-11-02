@@ -1,5 +1,5 @@
 {
-  "_comment": "Dashboard-owned paper limits. Paper only. This file is not the picks database. Safer desk: venue edges after fees, Kelly-lite sizing capped by open risk, correlation veto, model-flip exits, expectancy starve, BTC shadow promote path. Under 80%, a paper stake is about $20. At 80% or higher, a paper stake is $20 to $100. Pace never waives edge.",
+  "_comment": "Dashboard-owned paper limits. Paper only. This file is not the picks database. Profit desk: higher venue edges after fees, Kelly-lite sizing capped by open risk, correlation veto, tighter model-flip exits, expectancy starve, BTC shadow promote path, live Sized Kalshi tower. Under 80%, a paper stake is about $20. At 80% or higher, a paper stake is $20 to $100. Pace never waives edge.",
   "paper_only": true,
   "stake_hi_min": 20.0,
   "stake_hi_max": 100.0,
@@ -12,10 +12,10 @@
   "pace_min": 6,
   "pace_target": 12,
   "venue_min_edge": {
-    "kalshi_sports": 0.06,
-    "kalshi_btc15m": 0.05,
-    "kalshi_inx": 0.0,
-    "solana_dex": 0.02
+    "kalshi_sports": 0.07,
+    "kalshi_btc15m": 0.055,
+    "kalshi_inx": 0.02,
+    "solana_dex": 0.025
   },
   "sizing": "kelly_lite",
   "kelly_fraction": 0.25,
@@ -23,9 +23,9 @@
     ["risk_on_btc", "risk_on_equity"],
     ["risk_off_btc", "risk_off_equity"]
   ],
-  "model_flip_delta": 0.08,
+  "model_flip_delta": 0.06,
   "model_flip_exits": true,
-  "starve_min_n": 8,
+  "starve_min_n": 6,
   "starve_expectancy": 0.0,
   "starve_factor": 0.25,
   "expectancy_window_days": 20,

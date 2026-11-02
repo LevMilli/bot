@@ -36,6 +36,9 @@ def _tree(tmp, script):
     _write(os.path.join(tmp, "kalshi-sp500-paper", "bot.py"), script)
     _write(os.path.join(tmp, "kalshi-sp500-paper", "config.json"), json.dumps({"paper_mode": True}))
     _write(os.path.join(tmp, "kalshi-sp500-paper", "calendar.json"), "{}\n")
+    _write(os.path.join(tmp, "kalshi-sized-paper", "bot.py"), script)
+    _write(os.path.join(tmp, "kalshi-sized-paper", "config.json"), json.dumps({"paper_mode": True}))
+    _write(os.path.join(tmp, "kalshi-sized-paper", "calendar.json"), "{}\n")
     _write(os.path.join(tmp, "btc15m-signal", "btc15m_signal.py"), script)
     _write(os.path.join(tmp, "memecoin-paper", "bot.py"), script)
     _write(os.path.join(tmp, "memecoin-paper", "config.py"), "PAPER = True\n")
@@ -100,10 +103,16 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual([b["id"] for b in snap["bots"]],
                          ["sports-gap", "kalshi-sp", "btc15m", "memecoin", "kalshi-sized"])
         sized = snap["bots"][-1]
-        self.assertFalse(sized["present"])
-        self.assertEqual(sized["actions"], [])
-        expected_cash = {"sports-gap": 100.0, "kalshi-sp": 500.0, "btc15m": 100.0, "memecoin": 100.0}
-        for bot in snap["bots"][:-1]:
+        self.assertTrue(sized["present"])
+        self.assertTrue(sized["actions"])
+        expected_cash = {
+            "sports-gap": 100.0,
+            "kalshi-sp": 500.0,
+            "btc15m": 100.0,
+            "memecoin": 100.0,
+            "kalshi-sized": 500.0,
+        }
+        for bot in snap["bots"]:
             self.assertTrue(bot["present"], bot["id"])
             self.assertTrue(bot["has_state"], bot["id"])
             self.assertEqual(bot["cash"], expected_cash[bot["id"]], bot["id"])
@@ -115,8 +124,9 @@ class PimpDeskTests(unittest.TestCase):
             self.assertTrue(plans["failsafes"], bot["id"])
             self.assertIn(plans["exit_quality"], ("strong", "partial", "weak"), bot["id"])
             self.assertIn("gates_hit", bot)
-        self.assertEqual(sized["plans"]["exit_quality"], "absent")
-        self.assertIn("absent", sized["gates_hit"])
+            self.assertNotIn("absent", bot["gates_hit"], bot["id"])
+        self.assertEqual(sized["plans"]["exit_quality"], "partial")
+        self.assertTrue(sized["plans"]["entry_gated"])
         self.assertTrue(next(b for b in snap["bots"] if b["id"] == "btc15m")["plans"]["entry_gated"])
         self.assertTrue(next(b for b in snap["bots"] if b["id"] == "sports-gap")["plans"]["entry_gated"])
         self.assertEqual(snap["desk"]["ops"]["strong_exits"], ["memecoin"])
@@ -124,6 +134,8 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("btc15m", snap["desk"]["ops"]["weak_exits"])
         self.assertIn("sports-gap", snap["desk"]["ops"]["entry_gated_bots"])
         self.assertIn("btc15m", snap["desk"]["ops"]["entry_gated_bots"])
+        self.assertIn("kalshi-sized", snap["desk"]["ops"]["entry_gated_bots"])
+        self.assertIn("kalshi-sized", snap["desk"]["ops"]["weak_exits"])
         self.assertTrue(snap["roi_system"]["ok"])
         self.assertTrue(snap["roi_system"]["paper_only"])
         self.assertEqual(snap["roi_system"]["version"], 2)
@@ -145,7 +157,7 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(snap["desk"]["pace_line"], "0 of 12 this hour")
         self.assertFalse(snap["desk"]["pace_loosened"])
         self.assertIn("does not waive", snap["desk"]["pace_note"])
-        self.assertEqual(snap["desk"]["cash"], 800.0)
+        self.assertEqual(snap["desk"]["cash"], 1300.0)
         self.assertIn("Run one check", [a["label"] for a in snap["bots"][0]["actions"]])
         self.assertIn("Morning brief", [a["label"] for a in snap["bots"][1]["actions"]])
         self.assertIn("20.00", snap["limits_text"])
@@ -280,7 +292,10 @@ class PimpDeskTests(unittest.TestCase):
             self.assertIn(("memecoin", "run", None), names(noon))
             self.assertNotIn(("kalshi-sp", "run", "12:30"), names(late))
             self.assertEqual([row[0] for row in names(night)], ["sports-gap", "btc15m", "memecoin"])
+            self.assertNotIn(("kalshi-sized", "settle", "13:00"), names(night))
             self.assertIn(("kalshi-sp", "run", "12:30"), names(saturday))
+            saturday_scan = dt.datetime(2026, 10, 31, 12, 35, tzinfo=pimp_desk.CT)
+            self.assertIn(("kalshi-sized", "run", "12:35"), names(saturday_scan))
         snap = _checkout_snapshot()
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertIn("timer", snap["banner"].lower())
@@ -304,6 +319,7 @@ class PimpDeskTests(unittest.TestCase):
             # Live BTC + shadow BTC both invoke the stub script.
             self.assertEqual(_ran(tmp, "btc15m-signal"), "\n\n")
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
+            self.assertIsNone(_ran(tmp, "kalshi-sized-paper"))
             self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
             for folder in ("sports-gap-paper", "btc15m-signal", "kalshi-sp500-paper", "memecoin-paper"):
                 text = _ran(tmp, folder).lower()
@@ -314,9 +330,11 @@ class PimpDeskTests(unittest.TestCase):
             later = dt.datetime(2026, 10, 30, 12, 35, tzinfo=pimp_desk.CT)
             more = pimp_desk.run_scheduled(later, tmp)
             self.assertEqual({(row["bot"], row["action"]) for row in more},
-                             {("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow")})
+                             {("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
+                              ("kalshi-sized", "run")})
             self.assertTrue(all(row["ok"] for row in more))
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
+            self.assertEqual(_ran(tmp, "kalshi-sized-paper"), "scan\n")
             self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
             self.assertEqual(_ran(tmp, "sports-gap-paper"), "\n\n")
 
@@ -1002,13 +1020,15 @@ class PimpDeskTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _tree(tmp, QUIET)
             made = pimp_desk.ensure_paper_accounts(tmp)
-            self.assertEqual(set(made), {"sports-gap", "kalshi-sp", "btc15m", "memecoin"})
+            self.assertEqual(set(made), {"sports-gap", "kalshi-sp", "btc15m", "memecoin", "kalshi-sized"})
             snap = pimp_desk.snapshot(tmp)
             by_id = {bot["id"]: bot for bot in snap["bots"]}
             self.assertEqual(by_id["sports-gap"]["cash"], 100.0)
             self.assertEqual(by_id["kalshi-sp"]["cash"], 500.0)
             self.assertEqual(by_id["btc15m"]["cash"], 100.0)
             self.assertEqual(by_id["memecoin"]["cash"], 100.0)
+            self.assertEqual(by_id["kalshi-sized"]["cash"], 500.0)
+            self.assertTrue(by_id["kalshi-sized"]["present"])
             self.assertEqual(snap["desk"]["curve"], [])
             self.assertEqual(by_id["sports-gap"]["positions"], [])
             path = os.path.join(tmp, "sports-gap-paper", "state.json")

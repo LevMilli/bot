@@ -32,7 +32,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 
 # ---- rule settings (edit here) ----
 MIN_MINUTES_LEFT = 10        # need at least 10 minutes before close
-EDGE_BUFFER = 0.05           # fallback if desk venue_min_edge missing
+EDGE_BUFFER = 0.055          # fallback if desk venue_min_edge missing
 MIN_MODEL_PROB = 0.80        # safer desk: model Φ(z) must be ≥ 80%
 MIN_CUSHION_USD = 50         # BTC must be at least $50 away from the target
 MIN_Z = 0.7                  # cushion / sigma

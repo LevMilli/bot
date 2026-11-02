@@ -14,10 +14,10 @@ from typing import Any
 VENUE_KEYS = ("kalshi_sports", "kalshi_btc15m", "kalshi_inx", "solana_dex")
 
 DEFAULT_VENUE_MIN_EDGE = {
-    "kalshi_sports": 0.06,
-    "kalshi_btc15m": 0.05,
-    "kalshi_inx": 0.0,
-    "solana_dex": 0.02,
+    "kalshi_sports": 0.07,
+    "kalshi_btc15m": 0.055,
+    "kalshi_inx": 0.02,
+    "solana_dex": 0.025,
 }
 
 DEFAULT_CORRELATION_PAIRS = (
@@ -29,6 +29,7 @@ BOT_VENUE = {
     "sports-gap": "kalshi_sports",
     "btc15m": "kalshi_btc15m",
     "kalshi-sp": "kalshi_inx",
+    "kalshi-sized": "kalshi_inx",
     "memecoin": "solana_dex",
 }
 
@@ -52,7 +53,7 @@ def risk_factor_for(bot_id: str, side: str | None) -> str:
         if s == "no":
             return "risk_off_btc"
         return ""
-    if bot_id == "kalshi-sp":
+    if bot_id in ("kalshi-sp", "kalshi-sized"):
         if s in ("yes", "y"):
             return "risk_on_equity"
         if s in ("no", "n"):
