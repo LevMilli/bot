@@ -31,14 +31,14 @@ const BRASS = '#c9a227'
 const INK = '#050812'
 const FLOOR = '#0e061c'
 
-const HOME_POS: [number, number, number] = [0, 2.55, 6.5]
 const HOME_TARGET: [number, number, number] = [0, 1.4, 0.1]
 
-/** Wide enough that nameplates / glass fins never collide while bots sway. */
-const TELLER_COUNT = 5
-const TELLER_SPACING = 3.05
+/** One teller per building/bot — hall grows with the roster. */
+const MIN_TELLERS = 1
+const MAX_TELLERS = 8
+const TELLER_SPACING = 2.9
 /** Half-width of each teller's private rope channel (gap between neighbors = spacing − 2×half). */
-const LANE_HALF = 0.72
+const LANE_HALF = 0.68
 /** Rope mouth end toward lobby — no stanchion here (open mouth, no gate bloom). */
 const LANE_Z_MOUTH = 1.55
 /** Rear posts only — clear of the counter lip so the desk chrome never reads as a crossbar. */
@@ -46,14 +46,29 @@ const LANE_Z_BACK = 0.72
 /** Dolly distance along the focused lane (far → near). */
 const ZOOM_DIST_FAR = 6.55
 const ZOOM_DIST_NEAR = 3.85
+const HALL_HEIGHT = 4.55
 
-function tellerX(index: number) {
-  return (index - (TELLER_COUNT - 1) / 2) * TELLER_SPACING
+function tellerCountFor(bots: BotRow[]): number {
+  return Math.max(MIN_TELLERS, Math.min(MAX_TELLERS, bots.length || MIN_TELLERS))
+}
+
+function tellerX(index: number, count: number) {
+  return (index - (count - 1) / 2) * TELLER_SPACING
+}
+
+function hallWidthFor(count: number) {
+  return Math.max(15.5, count * TELLER_SPACING + 5.2)
+}
+
+function homePosFor(count: number): [number, number, number] {
+  const z = 6.35 + Math.max(0, count - 5) * 0.55
+  return [0, 2.55, z]
 }
 
 function TellerPod({
   bot,
   index,
+  count,
   focused,
   away,
   recalling,
@@ -61,11 +76,13 @@ function TellerPod({
 }: {
   bot: BotRow | null
   index: number
+  count: number
   focused: boolean
   away: boolean
   recalling: boolean
   onSelect: (id: string) => void
 }) {
+  // Whole station (desk, glass, lamp, plate, lane cues) follows the building beam color.
   const color = beamColorFor(bot?.id, index)
   const offline = !bot || bot.present === false
   const pose = bot ? botPose(bot) : 'waiting'
@@ -108,36 +125,54 @@ function TellerPod({
     if (bot) onSelect(bot.id)
   }
 
-  const x = tellerX(index)
+  const x = tellerX(index, count)
   const podW = 1.52
 
   return (
     <group position={[x, 0, -0.05]}>
-      {/* open trading pod — low counter so the full bot reads */}
+      {/* Station body — subtle emissive wash in building color */}
       <mesh position={[0, 0.42, -0.15]}>
         <boxGeometry args={[podW, 0.84, 0.7]} />
-        <meshStandardMaterial color="#14101c" roughness={0.72} metalness={0.22} />
+        <meshStandardMaterial
+          color="#14101c"
+          roughness={0.72}
+          metalness={0.22}
+          emissive={color}
+          emissiveIntensity={offline ? 0.04 : focused ? 0.14 : 0.08}
+        />
       </mesh>
       <mesh position={[0, 0.86, 0.18]} castShadow>
         <boxGeometry args={[podW + 0.06, 0.08, 0.95]} />
         <meshStandardMaterial color="#d8d0c0" roughness={0.28} metalness={0.22} />
       </mesh>
-      {/* Short brass lip only — full-width accent bars read as rope crossbars from the lobby. */}
+      {/* Side accent strips — match tower beam */}
+      {([-podW / 2 - 0.02, podW / 2 + 0.02] as const).map((sx) => (
+        <mesh key={sx} position={[sx, 0.42, -0.15]}>
+          <boxGeometry args={[0.04, 0.84, 0.72]} />
+          <meshBasicMaterial color={color} toneMapped={false} />
+        </mesh>
+      ))}
+      {/* Short lip only — full-width accent bars read as rope crossbars from the lobby. */}
       <mesh position={[0, 0.87, 0.66]}>
         <boxGeometry args={[podW * 0.55, 0.028, 0.04]} />
-        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={focused ? 0.35 : 0.18} />
+        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={focused ? 0.45 : 0.22} />
+      </mesh>
+      {/* Front kick plate in beam color */}
+      <mesh position={[0, 0.12, 0.2]}>
+        <boxGeometry args={[podW * 0.92, 0.08, 0.03]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
 
-      {/* side glass fins — inset so neighboring pods never clip */}
+      {/* side glass fins tinted to station color */}
       {([-0.74, 0.74] as const).map((sx) => (
         <group key={sx}>
           <mesh position={[sx, 1.45, -0.05]}>
             <boxGeometry args={[0.035, 1.15, 0.65]} />
-            <meshStandardMaterial color="#7ef9ff" transparent opacity={0.1} metalness={0.3} roughness={0.08} />
+            <meshStandardMaterial color={color} transparent opacity={0.14} metalness={0.35} roughness={0.08} />
           </mesh>
           <mesh position={[sx, 2.05, -0.05]}>
             <boxGeometry args={[0.05, 0.05, 0.68]} />
-            <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.28} />
+            <meshStandardMaterial color={color} metalness={0.55} roughness={0.28} emissive={color} emissiveIntensity={0.35} />
           </mesh>
         </group>
       ))}
@@ -145,7 +180,7 @@ function TellerPod({
       {/* desk terminal + lamp */}
       <mesh position={[-0.38, 1.05, 0.28]} rotation={[-0.4, 0.12, 0]}>
         <boxGeometry args={[0.42, 0.28, 0.03]} />
-        <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
+        <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} emissive={color} emissiveIntensity={0.12} />
       </mesh>
       <mesh position={[-0.38, 1.05, 0.3]} rotation={[-0.4, 0.12, 0]}>
         <planeGeometry args={[0.36, 0.22]} />
@@ -163,14 +198,14 @@ function TellerPod({
         <coneGeometry args={[0.08, 0.11, 12, 1, true]} />
         <meshStandardMaterial
           color="#1a1420"
-          emissive={offline ? '#401820' : '#fff0b0'}
+          emissive={offline ? '#401820' : color}
           emissiveIntensity={0.7}
           side={DoubleSide}
           roughness={0.4}
         />
       </mesh>
 
-      {/* sharp canvas nameplate — larger for PnL / label readability */}
+      {/* sharp canvas nameplate — frame glows in station color */}
       <mesh
         position={[0, 1.88, 0.42]}
         onClick={select}
@@ -180,11 +215,16 @@ function TellerPod({
         }}
       >
         <boxGeometry args={[1.38, 0.5, 0.05]} />
-        <meshStandardMaterial color={INK} metalness={0.35} roughness={0.4} emissive={focused ? color : '#000'} emissiveIntensity={focused ? 0.25 : 0} />
+        <meshStandardMaterial color={INK} metalness={0.35} roughness={0.4} emissive={color} emissiveIntensity={focused ? 0.35 : 0.12} />
       </mesh>
       <mesh position={[0, 1.88, 0.455]} onClick={select}>
         <planeGeometry args={[1.28, 0.42]} />
         <meshBasicMaterial map={plate} toneMapped={false} />
+      </mesh>
+      {/* Nameplate rim */}
+      <mesh position={[0, 1.88, 0.4]}>
+        <boxGeometry args={[1.44, 0.56, 0.02]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
 
       {/* standing teller facing the customer (+Z / camera) */}
@@ -547,36 +587,164 @@ function SideScreen({
   )
 }
 
-function CeilingHall() {
-  // Ceiling beams between teller lanes (midpoints), never on pod centerlines.
-  const beamXs = Array.from({ length: TELLER_COUNT - 1 }, (_, i) => (tellerX(i) + tellerX(i + 1)) / 2)
+/**
+ * Fully enclosed synthwave bank shell — thick walls, ceiling coffers, portal front.
+ * Width scales with teller count so every building gets a linked station inside.
+ */
+function BankEnclosure({ width, tellerCount }: { width: number; tellerCount: number }) {
+  const halfW = width / 2
+  const wallT = 0.28
+  const zBack = -3.35
+  const zFront = 4.55
+  const depth = zFront - zBack
+  const midZ = (zFront + zBack) / 2
+  const portalW = Math.min(4.2, width * 0.28)
+  const sidePanelW = (width - portalW) / 2
+  const beamXs =
+    tellerCount > 1
+      ? Array.from({ length: tellerCount - 1 }, (_, i) => (tellerX(i, tellerCount) + tellerX(i + 1, tellerCount)) / 2)
+      : [0]
+  const ceilY = HALL_HEIGHT
+
   return (
     <group>
-      <mesh position={[0, 4.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[16, 9.2]} />
-        <meshStandardMaterial color="#100a1e" roughness={0.95} side={DoubleSide} />
+      {/* Thick floor slab */}
+      <mesh position={[0, -0.08, midZ]} receiveShadow>
+        <boxGeometry args={[width + 0.4, 0.18, depth + 0.4]} />
+        <meshStandardMaterial color={FLOOR} roughness={0.55} metalness={0.28} />
+      </mesh>
+      <mesh position={[0, 0.01, midZ]} receiveShadow>
+        <boxGeometry args={[width - 0.35, 0.04, depth - 0.5]} />
+        <meshStandardMaterial color="#160e2c" roughness={0.4} metalness={0.35} />
+      </mesh>
+      <gridHelper args={[Math.min(width - 1.5, 14), 28, '#2de2e6', '#2a1060']} position={[0, 0.035, 0.15]} />
+
+      {/* Back wall + wainscot */}
+      <mesh position={[0, ceilY / 2, zBack - wallT / 2]}>
+        <boxGeometry args={[width + wallT * 2, ceilY, wallT]} />
+        <meshStandardMaterial color={WALL} roughness={0.88} />
+      </mesh>
+      <mesh position={[0, 0.55, zBack + 0.02]}>
+        <boxGeometry args={[width - 0.2, 1.15, 0.08]} />
+        <meshStandardMaterial color={WAINSCOT} roughness={0.8} />
+      </mesh>
+      <mesh position={[0, 1.14, zBack + 0.06]}>
+        <boxGeometry args={[width - 0.15, 0.045, 0.05]} />
+        <meshStandardMaterial color={TRIM} metalness={0.45} roughness={0.35} />
+      </mesh>
+      <mesh position={[0, ceilY - 0.12, zBack + 0.08]}>
+        <boxGeometry args={[width - 0.4, 0.04, 0.04]} />
+        <meshBasicMaterial color="#2de2e6" toneMapped={false} />
+      </mesh>
+
+      {/* Side walls (solid boxes) */}
+      {([-1, 1] as const).map((side) => (
+        <group key={side}>
+          <mesh position={[side * (halfW + wallT / 2), ceilY / 2, midZ]}>
+            <boxGeometry args={[wallT, ceilY, depth + wallT]} />
+            <meshStandardMaterial color={WALL_DEEP} roughness={0.9} />
+          </mesh>
+          <mesh position={[side * (halfW - 0.04), 0.55, midZ]}>
+            <boxGeometry args={[0.1, 1.15, depth - 0.3]} />
+            <meshStandardMaterial color={WAINSCOT} roughness={0.8} />
+          </mesh>
+          {/* Wall sconces */}
+          {[-1.2, 0.6, 2.4].map((z) => (
+            <group key={z} position={[side * (halfW - 0.18), 2.55, z]}>
+              <mesh>
+                <boxGeometry args={[0.08, 0.22, 0.12]} />
+                <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
+              </mesh>
+              <mesh position={[side * -0.06, 0, 0]}>
+                <sphereGeometry args={[0.06, 10, 10]} />
+                <meshBasicMaterial color="#7ef9ff" toneMapped={false} />
+              </mesh>
+              <pointLight position={[side * -0.2, 0, 0]} intensity={0.25} color="#7ef9ff" distance={4.5} />
+            </group>
+          ))}
+          {/* Decorative wall panels */}
+          {[-0.8, 1.1].map((z) => (
+            <mesh key={z} position={[side * (halfW - 0.16), 2.35, z]}>
+              <boxGeometry args={[0.04, 1.6, 1.1]} />
+              <meshStandardMaterial color="#1c1430" roughness={0.75} metalness={0.15} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+
+      {/* Front wall with portal opening toward the plaza camera */}
+      <mesh position={[-(portalW / 2 + sidePanelW / 2), ceilY / 2, zFront]}>
+        <boxGeometry args={[sidePanelW, ceilY, wallT]} />
+        <meshStandardMaterial color={WALL} roughness={0.88} />
+      </mesh>
+      <mesh position={[portalW / 2 + sidePanelW / 2, ceilY / 2, zFront]}>
+        <boxGeometry args={[sidePanelW, ceilY, wallT]} />
+        <meshStandardMaterial color={WALL} roughness={0.88} />
+      </mesh>
+      {/* Lintel over portal */}
+      <mesh position={[0, ceilY - 0.55, zFront]}>
+        <boxGeometry args={[portalW + 0.35, 1.1, wallT + 0.04]} />
+        <meshStandardMaterial color={WALL} roughness={0.85} />
+      </mesh>
+      <mesh position={[0, ceilY - 1.05, zFront + 0.02]}>
+        <boxGeometry args={[portalW + 0.5, 0.08, 0.06]} />
+        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
+      </mesh>
+      <mesh position={[0, ceilY - 1.12, zFront + 0.04]}>
+        <boxGeometry args={[portalW + 0.35, 0.035, 0.04]} />
+        <meshBasicMaterial color="#f9c80e" toneMapped={false} />
+      </mesh>
+      {/* Portal jambs */}
+      {([-1, 1] as const).map((side) => (
+        <mesh key={side} position={[side * (portalW / 2 + 0.06), 1.7, zFront + 0.02]}>
+          <boxGeometry args={[0.12, 3.4, 0.1]} />
+          <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
+        </mesh>
+      ))}
+
+      {/* Ceiling slab + coffered beams */}
+      <mesh position={[0, ceilY + 0.08, midZ]}>
+        <boxGeometry args={[width + wallT * 2, 0.22, depth + wallT]} />
+        <meshStandardMaterial color="#100a1e" roughness={0.95} />
       </mesh>
       {beamXs.map((x) => (
         <group key={x}>
-          <mesh position={[x, 4.12, 0.15]}>
-            <boxGeometry args={[0.18, 0.14, 6.2]} />
+          <mesh position={[x, ceilY - 0.08, midZ * 0.35]}>
+            <boxGeometry args={[0.18, 0.14, depth * 0.62]} />
             <meshStandardMaterial color="#1a1428" roughness={0.7} metalness={0.2} />
           </mesh>
-          {/* Stop short of the NET DESK face so neon never clips the board. */}
-          <mesh position={[x, 4.05, 0.35]}>
+          <mesh position={[x, ceilY - 0.16, 0.35]}>
             <boxGeometry args={[0.32, 0.045, 5.0]} />
             <meshBasicMaterial color="#e7f6ff" toneMapped={false} />
           </mesh>
         </group>
       ))}
-      <mesh position={[0, 4.12, -3.05]}>
-        <boxGeometry args={[15, 0.12, 0.2]} />
+      {/* Cross beams */}
+      {[-1.4, 0.5, 2.2].map((z) => (
+        <mesh key={z} position={[0, ceilY - 0.1, z]}>
+          <boxGeometry args={[width - 0.8, 0.1, 0.14]} />
+          <meshStandardMaterial color="#1a1428" roughness={0.7} metalness={0.2} />
+        </mesh>
+      ))}
+      <mesh position={[0, ceilY - 0.05, zBack + 0.25]}>
+        <boxGeometry args={[width - 0.6, 0.12, 0.2]} />
         <meshStandardMaterial color={TRIM} metalness={0.4} roughness={0.4} />
       </mesh>
-      {/* Cyan trim well above + behind NET DESK — never across the board face. */}
-      <mesh position={[0, 4.55, -3.35]}>
-        <boxGeometry args={[13.5, 0.04, 0.04]} />
-        <meshBasicMaterial color="#2de2e6" toneMapped={false} />
+
+      {/* Corner columns — all four corners of the enclosed hall */}
+      <Column x={-halfW + 0.35} z={zBack + 0.55} />
+      <Column x={halfW - 0.35} z={zBack + 0.55} />
+      <Column x={-halfW + 0.35} z={zFront - 0.55} />
+      <Column x={halfW - 0.35} z={zFront - 0.55} />
+
+      {/* Floor runner toward vault */}
+      <mesh position={[0, 0.018, -0.4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1.15, depth * 0.55]} />
+        <meshStandardMaterial color="#1a0e28" roughness={0.45} metalness={0.4} />
+      </mesh>
+      <mesh position={[0, 0.022, -0.4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.08, depth * 0.55]} />
+        <meshBasicMaterial color="#2de2e6" transparent opacity={0.45} toneMapped={false} />
       </mesh>
     </group>
   )
@@ -633,13 +801,14 @@ function Warden() {
 }
 
 function FloorGlowPaths({ tellers }: { tellers: (BotRow | null)[] }) {
+  const count = tellers.length
   return (
     <group>
-      {Array.from({ length: TELLER_COUNT }).map((_, i) => (
-        <mesh key={i} position={[tellerX(i), 0.012, 0.55]} rotation={[-Math.PI / 2, 0, 0]}>
+      {tellers.map((bot, i) => (
+        <mesh key={bot?.id || i} position={[tellerX(i, count), 0.012, 0.55]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.07, 2.6]} />
           <meshBasicMaterial
-            color={beamColorFor(tellers[i]?.id, i)}
+            color={beamColorFor(bot?.id, i)}
             transparent
             opacity={0.26}
             depthWrite={false}
@@ -660,11 +829,12 @@ function FloorGlowPaths({ tellers }: { tellers: (BotRow | null)[] }) {
 function QueueLanes({ tellers }: { tellers: (BotRow | null)[] }) {
   const ropeLen = LANE_Z_MOUTH - LANE_Z_BACK
   const ropeMidZ = (LANE_Z_MOUTH + LANE_Z_BACK) / 2
+  const count = tellers.length
   return (
     <group>
-      {Array.from({ length: TELLER_COUNT }).map((_, i) => {
-        const color = beamColorFor(tellers[i]?.id, i)
-        const cx = tellerX(i)
+      {tellers.map((bot, i) => {
+        const color = beamColorFor(bot?.id, i)
+        const cx = tellerX(i, count)
         const left = cx - LANE_HALF
         const right = cx + LANE_HALF
         return (
@@ -791,26 +961,31 @@ function Stanchion({ position, color }: { position: [number, number, number]; co
   )
 }
 
-/** Interior APEX-CITY TRUST — neon bank hall with hero vault door + open teller pods. */
+/** Interior APEX-CITY TRUST — enclosed neon hall; one teller station per building. */
 export function BankScene({ bots, desk, onSelectTeller }: Props) {
   const controls = useRef<OrbitControlsImpl>(null)
-  const tellers = useMemo(() => {
-    const list: (BotRow | null)[] = [...bots]
-    while (list.length < TELLER_COUNT) list.push(null)
-    return list.slice(0, TELLER_COUNT)
-  }, [bots])
+  const count = tellerCountFor(bots)
+  const hallW = hallWidthFor(count)
+  const homePos = useMemo(() => homePosFor(count), [count])
+  // Exactly one teller per bot/building — auto-links when a tower is added.
+  const tellers = useMemo(() => bots.slice(0, count), [bots, count])
   const workers = workersOnShift(bots)
-  const [focus, setFocus] = useState(2)
+  const startFocus = Math.min(2, Math.max(0, count - 1))
+  const [focus, setFocus] = useState(startFocus)
   const [awayIndex, setAwayIndex] = useState<number | null>(null)
   const [recalling, setRecalling] = useState(false)
   const recallTimer = useRef<number | null>(null)
   /** Brief A/D framing only — released after settle or on drag/zoom. */
-  const snapRef = useRef<{ active: boolean; focus: number }>({ active: false, focus: 2 })
+  const snapRef = useRef<{ active: boolean; focus: number }>({ active: false, focus: startFocus })
 
   const presentIndexes = useMemo(
     () => tellers.map((b, i) => (b && b.present !== false ? i : -1)).filter((i) => i >= 0),
     [tellers],
   )
+
+  useEffect(() => {
+    setFocus((f) => Math.min(f, Math.max(0, count - 1)))
+  }, [count])
 
   const releaseCameraLock = () => {
     snapRef.current.active = false
@@ -824,11 +999,11 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     const orbit = controls.current
     const cam = orbit?.object
     if (!orbit || !cam) return
-    cam.position.set(...HOME_POS)
+    cam.position.set(...homePos)
     orbit.target.set(...HOME_TARGET)
     orbit.update()
-    snapRef.current = { active: false, focus: 2 }
-  }, [])
+    snapRef.current = { active: false, focus: Math.min(2, Math.max(0, count - 1)) }
+  }, [homePos, count])
 
   // Cycle one present teller stepping away — light life without extra lights.
   useEffect(() => {
@@ -882,7 +1057,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       } else if (key === 'arrowright' || key === 'd') {
         e.preventDefault()
         setFocus((f) => {
-          const next = Math.min(TELLER_COUNT - 1, f + 1)
+          const next = Math.min(count - 1, f + 1)
           beginFocusSnap(next)
           return next
         })
@@ -897,7 +1072,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         const dz = cam.position.z - orbit.target.z
         const dist = Math.hypot(dx, dy, dz) || 1
         // Soft bias toward the selected teller's lane while dollying freely.
-        const softX = MathUtils.lerp(orbit.target.x, tellerX(focus), 0.18)
+        const softX = MathUtils.lerp(orbit.target.x, tellerX(focus, count), 0.18)
         orbit.target.x = softX
         const nx = dx / dist
         const ny = dy / dist
@@ -920,16 +1095,16 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [tellers, focus, awayIndex, recalling])
+  }, [tellers, focus, awayIndex, recalling, count])
 
   useFrame((_, dt) => {
     const orbit = controls.current
     if (!orbit) return
     orbit.minDistance = ZOOM_DIST_NEAR - 0.15
-    orbit.maxDistance = ZOOM_DIST_FAR + 0.8
+    orbit.maxDistance = ZOOM_DIST_FAR + 0.8 + Math.max(0, count - 5) * 0.35
     if (!snapRef.current.active) return
 
-    const tx = tellerX(snapRef.current.focus)
+    const tx = tellerX(snapRef.current.focus, count)
     const targetX = tx
     const targetY = 1.32
     const targetZ = 0.2
@@ -956,7 +1131,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     <>
       <color attach="background" args={['#12082a']} />
       <fog attach="fog" args={['#1a0a38', 10, 26]} />
-      <PerspectiveCamera makeDefault fov={40} near={0.08} far={80} position={HOME_POS} />
+      <PerspectiveCamera makeDefault fov={40} near={0.08} far={80} position={homePos} />
       <OrbitControls
         ref={controls}
         makeDefault
@@ -965,7 +1140,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         dampingFactor={0.08}
         enablePan={false}
         minDistance={ZOOM_DIST_NEAR - 0.15}
-        maxDistance={ZOOM_DIST_FAR + 0.8}
+        maxDistance={ZOOM_DIST_FAR + 0.8 + Math.max(0, count - 5) * 0.35}
         minPolarAngle={0.75}
         maxPolarAngle={1.55}
         minAzimuthAngle={-1.05}
@@ -973,54 +1148,14 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         onStart={releaseCameraLock}
       />
 
-      <ambientLight intensity={0.42} color="#c8b8ff" />
-      <directionalLight position={[3.2, 7.2, 2.8]} intensity={0.55} color="#ffe9c8" />
+      <ambientLight intensity={0.38} color="#c8b8ff" />
+      <directionalLight position={[3.2, 7.2, 2.8]} intensity={0.5} color="#ffe9c8" />
       <pointLight position={[0, 3.5, 0.6]} intensity={1.05} color="#fff0b0" distance={14} />
-      <pointLight position={[-2.4, 3.0, -0.4]} intensity={0.35} color="#7ef9ff" distance={9} />
-      <pointLight position={[2.4, 3.0, -0.4]} intensity={0.35} color="#b967ff" distance={9} />
+      <pointLight position={[-hallW * 0.28, 3.0, -0.4]} intensity={0.35} color="#7ef9ff" distance={9} />
+      <pointLight position={[hallW * 0.28, 3.0, -0.4]} intensity={0.35} color="#b967ff" distance={9} />
 
-      {/* floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0.35]} receiveShadow>
-        <planeGeometry args={[15, 10]} />
-        <meshStandardMaterial color={FLOOR} roughness={0.55} metalness={0.28} side={DoubleSide} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.006, 0.2]}>
-        <planeGeometry args={[12.5, 6.2]} />
-        <meshStandardMaterial color="#160e2c" roughness={0.4} metalness={0.35} />
-      </mesh>
-      <gridHelper args={[12, 24, '#2de2e6', '#2a1060']} position={[0, 0.012, 0.25]} />
+      <BankEnclosure width={hallW} tellerCount={count} />
       <FloorGlowPaths tellers={tellers} />
-
-      {/* shell */}
-      <mesh position={[0, 2.15, -3.2]}>
-        <boxGeometry args={[15.5, 4.5, 0.25]} />
-        <meshStandardMaterial color={WALL} roughness={0.88} />
-      </mesh>
-      <mesh position={[0, 0.55, -3.05]}>
-        <boxGeometry args={[15.5, 1.15, 0.1]} />
-        <meshStandardMaterial color={WAINSCOT} roughness={0.8} />
-      </mesh>
-      <mesh position={[0, 1.12, -3.02]}>
-        <boxGeometry args={[15.5, 0.04, 0.05]} />
-        <meshStandardMaterial color={TRIM} metalness={0.4} roughness={0.4} />
-      </mesh>
-      {([-1, 1] as const).map((side) => (
-        <group key={side}>
-          <mesh position={[side * 7.4, 2.15, 0]} rotation={[0, -side * (Math.PI / 2), 0]}>
-            <planeGeometry args={[9.2, 4.5]} />
-            <meshStandardMaterial color={WALL_DEEP} roughness={0.9} side={DoubleSide} />
-          </mesh>
-          <mesh position={[side * 7.32, 0.55, 0]} rotation={[0, -side * (Math.PI / 2), 0]}>
-            <planeGeometry args={[9.2, 1.15]} />
-            <meshStandardMaterial color={WAINSCOT} roughness={0.8} side={DoubleSide} />
-          </mesh>
-        </group>
-      ))}
-
-      <CeilingHall />
-      {/* Rear corner columns only — front aisle posts occlude outer-lane zooms */}
-      <Column x={-7.05} z={-2.55} />
-      <Column x={7.05} z={-2.55} />
 
       <HeroVaultDoor />
       <ProfitBoard desk={desk} />
@@ -1032,17 +1167,18 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <Warden />
       <CompliancePillar />
       <NightDeposit />
-      <WaitingBench x={-4.0} />
-      <WaitingBench x={4.0} />
+      <WaitingBench x={-Math.min(hallW * 0.28, 5.2)} />
+      <WaitingBench x={Math.min(hallW * 0.28, 5.2)} />
       <DataMotes />
 
       <QueueLanes tellers={tellers} />
 
       {tellers.map((bot, i) => (
         <TellerPod
-          key={bot?.id || `empty-${i}`}
+          key={bot.id}
           bot={bot}
           index={i}
+          count={count}
           focused={focus === i}
           away={awayIndex === i}
           recalling={recalling && awayIndex === i}

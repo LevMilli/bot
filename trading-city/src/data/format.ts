@@ -25,8 +25,27 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'kalshi-sized': '#ff8c42',
 }
 
+function hashBotId(id: string): number {
+  let h = 2166136261
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+/**
+ * Color for a tower / vault teller station.
+ * Known bots use the map; new buildings get a deterministic free palette color.
+ */
 export function beamColorFor(botId: string | null | undefined, index = 0): string {
   if (botId && BOT_BEAM_COLORS[botId]) return BOT_BEAM_COLORS[botId]
+  if (botId) {
+    const known = new Set(Object.values(BOT_BEAM_COLORS))
+    const free = BEAM_COLORS.filter((c) => !known.has(c))
+    const pool = free.length ? free : [...BEAM_COLORS]
+    return pool[hashBotId(botId) % pool.length]
+  }
   return BEAM_COLORS[((index % BEAM_COLORS.length) + BEAM_COLORS.length) % BEAM_COLORS.length]
 }
 
