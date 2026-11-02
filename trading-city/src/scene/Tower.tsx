@@ -31,10 +31,11 @@ function WindowInstances({
   sparse?: boolean
 }) {
   const mesh = useRef<InstancedMesh>(null)
-  const yStep = sparse ? 0.85 : 0.55
+  const yStep = sparse ? 0.8 : 0.55
   const colMin = sparse ? -1 : -2
   const colMax = sparse ? 1 : 2
-  const facesPer = sparse ? 1 : 2
+  // Front + back faces so orbiting the city still shows windows.
+  const facesPer = 2
 
   const count = useMemo(() => {
     let n = 0
@@ -55,12 +56,10 @@ function WindowInstances({
       for (let col = colMin; col <= colMax; col++) {
         if (((y * 17 + col * 5 + seed * 11) | 0) % 7 === 0) continue
         const x = col * 0.22
-        const faces: [number, number, number][] = sparse
-          ? [[x, y, width / 2 + 0.015]]
-          : [
-              [x, y, width / 2 + 0.015],
-              [width / 2 + 0.015, y, x],
-            ]
+        const faces: [number, number, number][] = [
+          [x, y, width / 2 + 0.015],
+          [x, y, -width / 2 - 0.015],
+        ]
         for (const p of faces) {
           dummy.position.set(p[0], p[1], p[2])
           dummy.updateMatrix()
@@ -70,7 +69,7 @@ function WindowInstances({
     }
     mesh.current.count = i
     mesh.current.instanceMatrix.needsUpdate = true
-  }, [count, height, seed, width, yStep, colMin, colMax, sparse])
+  }, [count, height, seed, width, yStep, colMin, colMax])
 
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
