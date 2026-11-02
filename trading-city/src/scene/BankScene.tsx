@@ -32,20 +32,19 @@ const INK = '#050812'
 const FLOOR = '#0e061c'
 
 /**
- * T-hall: six tellers per side facing a center aisle; vault + boards at the far end.
- * Fixed 12 slots keep the room square and complete even when some buildings are dark.
+ * Tellers wrap a square. The customer window (local +Z) faces out of the square,
+ * so the lobby looks at faces, screens, and lamps — not the staff backs.
+ * One station per building.
  */
-const SIDE_COUNT = 6
-const TOTAL_SLOTS = SIDE_COUNT * 2
-const TELLER_SPACING = 2.05
-const AISLE_HALF = 3.2
-const TELLER_Z0 = 2.4
+const TELLER_SPACING = 2.1
+const MAX_TELLERS = 12
+const SQUARE_CZ = -1.55
 const HALL_W = 13.2
 const Z_BACK = -8.45
 const Z_FRONT = 5.75
 const HALL_HEIGHT = 4.55
-const HOME_POS: [number, number, number] = [0, 2.85, 5.2]
-const HOME_TARGET: [number, number, number] = [0, 1.4, -2.6]
+const HOME_POS: [number, number, number] = [0, 2.4, 4.55]
+const HOME_TARGET: [number, number, number] = [0, 1.22, 1.15]
 /** Half-width of each teller's private rope channel (local X). */
 const LANE_HALF = 0.7
 /** Mouth posts toward the aisle (local +Z) — open entry, no front bar. */
@@ -60,27 +59,57 @@ const ZOOM_DIST_FAR = 7.2
 const ZOOM_DIST_NEAR = 3.55
 
 type SlotPose = {
-  side: -1 | 1
-  row: number
   x: number
   z: number
   rotY: number
 }
 
-/** Left bank = 0..5, right bank = 6..11. Local +Z faces the center aisle. */
-function slotPose(index: number): SlotPose {
-  const side: -1 | 1 = index < SIDE_COUNT ? -1 : 1
-  const row = index % SIDE_COUNT
-  const z = TELLER_Z0 - row * TELLER_SPACING
-  const x = side * AISLE_HALF
-  const rotY = side < 0 ? -Math.PI / 2 : Math.PI / 2
-  return { side, row, x, z, rotY }
+/** Back, right, front, left. Extra tellers fill the longer sides first. */
+function sideCounts(count: number): [number, number, number, number] {
+  const n = Math.max(1, Math.min(MAX_TELLERS, count))
+  const counts: [number, number, number, number] = [0, 0, 0, 0]
+  for (let i = 0; i < n; i++) counts[i % 4]++
+  return counts
+}
+
+/** Pod-origin distance from the square center. Grows with the busiest side. */
+function squareSpan(count: number): number {
+  const maxSide = Math.max(1, ...sideCounts(count))
+  const along = ((maxSide - 1) / 2) * TELLER_SPACING
+  const span = along + 1.8
+  // Keep outward rope mouths between the vault door and the trust seal.
+  const room = 3.15 - -6.65
+  return Math.min(span, room / 2 - 1.65)
+}
+
+/**
+ * Local +Z is the customer window. It points out of the square:
+ * back faces the vault, front faces the lobby, sides face the side walls.
+ */
+function slotPose(index: number, count: number): SlotPose {
+  const counts = sideCounts(count)
+  let side = 0
+  let row = index
+  for (let s = 0; s < 4; s++) {
+    if (row < counts[s]) {
+      side = s
+      break
+    }
+    row -= counts[s]
+  }
+  const nSide = Math.max(1, counts[side])
+  const along = (row - (nSide - 1) / 2) * TELLER_SPACING
+  const s = squareSpan(count)
+  const cz = SQUARE_CZ
+  if (side === 0) return { x: along, z: cz - s, rotY: Math.PI }
+  if (side === 1) return { x: s, z: cz + along, rotY: Math.PI / 2 }
+  if (side === 2) return { x: -along, z: cz + s, rotY: 0 }
+  return { x: -s, z: cz - along, rotY: -Math.PI / 2 }
 }
 
 function tellerSlots(bots: BotRow[]): (BotRow | null)[] {
-  const list: (BotRow | null)[] = bots.slice(0, TOTAL_SLOTS)
-  while (list.length < TOTAL_SLOTS) list.push(null)
-  return list
+  if (!bots.length) return [null]
+  return bots.slice(0, MAX_TELLERS)
 }
 
 function TellerPod({
@@ -600,7 +629,7 @@ function SideScreen({
  * Square enclosed synthwave bank shell — portal front, vault wall at the far end.
  * Tellers sit on the four sides of the floor square.
  */
-function BankEnclosure() {
+function BankEnclosure({ span }: { span: number }) {
   const width = HALL_W
   const halfW = width / 2
   const wallT = 0.28
@@ -739,15 +768,24 @@ function BankEnclosure() {
       <Column x={-halfW + 0.35} z={zFront - 0.55} />
       <Column x={halfW - 0.35} z={zFront - 0.55} />
 
-      {/* Center aisle runner to the vault */}
-      <mesh position={[0, 0.018, midZ * 0.2]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[1.3, depth * 0.7]} />
+      {/* Floor square the tellers stand around */}
+      <mesh position={[0, 0.018, SQUARE_CZ]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[span * 1.55, span * 1.55]} />
         <meshStandardMaterial color="#1a0e28" roughness={0.45} metalness={0.4} />
       </mesh>
-      <mesh position={[0, 0.022, midZ * 0.2]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[0.08, depth * 0.7]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.4} toneMapped={false} />
-      </mesh>
+      {(
+        [
+          [0, SQUARE_CZ - span, span * 2, 0.05],
+          [0, SQUARE_CZ + span, span * 2, 0.05],
+          [-span, SQUARE_CZ, 0.05, span * 2],
+          [span, SQUARE_CZ, 0.05, span * 2],
+        ] as const
+      ).map(([x, z, w, d], i) => (
+        <mesh key={`sq-${i}`} position={[x, 0.022, z]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[w, d]} />
+          <meshBasicMaterial color={i % 2 === 0 ? '#f9c80e' : '#2de2e6'} transparent opacity={0.28} toneMapped={false} />
+        </mesh>
+      ))}
     </group>
   )
 }
@@ -804,17 +842,21 @@ function Warden() {
 }
 
 function FloorGlowPaths({ tellers }: { tellers: (BotRow | null)[] }) {
+  const count = tellers.length
   return (
     <group>
       {tellers.map((bot, i) => {
-        const pose = slotPose(i)
+        const pose = slotPose(i, count)
+        const dx = pose.x
+        const dz = pose.z - SQUARE_CZ
+        const len = Math.hypot(dx, dz)
         return (
           <mesh
             key={bot?.id || i}
-            position={[pose.side * 0.5, 0.013, pose.z]}
-            rotation={[-Math.PI / 2, 0, Math.PI / 2]}
+            position={[dx * 0.35, 0.016, SQUARE_CZ + dz * 0.35]}
+            rotation={[-Math.PI / 2, 0, Math.atan2(dx, dz)]}
           >
-            <planeGeometry args={[0.05, 0.9]} />
+            <planeGeometry args={[0.05, Math.max(0.4, len * 0.35)]} />
             <meshBasicMaterial
               color={beamColorFor(bot?.id, i)}
               transparent
@@ -1080,7 +1122,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       } else if (key === 'arrowright' || key === 'd') {
         e.preventDefault()
         setFocus((f) => {
-          const next = Math.min(TOTAL_SLOTS - 1, f + 1)
+          const next = Math.min(tellers.length - 1, f + 1)
           beginFocusSnap(next)
           return next
         })
@@ -1094,8 +1136,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         const dy = cam.position.y - orbit.target.y
         const dz = cam.position.z - orbit.target.z
         const dist = Math.hypot(dx, dy, dz) || 1
-        const pose = slotPose(focus)
-        orbit.target.x = MathUtils.lerp(orbit.target.x, pose.x * 0.4, 0.18)
+        const pose = slotPose(focus, tellers.length)
+        orbit.target.x = MathUtils.lerp(orbit.target.x, pose.x, 0.18)
         orbit.target.z = MathUtils.lerp(orbit.target.z, pose.z, 0.18)
         const nx = dx / dist
         const ny = dy / dist
@@ -1127,9 +1169,11 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     orbit.maxDistance = ZOOM_DIST_FAR + 4.8
     if (!snapRef.current.active) return
 
-    const pose = slotPose(snapRef.current.focus)
-    // Stand in the aisle and look at the selected teller.
-    const targetX = pose.x * 0.5
+    const pose = slotPose(snapRef.current.focus, tellers.length)
+    // Stand on the customer side (local +Z) and look at the teller's face.
+    const dirX = Math.sin(pose.rotY)
+    const dirZ = Math.cos(pose.rotY)
+    const targetX = pose.x
     const targetY = 1.32
     const targetZ = pose.z
     orbit.target.x = MathUtils.damp(orbit.target.x, targetX, 5.5, dt)
@@ -1137,9 +1181,9 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     orbit.target.z = MathUtils.damp(orbit.target.z, targetZ, 5.5, dt)
 
     const cam = orbit.object
-    const wantX = pose.side * 0.2
-    const wantY = 2.35
-    const wantZ = pose.z + 0.4
+    const wantX = pose.x + dirX * 2.85
+    const wantY = 2.15
+    const wantZ = pose.z + dirZ * 2.85
     cam.position.x = MathUtils.damp(cam.position.x, wantX, 5.2, dt)
     cam.position.y = MathUtils.damp(cam.position.y, wantY, 5.2, dt)
     cam.position.z = MathUtils.damp(cam.position.z, wantZ, 5.2, dt)
@@ -1155,7 +1199,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     <>
       <color attach="background" args={['#12082a']} />
       <fog attach="fog" args={['#1a0a38', 12, 32]} />
-      <PerspectiveCamera makeDefault fov={46} near={0.08} far={90} position={HOME_POS} />
+      <PerspectiveCamera makeDefault fov={42} near={0.08} far={90} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault
@@ -1177,7 +1221,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <pointLight position={[0, 3.4, -1.0]} intensity={0.85} color="#fff0b0" distance={14} />
       <pointLight position={[0, 3.1, Z_BACK + 1.8]} intensity={0.4} color="#7ef9ff" distance={8} />
 
-      <BankEnclosure />
+      <BankEnclosure span={squareSpan(Math.max(1, tellers.length))} />
       <FloorGlowPaths tellers={tellers} />
 
       <HeroVaultDoor />
@@ -1195,7 +1239,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <DataMotes />
 
       {tellers.map((bot, i) => {
-        const pose = slotPose(i)
+        const pose = slotPose(i, tellers.length)
         const color = beamColorFor(bot?.id, i)
         return (
           <group key={bot?.id || `empty-${i}`} position={[pose.x, 0, pose.z]} rotation={[0, pose.rotY, 0]}>
