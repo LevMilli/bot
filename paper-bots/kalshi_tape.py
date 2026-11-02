@@ -51,6 +51,7 @@ def _empty() -> dict:
         "last_sync_at": None,
         "last_error": None,
         "open_markets": {},
+        "min_ts_by_ticker": {},
     }
 
 
@@ -77,6 +78,8 @@ def load_tape(root: str | None = None) -> dict:
         base["seen_ids"] = []
     if not isinstance(base.get("open_markets"), dict):
         base["open_markets"] = {}
+    if not isinstance(base.get("min_ts_by_ticker"), dict):
+        base["min_ts_by_ticker"] = {}
     return base
 
 
@@ -209,25 +212,25 @@ def sync_tape(
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{s} markets: {type(exc).__name__}")
 
+    watermarks = dict(state.get("min_ts_by_ticker") or {})
     for ticker in sorted(want_tickers):
         ser = series_of_ticker(ticker)
         if not ser or ser not in watched:
             continue
-        min_ts = None
-        # If we have a last wall time for this series, nudge min_ts back 2 minutes
-        # so we do not miss borderline prints; seen_ids dedupe.
-        last = (state.get("by_series") or {}).get(ser, {}).get("last_ts")
-        if last:
-            try:
-                # created_time is ISO; convert roughly via fromisoformat if present on a trade
-                pass
-            except Exception:
-                min_ts = None
+        # Speed: only pull prints at/after last watermark (minus 5s overlap); seen_ids dedupe.
+        min_ts = watermarks.get(ticker)
         try:
-            rows = fetch_trades_for_ticker(ticker, min_ts=min_ts, limit=per_ticker_limit)
+            min_ts_i = int(min_ts) - 5 if min_ts else None
+            if min_ts_i is not None and min_ts_i < 0:
+                min_ts_i = None
+        except (TypeError, ValueError):
+            min_ts_i = None
+        try:
+            rows = fetch_trades_for_ticker(ticker, min_ts=min_ts_i, limit=per_ticker_limit)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{ticker} trades: {type(exc).__name__}")
             continue
+        newest_ts = watermarks.get(ticker)
         for raw in rows:
             norm = _norm_trade(raw)
             if not norm or norm["trade_id"] in seen:
@@ -241,6 +244,18 @@ def sync_tape(
             bucket["last_ts"] = norm.get("created_time") or bucket.get("last_ts")
             bucket["last_trade_id"] = norm["trade_id"]
             added += 1
+            # Advance watermark from created_time when parseable.
+            created = norm.get("created_time") or ""
+            try:
+                from datetime import datetime
+                ts = int(datetime.fromisoformat(str(created).replace("Z", "+00:00")).timestamp())
+                if newest_ts is None or ts > int(newest_ts):
+                    newest_ts = ts
+            except Exception:
+                pass
+        if newest_ts is not None:
+            watermarks[ticker] = int(newest_ts)
+    state["min_ts_by_ticker"] = watermarks
 
     state["seen_ids"] = list(seen)
     state["open_markets"] = open_markets

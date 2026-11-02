@@ -449,6 +449,34 @@ def book_for_side(ticker, side):
     return bid, ask, depth
 
 
+def prefetch_books(jobs):
+    """Parallel orderbook fetches. jobs = [(ticker, side), ...].
+
+    Returns ({(ticker, side): (bid, ask, depth)}, {(ticker, side): error_str}).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    books, errors = {}, {}
+    if not jobs:
+        return books, errors
+
+    def _one(pair):
+        ticker, side = pair
+        try:
+            return pair, book_for_side(ticker, side), None
+        except Exception as exc:  # noqa: BLE001
+            return pair, (None, None, 0.0), str(exc)
+
+    workers = min(8, max(1, len(jobs)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_one, job) for job in jobs]
+        for fut in as_completed(futs):
+            pair, result, err = fut.result()
+            if err:
+                errors[pair] = err
+            books[pair] = result
+    return books, errors
+
+
 def spot_prices():
     out = {}
     try:
@@ -527,22 +555,25 @@ def _sigma_for(price, min_left, closes, dvol):
     return sigma, realized, sig_dvol
 
 
-def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf):
+def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None):
     """Apply the same guideline gates to one open KXBTC15M window.
 
+    Cheap gates first (time / band / cushion) before news and heavy reasons.
+    `book` optional (bid, ask, depth) from prefetch_books.
     Returns dict with reasons, side, p, ask, bid, fee, depth, edge, min_left.
     """
     now = dt.datetime.now(dt.timezone.utc)
     min_left = (m["close_time"] - now).total_seconds() / 60
-    sigma, realized, sig_dvol = _sigma_for(price, min_left, closes, dvol)
+    side = "YES" if price > m["target"] else "NO"
+    cushion = abs(price - m["target"])
     out = {
         "ticker": m["ticker"],
         "min_left": min_left,
-        "sigma": sigma,
-        "realized": realized,
-        "sig_dvol": sig_dvol,
+        "sigma": None,
+        "realized": None,
+        "sig_dvol": None,
         "reasons": [],
-        "side": None,
+        "side": side,
         "p": None,
         "ask": None,
         "bid": None,
@@ -551,29 +582,51 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf):
         "edge": None,
         "toward": None,
         "news": None,
+        "cushion": cushion,
+        "confidence": None,
     }
+    # Cheap gates first — fail fast before σ / news / book work when possible.
+    cheap = []
+    if min_left < MIN_MINUTES_LEFT:
+        cheap.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
+    if cushion < MIN_CUSHION_USD:
+        cheap.append(f"cushion ${cushion:.2f} < ${MIN_CUSHION_USD}")
+    listing_ask = m["yes_ask"] if side == "YES" else m["no_ask"]
+    if listing_ask is not None and not (ASK_MIN <= listing_ask <= ASK_MAX):
+        # Still allow book to rescue a stale listing; only hard-fail if book also bad later.
+        pass
+
+    sigma, realized, sig_dvol = _sigma_for(price, min_left, closes, dvol)
+    out["sigma"] = sigma
+    out["realized"] = realized
+    out["sig_dvol"] = sig_dvol
     if sigma is None:
-        out["reasons"].append("could not compute sigma")
+        out["reasons"] = cheap + ["could not compute sigma"]
         return out
 
-    side = "YES" if price > m["target"] else "NO"
-    cushion = abs(price - m["target"])
     z = cushion / sigma if sigma > 0 else 0
     p = phi(z)
-    ask = m["yes_ask"] if side == "YES" else m["no_ask"]
+    ask = listing_ask
     bid = m["yes_bid"] if side == "YES" else m["no_bid"]
     depth = 0.0
-    try:
-        b_bid, b_ask, depth = book_for_side(m["ticker"], side)
+    if book is not None:
+        b_bid, b_ask, depth = book[0], book[1], book[2]
         if b_ask is not None:
             ask = b_ask
         if b_bid is not None:
             bid = b_bid
-    except Exception as e:
-        out["reasons"].append(f"orderbook failed ({e})")
-        return out
+    else:
+        try:
+            b_bid, b_ask, depth = book_for_side(m["ticker"], side)
+            if b_ask is not None:
+                ask = b_ask
+            if b_bid is not None:
+                bid = b_bid
+        except Exception as e:
+            out["reasons"] = cheap + [f"orderbook failed ({e})"]
+            return out
     if ask is None or bid is None:
-        out["reasons"].append("missing bid/ask")
+        out["reasons"] = cheap + ["missing bid/ask"]
         return out
 
     fee = fee_per_contract(ask)
@@ -590,16 +643,12 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf):
     except Exception:
         news = None
 
-    reasons = []
+    reasons = list(cheap)
     zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
-    if min_left < MIN_MINUTES_LEFT:
-        reasons.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
     if p < MIN_MODEL_PROB:
         reasons.append(f"p {p:.3f} < safer floor {MIN_MODEL_PROB:.2f}")
     if p < need:
         reasons.append(f"p {p:.3f} < ask+fee+{edge_buf:.2f} = {need:.3f}")
-    if cushion < MIN_CUSHION_USD:
-        reasons.append(f"cushion ${cushion:.2f} < ${MIN_CUSHION_USD}")
     if z < zmin:
         reasons.append(f"z {z:.2f} < {zmin}")
     if not (ASK_MIN <= ask <= ASK_MAX):
@@ -621,6 +670,7 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf):
         "reasons": reasons,
         "side": side,
         "p": p,
+        "confidence": p,
         "ask": ask,
         "bid": bid,
         "fee": fee,
@@ -706,38 +756,78 @@ def main():
     except Exception as e:
         print(f"  DVOL failed: {e}")
 
-    print(f"Open KXBTC15M windows to score: {len(markets)} (guidelines unchanged; bid every fit)\n")
+    print(f"Open KXBTC15M windows to score: {len(markets)} (rank-then-buy; guidelines unchanged)\n")
+
+    # Parallel books for every window's model side (speed).
+    book_jobs = []
+    for m in markets:
+        side0 = "YES" if price > m["target"] else "NO"
+        book_jobs.append((m["ticker"], side0))
+    books, book_errs = prefetch_books(book_jobs)
+
+    scored = []
+    for m in markets:
+        key = (m["ticker"], "YES" if price > m["target"] else "NO")
+        if key in book_errs:
+            ev = {
+                "ticker": m["ticker"], "side": key[1], "reasons": [f"orderbook failed ({book_errs[key]})"],
+                "ask": None, "bid": None, "p": None, "fee": None, "depth": 0, "edge": None,
+                "confidence": None, "close_time": m["close_time"], "market": m,
+            }
+        else:
+            ev = evaluate_window(
+                m, price, closes, dvol, coinbase_only, edge_buf,
+                book=books.get(key),
+            )
+            ev["close_time"] = m["close_time"]
+            ev["market"] = m
+        scored.append(ev)
+
+    # Rank fits by opportunity score; spend open-risk on best edges first.
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_brain
+        ranked = desk_brain.rank_candidates(scored, edge_key="edge", conf_key="confidence", depth_key="depth")
+    except Exception:
+        desk_brain = None
+        ranked = scored
 
     buys = 0
     skips = 0
     last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
 
-    for m in markets:
-        min_left = (m["close_time"] - now).total_seconds() / 60
-        print(f"--- {m['ticker']}  target ${m['target']:,.2f}  closes {m['close_time']:%H:%M} UTC "
-              f"({min_left:.1f} min left)")
-        print(f"  listing quotes (can lag): YES bid/ask {m['yes_bid']}/{m['yes_ask']}   "
-              f"NO bid/ask {m['no_bid']}/{m['no_ask']}")
-
-        ev = evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf)
-        if ev["sigma"] is not None:
+    for ev in ranked:
+        m = ev.get("market") or {"ticker": ev.get("ticker"), "target": 0, "close_time": ev.get("close_time"),
+                                 "yes_bid": None, "yes_ask": None, "no_bid": None, "no_ask": None}
+        min_left = ev.get("min_left")
+        if min_left is None and ev.get("close_time"):
+            min_left = (ev["close_time"] - now).total_seconds() / 60
+        close = ev.get("close_time")
+        if close is not None:
             print(
-                f"  Sigma: DVOL {ev.get('dvol') if ev.get('dvol') else 'n/a'}"
-                + (f" -> ${ev['sig_dvol']:,.2f}" if ev.get("sig_dvol") else "")
-                + (f" | realized ${ev['realized']:,.2f}" if ev.get("realized") is not None else " | realized n/a")
-                + f" | used ${ev['sigma']:,.2f}"
+                f"--- {ev.get('ticker')}  target ${float(m.get('target') or 0):,.2f}  "
+                f"closes {close:%H:%M} UTC"
             )
-        if ev["side"] and ev["ask"] is not None:
+        else:
+            print(f"--- {ev.get('ticker')}")
+        if min_left is not None:
+            print(f"  ({min_left:.1f} min left) brain_score={ev.get('_brain_score', 'n/a')}")
+        if ev.get("sigma") is not None:
+            print(
+                f"  Sigma used ${ev['sigma']:,.2f}"
+                + (f" | realized ${ev['realized']:,.2f}" if ev.get("realized") is not None else "")
+            )
+        if ev.get("side") and ev.get("ask") is not None and ev.get("p") is not None:
             print(
                 f"  Side {ev['side']}: cushion ${ev.get('cushion', 0):,.2f}  z {ev.get('z', 0):.2f}  "
                 f"p {ev['p']:.3f}  ask {ev['ask']:.2f}  fee {ev['fee']:.2f}  "
                 f"need p >= {ev.get('need', 0):.3f}  spread {ev.get('spread', 0):.2f}  "
                 f"(venue edge {edge_buf:.2f})"
             )
-            print(f"  Depth offered at or below ask: {ev['depth']:,.0f} contracts")
+            print(f"  Depth offered at or below ask: {ev.get('depth', 0):,.0f} contracts")
 
-        # Per-window model-flip before considering a new buy on this ticker.
-        if flip_on and account.get("open") and ev["side"] and ev["bid"] is not None and ev["p"] is not None:
+        if flip_on and account.get("open") and ev.get("side") and ev.get("bid") is not None and ev.get("p") is not None:
             sold = manage_model_flips(
                 account,
                 ev["side"],
@@ -745,33 +835,78 @@ def main():
                 ev["bid"],
                 fee_per_contract(ev["bid"]) if ev["bid"] else 0,
                 flip_delta,
-                ticker=m["ticker"],
+                ticker=ev.get("ticker"),
             )
             if sold:
                 save_account(account)
                 for line in sold:
                     print(f"  MODEL-FLIP SELL: {line}")
+                    if desk_brain and not IS_SHADOW:
+                        try:
+                            desk_brain.record_decision(
+                                DESK_ROOT, bot="btc15m", action="flip",
+                                ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                                note=line,
+                            )
+                        except Exception:
+                            pass
 
         reasons = list(ev.get("reasons") or [])
         if reasons:
             print("  SIGNAL: SKIP -> " + "; ".join(reasons))
             skips += 1
             last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
+            if desk_brain and not IS_SHADOW:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                        edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
+                        depth=ev.get("depth"), reasons=reasons, score=ev.get("_brain_score"),
+                    )
+                except Exception:
+                    pass
         else:
             tp = min(round(ev["ask"] + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
             print(
-                f"  SIGNAL: BUY {ev['side']} on {m['ticker']} at <= {ev['ask']:.2f} "
+                f"  SIGNAL: BUY {ev['side']} on {ev['ticker']} at <= {ev['ask']:.2f} "
                 f"(fee {ev['fee']:.2f}). Suggested take-profit {tp:.2f} (fill + 0.15, max 0.99)."
             )
             last_sentence = paper_buy(
-                account, m["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
-                m["close_time"], True, edge=ev.get("edge"),
+                account, ev["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
+                ev.get("close_time") or m.get("close_time"), True, edge=ev.get("edge"),
             )
             if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
                 buys += 1
+                if desk_brain and not IS_SHADOW:
+                    try:
+                        note = desk_brain.explain_buy(
+                            "btc15m", ev["side"], ev["ticker"], ev.get("edge"),
+                            ev.get("confidence") or ev.get("p"), ev.get("depth"),
+                        )
+                        print(f"  BRAIN: {note}")
+                        desk_brain.record_decision(
+                            DESK_ROOT, bot="btc15m", action="buy",
+                            ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                            edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
+                            depth=ev.get("depth"), score=ev.get("_brain_score"), note=note,
+                        )
+                    except Exception:
+                        pass
             else:
                 skips += 1
                 print(f"  desk/account blocked fill: {last_sentence}")
+                if desk_brain and not IS_SHADOW:
+                    try:
+                        desk_brain.record_decision(
+                            DESK_ROOT, bot="btc15m", action="skip",
+                            ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                            edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
+                            depth=ev.get("depth"), reasons=[last_sentence],
+                            score=ev.get("_brain_score"),
+                        )
+                    except Exception:
+                        pass
         print()
 
     print(f"Windows scored: {len(markets)}  paper buys: {buys}  skips/blocks: {skips}")
