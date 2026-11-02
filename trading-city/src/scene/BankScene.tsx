@@ -20,6 +20,8 @@ type Props = {
   bots: BotRow[]
   desk?: Desk
   onSelectTeller: (id: string) => void
+  /** Open the 2D desk ops board (budgets / adapt / fill tax) from a ledger click. */
+  onOpenDeskOps?: () => void
 }
 
 /** Office-matched synthwave trust hall — purple shell, cyan trim, amber chrome. */
@@ -43,12 +45,13 @@ const TELLER_SPACING = 2.05
 const AISLE_HALF = 3.25
 /** Frontmost row (toward portal); rows step toward the vault (−Z). */
 const TELLER_Z0 = 2.35
-const HALL_W = 13.2
-const Z_BACK = -8.45
-const Z_FRONT = 5.75
-const HALL_HEIGHT = 4.55
-const HOME_POS: [number, number, number] = [0, 2.75, 5.25]
-const HOME_TARGET: [number, number, number] = [0, 1.35, -2.4]
+/** Bigger enclosed hall so zoom-out does not clip into black fog. */
+const HALL_W = 18.5
+const Z_BACK = -11.5
+const Z_FRONT = 8.2
+const HALL_HEIGHT = 5.4
+const HOME_POS: [number, number, number] = [0, 3.05, 6.4]
+const HOME_TARGET: [number, number, number] = [0, 1.45, -2.8]
 /** Half-width of each teller's private rope channel (local X). */
 const LANE_HALF = 0.7
 /** Mouth posts into the aisle (local +Z) — open entry, no front bar. */
@@ -56,8 +59,8 @@ const LANE_Z_MOUTH = 1.85
 const LANE_Z_MID = 1.15
 const LANE_Z_BACK = 0.55
 const ROPE_Y = 0.82
-const ZOOM_DIST_FAR = 7.2
 const ZOOM_DIST_NEAR = 3.55
+const ZOOM_DIST_MAX = 22
 
 type SlotPose = {
   side: -1 | 1
@@ -297,23 +300,23 @@ function ProfitBoard({ desk }: { desk?: Desk }) {
   useEffect(() => {
     sharpenBoardTexture(map, gl.capabilities.getMaxAnisotropy())
   }, [gl, map])
-  // No per-frame needsUpdate — canvas only changes when `desk` identity changes.
+  // Larger NET DESK board — readable when zoomed out in the bigger hall.
   return (
-    <group position={[0, 3.9, Z_BACK + 0.55]}>
+    <group position={[0, 4.15, Z_BACK + 0.55]}>
       <mesh>
-        <boxGeometry args={[5.2, 0.92, 0.14]} />
+        <boxGeometry args={[6.4, 1.12, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.5} roughness={0.28} />
       </mesh>
       <mesh position={[0, 0, 0.08]}>
-        <planeGeometry args={[4.85, 0.76]} />
+        <planeGeometry args={[6.0, 0.92]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.49, 0.05]}>
-        <boxGeometry args={[5.3, 0.04, 0.07]} />
+      <mesh position={[0, 0.6, 0.05]}>
+        <boxGeometry args={[6.5, 0.045, 0.07]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.49, 0.05]}>
-        <boxGeometry args={[5.3, 0.04, 0.07]} />
+      <mesh position={[0, -0.6, 0.05]}>
+        <boxGeometry args={[6.5, 0.045, 0.07]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
     </group>
@@ -565,10 +568,12 @@ function SideScreen({
   side,
   desk,
   bots,
+  onOpen,
 }: {
   side: -1 | 1
   desk?: Desk
   bots: BotRow[]
+  onOpen?: () => void
 }) {
   const map = useMemo(
     () => (side < 0 ? vaultLedgerTexture(desk, bots) : vaultComplianceTexture(desk, bots)),
@@ -578,26 +583,54 @@ function SideScreen({
   useEffect(() => {
     sharpenBoardTexture(map, gl.capabilities.getMaxAnisotropy())
   }, [gl, map])
-  // Flank the vault end — DESK LEDGER left, COMPLIANCE BAY right.
+  // Larger far-readable boards flanking the vault — click opens desk ops HUD.
   const accent = side < 0 ? '#f9c80e' : '#39ff14'
+  const open = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation()
+    onOpen?.()
+  }
   return (
-    <group position={[side * 3.55, 2.52, Z_BACK + 0.55]}>
-      <mesh>
-        <boxGeometry args={[2.7, 1.2, 0.12]} />
+    <group position={[side * 4.15, 2.85, Z_BACK + 0.58]}>
+      <mesh
+        onClick={open}
+        onPointerOver={() => {
+          document.body.style.cursor = onOpen ? 'pointer' : 'default'
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = 'default'
+        }}
+      >
+        <boxGeometry args={[3.35, 1.55, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
       </mesh>
-      <mesh position={[0, 0, 0.07]}>
-        <planeGeometry args={[2.5, 1.05]} />
+      <mesh position={[0, 0, 0.08]} onClick={open}>
+        <planeGeometry args={[3.1, 1.35]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.64, 0.05]}>
-        <boxGeometry args={[2.75, 0.04, 0.06]} />
+      <mesh position={[0, 0.82, 0.06]}>
+        <boxGeometry args={[3.4, 0.05, 0.06]} />
         <meshBasicMaterial color={accent} toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.64, 0.05]}>
-        <boxGeometry args={[2.75, 0.035, 0.05]} />
+      <mesh position={[0, -0.82, 0.06]}>
+        <boxGeometry args={[3.4, 0.04, 0.05]} />
         <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
+      {onOpen && (
+        <Html position={[0, -1.05, 0.1]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
+          <div
+            style={{
+              fontFamily: 'Share Tech Mono, monospace',
+              fontSize: '10px',
+              color: accent,
+              letterSpacing: '0.08em',
+              whiteSpace: 'nowrap',
+              opacity: 0.85,
+            }}
+          >
+            click · desk ops
+          </div>
+        </Html>
+      )}
     </group>
   )
 }
@@ -630,7 +663,7 @@ function BankEnclosure() {
         <boxGeometry args={[width - 0.35, 0.04, depth - 0.5]} />
         <meshStandardMaterial color="#160e2c" roughness={0.4} metalness={0.35} />
       </mesh>
-      <gridHelper args={[Math.min(width - 1.2, 12), 24, '#2de2e6', '#2a1060']} position={[0, 0.035, midZ * 0.15]} />
+      <gridHelper args={[Math.min(width - 1.2, 16), 28, '#2de2e6', '#2a1060']} position={[0, 0.035, midZ * 0.15]} />
 
       {/* Back wall + wainscot (vault end) */}
       <mesh position={[0, ceilY / 2, zBack - wallT / 2]}>
@@ -999,7 +1032,7 @@ function Stanchion({ position, color }: { position: [number, number, number]; co
 }
 
 /** Interior APEX-CITY TRUST — detailed hall, tellers wrapped around a square. */
-export function BankScene({ bots, desk, onSelectTeller }: Props) {
+export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) {
   const controls = useRef<OrbitControlsImpl>(null)
   // One detailed station per building, walked around the square.
   const tellers = useMemo(() => tellerSlots(bots), [bots])
@@ -1108,7 +1141,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         const ny = dy / dist
         const nz = dz / dist
         const step = key === 'arrowup' || key === 'w' ? -0.38 : 0.38
-        const nextDist = MathUtils.clamp(dist + step, ZOOM_DIST_NEAR - 0.15, ZOOM_DIST_FAR + 4.8)
+        const nextDist = MathUtils.clamp(dist + step, ZOOM_DIST_NEAR - 0.15, ZOOM_DIST_MAX)
         cam.position.set(
           orbit.target.x + nx * nextDist,
           orbit.target.y + ny * nextDist,
@@ -1131,7 +1164,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     const orbit = controls.current
     if (!orbit) return
     orbit.minDistance = ZOOM_DIST_NEAR - 0.15
-    orbit.maxDistance = ZOOM_DIST_FAR + 4.8
+    orbit.maxDistance = ZOOM_DIST_MAX
     if (!snapRef.current.active) return
 
     const pose = slotPose(snapRef.current.focus)
@@ -1161,8 +1194,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
   return (
     <>
       <color attach="background" args={['#12082a']} />
-      <fog attach="fog" args={['#1a0a38', 12, 32]} />
-      <PerspectiveCamera makeDefault fov={42} near={0.08} far={90} position={HOME_POS} />
+      <fog attach="fog" args={['#1a0a38', 22, 70]} />
+      <PerspectiveCamera makeDefault fov={42} near={0.08} far={200} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault
@@ -1171,7 +1204,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         dampingFactor={0.08}
         enablePan={false}
         minDistance={ZOOM_DIST_NEAR - 0.15}
-        maxDistance={ZOOM_DIST_FAR + 4.8}
+        maxDistance={ZOOM_DIST_MAX}
         minPolarAngle={0.7}
         maxPolarAngle={1.55}
         minAzimuthAngle={-2.6}
@@ -1191,8 +1224,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <ProfitBoard desk={desk} />
       <LockboxWall bots={bots} />
       <CountingCage />
-      <SideScreen side={-1} desk={desk} bots={bots} />
-      <SideScreen side={1} desk={desk} bots={bots} />
+      <SideScreen side={-1} desk={desk} bots={bots} onOpen={onOpenDeskOps} />
+      <SideScreen side={1} desk={desk} bots={bots} onOpen={onOpenDeskOps} />
       <TrustSeal workers={workers} />
       <Warden />
       <CompliancePillar />

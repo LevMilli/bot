@@ -677,6 +677,29 @@ a {
   letter-spacing: 0.02em;
 }
 
+.vault-board-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.vault-board-close {
+  appearance: none;
+  background: transparent;
+  border: 1px solid rgba(126, 200, 216, 0.4);
+  color: #9ad0dc;
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+}
+
+.vault-board-close:hover {
+  color: #fff;
+  border-color: rgba(45, 226, 230, 0.7);
+}
+
 .vault-board-row {
   display: grid;
   grid-template-columns: 4.2rem 1fr;
