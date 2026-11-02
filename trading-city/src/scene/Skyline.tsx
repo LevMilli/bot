@@ -16,13 +16,10 @@ export function Skyline({ z = -26, width = 78 }: { z?: number; width?: number })
       const h = 2.2 + rand(i + 7) * 11
       const d = 0.7 + rand(i + 3) * 1.8
       const windows: [number, number, number][] = []
-      // Sparse lit windows — dense per-window meshes crushed city FPS.
-      for (let wy = 0.55; wy < h - 0.35; wy += 0.95) {
-        if (rand(i * 17 + wy * 3) > 0.45) {
+      // Very few lit windows on the distant skyline strip.
+      for (let wy = 0.7; wy < h - 0.4; wy += 1.4) {
+        if (rand(i * 17 + wy * 3) > 0.55) {
           windows.push([(w / 2 - 0.08) * (rand(i + wy) > 0.5 ? 1 : -1), wy - h / 2, d / 2 + 0.02])
-        }
-        if (rand(i * 9 + wy) > 0.62) {
-          windows.push([(rand(i + wy) - 0.5) * (w - 0.3), wy - h / 2, d / 2 + 0.02])
         }
       }
       out.push({ x: x + w / 2, h, w, d, windows })

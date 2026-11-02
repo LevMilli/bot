@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import type { BotRow, Desk } from '../types'
 import { workersOnShift } from '../data/format'
-import { NeonBloom } from './Effects'
 import { GridFloor } from './GridFloor'
 import { PurpleHorizon, SkyEquityLine, Skyline, Starfield } from './Skyline'
 import { Vault } from './Vault'
@@ -16,8 +15,8 @@ export const VAULT_CLEAR_R = 4.55
 const TOWER_VAULT_MIN = 6.4
 /** Keep fillers within this distance of a trade tower as “linked”. */
 const TRADE_LINK_R = 3.4
-/** Drop this fraction of unlinked fillers (15–20%). */
-const UNLINKED_DROP = 0.42
+/** Drop this fraction of unlinked fillers. */
+const UNLINKED_DROP = 0.62
 
 type Props = {
   bots: BotRow[]
@@ -97,8 +96,8 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
   const candidates: FillerSlot[] = []
 
   // Inner cluster — keep behind the vault (not on the pad toward camera).
-  for (let i = 0; i < 7; i++) {
-    const a = (i / 7) * Math.PI * 2 + 0.35
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + 0.35
     const r = 2.8 + rand(i + 2) * 1.5
     const x = Math.cos(a) * r
     const z = Math.sin(a) * r - 0.6
@@ -113,8 +112,8 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
   }
 
   // Outer ring around the plaza rail
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2 + 0.08
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.08
     const r = 9.2 + rand(i + 1) * 1.8
     const x = Math.cos(a) * r
     const z = Math.sin(a) * r - 1
@@ -129,8 +128,8 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
   }
 
   // Mid-ring density
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2 + 0.5
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.5
     const r = 5.2 + rand(i + 3) * 1.4
     const x = Math.cos(a) * r
     const z = Math.sin(a) * r - 0.8
@@ -171,7 +170,7 @@ export function CityScene({ bots, desk, selectedId, onSelect, onOpenVault }: Pro
         onSelect={onSelect}
         onOpenVault={onOpenVault}
       />
-      <NeonBloom />
+      {/* City skips EffectComposer bloom — biggest remaining frame-time hit after lights. */}
     </>
   )
 }
@@ -194,16 +193,15 @@ export function CityContents({
   const workers = workersOnShift(bots)
   return (
     <>
-      <ambientLight intensity={0.42} />
-      <directionalLight position={[6, 18, 8]} intensity={0.65} color="#a8c8ff" />
-      {/* Two city fills only — streetlamps / towers use emissive glow, not real lights */}
-      <pointLight position={[0, 7, 4]} intensity={1.6} color="#ffe9a0" distance={32} />
-      <pointLight position={[-6, 5, -6]} intensity={0.9} color="#ff2a6d" distance={28} />
+      <ambientLight intensity={0.55} />
+      <directionalLight position={[6, 18, 8]} intensity={0.75} color="#a8c8ff" />
+      {/* One fill light — towers/lamps use emissive glow */}
+      <pointLight position={[0, 8, 3]} intensity={1.4} color="#ffe9a0" distance={30} />
 
       <PurpleHorizon />
-      <Starfield count={280} />
+      <Starfield count={160} />
       <GridFloor />
-      <Skyline z={-24} width={64} />
+      <Skyline z={-24} width={52} />
       <SkyEquityLine />
       <Vault desk={desk} workers={workers} onOpen={onOpenVault} />
 

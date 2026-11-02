@@ -1,3 +1,4 @@
+import { AdaptiveDpr, AdaptiveEvents } from '@react-three/drei'
 import { Canvas } from '@react-three/fiber'
 import { Suspense, useMemo, useState } from 'react'
 import { useSnapshot } from './data/useSnapshot'
@@ -57,11 +58,13 @@ export default function App() {
     <div className={`app ${view !== 'city' ? 'office' : 'city'}`}>
       <div className="stage">
         <Canvas
-          dpr={[1, 1.25]}
+          dpr={[1, 1]}
           gl={{ antialias: false, alpha: false, powerPreference: 'high-performance' }}
           camera={{ position: [0, 12, 14], fov: 46 }}
-          performance={{ min: 0.5 }}
+          performance={{ min: 0.4 }}
         >
+          <AdaptiveDpr pixelated />
+          <AdaptiveEvents />
           <Suspense fallback={null}>
             {view === 'office' && selected ? (
               <OfficeScene bot={selected} desk={snap?.desk} />

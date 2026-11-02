@@ -31,10 +31,10 @@ function WindowInstances({
   sparse?: boolean
 }) {
   const mesh = useRef<InstancedMesh>(null)
-  const yStep = sparse ? 0.62 : 0.36
-  const colMin = sparse ? -2 : -3
-  const colMax = sparse ? 2 : 3
-  const facesPer = sparse ? 2 : 4
+  const yStep = sparse ? 0.85 : 0.55
+  const colMin = sparse ? -1 : -2
+  const colMax = sparse ? 1 : 2
+  const facesPer = sparse ? 1 : 2
 
   const count = useMemo(() => {
     let n = 0
@@ -56,15 +56,10 @@ function WindowInstances({
         if (((y * 17 + col * 5 + seed * 11) | 0) % 7 === 0) continue
         const x = col * 0.22
         const faces: [number, number, number][] = sparse
-          ? [
-              [x, y, width / 2 + 0.015],
-              [width / 2 + 0.015, y, x],
-            ]
+          ? [[x, y, width / 2 + 0.015]]
           : [
               [x, y, width / 2 + 0.015],
-              [x, y, -width / 2 - 0.015],
               [width / 2 + 0.015, y, x],
-              [-width / 2 - 0.015, y, x],
             ]
         for (const p of faces) {
           dummy.position.set(p[0], p[1], p[2])
@@ -159,7 +154,7 @@ export function Tower({ bot, index, position, selected, onSelect, vista = false 
         />
       </mesh>
 
-      <WindowInstances height={height} width={width} seed={index + 3} offline={offline} />
+      <WindowInstances height={height} width={width} seed={index + 3} offline={offline} sparse />
 
       {/* roof cap */}
       <mesh position={[0, height + 0.08, 0]}>
