@@ -479,8 +479,10 @@ class PimpDeskTests(unittest.TestCase):
         self.assertNotIn("stake_for_gap", gap.__dict__)
         self.assertEqual(gap.stake_for_model(0.657, pimp_desk), 20.0)
         self.assertEqual(gap.stake_for_model(0.80, pimp_desk), 20.0)
-        self.assertEqual(gap.stake_for_model(0.90, pimp_desk), 60.0)
-        self.assertEqual(gap.stake_for_model(1, pimp_desk), 100.0)
+        # Phase 1 tower budgets soft-cap sports-gap to 35% of desk $100 → $35.
+        sports_cap = round(100.0 * float(pimp_desk.DEFAULTS["tower_risk_budgets"]["sports-gap"]), 2)
+        self.assertEqual(gap.stake_for_model(0.90, pimp_desk), min(60.0, sports_cap))
+        self.assertEqual(gap.stake_for_model(1, pimp_desk), min(100.0, sports_cap))
         per = 0.55 + gap.fee(0.55)
         count = pimp_desk.contracts_for_stake(per, gap.stake_for_model(0.62, pimp_desk))
         cost = round(count * per, 2)

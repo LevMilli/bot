@@ -620,6 +620,24 @@ def run():
                     "fill_id": p.get("fill_id") or "",
                     "at": ts,
                 })
+            # Closing-line value: entry fair vs settle binary (1 win / 0 loss) as close proxy.
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_more
+                close_fair = 1.0 if payout > 0 else 0.0
+                desk_more.record_sports_clv(
+                    DESK_ROOT,
+                    ticker=str(p.get("ticker") or ""),
+                    side=str(p.get("side") or ""),
+                    fair_entry=p.get("fair_at_entry"),
+                    close_fair=close_fair,
+                    pnl=pnl,
+                    league=str(p.get("league") or ""),
+                    exit_reason="settled",
+                )
+            except Exception:
+                pass
             lines.append(f"| {ts} | {p['league']} | {p['game']} | FINAL {as_}-{hs} | | | | | **PAPER SETTLE** {p['team']}: {'WON' if payout else 'LOST'} payout ${payout:.2f}, P&L ${pnl:+.2f} |")
             summary_out["closes"].append(f"SETTLE {p['ticker']} pnl {pnl:+.2f}")
             continue
@@ -655,6 +673,23 @@ def run():
                         "fill_id": p.get("fill_id") or "",
                         "at": ts,
                     })
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_more
+                    desk_more.record_sports_clv(
+                        DESK_ROOT,
+                        ticker=str(p.get("ticker") or ""),
+                        side=str(p.get("side") or ""),
+                        fair_entry=p.get("fair_at_entry"),
+                        fair_exit=fair,
+                        close_fair=fair,
+                        pnl=pnl,
+                        league=str(p.get("league") or ""),
+                        exit_reason=str(exit_reason or "sell"),
+                    )
+                except Exception:
+                    pass
                 lines.append(f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | **PAPER SELL** {p['contracts']} @ bid {bid:.2f} ({exit_reason}), P&L ${pnl:+.2f} |")
                 summary_out["closes"].append(f"SELL {p['ticker']} pnl {pnl:+.2f}")
                 continue

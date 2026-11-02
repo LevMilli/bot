@@ -1076,6 +1076,36 @@ def main():
                         )
                     except Exception:
                         pass
+                    # Phase 1 shadow near-miss: log only (does not eat desk open-risk).
+                    try:
+                        import desk_more
+                        z_val = None
+                        if ev.get("cushion") is not None and ev.get("sigma"):
+                            try:
+                                z_val = float(ev["cushion"]) / float(ev["sigma"])
+                            except (TypeError, ValueError, ZeroDivisionError):
+                                z_val = None
+                        nm = desk_more.is_near_miss(
+                            reasons=reasons or [regime],
+                            z=z_val,
+                            p=ev.get("p") or ev.get("confidence"),
+                            edge=ev.get("edge"),
+                            min_edge=float(edge_buf),
+                        )
+                        if nm.get("near_miss"):
+                            desk_more.record_near_miss(DESK_ROOT, {
+                                "bot": "btc15m",
+                                "ticker": ev.get("ticker"),
+                                "side": ev.get("side"),
+                                "soft": nm.get("soft"),
+                                "z": z_val,
+                                "p": ev.get("p"),
+                                "edge": ev.get("edge"),
+                                "note": nm.get("note"),
+                            })
+                            print(f"  NEAR-MISS shadow logged ({nm.get('note')})")
+                    except Exception:
+                        pass
                 print()
                 continue
 
