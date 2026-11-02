@@ -16,12 +16,23 @@ function shell(emissiveIntensity = 0.22) {
   }
 }
 
-/** Slim two-finger gripper on a small cuff, so the hand reads as one piece. */
-function Grip() {
+/** Slim two-finger gripper. At the desk the left hand taps keys and the right clicks. */
+function Grip({ work = false, side = 1 }: { work?: boolean; side?: -1 | 1 }) {
   const ref = useRef<Group>(null)
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
     if (!ref.current) return
+    if (work && side === -1) {
+      ref.current.rotation.x = -0.55 + Math.sin(t * 14) * 0.22
+      ref.current.rotation.z = Math.sin(t * 9.5) * 0.08
+      return
+    }
+    if (work) {
+      const click = Math.pow(Math.max(0, Math.sin(t * 1.65)), 8)
+      ref.current.rotation.x = -0.4 - click * 0.45
+      ref.current.rotation.z = Math.sin(t * 1.25) * 0.05
+      return
+    }
     ref.current.rotation.z = Math.sin(t * 2.8) * 0.16
     ref.current.rotation.x = Math.sin(t * 1.9) * 0.1
   })
@@ -71,13 +82,31 @@ function Antenna({
 
 type ArmPose = BotPose
 
-function Arm({ side, pose }: { side: -1 | 1; pose: ArmPose }) {
+function Arm({ side, pose, work = false }: { side: -1 | 1; pose: ArmPose; work?: boolean }) {
   const ref = useRef<Group>(null)
   const fore = useRef<Group>(null)
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
     if (!ref.current) return
+
+    if (work) {
+      // -2.1 pitches the limb onto the desktop (same family as the old typing pose).
+      const pace = pose === 'losing' ? 0.45 : pose === 'winning' ? 1.2 : pose === 'trading' ? 1.1 : 0.75
+      if (side === -1) {
+        ref.current.rotation.x = -2.2 + Math.sin(t * 7.5 * pace) * 0.05
+        ref.current.rotation.y = 0.48
+        ref.current.rotation.z = 0.22
+        if (fore.current) fore.current.rotation.x = -0.35 + Math.sin(t * 12 * pace) * 0.12
+      } else {
+        const sweep = Math.sin(t * 1.35) * 0.1
+        ref.current.rotation.x = -2.12 + Math.cos(t * 1.05) * 0.05
+        ref.current.rotation.y = -0.5 + sweep
+        ref.current.rotation.z = -0.18
+        if (fore.current) fore.current.rotation.x = -0.28 + Math.sin(t * 1.6) * 0.06
+      }
+      return
+    }
 
     if (pose === 'trading') {
       const type = Math.sin(t * 7.2 + side * 1.7) * 0.07
@@ -143,10 +172,30 @@ function Arm({ side, pose }: { side: -1 | 1; pose: ArmPose }) {
           <meshBasicMaterial color="#f4fdff" toneMapped={false} />
         </mesh>
         <group position={[0, 0.34, 0]}>
-          <Grip />
+          <Grip work={work} side={side} />
         </group>
       </group>
     </group>
+  )
+}
+
+/** Thighs toward the desk, shins down beside the chair, clear of the desktop. */
+function SeatedLegs() {
+  return (
+    <>
+      {([-1, 1] as const).map((side) => (
+        <group key={side} position={[side * 0.12, 0.16, 0.02]}>
+          <mesh position={[0, -0.05, -0.13]} rotation={[-1.15, 0, side * 0.08]}>
+            <capsuleGeometry args={[0.052, 0.2, 4, 8]} />
+            <meshStandardMaterial {...shell(0.12)} />
+          </mesh>
+          <mesh position={[side * 0.015, -0.24, -0.24]} rotation={[0.18, 0, side * 0.05]}>
+            <capsuleGeometry args={[0.044, 0.16, 4, 8]} />
+            <meshStandardMaterial {...shell(0.1)} />
+          </mesh>
+        </group>
+      ))}
+    </>
   )
 }
 
@@ -158,15 +207,18 @@ function Arm({ side, pose }: { side: -1 | 1; pose: ArmPose }) {
 export function BotFigure({
   pose = 'waiting',
   seated = true,
+  deskWork = false,
 }: {
   pose?: BotPose
   seated?: boolean
+  /** Seated at the office desk: hands stay on the keyboard and mouse. */
+  deskWork?: boolean
 }) {
   const body = useRef<Group>(null)
   const torso = useRef<Group>(null)
   const head = useRef<Group>(null)
   const bulb = useRef<MeshStandardMaterial>(null)
-  const anchor: [number, number, number] = seated ? [0, 0, 0.42] : [0, 0.22, 0]
+  const anchor: [number, number, number] = deskWork ? [0, 0.34, 0.98] : seated ? [0, 0, 0.42] : [0, 0.22, 0]
 
   const accent =
     pose === 'winning' ? '#39ff14' : pose === 'losing' ? '#ff2a6d' : pose === 'trading' ? '#2de2e6' : '#f9c80e'
@@ -180,15 +232,16 @@ export function BotFigure({
       if (pose === 'losing') bob = Math.sin(t * 0.9) * 0.01
       if (pose === 'researching') bob = Math.sin(t * 1.3) * 0.012
       body.current.position.y = anchor[1] + bob
-      body.current.position.x = anchor[0] + Math.sin(t * 0.55) * 0.014
-      body.current.rotation.y = Math.sin(t * 0.42) * 0.055
+      const sway = deskWork ? 0.006 : 0.014
+      body.current.position.x = anchor[0] + Math.sin(t * 0.55) * sway
+      body.current.rotation.y = Math.sin(t * 0.42) * (deskWork ? 0.03 : 0.055)
       body.current.rotation.z = Math.sin(t * 0.72) * 0.016
       const breathe = 1 + Math.sin(t * 1.35) * 0.01
       body.current.scale.set(1, breathe, 1)
     }
     if (torso.current) {
       if (pose === 'losing') {
-        torso.current.rotation.x = 0.28
+        torso.current.rotation.x = deskWork ? 0.1 : 0.28
       } else if (pose === 'researching') {
         torso.current.rotation.x = -0.12 + Math.sin(t * 1.4) * 0.03
       } else if (pose === 'winning') {
@@ -201,20 +254,21 @@ export function BotFigure({
       const look = Math.sin(t * 0.62) * 0.2
       const nod = Math.sin(t * 0.48 + 0.6) * 0.06
       const tilt = Math.sin(t * 0.8) * 0.04
+      const deskNod = deskWork ? -0.14 : 0
       if (pose === 'losing') {
-        head.current.rotation.x = 0.22 + nod
+        head.current.rotation.x = (deskWork ? 0.05 : 0.22) + nod
         head.current.rotation.y = look * 0.55
       } else if (pose === 'researching') {
         head.current.rotation.y = look
-        head.current.rotation.x = -0.08 + nod
+        head.current.rotation.x = -0.08 + nod + deskNod
       } else if (pose === 'trading') {
-        head.current.rotation.x = -0.1 + nod
+        head.current.rotation.x = -0.1 + nod + deskNod
         head.current.rotation.y = look * 0.7
       } else if (pose === 'winning') {
-        head.current.rotation.x = -0.06 + nod
+        head.current.rotation.x = -0.06 + nod + deskNod
         head.current.rotation.y = look
       } else {
-        head.current.rotation.x = nod
+        head.current.rotation.x = nod + deskNod
         head.current.rotation.y = look
       }
       head.current.rotation.z = tilt
@@ -303,16 +357,20 @@ export function BotFigure({
           ))}
         </group>
 
-        <Arm side={-1} pose={pose} />
-        <Arm side={1} pose={pose} />
+        <Arm side={-1} pose={pose} work={deskWork} />
+        <Arm side={1} pose={pose} work={deskWork} />
       </group>
 
-      {([-0.1, 0.1] as const).map((x) => (
-        <mesh key={x} position={[x, 0.02, 0.04]} rotation={[0.55, 0, x > 0 ? -0.05 : 0.05]}>
-          <cylinderGeometry args={[0.05, 0.045, 0.32, 14]} />
-          <meshStandardMaterial {...shell(0.12)} />
-        </mesh>
-      ))}
+      {deskWork ? (
+        <SeatedLegs />
+      ) : (
+        ([-0.1, 0.1] as const).map((x) => (
+          <mesh key={x} position={[x, 0.02, 0.04]} rotation={[0.55, 0, x > 0 ? -0.05 : 0.05]}>
+            <cylinderGeometry args={[0.05, 0.045, 0.32, 14]} />
+            <meshStandardMaterial {...shell(0.12)} />
+          </mesh>
+        ))
+      )}
     </group>
   )
 }

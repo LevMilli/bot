@@ -1,8 +1,9 @@
 import { AdaptiveDpr, AdaptiveEvents } from '@react-three/drei'
 import { Canvas } from '@react-three/fiber'
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSnapshot } from './data/useSnapshot'
 import { Banners } from './hud/Banners'
+import { Monitors } from './hud/Monitors'
 import { Ticker } from './hud/Ticker'
 import { BEAM_COLORS } from './data/format'
 import { CityScene } from './scene/CityScene'
@@ -17,6 +18,7 @@ export default function App() {
   const [view, setView] = useState<View>('city')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [fromBank, setFromBank] = useState(false)
+  const [screensOpen, setScreensOpen] = useState(false)
 
   const bots = snap?.bots || []
   const selected: BotRow | null = useMemo(
@@ -41,6 +43,10 @@ export default function App() {
     setFromBank(false)
     setView('office')
   }
+
+  useEffect(() => {
+    setScreensOpen(false)
+  }, [selectedId, view])
 
   const backToCity = () => {
     setSelectedId(null)
@@ -67,7 +73,12 @@ export default function App() {
           <AdaptiveEvents />
           <Suspense fallback={null}>
             {view === 'office' && selected ? (
-              <OfficeScene bot={selected} desk={snap?.desk} />
+              <OfficeScene
+                bot={selected}
+                bots={bots}
+                desk={snap?.desk}
+                onOpenScreens={() => setScreensOpen(true)}
+              />
             ) : view === 'bank' ? (
               <BankScene bots={bots} desk={snap?.desk} onSelectTeller={openTeller} />
             ) : (
@@ -140,6 +151,7 @@ export default function App() {
             <div className="office-title">
               <strong>{fromBank ? `Teller · ${selected.name}` : selected.name}</strong>
               <span>{selected.id}</span>
+              <span className="screen-hint">click a screen for the trades</span>
             </div>
             {fromBank && (
               <div className="teller-switch" role="tablist" aria-label="Switch teller">
@@ -158,6 +170,22 @@ export default function App() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {view === 'office' && selected && screensOpen && (
+          <div
+            className="screen-lightbox"
+            role="dialog"
+            aria-label="Desk screens"
+            onClick={() => setScreensOpen(false)}
+          >
+            <button type="button" className="back-btn screen-close" onClick={() => setScreensOpen(false)}>
+              Close screens
+            </button>
+            <div className="screen-sheet" onClick={(e) => e.stopPropagation()}>
+              <Monitors bot={selected} desk={snap?.desk} />
+            </div>
           </div>
         )}
 

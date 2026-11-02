@@ -429,6 +429,47 @@ a {
   font-size: 0.78rem;
 }
 
+.screen-hint {
+  color: var(--lime);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+}
+
+.screen-lightbox {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5rem 1rem 3.2rem;
+  background: rgba(4, 2, 16, 0.78);
+  pointer-events: auto;
+}
+
+.screen-sheet {
+  width: min(1100px, 96vw);
+  pointer-events: auto;
+}
+
+.screen-sheet .monitors {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  align-self: center;
+}
+
+.screen-sheet .monitor {
+  min-height: 16rem;
+  font-size: 0.92rem;
+}
+
+.screen-close {
+  position: absolute;
+  top: 4.4rem;
+  right: 1rem;
+}
+
 .teller-switch {
   display: flex;
   flex-wrap: wrap;

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { OrbitControls, PerspectiveCamera, RenderTexture } from '@react-three/drei'
+import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import { DoubleSide, type Texture } from 'three'
+import { DoubleSide, type Group, type Texture } from 'three'
 import type { BotRow, Desk } from '../types'
+import { useFrame } from '@react-three/fiber'
 import {
   centerMonitorTexture,
   leftMonitorTexture,
@@ -11,12 +12,14 @@ import {
 import { botPose } from '../data/botPose'
 import { NeonBloom } from './Effects'
 import { BotFigure } from './BotFigure'
-import { CityGlass } from './WindowCity'
+import { StreetCity } from './WindowCity'
 import { WallStockChart } from './WallCharts'
 
 type Props = {
   bot: BotRow
+  bots?: BotRow[]
   desk?: Desk
+  onOpenScreens?: () => void
 }
 
 const FRAME = '#3a2a68'
@@ -29,16 +32,31 @@ function MonitorFrame({
   size,
   edge,
   map,
+  onOpen,
 }: {
   position: [number, number, number]
   rotation: [number, number, number]
   size: [number, number]
   edge: string
   map: Texture
+  onOpen?: () => void
 }) {
   const [w, h] = size
   return (
-    <group position={position} rotation={rotation}>
+    <group
+      position={position}
+      rotation={rotation}
+      onClick={(e) => {
+        e.stopPropagation()
+        onOpen?.()
+      }}
+      onPointerOver={() => {
+        document.body.style.cursor = 'pointer'
+      }}
+      onPointerOut={() => {
+        document.body.style.cursor = 'default'
+      }}
+    >
       <mesh>
         <boxGeometry args={[w, h, 0.05]} />
         <meshStandardMaterial color="#0c1018" metalness={0.35} roughness={0.4} />
@@ -175,6 +193,12 @@ function Credenza() {
         <sphereGeometry args={[0.1, 10, 10]} />
         <meshStandardMaterial color="#1d6b45" roughness={0.7} />
       </mesh>
+      {([0.15, 0.28, 0.4] as const).map((z, i) => (
+        <mesh key={z} position={[0.02, 0.46 + i * 0.035, z]}>
+          <boxGeometry args={[0.42, 0.03, 0.28]} />
+          <meshStandardMaterial color={i === 1 ? '#1a3a55' : '#121820'} roughness={0.6} />
+        </mesh>
+      ))}
     </group>
   )
 }
@@ -182,7 +206,7 @@ function Credenza() {
 function OfficeChair() {
   const spokes = [0, 1, 2, 3, 4]
   return (
-    <group position={[0, 0, 0.62]}>
+    <group position={[0, 0, 1.16]}>
       <mesh position={[0, 0.28, 0]}>
         <cylinderGeometry args={[0.045, 0.05, 0.36, 12]} />
         <meshStandardMaterial color="#c5ccd8" metalness={0.85} roughness={0.22} />
@@ -270,14 +294,17 @@ function WindowWall() {
         </mesh>
       ))}
 
-      {/* glass: eye-level street outside, neighboring towers, no other bots */}
+      {/* Clear glass. The city meshes sit outside this opening. */}
       <mesh position={[0, 1.95, 0.02]} raycast={() => null}>
         <planeGeometry args={[6.82, 2.26]} />
-        <meshBasicMaterial toneMapped={false} side={DoubleSide}>
-          <RenderTexture attach="map" width={1536} height={512} anisotropy={16}>
-            <CityGlass />
-          </RenderTexture>
-        </meshBasicMaterial>
+        <meshBasicMaterial
+          color="#b7fff8"
+          transparent
+          opacity={0.06}
+          depthWrite={false}
+          side={DoubleSide}
+          toneMapped={false}
+        />
       </mesh>
       {/* faint glass sheen in front of the mullions' plane */}
       <mesh position={[0, 1.95, 0.09]} raycast={() => null}>
@@ -319,7 +346,7 @@ function Desk() {
         <boxGeometry args={[0.55, 0.02, 0.2]} />
         <meshStandardMaterial color="#0c0e14" roughness={0.5} />
       </mesh>
-      <mesh position={[-0.95, 0.82, 0.28]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[-1.5, 0.82, 0.15]} rotation={[-Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.13, 0.13, 0.045, 24]} />
         <meshStandardMaterial color="#c01028" emissive="#ff2040" emissiveIntensity={0.7} roughness={0.35} />
       </mesh>
@@ -342,7 +369,129 @@ function OfficeFloor() {
 const HOME_POS: [number, number, number] = [0.15, 1.78, 3.35]
 const HOME_TARGET: [number, number, number] = [0, 1.42, 0.05]
 
-export function OfficeScene({ bot, desk }: Props) {
+function DeskKit() {
+  const mouse = useRef<Group>(null)
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime()
+    if (!mouse.current) return
+    mouse.current.position.x = 0.5 + Math.sin(t * 1.35) * 0.04
+    mouse.current.position.z = 0.4 + Math.cos(t * 1.05) * 0.028
+    mouse.current.rotation.y = Math.sin(t * 1.35) * 0.18
+  })
+  const keys: [number, number][] = []
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 12; col++) {
+      keys.push([col, row])
+    }
+  }
+  return (
+    <group>
+      {/* keyboard in reach of the left hand */}
+      <group position={[-0.46, 0.812, 0.42]} rotation={[-0.18, 0.2, 0]}>
+        <mesh>
+          <boxGeometry args={[0.52, 0.02, 0.18]} />
+          <meshStandardMaterial color="#2c3548" metalness={0.35} roughness={0.45} />
+        </mesh>
+        {keys.map(([col, row]) => (
+          <mesh key={`${col}-${row}`} position={[-0.22 + col * 0.04, 0.016, -0.06 + row * 0.038]}>
+            <boxGeometry args={[0.03, 0.012, 0.028]} />
+            <meshStandardMaterial
+              color={row === 0 ? '#d7fff8' : '#c5d0e0'}
+              emissive={row === 0 ? '#2de2e6' : '#1a2433'}
+              emissiveIntensity={row === 0 ? 0.45 : 0.15}
+              metalness={0.2}
+              roughness={0.4}
+            />
+          </mesh>
+        ))}
+      </group>
+      {/* mouse pad + mouse under the right hand */}
+      <mesh position={[0.5, 0.805, 0.4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.28, 0.22]} />
+        <meshStandardMaterial color="#10141c" roughness={0.8} />
+      </mesh>
+      <group ref={mouse} position={[0.5, 0.82, 0.4]}>
+        <mesh>
+          <boxGeometry args={[0.07, 0.028, 0.11]} />
+          <meshStandardMaterial color="#d8fff8" emissive="#7ef9ff" emissiveIntensity={0.25} metalness={0.4} roughness={0.3} />
+        </mesh>
+        <mesh position={[0, 0.016, -0.01]}>
+          <boxGeometry args={[0.028, 0.008, 0.04]} />
+          <meshStandardMaterial color="#39ff14" emissive="#39ff14" emissiveIntensity={0.6} />
+        </mesh>
+      </group>
+      {/* lamp over the right corner */}
+      <group position={[1.42, 0.8, -0.42]}>
+        <mesh position={[0, 0.02, 0]}>
+          <cylinderGeometry args={[0.08, 0.1, 0.03, 16]} />
+          <meshStandardMaterial color="#1c222e" metalness={0.6} roughness={0.35} />
+        </mesh>
+        <mesh position={[0, 0.28, 0]}>
+          <cylinderGeometry args={[0.015, 0.015, 0.48, 8]} />
+          <meshStandardMaterial color="#c5ccd8" metalness={0.8} roughness={0.25} />
+        </mesh>
+        <mesh position={[-0.16, 0.5, 0.08]} rotation={[0.4, 0, 0.9]}>
+          <cylinderGeometry args={[0.012, 0.012, 0.36, 8]} />
+          <meshStandardMaterial color="#c5ccd8" metalness={0.8} roughness={0.25} />
+        </mesh>
+        <mesh position={[-0.28, 0.42, 0.16]}>
+          <coneGeometry args={[0.09, 0.08, 16, 1, true]} />
+          <meshStandardMaterial color="#f4e2a8" emissive="#f9c80e" emissiveIntensity={0.55} side={DoubleSide} />
+        </mesh>
+      </group>
+      <pointLight position={[1.05, 1.15, -0.05]} intensity={0.45} color="#ffe2a0" distance={2.4} />
+      {/* mug and notebook */}
+      <group position={[0.92, 0.84, 0.22]}>
+        <mesh>
+          <cylinderGeometry args={[0.045, 0.04, 0.07, 16]} />
+          <meshStandardMaterial color="#101820" roughness={0.4} metalness={0.3} />
+        </mesh>
+        <mesh position={[0, 0.02, 0]}>
+          <cylinderGeometry args={[0.038, 0.038, 0.02, 16]} />
+          <meshStandardMaterial color="#3a2418" roughness={0.5} />
+        </mesh>
+        <mesh position={[0.055, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.022, 0.006, 6, 12]} />
+          <meshStandardMaterial color="#c5ccd8" metalness={0.7} roughness={0.3} />
+        </mesh>
+      </group>
+      <mesh position={[-1.35, 0.812, -0.15]} rotation={[-0.04, -0.4, 0]}>
+        <boxGeometry args={[0.2, 0.012, 0.26]} />
+        <meshStandardMaterial color="#1a2744" roughness={0.7} />
+      </mesh>
+      <mesh position={[-1.35, 0.82, -0.15]} rotation={[-0.04, -0.4, 0]}>
+        <boxGeometry args={[0.16, 0.004, 0.2]} />
+        <meshBasicMaterial color="#d7e6ff" />
+      </mesh>
+      {/* bin and rug */}
+      <mesh position={[1.85, 0.16, 0.95]}>
+        <cylinderGeometry args={[0.12, 0.1, 0.32, 12]} />
+        <meshStandardMaterial color="#12151c" metalness={0.35} roughness={0.5} />
+      </mesh>
+      <mesh position={[0.05, 0.015, 1.15]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.85, 24]} />
+        <meshStandardMaterial color="#1a1038" roughness={0.9} />
+      </mesh>
+      {/* coat rack by the door */}
+      <group position={[-6.35, 0, 2.15]}>
+        <mesh position={[0, 0.7, 0]}>
+          <cylinderGeometry args={[0.03, 0.04, 1.4, 8]} />
+          <meshStandardMaterial color="#2a3344" metalness={0.5} roughness={0.4} />
+        </mesh>
+        <mesh position={[0, 1.42, 0]}>
+          <sphereGeometry args={[0.05, 10, 10]} />
+          <meshStandardMaterial color="#c5ccd8" metalness={0.7} roughness={0.3} />
+        </mesh>
+        <mesh position={[0.08, 1.05, 0.02]} rotation={[0.15, 0, 0.2]}>
+          <boxGeometry args={[0.28, 0.42, 0.06]} />
+          <meshStandardMaterial color="#123044" roughness={0.6} />
+        </mesh>
+      </group>
+    </group>
+  )
+}
+
+export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
   const controls = useRef<OrbitControlsImpl>(null)
   const pose = useMemo(() => botPose(bot), [bot])
 
@@ -373,7 +522,7 @@ export function OfficeScene({ bot, desk }: Props) {
   return (
     <>
       <color attach="background" args={['#12082a']} />
-      <fog attach="fog" args={['#1a0a38', 12, 28]} />
+      <fog attach="fog" args={['#14082e', 16, 62]} />
       <PerspectiveCamera makeDefault fov={46} near={0.08} far={80} position={HOME_POS} />
       <OrbitControls
         ref={controls}
@@ -394,6 +543,7 @@ export function OfficeScene({ bot, desk }: Props) {
       <pointLight position={[-1.15, 3.15, 0.4]} intensity={0.75} color="#7ef9ff" distance={8} />
       <pointLight position={[1.15, 3.15, 0.4]} intensity={0.75} color="#b967ff" distance={8} />
       <pointLight position={[0, 1.9, -2.4]} intensity={0.55} color="#2de2e6" distance={7} />
+      <pointLight position={[0, 5.5, -10]} intensity={0.7} color="#9ecbff" distance={14} />
 
       <OfficeFloor />
       <Ceiling />
@@ -408,14 +558,16 @@ export function OfficeScene({ bot, desk }: Props) {
       <Door />
       <Credenza />
       <WindowWall />
+      <StreetCity bots={bots && bots.length ? bots : [bot]} desk={desk} />
       <Desk />
+      <DeskKit />
       <OfficeChair />
 
-      <MonitorFrame position={[-1.55, 1.28, -0.62]} rotation={[0, 0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.left} />
-      <MonitorFrame position={[0.02, 1.4, -0.88]} rotation={[-0.08, 0, 0]} size={[1.22, 0.72]} edge="#2de2e6" map={maps.center} />
-      <MonitorFrame position={[1.58, 1.28, -0.62]} rotation={[0, -0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.right} />
+      <MonitorFrame position={[-1.55, 1.28, -0.62]} rotation={[0, 0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.left} onOpen={onOpenScreens} />
+      <MonitorFrame position={[0.02, 1.4, -0.88]} rotation={[-0.08, 0, 0]} size={[1.22, 0.72]} edge="#2de2e6" map={maps.center} onOpen={onOpenScreens} />
+      <MonitorFrame position={[1.58, 1.28, -0.62]} rotation={[0, -0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.right} onOpen={onOpenScreens} />
 
-      <BotFigure pose={pose} />
+      <BotFigure pose={pose} deskWork />
       <NeonBloom strength={0.48} />
     </>
   )
