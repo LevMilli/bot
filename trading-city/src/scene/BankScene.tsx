@@ -35,9 +35,9 @@ const HOME_TARGET: [number, number, number] = [0, 1.4, 0.1]
 
 /** Wide enough that nameplates / glass fins never collide while bots sway. */
 const TELLER_COUNT = 5
-const TELLER_SPACING = 2.95
+const TELLER_SPACING = 3.05
 /** Half-width of each teller's private rope channel (gap between neighbors = spacing − 2×half). */
-const LANE_HALF = 0.92
+const LANE_HALF = 0.72
 const LANE_Z_FRONT = 2.05
 /** Keep rear posts in the aisle — clear of the counter lip. */
 const LANE_Z_BACK = 0.88
@@ -171,20 +171,20 @@ function TellerPod({
         />
       </mesh>
 
-      {/* sharp canvas nameplate */}
+      {/* sharp canvas nameplate — larger for PnL / label readability */}
       <mesh
-        position={[0, 1.72, 0.42]}
+        position={[0, 1.88, 0.42]}
         onClick={select}
         onPointerOver={() => bot && (document.body.style.cursor = 'pointer')}
         onPointerOut={() => {
           document.body.style.cursor = 'default'
         }}
       >
-        <boxGeometry args={[1.22, 0.4, 0.05]} />
+        <boxGeometry args={[1.38, 0.5, 0.05]} />
         <meshStandardMaterial color={INK} metalness={0.35} roughness={0.4} emissive={focused ? color : '#000'} emissiveIntensity={focused ? 0.25 : 0} />
       </mesh>
-      <mesh position={[0, 1.72, 0.45]} onClick={select}>
-        <planeGeometry args={[1.12, 0.34]} />
+      <mesh position={[0, 1.88, 0.455]} onClick={select}>
+        <planeGeometry args={[1.28, 0.42]} />
         <meshBasicMaterial map={plate} toneMapped={false} />
       </mesh>
 
@@ -235,28 +235,29 @@ function ProfitBoard({ desk }: { desk?: Desk }) {
   useFrame(() => {
     map.needsUpdate = true
   })
+  // High on the back wall — readable, not covering teller heads.
   return (
-    <group position={[0, 3.2, -2.72]}>
+    <group position={[0, 3.62, -2.92]}>
       <mesh>
-        <boxGeometry args={[7.0, 1.28, 0.14]} />
+        <boxGeometry args={[5.2, 0.92, 0.12]} />
         <meshStandardMaterial color={INK} metalness={0.5} roughness={0.28} />
       </mesh>
-      <mesh position={[0, 0, 0.08]}>
-        <planeGeometry args={[6.55, 1.05]} />
+      <mesh position={[0, 0, 0.07]}>
+        <planeGeometry args={[4.85, 0.74]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.68, 0.05]}>
-        <boxGeometry args={[7.1, 0.045, 0.08]} />
+      <mesh position={[0, 0.49, 0.04]}>
+        <boxGeometry args={[5.3, 0.035, 0.06]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.68, 0.05]}>
-        <boxGeometry args={[7.1, 0.045, 0.08]} />
+      <mesh position={[0, -0.49, 0.04]}>
+        <boxGeometry args={[5.3, 0.035, 0.06]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
-      {([-3.25, 3.25] as const).map((x) =>
-        ([-0.45, 0.45] as const).map((y) => (
-          <mesh key={`${x}-${y}`} position={[x, y, 0.1]}>
-            <cylinderGeometry args={[0.04, 0.04, 0.035, 10]} />
+      {([-2.4, 2.4] as const).map((x) =>
+        ([-0.32, 0.32] as const).map((y) => (
+          <mesh key={`${x}-${y}`} position={[x, y, 0.08]}>
+            <cylinderGeometry args={[0.035, 0.035, 0.03, 10]} />
             <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.2} />
           </mesh>
         )),
@@ -521,18 +522,19 @@ function SideScreen({
   useFrame(() => {
     map.needsUpdate = true
   })
+  // Against the side walls, raised and back — clear of outer teller pods.
   return (
-    <group position={[side * 5.15, 2.4, 1.0]} rotation={[0, -side * 0.9, 0]}>
+    <group position={[side * 6.45, 3.05, -1.15]} rotation={[0, -side * 0.55, 0]}>
       <mesh>
-        <boxGeometry args={[2.2, 1.45, 0.08]} />
+        <boxGeometry args={[1.75, 1.1, 0.07]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
       </mesh>
-      <mesh position={[0, 0, 0.05]}>
-        <planeGeometry args={[2.0, 1.25]} />
+      <mesh position={[0, 0, 0.045]}>
+        <planeGeometry args={[1.58, 0.92]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.76, 0.04]}>
-        <boxGeometry args={[2.25, 0.035, 0.045]} />
+      <mesh position={[0, 0.58, 0.035]}>
+        <boxGeometry args={[1.8, 0.03, 0.04]} />
         <meshBasicMaterial color="#2de2e6" toneMapped={false} />
       </mesh>
     </group>
@@ -564,7 +566,7 @@ function CeilingHall() {
         <boxGeometry args={[15, 0.12, 0.2]} />
         <meshStandardMaterial color={TRIM} metalness={0.4} roughness={0.4} />
       </mesh>
-      <mesh position={[0, 3.35, -2.55]}>
+      <mesh position={[0, 3.85, -2.7]}>
         <boxGeometry args={[13.5, 0.04, 0.04]} />
         <meshBasicMaterial color="#2de2e6" toneMapped={false} />
       </mesh>
@@ -642,13 +644,13 @@ function FloorGlowPaths() {
 }
 
 /**
- * Per-teller queue channel: left + right posts/ropes in that station's accent.
+ * Per-teller queue channel: accent ropes down both sides only.
+ * No front/rear crossbars — the lane mouth stays open to the desk.
  * Posts are inset (not shared), so neighboring lanes never cross or stack colors.
  */
 function QueueLanes() {
   const ropeLen = LANE_Z_FRONT - LANE_Z_BACK
   const ropeMidZ = (LANE_Z_FRONT + LANE_Z_BACK) / 2
-  const mouthW = LANE_HALF * 2
   return (
     <group>
       {Array.from({ length: TELLER_COUNT }).map((_, i) => {
@@ -668,14 +670,6 @@ function QueueLanes() {
                 </mesh>
               </group>
             ))}
-            <mesh position={[cx, 0.78, LANE_Z_FRONT]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.013, 0.013, mouthW, 6]} />
-              <meshBasicMaterial color={color} toneMapped={false} />
-            </mesh>
-            <mesh position={[cx, 0.78, LANE_Z_BACK]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.012, 0.012, mouthW, 6]} />
-              <meshBasicMaterial color={color} transparent opacity={0.75} toneMapped={false} />
-            </mesh>
           </group>
         )
       })}
@@ -684,8 +678,9 @@ function QueueLanes() {
 }
 
 function CompliancePillar() {
+  // Park against the left wall, forward of the queue mouths — never in a teller sightline.
   return (
-    <group position={[-4.2, 0, 2.4]}>
+    <group position={[-6.55, 0, 3.55]}>
       <mesh position={[0, 0.9, 0]}>
         <boxGeometry args={[0.55, 1.75, 0.55]} />
         <meshStandardMaterial color="#1a1230" roughness={0.65} metalness={0.25} />
@@ -725,8 +720,9 @@ function NightDeposit() {
     const mat = slot.current.material as { emissiveIntensity?: number }
     if (mat.emissiveIntensity != null) mat.emissiveIntensity = 0.45 + Math.sin(clock.getElapsedTime() * 2.2) * 0.25
   })
+  // Mirror of compliance — right wall, clear of outer-lane zooms.
   return (
-    <group position={[4.4, 0.95, 2.2]} rotation={[0, -0.9, 0]}>
+    <group position={[6.55, 0.95, 3.55]} rotation={[0, -0.9, 0]}>
       <mesh>
         <boxGeometry args={[0.85, 1.3, 0.32]} />
         <meshStandardMaterial color="#16101f" roughness={0.6} metalness={0.28} />
@@ -744,8 +740,9 @@ function NightDeposit() {
 }
 
 function WaitingBench({ x }: { x: number }) {
+  // Behind the camera's near dolly so benches never sit in a focused lane.
   return (
-    <group position={[x, 0, 3.0]}>
+    <group position={[x, 0, 4.15]}>
       <mesh position={[0, 0.28, 0]}>
         <boxGeometry args={[1.35, 0.08, 0.4]} />
         <meshStandardMaterial color="#1c1828" roughness={0.6} />
@@ -794,13 +791,21 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
   const [awayIndex, setAwayIndex] = useState<number | null>(null)
   const [recalling, setRecalling] = useState(false)
   const recallTimer = useRef<number | null>(null)
-  /** 0 = lobby distance, 1 = dolly in on the focused teller. */
-  const zoomRef = useRef(0)
+  /** Brief A/D framing only — released after settle or on drag/zoom. */
+  const snapRef = useRef<{ active: boolean; focus: number }>({ active: false, focus: 2 })
 
   const presentIndexes = useMemo(
     () => tellers.map((b, i) => (b && b.present !== false ? i : -1)).filter((i) => i >= 0),
     [tellers],
   )
+
+  const releaseCameraLock = () => {
+    snapRef.current.active = false
+  }
+
+  const beginFocusSnap = (index: number) => {
+    snapRef.current = { active: true, focus: index }
+  }
 
   useEffect(() => {
     const orbit = controls.current
@@ -809,7 +814,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     cam.position.set(...HOME_POS)
     orbit.target.set(...HOME_TARGET)
     orbit.update()
-    zoomRef.current = 0
+    snapRef.current = { active: false, focus: 2 }
   }, [])
 
   // Cycle one present teller stepping away — light life without extra lights.
@@ -847,7 +852,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     }
   }, [])
 
-  // A/D · ←/→ switch teller; W/S · ↑/↓ zoom on focused lane; Enter / Space opens.
+  // A/D · ←/→ briefly snap to teller; W/S · ↑/↓ free-roam dolly; Enter / Space opens.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -856,16 +861,42 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       const key = e.key.toLowerCase()
       if (key === 'arrowleft' || key === 'a') {
         e.preventDefault()
-        setFocus((f) => Math.max(0, f - 1))
+        setFocus((f) => {
+          const next = Math.max(0, f - 1)
+          beginFocusSnap(next)
+          return next
+        })
       } else if (key === 'arrowright' || key === 'd') {
         e.preventDefault()
-        setFocus((f) => Math.min(TELLER_COUNT - 1, f + 1))
-      } else if (key === 'arrowup' || key === 'w') {
+        setFocus((f) => {
+          const next = Math.min(TELLER_COUNT - 1, f + 1)
+          beginFocusSnap(next)
+          return next
+        })
+      } else if (key === 'arrowup' || key === 'w' || key === 'arrowdown' || key === 's') {
         e.preventDefault()
-        zoomRef.current = Math.min(1, zoomRef.current + 0.12)
-      } else if (key === 'arrowdown' || key === 's') {
-        e.preventDefault()
-        zoomRef.current = Math.max(0, zoomRef.current - 0.12)
+        releaseCameraLock()
+        const orbit = controls.current
+        if (!orbit) return
+        const cam = orbit.object
+        const dx = cam.position.x - orbit.target.x
+        const dy = cam.position.y - orbit.target.y
+        const dz = cam.position.z - orbit.target.z
+        const dist = Math.hypot(dx, dy, dz) || 1
+        // Soft bias toward the selected teller's lane while dollying freely.
+        const softX = MathUtils.lerp(orbit.target.x, tellerX(focus), 0.18)
+        orbit.target.x = softX
+        const nx = dx / dist
+        const ny = dy / dist
+        const nz = dz / dist
+        const step = key === 'arrowup' || key === 'w' ? -0.38 : 0.38
+        const nextDist = MathUtils.clamp(dist + step, ZOOM_DIST_NEAR - 0.15, ZOOM_DIST_FAR + 0.8)
+        cam.position.set(
+          orbit.target.x + nx * nextDist,
+          orbit.target.y + ny * nextDist,
+          orbit.target.z + nz * nextDist,
+        )
+        orbit.update()
       } else if (key === 'enter' || key === ' ') {
         const bot = tellers[focus]
         if (bot) {
@@ -881,26 +912,31 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
   useFrame((_, dt) => {
     const orbit = controls.current
     if (!orbit) return
-    const tx = tellerX(focus)
-    // Frame down the focused lane so side columns never sit in the sightline.
+    orbit.minDistance = ZOOM_DIST_NEAR - 0.15
+    orbit.maxDistance = ZOOM_DIST_FAR + 0.8
+    if (!snapRef.current.active) return
+
+    const tx = tellerX(snapRef.current.focus)
     const targetX = tx
     const targetY = 1.32
     const targetZ = 0.2
-    orbit.target.x = MathUtils.damp(orbit.target.x, targetX, 4.2, dt)
-    orbit.target.y = MathUtils.damp(orbit.target.y, targetY, 4.2, dt)
-    orbit.target.z = MathUtils.damp(orbit.target.z, targetZ, 4.2, dt)
+    orbit.target.x = MathUtils.damp(orbit.target.x, targetX, 5.5, dt)
+    orbit.target.y = MathUtils.damp(orbit.target.y, targetY, 5.5, dt)
+    orbit.target.z = MathUtils.damp(orbit.target.z, targetZ, 5.5, dt)
 
-    const zDist = MathUtils.lerp(ZOOM_DIST_FAR, ZOOM_DIST_NEAR, zoomRef.current)
     const cam = orbit.object
     const wantX = tx
-    const wantY = MathUtils.lerp(2.55, 2.15, zoomRef.current)
-    const wantZ = zDist
-    cam.position.x = MathUtils.damp(cam.position.x, wantX, 4.0, dt)
-    cam.position.y = MathUtils.damp(cam.position.y, wantY, 4.0, dt)
-    cam.position.z = MathUtils.damp(cam.position.z, wantZ, 4.0, dt)
-    // Keep OrbitControls distance clamps honest with our dolly.
-    orbit.minDistance = ZOOM_DIST_NEAR - 0.15
-    orbit.maxDistance = ZOOM_DIST_FAR + 0.8
+    const wantY = 2.45
+    const wantZ = MathUtils.lerp(ZOOM_DIST_FAR, ZOOM_DIST_NEAR, 0.35)
+    cam.position.x = MathUtils.damp(cam.position.x, wantX, 5.2, dt)
+    cam.position.y = MathUtils.damp(cam.position.y, wantY, 5.2, dt)
+    cam.position.z = MathUtils.damp(cam.position.z, wantZ, 5.2, dt)
+
+    const settled =
+      Math.abs(cam.position.x - wantX) < 0.04 &&
+      Math.abs(cam.position.z - wantZ) < 0.06 &&
+      Math.abs(orbit.target.x - targetX) < 0.04
+    if (settled) releaseCameraLock()
   })
 
   return (
@@ -917,10 +953,11 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         enablePan={false}
         minDistance={ZOOM_DIST_NEAR - 0.15}
         maxDistance={ZOOM_DIST_FAR + 0.8}
-        minPolarAngle={0.95}
-        maxPolarAngle={1.45}
-        minAzimuthAngle={-0.55}
-        maxAzimuthAngle={0.55}
+        minPolarAngle={0.75}
+        maxPolarAngle={1.55}
+        minAzimuthAngle={-1.05}
+        maxAzimuthAngle={1.05}
+        onStart={releaseCameraLock}
       />
 
       <ambientLight intensity={0.42} color="#c8b8ff" />
@@ -968,11 +1005,9 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       ))}
 
       <CeilingHall />
-      {/* Corner columns only — keep clear of every teller sightline */}
+      {/* Rear corner columns only — front aisle posts occlude outer-lane zooms */}
       <Column x={-7.05} z={-2.55} />
       <Column x={7.05} z={-2.55} />
-      <Column x={-7.05} z={2.55} />
-      <Column x={7.05} z={2.55} />
 
       <HeroVaultDoor />
       <ProfitBoard desk={desk} />
@@ -984,8 +1019,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <Warden />
       <CompliancePillar />
       <NightDeposit />
-      <WaitingBench x={-2.6} />
-      <WaitingBench x={2.6} />
+      <WaitingBench x={-5.2} />
+      <WaitingBench x={5.2} />
       <DataMotes />
 
       <QueueLanes />
@@ -1000,6 +1035,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
           recalling={recalling && awayIndex === i}
           onSelect={(id) => {
             setFocus(i)
+            beginFocusSnap(i)
             requestTeller(id, i)
           }}
         />
@@ -1015,7 +1051,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
             letterSpacing: '0.06em',
           }}
         >
-          A/D · ←→ switch · W/S · ↑↓ zoom · Enter open · drag to look · cash {money(desk?.cash)}
+          A/D · ←→ snap · W/S · ↑↓ zoom free · Enter open · drag to look · cash {money(desk?.cash)}
         </div>
       </Html>
 
