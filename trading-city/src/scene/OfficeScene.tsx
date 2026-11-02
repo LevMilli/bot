@@ -815,10 +815,10 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
         dampingFactor={0.08}
         enablePan
         screenSpacePanning
-        minDistance={1.15}
-        maxDistance={11}
-        minPolarAngle={0.28}
-        maxPolarAngle={1.55}
+        minDistance={1.05}
+        maxDistance={14}
+        minPolarAngle={0.12}
+        maxPolarAngle={1.58}
         // Full yaw so the whole room is readable; home still opens OTS at the desk.
         minAzimuthAngle={-Infinity}
         maxAzimuthAngle={Infinity}
