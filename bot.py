@@ -52465,11 +52465,18 @@ class PicksBot(discord.Client):
         """Run the paper desk checks on a timer. Paper only. No live orders."""
         await self.wait_until_ready()
         log.info("Paper timer on. Same checks as the PIMP-TRADING desk, paper only.")
-        await asyncio.sleep(45)
+        loop = asyncio.get_running_loop()
+        # Mark alive immediately so SIGNAL-CITY does not flash "No timer loop yet"
+        # during the short post-redeploy warmup before the first scheduled pass.
+        try:
+            desk = pimp_mod()
+            await loop.run_in_executor(None, desk.touch_heartbeat)
+        except Exception:
+            log.exception("Paper timer could not write the first heartbeat")
+        await asyncio.sleep(20)
         while not self.is_closed():
             try:
                 desk = pimp_mod()
-                loop = asyncio.get_running_loop()
                 health = await loop.run_in_executor(None, desk.timer_health)
                 if health.get("alert"):
                     await self._paper_audit(health["alert"])
