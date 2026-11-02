@@ -13,22 +13,22 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-/** One purple livery. Bogie spacing keeps both skids on the guideway. */
+/** One purple livery. Bogie spacing keeps both ends on the guideway. */
 const CARS = [
   { arc: 0, role: 'lead' as const, len: 2.05 },
-  { arc: 2.16, role: 'mid' as const, len: 1.92 },
-  { arc: 4.24, role: 'mid' as const, len: 1.92 },
-  { arc: 6.32, role: 'tail' as const, len: 1.88 },
+  { arc: 2.08, role: 'mid' as const, len: 1.92 },
+  { arc: 4.08, role: 'mid' as const, len: 1.92 },
+  { arc: 6.04, role: 'tail' as const, len: 1.88 },
 ]
-/** Gap from the rail head to the skid. Each car bobs on its own. */
-const HOVER = 0.13
+/** Gap from the rail head. Every car uses this same lift. */
+const HOVER = 0.11
 
-const BODY = '#3a1674'
-const BODY_DARK = '#12081c'
-const BODY_MID = '#5b2d9e'
+const SHELL = '#efe7ff'
+const SHELL_DEEP = '#7c3aed'
+const BELLY = '#3b0764'
 const GLOW = '#c084fc'
 const GLOW_HOT = '#f3e8ff'
-const GLASS = '#0c0614'
+const GLASS = '#07040e'
 
 function railPoint(angle: number, radius: number) {
   return {
@@ -55,142 +55,126 @@ function poseOnRail(angle: number, radius: number, bogie: number) {
   }
 }
 
-function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }) {
-  const half = len / 2
-  const panes = role === 'mid' ? [-0.34, -0.08, 0.18, 0.44] : [-0.22, 0.08, 0.36]
+/** Two identical rings per car. Wider than the body so the circle reads from above. */
+function HoverRings({ len }: { len: number }) {
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]}>
-        <planeGeometry args={[len * 0.94, 1.2]} />
-        <meshBasicMaterial color={GLOW} transparent opacity={0.42} depthWrite={false} toneMapped={false} />
-      </mesh>
-
-      {([-1, 1] as const).map((side) => (
-        <group key={side} position={[0, 0.045, side * (RAIL_GAUGE / 2)]}>
-          <mesh>
-            <boxGeometry args={[len * 0.7, 0.04, 0.11]} />
-            <meshStandardMaterial color="#07040e" metalness={0.72} roughness={0.28} />
-          </mesh>
-          <mesh position={[0, -0.012, 0]}>
-            <boxGeometry args={[len * 0.6, 0.016, 0.055]} />
+      {([-0.32, 0.32] as const).map((t) => (
+        <group key={t} position={[t * len, -0.02, 0]}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.3, 0.028, 8, 32]} />
             <meshBasicMaterial color={GLOW} toneMapped={false} />
           </mesh>
-          {([-0.32, 0.32] as const).map((at) => (
-            <mesh key={at} position={[at * len, 0.028, 0]}>
-              <boxGeometry args={[0.18, 0.028, 0.13]} />
-              <meshStandardMaterial color={BODY_MID} emissive={GLOW} emissiveIntensity={0.55} roughness={0.35} />
-            </mesh>
-          ))}
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.16, 0.012, 6, 24]} />
+            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} />
+          </mesh>
         </group>
       ))}
+    </group>
+  )
+}
 
-      <mesh position={[0, 0.12, 0]}>
-        <boxGeometry args={[len, 0.09, 0.72]} />
-        <meshStandardMaterial color={BODY_DARK} metalness={0.78} roughness={0.26} />
-      </mesh>
-      <mesh position={[0, 0.175, 0]}>
-        <boxGeometry args={[len + 0.02, 0.04, 0.9]} />
-        <meshStandardMaterial color={BODY} metalness={0.5} roughness={0.36} emissive={GLOW} emissiveIntensity={0.12} />
-      </mesh>
-      <mesh position={[0, 0.36, 0]}>
-        <boxGeometry args={[len - 0.02, 0.3, 0.64]} />
-        <meshStandardMaterial color={BODY} metalness={0.46} roughness={0.3} emissive="#2a1058" emissiveIntensity={0.28} />
-      </mesh>
-      <mesh position={[0, 0.53, 0]}>
-        <boxGeometry args={[len - 0.1, 0.07, 0.5]} />
-        <meshStandardMaterial color={BODY_MID} metalness={0.4} roughness={0.32} />
-      </mesh>
-      <mesh position={[0, 0.59, 0]}>
-        <boxGeometry args={[len - 0.18, 0.04, 0.34]} />
-        <meshStandardMaterial color={BODY_DARK} metalness={0.55} roughness={0.28} />
-      </mesh>
-      <mesh position={[0, 0.62, 0]}>
-        <boxGeometry args={[len * 0.66, 0.018, 0.055]} />
-        <meshBasicMaterial color={GLOW} toneMapped={false} />
-      </mesh>
+const shellMat = {
+  color: SHELL,
+  metalness: 0.22,
+  roughness: 0.32,
+  emissive: SHELL_DEEP,
+  emissiveIntensity: 0.42,
+} as const
 
+const glassMat = {
+  color: GLASS,
+  metalness: 0.72,
+  roughness: 0.08,
+  emissive: '#1a1030',
+  emissiveIntensity: 0.08,
+} as const
+
+function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }) {
+  const half = len / 2
+  const rearExtra = role === 'tail' ? 0 : 0.18
+  const frontExtra = role === 'lead' ? 0.16 : 0
+  const glassLen = len + rearExtra + frontExtra
+  const glassX = (rearExtra - frontExtra) / 2
+  return (
+    <group>
+      <HoverRings len={len} />
+
+      <mesh position={[0, 0.1, 0]}>
+        <boxGeometry args={[len, 0.045, 0.36]} />
+        <meshStandardMaterial color={BELLY} metalness={0.3} roughness={0.4} emissive="#4c1d95" emissiveIntensity={0.2} />
+      </mesh>
       <mesh position={[0, 0.22, 0]}>
-        <boxGeometry args={[len + 0.01, 0.028, 0.8]} />
-        <meshBasicMaterial color={GLOW} toneMapped={false} />
+        <boxGeometry args={[len, 0.18, 0.4]} />
+        <meshStandardMaterial {...shellMat} />
+      </mesh>
+      <mesh position={[0, 0.33, 0]}>
+        <boxGeometry args={[len * 0.98, 0.05, 0.34]} />
+        <meshStandardMaterial color="#f5f3ff" metalness={0.2} roughness={0.28} emissive={SHELL_DEEP} emissiveIntensity={0.28} />
+      </mesh>
+      {/* Dark glass channel down the roof. */}
+      <mesh position={[glassX, 0.362, 0]}>
+        <boxGeometry args={[glassLen, 0.014, 0.12]} />
+        <meshStandardMaterial {...glassMat} />
       </mesh>
 
       {([-1, 1] as const).map((side) => (
         <group key={side}>
-          <mesh position={[role === 'lead' ? 0.1 : 0, 0.4, side * 0.33]}>
-            <boxGeometry args={[role === 'mid' ? len - 0.32 : len - 0.52, 0.11, 0.02]} />
-            <meshStandardMaterial color={GLASS} metalness={0.82} roughness={0.08} emissive="#b9a0e8" emissiveIntensity={0.4} />
+          <mesh position={[glassX, 0.23, side * 0.208]}>
+            <boxGeometry args={[glassLen, 0.11, 0.016]} />
+            <meshStandardMaterial {...glassMat} />
           </mesh>
-          {panes.map((at) => (
-            <mesh key={at} position={[at * len * 0.7, 0.4, side * 0.342]}>
-              <boxGeometry args={[0.018, 0.12, 0.01]} />
-              <meshStandardMaterial color={BODY_DARK} />
-            </mesh>
-          ))}
-          {([-0.24, 0.24] as const).map((at) => (
-            <mesh key={at} position={[at * len, 0.32, side * 0.345]}>
-              <boxGeometry args={[0.016, 0.2, 0.008]} />
-              <meshStandardMaterial color="#1a0c28" />
-            </mesh>
-          ))}
+          <mesh position={[glassX, 0.155, side * 0.214]}>
+            <boxGeometry args={[glassLen, 0.012, 0.008]} />
+            <meshBasicMaterial color={GLOW} toneMapped={false} />
+          </mesh>
         </group>
       ))}
 
-      {role === 'mid' && (
-        <mesh position={[0, 0.66, 0]}>
-          <boxGeometry args={[0.42, 0.055, 0.22]} />
-          <meshStandardMaterial color={BODY_MID} emissive={GLOW} emissiveIntensity={0.35} roughness={0.4} />
-        </mesh>
-      )}
-
       {role === 'lead' && (
         <group>
-          <mesh position={[-half - 0.5, 0.34, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <coneGeometry args={[0.22, 1.18, 14]} />
-            <meshStandardMaterial color={BODY} metalness={0.42} roughness={0.3} emissive="#2a1058" emissiveIntensity={0.22} />
+          <mesh position={[-half - 0.9, 0.2, 0]} rotation={[0, 0, Math.PI / 2]} scale={[0.5, 1, 1.05]}>
+            <coneGeometry args={[0.22, 2.15, 16]} />
+            <meshStandardMaterial {...shellMat} />
           </mesh>
-          <mesh position={[-half - 0.22, 0.44, 0]} rotation={[0, 0, 0.42]}>
-            <boxGeometry args={[0.34, 0.07, 0.32]} />
-            <meshStandardMaterial color={GLASS} metalness={0.75} roughness={0.1} emissive="#d8c4ff" emissiveIntensity={0.55} />
+          <mesh position={[-half - 0.62, 0.11, 0]} rotation={[0, 0, Math.PI / 2]} scale={[0.32, 1, 0.9]}>
+            <coneGeometry args={[0.18, 1.45, 12]} />
+            <meshStandardMaterial color={SHELL_DEEP} metalness={0.2} roughness={0.34} emissive="#5b21b6" emissiveIntensity={0.35} />
           </mesh>
-          <mesh position={[-half - 1.02, 0.3, 0]}>
-            <boxGeometry args={[0.06, 0.05, 0.2]} />
+          <mesh position={[-half - 0.42, 0.26, 0]} rotation={[0, 0, 0.5]}>
+            <boxGeometry args={[0.85, 0.04, 0.28]} />
+            <meshStandardMaterial {...glassMat} />
+          </mesh>
+          <mesh position={[-half - 0.12, 0.33, 0]} rotation={[0, 0, 0.32]}>
+            <boxGeometry args={[0.42, 0.012, 0.1]} />
+            <meshStandardMaterial {...glassMat} />
+          </mesh>
+          <mesh position={[-half - 1.92, 0.2, 0]}>
+            <boxGeometry args={[0.04, 0.03, 0.06]} />
             <meshBasicMaterial color={GLOW_HOT} toneMapped={false} />
           </mesh>
-          {([-1, 1] as const).map((side) => (
-            <mesh key={side} position={[-half - 0.72, 0.3, side * 0.16]}>
-              <boxGeometry args={[0.05, 0.04, 0.05]} />
-              <meshBasicMaterial color={GLOW} toneMapped={false} />
-            </mesh>
-          ))}
         </group>
       )}
 
       {role === 'tail' && (
-        <group>
-          <mesh position={[half + 0.36, 0.33, 0]} rotation={[0, 0, -Math.PI / 2]}>
-            <coneGeometry args={[0.2, 0.82, 12]} />
-            <meshStandardMaterial color={BODY} metalness={0.42} roughness={0.3} emissive="#2a1058" emissiveIntensity={0.16} />
-          </mesh>
-          {([-1, 1] as const).map((side) => (
-            <mesh key={side} position={[half + 0.7, 0.36, side * 0.12]}>
-              <boxGeometry args={[0.045, 0.06, 0.07]} />
-              <meshBasicMaterial color={GLOW} toneMapped={false} />
-            </mesh>
-          ))}
-        </group>
+        <mesh position={[half + 0.16, 0.2, 0]} rotation={[0, 0, -Math.PI / 2]} scale={[0.55, 1, 1.05]}>
+          <coneGeometry args={[0.16, 0.46, 12]} />
+          <meshStandardMaterial {...shellMat} />
+        </mesh>
       )}
 
       {role !== 'tail' && (
-        <mesh position={[half + 0.08, 0.34, 0]}>
-          <boxGeometry args={[0.16, 0.2, 0.34]} />
-          <meshStandardMaterial color="#1a0c30" roughness={0.62} metalness={0.2} />
+        <mesh position={[half + 0.09, 0.22, 0]}>
+          <boxGeometry args={[0.22, 0.14, 0.36]} />
+          <meshStandardMaterial {...shellMat} />
         </mesh>
       )}
     </group>
   )
 }
 
-/** Purple maglev. Bogies locked to the loop, body hovering just above the rails. */
+/** Sleek purple maglev. Bogies stay on the loop. The consist lifts as one piece. */
 export function PlazaTrain({
   radius = RAIL_R,
   y = RAIL_Y,
@@ -219,11 +203,9 @@ export function PlazaTrain({
       g.rotation.y = pose.rotY
       const bob = bobRefs.current[i]
       if (!bob) continue
-      const lift = reduced
-        ? HOVER
-        : HOVER + Math.sin(t * 1.65 + i * 1.15) * 0.016 + Math.sin(t * 0.48) * 0.006
+      const lift = reduced ? HOVER : HOVER + Math.sin(t * 1.35) * 0.011
       bob.position.y = lift
-      bob.rotation.z = car.role === 'lead' ? -0.03 : 0
+      bob.rotation.z = 0
     }
   })
 
