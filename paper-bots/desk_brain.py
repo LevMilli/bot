@@ -108,6 +108,72 @@ def rank_candidates(rows: Iterable[dict], *, edge_key: str = "edge",
     return scored
 
 
+def rank_desk_queue(rows: Iterable[dict]) -> list[dict]:
+    """Cross-tower rank: requires bot/ticker/side/edge/confidence; optional depth/stake_est."""
+    ranked = rank_candidates(rows)
+    out = []
+    for i, row in enumerate(ranked):
+        item = dict(row)
+        item["_queue_rank"] = i + 1
+        out.append(item)
+    return out
+
+
+def allocate_risk(ranked: Iterable[dict], remaining_risk: float) -> list[dict]:
+    """Greedy accept while stake_est fits remaining open-risk budget."""
+    try:
+        left = float(remaining_risk)
+    except (TypeError, ValueError):
+        left = 0.0
+    if left < 0:
+        left = 0.0
+    out = []
+    for row in ranked or []:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        try:
+            stake = float(item.get("stake_est") if item.get("stake_est") is not None else item.get("stake") or 0)
+        except (TypeError, ValueError):
+            stake = 0.0
+        if stake <= 0:
+            item["queue_status"] = "deferred"
+            item["queue_note"] = "missing stake_est"
+            out.append(item)
+            continue
+        if stake <= left + 1e-9:
+            item["queue_status"] = "accepted"
+            item["queue_note"] = f"fits risk ({stake:.2f} of {left:.2f})"
+            left = round(left - stake, 2)
+        else:
+            item["queue_status"] = "deferred"
+            item["queue_note"] = f"open-risk full (need {stake:.2f}, left {left:.2f})"
+        out.append(item)
+    return out
+
+
+def remember_queue(root: str | None, ranked: list[dict], *, note: str = "") -> None:
+    """Persist latest global queue snapshot into the brain journal."""
+    state = load_journal(root)
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    slim = []
+    for row in ranked[:40]:
+        slim.append({
+            "bot": row.get("bot"),
+            "ticker": row.get("ticker"),
+            "side": row.get("side"),
+            "edge": row.get("edge"),
+            "confidence": row.get("confidence"),
+            "score": row.get("_brain_score"),
+            "rank": row.get("_queue_rank"),
+            "status": row.get("queue_status"),
+            "stake_est": row.get("stake_est"),
+        })
+    state["global_queue"] = {"at": now, "note": (note or "")[:160], "rows": slim}
+    state["last_at"] = now
+    save_journal(state, root)
+
+
 def cheap_gate_order(checks: list[tuple[str, bool, str]]) -> list[str]:
     """
     Run cheap boolean gates in order; return list of failure reasons.
@@ -192,6 +258,27 @@ def brain_summary(root: str | None = None) -> dict:
         ((k, int(v)) for k, v in gate_counts.items()),
         key=lambda kv: -kv[1],
     )[:12]
+    # Soft global queue: recent observe/buy decisions re-ranked across bots.
+    cand = []
+    for row in decisions[-120:]:
+        if not isinstance(row, dict):
+            continue
+        if row.get("action") not in ("observe", "buy", "candidate"):
+            continue
+        if row.get("edge") is None and row.get("confidence") is None:
+            continue
+        cand.append({
+            "bot": row.get("bot"),
+            "ticker": row.get("ticker"),
+            "side": row.get("side"),
+            "edge": row.get("edge"),
+            "confidence": row.get("confidence"),
+            "depth": row.get("depth"),
+            "stake_est": row.get("stake_est"),
+            "at": row.get("at"),
+        })
+    queued = allocate_risk(rank_desk_queue(cand), remaining_risk=100.0)
+    stored = state.get("global_queue") if isinstance(state.get("global_queue"), dict) else {}
     return {
         "paper_only": True,
         "version": state.get("version", 1),
@@ -200,6 +287,17 @@ def brain_summary(root: str | None = None) -> dict:
         "by_bot": state.get("by_bot") or {},
         "top_skip_gates": [{"gate": g, "n": n} for g, n in top_gates],
         "recent": decisions[-MAX_SUMMARY:],
+        "global_queue": stored.get("rows") or [
+            {
+                "bot": r.get("bot"),
+                "ticker": r.get("ticker"),
+                "side": r.get("side"),
+                "score": r.get("_brain_score"),
+                "rank": r.get("_queue_rank"),
+                "status": r.get("queue_status"),
+            }
+            for r in queued[:20]
+        ],
         "loop": ["observe", "score", "rank", "gate", "size", "fill", "learn"],
     }
 
@@ -232,6 +330,14 @@ def self_check() -> None:
         ("band", True, "ask bad"),
     ])
     assert reasons == ["too late"]
+    q = rank_desk_queue([
+        {"bot": "btc15m", "ticker": "t1", "edge": 0.08, "confidence": 0.9, "stake_est": 40},
+        {"bot": "sports-gap", "ticker": "t2", "edge": 0.12, "confidence": 0.85, "stake_est": 30},
+    ])
+    assert q[0]["_queue_rank"] == 1
+    alloc = allocate_risk(q, 50)
+    accepted = [r for r in alloc if r.get("queue_status") == "accepted"]
+    assert len(accepted) >= 1
 
 
 if __name__ == "__main__":

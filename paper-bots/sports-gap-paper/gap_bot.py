@@ -442,15 +442,9 @@ def run():
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import kalshi_tape
-        # Sports series only — never expand KXINXU/NCAAF hundreds of opens here
+        # Sports family budget — never expand KXINXU/NCAAF hundreds of opens here
         # (that blew the 75s desk timeout → "Stopped after 75s.").
-        sports_series = tuple(row[1] for row in SPORTS.values())
-        tape = kalshi_tape.sync_tape(
-            DESK_ROOT,
-            series=sports_series,
-            max_markets_per_series=25,
-            per_ticker_limit=50,
-        )
+        tape = kalshi_tape.sync_tape_family(DESK_ROOT, "sports")
         print(
             f"Kalshi tape: +{tape.get('last_added') or 0} new prints "
             f"(kept {len(tape.get('trades') or [])})"

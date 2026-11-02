@@ -11,14 +11,25 @@ import math
 from typing import Any
 
 
-VENUE_KEYS = ("kalshi_sports", "kalshi_btc15m", "kalshi_inx", "solana_dex")
+VENUE_KEYS = (
+    "kalshi_sports",
+    "kalshi_btc15m",
+    "kalshi_commodity15m",
+    "kalshi_inx",
+    "solana_dex",
+)
 
 DEFAULT_VENUE_MIN_EDGE = {
     "kalshi_sports": 0.06,
     "kalshi_btc15m": 0.05,
+    "kalshi_commodity15m": 0.05,
     "kalshi_inx": 0.02,
     "solana_dex": 0.02,
 }
+
+# Display / board tax: assume +1¢ adverse vs stored ask when grading ROI honesty.
+FILL_ADVERSE_TAX = 0.01
+GATE_A_MIN_N = 20
 
 DEFAULT_CORRELATION_PAIRS = (
     ("risk_on_btc", "risk_on_equity"),
@@ -28,6 +39,7 @@ DEFAULT_CORRELATION_PAIRS = (
 BOT_VENUE = {
     "sports-gap": "kalshi_sports",
     "btc15m": "kalshi_btc15m",
+    "commodity-15m": "kalshi_commodity15m",
     "kalshi-sp": "kalshi_inx",
     "kalshi-sized": "kalshi_inx",
     "memecoin": "solana_dex",
@@ -52,6 +64,12 @@ def risk_factor_for(bot_id: str, side: str | None) -> str:
             return "risk_on_btc"
         if s == "no":
             return "risk_off_btc"
+        return ""
+    if bot_id == "commodity-15m":
+        if s == "yes":
+            return "risk_on_commodity"
+        if s == "no":
+            return "risk_off_commodity"
         return ""
     if bot_id in ("kalshi-sp", "kalshi-sized"):
         if s in ("yes", "y"):
@@ -342,12 +360,14 @@ def _parse_when(text: str) -> dt.datetime | None:
         return None
 
 
-def bot_expectancy(history: list, window_days: int = 20, now: dt.datetime | None = None) -> dict:
-    """EV per closed trade after fees from signed pnl rows."""
+def _history_pnls(history: list, window_days: int = 20, now: dt.datetime | None = None,
+                  *, fill_tax: float = 0.0) -> list[float]:
+    """Signed pnls in window. Optional fill_tax haircuts wins/losses by tax × contracts proxy."""
     now = now or dt.datetime.now(dt.timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=dt.timezone.utc)
     cutoff = now - dt.timedelta(days=max(1, int(window_days)))
+    tax = float(fill_tax or 0.0)
     pnls: list[float] = []
     for row in history or []:
         if not isinstance(row, dict):
@@ -366,7 +386,34 @@ def bot_expectancy(history: list, window_days: int = 20, now: dt.datetime | None
                 when = when.replace(tzinfo=dt.timezone.utc)
             if when < cutoff:
                 continue
-        pnls.append(float(pnl))
+        adj = float(pnl)
+        if tax > 0:
+            # Adverse +tax on entry: roughly contracts × tax out of PnL.
+            contracts = _num(row.get("contracts"))
+            if contracts is None:
+                cost = _num(row.get("cost")) or _num(row.get("cost_usd"))
+                ask = _num(row.get("ask")) or _num(row.get("entry_price"))
+                if cost is not None and ask is not None and ask > 1e-9:
+                    contracts = cost / ask
+            if contracts is None:
+                contracts = 1.0
+            adj = adj - float(contracts) * tax
+        pnls.append(adj)
+    return pnls
+
+
+def bot_expectancy(
+    history: list,
+    window_days: int = 20,
+    now: dt.datetime | None = None,
+    *,
+    fill_tax: float = 0.0,
+) -> dict:
+    """EV per closed trade after fees from signed pnl rows.
+
+    When fill_tax > 0, boards show a realism-taxed expectancy (display honesty).
+    """
+    pnls = _history_pnls(history, window_days=window_days, now=now, fill_tax=fill_tax)
     n = len(pnls)
     if n == 0:
         return {
@@ -376,6 +423,7 @@ def bot_expectancy(history: list, window_days: int = 20, now: dt.datetime | None
             "avg_loss": None,
             "expectancy": None,
             "after_fees": True,
+            "fill_tax": float(fill_tax or 0.0),
             "window": f"{int(window_days)}d",
         }
     wins = [p for p in pnls if p > 0]
@@ -391,7 +439,39 @@ def bot_expectancy(history: list, window_days: int = 20, now: dt.datetime | None
         "avg_loss": round(avg_loss, 4) if losses else None,
         "expectancy": round(ev, 4),
         "after_fees": True,
+        "fill_tax": float(fill_tax or 0.0),
         "window": f"{int(window_days)}d",
+    }
+
+
+def gate_a(
+    history: list,
+    *,
+    min_n: int = GATE_A_MIN_N,
+    window_days: int = 20,
+    fill_tax: float = FILL_ADVERSE_TAX,
+) -> dict:
+    """Gate A: paper net after fees (and realism tax) ≥ 0 with enough settles — live-ready flag only."""
+    exp = bot_expectancy(history or [], window_days=window_days, fill_tax=fill_tax)
+    n = int(exp.get("n") or 0)
+    ev = _num(exp.get("expectancy"))
+    ready = bool(n >= int(min_n) and ev is not None and ev + 1e-12 >= 0.0)
+    return {
+        "gate": "A",
+        "ready": ready,
+        "min_n": int(min_n),
+        "n": n,
+        "expectancy_taxed": ev,
+        "fill_tax": float(fill_tax or 0.0),
+        "after_fees": True,
+        "paper_only": True,
+        "reason": (
+            "paper net ≥ 0 after fees+tax"
+            if ready
+            else (
+                f"need n≥{min_n} and taxed EV≥0 (have n={n}, EV={ev})"
+            )
+        ),
     }
 
 

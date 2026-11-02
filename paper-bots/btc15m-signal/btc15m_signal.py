@@ -280,13 +280,14 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         vk = dict(vol_kwargs or {})
         vk.setdefault("ask", ask)
         vk.setdefault("ticker", ticker)
-        stake = desk.stake_dollars_for(
+        stake, adapt_plan = desk.stake_dollars_for(
             "btc15m", prob, edge=edge_val, cfg=cfg, open_risk_used=open_risk, ask=ask,
-            root=DESK_ROOT, vol_kwargs=vk,
+            root=DESK_ROOT, vol_kwargs=vk, return_plan=True,
         )
         contracts = desk.contracts_for_stake(per, stake)
     except Exception:
         stake = 20.0
+        adapt_plan = {}
         contracts = int(stake // per) if per > 0 else 0
     if contracts < 1:
         return none_msg
@@ -303,6 +304,8 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         risk_factor = desk_profit.risk_factor_for("btc15m", side)
     except Exception:
         risk_factor = ""
+    vol = (adapt_plan or {}).get("vol") or {}
+    perf = (adapt_plan or {}).get("perf") or {}
     state.setdefault("open", []).append({
         "ticker": ticker,
         "team": ticker,
@@ -327,6 +330,19 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "price_at": opened,
         "paper_only": True,
         "shadow": IS_SHADOW,
+        # Prove-it drawer fields (city reads snapshot only).
+        "cushion": vk.get("cushion"),
+        "sigma": vk.get("sigma"),
+        "adapt_mult": (adapt_plan or {}).get("mult"),
+        "adapt_notes": list((adapt_plan or {}).get("notes") or [])[:6],
+        "play_safe": bool((adapt_plan or {}).get("play_safe")),
+        "play_big": bool((adapt_plan or {}).get("play_big")),
+        "vol_regime": vol.get("regime"),
+        "vol_score": vol.get("score"),
+        "history_n": perf.get("n"),
+        "history_hit": perf.get("hit_rate"),
+        "history_ci_low": perf.get("hit_ci_low"),
+        "fill_tax": 0.01,
     })
     save_account(state)
     return "Checked all open BTC 15-minute markets. Paper buy."
@@ -798,12 +814,8 @@ def main():
                 sys.path.insert(0, DESK_ROOT)
             import kalshi_tape
             tickers = [m["ticker"] for m in markets] + [m["ticker"] for m in eth_markets]
-            tape = kalshi_tape.sync_tape(
-                DESK_ROOT,
-                series=("KXBTC15M", "KXETH15M", "KXBTCD"),
-                tickers=tickers,
-                max_markets_per_series=20,
-                per_ticker_limit=50,
+            tape = kalshi_tape.sync_tape_family(
+                DESK_ROOT, "crypto15m", tickers=tickers,
             )
             print(
                 f"Kalshi tape: +{tape.get('last_added') or 0} new prints "
@@ -840,6 +852,12 @@ def main():
             if DESK_ROOT not in sys.path:
                 sys.path.insert(0, DESK_ROOT)
             import kalshi_history
+            try:
+                settled = kalshi_history.settle_open_windows(DESK_ROOT, limit=30)
+                if settled.get("settled"):
+                    print(f"History settle harness: labeled {settled['settled']} window(s)")
+            except Exception as exc:
+                print(f"  history settle harness skipped: {type(exc).__name__}")
             n15 = kalshi_history.snapshot_open_15m_series(DESK_ROOT)
             if n15:
                 print(f"15m series history: recorded {n15} open markets (crypto/metals/energy)")

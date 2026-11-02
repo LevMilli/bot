@@ -87,9 +87,12 @@ DEFAULTS = {
         # Fee-aware floors — keep positive EV after fees without starving fill rate.
         "kalshi_sports": 0.06,
         "kalshi_btc15m": 0.05,
+        "kalshi_commodity15m": 0.05,
         "kalshi_inx": 0.02,
         "solana_dex": 0.02,
     },
+    "fill_adverse_tax": 0.01,
+    "gate_a_min_n": 20,
     "sizing": "kelly_lite",
     "kelly_fraction": 0.25,
     "correlation_pairs": [
@@ -117,6 +120,7 @@ ACCOUNT_FILES = {
     "sports-gap": "state.json",
     "kalshi-sp": "paper_state.json",
     "btc15m": "paper_account.json",
+    "commodity-15m": "paper_account.json",
     "memecoin": "positions.json",
     "kalshi-sized": "paper_state.json",
 }
@@ -128,6 +132,7 @@ SETTLEMENT_FILES = (
     "sports-gap-paper/state.json",
     "sports-gap-paper/paper_trades.md",
     "btc15m-signal/paper_account.json",
+    "commodity-15m-paper/paper_account.json",
     "kalshi-sp500-paper/paper_state.json",
     "kalshi-sp500-paper/Trade_Ledger.md",
     "kalshi-sp500-paper/Learning.md",
@@ -167,6 +172,10 @@ ACTIONS = {
         # Timeout 150s: BTC+ETH 15m + KXBTCD history + tape + optional ≤5m parlay.
         "run": {"argv": ("btc15m_signal.py",), "entry": True, "timeout": 150, "label": "Run one check"},
     },
+    "commodity-15m": {
+        # Metals/energy 15m paper tower — family tape + settle harness + adapt sizing.
+        "run": {"argv": ("bot.py",), "entry": True, "timeout": 150, "label": "Run one check"},
+    },
     "memecoin": {
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 120, "label": "Run one check"},
     },
@@ -186,6 +195,7 @@ AUTO = (
     {"id": "sports-gap", "action": "run", "every_sec": 300},
     # BTC is the busiest Kalshi series — poll every 90s; guidelines unchanged, bid every fit.
     {"id": "btc15m", "action": "run", "every_sec": 90},
+    {"id": "commodity-15m", "action": "run", "every_sec": 120},
     {"id": "memecoin", "action": "run", "every_sec": 600},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
@@ -225,6 +235,17 @@ BOTS = (
         "folder": "btc15m-signal",
         "script": "btc15m_signal.py",
         "blurb": "BTC 15-minute paper account. A timer check can paper-buy. It places nothing.",
+        "state": "paper_account.json",
+        "kind": "btc",
+        "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+    },
+    {
+        "id": "commodity-15m",
+        "name": "Commodity 15m",
+        "folder": "commodity-15m-paper",
+        "script": "bot.py",
+        "blurb": "Palladium/NatGas/Copper/Brent/WTI/Silver/Gold/Platinum 15m paper tower. Same adapt gates as BTC.",
         "state": "paper_account.json",
         "kind": "btc",
         "log": "",
@@ -326,6 +347,26 @@ BOT_PLANS = {
             "News calendar fail-closed (unavailable = skip BUY)",
             "Correlation veto + starve; cash / max 12 opens / learning",
             "Pause file",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "kelly-lite",
+    },
+    "commodity-15m": {
+        "buy": [
+            "Open KX*15M metals/energy windows (Pd/NatGas/Cu/Brent/WTI/Ag/Au/Pt)",
+            "Spot vs floor_strike; side YES if above else NO",
+            "p ≥ ask + fee + venue kalshi_commodity15m; model p ≥ 80%",
+            "Cushion/σ gate; ask 75–90¢; ≥10m for early single (else skip)",
+            "Kelly-lite + adapt: safe on high/false-conf vol; Wilson CI ≥70% for play-big",
+        ],
+        "sell": [
+            "Settle when Kalshi resolves yes/no (history settle harness labels windows)",
+        ],
+        "failsafes": [
+            "Desk entry_gate (daily loss / max open / open risk)",
+            "No spot / no σ → skip",
+            "Commodity tape family budget; correlation + starve; pause file",
         ],
         "exit_quality": "partial",
         "entry_gated": True,
@@ -1025,6 +1066,8 @@ def parse_settings(raw: dict):
         starve_ev = float(raw.get("starve_expectancy", DEFAULTS["starve_expectancy"]))
         starve_factor = float(raw.get("starve_factor", DEFAULTS["starve_factor"]))
         exp_days = int(float(raw.get("expectancy_window_days", DEFAULTS["expectancy_window_days"])))
+        fill_tax = float(raw.get("fill_adverse_tax", DEFAULTS.get("fill_adverse_tax", 0.01)))
+        gate_a_n = int(float(raw.get("gate_a_min_n", DEFAULTS.get("gate_a_min_n", 20))))
     except (TypeError, ValueError):
         return None, "Profit-six limits have to be numbers."
     if not (0.05 <= kelly <= 1.0):
@@ -1039,6 +1082,10 @@ def parse_settings(raw: dict):
         return None, "starve_factor stays between 0 and 1."
     if not (5 <= exp_days <= 90):
         return None, "expectancy_window_days stays between 5 and 90."
+    if not (0.0 <= fill_tax <= 0.05):
+        return None, "fill_adverse_tax stays between 0 and 0.05."
+    if not (5 <= gate_a_n <= 200):
+        return None, "gate_a_min_n stays between 5 and 200."
     model_flip_exits = bool(raw.get("model_flip_exits", DEFAULTS["model_flip_exits"]))
     return {
         "paper_only": True,
@@ -1065,6 +1112,8 @@ def parse_settings(raw: dict):
         "starve_expectancy": round(starve_ev, 4),
         "starve_factor": round(starve_factor, 4),
         "expectancy_window_days": exp_days,
+        "fill_adverse_tax": round(fill_tax, 4),
+        "gate_a_min_n": gate_a_n,
         "shadow": shadow,
     }, None
 
@@ -1283,6 +1332,8 @@ def _fill_row(pos: dict, title: str, detail: str, cost: float, when: str) -> dic
         "ask": None if _num(ask) is None else round(_num(ask), 4),
         "fee": None if _num(fee) is None else round(_num(fee), 4),
         "fill": paper_fill(bid, ask),
+        "fill_untaxed": None if _num(ask) is None else round(_num(ask), 4),
+        "fill_tax": desk_profit.FILL_ADVERSE_TAX,
         "source": _clean(pos.get("price_source") or "", 180),
         "priced_at": priced_at,
         "priced_central": _central_from_text(priced_at) if priced_at else "",
@@ -1306,6 +1357,24 @@ def _fill_row(pos: dict, title: str, detail: str, cost: float, when: str) -> dic
         "closed_at": "",
         "confidence": _confidence(_num(prob)),
         "edge": edge_after_fee(prob, ask),
+        # Prove-it drawer (pass through when bots stored adapt diagnostics).
+        "prove": {
+            "cushion": pos.get("cushion"),
+            "sigma": pos.get("sigma"),
+            "adapt_mult": pos.get("adapt_mult"),
+            "adapt_notes": list(pos.get("adapt_notes") or [])[:8],
+            "play_safe": pos.get("play_safe"),
+            "play_big": pos.get("play_big"),
+            "vol_regime": pos.get("vol_regime"),
+            "vol_score": pos.get("vol_score"),
+            "history_n": pos.get("history_n"),
+            "history_hit": pos.get("history_hit"),
+            "history_ci_low": pos.get("history_ci_low"),
+            "fee": None if _num(fee) is None else round(_num(fee), 4),
+            "ask": None if _num(ask) is None else round(_num(ask), 4),
+            "fill_tax": desk_profit.FILL_ADVERSE_TAX,
+            "edge": edge_after_fee(prob, ask),
+        },
     }
 
 
@@ -1719,11 +1788,13 @@ def stake_dollars_for(
     ask=None,
     root: str | None = None,
     vol_kwargs: dict | None = None,
-) -> float:
+    return_plan: bool = False,
+):
     """Unified stake: Kelly-lite → expectancy starve → vol/learn adapt.
 
     All bots share adapt: play safe on high volatility; size up only when the
-    tower's own settled record is consistently ≥80% accurate (enough n).
+    tower's own settled record is consistently ≥80% accurate with Wilson CI.
+    Set return_plan=True to also get the adapt plan for prove-it drawers.
     """
     cfg = cfg or (load_settings(root) if root is not None else dict(DEFAULTS))
     starve_mult = 1.0
@@ -1748,6 +1819,7 @@ def stake_dollars_for(
     base = kelly_lite_dollars(
         prob, edge, cfg=cfg, open_risk_used=open_risk_used, ask=ask, starve_mult=starve_mult
     )
+    empty_plan = {"mult": 1.0, "play_safe": False, "play_big": False, "notes": [], "vol": {}, "perf": {}}
     try:
         import desk_adapt
         adapted, plan = desk_adapt.adapt_stake(
@@ -1761,8 +1833,12 @@ def stake_dollars_for(
                 desk_adapt.remember_vol(root, bot_id, str((vol_kwargs or {}).get("ticker") or bot_id), plan.get("vol") or {}, plan)
             except Exception:
                 pass
+        if return_plan:
+            return float(adapted), plan
         return float(adapted)
     except Exception:
+        if return_plan:
+            return float(base), empty_plan
         return float(base)
 
 
@@ -1891,15 +1967,26 @@ def _enrich_bot_profit_fields(bot: dict, cfg: dict, capital: dict) -> dict:
     window = int(cfg.get("expectancy_window_days") or 20)
     exp = desk_profit.bot_expectancy(bot.get("history") or [], window_days=window)
     starve = desk_profit.starve_state(exp, cfg)
+    tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
+    exp_taxed = desk_profit.bot_expectancy(bot.get("history") or [], window_days=window, fill_tax=tax)
+    gate = desk_profit.gate_a(
+        bot.get("history") or [],
+        min_n=int(cfg.get("gate_a_min_n") or desk_profit.GATE_A_MIN_N),
+        window_days=window,
+        fill_tax=tax,
+    )
     bot["expectancy"] = exp.get("expectancy")
+    bot["expectancy_taxed"] = exp_taxed.get("expectancy")
     bot["expectancy_n"] = exp.get("n") or 0
     bot["expectancy_hit_rate"] = exp.get("hit_rate")
     bot["expectancy_window"] = exp.get("window")
+    bot["fill_tax"] = tax
     bot["avg_win"] = exp.get("avg_win")
     bot["avg_loss"] = exp.get("avg_loss")
     bot["starved"] = bool(starve.get("starved"))
     bot["starve_reason"] = starve.get("starve_reason") or ""
     bot["starve_factor"] = starve.get("starve_factor")
+    bot["gate_a"] = gate
     bot["capital_weight"] = float((capital.get("weights") or {}).get(bot.get("id"), 0) or 0)
     bot["venue_min_edge"] = desk_profit.bot_venue_edge(str(bot.get("id") or ""), cfg)
     mode = str(cfg.get("sizing") or "kelly_lite")
@@ -2018,6 +2105,65 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["adapt"] = desk_adapt.adapt_summary(root)
     except Exception as exc:  # noqa: BLE001
         desk_row["adapt"] = {"paper_only": True, "error": type(exc).__name__}
+    # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
+    tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
+    gate_rows = []
+    prove_rows = []
+    for bot in public:
+        ga = bot.get("gate_a") if isinstance(bot.get("gate_a"), dict) else desk_profit.gate_a(
+            bot.get("history") or [],
+            min_n=int(cfg.get("gate_a_min_n") or desk_profit.GATE_A_MIN_N),
+            fill_tax=tax,
+        )
+        gate_rows.append({
+            "bot": bot.get("id"),
+            "ready": bool(ga.get("ready")),
+            "n": ga.get("n"),
+            "expectancy_taxed": ga.get("expectancy_taxed"),
+            "reason": ga.get("reason"),
+        })
+        for pos in list(bot.get("positions") or [])[:8]:
+            prove = pos.get("prove") if isinstance(pos.get("prove"), dict) else {}
+            if not prove and not pos.get("adapt_mult") and not pos.get("ticker"):
+                continue
+            prove_rows.append({
+                "bot": bot.get("id"),
+                "ticker": pos.get("ticker"),
+                "side": pos.get("side"),
+                "ask": pos.get("ask"),
+                "fill": pos.get("fill"),
+                "fill_untaxed": pos.get("fill_untaxed"),
+                "edge": pos.get("edge"),
+                "prove": prove or {
+                    "adapt_mult": pos.get("adapt_mult"),
+                    "adapt_notes": pos.get("adapt_notes"),
+                    "play_safe": pos.get("play_safe"),
+                    "play_big": pos.get("play_big"),
+                    "cushion": pos.get("cushion"),
+                    "sigma": pos.get("sigma"),
+                    "history_n": pos.get("history_n"),
+                    "history_hit": pos.get("history_hit"),
+                    "fill_tax": tax,
+                },
+            })
+    desk_row["gate_a"] = {
+        "paper_only": True,
+        "fill_tax": tax,
+        "min_n": int(cfg.get("gate_a_min_n") or desk_profit.GATE_A_MIN_N),
+        "any_ready": any(r.get("ready") for r in gate_rows),
+        "bots": gate_rows,
+        "note": "Gate A = taxed paper EV ≥ 0 with enough settles. Not a live switch.",
+    }
+    desk_row["prove_it"] = {
+        "paper_only": True,
+        "fill_tax_default": tax,
+        "open": prove_rows[:40],
+    }
+    desk_row["ops"] = {
+        **(desk_row.get("ops") or {}),
+        "fill_tax": tax,
+        "gate_a_ready_bots": [r["bot"] for r in gate_rows if r.get("ready")],
+    }
     return {
         "paper_only": True,
         "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
@@ -2037,6 +2183,9 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             "gap": "Gap is the fair price minus the ask, after the Kalshi fee.",
             "fee": "Fee is the Kalshi taker fee, rounded up to the cent.",
             "fair": "Fair price is the model probability. Unknown means it was not stored.",
+            "fill_tax": "Board fills add a +1¢ adverse tax vs stored ask so ROI stays honest.",
+            "gate_a": "Gate A = taxed paper EV ≥ 0 with enough settles — not a live switch.",
+            "prove_it": "Prove-it shows cushion/σ/fee/adapt mult/history for each open fill.",
         },
         "audit": audit_rows(root)[:12],
         "bots": public,
@@ -2539,12 +2688,16 @@ def kalshi_fee(price: float) -> float:
     return math.ceil(round(0.07 * float(price) * (1 - float(price)) * 100, 6)) / 100
 
 
-def paper_fill(bid, ask):
-    """Paper fills pay the ask. The mid is never used. A missing ask stays unknown."""
+def paper_fill(bid, ask, *, adverse: float | None = None):
+    """Paper fills pay the ask (+ optional adverse tax for board honesty). Mid never used."""
     ask_n = _num(ask)
     if ask_n is None:
         return None
-    return round(ask_n, 4)
+    tax = desk_profit.FILL_ADVERSE_TAX if adverse is None else float(adverse)
+    if tax < 0:
+        tax = 0.0
+    # Snapshot boards show taxed fill; ledger bots still store raw ask separately.
+    return round(min(0.99, ask_n + tax), 4)
 
 
 def edge_after_fee(fair, ask):
@@ -2603,7 +2756,7 @@ def _account_body(bot_id: str) -> dict:
             "created": dt.datetime.now().isoformat(timespec="seconds"),
             "paper_only": True,
         }
-    if bot_id == "btc15m":
+    if bot_id in ("btc15m", "commodity-15m"):
         return {"cash": 100.0, "open": [], "closed": [], "paper_only": True}
     if bot_id == "memecoin":
         return {
