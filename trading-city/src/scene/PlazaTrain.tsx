@@ -7,8 +7,8 @@ const RAIL_Y = 0.2
 const Z_OFF = -1
 /** Distance between inner and outer rail centers (gauge) — wide enough to read from the plaza cam. */
 export const RAIL_GAUGE = 0.85
-const TIE_COUNT = 36
-const SEGMENTS = 64
+const TIE_COUNT = 24
+const SEGMENTS = 48
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined' || !window.matchMedia) return false
