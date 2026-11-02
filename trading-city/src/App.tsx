@@ -110,7 +110,7 @@ export default function App() {
               {guest
                 ? 'Guest read-only · paper desk · no staff actions'
                 : view === 'bank'
-                  ? 'Neon paper trust · square tellers · desk board'
+                  ? 'Neon paper trust · dual banks · aisle to vault'
                   : view === 'office' && fromBank
                     ? 'Teller desk · paper trades · switch windows'
                     : 'Neon paper desk · towers · live snapshot'}
