@@ -237,18 +237,18 @@ function Arm({ side, pose, work = false }: { side: -1 | 1; pose: ArmPose; work?:
   )
 }
 
-/** Thighs toward the desk, shins down beside the chair, clear of the desktop. */
+/** Thighs lie on the cushion; the knee is past the lip and the shin hangs in front. */
 function SeatedLegs() {
   return (
     <>
       {([-1, 1] as const).map((side) => (
-        <group key={side} position={[side * 0.12, 0.16, 0.02]}>
-          <mesh position={[0, -0.05, -0.13]} rotation={[-1.15, 0, side * 0.08]}>
-            <capsuleGeometry args={[0.052, 0.2, 4, 8]} />
+        <group key={side}>
+          <mesh position={[side * 0.32, 0.23, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <capsuleGeometry args={[0.055, 0.21, 4, 8]} />
             <meshStandardMaterial {...shell(0.12)} />
           </mesh>
-          <mesh position={[side * 0.015, -0.24, -0.24]} rotation={[0.18, 0, side * 0.05]}>
-            <capsuleGeometry args={[0.044, 0.16, 4, 8]} />
+          <mesh position={[side * 0.32, -0.06, -0.17]} rotation={[Math.PI, 0, 0]}>
+            <capsuleGeometry args={[0.046, 0.49, 4, 8]} />
             <meshStandardMaterial {...shell(0.1)} />
           </mesh>
         </group>
@@ -276,7 +276,7 @@ export function BotFigure({
   const torso = useRef<Group>(null)
   const head = useRef<Group>(null)
   const bulb = useRef<MeshStandardMaterial>(null)
-  const anchor: [number, number, number] = deskWork ? [0, 0.34, 0.98] : seated ? [0, 0, 0.42] : [0, 0.22, 0]
+  const anchor: [number, number, number] = deskWork ? [0, 0.49, 0.86] : seated ? [0, 0, 0.42] : [0, 0.22, 0]
 
   const accent =
     pose === 'winning' ? '#39ff14' : pose === 'losing' ? '#ff2a6d' : pose === 'trading' ? '#2de2e6' : '#f9c80e'
@@ -342,7 +342,8 @@ export function BotFigure({
   return (
     <group ref={body} position={anchor}>
       <group ref={torso}>
-        <mesh position={[0, 0.16, 0]}>
+        {/* Desk hips sit on the cushion. Standing bots keep the lower hip ball. */}
+        <mesh position={[0, deskWork ? 0.32 : 0.16, deskWork ? 0.06 : 0]}>
           <sphereGeometry args={[0.15, 20, 16]} />
           <meshStandardMaterial {...shell(0.16)} />
         </mesh>

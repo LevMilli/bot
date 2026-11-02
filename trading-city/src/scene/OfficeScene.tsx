@@ -207,9 +207,9 @@ function Credenza() {
 function OfficeChair() {
   const spokes = [0, 1, 2, 3, 4]
   return (
-    <group position={[0, 0, 1.16]}>
-      <mesh position={[0, 0.28, 0]}>
-        <cylinderGeometry args={[0.045, 0.05, 0.36, 12]} />
+    <group position={[0, 0, 0.86]}>
+      <mesh position={[0, 0.31, 0]}>
+        <cylinderGeometry args={[0.045, 0.05, 0.5, 12]} />
         <meshStandardMaterial color="#c5ccd8" metalness={0.85} roughness={0.22} />
       </mesh>
       {spokes.map((i) => {
@@ -227,23 +227,24 @@ function OfficeChair() {
           </group>
         )
       })}
-      <mesh position={[0, 0.48, 0.02]}>
-        <boxGeometry args={[0.62, 0.08, 0.58]} />
+      {/* Cushion under the hips and thighs. The front lip stops at the knees. */}
+      <mesh position={[0, 0.6, 0.1]}>
+        <boxGeometry args={[0.98, 0.08, 0.36]} />
         <meshStandardMaterial color="#12151c" roughness={0.7} />
       </mesh>
-      {/* Lumbar only — the pack and its cross stay visible above it. */}
-      <mesh position={[0, 0.4, 0.2]}>
-        <boxGeometry args={[0.46, 0.16, 0.05]} />
+      {/* Backrest sits behind the pack. */}
+      <mesh position={[0, 1.02, 0.36]}>
+        <boxGeometry args={[0.52, 0.58, 0.06]} />
         <meshStandardMaterial color="#1c2433" roughness={0.6} />
       </mesh>
-      {([-0.36, 0.36] as const).map((x) => (
+      {([-0.58, 0.58] as const).map((x) => (
         <group key={x}>
-          <mesh position={[x, 0.68, 0.02]}>
-            <boxGeometry args={[0.05, 0.28, 0.05]} />
+          <mesh position={[x, 0.78, 0.16]}>
+            <boxGeometry args={[0.04, 0.28, 0.04]} />
             <meshStandardMaterial color="#1c222e" metalness={0.4} roughness={0.4} />
           </mesh>
-          <mesh position={[x, 0.82, 0.04]}>
-            <boxGeometry args={[0.08, 0.035, 0.32]} />
+          <mesh position={[x, 0.92, 0.16]}>
+            <boxGeometry args={[0.06, 0.028, 0.26]} />
             <meshStandardMaterial color="#1c222e" metalness={0.4} roughness={0.4} />
           </mesh>
         </group>
@@ -470,7 +471,7 @@ function DeskKit() {
         <cylinderGeometry args={[0.12, 0.1, 0.32, 12]} />
         <meshStandardMaterial color="#12151c" metalness={0.35} roughness={0.5} />
       </mesh>
-      <mesh position={[0.05, 0.015, 1.15]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0.05, 0.015, 0.9]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[0.85, 24]} />
         <meshStandardMaterial color="#1a1038" roughness={0.9} />
       </mesh>
