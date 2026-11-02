@@ -138,7 +138,9 @@ SETTLEMENT_FILES = (
     "memecoin-paper/trades.csv",
     "memecoin-paper/checks.csv",
     "kalshi_tape.json",
+    "kalshi_crypto_history.json",
     "desk_brain_journal.json",
+    "btc15m-signal/paper_parlays.json",
     "pimp-learning.json",
     "pimp-good.json",
 )
@@ -161,8 +163,8 @@ ACTIONS = {
     },
     "btc15m": {
         # entry:True — ROI system: desk daily loss / max open / open risk gate paper buys.
-        # Timeout 120s: scores every open KXBTC15M window + tape sync in one check.
-        "run": {"argv": ("btc15m_signal.py",), "entry": True, "timeout": 120, "label": "Run one check"},
+        # Timeout 150s: BTC+ETH 15m + KXBTCD history + tape + optional ≤5m parlay.
+        "run": {"argv": ("btc15m_signal.py",), "entry": True, "timeout": 150, "label": "Run one check"},
     },
     "memecoin": {
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 120, "label": "Run one check"},
@@ -302,11 +304,11 @@ BOT_PLANS = {
     },
     "btc15m": {
         "buy": [
-            "Every open KXBTC15M window; parallel books; rank-then-buy by edge×p×depth",
+            "Track KXBTC15M + KXETH15M + KXBTCD ladder history each check",
+            "Confident early (≥10m): single paper buy if gates clear",
+            "Volatile: hold + history; ≤5m fee-aware paper parlay (BTC+ETH legs)",
             "p ≥ ask + fee + venue kalshi_btc15m; model p ≥ 80%; brain journal",
-            "≥10 min left; cushion ≥ $40; z ≥ 0.65 (0.80 Coinbase-only)",
-            "Ask 75–90¢; spread ≤ 3¢; depth ≥ 5",
-            "Last 5×1m candles not toward target; no USD high news ±30m",
+            "BTC cushion ≥ $40 / ETH ≥ $2; z ≥ 0.65; ask 75–90¢; depth ≥ 5",
             "Kelly-lite stake; correlation + learning clear; desk open-risk cap",
         ],
         "sell": [
@@ -1971,6 +1973,18 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             "recent": [],
             "loop": ["observe", "score", "rank", "gate", "size", "fill", "learn"],
         }
+    try:
+        import kalshi_history
+        desk_row["crypto_history"] = kalshi_history.history_summary(root)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["crypto_history"] = {"paper_only": True, "error": type(exc).__name__, "snapshot_count": 0}
+    try:
+        import kalshi_parlay
+        desk_row["crypto_parlays"] = kalshi_parlay.parlay_summary(
+            kalshi_parlay.parlay_path(root)
+        )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["crypto_parlays"] = {"paper_only": True, "error": type(exc).__name__, "open_count": 0}
     return {
         "paper_only": True,
         "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
