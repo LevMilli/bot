@@ -1,6 +1,34 @@
 import type { BotRow, Money, TradeOrHistory } from '../types'
 
-export const BEAM_COLORS = ['#2de2e6', '#ff2a6d', '#39ff14', '#f9c80e', '#b967ff'] as const
+/**
+ * Unique neon beam per tower / teller. Index fallback must stay longer than the
+ * BOTS roster so Sports gap and Sized Kalshi never share cyan again.
+ */
+export const BEAM_COLORS = [
+  '#2de2e6', // cyan
+  '#ff2a6d', // magenta
+  '#39ff14', // lime
+  '#f9c80e', // amber
+  '#b967ff', // violet
+  '#ff8c42', // coral — 6th tower (Sized Kalshi)
+  '#4d9fff', // sky
+  '#ff4d9a', // hot pink
+] as const
+
+/** Stable id → color so reordering bots does not reshuffle building colors. */
+export const BOT_BEAM_COLORS: Record<string, string> = {
+  'sports-gap': '#2de2e6',
+  'kalshi-sp': '#ff2a6d',
+  btc15m: '#39ff14',
+  'commodity-15m': '#f9c80e',
+  memecoin: '#b967ff',
+  'kalshi-sized': '#ff8c42',
+}
+
+export function beamColorFor(botId: string | null | undefined, index = 0): string {
+  if (botId && BOT_BEAM_COLORS[botId]) return BOT_BEAM_COLORS[botId]
+  return BEAM_COLORS[((index % BEAM_COLORS.length) + BEAM_COLORS.length) % BEAM_COLORS.length]
+}
 
 export function money(n: Money, signed = false): string {
   if (n == null || Number.isNaN(Number(n))) return '—'

@@ -6,7 +6,7 @@ import { Banners } from './hud/Banners'
 import { Monitors } from './hud/Monitors'
 import { Ticker } from './hud/Ticker'
 import { TowerRail } from './hud/TowerRail'
-import { BEAM_COLORS } from './data/format'
+import { beamColorFor } from './data/format'
 import { CityScene } from './scene/CityScene'
 import { OfficeScene } from './scene/OfficeScene'
 import { BankScene } from './scene/BankScene'
@@ -164,7 +164,7 @@ export default function App() {
                     role="tab"
                     aria-selected={bot.id === selected.id}
                     className={`teller-chip ${bot.id === selected.id ? 'active' : ''}`}
-                    style={{ borderColor: BEAM_COLORS[i % BEAM_COLORS.length] }}
+                    style={{ borderColor: beamColorFor(bot.id, i) }}
                     onClick={() => openTeller(bot.id)}
                   >
                     {bot.name}

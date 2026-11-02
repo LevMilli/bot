@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Group, InstancedMesh, Mesh } from 'three'
 import type { BotRow } from '../types'
-import { BEAM_COLORS } from '../data/format'
+import { beamColorFor } from '../data/format'
 import { TowerHologram } from '../hud/Holograms'
 
 type Props = {
@@ -90,7 +90,7 @@ function WindowInstances({
 export function Tower({ bot, index, position, selected, onSelect, vista = false }: Props) {
   const beamGroup = useRef<Group>(null)
   const beamCore = useRef<Mesh>(null)
-  const color = BEAM_COLORS[index % BEAM_COLORS.length]
+  const color = beamColorFor(bot.id, index)
   const offline = bot.present === false
   const height = offline ? 5.4 : 7.6 + (index % 3) * 1.35 + (index === 0 ? 1.2 : 0)
   const width = 1.9 + (index % 2) * 0.28
