@@ -105,6 +105,16 @@ DEFAULTS = {
     "starve_expectancy": 0.0,
     "starve_factor": 0.25,
     "expectancy_window_days": 20,
+    # Phase 1: soft per-tower share of max_open_risk (sums to 1.0). Desk cap still hard.
+    "tower_risk_budgets": {
+        "sports-gap": 0.35,
+        "btc15m": 0.30,
+        "commodity-15m": 0.15,
+        "kalshi-sp": 0.08,
+        "kalshi-sized": 0.07,
+        "memecoin": 0.05,
+    },
+    "hillclimb_lever": None,  # one of desk_more.HILLCLIMB_LEVERS, or null
     "shadow": {
         "enabled": True,
         "btc15m": [{
@@ -146,6 +156,12 @@ SETTLEMENT_FILES = (
     "kalshi_crypto_history.json",
     "desk_brain_journal.json",
     "desk_adapt_state.json",
+    "desk_more_state.json",
+    "desk_sports_clv.json",
+    "desk_top25_state.json",
+    "desk_maker_taker_study.json",
+    "desk_phase2_state.json",
+    "desk_adapt_ab_ledger.json",
     "btc15m-signal/paper_parlays.json",
     "pimp-learning.json",
     "pimp-good.json",
@@ -1090,6 +1106,36 @@ def parse_settings(raw: dict):
     if not (5 <= gate_a_n <= 200):
         return None, "gate_a_min_n stays between 5 and 200."
     model_flip_exits = bool(raw.get("model_flip_exits", DEFAULTS["model_flip_exits"]))
+    tower_budgets_raw = raw.get("tower_risk_budgets", DEFAULTS.get("tower_risk_budgets"))
+    tower_budgets: dict = {}
+    if tower_budgets_raw is None:
+        tower_budgets = dict(DEFAULTS.get("tower_risk_budgets") or {})
+    elif not isinstance(tower_budgets_raw, dict):
+        return None, "tower_risk_budgets must be a map of bot id → share."
+    else:
+        total_share = 0.0
+        for bot_id, share in tower_budgets_raw.items():
+            try:
+                s = float(share)
+            except (TypeError, ValueError):
+                return None, "tower_risk_budgets shares must be numbers."
+            if not math.isfinite(s) or s < 0 or s > 1:
+                return None, "each tower_risk_budgets share stays between 0 and 1."
+            tower_budgets[str(bot_id)] = round(s, 4)
+            total_share += s
+        if total_share > 1.0001:
+            return None, "tower_risk_budgets shares must sum to ≤ 1.0."
+    hillclimb_lever = raw.get("hillclimb_lever", DEFAULTS.get("hillclimb_lever"))
+    if hillclimb_lever in ("", None):
+        hillclimb_lever = None
+    else:
+        hillclimb_lever = str(hillclimb_lever)
+        try:
+            import desk_more
+            if hillclimb_lever not in desk_more.HILLCLIMB_LEVERS:
+                return None, f"hillclimb_lever must be one of {list(desk_more.HILLCLIMB_LEVERS)} or null."
+        except Exception:
+            pass
     return {
         "paper_only": True,
         "stake_hi_min": round(hi_min, 2),
@@ -1117,6 +1163,8 @@ def parse_settings(raw: dict):
         "expectancy_window_days": exp_days,
         "fill_adverse_tax": round(fill_tax, 4),
         "gate_a_min_n": gate_a_n,
+        "tower_risk_budgets": tower_budgets,
+        "hillclimb_lever": hillclimb_lever,
         "shadow": shadow,
     }, None
 
@@ -1784,6 +1832,40 @@ def kelly_lite_dollars(
     )
 
 
+def tower_open_risk(bot_id: str, root: str | None = None, bots: list | None = None) -> float:
+    """Open risk currently used by one tower (paper positions)."""
+    rows = bots
+    if rows is None:
+        try:
+            rows = snapshot(root)["bots"]
+        except Exception:
+            rows = []
+    for bot in rows or []:
+        if bot.get("id") == bot_id and not bot.get("shadow_only"):
+            try:
+                return float(bot.get("open_risk") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def tower_budget_blocks(
+    bot_id: str,
+    stake: float,
+    root: str | None = None,
+    cfg: dict | None = None,
+    bots: list | None = None,
+) -> str:
+    """Block a fill that would blow this tower's soft risk share (desk cap still hard)."""
+    cfg = cfg or load_settings(root)
+    try:
+        import desk_more
+        used = tower_open_risk(bot_id, root=root, bots=bots)
+        return desk_more.tower_budget_blocks(bot_id, used, stake, cfg)
+    except Exception:
+        return ""
+
+
 def stake_dollars_for(
     bot_id: str,
     prob,
@@ -1800,10 +1882,12 @@ def stake_dollars_for(
     All bots share adapt: play safe on high volatility; size up only when the
     tower's own settled record is consistently ≥80% accurate with Wilson CI.
     Set return_plan=True to also get the adapt plan for prove-it drawers.
+    Phase 1: also soft-cap by per-tower risk budget share of desk open-risk.
     """
     cfg = cfg or (load_settings(root) if root is not None else dict(DEFAULTS))
     starve_mult = 1.0
     history = []
+    bot_open = 0.0
     if root is not None:
         try:
             runs = _load_runs(root)
@@ -1813,6 +1897,10 @@ def stake_dollars_for(
                     continue
                 view = _bot_view(spec, root, runs, day)
                 history = list(view.get("history") or [])
+                try:
+                    bot_open = float(view.get("open_risk") or 0.0)
+                except (TypeError, ValueError):
+                    bot_open = 0.0
                 exp = desk_profit.bot_expectancy(
                     history,
                     window_days=int(cfg.get("expectancy_window_days") or 20),
@@ -1827,24 +1915,76 @@ def stake_dollars_for(
     empty_plan = {"mult": 1.0, "play_safe": False, "play_big": False, "notes": [], "vol": {}, "perf": {}}
     try:
         import desk_adapt
+        series = None
+        if isinstance(vol_kwargs, dict):
+            series = vol_kwargs.get("series")
         adapted, plan = desk_adapt.adapt_stake(
             base,
             history=history,
             window_days=int(cfg.get("expectancy_window_days") or 20),
             vol_kwargs=vol_kwargs or ({"ask": ask} if ask is not None else None),
+            series=series,
         )
         if root is not None:
             try:
                 desk_adapt.remember_vol(root, bot_id, str((vol_kwargs or {}).get("ticker") or bot_id), plan.get("vol") or {}, plan)
             except Exception:
                 pass
+        # Soft-cap by per-tower budget so one red tower cannot silence the desk.
+        try:
+            import desk_more
+            info = desk_more.tower_budget_remaining(bot_id, bot_open, cfg)
+            if info["cap"] > 0 and float(adapted) > info["left"] + 1e-9:
+                plan = dict(plan)
+                notes = list(plan.get("notes") or [])
+                notes.append(
+                    f"tower budget cap {info['left']:.2f} left of {info['cap']:.2f}"
+                )
+                plan["notes"] = notes
+                plan["tower_budget"] = info
+                adapted = float(info["left"])
+                if 0 < adapted < 1.0:
+                    adapted = 0.0
+        except Exception:
+            pass
+        # Phase 2: adapt A/B ledger — what stake would have been without adapt.
+        try:
+            import desk_phase2
+            plan = dict(plan)
+            plan["stake_flat"] = round(float(base), 2)
+            plan["stake_adapt"] = round(float(adapted), 2)
+            if root is not None:
+                desk_phase2.record_adapt_ab(
+                    root,
+                    bot=bot_id,
+                    ticker=str((vol_kwargs or {}).get("ticker") or ""),
+                    stake_flat=float(base),
+                    stake_adapt=float(adapted),
+                    mult=float(plan.get("mult") or 1.0),
+                    regime=str((plan.get("vol") or {}).get("regime") or ""),
+                    play_safe=bool(plan.get("play_safe")),
+                    play_big=bool(plan.get("play_big")),
+                    fill_id=str((vol_kwargs or {}).get("fill_id") or ""),
+                )
+        except Exception:
+            pass
         if return_plan:
             return float(adapted), plan
         return float(adapted)
     except Exception:
+        capped = float(base)
+        try:
+            import desk_more
+            info = desk_more.tower_budget_remaining(bot_id, bot_open, cfg)
+            if info["cap"] > 0:
+                capped = min(capped, float(info["left"]))
+                if 0 < capped < 1.0:
+                    capped = 0.0
+        except Exception:
+            pass
         if return_plan:
-            return float(base), empty_plan
-        return float(base)
+            return capped, empty_plan
+        return capped
 
 
 def bot_expectancy(history, window_days: int = 20) -> dict:
@@ -2110,6 +2250,29 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["adapt"] = desk_adapt.adapt_summary(root)
     except Exception as exc:  # noqa: BLE001
         desk_row["adapt"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_more
+        desk_row["more"] = desk_more.more_summary(root, bots=public, cfg=cfg)
+        # Surface skip board on brain too when journal empty.
+        if isinstance(desk_row.get("brain"), dict) and not desk_row["brain"].get("skip_leaderboard"):
+            desk_row["brain"]["skip_leaderboard"] = desk_row["more"].get("skip_leaderboard")
+    except Exception as exc:  # noqa: BLE001
+        desk_row["more"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_top25
+        desk_row["top25"] = desk_top25.top25_summary(
+            root, bots=public, health=timer_health(root), cfg=cfg,
+        )
+        # Gate B beside Gate A.
+        desk_row["gate_b"] = desk_row["top25"].get("gate_b")
+    except Exception as exc:  # noqa: BLE001
+        desk_row["top25"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["gate_b"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_phase2
+        desk_row["phase2"] = desk_phase2.phase2_summary(root)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["phase2"] = {"paper_only": True, "error": type(exc).__name__}
     # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
     tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
     gate_rows = []
@@ -2191,6 +2354,18 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             "fill_tax": "Board fills add a +1¢ adverse tax vs stored ask so ROI stays honest.",
             "gate_a": "Gate A = taxed paper EV ≥ 0 with enough settles — not a live switch.",
             "prove_it": "Prove-it shows cushion/σ/fee/adapt mult/history for each open fill.",
+            "skip_leaderboard": "Top reasons we did not buy today. WEEKEND on Sat/Sun is normal, not broken.",
+            "tower_budgets": "Soft per-tower share of desk open-risk so one tower cannot silence the others.",
+            "near_miss": "Shadow-only near-miss lane studies one soft gate miss without eating desk risk.",
+            "clv": "Sports closing-line value: entry fair minus later fair/close.",
+            "hillclimb": "Change one sizing/edge lever per week; revert if taxed EV falls two weeks.",
+            "fill_tax_education": (
+                "Board fills add a +1¢ adverse tax vs stored ask so ROI stays honest. "
+                "Untaxed paper wins are not live-ready."
+            ),
+            "gate_b": "Gate B = peak-to-trough drawdown within bound with enough settles — readiness only.",
+            "top25": "Top-25 shortlist hooks: skip-regret, budgets, watchdog, playbooks, doctor.",
+            "guest": "Guest mode (?guest=1) is read-only — no staff actions.",
         },
         "audit": audit_rows(root)[:12],
         "bots": public,
@@ -2438,6 +2613,26 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
         now = dt.datetime.now(dt.timezone.utc)
     elif now.tzinfo is None:
         now = now.replace(tzinfo=dt.timezone.utc)
+    # Phase 0: settle open 15m history labels ≤1× / 10m so adapt can learn without stalling.
+    try:
+        import kalshi_history
+        marker = _under(root, "desk_settle_harness_at.txt")
+        due = True
+        if os.path.isfile(marker):
+            try:
+                age = now.timestamp() - os.path.getmtime(marker)
+                due = age >= 600
+            except OSError:
+                due = True
+        if due:
+            kalshi_history.settle_open_windows(root, limit=12)
+            try:
+                with open(marker, "w", encoding="utf-8") as handle:
+                    handle.write(_iso(now) + "\n")
+            except OSError:
+                pass
+    except Exception:
+        pass
     touch_heartbeat(root, now)
     # Broke towers only: once per Chicago day in the early window, reload ammo + reset P&L.
     # Winners and towers with open paper stay untouched.
@@ -2501,6 +2696,57 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
         })
     if results:
         _atomic_write(auto_path(root), json.dumps(saved, indent=2) + "\n")
+    # Phase 0/1 recycle: remember sticky opens so staff/ops can free risk.
+    try:
+        import desk_more
+        bots = snapshot(root).get("bots") or []
+        sticky = desk_more.sticky_positions(bots)
+        desk_more.remember_sticky(root, sticky)
+    except Exception:
+        bots = []
+        sticky = []
+    # Top25 #5 — global rank minute across recent brain candidates.
+    try:
+        import desk_brain
+        import desk_top25
+        summary = desk_brain.brain_summary(root)
+        cand = []
+        for row in summary.get("recent") or []:
+            if not isinstance(row, dict):
+                continue
+            if row.get("action") not in ("observe", "buy", "candidate", "skip"):
+                continue
+            if row.get("edge") is None:
+                continue
+            cand.append({
+                "bot": row.get("bot"),
+                "ticker": row.get("ticker"),
+                "side": row.get("side"),
+                "edge": row.get("edge"),
+                "confidence": row.get("confidence"),
+                "depth": row.get("depth"),
+                "stake_est": row.get("stake_est") or 20,
+                "venue": {
+                    "btc15m": "kalshi_btc15m",
+                    "commodity-15m": "kalshi_commodity15m",
+                    "sports-gap": "kalshi_sports",
+                }.get(str(row.get("bot") or ""), ""),
+            })
+        cfg = load_settings(root)
+        used = 0.0
+        for b in bots or []:
+            if b.get("shadow_only"):
+                continue
+            try:
+                used += float(b.get("open_risk") or 0)
+            except (TypeError, ValueError):
+                pass
+        left = max(0.0, float(cfg.get("max_open_risk") or 100) - used)
+        if cand:
+            desk_top25.global_rank_minute(cand, left, root=root)
+        desk_top25.sticky_settle_sla(len(sticky), root=root)
+    except Exception:
+        pass
     return results
 
 

@@ -140,6 +140,43 @@ export type Desk = {
     correlation_pressure?: string[]
     starved_bots?: string[]
     shadow_count?: number
+    fill_tax?: number
+    gate_a_ready_bots?: string[]
+  }
+  more?: {
+    skip_leaderboard?: {
+      top?: { code?: string; n?: number }[]
+      weekend_n?: number
+      weekday_n?: number
+      note?: string
+    }
+    tower_budgets?: Record<string, number>
+    sticky_count?: number
+  }
+  adapt?: {
+    by_bot?: Record<string, { safe?: number; big?: number; obs?: number }>
+    rules?: Record<string, unknown>
+  }
+  top25?: {
+    city_vault?: {
+      show_skip_board?: boolean
+      show_budget_bars?: boolean
+      show_adapt_dial?: boolean
+      fill_tax_education?: boolean
+      guest_readonly_query?: string
+    }
+    gate_b?: { any_ready?: boolean; bots?: { bot?: string; ready?: boolean }[] }
+    doctor?: { ok?: boolean; hint?: string }
+    dual_control?: { armed?: boolean; status?: string }
+  }
+  gate_a?: {
+    any_ready?: boolean
+    fill_tax?: number
+    note?: string
+  }
+  gate_b?: {
+    any_ready?: boolean
+    note?: string
   }
   chart?: {
     zone?: string

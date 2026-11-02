@@ -70,8 +70,17 @@ def save_journal(state: dict, root: str | None = None) -> None:
     os.replace(tmp, path)
 
 
-def opportunity_score(edge, confidence, depth=None) -> float:
-    """Higher = spend risk first. Depth soft-boosts when present."""
+def opportunity_score(edge, confidence, depth=None, need: float = 10.0) -> float:
+    """Higher = spend risk first.
+
+    Phase 1: depth-adjusted edge × confidence
+    (`edge × min(1, depth/need) × p`). Missing depth keeps raw edge.
+    """
+    try:
+        import desk_more
+        return desk_more.opportunity_score_v2(edge, confidence, depth, need=need)
+    except Exception:
+        pass
     try:
         e = float(edge)
     except (TypeError, ValueError):
@@ -243,6 +252,17 @@ def record_decision(
             key = str(reason).split(":")[0].strip()[:80] or "other"
             state.setdefault("gate_counts", {})
             state["gate_counts"][key] = int(state["gate_counts"].get(key) or 0) + 1
+        # Phase 0: canonical skip codes + weekend attribution for staff board.
+        try:
+            import desk_more
+            from datetime import datetime, timezone
+            wd = datetime.now(timezone.utc).weekday()
+            codes = desk_more.record_skip_codes(
+                root, bot=bot, reasons=list(reasons or []), weekday=wd,
+            )
+            row["skip_codes"] = codes
+        except Exception:
+            pass
     elif action == "flip":
         bot_row["flips"] = int(bot_row.get("flips") or 0) + 1
     bot_row["last_at"] = now
@@ -279,6 +299,12 @@ def brain_summary(root: str | None = None) -> dict:
         })
     queued = allocate_risk(rank_desk_queue(cand), remaining_risk=100.0)
     stored = state.get("global_queue") if isinstance(state.get("global_queue"), dict) else {}
+    skip_board = {}
+    try:
+        import desk_more
+        skip_board = desk_more.skip_leaderboard(root)
+    except Exception:
+        skip_board = {}
     return {
         "paper_only": True,
         "version": state.get("version", 1),
@@ -286,6 +312,7 @@ def brain_summary(root: str | None = None) -> dict:
         "decision_count": len(decisions),
         "by_bot": state.get("by_bot") or {},
         "top_skip_gates": [{"gate": g, "n": n} for g, n in top_gates],
+        "skip_leaderboard": skip_board,
         "recent": decisions[-MAX_SUMMARY:],
         "global_queue": stored.get("rows") or [
             {
