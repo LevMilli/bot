@@ -146,7 +146,8 @@ SETTLEMENT_FILES = (
 # Fixed commands. Nothing from the request is concatenated onto these.
 ACTIONS = {
     "sports-gap": {
-        "run": {"argv": ("gap_bot.py",), "entry": True, "timeout": 75, "label": "Run one check"},
+        # 120s: ESPN + sports tape (capped) + gap scan; 75s was killing tape sync.
+        "run": {"argv": ("gap_bot.py",), "entry": True, "timeout": 120, "label": "Run one check"},
     },
     "kalshi-sp": {
         "run": {"argv": ("bot.py", "scan"), "entry": True, "timeout": 75, "label": "Run one check"},

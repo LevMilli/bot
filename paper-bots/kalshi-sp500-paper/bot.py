@@ -94,7 +94,12 @@ def _sync_kalshi_tape():
         if root not in sys.path:
             sys.path.insert(0, root)
         import kalshi_tape
-        tape = kalshi_tape.sync_tape(root, series=("KXINXU", "KXBTC15M"))
+        tape = kalshi_tape.sync_tape(
+            root,
+            series=("KXINXU",),
+            max_markets_per_series=30,
+            per_ticker_limit=40,
+        )
         print(f"Kalshi tape: +{tape.get('last_added') or 0} new prints (kept {len(tape.get('trades') or [])})")
     except Exception as exc:
         print(f"Kalshi tape sync skipped: {type(exc).__name__}")
