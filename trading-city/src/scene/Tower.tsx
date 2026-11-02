@@ -31,11 +31,11 @@ function WindowInstances({
   sparse?: boolean
 }) {
   const mesh = useRef<InstancedMesh>(null)
-  const yStep = sparse ? 0.8 : 0.55
+  const yStep = sparse ? 0.75 : 0.52
   const colMin = sparse ? -1 : -2
   const colMax = sparse ? 1 : 2
-  // Front + back faces so orbiting the city still shows windows.
-  const facesPer = 2
+  // All four façades — front/back (+z/−z) and sides (+x/−x).
+  const facesPer = 4
 
   const count = useMemo(() => {
     let n = 0
@@ -52,19 +52,27 @@ function WindowInstances({
     if (!mesh.current) return
     const dummy = new THREE.Object3D()
     let i = 0
+    const half = width / 2 + 0.015
     for (let y = 0.35; y < height - 0.25; y += yStep) {
       for (let col = colMin; col <= colMax; col++) {
         if (((y * 17 + col * 5 + seed * 11) | 0) % 7 === 0) continue
-        const x = col * 0.22
-        const faces: [number, number, number][] = [
-          [x, y, width / 2 + 0.015],
-          [x, y, -width / 2 - 0.015],
-        ]
-        for (const p of faces) {
-          dummy.position.set(p[0], p[1], p[2])
-          dummy.updateMatrix()
-          mesh.current!.setMatrixAt(i++, dummy.matrix)
-        }
+        const o = col * 0.22
+        // Front / back
+        dummy.rotation.set(0, 0, 0)
+        dummy.position.set(o, y, half)
+        dummy.updateMatrix()
+        mesh.current!.setMatrixAt(i++, dummy.matrix)
+        dummy.position.set(o, y, -half)
+        dummy.updateMatrix()
+        mesh.current!.setMatrixAt(i++, dummy.matrix)
+        // Left / right — rotate so the pane sits on the side wall
+        dummy.rotation.set(0, Math.PI / 2, 0)
+        dummy.position.set(half, y, o)
+        dummy.updateMatrix()
+        mesh.current!.setMatrixAt(i++, dummy.matrix)
+        dummy.position.set(-half, y, o)
+        dummy.updateMatrix()
+        mesh.current!.setMatrixAt(i++, dummy.matrix)
       }
     }
     mesh.current.count = i
