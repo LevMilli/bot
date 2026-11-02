@@ -39,16 +39,18 @@ PARLAY_MAX_MIN = 5.0         # late multi-leg window (staff: wait → parlay by 
 PARLAY_MIN_MIN = 1.0
 EDGE_BUFFER = 0.05           # fallback if desk venue_min_edge missing
 MIN_MODEL_ACCURATE = 0.80    # accurate lane
-MIN_MODEL_SPEED = 0.75       # speed lane (needs SPEED_EDGE_EXTRA)
+MIN_MODEL_SPEED = 0.72       # speed lane (match sports; needs SPEED_EDGE_EXTRA)
 MIN_MODEL_PROB = MIN_MODEL_ACCURATE
 SPEED_EDGE_EXTRA = 0.02
 MIN_CUSHION_USD = 35         # BTC cushion floor
 MIN_CUSHION_ETH = 1.5        # ETH 15m cushion (KXETH15M)
-MIN_Z = 0.60                 # cushion / sigma
+MIN_Z = 0.60                 # cushion / sigma (accurate lane)
+MIN_Z_SPEED = 0.55           # speed lane may sit in near-miss z band if edge clears
 MIN_Z_COINBASE_ONLY = 0.75   # stricter if only Coinbase spot worked
 ASK_MIN, ASK_MAX = 0.70, 0.92  # slightly wider book for more fee-aware fills
 MAX_SPREAD = 0.04
 MIN_DEPTH = 3                # contracts offered at or below the ask
+MAX_BUYS_PER_CHECK = 3       # spend idle desk margin across multiple windows
 NEWS_WINDOW_MIN = 30         # USD high-impact event within 30 min of the block -> skip
 TAKE_PROFIT_ADD, TAKE_PROFIT_CAP = 0.15, 0.99
 DVOL_FAIL_MULT = 1.2         # if DVOL fails: use realized sigma * 1.2
@@ -741,7 +743,7 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         news = None
 
     reasons = list(cheap)
-    zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
+    zmin_acc = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
     lane = "accurate"
     need_p = float(need)
     if p + 1e-12 >= MIN_MODEL_ACCURATE:
@@ -753,6 +755,8 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED:.2f}")
     if p < need_p:
         reasons.append(f"p {p:.3f} < ask+fee+buf ({lane}) = {need_p:.3f}")
+    # Speed lane: allow near-miss z band only when extra fee-aware edge already clears.
+    zmin = zmin_acc if lane == "accurate" else min(zmin_acc, MIN_Z_SPEED)
     if z < zmin:
         reasons.append(f"z {z:.2f} < {zmin}")
     if not (ASK_MIN <= ask <= ASK_MAX):
@@ -939,6 +943,10 @@ def main():
     last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
 
     for ev in ranked:
+        if buys >= MAX_BUYS_PER_CHECK:
+            skips += 1
+            print(f"--- {ev.get('ticker')}  skip: max buys this check ({MAX_BUYS_PER_CHECK})")
+            continue
         m = ev.get("market") or {"ticker": ev.get("ticker"), "target": 0, "close_time": ev.get("close_time"),
                                  "yes_bid": None, "yes_ask": None, "no_bid": None, "no_ask": None}
         min_left = ev.get("min_left")
