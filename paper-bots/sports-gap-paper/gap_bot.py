@@ -429,6 +429,19 @@ def run():
     s = load_state()
     if not existed:
         save_state(s)
+    # Sync public Kalshi trade tape for sports + desk series (read-only).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import kalshi_tape
+        sports_series = [row[1] for row in SPORTS.values()]
+        tape = kalshi_tape.sync_tape(DESK_ROOT, series=("KXBTC15M", "KXINXU", *sports_series))
+        print(
+            f"Kalshi tape: +{tape.get('last_added') or 0} new prints "
+            f"(kept {len(tape.get('trades') or [])})"
+        )
+    except Exception as exc:
+        print(f"Kalshi tape sync skipped: {type(exc).__name__}")
     desk, cfg = _paper_limits()
     try:
         need_edge = float(desk.venue_min_edge("kalshi_sports", cfg)) if desk is not None else float(
