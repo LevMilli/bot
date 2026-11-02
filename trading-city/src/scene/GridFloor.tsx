@@ -292,7 +292,7 @@ function PlazaExtras() {
   )
 }
 
-function PlazaDressing() {
+function PlazaDressing({ parks: showParks = true }: { parks?: boolean }) {
   const lamps = useMemo(
     () =>
       [
@@ -329,9 +329,10 @@ function PlazaDressing() {
     <group>
       <BackAvenueBridge />
       <PlazaExtras />
-      {parks.map((pk, i) => (
-        <ParkBlock key={i} position={pk.p} size={pk.s} />
-      ))}
+      {showParks &&
+        parks.map((pk, i) => (
+          <ParkBlock key={i} position={pk.p} size={pk.s} />
+        ))}
       {lamps.map((p, i) => (
         <StreetLamp key={i} position={p} />
       ))}
@@ -342,10 +343,13 @@ function PlazaDressing() {
 export function GridFloor({
   size = 90,
   plaza = true,
+  parks = true,
 }: {
   size?: number
   cell?: number
   plaza?: boolean
+  /** Park pads and trees. The office window turns these off so none sit inside the room. */
+  parks?: boolean
 }) {
   const groundTex = usePlazaGroundTexture()
   return (
@@ -356,7 +360,7 @@ export function GridFloor({
       </mesh>
       {plaza && (
         <>
-          <PlazaDressing />
+          <PlazaDressing parks={parks} />
           <PlazaRail />
         </>
       )}

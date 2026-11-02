@@ -19,7 +19,8 @@ export function StreetCity({ bots, desk }: { bots: BotRow[]; desk?: Desk }) {
     <group position={[3.2, 0, -16]}>
       <PurpleHorizon />
       <Starfield count={320} />
-      <GridFloor />
+      {/* No park pads here — one of them crosses the glass and lands on the office floor. */}
+      <GridFloor parks={false} />
       <Skyline z={-28} width={72} />
       <Skyline z={-36} width={88} />
       <SkyEquityLine />
