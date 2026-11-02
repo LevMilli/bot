@@ -2,12 +2,28 @@ import * as THREE from 'three'
 import type { BotRow, Desk } from '../types'
 import { equitySeries, money, statusLabel } from '../data/format'
 
+const TEXTURE_SCALE = 4
+
 function makeCanvas(w = 512, h = 384) {
   const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
+  canvas.width = w * TEXTURE_SCALE
+  canvas.height = h * TEXTURE_SCALE
   const ctx = canvas.getContext('2d')!
+  ctx.scale(TEXTURE_SCALE, TEXTURE_SCALE)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
   return { canvas, ctx, w, h }
+}
+
+function screenTexture(canvas: HTMLCanvasElement) {
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 16
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.generateMipmaps = false
+  tex.needsUpdate = true
+  return tex
 }
 
 function paintBase(ctx: CanvasRenderingContext2D, w: number, h: number) {
@@ -91,10 +107,7 @@ export function leftMonitorTexture(bot: BotRow): THREE.CanvasTexture {
     }
   }
 
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.needsUpdate = true
-  return tex
+  return screenTexture(canvas)
 }
 
 export function centerMonitorTexture(bot: BotRow, desk?: Desk): THREE.CanvasTexture {
@@ -149,10 +162,7 @@ export function centerMonitorTexture(bot: BotRow, desk?: Desk): THREE.CanvasText
   ctx.font = '15px monospace'
   ctx.fillText(`history ${bot.history?.length ?? 0}   VWAP/EMA cosmetic`, 18, h - 24)
 
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.needsUpdate = true
-  return tex
+  return screenTexture(canvas)
 }
 
 export function rightMonitorTexture(bot: BotRow): THREE.CanvasTexture {
@@ -199,10 +209,7 @@ export function rightMonitorTexture(bot: BotRow): THREE.CanvasTexture {
     ctx.fillText('No closed paper trades yet', 18, 250)
   }
 
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.needsUpdate = true
-  return tex
+  return screenTexture(canvas)
 }
 
 /** Wide bank lobby board — desk net profit / cash / pace. */
@@ -237,8 +244,5 @@ export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
     ctx.fillText(pace, w - 28 - ctx.measureText(pace).width, 198)
   }
 
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.needsUpdate = true
-  return tex
+  return screenTexture(canvas)
 }

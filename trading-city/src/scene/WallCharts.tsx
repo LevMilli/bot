@@ -34,10 +34,14 @@ function paintWallChart(
 ): THREE.CanvasTexture {
   const w = 768
   const h = 512
+  const scale = 3
   const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
+  canvas.width = w * scale
+  canvas.height = h * scale
   const ctx = canvas.getContext('2d')!
+  ctx.scale(scale, scale)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
 
   ctx.fillStyle = '#050818'
   ctx.fillRect(0, 0, w, h)
@@ -137,6 +141,10 @@ function paintWallChart(
 
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 16
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.generateMipmaps = false
   tex.needsUpdate = true
   return tex
 }
