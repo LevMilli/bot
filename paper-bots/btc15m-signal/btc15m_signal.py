@@ -1202,19 +1202,52 @@ def main():
             except Exception:
                 pass
         if regime == "confident_early" and not (ev_early.get("reasons") or []):
-            sentence = paper_buy(
-                account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
-                ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
-                vol_kwargs={
-                    "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
-                    "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
-                    "ask": ev_early.get("ask"), "ticker": m["ticker"],
-                },
-            )
+            # Top25 #10 — ETH lead-lag study: if BTC just spiked, delay ETH early buy.
+            delay_eth = False
+            btc_move = None
+            delay_sec = 45
+            try:
+                if price and closes and len(closes) >= 2:
+                    btc_move = abs(float(price) - float(closes[-1])) / max(float(closes[-1]), 1e-9) * 100.0
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_top25 as _top25
+                delay_sec = int(_top25.ETH_LEAD_LAG_DELAY_SEC)
+                delay_eth = _top25.should_delay_eth(btc_move)
+                _top25.record_eth_lead_lag(
+                    DESK_ROOT,
+                    btc_move_pct=btc_move,
+                    eth_edge=ev_early.get("edge"),
+                    delayed=delay_eth,
+                    note=m["ticker"],
+                )
+            except Exception:
+                delay_eth = False
+            if delay_eth:
+                mv = f"{btc_move:.3f}%" if btc_move is not None else "?"
+                print(f"  ETH early DELAYED ({delay_sec}s study) — BTC move {mv} (paper lead-lag)")
+                sentence = "ETH early delayed for BTC lead-lag study (no paper buy this pass)."
+            else:
+                sentence = paper_buy(
+                    account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
+                    ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
+                    vol_kwargs={
+                        "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
+                        "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
+                        "ask": ev_early.get("ask"), "ticker": m["ticker"], "series": "KXETH15M",
+                    },
+                )
             print(f"  ETH early: {sentence}")
             if "Paper buy" in sentence and "No paper buy" not in sentence:
                 buys += 1
                 last_sentence = sentence
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_top25 as _top25b
+                    _top25b.remember_buy(DESK_ROOT)
+                except Exception:
+                    pass
         elif regime == "parlay_window":
             late = evaluate_window(
                 m, eth_price, eth_closes, dvol, False, edge_buf,

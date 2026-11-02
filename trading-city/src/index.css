@@ -654,6 +654,53 @@ a {
   color: #fff;
 }
 
+.vault-holo .vault-skips,
+.vault-holo .vault-budgets,
+.vault-holo .vault-adapt,
+.vault-holo .vault-tax {
+  display: block;
+  font-size: 0.72em;
+  opacity: 0.88;
+  margin-top: 0.15rem;
+}
+
+.vault-board {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.28rem;
+  max-width: min(52rem, 92vw);
+  padding: 0.55rem 0.7rem;
+  background: linear-gradient(180deg, rgba(12, 8, 28, 0.82), rgba(8, 5, 18, 0.72));
+  border: 1px solid rgba(126, 200, 216, 0.28);
+  color: #d7e6f2;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+
+.vault-board-row {
+  display: grid;
+  grid-template-columns: 4.2rem 1fr;
+  gap: 0.55rem;
+  align-items: start;
+}
+
+.vault-board-row .vb-label {
+  color: #7ec8d8;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
+.vault-board-row.tax-edu {
+  border-top: 1px solid rgba(126, 200, 216, 0.18);
+  padding-top: 0.35rem;
+  color: #c9b27a;
+}
+
+.app.guest .chrome-top .tagline {
+  color: #9ad0dc;
+}
+
 .bank-hud .office-title strong {
   color: var(--amber);
 }

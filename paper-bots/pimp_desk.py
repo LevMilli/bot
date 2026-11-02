@@ -158,6 +158,8 @@ SETTLEMENT_FILES = (
     "desk_adapt_state.json",
     "desk_more_state.json",
     "desk_sports_clv.json",
+    "desk_top25_state.json",
+    "desk_maker_taker_study.json",
     "btc15m-signal/paper_parlays.json",
     "pimp-learning.json",
     "pimp-good.json",
@@ -2228,6 +2230,16 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             desk_row["brain"]["skip_leaderboard"] = desk_row["more"].get("skip_leaderboard")
     except Exception as exc:  # noqa: BLE001
         desk_row["more"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_top25
+        desk_row["top25"] = desk_top25.top25_summary(
+            root, bots=public, health=timer_health(root), cfg=cfg,
+        )
+        # Gate B beside Gate A.
+        desk_row["gate_b"] = desk_row["top25"].get("gate_b")
+    except Exception as exc:  # noqa: BLE001
+        desk_row["top25"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["gate_b"] = {"paper_only": True, "error": type(exc).__name__}
     # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
     tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
     gate_rows = []
@@ -2314,6 +2326,13 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             "near_miss": "Shadow-only near-miss lane studies one soft gate miss without eating desk risk.",
             "clv": "Sports closing-line value: entry fair minus later fair/close.",
             "hillclimb": "Change one sizing/edge lever per week; revert if taxed EV falls two weeks.",
+            "fill_tax_education": (
+                "Board fills add a +1¢ adverse tax vs stored ask so ROI stays honest. "
+                "Untaxed paper wins are not live-ready."
+            ),
+            "gate_b": "Gate B = peak-to-trough drawdown within bound with enough settles — readiness only.",
+            "top25": "Top-25 shortlist hooks: skip-regret, budgets, watchdog, playbooks, doctor.",
+            "guest": "Guest mode (?guest=1) is read-only — no staff actions.",
         },
         "audit": audit_rows(root)[:12],
         "bots": public,
@@ -2647,6 +2666,49 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
         bots = snapshot(root).get("bots") or []
         sticky = desk_more.sticky_positions(bots)
         desk_more.remember_sticky(root, sticky)
+    except Exception:
+        bots = []
+        sticky = []
+    # Top25 #5 — global rank minute across recent brain candidates.
+    try:
+        import desk_brain
+        import desk_top25
+        summary = desk_brain.brain_summary(root)
+        cand = []
+        for row in summary.get("recent") or []:
+            if not isinstance(row, dict):
+                continue
+            if row.get("action") not in ("observe", "buy", "candidate", "skip"):
+                continue
+            if row.get("edge") is None:
+                continue
+            cand.append({
+                "bot": row.get("bot"),
+                "ticker": row.get("ticker"),
+                "side": row.get("side"),
+                "edge": row.get("edge"),
+                "confidence": row.get("confidence"),
+                "depth": row.get("depth"),
+                "stake_est": row.get("stake_est") or 20,
+                "venue": {
+                    "btc15m": "kalshi_btc15m",
+                    "commodity-15m": "kalshi_commodity15m",
+                    "sports-gap": "kalshi_sports",
+                }.get(str(row.get("bot") or ""), ""),
+            })
+        cfg = load_settings(root)
+        used = 0.0
+        for b in bots or []:
+            if b.get("shadow_only"):
+                continue
+            try:
+                used += float(b.get("open_risk") or 0)
+            except (TypeError, ValueError):
+                pass
+        left = max(0.0, float(cfg.get("max_open_risk") or 100) - used)
+        if cand:
+            desk_top25.global_rank_minute(cand, left, root=root)
+        desk_top25.sticky_settle_sla(len(sticky), root=root)
     except Exception:
         pass
     return results

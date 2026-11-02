@@ -14,12 +14,21 @@ import type { BotRow } from './types'
 
 type View = 'city' | 'bank' | 'office'
 
+function guestModeFromUrl() {
+  try {
+    return new URLSearchParams(window.location.search).get('guest') === '1'
+  } catch {
+    return false
+  }
+}
+
 export default function App() {
   const { snap, mode, error, loading, updatedAt, connectLive } = useSnapshot()
   const [view, setView] = useState<View>('city')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [fromBank, setFromBank] = useState(false)
   const [screensOpen, setScreensOpen] = useState(false)
+  const guest = useMemo(() => guestModeFromUrl(), [])
 
   const bots = snap?.bots || []
   const selected: BotRow | null = useMemo(
@@ -62,7 +71,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${view !== 'city' ? 'office' : 'city'}`}>
+    <div className={`app ${view !== 'city' ? 'office' : 'city'}${guest ? ' guest' : ''}`}>
       <div className="stage">
         <Canvas
           dpr={[1, 1]}
@@ -98,11 +107,13 @@ export default function App() {
           <div className="brand-block">
             <h1 className="brand">APEX-CITY</h1>
             <p className="tagline">
-              {view === 'bank'
-                ? 'Neon paper trust · T-hall · twelve tellers · desk board'
-                : view === 'office' && fromBank
-                  ? 'Teller desk · paper trades · switch windows'
-                  : 'Neon paper desk · five towers · live snapshot'}
+              {guest
+                ? 'Guest read-only · paper desk · no staff actions'
+                : view === 'bank'
+                  ? 'Neon paper trust · T-hall · tellers · desk board'
+                  : view === 'office' && fromBank
+                    ? 'Teller desk · paper trades · switch windows'
+                    : 'Neon paper desk · towers · live snapshot'}
             </p>
           </div>
           <div className="chrome-actions">
@@ -114,7 +125,7 @@ export default function App() {
               <button type="button" className="back-btn" onClick={backToCity}>
                 ← Back to city
               </button>
-            ) : (
+            ) : guest ? null : (
               <a className="back-btn ghost" href="/pimp-trading">
                 PIMP-TRADING
               </a>
@@ -125,6 +136,7 @@ export default function App() {
               </button>
             )}
             <span className="meta">
+              {guest ? 'guest · ' : ''}
               {loading && !snap
                 ? 'loading…'
                 : mode === 'offline'
@@ -196,6 +208,50 @@ export default function App() {
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
               <span>A/D · ←→ snap · W/S · ↑↓ zoom free · Enter open · drag to look</span>
+            </div>
+            <div className="vault-board" aria-label="Desk vault board">
+              <div className="vault-board-row">
+                <span className="vb-label">skips</span>
+                <span>
+                  {(snap?.desk?.more?.skip_leaderboard?.top || [])
+                    .slice(0, 5)
+                    .map((s) => `${s.code}×${s.n}`)
+                    .join(' · ') || 'quiet'}
+                </span>
+              </div>
+              <div className="vault-board-row">
+                <span className="vb-label">budgets</span>
+                <span>
+                  {Object.entries(snap?.desk?.more?.tower_budgets || {})
+                    .slice(0, 6)
+                    .map(([id, n]) => `${id}:$${Number(n).toFixed(0)}`)
+                    .join(' · ') || '—'}
+                </span>
+              </div>
+              <div className="vault-board-row">
+                <span className="vb-label">adapt</span>
+                <span>
+                  {(() => {
+                    const by = snap?.desk?.adapt?.by_bot || {}
+                    let s = 0
+                    let b = 0
+                    for (const row of Object.values(by)) {
+                      s += Number(row?.safe || 0)
+                      b += Number(row?.big || 0)
+                    }
+                    return `safe×${s} · big×${b}`
+                  })()}
+                  {snap?.desk?.gate_a?.any_ready ? ' · Gate A ready' : ''}
+                  {snap?.desk?.gate_b?.any_ready ? ' · Gate B ready' : ''}
+                </span>
+              </div>
+              <div className="vault-board-row tax-edu">
+                <span className="vb-label">fill tax</span>
+                <span>
+                  +{(((snap?.desk?.ops?.fill_tax ?? snap?.desk?.gate_a?.fill_tax) ?? 0.01) * 100).toFixed(0)}¢
+                  adverse on boards — untaxed paper wins are not live-ready
+                </span>
+              </div>
             </div>
           </div>
         )}
