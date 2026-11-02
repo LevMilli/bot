@@ -675,6 +675,7 @@ a {
   color: #d7e6f2;
   font-size: 0.78rem;
   letter-spacing: 0.02em;
+  pointer-events: auto;
 }
 
 .vault-board-toolbar {

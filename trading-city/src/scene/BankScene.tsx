@@ -45,13 +45,13 @@ const TELLER_SPACING = 2.05
 const AISLE_HALF = 3.25
 /** Frontmost row (toward portal); rows step toward the vault (−Z). */
 const TELLER_Z0 = 2.35
-/** Bigger enclosed hall so zoom-out does not clip into black fog. */
-const HALL_W = 18.5
-const Z_BACK = -11.5
-const Z_FRONT = 8.2
-const HALL_HEIGHT = 5.4
-const HOME_POS: [number, number, number] = [0, 3.05, 6.4]
-const HOME_TARGET: [number, number, number] = [0, 1.45, -2.8]
+/** Bigger enclosed hall so zoom-out stays inside walls/floor (no black void). */
+const HALL_W = 26
+const Z_BACK = -15.5
+const Z_FRONT = 11.5
+const HALL_HEIGHT = 6.4
+const HOME_POS: [number, number, number] = [0, 3.2, 7.2]
+const HOME_TARGET: [number, number, number] = [0, 1.5, -3.2]
 /** Half-width of each teller's private rope channel (local X). */
 const LANE_HALF = 0.7
 /** Mouth posts into the aisle (local +Z) — open entry, no front bar. */
@@ -60,7 +60,8 @@ const LANE_Z_MID = 1.15
 const LANE_Z_BACK = 0.55
 const ROPE_Y = 0.82
 const ZOOM_DIST_NEAR = 3.55
-const ZOOM_DIST_MAX = 22
+/** Cap far zoom so the frame stays filled by the hall, not the fog void. */
+const ZOOM_DIST_MAX = 16
 
 type SlotPose = {
   side: -1 | 1
@@ -590,7 +591,7 @@ function SideScreen({
     onOpen?.()
   }
   return (
-    <group position={[side * 4.15, 2.85, Z_BACK + 0.58]}>
+    <group position={[side * 5.35, 3.05, Z_BACK + 0.58]}>
       <mesh
         onClick={open}
         onPointerOver={() => {
@@ -600,23 +601,23 @@ function SideScreen({
           document.body.style.cursor = 'default'
         }}
       >
-        <boxGeometry args={[3.35, 1.55, 0.14]} />
+        <boxGeometry args={[3.7, 1.7, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
       </mesh>
       <mesh position={[0, 0, 0.08]} onClick={open}>
-        <planeGeometry args={[3.1, 1.35]} />
+        <planeGeometry args={[3.4, 1.48]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.82, 0.06]}>
-        <boxGeometry args={[3.4, 0.05, 0.06]} />
+      <mesh position={[0, 0.9, 0.06]}>
+        <boxGeometry args={[3.75, 0.05, 0.06]} />
         <meshBasicMaterial color={accent} toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.82, 0.06]}>
-        <boxGeometry args={[3.4, 0.04, 0.05]} />
+      <mesh position={[0, -0.9, 0.06]}>
+        <boxGeometry args={[3.75, 0.04, 0.05]} />
         <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
       {onOpen && (
-        <Html position={[0, -1.05, 0.1]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
+        <Html position={[0, -1.15, 0.1]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
           <div
             style={{
               fontFamily: 'Share Tech Mono, monospace',
@@ -663,7 +664,7 @@ function BankEnclosure() {
         <boxGeometry args={[width - 0.35, 0.04, depth - 0.5]} />
         <meshStandardMaterial color="#160e2c" roughness={0.4} metalness={0.35} />
       </mesh>
-      <gridHelper args={[Math.min(width - 1.2, 16), 28, '#2de2e6', '#2a1060']} position={[0, 0.035, midZ * 0.15]} />
+      <gridHelper args={[Math.min(width - 1.5, 22), 32, '#2de2e6', '#2a1060']} position={[0, 0.035, midZ * 0.12]} />
 
       {/* Back wall + wainscot (vault end) */}
       <mesh position={[0, ceilY / 2, zBack - wallT / 2]}>
@@ -1194,8 +1195,8 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
   return (
     <>
       <color attach="background" args={['#12082a']} />
-      <fog attach="fog" args={['#1a0a38', 22, 70]} />
-      <PerspectiveCamera makeDefault fov={42} near={0.08} far={200} position={HOME_POS} />
+      <fog attach="fog" args={['#1a0a38', 28, 95]} />
+      <PerspectiveCamera makeDefault fov={42} near={0.08} far={260} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault
