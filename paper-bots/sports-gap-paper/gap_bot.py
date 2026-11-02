@@ -592,16 +592,20 @@ def run():
             reason = None
             lane = "accurate"
             need = base_need
-            # Top25 #15 — sport-split fair floors (NFL stricter on the accurate lane).
+            # Top25 #15 / E1 #113 — sport-split fair floors (NFL stricter both lanes).
             fair_floor = MIN_FAIR_PROB
+            speed_floor = MIN_FAIR_SPEED
             try:
                 if DESK_ROOT not in sys.path:
                     sys.path.insert(0, DESK_ROOT)
                 import desk_top25
                 fair_floor = float(desk_top25.league_fair_floor(league))
+                speed_floor = float(desk_top25.league_speed_floor(league))
             except Exception:
                 fair_floor = MIN_FAIR_PROB
+                speed_floor = MIN_FAIR_SPEED
             accurate_floor = max(MIN_FAIR_ACCURATE, fair_floor)
+            speed_floor = max(float(speed_floor), float(MIN_FAIR_SPEED))
             if entries_off:
                 reason = entries_off
             elif key in open_by_game:
@@ -611,12 +615,12 @@ def run():
             elif fair + 1e-12 >= accurate_floor:
                 lane = "accurate"
                 need = base_need
-            elif fair + 1e-12 >= MIN_FAIR_SPEED:
+            elif fair + 1e-12 >= speed_floor:
                 # Speed lane: take the fill only with extra fee-aware edge.
                 lane = "speed"
                 need = round(base_need + MIN_GAP_SPEED_EXTRA, 4)
             else:
-                reason = f"fair {fair:.0%} < speed floor {MIN_FAIR_SPEED:.0%} - skip"
+                reason = f"fair {fair:.0%} < speed floor {speed_floor:.0%} - skip"
             if reason is None and gap < need:
                 reason = f"gap < {need*100:.0f} ({lane}) - no trade"
             elif reason is None and ask - bid > MAX_SPREAD:

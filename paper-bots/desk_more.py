@@ -416,12 +416,49 @@ def skip_leaderboard(root: str | None = None, *, day: str | None = None, top: in
     }
 
 
-def tower_budgets(cfg: dict | None = None) -> dict[str, float]:
-    """Dollar caps per tower from desk max_open_risk × share."""
+# E1 #116 — while memecoin is red, starve its share and feed BTC/commodity.
+MEME_RED_SHARE = 0.03
+MEME_RED_LOCK_USD = 20.0
+
+
+def effective_tower_shares(
+    cfg: dict | None = None,
+    *,
+    meme_today: float | None = None,
+    red_lock_usd: float | None = None,
+) -> dict[str, float]:
+    """Tower budget shares; on meme red day cut memecoin to 0.03 and boost BTC/commodity."""
+    cfg = cfg or {}
+    shares = cfg.get("tower_risk_budgets") if isinstance(cfg.get("tower_risk_budgets"), dict) else None
+    shares = {str(k): float(v) for k, v in dict(shares or DEFAULT_TOWER_BUDGET_SHARE).items()}
+    lock = float(MEME_RED_LOCK_USD if red_lock_usd is None else red_lock_usd)
+    today = meme_today
+    if today is None:
+        today = _finite(cfg.get("meme_today"))
+    if today is None or today > -lock:
+        return shares
+    cur = float(shares.get("memecoin") or 0.0)
+    target = float(MEME_RED_SHARE)
+    if cur <= target + 1e-12:
+        shares["memecoin"] = min(cur, target)
+        return shares
+    cut = cur - target
+    shares["memecoin"] = target
+    shares["btc15m"] = float(shares.get("btc15m") or 0.0) + cut * 0.60
+    shares["commodity-15m"] = float(shares.get("commodity-15m") or 0.0) + cut * 0.40
+    return shares
+
+
+def tower_budgets(
+    cfg: dict | None = None,
+    *,
+    meme_today: float | None = None,
+    red_lock_usd: float | None = None,
+) -> dict[str, float]:
+    """Dollar caps per tower from desk max_open_risk × share (red-day aware)."""
     cfg = cfg or {}
     desk_cap = float(cfg.get("max_open_risk") if cfg.get("max_open_risk") is not None else 100.0)
-    shares = cfg.get("tower_risk_budgets") if isinstance(cfg.get("tower_risk_budgets"), dict) else None
-    shares = dict(shares or DEFAULT_TOWER_BUDGET_SHARE)
+    shares = effective_tower_shares(cfg, meme_today=meme_today, red_lock_usd=red_lock_usd)
     out = {}
     for bot_id, share in shares.items():
         try:
@@ -779,11 +816,21 @@ def more_summary(root: str | None = None, *, bots: list | None = None, cfg: dict
     sticky = sticky_positions(bots or [])
     if root is not None:
         remember_sticky(root, sticky)
+    meme_today = None
+    for bot in bots or []:
+        if isinstance(bot, dict) and bot.get("id") == "memecoin":
+            meme_today = _finite(bot.get("today"))
+            break
+    shares = effective_tower_shares(cfg, meme_today=meme_today)
+    red = meme_today is not None and meme_today <= -float(MEME_RED_LOCK_USD)
     return {
         "paper_only": True,
         "version": 1,
         "skip_leaderboard": skip_leaderboard(root),
-        "tower_budgets": tower_budgets(cfg),
+        "tower_budgets": tower_budgets(cfg, meme_today=meme_today),
+        "tower_shares": shares,
+        "meme_red_day": red,
+        "meme_red_share": MEME_RED_SHARE if red else None,
         "near_miss_count": len((load_more(root).get("near_miss") or [])),
         "near_miss_recent": list((load_more(root).get("near_miss") or []))[-12:],
         "sticky": sticky[:20],
@@ -813,6 +860,11 @@ def self_check() -> None:
     assert abs(sum(budgets.values()) - 100) < 0.05
     block = tower_budget_blocks("memecoin", 4.0, 3.0, {"max_open_risk": 100})
     assert "tower risk budget" in block
+    red_shares = effective_tower_shares({"tower_risk_budgets": dict(DEFAULT_TOWER_BUDGET_SHARE)}, meme_today=-25)
+    assert abs(red_shares["memecoin"] - MEME_RED_SHARE) < 1e-9
+    assert red_shares["btc15m"] > DEFAULT_TOWER_BUDGET_SHARE["btc15m"]
+    assert red_shares["commodity-15m"] > DEFAULT_TOWER_BUDGET_SHARE["commodity-15m"]
+    assert abs(sum(red_shares.values()) - sum(DEFAULT_TOWER_BUDGET_SHARE.values())) < 1e-9
     nm = is_near_miss(z=0.60, p=0.85, reasons=["z 0.60 < 0.65"])
     assert nm["near_miss"] is True and nm["shadow_only"] is True
     assert series_vol_prior("KXNATGAS15M-FOO") > series_vol_prior("KXGOLD15M")

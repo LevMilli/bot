@@ -49,6 +49,11 @@ IDLE_SPORTS_SEC = 900
 # Forced sports AUTO near tip (T−15 / T−5). Fee floors still apply inside gap_bot.
 SPORTS_TIP_FORCE_SEC = 45
 SPORTS_TIP_FORCE_WINDOW_MIN = 15
+# E2 #203 — manage-only pulse when memecoin has open paper (exits before bleed).
+MEME_MANAGE_OPEN_SEC = 120
+# E1 #110 — commodity calm cadence when ≥2 series already open.
+COMMODITY_CALM_OPEN_SEC = 60
+COMMODITY_CALM_OPEN_N = 2
 LOG_CAP_BYTES = 256 * 1024
 PAGE_SIZE = 20
 STALE_PRICE_SEC = 30
@@ -2584,7 +2589,9 @@ def timer_text() -> str:
         "Kalshi morning brief once at 8:00 AM, dry run. "
         "Kalshi paper scans forced at 12:05, 13:05, and 14:20 CT (up to 3/day). "
         "Kalshi paper settle once at 4:00 PM. "
-        "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed). "
+        "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed); "
+        "about every 2 minutes when open paper needs manage. "
+        "Commodity about every 90 seconds; about every 60 seconds when ≥2 series are open. "
         "No edge is a finished check with zero paper trades. "
         "Numbers only move while the Discord bot paper timer is alive."
     )
@@ -2646,6 +2653,10 @@ def due_slots(now: dt.datetime, root: str) -> list:
             gap = float(slot["every_sec"])
             if slot["id"] == "sports-gap":
                 gap = _sports_auto_gap_sec(root, gap, now=now)
+            elif slot["id"] == "memecoin":
+                gap = _meme_auto_gap_sec(root, gap)
+            elif slot["id"] == "commodity-15m":
+                gap = _commodity_auto_gap_sec(root, gap)
             if prev is not None and (now - prev).total_seconds() < gap:
                 continue
             due.append(slot)
@@ -2709,6 +2720,12 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
                     handle.write(_iso(now) + "\n")
             except OSError:
                 pass
+    except Exception:
+        pass
+    # E3 helper — calendar scanner digest (never places).
+    try:
+        from helpers import calendar_scanner
+        calendar_scanner.run_if_due(root, now)
     except Exception:
         pass
     touch_heartbeat(root, now)
@@ -4259,6 +4276,34 @@ def _sports_auto_gap_sec(root: str, base_gap: float, now: dt.datetime | None = N
     return float(base_gap)
 
 
+def _meme_open_count(root: str) -> int:
+    state = _read_json(_under(root, "memecoin-paper", "positions.json"))
+    if not isinstance(state, dict):
+        return 0
+    return len([p for p in (state.get("open") or []) if isinstance(p, dict)])
+
+
+def _commodity_open_count(root: str) -> int:
+    state = _read_json(_under(root, "commodity-15m-paper", "paper_account.json"))
+    if not isinstance(state, dict):
+        return 0
+    return len([p for p in (state.get("open") or []) if isinstance(p, dict)])
+
+
+def _meme_auto_gap_sec(root: str, base_gap: float) -> float:
+    """Faster manage ticks when meme book is open — exits still fee-aware."""
+    if _meme_open_count(root) > 0:
+        return float(MEME_MANAGE_OPEN_SEC)
+    return float(base_gap)
+
+
+def _commodity_auto_gap_sec(root: str, base_gap: float) -> float:
+    """Calm-regime faster poll when ≥2 commodity series already open."""
+    if _commodity_open_count(root) >= int(COMMODITY_CALM_OPEN_N):
+        return float(COMMODITY_CALM_OPEN_SEC)
+    return float(base_gap)
+
+
 def _rate_ok(root: str, bot_id: str, now: dt.datetime | None = None) -> bool:
     now = now or dt.datetime.now(dt.timezone.utc)
     data = _read_json(manual_path(root)) or {}
@@ -4361,6 +4406,10 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
             gap = float(slot["every_sec"])
             if bot_id == "sports-gap":
                 gap = _sports_auto_gap_sec(root, gap, now=now)
+            elif bot_id == "memecoin":
+                gap = _meme_auto_gap_sec(root, gap)
+            elif bot_id == "commodity-15m":
+                gap = _commodity_auto_gap_sec(root, gap)
             when = now if prev is None else prev + dt.timedelta(seconds=gap)
             if when < now:
                 when = now
