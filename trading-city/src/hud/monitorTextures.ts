@@ -230,14 +230,10 @@ export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
   const { canvas, ctx, w, h } = makeCanvas(1280, 360)
   ctx.fillStyle = '#050812'
   ctx.fillRect(0, 0, w, h)
-  ctx.fillStyle = 'rgba(45,226,230,0.045)'
-  for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1)
-  ctx.strokeStyle = 'rgba(249,200,14,0.75)'
+  // Soft gold frame only — inner cyan strokes read as a clip line through "realized" at lobby distance.
+  ctx.strokeStyle = 'rgba(249,200,14,0.8)'
   ctx.lineWidth = 4
   ctx.strokeRect(8, 8, w - 16, h - 16)
-  ctx.strokeStyle = 'rgba(45,226,230,0.35)'
-  ctx.lineWidth = 2
-  ctx.strokeRect(16, 16, w - 32, h - 32)
 
   ctx.fillStyle = '#f9c80e'
   ctx.font = 'bold 34px monospace'
