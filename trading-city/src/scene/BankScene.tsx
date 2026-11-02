@@ -46,12 +46,12 @@ const AISLE_HALF = 3.25
 /** Frontmost row (toward portal); rows step toward the vault (−Z). */
 const TELLER_Z0 = 2.35
 /** Bigger enclosed hall so zoom-out stays inside walls/floor (no black void). */
-const HALL_W = 26
-const Z_BACK = -15.5
-const Z_FRONT = 11.5
-const HALL_HEIGHT = 6.4
-const HOME_POS: [number, number, number] = [0, 3.2, 7.2]
-const HOME_TARGET: [number, number, number] = [0, 1.5, -3.2]
+const HALL_W = 32
+const Z_BACK = -18
+const Z_FRONT = 14
+const HALL_HEIGHT = 7.2
+const HOME_POS: [number, number, number] = [0, 3.35, 7.6]
+const HOME_TARGET: [number, number, number] = [0, 1.55, -3.4]
 /** Half-width of each teller's private rope channel (local X). */
 const LANE_HALF = 0.7
 /** Mouth posts into the aisle (local +Z) — open entry, no front bar. */
@@ -61,7 +61,7 @@ const LANE_Z_BACK = 0.55
 const ROPE_Y = 0.82
 const ZOOM_DIST_NEAR = 3.55
 /** Cap far zoom so the frame stays filled by the hall, not the fog void. */
-const ZOOM_DIST_MAX = 16
+const ZOOM_DIST_MAX = 12.5
 
 type SlotPose = {
   side: -1 | 1
@@ -655,6 +655,12 @@ function BankEnclosure() {
 
   return (
     <group>
+      {/* Outer ground apron so zoom-out past the slab still shows floor, not void. */}
+      <mesh position={[0, -0.22, midZ]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[52, 64]} />
+        <meshStandardMaterial color="#0c0618" roughness={0.95} metalness={0.05} />
+      </mesh>
+
       {/* Thick floor slab */}
       <mesh position={[0, -0.08, midZ]} receiveShadow>
         <boxGeometry args={[width + 0.4, 0.18, depth + 0.4]} />
@@ -664,7 +670,7 @@ function BankEnclosure() {
         <boxGeometry args={[width - 0.35, 0.04, depth - 0.5]} />
         <meshStandardMaterial color="#160e2c" roughness={0.4} metalness={0.35} />
       </mesh>
-      <gridHelper args={[Math.min(width - 1.5, 22), 32, '#2de2e6', '#2a1060']} position={[0, 0.035, midZ * 0.12]} />
+      <gridHelper args={[Math.min(width - 1.8, 26), 36, '#2de2e6', '#2a1060']} position={[0, 0.035, midZ * 0.1]} />
 
       {/* Back wall + wainscot (vault end) */}
       <mesh position={[0, ceilY / 2, zBack - wallT / 2]}>
@@ -1195,8 +1201,8 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
   return (
     <>
       <color attach="background" args={['#12082a']} />
-      <fog attach="fog" args={['#1a0a38', 28, 95]} />
-      <PerspectiveCamera makeDefault fov={42} near={0.08} far={260} position={HOME_POS} />
+      <fog attach="fog" args={['#1a0a38', 24, 72]} />
+      <PerspectiveCamera makeDefault fov={42} near={0.08} far={220} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault
