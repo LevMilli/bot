@@ -127,5 +127,5 @@ There is **no** claim of live alpha. Paper results stay optimistic.
 | Policy object | `pimp_desk.ROI_POLICY` → `snapshot["roi_system"]` |
 | Per-bot plans | `BOT_PLANS` / `bot_plans()` |
 | Live gates | `gates_hit` / `entry_gate` |
-| Staff + city | PIMP-TRADING cards, PIMP-CITY monitors |
+| Staff + city | PIMP-TRADING cards, APEX-CITY monitors |
 | Follow-ups | Sports hard stop; BTC real TP or drop; sized Kalshi when present |

@@ -152,7 +152,7 @@ function ProfitBoard({ desk }: { desk?: Desk }) {
   )
 }
 
-/** Interior SIGNAL-CITY bank — five teller windows + net-profit board. */
+/** Interior APEX-CITY bank — five teller windows + net-profit board. */
 export function BankScene({ bots, desk, onSelectTeller }: Props) {
   const cam = useRef<Cam>(null)
   const tellers = useMemo(() => {
@@ -250,7 +250,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
             textShadow: '0 0 12px rgba(249,200,14,0.45)',
           }}
         >
-          SIGNAL-CITY TRUST · {workers} TELLERS ON DUTY
+          APEX-CITY TRUST · {workers} TELLERS ON DUTY
           <div style={{ color: '#9aa3c7', marginTop: 4, letterSpacing: '0.04em' }}>
             cash {money(desk?.cash)} · click a teller for trades
           </div>

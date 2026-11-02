@@ -1,4 +1,4 @@
-"""Header policy that was leaving SIGNAL-CITY a blank page.
+"""Header policy that was leaving APEX-CITY a blank page.
 
 Loads pimp_city_csp / dash_secure from bot.py without importing discord.
 """
@@ -59,7 +59,7 @@ def test_city_csp_allows_the_bundle_and_framing():
 def test_city_response_is_frameable_and_executable():
     ns = _load()
     resp = Resp()
-    ns["dash_secure"](resp, "/signal-city/")
+    ns["dash_secure"](resp, "/apex-city/")
     h = resp.headers
     assert "X-Frame-Options" not in h
     assert "frame-ancestors *" in h["Content-Security-Policy"]
@@ -71,14 +71,15 @@ def test_city_response_is_frameable_and_executable():
 def test_city_policy_covers_assets_and_not_the_rest_of_the_dashboard():
     ns = _load()
     asset = Resp()
-    ns["dash_secure"](asset, "/signal-city/assets/index.js")
+    ns["dash_secure"](asset, "/apex-city/assets/index.js")
     assert "X-Frame-Options" not in asset.headers
     assert "script-src 'self'" in asset.headers["Content-Security-Policy"]
 
-    legacy = Resp()
-    ns["dash_secure"](legacy, "/pimp-city/")
-    assert "X-Frame-Options" not in legacy.headers
-    assert "script-src 'self'" in legacy.headers["Content-Security-Policy"]
+    for legacy_path in ("/pimp-city/", "/signal-city/"):
+        legacy = Resp()
+        ns["dash_secure"](legacy, legacy_path)
+        assert "X-Frame-Options" not in legacy.headers
+        assert "script-src 'self'" in legacy.headers["Content-Security-Policy"]
 
     other = Resp()
     ns["dash_secure"](other, "/staff")
@@ -96,11 +97,12 @@ def test_shell_is_served_without_a_staff_cookie():
     assert "Live trades stay staff-only" in body
 
 
-def test_path_matcher_covers_signal_and_legacy():
+def test_path_matcher_covers_apex_and_legacy():
     ns = _load()
     fn = ns["_pimp_city_path"]
+    assert fn("/apex-city/")
+    assert fn("/apex-city/assets/x.js")
     assert fn("/signal-city/")
-    assert fn("/signal-city/assets/x.js")
     assert fn("/pimp-city/")
     assert not fn("/staff")
 
@@ -110,5 +112,5 @@ if __name__ == "__main__":
     test_city_response_is_frameable_and_executable()
     test_city_policy_covers_assets_and_not_the_rest_of_the_dashboard()
     test_shell_is_served_without_a_staff_cookie()
-    test_path_matcher_covers_signal_and_legacy()
+    test_path_matcher_covers_apex_and_legacy()
     print("ok")
