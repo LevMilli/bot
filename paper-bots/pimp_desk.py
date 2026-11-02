@@ -27,11 +27,16 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 
+# bot.py loads this file via importlib without putting paper-bots/ on sys.path.
+# Keep desk_profit importable in that host path (live /api/pimp-trading.json).
+_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
 import desk_profit
 
 log = logging.getLogger("pimpdesk")
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = _ROOT_DIR
 CT = ZoneInfo("America/Chicago")
 CONFIRM = "RESET PAPER"
 QUIET_START = "22:00"

@@ -41667,7 +41667,10 @@ def pimp_mod():
         return _PIMP
     import importlib.util
     import sys
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper-bots", "pimp_desk.py")
+    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper-bots")
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    path = os.path.join(folder, "pimp_desk.py")
     spec = importlib.util.spec_from_file_location("pimp_desk", path)
     if spec is None or spec.loader is None:
         raise RuntimeError("paper desk missing")
