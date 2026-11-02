@@ -42,6 +42,7 @@ CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this ban
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
 PRICE_BOUNDS = (0.05, 0.92)     # avoid near-worthless / near-locked contracts
 PREGAME_WINDOW_MIN = 180  # tip-soon window (3h) so Monday/weekday books fill earlier
+TIP_ALARM_WINDOWS_MIN = (15, 5)  # force-priority refresh bands before tip
 MAX_BUYS_PER_CHECK = 4    # more than one paper fill per timer tick when risk allows
 
 def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None, spread=None, ticker=None):
@@ -273,19 +274,42 @@ def espn_pregame_fair_home(summary):
         return None
 
 
-def tip_within_minutes(game, minutes=PREGAME_WINDOW_MIN) -> bool:
-    """True when tip/start is within ±minutes of now (CT-aware via UTC date string)."""
+def tip_eta_minutes(game) -> float | None:
+    """Minutes until tip (negative if already tipped). None if date missing/bad."""
     raw = game.get("date")
     if not raw:
-        return False
+        return None
     try:
         when = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except ValueError:
-        return False
+        return None
     now = datetime.now(timezone.utc)
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
-    return abs((when - now).total_seconds()) <= float(minutes) * 60.0
+    return (when - now).total_seconds() / 60.0
+
+
+def tip_within_minutes(game, minutes=PREGAME_WINDOW_MIN) -> bool:
+    """True when tip/start is within ±minutes of now (CT-aware via UTC date string)."""
+    eta = tip_eta_minutes(game)
+    if eta is None:
+        return False
+    return abs(float(eta)) <= float(minutes)
+
+
+def tip_alarm_band(game) -> int | None:
+    """
+    Masters tip alarms: return 15 or 5 when tip is inside that forward window
+    (0 < eta <= band). Used to prioritize fee-aware buys near tip — does not
+    waive venue min_edge.
+    """
+    eta = tip_eta_minutes(game)
+    if eta is None or eta <= 0:
+        return None
+    for band in sorted(TIP_ALARM_WINDOWS_MIN):
+        if eta <= float(band):
+            return int(band)
+    return None
 
 
 def espn_fair_home(summary, game):
@@ -603,10 +627,14 @@ def run():
                     summary_out["skips"].append(skip)
             if reason:
                 lines.append(row + gtxt + f" | {reason} |"); continue
+            alarm = tip_alarm_band(g) if g.get("state") == "pre" else None
+            if alarm is not None:
+                print(f"  TIP-ALARM T−{alarm}: {league} {name} (fee-aware priority, edge still required)")
             buy_candidates.append({
                 "key": key, "league": league, "name": name, "m": m, "side": side, "fair": fair,
                 "bid": bid, "ask": ask, "gap": gap, "score": score, "path": path, "g": g,
                 "series": series, "row": row, "gtxt": gtxt, "lane": lane, "need": need,
+                "tip_alarm": alarm,
             })
 
     # ---- exits / settlement (before new paper buys) ----
@@ -772,9 +800,13 @@ def run():
                 import desk_more
                 import desk_top25
                 clv_avg = (desk_more.clv_summary(DESK_ROOT) or {}).get("avg_clv")
-                c["_brain_score"] = desk_top25.sports_rank_score(
+                base = float(desk_top25.sports_rank_score(
                     c.get("gap"), c.get("fair"), clv=clv_avg, depth=None,
-                )
+                ) or 0)
+                # Tip-alarm boost: T−5 > T−15 > none (still must clear fee gap).
+                alarm = c.get("tip_alarm")
+                boost = 0.15 if alarm == 5 else (0.08 if alarm == 15 else 0.0)
+                c["_brain_score"] = base + boost
             except Exception:
                 pass
         buy_candidates = desk_brain.rank_candidates(buy_candidates)
