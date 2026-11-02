@@ -184,12 +184,11 @@ ACTIONS = {
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
 # Daily slots run once per Chicago day, the first time the process is up inside
 # the window. The Kalshi scan uses the desk's paper scan (no --any-time) and
-# only starts from 12:30 to 14:55 CT, the script's own entry window. An earlier
-# scan would exit without a paper fill. The morning brief stays the desk's dry run.
-# Settle is the desk's paper settle, once at 4:00 PM CT, after the 3:00 PM
-# contract time, so a closed paper trade can land in the state file.
-# Memecoin manages open exits about every 10 minutes (same script still scans
-# for new tickets). Three daily slots were too sparse for stop/ladder/time exits.
+# starts from 12:00 to 14:55 CT (up to 3 scans/day). The morning brief stays
+# the desk's dry run. Settle is the desk's paper settle, once at 4:00 PM CT,
+# after the 3:00 PM contract time, so a closed paper trade can land in the
+# state file. Memecoin manages open exits about every 5 minutes (same script
+# still scans for new tickets; dual accurate/speed lanes).
 AUTO_RETRY_SEC = 900
 AUTO = (
     # Faster sports polls so tip-soon + dual lanes can land multiple fills.
@@ -2325,13 +2324,14 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
 def timer_text() -> str:
     """Plain schedule for the desk. No forecast and no profit language."""
     return (
-        "On a timer, America/Chicago. Sports gap about every 5 minutes. "
-        "BTC 15-minute signal about every 90 seconds — scores every open KXBTC15M window "
+        "On a timer, America/Chicago. Sports gap about every 3 minutes (dual lanes). "
+        "BTC 15-minute signal about every 60 seconds — scores every open KXBTC15M window "
         "and syncs the Kalshi public trade tape for desk series. "
+        "Commodity 15m about every 90 seconds. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
-        "Kalshi paper scan once at 12:30 PM, inside that bot's own window. "
+        "Kalshi paper scan from 12:00 PM (up to 3/day), inside that bot's own window. "
         "Kalshi paper settle once at 4:00 PM. "
-        "Memecoin about every 10 minutes (manage exits, then scan). "
+        "Memecoin about every 5 minutes (manage exits, then scan; dual lanes). "
         "No edge is a finished check with zero paper trades. "
         "Numbers only move while the Discord bot paper timer is alive."
     )
