@@ -3282,7 +3282,7 @@ def _mark_manual(root: str, bot_id: str) -> None:
     _write_json(manual_path(root), data)
 
 
-def touch_heartbeat(root: str, now: dt.datetime | None = None) -> None:
+def touch_heartbeat(root: str | None = None, now: dt.datetime | None = None) -> None:
     when = now or dt.datetime.now(dt.timezone.utc)
     _write_json(heartbeat_path(root), {"at": _iso(when), "paper_only": True})
 
