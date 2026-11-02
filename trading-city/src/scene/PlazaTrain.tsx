@@ -1,5 +1,6 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
+import * as THREE from 'three'
 import type { Group, Mesh } from 'three'
 import { RAIL_GAUGE, RAIL_R, RAIL_Z_OFF } from './plazaLayout'
 
@@ -7,6 +8,8 @@ const RAIL_Y = 0.2
 const Z_OFF = RAIL_Z_OFF
 const TIE_COUNT = 36
 const SEGMENTS = 56
+const SMOKE_COUNT = 18
+const SMOKE_LIFE = 2.8
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined' || !window.matchMedia) return false
@@ -17,29 +20,10 @@ function prefersReducedMotion() {
 const CAR_ARCS = [0, 1.38, 2.65, 3.9] as const
 const CAR_COLORS = ['#ff2a6d', '#2de2e6', '#b967ff', '#39ff14'] as const
 
+/** Physical stack on the loco (no particles — trail lives in world space). */
 function SmokeStack() {
-  const puffs = useRef<(Mesh | null)[]>([])
-  const reduced = useMemo(() => prefersReducedMotion(), [])
-
-  useFrame(({ clock }) => {
-    if (reduced) return
-    const t = clock.getElapsedTime()
-    for (let i = 0; i < puffs.current.length; i++) {
-      const m = puffs.current[i]
-      if (!m) continue
-      const phase = (t * 0.85 + i * 0.42) % 2.4
-      const y = 0.15 + phase * 0.95
-      const s = 0.12 + phase * 0.22
-      m.position.set(0.08, y, 0)
-      m.scale.setScalar(s)
-      const mat = m.material as { opacity?: number }
-      if (mat.opacity != null) mat.opacity = Math.max(0, 0.55 - phase * 0.22)
-    }
-  })
-
   return (
     <group position={[0.22, 0.92, 0]}>
-      {/* stack */}
       <mesh position={[0, 0.18, 0]}>
         <cylinderGeometry args={[0.07, 0.09, 0.36, 8]} />
         <meshBasicMaterial color="#1a1e28" />
@@ -48,17 +32,76 @@ function SmokeStack() {
         <cylinderGeometry args={[0.1, 0.08, 0.08, 8]} />
         <meshBasicMaterial color="#2a2438" />
       </mesh>
-      {/* live smoke puffs */}
-      {[0, 1, 2, 3].map((i) => (
+    </group>
+  )
+}
+
+/**
+ * World-space smoke trail: puffs spawn at the stack tip and stay put while the
+ * train moves on, so smoke hangs behind the loco along the track.
+ */
+function SmokeTrail({ locoRef }: { locoRef: { current: Group | null } }) {
+  const puffs = useRef<(Mesh | null)[]>([])
+  const ages = useRef<Float32Array>(new Float32Array(SMOKE_COUNT).fill(SMOKE_LIFE + 1))
+  const spawnAcc = useRef(0)
+  const next = useRef(0)
+  const tipLocal = useMemo(() => new THREE.Vector3(0.3, 1.45, 0), [])
+  const tipWorld = useMemo(() => new THREE.Vector3(), [])
+  const reduced = useMemo(() => prefersReducedMotion(), [])
+
+  useFrame((_, dt) => {
+    if (reduced) return
+    const loco = locoRef.current
+    if (loco) {
+      loco.updateWorldMatrix(true, false)
+      tipWorld.copy(tipLocal).applyMatrix4(loco.matrixWorld)
+      spawnAcc.current += dt
+      if (spawnAcc.current >= 0.09) {
+        spawnAcc.current = 0
+        const i = next.current % SMOKE_COUNT
+        next.current += 1
+        const m = puffs.current[i]
+        if (m) {
+          m.position.copy(tipWorld)
+          m.scale.setScalar(0.14)
+          ages.current[i] = 0
+          const mat = m.material as THREE.MeshBasicMaterial
+          mat.opacity = 0.5
+          m.visible = true
+        }
+      }
+    }
+
+    for (let i = 0; i < SMOKE_COUNT; i++) {
+      const m = puffs.current[i]
+      if (!m || !m.visible) continue
+      ages.current[i] += dt
+      const age = ages.current[i]
+      if (age > SMOKE_LIFE) {
+        m.visible = false
+        continue
+      }
+      const t = age / SMOKE_LIFE
+      // Drift up + slightly outward; stay in world space so the trail lags the train.
+      m.position.y += dt * 0.55
+      m.scale.setScalar(0.14 + t * 0.55)
+      const mat = m.material as THREE.MeshBasicMaterial
+      mat.opacity = Math.max(0, 0.48 * (1 - t))
+    }
+  })
+
+  return (
+    <group>
+      {Array.from({ length: SMOKE_COUNT }).map((_, i) => (
         <mesh
           key={i}
           ref={(el) => {
             puffs.current[i] = el
           }}
-          position={[0.08, 0.2, 0]}
+          visible={false}
         >
-          <sphereGeometry args={[0.16, 8, 8]} />
-          <meshBasicMaterial color="#c8d0dc" transparent opacity={0.4} depthWrite={false} />
+          <sphereGeometry args={[0.18, 7, 7]} />
+          <meshBasicMaterial color="#d0d6e0" transparent opacity={0} depthWrite={false} />
         </mesh>
       ))}
     </group>
@@ -149,6 +192,7 @@ export function PlazaTrain({
   speed?: number
 }) {
   const carRefs = useRef<(Group | null)[]>([])
+  const locoRef = useRef<Group | null>(null)
   const reduced = useMemo(() => prefersReducedMotion(), [])
   const angle = useRef(0.35)
 
@@ -174,6 +218,7 @@ export function PlazaTrain({
             key={i}
             ref={(el) => {
               carRefs.current[i] = el
+              if (i === 0) locoRef.current = el
             }}
             position={[Math.cos(a) * radius, y, Math.sin(a) * radius + Z_OFF]}
             rotation={[0, -a + Math.PI / 2, 0]}
@@ -182,6 +227,7 @@ export function PlazaTrain({
           </group>
         )
       })}
+      <SmokeTrail locoRef={locoRef} />
     </group>
   )
 }
