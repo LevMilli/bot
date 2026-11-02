@@ -223,7 +223,9 @@ const PALETTE = [
   { color: '#39ff14', accent: '#9dff9a', occupancy: 'driver' as const },
 ]
 
-const LANE = 0.55
+const LANE = 0.72
+/** Nose-to-tail gap along the avenue (car length ≈ 1.35). */
+const MIN_GAP = 3.6
 const ROAD_END = BACK_ROAD_HALF_LEN - 1.2
 const FADE_DIST = 2.8
 
@@ -233,7 +235,7 @@ function makeCar(slot: number, dir: -1 | 1, x: number, gen: number): TrafficCar 
     slot,
     dir,
     x,
-    speed: 2.35 + (slot % 3) * 0.4,
+    speed: 2.2 + (slot % 2) * 0.25,
     color: pal.color,
     accent: pal.accent,
     occupancy: pal.occupancy,
@@ -243,23 +245,73 @@ function makeCar(slot: number, dir: -1 | 1, x: number, gen: number): TrafficCar 
   }
 }
 
+/** True if `x` is clear of every same-direction car (except optional skip slot). */
+function spawnClear(cars: TrafficCar[], dir: -1 | 1, x: number, skipSlot: number) {
+  for (const o of cars) {
+    if (o.slot === skipSlot || o.dir !== dir) continue
+    if (Math.abs(o.x - x) < MIN_GAP) return false
+  }
+  return true
+}
+
+/** Find a spawn X at the lane entrance that does not stack on another car. */
+function clearSpawnX(cars: TrafficCar[], dir: -1 | 1, skipSlot: number) {
+  const start = dir < 0 ? ROAD_END : -ROAD_END
+  // Walk inward from the entrance until we clear everyone ahead in this lane.
+  for (let step = 0; step < 12; step++) {
+    const x = start - dir * step * (MIN_GAP * 0.55)
+    if (Math.abs(x) > ROAD_END + 0.5) continue
+    if (spawnClear(cars, dir, x, skipSlot)) return x
+  }
+  // Last resort: park just inside the fade zone, still spaced from peers.
+  return start - dir * MIN_GAP
+}
+
 /**
  * Exactly 4 cars on the elevated back avenue, right-hand lanes, looping with fade.
- * Westbound (−X) uses the south lane; eastbound (+X) uses the north lane.
+ * Same-lane cars keep a hard MIN_GAP so they never intersect.
  */
 export function AvenueTraffic({ deckY = 1.35 }: { deckY?: number }) {
+  // Two per lane, seeded far apart.
   const sim = useRef<TrafficCar[]>([
-    makeCar(0, -1, 8, 0),
-    makeCar(1, -1, -4, 0),
-    makeCar(2, 1, -10, 0),
-    makeCar(3, 1, 2, 0),
+    makeCar(0, -1, 10, 0),
+    makeCar(1, -1, -6, 0),
+    makeCar(2, 1, -12, 0),
+    makeCar(3, 1, 4, 0),
   ])
   const [snap, setSnap] = useState(() => sim.current.map((c) => ({ ...c })))
   const acc = useRef(0)
 
   useFrame((_, dt) => {
-    for (const c of sim.current) {
+    const cars = sim.current
+
+    // 1) Integrate motion
+    for (const c of cars) {
       c.x += c.dir * c.speed * dt
+    }
+
+    // 2) Same-lane separation — never let a follower overlap / pass the leader.
+    for (const dir of [-1, 1] as const) {
+      const lane = cars.filter((c) => c.dir === dir).sort((a, b) => (dir < 0 ? a.x - b.x : b.x - a.x))
+      // Sorted so index 0 is the lead car (furthest along travel direction).
+      for (let i = 1; i < lane.length; i++) {
+        const lead = lane[i - 1]
+        const follow = lane[i]
+        // Lead is ahead: for dir=-1 ahead means smaller x; for dir=+1 ahead means larger x.
+        const aheadX = lead.x
+        const minFollowX = dir < 0 ? aheadX + MIN_GAP : aheadX - MIN_GAP
+        if (dir < 0 && follow.x < minFollowX) {
+          follow.x = minFollowX
+          follow.speed = Math.min(follow.speed, lead.speed * 0.92)
+        } else if (dir > 0 && follow.x > minFollowX) {
+          follow.x = minFollowX
+          follow.speed = Math.min(follow.speed, lead.speed * 0.92)
+        }
+      }
+    }
+
+    // 3) End fade / respawn with clearance check
+    for (const c of cars) {
       const end = c.dir < 0 ? -ROAD_END : ROAD_END
       const start = c.dir < 0 ? ROAD_END : -ROAD_END
       const distToEnd = c.dir < 0 ? c.x - end : end - c.x
@@ -269,10 +321,17 @@ export function AvenueTraffic({ deckY = 1.35 }: { deckY?: number }) {
       if (c.phase === 'fadeOut') {
         c.opacity = Math.max(0, distToEnd / FADE_DIST)
         if (c.opacity <= 0.02 || distToEnd < 0) {
+          // Hold invisible until the entrance is clear, then fade in.
+          const x = clearSpawnX(cars, c.dir, c.slot)
+          if (!spawnClear(cars, c.dir, x, c.slot)) {
+            c.opacity = 0
+            c.x = x
+            continue
+          }
           c.gen += 1
           const pal = PALETTE[(c.slot + c.gen) % PALETTE.length]
-          c.x = start
-          c.speed = 2.2 + Math.random() * 1.0
+          c.x = x
+          c.speed = 2.0 + Math.random() * 0.55
           c.color = pal.color
           c.accent = pal.accent
           c.occupancy = pal.occupancy
@@ -294,7 +353,7 @@ export function AvenueTraffic({ deckY = 1.35 }: { deckY?: number }) {
     acc.current += dt
     if (acc.current >= 0.05) {
       acc.current = 0
-      setSnap(sim.current.map((c) => ({ ...c })))
+      setSnap(cars.map((c) => ({ ...c })))
     }
   })
 
