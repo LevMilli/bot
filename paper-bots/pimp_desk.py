@@ -44,6 +44,9 @@ QUIET_END = "07:00"
 MANUAL_GAP_SEC = 30
 HEARTBEAT_STALE_SEC = 180
 IDLE_SPORTS_SEC = 900
+# Forced sports AUTO near tip (T−15 / T−5). Fee floors still apply inside gap_bot.
+SPORTS_TIP_FORCE_SEC = 45
+SPORTS_TIP_FORCE_WINDOW_MIN = 15
 LOG_CAP_BYTES = 256 * 1024
 PAGE_SIZE = 20
 STALE_PRICE_SEC = 30
@@ -2324,6 +2327,10 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         )
     except Exception as exc:  # noqa: BLE001
         desk_row["master"] = {"paper_only": True, "error": type(exc).__name__}
+    tip = sports_tip_alarm_from_cache(root)
+    desk_row["sports_tip"] = tip
+    if isinstance(desk_row.get("master"), dict):
+        desk_row["master"]["sports_tip"] = tip
     gate_rows = []
     prove_rows = []
     for bot in public:
@@ -2552,7 +2559,8 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
 def timer_text() -> str:
     """Plain schedule for the desk. No forecast and no profit language."""
     return (
-        "On a timer, America/Chicago. Sports gap about every 3 minutes (dual lanes). "
+        "On a timer, America/Chicago. Sports gap about every 3 minutes (dual lanes); "
+        "about every 45 seconds when a cached tip is inside T−15 (fee-aware still). "
         "BTC 15-minute signal about every 60 seconds — scores every open KXBTC15M window "
         "and syncs the Kalshi public trade tape for desk series. "
         "Commodity 15m about every 90 seconds. "
@@ -2619,8 +2627,8 @@ def due_slots(now: dt.datetime, root: str) -> list:
         if "every_sec" in slot:
             prev = _parsed(saved.get(key) or "")
             gap = float(slot["every_sec"])
-            if slot["id"] == "sports-gap" and _sports_idle(root):
-                gap = max(gap, IDLE_SPORTS_SEC)
+            if slot["id"] == "sports-gap":
+                gap = _sports_auto_gap_sec(root, gap, now=now)
             if prev is not None and (now - prev).total_seconds() < gap:
                 continue
             due.append(slot)
@@ -4144,6 +4152,96 @@ def _sports_idle(root: str) -> bool:
     return "no live games" in text or '"live_games": 0' in text or '"live_games":0' in text
 
 
+def sports_tip_alarm_from_cache(
+    root: str | None = None,
+    now: dt.datetime | None = None,
+    window_min: float | None = None,
+) -> dict:
+    """Offline tip-alarm from sports-gap quote_cache. No network. Fee floors unchanged.
+
+    Returns active=True when any pregame tip is inside the forward window (default T−15).
+    Band is 5 when nearest tip ≤5m, else 15 when ≤window.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    window = float(SPORTS_TIP_FORCE_WINDOW_MIN if window_min is None else window_min)
+    path = _under(root, "sports-gap-paper", "quote_cache.json")
+    data = _read_json(path)
+    nearest = None
+    n_pre = 0
+    n_tip = 0
+    sample = ""
+    if isinstance(data, dict):
+        for payload in data.values():
+            if not isinstance(payload, dict):
+                continue
+            body = payload.get("body")
+            if isinstance(body, str):
+                try:
+                    body = json.loads(body)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+            if not isinstance(body, dict):
+                continue
+            for event in body.get("events") or []:
+                if not isinstance(event, dict):
+                    continue
+                comps = (event.get("competitions") or [{}])
+                comp = comps[0] if comps and isinstance(comps[0], dict) else {}
+                status = (comp.get("status") or event.get("status") or {})
+                stype = status.get("type") if isinstance(status, dict) else {}
+                if not isinstance(stype, dict):
+                    stype = {}
+                if str(stype.get("state") or "") != "pre":
+                    continue
+                n_pre += 1
+                raw = comp.get("date") or event.get("date")
+                if not raw:
+                    continue
+                try:
+                    when = dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=dt.timezone.utc)
+                eta = (when - now).total_seconds() / 60.0
+                if eta <= 0 or eta > window:
+                    continue
+                n_tip += 1
+                if nearest is None or eta < nearest:
+                    nearest = eta
+                    sample = _clean(event.get("name") or event.get("shortName") or "", 80)
+    band = None
+    if nearest is not None:
+        if nearest <= 5:
+            band = 5
+        elif nearest <= window:
+            band = 15
+    return {
+        "paper_only": True,
+        "active": band is not None,
+        "band": band,
+        "n_pre": n_pre,
+        "n_tip": n_tip,
+        "nearest_eta_min": round(nearest, 2) if nearest is not None else None,
+        "sample": sample,
+        "force_sec": SPORTS_TIP_FORCE_SEC,
+        "window_min": window,
+        "note": "Forced AUTO cadence only — venue min_edge still required inside gap_bot.",
+    }
+
+
+def _sports_auto_gap_sec(root: str, base_gap: float, now: dt.datetime | None = None) -> float:
+    """Sports cadence: tip-force (45s) > normal > idle stretch. Never loosens fees."""
+    tip = sports_tip_alarm_from_cache(root, now=now)
+    if tip.get("active"):
+        return float(SPORTS_TIP_FORCE_SEC)
+    if _sports_idle(root):
+        return max(float(base_gap), float(IDLE_SPORTS_SEC))
+    return float(base_gap)
+
+
 def _rate_ok(root: str, bot_id: str, now: dt.datetime | None = None) -> bool:
     now = now or dt.datetime.now(dt.timezone.utc)
     data = _read_json(manual_path(root)) or {}
@@ -4217,8 +4315,8 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
         if "every_sec" in slot:
             prev = _parsed(saved.get(_slot_key(slot)) or "")
             gap = float(slot["every_sec"])
-            if bot_id == "sports-gap" and _sports_idle(root):
-                gap = max(gap, float(IDLE_SPORTS_SEC))
+            if bot_id == "sports-gap":
+                gap = _sports_auto_gap_sec(root, gap, now=now)
             when = now if prev is None else prev + dt.timedelta(seconds=gap)
             if when < now:
                 when = now

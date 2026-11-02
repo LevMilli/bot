@@ -178,6 +178,35 @@ export type Desk = {
     any_ready?: boolean
     note?: string
   }
+  sports_tip?: {
+    paper_only?: boolean
+    active?: boolean
+    band?: number | null
+    n_pre?: number
+    n_tip?: number
+    nearest_eta_min?: number | null
+    sample?: string
+    force_sec?: number
+    window_min?: number
+    note?: string
+  }
+  master?: {
+    paper_only?: boolean
+    version?: number
+    stopbleed?: {
+      stop_exits?: number
+      model_flip_exits?: number
+      trail_exits?: number
+      red_day_locked?: boolean
+      expand_volume?: boolean
+      stopbleed_pnl?: number
+      today?: number | null
+      note?: string
+    }
+    sports_tip?: Desk['sports_tip']
+    towers?: unknown[]
+    note?: string
+  }
   chart?: {
     zone?: string
     default?: string

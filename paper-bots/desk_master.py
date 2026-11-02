@@ -95,6 +95,74 @@ def tower_master_row(bot: dict, *, fill_tax: float = 0.01, cfg: dict | None = No
     }
 
 
+def meme_stopbleed_measure(bot: dict | None = None, *, red_lock_usd: float = 20.0) -> dict:
+    """Measure memecoin stop-bleed week after Masters exits (−18% / model-flip −8% / red lock).
+
+    Paper only. Does not expand volume. Counts SELL exits from history reasons.
+    """
+    bot = bot if isinstance(bot, dict) else {}
+    hist = [h for h in (bot.get("history") or []) if isinstance(h, dict)]
+    sells = []
+    for h in hist:
+        side = str(h.get("side") or "").upper()
+        reason = str(h.get("exit_reason") or h.get("exit") or h.get("reason") or h.get("what") or "")
+        # Prefer true SELLs; also accept reason-tagged rows without side.
+        if side and side != "SELL" and "SELL" not in str(h.get("what") or "").upper():
+            continue
+        if not reason and side != "SELL" and "SELL" not in str(h.get("what") or "").upper():
+            continue
+        sells.append(h if reason else {**h, "exit_reason": str(h.get("what") or "")})
+    stop_n = 0
+    flip_n = 0
+    trail_n = 0
+    other_n = 0
+    stop_pnl = 0.0
+    for h in sells:
+        reason = str(h.get("exit_reason") or h.get("exit") or h.get("reason") or h.get("what") or "").lower()
+        pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd")) or 0.0
+        if "model-flip" in reason or "model flip" in reason:
+            flip_n += 1
+            stop_pnl += pnl
+        elif "stop" in reason and "time_stop" not in reason and "trail" not in reason:
+            stop_n += 1
+            stop_pnl += pnl
+        elif "trail" in reason:
+            trail_n += 1
+        else:
+            other_n += 1
+    today = _finite(bot.get("today"))
+    red_locked = today is not None and today <= -float(red_lock_usd)
+    volume_ok = (stop_n + flip_n) >= 1 or red_locked is False
+    # Expand volume only after a clean measure week with no fresh bleed — staff gate.
+    expand_volume = False
+    if stop_n + flip_n >= 3 and (stop_pnl / max(1, stop_n + flip_n)) > -5 and not red_locked:
+        expand_volume = False  # still require explicit staff week pass; never auto-expand
+    return {
+        "paper_only": True,
+        "bot": str(bot.get("id") or "memecoin"),
+        "sells_n": len(sells),
+        "stop_exits": stop_n,
+        "model_flip_exits": flip_n,
+        "trail_exits": trail_n,
+        "other_exits": other_n,
+        "stopbleed_pnl": round(stop_pnl, 2),
+        "today": today,
+        "red_day_locked": red_locked,
+        "red_lock_usd": float(red_lock_usd),
+        "policy": {
+            "stop_pct": -18,
+            "model_flip_momentum_h1_floor": -8,
+            "red_day_entry_lock_usd": float(red_lock_usd),
+        },
+        "expand_volume": expand_volume,
+        "volume_ok_to_discuss": volume_ok,
+        "note": (
+            "Stop-bleed measure only — do not expand memecoin volume until a Chicago "
+            "week clears with taxed EV ≥ 0 and red-day lock proven. No profit guarantee."
+        ),
+    }
+
+
 def master_summary(
     root: str | None = None,
     *,
@@ -110,6 +178,8 @@ def master_summary(
     desk_cap = _finite(cfg.get("max_open_risk")) or 100.0
     desk_util = round(desk_open / desk_cap, 4) if desk_cap else None
     m1_ready = sum(1 for r in rows if (r.get("passing") or {}).get("M1"))
+    meme = next((b for b in (bots or []) if isinstance(b, dict) and b.get("id") == "memecoin"), None)
+    stopbleed = meme_stopbleed_measure(meme)
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -119,6 +189,7 @@ def master_summary(
         "M5_desk_util": desk_util,
         "towers_m1_pass": m1_ready,
         "towers": rows,
+        "stopbleed": stopbleed,
         "priority": [
             "memecoin stop-bleed before volume",
             "sports tip alarms",
@@ -150,6 +221,22 @@ def self_check() -> None:
     )
     assert summary["version"] == MASTER_VERSION
     assert "towers" in summary
+    assert isinstance(summary.get("stopbleed"), dict)
+    bleed = meme_stopbleed_measure(
+        {
+            "id": "memecoin",
+            "today": -22,
+            "history": [
+                {"side": "SELL", "exit_reason": "stop -19.2% <= -18%", "pnl": -4.5},
+                {"side": "SELL", "exit_reason": "model-flip momentum -9.0% <= -8.0%", "pnl": -2.1},
+                {"side": "BUY", "reason": "entry", "pnl": None},
+            ],
+        }
+    )
+    assert bleed["stop_exits"] == 1
+    assert bleed["model_flip_exits"] == 1
+    assert bleed["red_day_locked"] is True
+    assert bleed["expand_volume"] is False
 
 
 if __name__ == "__main__":
