@@ -1142,6 +1142,28 @@ class PimpDeskTests(unittest.TestCase):
                 self.assertFalse(os.path.exists(local + ".tmp"), name)
 
 
+    def test_importlib_load_like_discord_host(self):
+        """bot.py loads pimp_desk via importlib; desk_profit must still import."""
+        import importlib.util
+        folder = os.path.dirname(os.path.abspath(pimp_desk.__file__))
+        # Drop paper-bots from path to mimic the Discord process.
+        kept = list(sys.path)
+        try:
+            sys.path[:] = [p for p in sys.path if os.path.realpath(p) != os.path.realpath(folder)]
+            path = os.path.join(folder, "pimp_desk.py")
+            name = "pimp_desk_host_load_test"
+            spec = importlib.util.spec_from_file_location(name, path)
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[name] = mod
+            spec.loader.exec_module(mod)
+            self.assertTrue(hasattr(mod, "desk_profit"))
+            snap = mod.snapshot(folder)
+            self.assertTrue(snap["paper_only"])
+            self.assertEqual(snap["roi_system"]["version"], 2)
+        finally:
+            sys.path[:] = kept
+            sys.modules.pop("pimp_desk_host_load_test", None)
+
     def test_venue_min_edge_and_kelly_lite(self):
         cfg, err = pimp_desk.parse_settings({
             "stake_hi_min": 20, "stake_hi_max": 100, "stake_lo_max": 20,
