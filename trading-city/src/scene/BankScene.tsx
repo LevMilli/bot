@@ -39,10 +39,10 @@ const TELLER_COUNT = 5
 const TELLER_SPACING = 3.05
 /** Half-width of each teller's private rope channel (gap between neighbors = spacing − 2×half). */
 const LANE_HALF = 0.72
-/** Front posts sit mid-aisle — mouth stays open (no crossbar). */
-const LANE_Z_FRONT = 1.72
-/** Keep rear posts in the aisle — clear of the counter lip. */
-const LANE_Z_BACK = 0.88
+/** Rope mouth end toward lobby — no stanchion here (open mouth, no gate bloom). */
+const LANE_Z_MOUTH = 1.55
+/** Rear posts only — clear of the counter lip so the desk chrome never reads as a crossbar. */
+const LANE_Z_BACK = 0.72
 /** Dolly distance along the focused lane (far → near). */
 const ZOOM_DIST_FAR = 6.55
 const ZOOM_DIST_NEAR = 3.85
@@ -122,13 +122,10 @@ function TellerPod({
         <boxGeometry args={[podW + 0.06, 0.08, 0.95]} />
         <meshStandardMaterial color="#d8d0c0" roughness={0.28} metalness={0.22} />
       </mesh>
-      <mesh position={[0, 0.83, 0.64]}>
-        <boxGeometry args={[podW + 0.06, 0.025, 0.03]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={focused ? 0.95 : 0.65} toneMapped={false} />
-      </mesh>
+      {/* Short brass lip only — full-width accent bars read as rope crossbars from the lobby. */}
       <mesh position={[0, 0.87, 0.66]}>
-        <boxGeometry args={[podW + 0.06, 0.03, 0.045]} />
-        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
+        <boxGeometry args={[podW * 0.55, 0.028, 0.04]} />
+        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={focused ? 0.35 : 0.18} />
       </mesh>
 
       {/* side glass fins — inset so neighboring pods never clip */}
@@ -241,23 +238,23 @@ function ProfitBoard({ desk }: { desk?: Desk }) {
   useFrame(() => {
     map.needsUpdate = true
   })
-  // Raised so ledger/compliance sit under it in the default FOV.
+  // Hero board — in front of flank ledgers, clear vertical gap above them.
   return (
-    <group position={[0, 3.72, -2.95]}>
+    <group position={[0, 3.95, -2.88]}>
       <mesh>
-        <boxGeometry args={[5.9, 0.88, 0.14]} />
+        <boxGeometry args={[5.6, 0.95, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.5} roughness={0.28} />
       </mesh>
       <mesh position={[0, 0, 0.08]}>
-        <planeGeometry args={[5.5, 0.72]} />
+        <planeGeometry args={[5.2, 0.78]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.47, 0.05]}>
-        <boxGeometry args={[6.0, 0.04, 0.07]} />
+      <mesh position={[0, 0.5, 0.05]}>
+        <boxGeometry args={[5.7, 0.04, 0.07]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.47, 0.05]}>
-        <boxGeometry args={[6.0, 0.04, 0.07]} />
+      <mesh position={[0, -0.5, 0.05]}>
+        <boxGeometry args={[5.7, 0.04, 0.07]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
     </group>
@@ -280,9 +277,9 @@ function HeroVaultDoor() {
     const a = (i / 14) * Math.PI * 2
     return [Math.cos(a) * 1.05, Math.sin(a) * 1.05] as const
   })
-  // Behind NET DESK / flank boards — cyan ring must not arc through board faces.
+  // Behind + below NET DESK / flank boards — cyan ring must not arc through board faces.
   return (
-    <group position={[0, 1.35, -3.28]} scale={0.92}>
+    <group position={[0, 1.15, -3.45]} scale={0.82}>
       <mesh position={[0, 0, -0.06]}>
         <cylinderGeometry args={[1.45, 1.45, 0.18, 48]} />
         <meshStandardMaterial color="#0a0614" metalness={0.6} roughness={0.32} />
@@ -525,26 +522,25 @@ function SideScreen({
   useFrame(() => {
     map.needsUpdate = true
   })
-  // Centered under NET DESK — fully inside default FOV, faces camera, above nameplates.
-  // Left = DESK LEDGER, right = COMPLIANCE BAY. These 3D boards carry the readable data
-  // (not the 2D HUD “compliance ok” strip).
+  // Flank NET DESK — wide center gap so the hero board stays fully readable.
+  // Left = DESK LEDGER, right = COMPLIANCE BAY. Sit below + slightly behind NET DESK.
   const accent = side < 0 ? '#f9c80e' : '#39ff14'
   return (
-    <group position={[side * 2.05, 2.85, -2.92]}>
+    <group position={[side * 3.55, 2.48, -2.98]}>
       <mesh>
-        <boxGeometry args={[3.9, 1.45, 0.12]} />
+        <boxGeometry args={[2.95, 1.2, 0.12]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
       </mesh>
       <mesh position={[0, 0, 0.07]}>
-        <planeGeometry args={[3.65, 1.28]} />
+        <planeGeometry args={[2.75, 1.05]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.76, 0.05]}>
-        <boxGeometry args={[3.95, 0.05, 0.06]} />
+      <mesh position={[0, 0.64, 0.05]}>
+        <boxGeometry args={[3.0, 0.045, 0.06]} />
         <meshBasicMaterial color={accent} toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.76, 0.05]}>
-        <boxGeometry args={[3.95, 0.04, 0.05]} />
+      <mesh position={[0, -0.64, 0.05]}>
+        <boxGeometry args={[3.0, 0.035, 0.05]} />
         <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
     </group>
@@ -577,8 +573,8 @@ function CeilingHall() {
         <boxGeometry args={[15, 0.12, 0.2]} />
         <meshStandardMaterial color={TRIM} metalness={0.4} roughness={0.4} />
       </mesh>
-      {/* Cyan trim behind/above NET DESK — never across the board face. */}
-      <mesh position={[0, 4.22, -3.05]}>
+      {/* Cyan trim well above + behind NET DESK — never across the board face. */}
+      <mesh position={[0, 4.55, -3.35]}>
         <boxGeometry args={[13.5, 0.04, 0.04]} />
         <meshBasicMaterial color="#2de2e6" toneMapped={false} />
       </mesh>
@@ -657,12 +653,13 @@ function FloorGlowPaths() {
 
 /**
  * Per-teller queue channel: accent ropes down both sides only.
- * Open mouth toward the lobby — no front or rear crossbar (avoids a closed U).
+ * Open mouth toward the lobby — rear posts only (no front posts / crossbars).
+ * Front stanchion pairs bloomed into a false gate; mouth ends are bare rope tips.
  * Posts are inset (not shared), so neighboring lanes never cross or stack colors.
  */
 function QueueLanes() {
-  const ropeLen = LANE_Z_FRONT - LANE_Z_BACK
-  const ropeMidZ = (LANE_Z_FRONT + LANE_Z_BACK) / 2
+  const ropeLen = LANE_Z_MOUTH - LANE_Z_BACK
+  const ropeMidZ = (LANE_Z_MOUTH + LANE_Z_BACK) / 2
   return (
     <group>
       {Array.from({ length: TELLER_COUNT }).map((_, i) => {
@@ -674,12 +671,15 @@ function QueueLanes() {
           <group key={`lane-${i}`}>
             {([left, right] as const).map((x) => (
               <group key={x}>
-                {/* Mouth post + desk post on each side — never a spanning front rope. */}
-                <Stanchion position={[x, 0, LANE_Z_FRONT]} color={color} />
                 <Stanchion position={[x, 0, LANE_Z_BACK]} color={color} />
                 <mesh position={[x, 0.78, ropeMidZ]} rotation={[Math.PI / 2, 0, 0]}>
-                  <cylinderGeometry args={[0.014, 0.014, ropeLen, 6]} />
+                  <cylinderGeometry args={[0.012, 0.012, ropeLen, 6]} />
                   <meshBasicMaterial color={color} toneMapped={false} />
+                </mesh>
+                {/* Dim tip — marks the mouth without a post that can bloom into a gate. */}
+                <mesh position={[x, 0.78, LANE_Z_MOUTH]}>
+                  <sphereGeometry args={[0.028, 8, 8]} />
+                  <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.3} emissive={color} emissiveIntensity={0.15} />
                 </mesh>
               </group>
             ))}
@@ -780,8 +780,8 @@ function Stanchion({ position, color }: { position: [number, number, number]; co
         <meshStandardMaterial color="#1a1424" metalness={0.45} roughness={0.4} />
       </mesh>
       <mesh position={[0, 0.86, 0]}>
-        <sphereGeometry args={[0.065, 12, 12]} />
-        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={0.4} />
+        <sphereGeometry args={[0.055, 12, 12]} />
+        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={0.18} />
       </mesh>
       <mesh position={[0, 0.04, 0]}>
         <cylinderGeometry args={[0.09, 0.11, 0.05, 10]} />
@@ -1068,8 +1068,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         </div>
       </Html>
 
-      {/* Softer bloom so board glyphs stay crisp at lobby distance. */}
-      <NeonBloom strength={0.32} />
+      {/* Soft bloom — strong bloom turns rope tips / desk chrome into false gate bars. */}
+      <NeonBloom strength={0.24} />
     </>
   )
 }
