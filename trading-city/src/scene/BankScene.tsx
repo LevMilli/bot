@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Html, OrbitControls, PerspectiveCamera } from '@react-three/drei'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { DoubleSide, MathUtils, type Group, type Mesh } from 'three'
 import type { BotRow, Desk } from '../types'
 import { BEAM_COLORS, money, workersOnShift } from '../data/format'
 import { botPose } from '../data/botPose'
 import {
+  sharpenBoardTexture,
   tellerPlateTexture,
   vaultBoardTexture,
   vaultComplianceTexture,
@@ -233,37 +234,32 @@ function TellerPod({
 
 function ProfitBoard({ desk }: { desk?: Desk }) {
   const map = useMemo(() => vaultBoardTexture(desk), [desk])
+  const { gl } = useThree()
+  useEffect(() => {
+    sharpenBoardTexture(map, gl.capabilities.getMaxAnisotropy())
+  }, [gl, map])
   useFrame(() => {
     map.needsUpdate = true
   })
-  // Back wall, large face — readable from default lobby distance; clear of ceiling neon.
-  // Slightly lower so primary rows sit under the chrome banner stack.
+  // Raised so ledger/compliance sit under it in the default FOV.
   return (
-    <group position={[0, 3.22, -2.98]}>
+    <group position={[0, 3.72, -2.95]}>
       <mesh>
-        <boxGeometry args={[7.0, 1.55, 0.14]} />
+        <boxGeometry args={[5.9, 0.88, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.5} roughness={0.28} />
       </mesh>
       <mesh position={[0, 0, 0.08]}>
-        <planeGeometry args={[6.55, 1.32]} />
+        <planeGeometry args={[5.5, 0.72]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.81, 0.05]}>
-        <boxGeometry args={[7.1, 0.04, 0.07]} />
+      <mesh position={[0, 0.47, 0.05]}>
+        <boxGeometry args={[6.0, 0.04, 0.07]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.81, 0.05]}>
-        <boxGeometry args={[7.1, 0.04, 0.07]} />
+      <mesh position={[0, -0.47, 0.05]}>
+        <boxGeometry args={[6.0, 0.04, 0.07]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
-      {([-3.25, 3.25] as const).map((x) =>
-        ([-0.58, 0.58] as const).map((y) => (
-          <mesh key={`${x}-${y}`} position={[x, y, 0.09]}>
-            <cylinderGeometry args={[0.04, 0.04, 0.035, 10]} />
-            <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.2} />
-          </mesh>
-        )),
-      )}
     </group>
   )
 }
@@ -445,9 +441,9 @@ function LockboxWall({ bots }: { bots: BotRow[] }) {
     }
   }
   return (
-    <group position={[-5.4, 0, -1.5]} rotation={[0, 0.5, 0]}>
-      <mesh position={[0, 1.9, -0.05]}>
-        <boxGeometry args={[1.5, 2.7, 0.14]} />
+    <group position={[-6.55, 0, -2.2]} rotation={[0, 0.35, 0]}>
+      <mesh position={[0, 1.5, -0.05]}>
+        <boxGeometry args={[1.35, 2.2, 0.14]} />
         <meshStandardMaterial color="#12101a" metalness={0.5} roughness={0.35} />
       </mesh>
       {cells.map((c, i) => (
@@ -522,28 +518,33 @@ function SideScreen({
     () => (side < 0 ? vaultLedgerTexture(desk, bots) : vaultComplianceTexture(desk, bots)),
     [side, desk, bots],
   )
+  const { gl } = useThree()
+  useEffect(() => {
+    sharpenBoardTexture(map, gl.capabilities.getMaxAnisotropy())
+  }, [gl, map])
   useFrame(() => {
     map.needsUpdate = true
   })
-  // Flank NET DESK on the back wall — inside default lobby FOV, clear of teller heads.
-  // Left = DESK LEDGER, right = COMPLIANCE BAY.
+  // Centered under NET DESK — fully inside default FOV, faces camera, above nameplates.
+  // Left = DESK LEDGER, right = COMPLIANCE BAY. These 3D boards carry the readable data
+  // (not the 2D HUD “compliance ok” strip).
   const accent = side < 0 ? '#f9c80e' : '#39ff14'
   return (
-    <group position={[side * 5.25, 2.85, -2.95]} rotation={[0, -side * 0.1, 0]}>
+    <group position={[side * 2.05, 2.85, -2.92]}>
       <mesh>
-        <boxGeometry args={[2.85, 1.95, 0.1]} />
+        <boxGeometry args={[3.9, 1.45, 0.12]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
       </mesh>
-      <mesh position={[0, 0, 0.06]}>
-        <planeGeometry args={[2.62, 1.72]} />
+      <mesh position={[0, 0, 0.07]}>
+        <planeGeometry args={[3.65, 1.28]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 1.01, 0.045]}>
-        <boxGeometry args={[2.9, 0.045, 0.05]} />
+      <mesh position={[0, 0.76, 0.05]}>
+        <boxGeometry args={[3.95, 0.05, 0.06]} />
         <meshBasicMaterial color={accent} toneMapped={false} />
       </mesh>
-      <mesh position={[0, -1.01, 0.045]}>
-        <boxGeometry args={[2.9, 0.035, 0.04]} />
+      <mesh position={[0, -0.76, 0.05]}>
+        <boxGeometry args={[3.95, 0.04, 0.05]} />
         <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
     </group>
@@ -1053,7 +1054,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         />
       ))}
 
-      <Html position={[0, 0.1, 3.55]} center distanceFactor={12} style={{ pointerEvents: 'none' }}>
+      <Html position={[0, 0.08, 5.35]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
         <div
           style={{
             fontFamily: 'Share Tech Mono, monospace',
@@ -1067,7 +1068,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         </div>
       </Html>
 
-      <NeonBloom strength={0.55} />
+      {/* Softer bloom so board glyphs stay crisp at lobby distance. */}
+      <NeonBloom strength={0.32} />
     </>
   )
 }

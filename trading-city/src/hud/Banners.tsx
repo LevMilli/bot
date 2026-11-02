@@ -8,6 +8,8 @@ type Props = {
   health?: Snapshot['health'] | null
   lastCheck?: string | null
   onConnect?: () => void
+  /** Keep banners compact in the vault so they don’t cover 3D ledger boards. */
+  compact?: boolean
 }
 
 export function Banners({
@@ -18,6 +20,7 @@ export function Banners({
   health,
   lastCheck,
   onConnect,
+  compact = false,
 }: Props) {
   const paper =
     paperBanner && paperBanner.length > 110
@@ -34,7 +37,7 @@ export function Banners({
   const timerDead = mode === 'live' && health && health.alive === false
   const needsStaff = Boolean(error && /→ 40[13]/.test(error))
   return (
-    <div className="banners">
+    <div className={`banners${compact ? ' banners-compact' : ''}`}>
       <div className="banner paper">{paper}</div>
       {roi && (
         <div className={`banner roi ${roi.ok === false ? 'roi-warn' : ''}`}>

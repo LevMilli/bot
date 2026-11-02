@@ -145,6 +145,7 @@ export default function App() {
           health={snap?.health}
           lastCheck={snap?.desk?.central_check || snap?.desk?.last_check}
           onConnect={() => void connectLive()}
+          compact={view === 'bank'}
         />
 
         {view === 'office' && selected && (
