@@ -558,14 +558,23 @@ def run():
             gtxt = f"{gap*100:+.1f} pts on {m.get('yes_sub_title')} (fair {fair:.1%} vs ask {ask:.2f})"
             need = need_edge if src == "espn" else round(need_edge + 0.02, 4)
             reason = None
+            # Top25 #15 — sport-split fair floors (NFL stricter by default).
+            fair_floor = MIN_FAIR_PROB
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_top25
+                fair_floor = float(desk_top25.league_fair_floor(league))
+            except Exception:
+                fair_floor = MIN_FAIR_PROB
             if entries_off:
                 reason = entries_off
             elif key in open_by_game:
                 reason = "already holding this game"
             elif CLOSE_GAME_BAND[0] <= fair_home <= CLOSE_GAME_BAND[1]:
                 reason = "close game - skip"
-            elif fair + 1e-12 < MIN_FAIR_PROB:
-                reason = f"fair {fair:.0%} < safer floor {MIN_FAIR_PROB:.0%} - skip"
+            elif fair + 1e-12 < fair_floor:
+                reason = f"fair {fair:.0%} < safer floor {fair_floor:.0%} ({league}) - skip"
             elif gap < need:
                 reason = f"gap < {need*100:.0f} - no trade"
             elif ask - bid > MAX_SPREAD:
@@ -620,6 +629,24 @@ def run():
                     "fill_id": p.get("fill_id") or "",
                     "at": ts,
                 })
+            # Closing-line value: entry fair vs settle binary (1 win / 0 loss) as close proxy.
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_more
+                close_fair = 1.0 if payout > 0 else 0.0
+                desk_more.record_sports_clv(
+                    DESK_ROOT,
+                    ticker=str(p.get("ticker") or ""),
+                    side=str(p.get("side") or ""),
+                    fair_entry=p.get("fair_at_entry"),
+                    close_fair=close_fair,
+                    pnl=pnl,
+                    league=str(p.get("league") or ""),
+                    exit_reason="settled",
+                )
+            except Exception:
+                pass
             lines.append(f"| {ts} | {p['league']} | {p['game']} | FINAL {as_}-{hs} | | | | | **PAPER SETTLE** {p['team']}: {'WON' if payout else 'LOST'} payout ${payout:.2f}, P&L ${pnl:+.2f} |")
             summary_out["closes"].append(f"SETTLE {p['ticker']} pnl {pnl:+.2f}")
             continue
@@ -628,7 +655,39 @@ def run():
             fair = info["fair_home"] if p["side"] == "home" else 1 - info["fair_home"]
             bid = px(m, "yes_bid_dollars")
             exit_reason = None
-            if flip_on and desk is not None:
+            # Phase 2: gap-decay — tip edge that died mid-game frees risk.
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_phase2
+                live_ask = px(m, "yes_ask_dollars")
+                if live_ask is not None:
+                    gap_now = float(fair) - float(live_ask) - fee(live_ask)
+                else:
+                    gap_now = float(fair) - float(p.get("entry_price") or 0)
+                mins = None
+                try:
+                    from datetime import datetime, timezone
+                    opened = str(p.get("opened") or "")
+                    if opened.endswith("Z"):
+                        opened = opened[:-1] + "+00:00"
+                    mins = (datetime.now(timezone.utc) - datetime.fromisoformat(opened)).total_seconds() / 60.0
+                except Exception:
+                    mins = None
+                decay = desk_phase2.sports_gap_decay_exit(
+                    gap_at_entry=p.get("gap_at_entry"),
+                    gap_now=gap_now,
+                    minutes_since_open=mins,
+                    live=True,
+                )
+                if decay.get("exit"):
+                    exit_reason = decay.get("reason") or "gap-decay"
+                    desk_phase2.remember_gap_decay(DESK_ROOT, {
+                        "ticker": p.get("ticker"), "league": p.get("league"), **decay,
+                    })
+            except Exception:
+                pass
+            if exit_reason is None and flip_on and desk is not None:
                 try:
                     import desk_profit
                     if desk_profit.model_flip_adverse(
@@ -655,6 +714,23 @@ def run():
                         "fill_id": p.get("fill_id") or "",
                         "at": ts,
                     })
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_more
+                    desk_more.record_sports_clv(
+                        DESK_ROOT,
+                        ticker=str(p.get("ticker") or ""),
+                        side=str(p.get("side") or ""),
+                        fair_entry=p.get("fair_at_entry"),
+                        fair_exit=fair,
+                        close_fair=fair,
+                        pnl=pnl,
+                        league=str(p.get("league") or ""),
+                        exit_reason=str(exit_reason or "sell"),
+                    )
+                except Exception:
+                    pass
                 lines.append(f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | **PAPER SELL** {p['contracts']} @ bid {bid:.2f} ({exit_reason}), P&L ${pnl:+.2f} |")
                 summary_out["closes"].append(f"SELL {p['ticker']} pnl {pnl:+.2f}")
                 continue
@@ -672,7 +748,24 @@ def run():
             c["edge"] = c.get("gap")
             c["confidence"] = c.get("fair")
             c["depth"] = None
+            # Top25 #2 — CLV-aware sports score when we have avg CLV history.
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_more
+                import desk_top25
+                clv_avg = (desk_more.clv_summary(DESK_ROOT) or {}).get("avg_clv")
+                c["_brain_score"] = desk_top25.sports_rank_score(
+                    c.get("gap"), c.get("fair"), clv=clv_avg, depth=None,
+                )
+            except Exception:
+                pass
         buy_candidates = desk_brain.rank_candidates(buy_candidates)
+        # Prefer precomputed CLV-adjusted scores when present.
+        if any(c.get("_brain_score") is not None for c in buy_candidates):
+            buy_candidates = sorted(
+                buy_candidates, key=lambda c: -float(c.get("_brain_score") or 0),
+            )
     except Exception:
         desk_brain = None
         buy_candidates = sorted(buy_candidates, key=lambda c: -float(c.get("gap") or 0))

@@ -296,6 +296,17 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     cushion = abs(spot - target)
     frac = MIN_CUSHION_FRAC.get(m["series"], 0.001)
     min_cush = max(spot * frac, 1e-6)
+    # Top25 #9 — metals vs energy playbooks (stricter cushion/z for energy spikes).
+    z_floor = MIN_Z
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_top25
+        book = desk_top25.commodity_playbook(m.get("series"))
+        min_cush *= float(book.get("min_cushion_mult") or 1.0)
+        z_floor = float(book.get("min_z") or MIN_Z)
+    except Exception:
+        z_floor = MIN_Z
     # Conservative σ: ~0.15% of spot * sqrt(minutes_left / 15) for 15m commodities.
     sigma = spot * 0.0015 * math.sqrt(max(minutes_left, 1.0) / 15.0)
     z = cushion / sigma if sigma > 1e-12 else 0.0
@@ -304,8 +315,8 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     spread, depth = book_depth(str(m["ticker"]), side, ask)
     if cushion + 1e-12 < min_cush:
         reasons.append(f"cushion {cushion:.5f} < {min_cush:.5f}")
-    if z + 1e-12 < MIN_Z:
-        reasons.append(f"z {z:.2f} < {MIN_Z}")
+    if z + 1e-12 < z_floor:
+        reasons.append(f"z {z:.2f} < {z_floor}")
     if p + 1e-12 < MIN_MODEL_PROB:
         reasons.append(f"p {p:.3f} < {MIN_MODEL_PROB}")
     if not (ASK_MIN - 1e-12 <= float(ask) <= ASK_MAX + 1e-12):

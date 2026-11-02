@@ -273,7 +273,7 @@ class PimpDeskTests(unittest.TestCase):
         sports = next(s for s in pimp_desk.AUTO if s["id"] == "sports-gap")
         btc = next(s for s in pimp_desk.AUTO if s["id"] == "btc15m")
         meme = next(s for s in pimp_desk.AUTO if s["id"] == "memecoin")
-        self.assertEqual(sports["every_sec"], 300)
+        self.assertEqual(sports["every_sec"], 180)  # Phase 2 tip-soon cadence
         self.assertEqual(btc["every_sec"], 90)
         self.assertEqual(meme["every_sec"], 600)
         brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")
@@ -480,8 +480,10 @@ class PimpDeskTests(unittest.TestCase):
         self.assertNotIn("stake_for_gap", gap.__dict__)
         self.assertEqual(gap.stake_for_model(0.657, pimp_desk), 20.0)
         self.assertEqual(gap.stake_for_model(0.80, pimp_desk), 20.0)
-        self.assertEqual(gap.stake_for_model(0.90, pimp_desk), 60.0)
-        self.assertEqual(gap.stake_for_model(1, pimp_desk), 100.0)
+        # Phase 1 tower budgets soft-cap sports-gap to 35% of desk $100 → $35.
+        sports_cap = round(100.0 * float(pimp_desk.DEFAULTS["tower_risk_budgets"]["sports-gap"]), 2)
+        self.assertEqual(gap.stake_for_model(0.90, pimp_desk), min(60.0, sports_cap))
+        self.assertEqual(gap.stake_for_model(1, pimp_desk), min(100.0, sports_cap))
         per = 0.55 + gap.fee(0.55)
         count = pimp_desk.contracts_for_stake(per, gap.stake_for_model(0.62, pimp_desk))
         cost = round(count * per, 2)
