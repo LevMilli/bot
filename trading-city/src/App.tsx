@@ -7,6 +7,7 @@ import { Monitors } from './hud/Monitors'
 import { Ticker } from './hud/Ticker'
 import { TowerRail } from './hud/TowerRail'
 import { beamColorFor } from './data/format'
+import { parseCityHash } from './data/floorMap'
 import { CityScene } from './scene/CityScene'
 import { OfficeScene } from './scene/OfficeScene'
 import { BankScene } from './scene/BankScene'
@@ -20,6 +21,37 @@ function guestModeFromUrl() {
   } catch {
     return false
   }
+}
+
+function applyHashRoute(
+  setView: (v: View) => void,
+  setSelectedId: (id: string | null) => void,
+  setFromBank: (v: boolean) => void,
+) {
+  const route = parseCityHash(window.location.hash || '')
+  if (route.view === 'bank' || route.view === 'boss') {
+    // Boss suite stub → vault hall until Floor 6 scene ships.
+    setSelectedId(null)
+    setFromBank(true)
+    setView('bank')
+    return
+  }
+  if (route.view === 'office' && route.botId) {
+    setSelectedId(route.botId)
+    setFromBank(true)
+    setView('office')
+    return
+  }
+  if (route.view === 'floor') {
+    // Floor scenes stub: open vault for now; FloorMap still drives directory.
+    setSelectedId(null)
+    setFromBank(true)
+    setView('bank')
+    return
+  }
+  setSelectedId(null)
+  setFromBank(false)
+  setView('city')
 }
 
 export default function App() {
@@ -36,22 +68,32 @@ export default function App() {
     [bots, selectedId],
   )
 
+  useEffect(() => {
+    applyHashRoute(setView, setSelectedId, setFromBank)
+    const onHash = () => applyHashRoute(setView, setSelectedId, setFromBank)
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
   const openVault = () => {
     setSelectedId(null)
     setFromBank(true)
     setView('bank')
+    window.location.hash = '#/bank'
   }
 
   const openTeller = (id: string) => {
     setSelectedId(id)
     setFromBank(true)
     setView('office')
+    window.location.hash = `#/office/${id}`
   }
 
   const openTower = (id: string) => {
     setSelectedId(id)
     setFromBank(false)
     setView('office')
+    window.location.hash = `#/office/${id}`
   }
 
   useEffect(() => {
@@ -62,12 +104,14 @@ export default function App() {
     setSelectedId(null)
     setFromBank(false)
     setView('city')
+    window.location.hash = '#/plaza'
   }
 
   const backToBank = () => {
     setSelectedId(null)
     setFromBank(true)
     setView('bank')
+    window.location.hash = '#/bank'
   }
 
   return (

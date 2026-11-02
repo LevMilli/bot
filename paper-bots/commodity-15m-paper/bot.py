@@ -70,6 +70,32 @@ MIN_CUSHION_FRAC = {
     "KXWTI15M": 0.0010,
 }
 
+# Portfolio corr cap: at most one energy + one metal open at a time.
+ENERGY_SERIES = frozenset({"KXNATGAS15M", "KXBRENT15M", "KXWTI15M"})
+METAL_SERIES = frozenset({
+    "KXGOLD15M", "KXSILVER15M", "KXPLATINUM15M", "KXPALLADIUM15M", "KXCOPPER15M",
+})
+
+
+def series_family(series: str) -> str:
+    s = str(series or "")
+    if s in ENERGY_SERIES:
+        return "energy"
+    if s in METAL_SERIES:
+        return "metal"
+    return "other"
+
+
+def open_families(state: dict) -> set[str]:
+    out = set()
+    for pos in state.get("open") or []:
+        if not isinstance(pos, dict):
+            continue
+        fam = series_family(str(pos.get("series") or ""))
+        if fam != "other":
+            out.add(fam)
+    return out
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DESK_ROOT = os.path.dirname(HERE)
 ACCOUNT = os.path.join(HERE, "paper_account.json")
@@ -373,6 +399,12 @@ def paper_buy(state: dict, ev: dict) -> str:
         return none_msg + " already open."
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
         return "Desk entry_gate blocked a new paper buy."
+    fam = series_family(str(ev.get("series") or ""))
+    if fam in ("energy", "metal") and fam in open_families(state):
+        return (
+            f"{none_msg} portfolio corr: already open a {fam} series "
+            "(max 1 energy + 1 metal)."
+        )
     ask = float(ev["ask"])
     fee = float(ev["fee"] or 0)
     per = ask + fee
