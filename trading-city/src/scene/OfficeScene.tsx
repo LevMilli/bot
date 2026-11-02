@@ -13,6 +13,7 @@ import { botPose } from '../data/botPose'
 import { NeonBloom } from './Effects'
 import { BotFigure } from './BotFigure'
 import { StreetCity } from './WindowCity'
+import { KEY_TOP, MOUSE_TOP, mouseHand } from './deskReach'
 import { WallStockChart } from './WallCharts'
 
 type Props = {
@@ -374,9 +375,10 @@ function DeskKit() {
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
     if (!mouse.current) return
-    mouse.current.position.x = 0.5 + Math.sin(t * 1.35) * 0.04
-    mouse.current.position.z = 0.4 + Math.cos(t * 1.05) * 0.028
-    mouse.current.rotation.y = Math.sin(t * 1.35) * 0.18
+    const pose = mouseHand(t)
+    mouse.current.position.x = pose.x
+    mouse.current.position.z = pose.z
+    mouse.current.rotation.y = pose.yaw
   })
   const keys: [number, number][] = []
   for (let row = 0; row < 4; row++) {
@@ -387,7 +389,7 @@ function DeskKit() {
   return (
     <group>
       {/* keyboard in reach of the left hand */}
-      <group position={[-0.46, 0.812, 0.42]} rotation={[-0.18, 0.2, 0]}>
+      <group position={[-0.3, KEY_TOP - 0.022, 0.34]}>
         <mesh>
           <boxGeometry args={[0.52, 0.02, 0.18]} />
           <meshStandardMaterial color="#2c3548" metalness={0.35} roughness={0.45} />
@@ -406,11 +408,11 @@ function DeskKit() {
         ))}
       </group>
       {/* mouse pad + mouse under the right hand */}
-      <mesh position={[0.5, 0.805, 0.4]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0.48, 0.802, 0.4]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[0.28, 0.22]} />
         <meshStandardMaterial color="#10141c" roughness={0.8} />
       </mesh>
-      <group ref={mouse} position={[0.5, 0.82, 0.4]}>
+      <group ref={mouse} position={[0.48, MOUSE_TOP - 0.02, 0.4]}>
         <mesh>
           <boxGeometry args={[0.07, 0.028, 0.11]} />
           <meshStandardMaterial color="#d8fff8" emissive="#7ef9ff" emissiveIntensity={0.25} metalness={0.4} roughness={0.3} />

@@ -1,7 +1,8 @@
 import { useRef, type RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group, MeshStandardMaterial } from 'three'
+import { Matrix4, Quaternion, Vector3, type Group, type MeshStandardMaterial } from 'three'
 import type { BotPose } from '../data/botPose'
+import { mouseHand, typingHand } from './deskReach'
 
 const SHELL = '#d7fbff'
 const JOINT = '#071820'
@@ -16,23 +17,13 @@ function shell(emissiveIntensity = 0.22) {
   }
 }
 
-/** Slim two-finger gripper. At the desk the left hand taps keys and the right clicks. */
-function Grip({ work = false, side = 1 }: { work?: boolean; side?: -1 | 1 }) {
-  const ref = useRef<Group>(null)
+/** Slim two-finger gripper. Desk hands are posed by the arm so they stay on the devices. */
+function Grip({ work = false, gripRef }: { work?: boolean; gripRef?: RefObject<Group | null> }) {
+  const own = useRef<Group>(null)
+  const ref = gripRef ?? own
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
-    if (!ref.current) return
-    if (work && side === -1) {
-      ref.current.rotation.x = -0.55 + Math.sin(t * 14) * 0.22
-      ref.current.rotation.z = Math.sin(t * 9.5) * 0.08
-      return
-    }
-    if (work) {
-      const click = Math.pow(Math.max(0, Math.sin(t * 1.65)), 8)
-      ref.current.rotation.x = -0.4 - click * 0.45
-      ref.current.rotation.z = Math.sin(t * 1.25) * 0.05
-      return
-    }
+    if (!ref.current || work) return
     ref.current.rotation.z = Math.sin(t * 2.8) * 0.16
     ref.current.rotation.x = Math.sin(t * 1.9) * 0.1
   })
@@ -82,28 +73,95 @@ function Antenna({
 
 type ArmPose = BotPose
 
+const UPPER = 0.34
+const FORE = 0.34
+const _shoulder = new Vector3()
+const _target = new Vector3()
+const _delta = new Vector3()
+const _dir = new Vector3()
+const _bend = new Vector3()
+const _elbow = new Vector3()
+const _pole = new Vector3()
+const _fingers = new Vector3()
+const _up = new Vector3()
+const _x = new Vector3()
+const _z = new Vector3()
+const _parentQ = new Quaternion()
+const _worldQ = new Quaternion()
+const _basis = new Matrix4()
+
+/** Point a bone's local +Y along `dir`, twisted so local +Z leans toward `hint`. */
+function aimY(dir: Vector3, hint: Vector3, out: Quaternion) {
+  _z.copy(dir).normalize()
+  // reuse _z as Y temporarily via _dir
+  _dir.copy(dir).normalize()
+  _x.crossVectors(hint, _dir)
+  if (_x.lengthSq() < 1e-8) _x.set(1, 0, 0).cross(_dir)
+  _x.normalize()
+  _z.crossVectors(_x, _dir).normalize()
+  _basis.makeBasis(_x, _dir, _z)
+  return out.setFromRotationMatrix(_basis)
+}
+
 function Arm({ side, pose, work = false }: { side: -1 | 1; pose: ArmPose; work?: boolean }) {
   const ref = useRef<Group>(null)
   const fore = useRef<Group>(null)
+  const grip = useRef<Group>(null)
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
     if (!ref.current) return
 
-    if (work) {
-      // -2.1 pitches the limb onto the desktop (same family as the old typing pose).
-      const pace = pose === 'losing' ? 0.45 : pose === 'winning' ? 1.2 : pose === 'trading' ? 1.1 : 0.75
-      if (side === -1) {
-        ref.current.rotation.x = -2.2 + Math.sin(t * 7.5 * pace) * 0.05
-        ref.current.rotation.y = 0.48
-        ref.current.rotation.z = 0.22
-        if (fore.current) fore.current.rotation.x = -0.35 + Math.sin(t * 12 * pace) * 0.12
-      } else {
-        const sweep = Math.sin(t * 1.35) * 0.1
-        ref.current.rotation.x = -2.12 + Math.cos(t * 1.05) * 0.05
-        ref.current.rotation.y = -0.5 + sweep
-        ref.current.rotation.z = -0.18
-        if (fore.current) fore.current.rotation.x = -0.28 + Math.sin(t * 1.6) * 0.06
+    if (work && fore.current && ref.current.parent) {
+      const pace = pose === 'losing' ? 0.55 : pose === 'winning' ? 1.15 : pose === 'trading' ? 1.05 : 0.8
+      const goal = side === -1 ? typingHand(t, pace) : mouseHand(t)
+      ref.current.updateWorldMatrix(true, false)
+      ref.current.getWorldPosition(_shoulder)
+      _target.set(goal.x, goal.y, goal.z)
+      // Keep each hand on its own side of the desk.
+      if (side === -1) _target.x = Math.min(_target.x, -0.08)
+      else _target.x = Math.max(_target.x, 0.22)
+
+      _delta.copy(_target).sub(_shoulder)
+      let dist = _delta.length()
+      const max = UPPER + FORE - 0.001
+      const min = Math.abs(UPPER - FORE) + 0.001
+      if (dist > max) {
+        _delta.multiplyScalar(max / dist)
+        dist = max
+      } else if (dist < min) {
+        _delta.multiplyScalar(min / Math.max(dist, 1e-6))
+        dist = min
+      }
+      _dir.copy(_delta).normalize()
+      const cosA = Math.min(1, Math.max(-1, (UPPER * UPPER + dist * dist - FORE * FORE) / (2 * UPPER * dist)))
+      const sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA))
+      // Elbow up and out, so the forearm stays above the desktop and the arms never cross.
+      _pole.set(side * -0.45, 1, 0.55)
+      _bend.copy(_pole).addScaledVector(_dir, -_pole.dot(_dir))
+      if (_bend.lengthSq() < 1e-8) _bend.set(0, 0, 1)
+      _bend.normalize()
+      _elbow.copy(_shoulder).addScaledVector(_dir, cosA * UPPER).addScaledVector(_bend, sinA * UPPER)
+
+      const parent = ref.current.parent
+      parent.updateWorldMatrix(true, false)
+      parent.getWorldQuaternion(_parentQ)
+      aimY(_elbow.clone().sub(_shoulder), _bend, _worldQ)
+      ref.current.quaternion.copy(_parentQ).invert().multiply(_worldQ)
+
+      const upperWorld = _worldQ.clone()
+      aimY(_target.clone().sub(_elbow), _bend, _worldQ)
+      fore.current.quaternion.copy(upperWorld).invert().multiply(_worldQ)
+
+      if (grip.current) {
+        // Fingers lie along the desk and tip down onto the keys or the mouse.
+        const down = side === -1 ? -0.34 : -0.16
+        _fingers.set(side * 0.08, down, -1).normalize()
+        _up.set(0, 1, 0)
+        aimY(_fingers, _up, _worldQ)
+        const foreWorld = upperWorld // overwritten; recompute from forearm world quat
+        fore.current.getWorldQuaternion(foreWorld)
+        grip.current.quaternion.copy(foreWorld).invert().multiply(_worldQ)
       }
       return
     }
@@ -172,7 +230,7 @@ function Arm({ side, pose, work = false }: { side: -1 | 1; pose: ArmPose; work?:
           <meshBasicMaterial color="#f4fdff" toneMapped={false} />
         </mesh>
         <group position={[0, 0.34, 0]}>
-          <Grip work={work} side={side} />
+          <Grip work={work} gripRef={grip} />
         </group>
       </group>
     </group>
@@ -235,8 +293,8 @@ export function BotFigure({
       const sway = deskWork ? 0.006 : 0.014
       body.current.position.x = anchor[0] + Math.sin(t * 0.55) * sway
       body.current.rotation.y = Math.sin(t * 0.42) * (deskWork ? 0.03 : 0.055)
-      body.current.rotation.z = Math.sin(t * 0.72) * 0.016
-      const breathe = 1 + Math.sin(t * 1.35) * 0.01
+      body.current.rotation.z = Math.sin(t * 0.72) * (deskWork ? 0 : 0.016)
+      const breathe = deskWork ? 1 : 1 + Math.sin(t * 1.35) * 0.01
       body.current.scale.set(1, breathe, 1)
     }
     if (torso.current) {
