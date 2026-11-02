@@ -84,10 +84,10 @@ DEFAULTS = {
     "quiet_end": QUIET_END,
     # Desk profit six (venue edge / correlation / kelly / flip / starve / shadow).
     "venue_min_edge": {
-        "kalshi_sports": 0.06,
-        "kalshi_btc15m": 0.05,
-        "kalshi_inx": 0.0,
-        "solana_dex": 0.02,
+        "kalshi_sports": 0.07,
+        "kalshi_btc15m": 0.055,
+        "kalshi_inx": 0.02,
+        "solana_dex": 0.025,
     },
     "sizing": "kelly_lite",
     "kelly_fraction": 0.25,
@@ -95,9 +95,9 @@ DEFAULTS = {
         ["risk_on_btc", "risk_on_equity"],
         ["risk_off_btc", "risk_off_equity"],
     ],
-    "model_flip_delta": 0.08,
+    "model_flip_delta": 0.06,
     "model_flip_exits": True,
-    "starve_min_n": 8,
+    "starve_min_n": 6,
     "starve_expectancy": 0.0,
     "starve_factor": 0.25,
     "expectancy_window_days": 20,
@@ -117,6 +117,7 @@ ACCOUNT_FILES = {
     "kalshi-sp": "paper_state.json",
     "btc15m": "paper_account.json",
     "memecoin": "positions.json",
+    "kalshi-sized": "paper_state.json",
 }
 
 # Closed paper settlements and the logs that record them. These are the files a
@@ -129,6 +130,9 @@ SETTLEMENT_FILES = (
     "kalshi-sp500-paper/paper_state.json",
     "kalshi-sp500-paper/Trade_Ledger.md",
     "kalshi-sp500-paper/Learning.md",
+    "kalshi-sized-paper/paper_state.json",
+    "kalshi-sized-paper/Trade_Ledger.md",
+    "kalshi-sized-paper/Learning.md",
     "memecoin-paper/positions.json",
     "memecoin-paper/trades.csv",
     "memecoin-paper/checks.csv",
@@ -142,6 +146,11 @@ ACTIONS = {
         "run": {"argv": ("gap_bot.py",), "entry": True, "timeout": 75, "label": "Run one check"},
     },
     "kalshi-sp": {
+        "run": {"argv": ("bot.py", "scan"), "entry": True, "timeout": 75, "label": "Run one check"},
+        "settle": {"argv": ("bot.py", "settle"), "entry": False, "timeout": 75, "label": "Settle paper"},
+        "brief": {"argv": ("bot.py", "brief", "--dry-run"), "entry": False, "timeout": 75, "label": "Morning brief"},
+    },
+    "kalshi-sized": {
         "run": {"argv": ("bot.py", "scan"), "entry": True, "timeout": 75, "label": "Run one check"},
         "settle": {"argv": ("bot.py", "settle"), "entry": False, "timeout": 75, "label": "Settle paper"},
         "brief": {"argv": ("bot.py", "brief", "--dry-run"), "entry": False, "timeout": 75, "label": "Morning brief"},
@@ -172,6 +181,10 @@ AUTO = (
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
+    {"id": "kalshi-sized", "action": "run", "at_ct": "12:35", "until_ct": "14:55"},
+    # Model-flip / settle polls — offset from the scan window so one bot never double-locks.
+    {"id": "kalshi-sized", "action": "settle", "at_ct": "13:00", "until_ct": "15:55"},
+    {"id": "kalshi-sized", "action": "settle", "at_ct": "16:05", "until_ct": "23:30"},
 )
 
 BOTS = (
@@ -218,6 +231,17 @@ BOTS = (
         "kind": "meme",
         "log": "trades.csv",
         "empty": "No positions.json yet. A check writes positions.json, trades.csv, and checks.csv.",
+    },
+    {
+        "id": "kalshi-sized",
+        "name": "Sized Kalshi",
+        "folder": "kalshi-sized-paper",
+        "script": "bot.py",
+        "blurb": "KXINXU paper bot with desk Kelly-lite stake (84–92¢ band). Own bankroll; model-flip + settle.",
+        "state": "paper_state.json",
+        "kind": "kalshi",
+        "log": "Trade_Ledger.md",
+        "empty": "No paper_state.json yet. A scan inside the bot's window writes one.",
     },
 )
 
@@ -317,12 +341,25 @@ BOT_PLANS = {
         "stake": "fixed-25",
     },
     "kalshi-sized": {
-        "buy": ["Not on this checkout — no buy plan until the bot lands on main."],
-        "sell": ["Not on this checkout — no sell plan."],
-        "failsafes": ["Desk stake bounds are saved for when this bot is present."],
-        "exit_quality": "absent",
-        "entry_gated": False,
-        "stake": "none",
+        "buy": [
+            "KXINXU 3 PM CT; scan 12:35–14:55 CT",
+            "Ask band 84–92¢; order-book confirm",
+            "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
+            "Correlation veto vs BTC / fixed Kalshi; learning skip clear",
+        ],
+        "sell": [
+            "Model-flip: side bid collapses under 50¢ → paper sell",
+            "Else settle when Kalshi resolves yes/no",
+        ],
+        "failsafes": [
+            "Desk entry_gate (daily loss / max open / open risk)",
+            "News calendar + kill switch / 1 trade/day / daily loss $50",
+            "Correlation + starve; paper_mode required",
+            "Pause file",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "kelly-lite",
     },
 }
 
@@ -412,7 +449,7 @@ ROI_POLICY = {
         {"id": "R9", "text": "Pace never waives edge."},
         {"id": "R10", "text": "One position key — no duplicate game/ticker/mint."},
         {"id": "R11", "text": "City/staff read snapshot only — never re-parse bot files."},
-        {"id": "R12", "text": "Absent Tower 5 stays offline — no substitute bot."},
+        {"id": "R12", "text": "Tower 5 is Sized Kalshi (Kelly-lite KXINXU) when present — no fake substitute."},
         {"id": "R13", "text": "Correlation veto — paired directional factors cannot stack when the open book is as good or better."},
         {"id": "R14", "text": "Fee-aware venue_min_edge per book (sports/BTC/INX/DEX)."},
         {"id": "R15", "text": "Model-flip exits fire before hard stops / settle-only waits."},
@@ -455,7 +492,7 @@ ROI_POLICY = {
         "kalshi-sp": "partial",
         "btc15m": "partial",
         "memecoin": "strong",
-        "kalshi-sized": "absent",
+        "kalshi-sized": "partial",
     },
 }
 
@@ -467,11 +504,11 @@ def bot_roi_compliance(bot_id: str, plans: dict | None = None) -> dict:
     quality = plans.get("exit_quality") or "none"
     order = {"strong": 3, "partial": 2, "weak": 1, "absent": 0, "none": -1}
     ok_exit = order.get(quality, -1) >= order.get(target, 2)
-    entry_ok = bool(plans.get("entry_gated")) or bot_id == "kalshi-sized"
-    # Sized placeholder is compliant when absent.
-    if bot_id == "kalshi-sized":
+    entry_ok = bool(plans.get("entry_gated"))
+    # Legacy absent checkout: still compliant if placeholder-only.
+    if bot_id == "kalshi-sized" and quality == "absent":
         entry_ok = True
-        ok_exit = quality == "absent"
+        ok_exit = True
     has_buy = bool(plans.get("buy"))
     has_sell = bool(plans.get("sell"))
     has_fail = bool(plans.get("failsafes"))
@@ -1150,8 +1187,8 @@ def _folder_ok(root: str, folder: str, script: str) -> bool:
     return os.path.isfile(os.path.join(cwd, script))
 
 
-def _kalshi_paper(root: str) -> bool:
-    cfg = _read_json(_under(root, "kalshi-sp500-paper", "config.json")) or {}
+def _kalshi_paper(root: str, folder: str = "kalshi-sp500-paper") -> bool:
+    cfg = _read_json(_under(root, folder, "config.json")) or {}
     return cfg.get("paper_mode") is True
 
 
@@ -1855,7 +1892,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     runs = _load_runs(root)
     day = _today()
     bots = [_bot_view(spec, root, runs, day) for spec in BOTS]
-    bots.append(_sized_view())
+    if not any(b.get("id") == "kalshi-sized" for b in bots):
+        bots.append(_sized_view())
     # Expectancy pass (needs history) before capital weights.
     prelim = []
     for bot in bots:
@@ -1939,6 +1977,8 @@ def _clip_out(text: str, limit: int = 6000) -> str:
 def _paper_ok(root: str, bot_id: str) -> str:
     if bot_id == "kalshi-sp" and not _kalshi_paper(root):
         return "Kalshi config is not paper_mode. This desk will not start it."
+    if bot_id == "kalshi-sized" and not _kalshi_paper(root, "kalshi-sized-paper"):
+        return "Sized Kalshi config is not paper_mode. This desk will not start it."
     if bot_id == "memecoin" and not _meme_paper(root):
         return "Memecoin PAPER is not True. This desk will not start it."
     return ""
@@ -2287,7 +2327,7 @@ def reset_bot(bot_id: str, root: str | None = None, who: str = "") -> dict:
             removed.append(_clip_out(proc.stdout or "Paper state reset.", 400))
             if proc.returncode != 0:
                 return {"ok": False, "error": removed[-1] or "Reset did not finish."}
-        elif bot_id == "kalshi-sp":
+        elif bot_id in ("kalshi-sp", "kalshi-sized"):
             for name in ("paper_state.json", "Trade_Ledger.md"):
                 if _unlink(_under(root, folder, name)):
                     removed.append(name)
@@ -2458,7 +2498,7 @@ def lift_sports_starter(state: dict) -> bool:
 def _account_body(bot_id: str) -> dict:
     if bot_id == "sports-gap":
         return {"cash": SPORTS_CASH, "open": [], "closed": [], "runs": 0, "paper_only": True}
-    if bot_id == "kalshi-sp":
+    if bot_id in ("kalshi-sp", "kalshi-sized"):
         return {
             "bankroll": 500.0,
             "open": [],
@@ -2645,6 +2685,7 @@ def hour_trade_count(root: str | None = None, now: dt.datetime | None = None) ->
     for bot_id, filename in (
         ("sports-gap", "state.json"),
         ("kalshi-sp", "paper_state.json"),
+        ("kalshi-sized", "paper_state.json"),
         ("btc15m", "paper_account.json"),
     ):
         folder = next((spec["folder"] for spec in BOTS if spec["id"] == bot_id), "")
@@ -3217,8 +3258,11 @@ def annotate(root: str | None, bot_id: str, trade_id: str, note: str = "", skipp
 
 def _calendar_warning(root: str, bot_id: str) -> str:
     """Missing calendar is shown on the card. It does not stop the paper check."""
-    if bot_id == "kalshi-sp":
-        path = _under(root, "kalshi-sp500-paper", "calendar.json")
+    if bot_id in ("kalshi-sp", "kalshi-sized"):
+        folder = "kalshi-sized-paper" if bot_id == "kalshi-sized" else "kalshi-sp500-paper"
+        path = _under(root, folder, "calendar.json")
+        if bot_id == "kalshi-sized" and not os.path.isfile(path):
+            path = _under(root, "kalshi-sp500-paper", "calendar.json")
         if not os.path.isfile(path):
             return "News calendar did not load."
         try:

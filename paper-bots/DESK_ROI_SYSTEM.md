@@ -30,7 +30,7 @@ Cut repeating losers via learning skip. Never size up to “make it back.” Nev
 | R9 | **Pace never waives edge** | Volume ≠ edge |
 | R10 | **One position key** — no duplicate game/ticker/mint | Concentration risk |
 | R11 | **Snapshot path only** for city/staff — never re-parse bot files in UI | Accuracy |
-| R12 | **Tower 5 absent** stays live offline until sized Kalshi lands — no substitute | Accuracy |
+| R12 | **Tower 5 Sized Kalshi** is live when `kalshi-sized-paper` is present — no fake substitute | Accuracy |
 | R13 | **Correlation veto** — paired directional factors cannot stack when the open book is as good or better | Portfolio heat |
 | R14 | **Fee-aware venue bars** — sports / BTC / INX / DEX | Honest edge |
 | R15 | **Model-flip exits** fire before hard stops / settle-only waits | Cut losers earlier |
@@ -61,7 +61,7 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 | **strong** | Active stop + scale-out + trail/time/liq | Memecoin |
 | **partial** | Path to exit before full adverse run (gap-close) + settle | Sports gap |
 | **weak** | Settle-only (optional advisory TP) | Kalshi S&P, BTC 15m |
-| **absent** | No script | Sized Kalshi |
+| **absent** | No script | *(legacy only)* |
 
 **ROI system target:** no present bot may stay below **partial** without an explicit waiver in `roi_system.waivers`. Weak books must at least: (a) hard entry filters, (b) calendar/news blocks where relevant, (c) desk entry_gate, (d) invalidation logging.
 
@@ -88,8 +88,9 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 - Facts fail-closed; stop/ladder/trail/time/liq.
 - Flat $25 is an approved fixed-ticket waiver (`fixed_ticket_25`).
 
-### Sized Kalshi → absent
-- No buys until present; show offline plan only.
+### Sized Kalshi → **partial**
+- KXINXU 84–92¢ band; desk Kelly-lite stake; model-flip under 50¢ + settle.
+- Own paper bankroll; desk entry_gate + venue `kalshi_inx` edge.
 
 ---
 

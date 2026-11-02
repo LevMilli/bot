@@ -22,7 +22,7 @@ FACTS = {                   # the rug filter. code only, no model
     "max_age_hours": 72,
 }
 
-MIN_CONFIDENCE = 0.8        # safer desk: only buy when scorer confidence ≥ 80%
+MIN_CONFIDENCE = 0.82       # profit desk: only buy when scorer confidence ≥ 82%
 
 EXIT = {
     "stop_pct": -35,                        # hard stop from entry

@@ -30,9 +30,9 @@ OLD_BANKROLL = 14.00
 # New defaults: 4 points of edge, 12 open positions. A paper buy needs that edge after the fee.
 # The hourly count does not waive it. The desk daily loss stop still ends a bad paper day.
 MAX_OPEN = 12
-MIN_GAP = 0.06            # safer desk edge bar AFTER the taker fee
-MIN_GAP_MODEL = 0.08      # NHL model stays 2 points stricter
-MIN_FAIR_PROB = 0.80      # only paper-buy when selected-side fair ≥ 80%
+MIN_GAP = 0.07            # profit desk: fee-aware edge bar AFTER the taker fee
+MIN_GAP_MODEL = 0.09      # NHL model stays 2 points stricter
+MIN_FAIR_PROB = 0.82      # only paper-buy when selected-side fair ≥ 82%
 DESK_ROOT = os.path.dirname(HERE)
 CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this band
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
