@@ -194,7 +194,7 @@ export default function App() {
           <div className="office-hud bank-hud">
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
-              <span>A/D · ←→ switch · W/S · ↑↓ zoom · Enter open · drag to look</span>
+              <span>A/D · ←→ snap · W/S · ↑↓ zoom free · Enter open · drag to look</span>
             </div>
           </div>
         )}

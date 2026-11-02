@@ -303,37 +303,37 @@ export function tellerPlateTexture(
   index: number,
   accent: string,
 ): THREE.CanvasTexture {
-  const { canvas, ctx, w, h } = makeCanvas(512, 160)
+  const { canvas, ctx, w, h } = makeCanvas(640, 200)
   ctx.fillStyle = '#050812'
   ctx.fillRect(0, 0, w, h)
   ctx.strokeStyle = accent
-  ctx.lineWidth = 4
-  ctx.strokeRect(4, 4, w - 8, h - 8)
+  ctx.lineWidth = 5
+  ctx.strokeRect(5, 5, w - 10, h - 10)
   ctx.fillStyle = accent
-  ctx.fillRect(4, 4, w - 8, 6)
+  ctx.fillRect(5, 5, w - 10, 8)
 
   const offline = !bot || bot.present === false
-  ctx.fillStyle = '#f4f7ff'
-  ctx.font = 'bold 28px monospace'
-  ctx.fillText(String(bot?.name || `Teller ${index + 1}`).slice(0, 22), 18, 52)
+  ctx.fillStyle = '#ffffff'
+  ctx.font = 'bold 36px monospace'
+  ctx.fillText(String(bot?.name || `Teller ${index + 1}`).slice(0, 20), 20, 58)
 
-  ctx.fillStyle = offline ? '#6a5678' : '#9aa3c7'
-  ctx.font = '18px monospace'
-  ctx.fillText(offline ? 'vault dark' : String(bot?.id || ''), 18, 84)
+  ctx.fillStyle = offline ? '#8a7498' : '#c8d0e8'
+  ctx.font = '22px monospace'
+  ctx.fillText(offline ? 'vault dark' : String(bot?.id || ''), 20, 92)
 
   if (!offline && bot) {
     const figure = bot.today != null && bot.today !== 0 ? bot.today : bot.realized
     ctx.fillStyle = Number(figure || 0) >= 0 ? '#39ff14' : '#ff2a6d'
-    ctx.font = 'bold 24px monospace'
-    ctx.fillText(money(figure, true), 18, 128)
+    ctx.font = 'bold 34px monospace'
+    ctx.fillText(money(figure, true), 20, 155)
     ctx.fillStyle = '#7ef9ff'
-    ctx.font = '16px monospace'
+    ctx.font = 'bold 22px monospace'
     const cash = `cash ${money(bot.cash)}`
-    ctx.fillText(cash, w - 18 - ctx.measureText(cash).width, 128)
+    ctx.fillText(cash, w - 22 - ctx.measureText(cash).width, 155)
   } else {
-    ctx.fillStyle = '#6a5678'
-    ctx.font = '18px monospace'
-    ctx.fillText('offline · no paper book', 18, 128)
+    ctx.fillStyle = '#8a7498'
+    ctx.font = '22px monospace'
+    ctx.fillText('offline · no paper book', 20, 155)
   }
 
   return screenTexture(canvas)
