@@ -217,39 +217,177 @@ export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
   const { canvas, ctx, w, h } = makeCanvas(1024, 220)
   ctx.fillStyle = '#050812'
   ctx.fillRect(0, 0, w, h)
-  ctx.strokeStyle = 'rgba(201,162,39,0.55)'
+  // subtle scanlines
+  ctx.fillStyle = 'rgba(45,226,230,0.04)'
+  for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1)
+  ctx.strokeStyle = 'rgba(249,200,14,0.65)'
   ctx.lineWidth = 3
   ctx.strokeRect(6, 6, w - 12, h - 12)
+  ctx.strokeStyle = 'rgba(45,226,230,0.28)'
+  ctx.lineWidth = 1
+  ctx.strokeRect(12, 12, w - 24, h - 24)
 
   ctx.fillStyle = '#f9c80e'
-  ctx.font = 'bold 28px monospace'
-  ctx.fillText('APEX-CITY TRUST  ·  NET DESK', 28, 42)
+  ctx.font = 'bold 26px monospace'
+  ctx.fillText('APEX-CITY TRUST  ·  NET DESK', 28, 40)
+  ctx.fillStyle = '#9aa3c7'
+  ctx.font = '16px monospace'
+  const clock = String(desk?.central_check || desk?.last_check || 'central clock pending').slice(0, 28)
+  ctx.fillText(clock, w - 28 - ctx.measureText(clock).width, 40)
 
   const realized = Number(desk?.realized || 0)
   const today = Number(desk?.today || 0)
   ctx.fillStyle = realized >= 0 ? '#39ff14' : '#ff3b3b'
-  ctx.font = 'bold 54px monospace'
-  ctx.fillText(`realized ${money(desk?.realized, true)}`, 28, 110)
+  ctx.font = 'bold 52px monospace'
+  ctx.fillText(`realized ${money(desk?.realized, true)}`, 28, 105)
 
   ctx.fillStyle = today >= 0 ? '#39ff14' : '#ff3b3b'
-  ctx.font = 'bold 36px monospace'
-  ctx.fillText(`today ${money(desk?.today, true)}`, 28, 160)
+  ctx.font = 'bold 34px monospace'
+  ctx.fillText(`today ${money(desk?.today, true)}`, 28, 152)
 
   ctx.fillStyle = '#7ef9ff'
   ctx.font = '22px monospace'
-  ctx.fillText(`cash ${money(desk?.cash)}`, 28, 198)
-  const starved = (desk?.ops?.starved_bots || []).length
-  const shadows = desk?.ops?.shadow_count || 0
-  const corr = (desk?.ops?.correlation_pressure || []).length
-  const meta = `starve ${starved} · shadow ${shadows} · corr ${corr}`
-  ctx.fillStyle = '#9aa3c7'
+  ctx.fillText(`cash ${money(desk?.cash)}`, 28, 192)
+
+  ctx.fillStyle = '#b967ff'
   ctx.font = '18px monospace'
-  ctx.fillText(meta, w - 28 - ctx.measureText(meta).width, 160)
+  const open = `open ${desk?.open_count ?? 0} · risk ${money(desk?.open_risk)}`
+  ctx.fillText(open, 320, 192)
+
   if (desk?.pace_line) {
-    const pace = String(desk.pace_line).slice(0, 36)
+    const pace = String(desk.pace_line).slice(0, 34)
     ctx.fillStyle = '#9aa3c7'
-    ctx.fillText(pace, w - 28 - ctx.measureText(pace).width, 198)
+    ctx.fillText(pace, w - 28 - ctx.measureText(pace).width, 192)
   }
+
+  return screenTexture(canvas)
+}
+
+/** Left lobby wall — live desk ledger / teller cash strip. */
+export function vaultLedgerTexture(desk?: Desk, bots: BotRow[] = []): THREE.CanvasTexture {
+  const { canvas, ctx, w, h } = makeCanvas(640, 400)
+  paintBase(ctx, w, h)
+  ctx.fillStyle = '#f9c80e'
+  ctx.font = 'bold 22px monospace'
+  ctx.fillText('DESK LEDGER', 22, 36)
+  ctx.fillStyle = '#7ef9ff'
+  ctx.font = '16px monospace'
+  ctx.fillText(`vault cash ${money(desk?.cash)}`, 22, 62)
+  ctx.fillStyle = '#9aa3c7'
+  ctx.fillText(`open risk ${money(desk?.open_risk)} · positions ${desk?.open_count ?? 0}`, 22, 86)
+
+  let y = 118
+  ctx.font = '15px monospace'
+  for (const bot of bots.slice(0, 5)) {
+    const offline = bot.present === false
+    ctx.fillStyle = offline ? '#6a5678' : '#f4f7ff'
+    ctx.fillText(String(bot.name || bot.id).slice(0, 18), 22, y)
+    ctx.fillStyle = offline ? '#6a5678' : Number(bot.today || 0) >= 0 ? '#39ff14' : '#ff2a6d'
+    const figure = offline ? 'offline' : money(bot.today != null && bot.today !== 0 ? bot.today : bot.realized, true)
+    ctx.fillText(figure, w - 22 - ctx.measureText(figure).width, y)
+    y += 28
+    ctx.fillStyle = '#3a4560'
+    ctx.fillRect(22, y - 18, w - 44, 1)
+  }
+
+  ctx.fillStyle = '#2de2e6'
+  ctx.font = '14px monospace'
+  wrapText(ctx, desk?.status_line || desk?.pace_line || 'Paper reserve synced to snapshot.', 22, h - 40, w - 44, 18, 2)
+
+  return screenTexture(canvas)
+}
+
+/** Teller pod nameplate — sharp canvas so lobby labels match office monitors. */
+export function tellerPlateTexture(
+  bot: BotRow | null,
+  index: number,
+  accent: string,
+): THREE.CanvasTexture {
+  const { canvas, ctx, w, h } = makeCanvas(512, 160)
+  ctx.fillStyle = '#050812'
+  ctx.fillRect(0, 0, w, h)
+  ctx.strokeStyle = accent
+  ctx.lineWidth = 4
+  ctx.strokeRect(4, 4, w - 8, h - 8)
+  ctx.fillStyle = accent
+  ctx.fillRect(4, 4, w - 8, 6)
+
+  const offline = !bot || bot.present === false
+  ctx.fillStyle = '#f4f7ff'
+  ctx.font = 'bold 28px monospace'
+  ctx.fillText(String(bot?.name || `Teller ${index + 1}`).slice(0, 22), 18, 52)
+
+  ctx.fillStyle = offline ? '#6a5678' : '#9aa3c7'
+  ctx.font = '18px monospace'
+  ctx.fillText(offline ? 'vault dark' : String(bot?.id || ''), 18, 84)
+
+  if (!offline && bot) {
+    const figure = bot.today != null && bot.today !== 0 ? bot.today : bot.realized
+    ctx.fillStyle = Number(figure || 0) >= 0 ? '#39ff14' : '#ff2a6d'
+    ctx.font = 'bold 24px monospace'
+    ctx.fillText(money(figure, true), 18, 128)
+    ctx.fillStyle = '#7ef9ff'
+    ctx.font = '16px monospace'
+    const cash = `cash ${money(bot.cash)}`
+    ctx.fillText(cash, w - 18 - ctx.measureText(cash).width, 128)
+  } else {
+    ctx.fillStyle = '#6a5678'
+    ctx.font = '18px monospace'
+    ctx.fillText('offline · no paper book', 18, 128)
+  }
+
+  return screenTexture(canvas)
+}
+
+/** Right lobby wall — ROI / paper compliance strip. */
+export function vaultComplianceTexture(desk?: Desk, bots: BotRow[] = []): THREE.CanvasTexture {
+  const { canvas, ctx, w, h } = makeCanvas(640, 400)
+  paintBase(ctx, w, h)
+  ctx.fillStyle = '#39ff14'
+  ctx.font = 'bold 22px monospace'
+  ctx.fillText('COMPLIANCE BAY', 22, 36)
+
+  const roiOk = desk?.ops?.roi_ok
+  ctx.fillStyle = roiOk === false ? '#ff2a6d' : '#39ff14'
+  ctx.font = '18px monospace'
+  ctx.fillText(roiOk === false ? 'ROI SYSTEM · gaps' : 'ROI SYSTEM · compliance ok', 22, 68)
+
+  ctx.fillStyle = '#f9c80e'
+  ctx.font = '15px monospace'
+  ctx.fillText('PAPER ONLY · no wallet · no live orders', 22, 96)
+
+  ctx.fillStyle = '#9aa3c7'
+  ctx.font = '14px monospace'
+  const gated = desk?.ops?.entry_gated_bots?.length ?? 0
+  const strong = desk?.ops?.strong_exits?.length ?? 0
+  const weak = desk?.ops?.weak_exits?.length ?? 0
+  ctx.fillText(`entry gated ${gated} · strong exits ${strong} · weak ${weak}`, 22, 124)
+
+  let y = 160
+  ctx.font = '15px monospace'
+  for (const bot of bots.slice(0, 5)) {
+    const offline = bot.present === false
+    const exit = bot.plans?.exit_quality || '—'
+    ctx.fillStyle = offline ? '#6a5678' : '#f4f7ff'
+    ctx.fillText(String(bot.id).slice(0, 14), 22, y)
+    ctx.fillStyle = exit === 'strong' ? '#39ff14' : exit === 'weak' ? '#ff2a6d' : '#f9c80e'
+    ctx.fillText(String(exit), 220, y)
+    ctx.fillStyle = bot.plans?.entry_gated ? '#ff2a6d' : '#2de2e6'
+    ctx.fillText(bot.plans?.entry_gated ? 'gated' : 'open', 340, y)
+    y += 26
+  }
+
+  ctx.fillStyle = '#7ef9ff'
+  ctx.font = '14px monospace'
+  wrapText(
+    ctx,
+    desk?.gate || 'Desk gates live from snapshot — vault does not invent fills.',
+    22,
+    h - 42,
+    w - 44,
+    18,
+    2,
+  )
 
   return screenTexture(canvas)
 }

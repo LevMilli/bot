@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Mesh } from 'three'
+import type { Group, Mesh } from 'three'
 import type { Desk } from '../types'
 import { VaultHologram } from '../hud/Holograms'
 
@@ -23,6 +23,7 @@ function Crystal({ position, scale = 1 }: { position: [number, number, number]; 
   )
 }
 
+/** Plaza vault dome — warm trust shell with brass portal ring into the bank lobby. */
 export function Vault({
   lights = true,
   position = [0, 0, 5.2],
@@ -42,6 +43,8 @@ export function Vault({
 }) {
   const dome = useRef<Mesh>(null)
   const glow = useRef<Mesh>(null)
+  const portal = useRef<Group>(null)
+  const portalGlow = useRef<Mesh>(null)
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
@@ -53,6 +56,11 @@ export function Vault({
     if (glow.current) {
       const s = 1 + Math.sin(t * 1.5) * 0.045
       glow.current.scale.set(s, 1.35 * s, s)
+    }
+    if (portal.current) portal.current.rotation.y = t * 0.4
+    if (portalGlow.current) {
+      const mat = portalGlow.current.material as { opacity?: number }
+      if (mat.opacity != null) mat.opacity = 0.35 + Math.sin(t * 2.2) * 0.12
     }
   })
 
@@ -93,6 +101,20 @@ export function Vault({
         <ringGeometry args={[2.55, 2.7, 32]} />
         <meshBasicMaterial color="#2de2e6" transparent opacity={0.55} />
       </mesh>
+      {/* trust seal spokes on the pad */}
+      {Array.from({ length: 8 }).map((_, i) => {
+        const a = (i / 8) * Math.PI * 2
+        return (
+          <mesh
+            key={`spoke-${i}`}
+            position={[Math.cos(a) * 1.6, 0.035, Math.sin(a) * 1.6]}
+            rotation={[-Math.PI / 2, 0, -a]}
+          >
+            <planeGeometry args={[0.08, 1.1]} />
+            <meshBasicMaterial color="#b967ff" transparent opacity={0.35} depthWrite={false} />
+          </mesh>
+        )
+      })}
 
       <mesh ref={dome} position={[0, 0.05, 0]} scale={[1, 1.38, 1]} {...clickProps}>
         <sphereGeometry args={[2.55, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
@@ -121,6 +143,37 @@ export function Vault({
           </mesh>
         )
       })}
+
+      {/* brass portal ring facing plaza approach — reads as bank entrance */}
+      <group position={[0, 1.15, 2.15]} rotation={[0.15, 0, 0]}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.72, 0.05, 10, 28]} />
+          <meshStandardMaterial color="#c9a227" metalness={0.85} roughness={0.22} emissive="#c9a227" emissiveIntensity={0.35} />
+        </mesh>
+        <mesh ref={portalGlow} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.58, 0.03, 8, 24]} />
+          <meshBasicMaterial color="#2de2e6" transparent opacity={0.4} depthWrite={false} toneMapped={false} />
+        </mesh>
+        <group ref={portal}>
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.28, 0.035, 8, 20]} />
+            <meshBasicMaterial color="#f9c80e" toneMapped={false} />
+          </mesh>
+          <mesh>
+            <boxGeometry args={[0.42, 0.04, 0.04]} />
+            <meshBasicMaterial color="#39ff14" toneMapped={false} />
+          </mesh>
+        </group>
+        {/* threshold slab */}
+        <mesh position={[0, -0.95, 0.15]}>
+          <boxGeometry args={[1.5, 0.08, 0.55]} />
+          <meshStandardMaterial color="#12101a" metalness={0.4} roughness={0.4} />
+        </mesh>
+        <mesh position={[0, -0.9, 0.15]}>
+          <boxGeometry args={[1.52, 0.02, 0.04]} />
+          <meshBasicMaterial color="#f9c80e" toneMapped={false} />
+        </mesh>
+      </group>
 
       <mesh ref={glow} position={[0, 0.05, 0]} scale={[1, 1.38, 1]}>
         <sphereGeometry args={[2.82, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
