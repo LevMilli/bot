@@ -194,7 +194,7 @@ export default function App() {
           <div className="office-hud bank-hud">
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
-              <span>drag to look · open pods · click a teller for trades</span>
+              <span>A/D or ←→ switch teller · Enter open · drag to look</span>
             </div>
           </div>
         )}
