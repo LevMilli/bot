@@ -243,20 +243,20 @@ function ProfitBoard({ desk }: { desk?: Desk }) {
   })
   // Raised so ledger/compliance sit under it in the default FOV.
   return (
-    <group position={[0, 3.88, -2.95]}>
+    <group position={[0, 3.72, -2.95]}>
       <mesh>
-        <boxGeometry args={[5.9, 1.05, 0.14]} />
+        <boxGeometry args={[5.9, 0.88, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.5} roughness={0.28} />
       </mesh>
       <mesh position={[0, 0, 0.08]}>
-        <planeGeometry args={[5.5, 0.88]} />
+        <planeGeometry args={[5.5, 0.72]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.56, 0.05]}>
+      <mesh position={[0, 0.47, 0.05]}>
         <boxGeometry args={[6.0, 0.04, 0.07]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.56, 0.05]}>
+      <mesh position={[0, -0.47, 0.05]}>
         <boxGeometry args={[6.0, 0.04, 0.07]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
