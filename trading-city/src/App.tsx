@@ -60,6 +60,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [fromBank, setFromBank] = useState(false)
   const [screensOpen, setScreensOpen] = useState(false)
+  /** Desk ops HUD (skips / budgets / adapt / fill tax) — opens from ledger/compliance click. */
+  const [vaultOpsOpen, setVaultOpsOpen] = useState(false)
   const guest = useMemo(() => guestModeFromUrl(), [])
 
   const bots = snap?.bots || []
@@ -100,9 +102,14 @@ export default function App() {
     setScreensOpen(false)
   }, [selectedId, view])
 
+  useEffect(() => {
+    if (view !== 'bank') setVaultOpsOpen(false)
+  }, [view])
+
   const backToCity = () => {
     setSelectedId(null)
     setFromBank(false)
+    setVaultOpsOpen(false)
     setView('city')
     window.location.hash = '#/plaza'
   }
@@ -134,7 +141,12 @@ export default function App() {
                 onOpenScreens={() => setScreensOpen(true)}
               />
             ) : view === 'bank' ? (
-              <BankScene bots={bots} desk={snap?.desk} onSelectTeller={openTeller} />
+              <BankScene
+                bots={bots}
+                desk={snap?.desk}
+                onSelectTeller={openTeller}
+                onOpenDeskOps={() => setVaultOpsOpen(true)}
+              />
             ) : (
               <CityScene
                 bots={bots}
@@ -272,73 +284,84 @@ export default function App() {
               <strong>APEX-CITY TRUST</strong>
               <span>A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look</span>
             </div>
-            <div className="vault-board" aria-label="Desk vault board">
-              <div className="vault-board-row">
-                <span className="vb-label">skips</span>
-                <span>
-                  {(snap?.desk?.more?.skip_leaderboard?.top || [])
-                    .slice(0, 5)
-                    .map((s) => `${s.code}×${s.n}`)
-                    .join(' · ') || 'quiet'}
-                </span>
+            {vaultOpsOpen && (
+              <div className="vault-board" aria-label="Desk vault board">
+                <div className="vault-board-toolbar">
+                  <button
+                    type="button"
+                    className="vault-board-close"
+                    onClick={() => setVaultOpsOpen(false)}
+                  >
+                    Close desk ops
+                  </button>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">skips</span>
+                  <span>
+                    {(snap?.desk?.more?.skip_leaderboard?.top || [])
+                      .slice(0, 5)
+                      .map((s) => `${s.code}×${s.n}`)
+                      .join(' · ') || 'quiet'}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">budgets</span>
+                  <span>
+                    {Object.entries(snap?.desk?.more?.tower_budgets || {})
+                      .slice(0, 6)
+                      .map(([id, n]) => `${id}:$${Number(n).toFixed(0)}`)
+                      .join(' · ') || '—'}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">adapt</span>
+                  <span>
+                    {(() => {
+                      const by = snap?.desk?.adapt?.by_bot || {}
+                      let s = 0
+                      let b = 0
+                      for (const row of Object.values(by)) {
+                        s += Number(row?.safe || 0)
+                        b += Number(row?.big || 0)
+                      }
+                      return `safe×${s} · big×${b}`
+                    })()}
+                    {snap?.desk?.gate_a?.any_ready ? ' · Gate A ready' : ''}
+                    {snap?.desk?.gate_b?.any_ready ? ' · Gate B ready' : ''}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">tip</span>
+                  <span>
+                    {snap?.desk?.sports_tip?.active
+                      ? `T−${snap.desk.sports_tip.band} force ${snap.desk.sports_tip.force_sec || 45}s` +
+                        (snap.desk.sports_tip.sample ? ` · ${snap.desk.sports_tip.sample}` : '')
+                      : 'no tip-force · sports on normal cadence'}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">bleed</span>
+                  <span>
+                    {(() => {
+                      const sb = snap?.desk?.master?.stopbleed
+                      if (!sb) return 'memecoin measure pending'
+                      return (
+                        `stop×${sb.stop_exits ?? 0} · flip×${sb.model_flip_exits ?? 0}` +
+                        (sb.red_day_locked ? ' · RED LOCK' : '') +
+                        (sb.expand_volume ? ' · volume ok' : ' · no volume expand')
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row tax-edu">
+                  <span className="vb-label">fill tax</span>
+                  <span>
+                    +{(((snap?.desk?.ops?.fill_tax ?? snap?.desk?.gate_a?.fill_tax) ?? 0.01) * 100).toFixed(0)}¢
+                    adverse on boards — untaxed paper wins are not live-ready
+                  </span>
+                </div>
               </div>
-              <div className="vault-board-row">
-                <span className="vb-label">budgets</span>
-                <span>
-                  {Object.entries(snap?.desk?.more?.tower_budgets || {})
-                    .slice(0, 6)
-                    .map(([id, n]) => `${id}:$${Number(n).toFixed(0)}`)
-                    .join(' · ') || '—'}
-                </span>
-              </div>
-              <div className="vault-board-row">
-                <span className="vb-label">adapt</span>
-                <span>
-                  {(() => {
-                    const by = snap?.desk?.adapt?.by_bot || {}
-                    let s = 0
-                    let b = 0
-                    for (const row of Object.values(by)) {
-                      s += Number(row?.safe || 0)
-                      b += Number(row?.big || 0)
-                    }
-                    return `safe×${s} · big×${b}`
-                  })()}
-                  {snap?.desk?.gate_a?.any_ready ? ' · Gate A ready' : ''}
-                  {snap?.desk?.gate_b?.any_ready ? ' · Gate B ready' : ''}
-                </span>
-              </div>
-              <div className="vault-board-row">
-                <span className="vb-label">tip</span>
-                <span>
-                  {snap?.desk?.sports_tip?.active
-                    ? `T−${snap.desk.sports_tip.band} force ${snap.desk.sports_tip.force_sec || 45}s` +
-                      (snap.desk.sports_tip.sample ? ` · ${snap.desk.sports_tip.sample}` : '')
-                    : 'no tip-force · sports on normal cadence'}
-                </span>
-              </div>
-              <div className="vault-board-row">
-                <span className="vb-label">bleed</span>
-                <span>
-                  {(() => {
-                    const sb = snap?.desk?.master?.stopbleed
-                    if (!sb) return 'memecoin measure pending'
-                    return (
-                      `stop×${sb.stop_exits ?? 0} · flip×${sb.model_flip_exits ?? 0}` +
-                      (sb.red_day_locked ? ' · RED LOCK' : '') +
-                      (sb.expand_volume ? ' · volume ok' : ' · no volume expand')
-                    )
-                  })()}
-                </span>
-              </div>
-              <div className="vault-board-row tax-edu">
-                <span className="vb-label">fill tax</span>
-                <span>
-                  +{(((snap?.desk?.ops?.fill_tax ?? snap?.desk?.gate_a?.fill_tax) ?? 0.01) * 100).toFixed(0)}¢
-                  adverse on boards — untaxed paper wins are not live-ready
-                </span>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
