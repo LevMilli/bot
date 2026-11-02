@@ -38,14 +38,17 @@ MIN_MINUTES_LEFT = 10        # early singles need ≥10 minutes before close
 PARLAY_MAX_MIN = 5.0         # late multi-leg window (staff: wait → parlay by ~5m left)
 PARLAY_MIN_MIN = 1.0
 EDGE_BUFFER = 0.05           # fallback if desk venue_min_edge missing
-MIN_MODEL_PROB = 0.80        # margin goal: model Φ(z) must be ≥ 80%
-MIN_CUSHION_USD = 40         # BTC cushion floor (was $50 — still fee-aware with venue edge)
-MIN_CUSHION_ETH = 2.0        # ETH 15m cushion (KXETH15M)
-MIN_Z = 0.65                 # cushion / sigma
-MIN_Z_COINBASE_ONLY = 0.80   # stricter if only Coinbase spot worked
-ASK_MIN, ASK_MAX = 0.75, 0.90  # only buy high-probability priced contracts
-MAX_SPREAD = 0.03
-MIN_DEPTH = 5                # contracts offered at or below the ask
+MIN_MODEL_ACCURATE = 0.80    # accurate lane
+MIN_MODEL_SPEED = 0.75       # speed lane (needs SPEED_EDGE_EXTRA)
+MIN_MODEL_PROB = MIN_MODEL_ACCURATE
+SPEED_EDGE_EXTRA = 0.02
+MIN_CUSHION_USD = 35         # BTC cushion floor
+MIN_CUSHION_ETH = 1.5        # ETH 15m cushion (KXETH15M)
+MIN_Z = 0.60                 # cushion / sigma
+MIN_Z_COINBASE_ONLY = 0.75   # stricter if only Coinbase spot worked
+ASK_MIN, ASK_MAX = 0.70, 0.92  # slightly wider book for more fee-aware fills
+MAX_SPREAD = 0.04
+MIN_DEPTH = 3                # contracts offered at or below the ask
 NEWS_WINDOW_MIN = 30         # USD high-impact event within 30 min of the block -> skip
 TAKE_PROFIT_ADD, TAKE_PROFIT_CAP = 0.15, 0.99
 DVOL_FAIL_MULT = 1.2         # if DVOL fails: use realized sigma * 1.2
@@ -739,10 +742,17 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
 
     reasons = list(cheap)
     zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
-    if p < MIN_MODEL_PROB:
-        reasons.append(f"p {p:.3f} < safer floor {MIN_MODEL_PROB:.2f}")
-    if p < need:
-        reasons.append(f"p {p:.3f} < ask+fee+{edge_buf:.2f} = {need:.3f}")
+    lane = "accurate"
+    need_p = float(need)
+    if p + 1e-12 >= MIN_MODEL_ACCURATE:
+        lane = "accurate"
+    elif p + 1e-12 >= MIN_MODEL_SPEED:
+        lane = "speed"
+        need_p = float(need) + SPEED_EDGE_EXTRA
+    else:
+        reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED:.2f}")
+    if p < need_p:
+        reasons.append(f"p {p:.3f} < ask+fee+buf ({lane}) = {need_p:.3f}")
     if z < zmin:
         reasons.append(f"z {z:.2f} < {zmin}")
     if not (ASK_MIN <= ask <= ASK_MAX):
@@ -762,6 +772,7 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
 
     out.update({
         "reasons": reasons,
+        "lane": lane,
         "side": side,
         "p": p,
         "confidence": p,

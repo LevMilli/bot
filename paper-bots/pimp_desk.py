@@ -200,24 +200,23 @@ ACTIONS = {
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
 # Daily slots run once per Chicago day, the first time the process is up inside
 # the window. The Kalshi scan uses the desk's paper scan (no --any-time) and
-# only starts from 12:30 to 14:55 CT, the script's own entry window. An earlier
-# scan would exit without a paper fill. The morning brief stays the desk's dry run.
-# Settle is the desk's paper settle, once at 4:00 PM CT, after the 3:00 PM
-# contract time, so a closed paper trade can land in the state file.
-# Memecoin manages open exits about every 10 minutes (same script still scans
-# for new tickets). Three daily slots were too sparse for stop/ladder/time exits.
+# starts from 12:00 to 14:55 CT (up to 3 scans/day). The morning brief stays
+# the desk's dry run. Settle is the desk's paper settle, once at 4:00 PM CT,
+# after the 3:00 PM contract time, so a closed paper trade can land in the
+# state file. Memecoin manages open exits about every 5 minutes (same script
+# still scans for new tickets; dual accurate/speed lanes).
 AUTO_RETRY_SEC = 900
 AUTO = (
-    # Phase 2: tip-soon sports wakes every 3m; commodity 90s with crypto.
+    # Faster sports polls so tip-soon + dual lanes can land multiple fills.
     {"id": "sports-gap", "action": "run", "every_sec": 180},
-    # BTC is the busiest Kalshi series — poll every 90s; guidelines unchanged, bid every fit.
-    {"id": "btc15m", "action": "run", "every_sec": 90},
+    # BTC is the busiest Kalshi series — poll every 60s; guidelines unchanged, bid every fit.
+    {"id": "btc15m", "action": "run", "every_sec": 60},
     {"id": "commodity-15m", "action": "run", "every_sec": 90},
-    {"id": "memecoin", "action": "run", "every_sec": 600},
-    {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
-    {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
+    {"id": "memecoin", "action": "run", "every_sec": 300},
+    {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "12:00", "until_ct": "14:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
-    {"id": "kalshi-sized", "action": "run", "at_ct": "12:35", "until_ct": "14:55"},
+    {"id": "kalshi-sized", "action": "run", "at_ct": "12:05", "until_ct": "14:55"},
     # Model-flip / settle polls — offset from the scan window so one bot never double-locks.
     {"id": "kalshi-sized", "action": "settle", "at_ct": "13:00", "until_ct": "15:55"},
     {"id": "kalshi-sized", "action": "settle", "at_ct": "16:05", "until_ct": "23:30"},
@@ -284,7 +283,7 @@ BOTS = (
         "name": "Sized Kalshi",
         "folder": "kalshi-sized-paper",
         "script": "bot.py",
-        "blurb": "KXINXU paper bot with desk Kelly-lite stake (84–92¢ band). Own bankroll; model-flip + settle.",
+        "blurb": "KXINXU paper bot with desk Kelly-lite stake (80–92¢ band). Own bankroll; model-flip + settle.",
         "state": "paper_state.json",
         "kind": "kalshi",
         "log": "Trade_Ledger.md",
@@ -297,9 +296,9 @@ BOTS = (
 BOT_PLANS = {
     "sports-gap": {
         "buy": [
-            "Live or tip-soon (≤90m) ESPN game matched to a Kalshi series",
-            "Edge after fee ≥ venue kalshi_sports (NHL +0.02)",
-            "Selected-side fair ≥ 80%; home fair outside 0.40–0.60 close band",
+            "Live or tip-soon (≤180m) ESPN game matched to a Kalshi series",
+            "Dual lanes: accurate fair ≥80% OR speed fair ≥72% with +2¢ edge",
+            "Up to 4 paper buys per check; home fair outside 0.40–0.60 close band",
             "Spread ≤ 0.05; ask in 0.05–0.95",
             "Kelly-lite / desk stake; correlation + learning clear",
             "Adapt: safe on high vol; bigger only if ≥80% hit with enough settles",
@@ -323,8 +322,8 @@ BOT_PLANS = {
     },
     "kalshi-sp": {
         "buy": [
-            "Once per day 12:30–14:55 CT",
-            "Safest YES/NO ask in the 80–90¢ band; venue kalshi_inx edge",
+            "Up to 3 scans/day 12:00–14:55 CT",
+            "Safest YES/NO ask in the 80–92¢ band; venue kalshi_inx edge",
             "Stake floor($25 / ask); correlation + learning clear",
             "Adapt layer still logs vol/performance for desk study",
         ],
@@ -335,7 +334,7 @@ BOT_PLANS = {
         "failsafes": [
             "Desk entry_gate on scan (not settle/brief)",
             "Weekend + news/holiday calendar",
-            "Max 1 trade/day; bot daily loss −$50",
+            "Max 3 trades/day; bot daily loss −$50",
             "Kill switch bankroll ≤ $400; paper_mode required",
             "Correlation veto + starve; pause file",
         ],
@@ -392,9 +391,9 @@ BOT_PLANS = {
     "memecoin": {
         "buy": [
             "RugCheck facts fail-closed + scorer ≥ 0.8",
-            "Desk Kelly-lite ticket ($10–$25) capped by cash; max 4 open / 6 entries per day",
+            "Dual lanes: accurate conf ≥80% OR speed ≥72% (+venue); tickets $10–$25",
+            "Max 6 open / 12 entries per day; 12h cooldown",
             "Midnight broke reload (Chicago): out-of-ammo towers reset P&L + cash; winners left alone",
-            "24h cooldown after close; learning skip clear",
             "Adapt: high 5m move → safer size; ≥80% settled hit → size-up",
         ],
         "sell": [
@@ -417,8 +416,8 @@ BOT_PLANS = {
     },
     "kalshi-sized": {
         "buy": [
-            "KXINXU 3 PM CT; scan 12:35–14:55 CT",
-            "Ask band 84–92¢; order-book confirm",
+            "KXINXU 3 PM CT; up to 3 scans 12:05–14:55 CT",
+            "Ask band 80–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
             "Correlation veto vs BTC / fixed Kalshi; learning skip clear",
             "Adapt: safe on high vol; bigger only on proven ≥80% record",
@@ -1336,9 +1335,11 @@ def _kalshi_skip(root: str, state: dict | None) -> str:
     if reasons:
         line = f"{key} CT skip: {', '.join(reasons)}."
     else:
-        line = f"{key} CT is not on the skip calendar."
+        # Tradable day — do not put a "not on skip calendar" line in why/skip (looks like a block).
+        line = ""
     if state and state.get("halted"):
-        line += " The paper account is halted by its own kill switch."
+        halt = "The paper account is halted by its own kill switch."
+        line = f"{line} {halt}".strip() if line else halt
     return line
 
 
@@ -2498,13 +2499,14 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
 def timer_text() -> str:
     """Plain schedule for the desk. No forecast and no profit language."""
     return (
-        "On a timer, America/Chicago. Sports gap about every 5 minutes. "
-        "BTC 15-minute signal about every 90 seconds — scores every open KXBTC15M window "
+        "On a timer, America/Chicago. Sports gap about every 3 minutes (dual lanes). "
+        "BTC 15-minute signal about every 60 seconds — scores every open KXBTC15M window "
         "and syncs the Kalshi public trade tape for desk series. "
+        "Commodity 15m about every 90 seconds. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
-        "Kalshi paper scan once at 12:30 PM, inside that bot's own window. "
+        "Kalshi paper scan from 12:00 PM (up to 3/day), inside that bot's own window. "
         "Kalshi paper settle once at 4:00 PM. "
-        "Memecoin about every 10 minutes (manage exits, then scan). "
+        "Memecoin about every 5 minutes (manage exits, then scan; dual lanes). "
         "No edge is a finished check with zero paper trades. "
         "Numbers only move while the Discord bot paper timer is alive."
     )

@@ -416,8 +416,12 @@ def scan(st, stats):
             record("SKIP", "failed: " + ", ".join(fails))
             continue
         stats["facts_pass"] += 1
-        if conf < C.MIN_CONFIDENCE:
-            record("SKIP", f"confidence {conf} < {C.MIN_CONFIDENCE}")
+        if conf + 1e-12 >= C.MIN_CONFIDENCE_ACCURATE:
+            lane = "accurate"
+        elif conf + 1e-12 >= C.MIN_CONFIDENCE_SPEED:
+            lane = "speed"
+        else:
+            record("SKIP", f"confidence {conf} < speed floor {C.MIN_CONFIDENCE_SPEED}")
             continue
         stats["confidence_pass"] += 1
         veto = grok_veto(p, rf, conf)
@@ -445,9 +449,11 @@ def scan(st, stats):
                 try:
                     desk = _desk()
                     venue = float(desk.venue_min_edge("solana_dex", desk.load_settings(os.path.dirname(BASE))))
-                    # Confidence above 0.5 as a crude residual edge vs coin-flip.
-                    if max(0.0, float(conf) - 0.5) + 1e-12 < venue:
-                        gate_reason = f"venue solana_dex edge {max(0.0, float(conf) - 0.5):.3f} < {venue:.3f}"
+                    # Speed lane: require a bit more residual confidence vs coin-flip.
+                    need_venue = venue + (0.02 if lane == "speed" else 0.0)
+                    residual = max(0.0, float(conf) - 0.5)
+                    if residual + 1e-12 < need_venue:
+                        gate_reason = f"venue solana_dex edge {residual:.3f} < {need_venue:.3f} ({lane})"
                     else:
                         gate_reason = desk.learning_skip(
                             desk.load_learning(os.path.dirname(BASE)),
@@ -464,15 +470,18 @@ def scan(st, stats):
         if ticket < C.MIN_TICKET_USD:
             record("SKIP", f"ticket ${ticket:.2f} below min")
             continue
+        # Speed lane: slightly smaller ticket so more fills fit open-risk.
+        if lane == "speed":
+            ticket = round(max(C.MIN_TICKET_USD, min(ticket, C.TICKET_USD * 0.7, float(st["cash_usd"]))), 2)
         price = float(p["priceUsd"])
         tokens, fee, imp, fill = paper_buy(price, liq, ticket)
         st["cash_usd"] = round(float(st["cash_usd"]) - ticket, 4)
         pos = dict(mint=mint, symbol=row["symbol"], pair=p["pairAddress"], entry_ts=NOW, entry_iso=now_iso(),
                    entry_market_price=price, entry_fill_price=fill, entry_liq=liq, tokens=tokens,
                    tokens_left=tokens, cost_usd=ticket, risk=ticket,
-                   why=f"Paper buy. Confidence {conf}. Ticket ${ticket:.2f}.",
+                   why=f"Paper buy ({lane} lane). Confidence {conf}. Ticket ${ticket:.2f}.",
                    peak_price=price, ladder_done=[],
-                   confidence=conf, url=p.get("url"))
+                   confidence=conf, lane=lane, url=p.get("url"))
         st["open"].append(pos)
         open_mints.add(mint)
         entries_today += 1

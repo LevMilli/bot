@@ -273,24 +273,26 @@ class PimpDeskTests(unittest.TestCase):
         sports = next(s for s in pimp_desk.AUTO if s["id"] == "sports-gap")
         btc = next(s for s in pimp_desk.AUTO if s["id"] == "btc15m")
         meme = next(s for s in pimp_desk.AUTO if s["id"] == "memecoin")
-        self.assertEqual(sports["every_sec"], 180)  # Phase 2 tip-soon cadence
-        self.assertEqual(btc["every_sec"], 90)
-        self.assertEqual(meme["every_sec"], 600)
+        self.assertEqual(sports["every_sec"], 180)  # tip-soon + dual lanes
+        self.assertEqual(btc["every_sec"], 60)
+        self.assertEqual(meme["every_sec"], 300)
         brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")
         scan = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run")
         settle = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle")
-        self.assertEqual((brief["at_ct"], scan["at_ct"], settle["at_ct"]), ("08:00", "12:30", "16:00"))
+        self.assertEqual((brief["at_ct"], scan["at_ct"], settle["at_ct"]), ("08:00", "12:00", "16:00"))
         self.assertEqual(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["argv"], ("bot.py", "brief", "--dry-run"))
         self.assertFalse(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["entry"])
         self.assertTrue(pimp_desk.ACTIONS["kalshi-sp"]["run"]["entry"])
         self.assertEqual([s for s in pimp_desk.AUTO if s["id"] == "memecoin" and "at_ct" in s], [])
         text = pimp_desk.timer_text().lower()
-        self.assertIn("every 5 minutes", text)
+        self.assertIn("every 3 minutes", text)
+        self.assertIn("60 seconds", text)
         self.assertIn("90 seconds", text)
         self.assertIn("trade tape", text)
-        self.assertIn("10 minutes", text)
+        self.assertIn("every 5 minutes", text)
+        self.assertIn("dual lanes", text)
         self.assertIn("8:00", text)
-        self.assertIn("12:30", text)
+        self.assertIn("12:00", text)
         self.assertIn("dry run", text)
         self.assertNotIn("guarantee", text)
         with tempfile.TemporaryDirectory() as tmp:
@@ -302,17 +304,17 @@ class PimpDeskTests(unittest.TestCase):
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
             saturday = dt.datetime(2026, 10, 31, 12, 30, tzinfo=pimp_desk.CT)
             self.assertIn(("kalshi-sp", "brief", "08:00"), names(morning))
-            self.assertNotIn(("kalshi-sp", "run", "12:30"), names(morning))
-            self.assertIn(("kalshi-sp", "run", "12:30"), names(noon))
+            self.assertNotIn(("kalshi-sp", "run", "12:00"), names(morning))
+            self.assertIn(("kalshi-sp", "run", "12:00"), names(noon))
             self.assertNotIn(("kalshi-sp", "brief", "08:00"), names(noon))
             self.assertIn(("memecoin", "run", None), names(noon))
-            self.assertNotIn(("kalshi-sp", "run", "12:30"), names(late))
+            self.assertNotIn(("kalshi-sp", "run", "12:00"), names(late))
             self.assertEqual([row[0] for row in names(night)],
                              ["sports-gap", "btc15m", "commodity-15m", "memecoin"])
             self.assertNotIn(("kalshi-sized", "settle", "13:00"), names(night))
-            self.assertIn(("kalshi-sp", "run", "12:30"), names(saturday))
+            self.assertIn(("kalshi-sp", "run", "12:00"), names(saturday))
             saturday_scan = dt.datetime(2026, 10, 31, 12, 35, tzinfo=pimp_desk.CT)
-            self.assertIn(("kalshi-sized", "run", "12:35"), names(saturday_scan))
+            self.assertIn(("kalshi-sized", "run", "12:05"), names(saturday_scan))
         snap = _checkout_snapshot()
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertIn("timer", snap["banner"].lower())
@@ -326,7 +328,8 @@ class PimpDeskTests(unittest.TestCase):
             by = {(row["bot"], row["action"]): row for row in rows}
             self.assertEqual(set(by), {
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
-                ("commodity-15m", "run"), ("kalshi-sp", "run"), ("memecoin", "run"),
+                ("commodity-15m", "run"), ("kalshi-sp", "run"), ("kalshi-sized", "run"),
+                ("memecoin", "run"),
             })
             for row in rows:
                 self.assertTrue(row["ok"], row)
@@ -336,9 +339,12 @@ class PimpDeskTests(unittest.TestCase):
             # Live BTC + shadow BTC both invoke the stub script.
             self.assertEqual(_ran(tmp, "btc15m-signal"), "\n\n")
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
-            self.assertIsNone(_ran(tmp, "kalshi-sized-paper"))
+            self.assertEqual(_ran(tmp, "kalshi-sized-paper"), "scan\n")
             self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
-            for folder in ("sports-gap-paper", "btc15m-signal", "kalshi-sp500-paper", "memecoin-paper"):
+            for folder in (
+                "sports-gap-paper", "btc15m-signal", "kalshi-sp500-paper",
+                "kalshi-sized-paper", "memecoin-paper",
+            ):
                 text = _ran(tmp, folder).lower()
                 for word in ("order", "wallet", "api_key", "any-time", "live"):
                     self.assertNotIn(word, text, folder)
@@ -346,14 +352,16 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
             later = dt.datetime(2026, 10, 30, 12, 35, tzinfo=pimp_desk.CT)
             more = pimp_desk.run_scheduled(later, tmp)
+            # Sized already took its daily scan at noon; interval bots still fire.
             self.assertEqual({(row["bot"], row["action"]) for row in more},
                              {("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
-                              ("commodity-15m", "run"), ("kalshi-sized", "run")})
+                              ("commodity-15m", "run"), ("memecoin", "run")})
             self.assertTrue(all(row["ok"] for row in more))
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
             self.assertEqual(_ran(tmp, "kalshi-sized-paper"), "scan\n")
-            self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
-            self.assertEqual(_ran(tmp, "sports-gap-paper"), "\n\n")
+            # Memecoin / sports re-fire on the shorter interval.
+            self.assertGreaterEqual((_ran(tmp, "memecoin-paper") or "").count("\n"), 2)
+            self.assertGreaterEqual((_ran(tmp, "sports-gap-paper") or "").count("\n"), 2)
 
     def test_morning_brief_is_dry_run_and_limits_skip_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
