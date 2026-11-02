@@ -138,6 +138,7 @@ SETTLEMENT_FILES = (
     "memecoin-paper/trades.csv",
     "memecoin-paper/checks.csv",
     "kalshi_tape.json",
+    "desk_brain_journal.json",
     "pimp-learning.json",
     "pimp-good.json",
 )
@@ -300,8 +301,8 @@ BOT_PLANS = {
     },
     "btc15m": {
         "buy": [
-            "Every open KXBTC15M window that clears gates (not nearest-only); tape synced",
-            "p ≥ ask + fee + venue kalshi_btc15m; model p ≥ 80%",
+            "Every open KXBTC15M window; parallel books; rank-then-buy by edge×p×depth",
+            "p ≥ ask + fee + venue kalshi_btc15m; model p ≥ 80%; brain journal",
             "≥10 min left; cushion ≥ $40; z ≥ 0.65 (0.80 Coinbase-only)",
             "Ask 75–90¢; spread ≤ 3¢; depth ≥ 5",
             "Last 5×1m candles not toward target; no USD high news ±30m",
@@ -1957,6 +1958,17 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             "tracked_series": [],
             "trade_count": 0,
             "recent": [],
+        }
+    try:
+        import desk_brain
+        desk_row["brain"] = desk_brain.brain_summary(root)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["brain"] = {
+            "paper_only": True,
+            "error": type(exc).__name__,
+            "decision_count": 0,
+            "recent": [],
+            "loop": ["observe", "score", "rank", "gate", "size", "fill", "learn"],
         }
     return {
         "paper_only": True,

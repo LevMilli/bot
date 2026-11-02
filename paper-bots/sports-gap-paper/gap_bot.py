@@ -654,6 +654,20 @@ def run():
     open_by_game = {p["game_key"]: p for p in s["open"]}
 
     # ---- paper buys after exits, capped by desk open risk ----
+    # Rank-then-buy: spend open-risk on highest fee-aware gaps first.
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_brain
+        for c in buy_candidates:
+            c["edge"] = c.get("gap")
+            c["confidence"] = c.get("fair")
+            c["depth"] = None
+        buy_candidates = desk_brain.rank_candidates(buy_candidates)
+    except Exception:
+        desk_brain = None
+        buy_candidates = sorted(buy_candidates, key=lambda c: -float(c.get("gap") or 0))
+
     for c in buy_candidates:
         key, m, fair, ask, bid, gap = c["key"], c["m"], c["fair"], c["ask"], c["bid"], c["gap"]
         row, gtxt = c["row"], c["gtxt"]
@@ -686,6 +700,16 @@ def run():
             reason = f"max open risk (${open_risk:.2f} + ${cost:.2f} > ${max_open_risk:.2f})"
         if reason:
             lines.append(row + gtxt + f" | {reason} |")
+            if desk_brain is not None:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="sports-gap", action="skip",
+                        ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
+                        edge=gap, confidence=fair, reasons=[reason],
+                        score=c.get("_brain_score"),
+                    )
+                except Exception:
+                    pass
             continue
         s["cash"] = round(s["cash"] - cost, 2)
         max_payout = round(n * 1.0, 2)
@@ -711,6 +735,18 @@ def run():
         open_by_game[key] = pos
         lines.append(row + gtxt + f" | **PAPER BUY** {n} YES {m.get('yes_sub_title')} @ {ask:.2f} (+fee {fee(ask):.2f}) = ${cost:.2f} |")
         summary_out["trades"].append(f"BUY {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")
+        if desk_brain is not None:
+            try:
+                note = desk_brain.explain_buy(
+                    "sports-gap", c["side"], m["ticker"], gap, fair, None,
+                )
+                desk_brain.record_decision(
+                    DESK_ROOT, bot="sports-gap", action="buy",
+                    ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
+                    edge=gap, confidence=fair, score=c.get("_brain_score"), note=note,
+                )
+            except Exception:
+                pass
 
     equity_open = sum(p["cost"] for p in s["open"])
     realized = round(sum(p["pnl"] for p in s["closed"]), 2)
