@@ -32,3 +32,4 @@ commodity-15m-paper/paper_account.json
 *.tmp
 __pycache__/
 helpers/__pycache__/
+teller_memory.json

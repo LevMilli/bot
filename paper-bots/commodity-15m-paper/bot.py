@@ -367,6 +367,19 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     edge = float(p) - float(ask) - float(fee) - float(edge_buf)
     if edge + 1e-12 < need_edge:
         reasons.append(f"edge {edge:.3f} < {need_edge:.3f} ({lane})")
+    # E1 #109 — EIA / inventory blackout for energy series only.
+    eia_hit = None
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        from helpers import eia_blackout
+        events = eia_blackout.load_calendar_events(DESK_ROOT)
+        gate = eia_blackout.energy_blackout(m.get("series"), events)
+        if gate.get("blocked"):
+            eia_hit = gate
+            reasons.append(str(gate.get("reason") or "EIA/inventory blackout"))
+    except Exception:
+        eia_hit = None
     return {
         "side": side,
         "ask": ask,
@@ -387,6 +400,7 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
         "close_time": m["close_time"],
         "target": target,
         "spot": spot,
+        "eia_blackout": eia_hit,
     }
 
 
