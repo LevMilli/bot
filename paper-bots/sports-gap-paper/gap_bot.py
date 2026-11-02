@@ -38,16 +38,24 @@ CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this ban
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
 PRICE_BOUNDS = (0.05, 0.92)     # avoid near-worthless / near-locked contracts
 
-def stake_for_model(fair, desk=None, cfg=None):
-    """Paper dollars for one sports fill. Under 80% this is about $20.
-
-    At 80% or higher it scales from $20 to $100. No real order is sent.
-    """
+def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None):
+    """Paper dollars for one sports fill — Kelly-lite when the desk asks for it."""
     if desk is not None:
         try:
-            return float(desk.paper_stake_dollars(fair, cfg))
+            return float(desk.stake_dollars_for(
+                "sports-gap",
+                fair,
+                edge=edge,
+                cfg=cfg,
+                open_risk_used=open_risk_used,
+                ask=ask,
+                root=DESK_ROOT,
+            ))
         except Exception:
-            pass
+            try:
+                return float(desk.paper_stake_dollars(fair, cfg))
+            except Exception:
+                pass
     try:
         chance = float(fair)
     except (TypeError, ValueError):
@@ -381,7 +389,14 @@ def run():
     if not existed:
         save_state(s)
     desk, cfg = _paper_limits()
-    need_edge = float(cfg.get("min_edge") if cfg.get("min_edge") is not None else MIN_GAP)
+    try:
+        need_edge = float(desk.venue_min_edge("kalshi_sports", cfg)) if desk is not None else float(
+            cfg.get("min_edge") if cfg.get("min_edge") is not None else MIN_GAP
+        )
+    except Exception:
+        need_edge = float(cfg.get("min_edge") if cfg.get("min_edge") is not None else MIN_GAP)
+    flip_delta = float(cfg.get("model_flip_delta") if cfg.get("model_flip_delta") is not None else 0.08)
+    flip_on = bool(cfg.get("model_flip_exits", True))
     max_open = int(cfg.get("max_open_positions") or MAX_OPEN)
     day = datetime.now(CT).strftime("%Y-%m-%d")
     today_pnl = 0.0
@@ -540,11 +555,23 @@ def run():
             m = info["pair"][p["side"]]
             fair = info["fair_home"] if p["side"] == "home" else 1 - info["fair_home"]
             bid = px(m, "yes_bid_dollars")
-            if bid is not None and bid > 0 and bid - fee(bid) >= fair:
+            exit_reason = None
+            if flip_on and desk is not None:
+                try:
+                    import desk_profit
+                    if desk_profit.model_flip_adverse(
+                        p["side"], p.get("fair_at_entry"), fair, flip_delta
+                    ):
+                        exit_reason = f"model-flip fair Δ≥{flip_delta:g}"
+                except Exception:
+                    pass
+            if exit_reason is None and bid is not None and bid > 0 and bid - fee(bid) >= fair:
+                exit_reason = "gap closed - sold at bid"
+            if exit_reason and bid is not None and bid > 0:
                 proceeds = round(p["contracts"] * (bid - fee(bid)), 2)
                 pnl = round(proceeds - p["cost"], 2)
                 s["cash"] = round(s["cash"] + proceeds, 2)
-                p.update({"closed": ts, "exit": "gap closed - sold at bid", "exit_price": bid, "payout": proceeds,
+                p.update({"closed": ts, "exit": exit_reason, "exit_price": bid, "payout": proceeds,
                           "pnl": pnl, "fair_at_exit": round(fair, 4)})
                 s["closed"].append(p)
                 if desk is not None:
@@ -556,7 +583,7 @@ def run():
                         "fill_id": p.get("fill_id") or "",
                         "at": ts,
                     })
-                lines.append(f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | **PAPER SELL** {p['contracts']} @ bid {bid:.2f} (gap closed), P&L ${pnl:+.2f} |")
+                lines.append(f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | **PAPER SELL** {p['contracts']} @ bid {bid:.2f} ({exit_reason}), P&L ${pnl:+.2f} |")
                 summary_out["closes"].append(f"SELL {p['ticker']} pnl {pnl:+.2f}")
                 continue
         still.append(p)
@@ -573,7 +600,14 @@ def run():
         elif len(s["open"]) >= max_open:
             reason = "max open positions"
         open_risk = sum(float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0) for p in s["open"])
-        stake = stake_for_model(fair, desk, cfg)
+        if reason is None and desk is not None:
+            try:
+                blocked = desk.correlation_blocks(DESK_ROOT, "sports-gap", c["side"], gap)
+                if blocked:
+                    reason = blocked
+            except Exception:
+                pass
+        stake = stake_for_model(fair, desk, cfg, edge=gap, open_risk_used=open_risk, ask=ask)
         per = ask + fee(ask)
         if desk is not None:
             try:
@@ -595,11 +629,17 @@ def run():
         reward = round(max_payout - cost, 2)
         ratio = round(reward / cost, 4) if cost else None
         why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
+        try:
+            import desk_profit
+            risk_factor = desk_profit.risk_factor_for("sports-gap", c["side"])
+        except Exception:
+            risk_factor = ""
         pos = {"game_key": key, "league": c["league"], "game": c["name"], "ticker": m["ticker"], "team": m.get("yes_sub_title"),
                "side": c["side"], "contracts": n, "entry_price": ask, "bid": bid, "ask": ask, "entry_fee": fee(ask),
                "fee": fee(ask), "cost": cost, "risk": cost, "reward": reward, "risk_reward": ratio,
                "max_payout": max_payout, "why": why,
                "fair_at_entry": round(fair, 4), "gap_at_entry": round(gap, 4),
+               "risk_factor": risk_factor,
                "opened": ts, "score_at_entry": c["score"], "espn_id": c["g"]["id"], "espn_path": c["path"],
                "price_source": f"{KALSHI}/markets?series_ticker={c['series']}",
                "price_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

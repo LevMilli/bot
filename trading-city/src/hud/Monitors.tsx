@@ -54,7 +54,8 @@ function PlanList({ title, lines }: { title: string; lines?: string[] }) {
   )
 }
 
-function planStake(plans?: BotPlans): string {
+function planStake(plans?: BotPlans, mode?: string): string {
+  if (mode === 'kelly_lite' || plans?.stake === 'kelly-lite') return 'stake: kelly-lite'
   if (!plans?.stake) return ''
   if (plans.stake === 'desk-curve') return 'stake: desk curve'
   if (plans.stake === 'fixed-25') return 'stake: $25 fixed'
@@ -97,6 +98,12 @@ export function MonitorPanels({ bot, desk }: Props): {
       <div className="risk">
         open {bot.open_count ?? 0} · risk {money(bot.open_risk)} · cash {money(bot.cash)}
       </div>
+      <div className="risk">
+        EV {bot.expectancy == null ? '—' : money(bot.expectancy, true)}
+        {bot.expectancy_n != null ? ` · n ${bot.expectancy_n}` : ''}
+        {bot.starved ? ' · STARVED' : ''}
+        {bot.shadow?.active ? ` · SHADOW ${bot.shadow.variant_id || ''}` : ''}
+      </div>
       {gates.length > 0 && <div className="gates-hit">gates: {gates.join(' · ')}</div>}
       <PlanList title="Buy plan" lines={plans?.buy} />
       <ul className="pos-list">
@@ -131,9 +138,13 @@ export function MonitorPanels({ bot, desk }: Props): {
       <div className="chips">
         <span>history {bot.history?.length ?? 0}</span>
         <span>exits {plans?.exit_quality || '—'}</span>
-        <span>{planStake(plans)}</span>
+        <span>{planStake(plans, bot.sizing_mode)}</span>
         {plans?.entry_gated ? <span>desk entry_gate</span> : null}
+        {bot.venue_min_edge != null ? <span>venue edge {bot.venue_min_edge}</span> : null}
         {desk?.ops?.roi_ok === false ? <span className="chip-warn">roi gaps</span> : null}
+        {(desk?.ops?.starved_bots || []).includes(bot.id) ? (
+          <span className="chip-warn">starved</span>
+        ) : null}
       </div>
       <PlanList title="Sell plan" lines={plans?.sell} />
     </section>

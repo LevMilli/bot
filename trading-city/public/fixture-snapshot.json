@@ -3,7 +3,7 @@
   "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
   "roi_system": {
     "name": "desk-roi-system",
-    "version": 1,
+    "version": 2,
     "paper_only": true,
     "banner": "ROI SYSTEM (paper). Enter only on edge after costs, inside desk risk budget, with an exit plan. Pace never waives edge. Learning skip cuts cold buckets.",
     "ok": true,
@@ -61,13 +61,21 @@
       "daily_loss_stop": 150.0,
       "max_open_positions": 12,
       "max_open_risk": 100.0,
-      "min_edge": 0.04,
+      "min_edge": 0.06,
       "stake_lo_max": 20.0,
       "stake_hi_min": 20.0,
       "stake_hi_max": 100.0,
       "stake_hi_prob": 0.8,
       "learn_min_settles": 8,
-      "learn_hit_rate": 0.4
+      "learn_hit_rate": 0.4,
+      "venue_min_edge": {
+        "kalshi_sports": 0.06,
+        "kalshi_btc15m": 0.05,
+        "kalshi_inx": 0.0,
+        "solana_dex": 0.02
+      },
+      "sizing": "kelly_lite",
+      "kelly_fraction": 0.25
     },
     "exit_ladder": {
       "strong": "Active stop + scale-out + trail/time/liq",
@@ -188,8 +196,16 @@
         "btc15m"
       ],
       "roi_ok": true,
-      "roi_version": 1
-    }
+      "roi_version": 2,
+      "correlation_pressure": [],
+      "starved_bots": [],
+      "shadow_count": 1
+    },
+    "capital": {
+      "method": "expectancy",
+      "weights": {}
+    },
+    "shadow_leaderboard": []
   },
   "bots": [
     {
@@ -241,7 +257,15 @@
         "entry_gated": true,
         "stake": "desk-curve"
       },
-      "gates_hit": []
+      "gates_hit": [],
+      "expectancy": null,
+      "expectancy_n": 0,
+      "starved": false,
+      "capital_weight": 0,
+      "sizing_mode": "kelly_lite",
+      "venue_min_edge": 0.06,
+      "shadow": null,
+      "risk_factors_open": []
     },
     {
       "id": "kalshi-sp",
@@ -292,7 +316,15 @@
       },
       "gates_hit": [
         "skip"
-      ]
+      ],
+      "expectancy": null,
+      "expectancy_n": 0,
+      "starved": false,
+      "capital_weight": 0,
+      "sizing_mode": "fixed",
+      "venue_min_edge": 0.0,
+      "shadow": null,
+      "risk_factors_open": []
     },
     {
       "id": "btc15m",
@@ -345,7 +377,15 @@
       },
       "gates_hit": [
         "skip"
-      ]
+      ],
+      "expectancy": null,
+      "expectancy_n": 0,
+      "starved": false,
+      "capital_weight": 0,
+      "sizing_mode": "kelly_lite",
+      "venue_min_edge": 0.05,
+      "shadow": null,
+      "risk_factors_open": []
     },
     {
       "id": "memecoin",
@@ -395,7 +435,15 @@
         "entry_gated": true,
         "stake": "fixed-25"
       },
-      "gates_hit": []
+      "gates_hit": [],
+      "expectancy": null,
+      "expectancy_n": 0,
+      "starved": false,
+      "capital_weight": 0,
+      "sizing_mode": "fixed",
+      "venue_min_edge": 0.0,
+      "shadow": null,
+      "risk_factors_open": []
     },
     {
       "id": "kalshi-sized",
@@ -439,7 +487,25 @@
       },
       "gates_hit": [
         "absent"
-      ]
+      ],
+      "expectancy": null,
+      "expectancy_n": 0,
+      "starved": false,
+      "capital_weight": 0,
+      "sizing_mode": "fixed",
+      "venue_min_edge": 0.0,
+      "shadow": null,
+      "risk_factors_open": []
     }
-  ]
+  ],
+  "limits": {
+    "min_edge": 0.06,
+    "venue_min_edge": {
+      "kalshi_sports": 0.06,
+      "kalshi_btc15m": 0.05,
+      "kalshi_inx": 0.0,
+      "solana_dex": 0.02
+    },
+    "sizing": "kelly_lite"
+  }
 }

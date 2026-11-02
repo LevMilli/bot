@@ -196,9 +196,13 @@ def manage(st):
         from_peak = (1 - price / pos["peak_price"]) * 100
         print(f"  {pos['symbol']}: {pct:+.1f}% from entry, {from_peak:.1f}% off peak, liq {liq_drop:+.1f}% drop, held {held_h:.2f}h")
         exit_reason = None
-        if liq_drop >= E["liq_drop_pct"]:
+        # Model-flip before hard stop: adverse move / momentum collapse (still above −35%).
+        floor_m = float(E.get("model_flip_momentum_h1_floor") or -12)
+        if pct <= floor_m and pct > float(E["stop_pct"]):
+            exit_reason = f"model-flip momentum {pct:.1f}% <= {floor_m:.1f}%"
+        if exit_reason is None and liq_drop >= E["liq_drop_pct"]:
             exit_reason = f"liq_drop {liq_drop:.1f}% >= {E['liq_drop_pct']}%"
-        elif pct <= E["stop_pct"]:
+        elif exit_reason is None and pct <= E["stop_pct"]:
             exit_reason = f"stop {pct:.1f}% <= {E['stop_pct']}%"
         if not exit_reason:
             for i, (lvl, frac) in enumerate(E["ladder"]):

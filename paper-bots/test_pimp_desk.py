@@ -120,13 +120,22 @@ class PimpDeskTests(unittest.TestCase):
         self.assertTrue(next(b for b in snap["bots"] if b["id"] == "btc15m")["plans"]["entry_gated"])
         self.assertTrue(next(b for b in snap["bots"] if b["id"] == "sports-gap")["plans"]["entry_gated"])
         self.assertEqual(snap["desk"]["ops"]["strong_exits"], ["memecoin"])
+        # ops.weak_exits includes partial books (sports / kalshi / btc).
         self.assertIn("btc15m", snap["desk"]["ops"]["weak_exits"])
         self.assertIn("sports-gap", snap["desk"]["ops"]["entry_gated_bots"])
         self.assertIn("btc15m", snap["desk"]["ops"]["entry_gated_bots"])
         self.assertTrue(snap["roi_system"]["ok"])
         self.assertTrue(snap["roi_system"]["paper_only"])
-        self.assertEqual(snap["roi_system"]["version"], 1)
+        self.assertEqual(snap["roi_system"]["version"], 2)
         self.assertTrue(snap["desk"]["ops"]["roi_ok"])
+        self.assertIn("venue_min_edge", snap["limits"])
+        self.assertEqual(snap["limits"]["sizing"], "kelly_lite")
+        btc = next(b for b in snap["bots"] if b["id"] == "btc15m")
+        self.assertEqual(btc["plans"]["exit_quality"], "partial")
+        self.assertIn("expectancy_n", btc)
+        self.assertIn("starved", btc)
+        self.assertEqual(btc["sizing_mode"], "kelly_lite")
+        self.assertIn("shadow_count", snap["desk"]["ops"])
         btc_comp = next(c for c in snap["roi_system"]["compliance"] if c["bot"] == "btc15m")
         self.assertTrue(btc_comp["ok"])
         self.assertTrue(btc_comp["entry_gated"])
@@ -284,14 +293,16 @@ class PimpDeskTests(unittest.TestCase):
             rows = pimp_desk.run_scheduled(noon, tmp)
             by = {(row["bot"], row["action"]): row for row in rows}
             self.assertEqual(set(by), {
-                ("sports-gap", "run"), ("btc15m", "run"), ("kalshi-sp", "run"), ("memecoin", "run"),
+                ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
+                ("kalshi-sp", "run"), ("memecoin", "run"),
             })
             for row in rows:
                 self.assertTrue(row["ok"], row)
                 self.assertFalse(row["blocked"])
                 self.assertIn("no trade", row["summary"])
             self.assertEqual(_ran(tmp, "sports-gap-paper"), "\n")
-            self.assertEqual(_ran(tmp, "btc15m-signal"), "\n")
+            # Live BTC + shadow BTC both invoke the stub script.
+            self.assertEqual(_ran(tmp, "btc15m-signal"), "\n\n")
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
             self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
             for folder in ("sports-gap-paper", "btc15m-signal", "kalshi-sp500-paper", "memecoin-paper"):
@@ -303,7 +314,7 @@ class PimpDeskTests(unittest.TestCase):
             later = dt.datetime(2026, 10, 30, 12, 35, tzinfo=pimp_desk.CT)
             more = pimp_desk.run_scheduled(later, tmp)
             self.assertEqual({(row["bot"], row["action"]) for row in more},
-                             {("sports-gap", "run"), ("btc15m", "run")})
+                             {("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow")})
             self.assertTrue(all(row["ok"] for row in more))
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
             self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
@@ -351,8 +362,9 @@ class PimpDeskTests(unittest.TestCase):
             _tree(tmp, "import sys\nsys.exit(1)\n")
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
             rows = pimp_desk.run_scheduled(night, tmp)
-            self.assertEqual(sorted((row["bot"], row["ok"]) for row in rows),
-                             [("btc15m", False), ("memecoin", False), ("sports-gap", False)])
+            self.assertEqual(sorted((row["bot"], row["action"], row["ok"]) for row in rows),
+                             [("btc15m", "run", False), ("btc15m", "shadow", False),
+                              ("memecoin", "run", False), ("sports-gap", "run", False)])
             self.assertTrue(all(not row["blocked"] for row in rows))
 
 
@@ -1128,6 +1140,98 @@ class PimpDeskTests(unittest.TestCase):
                     saved = json.load(handle)
                 self.assertEqual(saved["closed"][0]["pnl"], payload["closed"][0]["pnl"], name)
                 self.assertFalse(os.path.exists(local + ".tmp"), name)
+
+
+    def test_venue_min_edge_and_kelly_lite(self):
+        cfg, err = pimp_desk.parse_settings({
+            "stake_hi_min": 20, "stake_hi_max": 100, "stake_lo_max": 20,
+            "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
+            "min_edge": 0.06,
+            "venue_min_edge": {"kalshi_sports": 0.07, "kalshi_btc15m": 0.05,
+                               "kalshi_inx": 0.0, "solana_dex": 0.02},
+            "sizing": "kelly_lite",
+            "kelly_fraction": 0.25,
+        })
+        self.assertIsNone(err)
+        self.assertEqual(cfg["venue_min_edge"]["kalshi_sports"], 0.07)
+        self.assertEqual(pimp_desk.venue_min_edge("kalshi_btc15m", cfg), 0.05)
+        bad, err = pimp_desk.parse_settings({
+            "stake_hi_min": 20, "stake_hi_max": 100, "stake_lo_max": 20,
+            "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
+            "venue_min_edge": {"nope": 0.1},
+        })
+        self.assertIsNone(bad)
+        self.assertIn("Unknown venue", err)
+        small = pimp_desk.kelly_lite_dollars(0.85, 0.04, cfg=cfg, open_risk_used=0, ask=0.75)
+        big = pimp_desk.kelly_lite_dollars(0.92, 0.10, cfg=cfg, open_risk_used=0, ask=0.75)
+        self.assertGreater(big, small)
+        capped = pimp_desk.kelly_lite_dollars(0.95, 0.12, cfg=cfg, open_risk_used=90, ask=0.70)
+        self.assertLessEqual(capped, 10.0 + 1e-9)
+        zero = pimp_desk.kelly_lite_dollars(0.95, 0.12, cfg=cfg, open_risk_used=100, ask=0.70)
+        self.assertEqual(zero, 0.0)
+
+    def test_correlation_veto_btc_vs_kalshi(self):
+        import desk_profit
+        open_rows = [{
+            "bot": "btc15m", "side": "YES", "factor": "risk_on_btc",
+            "edge": 0.08, "risk": 20, "what": "KXBTC",
+        }]
+        blocked = desk_profit.correlation_veto_reason(
+            "kalshi-sp", "yes", 0.05, open_rows
+        )
+        self.assertIn("correlation veto", blocked)
+        allowed = desk_profit.correlation_veto_reason(
+            "kalshi-sp", "yes", 0.12, open_rows
+        )
+        # Higher candidate edge still vetoes stacking heat in current rule.
+        self.assertIn("correlation veto", allowed)
+        clear = desk_profit.correlation_veto_reason(
+            "kalshi-sp", "no", 0.05, open_rows
+        )
+        self.assertEqual(clear, "")
+
+    def test_expectancy_starve_and_shadow_excluded(self):
+        import desk_profit
+        now = dt.datetime(2026, 11, 1, 12, 0, tzinfo=dt.timezone.utc)
+        history = []
+        for i in range(10):
+            history.append({
+                "pnl": -2.0 if i < 7 else 1.0,
+                "closed": (now - dt.timedelta(days=i)).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            })
+        exp = desk_profit.bot_expectancy(history, window_days=20, now=now)
+        self.assertEqual(exp["n"], 10)
+        self.assertIsNotNone(exp["expectancy"])
+        self.assertLess(exp["expectancy"], 0)
+        starve = desk_profit.starve_state(exp, {
+            "starve_min_n": 8, "starve_expectancy": 0.0, "starve_factor": 0.25,
+        })
+        self.assertTrue(starve["starved"])
+        self.assertEqual(starve["starve_factor"], 0.25)
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, STUB)
+            cfg = {
+                "stake_hi_min": 20, "stake_hi_max": 100, "stake_lo_max": 20,
+                "daily_loss_stop": 150, "max_open_risk": 100, "max_open_positions": 12,
+                "min_edge": 0.06, "pace_min": 6, "pace_target": 12,
+            }
+            pimp_desk.save_settings(cfg, tmp)
+            # Seed a shadow account with cash that must not enter desk.cash.
+            pimp_desk.save_shadow_account(tmp, "btc15m", "edge08", {
+                "cash": 999.0, "open": [], "closed": [], "paper_only": True,
+            })
+            snap = pimp_desk.snapshot(tmp)
+            self.assertNotEqual(snap["desk"]["cash"], 999.0)
+            self.assertGreaterEqual(snap["desk"]["ops"]["shadow_count"], 1)
+            board = snap["desk"]["shadow_leaderboard"]
+            self.assertTrue(any(r.get("variant_id") == "edge08" for r in board))
+            self.assertAlmostEqual(board[0]["cash"], 999.0)
+
+    def test_model_flip_adverse_helper(self):
+        import desk_profit
+        self.assertTrue(desk_profit.model_flip_adverse("YES", 0.85, 0.70, 0.08))
+        self.assertFalse(desk_profit.model_flip_adverse("YES", 0.85, 0.80, 0.08))
+        self.assertTrue(desk_profit.model_flip_adverse("NO", 0.20, 0.35, 0.08))
 
 
 if __name__ == "__main__":
