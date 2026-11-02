@@ -437,26 +437,40 @@ def scan(st, stats):
             gate_reason = f"MAX_ENTRIES_PER_DAY {C.MAX_ENTRIES_PER_DAY} reached"
         elif pnl_today <= -C.DAILY_LOSS_HALT_USD:
             gate_reason = f"daily loss halt (realized today ${pnl_today:.2f})"
-        elif st["cash_usd"] < C.TICKET_USD:
-            gate_reason = f"paper cash ${st['cash_usd']:.2f} < ticket"
         else:
-            try:
-                desk = _desk()
-                gate_reason = desk.learning_skip(
-                    desk.load_learning(os.path.dirname(BASE)), mint or row.get("symbol") or "", desk.prob_bucket(conf)) or None
-            except Exception:
-                gate_reason = None
+            ticket = ticket_for(st, conf)
+            if ticket < C.MIN_TICKET_USD:
+                gate_reason = f"paper cash ${st['cash_usd']:.2f} < min ticket ${C.MIN_TICKET_USD}"
+            else:
+                try:
+                    desk = _desk()
+                    venue = float(desk.venue_min_edge("solana_dex", desk.load_settings(os.path.dirname(BASE))))
+                    # Confidence above 0.5 as a crude residual edge vs coin-flip.
+                    if max(0.0, float(conf) - 0.5) + 1e-12 < venue:
+                        gate_reason = f"venue solana_dex edge {max(0.0, float(conf) - 0.5):.3f} < {venue:.3f}"
+                    else:
+                        gate_reason = desk.learning_skip(
+                            desk.load_learning(os.path.dirname(BASE)),
+                            mint or row.get("symbol") or "",
+                            desk.prob_bucket(conf),
+                        ) or None
+                except Exception:
+                    gate_reason = None
         row["risk_gates_ok"] = "PASS" if not gate_reason else "FAIL"
         if gate_reason:
             record("SKIP", gate_reason)
             continue
+        ticket = ticket_for(st, conf)
+        if ticket < C.MIN_TICKET_USD:
+            record("SKIP", f"ticket ${ticket:.2f} below min")
+            continue
         price = float(p["priceUsd"])
-        tokens, fee, imp, fill = paper_buy(price, liq, C.TICKET_USD)
-        st["cash_usd"] -= C.TICKET_USD
+        tokens, fee, imp, fill = paper_buy(price, liq, ticket)
+        st["cash_usd"] = round(float(st["cash_usd"]) - ticket, 4)
         pos = dict(mint=mint, symbol=row["symbol"], pair=p["pairAddress"], entry_ts=NOW, entry_iso=now_iso(),
                    entry_market_price=price, entry_fill_price=fill, entry_liq=liq, tokens=tokens,
-                   tokens_left=tokens, cost_usd=C.TICKET_USD, risk=C.TICKET_USD,
-                   why=f"Paper buy. Confidence {conf}.",
+                   tokens_left=tokens, cost_usd=ticket, risk=ticket,
+                   why=f"Paper buy. Confidence {conf}. Ticket ${ticket:.2f}.",
                    peak_price=price, ladder_done=[],
                    confidence=conf, url=p.get("url"))
         st["open"].append(pos)
@@ -465,10 +479,10 @@ def scan(st, stats):
         stats["entries"] += 1
         append_csv(P_TRADES, TRADE_COLS, dict(ts=now_iso(), run_id=RUN_ID, side="BUY", mint=mint,
                    symbol=row["symbol"], pair=p["pairAddress"], reason=f"conf {conf}", market_price_usd=price,
-                   fill_price_usd=fill, tokens=round(tokens, 4), usd=C.TICKET_USD, fee_usd=round(fee, 4),
+                   fill_price_usd=fill, tokens=round(tokens, 4), usd=ticket, fee_usd=round(fee, 4),
                    impact_pct=round(imp * 100, 3), liquidity_usd=liq))
-        record("BUY", f"PAPER BUY ${C.TICKET_USD} @ market {price} (fill est {fill:.10g})")
-        print(f"  PAPER BUY {row['symbol']} ${C.TICKET_USD} @ {price} conf {conf}")
+        record("BUY", f"PAPER BUY ${ticket:.2f} @ market {price} (fill est {fill:.10g})")
+        print(f"  PAPER BUY {row['symbol']} ${ticket:.2f} @ {price} conf {conf}")
 
 
 def _desk():
@@ -479,6 +493,46 @@ def _desk():
     return pimp_desk
 
 
+def ticket_for(st, conf) -> float:
+    """Fee-aware ticket: desk Kelly-lite when available, never above cash or TICKET_USD."""
+    cash = float(st.get("cash_usd") or 0)
+    if cash + 1e-9 < C.MIN_TICKET_USD:
+        return 0.0
+    dollars = float(C.TICKET_USD)
+    try:
+        desk = _desk()
+        cfg = desk.load_settings(os.path.dirname(BASE))
+        edge = max(0.0, float(conf) - 0.5)  # residual confidence above coin-flip
+        open_risk = sum(float(p.get("cost_usd") or 0) for p in (st.get("open") or []))
+        dollars = float(desk.stake_dollars_for(
+            "memecoin", conf, edge=edge, cfg=cfg, open_risk_used=open_risk,
+            ask=None, root=os.path.dirname(BASE),
+        ))
+    except Exception:
+        pass
+    dollars = max(float(C.MIN_TICKET_USD), min(float(C.TICKET_USD), dollars, cash))
+    return round(dollars, 2)
+
+
+def maybe_reload_broke_cash(st) -> bool:
+    """Paper-desk reload when cash cannot fund a minimum ticket and nothing is open.
+
+    Does not invent trades or erase realized PnL — only restores buy capacity.
+    """
+    if st.get("open"):
+        return False
+    cash = float(st.get("cash_usd") or 0)
+    if cash + 1e-9 >= C.MIN_TICKET_USD:
+        return False
+    before = cash
+    st["cash_usd"] = float(C.START_BANKROLL_USD)
+    st["paper_only"] = True
+    st["reloaded_at"] = now_iso()
+    st["reloaded_from"] = round(before, 2)
+    print(f"  PAPER RELOAD cash ${before:.2f} -> ${st['cash_usd']:.2f} (no open positions; min ticket ${C.MIN_TICKET_USD})")
+    return True
+
+
 def main():
     if not C.PAPER:
         sys.exit("PAPER is False. This desk is paper-only and has no wallet. Refusing to run.")
@@ -486,6 +540,8 @@ def main():
     stats = Counter()
     st = load_state()
     if not os.path.exists(P_POS):
+        save_state(st)
+    if maybe_reload_broke_cash(st):
         save_state(st)
     print(f"run {RUN_ID} @ {now_iso()}  cash ${st['cash_usd']:.2f}  open {len(st['open'])}")
     print("1) managing open paper positions")

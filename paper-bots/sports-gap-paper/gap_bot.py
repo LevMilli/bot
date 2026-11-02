@@ -30,13 +30,14 @@ OLD_BANKROLL = 14.00
 # New defaults: 4 points of edge, 12 open positions. A paper buy needs that edge after the fee.
 # The hourly count does not waive it. The desk daily loss stop still ends a bad paper day.
 MAX_OPEN = 12
-MIN_GAP = 0.07            # profit desk: fee-aware edge bar AFTER the taker fee
-MIN_GAP_MODEL = 0.09      # NHL model stays 2 points stricter
-MIN_FAIR_PROB = 0.82      # only paper-buy when selected-side fair ≥ 82%
+MIN_GAP = 0.06            # fee-aware edge floor AFTER the taker fee (desk venue can raise)
+MIN_GAP_MODEL = 0.08      # NHL model stays 2 points stricter
+MIN_FAIR_PROB = 0.80      # margin goal: ≥80% fair + fee-aware edge (not 82% alone)
 DESK_ROOT = os.path.dirname(HERE)
 CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this band
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
 PRICE_BOUNDS = (0.05, 0.92)     # avoid near-worthless / near-locked contracts
+PREGAME_WINDOW_MIN = 90   # also scan tip-soon books so Sunday nights are not one-trade desks
 
 def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None):
     """Paper dollars for one sports fill — Kelly-lite when the desk asks for it."""
@@ -243,6 +244,46 @@ def espn_home_wp(summary):
     v = wp[-1].get("homeWinPercentage")
     return float(v) if v is not None else None
 
+
+def espn_pregame_fair_home(summary):
+    """De-vigged home win prob from ESPN pickcenter moneylines (pregame)."""
+    pc = (summary.get("pickcenter") or [])
+    if not pc:
+        return None
+    try:
+        ph = ml_to_prob(pc[0]["homeTeamOdds"]["moneyLine"])
+        pa = ml_to_prob(pc[0]["awayTeamOdds"]["moneyLine"])
+        if ph + pa <= 0:
+            return None
+        return ph / (ph + pa)
+    except Exception:
+        return None
+
+
+def tip_within_minutes(game, minutes=PREGAME_WINDOW_MIN) -> bool:
+    """True when tip/start is within ±minutes of now (CT-aware via UTC date string)."""
+    raw = game.get("date")
+    if not raw:
+        return False
+    try:
+        when = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    now = datetime.now(timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return abs((when - now).total_seconds()) <= float(minutes) * 60.0
+
+
+def espn_fair_home(summary, game):
+    """Live WP when available; otherwise tip-soon pickcenter fair."""
+    live = espn_home_wp(summary)
+    if live is not None:
+        return live
+    if game.get("state") == "pre" and tip_within_minutes(game):
+        return espn_pregame_fair_home(summary)
+    return None
+
 def ml_to_prob(ml):
     ml = float(ml)
     return 100 / (ml + 100) if ml > 0 else -ml / (-ml + 100)
@@ -439,9 +480,17 @@ def run():
             lines.append(f"| {ts} | {league} | - | data error: ESPN down | | | | | data error |")
             summary_out.setdefault("data_errors", []).append({"league": league, "source": "ESPN", "error": "failed"})
             continue
-        relevant = [g for g in games if g["state"] == "in" or f"{league}:{g['id']}" in open_by_game]
+        relevant = []
+        for g in games:
+            key = f"{league}:{g['id']}"
+            if key in open_by_game:
+                relevant.append(g)
+            elif g["state"] == "in":
+                relevant.append(g)
+            elif g["state"] == "pre" and tip_within_minutes(g):
+                relevant.append(g)
         if not relevant:
-            summary_out["leagues"][league] = "no live games"; continue
+            summary_out["leagues"][league] = "no live/tip-soon games"; continue
         try:
             markets = kalshi_markets(series)
         except Exception:
@@ -464,13 +513,14 @@ def run():
             summary_out["matched"] += 1
             try:
                 summ = espn_summary(path, g["id"])
-                fair_home = espn_home_wp(summ) if src == "espn" else nhl_model(summ, g)
+                fair_home = nhl_model(summ, g) if src != "espn" else espn_fair_home(summ, g)
             except Exception as e:
                 fair_home = None
             hb, ha = px(pair["home"], "yes_bid_dollars"), px(pair["home"], "yes_ask_dollars")
             ab, aa = px(pair["away"], "yes_bid_dollars"), px(pair["away"], "yes_ask_dollars")
+            src_tag = "model" if src != "espn" else ("ESPN" if g.get("state") == "in" else "pregame")
             row = f"| {ts} | {league} | {name} | {score} | " + \
-                  (f"{fair_home:.1%}" + (" (model)" if src != "espn" else " (ESPN)") if fair_home is not None else "n/a") + \
+                  (f"{fair_home:.1%} ({src_tag})" if fair_home is not None else "n/a") + \
                   f" | {hb}/{ha} | {ab}/{aa} | "
             live_info[key] = {"final": False, "game": g, "pair": pair, "fair_home": fair_home, "name": name, "score": score}
             if fair_home is None:
