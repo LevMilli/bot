@@ -203,8 +203,8 @@ ACTIONS = {
 # starts from 12:00 to 14:55 CT (up to 3 scans/day). The morning brief stays
 # the desk's dry run. Settle is the desk's paper settle, once at 4:00 PM CT,
 # after the 3:00 PM contract time, so a closed paper trade can land in the
-# state file. Memecoin manages open exits about every 5 minutes (same script
-# still scans for new tickets; dual accurate/speed lanes).
+# state file. Memecoin manages open exits about every 3 minutes (same script
+# still scans for new tickets; dual accurate/speed lanes; stop-bleed exits).
 AUTO_RETRY_SEC = 900
 AUTO = (
     # Faster sports polls so tip-soon + dual lanes can land multiple fills.
@@ -212,7 +212,8 @@ AUTO = (
     # BTC is the busiest Kalshi series — poll every 60s; guidelines unchanged, bid every fit.
     {"id": "btc15m", "action": "run", "every_sec": 60},
     {"id": "commodity-15m", "action": "run", "every_sec": 90},
-    {"id": "memecoin", "action": "run", "every_sec": 300},
+    # Faster manage ticks so −18% / model-flip stops fire before a full bleed.
+    {"id": "memecoin", "action": "run", "every_sec": 180},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:00", "until_ct": "14:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
@@ -2275,6 +2276,13 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["phase2"] = {"paper_only": True, "error": type(exc).__name__}
     # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
     tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
+    try:
+        import desk_master
+        desk_row["master"] = desk_master.master_summary(
+            root, bots=public, cfg=cfg, fill_tax=tax,
+        )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["master"] = {"paper_only": True, "error": type(exc).__name__}
     gate_rows = []
     prove_rows = []
     for bot in public:
@@ -2365,6 +2373,10 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             ),
             "gate_b": "Gate B = peak-to-trough drawdown within bound with enough settles — readiness only.",
             "top25": "Top-25 shortlist hooks: skip-regret, budgets, watchdog, playbooks, doctor.",
+            "master": (
+                "Trading Masters scoreboard (M1–M7): taxed EV vs volume. "
+                "Stub — no profit guarantee; fee floors unchanged."
+            ),
             "guest": "Guest mode (?guest=1) is read-only — no staff actions.",
         },
         "audit": audit_rows(root)[:12],
@@ -2506,7 +2518,7 @@ def timer_text() -> str:
         "Kalshi morning brief once at 8:00 AM, dry run. "
         "Kalshi paper scan from 12:00 PM (up to 3/day), inside that bot's own window. "
         "Kalshi paper settle once at 4:00 PM. "
-        "Memecoin about every 5 minutes (manage exits, then scan; dual lanes). "
+        "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed). "
         "No edge is a finished check with zero paper trades. "
         "Numbers only move while the Discord bot paper timer is alive."
     )

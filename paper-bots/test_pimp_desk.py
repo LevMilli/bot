@@ -275,7 +275,7 @@ class PimpDeskTests(unittest.TestCase):
         meme = next(s for s in pimp_desk.AUTO if s["id"] == "memecoin")
         self.assertEqual(sports["every_sec"], 180)  # tip-soon + dual lanes
         self.assertEqual(btc["every_sec"], 60)
-        self.assertEqual(meme["every_sec"], 300)
+        self.assertEqual(meme["every_sec"], 180)
         brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")
         scan = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run")
         settle = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle")
@@ -289,7 +289,7 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("60 seconds", text)
         self.assertIn("90 seconds", text)
         self.assertIn("trade tape", text)
-        self.assertIn("every 5 minutes", text)
+        self.assertIn("stop-bleed", text)
         self.assertIn("dual lanes", text)
         self.assertIn("8:00", text)
         self.assertIn("12:00", text)
@@ -318,7 +318,8 @@ class PimpDeskTests(unittest.TestCase):
         snap = _checkout_snapshot()
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertIn("timer", snap["banner"].lower())
-        self.assertIn("every 5 minutes", snap["timer"].lower())
+        self.assertIn("stop-bleed", snap["timer"].lower())
+        self.assertIn("every 3 minutes", snap["timer"].lower())
 
     def test_scheduler_once_places_no_orders(self):
         with tempfile.TemporaryDirectory() as tmp:
