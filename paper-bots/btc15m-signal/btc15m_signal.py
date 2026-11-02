@@ -607,7 +607,26 @@ def dvol_latest():
 
 
 def usd_high_impact_near(block_start, block_end):
-    d = get_json("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers=UA)
+    """
+    High-impact USD events near the block.
+    Prefers helpers.calendar_cache last-good so a CDN blip does not fail-closed
+    every window. Returns [] for no hits, None only if calendar never loaded.
+    """
+    d = None
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        from helpers.calendar_cache import load_ff_calendar
+        d = load_ff_calendar(DESK_ROOT)
+    except Exception:
+        d = None
+    if d is None:
+        try:
+            d = get_json("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers=UA)
+        except Exception:
+            return None
+    if not isinstance(d, list):
+        return None
     w = dt.timedelta(minutes=NEWS_WINDOW_MIN)
     hits = []
     for ev in d:
@@ -765,13 +784,11 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         reasons.append(f"spread {spread:.2f} > {MAX_SPREAD:.2f}")
     if depth < MIN_DEPTH:
         reasons.append(f"only {depth:.0f} contracts at/below ask (< {MIN_DEPTH})")
-    if toward is None:
-        reasons.append("candle trend unknown")
-    elif toward:
+    # Soft: unknown candle trend does not block (only adverse toward-target does).
+    if toward:
         reasons.append("last 5 candles moving toward target")
-    if news is None:
-        reasons.append("news calendar unavailable")
-    elif news:
+    # Soft: calendar never loaded → do not block; known high-impact still blocks.
+    if news:
         reasons.append("USD high-impact news near this block")
 
     out.update({
@@ -787,6 +804,8 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         "edge": float(p) - float(ask) - float(fee),
         "toward": toward,
         "news": news,
+        "news_soft_unavailable": news is None,
+        "candle_soft_unknown": toward is None,
         "cushion": cushion,
         "z": z,
         "need": need,

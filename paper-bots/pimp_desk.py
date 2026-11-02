@@ -1344,6 +1344,47 @@ def _kalshi_skip(root: str, state: dict | None) -> str:
     return line
 
 
+def next_inx_scan_line(bot_id: str, now: dt.datetime | None = None) -> str:
+    """
+    Heartbeat for KXINXU towers: next scan / settle window in America/Chicago.
+    Morning idle is schedule-true, not a broken desk.
+    """
+    now = now or dt.datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    else:
+        now = now.astimezone(CT)
+    slots = [s for s in AUTO if s.get("id") == bot_id and "at_ct" in s]
+    if not slots:
+        return ""
+    # Prefer run (scan) slots for the heartbeat; fall back to any.
+    runs = [s for s in slots if s.get("action") == "run"] or slots
+    hm = now.hour * 60 + now.minute
+
+    def _mins(hhmm: str) -> int:
+        h, m = str(hhmm).split(":")
+        return int(h) * 60 + int(m)
+
+    for s in runs:
+        start = _mins(s["at_ct"])
+        until = _mins(s.get("until_ct") or s["at_ct"])
+        if start <= hm <= until:
+            label = "scan" if s.get("action") == "run" else s.get("action")
+            return f"In {label} window until {s.get('until_ct')} CT."
+    # Next future run today, else first run tomorrow.
+    future = sorted(
+        (s for s in runs if _mins(s["at_ct"]) > hm),
+        key=lambda s: _mins(s["at_ct"]),
+    )
+    if future:
+        s = future[0]
+        label = "scan" if s.get("action") == "run" else s.get("action")
+        return f"Next {label} {s['at_ct']} CT."
+    s = sorted(runs, key=lambda x: _mins(x["at_ct"]))[0]
+    label = "scan" if s.get("action") == "run" else s.get("action")
+    return f"Next {label} tomorrow {s['at_ct']} CT."
+
+
 def _btc_skip(summary: str) -> str:
     if not summary:
         return "No check yet. Skip and news status show up after a run."
@@ -4280,6 +4321,20 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         view["idle_copy"] = f"No paper trades yet. Last check {view['central_check']}. No edge."
     else:
         view["idle_copy"] = ""
+    # INX towers: surface next scan heartbeat so morning idle is not read as broken.
+    if spec.get("id") in ("kalshi-sp", "kalshi-sized"):
+        heartbeat = next_inx_scan_line(str(spec.get("id")))
+        view["next_scan"] = heartbeat
+        if heartbeat:
+            if view.get("idle_copy"):
+                view["idle_copy"] = f"{view['idle_copy']} {heartbeat}"
+            why = str(view.get("why") or "")
+            if why and "Next scan" not in why and "In scan window" not in why and "Next " not in why:
+                # Keep CARD why; append schedule only when it looks like a no-buy finish.
+                if "no paper buy" in why.lower() or "check finished" in why.lower() or not why.strip():
+                    view["why"] = f"{why} {heartbeat}".strip()
+            elif not why:
+                view["why"] = heartbeat
     if not view.get("why") and view.get("skip"):
         view["why"] = plain_reason(view.get("skip") or "")
     summary = str(run.get("summary") or "")

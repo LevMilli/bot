@@ -22,8 +22,11 @@ desk_settle_harness_at.txt
 desk_top25_state.json
 desk_maker_taker_study.json
 desk_phase2_state.json
+desk_phase3_state.json
 desk_adapt_ab_ledger.json
+helpers/ff_calendar_cache.json
 btc15m-signal/paper_parlays.json
 commodity-15m-paper/paper_account.json
 *.tmp
 __pycache__/
+helpers/__pycache__/
