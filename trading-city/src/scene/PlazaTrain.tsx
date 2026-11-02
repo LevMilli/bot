@@ -1,12 +1,18 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, type MutableRefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group } from 'three'
+import type { Group, Mesh } from 'three'
 import { RAIL_GAUGE, RAIL_R, RAIL_Z_OFF } from './plazaLayout'
 
 const RAIL_Y = 0.2
 const Z_OFF = RAIL_Z_OFF
 const TIE_COUNT = 36
 const SEGMENTS = 56
+/** Evenly spaced hover pads around the guideway (not attached to the train). */
+const PAD_COUNT = 36
+/** Angular half-width that counts as "under the train." */
+const PAD_LIGHT_RAD = 0.14
+/** Fade-out after the consist leaves a pad. */
+const PAD_FADE_SEC = 1.15
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined' || !window.matchMedia) return false
@@ -18,7 +24,7 @@ const CARS = [
   { arc: 0, role: 'lead' as const, len: 2.05 },
   { arc: 2.08, role: 'mid' as const, len: 1.92 },
   { arc: 4.08, role: 'mid' as const, len: 1.92 },
-  { arc: 6.04, role: 'tail' as const, len: 1.88 },
+  { arc: 6.04, role: 'tail' as const, len: 1.95 },
 ]
 /** Gap from the rail head. Every car uses this same lift. */
 const HOVER = 0.11
@@ -29,12 +35,20 @@ const BELLY = '#3b0764'
 const GLOW = '#c084fc'
 const GLOW_HOT = '#f3e8ff'
 const GLASS = '#07040e'
+const TAIL_LIGHT = '#ff4d6d'
 
 function railPoint(angle: number, radius: number) {
   return {
     x: Math.cos(angle) * radius,
     z: Math.sin(angle) * radius + Z_OFF,
   }
+}
+
+function wrapPi(d: number) {
+  let x = d
+  while (x > Math.PI) x -= Math.PI * 2
+  while (x < -Math.PI) x += Math.PI * 2
+  return x
 }
 
 /**
@@ -55,26 +69,6 @@ function poseOnRail(angle: number, radius: number, bogie: number) {
   }
 }
 
-/** Two identical rings per car. Wider than the body so the circle reads from above. */
-function HoverRings({ len }: { len: number }) {
-  return (
-    <group>
-      {([-0.32, 0.32] as const).map((t) => (
-        <group key={t} position={[t * len, -0.02, 0]}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.3, 0.028, 8, 32]} />
-            <meshBasicMaterial color={GLOW} toneMapped={false} />
-          </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.16, 0.012, 6, 24]} />
-            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  )
-}
-
 const shellMat = {
   color: SHELL,
   metalness: 0.22,
@@ -93,25 +87,38 @@ const glassMat = {
 
 function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }) {
   const half = len / 2
-  const rearExtra = role === 'tail' ? 0 : 0.18
+  // Tail: shorten the box so a flat rear face never peeks past the taper.
+  const bodyLen = role === 'tail' ? len * 0.72 : len
+  const bodyShift = role === 'tail' ? -((len - bodyLen) / 2) : 0
+  const rearExtra = role === 'tail' ? 0.02 : 0.18
   const frontExtra = role === 'lead' ? 0.16 : 0
-  const glassLen = len + rearExtra + frontExtra
-  const glassX = (rearExtra - frontExtra) / 2
+  const glassLen = bodyLen + rearExtra + frontExtra
+  const glassX = bodyShift + (rearExtra - frontExtra) / 2
   return (
     <group>
-      <HoverRings len={len} />
-
-      <mesh position={[0, 0.1, 0]}>
-        <boxGeometry args={[len, 0.045, 0.36]} />
-        <meshStandardMaterial color={BELLY} metalness={0.3} roughness={0.4} emissive="#4c1d95" emissiveIntensity={0.2} />
+      <mesh position={[bodyShift, 0.1, 0]}>
+        <boxGeometry args={[bodyLen, 0.045, 0.36]} />
+        <meshStandardMaterial
+          color={BELLY}
+          metalness={0.3}
+          roughness={0.4}
+          emissive="#4c1d95"
+          emissiveIntensity={0.2}
+        />
       </mesh>
-      <mesh position={[0, 0.22, 0]}>
-        <boxGeometry args={[len, 0.18, 0.4]} />
+      <mesh position={[bodyShift, 0.22, 0]}>
+        <boxGeometry args={[bodyLen, 0.18, 0.4]} />
         <meshStandardMaterial {...shellMat} />
       </mesh>
-      <mesh position={[0, 0.33, 0]}>
-        <boxGeometry args={[len * 0.98, 0.05, 0.34]} />
-        <meshStandardMaterial color="#f5f3ff" metalness={0.2} roughness={0.28} emissive={SHELL_DEEP} emissiveIntensity={0.28} />
+      <mesh position={[bodyShift, 0.33, 0]}>
+        <boxGeometry args={[bodyLen * 0.98, 0.05, 0.34]} />
+        <meshStandardMaterial
+          color="#f5f3ff"
+          metalness={0.2}
+          roughness={0.28}
+          emissive={SHELL_DEEP}
+          emissiveIntensity={0.28}
+        />
       </mesh>
       {/* Dark glass channel down the roof. */}
       <mesh position={[glassX, 0.362, 0]}>
@@ -140,7 +147,13 @@ function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }
           </mesh>
           <mesh position={[-half - 0.62, 0.11, 0]} rotation={[0, 0, Math.PI / 2]} scale={[0.32, 1, 0.9]}>
             <coneGeometry args={[0.18, 1.45, 12]} />
-            <meshStandardMaterial color={SHELL_DEEP} metalness={0.2} roughness={0.34} emissive="#5b21b6" emissiveIntensity={0.35} />
+            <meshStandardMaterial
+              color={SHELL_DEEP}
+              metalness={0.2}
+              roughness={0.34}
+              emissive="#5b21b6"
+              emissiveIntensity={0.35}
+            />
           </mesh>
           <mesh position={[-half - 0.42, 0.26, 0]} rotation={[0, 0, 0.5]}>
             <boxGeometry args={[0.85, 0.04, 0.28]} />
@@ -157,11 +170,87 @@ function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }
         </group>
       )}
 
+      {/* Finished rear — long taper + rounded cap + bright taillights (no flat chop). */}
       {role === 'tail' && (
-        <mesh position={[half + 0.16, 0.2, 0]} rotation={[0, 0, -Math.PI / 2]} scale={[0.55, 1, 1.05]}>
-          <coneGeometry args={[0.16, 0.46, 12]} />
-          <meshStandardMaterial {...shellMat} />
-        </mesh>
+        <group>
+          {/* Start taper where the shortened body ends so no slab face shows. */}
+          <mesh
+            position={[bodyShift + bodyLen / 2 + 0.85, 0.21, 0]}
+            rotation={[0, 0, -Math.PI / 2]}
+            scale={[0.55, 1, 1.05]}
+          >
+            <coneGeometry args={[0.22, 2.05, 20]} />
+            <meshStandardMaterial {...shellMat} />
+          </mesh>
+          <mesh
+            position={[bodyShift + bodyLen / 2 + 0.7, 0.1, 0]}
+            rotation={[0, 0, -Math.PI / 2]}
+            scale={[0.36, 1, 0.92]}
+          >
+            <coneGeometry args={[0.19, 1.55, 14]} />
+            <meshStandardMaterial
+              color={SHELL_DEEP}
+              metalness={0.22}
+              roughness={0.34}
+              emissive="#5b21b6"
+              emissiveIntensity={0.4}
+            />
+          </mesh>
+          {/* Soft rounded end-cap — reads clearly past the body. */}
+          <mesh position={[bodyShift + bodyLen / 2 + 1.82, 0.2, 0]} scale={[0.85, 1.0, 1.05]}>
+            <sphereGeometry args={[0.19, 16, 14]} />
+            <meshStandardMaterial {...shellMat} />
+          </mesh>
+          <mesh position={[bodyShift + bodyLen / 2 + 1.88, 0.11, 0]} scale={[0.6, 0.5, 0.9]}>
+            <sphereGeometry args={[0.15, 12, 10]} />
+            <meshStandardMaterial
+              color={BELLY}
+              metalness={0.28}
+              roughness={0.4}
+              emissive="#4c1d95"
+              emissiveIntensity={0.3}
+            />
+          </mesh>
+          {/* Roof spine fade into the taper. */}
+          <mesh position={[bodyShift + bodyLen / 2 + 0.55, 0.33, 0]} rotation={[0, 0, -0.34]}>
+            <boxGeometry args={[1.05, 0.03, 0.2]} />
+            <meshStandardMaterial
+              color="#f5f3ff"
+              metalness={0.2}
+              roughness={0.28}
+              emissive={SHELL_DEEP}
+              emissiveIntensity={0.28}
+            />
+          </mesh>
+          {/* Twin taillights — oversized so they read at plaza distance. */}
+          {([-1, 1] as const).map((side) => (
+            <mesh key={side} position={[bodyShift + bodyLen / 2 + 1.95, 0.19, side * 0.09]}>
+              <boxGeometry args={[0.08, 0.08, 0.09]} />
+              <meshBasicMaterial color={TAIL_LIGHT} toneMapped={false} />
+            </mesh>
+          ))}
+          <mesh position={[bodyShift + bodyLen / 2 + 1.98, 0.2, 0]}>
+            <boxGeometry args={[0.05, 0.03, 0.14]} />
+            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} />
+          </mesh>
+          {/* Side fins taper with the rear. */}
+          {([-1, 1] as const).map((side) => (
+            <mesh
+              key={`fin-${side}`}
+              position={[bodyShift + bodyLen / 2 + 0.85, 0.15, side * 0.2]}
+              rotation={[side * 0.22, 0, -0.42]}
+            >
+              <boxGeometry args={[1.15, 0.02, 0.05]} />
+              <meshStandardMaterial
+                color={SHELL_DEEP}
+                metalness={0.25}
+                roughness={0.35}
+                emissive="#6d28d9"
+                emissiveIntensity={0.4}
+              />
+            </mesh>
+          ))}
+        </group>
       )}
 
       {role !== 'tail' && (
@@ -170,6 +259,105 @@ function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }
           <meshStandardMaterial {...shellMat} />
         </mesh>
       )}
+    </group>
+  )
+}
+
+/**
+ * Fixed pads on the guideway. The train lights each pad as it passes;
+ * pads pulse while lit, then fade out when the consist leaves.
+ */
+function MaglevPads({
+  radius,
+  y,
+  trainAngle,
+  reduced,
+}: {
+  radius: number
+  y: number
+  trainAngle: MutableRefObject<number>
+  reduced: boolean
+}) {
+  const pads = useMemo(() => {
+    const out: { angle: number; x: number; z: number }[] = []
+    for (let i = 0; i < PAD_COUNT; i++) {
+      const a = (i / PAD_COUNT) * Math.PI * 2
+      const p = railPoint(a, radius)
+      out.push({ angle: a, x: p.x, z: p.z })
+    }
+    return out
+  }, [radius])
+
+  const glowRefs = useRef<(Mesh | null)[]>([])
+  const coreRefs = useRef<(Mesh | null)[]>([])
+  const energy = useRef(new Float32Array(PAD_COUNT))
+  const carAngles = useRef(new Float32Array(CARS.length))
+
+  useFrame(({ clock }, dt) => {
+    const t = clock.getElapsedTime()
+    const a0 = trainAngle.current
+    for (let i = 0; i < CARS.length; i++) {
+      carAngles.current[i] = a0 - CARS[i].arc / radius
+    }
+    const pulse = reduced ? 1 : 0.62 + 0.38 * Math.sin(t * 7.2)
+    for (let i = 0; i < PAD_COUNT; i++) {
+      let nearest = Math.PI
+      for (let c = 0; c < CARS.length; c++) {
+        const d = Math.abs(wrapPi(pads[i].angle - carAngles.current[c]))
+        if (d < nearest) nearest = d
+      }
+      const target = nearest < PAD_LIGHT_RAD ? 1 - nearest / PAD_LIGHT_RAD : 0
+      const cur = energy.current[i]
+      // Snap up with the train, ease out after it leaves.
+      const next =
+        target > cur
+          ? Math.min(1, cur + dt * 8)
+          : Math.max(0, cur - dt / PAD_FADE_SEC)
+      energy.current[i] = next
+      const lit = next * pulse
+      const glow = glowRefs.current[i]
+      const core = coreRefs.current[i]
+      if (glow) {
+        glow.visible = next > 0.03
+        const mat = glow.material as { opacity: number }
+        mat.opacity = lit * 1.0
+        glow.scale.setScalar(0.9 + lit * 0.45)
+      }
+      if (core) {
+        core.visible = next > 0.03
+        const mat = core.material as { opacity: number }
+        mat.opacity = lit * 0.95
+        core.scale.setScalar(0.95 + lit * 0.25)
+      }
+    }
+  })
+
+  return (
+    <group>
+      {pads.map((p, i) => (
+        <group key={i} position={[p.x, y, p.z]}>
+          <mesh
+            ref={(el) => {
+              glowRefs.current[i] = el
+            }}
+            rotation={[-Math.PI / 2, 0, 0]}
+            visible={false}
+          >
+            <torusGeometry args={[0.34, 0.034, 8, 32]} />
+            <meshBasicMaterial color={GLOW} toneMapped={false} transparent opacity={0} depthWrite={false} />
+          </mesh>
+          <mesh
+            ref={(el) => {
+              coreRefs.current[i] = el
+            }}
+            rotation={[-Math.PI / 2, 0, 0]}
+            visible={false}
+          >
+            <torusGeometry args={[0.16, 0.016, 6, 24]} />
+            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} transparent opacity={0} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
     </group>
   )
 }
@@ -211,6 +399,8 @@ export function PlazaTrain({
 
   return (
     <group raycast={() => null}>
+      {/* Pads sit on the guideway deck — lit only while the consist is overhead. */}
+      <MaglevPads radius={radius} y={0.175} trainAngle={angle} reduced={reduced} />
       {CARS.map((car, i) => {
         const a = 1.15 - car.arc / radius
         const pose = poseOnRail(a, radius, car.len * 0.32)
