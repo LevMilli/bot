@@ -26,8 +26,8 @@ type Props = {
 const POSES: BotPose[] = ['waiting', 'researching', 'trading', 'winning']
 
 /**
- * Reusable APEX-CITY street car (procedural R3F model).
- * Forward = local −X. Headlights / cones aim that way.
+ * Future APEX-CITY hover car. Forward = local −X.
+ * No wheels — it rides a neon cushion above the avenue.
  */
 export function CityCar({
   position,
@@ -39,31 +39,29 @@ export function CityCar({
   opacity = 1,
   rolling = false,
 }: Props) {
-  const wheelSpin = useRef(0)
-  const wheelRefs = useRef<(Group | null)[]>([])
+  const hover = useRef<Group>(null)
+  const phase = useMemo(() => color.charCodeAt(1) * 0.17, [color])
 
   const passengers = useMemo(() => {
     if (occupancy === 'empty') return [] as { seat: [number, number, number]; pose: BotPose }[]
     if (occupancy === 'driver')
-      return [{ seat: [0.06, 0.22, 0.1] as [number, number, number], pose: POSES[0] }]
+      return [{ seat: [0.02, 0.3, 0.08] as [number, number, number], pose: POSES[0] }]
     if (occupancy === 'couple')
       return [
-        { seat: [0.06, 0.22, 0.1] as [number, number, number], pose: POSES[1] },
-        { seat: [0.06, 0.22, -0.1] as [number, number, number], pose: POSES[2] },
+        { seat: [0.02, 0.3, 0.08] as [number, number, number], pose: POSES[1] },
+        { seat: [0.02, 0.3, -0.08] as [number, number, number], pose: POSES[2] },
       ]
     return [
-      { seat: [0.08, 0.22, 0.1] as [number, number, number], pose: POSES[0] },
-      { seat: [0.08, 0.22, -0.1] as [number, number, number], pose: POSES[3] },
-      { seat: [-0.22, 0.2, 0] as [number, number, number], pose: POSES[1] },
+      { seat: [0.06, 0.3, 0.08] as [number, number, number], pose: POSES[0] },
+      { seat: [0.06, 0.3, -0.08] as [number, number, number], pose: POSES[3] },
+      { seat: [-0.16, 0.28, 0] as [number, number, number], pose: POSES[1] },
     ]
   }, [occupancy])
 
-  useFrame((_, dt) => {
-    if (!rolling) return
-    wheelSpin.current += dt * 9
-    for (const w of wheelRefs.current) {
-      if (w) w.rotation.x = wheelSpin.current
-    }
+  useFrame(({ clock }) => {
+    if (!hover.current) return
+    const bob = rolling ? Math.sin(clock.getElapsedTime() * 1.8 + phase) * 0.07 : 0
+    hover.current.position.y = bob
   })
 
   const bodyOpacity = Math.max(0, Math.min(1, opacity))
@@ -71,133 +69,92 @@ export function CityCar({
 
   return (
     <group position={position} rotation={[0, rotation, 0]} visible={visible}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <planeGeometry args={[1.35, 0.7]} />
-        <meshBasicMaterial color={accent} transparent opacity={0.14 * bodyOpacity} depthWrite={false} />
-      </mesh>
-
-      <mesh position={[0, 0.2, 0]}>
-        <boxGeometry args={[1.35, 0.22, 0.62]} />
-        <meshStandardMaterial
-          color={color}
-          metalness={0.55}
-          roughness={0.32}
-          emissive={color}
-          emissiveIntensity={0.12}
-          transparent
-          opacity={bodyOpacity}
-        />
-      </mesh>
-      <mesh position={[0, 0.1, 0]}>
-        <boxGeometry args={[1.38, 0.08, 0.64]} />
-        <meshBasicMaterial color="#0a0e16" transparent opacity={bodyOpacity} />
-      </mesh>
-      <mesh position={[-0.42, 0.28, 0]}>
-        <boxGeometry args={[0.42, 0.1, 0.58]} />
-        <meshStandardMaterial color={color} metalness={0.5} roughness={0.35} transparent opacity={bodyOpacity} />
-      </mesh>
-      <mesh position={[0.08, 0.42, 0]}>
-        <boxGeometry args={[0.62, 0.28, 0.56]} />
-        <meshBasicMaterial color="#0c1018" transparent opacity={bodyOpacity} />
-      </mesh>
-      <mesh position={[-0.22, 0.42, 0]} rotation={[0, 0, -0.35]}>
-        <boxGeometry args={[0.28, 0.22, 0.54]} />
-        <meshBasicMaterial color="#9ee9ff" transparent opacity={0.35 * bodyOpacity} depthWrite={false} toneMapped={false} />
-      </mesh>
-      <mesh position={[0.38, 0.42, 0]} rotation={[0, 0, 0.28]}>
-        <boxGeometry args={[0.22, 0.2, 0.54]} />
-        <meshBasicMaterial color="#7ec8e0" transparent opacity={0.28 * bodyOpacity} depthWrite={false} />
-      </mesh>
-      {([-1, 1] as const).map((side) => (
-        <mesh key={side} position={[0.06, 0.44, side * 0.29]}>
-          <boxGeometry args={[0.48, 0.16, 0.03]} />
-          <meshBasicMaterial color="#b8f0ff" transparent opacity={0.4 * bodyOpacity} depthWrite={false} toneMapped={false} />
+      <group ref={hover}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0.05, 0.02, 0]}>
+          <planeGeometry args={[1.7, 0.72]} />
+          <meshBasicMaterial color={accent} transparent opacity={0.28 * bodyOpacity} depthWrite={false} toneMapped={false} />
         </mesh>
-      ))}
 
-      <mesh position={[-0.7, 0.16, 0]}>
-        <boxGeometry args={[0.08, 0.12, 0.66]} />
-        <meshBasicMaterial color="#1a2030" transparent opacity={bodyOpacity} />
-      </mesh>
-      <mesh position={[0.7, 0.16, 0]}>
-        <boxGeometry args={[0.08, 0.12, 0.66]} />
-        <meshBasicMaterial color="#1a2030" transparent opacity={bodyOpacity} />
-      </mesh>
-      <mesh position={[-0.72, 0.22, 0]}>
-        <boxGeometry args={[0.04, 0.1, 0.28]} />
-        <meshBasicMaterial color="#0e1218" transparent opacity={bodyOpacity} />
-      </mesh>
-
-      {/* Headlights aim local −X (forward). Cone default is +Y → rotate onto −X. */}
-      {([-1, 1] as const).map((side) => (
-        <group key={`hl-${side}`} position={[-0.72, 0.24, side * 0.2]}>
-          <mesh>
-            <boxGeometry args={[0.08, 0.09, 0.11]} />
-            <meshBasicMaterial color="#fff6c8" transparent opacity={bodyOpacity} toneMapped={false} />
-          </mesh>
-          <mesh position={[-0.55, -0.08, 0]} rotation={[0, 0, -Math.PI / 2]}>
-            <coneGeometry args={[0.22, 1.15, 10, 1, true]} />
-            <meshBasicMaterial
-              color="#ffe9a0"
-              transparent
-              opacity={0.16 * bodyOpacity}
-              depthWrite={false}
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-        </group>
-      ))}
-      {castHeadlight && bodyOpacity > 0.4 && (
-        <pointLight position={[-1.2, 0.2, 0]} intensity={1.6 * bodyOpacity} distance={6} color="#ffe9a0" decay={2} />
-      )}
-
-      {([-1, 1] as const).map((side) => (
-        <mesh key={`tl-${side}`} position={[0.72, 0.24, side * 0.22]}>
-          <boxGeometry args={[0.05, 0.07, 0.1]} />
-          <meshBasicMaterial color="#ff2a6d" transparent opacity={bodyOpacity} toneMapped={false} />
+        <mesh position={[0.05, 0.1, 0]}>
+          <boxGeometry args={[1.62, 0.06, 0.58]} />
+          <meshBasicMaterial color="#07080e" transparent opacity={bodyOpacity} />
         </mesh>
-      ))}
+        <mesh position={[0.02, 0.22, 0]}>
+          <boxGeometry args={[1.7, 0.16, 0.56]} />
+          <meshStandardMaterial
+            color={color}
+            metalness={0.62}
+            roughness={0.28}
+            emissive={color}
+            emissiveIntensity={0.22}
+            transparent
+            opacity={bodyOpacity}
+          />
+        </mesh>
+        <mesh position={[-0.72, 0.2, 0]} rotation={[0, 0, -0.55]}>
+          <boxGeometry args={[0.42, 0.08, 0.36]} />
+          <meshStandardMaterial color={color} metalness={0.55} roughness={0.3} emissive={color} emissiveIntensity={0.15} transparent opacity={bodyOpacity} />
+        </mesh>
 
-      <mesh position={[0.05, 0.58, 0]}>
-        <boxGeometry args={[0.35, 0.03, 0.12]} />
-        <meshBasicMaterial color={accent} transparent opacity={bodyOpacity} toneMapped={false} />
-      </mesh>
+        <mesh position={[0.12, 0.38, 0]}>
+          <boxGeometry args={[0.72, 0.14, 0.44]} />
+          <meshBasicMaterial color="#0c1018" transparent opacity={bodyOpacity} />
+        </mesh>
+        <mesh position={[-0.22, 0.38, 0]} rotation={[0, 0, -0.5]}>
+          <boxGeometry args={[0.32, 0.1, 0.4]} />
+          <meshBasicMaterial color="#d8f6ff" transparent opacity={0.55 * bodyOpacity} depthWrite={false} toneMapped={false} />
+        </mesh>
+        <mesh position={[0.08, 0.47, 0]}>
+          <boxGeometry args={[0.85, 0.025, 0.1]} />
+          <meshBasicMaterial color={accent} transparent opacity={bodyOpacity} toneMapped={false} />
+        </mesh>
 
-      {(
-        [
-          [-0.42, 0.11, 0.34],
-          [-0.42, 0.11, -0.34],
-          [0.42, 0.11, 0.34],
-          [0.42, 0.11, -0.34],
-        ] as const
-      ).map((p, i) => (
-        <group
-          key={i}
-          position={p}
-          ref={(el) => {
-            wheelRefs.current[i] = el
-          }}
-        >
-          <mesh rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.12, 0.12, 0.1, 12]} />
-            <meshBasicMaterial color="#0a0c10" transparent opacity={bodyOpacity} />
-          </mesh>
-          <mesh rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.06, 0.06, 0.11, 8]} />
-            <meshBasicMaterial color="#8a93a8" transparent opacity={bodyOpacity} />
-          </mesh>
-          <mesh rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.03, 0.03, 0.12, 6]} />
+        {([-1, 1] as const).map((side) => (
+          <mesh key={`stripe-${side}`} position={[0.02, 0.2, side * 0.29]}>
+            <boxGeometry args={[1.45, 0.035, 0.03]} />
             <meshBasicMaterial color={accent} transparent opacity={bodyOpacity} toneMapped={false} />
           </mesh>
-        </group>
-      ))}
+        ))}
 
-      {passengers.map((p, i) => (
-        <group key={i} position={p.seat} scale={0.2} rotation={[0, -Math.PI / 2, 0]}>
-          <BotFigure pose={p.pose} seated />
-        </group>
-      ))}
+        {([-1, 1] as const).map((side) => (
+          <group key={`hl-${side}`} position={[-0.86, 0.2, side * 0.16]}>
+            <mesh>
+              <boxGeometry args={[0.06, 0.07, 0.1]} />
+              <meshBasicMaterial color="#fff6c8" transparent opacity={bodyOpacity} toneMapped={false} />
+            </mesh>
+            <mesh position={[-0.42, -0.04, 0]} rotation={[0, 0, -Math.PI / 2]}>
+              <coneGeometry args={[0.14, 0.85, 8, 1, true]} />
+              <meshBasicMaterial color="#ffe9a0" transparent opacity={0.14 * bodyOpacity} depthWrite={false} side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+        ))}
+        {castHeadlight && bodyOpacity > 0.4 && (
+          <pointLight position={[-1.15, 0.22, 0]} intensity={1.4 * bodyOpacity} distance={6} color="#ffe9a0" decay={2} />
+        )}
+
+        {([-1, 1] as const).map((side) => (
+          <group key={`thrust-${side}`} position={[0.84, 0.12, side * 0.18]}>
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.07, 0.09, 0.1, 10]} />
+              <meshBasicMaterial color="#1a1020" transparent opacity={bodyOpacity} />
+            </mesh>
+            <mesh position={[0.08, -0.02, 0]} rotation={[0, 0, Math.PI / 2]}>
+              <coneGeometry args={[0.06, 0.28, 8]} />
+              <meshBasicMaterial color={accent} transparent opacity={0.85 * bodyOpacity} toneMapped={false} />
+            </mesh>
+            <mesh position={[0.02, 0.08, 0]}>
+              <boxGeometry args={[0.05, 0.05, 0.08]} />
+              <meshBasicMaterial color="#ff2a6d" transparent opacity={bodyOpacity} toneMapped={false} />
+            </mesh>
+          </group>
+        ))}
+
+        {passengers.map((p, i) => (
+          <group key={i} position={p.seat} scale={0.18} rotation={[0, -Math.PI / 2, 0]}>
+            <BotFigure pose={p.pose} seated />
+          </group>
+        ))}
+      </group>
     </group>
   )
 }
@@ -235,7 +192,7 @@ function makeCar(slot: number, dir: -1 | 1, x: number, gen: number): TrafficCar 
     slot,
     dir,
     x,
-    speed: 2.2 + (slot % 2) * 0.25,
+    speed: 3.4 + (slot % 2) * 0.35,
     color: pal.color,
     accent: pal.accent,
     occupancy: pal.occupancy,
@@ -268,7 +225,7 @@ function clearSpawnX(cars: TrafficCar[], dir: -1 | 1, skipSlot: number) {
 }
 
 /**
- * Exactly 4 cars on the elevated back avenue, right-hand lanes, looping with fade.
+ * Four hover cars on the back avenue, lifted into two air lanes, looping with fade.
  * Same-lane cars keep a hard MIN_GAP so they never intersect.
  */
 export function AvenueTraffic({ deckY = 1.35 }: { deckY?: number }) {
@@ -331,7 +288,7 @@ export function AvenueTraffic({ deckY = 1.35 }: { deckY?: number }) {
           c.gen += 1
           const pal = PALETTE[(c.slot + c.gen) % PALETTE.length]
           c.x = x
-          c.speed = 2.0 + Math.random() * 0.55
+          c.speed = 3.1 + Math.random() * 0.7
           c.color = pal.color
           c.accent = pal.accent
           c.occupancy = pal.occupancy
@@ -362,10 +319,11 @@ export function AvenueTraffic({ deckY = 1.35 }: { deckY?: number }) {
       {snap.map((c) => {
         const yaw = c.dir < 0 ? 0 : Math.PI
         const z = c.dir < 0 ? BACK_ROAD_Z - LANE : BACK_ROAD_Z + LANE
+        const fly = c.dir < 0 ? 1.35 : 1.85
         return (
           <CityCar
             key={c.slot}
-            position={[c.x, deckY, z]}
+            position={[c.x, deckY + fly, z]}
             rotation={yaw}
             color={c.color}
             accent={c.accent}
