@@ -18,11 +18,11 @@ function makeCanvas(w = 512, h = 384) {
 function screenTexture(canvas: HTMLCanvasElement) {
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
-  // High-res lobby boards: keep full texel density (no mip blur) + max anisotropy.
+  // Mipmaps required: high-res canvases look jagged when minified without them.
   tex.anisotropy = 16
-  tex.minFilter = THREE.LinearFilter
+  tex.generateMipmaps = true
+  tex.minFilter = THREE.LinearMipmapLinearFilter
   tex.magFilter = THREE.LinearFilter
-  tex.generateMipmaps = false
   tex.wrapS = THREE.ClampToEdgeWrapping
   tex.wrapT = THREE.ClampToEdgeWrapping
   tex.needsUpdate = true
@@ -32,9 +32,9 @@ function screenTexture(canvas: HTMLCanvasElement) {
 /** Apply renderer max anisotropy once the WebGL context is available. */
 export function sharpenBoardTexture(tex: THREE.Texture, maxAnisotropy: number) {
   tex.anisotropy = Math.max(tex.anisotropy || 1, maxAnisotropy)
-  tex.minFilter = THREE.LinearFilter
+  tex.generateMipmaps = true
+  tex.minFilter = THREE.LinearMipmapLinearFilter
   tex.magFilter = THREE.LinearFilter
-  tex.generateMipmaps = false
   tex.needsUpdate = true
 }
 

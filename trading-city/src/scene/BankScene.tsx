@@ -1054,7 +1054,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         />
       ))}
 
-      <Html position={[0, 0.1, 3.55]} center distanceFactor={12} style={{ pointerEvents: 'none' }}>
+      <Html position={[0, 0.08, 5.35]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
         <div
           style={{
             fontFamily: 'Share Tech Mono, monospace',
@@ -1068,7 +1068,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         </div>
       </Html>
 
-      <NeonBloom strength={0.55} />
+      {/* Softer bloom so board glyphs stay crisp at lobby distance. */}
+      <NeonBloom strength={0.32} />
     </>
   )
 }
