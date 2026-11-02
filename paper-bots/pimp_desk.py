@@ -27,6 +27,8 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 
+import desk_profit
+
 log = logging.getLogger("pimpdesk")
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +77,33 @@ DEFAULTS = {
     "week_goal": WEEK_GOAL,
     "quiet_start": QUIET_START,
     "quiet_end": QUIET_END,
+    # Desk profit six (venue edge / correlation / kelly / flip / starve / shadow).
+    "venue_min_edge": {
+        "kalshi_sports": 0.06,
+        "kalshi_btc15m": 0.05,
+        "kalshi_inx": 0.0,
+        "solana_dex": 0.02,
+    },
+    "sizing": "kelly_lite",
+    "kelly_fraction": 0.25,
+    "correlation_pairs": [
+        ["risk_on_btc", "risk_on_equity"],
+        ["risk_off_btc", "risk_off_equity"],
+    ],
+    "model_flip_delta": 0.08,
+    "model_flip_exits": True,
+    "starve_min_n": 8,
+    "starve_expectancy": 0.0,
+    "starve_factor": 0.25,
+    "expectancy_window_days": 20,
+    "shadow": {
+        "enabled": True,
+        "btc15m": [{
+            "id": "edge08",
+            "params": {"venue_edge": 0.08},
+            "promote_after": {"n": 30, "min_expectancy": 0.5},
+        }],
+    },
 }
 
 # Starting paper cash. Written once, on the first run, and never used to invent trades.
@@ -193,12 +222,13 @@ BOT_PLANS = {
     "sports-gap": {
         "buy": [
             "Live ESPN game matched to a Kalshi series",
-            "Edge after fee ≥ desk min_edge (NHL +0.02)",
+            "Edge after fee ≥ venue kalshi_sports (NHL +0.02)",
             "Home fair outside close-game band 0.40–0.60",
             "Spread ≤ 0.05; ask in 0.05–0.95",
-            "Desk stake curve; learning skip clear",
+            "Kelly-lite / desk stake; correlation + learning clear",
         ],
         "sell": [
+            "Model-flip: fair moves against side by desk δ → sell at bid",
             "Gap closed: bid − fee ≥ fair → sell at bid",
             "Game final → settle $1 / $0 (ties wait)",
         ],
@@ -206,64 +236,66 @@ BOT_PLANS = {
             "Desk entry_gate (daily loss / max open / open risk)",
             "Bot daily loss stop (desk daily_loss_stop)",
             "Intra-check max open risk + max open / cash / learning skip",
+            "Correlation veto + expectancy starve multiplier",
             "Sells/settles before new paper buys each check",
             "Pause file",
         ],
         "exit_quality": "partial",
         "entry_gated": True,
-        "stake": "desk-curve",
+        "stake": "kelly-lite",
     },
     "kalshi-sp": {
         "buy": [
             "Once per day 12:30–14:55 CT",
-            "Safest YES/NO ask in the 80–90¢ band",
-            "Stake floor($25 / ask); learning skip clear",
+            "Safest YES/NO ask in the 80–90¢ band; venue kalshi_inx edge",
+            "Stake floor($25 / ask); correlation + learning clear",
         ],
         "sell": [
-            "Hold to 3 PM CT Kalshi settlement only",
-            "Bid under 50¢ → invalidation log only (no stop)",
+            "Model-flip: bid under 50¢ → paper sell at bid when enabled",
+            "Else hold to 3 PM CT Kalshi settlement",
         ],
         "failsafes": [
             "Desk entry_gate on scan (not settle/brief)",
             "Weekend + news/holiday calendar",
             "Max 1 trade/day; bot daily loss −$50",
             "Kill switch bankroll ≤ $400; paper_mode required",
-            "Pause file",
+            "Correlation veto + starve; pause file",
         ],
-        "exit_quality": "weak",
+        "exit_quality": "partial",
         "entry_gated": True,
         "stake": "fixed-25",
     },
     "btc15m": {
         "buy": [
-            "Nearest open KXBTC15M; p ≥ ask + fee + 0.05",
-            "≥10 min left; cushion ≥ $40; z ≥ 0.5 (0.6 Coinbase-only)",
-            "Ask 65–85¢; spread ≤ 3¢; depth ≥ 5",
+            "Nearest open KXBTC15M; p ≥ ask + fee + venue kalshi_btc15m",
+            "≥10 min left; cushion ≥ $50; z ≥ 0.7 (0.85 Coinbase-only)",
+            "Ask 75–90¢; spread ≤ 3¢; depth ≥ 5",
             "Last 5×1m candles not toward target; no USD high news ±30m",
-            "Desk stake curve; learning skip clear",
+            "Kelly-lite stake; correlation + learning clear",
         ],
         "sell": [
-            "Settle only when Kalshi resolves yes/no",
-            "Suggested TP fill+15¢ is printed only — not executed",
+            "Model-flip: side flips or fair collapses by δ → paper sell at bid",
+            "Else settle when Kalshi resolves yes/no",
         ],
         "failsafes": [
             "Desk entry_gate (daily loss / max open / open risk)",
             "Full signal checklist (no spot/σ → skip)",
             "News calendar fail-closed (unavailable = skip BUY)",
-            "Cash / hardcoded max 12 opens / learning skip",
+            "Correlation veto + starve; cash / max 12 opens / learning",
             "Pause file",
         ],
-        "exit_quality": "weak",
+        "exit_quality": "partial",
         "entry_gated": True,
-        "stake": "desk-curve",
+        "stake": "kelly-lite",
     },
     "memecoin": {
         "buy": [
-            "RugCheck facts fail-closed + scorer ≥ 0.7",
+            "RugCheck facts fail-closed + scorer ≥ 0.8",
             "Flat $25 ticket; max 4 open / 6 entries per day",
             "24h cooldown after close; learning skip clear",
         ],
         "sell": [
+            "Model-flip: scorer confidence / momentum collapse → out before hard stop",
             "Liq drop ≥ 40% from entry → full out",
             "Hard stop ≤ −35% from entry → full out",
             "Ladder +100% sell 50%, +200% sell 25% of original",
@@ -273,7 +305,7 @@ BOT_PLANS = {
         "failsafes": [
             "Desk entry_gate + pause",
             "Bot daily halt −$50; PAPER must be True",
-            "Max open 4 / cooldown / facts fail-closed",
+            "Max open 4 / cooldown / facts fail-closed / starve",
         ],
         "exit_quality": "strong",
         "entry_gated": True,
@@ -309,10 +341,13 @@ def bot_plans(bot_id: str, cfg: dict | None = None) -> dict:
         "stake": base["stake"],
     }
     if cfg and bot_id == "sports-gap":
-        edge = cfg.get("min_edge", DEFAULTS["min_edge"])
+        edge = desk_profit.bot_venue_edge("sports-gap", cfg)
         plans["buy"] = [
-            line.replace("desk min_edge (NHL +0.02)", f"desk min_edge {edge:g} (NHL +0.02)")
-            if "desk min_edge" in line else line
+            line.replace(
+                "venue kalshi_sports (NHL +0.02)",
+                f"venue kalshi_sports {edge:g} (NHL +0.02)",
+            )
+            if "venue kalshi_sports" in line else line
             for line in plans["buy"]
         ]
         loss = cfg.get("daily_loss_stop", DEFAULTS["daily_loss_stop"])
@@ -321,6 +356,9 @@ def bot_plans(bot_id: str, cfg: dict | None = None) -> dict:
             if "desk daily_loss_stop" in line else line
             for line in plans["failsafes"]
         ]
+    if cfg and bot_id in ("sports-gap", "btc15m"):
+        mode = str(cfg.get("sizing") or DEFAULTS["sizing"])
+        plans["stake"] = "kelly-lite" if mode == "kelly_lite" else "desk-curve"
     return plans
 
 
@@ -340,24 +378,29 @@ def bot_gates_hit(view: dict, desk_gate: str = "") -> list:
     plans = view.get("plans") or {}
     if desk_gate and plans.get("entry_gated"):
         hits.append("desk entry gate")
+    if view.get("starved"):
+        hits.append("starved")
+    if view.get("correlation_blocked"):
+        hits.append("correlation veto")
     return hits
 
 
 # Desk-wide ROI operating system. Paper only — protects bankroll and edge habits.
 ROI_POLICY = {
     "name": "desk-roi-system",
-    "version": 1,
+    "version": 2,
     "paper_only": True,
     "banner": (
-        "ROI SYSTEM (paper). Prefer ≥80% model/confidence entries, edge after costs, "
-        "inside desk risk budget, with an exit plan. Pace never waives edge."
+        "ROI SYSTEM (paper). Prefer ≥80% model/confidence entries, venue edge after costs, "
+        "Kelly-lite inside open-risk, correlation veto, model-flip exits, expectancy starve. "
+        "Pace never waives edge."
     ),
     "rules": [
         {"id": "R1", "text": "Paper only — no live keys, wallets, or real orders."},
-        {"id": "R2", "text": "Edge after fees/slippage must clear the desk (or bot) bar."},
+        {"id": "R2", "text": "Edge after fees/slippage must clear the venue (or desk) bar."},
         {"id": "R3", "text": "Desk entry_gate blocks new entries on daily loss / max opens / open risk."},
-        {"id": "R4", "text": "Stake from desk curve unless a documented fixed ticket applies."},
-        {"id": "R5", "text": "Exit plan exists before entry (settle and/or stop/trail/time/liq)."},
+        {"id": "R4", "text": "Stake from Kelly-lite (capped by curve + open risk) unless a fixed ticket applies."},
+        {"id": "R5", "text": "Exit plan exists before entry (model-flip and/or stop/trail/time/liq/settle)."},
         {"id": "R6", "text": "Learning skip on cold market×bucket (≥8 settles, <40% hits)."},
         {"id": "R7", "text": "Pause file is honored."},
         {"id": "R8", "text": "Quiet hours hold alerts only — not a trade halt."},
@@ -365,12 +408,25 @@ ROI_POLICY = {
         {"id": "R10", "text": "One position key — no duplicate game/ticker/mint."},
         {"id": "R11", "text": "City/staff read snapshot only — never re-parse bot files."},
         {"id": "R12", "text": "Absent Tower 5 stays offline — no substitute bot."},
+        {"id": "R13", "text": "Correlation veto — paired directional factors cannot stack when the open book is as good or better."},
+        {"id": "R14", "text": "Fee-aware venue_min_edge per book (sports/BTC/INX/DEX)."},
+        {"id": "R15", "text": "Model-flip exits fire before hard stops / settle-only waits."},
+        {"id": "R16", "text": "Expectancy starve throttles losers after enough settles."},
+        {"id": "R17", "text": "Shadow bots spend no desk cash; promote only after expectancy gates."},
     ],
     "risk": {
         "daily_loss_stop": DEFAULTS["daily_loss_stop"],
         "max_open_positions": DEFAULTS["max_open_positions"],
         "max_open_risk": DEFAULTS["max_open_risk"],
         "min_edge": DEFAULTS["min_edge"],
+        "venue_min_edge": dict(DEFAULTS["venue_min_edge"]),
+        "sizing": DEFAULTS["sizing"],
+        "kelly_fraction": DEFAULTS["kelly_fraction"],
+        "correlation_pairs": [list(p) for p in DEFAULTS["correlation_pairs"]],
+        "model_flip_delta": DEFAULTS["model_flip_delta"],
+        "starve_min_n": DEFAULTS["starve_min_n"],
+        "starve_expectancy": DEFAULTS["starve_expectancy"],
+        "starve_factor": DEFAULTS["starve_factor"],
         "stake_lo_max": DEFAULTS["stake_lo_max"],
         "stake_hi_min": DEFAULTS["stake_hi_min"],
         "stake_hi_max": DEFAULTS["stake_hi_max"],
@@ -380,19 +436,19 @@ ROI_POLICY = {
     },
     "exit_ladder": {
         "strong": "Active stop + scale-out + trail/time/liq",
-        "partial": "Pre-settle exit path (e.g. gap-close) + settle",
+        "partial": "Model-flip / gap-close path + settle",
         "weak": "Settle-only with hard entry filters",
         "absent": "No script on this checkout",
     },
     "waivers": {
-        "kalshi-sp": ["settle_only_inx", "fixed_ticket_25"],
-        "btc15m": ["settle_only_btc15m", "tp_print_only"],
+        "kalshi-sp": ["fixed_ticket_25"],
+        "btc15m": [],
         "memecoin": ["fixed_ticket_25"],
     },
     "target_exit_quality": {
         "sports-gap": "partial",
-        "kalshi-sp": "weak",
-        "btc15m": "weak",
+        "kalshi-sp": "partial",
+        "btc15m": "partial",
         "memecoin": "strong",
         "kalshi-sized": "absent",
     },
@@ -442,6 +498,14 @@ def roi_system(cfg: dict | None = None, bots: list | None = None) -> dict:
         "max_open_positions": cfg.get("max_open_positions", risk["max_open_positions"]),
         "max_open_risk": cfg.get("max_open_risk", risk["max_open_risk"]),
         "min_edge": cfg.get("min_edge", risk["min_edge"]),
+        "venue_min_edge": dict(cfg.get("venue_min_edge") or risk.get("venue_min_edge") or {}),
+        "sizing": cfg.get("sizing", risk.get("sizing")),
+        "kelly_fraction": cfg.get("kelly_fraction", risk.get("kelly_fraction")),
+        "correlation_pairs": list(cfg.get("correlation_pairs") or risk.get("correlation_pairs") or []),
+        "model_flip_delta": cfg.get("model_flip_delta", risk.get("model_flip_delta")),
+        "starve_min_n": cfg.get("starve_min_n", risk.get("starve_min_n")),
+        "starve_expectancy": cfg.get("starve_expectancy", risk.get("starve_expectancy")),
+        "starve_factor": cfg.get("starve_factor", risk.get("starve_factor")),
         "stake_lo_max": cfg.get("stake_lo_max", risk["stake_lo_max"]),
         "stake_hi_min": cfg.get("stake_hi_min", risk["stake_hi_min"]),
         "stake_hi_max": cfg.get("stake_hi_max", risk["stake_hi_max"]),
@@ -454,6 +518,7 @@ def roi_system(cfg: dict | None = None, bots: list | None = None) -> dict:
             if row:
                 plans = row.get("plans")
         compliance.append(bot_roi_compliance(bot_id, plans))
+    capital = desk_profit.capital_weights(bots or [])
     return {
         "name": ROI_POLICY["name"],
         "version": ROI_POLICY["version"],
@@ -464,6 +529,7 @@ def roi_system(cfg: dict | None = None, bots: list | None = None) -> dict:
         "exit_ladder": dict(ROI_POLICY["exit_ladder"]),
         "waivers": {k: list(v) for k, v in (ROI_POLICY.get("waivers") or {}).items()},
         "compliance": compliance,
+        "capital": capital,
         "ok": all(row.get("ok") for row in compliance),
     }
 
@@ -822,6 +888,15 @@ def load_settings(root: str | None = None) -> dict:
             cfg[key] = raw[key]
     cfg["paper_only"] = True
     cfg["stake_hi_prob"] = 0.8
+    # Nested defaults merge when file omits new keys.
+    if not isinstance(cfg.get("venue_min_edge"), dict):
+        cfg["venue_min_edge"] = dict(DEFAULTS["venue_min_edge"])
+    else:
+        merged = dict(DEFAULTS["venue_min_edge"])
+        merged.update(cfg["venue_min_edge"])
+        cfg["venue_min_edge"] = merged
+    if not isinstance(cfg.get("shadow"), dict):
+        cfg["shadow"] = dict(DEFAULTS["shadow"])
     checked, err = parse_settings(cfg)
     return checked if checked and not err else dict(DEFAULTS)
 
@@ -869,6 +944,44 @@ def parse_settings(raw: dict):
     quiet_end = str(raw.get("quiet_end") or DEFAULTS["quiet_end"])
     if _hhmm_ok(quiet_start) is None or _hhmm_ok(quiet_end) is None:
         return None, "Quiet hours use 24-hour times like 22:00."
+    venue, venue_err = desk_profit.parse_venue_min_edge(
+        raw.get("venue_min_edge", DEFAULTS["venue_min_edge"])
+    )
+    if venue_err:
+        return None, venue_err
+    pairs, pairs_err = desk_profit.parse_correlation_pairs(
+        raw.get("correlation_pairs", DEFAULTS["correlation_pairs"])
+    )
+    if pairs_err:
+        return None, pairs_err
+    shadow, shadow_err = desk_profit.parse_shadow(raw.get("shadow", DEFAULTS["shadow"]))
+    if shadow_err:
+        return None, shadow_err
+    sizing = str(raw.get("sizing") or DEFAULTS["sizing"]).strip().lower()
+    if sizing not in ("curve", "kelly_lite"):
+        return None, "sizing must be curve or kelly_lite."
+    try:
+        kelly = float(raw.get("kelly_fraction", DEFAULTS["kelly_fraction"]))
+        flip_delta = float(raw.get("model_flip_delta", DEFAULTS["model_flip_delta"]))
+        starve_n = int(float(raw.get("starve_min_n", DEFAULTS["starve_min_n"])))
+        starve_ev = float(raw.get("starve_expectancy", DEFAULTS["starve_expectancy"]))
+        starve_factor = float(raw.get("starve_factor", DEFAULTS["starve_factor"]))
+        exp_days = int(float(raw.get("expectancy_window_days", DEFAULTS["expectancy_window_days"])))
+    except (TypeError, ValueError):
+        return None, "Profit-six limits have to be numbers."
+    if not (0.05 <= kelly <= 1.0):
+        return None, "kelly_fraction stays between 0.05 and 1.0."
+    if not (0.0 <= flip_delta <= 0.50):
+        return None, "model_flip_delta stays between 0 and 0.50."
+    if not (3 <= starve_n <= 200):
+        return None, "starve_min_n stays between 3 and 200."
+    if not math.isfinite(starve_ev) or starve_ev < -100 or starve_ev > 100:
+        return None, "starve_expectancy stays between -100 and 100."
+    if not (0.0 <= starve_factor <= 1.0):
+        return None, "starve_factor stays between 0 and 1."
+    if not (5 <= exp_days <= 90):
+        return None, "expectancy_window_days stays between 5 and 90."
+    model_flip_exits = bool(raw.get("model_flip_exits", DEFAULTS["model_flip_exits"]))
     return {
         "paper_only": True,
         "stake_hi_min": round(hi_min, 2),
@@ -884,6 +997,17 @@ def parse_settings(raw: dict):
         "week_goal": round(goal, 2),
         "quiet_start": quiet_start,
         "quiet_end": quiet_end,
+        "venue_min_edge": venue,
+        "sizing": sizing,
+        "kelly_fraction": round(kelly, 4),
+        "correlation_pairs": pairs,
+        "model_flip_delta": round(flip_delta, 4),
+        "model_flip_exits": model_flip_exits,
+        "starve_min_n": starve_n,
+        "starve_expectancy": round(starve_ev, 4),
+        "starve_factor": round(starve_factor, 4),
+        "expectancy_window_days": exp_days,
+        "shadow": shadow,
     }, None
 
 
@@ -995,13 +1119,21 @@ def _save_run(root: str, bot_id: str, row: dict) -> None:
 _MANAGE_WHEN_GATED = frozenset({"sports-gap", "memecoin", "btc15m"})
 
 
-def _child_env(block_entries: bool = False) -> dict:
+def _child_env(block_entries: bool = False, shadow: dict | None = None) -> dict:
     env = {key: os.environ[key] for key in _ENV_KEEP if os.environ.get(key)}
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PAPER_ONLY"] = "1"
     if block_entries:
         env["DESK_BLOCK_ENTRIES"] = "1"
+    if shadow:
+        env["DESK_SHADOW"] = "1"
+        env["DESK_SHADOW_ID"] = str(shadow.get("id") or "")
+        if shadow.get("account"):
+            env["DESK_SHADOW_ACCOUNT"] = str(shadow["account"])
+        params = shadow.get("params") if isinstance(shadow.get("params"), dict) else {}
+        if params.get("venue_edge") is not None:
+            env["DESK_SHADOW_VENUE_EDGE"] = str(params["venue_edge"])
     return env
 
 
@@ -1451,9 +1583,11 @@ def _sized_view() -> dict:
 def entry_gate(root: str | None = None, bots: list | None = None) -> str:
     cfg = load_settings(root)
     rows = bots if bots is not None else snapshot(root)["bots"]
-    open_risk = round(sum(float(b.get("open_risk") or 0) for b in rows), 2)
-    open_count = int(sum(int(b.get("open_count") or 0) for b in rows))
-    today = round(sum(float(b.get("today") or 0) for b in rows), 2)
+    # Shadow rows never count toward desk open risk / cash gates.
+    live = [b for b in rows if not b.get("shadow_only")]
+    open_risk = round(sum(float(b.get("open_risk") or 0) for b in live), 2)
+    open_count = int(sum(int(b.get("open_count") or 0) for b in live))
+    today = round(sum(float(b.get("today") or 0) for b in live), 2)
     if today <= -float(cfg["daily_loss_stop"]):
         return (
             f"Daily loss stop is hit (${abs(today):.2f} against ${cfg['daily_loss_stop']:.2f}). "
@@ -1472,6 +1606,242 @@ def entry_gate(root: str | None = None, bots: list | None = None) -> str:
     return ""
 
 
+def venue_min_edge(venue: str, cfg: dict | None = None) -> float:
+    return desk_profit.venue_min_edge(venue, cfg or load_settings(), DEFAULTS["min_edge"])
+
+
+def correlation_blocks(
+    root: str | None,
+    bot_id: str,
+    side: str,
+    edge=None,
+    bots: list | None = None,
+) -> str:
+    """Return a human reason when a correlated open book blocks this fill."""
+    cfg = load_settings(root)
+    rows = bots
+    if rows is None:
+        # Lightweight: rebuild bot views without full snapshot recursion.
+        runs = _load_runs(root)
+        day = _today()
+        rows = [_bot_view(spec, root, runs, day) for spec in BOTS]
+    open_rows = desk_profit.open_risk_factor_rows(rows)
+    return desk_profit.correlation_veto_reason(
+        bot_id, side, edge, open_rows, cfg.get("correlation_pairs")
+    )
+
+
+def kelly_lite_dollars(
+    prob,
+    edge,
+    cfg: dict | None = None,
+    open_risk_used: float = 0.0,
+    ask=None,
+    starve_mult: float = 1.0,
+) -> float:
+    cfg = cfg or DEFAULTS
+    curve = paper_stake_dollars(prob, cfg)
+    return desk_profit.kelly_lite_dollars(
+        prob,
+        edge,
+        cfg=cfg,
+        open_risk_used=open_risk_used,
+        ask=ask,
+        curve_dollars=curve,
+        starve_mult=starve_mult,
+    )
+
+
+def stake_dollars_for(
+    bot_id: str,
+    prob,
+    edge=None,
+    cfg: dict | None = None,
+    open_risk_used: float = 0.0,
+    ask=None,
+    root: str | None = None,
+) -> float:
+    """Unified stake: Kelly-lite / curve, then expectancy starve multiplier."""
+    cfg = cfg or (load_settings(root) if root is not None else dict(DEFAULTS))
+    starve_mult = 1.0
+    if root is not None:
+        try:
+            snap_bots = None
+            # Prefer cheap history from the bot state already on disk via a thin view.
+            runs = _load_runs(root)
+            day = _today()
+            for spec in BOTS:
+                if spec["id"] != bot_id:
+                    continue
+                view = _bot_view(spec, root, runs, day)
+                exp = desk_profit.bot_expectancy(
+                    view.get("history") or [],
+                    window_days=int(cfg.get("expectancy_window_days") or 20),
+                )
+                starve_mult = float(desk_profit.starve_state(exp, cfg).get("starve_factor") or 1.0)
+                break
+        except Exception:
+            starve_mult = 1.0
+    return kelly_lite_dollars(
+        prob, edge, cfg=cfg, open_risk_used=open_risk_used, ask=ask, starve_mult=starve_mult
+    )
+
+
+def bot_expectancy(history, window_days: int = 20) -> dict:
+    return desk_profit.bot_expectancy(history, window_days=window_days)
+
+
+def shadow_account_path(root: str, bot_id: str, variant_id: str) -> str:
+    folder = next((b["folder"] for b in BOTS if b["id"] == bot_id), None)
+    if not folder:
+        raise RuntimeError(f"unknown bot {bot_id}")
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", variant_id)[:40]
+    return _under(root, folder, f"shadow_{safe}_account.json")
+
+
+def load_shadow_account(root: str, bot_id: str, variant_id: str) -> dict:
+    path = shadow_account_path(root, bot_id, variant_id)
+    data = _read_json(path) or {}
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("cash", 100.0)
+    data.setdefault("open", [])
+    data.setdefault("closed", [])
+    data["paper_only"] = True
+    data["shadow"] = True
+    data["shadow_id"] = variant_id
+    return data
+
+
+def save_shadow_account(root: str, bot_id: str, variant_id: str, state: dict) -> None:
+    path = shadow_account_path(root, bot_id, variant_id)
+    payload = dict(state)
+    payload["paper_only"] = True
+    payload["shadow"] = True
+    payload["shadow_id"] = variant_id
+    _write_json(path, payload)
+
+
+def shadow_profiles(cfg: dict | None = None) -> list:
+    cfg = cfg or DEFAULTS
+    shadow = cfg.get("shadow") if isinstance(cfg.get("shadow"), dict) else {}
+    if not shadow.get("enabled", True):
+        return []
+    rows = []
+    for bot_id, profiles in shadow.items():
+        if bot_id == "enabled" or not isinstance(profiles, list):
+            continue
+        for prof in profiles:
+            if isinstance(prof, dict) and prof.get("id"):
+                rows.append({"bot": bot_id, **prof})
+    return rows
+
+
+def promote_shadow(root: str | None, bot_id: str, variant_id: str, who: str = "") -> tuple:
+    """Copy winning shadow venue_edge into pimp-bot-params.json overlay. Paper only."""
+    root = _root(root)
+    cfg = load_settings(root)
+    prof = None
+    for row in shadow_profiles(cfg):
+        if row.get("bot") == bot_id and row.get("id") == variant_id:
+            prof = row
+            break
+    if not prof:
+        return None, "Unknown shadow profile."
+    state = load_shadow_account(root, bot_id, variant_id)
+    exp = desk_profit.bot_expectancy(state.get("closed") or [], window_days=int(cfg.get("expectancy_window_days") or 20))
+    if not desk_profit.shadow_promote_ready(exp, prof.get("promote_after")):
+        return None, (
+            f"Shadow {variant_id} not ready "
+            f"(n={exp.get('n')}, EV={exp.get('expectancy')})."
+        )
+    path = _under(root, "pimp-bot-params.json")
+    overlay = _read_json(path) or {}
+    if not isinstance(overlay, dict):
+        overlay = {}
+    bot_overlay = dict(overlay.get(bot_id) or {})
+    bot_overlay.update(dict(prof.get("params") or {}))
+    bot_overlay["promoted_from_shadow"] = variant_id
+    bot_overlay["promoted_at"] = central_text()
+    overlay[bot_id] = bot_overlay
+    _write_json(path, overlay)
+    audit(root, who or "unknown", f"Promoted shadow {bot_id}/{variant_id}", None, bot_overlay)
+    return overlay, None
+
+
+def shadow_snapshot_rows(root: str, cfg: dict) -> list:
+    rows = []
+    for prof in shadow_profiles(cfg):
+        bot_id = prof["bot"]
+        variant = prof["id"]
+        try:
+            state = load_shadow_account(root, bot_id, variant)
+        except Exception:
+            continue
+        closed = state.get("closed") if isinstance(state.get("closed"), list) else []
+        open_rows = state.get("open") if isinstance(state.get("open"), list) else []
+        exp = desk_profit.bot_expectancy(
+            closed, window_days=int(cfg.get("expectancy_window_days") or 20)
+        )
+        rows.append({
+            "bot": bot_id,
+            "variant_id": variant,
+            "active": True,
+            "cash": float(state.get("cash") or 0),
+            "open_count": len(open_rows),
+            "n": exp.get("n") or 0,
+            "expectancy": exp.get("expectancy"),
+            "promote_ready": desk_profit.shadow_promote_ready(exp, prof.get("promote_after")),
+            "params": dict(prof.get("params") or {}),
+            "shadow_only": True,
+        })
+    return rows
+
+
+def _enrich_bot_profit_fields(bot: dict, cfg: dict, capital: dict) -> dict:
+    """Attach expectancy / starve / venue / sizing fields for city + staff."""
+    if bot.get("present") is False:
+        bot.setdefault("expectancy", None)
+        bot.setdefault("expectancy_n", 0)
+        bot.setdefault("starved", False)
+        bot.setdefault("capital_weight", 0)
+        bot.setdefault("venue_min_edge", None)
+        bot.setdefault("sizing_mode", "none")
+        bot.setdefault("shadow", None)
+        return bot
+    window = int(cfg.get("expectancy_window_days") or 20)
+    exp = desk_profit.bot_expectancy(bot.get("history") or [], window_days=window)
+    starve = desk_profit.starve_state(exp, cfg)
+    bot["expectancy"] = exp.get("expectancy")
+    bot["expectancy_n"] = exp.get("n") or 0
+    bot["expectancy_hit_rate"] = exp.get("hit_rate")
+    bot["expectancy_window"] = exp.get("window")
+    bot["avg_win"] = exp.get("avg_win")
+    bot["avg_loss"] = exp.get("avg_loss")
+    bot["starved"] = bool(starve.get("starved"))
+    bot["starve_reason"] = starve.get("starve_reason") or ""
+    bot["starve_factor"] = starve.get("starve_factor")
+    bot["capital_weight"] = float((capital.get("weights") or {}).get(bot.get("id"), 0) or 0)
+    bot["venue_min_edge"] = desk_profit.bot_venue_edge(str(bot.get("id") or ""), cfg)
+    mode = str(cfg.get("sizing") or "kelly_lite")
+    stake = (bot.get("plans") or {}).get("stake") or ""
+    if stake.startswith("fixed"):
+        bot["sizing_mode"] = "fixed"
+    elif mode == "kelly_lite":
+        bot["sizing_mode"] = "kelly_lite"
+    else:
+        bot["sizing_mode"] = "curve"
+    factors = []
+    for pos in bot.get("positions") or []:
+        factor = pos.get("risk_factor") or desk_profit.risk_factor_for(
+            str(bot.get("id") or ""), pos.get("side")
+        )
+        if factor and factor not in factors:
+            factors.append(factor)
+    bot["risk_factors_open"] = factors
+    return bot
+
+
 def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int = 1) -> dict:
     root = _root(root)
     keep_closed_settlements(root)
@@ -1481,10 +1851,29 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     day = _today()
     bots = [_bot_view(spec, root, runs, day) for spec in BOTS]
     bots.append(_sized_view())
+    # Expectancy pass (needs history) before capital weights.
+    prelim = []
+    for bot in bots:
+        window = int(cfg.get("expectancy_window_days") or 20)
+        exp = desk_profit.bot_expectancy(bot.get("history") or [], window_days=window)
+        starve = desk_profit.starve_state(exp, cfg)
+        row = dict(bot)
+        row["expectancy"] = exp.get("expectancy")
+        row["starved"] = bool(starve.get("starved"))
+        prelim.append(row)
+    capital = desk_profit.capital_weights(prelim)
+    for bot in bots:
+        _enrich_bot_profit_fields(bot, cfg, capital)
     gate = entry_gate(root, bots)
+    corr_pressure = sorted({
+        r["factor"] for r in desk_profit.open_risk_factor_rows(bots)
+    })
+    shadow_rows = shadow_snapshot_rows(root, cfg)
     for bot in bots:
         bot["gates_hit"] = bot_gates_hit(bot, gate)
-    cashes = [b["cash"] for b in bots if b.get("cash") is not None]
+        matches = [s for s in shadow_rows if s.get("bot") == bot.get("id")]
+        bot["shadow"] = matches[0] if matches else None
+    cashes = [b["cash"] for b in bots if b.get("cash") is not None and not b.get("shadow_only")]
     realized_rows = [b["realized"] for b in bots if b.get("realized") is not None]
     last_epoch = max((b.get("last_epoch") or 0) for b in bots)
     last_check = _fmt_epoch(last_epoch)
@@ -1504,7 +1893,12 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         **(desk_row.get("ops") or {}),
         "roi_ok": bool(roi.get("ok")),
         "roi_version": roi.get("version"),
+        "correlation_pressure": corr_pressure,
+        "starved_bots": [b["id"] for b in public if b.get("starved")],
+        "shadow_count": len(shadow_rows),
     }
+    desk_row["capital"] = capital
+    desk_row["shadow_leaderboard"] = shadow_rows
     return {
         "paper_only": True,
         "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
@@ -1546,7 +1940,7 @@ def _paper_ok(root: str, bot_id: str) -> str:
 
 
 def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: bool = False,
-            stake=None, prob=None) -> dict:
+            stake=None, prob=None, shadow_profile: dict | None = None) -> dict:
     root = _root(root)
     keep_closed_settlements(root)
     ensure_paper_accounts(root)
@@ -1562,12 +1956,25 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
     refused = _paper_ok(root, bot_id)
     if refused:
         return {"ok": False, "error": refused}
-    if bot_paused(root, bot_id):
+    if bot_paused(root, bot_id) and not shadow_profile:
         return {"ok": False, "error": "Paused.", "blocked": True, "summary": "Paused."}
     warning = _calendar_warning(root, bot_id) if spec["entry"] or bot_id == "btc15m" else ""
     block_entries = False
     gate_note = ""
-    if spec["entry"]:
+    shadow_env = None
+    if shadow_profile:
+        variant = str(shadow_profile.get("id") or "")
+        account = shadow_account_path(root, bot_id, variant)
+        if not os.path.isfile(account):
+            save_shadow_account(root, bot_id, variant, {
+                "cash": 100.0, "open": [], "closed": [], "paper_only": True,
+            })
+        shadow_env = {
+            "id": variant,
+            "account": account,
+            "params": dict(shadow_profile.get("params") or {}),
+        }
+    if spec["entry"] and not shadow_profile:
         gate = entry_gate(root)
         if gate:
             if bot_id in _MANAGE_WHEN_GATED:
@@ -1597,7 +2004,7 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
             proc = subprocess.Popen(
                 [sys.executable, script, *spec["argv"][1:]],
                 cwd=cwd,
-                env=_child_env(block_entries=block_entries),
+                env=_child_env(block_entries=block_entries, shadow=shadow_env),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -1756,8 +2163,6 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
         now = now.replace(tzinfo=dt.timezone.utc)
     touch_heartbeat(root, now)
     slots = due_slots(now, root)
-    if not slots:
-        return []
     saved = _load_auto(root)
     results = []
     saved_lock = threading.Lock()
@@ -1788,12 +2193,35 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
             log.warning("paper timer %s %s did not finish: %s", bot_id, action, head or "no output")
         return row
 
-    workers = max(1, min(4, len(slots)))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_one, slot) for slot in slots]
-        for fut in as_completed(futures):
-            results.append(fut.result())
-    _atomic_write(auto_path(root), json.dumps(saved, indent=2) + "\n")
+    if slots:
+        workers = max(1, min(4, len(slots)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_one, slot) for slot in slots]
+            for fut in as_completed(futures):
+                results.append(fut.result())
+    # Shadow BTC variants — same timer cadence, separate cash, never desk-gated.
+    cfg = load_settings(root)
+    for prof in shadow_profiles(cfg):
+        if prof.get("bot") != "btc15m":
+            continue
+        key = f"shadow:btc15m:{prof.get('id')}"
+        prev = _parsed(saved.get(key) or "")
+        if prev is not None and (now - prev).total_seconds() < 300:
+            continue
+        result = run_bot("btc15m", "run", root, shadow_profile=prof)
+        saved[key] = _iso(now)
+        results.append({
+            "bot": "btc15m",
+            "action": "shadow",
+            "shadow_id": prof.get("id"),
+            "ok": bool(result.get("ok")),
+            "blocked": bool(result.get("blocked")),
+            "entries_blocked": False,
+            "error": result.get("error") or "",
+            "summary": result.get("summary") or "",
+        })
+    if results:
+        _atomic_write(auto_path(root), json.dumps(saved, indent=2) + "\n")
     return results
 
 

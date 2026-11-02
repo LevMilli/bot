@@ -32,7 +32,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 
 # ---- rule settings (edit here) ----
 MIN_MINUTES_LEFT = 10        # need at least 10 minutes before close
-EDGE_BUFFER = 0.05           # p must beat ask + fee by 5 points
+EDGE_BUFFER = 0.05           # fallback if desk venue_min_edge missing
 MIN_MODEL_PROB = 0.80        # safer desk: model Φ(z) must be ≥ 80%
 MIN_CUSHION_USD = 50         # BTC must be at least $50 away from the target
 MIN_Z = 0.7                  # cushion / sigma
@@ -47,25 +47,48 @@ DVOL_FAIL_MULT = 1.2         # if DVOL fails: use realized sigma * 1.2
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DESK_ROOT = os.path.dirname(HERE)
-ACCOUNT = os.path.join(HERE, "paper_account.json")
+ACCOUNT = os.environ.get("DESK_SHADOW_ACCOUNT") or os.path.join(HERE, "paper_account.json")
 _CACHE = os.path.join(HERE, "quote_cache.json")
 PAPER_CASH = 100.0
+IS_SHADOW = os.environ.get("DESK_SHADOW") == "1"
+
+
+def _edge_buffer():
+    """Venue kalshi_btc15m from desk, or shadow overlay, else local EDGE_BUFFER."""
+    shadow = os.environ.get("DESK_SHADOW_VENUE_EDGE")
+    if shadow not in (None, ""):
+        try:
+            return float(shadow)
+        except (TypeError, ValueError):
+            pass
+    try:
+        desk = _desk()
+        cfg = desk.load_settings(DESK_ROOT)
+        return float(desk.venue_min_edge("kalshi_btc15m", cfg))
+    except Exception:
+        return float(EDGE_BUFFER)
 
 
 def load_account():
-    if os.path.exists(ACCOUNT):
+    path = ACCOUNT
+    if os.path.exists(path):
         try:
-            with open(ACCOUNT, encoding="utf-8") as handle:
+            with open(path, encoding="utf-8") as handle:
                 data = json.load(handle)
             if isinstance(data, dict):
                 data.setdefault("cash", PAPER_CASH)
                 data.setdefault("open", [])
                 data.setdefault("closed", [])
                 data["paper_only"] = True
+                if IS_SHADOW:
+                    data["shadow"] = True
                 return data
         except (OSError, json.JSONDecodeError):
             pass
-    return {"cash": PAPER_CASH, "open": [], "closed": [], "paper_only": True}
+    out = {"cash": PAPER_CASH, "open": [], "closed": [], "paper_only": True}
+    if IS_SHADOW:
+        out["shadow"] = True
+    return out
 
 
 def save_account(state):
@@ -73,6 +96,7 @@ def save_account(state):
     if os.path.islink(path):
         path = os.path.realpath(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2)
@@ -139,7 +163,69 @@ def settle_account(state):
     state["open"] = still
 
 
-def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
+def paper_sell(state, pos, bid, fee, reason):
+    """Flatten one open BTC paper position at bid − fee. No live order."""
+    contracts = float(pos.get("contracts") or 0)
+    per = max(0.0, float(bid) - float(fee or 0))
+    proceeds = round(contracts * per, 2)
+    pnl = round(proceeds - float(pos.get("cost") or 0), 2)
+    state["cash"] = round(float(state.get("cash") or 0) + proceeds, 2)
+    closed = dict(pos)
+    closed.update({
+        "closed": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "exit": reason,
+        "exit_price": round(float(bid), 4),
+        "payout": proceeds,
+        "pnl": pnl,
+    })
+    state.setdefault("closed", []).append(closed)
+    if not IS_SHADOW:
+        try:
+            desk = _desk()
+            desk.record_learning(DESK_ROOT, {
+                "result": "hit" if pnl > 0 else "miss",
+                "market": "BTC",
+                "prob": pos.get("fair_at_entry"),
+                "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+                "fill_id": pos.get("fill_id") or "",
+                "at": closed["closed"],
+            })
+        except Exception:
+            pass
+    return pnl
+
+
+def manage_model_flips(state, side_now, prob_now, bid, fee, delta):
+    """Exit open BTC paper when the live model flips against the held side."""
+    still = []
+    sold = []
+    for pos in list(state.get("open") or []):
+        held = str(pos.get("side") or "").upper()
+        fair_entry = pos.get("fair_at_entry")
+        flip = False
+        reason = ""
+        if held and side_now and held != str(side_now).upper():
+            flip = True
+            reason = f"model-flip side {held}→{side_now}"
+        else:
+            try:
+                desk = _desk()
+                import desk_profit
+                if desk_profit.model_flip_adverse(held, fair_entry, prob_now, delta):
+                    flip = True
+                    reason = f"model-flip fair Δ≥{delta:g}"
+            except Exception:
+                pass
+        if flip and bid is not None and float(bid) > 0:
+            pnl = paper_sell(state, pos, bid, fee, reason)
+            sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
+        else:
+            still.append(pos)
+    state["open"] = still
+    return sold
+
+
+def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None):
     """Paper fill only when the signal cleared the edge after fees. No order is sent."""
     if ask is None or not (0.05 <= float(ask) <= 0.95):
         return "Checked the BTC 15-minute market. No paper buy."
@@ -153,15 +239,32 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
         pass
     if skip:
         return skip
-    if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
+    if os.environ.get("DESK_BLOCK_ENTRIES") == "1" and not IS_SHADOW:
         return "Desk entry_gate blocked a new paper buy. Settles still run."
     if not signal_buy:
         return "Checked the BTC 15-minute market. No paper buy."
+    edge_val = edge
+    if edge_val is None and prob is not None and ask is not None:
+        edge_val = float(prob) - float(ask) - float(fee or 0)
+    if not IS_SHADOW:
+        try:
+            desk = _desk()
+            blocked = desk.correlation_blocks(DESK_ROOT, "btc15m", side, edge_val)
+            if blocked:
+                return blocked
+        except Exception:
+            pass
     per = float(ask) + float(fee or 0)
+    open_risk = sum(
+        float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0)
+        for p in (state.get("open") or [])
+    )
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
-        stake = desk.paper_stake_dollars(prob, cfg)
+        stake = desk.stake_dollars_for(
+            "btc15m", prob, edge=edge_val, cfg=cfg, open_risk_used=open_risk, ask=ask, root=DESK_ROOT
+        )
         contracts = desk.contracts_for_stake(per, stake)
     except Exception:
         stake = 20.0
@@ -176,6 +279,11 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
     reward = round(contracts * 1.0 - cost, 2)
     why = "Paper buy. The BTC 15-minute signal cleared its checks."
     opened = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    try:
+        import desk_profit
+        risk_factor = desk_profit.risk_factor_for("btc15m", side)
+    except Exception:
+        risk_factor = ""
     state.setdefault("open", []).append({
         "ticker": ticker,
         "team": ticker,
@@ -191,12 +299,15 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy):
         "max_payout": round(contracts * 1.0, 2),
         "why": why,
         "fair_at_entry": None if prob is None else round(float(prob), 4),
+        "gap_at_entry": None if edge_val is None else round(float(edge_val), 4),
+        "risk_factor": risk_factor,
         "opened": opened,
         "close_time": close_time.isoformat() if hasattr(close_time, "isoformat") else str(close_time or ""),
         "fill_id": f"{ticker}|{opened}",
         "price_source": KALSHI,
         "price_at": opened,
         "paper_only": True,
+        "shadow": IS_SHADOW,
     })
     save_account(state)
     return "Checked the BTC 15-minute market. Paper buy."
@@ -368,7 +479,18 @@ def main():
         save_account(account)
     except Exception:
         pass
-    print(f"BTC 15-min Kalshi paper check  (no real orders)  {now:%Y-%m-%d %H:%M:%S} UTC")
+    edge_buf = _edge_buffer()
+    flip_delta = 0.08
+    flip_on = True
+    try:
+        desk = _desk()
+        cfg = desk.load_settings(DESK_ROOT)
+        flip_delta = float(cfg.get("model_flip_delta") or 0.08)
+        flip_on = bool(cfg.get("model_flip_exits", True))
+    except Exception:
+        pass
+    tag = "SHADOW " if IS_SHADOW else ""
+    print(f"BTC 15-min Kalshi paper check  ({tag}no real orders)  {now:%Y-%m-%d %H:%M:%S} UTC")
     print(f"Price source https://api.elections.kalshi.com/trade-api/v2 at {now:%Y-%m-%dT%H:%M:%SZ}\n")
 
     m = kalshi_market()
@@ -439,11 +561,20 @@ def main():
         return _card("Checked the BTC 15-minute market. No paper buy.")
     fee = fee_per_contract(ask)
     spread = ask - bid
-    need = ask + fee + EDGE_BUFFER
+    need = ask + fee + edge_buf
     print(f"Side {side}: cushion ${cushion:,.2f}  z {z:.2f}  p {p:.3f}  ask {ask:.2f}  fee {fee:.2f}  "
-          f"need p >= {need:.3f}  spread {spread:.2f}  (from order book)")
+          f"need p >= {need:.3f}  spread {spread:.2f}  (venue edge {edge_buf:.2f})")
 
     print(f"Depth offered at or below ask: {depth:,.0f} contracts")
+
+    # Model-flip exits before new buys (and before settle-only wait).
+    if flip_on and account.get("open"):
+        # For held positions, evaluate fair on their own side when possible.
+        sold = manage_model_flips(account, side, p, bid, fee_per_contract(bid) if bid else 0, flip_delta)
+        if sold:
+            save_account(account)
+            for line in sold:
+                print(f"MODEL-FLIP SELL: {line}")
 
     # last 5 candles moving toward target?
     toward = None
@@ -464,7 +595,7 @@ def main():
     zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
     if min_left < MIN_MINUTES_LEFT: reasons.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
     if p < MIN_MODEL_PROB: reasons.append(f"p {p:.3f} < safer floor {MIN_MODEL_PROB:.2f}")
-    if p < need: reasons.append(f"p {p:.3f} < ask+fee+{EDGE_BUFFER:.2f} = {need:.3f}")
+    if p < need: reasons.append(f"p {p:.3f} < ask+fee+{edge_buf:.2f} = {need:.3f}")
     if cushion < MIN_CUSHION_USD: reasons.append(f"cushion ${cushion:.2f} < ${MIN_CUSHION_USD}")
     if z < zmin: reasons.append(f"z {z:.2f} < {zmin}")
     if not (ASK_MIN <= ask <= ASK_MAX): reasons.append(f"ask {ask:.2f} outside {ASK_MIN:.2f}-{ASK_MAX:.2f}")
@@ -479,13 +610,14 @@ def main():
 
     print()
     signal_buy = not reasons
+    edge_now = float(p) - float(ask) - float(fee)
     if reasons:
         print("SIGNAL: SKIP -> " + "; ".join(reasons))
     else:
         tp = min(round(ask + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
         print(f"SIGNAL: BUY {side} on {m['ticker']} at <= {ask:.2f} (fee {fee:.2f}). "
               f"Suggested take-profit {tp:.2f} (fill + 0.15, max 0.99).")
-    sentence = paper_buy(account, m["ticker"], side, ask, fee, p, m["close_time"], signal_buy)
+    sentence = paper_buy(account, m["ticker"], side, ask, fee, p, m["close_time"], signal_buy, edge=edge_now)
     print("(Paper only. Nothing was ordered.)")
     return _card(sentence)
 

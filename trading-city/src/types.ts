@@ -44,6 +44,19 @@ export type BotPlans = {
   stake?: string
 }
 
+export type BotShadow = {
+  active?: boolean
+  variant_id?: string
+  cash?: number
+  expectancy?: number | null
+  n?: number
+  promote_ready?: boolean
+  params?: Record<string, unknown>
+  open_count?: number
+  shadow_only?: boolean
+  bot?: string
+}
+
 export type BotRow = {
   id: string
   name: string
@@ -72,6 +85,20 @@ export type BotRow = {
   blurb?: string
   plans?: BotPlans
   gates_hit?: string[]
+  expectancy?: number | null
+  expectancy_n?: number
+  expectancy_hit_rate?: number | null
+  expectancy_window?: string
+  avg_win?: number | null
+  avg_loss?: number | null
+  capital_weight?: number
+  starved?: boolean
+  starve_reason?: string
+  starve_factor?: number
+  risk_factors_open?: string[]
+  shadow?: BotShadow | null
+  venue_min_edge?: number | null
+  sizing_mode?: 'curve' | 'kelly_lite' | 'fixed' | 'none' | string
 }
 
 export type Desk = {
@@ -98,6 +125,11 @@ export type Desk = {
   pace_line?: string
   pace_loosened?: boolean
   paused_all?: boolean
+  capital?: {
+    method?: string
+    weights?: Record<string, number>
+  }
+  shadow_leaderboard?: BotShadow[]
   ops?: {
     entry_gate?: string
     entry_gated_bots?: string[]
@@ -105,6 +137,9 @@ export type Desk = {
     weak_exits?: string[]
     roi_ok?: boolean
     roi_version?: number
+    correlation_pressure?: string[]
+    starved_bots?: string[]
+    shadow_count?: number
   }
   chart?: {
     zone?: string

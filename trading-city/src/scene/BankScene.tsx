@@ -88,6 +88,19 @@ function TellerStation({
         >
           <strong>{bot?.name || `Teller ${index + 1}`}</strong>
           <div style={{ opacity: 0.75, fontSize: '10px' }}>{offline ? 'offline' : bot?.id}</div>
+          {!offline && bot && (
+            <div
+              style={{
+                opacity: 0.9,
+                fontSize: '10px',
+                color: bot.starved ? '#ff6b6b' : '#9ef0c4',
+              }}
+            >
+              EV {bot.expectancy == null ? '—' : money(bot.expectancy, true)}
+              {bot.starved ? ' · starve' : ''}
+              {bot.shadow?.active ? ' · SHADOW' : ''}
+            </div>
+          )}
         </div>
       </Html>
       {/* teller bot */}

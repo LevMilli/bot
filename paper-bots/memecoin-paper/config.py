@@ -31,6 +31,9 @@ EXIT = {
     "time_stop_hours": 6,                   # not up 20% after 6 hours -> out, dead money
     "time_stop_min_pct": 20,
     "liq_drop_pct": 40,                     # pool liquidity down 40% from entry -> out now
+    # Model-flip: leave before the hard −35% when confidence/momentum collapses.
+    "model_flip_confidence_floor": 0.45,
+    "model_flip_momentum_h1_floor": -12,
 }
 
 LOG = "checks.csv"

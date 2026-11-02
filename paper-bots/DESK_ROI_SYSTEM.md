@@ -20,10 +20,10 @@ Cut repeating losers via learning skip. Never size up to “make it back.” Nev
 | # | Rule | Why |
 | --- | --- | --- |
 | R1 | **Paper only** — no live keys, wallets, or real orders | Hard product constraint |
-| R2 | **Edge after costs** ≥ desk `min_edge` (or bot-equivalent buffer, e.g. BTC +0.05) | No zero/negative EV entries |
+| R2 | **Edge after costs** ≥ venue `venue_min_edge` (fallback desk `min_edge`) | No zero/negative EV entries |
 | R3 | **Desk entry_gate** blocks new entries on daily loss / max opens / open risk | Ruin control |
-| R4 | **Stake** from desk curve unless a bot documents a fixed ticket (Kalshi/meme $25) | Consistency + no revenge size |
-| R5 | **Exit plan before entry** — settle window and/or stop/trail/time/liq | Undefined exits destroy ROI |
+| R4 | **Stake** from Kelly-lite (capped by curve + open risk) unless a fixed ticket (Kalshi/meme $25) | Consistency + no revenge size |
+| R5 | **Exit plan before entry** — model-flip and/or settle/stop/trail/time/liq | Undefined exits destroy ROI |
 | R6 | **Learning skip** on cold market×bucket (≥8 settles, &lt;40% hits) | Stop feeding losing patterns |
 | R7 | **Pause honored** | Human override |
 | R8 | **Quiet hours ≠ trade halt** (alerts only) — do not treat them as a risk control | Avoid false safety |
@@ -31,6 +31,11 @@ Cut repeating losers via learning skip. Never size up to “make it back.” Nev
 | R10 | **One position key** — no duplicate game/ticker/mint | Concentration risk |
 | R11 | **Snapshot path only** for city/staff — never re-parse bot files in UI | Accuracy |
 | R12 | **Tower 5 absent** stays live offline until sized Kalshi lands — no substitute | Accuracy |
+| R13 | **Correlation veto** — paired directional factors cannot stack when the open book is as good or better | Portfolio heat |
+| R14 | **Fee-aware venue bars** — sports / BTC / INX / DEX | Honest edge |
+| R15 | **Model-flip exits** fire before hard stops / settle-only waits | Cut losers earlier |
+| R16 | **Expectancy starve** throttles losers after enough settles | Capital allocation |
+| R17 | **Shadow bots** spend no desk cash; promote only after expectancy gates | Research loop |
 
 ---
 
@@ -69,15 +74,15 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 - **Required:** gap-close sell + settle.
 - **Next upgrade:** optional hard stop / time-to-final risk trim (separate PR).
 
-### Kalshi S&P → **weak** allowed with waiver
+### Kalshi S&P → **partial** (model-flip under 50¢ + settle)
 - Band 80–90¢, 1/day, news calendar, −$50 day, kill ≤$400.
-- Settle-only is intentional; invalidation &lt;50¢ must stay visible on monitors.
-- Waiver: `settle_only_inx`.
+- Model-flip paper-sells when side bid collapses under 50¢; else settle at 3 PM CT.
+- Waiver: `fixed_ticket_25` only.
 
-### BTC 15m → **weak** + **must be entry_gated**
-- Full signal checklist; desk stake.
-- **ROI system:** `run` is an entry action → desk daily loss / open risk apply.
-- Advisory TP must not be presented as an executed sell; either implement later or keep labeled print-only.
+### BTC 15m → **partial** + **must be entry_gated**
+- Full signal checklist; Kelly-lite stake; venue `kalshi_btc15m` edge.
+- Model-flip flatten when side/fair flips against the open; else settle.
+- Shadow `edge08` runs on a parallel account and never spends desk cash.
 
 ### Memecoin → **strong** reference implementation
 - Facts fail-closed; stop/ladder/trail/time/liq.

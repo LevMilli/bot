@@ -238,6 +238,13 @@ export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
   ctx.fillStyle = '#7ef9ff'
   ctx.font = '22px monospace'
   ctx.fillText(`cash ${money(desk?.cash)}`, 28, 198)
+  const starved = (desk?.ops?.starved_bots || []).length
+  const shadows = desk?.ops?.shadow_count || 0
+  const corr = (desk?.ops?.correlation_pressure || []).length
+  const meta = `starve ${starved} · shadow ${shadows} · corr ${corr}`
+  ctx.fillStyle = '#9aa3c7'
+  ctx.font = '18px monospace'
+  ctx.fillText(meta, w - 28 - ctx.measureText(meta).width, 160)
   if (desk?.pace_line) {
     const pace = String(desk.pace_line).slice(0, 36)
     ctx.fillStyle = '#9aa3c7'

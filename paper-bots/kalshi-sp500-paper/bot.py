@@ -134,6 +134,22 @@ def step_scan(args, state, day):
     if skip:
         print(skip)
         return
+    try:
+        desk = _desk()
+        cfg = desk.load_settings(DESK_ROOT)
+        venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
+        # Band-only book: treat (1 - ask) as residual edge proxy after fee for correlation/EV.
+        fee_one = paper_sim.taker_fee(1, pick["ask"])
+        edge_proxy = max(0.0, (1.0 - float(pick["ask"]) - float(fee_one)))
+        if venue_edge > 0 and edge_proxy + 1e-12 < venue_edge:
+            print(alerts.format_skip_note(day, f"venue kalshi_inx edge {edge_proxy:.3f} < {venue_edge:.3f}"))
+            return
+        blocked = desk.correlation_blocks(DESK_ROOT, "kalshi-sp", pick["side"], edge_proxy)
+        if blocked:
+            print(blocked)
+            return
+    except Exception:
+        pass
     n = risk_manager.stake_contracts(pick["ask"], bankroll=state["bankroll"])
     if n < 1:
         print(alerts.format_skip_note(day, "not enough paper bankroll for 1 contract after fee"))
@@ -147,6 +163,13 @@ def step_scan(args, state, day):
         print(alerts.format_trade_note(preview, state["bankroll"] - preview["cost"] - fee, dry_run=True))
         return
     pos = paper_sim.open_position(state, day, ev, pick, n, now.isoformat(timespec="seconds"))
+    try:
+        import desk_profit
+        pos["risk_factor"] = desk_profit.risk_factor_for("kalshi-sp", pick["side"])
+        pos["gap_at_entry"] = round(max(0.0, 1.0 - float(pick["ask"]) - float(paper_sim.taker_fee(1, pick["ask"]))), 4)
+        pos["fair_at_entry"] = round(float(pick["ask"]), 4)
+    except Exception:
+        pass
     paper_sim.save_state(state)
     logger.ledger_open(pos, state["bankroll"])
     print(alerts.format_trade_note(pos, state["bankroll"]))
@@ -161,10 +184,56 @@ def step_settle(args, state, day):
         if not m:
             print(f"Could not read {pos['ticker']} yet."); continue
         if m.get("result") not in ("yes", "no"):
-            # still open: log an invalidation note if our side is now under 50c (no action - no stop in V1)
+            # still open: model-flip sell when desk enables it and side bid collapses under 50¢
             bid = feed.dollars(m.get("yes_bid_dollars")) if pos["side"] == "yes" else feed.dollars(m.get("no_bid_dollars"))
             note = f"{pos['ticker']} not settled yet (status {m.get('status')}); our side bid now {bid}"
             print(note)
+            flip_on = True
+            try:
+                desk = _desk()
+                cfg = desk.load_settings(DESK_ROOT)
+                flip_on = bool(cfg.get("model_flip_exits", True))
+            except Exception:
+                pass
+            if (
+                flip_on
+                and bid is not None
+                and bid < CFG["invalidation_log_below"]
+                and not args.dry_run
+            ):
+                # Paper sell at bid (fee applied as taker on sell notionally via remaining value).
+                contracts = float(pos.get("contracts") or 0)
+                proceeds = round(contracts * float(bid), 4)
+                pnl = round(proceeds - float(pos.get("cost") or 0) - float(pos.get("fee") or 0), 4)
+                state["bankroll"] = round(float(state["bankroll"]) + proceeds, 4)
+                pos.update({
+                    "status": "sold",
+                    "exit": "model-flip bid under 50c",
+                    "exit_price": bid,
+                    "payout": proceeds,
+                    "pnl": pnl,
+                    "settled_at": dt.datetime.now().isoformat(timespec="seconds"),
+                })
+                state["open"] = [p for p in state["open"] if p is not pos]
+                state["closed"].append(pos)
+                paper_sim.save_state(state)
+                try:
+                    desk = _desk()
+                    desk.record_learning(DESK_ROOT, {
+                        "result": "hit" if pnl > 0 else "miss",
+                        "market": "S&P",
+                        "prob": pos.get("ask"),
+                        "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+                        "fill_id": pos.get("fill_id") or "",
+                    })
+                except Exception:
+                    pass
+                logger.learn(
+                    f"MODEL-FLIP SELL: {pos['ticker']} {pos['side']} bid {bid:.2f} pnl {pnl:+.2f}",
+                    "model-flip",
+                )
+                print(f"MODEL-FLIP SELL {pos['ticker']} @ {bid:.2f} pnl {pnl:+.2f}")
+                continue
             if bid is not None and bid < CFG["invalidation_log_below"] and not args.dry_run:
                 logger.learn(f"INVALIDATION (log only): {pos['ticker']} {pos['side']} bid {bid:.2f} < 0.50", "invalidation")
             continue
