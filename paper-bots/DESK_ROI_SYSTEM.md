@@ -31,6 +31,7 @@ Cut repeating losers via learning skip. Never size up to “make it back.” Nev
 | R10 | **One position key** — no duplicate game/ticker/mint | Concentration risk |
 | R11 | **Snapshot path only** for city/staff — never re-parse bot files in UI | Accuracy |
 | R12 | **Tower 5 Sized Kalshi** is live when `kalshi-sized-paper` is present — no fake substitute | Accuracy |
+| R18 | **Midnight CT** — out-of-ammo / underwater flat towers reload cash + reset P&L + log/learn; winners untouched | Bankroll |
 | R13 | **Correlation veto** — paired directional factors cannot stack when the open book is as good or better | Portfolio heat |
 | R14 | **Fee-aware venue bars** — sports / BTC / INX / DEX | Honest edge |
 | R15 | **Model-flip exits** fire before hard stops / settle-only waits | Cut losers earlier |
