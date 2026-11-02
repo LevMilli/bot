@@ -19,9 +19,11 @@ from typing import Iterable
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 UA = {"User-Agent": "paper-bot/1.0 (kalshi-tape read-only)"}
 
-# Series the desk cares about (BTC + INX + sports-gap leagues).
+# Series the desk cares about (crypto 15m + BTC ladder + INX + sports).
 WATCH_SERIES = (
     "KXBTC15M",
+    "KXETH15M",
+    "KXBTCD",
     "KXINXU",
     "KXNFLGAME",
     "KXNCAAFGAME",

@@ -34,10 +34,13 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
                     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 
 # ---- rule settings (edit here) ----
-MIN_MINUTES_LEFT = 10        # need at least 10 minutes before close
+MIN_MINUTES_LEFT = 10        # early singles need ≥10 minutes before close
+PARLAY_MAX_MIN = 5.0         # late multi-leg window (staff: wait → parlay by ~5m left)
+PARLAY_MIN_MIN = 1.0
 EDGE_BUFFER = 0.05           # fallback if desk venue_min_edge missing
 MIN_MODEL_PROB = 0.80        # margin goal: model Φ(z) must be ≥ 80%
 MIN_CUSHION_USD = 40         # BTC cushion floor (was $50 — still fee-aware with venue edge)
+MIN_CUSHION_ETH = 2.0        # ETH 15m cushion (KXETH15M)
 MIN_Z = 0.65                 # cushion / sigma
 MIN_Z_COINBASE_ONLY = 0.80   # stricter if only Coinbase spot worked
 ASK_MIN, ASK_MAX = 0.75, 0.90  # only buy high-probability priced contracts
@@ -46,6 +49,8 @@ MIN_DEPTH = 5                # contracts offered at or below the ask
 NEWS_WINDOW_MIN = 30         # USD high-impact event within 30 min of the block -> skip
 TAKE_PROFIT_ADD, TAKE_PROFIT_CAP = 0.15, 0.99
 DVOL_FAIL_MULT = 1.2         # if DVOL fails: use realized sigma * 1.2
+# Track + history (staff screenshots): BTC 15m, ETH 15m, BTC 1am ladder.
+CRYPTO_SERIES = ("KXBTC15M", "KXETH15M", "KXBTCD")
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -404,13 +409,13 @@ def _market_row(m):
     }
 
 
-def kalshi_markets():
-    """Every still-open KXBTC15M window with a target, nearest close first."""
+def kalshi_markets(series: str = "KXBTC15M"):
+    """Every still-open window for a 15m series with a target, nearest close first."""
     now = dt.datetime.now(dt.timezone.utc)
     out = []
     cursor = ""
     while True:
-        url = f"{KALSHI}/markets?series_ticker=KXBTC15M&status=open&limit=200"
+        url = f"{KALSHI}/markets?series_ticker={series}&status=open&limit=200"
         if cursor:
             url += f"&cursor={cursor}"
         d = get_json(url)
@@ -418,6 +423,7 @@ def kalshi_markets():
             row = _market_row(raw)
             if not row or row["close_time"] <= now or row["target"] is None:
                 continue
+            row["series"] = series
             out.append(row)
         cursor = d.get("cursor") or ""
         if not cursor or not d.get("markets"):
@@ -430,8 +436,72 @@ def kalshi_markets():
 
 def kalshi_market():
     """Nearest open KXBTC15M (compat helper)."""
-    ms = kalshi_markets()
+    ms = kalshi_markets("KXBTC15M")
     return ms[0] if ms else None
+
+
+def eth_spot_prices():
+    out = {}
+    try:
+        out["coinbase"] = float(get_json("https://api.coinbase.com/v2/prices/ETH-USD/spot")["data"]["amount"])
+    except Exception as e:
+        print(f"  coinbase ETH spot failed: {e}")
+    try:
+        out["kraken"] = float(get_json("https://api.kraken.com/0/public/Ticker?pair=ETHUSD")["result"]["XETHZUSD"]["c"][0])
+    except Exception as e:
+        print(f"  kraken ETH spot failed: {e}")
+    return out
+
+
+def snapshot_btcd_ladder(root, btc_spot: float):
+    """History-only: nearest KXBTCD event strikes around spot (staff 1am ladder screen)."""
+    try:
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        import kalshi_history
+        ev = get_json(f"{KALSHI}/events?series_ticker=KXBTCD&status=open&limit=5")
+        events = ev.get("events") or []
+        if not events:
+            return 0
+        # Prefer soonest close / 1am style event first in list.
+        event_ticker = events[0].get("event_ticker")
+        if not event_ticker:
+            return 0
+        d = get_json(f"{KALSHI}/markets?event_ticker={event_ticker}&limit=200")
+        n = 0
+        for m in d.get("markets") or []:
+            try:
+                strike = float(m.get("floor_strike"))
+            except (TypeError, ValueError):
+                continue
+            if abs(strike - float(btc_spot)) > 800:
+                continue
+            yes_ask = fnum(m.get("yes_ask_dollars"))
+            no_ask = fnum(m.get("no_ask_dollars"))
+            close = parse_ts(m["close_time"]) if m.get("close_time") else None
+            min_left = (close - dt.datetime.now(dt.timezone.utc)).total_seconds() / 60 if close else None
+            kalshi_history.record_snapshot(
+                root,
+                series="KXBTCD",
+                ticker=str(m.get("ticker") or ""),
+                spot=float(btc_spot),
+                target=strike,
+                side="YES" if btc_spot >= strike else "NO",
+                yes_ask=yes_ask,
+                no_ask=no_ask,
+                model_p=None,
+                minutes_left=min_left,
+                regime="ladder_watch",
+                note=str(events[0].get("title") or "")[:120],
+                extra={"event": event_ticker},
+            )
+            n += 1
+            if n >= 24:
+                break
+        return n
+    except Exception as e:
+        print(f"  KXBTCD ladder history failed: {e}")
+        return 0
 
 
 def book_for_side(ticker, side):
@@ -495,9 +565,9 @@ def spot_prices():
     return out
 
 
-def candles_1m():
+def candles_1m(product: str = "BTC-USD"):
     """Coinbase 1-minute candles, returned oldest -> newest as (time, close)."""
-    rows = get_json("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60")
+    rows = get_json(f"https://api.exchange.coinbase.com/products/{product}/candles?granularity=60")
     rows = sorted(rows, key=lambda r: r[0])     # [time, low, high, open, close, volume]
     return [(r[0], float(r[4])) for r in rows]
 
@@ -555,8 +625,9 @@ def _sigma_for(price, min_left, closes, dvol):
     return sigma, realized, sig_dvol
 
 
-def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None):
-    """Apply the same guideline gates to one open KXBTC15M window.
+def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
+                    min_minutes_left=None, min_cushion=None):
+    """Apply the same guideline gates to one open 15m crypto window (BTC or ETH).
 
     Cheap gates first (time / band / cushion) before news and heavy reasons.
     `book` optional (bid, ask, depth) from prefetch_books.
@@ -566,8 +637,11 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None):
     min_left = (m["close_time"] - now).total_seconds() / 60
     side = "YES" if price > m["target"] else "NO"
     cushion = abs(price - m["target"])
+    time_floor = MIN_MINUTES_LEFT if min_minutes_left is None else float(min_minutes_left)
+    cush_floor = MIN_CUSHION_USD if min_cushion is None else float(min_cushion)
     out = {
         "ticker": m["ticker"],
+        "series": m.get("series") or "KXBTC15M",
         "min_left": min_left,
         "sigma": None,
         "realized": None,
@@ -587,10 +661,10 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None):
     }
     # Cheap gates first — fail fast before σ / news / book work when possible.
     cheap = []
-    if min_left < MIN_MINUTES_LEFT:
-        cheap.append(f"only {min_left:.1f} min left (< {MIN_MINUTES_LEFT})")
-    if cushion < MIN_CUSHION_USD:
-        cheap.append(f"cushion ${cushion:.2f} < ${MIN_CUSHION_USD}")
+    if min_left < time_floor:
+        cheap.append(f"only {min_left:.1f} min left (< {time_floor:g})")
+    if cushion < cush_floor:
+        cheap.append(f"cushion ${cushion:.2f} < ${cush_floor:g}")
     listing_ask = m["yes_ask"] if side == "YES" else m["no_ask"]
     if listing_ask is not None and not (ASK_MIN <= listing_ask <= ASK_MAX):
         # Still allow book to rescue a stale listing; only hard-fail if book also bad later.
@@ -711,42 +785,40 @@ def main():
     print(f"BTC 15-min Kalshi paper check  ({tag}no real orders)  {now:%Y-%m-%d %H:%M:%S} UTC")
     print(f"Price source https://api.elections.kalshi.com/trade-api/v2 at {now:%Y-%m-%dT%H:%M:%SZ}\n")
 
-    markets = kalshi_markets()
-    # Track public tape for desk series (BTC + INX + sports). Shadow runs skip disk writes
-    # on the shared tape only if DESK_SHADOW — still OK to read; sync once on live.
+    markets = kalshi_markets("KXBTC15M")
+    eth_markets = kalshi_markets("KXETH15M")
+    # Track public tape for crypto series from staff screenshots.
     if not IS_SHADOW:
         try:
             if DESK_ROOT not in sys.path:
                 sys.path.insert(0, DESK_ROOT)
             import kalshi_tape
+            tickers = [m["ticker"] for m in markets] + [m["ticker"] for m in eth_markets]
             tape = kalshi_tape.sync_tape(
                 DESK_ROOT,
-                series=("KXBTC15M",),
-                tickers=[m["ticker"] for m in markets],
+                series=("KXBTC15M", "KXETH15M", "KXBTCD"),
+                tickers=tickers,
                 max_markets_per_series=20,
                 per_ticker_limit=50,
             )
             print(
                 f"Kalshi tape: +{tape.get('last_added') or 0} new prints "
                 f"(kept {len(tape.get('trades') or [])}; "
-                f"{len(markets)} open KXBTC15M window(s))"
+                f"{len(markets)} BTC + {len(eth_markets)} ETH 15m window(s))"
             )
             if tape.get("last_error"):
                 print(f"  tape note: {tape['last_error']}")
         except Exception as e:
             print(f"  kalshi tape sync failed: {e}")
 
-    if not markets:
-        print("SKIP: no open KXBTC15M market with a target right now (between blocks?). Try again in a minute.")
-        return _card("Checked all open BTC 15-minute markets. No paper buy.")
-
     spots = spot_prices()
-    if not spots:
-        print("SKIP: no BTC spot price available from any source.")
+    if not spots and not eth_markets:
+        print("SKIP: no BTC spot and no ETH windows.")
         return _card("Checked all open BTC 15-minute markets. No paper buy.")
-    price = statistics.mean(spots.values())
-    print("Spot: " + ", ".join(f"{k} ${v:,.2f}" for k, v in spots.items()) + f"  -> avg ${price:,.2f}")
-    coinbase_only = list(spots) == ["coinbase"]
+    price = statistics.mean(spots.values()) if spots else None
+    if price is not None:
+        print("BTC spot: " + ", ".join(f"{k} ${v:,.2f}" for k, v in spots.items()) + f"  -> avg ${price:,.2f}")
+    coinbase_only = list(spots) == ["coinbase"] if spots else False
 
     closes = []
     try:
@@ -759,23 +831,35 @@ def main():
     except Exception as e:
         print(f"  DVOL failed: {e}")
 
-    print(f"Open KXBTC15M windows to score: {len(markets)} (rank-then-buy; guidelines unchanged)\n")
+    if not IS_SHADOW and price is not None:
+        n_ladder = snapshot_btcd_ladder(DESK_ROOT, price)
+        if n_ladder:
+            print(f"KXBTCD ladder history: recorded {n_ladder} strikes near spot")
+
+    if not markets:
+        print("No open KXBTC15M window right now — still tracking ETH/ladder history.")
+    else:
+        print(f"Open KXBTC15M windows to score: {len(markets)} (early confident single / volatile→5m parlay)\n")
 
     # Parallel books for every window's model side (speed).
     book_jobs = []
     for m in markets:
+        if price is None:
+            break
         side0 = "YES" if price > m["target"] else "NO"
         book_jobs.append((m["ticker"], side0))
-    books, book_errs = prefetch_books(book_jobs)
+    books, book_errs = prefetch_books(book_jobs) if book_jobs else ({}, {})
 
     scored = []
     for m in markets:
+        if price is None:
+            break
         key = (m["ticker"], "YES" if price > m["target"] else "NO")
         if key in book_errs:
             ev = {
                 "ticker": m["ticker"], "side": key[1], "reasons": [f"orderbook failed ({book_errs[key]})"],
                 "ask": None, "bid": None, "p": None, "fee": None, "depth": 0, "edge": None,
-                "confidence": None, "close_time": m["close_time"], "market": m,
+                "confidence": None, "close_time": m["close_time"], "market": m, "series": "KXBTC15M",
             }
         else:
             ev = evaluate_window(
@@ -796,8 +880,19 @@ def main():
         desk_brain = None
         ranked = scored
 
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import kalshi_history
+        import kalshi_parlay
+    except Exception:
+        kalshi_history = None
+        kalshi_parlay = None
+
     buys = 0
     skips = 0
+    parlays = 0
+    parlay_legs = []  # candidates for ≤5m combo
     last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
 
     for ev in ranked:
@@ -855,70 +950,306 @@ def main():
                             pass
 
         reasons = list(ev.get("reasons") or [])
-        if reasons:
-            print("  SIGNAL: SKIP -> " + "; ".join(reasons))
-            skips += 1
-            last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
-            if desk_brain and not IS_SHADOW:
+        ml = float(min_left) if min_left is not None else 0.0
+        regime = "unknown"
+        if kalshi_parlay is not None:
+            regime = kalshi_parlay.classify_regime(
+                minutes_left=ml,
+                model_p=ev.get("p"),
+                z=ev.get("z"),
+                cushion=ev.get("cushion"),
+                min_cushion=MIN_CUSHION_USD,
+                min_z=MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z,
+                min_p=MIN_MODEL_PROB,
+                early_min=MIN_MINUTES_LEFT,
+                parlay_max=PARLAY_MAX_MIN,
+                parlay_min=PARLAY_MIN_MIN,
+            )
+        print(f"  regime: {regime}")
+        if kalshi_history is not None and not IS_SHADOW:
+            try:
+                kalshi_history.record_snapshot(
+                    DESK_ROOT,
+                    series="KXBTC15M",
+                    ticker=str(ev.get("ticker") or ""),
+                    spot=price,
+                    target=float(m.get("target") or 0) or None,
+                    side=ev.get("side"),
+                    yes_ask=m.get("yes_ask"),
+                    no_ask=m.get("no_ask"),
+                    model_p=ev.get("p"),
+                    minutes_left=ml,
+                    regime=regime,
+                    note="; ".join(reasons)[:180],
+                )
+            except Exception:
+                pass
+
+        # Volatile → hold for ≤5m parlay (even if some gates look soft).
+        if regime == "volatile_hold":
+            hold_reason = "volatile — holding for ≤5m parlay window"
+            if hold_reason not in reasons:
+                reasons.append(hold_reason)
+            if kalshi_history is not None and not IS_SHADOW and ev.get("side"):
                 try:
-                    desk_brain.record_decision(
-                        DESK_ROOT, bot="btc15m", action="skip",
-                        ticker=ev.get("ticker") or "", side=ev.get("side") or "",
-                        edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
-                        depth=ev.get("depth"), reasons=reasons, score=ev.get("_brain_score"),
+                    kalshi_history.mark_hold(
+                        DESK_ROOT, str(ev.get("ticker") or ""), str(ev.get("side")),
+                        hold_reason, ml,
                     )
                 except Exception:
                     pass
-        else:
-            tp = min(round(ev["ask"] + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
-            print(
-                f"  SIGNAL: BUY {ev['side']} on {ev['ticker']} at <= {ev['ask']:.2f} "
-                f"(fee {ev['fee']:.2f}). Suggested take-profit {tp:.2f} (fill + 0.15, max 0.99)."
+
+        # Late window: defer singles into parlay candidate list if fee-aware fit
+        # (re-check without the early ≥10m time gate).
+        if regime == "parlay_window" and price is not None:
+            late = evaluate_window(
+                m, price, closes, dvol, coinbase_only, edge_buf,
+                book=books.get((m.get("ticker"), ev.get("side") or ("YES" if price > m["target"] else "NO"))),
+                min_minutes_left=PARLAY_MIN_MIN,
             )
-            last_sentence = paper_buy(
-                account, ev["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
-                ev.get("close_time") or m.get("close_time"), True, edge=ev.get("edge"),
-            )
-            if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
-                buys += 1
-                if desk_brain and not IS_SHADOW:
-                    try:
-                        note = desk_brain.explain_buy(
-                            "btc15m", ev["side"], ev["ticker"], ev.get("edge"),
-                            ev.get("confidence") or ev.get("p"), ev.get("depth"),
-                        )
-                        print(f"  BRAIN: {note}")
-                        desk_brain.record_decision(
-                            DESK_ROOT, bot="btc15m", action="buy",
-                            ticker=ev.get("ticker") or "", side=ev.get("side") or "",
-                            edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
-                            depth=ev.get("depth"), score=ev.get("_brain_score"), note=note,
-                        )
-                    except Exception:
-                        pass
+            late_reasons = [r for r in (late.get("reasons") or []) if "min left" not in r]
+            if not late_reasons and late.get("ask") is not None:
+                parlay_legs.append({
+                    "ticker": late["ticker"],
+                    "side": late["side"],
+                    "ask": late["ask"],
+                    "fee": late["fee"],
+                    "fair": late.get("p"),
+                    "close_time": m.get("close_time").isoformat() if hasattr(m.get("close_time"), "isoformat") else str(m.get("close_time") or ""),
+                    "series": "KXBTC15M",
+                    "edge": late.get("edge"),
+                    "confidence": late.get("p"),
+                    "depth": late.get("depth"),
+                })
+                print("  SIGNAL: PARLAY-CANDIDATE (≤5m) — waiting for combo legs")
+                reasons = ["deferred to ≤5m parlay candidate"]
             else:
+                reasons = late_reasons or reasons
+
+        if reasons or regime in ("volatile_hold", "parlay_window", "too_late"):
+            if regime == "confident_early" and not reasons:
+                pass  # fall through — should not hit
+            else:
+                print("  SIGNAL: SKIP -> " + "; ".join(reasons or [regime]))
                 skips += 1
-                print(f"  desk/account blocked fill: {last_sentence}")
+                last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
                 if desk_brain and not IS_SHADOW:
                     try:
                         desk_brain.record_decision(
                             DESK_ROOT, bot="btc15m", action="skip",
                             ticker=ev.get("ticker") or "", side=ev.get("side") or "",
                             edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
-                            depth=ev.get("depth"), reasons=[last_sentence],
+                            depth=ev.get("depth"), reasons=reasons or [regime],
                             score=ev.get("_brain_score"),
                         )
                     except Exception:
                         pass
+                print()
+                continue
+
+        # Confident early (≥10m) and clears guidelines → single paper buy now.
+        tp = min(round(ev["ask"] + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
+        print(
+            f"  SIGNAL: BUY {ev['side']} on {ev['ticker']} at <= {ev['ask']:.2f} "
+            f"(fee {ev['fee']:.2f}). Suggested take-profit {tp:.2f} (fill + 0.15, max 0.99)."
+        )
+        last_sentence = paper_buy(
+            account, ev["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
+            ev.get("close_time") or m.get("close_time"), True, edge=ev.get("edge"),
+        )
+        if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
+            buys += 1
+            if kalshi_history is not None and not IS_SHADOW:
+                try:
+                    kalshi_history.clear_hold(DESK_ROOT, str(ev.get("ticker") or ""))
+                except Exception:
+                    pass
+            if desk_brain and not IS_SHADOW:
+                try:
+                    note = desk_brain.explain_buy(
+                        "btc15m", ev["side"], ev["ticker"], ev.get("edge"),
+                        ev.get("confidence") or ev.get("p"), ev.get("depth"),
+                    )
+                    print(f"  BRAIN: {note}")
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="buy",
+                        ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                        edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
+                        depth=ev.get("depth"), score=ev.get("_brain_score"), note=note,
+                    )
+                except Exception:
+                    pass
+        else:
+            skips += 1
+            print(f"  desk/account blocked fill: {last_sentence}")
         print()
 
-    print(f"Windows scored: {len(markets)}  paper buys: {buys}  skips/blocks: {skips}")
+    # ---- ETH 15m: history + optional late parlay leg (same fee-aware gates) ----
+    eth_spots = eth_spot_prices()
+    eth_price = statistics.mean(eth_spots.values()) if eth_spots else None
+    if eth_price is not None:
+        print(f"\nETH spot avg ${eth_price:,.2f}  open KXETH15M windows: {len(eth_markets)}")
+    eth_closes = []
+    try:
+        eth_closes = [c for _, c in candles_1m("ETH-USD")]
+    except Exception as e:
+        print(f"  ETH candles failed: {e}")
+    eth_book_jobs = []
+    for m in eth_markets:
+        if eth_price is None:
+            break
+        eth_book_jobs.append((m["ticker"], "YES" if eth_price > m["target"] else "NO"))
+    eth_books, eth_errs = prefetch_books(eth_book_jobs) if eth_book_jobs else ({}, {})
+    for m in eth_markets:
+        if eth_price is None:
+            break
+        key = (m["ticker"], "YES" if eth_price > m["target"] else "NO")
+        if key in eth_errs:
+            continue
+        ev_early = evaluate_window(
+            m, eth_price, eth_closes, dvol, False, edge_buf,
+            book=eth_books.get(key), min_cushion=MIN_CUSHION_ETH,
+        )
+        ml = float(ev_early.get("min_left") or 0)
+        regime = "unknown"
+        if kalshi_parlay is not None:
+            regime = kalshi_parlay.classify_regime(
+                minutes_left=ml,
+                model_p=ev_early.get("p"),
+                z=ev_early.get("z"),
+                cushion=ev_early.get("cushion"),
+                min_cushion=MIN_CUSHION_ETH,
+                min_z=MIN_Z,
+                min_p=MIN_MODEL_PROB,
+            )
+        print(f"--- ETH {m['ticker']} regime={regime} p={ev_early.get('p')} cushion={ev_early.get('cushion')}")
+        if kalshi_history is not None and not IS_SHADOW:
+            try:
+                kalshi_history.record_snapshot(
+                    DESK_ROOT, series="KXETH15M", ticker=m["ticker"], spot=eth_price,
+                    target=m.get("target"), side=ev_early.get("side"),
+                    yes_ask=m.get("yes_ask"), no_ask=m.get("no_ask"),
+                    model_p=ev_early.get("p"), minutes_left=ml, regime=regime,
+                    note="; ".join(ev_early.get("reasons") or [])[:180],
+                )
+            except Exception:
+                pass
+        if regime == "confident_early" and not (ev_early.get("reasons") or []):
+            sentence = paper_buy(
+                account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
+                ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
+            )
+            print(f"  ETH early: {sentence}")
+            if "Paper buy" in sentence and "No paper buy" not in sentence:
+                buys += 1
+                last_sentence = sentence
+        elif regime == "parlay_window":
+            late = evaluate_window(
+                m, eth_price, eth_closes, dvol, False, edge_buf,
+                book=eth_books.get(key), min_minutes_left=PARLAY_MIN_MIN, min_cushion=MIN_CUSHION_ETH,
+            )
+            late_reasons = [r for r in (late.get("reasons") or []) if "min left" not in r]
+            if not late_reasons and late.get("ask") is not None:
+                parlay_legs.append({
+                    "ticker": late["ticker"], "side": late["side"], "ask": late["ask"],
+                    "fee": late["fee"], "fair": late.get("p"),
+                    "close_time": m["close_time"].isoformat(),
+                    "series": "KXETH15M", "edge": late.get("edge"),
+                    "confidence": late.get("p"), "depth": late.get("depth"),
+                })
+                print("  ETH PARLAY-CANDIDATE")
+            else:
+                skips += 1
+        elif regime == "volatile_hold":
+            if kalshi_history is not None and not IS_SHADOW:
+                try:
+                    kalshi_history.mark_hold(
+                        DESK_ROOT, m["ticker"], str(ev_early.get("side") or ""),
+                        "ETH volatile — hold for ≤5m parlay", ml,
+                    )
+                except Exception:
+                    pass
+            skips += 1
+        else:
+            skips += 1
+
+    # Open paper parlay when ≥2 fee-aware legs ready in the ≤5m window.
+    if (not IS_SHADOW) and kalshi_parlay is not None and len(parlay_legs) >= 2:
+        # Prefer one BTC + one ETH leg when available.
+        btc_leg = next((x for x in parlay_legs if x.get("series") == "KXBTC15M"), None)
+        eth_leg = next((x for x in parlay_legs if x.get("series") == "KXETH15M"), None)
+        legs = [btc_leg, eth_leg] if btc_leg and eth_leg else parlay_legs[:2]
+        if all(legs) and os.environ.get("DESK_BLOCK_ENTRIES") != "1":
+            path = kalshi_parlay.parlay_path(DESK_ROOT, os.path.dirname(ACCOUNT))
+            # Stake from desk Kelly-lite on the weaker confidence.
+            conf = min(float(legs[0].get("confidence") or 0), float(legs[1].get("confidence") or 0))
+            edge = min(float(legs[0].get("edge") or 0), float(legs[1].get("edge") or 0))
+            try:
+                desk = _desk()
+                cfg = desk.load_settings(DESK_ROOT)
+                stake = desk.stake_dollars_for(
+                    "btc15m", conf, edge=edge, cfg=cfg, open_risk_used=0.0,
+                    ask=legs[0]["ask"], root=DESK_ROOT,
+                )
+            except Exception:
+                stake = 20.0
+            cash = float(account.get("cash") or 0)
+            stake = min(float(stake), cash)
+            row = kalshi_parlay.open_paper_parlay(
+                path, legs, stake_dollars=stake,
+                note="≤5m paper parlay after volatile hold (BTC+ETH or dual legs)",
+            )
+            if row:
+                # Deduct combined stake from paper cash; attach legs as open positions tagged parlay.
+                account["cash"] = round(cash - float(row["stake"]), 2)
+                for leg in row["legs"]:
+                    account.setdefault("open", []).append({
+                        "ticker": leg["ticker"],
+                        "team": leg["ticker"],
+                        "game": f"parlay {row['parlay_id']}",
+                        "side": leg["side"],
+                        "contracts": leg["contracts"],
+                        "ask": leg["ask"],
+                        "fee": leg["fee"],
+                        "cost": leg["cost"],
+                        "risk": leg["cost"],
+                        "reward": round(leg["contracts"] * 1.0 - leg["cost"], 2),
+                        "fair_at_entry": leg.get("fair_at_entry"),
+                        "opened": row["opened"],
+                        "close_time": leg.get("close_time") or "",
+                        "fill_id": f"{row['parlay_id']}|{leg['ticker']}",
+                        "parlay_id": row["parlay_id"],
+                        "paper_only": True,
+                        "price_source": KALSHI,
+                        "why": "Paper parlay leg. Volatile early → ≤5m combo.",
+                    })
+                save_account(account)
+                parlays += 1
+                buys += 1
+                last_sentence = (
+                    f"Checked crypto Kalshi markets. Paper parlay {row['parlay_id']} "
+                    f"({len(row['legs'])} legs, stake ${row['stake']:.2f})."
+                )
+                print(f"PARLAY OPEN: {last_sentence}")
+                for leg in legs:
+                    if kalshi_history is not None:
+                        try:
+                            kalshi_history.clear_hold(DESK_ROOT, leg["ticker"])
+                        except Exception:
+                            pass
+
+    print(
+        f"Windows scored: BTC {len(markets)} ETH {len(eth_markets)}  "
+        f"paper buys: {buys}  parlays: {parlays}  skips/blocks: {skips}"
+    )
     print("(Paper only. Nothing was ordered.)")
     if buys:
-        return _card(
+        return _card(last_sentence if "parlay" in last_sentence.lower() else (
             f"Checked {len(markets)} open BTC 15-minute markets. "
             f"{buys} paper buy{'s' if buys != 1 else ''}."
-        )
+        ))
+    if not markets and eth_markets:
+        return _card("Checked ETH/BTC crypto Kalshi markets. No paper buy.")
     return _card(last_sentence if last_sentence else "Checked all open BTC 15-minute markets. No paper buy.")
 
 
