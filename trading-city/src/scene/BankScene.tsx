@@ -30,21 +30,23 @@ const BRASS = '#c9a227'
 const INK = '#050812'
 const FLOOR = '#0e061c'
 
-const HOME_POS: [number, number, number] = [0, 2.55, 6.4]
-const HOME_TARGET: [number, number, number] = [0, 1.45, -0.6]
+const HOME_POS: [number, number, number] = [0, 2.55, 6.5]
+const HOME_TARGET: [number, number, number] = [0, 1.4, 0.1]
 
 /** Wide enough that nameplates / glass fins never collide while bots sway. */
 const TELLER_COUNT = 5
-const TELLER_SPACING = 2.72
+const TELLER_SPACING = 2.95
+/** Half-width of each teller's private rope channel (gap between neighbors = spacing − 2×half). */
+const LANE_HALF = 0.92
 const LANE_Z_FRONT = 2.05
-const LANE_Z_BACK = 0.52
+/** Keep rear posts in the aisle — clear of the counter lip. */
+const LANE_Z_BACK = 0.88
+/** Dolly distance along the focused lane (far → near). */
+const ZOOM_DIST_FAR = 6.55
+const ZOOM_DIST_NEAR = 3.85
 
 function tellerX(index: number) {
   return (index - (TELLER_COUNT - 1) / 2) * TELLER_SPACING
-}
-
-function postX(post: number) {
-  return (post - TELLER_COUNT / 2) * TELLER_SPACING
 }
 
 function TellerPod({
@@ -538,37 +540,32 @@ function SideScreen({
 }
 
 function CeilingHall() {
+  // Ceiling beams between teller lanes (midpoints), never on pod centerlines.
+  const beamXs = Array.from({ length: TELLER_COUNT - 1 }, (_, i) => (tellerX(i) + tellerX(i + 1)) / 2)
   return (
     <group>
       <mesh position={[0, 4.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[14.5, 9.2]} />
+        <planeGeometry args={[16, 9.2]} />
         <meshStandardMaterial color="#100a1e" roughness={0.95} side={DoubleSide} />
       </mesh>
-      {/* coffered beams */}
-      {([-2.6, -0.85, 0.85, 2.6] as const).map((x) => (
+      {beamXs.map((x) => (
         <group key={x}>
           <mesh position={[x, 4.08, -0.15]}>
-            <boxGeometry args={[0.22, 0.16, 7.2]} />
+            <boxGeometry args={[0.18, 0.14, 7.2]} />
             <meshStandardMaterial color="#1a1428" roughness={0.7} metalness={0.2} />
           </mesh>
           <mesh position={[x, 4.0, -0.15]}>
-            <boxGeometry args={[0.38, 0.05, 5.6]} />
+            <boxGeometry args={[0.32, 0.045, 5.6]} />
             <meshBasicMaterial color="#e7f6ff" toneMapped={false} />
-          </mesh>
-          {/* soft shaft */}
-          <mesh position={[x, 2.3, -0.15]}>
-            <boxGeometry args={[0.12, 3.4, 4.8]} />
-            <meshBasicMaterial color="#fff6d8" transparent opacity={0.035} depthWrite={false} />
           </mesh>
         </group>
       ))}
       <mesh position={[0, 4.0, -3.0]}>
-        <boxGeometry args={[14, 0.12, 0.2]} />
+        <boxGeometry args={[15, 0.12, 0.2]} />
         <meshStandardMaterial color={TRIM} metalness={0.4} roughness={0.4} />
       </mesh>
-      {/* mezzanine rail hint */}
       <mesh position={[0, 3.35, -2.55]}>
-        <boxGeometry args={[12.5, 0.04, 0.04]} />
+        <boxGeometry args={[13.5, 0.04, 0.04]} />
         <meshBasicMaterial color="#2de2e6" toneMapped={false} />
       </mesh>
     </group>
@@ -644,51 +641,40 @@ function FloorGlowPaths() {
   )
 }
 
-/** Queue posts + ropes on BOTH sides of every teller lane (shared posts between neighbors). */
+/**
+ * Per-teller queue channel: left + right posts/ropes in that station's accent.
+ * Posts are inset (not shared), so neighboring lanes never cross or stack colors.
+ */
 function QueueLanes() {
-  const posts = TELLER_COUNT + 1
   const ropeLen = LANE_Z_FRONT - LANE_Z_BACK
   const ropeMidZ = (LANE_Z_FRONT + LANE_Z_BACK) / 2
+  const mouthW = LANE_HALF * 2
   return (
     <group>
-      {Array.from({ length: posts }).map((_, p) => {
-        const x = postX(p)
-        const leftLane = Math.max(0, p - 1)
-        const rightLane = Math.min(TELLER_COUNT - 1, p)
-        const laneColor = BEAM_COLORS[rightLane % BEAM_COLORS.length]
-        const leftColor = BEAM_COLORS[leftLane % BEAM_COLORS.length]
-        return (
-          <group key={`post-${p}`}>
-            <Stanchion position={[x, 0, LANE_Z_FRONT]} color={laneColor} />
-            <Stanchion position={[x, 0, LANE_Z_BACK]} color={laneColor} />
-            {/* dual rope heights so each lane wall reads clearly from the lobby */}
-            <mesh position={[x, 0.72, ropeMidZ]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.018, 0.018, ropeLen, 6]} />
-              <meshBasicMaterial color={leftColor} toneMapped={false} />
-            </mesh>
-            <mesh position={[x, 0.88, ropeMidZ]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.014, 0.014, ropeLen, 6]} />
-              <meshBasicMaterial color={laneColor} toneMapped={false} />
-            </mesh>
-          </group>
-        )
-      })}
-      {/* front mouth + rear gate so each lane is a closed channel */}
       {Array.from({ length: TELLER_COUNT }).map((_, i) => {
         const color = BEAM_COLORS[i % BEAM_COLORS.length]
-        const left = postX(i)
-        const right = postX(i + 1)
-        const mid = (left + right) / 2
-        const width = right - left
+        const cx = tellerX(i)
+        const left = cx - LANE_HALF
+        const right = cx + LANE_HALF
         return (
-          <group key={`mouth-${i}`}>
-            <mesh position={[mid, 0.8, LANE_Z_FRONT]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.014, 0.014, width * 0.78, 6]} />
+          <group key={`lane-${i}`}>
+            {([left, right] as const).map((x) => (
+              <group key={x}>
+                <Stanchion position={[x, 0, LANE_Z_FRONT]} color={color} />
+                <Stanchion position={[x, 0, LANE_Z_BACK]} color={color} />
+                <mesh position={[x, 0.78, ropeMidZ]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.016, 0.016, ropeLen, 6]} />
+                  <meshBasicMaterial color={color} toneMapped={false} />
+                </mesh>
+              </group>
+            ))}
+            <mesh position={[cx, 0.78, LANE_Z_FRONT]} rotation={[0, 0, Math.PI / 2]}>
+              <cylinderGeometry args={[0.013, 0.013, mouthW, 6]} />
               <meshBasicMaterial color={color} toneMapped={false} />
             </mesh>
-            <mesh position={[mid, 0.8, LANE_Z_BACK]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.012, 0.012, width * 0.78, 6]} />
-              <meshBasicMaterial color={color} transparent opacity={0.7} toneMapped={false} />
+            <mesh position={[cx, 0.78, LANE_Z_BACK]} rotation={[0, 0, Math.PI / 2]}>
+              <cylinderGeometry args={[0.012, 0.012, mouthW, 6]} />
+              <meshBasicMaterial color={color} transparent opacity={0.75} toneMapped={false} />
             </mesh>
           </group>
         )
@@ -808,6 +794,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
   const [awayIndex, setAwayIndex] = useState<number | null>(null)
   const [recalling, setRecalling] = useState(false)
   const recallTimer = useRef<number | null>(null)
+  /** 0 = lobby distance, 1 = dolly in on the focused teller. */
+  const zoomRef = useRef(0)
 
   const presentIndexes = useMemo(
     () => tellers.map((b, i) => (b && b.present !== false ? i : -1)).filter((i) => i >= 0),
@@ -821,6 +809,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     cam.position.set(...HOME_POS)
     orbit.target.set(...HOME_TARGET)
     orbit.update()
+    zoomRef.current = 0
   }, [])
 
   // Cycle one present teller stepping away — light life without extra lights.
@@ -858,7 +847,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     }
   }, [])
 
-  // WASD / arrows move focus across tellers; Enter / Space opens the focused desk.
+  // A/D · ←/→ switch teller; W/S · ↑/↓ zoom on focused lane; Enter / Space opens.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -871,9 +860,12 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       } else if (key === 'arrowright' || key === 'd') {
         e.preventDefault()
         setFocus((f) => Math.min(TELLER_COUNT - 1, f + 1))
-      } else if (key === 'arrowup' || key === 'w' || key === 'arrowdown' || key === 's') {
-        // Keep vertical keys from scrolling the page; focus stays on the teller row.
+      } else if (key === 'arrowup' || key === 'w') {
         e.preventDefault()
+        zoomRef.current = Math.min(1, zoomRef.current + 0.12)
+      } else if (key === 'arrowdown' || key === 's') {
+        e.preventDefault()
+        zoomRef.current = Math.max(0, zoomRef.current - 0.12)
       } else if (key === 'enter' || key === ' ') {
         const bot = tellers[focus]
         if (bot) {
@@ -890,9 +882,25 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     const orbit = controls.current
     if (!orbit) return
     const tx = tellerX(focus)
-    orbit.target.x = MathUtils.damp(orbit.target.x, tx * 0.35, 3.5, dt)
+    // Frame down the focused lane so side columns never sit in the sightline.
+    const targetX = tx
+    const targetY = 1.32
+    const targetZ = 0.2
+    orbit.target.x = MathUtils.damp(orbit.target.x, targetX, 4.2, dt)
+    orbit.target.y = MathUtils.damp(orbit.target.y, targetY, 4.2, dt)
+    orbit.target.z = MathUtils.damp(orbit.target.z, targetZ, 4.2, dt)
+
+    const zDist = MathUtils.lerp(ZOOM_DIST_FAR, ZOOM_DIST_NEAR, zoomRef.current)
     const cam = orbit.object
-    cam.position.x = MathUtils.damp(cam.position.x, HOME_POS[0] + tx * 0.22, 3.2, dt)
+    const wantX = tx
+    const wantY = MathUtils.lerp(2.55, 2.15, zoomRef.current)
+    const wantZ = zDist
+    cam.position.x = MathUtils.damp(cam.position.x, wantX, 4.0, dt)
+    cam.position.y = MathUtils.damp(cam.position.y, wantY, 4.0, dt)
+    cam.position.z = MathUtils.damp(cam.position.z, wantZ, 4.0, dt)
+    // Keep OrbitControls distance clamps honest with our dolly.
+    orbit.minDistance = ZOOM_DIST_NEAR - 0.15
+    orbit.maxDistance = ZOOM_DIST_FAR + 0.8
   })
 
   return (
@@ -907,12 +915,12 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         enableDamping
         dampingFactor={0.08}
         enablePan={false}
-        minDistance={4.2}
-        maxDistance={9.5}
-        minPolarAngle={0.85}
+        minDistance={ZOOM_DIST_NEAR - 0.15}
+        maxDistance={ZOOM_DIST_FAR + 0.8}
+        minPolarAngle={0.95}
         maxPolarAngle={1.45}
-        minAzimuthAngle={-0.95}
-        maxAzimuthAngle={0.95}
+        minAzimuthAngle={-0.55}
+        maxAzimuthAngle={0.55}
       />
 
       <ambientLight intensity={0.42} color="#c8b8ff" />
@@ -960,10 +968,11 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       ))}
 
       <CeilingHall />
-      <Column x={-5.2} z={-2.4} />
-      <Column x={5.2} z={-2.4} />
-      <Column x={-5.2} z={1.5} />
-      <Column x={5.2} z={1.5} />
+      {/* Corner columns only — keep clear of every teller sightline */}
+      <Column x={-7.05} z={-2.55} />
+      <Column x={7.05} z={-2.55} />
+      <Column x={-7.05} z={2.55} />
+      <Column x={7.05} z={2.55} />
 
       <HeroVaultDoor />
       <ProfitBoard desk={desk} />
@@ -1006,7 +1015,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
             letterSpacing: '0.06em',
           }}
         >
-          A/D or ←→ switch teller · Enter open · drag to look · cash {money(desk?.cash)}
+          A/D · ←→ switch · W/S · ↑↓ zoom · Enter open · drag to look · cash {money(desk?.cash)}
         </div>
       </Html>
 
