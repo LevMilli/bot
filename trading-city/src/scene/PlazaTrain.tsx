@@ -45,9 +45,11 @@ function SmokeTrail({ locoRef }: { locoRef: { current: Group | null } }) {
   const ages = useRef<Float32Array>(new Float32Array(SMOKE_COUNT).fill(SMOKE_LIFE + 1))
   const spawnAcc = useRef(0)
   const next = useRef(0)
-  const tipLocal = useMemo(() => new THREE.Vector3(0.3, 1.45, 0), [])
+  // Stack tip in loco local space (SmokeStack sits near cabin roof).
+  const tipLocal = useMemo(() => new THREE.Vector3(0.22, 1.38, 0), [])
   const tipWorld = useMemo(() => new THREE.Vector3(), [])
   const reduced = useMemo(() => prefersReducedMotion(), [])
+  const ready = useRef(false)
 
   useFrame((_, dt) => {
     if (reduced) return
@@ -55,18 +57,23 @@ function SmokeTrail({ locoRef }: { locoRef: { current: Group | null } }) {
     if (loco) {
       loco.updateWorldMatrix(true, false)
       tipWorld.copy(tipLocal).applyMatrix4(loco.matrixWorld)
+      // Skip first frames until the loco matrix is off the origin.
+      if (!ready.current) {
+        if (tipWorld.lengthSq() > 4) ready.current = true
+        else return
+      }
       spawnAcc.current += dt
-      if (spawnAcc.current >= 0.09) {
+      if (spawnAcc.current >= 0.08) {
         spawnAcc.current = 0
         const i = next.current % SMOKE_COUNT
         next.current += 1
         const m = puffs.current[i]
         if (m) {
-          m.position.copy(tipWorld)
-          m.scale.setScalar(0.14)
+          m.position.set(tipWorld.x, tipWorld.y + 0.05, tipWorld.z)
+          m.scale.setScalar(0.16)
           ages.current[i] = 0
           const mat = m.material as THREE.MeshBasicMaterial
-          mat.opacity = 0.5
+          mat.opacity = 0.55
           m.visible = true
         }
       }
@@ -82,11 +89,11 @@ function SmokeTrail({ locoRef }: { locoRef: { current: Group | null } }) {
         continue
       }
       const t = age / SMOKE_LIFE
-      // Drift up + slightly outward; stay in world space so the trail lags the train.
-      m.position.y += dt * 0.55
-      m.scale.setScalar(0.14 + t * 0.55)
+      // Rise + soft drift; stay in world space so the plume trails the loco.
+      m.position.y += dt * 0.72
+      m.scale.setScalar(0.16 + t * 0.7)
       const mat = m.material as THREE.MeshBasicMaterial
-      mat.opacity = Math.max(0, 0.48 * (1 - t))
+      mat.opacity = Math.max(0, 0.5 * (1 - t * t))
     }
   })
 
