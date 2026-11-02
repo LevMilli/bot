@@ -2,9 +2,9 @@
 kalshi_history.py — durable quote/history snapshots for desk crypto Kalshi markets.
 
 Series (from staff screenshots):
-  KXBTC15M  — BTC 15-minute up/down
-  KXETH15M  — ETH 15-minute up/down
-  KXBTCD    — BTC price above/below ladder (e.g. 1am EST)
+  KXBTC15M / KXETH15M / KXBTCD
+  KXPALLADIUM15M, KXNATGAS15M, KXCOPPER15M, KXBRENT15M, KXWTI15M, KXSILVER15M
+  (+ gold/platinum when listed)
 
 Paper / read-only. Appends snapshots so the desk can wait out volatility and
 re-check confidence before a late (≤5m) parlay.
@@ -17,8 +17,20 @@ import time
 from typing import Any
 
 HISTORY_NAME = "kalshi_crypto_history.json"
-MAX_SNAPSHOTS = 2500
-CRYPTO_SERIES = ("KXBTC15M", "KXETH15M", "KXBTCD")
+MAX_SNAPSHOTS = 4000
+CRYPTO_SERIES = (
+    "KXBTC15M",
+    "KXETH15M",
+    "KXBTCD",
+    "KXPALLADIUM15M",
+    "KXNATGAS15M",
+    "KXCOPPER15M",
+    "KXBRENT15M",
+    "KXWTI15M",
+    "KXSILVER15M",
+    "KXGOLD15M",
+    "KXPLATINUM15M",
+)
 
 
 def history_path(root: str | None = None) -> str:
@@ -163,6 +175,75 @@ def side_consistency(root: str | None, ticker: str, need: int = 3) -> str | None
     if sides and all(s == sides[0] and s in ("YES", "NO") for s in sides):
         return sides[0]
     return None
+
+
+def snapshot_open_15m_series(root: str | None, series_list: tuple | list | None = None, limit_per: int = 3) -> int:
+    """Light history pass: quote nearest open markets for commodity/crypto 15m series."""
+    import urllib.request
+
+    base = "https://api.elections.kalshi.com/trade-api/v2"
+    ua = {"User-Agent": "paper-bot/1.0 (history)"}
+    watched = tuple(series_list) if series_list is not None else CRYPTO_SERIES
+    n = 0
+
+    def _get(path: str) -> dict:
+        req = urllib.request.Request(base + path, headers=ua)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.load(resp)
+
+    for series in watched:
+        if series == "KXBTCD":
+            continue  # ladder handled separately
+        try:
+            d = _get(f"/markets?series_ticker={series}&status=open&limit={max(1, int(limit_per))}")
+        except Exception:
+            continue
+        for m in d.get("markets") or []:
+            try:
+                strike = float(m.get("floor_strike"))
+            except (TypeError, ValueError):
+                strike = None
+            yes_ask = m.get("yes_ask_dollars")
+            no_ask = m.get("no_ask_dollars")
+            try:
+                yes_ask_f = float(yes_ask) if yes_ask not in (None, "") else None
+            except (TypeError, ValueError):
+                yes_ask_f = None
+            try:
+                no_ask_f = float(no_ask) if no_ask not in (None, "") else None
+            except (TypeError, ValueError):
+                no_ask_f = None
+            close = m.get("close_time")
+            min_left = None
+            if close:
+                try:
+                    import datetime as dt
+                    when = dt.datetime.fromisoformat(str(close).replace("Z", "+00:00"))
+                    min_left = (when - dt.datetime.now(dt.timezone.utc)).total_seconds() / 60
+                except Exception:
+                    min_left = None
+            # Crude vol tag from mid-ask: near 50¢ ⇒ volatile coin-flip.
+            regime = "ladder_watch"
+            if yes_ask_f is not None and 0.40 <= yes_ask_f <= 0.60:
+                regime = "volatile_hold"
+            elif yes_ask_f is not None and (yes_ask_f >= 0.85 or yes_ask_f <= 0.15):
+                regime = "confident_early"
+            record_snapshot(
+                root,
+                series=series,
+                ticker=str(m.get("ticker") or ""),
+                spot=None,
+                target=strike,
+                side=None,
+                yes_ask=yes_ask_f,
+                no_ask=no_ask_f,
+                model_p=None,
+                minutes_left=min_left,
+                regime=regime,
+                note=str(m.get("title") or "")[:120],
+            )
+            n += 1
+    return n
 
 
 def history_summary(root: str | None = None) -> dict:

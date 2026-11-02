@@ -239,7 +239,7 @@ def manage_model_flips(state, side_now, prob_now, bid, fee, delta, ticker=None):
     return sold
 
 
-def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None):
+def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None, vol_kwargs=None):
     """Paper fill only when the signal cleared the edge after fees. No order is sent."""
     none_msg = "Checked all open BTC 15-minute markets. No paper buy."
     if ask is None or not (0.05 <= float(ask) <= 0.95):
@@ -277,8 +277,12 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
+        vk = dict(vol_kwargs or {})
+        vk.setdefault("ask", ask)
+        vk.setdefault("ticker", ticker)
         stake = desk.stake_dollars_for(
-            "btc15m", prob, edge=edge_val, cfg=cfg, open_risk_used=open_risk, ask=ask, root=DESK_ROOT
+            "btc15m", prob, edge=edge_val, cfg=cfg, open_risk_used=open_risk, ask=ask,
+            root=DESK_ROOT, vol_kwargs=vk,
         )
         contracts = desk.contracts_for_stake(per, stake)
     except Exception:
@@ -831,6 +835,16 @@ def main():
     except Exception as e:
         print(f"  DVOL failed: {e}")
 
+    if not IS_SHADOW:
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import kalshi_history
+            n15 = kalshi_history.snapshot_open_15m_series(DESK_ROOT)
+            if n15:
+                print(f"15m series history: recorded {n15} open markets (crypto/metals/energy)")
+        except Exception as e:
+            print(f"  15m history sweep failed: {e}")
     if not IS_SHADOW and price is not None:
         n_ladder = snapshot_btcd_ladder(DESK_ROOT, price)
         if n_ladder:
@@ -1056,6 +1070,11 @@ def main():
         last_sentence = paper_buy(
             account, ev["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
             ev.get("close_time") or m.get("close_time"), True, edge=ev.get("edge"),
+            vol_kwargs={
+                "cushion": ev.get("cushion"), "sigma": ev.get("sigma"),
+                "spread": ev.get("spread"), "minutes_left": ev.get("min_left"),
+                "ask": ev.get("ask"), "ticker": ev.get("ticker"),
+            },
         )
         if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
             buys += 1
@@ -1138,6 +1157,11 @@ def main():
             sentence = paper_buy(
                 account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
                 ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
+                vol_kwargs={
+                    "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
+                    "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
+                    "ask": ev_early.get("ask"), "ticker": m["ticker"],
+                },
             )
             print(f"  ETH early: {sentence}")
             if "Paper buy" in sentence and "No paper buy" not in sentence:

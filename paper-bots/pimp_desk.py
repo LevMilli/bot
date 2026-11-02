@@ -140,6 +140,7 @@ SETTLEMENT_FILES = (
     "kalshi_tape.json",
     "kalshi_crypto_history.json",
     "desk_brain_journal.json",
+    "desk_adapt_state.json",
     "btc15m-signal/paper_parlays.json",
     "pimp-learning.json",
     "pimp-good.json",
@@ -263,6 +264,7 @@ BOT_PLANS = {
             "Selected-side fair ≥ 80%; home fair outside 0.40–0.60 close band",
             "Spread ≤ 0.05; ask in 0.05–0.95",
             "Kelly-lite / desk stake; correlation + learning clear",
+            "Adapt: safe on high vol; bigger only if ≥80% hit with enough settles",
         ],
         "sell": [
             "Model-flip: fair moves against side by desk δ → sell at bid",
@@ -286,6 +288,7 @@ BOT_PLANS = {
             "Once per day 12:30–14:55 CT",
             "Safest YES/NO ask in the 80–90¢ band; venue kalshi_inx edge",
             "Stake floor($25 / ask); correlation + learning clear",
+            "Adapt layer still logs vol/performance for desk study",
         ],
         "sell": [
             "Model-flip: bid under 50¢ → paper sell at bid when enabled",
@@ -310,6 +313,8 @@ BOT_PLANS = {
             "p ≥ ask + fee + venue kalshi_btc15m; model p ≥ 80%; brain journal",
             "BTC cushion ≥ $40 / ETH ≥ $2; z ≥ 0.65; ask 75–90¢; depth ≥ 5",
             "Kelly-lite stake; correlation + learning clear; desk open-risk cap",
+            "Adapt: recognize vol → play safe; proven ≥80% record → play bigger",
+            "History sweep: metals/energy 15m (palladium, natgas, copper, brent, WTI, silver…)",
         ],
         "sell": [
             "Model-flip: side flips or fair collapses by δ → paper sell at bid",
@@ -331,6 +336,7 @@ BOT_PLANS = {
             "RugCheck facts fail-closed + scorer ≥ 0.8",
             "Desk Kelly-lite ticket ($10–$25) capped by cash; max 4 open / 6 entries per day",
             "Broke-cash paper reload when flat; 24h cooldown; learning skip clear",
+            "Adapt: high 5m move → safer size; ≥80% settled hit → size-up",
         ],
         "sell": [
             "Model-flip: scorer confidence / momentum collapse → out before hard stop",
@@ -355,6 +361,7 @@ BOT_PLANS = {
             "Ask band 84–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
             "Correlation veto vs BTC / fixed Kalshi; learning skip clear",
+            "Adapt: safe on high vol; bigger only on proven ≥80% record",
         ],
         "sell": [
             "Model-flip: side bid collapses under 50¢ → paper sell",
@@ -1711,31 +1718,52 @@ def stake_dollars_for(
     open_risk_used: float = 0.0,
     ask=None,
     root: str | None = None,
+    vol_kwargs: dict | None = None,
 ) -> float:
-    """Unified stake: Kelly-lite / curve, then expectancy starve multiplier."""
+    """Unified stake: Kelly-lite → expectancy starve → vol/learn adapt.
+
+    All bots share adapt: play safe on high volatility; size up only when the
+    tower's own settled record is consistently ≥80% accurate (enough n).
+    """
     cfg = cfg or (load_settings(root) if root is not None else dict(DEFAULTS))
     starve_mult = 1.0
+    history = []
     if root is not None:
         try:
-            snap_bots = None
-            # Prefer cheap history from the bot state already on disk via a thin view.
             runs = _load_runs(root)
             day = _today()
             for spec in BOTS:
                 if spec["id"] != bot_id:
                     continue
                 view = _bot_view(spec, root, runs, day)
+                history = list(view.get("history") or [])
                 exp = desk_profit.bot_expectancy(
-                    view.get("history") or [],
+                    history,
                     window_days=int(cfg.get("expectancy_window_days") or 20),
                 )
                 starve_mult = float(desk_profit.starve_state(exp, cfg).get("starve_factor") or 1.0)
                 break
         except Exception:
             starve_mult = 1.0
-    return kelly_lite_dollars(
+    base = kelly_lite_dollars(
         prob, edge, cfg=cfg, open_risk_used=open_risk_used, ask=ask, starve_mult=starve_mult
     )
+    try:
+        import desk_adapt
+        adapted, plan = desk_adapt.adapt_stake(
+            base,
+            history=history,
+            window_days=int(cfg.get("expectancy_window_days") or 20),
+            vol_kwargs=vol_kwargs or ({"ask": ask} if ask is not None else None),
+        )
+        if root is not None:
+            try:
+                desk_adapt.remember_vol(root, bot_id, str((vol_kwargs or {}).get("ticker") or bot_id), plan.get("vol") or {}, plan)
+            except Exception:
+                pass
+        return float(adapted)
+    except Exception:
+        return float(base)
 
 
 def bot_expectancy(history, window_days: int = 20) -> dict:
@@ -1985,6 +2013,11 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         )
     except Exception as exc:  # noqa: BLE001
         desk_row["crypto_parlays"] = {"paper_only": True, "error": type(exc).__name__, "open_count": 0}
+    try:
+        import desk_adapt
+        desk_row["adapt"] = desk_adapt.adapt_summary(root)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["adapt"] = {"paper_only": True, "error": type(exc).__name__}
     return {
         "paper_only": True,
         "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",

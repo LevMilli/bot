@@ -39,8 +39,8 @@ MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
 PRICE_BOUNDS = (0.05, 0.92)     # avoid near-worthless / near-locked contracts
 PREGAME_WINDOW_MIN = 90   # also scan tip-soon books so Sunday nights are not one-trade desks
 
-def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None):
-    """Paper dollars for one sports fill — Kelly-lite when the desk asks for it."""
+def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None, spread=None, ticker=None):
+    """Paper dollars for one sports fill — Kelly-lite + shared vol/learn adapt."""
     if desk is not None:
         try:
             return float(desk.stake_dollars_for(
@@ -51,6 +51,14 @@ def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, as
                 open_risk_used=open_risk_used,
                 ask=ask,
                 root=DESK_ROOT,
+                vol_kwargs={
+                    "ask": ask,
+                    "spread": spread,
+                    "ticker": ticker or "sports",
+                    # Thin edges near the money ⇒ higher vol / safer size.
+                    "cushion": abs(float(fair) - 0.5) if fair is not None else None,
+                    "sigma": 0.25,
+                },
             ))
         except Exception:
             try:
@@ -691,7 +699,16 @@ def run():
                     reason = blocked
             except Exception:
                 pass
-        stake = stake_for_model(fair, desk, cfg, edge=gap, open_risk_used=open_risk, ask=ask)
+        spread = None
+        try:
+            if bid is not None and ask is not None:
+                spread = abs(float(ask) - float(bid))
+        except (TypeError, ValueError):
+            spread = None
+        stake = stake_for_model(
+            fair, desk, cfg, edge=gap, open_risk_used=open_risk, ask=ask,
+            spread=spread, ticker=str(m.get("ticker") or ""),
+        )
         per = ask + fee(ask)
         if desk is not None:
             try:
