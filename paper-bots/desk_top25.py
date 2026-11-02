@@ -787,6 +787,10 @@ def desk_doctor(root: str | None = None, health: dict | None = None) -> dict:
     alive = bool((health or {}).get("alive")) if health is not None else None
     if alive is not None:
         add("timer_alive", alive, "paper_timer heartbeat" if alive else "timer dead")
+        if health and health.get("weekday_alert"):
+            add("weekday_timer_alert", False, str(health.get("alert") or "weekday timer alert"))
+        elif health is not None and alive:
+            add("weekday_timer_alert", True, "no weekday dead-timer alert")
     # Runtime files present?
     base = root or os.path.dirname(os.path.abspath(__file__))
     for label, name in (
@@ -807,6 +811,46 @@ def desk_doctor(root: str | None = None, health: dict | None = None) -> dict:
         add("adapt_import", True, f"VOL_SAFE={desk_adapt.VOL_SAFE}")
     except Exception as exc:
         add("adapt_import", False, type(exc).__name__)
+    # E0 #43/#44 — CARD safety net + Traceback page signal from last runs.
+    # Towers that print CARD: today (INX bots still use card_copy parsers).
+    _card_bots = {"sports-gap", "btc15m", "commodity-15m", "memecoin"}
+    runs_path = os.path.join(base, "pimp-runs.json")
+    traceback_bots = []
+    missing_card = []
+    if os.path.isfile(runs_path):
+        try:
+            with open(runs_path, encoding="utf-8") as handle:
+                runs = json.load(handle)
+        except Exception:
+            runs = {}
+        if isinstance(runs, dict):
+            for bot_id, row in runs.items():
+                if not isinstance(row, dict):
+                    continue
+                summary = str(row.get("summary") or "")
+                err = str(row.get("error") or "")
+                blob = f"{summary}\n{err}"
+                if "Traceback" in blob or "UnboundLocalError" in blob:
+                    traceback_bots.append(str(bot_id))
+                # Towers that print CARD: must leave it on finished ok checks.
+                if (
+                    str(bot_id) in _card_bots
+                    and row.get("ok")
+                    and len(summary.strip()) >= 12
+                    and "CARD:" not in summary
+                    and "card:" not in summary.lower()
+                ):
+                    missing_card.append(str(bot_id))
+    add(
+        "no_traceback_in_runs",
+        not traceback_bots,
+        "clean" if not traceback_bots else f"Traceback in {','.join(traceback_bots[:4])}",
+    )
+    add(
+        "card_line_present",
+        not missing_card,
+        "CARD ok" if not missing_card else f"missing CARD: {','.join(missing_card[:4])}",
+    )
     ok_n = sum(1 for c in checks if c["ok"])
     return {
         "paper_only": True,

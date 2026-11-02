@@ -43,6 +43,8 @@ QUIET_START = "22:00"
 QUIET_END = "07:00"
 MANUAL_GAP_SEC = 30
 HEARTBEAT_STALE_SEC = 180
+# Weekday ops alert when timer has been dead longer than 10 Chicago minutes.
+HEARTBEAT_WEEKDAY_ALERT_SEC = 600
 IDLE_SPORTS_SEC = 900
 # Forced sports AUTO near tip (T−15 / T−5). Fee floors still apply inside gap_bot.
 SPORTS_TIP_FORCE_SEC = 45
@@ -203,7 +205,7 @@ ACTIONS = {
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
 # Daily slots run once per Chicago day, the first time the process is up inside
 # the window. The Kalshi scan uses the desk's paper scan (no --any-time) and
-# starts from 12:00 to 14:55 CT (up to 3 scans/day). The morning brief stays
+# forced INX scans at 12:05 / 13:05 / 14:20 CT (up to 3/day). The morning brief stays
 # the desk's dry run. Settle is the desk's paper settle, once at 4:00 PM CT,
 # after the 3:00 PM contract time, so a closed paper trade can land in the
 # state file. Memecoin manages open exits about every 3 minutes (same script
@@ -218,7 +220,10 @@ AUTO = (
     # Faster manage ticks so −18% / model-flip stops fire before a full bleed.
     {"id": "memecoin", "action": "run", "every_sec": 180},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
-    {"id": "kalshi-sp", "action": "run", "at_ct": "12:00", "until_ct": "14:55"},
+    # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
+    {"id": "kalshi-sp", "action": "run", "at_ct": "12:05", "until_ct": "12:25"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "13:05", "until_ct": "13:25"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "14:20", "until_ct": "14:40"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
     {"id": "kalshi-sized", "action": "run", "at_ct": "12:05", "until_ct": "14:55"},
     # Model-flip / settle polls — offset from the scan window so one bot never double-locks.
@@ -420,7 +425,7 @@ BOT_PLANS = {
     },
     "kalshi-sized": {
         "buy": [
-            "KXINXU 3 PM CT; up to 3 scans 12:05–14:55 CT",
+            "KXINXU 3 PM CT; forced scans 12:05 / 13:05 / 14:20 CT",
             "Ask band 80–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
             "Correlation veto vs BTC / fixed Kalshi; learning skip clear",
@@ -2301,6 +2306,18 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         # Surface skip board on brain too when journal empty.
         if isinstance(desk_row.get("brain"), dict) and not desk_row["brain"].get("skip_leaderboard"):
             desk_row["brain"]["skip_leaderboard"] = desk_row["more"].get("skip_leaderboard")
+        # E0 #3 — every tower card gets today's skip codes (by bot).
+        by_bot = ((desk_row["more"].get("skip_leaderboard") or {}).get("by_bot") or {})
+        for bot in public:
+            raw = by_bot.get(bot.get("id") or "") or {}
+            ranked = sorted(
+                ((str(code), int(n)) for code, n in raw.items()),
+                key=lambda kv: -kv[1],
+            )[:5]
+            bot["skip_board"] = [
+                {"code": desk_more.stable_skip_code(code), "n": n}
+                for code, n in ranked
+            ]
     except Exception as exc:  # noqa: BLE001
         desk_row["more"] = {"paper_only": True, "error": type(exc).__name__}
     try:
@@ -2565,7 +2582,7 @@ def timer_text() -> str:
         "and syncs the Kalshi public trade tape for desk series. "
         "Commodity 15m about every 90 seconds. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
-        "Kalshi paper scan from 12:00 PM (up to 3/day), inside that bot's own window. "
+        "Kalshi paper scans forced at 12:05, 13:05, and 14:20 CT (up to 3/day). "
         "Kalshi paper settle once at 4:00 PM. "
         "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed). "
         "No edge is a finished check with zero paper trades. "
@@ -4270,12 +4287,39 @@ def timer_health(root: str | None = None, now: dt.datetime | None = None) -> dic
         now = now.replace(tzinfo=dt.timezone.utc)
     data = _read_json(heartbeat_path(root)) or {}
     when = _parsed(str(data.get("at") or ""))
+    weekday = now.astimezone(CT).weekday() < 5
     if when is None:
-        return {"alive": False, "detail": "No timer loop yet.", "age": None, "alert": ""}
+        alert = "WEEKDAY ALERT: no paper timer heartbeat yet — start Discord paper_timer." if weekday else ""
+        if not alert:
+            alert = "No timer loop yet."
+        return {
+            "alive": False,
+            "detail": "No timer loop yet.",
+            "age": None,
+            "alert": alert,
+            "weekday": weekday,
+            "weekday_alert": bool(weekday),
+        }
     age = int((now - when).total_seconds())
     alive = age <= HEARTBEAT_STALE_SEC
-    alert = "" if alive else "Paper timer looks dead. The last loop is too old."
-    return {"alive": alive, "detail": "Timer alive." if alive else "Last loop is too old.", "age": age, "alert": alert}
+    alert = ""
+    weekday_alert = False
+    if not alive:
+        alert = "Paper timer looks dead. The last loop is too old."
+        if weekday and age >= HEARTBEAT_WEEKDAY_ALERT_SEC:
+            weekday_alert = True
+            alert = (
+                f"WEEKDAY ALERT: paper timer dead {age // 60}m "
+                f"(>{HEARTBEAT_WEEKDAY_ALERT_SEC // 60}m) — restart Discord paper_timer."
+            )
+    return {
+        "alive": alive,
+        "detail": "Timer alive." if alive else "Last loop is too old.",
+        "age": age,
+        "alert": alert,
+        "weekday": weekday,
+        "weekday_alert": weekday_alert,
+    }
 
 
 def _note_state_mtime(root: str, bot_id: str, folder: str, state_name: str) -> None:

@@ -374,6 +374,18 @@ a {
   font-size: 0.58rem;
 }
 
+.tower-holo-compact .tower-skips {
+  display: block;
+  font-size: 0.48rem;
+  letter-spacing: 0.03em;
+  color: #9aa8c4;
+  opacity: 0.9;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ticker {
   overflow: hidden;
   border-top: 1px solid rgba(255, 42, 109, 0.45);
