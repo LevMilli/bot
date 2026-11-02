@@ -84,10 +84,11 @@ DEFAULTS = {
     "quiet_end": QUIET_END,
     # Desk profit six (venue edge / correlation / kelly / flip / starve / shadow).
     "venue_min_edge": {
-        "kalshi_sports": 0.07,
-        "kalshi_btc15m": 0.055,
+        # Fee-aware floors — keep positive EV after fees without starving fill rate.
+        "kalshi_sports": 0.06,
+        "kalshi_btc15m": 0.05,
         "kalshi_inx": 0.02,
-        "solana_dex": 0.025,
+        "solana_dex": 0.02,
     },
     "sizing": "kelly_lite",
     "kelly_fraction": 0.25,
@@ -250,9 +251,9 @@ BOTS = (
 BOT_PLANS = {
     "sports-gap": {
         "buy": [
-            "Live ESPN game matched to a Kalshi series",
+            "Live or tip-soon (≤90m) ESPN game matched to a Kalshi series",
             "Edge after fee ≥ venue kalshi_sports (NHL +0.02)",
-            "Home fair outside close-game band 0.40–0.60",
+            "Selected-side fair ≥ 80%; home fair outside 0.40–0.60 close band",
             "Spread ≤ 0.05; ask in 0.05–0.95",
             "Kelly-lite / desk stake; correlation + learning clear",
         ],
@@ -320,8 +321,8 @@ BOT_PLANS = {
     "memecoin": {
         "buy": [
             "RugCheck facts fail-closed + scorer ≥ 0.8",
-            "Flat $25 ticket; max 4 open / 6 entries per day",
-            "24h cooldown after close; learning skip clear",
+            "Desk Kelly-lite ticket ($10–$25) capped by cash; max 4 open / 6 entries per day",
+            "Broke-cash paper reload when flat; 24h cooldown; learning skip clear",
         ],
         "sell": [
             "Model-flip: scorer confidence / momentum collapse → out before hard stop",
@@ -2495,6 +2496,25 @@ def lift_sports_starter(state: dict) -> bool:
     return True
 
 
+def lift_memecoin_broke(state: dict) -> bool:
+    """Restore memecoin paper cash when it cannot fund a min ticket and nothing is open.
+
+    Keeps closed history / realized_pnl. Does not invent fills.
+    """
+    if not isinstance(state, dict):
+        return False
+    if state.get("open"):
+        return False
+    cash = _num(state.get("cash_usd"))
+    if cash is None or cash >= 10.0 - 1e-9:
+        return False
+    state["cash_usd"] = 100.0
+    state["paper_only"] = True
+    state["reloaded_from"] = round(cash, 2)
+    state["reloaded_at"] = central_text()
+    return True
+
+
 def _account_body(bot_id: str) -> dict:
     if bot_id == "sports-gap":
         return {"cash": SPORTS_CASH, "open": [], "closed": [], "runs": 0, "paper_only": True}
@@ -2537,6 +2557,10 @@ def ensure_paper_accounts(root: str | None = None) -> list:
             if spec["id"] == "sports-gap":
                 state, problem = _read_state(path)
                 if isinstance(state, dict) and not problem and lift_sports_starter(state):
+                    _write_json(path, state)
+            elif spec["id"] == "memecoin":
+                state, problem = _read_state(path)
+                if isinstance(state, dict) and not problem and lift_memecoin_broke(state):
                     _write_json(path, state)
             continue
         _write_json(path, _account_body(spec["id"]))

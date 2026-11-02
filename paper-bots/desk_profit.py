@@ -14,10 +14,10 @@ from typing import Any
 VENUE_KEYS = ("kalshi_sports", "kalshi_btc15m", "kalshi_inx", "solana_dex")
 
 DEFAULT_VENUE_MIN_EDGE = {
-    "kalshi_sports": 0.07,
-    "kalshi_btc15m": 0.055,
+    "kalshi_sports": 0.06,
+    "kalshi_btc15m": 0.05,
     "kalshi_inx": 0.02,
-    "solana_dex": 0.025,
+    "solana_dex": 0.02,
 }
 
 DEFAULT_CORRELATION_PAIRS = (

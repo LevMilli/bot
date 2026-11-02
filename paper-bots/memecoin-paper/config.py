@@ -4,10 +4,13 @@
 MODEL = "grok-4.7"          # only used by the OPTIONAL Grok hook below (paid API, off by default)
 PAPER = True                # week one: fake fills at real prices. bot.py refuses to run if this is False
 
-TICKET_USD = 25             # flat. never sized off the last win
+TICKET_USD = 25             # default ticket; desk Kelly-lite may size down to cash
+MIN_TICKET_USD = 10         # still trade when cash is thin but edge clears
 MAX_OPEN = 4                # 4 x $25 = $100 in the market, max
 MAX_ENTRIES_PER_DAY = 6
-DAILY_LOSS_HALT_USD = 50    # realized loss today hits this -> no new entries until tomorrow
+# Align with desk daily_loss_stop so a −$50 meme day does not idle the whole teller
+# while sports/BTC still have desk risk budget.
+DAILY_LOSS_HALT_USD = 150
 COOLDOWN_HOURS = 24         # no re-entry into a token you just left
 
 FACTS = {                   # the rug filter. code only, no model
@@ -22,7 +25,7 @@ FACTS = {                   # the rug filter. code only, no model
     "max_age_hours": 72,
 }
 
-MIN_CONFIDENCE = 0.82       # profit desk: only buy when scorer confidence ≥ 82%
+MIN_CONFIDENCE = 0.80       # margin goal: ≥80% confidence + facts + fee-aware venue edge
 
 EXIT = {
     "stop_pct": -35,                        # hard stop from entry
