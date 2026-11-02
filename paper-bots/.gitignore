@@ -12,5 +12,9 @@ pimp-watch.json
 pimp-alerts.json
 pimp-recap.json
 pimp-learning.json
+kalshi_tape.json
+kalshi_crypto_history.json
+desk_brain_journal.json
+btc15m-signal/paper_parlays.json
 *.tmp
 __pycache__/
