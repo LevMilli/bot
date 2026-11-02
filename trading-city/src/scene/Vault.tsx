@@ -47,18 +47,18 @@ function VaultDoor({ clickProps = {} }: { clickProps?: Record<string, unknown> }
           <meshBasicMaterial color="#8a7a40" />
         </mesh>
       ))}
-      <group ref={dial} position={[0, 0, 0.14]}>
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.26, 0.04, 8, 20]} />
-          <meshBasicMaterial color={GOLD} toneMapped={false} />
-        </mesh>
+      <group ref={dial} position={[0, 0, 0.16]}>
         <mesh>
-          <boxGeometry args={[0.42, 0.035, 0.03]} />
+          <torusGeometry args={[0.22, 0.028, 8, 24]} />
           <meshBasicMaterial color={GOLD} toneMapped={false} />
         </mesh>
-        <mesh rotation={[0, 0, Math.PI / 2]}>
-          <boxGeometry args={[0.22, 0.028, 0.028]} />
-          <meshBasicMaterial color="#39ff14" toneMapped={false} />
+        <mesh position={[0.14, 0, 0.05]}>
+          <boxGeometry args={[0.22, 0.045, 0.03]} />
+          <meshBasicMaterial color={GOLD} toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0, 0.03]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.06, 0.06, 0.04, 10]} />
+          <meshBasicMaterial color={GOLD} toneMapped={false} />
         </mesh>
       </group>
       <mesh ref={ring} position={[0, 0, 0.02]}>
