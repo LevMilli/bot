@@ -722,6 +722,31 @@ a {
   pointer-events: auto;
 }
 
+.vault-walk-toolbar {
+  margin-top: 0.45rem;
+  pointer-events: auto;
+}
+
+.vault-walk-btn {
+  appearance: none;
+  background: rgba(4, 8, 20, 0.82);
+  border: 1px solid rgba(45, 226, 230, 0.55);
+  color: var(--cyan);
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.65rem;
+  cursor: pointer;
+}
+
+.vault-walk-btn:hover,
+.vault-walk-btn.active {
+  color: #fff;
+  border-color: rgba(57, 255, 20, 0.7);
+  background: rgba(57, 255, 20, 0.12);
+}
+
 .vault-board-toolbar {
   display: flex;
   justify-content: flex-end;

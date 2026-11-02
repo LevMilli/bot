@@ -62,6 +62,9 @@ export default function App() {
   const [screensOpen, setScreensOpen] = useState(false)
   /** Desk ops HUD (skips / budgets / adapt / fill tax) — opens from ledger/compliance click. */
   const [vaultOpsOpen, setVaultOpsOpen] = useState(false)
+  /** First-person guest bot in the vault hall. */
+  const [walkMode, setWalkMode] = useState(false)
+  const [walkHint, setWalkHint] = useState('')
   const guest = useMemo(() => guestModeFromUrl(), [])
 
   const bots = snap?.bots || []
@@ -103,13 +106,18 @@ export default function App() {
   }, [selectedId, view])
 
   useEffect(() => {
-    if (view !== 'bank') setVaultOpsOpen(false)
+    if (view !== 'bank') {
+      setVaultOpsOpen(false)
+      setWalkMode(false)
+      setWalkHint('')
+    }
   }, [view])
 
   const backToCity = () => {
     setSelectedId(null)
     setFromBank(false)
     setVaultOpsOpen(false)
+    setWalkMode(false)
     setView('city')
     window.location.hash = '#/plaza'
   }
@@ -117,6 +125,7 @@ export default function App() {
   const backToBank = () => {
     setSelectedId(null)
     setFromBank(true)
+    setWalkMode(false)
     setView('bank')
     window.location.hash = '#/bank'
   }
@@ -146,6 +155,8 @@ export default function App() {
                 desk={snap?.desk}
                 onSelectTeller={openTeller}
                 onOpenDeskOps={() => setVaultOpsOpen(true)}
+                walkMode={walkMode}
+                onWalkHint={setWalkHint}
               />
             ) : (
               <CityScene
@@ -282,7 +293,20 @@ export default function App() {
           <div className="office-hud bank-hud">
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
-              <span>A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look</span>
+              <span>
+                {walkMode
+                  ? walkHint || 'WASD walk · Space jump · E talk · Esc unlock look'
+                  : 'A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look'}
+              </span>
+            </div>
+            <div className="vault-walk-toolbar">
+              <button
+                type="button"
+                className={`vault-walk-btn${walkMode ? ' active' : ''}`}
+                onClick={() => setWalkMode((v) => !v)}
+              >
+                {walkMode ? 'Exit bot POV' : 'Walk as guest bot'}
+              </button>
             </div>
             {vaultOpsOpen && (
               <div className="vault-board" aria-label="Desk vault board">

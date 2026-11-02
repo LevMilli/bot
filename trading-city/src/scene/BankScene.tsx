@@ -16,6 +16,7 @@ import {
 import { NeonBloom } from './Effects'
 import { BotFigure } from './BotFigure'
 import { clampBankWalk } from '../data/bankWalk'
+import { PlayerBot } from './PlayerBot'
 
 type Props = {
   bots: BotRow[]
@@ -23,6 +24,9 @@ type Props = {
   onSelectTeller: (id: string) => void
   /** Open the 2D desk ops board (budgets / adapt / fill tax) from a ledger click. */
   onOpenDeskOps?: () => void
+  /** First-person guest bot — walk / jump / talk to tellers. */
+  walkMode?: boolean
+  onWalkHint?: (hint: string) => void
 }
 
 /** Office-matched synthwave trust hall — purple shell, cyan trim, amber chrome. */
@@ -70,22 +74,24 @@ type SlotPose = {
   x: number
   z: number
   rotY: number
+  /** −1 flips tellers 7–12 around (Z mirror) while keeping faces on the aisle. */
+  scaleZ: 1 | -1
 }
 
 /**
- * Left = 0..5, right = 6..11.
- * Local +Z = customer approach toward the aisle.
- * Left rotY=+π/2 → local +Z maps to world +X (into the path).
- * Right rotY=−π/2 → local +Z maps to world −X.
- * Bot sits at local −Z (wall side); ropes extend local +Z (inside / aisle).
+ * Left = 0..5, right = 6..11 (tellers 7–12).
+ * Shared rotY=+π/2: local +Z starts toward world +X.
+ * Right bank scaleZ=−1 flips the pod around so approach still faces the aisle
+ * (world −X) — bots stay wall-side, ropes stay inside, stations read as mirrored.
  */
 function slotPose(index: number): SlotPose {
   const side: -1 | 1 = index < SIDE_COUNT ? -1 : 1
   const row = index % SIDE_COUNT
   const z = TELLER_Z0 - row * TELLER_SPACING
   const x = side * AISLE_HALF
-  const rotY = side < 0 ? Math.PI / 2 : -Math.PI / 2
-  return { side, row, x, z, rotY }
+  const rotY = Math.PI / 2
+  const scaleZ: 1 | -1 = side < 0 ? 1 : -1
+  return { side, row, x, z, rotY, scaleZ }
 }
 
 function tellerSlots(bots: BotRow[]): (BotRow | null)[] {
@@ -101,6 +107,7 @@ function TellerPod({
   away,
   recalling,
   onSelect,
+  mirrored = false,
 }: {
   bot: BotRow | null
   index: number
@@ -108,6 +115,8 @@ function TellerPod({
   away: boolean
   recalling: boolean
   onSelect: (id: string) => void
+  /** Right-bank Z mirror — keep the visor on the aisle. */
+  mirrored?: boolean
 }) {
   // Whole station (desk, glass, lamp, plate, lane cues) follows the building beam color.
   // Parent group orients local +Z toward the center aisle.
@@ -142,8 +151,8 @@ function TellerPod({
     if (botRoot.current) {
       botRoot.current.position.x = walk.current.x
       botRoot.current.position.z = -0.38 + walk.current.z
-      // Face the aisle customer (local +Z). Back-plate is local +Z → Y=π.
-      botRoot.current.rotation.y = Math.PI
+      // Face the aisle customer (local +Z). Mirrored pods already flip Z, so skip π.
+      botRoot.current.rotation.y = mirrored ? 0 : Math.PI
     }
   })
 
@@ -243,7 +252,7 @@ function TellerPod({
       </mesh>
       <mesh position={[0, 1.88, 0.455]} onClick={select}>
         <planeGeometry args={[1.28, 0.42]} />
-        <meshBasicMaterial map={plate} toneMapped={false} />
+        <meshBasicMaterial map={plate} toneMapped={false} side={DoubleSide} />
       </mesh>
       <mesh position={[0, 2.14, 0.44]}>
         <boxGeometry args={[1.4, 0.035, 0.03]} />
@@ -255,7 +264,12 @@ function TellerPod({
       </mesh>
 
       {/* standing teller facing the customer (+Z / camera) */}
-      <group ref={botRoot} position={[0, 0.02, -0.38]} rotation={[0, Math.PI, 0]} scale={0.88}>
+      <group
+        ref={botRoot}
+        position={[0, 0.02, -0.38]}
+        rotation={[0, mirrored ? 0 : Math.PI, 0]}
+        scale={0.88}
+      >
         <BotFigure pose={away && !recalling ? 'waiting' : pose} seated={false} />
       </group>
 
@@ -1040,7 +1054,7 @@ function Stanchion({ position, color }: { position: [number, number, number]; co
 }
 
 /** Interior APEX-CITY TRUST — detailed hall, tellers wrapped around a square. */
-export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) {
+export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, walkMode = false, onWalkHint }: Props) {
   const controls = useRef<OrbitControlsImpl>(null)
   // One detailed station per building, walked around the square.
   const tellers = useMemo(() => tellerSlots(bots), [bots])
@@ -1052,6 +1066,22 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
   const recallTimer = useRef<number | null>(null)
   /** Brief A/D framing only — released after settle or on drag/zoom. */
   const snapRef = useRef<{ active: boolean; focus: number }>({ active: false, focus: startFocus })
+
+  const tellerMouths = useMemo(
+    () =>
+      tellers.map((bot, i) => {
+        const pose = slotPose(i)
+        // Mouth in local +Z, then apply rotY and scaleZ.
+        const localZ = LANE_Z_MOUTH * pose.scaleZ
+        return {
+          x: pose.x + Math.sin(pose.rotY) * localZ,
+          z: pose.z + Math.cos(pose.rotY) * localZ,
+          id: bot?.id ?? null,
+          index: i,
+        }
+      }),
+    [tellers],
+  )
 
   const presentIndexes = useMemo(
     () => tellers.map((b, i) => (b && b.present !== false ? i : -1)).filter((i) => i >= 0),
@@ -1112,7 +1142,9 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
   }, [])
 
   // A/D · ←/→ snap to teller; W/S · ↑/↓ walk aisle with collision; Enter / Space opens.
+  // Disabled while the guest bot has first-person control.
   useEffect(() => {
+    if (walkMode) return
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
       const tag = (e.target as HTMLElement | null)?.tagName
@@ -1177,14 +1209,15 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [tellers, focus, awayIndex, recalling])
+  }, [tellers, focus, awayIndex, recalling, walkMode])
 
   useFrame((_, dt) => {
     const orbit = controls.current
     if (!orbit) return
+    orbit.enabled = !walkMode
     orbit.minDistance = ZOOM_DIST_NEAR - 0.15
     orbit.maxDistance = ZOOM_DIST_MAX
-    if (!snapRef.current.active) return
+    if (walkMode || !snapRef.current.active) return
 
     const pose = slotPose(snapRef.current.focus)
     // Stand in the clear aisle and look at the teller face (ropes on the inside).
@@ -1222,6 +1255,7 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
         enableDamping
         dampingFactor={0.08}
         enablePan={false}
+        enabled={!walkMode}
         minDistance={ZOOM_DIST_NEAR - 0.15}
         maxDistance={ZOOM_DIST_MAX}
         minPolarAngle={0.7}
@@ -1229,6 +1263,20 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
         minAzimuthAngle={-2.6}
         maxAzimuthAngle={2.6}
         onStart={releaseCameraLock}
+      />
+
+      <PlayerBot
+        active={walkMode}
+        aisleHalf={AISLE_HALF}
+        laneHalf={LANE_HALF}
+        zBack={Z_BACK}
+        zFront={Z_FRONT}
+        tellerMouths={tellerMouths}
+        onInteract={(id, index) => {
+          setFocus(index)
+          requestTeller(id, index)
+        }}
+        onHintChange={onWalkHint}
       />
 
       <ambientLight intensity={0.42} color="#c8b8ff" />
@@ -1257,13 +1305,19 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
         const pose = slotPose(i)
         const color = beamColorFor(bot?.id, i)
         return (
-          <group key={bot?.id || `empty-${i}`} position={[pose.x, 0, pose.z]} rotation={[0, pose.rotY, 0]}>
+          <group
+            key={bot?.id || `empty-${i}`}
+            position={[pose.x, 0, pose.z]}
+            rotation={[0, pose.rotY, 0]}
+            scale={[1, 1, pose.scaleZ]}
+          >
             <TellerPod
               bot={bot}
               index={i}
               focused={focus === i}
               away={awayIndex === i}
               recalling={recalling && awayIndex === i}
+              mirrored={pose.scaleZ < 0}
               onSelect={(id) => {
                 setFocus(i)
                 beginFocusSnap(i)
@@ -1275,19 +1329,21 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) 
         )
       })}
 
-      <Html position={[0, 0.08, Z_FRONT - 0.35]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
-        <div
-          style={{
-            fontFamily: 'Share Tech Mono, monospace',
-            fontSize: '11px',
-            color: '#9aa3c7',
-            textAlign: 'center',
-            letterSpacing: '0.06em',
-          }}
-        >
-          A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look · cash {money(desk?.cash)}
-        </div>
-      </Html>
+      {!walkMode && (
+        <Html position={[0, 0.08, Z_FRONT - 0.35]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
+          <div
+            style={{
+              fontFamily: 'Share Tech Mono, monospace',
+              fontSize: '11px',
+              color: '#9aa3c7',
+              textAlign: 'center',
+              letterSpacing: '0.06em',
+            }}
+          >
+            A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look · cash {money(desk?.cash)}
+          </div>
+        </Html>
+      )}
 
       {/* Light bloom — heavy bloom + long ceiling neon read as floating cyan slabs. */}
       <NeonBloom strength={0.16} />
