@@ -1,7 +1,7 @@
 import { Html } from '@react-three/drei'
 import type { BotRow, Desk } from '../types'
 import {
-  BEAM_COLORS,
+  beamColorFor,
   hologramPnl,
   hologramPnlValue,
   money,
@@ -25,7 +25,7 @@ export function TowerHologram({
   onSelect: (id: string) => void
 }) {
   const offline = bot.present === false
-  const color = BEAM_COLORS[index % BEAM_COLORS.length]
+  const color = beamColorFor(bot.id, index)
   const pnlToneClass = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
 
   return (

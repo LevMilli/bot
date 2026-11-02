@@ -1,5 +1,5 @@
 import {
-  BEAM_COLORS,
+  beamColorFor,
   hologramPnl,
   hologramPnlValue,
   money,
@@ -24,7 +24,7 @@ export function TowerRail({ bots, onSelect }: Props) {
       <div className="tower-rail-label">TOWERS</div>
       <ul className="tower-rail-list">
         {bots.map((bot, i) => {
-          const color = BEAM_COLORS[i % BEAM_COLORS.length]
+          const color = beamColorFor(bot.id, i)
           const offline = bot.present === false
           const tone = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
           const status = statusLabel(bot)

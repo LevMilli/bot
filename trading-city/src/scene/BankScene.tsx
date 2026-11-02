@@ -4,7 +4,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { DoubleSide, MathUtils, type Group, type Mesh } from 'three'
 import type { BotRow, Desk } from '../types'
-import { BEAM_COLORS, money, workersOnShift } from '../data/format'
+import { BEAM_COLORS, beamColorFor, money, workersOnShift } from '../data/format'
 import { botPose } from '../data/botPose'
 import {
   sharpenBoardTexture,
@@ -66,7 +66,7 @@ function TellerPod({
   recalling: boolean
   onSelect: (id: string) => void
 }) {
-  const color = BEAM_COLORS[index % BEAM_COLORS.length]
+  const color = beamColorFor(bot?.id, index)
   const offline = !bot || bot.present === false
   const pose = bot ? botPose(bot) : 'waiting'
   const plate = useMemo(() => tellerPlateTexture(bot, index, color), [bot, index, color])
@@ -433,7 +433,7 @@ function LockboxWall({ bots }: { bots: BotRow[] }) {
         x: col * 0.38 - 0.38,
         y: row * 0.34 + 1.0,
         lit: Boolean(bot && bot.present !== false),
-        color: BEAM_COLORS[i % BEAM_COLORS.length],
+        color: beamColorFor(bot?.id, i),
       })
     }
   }
@@ -632,14 +632,14 @@ function Warden() {
   )
 }
 
-function FloorGlowPaths() {
+function FloorGlowPaths({ tellers }: { tellers: (BotRow | null)[] }) {
   return (
     <group>
       {Array.from({ length: TELLER_COUNT }).map((_, i) => (
         <mesh key={i} position={[tellerX(i), 0.012, 0.55]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.07, 2.6]} />
           <meshBasicMaterial
-            color={BEAM_COLORS[i % BEAM_COLORS.length]}
+            color={beamColorFor(tellers[i]?.id, i)}
             transparent
             opacity={0.26}
             depthWrite={false}
@@ -657,13 +657,13 @@ function FloorGlowPaths() {
  * Front stanchion pairs bloomed into a false gate; mouth ends are bare rope tips.
  * Posts are inset (not shared), so neighboring lanes never cross or stack colors.
  */
-function QueueLanes() {
+function QueueLanes({ tellers }: { tellers: (BotRow | null)[] }) {
   const ropeLen = LANE_Z_MOUTH - LANE_Z_BACK
   const ropeMidZ = (LANE_Z_MOUTH + LANE_Z_BACK) / 2
   return (
     <group>
       {Array.from({ length: TELLER_COUNT }).map((_, i) => {
-        const color = BEAM_COLORS[i % BEAM_COLORS.length]
+        const color = beamColorFor(tellers[i]?.id, i)
         const cx = tellerX(i)
         const left = cx - LANE_HALF
         const right = cx + LANE_HALF
@@ -989,7 +989,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         <meshStandardMaterial color="#160e2c" roughness={0.4} metalness={0.35} />
       </mesh>
       <gridHelper args={[12, 24, '#2de2e6', '#2a1060']} position={[0, 0.012, 0.25]} />
-      <FloorGlowPaths />
+      <FloorGlowPaths tellers={tellers} />
 
       {/* shell */}
       <mesh position={[0, 2.15, -3.2]}>
@@ -1036,7 +1036,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <WaitingBench x={4.0} />
       <DataMotes />
 
-      <QueueLanes />
+      <QueueLanes tellers={tellers} />
 
       {tellers.map((bot, i) => (
         <TellerPod
