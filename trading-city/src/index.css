@@ -217,6 +217,150 @@ a {
   z-index: 3;
 }
 
+/* Edge tower tabs — readable, out of the orbit path */
+.tower-rail {
+  position: absolute;
+  top: 5.4rem;
+  left: 0.65rem;
+  bottom: 2.4rem;
+  z-index: 6;
+  width: min(13.5rem, 34vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  pointer-events: none;
+  padding: 0.35rem 0.2rem 0.35rem 0;
+  background: linear-gradient(90deg, rgba(4, 2, 16, 0.72), rgba(4, 2, 16, 0.28), transparent);
+}
+
+.tower-rail-label {
+  pointer-events: none;
+  font-family: var(--font-display);
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  padding-left: 0.35rem;
+}
+
+.tower-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  overflow: auto;
+  pointer-events: auto;
+  scrollbar-width: thin;
+}
+
+.tower-tab {
+  appearance: none;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 0.28rem 1fr;
+  gap: 0.45rem;
+  align-items: stretch;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid rgba(154, 163, 199, 0.28);
+  border-left: none;
+  background: rgba(6, 10, 24, 0.82);
+  color: var(--text);
+  padding: 0;
+  padding-right: 0.45rem;
+  font-family: var(--font-mono);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.tower-tab:hover,
+.tower-tab:focus-visible {
+  border-color: var(--tab-beam, var(--cyan));
+  background: rgba(10, 16, 36, 0.92);
+  transform: translateX(2px);
+  outline: none;
+}
+
+.tower-tab-beam {
+  background: var(--tab-beam, var(--cyan));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tab-beam, var(--cyan)) 55%, transparent);
+}
+
+.tower-tab-body {
+  display: grid;
+  gap: 0.08rem;
+  padding: 0.38rem 0 0.38rem 0;
+  min-width: 0;
+}
+
+.tower-tab-name {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  color: #fff;
+}
+
+.tower-tab-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+.tower-tab-pnl.tone-up {
+  color: var(--lime);
+}
+
+.tower-tab-pnl.tone-down {
+  color: #ff3b3b;
+}
+
+.tower-tab-cash {
+  color: var(--cyan);
+}
+
+.tower-tab-open {
+  color: #ffe9a8;
+}
+
+.tower-tab-status {
+  color: var(--muted);
+  font-size: 0.58rem;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  opacity: 0.9;
+}
+
+.tower-tab.offline {
+  opacity: 0.72;
+}
+
+.tower-tab.offline .tower-tab-beam {
+  filter: saturate(0.35);
+}
+
+.tower-holo-compact {
+  min-width: 6.8rem !important;
+  max-width: 9.5rem !important;
+  padding: 0.28rem 0.4rem !important;
+  gap: 0.06rem !important;
+}
+
+.tower-holo-compact strong {
+  font-size: 0.62rem;
+}
+
+.tower-holo-compact .holo-pnl {
+  font-size: 0.58rem;
+}
+
 .ticker {
   overflow: hidden;
   border-top: 1px solid rgba(255, 42, 109, 0.45);
@@ -682,6 +826,35 @@ a {
 
   .banners {
     top: 5.2rem;
+  }
+
+  .tower-rail {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 2.1rem;
+    width: auto;
+    max-height: none;
+    flex-direction: column;
+    background: linear-gradient(0deg, rgba(4, 2, 16, 0.88), rgba(4, 2, 16, 0.45), transparent);
+    padding: 0.35rem 0.55rem 0.2rem;
+  }
+
+  .tower-rail-list {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 0.35rem;
+  }
+
+  .tower-tab {
+    min-width: 9.5rem;
+    grid-template-columns: 0.22rem 1fr;
+    border-left: none;
+    border: 1px solid rgba(154, 163, 199, 0.28);
+  }
+
+  .tower-tab-status {
+    -webkit-line-clamp: 1;
   }
 }
 

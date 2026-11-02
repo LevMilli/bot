@@ -10,8 +10,8 @@ import {
 } from '../data/format'
 
 /**
- * Trade labels anchored to each tower.
- * `sprite` keeps the card facing the screen while the city orbits.
+ * Quiet name tag on each tower. Full details live in the edge TowerRail —
+ * these stay in-world without crowding the orbit.
  */
 export function TowerHologram({
   bot,
@@ -30,31 +30,30 @@ export function TowerHologram({
 
   return (
     <Html
-      position={[0, height + 1.35, 0]}
+      position={[0, height + 0.95, 0]}
       center
       sprite
-      distanceFactor={14}
+      distanceFactor={18}
       zIndexRange={[40, 10]}
       style={{ pointerEvents: 'auto' }}
     >
       <button
         type="button"
-        className={`holo html-holo tower-holo ${offline ? 'offline' : ''}`}
+        className={`holo html-holo tower-holo tower-holo-compact ${offline ? 'offline' : ''}`}
         style={{
           borderColor: color,
-          boxShadow: `0 0 18px ${color}55`,
+          boxShadow: `0 0 12px ${color}40`,
         }}
         onClick={(e) => {
           e.stopPropagation()
           onSelect(bot.id)
         }}
+        title={statusLabel(bot)}
       >
         <strong>{bot.name}</strong>
-        <span className="holo-status">{statusLabel(bot)}</span>
-        <span className={`holo-pnl tone-${pnlToneClass}`}>{hologramPnl(bot)}</span>
-        {!offline && bot.cash != null && (
-          <span className="holo-cash">cash {money(bot.cash)}</span>
-        )}
+        <span className={`holo-pnl tone-${pnlToneClass}`}>
+          {offline ? 'offline' : hologramPnl(bot)}
+        </span>
       </button>
     </Html>
   )
