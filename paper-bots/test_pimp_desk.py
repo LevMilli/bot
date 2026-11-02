@@ -273,24 +273,26 @@ class PimpDeskTests(unittest.TestCase):
         sports = next(s for s in pimp_desk.AUTO if s["id"] == "sports-gap")
         btc = next(s for s in pimp_desk.AUTO if s["id"] == "btc15m")
         meme = next(s for s in pimp_desk.AUTO if s["id"] == "memecoin")
-        self.assertEqual(sports["every_sec"], 300)
-        self.assertEqual(btc["every_sec"], 90)
-        self.assertEqual(meme["every_sec"], 600)
+        self.assertEqual(sports["every_sec"], 180)  # tip-soon + dual lanes
+        self.assertEqual(btc["every_sec"], 60)
+        self.assertEqual(meme["every_sec"], 180)
         brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")
         scan = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run")
         settle = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle")
-        self.assertEqual((brief["at_ct"], scan["at_ct"], settle["at_ct"]), ("08:00", "12:30", "16:00"))
+        self.assertEqual((brief["at_ct"], scan["at_ct"], settle["at_ct"]), ("08:00", "12:00", "16:00"))
         self.assertEqual(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["argv"], ("bot.py", "brief", "--dry-run"))
         self.assertFalse(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["entry"])
         self.assertTrue(pimp_desk.ACTIONS["kalshi-sp"]["run"]["entry"])
         self.assertEqual([s for s in pimp_desk.AUTO if s["id"] == "memecoin" and "at_ct" in s], [])
         text = pimp_desk.timer_text().lower()
-        self.assertIn("every 5 minutes", text)
+        self.assertIn("every 3 minutes", text)
+        self.assertIn("60 seconds", text)
         self.assertIn("90 seconds", text)
         self.assertIn("trade tape", text)
-        self.assertIn("10 minutes", text)
+        self.assertIn("stop-bleed", text)
+        self.assertIn("dual lanes", text)
         self.assertIn("8:00", text)
-        self.assertIn("12:30", text)
+        self.assertIn("12:00", text)
         self.assertIn("dry run", text)
         self.assertNotIn("guarantee", text)
         with tempfile.TemporaryDirectory() as tmp:
@@ -302,21 +304,22 @@ class PimpDeskTests(unittest.TestCase):
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
             saturday = dt.datetime(2026, 10, 31, 12, 30, tzinfo=pimp_desk.CT)
             self.assertIn(("kalshi-sp", "brief", "08:00"), names(morning))
-            self.assertNotIn(("kalshi-sp", "run", "12:30"), names(morning))
-            self.assertIn(("kalshi-sp", "run", "12:30"), names(noon))
+            self.assertNotIn(("kalshi-sp", "run", "12:00"), names(morning))
+            self.assertIn(("kalshi-sp", "run", "12:00"), names(noon))
             self.assertNotIn(("kalshi-sp", "brief", "08:00"), names(noon))
             self.assertIn(("memecoin", "run", None), names(noon))
-            self.assertNotIn(("kalshi-sp", "run", "12:30"), names(late))
+            self.assertNotIn(("kalshi-sp", "run", "12:00"), names(late))
             self.assertEqual([row[0] for row in names(night)],
                              ["sports-gap", "btc15m", "commodity-15m", "memecoin"])
             self.assertNotIn(("kalshi-sized", "settle", "13:00"), names(night))
-            self.assertIn(("kalshi-sp", "run", "12:30"), names(saturday))
+            self.assertIn(("kalshi-sp", "run", "12:00"), names(saturday))
             saturday_scan = dt.datetime(2026, 10, 31, 12, 35, tzinfo=pimp_desk.CT)
-            self.assertIn(("kalshi-sized", "run", "12:35"), names(saturday_scan))
+            self.assertIn(("kalshi-sized", "run", "12:05"), names(saturday_scan))
         snap = _checkout_snapshot()
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertIn("timer", snap["banner"].lower())
-        self.assertIn("every 5 minutes", snap["timer"].lower())
+        self.assertIn("stop-bleed", snap["timer"].lower())
+        self.assertIn("every 3 minutes", snap["timer"].lower())
 
     def test_scheduler_once_places_no_orders(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -326,7 +329,8 @@ class PimpDeskTests(unittest.TestCase):
             by = {(row["bot"], row["action"]): row for row in rows}
             self.assertEqual(set(by), {
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
-                ("commodity-15m", "run"), ("kalshi-sp", "run"), ("memecoin", "run"),
+                ("commodity-15m", "run"), ("kalshi-sp", "run"), ("kalshi-sized", "run"),
+                ("memecoin", "run"),
             })
             for row in rows:
                 self.assertTrue(row["ok"], row)
@@ -336,9 +340,12 @@ class PimpDeskTests(unittest.TestCase):
             # Live BTC + shadow BTC both invoke the stub script.
             self.assertEqual(_ran(tmp, "btc15m-signal"), "\n\n")
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
-            self.assertIsNone(_ran(tmp, "kalshi-sized-paper"))
+            self.assertEqual(_ran(tmp, "kalshi-sized-paper"), "scan\n")
             self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
-            for folder in ("sports-gap-paper", "btc15m-signal", "kalshi-sp500-paper", "memecoin-paper"):
+            for folder in (
+                "sports-gap-paper", "btc15m-signal", "kalshi-sp500-paper",
+                "kalshi-sized-paper", "memecoin-paper",
+            ):
                 text = _ran(tmp, folder).lower()
                 for word in ("order", "wallet", "api_key", "any-time", "live"):
                     self.assertNotIn(word, text, folder)
@@ -346,14 +353,16 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
             later = dt.datetime(2026, 10, 30, 12, 35, tzinfo=pimp_desk.CT)
             more = pimp_desk.run_scheduled(later, tmp)
+            # Sized already took its daily scan at noon; interval bots still fire.
             self.assertEqual({(row["bot"], row["action"]) for row in more},
                              {("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
-                              ("commodity-15m", "run"), ("kalshi-sized", "run")})
+                              ("commodity-15m", "run"), ("memecoin", "run")})
             self.assertTrue(all(row["ok"] for row in more))
             self.assertEqual(_ran(tmp, "kalshi-sp500-paper"), "scan\n")
             self.assertEqual(_ran(tmp, "kalshi-sized-paper"), "scan\n")
-            self.assertEqual(_ran(tmp, "memecoin-paper"), "\n")
-            self.assertEqual(_ran(tmp, "sports-gap-paper"), "\n\n")
+            # Memecoin / sports re-fire on the shorter interval.
+            self.assertGreaterEqual((_ran(tmp, "memecoin-paper") or "").count("\n"), 2)
+            self.assertGreaterEqual((_ran(tmp, "sports-gap-paper") or "").count("\n"), 2)
 
     def test_morning_brief_is_dry_run_and_limits_skip_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -400,6 +409,7 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(sorted((row["bot"], row["action"], row["ok"]) for row in rows),
                              [("btc15m", "run", False), ("btc15m", "shadow", False),
                               ("commodity-15m", "run", False),
+                              ("desk", "midnight-reload", True),
                               ("memecoin", "run", False), ("sports-gap", "run", False)])
             self.assertTrue(all(not row["blocked"] for row in rows))
 
@@ -479,8 +489,10 @@ class PimpDeskTests(unittest.TestCase):
         self.assertNotIn("stake_for_gap", gap.__dict__)
         self.assertEqual(gap.stake_for_model(0.657, pimp_desk), 20.0)
         self.assertEqual(gap.stake_for_model(0.80, pimp_desk), 20.0)
-        self.assertEqual(gap.stake_for_model(0.90, pimp_desk), 60.0)
-        self.assertEqual(gap.stake_for_model(1, pimp_desk), 100.0)
+        # Phase 1 tower budgets soft-cap sports-gap to 35% of desk $100 → $35.
+        sports_cap = round(100.0 * float(pimp_desk.DEFAULTS["tower_risk_budgets"]["sports-gap"]), 2)
+        self.assertEqual(gap.stake_for_model(0.90, pimp_desk), min(60.0, sports_cap))
+        self.assertEqual(gap.stake_for_model(1, pimp_desk), min(100.0, sports_cap))
         per = 0.55 + gap.fee(0.55)
         count = pimp_desk.contracts_for_stake(per, gap.stake_for_model(0.62, pimp_desk))
         cost = round(count * per, 2)
@@ -1298,6 +1310,71 @@ class PimpDeskTests(unittest.TestCase):
         self.assertTrue(desk_profit.model_flip_adverse("YES", 0.85, 0.70, 0.08))
         self.assertFalse(desk_profit.model_flip_adverse("YES", 0.85, 0.80, 0.08))
         self.assertTrue(desk_profit.model_flip_adverse("NO", 0.20, 0.35, 0.08))
+
+    def test_midnight_reloads_broke_towers_only(self):
+        broke = {
+            "id": "memecoin", "present": True, "open_count": 0,
+            "cash": 5.09, "today": -94.91, "realized": -94.91, "history": [
+                {"pnl": -25.0, "fill_id": "a", "ask": 0.5},
+                {"pnl": -30.0, "fill_id": "b", "ask": 0.5},
+            ],
+        }
+        winner = {
+            "id": "btc15m", "present": True, "open_count": 0,
+            "cash": 120.0, "today": 8.0, "realized": 20.0, "history": [],
+        }
+        armed = {
+            "id": "sports-gap", "present": True, "open_count": 0,
+            "cash": 79.0, "today": 0.0, "realized": 0.0, "history": [],
+        }
+        open_book = {
+            "id": "kalshi-sp", "present": True, "open_count": 1,
+            "cash": 5.0, "today": -10.0, "realized": -40.0, "history": [],
+        }
+        self.assertTrue(pimp_desk.tower_needs_midnight_reload(broke))
+        self.assertFalse(pimp_desk.tower_needs_midnight_reload(winner))
+        self.assertTrue(pimp_desk.tower_doing_good(winner))
+        self.assertTrue(pimp_desk.tower_doing_good(armed))
+        self.assertFalse(pimp_desk.tower_needs_midnight_reload(armed))
+        self.assertTrue(pimp_desk.tower_doing_good(open_book))  # open → leave alone
+        with tempfile.TemporaryDirectory() as tmp:
+            _tree(tmp, QUIET)
+            # Broke memecoin account on disk.
+            meme = os.path.join(tmp, "memecoin-paper")
+            os.makedirs(meme, exist_ok=True)
+            with open(os.path.join(meme, "positions.json"), "w", encoding="utf-8") as handle:
+                json.dump({
+                    "cash_usd": 5.09, "open": [], "cooldown": {},
+                    "realized_pnl_usd": -94.91, "paper_only": True,
+                }, handle)
+            with open(os.path.join(meme, "trades.csv"), "w", encoding="utf-8") as handle:
+                handle.write("ts,side,pnl_usd\n2026-11-01,SELL,-25\n")
+            # Healthy BTC stays.
+            btc = os.path.join(tmp, "btc15m-signal")
+            os.makedirs(btc, exist_ok=True)
+            with open(os.path.join(btc, "paper_account.json"), "w", encoding="utf-8") as handle:
+                json.dump({"cash": 120.0, "open": [], "closed": [], "paper_only": True}, handle)
+            night = dt.datetime(2026, 11, 2, 0, 15, tzinfo=pimp_desk.CT)
+            rows = pimp_desk.run_midnight_broke_reload(tmp, night)
+            self.assertTrue(any(r.get("bot") == "memecoin" and r.get("action") == "midnight-reload" for r in rows))
+            with open(os.path.join(meme, "positions.json"), encoding="utf-8") as handle:
+                after = json.load(handle)
+            self.assertEqual(after["cash_usd"], 100.0)
+            self.assertEqual(after.get("realized_pnl_usd"), 0.0)
+            self.assertFalse(os.path.exists(os.path.join(meme, "trades.csv")))
+            with open(os.path.join(btc, "paper_account.json"), encoding="utf-8") as handle:
+                btc_after = json.load(handle)
+            self.assertEqual(btc_after["cash"], 120.0)
+            with open(pimp_desk.midnight_path(tmp), encoding="utf-8") as handle:
+                marker = json.load(handle)
+            self.assertEqual(marker["day"], "2026-11-02")
+            self.assertIn("memecoin", marker["reloaded"])
+            self.assertIn("btc15m", marker["left_alone"])
+            # Second pass same day is a no-op.
+            self.assertEqual(pimp_desk.run_midnight_broke_reload(tmp, night), [])
+            # Outside the early window: skip.
+            afternoon = dt.datetime(2026, 11, 2, 15, 0, tzinfo=pimp_desk.CT)
+            self.assertEqual(pimp_desk.run_midnight_broke_reload(tmp, afternoon), [])
 
 
 if __name__ == "__main__":

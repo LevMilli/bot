@@ -140,20 +140,85 @@ export type Desk = {
     correlation_pressure?: string[]
     starved_bots?: string[]
     shadow_count?: number
+    fill_tax?: number
+    gate_a_ready_bots?: string[]
+  }
+  more?: {
+    skip_leaderboard?: {
+      top?: { code?: string; n?: number }[]
+      weekend_n?: number
+      weekday_n?: number
+      note?: string
+    }
+    tower_budgets?: Record<string, number>
+    sticky_count?: number
+  }
+  top25?: {
+    city_vault?: {
+      show_skip_board?: boolean
+      show_budget_bars?: boolean
+      show_adapt_dial?: boolean
+      fill_tax_education?: boolean
+      guest_readonly_query?: string
+    }
+    gate_b?: { any_ready?: boolean; bots?: { bot?: string; ready?: boolean }[] }
+    doctor?: { ok?: boolean; hint?: string }
+    dual_control?: { armed?: boolean; status?: string }
+  }
+  gate_a?: {
+    any_ready?: boolean
+    fill_tax?: number
+    note?: string
+  }
+  gate_b?: {
+    any_ready?: boolean
+    note?: string
+  }
+  sports_tip?: {
+    paper_only?: boolean
+    active?: boolean
+    band?: number | null
+    n_pre?: number
+    n_tip?: number
+    nearest_eta_min?: number | null
+    sample?: string
+    force_sec?: number
+    window_min?: number
+    note?: string
+  }
+  master?: {
+    paper_only?: boolean
+    version?: number
+    stopbleed?: {
+      stop_exits?: number
+      model_flip_exits?: number
+      trail_exits?: number
+      red_day_locked?: boolean
+      expand_volume?: boolean
+      stopbleed_pnl?: number
+      today?: number | null
+      note?: string
+    }
+    sports_tip?: Desk['sports_tip']
+    towers?: unknown[]
+    note?: string
   }
   chart?: {
     zone?: string
     default?: string
     ranges?: { id: string; label: string; start: string; end: string }[]
   }
-  /** desk_adapt.adapt_summary() — study / learn / size layer */
+  /** desk_adapt summary + vault dial counters from snapshot */
   adapt?: {
     paper_only?: boolean
     version?: number
     series_15m?: string[]
-    by_bot?: Record<string, Record<string, unknown>>
+    by_bot?: Record<
+      string,
+      Record<string, unknown> & { safe?: number; big?: number; obs?: number }
+    >
     recent_vol?: unknown[]
-    rules?: Record<string, number>
+    rules?: Record<string, unknown>
     error?: string
   }
 }

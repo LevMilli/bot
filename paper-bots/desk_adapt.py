@@ -227,14 +227,26 @@ def performance_from_history(history: list | None, window_days: int = 20) -> dic
 
     proven_80 requires point hit ≥ 80%, n ≥ MIN_N_FOR_BIG, AND Wilson lower ≥ HIT_CI_FLOOR
     so a lucky short streak cannot unlock play-big sizing.
+
+    Phase 1: also compute exponentially decayed hit rate so a hot prior month
+    cannot keep play-big forever (half-life via desk_more).
     """
     import desk_profit
     exp = desk_profit.bot_expectancy(history or [], window_days=window_days)
     n = int(exp.get("n") or 0)
     hit = exp.get("hit_rate")
     hit_f = float(hit) if hit is not None else None
+    decayed = None
+    try:
+        import desk_more
+        decayed = desk_more.decayed_hit_rate(history, window_days=max(window_days, 40))
+        # Use the more conservative of raw vs decayed for play-big.
+        if decayed.get("hit_rate_decayed") is not None and hit_f is not None:
+            hit_f = min(hit_f, float(decayed["hit_rate_decayed"]))
+    except Exception:
+        decayed = None
     # Reconstruct win count from expectancy hit_rate (same window as n).
-    hits = int(round(hit_f * n)) if hit_f is not None and n > 0 else 0
+    hits = int(round((float(hit) if hit is not None else 0) * n)) if n > 0 else 0
     ci_low = wilson_lower(hits, n) if n > 0 else None
     proven = bool(
         n >= MIN_N_FOR_BIG
@@ -247,6 +259,8 @@ def performance_from_history(history: list | None, window_days: int = 20) -> dic
     return {
         "n": n,
         "hit_rate": None if hit_f is None else round(hit_f, 4),
+        "hit_rate_raw": None if hit is None else round(float(hit), 4),
+        "hit_rate_decayed": None if not decayed else decayed.get("hit_rate_decayed"),
         "hit_ci_low": ci_low,
         "hits": hits if n > 0 else 0,
         "expectancy": exp.get("expectancy"),
@@ -328,10 +342,23 @@ def adapt_stake(
     history: list | None = None,
     window_days: int = 20,
     vol_kwargs: dict | None = None,
+    series: str | None = None,
 ) -> tuple[float, dict]:
     """Apply adapt multipliers to an already-computed Kelly/curve stake."""
-    vol = volatility_score(**(vol_kwargs or {}))
-    perf = performance_from_history(history, window_days=window_days)
+    raw_kwargs = dict(vol_kwargs or {})
+    series_key = series or raw_kwargs.pop("series", None)
+    vol = volatility_score(**raw_kwargs)
+    try:
+        import desk_more
+        vol = desk_more.apply_series_vol_prior(vol, series_key)
+    except Exception:
+        pass
+    # Phase 2: proven_80 from calm+elevated (and untagged) settles only.
+    try:
+        import desk_phase2
+        perf = desk_phase2.proven_80_regime_aware(history, window_days=window_days)
+    except Exception:
+        perf = performance_from_history(history, window_days=window_days)
     plan = size_multiplier(vol=vol, perf=perf)
     try:
         base = float(base_stake)
@@ -386,6 +413,8 @@ def adapt_summary(root: str | None = None) -> dict:
             "big_needs_n": MIN_N_FOR_BIG,
             "false_conf_ask": FALSE_CONF_ASK,
             "false_conf_z_min": FALSE_CONF_Z_MIN,
+            "hit_decay": True,
+            "series_vol_priors": True,
         },
     }
 

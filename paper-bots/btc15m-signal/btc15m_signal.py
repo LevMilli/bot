@@ -38,14 +38,19 @@ MIN_MINUTES_LEFT = 10        # early singles need ≥10 minutes before close
 PARLAY_MAX_MIN = 5.0         # late multi-leg window (staff: wait → parlay by ~5m left)
 PARLAY_MIN_MIN = 1.0
 EDGE_BUFFER = 0.05           # fallback if desk venue_min_edge missing
-MIN_MODEL_PROB = 0.80        # margin goal: model Φ(z) must be ≥ 80%
-MIN_CUSHION_USD = 40         # BTC cushion floor (was $50 — still fee-aware with venue edge)
-MIN_CUSHION_ETH = 2.0        # ETH 15m cushion (KXETH15M)
-MIN_Z = 0.65                 # cushion / sigma
-MIN_Z_COINBASE_ONLY = 0.80   # stricter if only Coinbase spot worked
-ASK_MIN, ASK_MAX = 0.75, 0.90  # only buy high-probability priced contracts
-MAX_SPREAD = 0.03
-MIN_DEPTH = 5                # contracts offered at or below the ask
+MIN_MODEL_ACCURATE = 0.80    # accurate lane
+MIN_MODEL_SPEED = 0.72       # speed lane (match sports; needs SPEED_EDGE_EXTRA)
+MIN_MODEL_PROB = MIN_MODEL_ACCURATE
+SPEED_EDGE_EXTRA = 0.02
+MIN_CUSHION_USD = 35         # BTC cushion floor
+MIN_CUSHION_ETH = 1.5        # ETH 15m cushion (KXETH15M)
+MIN_Z = 0.60                 # cushion / sigma (accurate lane)
+MIN_Z_SPEED = 0.55           # speed lane may sit in near-miss z band if edge clears
+MIN_Z_COINBASE_ONLY = 0.75   # stricter if only Coinbase spot worked
+ASK_MIN, ASK_MAX = 0.70, 0.92  # slightly wider book for more fee-aware fills
+MAX_SPREAD = 0.04
+MIN_DEPTH = 3                # contracts offered at or below the ask
+MAX_BUYS_PER_CHECK = 3       # spend idle desk margin across multiple windows
 NEWS_WINDOW_MIN = 30         # USD high-impact event within 30 min of the block -> skip
 TAKE_PROFIT_ADD, TAKE_PROFIT_CAP = 0.15, 0.99
 DVOL_FAIL_MULT = 1.2         # if DVOL fails: use realized sigma * 1.2
@@ -602,7 +607,26 @@ def dvol_latest():
 
 
 def usd_high_impact_near(block_start, block_end):
-    d = get_json("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers=UA)
+    """
+    High-impact USD events near the block.
+    Prefers helpers.calendar_cache last-good so a CDN blip does not fail-closed
+    every window. Returns [] for no hits, None only if calendar never loaded.
+    """
+    d = None
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        from helpers.calendar_cache import load_ff_calendar
+        d = load_ff_calendar(DESK_ROOT)
+    except Exception:
+        d = None
+    if d is None:
+        try:
+            d = get_json("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers=UA)
+        except Exception:
+            return None
+    if not isinstance(d, list):
+        return None
     w = dt.timedelta(minutes=NEWS_WINDOW_MIN)
     hits = []
     for ev in d:
@@ -738,11 +762,20 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         news = None
 
     reasons = list(cheap)
-    zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
-    if p < MIN_MODEL_PROB:
-        reasons.append(f"p {p:.3f} < safer floor {MIN_MODEL_PROB:.2f}")
-    if p < need:
-        reasons.append(f"p {p:.3f} < ask+fee+{edge_buf:.2f} = {need:.3f}")
+    zmin_acc = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
+    lane = "accurate"
+    need_p = float(need)
+    if p + 1e-12 >= MIN_MODEL_ACCURATE:
+        lane = "accurate"
+    elif p + 1e-12 >= MIN_MODEL_SPEED:
+        lane = "speed"
+        need_p = float(need) + SPEED_EDGE_EXTRA
+    else:
+        reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED:.2f}")
+    if p < need_p:
+        reasons.append(f"p {p:.3f} < ask+fee+buf ({lane}) = {need_p:.3f}")
+    # Speed lane: allow near-miss z band only when extra fee-aware edge already clears.
+    zmin = zmin_acc if lane == "accurate" else min(zmin_acc, MIN_Z_SPEED)
     if z < zmin:
         reasons.append(f"z {z:.2f} < {zmin}")
     if not (ASK_MIN <= ask <= ASK_MAX):
@@ -751,17 +784,16 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         reasons.append(f"spread {spread:.2f} > {MAX_SPREAD:.2f}")
     if depth < MIN_DEPTH:
         reasons.append(f"only {depth:.0f} contracts at/below ask (< {MIN_DEPTH})")
-    if toward is None:
-        reasons.append("candle trend unknown")
-    elif toward:
+    # Soft: unknown candle trend does not block (only adverse toward-target does).
+    if toward:
         reasons.append("last 5 candles moving toward target")
-    if news is None:
-        reasons.append("news calendar unavailable")
-    elif news:
+    # Soft: calendar never loaded → do not block; known high-impact still blocks.
+    if news:
         reasons.append("USD high-impact news near this block")
 
     out.update({
         "reasons": reasons,
+        "lane": lane,
         "side": side,
         "p": p,
         "confidence": p,
@@ -772,6 +804,8 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         "edge": float(p) - float(ask) - float(fee),
         "toward": toward,
         "news": news,
+        "news_soft_unavailable": news is None,
+        "candle_soft_unknown": toward is None,
         "cushion": cushion,
         "z": z,
         "need": need,
@@ -928,6 +962,10 @@ def main():
     last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
 
     for ev in ranked:
+        if buys >= MAX_BUYS_PER_CHECK:
+            skips += 1
+            print(f"--- {ev.get('ticker')}  skip: max buys this check ({MAX_BUYS_PER_CHECK})")
+            continue
         m = ev.get("market") or {"ticker": ev.get("ticker"), "target": 0, "close_time": ev.get("close_time"),
                                  "yes_bid": None, "yes_ask": None, "no_bid": None, "no_ask": None}
         min_left = ev.get("min_left")
@@ -1076,6 +1114,36 @@ def main():
                         )
                     except Exception:
                         pass
+                    # Phase 1 shadow near-miss: log only (does not eat desk open-risk).
+                    try:
+                        import desk_more
+                        z_val = None
+                        if ev.get("cushion") is not None and ev.get("sigma"):
+                            try:
+                                z_val = float(ev["cushion"]) / float(ev["sigma"])
+                            except (TypeError, ValueError, ZeroDivisionError):
+                                z_val = None
+                        nm = desk_more.is_near_miss(
+                            reasons=reasons or [regime],
+                            z=z_val,
+                            p=ev.get("p") or ev.get("confidence"),
+                            edge=ev.get("edge"),
+                            min_edge=float(edge_buf),
+                        )
+                        if nm.get("near_miss"):
+                            desk_more.record_near_miss(DESK_ROOT, {
+                                "bot": "btc15m",
+                                "ticker": ev.get("ticker"),
+                                "side": ev.get("side"),
+                                "soft": nm.get("soft"),
+                                "z": z_val,
+                                "p": ev.get("p"),
+                                "edge": ev.get("edge"),
+                                "note": nm.get("note"),
+                            })
+                            print(f"  NEAR-MISS shadow logged ({nm.get('note')})")
+                    except Exception:
+                        pass
                 print()
                 continue
 
@@ -1172,19 +1240,52 @@ def main():
             except Exception:
                 pass
         if regime == "confident_early" and not (ev_early.get("reasons") or []):
-            sentence = paper_buy(
-                account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
-                ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
-                vol_kwargs={
-                    "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
-                    "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
-                    "ask": ev_early.get("ask"), "ticker": m["ticker"],
-                },
-            )
+            # Top25 #10 — ETH lead-lag study: if BTC just spiked, delay ETH early buy.
+            delay_eth = False
+            btc_move = None
+            delay_sec = 45
+            try:
+                if price and closes and len(closes) >= 2:
+                    btc_move = abs(float(price) - float(closes[-1])) / max(float(closes[-1]), 1e-9) * 100.0
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_top25 as _top25
+                delay_sec = int(_top25.ETH_LEAD_LAG_DELAY_SEC)
+                delay_eth = _top25.should_delay_eth(btc_move)
+                _top25.record_eth_lead_lag(
+                    DESK_ROOT,
+                    btc_move_pct=btc_move,
+                    eth_edge=ev_early.get("edge"),
+                    delayed=delay_eth,
+                    note=m["ticker"],
+                )
+            except Exception:
+                delay_eth = False
+            if delay_eth:
+                mv = f"{btc_move:.3f}%" if btc_move is not None else "?"
+                print(f"  ETH early DELAYED ({delay_sec}s study) — BTC move {mv} (paper lead-lag)")
+                sentence = "ETH early delayed for BTC lead-lag study (no paper buy this pass)."
+            else:
+                sentence = paper_buy(
+                    account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
+                    ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
+                    vol_kwargs={
+                        "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
+                        "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
+                        "ask": ev_early.get("ask"), "ticker": m["ticker"], "series": "KXETH15M",
+                    },
+                )
             print(f"  ETH early: {sentence}")
             if "Paper buy" in sentence and "No paper buy" not in sentence:
                 buys += 1
                 last_sentence = sentence
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_top25 as _top25b
+                    _top25b.remember_buy(DESK_ROOT)
+                except Exception:
+                    pass
         elif regime == "parlay_window":
             late = evaluate_window(
                 m, eth_price, eth_closes, dvol, False, edge_buf,

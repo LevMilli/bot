@@ -44,6 +44,9 @@ QUIET_END = "07:00"
 MANUAL_GAP_SEC = 30
 HEARTBEAT_STALE_SEC = 180
 IDLE_SPORTS_SEC = 900
+# Forced sports AUTO near tip (T−15 / T−5). Fee floors still apply inside gap_bot.
+SPORTS_TIP_FORCE_SEC = 45
+SPORTS_TIP_FORCE_WINDOW_MIN = 15
 LOG_CAP_BYTES = 256 * 1024
 PAGE_SIZE = 20
 STALE_PRICE_SEC = 30
@@ -105,6 +108,16 @@ DEFAULTS = {
     "starve_expectancy": 0.0,
     "starve_factor": 0.25,
     "expectancy_window_days": 20,
+    # Phase 1: soft per-tower share of max_open_risk (sums to 1.0). Desk cap still hard.
+    "tower_risk_budgets": {
+        "sports-gap": 0.35,
+        "btc15m": 0.30,
+        "commodity-15m": 0.15,
+        "kalshi-sp": 0.08,
+        "kalshi-sized": 0.07,
+        "memecoin": 0.05,
+    },
+    "hillclimb_lever": None,  # one of desk_more.HILLCLIMB_LEVERS, or null
     "shadow": {
         "enabled": True,
         "btc15m": [{
@@ -146,6 +159,12 @@ SETTLEMENT_FILES = (
     "kalshi_crypto_history.json",
     "desk_brain_journal.json",
     "desk_adapt_state.json",
+    "desk_more_state.json",
+    "desk_sports_clv.json",
+    "desk_top25_state.json",
+    "desk_maker_taker_study.json",
+    "desk_phase2_state.json",
+    "desk_adapt_ab_ledger.json",
     "btc15m-signal/paper_parlays.json",
     "pimp-learning.json",
     "pimp-good.json",
@@ -184,23 +203,24 @@ ACTIONS = {
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
 # Daily slots run once per Chicago day, the first time the process is up inside
 # the window. The Kalshi scan uses the desk's paper scan (no --any-time) and
-# only starts from 12:30 to 14:55 CT, the script's own entry window. An earlier
-# scan would exit without a paper fill. The morning brief stays the desk's dry run.
-# Settle is the desk's paper settle, once at 4:00 PM CT, after the 3:00 PM
-# contract time, so a closed paper trade can land in the state file.
-# Memecoin manages open exits about every 10 minutes (same script still scans
-# for new tickets). Three daily slots were too sparse for stop/ladder/time exits.
+# starts from 12:00 to 14:55 CT (up to 3 scans/day). The morning brief stays
+# the desk's dry run. Settle is the desk's paper settle, once at 4:00 PM CT,
+# after the 3:00 PM contract time, so a closed paper trade can land in the
+# state file. Memecoin manages open exits about every 3 minutes (same script
+# still scans for new tickets; dual accurate/speed lanes; stop-bleed exits).
 AUTO_RETRY_SEC = 900
 AUTO = (
-    {"id": "sports-gap", "action": "run", "every_sec": 300},
-    # BTC is the busiest Kalshi series — poll every 90s; guidelines unchanged, bid every fit.
-    {"id": "btc15m", "action": "run", "every_sec": 90},
-    {"id": "commodity-15m", "action": "run", "every_sec": 120},
-    {"id": "memecoin", "action": "run", "every_sec": 600},
-    {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
-    {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
+    # Faster sports polls so tip-soon + dual lanes can land multiple fills.
+    {"id": "sports-gap", "action": "run", "every_sec": 180},
+    # BTC is the busiest Kalshi series — poll every 60s; guidelines unchanged, bid every fit.
+    {"id": "btc15m", "action": "run", "every_sec": 60},
+    {"id": "commodity-15m", "action": "run", "every_sec": 90},
+    # Faster manage ticks so −18% / model-flip stops fire before a full bleed.
+    {"id": "memecoin", "action": "run", "every_sec": 180},
+    {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "12:00", "until_ct": "14:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
-    {"id": "kalshi-sized", "action": "run", "at_ct": "12:35", "until_ct": "14:55"},
+    {"id": "kalshi-sized", "action": "run", "at_ct": "12:05", "until_ct": "14:55"},
     # Model-flip / settle polls — offset from the scan window so one bot never double-locks.
     {"id": "kalshi-sized", "action": "settle", "at_ct": "13:00", "until_ct": "15:55"},
     {"id": "kalshi-sized", "action": "settle", "at_ct": "16:05", "until_ct": "23:30"},
@@ -267,7 +287,7 @@ BOTS = (
         "name": "Sized Kalshi",
         "folder": "kalshi-sized-paper",
         "script": "bot.py",
-        "blurb": "KXINXU paper bot with desk Kelly-lite stake (84–92¢ band). Own bankroll; model-flip + settle.",
+        "blurb": "KXINXU paper bot with desk Kelly-lite stake (80–92¢ band). Own bankroll; model-flip + settle.",
         "state": "paper_state.json",
         "kind": "kalshi",
         "log": "Trade_Ledger.md",
@@ -280,9 +300,9 @@ BOTS = (
 BOT_PLANS = {
     "sports-gap": {
         "buy": [
-            "Live or tip-soon (≤90m) ESPN game matched to a Kalshi series",
-            "Edge after fee ≥ venue kalshi_sports (NHL +0.02)",
-            "Selected-side fair ≥ 80%; home fair outside 0.40–0.60 close band",
+            "Live or tip-soon (≤180m) ESPN game matched to a Kalshi series",
+            "Dual lanes: accurate fair ≥80% OR speed fair ≥72% with +2¢ edge",
+            "Up to 4 paper buys per check; home fair outside 0.40–0.60 close band",
             "Spread ≤ 0.05; ask in 0.05–0.95",
             "Kelly-lite / desk stake; correlation + learning clear",
             "Adapt: safe on high vol; bigger only if ≥80% hit with enough settles",
@@ -306,8 +326,8 @@ BOT_PLANS = {
     },
     "kalshi-sp": {
         "buy": [
-            "Once per day 12:30–14:55 CT",
-            "Safest YES/NO ask in the 80–90¢ band; venue kalshi_inx edge",
+            "Up to 3 scans/day 12:00–14:55 CT",
+            "Safest YES/NO ask in the 80–92¢ band; venue kalshi_inx edge",
             "Stake floor($25 / ask); correlation + learning clear",
             "Adapt layer still logs vol/performance for desk study",
         ],
@@ -318,7 +338,7 @@ BOT_PLANS = {
         "failsafes": [
             "Desk entry_gate on scan (not settle/brief)",
             "Weekend + news/holiday calendar",
-            "Max 1 trade/day; bot daily loss −$50",
+            "Max 3 trades/day; bot daily loss −$50",
             "Kill switch bankroll ≤ $400; paper_mode required",
             "Correlation veto + starve; pause file",
         ],
@@ -375,8 +395,9 @@ BOT_PLANS = {
     "memecoin": {
         "buy": [
             "RugCheck facts fail-closed + scorer ≥ 0.8",
-            "Desk Kelly-lite ticket ($10–$25) capped by cash; max 4 open / 6 entries per day",
-            "Broke-cash paper reload when flat; 24h cooldown; learning skip clear",
+            "Dual lanes: accurate conf ≥80% OR speed ≥72% (+venue); tickets $10–$25",
+            "Max 6 open / 12 entries per day; 12h cooldown",
+            "Midnight broke reload (Chicago): out-of-ammo towers reset P&L + cash; winners left alone",
             "Adapt: high 5m move → safer size; ≥80% settled hit → size-up",
         ],
         "sell": [
@@ -389,7 +410,8 @@ BOT_PLANS = {
         ],
         "failsafes": [
             "Desk entry_gate + pause",
-            "Bot daily halt −$50; PAPER must be True",
+            "Bot daily halt aligned to desk daily_loss_stop; PAPER must be True",
+            "Midnight broke reload when flat + out of ammo (winners left alone)",
             "Max open 4 / cooldown / facts fail-closed / starve",
         ],
         "exit_quality": "strong",
@@ -398,8 +420,8 @@ BOT_PLANS = {
     },
     "kalshi-sized": {
         "buy": [
-            "KXINXU 3 PM CT; scan 12:35–14:55 CT",
-            "Ask band 84–92¢; order-book confirm",
+            "KXINXU 3 PM CT; up to 3 scans 12:05–14:55 CT",
+            "Ask band 80–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
             "Correlation veto vs BTC / fixed Kalshi; learning skip clear",
             "Adapt: safe on high vol; bigger only on proven ≥80% record",
@@ -512,6 +534,7 @@ ROI_POLICY = {
         {"id": "R15", "text": "Model-flip exits fire before hard stops / settle-only waits."},
         {"id": "R16", "text": "Expectancy starve throttles losers after enough settles."},
         {"id": "R17", "text": "Shadow bots spend no desk cash; promote only after expectancy gates."},
+        {"id": "R18", "text": "Midnight (CT): out-of-ammo flat towers reload cash + reset P&L + log/learn; winners untouched."},
     ],
     "risk": {
         "daily_loss_stop": DEFAULTS["daily_loss_stop"],
@@ -1087,6 +1110,36 @@ def parse_settings(raw: dict):
     if not (5 <= gate_a_n <= 200):
         return None, "gate_a_min_n stays between 5 and 200."
     model_flip_exits = bool(raw.get("model_flip_exits", DEFAULTS["model_flip_exits"]))
+    tower_budgets_raw = raw.get("tower_risk_budgets", DEFAULTS.get("tower_risk_budgets"))
+    tower_budgets: dict = {}
+    if tower_budgets_raw is None:
+        tower_budgets = dict(DEFAULTS.get("tower_risk_budgets") or {})
+    elif not isinstance(tower_budgets_raw, dict):
+        return None, "tower_risk_budgets must be a map of bot id → share."
+    else:
+        total_share = 0.0
+        for bot_id, share in tower_budgets_raw.items():
+            try:
+                s = float(share)
+            except (TypeError, ValueError):
+                return None, "tower_risk_budgets shares must be numbers."
+            if not math.isfinite(s) or s < 0 or s > 1:
+                return None, "each tower_risk_budgets share stays between 0 and 1."
+            tower_budgets[str(bot_id)] = round(s, 4)
+            total_share += s
+        if total_share > 1.0001:
+            return None, "tower_risk_budgets shares must sum to ≤ 1.0."
+    hillclimb_lever = raw.get("hillclimb_lever", DEFAULTS.get("hillclimb_lever"))
+    if hillclimb_lever in ("", None):
+        hillclimb_lever = None
+    else:
+        hillclimb_lever = str(hillclimb_lever)
+        try:
+            import desk_more
+            if hillclimb_lever not in desk_more.HILLCLIMB_LEVERS:
+                return None, f"hillclimb_lever must be one of {list(desk_more.HILLCLIMB_LEVERS)} or null."
+        except Exception:
+            pass
     return {
         "paper_only": True,
         "stake_hi_min": round(hi_min, 2),
@@ -1114,6 +1167,8 @@ def parse_settings(raw: dict):
         "expectancy_window_days": exp_days,
         "fill_adverse_tax": round(fill_tax, 4),
         "gate_a_min_n": gate_a_n,
+        "tower_risk_budgets": tower_budgets,
+        "hillclimb_lever": hillclimb_lever,
         "shadow": shadow,
     }, None
 
@@ -1284,10 +1339,53 @@ def _kalshi_skip(root: str, state: dict | None) -> str:
     if reasons:
         line = f"{key} CT skip: {', '.join(reasons)}."
     else:
-        line = f"{key} CT is not on the skip calendar."
+        # Tradable day — do not put a "not on skip calendar" line in why/skip (looks like a block).
+        line = ""
     if state and state.get("halted"):
-        line += " The paper account is halted by its own kill switch."
+        halt = "The paper account is halted by its own kill switch."
+        line = f"{line} {halt}".strip() if line else halt
     return line
+
+
+def next_inx_scan_line(bot_id: str, now: dt.datetime | None = None) -> str:
+    """
+    Heartbeat for KXINXU towers: next scan / settle window in America/Chicago.
+    Morning idle is schedule-true, not a broken desk.
+    """
+    now = now or dt.datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    else:
+        now = now.astimezone(CT)
+    slots = [s for s in AUTO if s.get("id") == bot_id and "at_ct" in s]
+    if not slots:
+        return ""
+    # Prefer run (scan) slots for the heartbeat; fall back to any.
+    runs = [s for s in slots if s.get("action") == "run"] or slots
+    hm = now.hour * 60 + now.minute
+
+    def _mins(hhmm: str) -> int:
+        h, m = str(hhmm).split(":")
+        return int(h) * 60 + int(m)
+
+    for s in runs:
+        start = _mins(s["at_ct"])
+        until = _mins(s.get("until_ct") or s["at_ct"])
+        if start <= hm <= until:
+            label = "scan" if s.get("action") == "run" else s.get("action")
+            return f"In {label} window until {s.get('until_ct')} CT."
+    # Next future run today, else first run tomorrow.
+    future = sorted(
+        (s for s in runs if _mins(s["at_ct"]) > hm),
+        key=lambda s: _mins(s["at_ct"]),
+    )
+    if future:
+        s = future[0]
+        label = "scan" if s.get("action") == "run" else s.get("action")
+        return f"Next {label} {s['at_ct']} CT."
+    s = sorted(runs, key=lambda x: _mins(x["at_ct"]))[0]
+    label = "scan" if s.get("action") == "run" else s.get("action")
+    return f"Next {label} tomorrow {s['at_ct']} CT."
 
 
 def _btc_skip(summary: str) -> str:
@@ -1779,6 +1877,40 @@ def kelly_lite_dollars(
     )
 
 
+def tower_open_risk(bot_id: str, root: str | None = None, bots: list | None = None) -> float:
+    """Open risk currently used by one tower (paper positions)."""
+    rows = bots
+    if rows is None:
+        try:
+            rows = snapshot(root)["bots"]
+        except Exception:
+            rows = []
+    for bot in rows or []:
+        if bot.get("id") == bot_id and not bot.get("shadow_only"):
+            try:
+                return float(bot.get("open_risk") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def tower_budget_blocks(
+    bot_id: str,
+    stake: float,
+    root: str | None = None,
+    cfg: dict | None = None,
+    bots: list | None = None,
+) -> str:
+    """Block a fill that would blow this tower's soft risk share (desk cap still hard)."""
+    cfg = cfg or load_settings(root)
+    try:
+        import desk_more
+        used = tower_open_risk(bot_id, root=root, bots=bots)
+        return desk_more.tower_budget_blocks(bot_id, used, stake, cfg)
+    except Exception:
+        return ""
+
+
 def stake_dollars_for(
     bot_id: str,
     prob,
@@ -1795,10 +1927,12 @@ def stake_dollars_for(
     All bots share adapt: play safe on high volatility; size up only when the
     tower's own settled record is consistently ≥80% accurate with Wilson CI.
     Set return_plan=True to also get the adapt plan for prove-it drawers.
+    Phase 1: also soft-cap by per-tower risk budget share of desk open-risk.
     """
     cfg = cfg or (load_settings(root) if root is not None else dict(DEFAULTS))
     starve_mult = 1.0
     history = []
+    bot_open = 0.0
     if root is not None:
         try:
             runs = _load_runs(root)
@@ -1808,6 +1942,10 @@ def stake_dollars_for(
                     continue
                 view = _bot_view(spec, root, runs, day)
                 history = list(view.get("history") or [])
+                try:
+                    bot_open = float(view.get("open_risk") or 0.0)
+                except (TypeError, ValueError):
+                    bot_open = 0.0
                 exp = desk_profit.bot_expectancy(
                     history,
                     window_days=int(cfg.get("expectancy_window_days") or 20),
@@ -1822,24 +1960,76 @@ def stake_dollars_for(
     empty_plan = {"mult": 1.0, "play_safe": False, "play_big": False, "notes": [], "vol": {}, "perf": {}}
     try:
         import desk_adapt
+        series = None
+        if isinstance(vol_kwargs, dict):
+            series = vol_kwargs.get("series")
         adapted, plan = desk_adapt.adapt_stake(
             base,
             history=history,
             window_days=int(cfg.get("expectancy_window_days") or 20),
             vol_kwargs=vol_kwargs or ({"ask": ask} if ask is not None else None),
+            series=series,
         )
         if root is not None:
             try:
                 desk_adapt.remember_vol(root, bot_id, str((vol_kwargs or {}).get("ticker") or bot_id), plan.get("vol") or {}, plan)
             except Exception:
                 pass
+        # Soft-cap by per-tower budget so one red tower cannot silence the desk.
+        try:
+            import desk_more
+            info = desk_more.tower_budget_remaining(bot_id, bot_open, cfg)
+            if info["cap"] > 0 and float(adapted) > info["left"] + 1e-9:
+                plan = dict(plan)
+                notes = list(plan.get("notes") or [])
+                notes.append(
+                    f"tower budget cap {info['left']:.2f} left of {info['cap']:.2f}"
+                )
+                plan["notes"] = notes
+                plan["tower_budget"] = info
+                adapted = float(info["left"])
+                if 0 < adapted < 1.0:
+                    adapted = 0.0
+        except Exception:
+            pass
+        # Phase 2: adapt A/B ledger — what stake would have been without adapt.
+        try:
+            import desk_phase2
+            plan = dict(plan)
+            plan["stake_flat"] = round(float(base), 2)
+            plan["stake_adapt"] = round(float(adapted), 2)
+            if root is not None:
+                desk_phase2.record_adapt_ab(
+                    root,
+                    bot=bot_id,
+                    ticker=str((vol_kwargs or {}).get("ticker") or ""),
+                    stake_flat=float(base),
+                    stake_adapt=float(adapted),
+                    mult=float(plan.get("mult") or 1.0),
+                    regime=str((plan.get("vol") or {}).get("regime") or ""),
+                    play_safe=bool(plan.get("play_safe")),
+                    play_big=bool(plan.get("play_big")),
+                    fill_id=str((vol_kwargs or {}).get("fill_id") or ""),
+                )
+        except Exception:
+            pass
         if return_plan:
             return float(adapted), plan
         return float(adapted)
     except Exception:
+        capped = float(base)
+        try:
+            import desk_more
+            info = desk_more.tower_budget_remaining(bot_id, bot_open, cfg)
+            if info["cap"] > 0:
+                capped = min(capped, float(info["left"]))
+                if 0 < capped < 1.0:
+                    capped = 0.0
+        except Exception:
+            pass
         if return_plan:
-            return float(base), empty_plan
-        return float(base)
+            return capped, empty_plan
+        return capped
 
 
 def bot_expectancy(history, window_days: int = 20) -> dict:
@@ -2105,8 +2295,42 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["adapt"] = desk_adapt.adapt_summary(root)
     except Exception as exc:  # noqa: BLE001
         desk_row["adapt"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_more
+        desk_row["more"] = desk_more.more_summary(root, bots=public, cfg=cfg)
+        # Surface skip board on brain too when journal empty.
+        if isinstance(desk_row.get("brain"), dict) and not desk_row["brain"].get("skip_leaderboard"):
+            desk_row["brain"]["skip_leaderboard"] = desk_row["more"].get("skip_leaderboard")
+    except Exception as exc:  # noqa: BLE001
+        desk_row["more"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_top25
+        desk_row["top25"] = desk_top25.top25_summary(
+            root, bots=public, health=timer_health(root), cfg=cfg,
+        )
+        # Gate B beside Gate A.
+        desk_row["gate_b"] = desk_row["top25"].get("gate_b")
+    except Exception as exc:  # noqa: BLE001
+        desk_row["top25"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["gate_b"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_phase2
+        desk_row["phase2"] = desk_phase2.phase2_summary(root)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["phase2"] = {"paper_only": True, "error": type(exc).__name__}
     # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
     tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
+    try:
+        import desk_master
+        desk_row["master"] = desk_master.master_summary(
+            root, bots=public, cfg=cfg, fill_tax=tax,
+        )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["master"] = {"paper_only": True, "error": type(exc).__name__}
+    tip = sports_tip_alarm_from_cache(root)
+    desk_row["sports_tip"] = tip
+    if isinstance(desk_row.get("master"), dict):
+        desk_row["master"]["sports_tip"] = tip
     gate_rows = []
     prove_rows = []
     for bot in public:
@@ -2186,6 +2410,22 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             "fill_tax": "Board fills add a +1¢ adverse tax vs stored ask so ROI stays honest.",
             "gate_a": "Gate A = taxed paper EV ≥ 0 with enough settles — not a live switch.",
             "prove_it": "Prove-it shows cushion/σ/fee/adapt mult/history for each open fill.",
+            "skip_leaderboard": "Top reasons we did not buy today. WEEKEND on Sat/Sun is normal, not broken.",
+            "tower_budgets": "Soft per-tower share of desk open-risk so one tower cannot silence the others.",
+            "near_miss": "Shadow-only near-miss lane studies one soft gate miss without eating desk risk.",
+            "clv": "Sports closing-line value: entry fair minus later fair/close.",
+            "hillclimb": "Change one sizing/edge lever per week; revert if taxed EV falls two weeks.",
+            "fill_tax_education": (
+                "Board fills add a +1¢ adverse tax vs stored ask so ROI stays honest. "
+                "Untaxed paper wins are not live-ready."
+            ),
+            "gate_b": "Gate B = peak-to-trough drawdown within bound with enough settles — readiness only.",
+            "top25": "Top-25 shortlist hooks: skip-regret, budgets, watchdog, playbooks, doctor.",
+            "master": (
+                "Trading Masters scoreboard (M1–M7): taxed EV vs volume. "
+                "Stub — no profit guarantee; fee floors unchanged."
+            ),
+            "guest": "Guest mode (?guest=1) is read-only — no staff actions.",
         },
         "audit": audit_rows(root)[:12],
         "bots": public,
@@ -2319,13 +2559,15 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
 def timer_text() -> str:
     """Plain schedule for the desk. No forecast and no profit language."""
     return (
-        "On a timer, America/Chicago. Sports gap about every 5 minutes. "
-        "BTC 15-minute signal about every 90 seconds — scores every open KXBTC15M window "
+        "On a timer, America/Chicago. Sports gap about every 3 minutes (dual lanes); "
+        "about every 45 seconds when a cached tip is inside T−15 (fee-aware still). "
+        "BTC 15-minute signal about every 60 seconds — scores every open KXBTC15M window "
         "and syncs the Kalshi public trade tape for desk series. "
+        "Commodity 15m about every 90 seconds. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
-        "Kalshi paper scan once at 12:30 PM, inside that bot's own window. "
+        "Kalshi paper scan from 12:00 PM (up to 3/day), inside that bot's own window. "
         "Kalshi paper settle once at 4:00 PM. "
-        "Memecoin about every 10 minutes (manage exits, then scan). "
+        "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed). "
         "No edge is a finished check with zero paper trades. "
         "Numbers only move while the Discord bot paper timer is alive."
     )
@@ -2385,8 +2627,8 @@ def due_slots(now: dt.datetime, root: str) -> list:
         if "every_sec" in slot:
             prev = _parsed(saved.get(key) or "")
             gap = float(slot["every_sec"])
-            if slot["id"] == "sports-gap" and _sports_idle(root):
-                gap = max(gap, IDLE_SPORTS_SEC)
+            if slot["id"] == "sports-gap":
+                gap = _sports_auto_gap_sec(root, gap, now=now)
             if prev is not None and (now - prev).total_seconds() < gap:
                 continue
             due.append(slot)
@@ -2432,10 +2674,32 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
         now = dt.datetime.now(dt.timezone.utc)
     elif now.tzinfo is None:
         now = now.replace(tzinfo=dt.timezone.utc)
+    # Phase 0: settle open 15m history labels ≤1× / 10m so adapt can learn without stalling.
+    try:
+        import kalshi_history
+        marker = _under(root, "desk_settle_harness_at.txt")
+        due = True
+        if os.path.isfile(marker):
+            try:
+                age = now.timestamp() - os.path.getmtime(marker)
+                due = age >= 600
+            except OSError:
+                due = True
+        if due:
+            kalshi_history.settle_open_windows(root, limit=12)
+            try:
+                with open(marker, "w", encoding="utf-8") as handle:
+                    handle.write(_iso(now) + "\n")
+            except OSError:
+                pass
+    except Exception:
+        pass
     touch_heartbeat(root, now)
+    # Broke towers only: once per Chicago day in the early window, reload ammo + reset P&L.
+    # Winners and towers with open paper stay untouched.
+    results = list(run_midnight_broke_reload(root, now))
     slots = due_slots(now, root)
     saved = _load_auto(root)
-    results = []
     saved_lock = threading.Lock()
 
     def _one(slot: dict) -> dict:
@@ -2493,6 +2757,57 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
         })
     if results:
         _atomic_write(auto_path(root), json.dumps(saved, indent=2) + "\n")
+    # Phase 0/1 recycle: remember sticky opens so staff/ops can free risk.
+    try:
+        import desk_more
+        bots = snapshot(root).get("bots") or []
+        sticky = desk_more.sticky_positions(bots)
+        desk_more.remember_sticky(root, sticky)
+    except Exception:
+        bots = []
+        sticky = []
+    # Top25 #5 — global rank minute across recent brain candidates.
+    try:
+        import desk_brain
+        import desk_top25
+        summary = desk_brain.brain_summary(root)
+        cand = []
+        for row in summary.get("recent") or []:
+            if not isinstance(row, dict):
+                continue
+            if row.get("action") not in ("observe", "buy", "candidate", "skip"):
+                continue
+            if row.get("edge") is None:
+                continue
+            cand.append({
+                "bot": row.get("bot"),
+                "ticker": row.get("ticker"),
+                "side": row.get("side"),
+                "edge": row.get("edge"),
+                "confidence": row.get("confidence"),
+                "depth": row.get("depth"),
+                "stake_est": row.get("stake_est") or 20,
+                "venue": {
+                    "btc15m": "kalshi_btc15m",
+                    "commodity-15m": "kalshi_commodity15m",
+                    "sports-gap": "kalshi_sports",
+                }.get(str(row.get("bot") or ""), ""),
+            })
+        cfg = load_settings(root)
+        used = 0.0
+        for b in bots or []:
+            if b.get("shadow_only"):
+                continue
+            try:
+                used += float(b.get("open_risk") or 0)
+            except (TypeError, ValueError):
+                pass
+        left = max(0.0, float(cfg.get("max_open_risk") or 100) - used)
+        if cand:
+            desk_top25.global_rank_minute(cand, left, root=root)
+        desk_top25.sticky_settle_sla(len(sticky), root=root)
+    except Exception:
+        pass
     return results
 
 
@@ -2742,6 +3057,281 @@ def lift_memecoin_broke(state: dict) -> bool:
     state["reloaded_from"] = round(cash, 2)
     state["reloaded_at"] = central_text()
     return True
+
+
+# Starter cash / minimum “ammo” for midnight broke-tower reloads (Chicago day).
+TOWER_STARTER_CASH = {
+    "sports-gap": 100.0,
+    "btc15m": 100.0,
+    "commodity-15m": 100.0,
+    "memecoin": 100.0,
+    "kalshi-sp": 500.0,
+    "kalshi-sized": 500.0,
+}
+TOWER_MIN_AMMO = {
+    "sports-gap": 10.0,
+    "btc15m": 10.0,
+    "commodity-15m": 10.0,
+    "memecoin": 10.0,
+    "kalshi-sp": 20.0,
+    "kalshi-sized": 20.0,
+}
+
+
+def midnight_path(root: str | None = None) -> str:
+    return _under(root, "pimp-midnight.json")
+
+
+def tower_doing_good(bot: dict) -> bool:
+    """Winners / healthy towers stay untouched at midnight.
+
+    A mid-day cash top-up does not count as “doing good” if the book is still
+    underwater — those towers get a full P&L reset at Chicago midnight.
+    """
+    if not isinstance(bot, dict) or not bot.get("present"):
+        return True
+    bot_id = str(bot.get("id") or "")
+    starter = float(TOWER_STARTER_CASH.get(bot_id) or 100.0)
+    min_ammo = float(TOWER_MIN_AMMO.get(bot_id) or 10.0)
+    if int(bot.get("open_count") or 0) > 0:
+        return True
+    cash = _num(bot.get("cash"))
+    if cash is None:
+        return True
+    today = float(bot.get("today") or 0.0)
+    realized = _num(bot.get("realized"))
+    if realized is None:
+        realized = 0.0
+    # Green book with at least starter cash (or better).
+    if cash + 1e-9 >= starter and realized >= -1e-9 and today >= -1e-9:
+        return True
+    # Still armed and not underwater — leave the working bankroll alone.
+    if cash + 1e-9 >= min_ammo and realized >= -1e-9 and today >= -1e-9:
+        return True
+    return False
+
+
+def tower_needs_midnight_reload(bot: dict) -> bool:
+    """Out of ammo and/or blew the paper book — flat towers only."""
+    if not isinstance(bot, dict) or not bot.get("present"):
+        return False
+    if int(bot.get("open_count") or 0) > 0:
+        return False
+    if tower_doing_good(bot):
+        return False
+    bot_id = str(bot.get("id") or "")
+    starter = float(TOWER_STARTER_CASH.get(bot_id) or 100.0)
+    min_ammo = float(TOWER_MIN_AMMO.get(bot_id) or 10.0)
+    cash = _num(bot.get("cash"))
+    if cash is None:
+        return False
+    today = float(bot.get("today") or 0.0)
+    realized = _num(bot.get("realized"))
+    if realized is None:
+        realized = 0.0
+    if cash + 1e-9 < min_ammo:
+        return True
+    # Underwater after a losing day/book — even if cash was topped up mid-day.
+    if (realized < -1e-9 or today < -1e-9) and cash + 1e-9 <= starter + 1e-9:
+        return True
+    if cash + 1e-9 < starter * 0.5 and realized < -1e-9:
+        return True
+    return False
+
+
+def _learn_tower_before_midnight(root: str, bot: dict, day: str) -> int:
+    """Push closed P&L into desk learning so the next bankroll can skip cold buckets."""
+    bot_id = str(bot.get("id") or "")
+    n = 0
+    for idx, row in enumerate(list(bot.get("history") or [])[-80:]):
+        if not isinstance(row, dict):
+            continue
+        pnl = _num(row.get("pnl"))
+        if pnl is None:
+            continue
+        fill = _clean(row.get("fill_id") or row.get("when") or row.get("closed_at") or str(idx), 80)
+        record_learning(root, {
+            "result": "hit" if pnl > 0 else "miss",
+            "market": bot_id,
+            "prob": row.get("prob") or row.get("ask") or row.get("prob_exit") or 0.5,
+            "stake": abs(pnl) if abs(pnl) >= 0.01 else 1.0,
+            "fill_id": f"midnight-learn:{bot_id}:{day}:{fill}",
+            "at": central_text(),
+        })
+        n += 1
+    today = float(bot.get("today") or 0.0)
+    realized = _num(bot.get("realized"))
+    if realized is None:
+        realized = today
+    record_learning(root, {
+        "result": "hit" if (today >= 0 and realized >= 0) else "miss",
+        "market": bot_id,
+        "prob": 0.5,
+        "stake": max(1.0, abs(float(realized or 0.0)), abs(today)),
+        "fill_id": f"midnight-dayroll:{bot_id}:{day}",
+        "at": central_text(),
+    })
+    return n + 1
+
+
+def _archive_tower_file(root: str, folder: str, name: str, day: str) -> str:
+    """Move a paper file aside (keep evidence) before a fresh account write."""
+    src = _under(root, folder, name)
+    if not os.path.isfile(src) and not os.path.islink(src):
+        return ""
+    arch_dir = os.path.join(_root(root), "midnight-archive", day)
+    os.makedirs(arch_dir, exist_ok=True)
+    safe = f"{folder.replace(os.sep, '_')}__{name}"
+    dest = os.path.join(arch_dir, safe)
+    # Prefer rename; fall back to copy+unlink for cross-device volumes.
+    try:
+        os.replace(src, dest)
+    except OSError:
+        import shutil
+        shutil.copy2(src, dest)
+        _unlink(src)
+    return dest
+
+
+def reload_broke_tower(root: str, bot: dict, day: str, who: str = "midnight") -> dict:
+    """Archive P&L files, learn, reload starter cash — one tower only."""
+    root = _root(root)
+    bot_id = str(bot.get("id") or "")
+    spec = next((b for b in BOTS if b["id"] == bot_id), None)
+    if not spec:
+        return {"ok": False, "bot": bot_id, "error": "unknown bot"}
+    folder = spec["folder"]
+    before_cash = _num(bot.get("cash"))
+    before_today = float(bot.get("today") or 0.0)
+    before_realized = _num(bot.get("realized"))
+    learned = _learn_tower_before_midnight(root, bot, day)
+    archived = []
+    state_name = ACCOUNT_FILES.get(bot_id) or spec.get("state") or ""
+    extras = {
+        "sports-gap": ("paper_trades.md",),
+        "kalshi-sp": ("Trade_Ledger.md",),
+        "kalshi-sized": ("Trade_Ledger.md",),
+        "memecoin": ("trades.csv", "checks.csv"),
+        "btc15m": (),
+        "commodity-15m": (),
+    }.get(bot_id, ())
+    for name in (state_name, *extras):
+        if not name:
+            continue
+        dest = _archive_tower_file(root, folder, name, day)
+        if dest:
+            archived.append(os.path.basename(dest))
+    # Fresh starter account (P&L zeroed). Learning rows stay in pimp-learning.json.
+    body = _account_body(bot_id)
+    body["paper_only"] = True
+    body["midnight_reloaded_at"] = central_text()
+    body["midnight_reloaded_day"] = day
+    body["midnight_reloaded_from_cash"] = before_cash
+    path = _under(root, folder, state_name)
+    _write_json(path, body)
+    after_cash = (
+        _num(body.get("cash"))
+        or _num(body.get("bankroll"))
+        or _num(body.get("cash_usd"))
+        or float(TOWER_STARTER_CASH.get(bot_id) or 0)
+    )
+    note = (
+        f"Midnight reload {bot_id}: cash {before_cash} → {after_cash}, "
+        f"today {before_today:+.2f}, realized {before_realized}, learned {learned}, "
+        f"archived {len(archived)} file(s)."
+    )
+    audit(
+        root,
+        who or "midnight",
+        note[:120],
+        before={"cash": before_cash, "today": before_today, "realized": before_realized},
+        after={"cash": after_cash, "day": day, "archived": archived},
+    )
+    return {
+        "ok": True,
+        "bot": bot_id,
+        "error": "",
+        "summary": note,
+        "before_cash": before_cash,
+        "after_cash": after_cash,
+        "learned": learned,
+        "archived": archived,
+    }
+
+
+def run_midnight_broke_reload(root: str | None = None, now: dt.datetime | None = None) -> list:
+    """Once per Chicago day (00:00–06:00 CT): reload broke towers only; leave winners alone."""
+    root = _root(root)
+    if now is None:
+        now = dt.datetime.now(dt.timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    now_ct = now.astimezone(CT)
+    if not (0 <= now_ct.hour < 6):
+        return []
+    day = now_ct.date().isoformat()
+    marker = _read_json(midnight_path(root)) or {}
+    if isinstance(marker, dict) and marker.get("day") == day:
+        return []
+    ensure_paper_accounts(root)
+    runs = _load_runs(root)
+    bots = [_bot_view(spec, root, runs, now_ct.date()) for spec in BOTS]
+    if not any(b.get("id") == "kalshi-sized" for b in bots):
+        bots.append(_sized_view())
+    reloaded = []
+    left_alone = []
+    waiting_open = []
+    rows = []
+    for bot in bots:
+        bot_id = str(bot.get("id") or "")
+        if not bot.get("present"):
+            left_alone.append(bot_id)
+            continue
+        if int(bot.get("open_count") or 0) > 0 and not tower_doing_good(bot):
+            # Flat required before a P&L wipe — open books wait for the next day.
+            waiting_open.append(bot_id)
+            left_alone.append(bot_id)
+            continue
+        if tower_doing_good(bot):
+            left_alone.append(bot_id)
+            continue
+        if not tower_needs_midnight_reload(bot):
+            left_alone.append(bot_id)
+            continue
+        result = reload_broke_tower(root, bot, day, who="midnight")
+        reloaded.append(bot_id)
+        rows.append({
+            "bot": bot_id,
+            "action": "midnight-reload",
+            "ok": bool(result.get("ok")),
+            "blocked": False,
+            "entries_blocked": False,
+            "error": result.get("error") or "",
+            "summary": result.get("summary") or "",
+        })
+        log.info("midnight reload %s: %s", bot_id, _clean(result.get("summary") or "", 180))
+    _write_json(midnight_path(root), {
+        "day": day,
+        "at": central_text(now_ct),
+        "reloaded": reloaded,
+        "left_alone": left_alone,
+        "waiting_open": waiting_open,
+        "paper_only": True,
+    })
+    if not rows and left_alone:
+        rows.append({
+            "bot": "desk",
+            "action": "midnight-reload",
+            "ok": True,
+            "blocked": False,
+            "entries_blocked": False,
+            "error": "",
+            "summary": (
+                f"Midnight pass {day}: no broke towers to reload "
+                f"(left alone {len(left_alone)}; waiting open {len(waiting_open)})."
+            ),
+        })
+    return rows
 
 
 def _account_body(bot_id: str) -> dict:
@@ -3562,6 +4152,96 @@ def _sports_idle(root: str) -> bool:
     return "no live games" in text or '"live_games": 0' in text or '"live_games":0' in text
 
 
+def sports_tip_alarm_from_cache(
+    root: str | None = None,
+    now: dt.datetime | None = None,
+    window_min: float | None = None,
+) -> dict:
+    """Offline tip-alarm from sports-gap quote_cache. No network. Fee floors unchanged.
+
+    Returns active=True when any pregame tip is inside the forward window (default T−15).
+    Band is 5 when nearest tip ≤5m, else 15 when ≤window.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    window = float(SPORTS_TIP_FORCE_WINDOW_MIN if window_min is None else window_min)
+    path = _under(root, "sports-gap-paper", "quote_cache.json")
+    data = _read_json(path)
+    nearest = None
+    n_pre = 0
+    n_tip = 0
+    sample = ""
+    if isinstance(data, dict):
+        for payload in data.values():
+            if not isinstance(payload, dict):
+                continue
+            body = payload.get("body")
+            if isinstance(body, str):
+                try:
+                    body = json.loads(body)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+            if not isinstance(body, dict):
+                continue
+            for event in body.get("events") or []:
+                if not isinstance(event, dict):
+                    continue
+                comps = (event.get("competitions") or [{}])
+                comp = comps[0] if comps and isinstance(comps[0], dict) else {}
+                status = (comp.get("status") or event.get("status") or {})
+                stype = status.get("type") if isinstance(status, dict) else {}
+                if not isinstance(stype, dict):
+                    stype = {}
+                if str(stype.get("state") or "") != "pre":
+                    continue
+                n_pre += 1
+                raw = comp.get("date") or event.get("date")
+                if not raw:
+                    continue
+                try:
+                    when = dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=dt.timezone.utc)
+                eta = (when - now).total_seconds() / 60.0
+                if eta <= 0 or eta > window:
+                    continue
+                n_tip += 1
+                if nearest is None or eta < nearest:
+                    nearest = eta
+                    sample = _clean(event.get("name") or event.get("shortName") or "", 80)
+    band = None
+    if nearest is not None:
+        if nearest <= 5:
+            band = 5
+        elif nearest <= window:
+            band = 15
+    return {
+        "paper_only": True,
+        "active": band is not None,
+        "band": band,
+        "n_pre": n_pre,
+        "n_tip": n_tip,
+        "nearest_eta_min": round(nearest, 2) if nearest is not None else None,
+        "sample": sample,
+        "force_sec": SPORTS_TIP_FORCE_SEC,
+        "window_min": window,
+        "note": "Forced AUTO cadence only — venue min_edge still required inside gap_bot.",
+    }
+
+
+def _sports_auto_gap_sec(root: str, base_gap: float, now: dt.datetime | None = None) -> float:
+    """Sports cadence: tip-force (45s) > normal > idle stretch. Never loosens fees."""
+    tip = sports_tip_alarm_from_cache(root, now=now)
+    if tip.get("active"):
+        return float(SPORTS_TIP_FORCE_SEC)
+    if _sports_idle(root):
+        return max(float(base_gap), float(IDLE_SPORTS_SEC))
+    return float(base_gap)
+
+
 def _rate_ok(root: str, bot_id: str, now: dt.datetime | None = None) -> bool:
     now = now or dt.datetime.now(dt.timezone.utc)
     data = _read_json(manual_path(root)) or {}
@@ -3635,8 +4315,8 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
         if "every_sec" in slot:
             prev = _parsed(saved.get(_slot_key(slot)) or "")
             gap = float(slot["every_sec"])
-            if bot_id == "sports-gap" and _sports_idle(root):
-                gap = max(gap, float(IDLE_SPORTS_SEC))
+            if bot_id == "sports-gap":
+                gap = _sports_auto_gap_sec(root, gap, now=now)
             when = now if prev is None else prev + dt.timedelta(seconds=gap)
             if when < now:
                 when = now
@@ -3739,6 +4419,20 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         view["idle_copy"] = f"No paper trades yet. Last check {view['central_check']}. No edge."
     else:
         view["idle_copy"] = ""
+    # INX towers: surface next scan heartbeat so morning idle is not read as broken.
+    if spec.get("id") in ("kalshi-sp", "kalshi-sized"):
+        heartbeat = next_inx_scan_line(str(spec.get("id")))
+        view["next_scan"] = heartbeat
+        if heartbeat:
+            if view.get("idle_copy"):
+                view["idle_copy"] = f"{view['idle_copy']} {heartbeat}"
+            why = str(view.get("why") or "")
+            if why and "Next scan" not in why and "In scan window" not in why and "Next " not in why:
+                # Keep CARD why; append schedule only when it looks like a no-buy finish.
+                if "no paper buy" in why.lower() or "check finished" in why.lower() or not why.strip():
+                    view["why"] = f"{why} {heartbeat}".strip()
+            elif not why:
+                view["why"] = heartbeat
     if not view.get("why") and view.get("skip"):
         view["why"] = plain_reason(view.get("skip") or "")
     summary = str(run.get("summary") or "")

@@ -46,12 +46,17 @@ YAHOO = {
     "KXPLATINUM15M": "PL=F",
 }
 
-MIN_MINUTES_LEFT = 10
-MIN_MODEL_PROB = 0.80
-MIN_Z = 0.65
-ASK_MIN, ASK_MAX = 0.75, 0.90
-MAX_SPREAD = 0.04
-MIN_DEPTH = 3
+MIN_MINUTES_LEFT = 8
+MIN_MODEL_ACCURATE = 0.80
+MIN_MODEL_SPEED = 0.72       # match sports/BTC speed lane; needs SPEED_EDGE_EXTRA
+MIN_MODEL_PROB = MIN_MODEL_ACCURATE
+SPEED_EDGE_EXTRA = 0.02
+MIN_Z = 0.60
+MIN_Z_SPEED = 0.55           # speed lane near-miss z when extra edge clears
+MAX_BUYS_PER_CHECK = 3
+ASK_MIN, ASK_MAX = 0.70, 0.92
+MAX_SPREAD = 0.05
+MIN_DEPTH = 2
 EDGE_BUFFER = 0.05
 # Relative cushion floors (fraction of spot) — commodities have different scales.
 MIN_CUSHION_FRAC = {
@@ -64,6 +69,32 @@ MIN_CUSHION_FRAC = {
     "KXBRENT15M": 0.0010,
     "KXWTI15M": 0.0010,
 }
+
+# Portfolio corr cap: at most one energy + one metal open at a time.
+ENERGY_SERIES = frozenset({"KXNATGAS15M", "KXBRENT15M", "KXWTI15M"})
+METAL_SERIES = frozenset({
+    "KXGOLD15M", "KXSILVER15M", "KXPLATINUM15M", "KXPALLADIUM15M", "KXCOPPER15M",
+})
+
+
+def series_family(series: str) -> str:
+    s = str(series or "")
+    if s in ENERGY_SERIES:
+        return "energy"
+    if s in METAL_SERIES:
+        return "metal"
+    return "other"
+
+
+def open_families(state: dict) -> set[str]:
+    out = set()
+    for pos in state.get("open") or []:
+        if not isinstance(pos, dict):
+            continue
+        fam = series_family(str(pos.get("series") or ""))
+        if fam != "other":
+            out.add(fam)
+    return out
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DESK_ROOT = os.path.dirname(HERE)
@@ -296,6 +327,17 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     cushion = abs(spot - target)
     frac = MIN_CUSHION_FRAC.get(m["series"], 0.001)
     min_cush = max(spot * frac, 1e-6)
+    # Top25 #9 — metals vs energy playbooks (stricter cushion/z for energy spikes).
+    z_floor = MIN_Z
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_top25
+        book = desk_top25.commodity_playbook(m.get("series"))
+        min_cush *= float(book.get("min_cushion_mult") or 1.0)
+        z_floor = float(book.get("min_z") or MIN_Z)
+    except Exception:
+        z_floor = MIN_Z
     # Conservative σ: ~0.15% of spot * sqrt(minutes_left / 15) for 15m commodities.
     sigma = spot * 0.0015 * math.sqrt(max(minutes_left, 1.0) / 15.0)
     z = cushion / sigma if sigma > 1e-12 else 0.0
@@ -304,10 +346,18 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     spread, depth = book_depth(str(m["ticker"]), side, ask)
     if cushion + 1e-12 < min_cush:
         reasons.append(f"cushion {cushion:.5f} < {min_cush:.5f}")
-    if z + 1e-12 < MIN_Z:
-        reasons.append(f"z {z:.2f} < {MIN_Z}")
-    if p + 1e-12 < MIN_MODEL_PROB:
-        reasons.append(f"p {p:.3f} < {MIN_MODEL_PROB}")
+    lane = "accurate"
+    need_edge = 0.0
+    if p + 1e-12 >= MIN_MODEL_ACCURATE:
+        lane = "accurate"
+    elif p + 1e-12 >= MIN_MODEL_SPEED:
+        lane = "speed"
+        need_edge = SPEED_EDGE_EXTRA
+        z_floor = min(float(z_floor), MIN_Z_SPEED)
+    else:
+        reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED}")
+    if z + 1e-12 < z_floor:
+        reasons.append(f"z {z:.2f} < {z_floor}")
     if not (ASK_MIN - 1e-12 <= float(ask) <= ASK_MAX + 1e-12):
         reasons.append(f"ask {ask:.3f} outside band")
     if spread is not None and spread > MAX_SPREAD + 1e-12:
@@ -315,8 +365,8 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     if depth < MIN_DEPTH:
         reasons.append(f"depth {depth} < {MIN_DEPTH}")
     edge = float(p) - float(ask) - float(fee) - float(edge_buf)
-    if edge + 1e-12 < 0:
-        reasons.append(f"edge {edge:.3f} < 0")
+    if edge + 1e-12 < need_edge:
+        reasons.append(f"edge {edge:.3f} < {need_edge:.3f} ({lane})")
     return {
         "side": side,
         "ask": ask,
@@ -329,6 +379,7 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
         "spread": spread,
         "depth": depth,
         "edge": round(edge, 4),
+        "lane": lane,
         "min_left": round(minutes_left, 2),
         "reasons": reasons,
         "ticker": m["ticker"],
@@ -348,6 +399,12 @@ def paper_buy(state: dict, ev: dict) -> str:
         return none_msg + " already open."
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
         return "Desk entry_gate blocked a new paper buy."
+    fam = series_family(str(ev.get("series") or ""))
+    if fam in ("energy", "metal") and fam in open_families(state):
+        return (
+            f"{none_msg} portfolio corr: already open a {fam} series "
+            "(max 1 energy + 1 metal)."
+        )
     ask = float(ev["ask"])
     fee = float(ev["fee"] or 0)
     per = ask + fee
@@ -518,6 +575,9 @@ def main() -> int:
     except Exception:
         ranked = candidates
     for row in ranked:
+        if buys >= MAX_BUYS_PER_CHECK:
+            print(f"  → skip: max buys this check ({MAX_BUYS_PER_CHECK})")
+            break
         ev = row.get("_ev") or row
         msg = paper_buy(account, ev)
         print(f"  → {msg}")
@@ -525,6 +585,12 @@ def main() -> int:
             buys += 1
     save_account(account)
     print(f"Done. paper buys={buys} open={len(account.get('open') or [])}")
+    if buys <= 0:
+        print("CARD: Checked commodity 15m markets. No paper buy.")
+    elif buys == 1:
+        print("CARD: Checked commodity 15m markets. Paper buy.")
+    else:
+        print(f"CARD: Checked commodity 15m markets. {buys} paper buys.")
     return 0
 
 

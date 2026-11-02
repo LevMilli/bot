@@ -196,8 +196,8 @@ def manage(st):
         from_peak = (1 - price / pos["peak_price"]) * 100
         print(f"  {pos['symbol']}: {pct:+.1f}% from entry, {from_peak:.1f}% off peak, liq {liq_drop:+.1f}% drop, held {held_h:.2f}h")
         exit_reason = None
-        # Model-flip before hard stop: adverse move / momentum collapse (still above −35%).
-        floor_m = float(E.get("model_flip_momentum_h1_floor") or -12)
+        # Model-flip before hard stop: adverse move / momentum collapse.
+        floor_m = float(E.get("model_flip_momentum_h1_floor") or -8)
         if pct <= floor_m and pct > float(E["stop_pct"]):
             exit_reason = f"model-flip momentum {pct:.1f}% <= {floor_m:.1f}%"
         if exit_reason is None and liq_drop >= E["liq_drop_pct"]:
@@ -358,6 +358,17 @@ def scan(st, stats):
     entries_today, pnl_today = trades_today()
     open_mints = {p["mint"] for p in st["open"]}
     stats["candidates"] = len(mints)
+    red_lock = float(getattr(C, "RED_DAY_ENTRY_LOCK_USD", 20) or 20)
+    max_open_eff = int(C.MAX_OPEN)
+    if pnl_today < 0:
+        max_open_eff = min(max_open_eff, int(getattr(C, "MAX_OPEN_RED", 2) or 2))
+    if pnl_today <= -red_lock:
+        print(
+            f"  RED-DAY LOCK: today ${pnl_today:.2f} <= −${red_lock:.0f} — "
+            "new entries off (exits already ran)"
+        )
+        stats["red_day_lock"] = 1
+        return
 
     for mint in mints:
         row = {"ts": now_iso(), "run_id": RUN_ID, "mint": mint, "source": cands[mint]}
@@ -416,8 +427,23 @@ def scan(st, stats):
             record("SKIP", "failed: " + ", ".join(fails))
             continue
         stats["facts_pass"] += 1
-        if conf < C.MIN_CONFIDENCE:
-            record("SKIP", f"confidence {conf} < {C.MIN_CONFIDENCE}")
+        if conf + 1e-12 >= C.MIN_CONFIDENCE_ACCURATE:
+            lane = "accurate"
+        elif conf + 1e-12 >= C.MIN_CONFIDENCE_SPEED:
+            lane = "speed"
+        else:
+            record("SKIP", f"confidence {conf} < speed floor {C.MIN_CONFIDENCE_SPEED}")
+            continue
+        if (
+            lane == "speed"
+            and getattr(C, "SPEED_ONLY_IF_TODAY_NONNEG", True)
+            and pnl_today < 0
+        ):
+            record("SKIP", f"speed lane blocked on red day (today ${pnl_today:.2f})")
+            continue
+        speed_liq = float(getattr(C, "SPEED_MIN_LIQUIDITY_USD", 50000) or 50000)
+        if lane == "speed" and float(liq or 0) + 1e-9 < speed_liq:
+            record("SKIP", f"speed lane needs liq >= ${speed_liq:.0f} (have ${float(liq or 0):.0f})")
             continue
         stats["confidence_pass"] += 1
         veto = grok_veto(p, rf, conf)
@@ -431,8 +457,8 @@ def scan(st, stats):
             gate_reason = "already open"
         elif cd and NOW - cd < C.COOLDOWN_HOURS * 3600:
             gate_reason = f"cooldown ({(NOW - cd) / 3600:.1f}h < {C.COOLDOWN_HOURS}h)"
-        elif len(st["open"]) >= C.MAX_OPEN:
-            gate_reason = f"MAX_OPEN {C.MAX_OPEN} reached"
+        elif len(st["open"]) >= max_open_eff:
+            gate_reason = f"MAX_OPEN {max_open_eff} reached"
         elif entries_today >= C.MAX_ENTRIES_PER_DAY:
             gate_reason = f"MAX_ENTRIES_PER_DAY {C.MAX_ENTRIES_PER_DAY} reached"
         elif pnl_today <= -C.DAILY_LOSS_HALT_USD:
@@ -445,9 +471,11 @@ def scan(st, stats):
                 try:
                     desk = _desk()
                     venue = float(desk.venue_min_edge("solana_dex", desk.load_settings(os.path.dirname(BASE))))
-                    # Confidence above 0.5 as a crude residual edge vs coin-flip.
-                    if max(0.0, float(conf) - 0.5) + 1e-12 < venue:
-                        gate_reason = f"venue solana_dex edge {max(0.0, float(conf) - 0.5):.3f} < {venue:.3f}"
+                    # Speed lane: require a bit more residual confidence vs coin-flip.
+                    need_venue = venue + (0.02 if lane == "speed" else 0.0)
+                    residual = max(0.0, float(conf) - 0.5)
+                    if residual + 1e-12 < need_venue:
+                        gate_reason = f"venue solana_dex edge {residual:.3f} < {need_venue:.3f} ({lane})"
                     else:
                         gate_reason = desk.learning_skip(
                             desk.load_learning(os.path.dirname(BASE)),
@@ -464,15 +492,18 @@ def scan(st, stats):
         if ticket < C.MIN_TICKET_USD:
             record("SKIP", f"ticket ${ticket:.2f} below min")
             continue
+        # Speed lane: slightly smaller ticket so more fills fit open-risk.
+        if lane == "speed":
+            ticket = round(max(C.MIN_TICKET_USD, min(ticket, C.TICKET_USD * 0.7, float(st["cash_usd"]))), 2)
         price = float(p["priceUsd"])
         tokens, fee, imp, fill = paper_buy(price, liq, ticket)
         st["cash_usd"] = round(float(st["cash_usd"]) - ticket, 4)
         pos = dict(mint=mint, symbol=row["symbol"], pair=p["pairAddress"], entry_ts=NOW, entry_iso=now_iso(),
                    entry_market_price=price, entry_fill_price=fill, entry_liq=liq, tokens=tokens,
                    tokens_left=tokens, cost_usd=ticket, risk=ticket,
-                   why=f"Paper buy. Confidence {conf}. Ticket ${ticket:.2f}.",
+                   why=f"Paper buy ({lane} lane). Confidence {conf}. Ticket ${ticket:.2f}.",
                    peak_price=price, ladder_done=[],
-                   confidence=conf, url=p.get("url"))
+                   confidence=conf, lane=lane, url=p.get("url"))
         st["open"].append(pos)
         open_mints.add(mint)
         entries_today += 1
