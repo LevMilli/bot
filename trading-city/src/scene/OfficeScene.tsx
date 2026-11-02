@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { PerspectiveCamera, RenderTexture } from '@react-three/drei'
-import { useFrame } from '@react-three/fiber'
-import type { PerspectiveCamera as Cam, Texture } from 'three'
+import { OrbitControls, PerspectiveCamera, RenderTexture } from '@react-three/drei'
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import { DoubleSide, type Texture } from 'three'
 import type { BotRow, Desk } from '../types'
 import {
   centerMonitorTexture,
@@ -85,12 +85,12 @@ function Ceiling() {
     <group>
       <mesh position={[0, 3.38, 0.7]} rotation={[Math.PI / 2, 0, 0]}>
         <planeGeometry args={[16, 8.2]} />
-        <meshStandardMaterial color="#1a1e28" roughness={0.92} />
+        <meshStandardMaterial color="#1a1e28" roughness={0.92} side={DoubleSide} />
       </mesh>
       {tiles.map(([x, z]) => (
         <mesh key={`${x}-${z}`} position={[x, 3.36, z]} rotation={[Math.PI / 2, 0, 0]}>
           <planeGeometry args={[1.42, 1.18]} />
-          <meshStandardMaterial color="#222733" roughness={0.85} metalness={0.04} />
+          <meshStandardMaterial color="#222733" roughness={0.85} metalness={0.04} side={DoubleSide} />
         </mesh>
       ))}
       {/* troffer lights */}
@@ -109,11 +109,11 @@ function SideWall({ x, rot }: { x: number; rot: number }) {
     <group position={[x, 1.69, 0.7]} rotation={[0, rot, 0]}>
       <mesh>
         <planeGeometry args={[8.2, 3.38]} />
-        <meshStandardMaterial color={WALL} roughness={0.9} />
+        <meshStandardMaterial color={WALL} roughness={0.9} side={DoubleSide} />
       </mesh>
       <mesh position={[0, -0.85, 0.01]}>
         <planeGeometry args={[8.2, 1.35]} />
-        <meshStandardMaterial color="#1b212e" roughness={0.82} />
+        <meshStandardMaterial color="#1b212e" roughness={0.82} side={DoubleSide} />
       </mesh>
       <mesh position={[0, -0.16, 0.02]}>
         <boxGeometry args={[8.2, 0.04, 0.02]} />
@@ -330,15 +330,18 @@ function OfficeFloor() {
     <group>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0.7]}>
         <planeGeometry args={[16, 8.3]} />
-        <meshStandardMaterial color="#1a2230" roughness={0.72} metalness={0.12} />
+        <meshStandardMaterial color="#1a2230" roughness={0.72} metalness={0.12} side={DoubleSide} />
       </mesh>
       <gridHelper args={[8, 16, '#1a6a78', '#142033']} position={[0, 0.012, 0.55]} />
     </group>
   )
 }
 
+const HOME_POS: [number, number, number] = [0.15, 1.78, 3.35]
+const HOME_TARGET: [number, number, number] = [0, 1.42, 0.05]
+
 export function OfficeScene({ bot, desk }: Props) {
-  const cam = useRef<Cam>(null)
+  const controls = useRef<OrbitControlsImpl>(null)
   const celebrating = Number(bot.today || 0) > 0 || Number(bot.realized || 0) > 0 || bot.present !== false
 
   const maps = useMemo(() => {
@@ -357,25 +360,32 @@ export function OfficeScene({ bot, desk }: Props) {
   }, [maps])
 
   useEffect(() => {
-    if (cam.current) {
-      cam.current.position.set(0.05, 1.72, 3.55)
-      cam.current.lookAt(0, 1.55, 0.4)
-    }
+    const orbit = controls.current
+    const cam = orbit?.object
+    if (!orbit || !cam) return
+    cam.position.set(...HOME_POS)
+    orbit.target.set(...HOME_TARGET)
+    orbit.update()
   }, [bot.id])
-
-  useFrame((_, dt) => {
-    if (!cam.current) return
-    const target = { x: 0.05, y: 1.72, z: 3.55 }
-    cam.current.position.x += (target.x - cam.current.position.x) * Math.min(1, dt * 2.2)
-    cam.current.position.y += (target.y - cam.current.position.y) * Math.min(1, dt * 2.2)
-    cam.current.position.z += (target.z - cam.current.position.z) * Math.min(1, dt * 2.2)
-    cam.current.lookAt(0, 1.55, 0.4)
-  })
 
   return (
     <>
       <color attach="background" args={['#070b14']} />
-      <PerspectiveCamera ref={cam} makeDefault fov={46} near={0.1} far={80} />
+      <PerspectiveCamera makeDefault fov={46} near={0.08} far={80} position={HOME_POS} />
+      <OrbitControls
+        ref={controls}
+        makeDefault
+        target={HOME_TARGET}
+        enableDamping
+        dampingFactor={0.08}
+        enablePan={false}
+        minDistance={1.7}
+        maxDistance={4.15}
+        minPolarAngle={0.55}
+        maxPolarAngle={1.38}
+        minAzimuthAngle={-1.25}
+        maxAzimuthAngle={1.25}
+      />
       <ambientLight intensity={0.62} color="#d5deee" />
       <directionalLight position={[1.5, 4.2, 2]} intensity={0.7} color="#f2f6ff" />
       <pointLight position={[-1.15, 3.15, 0.4]} intensity={0.7} color="#e7f4ff" distance={8} />
@@ -388,7 +398,7 @@ export function OfficeScene({ bot, desk }: Props) {
       <SideWall x={7.9} rot={-Math.PI / 2} />
       <mesh position={[0, 1.69, 4.8]} rotation={[0, Math.PI, 0]}>
         <planeGeometry args={[16, 3.38]} />
-        <meshStandardMaterial color="#10141c" roughness={0.92} />
+        <meshStandardMaterial color="#10141c" roughness={0.92} side={DoubleSide} />
       </mesh>
       <Door />
       <Credenza />
