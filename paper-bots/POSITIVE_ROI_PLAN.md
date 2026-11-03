@@ -21,13 +21,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Commodity model-flip exits | `commodity-15m-paper/bot.py` `manage_model_flips` |
 | BTC real take-profit | `btc15m_signal.manage_take_profits` (no longer print-only) |
 
-### Next slice — sports exit quality
+### #105 — sports exit quality
 
 | Ticket | Where |
 | --- | --- |
 | Sports M4 latency | `gap_bot.run` → `record_latency(sports-gap)` |
 | Sports M3 fit journals | buy/block → `record_fit` |
 | Sports hard-stop **shadow** | bid ≤ entry − 12¢ logs would-stop; `SPORTS_HARD_STOP_LIVE=False` |
+
+### Next — INX twin / macro
+
+| Ticket | Where |
+| --- | --- |
+| Anti-double sized vs S&P | `desk_inx.anti_double_blocks` in sized `step_scan` |
+| Twin edge ≥ venue + 1¢ | `desk_inx.twin_edge_blocks` |
+| Pre-FOMC calm / post-print +30m | `desk_inx.inx_entry_blocks` on both INX bots |
 
 ## Hard rules unchanged
 
