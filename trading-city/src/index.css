@@ -585,6 +585,14 @@ a {
   z-index: 4;
 }
 
+/* Hard kill for the old full-height teller chip strip (main’s .teller-switch).
+   Office switching is the FloorNavMenu / Tellers dropdown only. */
+.teller-switch,
+.teller-chip,
+.floor-switch {
+  display: none !important;
+}
+
 .office-hud-top {
   display: flex;
   flex-wrap: wrap;
