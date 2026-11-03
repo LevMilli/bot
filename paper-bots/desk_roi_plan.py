@@ -27,6 +27,7 @@ MASTER_GRAD = "desk_master_grad.json"
 HILLCLIMB_KILL = "desk_hillclimb_kill.json"
 PROFIT_LOCK = "desk_profit_lock.json"
 SKIP_REGRET_WEEKLY = "desk_skip_regret_weekly.json"
+DAILY_R_NAME = "desk_daily_r.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -50,6 +51,17 @@ HILLCLIMB_KILL_WEEKS = 2
 # Phase 10: profit-lock harvest paper analog — hit weekly target → 0.5× size.
 PROFIT_LOCK_TARGET_USD = 40.0
 PROFIT_LOCK_SIZE_MULT = 0.5
+
+# Phase 7: daily R budget — hit +budget → settle-only for that tower (exits still on).
+DAILY_R_USD = 20.0  # 1R paper unit
+DAILY_R_BUDGET = {
+    "sports-gap": 1.5,
+    "btc15m": 2.0,
+    "commodity-15m": 1.5,
+    "kalshi-sp": 1.0,
+    "kalshi-sized": 1.0,
+    "memecoin": 0.5,
+}
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -492,6 +504,103 @@ def latest_skip_regret_weekly(root: str | None = None) -> dict | None:
         _path(SKIP_REGRET_WEEKLY, root),
         {"paper_only": True, "cards": [], "latest": None},
     )
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+# ---- Daily R budget (settle-only after target) -----------------------------
+
+def daily_r_budget_for(bot_id: str) -> float:
+    return float(DAILY_R_BUDGET.get(str(bot_id), 1.0))
+
+
+def daily_r_status(
+    bot_id: str,
+    today_pnl=None,
+    *,
+    r_usd: float = DAILY_R_USD,
+) -> dict:
+    """Chicago-day R usage. settle_only when today PnL ≥ budget×R (lock the win)."""
+    today = _finite(today_pnl)
+    budget_r = daily_r_budget_for(bot_id)
+    r = float(r_usd) if _finite(r_usd) and float(r_usd) > 0 else DAILY_R_USD
+    target_usd = round(budget_r * r, 2)
+    used_r = round(today / r, 4) if today is not None else None
+    settle_only = bool(today is not None and today + 1e-12 >= target_usd)
+    return {
+        "paper_only": True,
+        "bot": str(bot_id),
+        "r_usd": r,
+        "budget_r": budget_r,
+        "target_usd": target_usd,
+        "today_pnl": today,
+        "used_r": used_r,
+        "settle_only": settle_only,
+        "entries_blocked": settle_only,
+        "fee_floors_locked": True,
+        "note": (
+            f"Daily R budget {budget_r}R (${target_usd:.0f}): "
+            "after target → settle-only (exits stay on). No profit guarantee."
+        ),
+    }
+
+
+def daily_r_blocks(bot_id: str, today_pnl=None, *, r_usd: float = DAILY_R_USD) -> str:
+    """Non-empty reason when tower is settle-only after hitting daily R."""
+    status = daily_r_status(bot_id, today_pnl, r_usd=r_usd)
+    if not status.get("settle_only"):
+        return ""
+    return (
+        f"daily R budget hit for {bot_id}: "
+        f"today ${float(status.get('today_pnl') or 0):.2f} ≥ "
+        f"{status.get('budget_r')}R (${status.get('target_usd'):.0f}) — settle-only"
+    )
+
+
+def capture_daily_r_board(
+    root: str | None,
+    bots: list | None = None,
+    *,
+    label: str | None = None,
+    r_usd: float = DAILY_R_USD,
+) -> dict:
+    """Persist per-tower daily R card for Masters / hillclimb review."""
+    day = label or _chicago_day()
+    towers = {}
+    settle_only = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if not bot_id:
+            continue
+        row = daily_r_status(bot_id, bot.get("today"), r_usd=r_usd)
+        towers[bot_id] = row
+        if row.get("settle_only"):
+            settle_only.append(bot_id)
+    board = {
+        "paper_only": True,
+        "label": day,
+        "captured_at": _now(),
+        "r_usd": float(r_usd),
+        "towers": towers,
+        "settle_only": sorted(settle_only),
+        "fee_floors_locked": True,
+        "note": "Daily R board — settle-only after tower hits budget×R. Exits remain on.",
+    }
+    path = _path(DAILY_R_NAME, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = [c for c in cards if str(c.get("label") or "") != day]
+    cards.append(board)
+    store["cards"] = cards[-60:]
+    store["latest"] = board
+    _save(path, store)
+    return board
+
+
+def latest_daily_r_board(root: str | None = None) -> dict | None:
+    store = _load(_path(DAILY_R_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
 
@@ -1415,13 +1524,14 @@ def plan_summary(
         "hillclimb_kill": hillclimb_kill_status(root),
         "profit_lock": profit_lock_status(root),
         "skip_regret_weekly": latest_skip_regret_weekly(root),
+        "daily_r": latest_daily_r_board(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
             "INX band promote only after research week artifact",
-            "daily R budget per tower after which settle-only",
             "anti-revenge same-market cool after stop/flip",
-            "correlation matrix / daily R harvest ritual",
+            "correlation matrix firm portfolio haircut",
+            "incubation lane 50 fee-aware settles",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1552,6 +1662,16 @@ def self_check() -> None:
         assert sr["auto_promote"] is False
         assert sr["fee_floors_locked"] is True
         assert latest_skip_regret_weekly(tmp)["label"] == "2026-11-03"
+        # Sports 1.5R × $20 = $30 → settle-only at today ≥ 30.
+        assert daily_r_blocks("sports-gap", 29.0) == ""
+        assert "settle-only" in daily_r_blocks("sports-gap", 30.0)
+        board = capture_daily_r_board(
+            tmp,
+            bots=[{"id": "sports-gap", "today": 35.0}, {"id": "btc15m", "today": 10.0}],
+            label="2026-11-03",
+        )
+        assert "sports-gap" in board["settle_only"]
+        assert "btc15m" not in board["settle_only"]
 
 
 if __name__ == "__main__":

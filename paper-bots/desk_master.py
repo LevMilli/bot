@@ -395,6 +395,22 @@ def master_summary(
                 plan["skip_regret_weekly"] = latest_sr
         except Exception:
             plan["skip_regret_weekly"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_r = desk_roi_plan.latest_daily_r_board(root)
+            if root and bots and (
+                not isinstance(latest_r, dict)
+                or str(latest_r.get("label") or "") != today
+            ):
+                plan["daily_r"] = desk_roi_plan.capture_daily_r_board(
+                    root, bots, label=today,
+                )
+            else:
+                plan["daily_r"] = latest_r
+        except Exception:
+            plan["daily_r"] = None
     except Exception:
         plan = None
     return {
@@ -418,6 +434,7 @@ def master_summary(
         "priority": [
             "revert last lever if hillclimb kill trips",
             "profit-lock 0.5× after weekly target",
+            "daily R settle-only after tower budget",
             "memecoin retirement clock before any volume talk",
             "Master graduation = 2 Chicago weeks all M1–M7",
             "sports hard-stop shadow → promote after n≥30",

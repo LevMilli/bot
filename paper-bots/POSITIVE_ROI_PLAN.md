@@ -92,12 +92,19 @@ Interactive: Positive ROI Master Plan canvas.
 | Staff arm/disarm live sells | `staff_set_sports_hard_stop_live` → promote JSON |
 | Runtime live check | `sports_hard_stop_is_live` (gap_bot); code `SPORTS_HARD_STOP_LIVE` stays False |
 
+### Daily R budget
+
+| Ticket | Where |
+| --- | --- |
+| Per-tower R budgets (sports 1.5R …) | `desk_roi_plan.DAILY_R_BUDGET` / `daily_r_blocks` |
+| Fee-clear bots settle-only after target | sports / BTC / commodity buy loops |
+| Masters board | `roi_plan.daily_r` via `capture_daily_r_board` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | INX band promote | only after research-week artifact |
-| Daily R budget per tower | settle-only after budget |
 | Anti-revenge same-market cool | after stop/flip |
 
 ## Hard rules unchanged
