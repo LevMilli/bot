@@ -266,36 +266,47 @@ export function BotFigure({
   pose = 'waiting',
   seated = true,
   deskWork = false,
+  seed = 0,
 }: {
   pose?: BotPose
   seated?: boolean
   /** Seated at the office desk: hands stay on the keyboard and mouse. */
   deskWork?: boolean
+  /** Phase offset so lobby tellers don't idle in sync. */
+  seed?: number
 }) {
   const body = useRef<Group>(null)
   const torso = useRef<Group>(null)
   const head = useRef<Group>(null)
+  const legs = useRef<Group>(null)
   const bulb = useRef<MeshStandardMaterial>(null)
-  const anchor: [number, number, number] = deskWork ? [0, 0.49, 0.86] : seated ? [0, 0, 0.42] : [0, 0.22, 0]
+  const anchor: [number, number, number] = deskWork ? [0, 0.49, 0.86] : seated ? [0, 0, 0.42] : [0, 0.28, 0]
+  const phase = seed * 1.37
 
   const accent =
     pose === 'winning' ? '#39ff14' : pose === 'losing' ? '#ff2a6d' : pose === 'trading' ? '#2de2e6' : '#f9c80e'
 
   useFrame(({ clock }) => {
-    const t = clock.getElapsedTime()
+    const t = clock.getElapsedTime() + phase
     if (body.current) {
-      let bob = Math.sin(t * 1.25) * 0.012
-      if (pose === 'trading') bob = Math.sin(t * 1.6) * 0.014
-      if (pose === 'winning') bob = Math.sin(t * 2.2) * 0.018
-      if (pose === 'losing') bob = Math.sin(t * 0.9) * 0.01
-      if (pose === 'researching') bob = Math.sin(t * 1.3) * 0.012
+      let bob = Math.sin(t * 1.35) * 0.016
+      if (pose === 'trading') bob = Math.sin(t * 1.85) * 0.02
+      if (pose === 'winning') bob = Math.sin(t * 2.4) * 0.024
+      if (pose === 'losing') bob = Math.sin(t * 0.95) * 0.012
+      if (pose === 'researching') bob = Math.sin(t * 1.45) * 0.015
       body.current.position.y = anchor[1] + bob
-      const sway = deskWork ? 0.006 : 0.014
-      body.current.position.x = anchor[0] + Math.sin(t * 0.55) * sway
-      body.current.rotation.y = Math.sin(t * 0.42) * (deskWork ? 0.03 : 0.055)
-      body.current.rotation.z = Math.sin(t * 0.72) * (deskWork ? 0 : 0.016)
-      const breathe = deskWork ? 1 : 1 + Math.sin(t * 1.35) * 0.01
+      const sway = deskWork ? 0.006 : 0.022
+      body.current.position.x = anchor[0] + Math.sin(t * 0.62) * sway
+      body.current.rotation.y = Math.sin(t * 0.48) * (deskWork ? 0.03 : 0.09)
+      body.current.rotation.z = Math.sin(t * 0.78) * (deskWork ? 0 : 0.028)
+      const breathe = deskWork ? 1 : 1 + Math.sin(t * 1.45) * 0.014
       body.current.scale.set(1, breathe, 1)
+    }
+    if (legs.current && !seated && !deskWork) {
+      // Weight shift — standing tellers rock heel-to-heel.
+      const shift = Math.sin(t * 0.9) * 0.04
+      legs.current.rotation.z = shift
+      legs.current.position.x = -shift * 0.15
     }
     if (torso.current) {
       if (pose === 'losing') {
@@ -427,13 +438,28 @@ export function BotFigure({
 
       {deskWork ? (
         <SeatedLegs />
-      ) : (
+      ) : seated ? (
         ([-0.1, 0.1] as const).map((x) => (
           <mesh key={x} position={[x, 0.02, 0.04]} rotation={[0.55, 0, x > 0 ? -0.05 : 0.05]}>
             <cylinderGeometry args={[0.05, 0.045, 0.32, 14]} />
             <meshStandardMaterial {...shell(0.12)} />
           </mesh>
         ))
+      ) : (
+        <group ref={legs}>
+          {([-1, 1] as const).map((side) => (
+            <group key={side} position={[side * 0.12, 0, 0]}>
+              <mesh position={[0, -0.12, 0.02]} rotation={[0.12, 0, side * 0.04]}>
+                <capsuleGeometry args={[0.048, 0.28, 4, 10]} />
+                <meshStandardMaterial {...shell(0.14)} />
+              </mesh>
+              <mesh position={[0, -0.34, 0.06]} rotation={[0.35, 0, 0]}>
+                <boxGeometry args={[0.09, 0.06, 0.16]} />
+                <meshStandardMaterial color="#0a1820" roughness={0.55} metalness={0.35} />
+              </mesh>
+            </group>
+          ))}
+        </group>
       )}
     </group>
   )
