@@ -436,11 +436,23 @@ def scan(st, stats):
             continue
         if (
             lane == "speed"
-            and getattr(C, "SPEED_ONLY_IF_TODAY_NONNEG", True)
+            and (
+                getattr(C, "SPEED_ONLY_IF_TODAY_NONNEG", True)
+                or getattr(C, "ACCURATE_ONLY_WHEN_TODAY_NEG", True)
+            )
             and pnl_today < 0
         ):
             record("SKIP", f"speed lane blocked on red day (today ${pnl_today:.2f})")
             continue
+        if lane == "speed" and getattr(C, "SPEED_REQUIRE_M5_NONNEG", True):
+            try:
+                m5_raw = (p.get("priceChange") or {}).get("m5")
+                m5_v = float(m5_raw) if m5_raw is not None else None
+            except (TypeError, ValueError):
+                m5_v = None
+            if m5_v is None or m5_v < 0:
+                record("SKIP", f"speed lane needs m5 ≥ 0 (have {m5_v})")
+                continue
         speed_liq = float(getattr(C, "SPEED_MIN_LIQUIDITY_USD", 50000) or 50000)
         if lane == "speed" and float(liq or 0) + 1e-9 < speed_liq:
             record("SKIP", f"speed lane needs liq >= ${speed_liq:.0f} (have ${float(liq or 0):.0f})")
@@ -492,6 +504,13 @@ def scan(st, stats):
         if ticket < C.MIN_TICKET_USD:
             record("SKIP", f"ticket ${ticket:.2f} below min")
             continue
+        # ROI rescue: red-day ticket ceiling so each knife costs less.
+        if pnl_today < 0:
+            red_cap = float(getattr(C, "RED_DAY_TICKET_USD", C.MIN_TICKET_USD) or C.MIN_TICKET_USD)
+            ticket = round(min(ticket, red_cap, float(st["cash_usd"])), 2)
+            if ticket < C.MIN_TICKET_USD:
+                record("SKIP", f"red-day ticket ${ticket:.2f} below min after cap ${red_cap:.0f}")
+                continue
         # Speed lane: slightly smaller ticket so more fills fit open-risk.
         if lane == "speed":
             ticket = round(max(C.MIN_TICKET_USD, min(ticket, C.TICKET_USD * 0.7, float(st["cash_usd"]))), 2)

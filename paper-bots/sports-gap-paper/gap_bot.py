@@ -866,12 +866,20 @@ def run():
         buy_candidates = sorted(buy_candidates, key=lambda c: -float(c.get("gap") or 0))
 
     buys_this_check = 0
+    # ROI rescue: after a red sports day, fewer fills / accurate-only — don't dig.
+    max_buys_eff = int(MAX_BUYS_PER_CHECK)
+    if today_pnl < 0:
+        max_buys_eff = min(max_buys_eff, 2)
+    if today_pnl <= -10:
+        max_buys_eff = min(max_buys_eff, 1)
     for c in buy_candidates:
         key, m, fair, ask, bid, gap = c["key"], c["m"], c["fair"], c["ask"], c["bid"], c["gap"]
         row, gtxt = c["row"], c["gtxt"]
         reason = None
-        if buys_this_check >= MAX_BUYS_PER_CHECK:
-            reason = f"max buys this check ({MAX_BUYS_PER_CHECK})"
+        if buys_this_check >= max_buys_eff:
+            reason = f"max buys this check ({max_buys_eff})"
+        elif today_pnl < 0 and str(c.get("lane") or "") == "speed":
+            reason = f"speed lane off on red sports day (today ${today_pnl:.2f})"
         elif key in open_by_game:
             reason = "already holding this game"
         elif len(s["open"]) >= max_open:

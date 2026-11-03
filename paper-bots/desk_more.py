@@ -417,8 +417,9 @@ def skip_leaderboard(root: str | None = None, *, day: str | None = None, top: in
 
 
 # E1 #116 — while memecoin is red, starve its share and feed BTC/commodity.
+# ROI rescue: fire at −$8 so overnight −$10 boards starve meme before −$20.
 MEME_RED_SHARE = 0.03
-MEME_RED_LOCK_USD = 20.0
+MEME_RED_LOCK_USD = 8.0
 
 
 def effective_tower_shares(
