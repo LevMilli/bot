@@ -88,6 +88,18 @@ RUIN_LEVELS = ("soft", "hard", "nuclear")
 FILL_TAX_DEFAULT = 0.01
 MAX_FEE_LEDGER_ROWS = 4000
 
+# Phase 10: clock-skew / stale-world — skip new entries when last loop or quote is old.
+# Bars are ~2× Masters M4 latency bars (sports 45s → 90s; 15m 20s → 40s).
+STALE_LOOP_SEC = {
+    "sports-gap": 90.0,
+    "btc15m": 40.0,
+    "commodity-15m": 40.0,
+    "kalshi-sp": 40.0,
+    "kalshi-sized": 40.0,
+}
+STALE_LOOP_DEFAULT = 40.0
+CLOCK_SKEW_MAX_SEC = 30.0  # matches pimp_desk.STALE_PRICE_SEC
+
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
 
@@ -1557,6 +1569,102 @@ def ruin_drill_blocks_entries(root: str | None = None) -> str:
     )
 
 
+# ---- Clock-skew / stale-world skip (Phase 10) ------------------------------
+
+def stale_loop_bar(bot: str) -> float:
+    return float(STALE_LOOP_SEC.get(str(bot), STALE_LOOP_DEFAULT))
+
+
+def last_loop_seconds(root: str | None, bot: str) -> float | None:
+    """Most recent recorded loop latency for bot (seconds), if any."""
+    state = load_latency(root)
+    last = None
+    for r in state.get("rows") or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("bot") or "") != str(bot):
+            continue
+        sec = _finite(r.get("seconds"))
+        if sec is None:
+            continue
+        last = float(sec)
+    return last
+
+
+def stale_world_blocks(
+    root: str | None,
+    bot: str,
+    *,
+    loop_seconds=None,
+    quote_age_sec=None,
+    clock_skew_sec=None,
+) -> str:
+    """Non-empty reason when world is too stale for new entries (exits still on)."""
+    bot_id = str(bot or "")
+    if not bot_id:
+        return ""
+    loop = _finite(loop_seconds)
+    if loop is None:
+        loop = last_loop_seconds(root, bot_id)
+    bar = stale_loop_bar(bot_id)
+    if loop is not None and float(loop) > bar:
+        return (
+            f"stale-world: last loop {float(loop):.1f}s > {bar:.0f}s bar "
+            f"({bot_id}); skip new entries"
+        )
+    age = _finite(quote_age_sec)
+    if age is not None and float(age) > CLOCK_SKEW_MAX_SEC:
+        return (
+            f"stale-world: quote age {float(age):.0f}s > {CLOCK_SKEW_MAX_SEC:.0f}s; "
+            "skip new entries"
+        )
+    skew = _finite(clock_skew_sec)
+    if skew is not None and float(skew) > CLOCK_SKEW_MAX_SEC:
+        return (
+            f"clock-skew: source offset {float(skew):.0f}s > {CLOCK_SKEW_MAX_SEC:.0f}s; "
+            "skip new entries"
+        )
+    return ""
+
+
+def stale_world_status(root: str | None = None, bots: list | None = None) -> dict:
+    """Masters board: per-bot last loop vs stale bar."""
+    ids = []
+    if bots:
+        for b in bots:
+            if isinstance(b, dict) and b.get("id"):
+                ids.append(str(b["id"]))
+    if not ids:
+        ids = list(STALE_LOOP_SEC.keys())
+    rows = []
+    blocked = []
+    for bot_id in ids:
+        last = last_loop_seconds(root, bot_id)
+        bar = stale_loop_bar(bot_id)
+        reason = stale_world_blocks(root, bot_id, loop_seconds=last)
+        row = {
+            "bot": bot_id,
+            "last_loop_s": round(last, 3) if last is not None else None,
+            "bar_s": bar,
+            "stale": bool(reason),
+            "reason": reason or "",
+        }
+        rows.append(row)
+        if reason:
+            blocked.append(bot_id)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "clock_skew_max_s": CLOCK_SKEW_MAX_SEC,
+        "blocked": blocked,
+        "rows": rows,
+        "note": (
+            "Stale-world skip when last loop > bar or quote/clock skew > "
+            f"{CLOCK_SKEW_MAX_SEC:.0f}s. Exits/settles still run."
+        ),
+    }
+
+
 # ---- Tax / fee ledger (Phase 10) -------------------------------------------
 
 def estimate_kalshi_fee(price, contracts=1.0) -> float:
@@ -2298,10 +2406,10 @@ def plan_summary(
         "ruin_drill": ruin_drill_status(root),
         "fee_ledger": fee_ledger_summary(root),
         "fee_ledger_completeness": fee_ledger_completeness(root, bots=bots),
+        "stale_world": stale_world_status(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "clock-skew / stale-world skip",
             "helper Gate A taxed EV gate",
             "weekly harvest cold-ledger habit",
         ],
@@ -2486,6 +2594,17 @@ def self_check() -> None:
         assert summ["n"] == 5
         assert summ["fill_tax_sum"] == 0.05
         assert summ["fee_floors_locked"] is True
+        # Stale-world: last loop over bar → block entries.
+        assert stale_world_blocks(tmp, "btc15m") == ""
+        record_latency(tmp, bot="btc15m", seconds=55.0)
+        assert "stale-world" in stale_world_blocks(tmp, "btc15m")
+        assert stale_world_blocks(tmp, "btc15m", loop_seconds=10.0) == ""
+        assert "clock-skew" in stale_world_blocks(
+            tmp, "btc15m", loop_seconds=1.0, clock_skew_sec=45.0,
+        )
+        sw = stale_world_status(tmp, bots=[{"id": "btc15m"}])
+        assert "btc15m" in sw["blocked"]
+        assert sw["fee_floors_locked"] is True
 
 
 if __name__ == "__main__":

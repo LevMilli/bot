@@ -148,11 +148,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Wired on exits/settles | sports / BTC / commodity |
 | Masters board | `roi_plan.fee_ledger` + `fee_ledger_completeness` |
 
+### Clock-skew / stale-world skip
+
+| Ticket | Where |
+| --- | --- |
+| Loop latency bars | sports 90s / 15m 40s (`STALE_LOOP_SEC`) |
+| Quote / clock skew max | 30s (`CLOCK_SKEW_MAX_SEC`) |
+| Entry skip API | `stale_world_blocks` / `stale_world_status` |
+| Wired on buys | sports / BTC / commodity |
+| Masters board | `roi_plan.stale_world` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Clock-skew / stale-world skip | loop latency threshold |
 | Helper Gate A taxed EV | helper autonomy bar |
 | Weekly harvest cold ledger | paper profit → cold habit |
 

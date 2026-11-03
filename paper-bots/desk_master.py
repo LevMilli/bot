@@ -434,6 +434,10 @@ def master_summary(
         except Exception:
             plan["fee_ledger"] = None
             plan["fee_ledger_completeness"] = None
+        try:
+            plan["stale_world"] = desk_roi_plan.stale_world_status(root, bots=bots)
+        except Exception:
+            plan["stale_world"] = None
     except Exception:
         plan = None
     return {

@@ -520,6 +520,9 @@ def paper_buy(state: dict, ev: dict) -> str:
         return "Desk entry_gate blocked a new paper buy."
     try:
         import desk_roi_plan
+        stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "commodity-15m")
+        if stale:
+            return stale
         revenge = desk_roi_plan.anti_revenge_blocks(DESK_ROOT, "commodity-15m", ticker)
         if revenge:
             return revenge
