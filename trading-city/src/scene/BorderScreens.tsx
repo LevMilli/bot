@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { BotRow } from '../types'
-import { money } from '../data/format'
+import { hologramPnlValue, money } from '../data/format'
 
 /**
  * One trade chart per side of the world, four at most.
@@ -59,7 +59,8 @@ function seriesFor(bot: BotRow): number[] {
     })
     return full.length > 42 ? full.slice(-42) : full
   }
-  const end = Number(bot.today ?? bot.realized ?? 0)
+  const shown = hologramPnlValue(bot)
+  const end = shown == null ? 0 : shown
   const seed = hashId(bot.id || bot.name || 'wall')
   const n = 36
   const raw: number[] = []
@@ -78,9 +79,12 @@ function seriesFor(bot: BotRow): number[] {
 }
 
 function returnOf(bot: BotRow, last: number) {
-  if (typeof bot.today === 'number' && !Number.isNaN(bot.today)) return bot.today
-  if (typeof bot.realized === 'number' && !Number.isNaN(bot.realized)) return bot.realized
-  return last
+  const shown = hologramPnlValue(bot)
+  return shown == null ? last : shown
+}
+
+function periodOf(bot: BotRow) {
+  return bot.today != null && bot.today !== 0 ? 'TODAY' : 'REALIZED'
 }
 
 function tone(n: number) {
@@ -200,14 +204,17 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
     ctx.fill()
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
-    ctx.strokeStyle = up ? 'rgba(61,255,122,0.4)' : 'rgba(255,51,85,0.45)'
-    ctx.lineWidth = 22
+    ctx.strokeStyle = up ? 'rgba(120,255,170,0.55)' : 'rgba(255,90,110,0.55)'
+    ctx.lineWidth = 28
     ctx.beginPath()
     ctx.moveTo(a.x, a.y)
     ctx.lineTo(b.x, b.y)
     ctx.stroke()
     ctx.strokeStyle = color
-    ctx.lineWidth = 8
+    ctx.lineWidth = 12
+    ctx.stroke()
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)'
+    ctx.lineWidth = 3
     ctx.stroke()
   }
 
@@ -235,24 +242,43 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   const ret = returnOf(bot, tip.v)
   const retColor = tone(ret)
   const word = ret > 0.005 ? 'UP' : ret < -0.005 ? 'DOWN' : 'FLAT'
-  ctx.fillStyle = 'rgba(6,4,20,0.78)'
-  ctx.fillRect(0, 0, W, H * 0.32)
-  ctx.fillStyle = '#ffffff'
-  ctx.font = '700 64px sans-serif'
-  ctx.fillText((bot.name || 'trade').slice(0, 18), 36, 78)
+  const figure = money(ret, true)
+  ctx.fillStyle = 'rgba(4,2,16,0.82)'
+  ctx.fillRect(0, 0, W, 118)
   ctx.fillStyle = retColor
-  ctx.font = '800 72px sans-serif'
-  ctx.fillText(word, W * 0.46, 78)
-  ctx.font = '700 68px monospace'
-  ctx.fillText(money(ret, true), W * 0.46, 156)
+  ctx.fillRect(0, 114, W, 6)
+  ctx.fillStyle = '#ffffff'
+  ctx.font = '700 58px sans-serif'
+  ctx.fillText((bot.name || 'trade').slice(0, 16), 28, 74)
+  ctx.font = '800 28px sans-serif'
+  ctx.fillStyle = retColor
+  ctx.fillText(word, 620, 42)
+  ctx.font = '700 54px monospace'
+  ctx.fillText(figure, 620, 96)
+  const figureW = ctx.measureText(figure).width
+  ctx.fillStyle = 'rgba(255,255,255,0.72)'
+  ctx.font = '600 24px sans-serif'
+  ctx.fillText(periodOf(bot), 620 + figureW + 18, 90)
   const liveOn = Math.sin(time * 4) > 0
   ctx.fillStyle = liveOn ? retColor : 'rgba(255,255,255,0.35)'
   ctx.beginPath()
-  ctx.arc(W - 150, 64, 12, 0, Math.PI * 2)
+  ctx.arc(W - 148, 58, 11, 0, Math.PI * 2)
   ctx.fill()
   ctx.fillStyle = '#ffffff'
-  ctx.font = '700 40px sans-serif'
-  ctx.fillText('LIVE', W - 124, 78)
+  ctx.font = '700 32px sans-serif'
+  ctx.fillText('LIVE', W - 124, 70)
+
+  ctx.font = '700 32px monospace'
+  const tag = figure
+  const tagW = ctx.measureText(tag).width + 28
+  const tagX = tip.x + 18 + tagW > W - 12 ? tip.x - tagW - 16 : tip.x + 18
+  const tagY = Math.min(Math.max(tip.y - 22, 132), H - 56)
+  ctx.fillStyle = 'rgba(4,2,16,0.88)'
+  ctx.fillRect(tagX, tagY, tagW, 44)
+  ctx.fillStyle = retColor
+  ctx.fillRect(tagX, tagY, 6, 44)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText(tag, tagX + 16, tagY + 31)
 }
 
 function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
