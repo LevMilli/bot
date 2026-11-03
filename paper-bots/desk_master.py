@@ -1,8 +1,10 @@
 """
-desk_master.py — Trading Masters scoreboard stub (M1–M7).
+desk_master.py — Trading Masters scoreboard (M1–M7).
 
 Paper only. Surfaces dual metrics (volume vs taxed EV) so staff can see whether
 throughput upgrades are helping ROI — not a profit guarantee.
+
+M3/M4 read desk_roi_plan fit + latency journals (no longer stubs).
 """
 from __future__ import annotations
 
@@ -10,13 +12,15 @@ import math
 import os
 from typing import Any
 
-MASTER_VERSION = 1
+MASTER_VERSION = 2
 
 # Bars from docs/trading-masters-per-bot-plan.md (Chicago weeks).
 MASTER_BARS = {
     "M1_taxed_ev": 0.0,
     "M2_hit_rate": 0.55,
     "M3_fit_buy": 0.40,
+    "M4_latency_15m_s": 20.0,
+    "M4_latency_sports_s": 45.0,
     "M5_util_lo": 0.40,
     "M5_util_hi": 0.80,
     "M6_gate_a_n": 20,
@@ -54,8 +58,14 @@ def _taxed_expectancy(history: list, fill_tax: float = 0.01) -> dict:
     }
 
 
-def tower_master_row(bot: dict, *, fill_tax: float = 0.01, cfg: dict | None = None) -> dict:
-    """One tower's master metrics from snapshot bot view."""
+def tower_master_row(
+    bot: dict,
+    *,
+    fill_tax: float = 0.01,
+    cfg: dict | None = None,
+    root: str | None = None,
+) -> dict:
+    """One tower's master metrics from snapshot bot view + ROI plan journals."""
     cfg = cfg or {}
     bot_id = str(bot.get("id") or "")
     hist = list(bot.get("history") or [])
@@ -72,9 +82,30 @@ def tower_master_row(bot: dict, *, fill_tax: float = 0.01, cfg: dict | None = No
     m1 = taxed.get("expectancy_taxed")
     m2 = taxed.get("hit_rate")
     n = int(taxed.get("n") or 0)
+    m3 = None
+    m3_n = 0
+    m4 = None
+    m4_n = 0
+    try:
+        import desk_roi_plan
+        fb = desk_roi_plan.fit_buy_rate(root, bot_id)
+        m3 = fb.get("rate")
+        m3_n = int(fb.get("n_fit") or 0)
+        lat = desk_roi_plan.latency_p50(root, bot_id)
+        m4 = lat.get("p50_s")
+        m4_n = int(lat.get("n") or 0)
+    except Exception:
+        pass
+    m4_bar = (
+        MASTER_BARS["M4_latency_sports_s"]
+        if bot_id == "sports-gap"
+        else MASTER_BARS["M4_latency_15m_s"]
+    )
     ready_bits = {
         "M1": m1 is not None and m1 >= MASTER_BARS["M1_taxed_ev"] and n >= 5,
         "M2": m2 is not None and m2 >= MASTER_BARS["M2_hit_rate"] and n >= 10,
+        "M3": m3 is not None and m3_n >= 10 and m3 >= MASTER_BARS["M3_fit_buy"],
+        "M4": m4 is not None and m4_n >= 5 and m4 <= m4_bar,
         "M6": bool(ga.get("ready")),
     }
     return {
@@ -83,15 +114,18 @@ def tower_master_row(bot: dict, *, fill_tax: float = 0.01, cfg: dict | None = No
         "n_settles": n,
         "M1_taxed_ev": m1,
         "M2_hit_rate": m2,
-        "M3_fit_buy": None,  # filled when skip/fit journals mature
-        "M4_latency_s": None,
+        "M3_fit_buy": m3,
+        "M3_n_fit": m3_n,
+        "M4_latency_s": m4,
+        "M4_n": m4_n,
+        "M4_bar_s": m4_bar,
         "M5_tower_util": util,
         "M6_gate_a": bool(ga.get("ready")),
         "open_risk": round(open_risk, 2),
         "tower_cap": tower_cap,
         "today": bot.get("today"),
         "passing": ready_bits,
-        "note": "M3/M4 stub until fit journals + latency timers land",
+        "note": "M3/M4 from desk_roi_plan journals when present",
     }
 
 
@@ -218,9 +252,12 @@ def master_summary(
     fill_tax: float = 0.01,
 ) -> dict:
     """Desk-level Trading Masters board."""
-    _ = root  # reserved for future journal paths
     cfg = cfg or {}
-    rows = [tower_master_row(b, fill_tax=fill_tax, cfg=cfg) for b in (bots or []) if isinstance(b, dict)]
+    rows = [
+        tower_master_row(b, fill_tax=fill_tax, cfg=cfg, root=root)
+        for b in (bots or [])
+        if isinstance(b, dict)
+    ]
     desk_open = round(sum(float(r.get("open_risk") or 0) for r in rows), 2)
     desk_cap = _finite(cfg.get("max_open_risk")) or 100.0
     desk_util = round(desk_open / desk_cap, 4) if desk_cap else None
@@ -228,6 +265,33 @@ def master_summary(
     meme = next((b for b in (bots or []) if isinstance(b, dict) and b.get("id") == "memecoin"), None)
     stopbleed = meme_stopbleed_measure(meme)
     rescue = firm_roi_rescue(bots, cfg=cfg)
+    bleed = None
+    misplaced = None
+    plan = None
+    try:
+        import desk_roi_plan
+        bleed = desk_roi_plan.firm_bleed_ratio(bots)
+        misplaced = desk_roi_plan.capital_misplaced(bots, cfg)
+        baseline_store = desk_roi_plan.load_baseline(root)
+        baseline = baseline_store.get("latest") if isinstance(baseline_store, dict) else None
+        # Auto-capture W0 once so staff always have a compare point.
+        if root and not baseline and bots:
+            try:
+                baseline = desk_roi_plan.capture_baseline(
+                    root, bots=bots, cfg=cfg, label="W0",
+                )
+            except Exception:
+                baseline = None
+        plan = {
+            "bleed": bleed,
+            "capital_misplaced": misplaced,
+            "fit_firm": desk_roi_plan.fit_buy_rate(root),
+            "clv_completeness": desk_roi_plan.clv_completeness(root),
+            "baseline": baseline,
+            "fee_floors_locked": True,
+        }
+    except Exception:
+        plan = None
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -236,16 +300,19 @@ def master_summary(
         "desk_cap": desk_cap,
         "M5_desk_util": desk_util,
         "roi_rescue": rescue,
+        "bleed": bleed,
+        "capital_misplaced": misplaced,
+        "roi_plan": plan,
         "towers_m1_pass": m1_ready,
         "towers": rows,
         "stopbleed": stopbleed,
         "priority": [
             "memecoin stop-bleed before volume",
-            "sports tip alarms",
+            "exit quality: commodity flip + BTC real TP",
             "feed idle BTC/commodity risk when gates clear",
         ],
         "note": (
-            "Trading Masters stub — dual scoreboard for volume vs taxed EV. "
+            "Trading Masters — dual scoreboard for volume vs taxed EV. "
             "No profit guarantee. Fee floors unchanged."
         ),
     }

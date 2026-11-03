@@ -369,6 +369,7 @@ BOT_PLANS = {
             "History sweep: metals/energy 15m (palladium, natgas, copper, brent, WTI, silver…)",
         ],
         "sell": [
+            "Take-profit: paper-sell when bid ≥ fill + 0.15 (cap 0.99)",
             "Model-flip: side flips or fair collapses by δ → paper sell at bid",
             "Else settle when Kalshi resolves yes/no",
         ],
@@ -393,6 +394,7 @@ BOT_PLANS = {
             "Max 1 energy + 1 metal; EIA/inventory blackout on NatGas/Oil",
         ],
         "sell": [
+            "Model-flip when side/fair moves against entry (before settle)",
             "Settle when Kalshi resolves yes/no (history settle harness labels windows)",
         ],
         "failsafes": [
