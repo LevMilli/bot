@@ -1847,13 +1847,19 @@ def main():
                         except Exception:
                             pass
 
+    elapsed = time.perf_counter() - t0
     if not IS_SHADOW:
         try:
             import desk_roi_plan
             desk_roi_plan.record_latency(
-                DESK_ROOT, bot="btc15m", seconds=time.perf_counter() - t0,
+                DESK_ROOT, bot="btc15m", seconds=elapsed,
                 note="btc15m check",
             )
+            if not markets and not eth_markets:
+                desk_roi_plan.record_empty_card(
+                    DESK_ROOT, bot="btc15m", seconds=elapsed, markets_n=0,
+                    note="no open BTC/ETH 15m windows",
+                )
         except Exception:
             pass
     print(

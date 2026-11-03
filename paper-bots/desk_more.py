@@ -356,6 +356,38 @@ def opportunity_score_v2(edge, confidence, depth=None, need: float = DEFAULT_DEP
     return round(adj * c, 6)
 
 
+def prefetch_map(jobs: Iterable, worker, *, max_workers: int = 8) -> tuple[dict, dict]:
+    """Parallel map for orderbook / spot jobs.
+
+    ``jobs`` are hashable keys (or any hashable). ``worker(job) -> value``.
+    Returns ``({job: value}, {job: error_str})``. Empty jobs → empty maps.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    jobs_list = list(jobs or [])
+    ok: dict = {}
+    errors: dict = {}
+    if not jobs_list:
+        return ok, errors
+
+    def _one(job):
+        try:
+            return job, worker(job), None
+        except Exception as exc:  # noqa: BLE001
+            return job, None, str(exc)
+
+    workers = min(int(max_workers) if max_workers else 1, max(1, len(jobs_list)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_one, job) for job in jobs_list]
+        for fut in as_completed(futs):
+            job, value, err = fut.result()
+            if err:
+                errors[job] = err
+            else:
+                ok[job] = value
+    return ok, errors
+
+
 def record_skip_codes(
     root: str | None,
     *,
