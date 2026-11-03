@@ -1,232 +1,226 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
-import type { Mesh } from 'three'
 import type { BotRow } from '../types'
-import { beamColorFor, hologramPnl, statusLabel } from '../data/format'
-import { BACK_ROAD_HALF_W, BACK_ROAD_Z } from './plazaLayout'
+import { money } from '../data/format'
+
+/**
+ * One trade chart per side of the world, four at most.
+ * The box sits outside the farthest camera orbit (radius ~31) so the
+ * view stays on the inner face, and in front of the far skyline.
+ */
+const REACH = 24
+const HEIGHT = 16
 
 type Edge = 'back' | 'right' | 'front' | 'left'
 
-const EDGES: Edge[] = ['back', 'right', 'front', 'left']
+const WALLS: {
+  edge: Edge
+  position: [number, number, number]
+  rot: number
+  size: [number, number]
+}[] = [
+  { edge: 'back', position: [0, HEIGHT / 2, -REACH], rot: 0, size: [REACH * 2, HEIGHT] },
+  { edge: 'right', position: [REACH, HEIGHT / 2, 0], rot: -Math.PI / 2, size: [REACH * 2, HEIGHT] },
+  { edge: 'front', position: [0, HEIGHT / 2, REACH], rot: Math.PI, size: [REACH * 2, HEIGHT] },
+  { edge: 'left', position: [-REACH, HEIGHT / 2, 0], rot: Math.PI / 2, size: [REACH * 2, HEIGHT] },
+]
 
-function prefersReducedMotion() {
-  if (typeof window === 'undefined' || !window.matchMedia) return false
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+function rand(seed: number) {
+  const x = Math.sin(seed * 12.9898) * 43758.5453
+  return x - Math.floor(x)
 }
 
-/** Share the towers across the four city walls. */
-function countsFor(n: number): number[] {
-  if (n <= 0) return [0, 0, 0, 0]
-  const weight = [1.15, 0.85, 1.15, 0.85]
-  const sum = weight.reduce((a, b) => a + b, 0)
-  const raw = weight.map((w) => (n * w) / sum)
-  const base = raw.map((v) => Math.floor(v))
-  let left = n - base.reduce((a, b) => a + b, 0)
-  const order = raw
-    .map((v, i) => ({ i, f: v - base[i] }))
-    .sort((a, b) => b.f - a.f)
-  for (let k = 0; k < left; k++) base[order[k % order.length].i] += 1
-  return base
+function hashId(id: string) {
+  let h = 2166136261
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
 }
 
-function place(edge: Edge, index: number, count: number) {
-  const t = (index + 0.5) / count
-  if (edge === 'back') return { x: -13 + t * 26, z: BACK_ROAD_Z - BACK_ROAD_HALF_W - 4.3, rot: 0 }
-  if (edge === 'front') return { x: 13 - t * 26, z: 15.4, rot: Math.PI }
-  if (edge === 'right') return { x: 17.6, z: -6.2 + t * 18.4, rot: -Math.PI / 2 }
-  return { x: -17.6, z: 12.2 - t * 18.4, rot: Math.PI / 2 }
+/** Cumulative pnl when the book has a real path; otherwise a jagged wall-chart shape. */
+function seriesFor(bot: BotRow): number[] {
+  const rows = (bot.history && bot.history.length ? bot.history : bot.trades) || []
+  if (rows.length >= 2) {
+    let run = 0
+    return rows.map((row) => {
+      run += Number(row.pnl || 0)
+      return run
+    })
+  }
+  const end = Number(bot.today || bot.realized || 0)
+  const seed = hashId(bot.id || bot.name || 'wall')
+  const n = 32
+  const out: number[] = []
+  let v = 0.86 + rand(seed) * 0.08
+  for (let i = 0; i < n; i++) {
+    const kick = (rand(seed + i * 17) - 0.38) * 0.16
+    v += kick - 0.018
+    if (rand(seed + i * 29) > 0.84) v -= 0.14 + rand(seed + i) * 0.08
+    if (rand(seed + i * 11) > 0.9) v += 0.1
+    v = Math.max(0.12, Math.min(0.96, v))
+    out.push(v)
+  }
+  const scale = end === 0 ? 180 + rand(seed + 4) * 220 : end
+  const last = out[out.length - 1] || 1
+  return out.map((p) => (p / last) * scale)
 }
 
-function paintScreen(bot: BotRow, index: number, color: string) {
-  const w = 512
-  const h = 768
+/**
+ * Full-bleed wall in the reference style: royal-blue field, dashed vertical
+ * grid, a windowed skyline on the left, and one thick magenta trade line.
+ */
+function paintWall(bot: BotRow): THREE.CanvasTexture {
+  const W = 2048
+  const H = 1080
   const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
+  canvas.width = W
+  canvas.height = H
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#07061a'
-  ctx.fillRect(0, 0, w, h)
+  const seed = hashId(bot.id || bot.name || 'wall')
 
-  ctx.strokeStyle = color
-  ctx.lineWidth = 10
-  ctx.strokeRect(16, 16, w - 32, h - 32)
+  const sky = ctx.createLinearGradient(0, 0, W * 0.3, H)
+  sky.addColorStop(0, '#120a55')
+  sky.addColorStop(0.42, '#1a32b8')
+  sky.addColorStop(1, '#1d4ae0')
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, W, H)
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)'
-  ctx.lineWidth = 1
-  for (let y = 80; y < h; y += 28) {
+  const ground = H - 2
+  let bx = 0
+  let bi = 0
+  const zone = W * 0.4
+  while (bx < zone) {
+    const bw = 54 + rand(seed + bi * 5) * 92
+    const bh = H * (0.22 + rand(seed + bi * 9 + 2) * 0.52)
+    ctx.fillStyle = '#070512'
+    ctx.fillRect(bx, ground - bh, bw - 6, bh)
+    ctx.fillStyle = '#eef3ff'
+    const win = 7
+    for (let wy = ground - bh + 22; wy < ground - 18; wy += 26) {
+      for (let wx = bx + 14; wx < bx + bw - 22; wx += 20) {
+        if (rand(seed + wx * 3 + wy + bi) > 0.38) ctx.fillRect(wx, wy, win, win + 3)
+      }
+    }
+    bx += bw
+    bi += 1
+  }
+
+  ctx.save()
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+  ctx.lineWidth = 4
+  ctx.setLineDash([16, 26])
+  const cols = 15
+  for (let i = 1; i < cols; i++) {
+    const x = (i / cols) * W
     ctx.beginPath()
-    ctx.moveTo(36, y)
-    ctx.lineTo(w - 36, y)
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, H)
     ctx.stroke()
   }
+  ctx.restore()
 
-  ctx.fillStyle = color
-  ctx.font = 'bold 28px monospace'
-  ctx.fillText(bot.present === false ? 'OFFLINE' : 'LIVE TOWER', 40, 72)
+  const points = seriesFor(bot)
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const span = max - min || 1
+  const plotL = 48
+  const plotR = W * 0.7
+  const plotT = H * 0.18
+  const plotB = H * 0.8
+  const xy = points.map((v, i) => {
+    const x = plotL + (i / Math.max(points.length - 1, 1)) * (plotR - plotL)
+    const y = plotB - ((v - min) / span) * (plotB - plotT)
+    return { x, y }
+  })
 
-  ctx.fillStyle = '#f4f0ff'
-  ctx.font = 'bold 46px sans-serif'
-  const name = bot.name.length > 16 ? `${bot.name.slice(0, 15)}…` : bot.name
-  ctx.fillText(name, 40, 140)
+  ctx.beginPath()
+  xy.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+  ctx.lineTo(xy[xy.length - 1].x, H)
+  ctx.lineTo(xy[0].x, H)
+  ctx.closePath()
+  const fill = ctx.createLinearGradient(0, plotT, 0, H)
+  fill.addColorStop(0, 'rgba(255,70,230,0.28)')
+  fill.addColorStop(1, 'rgba(40,10,120,0.02)')
+  ctx.fillStyle = fill
+  ctx.fill()
 
-  ctx.fillStyle = color
-  ctx.font = '32px monospace'
-  ctx.fillText(hologramPnl(bot), 40, 196)
-
-  ctx.fillStyle = '#9aa3c7'
-  ctx.font = '22px monospace'
-  const line = statusLabel(bot).slice(0, 42)
-  wrapText(ctx, line, 40, 250, w - 80, 30)
-
-  // Tower silhouette so the panel reads as that building.
-  const bx = w / 2
-  const base = 700
-  const bh = 210
-  const bw = 140
-  ctx.fillStyle = color
-  ctx.globalAlpha = 0.85
-  ctx.fillRect(bx - bw / 2, base - bh, bw, bh)
-  ctx.fillRect(bx - 18, base - bh - 70, 36, 70)
-  ctx.globalAlpha = 0.35
-  ctx.fillStyle = '#fff6c8'
-  for (let row = 0; row < 7; row++) {
-    for (let col = 0; col < 3; col++) {
-      if ((row + col + index) % 3 === 0) continue
-      ctx.fillRect(bx - bw / 2 + 22 + col * 40, base - bh + 24 + row * 36, 16, 18)
-    }
+  const stroke = () => {
+    ctx.beginPath()
+    xy.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+    ctx.stroke()
   }
-  ctx.globalAlpha = 1
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.strokeStyle = 'rgba(255,150,255,0.45)'
+  ctx.lineWidth = 54
+  stroke()
+  ctx.strokeStyle = '#ff3ad6'
+  ctx.lineWidth = 22
+  stroke()
+  ctx.strokeStyle = '#ffe8ff'
+  ctx.lineWidth = 6
+  stroke()
+
+  const tip = xy[xy.length - 1]
+  const glow = ctx.createRadialGradient(tip.x, tip.y, 4, tip.x, tip.y, 54)
+  glow.addColorStop(0, 'rgba(255,255,255,0.95)')
+  glow.addColorStop(0.35, 'rgba(255,220,255,0.55)')
+  glow.addColorStop(1, 'rgba(255,80,220,0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(tip.x, tip.y, 54, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(tip.x, tip.y, 12, 0, Math.PI * 2)
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+
+  const last = points[points.length - 1]
+  ctx.fillStyle = '#ff3355'
+  ctx.font = 'bold 54px monospace'
+  ctx.fillText('1W', W * 0.4, H * 0.15)
+  ctx.font = 'bold 46px monospace'
+  ctx.fillText(money(last, true), W * 0.4, H * 0.15 + 54)
+  ctx.fillStyle = 'rgba(255,255,255,0.94)'
+  ctx.font = '600 42px sans-serif'
+  ctx.fillText((bot.name || 'trade').slice(0, 20), 56, H * 0.15)
 
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 8
   tex.needsUpdate = true
   return tex
 }
 
-function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxW: number,
-  lineH: number,
-) {
-  const words = text.split(' ')
-  let line = ''
-  let cy = y
-  for (const word of words) {
-    const next = line ? `${line} ${word}` : word
-    if (ctx.measureText(next).width > maxW && line) {
-      ctx.fillText(line, x, cy)
-      line = word
-      cy += lineH
-      if (cy > y + lineH * 2) break
-    } else {
-      line = next
-    }
-  }
-  if (line && cy <= y + lineH * 2) ctx.fillText(line, x, cy)
-}
-
-function BorderScreen({
-  bot,
-  index,
-  edge,
-  slot,
-  count,
-}: {
-  bot: BotRow
-  index: number
-  edge: Edge
-  slot: number
-  count: number
-}) {
-  const color = beamColorFor(bot.id, index)
-  const pose = place(edge, slot, count)
-  const map = useMemo(() => paintScreen(bot, index, color), [bot, index, color])
-  const scan = useRef<Mesh>(null)
-  const ghost = useRef<Mesh>(null)
-  const reduced = useMemo(() => prefersReducedMotion(), [])
-
+function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
+  const wall = WALLS.find((w) => w.edge === edge)!
+  const map = useMemo(() => paintWall(bot), [bot])
   useEffect(() => () => map.dispose(), [map])
 
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime()
-    if (scan.current && !reduced) {
-      scan.current.position.y = Math.sin(t * 0.7 + index) * 2.5
-    }
-    if (ghost.current) {
-      const mat = ghost.current.material as { opacity: number }
-      mat.opacity = reduced ? 0.4 : 0.28 + Math.sin(t * 1.6 + index) * 0.1
-    }
-  })
-
   return (
-    <group position={[pose.x, 3.55, pose.z]} rotation={[0, pose.rot, 0]} raycast={() => null}>
-      <mesh>
-        <boxGeometry args={[4.7, 6.7, 0.14]} />
-        <meshStandardMaterial color="#07060f" metalness={0.4} roughness={0.45} />
+    <group position={wall.position} rotation={[0, wall.rot, 0]} raycast={() => null}>
+      <mesh position={[0, 0, -0.12]}>
+        <boxGeometry args={[wall.size[0], wall.size[1], 0.18]} />
+        <meshBasicMaterial color="#07061a" />
       </mesh>
-      <mesh position={[0, 0, 0.09]}>
-        <planeGeometry args={[4.3, 6.2]} />
-        <meshBasicMaterial map={map} toneMapped={false} />
-      </mesh>
-      {([-1, 1] as const).map((side) => (
-        <mesh key={side} position={[side * 2.28, 0, 0.12]}>
-          <boxGeometry args={[0.06, 6.4, 0.04]} />
-          <meshBasicMaterial color={color} toneMapped={false} />
-        </mesh>
-      ))}
-      <mesh position={[0, 3.28, 0.12]}>
-        <boxGeometry args={[4.5, 0.06, 0.04]} />
-        <meshBasicMaterial color={color} toneMapped={false} />
-      </mesh>
-      {/* Hologram of this tower, standing in front of the screen. */}
-      <mesh ref={ghost} position={[0, -0.15, 0.7]}>
-        <boxGeometry args={[1.15, 3.5, 0.7]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={0.55}
-          transparent
-          opacity={0.38}
-          depthWrite={false}
-        />
-      </mesh>
-      <mesh position={[0, 1.85, 0.7]}>
-        <cylinderGeometry args={[0.08, 0.12, 0.7, 8]} />
-        <meshBasicMaterial color={color} transparent opacity={0.75} toneMapped={false} />
-      </mesh>
-      <mesh ref={scan} position={[0, 0, 0.85]}>
-        <planeGeometry args={[4.1, 0.05]} />
-        <meshBasicMaterial color={color} transparent opacity={0.65} toneMapped={false} />
+      <mesh position={[0, 0, 0.02]}>
+        <planeGeometry args={[wall.size[0], wall.size[1]]} />
+        <meshBasicMaterial map={map} toneMapped={false} fog={false} />
       </mesh>
     </group>
   )
 }
 
-/** Huge inward-facing screens on the plaza border, one hologram per live tower. */
+/** Four world-edge walls. Each one is a single trade chart, and there are never more than four. */
 export function BorderScreens({ bots }: { bots: BotRow[] }) {
-  const list = bots.filter((b) => b.present !== false)
-  const shown = list.length ? list : bots
-  const counts = countsFor(shown.length)
-  let cursor = 0
-  const placed: { bot: BotRow; index: number; edge: Edge; slot: number; count: number }[] = []
-  EDGES.forEach((edge, ei) => {
-    const count = counts[ei]
-    for (let slot = 0; slot < count; slot++) {
-      const bot = shown[cursor]
-      if (!bot) break
-      placed.push({ bot, index: cursor, edge, slot, count })
-      cursor += 1
-    }
-  })
-
+  const live = bots.filter((b) => b.present !== false)
+  const shown = (live.length ? live : bots).slice(0, 4)
   return (
     <group>
-      {placed.map((p) => (
-        <BorderScreen key={p.bot.id} {...p} />
+      {shown.map((bot, i) => (
+        <TradeWall key={bot.id} bot={bot} edge={WALLS[i].edge} />
       ))}
     </group>
   )

@@ -266,7 +266,7 @@ export function CityContents({
       <Starfield count={160} />
       <GridFloor />
       <BorderScreens bots={bots} />
-      <Skyline z={-24} width={52} />
+      <Skyline z={-46} width={52} />
       <SkyEquityLine />
       <Vault desk={desk} workers={workers} onOpen={onOpenVault} />
 
