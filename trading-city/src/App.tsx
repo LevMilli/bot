@@ -1,6 +1,6 @@
 import { AdaptiveDpr, AdaptiveEvents } from '@react-three/drei'
 import { Canvas } from '@react-three/fiber'
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useSnapshot } from './data/useSnapshot'
 import { Banners } from './hud/Banners'
 import { Monitors } from './hud/Monitors'
@@ -11,9 +11,138 @@ import { FLOORS, parseCityHash } from './data/floorMap'
 import { CityScene } from './scene/CityScene'
 import { OfficeHallScene } from './scene/OfficeHallScene'
 import { BankScene } from './scene/BankScene'
+import { BossDashboard } from './hud/BossDashboard'
 import type { BotRow } from './types'
 
 type View = 'city' | 'bank' | 'office'
+type FloorFocus = 'suite' | 'hall' | 'boss'
+
+function FloorNavMenu({
+  bots,
+  selected,
+  fromBank,
+  floorFocus,
+  bossOpen,
+  onSuite,
+  onHall,
+  onBoss,
+  onPickBot,
+}: {
+  bots: BotRow[]
+  selected: BotRow
+  fromBank: boolean
+  floorFocus: FloorFocus
+  bossOpen: boolean
+  onSuite: () => void
+  onHall: () => void
+  onBoss: () => void
+  onPickBot: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const kind = fromBank ? 'Tellers' : 'Floor'
+  const label =
+    bossOpen || floorFocus === 'boss'
+      ? `${kind} · Boss office`
+      : floorFocus === 'hall'
+        ? `${kind} · Hallway`
+        : `${kind} · ${selected.name}`
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t?.closest?.('.floor-nav')) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    // click (not mousedown): mousedown-outside can race the option's click
+    // and close/unmount the panel before onHall/onBoss runs.
+    document.addEventListener('click', onDoc)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('click', onDoc)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const pick = (fn: () => void) => (e: { preventDefault(): void; stopPropagation(): void }) => {
+    e.preventDefault()
+    e.stopPropagation()
+    fn()
+    setOpen(false)
+  }
+
+  const botSection = fromBank ? 'Switch teller' : 'Tower suites'
+
+  return (
+    <div className={`floor-nav${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        className="floor-nav-toggle"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={open ? `Hide ${kind} menu` : `Show ${kind} menu`}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+      >
+        <span className="floor-nav-label">{label}</span>
+        <span className="floor-nav-caret" aria-hidden>
+          {open ? '▴' : '▾'}
+        </span>
+      </button>
+      {open && (
+        <div
+          className="floor-nav-panel"
+          role="listbox"
+          aria-label={fromBank ? 'Teller and floor navigation' : 'Floor navigation'}
+        >
+          <p className="floor-nav-section">{botSection}</p>
+          {bots.map((bot, i) => (
+            <button
+              key={bot.id}
+              type="button"
+              role="option"
+              className={bot.id === selected.id && floorFocus === 'suite' && !bossOpen ? 'active' : ''}
+              style={{ borderLeftColor: beamColorFor(bot.id, i) }}
+              onClick={pick(() => onPickBot(bot.id))}
+            >
+              {bot.name}
+            </button>
+          ))}
+          <p className="floor-nav-section">Floor zones</p>
+          <button
+            type="button"
+            role="option"
+            className={floorFocus === 'suite' && !bossOpen ? 'active' : ''}
+            onClick={pick(onSuite)}
+          >
+            This suite
+          </button>
+          <button
+            type="button"
+            role="option"
+            className={floorFocus === 'hall' && !bossOpen ? 'active' : ''}
+            onClick={pick(onHall)}
+          >
+            Hallway
+          </button>
+          <button
+            type="button"
+            role="option"
+            className={bossOpen || floorFocus === 'boss' ? 'active' : ''}
+            onClick={pick(onBoss)}
+          >
+            Boss office
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function guestModeFromUrl() {
   try {
@@ -27,42 +156,64 @@ function applyHashRoute(
   setView: (v: View) => void,
   setSelectedId: (id: string | null) => void,
   setFromBank: (v: boolean) => void,
+  setFloorFocus: (v: FloorFocus) => void,
+  setBossOpen: (v: boolean) => void,
   setSpawnBotId: (id: string | null) => void,
+  bots: BotRow[],
 ) {
   const route = parseCityHash(window.location.hash || '')
+  if (route.view === 'boss') {
+    // Prefer the live boss board on the office floor when a bot is available.
+    const fallback = bots.find((b) => b.present !== false)?.id || bots[0]?.id || null
+    if (fallback) {
+      setSelectedId(fallback)
+      setSpawnBotId(fallback)
+      setFromBank(false)
+      setFloorFocus('boss')
+      setBossOpen(true)
+      setView('office')
+      return
+    }
+    setSelectedId(null)
+    setFromBank(true)
+    setFloorFocus('suite')
+    setBossOpen(false)
+    setView('bank')
+    return
+  }
   if (route.view === 'bank') {
     setSelectedId(null)
     setSpawnBotId(null)
     setFromBank(true)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('bank')
-    return
-  }
-  if (route.view === 'boss') {
-    setSelectedId('kalshi-sized')
-    setSpawnBotId('kalshi-sized')
-    setFromBank(true)
-    setView('office')
     return
   }
   if (route.view === 'office' && route.botId) {
     setSelectedId(route.botId)
     setSpawnBotId(route.botId)
     setFromBank(true)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('office')
     return
   }
   if (route.view === 'floor') {
-    // Walkable trading wing — spawn at first suite (or hash bot).
-    const id = route.botId || 'sports-gap'
+    const id = route.botId || bots.find((b) => b.present !== false)?.id || bots[0]?.id || 'sports-gap'
     setSelectedId(id)
     setSpawnBotId(id)
     setFromBank(true)
+    setFloorFocus('hall')
+    setBossOpen(false)
     setView('office')
     return
   }
   setSelectedId(null)
   setSpawnBotId(null)
   setFromBank(false)
+  setFloorFocus('suite')
+  setBossOpen(false)
   setView('city')
 }
 
@@ -72,10 +223,12 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [fromBank, setFromBank] = useState(false)
   const [screensOpen, setScreensOpen] = useState(false)
+  const [floorFocus, setFloorFocus] = useState<FloorFocus>('suite')
+  const [bossOpen, setBossOpen] = useState(false)
+  const [spawnBotId, setSpawnBotId] = useState<string | null>(null)
   /** Desk ops HUD (skips / budgets / adapt / fill tax) — opens from ledger/compliance click. */
   const [vaultOpsOpen, setVaultOpsOpen] = useState(false)
-  /** Spawn-behind target — only changes when entering the wing from tower/bank/hash. */
-  const [spawnBotId, setSpawnBotId] = useState<string | null>(null)
+  const [walkHint, setWalkHint] = useState('')
   const guest = useMemo(() => guestModeFromUrl(), [])
 
   const bots = snap?.bots || []
@@ -84,17 +237,40 @@ export default function App() {
     [bots, selectedId],
   )
 
+  // Keep a ref so hash routing can read latest bots without re-applying on every
+  // snapshot poll (re-apply was resetting floorFocus → suite and closing the hall).
+  const botsRef = useRef(bots)
+  botsRef.current = bots
+
   useEffect(() => {
-    applyHashRoute(setView, setSelectedId, setFromBank, setSpawnBotId)
-    const onHash = () => applyHashRoute(setView, setSelectedId, setFromBank, setSpawnBotId)
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
+    const apply = () =>
+      applyHashRoute(
+        setView,
+        setSelectedId,
+        setFromBank,
+        setFloorFocus,
+        setBossOpen,
+        setSpawnBotId,
+        botsRef.current,
+      )
+    apply()
+    window.addEventListener('hashchange', apply)
+    return () => window.removeEventListener('hashchange', apply)
   }, [])
+
+  // Deep-link #/boss once bots exist (hash effect alone may run before fixture load).
+  useEffect(() => {
+    if (!bots.length) return
+    if (parseCityHash(window.location.hash || '').view !== 'boss') return
+    applyHashRoute(setView, setSelectedId, setFromBank, setFloorFocus, setBossOpen, setSpawnBotId, bots)
+  }, [bots.length])
 
   const openVault = () => {
     setSelectedId(null)
     setSpawnBotId(null)
     setFromBank(true)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('bank')
     window.location.hash = '#/bank'
   }
@@ -103,6 +279,8 @@ export default function App() {
     setSelectedId(id)
     setSpawnBotId(id)
     setFromBank(true)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('office')
     window.location.hash = `#/office/${id}`
   }
@@ -111,16 +289,10 @@ export default function App() {
     setSelectedId(id)
     setSpawnBotId(id)
     setFromBank(false)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('office')
     window.location.hash = `#/office/${id}`
-  }
-
-  const openHall = () => {
-    const id = selectedId || bots[0]?.id || 'sports-gap'
-    setSelectedId(id)
-    setSpawnBotId(id)
-    setView('office')
-    window.location.hash = '#/floor/1'
   }
 
   useEffect(() => {
@@ -128,13 +300,18 @@ export default function App() {
   }, [selectedId, view])
 
   useEffect(() => {
-    if (view !== 'bank') setVaultOpsOpen(false)
+    if (view !== 'bank') {
+      setVaultOpsOpen(false)
+      setWalkHint('')
+    }
   }, [view])
 
   const backToCity = () => {
     setSelectedId(null)
     setSpawnBotId(null)
     setFromBank(false)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setVaultOpsOpen(false)
     setView('city')
     window.location.hash = '#/plaza'
@@ -144,6 +321,8 @@ export default function App() {
     setSelectedId(null)
     setSpawnBotId(null)
     setFromBank(true)
+    setFloorFocus('suite')
+    setBossOpen(false)
     setView('bank')
     window.location.hash = '#/bank'
   }
@@ -152,10 +331,14 @@ export default function App() {
     <div className={`app ${view !== 'city' ? 'office' : 'city'}${guest ? ' guest' : ''}`}>
       <div className="stage">
         <Canvas
-          dpr={[1, 1]}
-          gl={{ antialias: false, alpha: false, powerPreference: 'high-performance' }}
+          dpr={view === 'bank' ? [1, 1.75] : [1, 1.25]}
+          gl={{
+            antialias: view === 'bank',
+            alpha: false,
+            powerPreference: 'high-performance',
+          }}
           camera={{ position: [0, 12, 14], fov: 46 }}
-          performance={{ min: 0.4 }}
+          performance={{ min: 0.45 }}
         >
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
@@ -167,8 +350,9 @@ export default function App() {
                 desk={snap?.desk}
                 spawnBotId={spawnBotId}
                 onSelect={(id) => {
-                  // Proximity walk into a suite — swap live desk, keep spawn (no teleport).
                   setSelectedId(id)
+                  setFloorFocus('suite')
+                  setBossOpen(false)
                   window.history.replaceState(null, '', `#/office/${id}`)
                 }}
                 onOpenScreens={() => setScreensOpen(true)}
@@ -179,6 +363,7 @@ export default function App() {
                 desk={snap?.desk}
                 onSelectTeller={openTeller}
                 onOpenDeskOps={() => setVaultOpsOpen(true)}
+                onWalkHint={setWalkHint}
               />
             ) : (
               <CityScene
@@ -206,7 +391,7 @@ export default function App() {
             </p>
           </div>
           <div className="chrome-actions">
-            {view === 'office' && (
+            {view === 'office' ? (
               <>
                 {fromBank && (
                   <button type="button" className="back-btn" onClick={backToBank}>
@@ -217,26 +402,19 @@ export default function App() {
                   ← Go to city
                 </button>
               </>
-            )}
-            {view !== 'city' && view !== 'office' && (
+            ) : view !== 'city' ? (
               <button type="button" className="back-btn" onClick={backToCity}>
                 ← Go to city
               </button>
+            ) : guest ? null : (
+              <a className="back-btn ghost" href="/pimp-trading">
+                PIMP-TRADING
+              </a>
             )}
             {view === 'city' && (
-              <>
-                {guest ? null : (
-                  <a className="back-btn ghost" href="/pimp-trading">
-                    PIMP-TRADING
-                  </a>
-                )}
-                <button type="button" className="back-btn ghost" onClick={openVault}>
-                  Enter vault
-                </button>
-                <button type="button" className="back-btn" onClick={openHall}>
-                  Trading wing
-                </button>
-              </>
+              <button type="button" className="back-btn ghost" onClick={openVault}>
+                Enter vault
+              </button>
             )}
             <span className="meta">
               {guest ? 'guest · ' : ''}
@@ -265,28 +443,39 @@ export default function App() {
 
         {view === 'office' && selected && (
           <div className="office-hud">
-            <div className="office-title">
-              <strong>{fromBank ? `Teller · ${selected.name}` : selected.name}</strong>
-              <span>{selected.id}</span>
-              <span className="screen-hint">WASD walk · drag look · click screen for trades</span>
-            </div>
-            {fromBank && (
-              <div className="teller-switch" role="tablist" aria-label="Switch teller">
-                {bots.map((bot, i) => (
-                  <button
-                    key={bot.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={bot.id === selected.id}
-                    className={`teller-chip ${bot.id === selected.id ? 'active' : ''}`}
-                    style={{ borderColor: beamColorFor(bot.id, i) }}
-                    onClick={() => openTeller(bot.id)}
-                  >
-                    {bot.name}
-                  </button>
-                ))}
+            <div className="office-hud-top">
+              <FloorNavMenu
+                bots={bots}
+                selected={selected}
+                fromBank={fromBank}
+                floorFocus={floorFocus}
+                bossOpen={bossOpen}
+                onSuite={() => {
+                  setFloorFocus('suite')
+                  setBossOpen(false)
+                }}
+                onHall={() => {
+                  setFloorFocus('hall')
+                  setBossOpen(false)
+                  if (selectedId) setSpawnBotId(selectedId)
+                }}
+                onBoss={() => {
+                  setFloorFocus('boss')
+                  setBossOpen(true)
+                  setSpawnBotId('kalshi-sized')
+                  setSelectedId('kalshi-sized')
+                }}
+                onPickBot={(id) => {
+                  if (fromBank) openTeller(id)
+                  else openTower(id)
+                }}
+              />
+              <div className="office-title">
+                <span className="screen-hint">
+                  WASD walk · drag look · click screen for trades · free wing
+                </span>
               </div>
-            )}
+            </div>
             {fromBank && (
               <div className="teller-dialogue" role="status" aria-label="Teller dialogue">
                 <p className="td-line">
@@ -319,6 +508,24 @@ export default function App() {
           </div>
         )}
 
+        {view === 'office' && bossOpen && (
+          <BossDashboard
+            bots={bots}
+            desk={snap?.desk}
+            roi={snap?.roi_system}
+            snap={snap}
+            onClose={() => {
+              setBossOpen(false)
+              setFloorFocus('hall')
+            }}
+            onFocusBot={(id) => {
+              setSelectedId(id)
+              setBossOpen(false)
+              setFloorFocus('suite')
+            }}
+          />
+        )}
+
         {view === 'office' && selected && screensOpen && (
           <div
             className="screen-lightbox"
@@ -339,7 +546,9 @@ export default function App() {
           <div className="office-hud bank-hud">
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
-              <span>A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look</span>
+              <span className={walkHint.startsWith('E') ? 'walk-hint-go' : undefined}>
+                {walkHint || 'Click to look · W/S walk · A/D turn · Space jump · E talk'}
+              </span>
             </div>
             <nav className="floor-directory" aria-label="Office floors">
               {FLOORS.map((floor) => (
@@ -448,10 +657,12 @@ export default function App() {
           />
         )}
         {view === 'city' && (
-          <div className="day-strip" aria-hidden={false}>
-            <span>{snap?.desk?.central_check || 'Central clock pending'}</span>
-            <span>{snap?.desk?.status_line || ''}</span>
-          </div>
+          <>
+            <div className="day-strip" aria-hidden={false}>
+              <span>{snap?.desk?.central_check || 'Central clock pending'}</span>
+              <span>{snap?.desk?.status_line || ''}</span>
+            </div>
+          </>
         )}
       </div>
 

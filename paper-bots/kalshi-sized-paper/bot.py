@@ -40,6 +40,18 @@ def _desk():
     return pimp_desk
 
 
+def _ask_band():
+    """Staff-promoted research band overrides config; else config.json."""
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        band = desk_roi_plan.effective_inx_ask_band(DESK_ROOT, CFG)
+        return float(band["lo"]), float(band["hi"])
+    except Exception:
+        return float(CFG["band_min_ask"]), float(CFG["band_max_ask"])
+
+
 def live_quotes(event_ticker):
     out = []
     for m in feed.get_event_markets(event_ticker):
@@ -57,7 +69,8 @@ def live_quotes(event_ticker):
 def confirm_with_orderbook(pick):
     ob = feed.get_orderbook(pick["ticker"])
     ask = ob["yes_ask"] if pick["side"] == "yes" else ob["no_ask"]
-    if ask is None or not (CFG["band_min_ask"] - 1e-9 <= ask <= CFG["band_max_ask"] + 1e-9):
+    lo, hi = _ask_band()
+    if ask is None or not (lo - 1e-9 <= ask <= hi + 1e-9):
         return None, ob
     return {**pick, "ask": round(ask, 4)}, ob
 
@@ -89,7 +102,8 @@ def step_brief(args, state, day):
     ev = feed.find_event_for(CFG["series"], day, CFG["settle_time_ct"])
     cands = []
     if ev:
-        cands = signal_engine.candidate_sides(live_quotes(ev), CFG["band_min_ask"], CFG["band_max_ask"])
+        lo, hi = _ask_band()
+        cands = signal_engine.candidate_sides(live_quotes(ev), lo, hi)
         cands.sort(key=lambda c: -c["ask"])
     text = alerts.format_brief(day, skip, ok, msg, state, ev, cands, upcoming_skips(day), logger.now_ct())
     print(text)
@@ -152,7 +166,8 @@ def step_scan(args, state, day):
         pass
     quotes = live_quotes(ev)
     print(f"Sized Kalshi event {ev}: {len(quotes)} active contracts at {logger.now_ct()}")
-    pick = signal_engine.pick_trade(quotes, CFG["band_min_ask"], CFG["band_max_ask"])
+    lo, hi = _ask_band()
+    pick = signal_engine.pick_trade(quotes, lo, hi)
     if not pick:
         print(alerts.format_skip_note(day, "no contract with ask in the 84-92c band"))
         if not args.dry_run:

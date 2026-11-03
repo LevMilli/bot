@@ -173,6 +173,36 @@ def settle_account(state):
             })
         except Exception:
             pass
+        if not IS_SHADOW:
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_fee_ledger(
+                    DESK_ROOT,
+                    bot="btc15m",
+                    ticker=str(pos.get("ticker") or ""),
+                    side=str(pos.get("side") or ""),
+                    price=pos.get("ask") or pos.get("entry_price"),
+                    contracts=pos.get("contracts"),
+                    fee=0.0,
+                    pnl=pnl,
+                    fill_id=str(pos.get("fill_id") or ""),
+                    kind="settle",
+                    note="settled",
+                )
+                helper = str(pos.get("helper_source") or "").strip()
+                if helper:
+                    desk_roi_plan.record_helper_fill(
+                        DESK_ROOT,
+                        helper=helper,
+                        bot="btc15m",
+                        ticker=str(pos.get("ticker") or ""),
+                        pnl=pnl,
+                        contracts=pos.get("contracts"),
+                        fill_id=str(pos.get("fill_id") or ""),
+                        note="settled",
+                    )
+            except Exception:
+                pass
     state["open"] = still
 
 
@@ -203,6 +233,44 @@ def paper_sell(state, pos, bid, fee, reason):
                 "fill_id": pos.get("fill_id") or "",
                 "at": closed["closed"],
             })
+        except Exception:
+            pass
+        try:
+            import desk_roi_plan
+            series = str(pos.get("series") or "KXBTC15M")
+            desk_roi_plan.record_incubation_settle(
+                DESK_ROOT,
+                series=series,
+                bot="btc15m",
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                note=str(reason or "")[:80],
+            )
+            desk_roi_plan.record_fee_ledger(
+                DESK_ROOT,
+                bot="btc15m",
+                ticker=str(pos.get("ticker") or ""),
+                side=str(pos.get("side") or ""),
+                price=bid,
+                contracts=pos.get("contracts"),
+                fee=fee,
+                pnl=pnl,
+                fill_id=str(pos.get("fill_id") or ""),
+                kind="sell",
+                note=str(reason or "")[:120],
+            )
+            helper = str(pos.get("helper_source") or "").strip()
+            if helper:
+                desk_roi_plan.record_helper_fill(
+                    DESK_ROOT,
+                    helper=helper,
+                    bot="btc15m",
+                    ticker=str(pos.get("ticker") or ""),
+                    pnl=pnl,
+                    contracts=pos.get("contracts"),
+                    fill_id=str(pos.get("fill_id") or ""),
+                    note=str(reason or "")[:120],
+                )
         except Exception:
             pass
     return pnl
@@ -292,6 +360,12 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "btc15m")
             if cool:
                 return cool
+            stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "btc15m")
+            if stale:
+                return stale
+            revenge = desk_roi_plan.anti_revenge_blocks(DESK_ROOT, "btc15m", ticker)
+            if revenge:
+                return revenge
         except Exception:
             pass
     skip = ""
@@ -400,6 +474,10 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "history_hit": perf.get("hit_rate"),
         "history_ci_low": perf.get("hit_ci_low"),
         "fill_tax": 0.01,
+        # Calendar consulted (loaded) → attribute close to helper for Gate A evidence.
+        "helper_source": (
+            "calendar_scanner" if vk.get("calendar_loaded") else str(vk.get("helper_source") or "")
+        ),
         "take_profit": min(round(float(ask) + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP),
         "exit_plan": {
             "kind": "take_profit+model_flip+settle",
@@ -917,6 +995,7 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         "edge": float(p) - float(ask) - float(fee),
         "toward": toward,
         "news": news,
+        "calendar_loaded": news is not None,
         "news_soft_unavailable": news is None,
         "candle_soft_unknown": toward is None,
         "cushion": cushion,
@@ -1096,6 +1175,17 @@ def main():
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
         print(f"Selective volume: max buys {max_buys_eff} (today ${today_pnl:.2f} ≥ 0, fee floors locked)")
+    # Daily R budget → settle-only after tower hits target (exits stay on).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        r_block = desk_roi_plan.daily_r_blocks("btc15m", today_pnl)
+        if r_block:
+            print(f"Settle-only: {r_block}")
+            max_buys_eff = 0
+    except Exception:
+        pass
 
     for ev in ranked:
         if buys >= max_buys_eff:
@@ -1149,6 +1239,15 @@ def main():
                             )
                         except Exception:
                             pass
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.record_anti_revenge(
+                        DESK_ROOT, bot="btc15m",
+                        ticker=str(ev.get("ticker") or ""), reason="take-profit",
+                        note=str(tp_sold[0])[:120],
+                    )
+                except Exception:
+                    pass
         if flip_on and account.get("open") and ev.get("side") and ev.get("bid") is not None and ev.get("p") is not None:
             sold = manage_model_flips(
                 account,
@@ -1172,6 +1271,15 @@ def main():
                             )
                         except Exception:
                             pass
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.record_anti_revenge(
+                        DESK_ROOT, bot="btc15m",
+                        ticker=str(ev.get("ticker") or ""), reason="model-flip",
+                        note=str(sold[0])[:120],
+                    )
+                except Exception:
+                    pass
 
         reasons = list(ev.get("reasons") or [])
         ml = float(min_left) if min_left is not None else 0.0
@@ -1314,6 +1422,7 @@ def main():
                 "cushion": ev.get("cushion"), "sigma": ev.get("sigma"),
                 "spread": ev.get("spread"), "minutes_left": ev.get("min_left"),
                 "ask": ev.get("ask"), "ticker": ev.get("ticker"),
+                "calendar_loaded": bool(ev.get("calendar_loaded")),
             },
         )
         if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
@@ -1479,6 +1588,7 @@ def main():
                     "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
                     "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
                     "ask": ev_early.get("ask"), "ticker": m["ticker"], "series": "KXETH15M",
+                    "calendar_loaded": bool(ev_early.get("calendar_loaded")),
                 },
             )
             print(f"  ETH early: {sentence}")

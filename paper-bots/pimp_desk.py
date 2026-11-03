@@ -1832,6 +1832,13 @@ def entry_gate(root: str | None = None, bots: list | None = None) -> str:
     open_risk = round(sum(float(b.get("open_risk") or 0) for b in live), 2)
     open_count = int(sum(int(b.get("open_count") or 0) for b in live))
     today = round(sum(float(b.get("today") or 0) for b in live), 2)
+    try:
+        import desk_roi_plan
+        ruin = desk_roi_plan.ruin_drill_blocks_entries(root)
+        if ruin:
+            return ruin
+    except Exception:
+        pass
     if today <= -float(cfg["daily_loss_stop"]):
         return (
             f"Daily loss stop is hit (${abs(today):.2f} against ${cfg['daily_loss_stop']:.2f}). "
@@ -2011,6 +2018,21 @@ def stake_dollars_for(
                     adapted = 0.0
         except Exception:
             pass
+        # Phase 10: profit-lock harvest — 0.5× after Chicago-week firm target.
+        try:
+            import desk_roi_plan
+            pl_mult = float(desk_roi_plan.profit_lock_size_mult(root))
+            if pl_mult < 1.0 - 1e-12:
+                plan = dict(plan)
+                notes = list(plan.get("notes") or [])
+                notes.append(f"profit-lock harvest → {pl_mult:.2f}× size")
+                plan["notes"] = notes
+                plan["profit_lock_mult"] = pl_mult
+                adapted = round(float(adapted) * pl_mult, 2)
+                if 0 < adapted < 1.0:
+                    adapted = 0.0
+        except Exception:
+            pass
         # Phase 2: adapt A/B ledger — what stake would have been without adapt.
         try:
             import desk_phase2
@@ -2044,6 +2066,20 @@ def stake_dollars_for(
                 capped = min(capped, float(info["left"]))
                 if 0 < capped < 1.0:
                     capped = 0.0
+        except Exception:
+            pass
+        try:
+            import desk_roi_plan
+            pl_mult = float(desk_roi_plan.profit_lock_size_mult(root))
+            if pl_mult < 1.0 - 1e-12:
+                capped = round(float(capped) * pl_mult, 2)
+                if 0 < capped < 1.0:
+                    capped = 0.0
+                empty_plan = dict(empty_plan)
+                empty_plan["profit_lock_mult"] = pl_mult
+                empty_plan["notes"] = list(empty_plan.get("notes") or []) + [
+                    f"profit-lock harvest → {pl_mult:.2f}× size"
+                ]
         except Exception:
             pass
         if return_plan:

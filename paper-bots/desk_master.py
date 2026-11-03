@@ -296,6 +296,8 @@ def master_summary(
     plan = None
     graduation = None
     retirement = None
+    hillclimb = None
+    profit_lock = None
     try:
         import desk_roi_plan
         bleed = desk_roi_plan.firm_bleed_ratio(bots)
@@ -339,18 +341,153 @@ def master_summary(
             retirement = desk_roi_plan.meme_retirement_clock(meme)
         except Exception:
             retirement = None
+        hillclimb = None
+        try:
+            if root and bots:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+                latest_hc = desk_roi_plan.hillclimb_kill_status(root).get("latest")
+                if not isinstance(latest_hc, dict) or str(latest_hc.get("label") or "") != today:
+                    desk_roi_plan.capture_hillclimb_week(root, bots=bots, label=today)
+            hillclimb = desk_roi_plan.hillclimb_kill_status(root)
+        except Exception:
+            hillclimb = None
+        profit_lock = None
+        try:
+            if root and bots:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+                latest_pl = desk_roi_plan.profit_lock_status(root).get("latest")
+                if not isinstance(latest_pl, dict) or str(latest_pl.get("label") or "") != today:
+                    desk_roi_plan.capture_profit_lock(root, bots=bots, label=today)
+            profit_lock = desk_roi_plan.profit_lock_status(root)
+        except Exception:
+            profit_lock = None
         plan = {
             "bleed": bleed,
             "capital_misplaced": misplaced,
             "fit_firm": desk_roi_plan.fit_buy_rate(root),
             "clv_completeness": desk_roi_plan.clv_completeness(root),
             "sports_hard_stop_shadow": desk_roi_plan.sports_hard_stop_shadow_summary(root),
+            "inx_band_promote": desk_roi_plan.inx_band_promote_status(root),
+            "correlation": None,
             "weekly_scorecard": weekly,
             "graduation": graduation,
             "meme_retirement": retirement,
+            "hillclimb_kill": hillclimb,
+            "profit_lock": profit_lock,
             "baseline": baseline,
             "fee_floors_locked": True,
         }
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_sr = desk_roi_plan.latest_skip_regret_weekly(root)
+            if root and (
+                not isinstance(latest_sr, dict)
+                or str(latest_sr.get("label") or "") != today
+            ):
+                plan["skip_regret_weekly"] = desk_roi_plan.skip_regret_weekly_card(
+                    root, label=today,
+                )
+            else:
+                plan["skip_regret_weekly"] = latest_sr
+        except Exception:
+            plan["skip_regret_weekly"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_r = desk_roi_plan.latest_daily_r_board(root)
+            if root and bots and (
+                not isinstance(latest_r, dict)
+                or str(latest_r.get("label") or "") != today
+            ):
+                plan["daily_r"] = desk_roi_plan.capture_daily_r_board(
+                    root, bots, label=today,
+                )
+            else:
+                plan["daily_r"] = latest_r
+        except Exception:
+            plan["daily_r"] = None
+        try:
+            import desk_profit
+            plan["correlation"] = desk_profit.correlation_matrix(bots, cfg=cfg)
+        except Exception:
+            plan["correlation"] = None
+        try:
+            plan["incubation"] = desk_roi_plan.incubation_board(root)
+        except Exception:
+            plan["incubation"] = None
+        try:
+            plan["ruin_drill"] = desk_roi_plan.ruin_drill_status(root)
+        except Exception:
+            plan["ruin_drill"] = None
+        try:
+            plan["fee_ledger"] = desk_roi_plan.fee_ledger_summary(root)
+            plan["fee_ledger_completeness"] = desk_roi_plan.fee_ledger_completeness(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["fee_ledger"] = None
+            plan["fee_ledger_completeness"] = None
+        try:
+            plan["stale_world"] = desk_roi_plan.stale_world_status(root, bots=bots)
+        except Exception:
+            plan["stale_world"] = None
+        try:
+            plan["helper_gate_a"] = desk_roi_plan.helper_promote_status(root)
+        except Exception:
+            plan["helper_gate_a"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_ch = desk_roi_plan.cold_harvest_status(root).get("latest")
+            if root and bots and (
+                not isinstance(latest_ch, dict)
+                or str(latest_ch.get("label") or "") != today
+            ):
+                plan["cold_harvest"] = desk_roi_plan.capture_cold_harvest(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["cold_harvest"] = desk_roi_plan.cold_harvest_status(root)
+        except Exception:
+            plan["cold_harvest"] = None
+        try:
+            plan["hillclimb_lever"] = desk_roi_plan.hillclimb_lever_status(root)
+        except Exception:
+            plan["hillclimb_lever"] = None
+        try:
+            plan["dual_control"] = desk_roi_plan.dual_control_status(root)
+        except Exception:
+            plan["dual_control"] = None
+        try:
+            plan["quarterly_rebaseline"] = desk_roi_plan.quarterly_rebaseline_status(root)
+        except Exception:
+            plan["quarterly_rebaseline"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_os = desk_roi_plan.latest_capital_os(root)
+            if root and bots and (
+                not isinstance(latest_os, dict)
+                or str(latest_os.get("label") or "") != today
+            ):
+                plan["capital_os"] = desk_roi_plan.capture_capital_os(
+                    root, bots=bots, cfg=cfg, desk_util=desk_util, label=today,
+                )
+            else:
+                plan["capital_os"] = latest_os or desk_roi_plan.capital_os_status(
+                    root, bots=bots, cfg=cfg, desk_util=desk_util,
+                )
+        except Exception:
+            plan["capital_os"] = None
     except Exception:
         plan = None
     return {
@@ -366,10 +503,15 @@ def master_summary(
         "roi_plan": plan,
         "graduation": graduation,
         "meme_retirement": retirement,
+        "hillclimb_kill": hillclimb,
+        "profit_lock": profit_lock,
         "towers_m1_pass": m1_ready,
         "towers": rows,
         "stopbleed": stopbleed,
         "priority": [
+            "revert last lever if hillclimb kill trips",
+            "profit-lock 0.5× after weekly target",
+            "daily R settle-only after tower budget",
             "memecoin retirement clock before any volume talk",
             "Master graduation = 2 Chicago weeks all M1–M7",
             "sports hard-stop shadow → promote after n≥30",

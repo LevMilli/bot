@@ -1,11 +1,13 @@
 /**
- * Bank hall walk bounds — keep the camera target in the clear aisle.
- * Shared WalkBounds / obstacle helpers also power the trading-wing walker.
+ * Vault hall walk bounds + obstacle helpers for the grounded player.
+ * Shared WalkBounds / resolveObstacles also power the trading-wing walker.
  */
-export const BANK_AISLE_HALF = 3.25
-export const BANK_LANE_HALF = 0.7
-export const BANK_Z_BACK = -8.45
-export const BANK_Z_FRONT = 5.75
+
+export const BANK_AISLE_HALF = 3.35
+export const BANK_LANE_HALF = 0.58
+export const BANK_Z_BACK = -11.5
+export const BANK_Z_FRONT = 7.5
+export const BANK_HALL_HALF_W = 6.1
 
 export type WalkBounds = {
   minX: number
@@ -27,6 +29,21 @@ export function aisleClearHalf(aisleHalf = BANK_AISLE_HALF, laneHalf = BANK_LANE
   return Math.max(0.35, aisleHalf - laneHalf - 0.45)
 }
 
+/** Full floor rectangle inside the vault walls (player capsule radius inset). */
+export function vaultFloorBounds(
+  hallHalfW = BANK_HALL_HALF_W,
+  zBack = BANK_Z_BACK,
+  zFront = BANK_Z_FRONT,
+  radius = 0.35,
+): WalkBounds {
+  return {
+    minX: -hallHalfW + radius + 0.25,
+    maxX: hallHalfW - radius - 0.25,
+    minZ: zBack + 1.6 + radius,
+    maxZ: zFront - 0.85 - radius,
+  }
+}
+
 export function clampToBounds(x: number, z: number, b: WalkBounds): { x: number; z: number } {
   return {
     x: Math.min(b.maxX, Math.max(b.minX, x)),
@@ -43,6 +60,7 @@ export function resolveObstacle(
 ): { x: number; z: number; hit: boolean } {
   const nearestX = Math.min(ob.maxX, Math.max(ob.minX, x))
   const nearestZ = Math.min(ob.maxZ, Math.max(ob.minZ, z))
+  // If center is inside the box, push out on the shallowest face.
   if (x >= ob.minX && x <= ob.maxX && z >= ob.minZ && z <= ob.maxZ) {
     const left = x - ob.minX
     const right = ob.maxX - x
@@ -81,6 +99,7 @@ export function resolveObstacles(
   return { x: nx, z: nz }
 }
 
+/** @deprecated Prefer vaultFloorBounds + clampToBounds for free player walk. */
 export function clampBankWalk(
   x: number,
   z: number,

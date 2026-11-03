@@ -276,6 +276,43 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
         "pnl": pnl,
     })
     state.setdefault("closed", []).append(closed)
+    try:
+        import desk_roi_plan
+        desk_roi_plan.record_incubation_settle(
+            DESK_ROOT,
+            series=str(pos.get("series") or ""),
+            bot="commodity-15m",
+            pnl=pnl,
+            contracts=pos.get("contracts"),
+            note=str(reason or "")[:80],
+        )
+        desk_roi_plan.record_fee_ledger(
+            DESK_ROOT,
+            bot="commodity-15m",
+            ticker=str(pos.get("ticker") or ""),
+            side=str(pos.get("side") or ""),
+            price=bid,
+            contracts=pos.get("contracts"),
+            fee=fee,
+            pnl=pnl,
+            fill_id=str(pos.get("fill_id") or ""),
+            kind="sell",
+            note=str(reason or "")[:120],
+        )
+        helper = str(pos.get("helper_source") or "").strip()
+        if helper:
+            desk_roi_plan.record_helper_fill(
+                DESK_ROOT,
+                helper=helper,
+                bot="commodity-15m",
+                ticker=str(pos.get("ticker") or ""),
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                fill_id=str(pos.get("fill_id") or ""),
+                note=str(reason or "")[:120],
+            )
+    except Exception:
+        pass
     return pnl
 
 
@@ -360,6 +397,33 @@ def settle_account(state: dict) -> None:
                 result=str(result),
                 side=str(pos.get("side") or ""),
                 note="commodity-15m settle",
+            )
+        except Exception:
+            pass
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan
+            desk_roi_plan.record_incubation_settle(
+                DESK_ROOT,
+                series=str(pos.get("series") or ""),
+                bot="commodity-15m",
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                note="settled",
+            )
+            desk_roi_plan.record_fee_ledger(
+                DESK_ROOT,
+                bot="commodity-15m",
+                ticker=str(pos.get("ticker") or ""),
+                side=str(pos.get("side") or ""),
+                price=pos.get("ask") or pos.get("entry_price"),
+                contracts=pos.get("contracts"),
+                fee=0.0,
+                pnl=pnl,
+                fill_id=str(pos.get("fill_id") or ""),
+                kind="settle",
+                note="settled",
             )
         except Exception:
             pass
@@ -466,6 +530,16 @@ def paper_buy(state: dict, ev: dict) -> str:
         return none_msg + " already open."
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
         return "Desk entry_gate blocked a new paper buy."
+    try:
+        import desk_roi_plan
+        stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "commodity-15m")
+        if stale:
+            return stale
+        revenge = desk_roi_plan.anti_revenge_blocks(DESK_ROOT, "commodity-15m", ticker)
+        if revenge:
+            return revenge
+    except Exception:
+        pass
     fam = series_family(str(ev.get("series") or ""))
     if fam in ("energy", "metal") and fam in open_families(state):
         return (
@@ -502,6 +576,36 @@ def paper_buy(state: dict, ev: dict) -> str:
             },
             return_plan=True,
         )
+        # WTI↔Brent series haircut when sibling open or closed today.
+        try:
+            import desk_profit
+            today_tag = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+            open_series = [
+                str(p.get("series") or "")
+                for p in (state.get("open") or [])
+                if isinstance(p, dict)
+            ]
+            closed_today = []
+            for p in state.get("closed") or []:
+                if not isinstance(p, dict):
+                    continue
+                if today_tag not in str(p.get("closed") or p.get("at") or ""):
+                    continue
+                closed_today.append(str(p.get("series") or ""))
+            hair = desk_profit.series_corr_haircut(
+                ev.get("series"),
+                open_series=open_series,
+                closed_today_series=closed_today,
+            )
+            if hair.get("apply") and float(hair.get("mult") or 1) < 1.0 - 1e-12:
+                stake = round(float(stake) * float(hair["mult"]), 2)
+                plan = dict(plan or {})
+                notes = list(plan.get("notes") or [])
+                notes.append(str(hair.get("note") or "series corr haircut"))
+                plan["notes"] = notes
+                plan["series_corr_haircut"] = hair
+        except Exception:
+            pass
         contracts = desk.contracts_for_stake(per, stake)
     except Exception as exc:
         return f"Desk sizing failed: {type(exc).__name__}"
@@ -631,6 +735,15 @@ def main() -> int:
                     save_account(account)
                     for line in sold:
                         print(f"  MODEL-FLIP SELL: {line}")
+                    try:
+                        import desk_roi_plan
+                        desk_roi_plan.record_anti_revenge(
+                            DESK_ROOT, bot="commodity-15m",
+                            ticker=str(ev.get("ticker") or ""), reason="model-flip",
+                            note=str(sold[0])[:120],
+                        )
+                    except Exception:
+                        pass
             try:
                 import kalshi_history
                 kalshi_history.record_snapshot(
@@ -694,6 +807,17 @@ def main() -> int:
             f"Selective volume: max buys {max_buys_eff} "
             f"(today ${today_pnl:.2f} ≥ 0, fee floors locked)"
         )
+    # Daily R budget → settle-only after tower hits target (exits stay on).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        r_block = desk_roi_plan.daily_r_blocks("commodity-15m", today_pnl)
+        if r_block:
+            print(f"Settle-only: {r_block}")
+            max_buys_eff = 0
+    except Exception:
+        pass
     for row in ranked:
         if buys >= max_buys_eff:
             print(f"  → skip: max buys this check ({max_buys_eff})")

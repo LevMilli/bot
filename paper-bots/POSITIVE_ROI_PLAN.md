@@ -60,14 +60,160 @@ Interactive: Positive ROI Master Plan canvas.
 | Graduation checklist (2 Chicago weeks) | `desk_roi_plan.capture_graduation_week` / `graduation_board` |
 | Meme 20d retirement clock | `desk_roi_plan.meme_retirement_clock` — recommend pause, never auto-retire |
 
+### Hillclimb kill detector
+
+| Ticket | Where |
+| --- | --- |
+| Firm M1 proxy | `desk_roi_plan.firm_taxed_m1` |
+| Kill rule M3↑ M1↓ × 2 weeks | `capture_hillclimb_week` / `hillclimb_kill_status` — flag only, no auto param write |
+| Masters wire | `desk_master.master_summary` → `hillclimb_kill` |
+
+### Profit-lock harvest
+
+| Ticket | Where |
+| --- | --- |
+| Chicago-week firm PnL ledger | `desk_roi_plan.capture_profit_lock` |
+| Safe-mode 0.5× after $40 target | `profit_lock_size_mult` / `profit_lock_status` |
+| Masters wire | `desk_master.master_summary` → `profit_lock` |
+| Kelly path applies 0.5× | `pimp_desk.stake_dollars_for` notes `profit_lock_mult` |
+
+### Skip-regret weekly review
+
+| Ticket | Where |
+| --- | --- |
+| Weekly twin card | `desk_roi_plan.skip_regret_weekly_card` (`auto_promote=False`) |
+| Masters wire | `desk_master.master_summary` → `roi_plan.skip_regret_weekly` |
+
+### Sports hard-stop staff promote
+
+| Ticket | Where |
+| --- | --- |
+| Promote readiness (n≥30, shadow EV≥0) | `sports_hard_stop_shadow_summary.promote_ready` |
+| Staff arm/disarm live sells | `staff_set_sports_hard_stop_live` → promote JSON |
+| Runtime live check | `sports_hard_stop_is_live` (gap_bot); code `SPORTS_HARD_STOP_LIVE` stays False |
+
+### Daily R budget
+
+| Ticket | Where |
+| --- | --- |
+| Per-tower R budgets (sports 1.5R …) | `desk_roi_plan.DAILY_R_BUDGET` / `daily_r_blocks` |
+| Fee-clear bots settle-only after target | sports / BTC / commodity buy loops |
+| Masters board | `roi_plan.daily_r` via `capture_daily_r_board` |
+
+### Anti-revenge cool
+
+| Ticket | Where |
+| --- | --- |
+| Same-market block after stop/flip | `record_anti_revenge` / `anti_revenge_blocks` (30m) |
+| Wired on exits + buys | sports / BTC / commodity |
+
+### INX band staff promote
+
+| Ticket | Where |
+| --- | --- |
+| Promote-ready after research leader n≥20 | `inx_band_promote_status` |
+| Staff arm/clear artifact | `staff_promote_inx_band` / `staff_clear_inx_band_promote` |
+| Bots honor promote | `effective_inx_ask_band` in kalshi-sp / sized |
+
+### Correlation matrix + series haircut
+
+| Ticket | Where |
+| --- | --- |
+| Firm matrix board | `desk_profit.correlation_matrix` → Masters `roi_plan.correlation` |
+| BTC↔INX hard veto | existing `correlation_pairs` (unchanged) |
+| WTI↔Brent 0.5× haircut | `series_corr_haircut` in commodity `paper_buy` |
+
+### Incubation lane
+
+| Ticket | Where |
+| --- | --- |
+| New series settle counter | `record_incubation_settle` (n≥50) |
+| Staff graduate | `staff_graduate_incubation` (`auto_promote=False`) |
+| Masters board | `incubation_board` → `roi_plan.incubation` |
+
+### Ruin drill UX
+
+| Ticket | Where |
+| --- | --- |
+| Soft / hard / nuclear levels | `set_ruin_drill` / `clear_ruin_drill` |
+| Entry gate blocks on active drill | `pimp_desk.entry_gate` via `ruin_drill_blocks_entries` |
+| Hard/nuclear pauses all bots | uses existing `set_pause(all_bots=True)` |
+
+### Tax / fee ledger
+
+| Ticket | Where |
+| --- | --- |
+| Fee + 1¢ fill-tax rows | `record_fee_ledger` / `estimate_kalshi_fee` |
+| Completeness ≥80% vs closes | `fee_ledger_completeness` |
+| Wired on exits/settles | sports / BTC / commodity |
+| Masters board | `roi_plan.fee_ledger` + `fee_ledger_completeness` |
+
+### Clock-skew / stale-world skip
+
+| Ticket | Where |
+| --- | --- |
+| Loop latency bars | sports 90s / 15m 40s (`STALE_LOOP_SEC`) |
+| Quote / clock skew max | 30s (`CLOCK_SKEW_MAX_SEC`) |
+| Entry skip API | `stale_world_blocks` / `stale_world_status` |
+| Wired on buys | sports / BTC / commodity |
+| Masters board | `roi_plan.stale_world` |
+
+### Helper Gate A
+
+| Ticket | Where |
+| --- | --- |
+| Helper-attributed fills | `record_helper_fill` (BTC tags `calendar_scanner`) |
+| Taxed EV Gate A | `helper_gate_a` (n≥20, EV≥0) |
+| Staff autonomy arm | `staff_set_helper_autonomy` (`auto_promote=False`) |
+| Place-alone block | `helper_autonomy_blocks` / `helpers.may_place_alone` |
+| Masters board | `roi_plan.helper_gate_a` |
+
+### Weekly cold harvest
+
+| Ticket | Where |
+| --- | --- |
+| 30–50% of green week PnL | `capture_cold_harvest` (default 40%) |
+| Cold ledger total | `cold_harvest_status` → `desk_cold_harvest.json` |
+| Masters board | `roi_plan.cold_harvest` (daily refresh) |
+| Distinct from profit-lock | size 0.5× stays on profit-lock; cold is habit ledger |
+
+### Hillclimb lever allowlist
+
+| Ticket | Where |
+| --- | --- |
+| Allowlist | `VOL_SAFE` / `HIT_FOR_BIG` / `venue_min_edge_btc` / `min_cushion_btc` / `kelly_fraction` |
+| One per Chicago week | `staff_pick_hillclimb_lever` (midweek thrash banned) |
+| Raise-only floors | BTC edge/cushion reject soften proposals |
+| Sunday demote | `staff_demote_hillclimb_lever` |
+| Kill card uses active | `capture_hillclimb_week` reads active lever |
+| Masters board | `roi_plan.hillclimb_lever` |
+
+### Dual-control + quarterly re-baseline
+
+| Ticket | Where |
+| --- | --- |
+| Live checklist stub | `dual_control_status` / `staff_sign_dual_control` |
+| Two-staff confirm | primary ≠ secondary required for `arm_ready_paper` |
+| Hard live lock | `LIVE_ORDERS_ENABLED=False` (stub never arms create-order) |
+| Quarterly W-baseline | `capture_quarterly_rebaseline` / `quarterly_rebaseline_status` |
+| Masters board | `roi_plan.dual_control` + `quarterly_rebaseline` |
+
+### Capital OS barbell + alerts
+
+| Ticket | Where |
+| --- | --- |
+| Barbell audit | meme ≤15% desk cap; fee-clear ≥70% of open (`barbell_status`) |
+| Share clamp | `effective_tower_shares` caps meme at 15% even when green |
+| Midday util alert | util &lt;20% + EDGE-heavy skips (`midday_util_alert`) |
+| Zero-buy alert | ≥6h weekday fee-clear quiet + BUDGET skips |
+| Masters board | `roi_plan.capital_os` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
-| INX band promote | only after research-week artifact |
-| Hillclimb kill detector | M3↑ with M1↓ for 2 Chicago weeks → revert flag |
-| Profit-lock harvest paper analog | cut size 50% after weekly target |
+| Idea review cadence 90d | kill stale experiments |
+| Opportunity-cost clock | log when low-edge blocks high-edge &gt;90s |
 
 ## Hard rules unchanged
 

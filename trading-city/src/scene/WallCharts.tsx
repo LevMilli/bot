@@ -43,15 +43,15 @@ function paintWallChart(
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
 
-  ctx.fillStyle = '#050818'
+  ctx.fillStyle = '#030612'
   ctx.fillRect(0, 0, w, h)
-  ctx.strokeStyle = 'rgba(45,226,230,0.35)'
-  ctx.lineWidth = 3
+  ctx.strokeStyle = 'rgba(45,226,230,0.55)'
+  ctx.lineWidth = 4
   ctx.strokeRect(8, 8, w - 16, h - 16)
 
-  // subtle grid
-  ctx.strokeStyle = 'rgba(26,156,255,0.18)'
-  ctx.lineWidth = 1
+  // subtle grid — higher contrast so direction reads from the chair
+  ctx.strokeStyle = 'rgba(26,156,255,0.28)'
+  ctx.lineWidth = 1.5
   for (let i = 1; i < 6; i++) {
     const y = 64 + ((h - 120) * i) / 6
     ctx.beginPath()
@@ -118,11 +118,13 @@ function paintWallChart(
     ctx.lineTo(lastX, plotY + plotH)
     ctx.lineTo(plotX, plotY + plotH)
     ctx.closePath()
-    ctx.fillStyle = up ? 'rgba(57,255,20,0.12)' : 'rgba(255,42,109,0.12)'
+    ctx.fillStyle = up ? 'rgba(57,255,20,0.2)' : 'rgba(255,42,109,0.2)'
     ctx.fill()
 
     ctx.strokeStyle = stroke
-    ctx.lineWidth = 3
+    ctx.lineWidth = 5.5
+    ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
     ctx.beginPath()
     points.forEach((p, i) => {
       const x = plotX + (i / Math.max(points.length - 1, 1)) * plotW
@@ -134,7 +136,7 @@ function paintWallChart(
 
     // tip dot
     ctx.beginPath()
-    ctx.arc(lastX, lastY, 6, 0, Math.PI * 2)
+    ctx.arc(lastX, lastY, 8, 0, Math.PI * 2)
     ctx.fillStyle = stroke
     ctx.fill()
   }

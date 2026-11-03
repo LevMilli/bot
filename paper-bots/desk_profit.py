@@ -36,6 +36,13 @@ DEFAULT_CORRELATION_PAIRS = (
     ("risk_off_btc", "risk_off_equity"),
 )
 
+# Series-level haircut (not hard veto): WTI ↔ Brent stake ×0.5 when sibling is open
+# or already closed same Chicago day.
+SERIES_HAIRCUT_PAIRS = (
+    ("KXWTI15M", "KXBRENT15M"),
+)
+SERIES_HAIRCUT_MULT = 0.5
+
 BOT_VENUE = {
     "sports-gap": "kalshi_sports",
     "btc15m": "kalshi_btc15m",
@@ -169,6 +176,118 @@ def correlation_veto_reason(
             f"(lower edge) still stacks heat with {bot_id} {factor}"
         )
     return ""
+
+
+def _normalize_series(series: str | None) -> str:
+    return str(series or "").strip().upper()
+
+
+def series_haircut_partners(series: str | None) -> set[str]:
+    key = _normalize_series(series)
+    out: set[str] = set()
+    if not key:
+        return out
+    for a, b in SERIES_HAIRCUT_PAIRS:
+        if key == a:
+            out.add(b)
+        if key == b:
+            out.add(a)
+    return out
+
+
+def series_corr_haircut(
+    candidate_series: str | None,
+    *,
+    open_series: list | None = None,
+    closed_today_series: list | None = None,
+    mult: float = SERIES_HAIRCUT_MULT,
+) -> dict:
+    """Stake haircut when WTI/Brent sibling is open or already traded today.
+
+    Hard family veto (max 1 energy) still applies separately in commodity bot.
+    This haircut covers sequential same-day sibling fills.
+    """
+    partners = series_haircut_partners(candidate_series)
+    hit = []
+    for s in list(open_series or []) + list(closed_today_series or []):
+        ns = _normalize_series(s)
+        if ns and ns in partners:
+            hit.append(ns)
+    hit = sorted(set(hit))
+    apply = bool(hit)
+    m = float(mult) if apply else 1.0
+    if m <= 0 or m > 1.0:
+        m = SERIES_HAIRCUT_MULT if apply else 1.0
+    return {
+        "paper_only": True,
+        "series": _normalize_series(candidate_series),
+        "partners": sorted(partners),
+        "hit": hit,
+        "apply": apply,
+        "mult": m,
+        "fee_floors_locked": True,
+        "note": (
+            f"WTI↔Brent haircut → {m:.2f}× stake when sibling open/closed today"
+            if apply
+            else "no series haircut"
+        ),
+    }
+
+
+def correlation_matrix(
+    bots: list | None = None,
+    *,
+    cfg: dict | None = None,
+) -> dict:
+    """Firm correlation board: veto pairs + series haircuts + open heat."""
+    cfg = cfg or {}
+    pairs = cfg.get("correlation_pairs") if isinstance(cfg.get("correlation_pairs"), list) else None
+    if pairs is None:
+        pairs = [list(p) for p in DEFAULT_CORRELATION_PAIRS]
+    open_rows = open_risk_factor_rows(bots or [])
+    factors_open = sorted({str(r.get("factor")) for r in open_rows if r.get("factor")})
+    veto_armed = []
+    for row in pairs or []:
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            continue
+        a, b = str(row[0]), str(row[1])
+        a_open = a in factors_open
+        b_open = b in factors_open
+        veto_armed.append({
+            "pair": [a, b],
+            "a_open": a_open,
+            "b_open": b_open,
+            "heat": bool(a_open and b_open),
+            "policy": "hard_veto",
+        })
+    series_rows = []
+    for a, b in SERIES_HAIRCUT_PAIRS:
+        series_rows.append({
+            "pair": [a, b],
+            "policy": "stake_haircut",
+            "mult": SERIES_HAIRCUT_MULT,
+        })
+    meme_open = any(
+        isinstance(bot, dict) and bot.get("id") == "memecoin"
+        and float(bot.get("open_risk") or 0) > 0
+        for bot in (bots or [])
+        if isinstance(bot, dict)
+    )
+    return {
+        "paper_only": True,
+        "veto_pairs": veto_armed,
+        "series_haircuts": series_rows,
+        "factors_open": factors_open,
+        "open_n": len(open_rows),
+        "meme_isolated": True,
+        "meme_open": meme_open,
+        "btc_inx_veto": True,
+        "fee_floors_locked": True,
+        "note": (
+            "BTC↔INX = hard veto; WTI↔Brent = 0.5× haircut; meme sleeve isolated. "
+            "No profit guarantee."
+        ),
+    }
 
 
 def venue_min_edge(venue: str, cfg: dict | None = None, fallback: float = 0.06) -> float:
