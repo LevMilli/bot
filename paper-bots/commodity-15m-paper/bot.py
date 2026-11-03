@@ -286,6 +286,19 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
             contracts=pos.get("contracts"),
             note=str(reason or "")[:80],
         )
+        desk_roi_plan.record_fee_ledger(
+            DESK_ROOT,
+            bot="commodity-15m",
+            ticker=str(pos.get("ticker") or ""),
+            side=str(pos.get("side") or ""),
+            price=bid,
+            contracts=pos.get("contracts"),
+            fee=fee,
+            pnl=pnl,
+            fill_id=str(pos.get("fill_id") or ""),
+            kind="sell",
+            note=str(reason or "")[:120],
+        )
     except Exception:
         pass
     return pnl
@@ -385,6 +398,19 @@ def settle_account(state: dict) -> None:
                 bot="commodity-15m",
                 pnl=pnl,
                 contracts=pos.get("contracts"),
+                note="settled",
+            )
+            desk_roi_plan.record_fee_ledger(
+                DESK_ROOT,
+                bot="commodity-15m",
+                ticker=str(pos.get("ticker") or ""),
+                side=str(pos.get("side") or ""),
+                price=pos.get("ask") or pos.get("entry_price"),
+                contracts=pos.get("contracts"),
+                fee=0.0,
+                pnl=pnl,
+                fill_id=str(pos.get("fill_id") or ""),
+                kind="settle",
                 note="settled",
             )
         except Exception:
@@ -494,6 +520,9 @@ def paper_buy(state: dict, ev: dict) -> str:
         return "Desk entry_gate blocked a new paper buy."
     try:
         import desk_roi_plan
+        stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "commodity-15m")
+        if stale:
+            return stale
         revenge = desk_roi_plan.anti_revenge_blocks(DESK_ROOT, "commodity-15m", ticker)
         if revenge:
             return revenge

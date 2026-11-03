@@ -139,13 +139,31 @@ Interactive: Positive ROI Master Plan canvas.
 | Entry gate blocks on active drill | `pimp_desk.entry_gate` via `ruin_drill_blocks_entries` |
 | Hard/nuclear pauses all bots | uses existing `set_pause(all_bots=True)` |
 
+### Tax / fee ledger
+
+| Ticket | Where |
+| --- | --- |
+| Fee + 1¢ fill-tax rows | `record_fee_ledger` / `estimate_kalshi_fee` |
+| Completeness ≥80% vs closes | `fee_ledger_completeness` |
+| Wired on exits/settles | sports / BTC / commodity |
+| Masters board | `roi_plan.fee_ledger` + `fee_ledger_completeness` |
+
+### Clock-skew / stale-world skip
+
+| Ticket | Where |
+| --- | --- |
+| Loop latency bars | sports 90s / 15m 40s (`STALE_LOOP_SEC`) |
+| Quote / clock skew max | 30s (`CLOCK_SKEW_MAX_SEC`) |
+| Entry skip API | `stale_world_blocks` / `stale_world_status` |
+| Wired on buys | sports / BTC / commodity |
+| Masters board | `roi_plan.stale_world` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Tax/fee ledger completeness | true ROI ledger |
-| Clock-skew / stale-world skip | loop latency threshold |
 | Helper Gate A taxed EV | helper autonomy bar |
+| Weekly harvest cold ledger | paper profit → cold habit |
 
 ## Hard rules unchanged
 

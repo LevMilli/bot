@@ -158,10 +158,6 @@ export type Desk = {
     tower_budgets?: Record<string, number>
     sticky_count?: number
   }
-  adapt?: {
-    by_bot?: Record<string, { safe?: number; big?: number; obs?: number }>
-    rules?: Record<string, unknown>
-  }
   top25?: {
     city_vault?: {
       show_skip_board?: boolean
@@ -226,6 +222,19 @@ export type Desk = {
     zone?: string
     default?: string
     ranges?: { id: string; label: string; start: string; end: string }[]
+  }
+  /** desk_adapt summary + vault dial counters from snapshot */
+  adapt?: {
+    paper_only?: boolean
+    version?: number
+    series_15m?: string[]
+    by_bot?: Record<
+      string,
+      Record<string, unknown> & { safe?: number; big?: number; obs?: number }
+    >
+    recent_vol?: unknown[]
+    rules?: Record<string, unknown>
+    error?: string
   }
 }
 

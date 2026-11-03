@@ -173,6 +173,24 @@ def settle_account(state):
             })
         except Exception:
             pass
+        if not IS_SHADOW:
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_fee_ledger(
+                    DESK_ROOT,
+                    bot="btc15m",
+                    ticker=str(pos.get("ticker") or ""),
+                    side=str(pos.get("side") or ""),
+                    price=pos.get("ask") or pos.get("entry_price"),
+                    contracts=pos.get("contracts"),
+                    fee=0.0,
+                    pnl=pnl,
+                    fill_id=str(pos.get("fill_id") or ""),
+                    kind="settle",
+                    note="settled",
+                )
+            except Exception:
+                pass
     state["open"] = still
 
 
@@ -215,6 +233,19 @@ def paper_sell(state, pos, bid, fee, reason):
                 pnl=pnl,
                 contracts=pos.get("contracts"),
                 note=str(reason or "")[:80],
+            )
+            desk_roi_plan.record_fee_ledger(
+                DESK_ROOT,
+                bot="btc15m",
+                ticker=str(pos.get("ticker") or ""),
+                side=str(pos.get("side") or ""),
+                price=bid,
+                contracts=pos.get("contracts"),
+                fee=fee,
+                pnl=pnl,
+                fill_id=str(pos.get("fill_id") or ""),
+                kind="sell",
+                note=str(reason or "")[:120],
             )
         except Exception:
             pass
@@ -305,6 +336,9 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "btc15m")
             if cool:
                 return cool
+            stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "btc15m")
+            if stale:
+                return stale
             revenge = desk_roi_plan.anti_revenge_blocks(DESK_ROOT, "btc15m", ticker)
             if revenge:
                 return revenge

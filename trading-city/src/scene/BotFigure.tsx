@@ -414,14 +414,19 @@ export function BotFigure({
           </group>
 
           {([-1, 1] as const).map((side) => (
-            <group key={side} position={[side * 0.25, 0.24, 0.06]}>
+            <group key={side} position={[side * 0.28, 0.24, 0.05]}>
+              {/* Large yellow ear disks — match bot-office-ref scale from OTS. */}
               <mesh rotation={[Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.062, 0.062, 0.028, 20]} />
-                <meshStandardMaterial color="#f9c80e" emissive="#f9c80e" emissiveIntensity={0.7} roughness={0.22} metalness={0.45} />
+                <cylinderGeometry args={[0.095, 0.095, 0.032, 24]} />
+                <meshStandardMaterial color="#f9c80e" emissive="#f9c80e" emissiveIntensity={0.85} roughness={0.2} metalness={0.4} />
               </mesh>
               <mesh rotation={[Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[0.062, 0.008, 8, 20]} />
+                <torusGeometry args={[0.095, 0.01, 8, 24]} />
                 <meshBasicMaterial color="#39ff14" toneMapped={false} />
+              </mesh>
+              <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+                <cylinderGeometry args={[0.035, 0.035, 0.02, 16]} />
+                <meshStandardMaterial color="#ffe89a" emissive="#f9c80e" emissiveIntensity={0.55} roughness={0.25} />
               </mesh>
             </group>
           ))}
