@@ -172,6 +172,7 @@ def correlation_veto_reason(
 
 
 def venue_min_edge(venue: str, cfg: dict | None = None, fallback: float = 0.06) -> float:
+    """Fee-aware venue floor. Runtime never returns below DEFAULT_VENUE_MIN_EDGE."""
     cfg = cfg or {}
     raw = cfg.get("venue_min_edge") if isinstance(cfg.get("venue_min_edge"), dict) else {}
     merged = dict(DEFAULT_VENUE_MIN_EDGE)
@@ -179,7 +180,9 @@ def venue_min_edge(venue: str, cfg: dict | None = None, fallback: float = 0.06) 
         if key in VENUE_KEYS:
             n = _num(value)
             if n is not None:
-                merged[key] = n
+                # May raise edge for stricter books; never soften below locked floor.
+                floor = float(DEFAULT_VENUE_MIN_EDGE.get(key) or 0.0)
+                merged[key] = max(float(n), floor)
     if venue in merged:
         return float(merged[venue])
     top = _num(cfg.get("min_edge"))
@@ -194,6 +197,7 @@ def bot_venue_edge(bot_id: str, cfg: dict | None = None) -> float:
 
 
 def parse_venue_min_edge(raw) -> tuple[dict | None, str | None]:
+    """Parse venue map. Rejects values below locked floors (raise OK, lower not)."""
     if raw is None:
         return dict(DEFAULT_VENUE_MIN_EDGE), None
     if not isinstance(raw, dict):
@@ -205,8 +209,35 @@ def parse_venue_min_edge(raw) -> tuple[dict | None, str | None]:
         n = _num(value)
         if n is None or not (0.0 <= n <= 0.20):
             return None, f"venue_min_edge.{key} stays between 0 and 0.20."
-        out[key] = round(n, 4)
+        floor = float(DEFAULT_VENUE_MIN_EDGE[key])
+        if float(n) + 1e-12 < floor:
+            return None, (
+                f"venue_min_edge.{key} locked floor is {floor:.2f} — "
+                "cannot lower (ROI path: keep fee floors)."
+            )
+        out[key] = round(float(n), 4)
     return out, None
+
+
+def venue_floors_locked(cfg: dict | None = None) -> dict:
+    """Snapshot proving runtime edges sit at/above locked floors."""
+    cfg = cfg or {}
+    rows = {}
+    for key in VENUE_KEYS:
+        floor = float(DEFAULT_VENUE_MIN_EDGE[key])
+        live = float(venue_min_edge(key, cfg))
+        rows[key] = {
+            "floor": floor,
+            "live": live,
+            "ok": live + 1e-12 >= floor,
+        }
+    return {
+        "paper_only": True,
+        "locked": True,
+        "all_ok": all(r["ok"] for r in rows.values()),
+        "venues": rows,
+        "note": "Venue min_edge floors are locked — selective volume never softens them.",
+    }
 
 
 def parse_correlation_pairs(raw) -> tuple[list | None, str | None]:
@@ -476,10 +507,12 @@ def gate_a(
 
 
 def starve_state(expectancy_row: dict, cfg: dict | None = None) -> dict:
+    """Throttle stake on negative-EV towers sooner (ROI path: starve losers)."""
     cfg = cfg or {}
-    min_n = int(cfg.get("starve_min_n") if cfg.get("starve_min_n") is not None else 8)
+    # Defaults tightened vs older 8 / 0.25 — cut losers faster after fewer settles.
+    min_n = int(cfg.get("starve_min_n") if cfg.get("starve_min_n") is not None else 4)
     floor = float(cfg.get("starve_expectancy") if cfg.get("starve_expectancy") is not None else 0.0)
-    factor = float(cfg.get("starve_factor") if cfg.get("starve_factor") is not None else 0.25)
+    factor = float(cfg.get("starve_factor") if cfg.get("starve_factor") is not None else 0.15)
     factor = max(0.0, min(1.0, factor))
     n = int((expectancy_row or {}).get("n") or 0)
     ev = _num((expectancy_row or {}).get("expectancy"))

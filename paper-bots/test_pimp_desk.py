@@ -1234,7 +1234,7 @@ class PimpDeskTests(unittest.TestCase):
             "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
             "min_edge": 0.06,
             "venue_min_edge": {"kalshi_sports": 0.07, "kalshi_btc15m": 0.05,
-                               "kalshi_inx": 0.0, "solana_dex": 0.02},
+                               "kalshi_inx": 0.02, "solana_dex": 0.02},
             "sizing": "kelly_lite",
             "kelly_fraction": 0.25,
         })
@@ -1248,6 +1248,13 @@ class PimpDeskTests(unittest.TestCase):
         })
         self.assertIsNone(bad)
         self.assertIn("Unknown venue", err)
+        soft, soft_err = pimp_desk.parse_settings({
+            "stake_hi_min": 20, "stake_hi_max": 100, "stake_lo_max": 20,
+            "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
+            "venue_min_edge": {"kalshi_btc15m": 0.01},
+        })
+        self.assertIsNone(soft)
+        self.assertIn("locked floor", soft_err)
         small = pimp_desk.kelly_lite_dollars(0.85, 0.04, cfg=cfg, open_risk_used=0, ask=0.75)
         big = pimp_desk.kelly_lite_dollars(0.92, 0.10, cfg=cfg, open_risk_used=0, ask=0.75)
         self.assertGreater(big, small)

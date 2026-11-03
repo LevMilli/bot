@@ -67,6 +67,13 @@ def check_can_trade(day, bankroll, trades_today, realised_pnl_today, cfg=CFG, ig
     """Return (ok, reason). ok=False means do NOT trade."""
     if bankroll <= cfg["kill_switch_bankroll"]:
         return False, f"KILL SWITCH: bankroll ${bankroll:.2f} <= ${cfg['kill_switch_bankroll']:.2f}. Halted for human review."
+    # ROI rescue: halt new entries after ~8% bankroll drawdown (exits/settles still run elsewhere).
+    dd_halt = cfg.get("drawdown_halt_bankroll")
+    if dd_halt is not None and float(bankroll) <= float(dd_halt) + 1e-9:
+        return False, (
+            f"tower drawdown halt: bankroll ${float(bankroll):.2f} <= "
+            f"${float(dd_halt):.2f} (start ${float(cfg.get('starting_bankroll') or 0):.0f})"
+        )
     if not ignore_calendar:
         r = news_skip_reason(day)
         if r:
@@ -91,5 +98,7 @@ if __name__ == "__main__":
     assert check_can_trade(dt.date(2026, 10, 27), 399, 0, 0)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 1, 0)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, -50)[0] is False
+    assert check_can_trade(dt.date(2026, 10, 27), 500, 0, -25)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, 0)[0] is True
+    assert check_can_trade(dt.date(2026, 10, 27), 444.0, 0, 0)[0] is False  # drawdown halt
     print("risk_manager self-test OK; Oct 28 2026 ->", news_skip_reason(dt.date(2026, 10, 28)))

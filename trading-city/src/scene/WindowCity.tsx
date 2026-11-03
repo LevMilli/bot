@@ -4,6 +4,7 @@ import { layoutCity } from './CityScene'
 import { GridFloor } from './GridFloor'
 import { PurpleHorizon, SkyEquityLine, Skyline, Starfield } from './Skyline'
 import { FillerTower, Tower } from './Tower'
+import { BorderScreens } from './BorderScreens'
 import { Vault } from './Vault'
 
 /**
@@ -21,6 +22,7 @@ export function StreetCity({ bots, desk }: { bots: BotRow[]; desk?: Desk }) {
       <Starfield count={320} />
       {/* No park pads here — one of them crosses the glass and lands on the office floor. */}
       <GridFloor parks={false} />
+      <BorderScreens bots={bots} />
       <Skyline z={-28} width={72} />
       <Skyline z={-36} width={88} />
       <SkyEquityLine />
