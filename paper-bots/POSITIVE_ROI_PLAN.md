@@ -228,12 +228,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Green-or-gone flags | `green_or_gone_status` — red+risk / loser Gate A |
 | Masters board | `roi_plan.sports_green_boost` + `green_or_gone` |
 
+### BTC calibration report
+
+| Ticket | Where |
+| --- | --- |
+| p-bucket vs hit rate | `btc_calibration_report` |
+| Hi-p miscalibration | labeled ≥80% with hit &lt;70% (n≥20) → `raise_phi` |
+| Daily capture | `capture_btc_calibration` |
+| Masters board | `roi_plan.btc_calibration` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Cross-tower rank queue | sports+btc+commodity best score |
-| BTC calibration report | Φ / hit vs label honesty |
 
 ## Hard rules unchanged
 

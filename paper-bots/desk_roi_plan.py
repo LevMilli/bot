@@ -41,6 +41,7 @@ DUAL_CONTROL_NAME = "desk_dual_control.json"
 CAPITAL_OS_NAME = "desk_capital_os.json"
 OPP_COST_NAME = "desk_opp_cost.json"
 IDEA_REVIEW_NAME = "desk_idea_review.json"
+BTC_CALIB_NAME = "desk_btc_calibration.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -159,6 +160,18 @@ MAX_OPP_COST_ROWS = 2000
 # Phase 11: idea review cadence — kill stale experiments after 90 Chicago days.
 IDEA_REVIEW_DAYS = 90
 MAX_IDEA_ROWS = 200
+
+# Phase 4: BTC calibration — labeled high-p buckets must roughly hit.
+BTC_CALIB_MIN_N = 20
+BTC_CALIB_HI_LABEL = 0.80
+BTC_CALIB_HI_HIT_FLOOR = 0.70  # if labeled ≥80% but hits <70% → raise Φ
+BTC_CALIB_BUCKETS = (
+    (0.50, 0.60),
+    (0.60, 0.70),
+    (0.70, 0.80),
+    (0.80, 0.90),
+    (0.90, 1.01),
+)
 
 # Phase 9: dual-control live checklist — paper stub; never enables live orders.
 LIVE_ORDERS_ENABLED = False  # hard lock — stub cannot arm create-order
@@ -711,6 +724,115 @@ def capture_capital_os(
 
 def latest_capital_os(root: str | None = None) -> dict | None:
     store = _load(_path(CAPITAL_OS_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+# ---- BTC calibration report (Phase 4) --------------------------------------
+
+def _btc_history_rows(bots: list | None) -> list:
+    rows = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        if str(bot.get("id") or "") not in ("btc15m", "btc"):
+            continue
+        for h in bot.get("history") or []:
+            if isinstance(h, dict):
+                rows.append(h)
+    return rows
+
+
+def btc_calibration_report(
+    bots: list | None = None,
+    *,
+    min_n: int = BTC_CALIB_MIN_N,
+) -> dict:
+    """Bucket BTC model-p vs realized hit rate. Flag high-p miscalibration.
+
+    Plan: if labeled ~80% wins ~55%, raise Φ — never size on miscalibration.
+    """
+    rows = _btc_history_rows(bots)
+    buckets = []
+    hi_hits = 0
+    hi_n = 0
+    for lo, hi in BTC_CALIB_BUCKETS:
+        local = []
+        for h in rows:
+            p = _finite(h.get("prob") if h.get("prob") is not None else h.get("fair_at_entry"))
+            pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if p is None or pnl is None:
+                continue
+            if not (lo <= float(p) < hi):
+                continue
+            hit = 1.0 if pnl > 0 else 0.0
+            local.append(hit)
+            if lo + 1e-12 >= BTC_CALIB_HI_LABEL:
+                hi_n += 1
+                hi_hits += int(hit)
+        n = len(local)
+        rate = round(sum(local) / n, 4) if n else None
+        buckets.append({
+            "lo": lo,
+            "hi": hi,
+            "label_mid": round((lo + min(hi, 1.0)) / 2, 3),
+            "n": n,
+            "hit_rate": rate,
+            "gap": None if rate is None else round(rate - ((lo + min(hi, 1.0)) / 2), 4),
+        })
+    hi_rate = round(hi_hits / hi_n, 4) if hi_n else None
+    miscal = bool(
+        hi_n >= int(min_n)
+        and hi_rate is not None
+        and hi_rate + 1e-12 < BTC_CALIB_HI_HIT_FLOOR
+    )
+    action = "raise_phi" if miscal else ("observe" if hi_n < int(min_n) else "keep")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bot": "btc15m",
+        "n": sum(b["n"] for b in buckets),
+        "hi_label": BTC_CALIB_HI_LABEL,
+        "hi_n": hi_n,
+        "hi_hit_rate": hi_rate,
+        "hi_hit_floor": BTC_CALIB_HI_HIT_FLOOR,
+        "miscalibrated": miscal,
+        "action": action,
+        "buckets": buckets,
+        "auto_promote": False,
+        "note": (
+            "BTC calibration: high-p (≥80%) bucket must hit ≥70% once n≥20. "
+            "Miscalibration → raise Φ / fix model — never size up on fake confidence."
+            if miscal
+            else "BTC calibration board. Fee floors locked; no auto param write."
+        ),
+    }
+
+
+def capture_btc_calibration(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+) -> dict:
+    """Persist today's BTC calibration card for Masters / Sunday review."""
+    day = label or _chicago_day()
+    report = btc_calibration_report(bots)
+    card = {**report, "label": day, "captured_at": _now()}
+    path = _path(BTC_CALIB_NAME, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = [c for c in cards if str(c.get("label") or "") != day]
+    cards.append(card)
+    store["cards"] = cards[-60:]
+    store["latest"] = card
+    store["last_at"] = _now()
+    _save(path, store)
+    return card
+
+
+def latest_btc_calibration(root: str | None = None) -> dict | None:
+    store = _load(_path(BTC_CALIB_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
 
@@ -3859,11 +3981,11 @@ def plan_summary(
         "idea_review": idea_review_status(root),
         "sports_green_boost": sports_green_boost_status(root, bots=bots),
         "green_or_gone": green_or_gone_status(bots),
+        "btc_calibration": btc_calibration_report(bots),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
             "cross-tower rank queue (sports+btc+commodity)",
-            "BTC calibration report card",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }

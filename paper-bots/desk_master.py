@@ -506,6 +506,22 @@ def master_summary(
             plan["green_or_gone"] = desk_roi_plan.green_or_gone_status(bots)
         except Exception:
             plan["green_or_gone"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_bc = desk_roi_plan.latest_btc_calibration(root)
+            if root and bots and (
+                not isinstance(latest_bc, dict)
+                or str(latest_bc.get("label") or "") != today
+            ):
+                plan["btc_calibration"] = desk_roi_plan.capture_btc_calibration(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["btc_calibration"] = latest_bc or desk_roi_plan.btc_calibration_report(bots)
+        except Exception:
+            plan["btc_calibration"] = None
     except Exception:
         plan = None
     return {
