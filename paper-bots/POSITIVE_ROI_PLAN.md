@@ -5,7 +5,9 @@ Paper only. No profit guarantee. Fee floors stay locked.
 Full narrative (store): `docs/positive-roi-master-plan.md` on the agent store.
 Interactive: Positive ROI Master Plan canvas.
 
-## This PR ships (P0–P3 starter tickets)
+## Shipped
+
+### #104 — P0–P3 starter
 
 | Ticket | Where |
 | --- | --- |
@@ -18,6 +20,14 @@ Interactive: Positive ROI Master Plan canvas.
 | INX band research harness | `run_inx_band_research` — **does not** change live 80–90¢ band |
 | Commodity model-flip exits | `commodity-15m-paper/bot.py` `manage_model_flips` |
 | BTC real take-profit | `btc15m_signal.manage_take_profits` (no longer print-only) |
+
+### Next slice — sports exit quality
+
+| Ticket | Where |
+| --- | --- |
+| Sports M4 latency | `gap_bot.run` → `record_latency(sports-gap)` |
+| Sports M3 fit journals | buy/block → `record_fit` |
+| Sports hard-stop **shadow** | bid ≤ entry − 12¢ logs would-stop; `SPORTS_HARD_STOP_LIVE=False` |
 
 ## Hard rules unchanged
 

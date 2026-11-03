@@ -319,6 +319,7 @@ BOT_PLANS = {
             "Adapt: safe on high vol; bigger only if ≥80% hit with enough settles",
         ],
         "sell": [
+            "Hard-stop shadow: bid ≤ entry − 12¢ logged (live sell off until n≥30 promote)",
             "Model-flip: fair moves against side by desk δ → sell at bid",
             "Gap closed: bid − fee ≥ fair → sell at bid",
             "Game final → settle $1 / $0 (ties wait)",
