@@ -100,12 +100,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Fee-clear bots settle-only after target | sports / BTC / commodity buy loops |
 | Masters board | `roi_plan.daily_r` via `capture_daily_r_board` |
 
+### Anti-revenge cool
+
+| Ticket | Where |
+| --- | --- |
+| Same-market block after stop/flip | `record_anti_revenge` / `anti_revenge_blocks` (30m) |
+| Wired on exits + buys | sports / BTC / commodity |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | INX band promote | only after research-week artifact |
-| Anti-revenge same-market cool | after stop/flip |
+| Correlation matrix firm haircut | BTC↔INX / WTI↔Brent |
+| Incubation lane | 50 fee-aware settles before promote |
 
 ## Hard rules unchanged
 

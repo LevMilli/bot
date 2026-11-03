@@ -466,6 +466,13 @@ def paper_buy(state: dict, ev: dict) -> str:
         return none_msg + " already open."
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
         return "Desk entry_gate blocked a new paper buy."
+    try:
+        import desk_roi_plan
+        revenge = desk_roi_plan.anti_revenge_blocks(DESK_ROOT, "commodity-15m", ticker)
+        if revenge:
+            return revenge
+    except Exception:
+        pass
     fam = series_family(str(ev.get("series") or ""))
     if fam in ("energy", "metal") and fam in open_families(state):
         return (
@@ -631,6 +638,15 @@ def main() -> int:
                     save_account(account)
                     for line in sold:
                         print(f"  MODEL-FLIP SELL: {line}")
+                    try:
+                        import desk_roi_plan
+                        desk_roi_plan.record_anti_revenge(
+                            DESK_ROOT, bot="commodity-15m",
+                            ticker=str(ev.get("ticker") or ""), reason="model-flip",
+                            note=str(sold[0])[:120],
+                        )
+                    except Exception:
+                        pass
             try:
                 import kalshi_history
                 kalshi_history.record_snapshot(
