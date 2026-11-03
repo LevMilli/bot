@@ -574,9 +574,11 @@ a {
 .office-hud {
   position: absolute;
   inset: 0;
+  /* Flex (not grid 1fr) — never stretch nav children into tall chip columns. */
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: flex-start;
   gap: 0.55rem;
   pointer-events: none;
   padding: 4rem 1rem 2.2rem;
@@ -647,33 +649,6 @@ a {
   position: absolute;
   top: 4.4rem;
   right: 1rem;
-}
-
-.teller-switch {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.65rem;
-  pointer-events: auto;
-  max-width: min(92vw, 52rem);
-}
-
-.teller-chip {
-  pointer-events: auto;
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  padding: 0.28rem 0.55rem;
-  border: 1px solid var(--cyan);
-  background: rgba(4, 8, 20, 0.82);
-  color: var(--text);
-  cursor: pointer;
-  border-radius: 2px;
-}
-
-.teller-chip.active {
-  background: rgba(45, 226, 230, 0.16);
-  box-shadow: 0 0 14px rgba(45, 226, 230, 0.25);
-  color: #fff;
 }
 
 .teller-dialogue {
@@ -1011,7 +986,9 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
+  width: auto;
   max-width: min(20rem, 78vw);
+  height: auto;
   padding: 0.45rem 0.75rem;
   border: 1px solid #2de2e6;
   background: rgba(6, 10, 24, 0.95);
@@ -1022,6 +999,9 @@ a {
   cursor: pointer;
   border-radius: 2px;
   box-shadow: 0 0 16px rgba(45, 226, 230, 0.28);
+  /* Never inherit stretched grid/flex height from older office-hud layouts. */
+  align-self: flex-start;
+  flex: 0 0 auto;
 }
 
 .floor-nav-toggle:hover,

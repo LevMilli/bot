@@ -20,6 +20,7 @@ type FloorFocus = 'suite' | 'hall' | 'boss'
 function FloorNavMenu({
   bots,
   selected,
+  fromBank,
   floorFocus,
   bossOpen,
   onSuite,
@@ -29,6 +30,7 @@ function FloorNavMenu({
 }: {
   bots: BotRow[]
   selected: BotRow
+  fromBank: boolean
   floorFocus: FloorFocus
   bossOpen: boolean
   onSuite: () => void
@@ -37,12 +39,13 @@ function FloorNavMenu({
   onPickBot: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const kind = fromBank ? 'Tellers' : 'Floor'
   const label =
     bossOpen || floorFocus === 'boss'
-      ? 'Floor · Boss office'
+      ? `${kind} · Boss office`
       : floorFocus === 'hall'
-        ? 'Floor · Hallway'
-        : `Floor · ${selected.name}`
+        ? `${kind} · Hallway`
+        : `${kind} · ${selected.name}`
 
   useEffect(() => {
     if (!open) return
@@ -71,6 +74,8 @@ function FloorNavMenu({
     setOpen(false)
   }
 
+  const botSection = fromBank ? 'Switch teller' : 'Tower suites'
+
   return (
     <div className={`floor-nav${open ? ' open' : ''}`}>
       <button
@@ -78,6 +83,7 @@ function FloorNavMenu({
         className="floor-nav-toggle"
         aria-expanded={open}
         aria-haspopup="listbox"
+        aria-label={open ? `Hide ${kind} menu` : `Show ${kind} menu`}
         onClick={(e) => {
           e.stopPropagation()
           setOpen((v) => !v)
@@ -85,12 +91,29 @@ function FloorNavMenu({
       >
         <span className="floor-nav-label">{label}</span>
         <span className="floor-nav-caret" aria-hidden>
-          ▾
+          {open ? '▴' : '▾'}
         </span>
       </button>
       {open && (
-        <div className="floor-nav-panel" role="listbox" aria-label="Floor navigation">
-          <p className="floor-nav-section">Zones</p>
+        <div
+          className="floor-nav-panel"
+          role="listbox"
+          aria-label={fromBank ? 'Teller and floor navigation' : 'Floor navigation'}
+        >
+          <p className="floor-nav-section">{botSection}</p>
+          {bots.map((bot, i) => (
+            <button
+              key={bot.id}
+              type="button"
+              role="option"
+              className={bot.id === selected.id && floorFocus === 'suite' && !bossOpen ? 'active' : ''}
+              style={{ borderLeftColor: beamColorFor(bot.id, i) }}
+              onClick={pick(() => onPickBot(bot.id))}
+            >
+              {bot.name}
+            </button>
+          ))}
+          <p className="floor-nav-section">Floor zones</p>
           <button
             type="button"
             role="option"
@@ -115,19 +138,6 @@ function FloorNavMenu({
           >
             Boss office
           </button>
-          <p className="floor-nav-section">Tower suites</p>
-          {bots.map((bot, i) => (
-            <button
-              key={bot.id}
-              type="button"
-              role="option"
-              className={bot.id === selected.id && floorFocus === 'suite' && !bossOpen ? 'active' : ''}
-              style={{ borderLeftColor: beamColorFor(bot.id, i) }}
-              onClick={pick(() => onPickBot(bot.id))}
-            >
-              {bot.name}
-            </button>
-          ))}
         </div>
       )}
     </div>
@@ -415,6 +425,7 @@ export default function App() {
               <FloorNavMenu
                 bots={bots}
                 selected={selected}
+                fromBank={fromBank}
                 floorFocus={floorFocus}
                 bossOpen={bossOpen}
                 onSuite={() => {
@@ -436,7 +447,9 @@ export default function App() {
               />
               <div className="office-title">
                 <span className="screen-hint">
-                  W/S walk · drag look · glass door → hall · boss board
+                  {fromBank
+                    ? 'Tellers menu · W/S walk · drag look'
+                    : 'Floor menu · W/S walk · drag look · glass door → hall'}
                 </span>
               </div>
             </div>
