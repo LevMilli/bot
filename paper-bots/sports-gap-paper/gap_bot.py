@@ -849,6 +849,15 @@ def run():
                         mark_price=bid,
                         note=str(exit_reason or "")[:120],
                     )
+                    why = str(exit_reason or "").lower()
+                    if any(k in why for k in ("hard-stop", "model-flip", "stop", "gap-decay")):
+                        desk_roi_plan.record_anti_revenge(
+                            DESK_ROOT,
+                            bot="sports-gap",
+                            ticker=str(p.get("ticker") or ""),
+                            reason=str(exit_reason or "stop")[:80],
+                            note=str(exit_reason or "")[:120],
+                        )
                 except Exception:
                     pass
                 if desk is not None:
@@ -972,6 +981,18 @@ def run():
                 blocked = desk.correlation_blocks(DESK_ROOT, "sports-gap", c["side"], gap)
                 if blocked:
                     reason = blocked
+            except Exception:
+                pass
+        if reason is None:
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                revenge = desk_roi_plan.anti_revenge_blocks(
+                    DESK_ROOT, "sports-gap", str(m.get("ticker") or ""),
+                )
+                if revenge:
+                    reason = revenge
             except Exception:
                 pass
         spread = None

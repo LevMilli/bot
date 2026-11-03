@@ -28,6 +28,7 @@ HILLCLIMB_KILL = "desk_hillclimb_kill.json"
 PROFIT_LOCK = "desk_profit_lock.json"
 SKIP_REGRET_WEEKLY = "desk_skip_regret_weekly.json"
 DAILY_R_NAME = "desk_daily_r.json"
+ANTI_REVENGE_NAME = "desk_anti_revenge.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -62,6 +63,9 @@ DAILY_R_BUDGET = {
     "kalshi-sized": 1.0,
     "memecoin": 0.5,
 }
+
+# Phase 10: anti-revenge — same market blocked T minutes after stop/flip.
+ANTI_REVENGE_MINUTES = 30
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -930,6 +934,84 @@ def record_adverse_fill(
     }
 
 
+def _anti_revenge_key(bot: str, ticker: str) -> str:
+    return f"{str(bot)}|{str(ticker).strip().upper()}"
+
+
+def record_anti_revenge(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str,
+    reason: str = "stop",
+    note: str = "",
+    minutes: int = ANTI_REVENGE_MINUTES,
+) -> dict:
+    """Block re-entry on the same market for `minutes` after a stop/flip exit."""
+    tick = str(ticker or "").strip()
+    if not tick:
+        return {"cooled": False, "reason": "no ticker"}
+    path = _path(ANTI_REVENGE_NAME, root)
+    state = _load(path, {"paper_only": True, "markets": {}})
+    until = time.time() + max(1, int(minutes)) * 60
+    key = _anti_revenge_key(bot, tick)
+    state.setdefault("markets", {})[key] = {
+        "until": until,
+        "at": _now(),
+        "bot": str(bot),
+        "ticker": tick,
+        "reason": str(reason or "stop")[:80],
+        "note": str(note or "")[:160],
+        "minutes": int(minutes),
+    }
+    # Prune expired keys opportunistically.
+    now = time.time()
+    markets = state.get("markets") or {}
+    state["markets"] = {
+        k: v for k, v in markets.items()
+        if isinstance(v, dict) and (_finite(v.get("until")) or 0) > now
+    }
+    state["markets"][key] = {
+        "until": until,
+        "at": _now(),
+        "bot": str(bot),
+        "ticker": tick,
+        "reason": str(reason or "stop")[:80],
+        "note": str(note or "")[:160],
+        "minutes": int(minutes),
+    }
+    state["last_at"] = _now()
+    _save(path, state)
+    return {
+        "cooled": True,
+        "bot": str(bot),
+        "ticker": tick,
+        "until": until,
+        "minutes": int(minutes),
+        "reason": str(reason or "stop")[:80],
+    }
+
+
+def anti_revenge_blocks(root: str | None, bot: str, ticker: str) -> str:
+    """Non-empty reason when same market is in anti-revenge cool-off."""
+    tick = str(ticker or "").strip()
+    if not tick:
+        return ""
+    path = _path(ANTI_REVENGE_NAME, root)
+    state = _load(path, {"paper_only": True, "markets": {}})
+    row = (state.get("markets") or {}).get(_anti_revenge_key(bot, tick))
+    if not isinstance(row, dict):
+        return ""
+    until = _finite(row.get("until"))
+    if until is None or time.time() >= until:
+        return ""
+    left = int(max(1, (until - time.time()) / 60.0))
+    why = str(row.get("reason") or "stop")
+    return (
+        f"anti-revenge: {bot} blocked on {tick} ~{left}m after {why}"
+    )
+
+
 def adverse_cool_blocks(root: str | None, bot: str) -> str:
     """Non-empty reason when bot is in adverse cool-off window."""
     path = _path(ADVERSE_COOL_NAME, root)
@@ -1529,9 +1611,9 @@ def plan_summary(
         "fee_floors_locked": True,
         "next_tickets": [
             "INX band promote only after research week artifact",
-            "anti-revenge same-market cool after stop/flip",
             "correlation matrix firm portfolio haircut",
             "incubation lane 50 fee-aware settles",
+            "ruin drill soft/hard/nuclear UX",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1672,6 +1754,12 @@ def self_check() -> None:
         )
         assert "sports-gap" in board["settle_only"]
         assert "btc15m" not in board["settle_only"]
+        ar = record_anti_revenge(
+            tmp, bot="btc15m", ticker="KXTEST", reason="model-flip", minutes=30,
+        )
+        assert ar["cooled"] is True
+        assert "anti-revenge" in anti_revenge_blocks(tmp, "btc15m", "KXTEST")
+        assert anti_revenge_blocks(tmp, "btc15m", "OTHER") == ""
 
 
 if __name__ == "__main__":
