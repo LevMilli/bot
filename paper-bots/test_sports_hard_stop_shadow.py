@@ -58,8 +58,29 @@ class SportsHardStopShadow(unittest.TestCase):
             self.assertGreaterEqual(summ["n_with_pnl"], 30)
             # Even when EV looks ok, never auto-promote.
             self.assertFalse(summ["auto_promote"])
-            self.assertFalse(summ["live"])
+            self.assertFalse(summ["code_default_live"])
+            self.assertFalse(desk_roi_plan.SPORTS_HARD_STOP_LIVE)
             self.assertIn(summ["decision"], ("review", "reject"))
+            self.assertTrue(summ["promote_ready"])
+            # Staff arm via file; code constant stays False.
+            armed = desk_roi_plan.staff_set_sports_hard_stop_live(
+                tmp, True, note="n≥30 shadow EV ok",
+            )
+            self.assertTrue(armed["ok"])
+            self.assertTrue(desk_roi_plan.sports_hard_stop_is_live(tmp))
+            self.assertFalse(desk_roi_plan.SPORTS_HARD_STOP_LIVE)
+            disarmed = desk_roi_plan.staff_set_sports_hard_stop_live(tmp, False)
+            self.assertTrue(disarmed["ok"])
+            self.assertFalse(desk_roi_plan.sports_hard_stop_is_live(tmp))
+
+    def test_staff_cannot_arm_before_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp, ticker="T0", entry_price=0.80, bid=0.60, contracts=10, cost=5.0,
+            )
+            denied = desk_roi_plan.staff_set_sports_hard_stop_live(tmp, True)
+            self.assertFalse(denied["ok"])
+            self.assertFalse(desk_roi_plan.sports_hard_stop_is_live(tmp))
 
 
 class SportsLatencyFit(unittest.TestCase):
