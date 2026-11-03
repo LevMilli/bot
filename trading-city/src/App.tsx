@@ -17,6 +17,123 @@ import type { BotRow } from './types'
 type View = 'city' | 'bank' | 'office'
 type FloorFocus = 'suite' | 'hall' | 'boss'
 
+function FloorNavMenu({
+  bots,
+  selected,
+  floorFocus,
+  bossOpen,
+  onSuite,
+  onHall,
+  onBoss,
+  onPickBot,
+}: {
+  bots: BotRow[]
+  selected: BotRow
+  floorFocus: FloorFocus
+  bossOpen: boolean
+  onSuite: () => void
+  onHall: () => void
+  onBoss: () => void
+  onPickBot: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const label =
+    bossOpen || floorFocus === 'boss'
+      ? 'Floor · Boss office'
+      : floorFocus === 'hall'
+        ? 'Floor · Hallway'
+        : `Floor · ${selected.name}`
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t?.closest?.('.floor-nav')) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className={`floor-nav${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        className="floor-nav-toggle"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="floor-nav-label">{label}</span>
+        <span className="floor-nav-caret" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div className="floor-nav-panel" role="listbox" aria-label="Floor navigation">
+          <p className="floor-nav-section">Zones</p>
+          <button
+            type="button"
+            role="option"
+            className={floorFocus === 'suite' && !bossOpen ? 'active' : ''}
+            onClick={() => {
+              onSuite()
+              setOpen(false)
+            }}
+          >
+            This suite
+          </button>
+          <button
+            type="button"
+            role="option"
+            className={floorFocus === 'hall' && !bossOpen ? 'active' : ''}
+            onClick={() => {
+              onHall()
+              setOpen(false)
+            }}
+          >
+            Hallway
+          </button>
+          <button
+            type="button"
+            role="option"
+            className={bossOpen || floorFocus === 'boss' ? 'active' : ''}
+            onClick={() => {
+              onBoss()
+              setOpen(false)
+            }}
+          >
+            Boss office
+          </button>
+          <p className="floor-nav-section">Tower suites</p>
+          {bots.map((bot, i) => (
+            <button
+              key={bot.id}
+              type="button"
+              role="option"
+              className={bot.id === selected.id && floorFocus === 'suite' && !bossOpen ? 'active' : ''}
+              style={{ borderLeftColor: beamColorFor(bot.id, i) }}
+              onClick={() => {
+                onPickBot(bot.id)
+                setOpen(false)
+              }}
+            >
+              {bot.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function guestModeFromUrl() {
   try {
     return new URLSearchParams(window.location.search).get('guest') === '1'
@@ -259,66 +376,34 @@ export default function App() {
 
         {view === 'office' && selected && (
           <div className="office-hud">
-            <div className="office-title">
-              <strong>{fromBank ? `Teller · ${selected.name}` : selected.name}</strong>
-              <span>{selected.id}</span>
-              <span className="screen-hint">
-                360° drag · scroll · pan · glass door → hall · boss board
-              </span>
-            </div>
-            <div className="teller-switch floor-switch" role="tablist" aria-label="Floor navigation">
-              <button
-                type="button"
-                role="tab"
-                className={`teller-chip ${floorFocus === 'suite' ? 'active' : ''}`}
-                aria-selected={floorFocus === 'suite'}
-                onClick={() => {
+            <div className="office-hud-top">
+              <FloorNavMenu
+                bots={bots}
+                selected={selected}
+                floorFocus={floorFocus}
+                bossOpen={bossOpen}
+                onSuite={() => {
                   setFloorFocus('suite')
                   setBossOpen(false)
                 }}
-              >
-                Suite
-              </button>
-              <button
-                type="button"
-                role="tab"
-                className={`teller-chip ${floorFocus === 'hall' ? 'active' : ''}`}
-                aria-selected={floorFocus === 'hall'}
-                onClick={() => {
+                onHall={() => {
                   setFloorFocus('hall')
                   setBossOpen(false)
                 }}
-              >
-                Hallway
-              </button>
-              <button
-                type="button"
-                role="tab"
-                className={`teller-chip ${floorFocus === 'boss' || bossOpen ? 'active' : ''}`}
-                aria-selected={floorFocus === 'boss' || bossOpen}
-                onClick={() => {
+                onBoss={() => {
                   setFloorFocus('boss')
                   setBossOpen(true)
                 }}
-              >
-                Boss office
-              </button>
-              {bots.map((bot, i) => (
-                <button
-                  key={bot.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={bot.id === selected.id && floorFocus === 'suite'}
-                  className={`teller-chip ${bot.id === selected.id && floorFocus === 'suite' ? 'active' : ''}`}
-                  style={{ borderColor: beamColorFor(bot.id, i) }}
-                  onClick={() => {
-                    if (fromBank) openTeller(bot.id)
-                    else openTower(bot.id)
-                  }}
-                >
-                  {bot.name}
-                </button>
-              ))}
+                onPickBot={(id) => {
+                  if (fromBank) openTeller(id)
+                  else openTower(id)
+                }}
+              />
+              <div className="office-title">
+                <span className="screen-hint">
+                  W/S walk · drag look · glass door → hall · boss board
+                </span>
+              </div>
             </div>
             {fromBank && (
               <div className="teller-dialogue" role="status" aria-label="Teller dialogue">

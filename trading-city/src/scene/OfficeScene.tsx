@@ -16,6 +16,7 @@ import { StreetCity } from './WindowCity'
 import { KEY_TOP, MOUSE_TOP, mouseHand } from './deskReach'
 import { WallStockChart } from './WallCharts'
 import { OfficeFloorPlan } from './OfficeFloorPlan'
+import { clampOfficeWalk, officeZoneForZ, type OfficeWalkZone } from '../data/officeWalk'
 
 type FloorFocus = 'suite' | 'hall' | 'boss'
 
@@ -699,26 +700,26 @@ function DeskKit() {
           <meshStandardMaterial color="#39ff14" emissive="#39ff14" emissiveIntensity={0.6} />
         </mesh>
       </group>
-      {/* Lamp in the gap between left + center monitors, shade aimed at the desk (not a screen). */}
-      <group position={[-0.72, 0.8, -0.28]}>
+      {/* Lamp between left + center monitors, base on near desk edge; shade aims into the gap. */}
+      <group position={[-0.75, 0.8, 0.22]}>
         <mesh position={[0, 0.02, 0]}>
-          <cylinderGeometry args={[0.08, 0.1, 0.03, 16]} />
+          <cylinderGeometry args={[0.07, 0.09, 0.03, 16]} />
           <meshStandardMaterial color="#1c222e" metalness={0.6} roughness={0.35} />
         </mesh>
-        <mesh position={[0, 0.26, 0]}>
-          <cylinderGeometry args={[0.015, 0.015, 0.42, 8]} />
+        <mesh position={[0, 0.2, 0]}>
+          <cylinderGeometry args={[0.014, 0.014, 0.32, 8]} />
           <meshStandardMaterial color="#c5ccd8" metalness={0.8} roughness={0.25} />
         </mesh>
-        <mesh position={[0.02, 0.42, 0.2]} rotation={[1.05, 0.1, 0]}>
-          <cylinderGeometry args={[0.012, 0.012, 0.28, 8]} />
+        <mesh position={[0, 0.3, -0.14]} rotation={[-0.95, 0, 0]}>
+          <cylinderGeometry args={[0.011, 0.011, 0.24, 8]} />
           <meshStandardMaterial color="#c5ccd8" metalness={0.8} roughness={0.25} />
         </mesh>
-        <mesh position={[0.02, 0.34, 0.34]} rotation={[1.25, 0, 0]}>
-          <coneGeometry args={[0.09, 0.08, 16, 1, true]} />
+        <mesh position={[0, 0.26, -0.26]} rotation={[-1.15, 0, 0]}>
+          <coneGeometry args={[0.08, 0.07, 16, 1, true]} />
           <meshStandardMaterial color="#f4e2a8" emissive="#f9c80e" emissiveIntensity={0.55} side={DoubleSide} />
         </mesh>
       </group>
-      <pointLight position={[-0.55, 1.15, 0.15]} intensity={0.5} color="#ffe2a0" distance={2.6} />
+      <pointLight position={[-0.75, 1.05, 0.05]} intensity={0.45} color="#ffe2a0" distance={2.2} />
       {/* Extra desk clutter — headphones, phone pad, sticky stack, pen cup */}
       <group position={[-0.95, 0.84, 0.28]}>
         <mesh rotation={[0.2, 0.4, 0]}>
@@ -856,6 +857,49 @@ export function OfficeScene({
     }
     orbit.update()
   }, [bot.id, floorFocus])
+
+  // Same walk physics as vault teller: W/S · ↑/↓ move along look vector; clamp to floor zones.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const key = e.key.toLowerCase()
+      if (!(key === 'arrowup' || key === 'w' || key === 'arrowdown' || key === 's')) return
+      e.preventDefault()
+      const orbit = controls.current
+      if (!orbit) return
+      const cam = orbit.object
+      const lx = orbit.target.x - cam.position.x
+      const lz = orbit.target.z - cam.position.z
+      const len = Math.hypot(lx, lz) || 1
+      const dir = key === 'arrowup' || key === 'w' ? 1 : -1
+      const step = 0.42 * dir
+      const nx = lx / len
+      const nz = lz / len
+      const zoneHint: OfficeWalkZone =
+        floorFocus === 'boss' ? 'boss' : floorFocus === 'hall' ? 'hall' : officeZoneForZ(orbit.target.z)
+      const nextTarget = clampOfficeWalk(
+        orbit.target.x + nx * step,
+        orbit.target.z + nz * step,
+        zoneHint,
+      )
+      const ox = orbit.target.x
+      const oz = orbit.target.z
+      orbit.target.x = nextTarget.x
+      orbit.target.z = nextTarget.z
+      cam.position.x += nextTarget.x - ox
+      cam.position.z += nextTarget.z - oz
+      const camZone = officeZoneForZ(cam.position.z)
+      const camClamp = clampOfficeWalk(cam.position.x, cam.position.z, camZone)
+      cam.position.x = camClamp.x
+      cam.position.z = camClamp.z
+      if (nextTarget.z > 4.5) setDoorOpen(true)
+      orbit.update()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [floorFocus])
 
   return (
     <>
