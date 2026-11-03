@@ -972,11 +972,33 @@ def main():
     parlays = 0
     parlay_legs = []  # candidates for ≤5m combo
     last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
+    # Selective volume: +1 fee-clear buy/check on green Chicago day (min_edge locked).
+    today_pnl = 0.0
+    today_tag = now.strftime("%Y-%m-%d")
+    for pos in account.get("closed") or []:
+        if not isinstance(pos, dict):
+            continue
+        if today_tag in str(pos.get("closed") or ""):
+            try:
+                today_pnl += float(pos.get("pnl") or 0)
+            except (TypeError, ValueError):
+                pass
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_more
+        max_buys_eff = int(
+            desk_more.selective_max_buys("btc15m", base=MAX_BUYS_PER_CHECK, today=today_pnl)
+        )
+    except Exception:
+        max_buys_eff = int(MAX_BUYS_PER_CHECK)
+    if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
+        print(f"Selective volume: max buys {max_buys_eff} (today ${today_pnl:.2f} ≥ 0, fee floors locked)")
 
     for ev in ranked:
-        if buys >= MAX_BUYS_PER_CHECK:
+        if buys >= max_buys_eff:
             skips += 1
-            print(f"--- {ev.get('ticker')}  skip: max buys this check ({MAX_BUYS_PER_CHECK})")
+            print(f"--- {ev.get('ticker')}  skip: max buys this check ({max_buys_eff})")
             continue
         m = ev.get("market") or {"ticker": ev.get("ticker"), "target": 0, "close_time": ev.get("close_time"),
                                  "yes_bid": None, "yes_ask": None, "no_bid": None, "no_ask": None}

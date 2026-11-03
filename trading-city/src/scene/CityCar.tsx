@@ -75,82 +75,101 @@ export function CityCar({
   return (
     <group position={position} rotation={[0, rotation, 0]} visible={visible}>
       <group ref={hover}>
-        {/* Purple cushion under the hull */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0.05, 0.02, 0]}>
-          <planeGeometry args={[2.35, 0.95]} />
-          <meshBasicMaterial color={accent} transparent opacity={0.62 * bodyOpacity} depthWrite={false} toneMapped={false} />
+        {/* Soft purple cushion — an oval, not a slab. */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0.05, 0.03, 0]} scale={[1.45, 0.62, 1]}>
+          <circleGeometry args={[0.72, 24]} />
+          <meshBasicMaterial color={accent} transparent opacity={0.4 * bodyOpacity} depthWrite={false} toneMapped={false} />
         </mesh>
 
-        <mesh position={[0.02, 0.09, 0]}>
-          <boxGeometry args={[2.2, 0.05, 0.66]} />
-          <meshStandardMaterial color="#07040e" metalness={0.7} roughness={0.28} transparent opacity={bodyOpacity} />
-        </mesh>
-        <mesh position={[0.02, 0.12, 0]}>
-          <boxGeometry args={[2.05, 0.02, 0.74]} />
-          <meshBasicMaterial color={accent} transparent opacity={bodyOpacity} toneMapped={false} />
-        </mesh>
-
-        {/* Long low body. Nose is −X. */}
-        <mesh position={[0.08, 0.2, 0]}>
-          <boxGeometry args={[1.85, 0.14, 0.58]} />
+        {/* Rounded hull. Cylinder axis is turned onto X; scale flattens it. Nose is −X. */}
+        <mesh position={[0.08, 0.2, 0]} rotation={[0, 0, Math.PI / 2]} scale={[0.55, 1, 0.82]}>
+          <cylinderGeometry args={[0.3, 0.3, 1.65, 22]} />
           <meshStandardMaterial
             color={color}
-            metalness={0.72}
-            roughness={0.24}
+            metalness={0.62}
+            roughness={0.26}
             emissive="#3b1468"
             emissiveIntensity={0.22}
             transparent
             opacity={bodyOpacity}
           />
         </mesh>
-        <mesh position={[-0.95, 0.17, 0]} rotation={[0, 0, -0.42]}>
-          <boxGeometry args={[0.55, 0.07, 0.34]} />
-          <meshStandardMaterial color={color} metalness={0.65} roughness={0.28} emissive="#1a0830" emissiveIntensity={0.25} transparent opacity={bodyOpacity} />
+        <mesh position={[-1.02, 0.18, 0]} rotation={[0, 0, Math.PI / 2]} scale={[0.42, 1, 0.68]}>
+          <coneGeometry args={[0.3, 0.95, 18]} />
+          <meshStandardMaterial
+            color={color}
+            metalness={0.58}
+            roughness={0.28}
+            emissive="#1a0830"
+            emissiveIntensity={0.24}
+            transparent
+            opacity={bodyOpacity}
+          />
         </mesh>
-        <mesh position={[-0.55, 0.2, 0]}>
-          <boxGeometry args={[0.7, 0.018, 0.08]} />
-          <meshBasicMaterial color={accent} transparent opacity={bodyOpacity} toneMapped={false} />
+        <mesh position={[0.95, 0.19, 0]} scale={[0.42, 0.26, 0.36]}>
+          <sphereGeometry args={[0.42, 16, 12]} />
+          <meshStandardMaterial
+            color={color}
+            metalness={0.6}
+            roughness={0.26}
+            emissive="#3b1468"
+            emissiveIntensity={0.18}
+            transparent
+            opacity={bodyOpacity}
+          />
         </mesh>
 
         {([-1, 1] as const).map((side) => (
-          <mesh key={`seam-${side}`} position={[0.05, 0.18, side * 0.3]}>
-            <boxGeometry args={[1.7, 0.022, 0.02]} />
+          <mesh key={`seam-${side}`} position={[0.02, 0.16, side * 0.22]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.012, 0.012, 1.7, 8]} />
             <meshBasicMaterial color={accent} transparent opacity={bodyOpacity} toneMapped={false} />
           </mesh>
         ))}
 
-        <mesh position={[-0.02, 0.32, 0]}>
-          <boxGeometry args={[0.78, 0.1, 0.42]} />
-          <meshStandardMaterial color="#07040e" metalness={0.55} roughness={0.2} transparent opacity={bodyOpacity} />
+        <mesh position={[-0.12, 0.34, 0]} scale={[0.72, 0.32, 0.46]}>
+          <sphereGeometry args={[0.42, 18, 14]} />
+          <meshStandardMaterial
+            color="#14081f"
+            metalness={0.78}
+            roughness={0.1}
+            emissive={accent}
+            emissiveIntensity={0.32}
+            transparent
+            opacity={bodyOpacity}
+          />
         </mesh>
-        <mesh position={[-0.4, 0.3, 0]} rotation={[0, 0, -0.48]}>
-          <boxGeometry args={[0.32, 0.07, 0.36]} />
-          <meshStandardMaterial color="#14081f" metalness={0.8} roughness={0.08} emissive={accent} emissiveIntensity={0.55} transparent opacity={bodyOpacity} />
-        </mesh>
-        <mesh position={[0.05, 0.38, 0]}>
-          <boxGeometry args={[0.62, 0.016, 0.05]} />
-          <meshBasicMaterial color={accent} transparent opacity={bodyOpacity} toneMapped={false} />
+        <mesh position={[-0.42, 0.32, 0]} rotation={[0, 0, Math.PI / 2]} scale={[0.28, 1, 0.4]}>
+          <sphereGeometry args={[0.22, 14, 10]} />
+          <meshStandardMaterial
+            color="#0c0614"
+            metalness={0.84}
+            roughness={0.08}
+            emissive={accent}
+            emissiveIntensity={0.45}
+            transparent
+            opacity={bodyOpacity}
+          />
         </mesh>
 
         {([-1, 1] as const).map((side) => (
-          <mesh key={`lamp-${side}`} position={[-1.18, 0.16, side * 0.12]}>
-            <boxGeometry args={[0.05, 0.04, 0.07]} />
+          <mesh key={`lamp-${side}`} position={[-1.42, 0.17, side * 0.1]}>
+            <sphereGeometry args={[0.035, 10, 8]} />
             <meshBasicMaterial color="#f3e8ff" transparent opacity={bodyOpacity} toneMapped={false} />
           </mesh>
         ))}
         {castHeadlight && bodyOpacity > 0.4 && (
-          <pointLight position={[-1.3, 0.18, 0]} intensity={0.8 * bodyOpacity} distance={4.5} color={accent} decay={2} />
+          <pointLight position={[-1.5, 0.18, 0]} intensity={0.8 * bodyOpacity} distance={4.5} color={accent} decay={2} />
         )}
 
-        {/* Tail housings and the long purple streak */}
         {([-1, 1] as const).map((side) => (
-          <mesh key={`port-${side}`} position={[1.02, 0.15, side * 0.16]}>
-            <boxGeometry args={[0.12, 0.08, 0.1]} />
-            <meshStandardMaterial color="#12081c" emissive={accent} emissiveIntensity={0.7} transparent opacity={bodyOpacity} />
+          <mesh key={`port-${side}`} position={[1.12, 0.17, side * 0.12]}>
+            <sphereGeometry args={[0.05, 10, 8]} />
+            <meshStandardMaterial color="#12081c" emissive={accent} emissiveIntensity={0.85} transparent opacity={bodyOpacity} />
           </mesh>
         ))}
-        <mesh position={[1.75, 0.15, 0]}>
-          <boxGeometry args={[1.35, 0.09, 0.2]} />
+        {/* Thruster streak — a tapering cone, not a box. */}
+        <mesh position={[1.85, 0.16, 0]} rotation={[0, 0, -Math.PI / 2]} scale={[0.28, 1, 0.16]}>
+          <coneGeometry args={[0.32, 1.7, 14]} />
           <meshBasicMaterial
             ref={trail}
             color={accent}
@@ -160,9 +179,9 @@ export function CityCar({
             toneMapped={false}
           />
         </mesh>
-        <mesh position={[1.45, 0.15, 0]}>
-          <boxGeometry args={[0.85, 0.03, 0.05]} />
-          <meshBasicMaterial color="#f3e8ff" transparent opacity={0.85 * bodyOpacity} depthWrite={false} toneMapped={false} />
+        <mesh position={[1.55, 0.16, 0]} rotation={[0, 0, -Math.PI / 2]} scale={[0.1, 1, 0.06]}>
+          <coneGeometry args={[0.2, 1.15, 10]} />
+          <meshBasicMaterial color="#f3e8ff" transparent opacity={0.8 * bodyOpacity} depthWrite={false} toneMapped={false} />
         </mesh>
 
         {passengers.map((p, i) => (
@@ -196,8 +215,8 @@ const PALETTE = [
 ]
 
 const LANE = 0.72
-/** Nose-to-tail gap along the avenue (car length ≈ 1.35). */
-const MIN_GAP = 3.6
+/** Nose-to-tail gap along the avenue (hull plus the thruster streak). */
+const MIN_GAP = 4.2
 const ROAD_END = BACK_ROAD_HALF_LEN - 1.2
 const FADE_DIST = 2.8
 

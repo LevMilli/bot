@@ -34,9 +34,9 @@
   ],
   "model_flip_delta": 0.06,
   "model_flip_exits": true,
-  "starve_min_n": 6,
+  "starve_min_n": 4,
   "starve_expectancy": 0.0,
-  "starve_factor": 0.25,
+  "starve_factor": 0.15,
   "expectancy_window_days": 20,
   "shadow": {
     "enabled": true,

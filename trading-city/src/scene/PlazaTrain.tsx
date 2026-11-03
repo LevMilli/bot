@@ -7,12 +7,12 @@ const RAIL_Y = 0.2
 const Z_OFF = RAIL_Z_OFF
 const TIE_COUNT = 36
 const SEGMENTS = 56
-/** Evenly spaced hover pads around the guideway (not attached to the train). */
-const PAD_COUNT = 36
-/** Angular half-width that counts as "under the train." */
-const PAD_LIGHT_RAD = 0.14
-/** Fade-out after the consist leaves a pad. */
-const PAD_FADE_SEC = 1.15
+/** Fixed magnetic rings around the guideway. They stay put and trace the loop. */
+const PAD_COUNT = 28
+/** How close the consist must be before a ring lights. */
+const PAD_LIGHT_RAD = 0.1
+/** Fade-out after the consist leaves a ring. */
+const PAD_FADE_SEC = 0.85
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined' || !window.matchMedia) return false
@@ -299,37 +299,36 @@ function MaglevPads({
     for (let i = 0; i < CARS.length; i++) {
       carAngles.current[i] = a0 - CARS[i].arc / radius
     }
-    const pulse = reduced ? 1 : 0.62 + 0.38 * Math.sin(t * 7.2)
-    for (let i = 0; i < PAD_COUNT; i++) {
-      let nearest = Math.PI
-      for (let c = 0; c < CARS.length; c++) {
-        const d = Math.abs(wrapPi(pads[i].angle - carAngles.current[c]))
-        if (d < nearest) nearest = d
+      const pulse = reduced ? 0.85 : 0.55 + 0.45 * Math.sin(t * 7.4)
+      for (let i = 0; i < PAD_COUNT; i++) {
+        let nearest = Math.PI
+        for (let c = 0; c < CARS.length; c++) {
+          const d = Math.abs(wrapPi(pads[i].angle - carAngles.current[c]))
+          if (d < nearest) nearest = d
+        }
+        const target = nearest < PAD_LIGHT_RAD ? 1 - nearest / PAD_LIGHT_RAD : 0
+        const cur = energy.current[i]
+        const next =
+          target > cur
+            ? Math.min(1, cur + dt * 8)
+            : Math.max(0, cur - dt / PAD_FADE_SEC)
+        energy.current[i] = next
+        const lit = next * pulse
+        const glow = glowRefs.current[i]
+        const core = coreRefs.current[i]
+        if (glow) {
+          glow.visible = true
+          const mat = glow.material as { opacity: number }
+          mat.opacity = 0.38 + lit * 0.62
+          glow.scale.setScalar(1 + lit * 0.05)
+        }
+        if (core) {
+          core.visible = true
+          const mat = core.material as { opacity: number }
+          mat.opacity = 0.08 + lit * 0.9
+          core.scale.setScalar(1 + lit * 0.04)
+        }
       }
-      const target = nearest < PAD_LIGHT_RAD ? 1 - nearest / PAD_LIGHT_RAD : 0
-      const cur = energy.current[i]
-      // Snap up with the train, ease out after it leaves.
-      const next =
-        target > cur
-          ? Math.min(1, cur + dt * 8)
-          : Math.max(0, cur - dt / PAD_FADE_SEC)
-      energy.current[i] = next
-      const lit = next * pulse
-      const glow = glowRefs.current[i]
-      const core = coreRefs.current[i]
-      if (glow) {
-        glow.visible = next > 0.03
-        const mat = glow.material as { opacity: number }
-        mat.opacity = lit * 1.0
-        glow.scale.setScalar(0.9 + lit * 0.45)
-      }
-      if (core) {
-        core.visible = next > 0.03
-        const mat = core.material as { opacity: number }
-        mat.opacity = lit * 0.95
-        core.scale.setScalar(0.95 + lit * 0.25)
-      }
-    }
   })
 
   return (
@@ -341,20 +340,18 @@ function MaglevPads({
               glowRefs.current[i] = el
             }}
             rotation={[-Math.PI / 2, 0, 0]}
-            visible={false}
           >
-            <torusGeometry args={[0.34, 0.034, 8, 32]} />
-            <meshBasicMaterial color={GLOW} toneMapped={false} transparent opacity={0} depthWrite={false} />
+            <torusGeometry args={[0.3, 0.016, 8, 28]} />
+            <meshBasicMaterial color={GLOW} toneMapped={false} transparent opacity={0.38} depthWrite={false} />
           </mesh>
           <mesh
             ref={(el) => {
               coreRefs.current[i] = el
             }}
             rotation={[-Math.PI / 2, 0, 0]}
-            visible={false}
           >
-            <torusGeometry args={[0.16, 0.016, 6, 24]} />
-            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} transparent opacity={0} depthWrite={false} />
+            <torusGeometry args={[0.16, 0.008, 6, 20]} />
+            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} transparent opacity={0.08} depthWrite={false} />
           </mesh>
         </group>
       ))}
@@ -400,7 +397,7 @@ export function PlazaTrain({
   return (
     <group raycast={() => null}>
       {/* Pads sit on the guideway deck — lit only while the consist is overhead. */}
-      <MaglevPads radius={radius} y={0.175} trainAngle={angle} reduced={reduced} />
+      <MaglevPads radius={radius} y={0.03} trainAngle={angle} reduced={reduced} />
       {CARS.map((car, i) => {
         const a = 1.15 - car.arc / radius
         const pose = poseOnRail(a, radius, car.len * 0.32)
@@ -474,6 +471,20 @@ export function PlazaRailroad({
     return out
   }, [radius])
 
+  const stators = useMemo(() => {
+    const out: { x: number; z: number; rot: number }[] = []
+    const n = 28
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.PI / n
+      out.push({
+        x: Math.cos(a) * radius,
+        z: Math.sin(a) * radius + Z_OFF,
+        rot: -a,
+      })
+    }
+    return out
+  }, [radius])
+
   const innerR = radius - RAIL_GAUGE / 2
   const outerR = radius + RAIL_GAUGE / 2
 
@@ -495,7 +506,24 @@ export function PlazaRailroad({
         </mesh>
       ))}
 
-      {/* Twin guide rails stay cyan / gold. A purple beam is what the train rides. */}
+      {/* Reaction plate sits just above the ties, inside the guide rails. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, y + 0.062, Z_OFF]}>
+        <ringGeometry args={[radius - 0.3, radius + 0.3, SEGMENTS]} />
+        <meshBasicMaterial color="#14121c" />
+      </mesh>
+      {/* Stator poles between the magnetic rings — linear-motor teeth, clear of the rails. */}
+      {stators.map((s, i) => (
+        <group key={`st-${i}`} position={[s.x, y + 0.085, s.z]} rotation={[0, s.rot, 0]}>
+          {([-1, 1] as const).map((side) => (
+            <mesh key={side} position={[side * 0.16, 0, 0]}>
+              <boxGeometry args={[0.07, 0.028, 0.1]} />
+              <meshBasicMaterial color={i % 2 === 0 ? '#2a2438' : '#1c1828'} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+
+      {/* Twin guide rails stay cyan / gold. A slim purple beam runs the center. */}
       <mesh position={[0, y + 0.1, Z_OFF]} rotation={[-Math.PI / 2, 0, 0]}>
         <torusGeometry args={[innerR, 0.045, 8, SEGMENTS]} />
         <meshBasicMaterial color="#2de2e6" toneMapped={false} />
@@ -504,8 +532,8 @@ export function PlazaRailroad({
         <torusGeometry args={[outerR, 0.045, 8, SEGMENTS]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
       </mesh>
-      <mesh position={[0, y + 0.08, Z_OFF]} rotation={[-Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.03, 6, SEGMENTS]} />
+      <mesh position={[0, y + 0.1, Z_OFF]} rotation={[-Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[radius, 0.014, 6, SEGMENTS]} />
         <meshBasicMaterial color="#b967ff" toneMapped={false} />
       </mesh>
       <mesh position={[0, y + 0.14, Z_OFF]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -542,9 +570,9 @@ export function PlazaRailroad({
         </group>
       ))}
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.028, Z_OFF]}>
-        <ringGeometry args={[innerR - 0.12, outerR + 0.12, 48]} />
-        <meshBasicMaterial color="#b967ff" transparent opacity={0.14} depthWrite={false} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, Z_OFF]}>
+        <ringGeometry args={[radius - 0.34, radius + 0.34, 48]} />
+        <meshBasicMaterial color="#6d28d9" transparent opacity={0.05} depthWrite={false} />
       </mesh>
 
       {signals.map(([x, , z, rot], i) => (

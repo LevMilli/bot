@@ -417,8 +417,45 @@ def skip_leaderboard(root: str | None = None, *, day: str | None = None, top: in
 
 
 # E1 #116 — while memecoin is red, starve its share and feed BTC/commodity.
+# ROI rescue: fire at −$8 so overnight −$10 boards starve meme before −$20.
 MEME_RED_SHARE = 0.03
-MEME_RED_LOCK_USD = 20.0
+MEME_RED_LOCK_USD = 8.0
+# Starve losers → feed fee-clear sports/BTC/commodity (never lower venue min_edge).
+FEE_CLEAR_TOWERS = ("sports-gap", "btc15m", "commodity-15m")
+INX_DRAWDOWN_CASH = 460.0
+INX_LOSER_SHARE = 0.02
+SPORTS_RED_TODAY = -10.0
+SPORTS_RED_SHARE = 0.20
+
+
+def _feed_fee_clear(
+    shares: dict[str, float],
+    cut: float,
+    *,
+    exclude: set[str] | None = None,
+) -> None:
+    """Redistribute cut into fee-clear towers (skip any currently being starved)."""
+    if cut <= 1e-12:
+        return
+    skip = set(exclude or ())
+    # Prefer sports tip books, then BTC, then commodity microstructure.
+    weights = {"sports-gap": 0.40, "btc15m": 0.35, "commodity-15m": 0.25}
+    live = {k: w for k, w in weights.items() if k not in skip}
+    if not live:
+        live = {"btc15m": 0.55, "commodity-15m": 0.45}
+    total_w = sum(live.values()) or 1.0
+    for bot_id, w in live.items():
+        shares[bot_id] = float(shares.get(bot_id) or 0.0) + cut * (w / total_w)
+
+
+def _cut_share(shares: dict[str, float], bot_id: str, target: float) -> float:
+    cur = float(shares.get(bot_id) or 0.0)
+    if cur <= target + 1e-12:
+        shares[bot_id] = min(cur, target)
+        return 0.0
+    cut = cur - target
+    shares[bot_id] = target
+    return cut
 
 
 def effective_tower_shares(
@@ -426,27 +463,62 @@ def effective_tower_shares(
     *,
     meme_today: float | None = None,
     red_lock_usd: float | None = None,
+    today_by_bot: dict | None = None,
+    cash_by_bot: dict | None = None,
 ) -> dict[str, float]:
-    """Tower budget shares; on meme red day cut memecoin to 0.03 and boost BTC/commodity."""
+    """Tower budget shares: starve losers, feed fee-clear sports/BTC/commodity."""
     cfg = cfg or {}
     shares = cfg.get("tower_risk_budgets") if isinstance(cfg.get("tower_risk_budgets"), dict) else None
     shares = {str(k): float(v) for k, v in dict(shares or DEFAULT_TOWER_BUDGET_SHARE).items()}
+    today_map = {str(k): _finite(v) for k, v in dict(today_by_bot or {}).items()}
+    cash_map = {str(k): _finite(v) for k, v in dict(cash_by_bot or {}).items()}
     lock = float(MEME_RED_LOCK_USD if red_lock_usd is None else red_lock_usd)
-    today = meme_today
-    if today is None:
-        today = _finite(cfg.get("meme_today"))
-    if today is None or today > -lock:
-        return shares
-    cur = float(shares.get("memecoin") or 0.0)
-    target = float(MEME_RED_SHARE)
-    if cur <= target + 1e-12:
-        shares["memecoin"] = min(cur, target)
-        return shares
-    cut = cur - target
-    shares["memecoin"] = target
-    shares["btc15m"] = float(shares.get("btc15m") or 0.0) + cut * 0.60
-    shares["commodity-15m"] = float(shares.get("commodity-15m") or 0.0) + cut * 0.40
+    meme = meme_today
+    if meme is None:
+        meme = today_map.get("memecoin")
+    if meme is None:
+        meme = _finite(cfg.get("meme_today"))
+    cut_total = 0.0
+    exclude: set[str] = set()
+    if meme is not None and meme <= -lock:
+        cut_total += _cut_share(shares, "memecoin", float(MEME_RED_SHARE))
+        exclude.add("memecoin")
+    # INX drawdown: shrink both S&P twins, feed fee-clear towers.
+    for inx_id in ("kalshi-sp", "kalshi-sized"):
+        cash = cash_map.get(inx_id)
+        if cash is not None and cash <= float(INX_DRAWDOWN_CASH):
+            cut_total += _cut_share(shares, inx_id, float(INX_LOSER_SHARE))
+            exclude.add(inx_id)
+    sports_today = today_map.get("sports-gap")
+    sports_red = sports_today is not None and sports_today <= float(SPORTS_RED_TODAY)
+    if sports_red:
+        cut_total += _cut_share(shares, "sports-gap", float(SPORTS_RED_SHARE))
+        exclude.add("sports-gap")
+    _feed_fee_clear(shares, cut_total, exclude=exclude)
     return shares
+
+
+def selective_max_buys(
+    bot_id: str,
+    *,
+    base: int,
+    today: float | None = None,
+    green_boost: int = 1,
+) -> int:
+    """
+    Selective volume: fee-clear towers may take +1 buy/check when today ≥ 0.
+    Red days never boost; sports red already capped elsewhere.
+    Does not touch venue min_edge.
+    """
+    base_n = max(1, int(base))
+    bid = str(bot_id or "")
+    if bid not in FEE_CLEAR_TOWERS:
+        return base_n
+    if today is not None and today < 0:
+        return base_n
+    if today is not None and today >= 0:
+        return base_n + max(0, int(green_boost))
+    return base_n
 
 
 def tower_budgets(
@@ -454,11 +526,19 @@ def tower_budgets(
     *,
     meme_today: float | None = None,
     red_lock_usd: float | None = None,
+    today_by_bot: dict | None = None,
+    cash_by_bot: dict | None = None,
 ) -> dict[str, float]:
-    """Dollar caps per tower from desk max_open_risk × share (red-day aware)."""
+    """Dollar caps per tower from desk max_open_risk × share (loser-starve aware)."""
     cfg = cfg or {}
     desk_cap = float(cfg.get("max_open_risk") if cfg.get("max_open_risk") is not None else 100.0)
-    shares = effective_tower_shares(cfg, meme_today=meme_today, red_lock_usd=red_lock_usd)
+    shares = effective_tower_shares(
+        cfg,
+        meme_today=meme_today,
+        red_lock_usd=red_lock_usd,
+        today_by_bot=today_by_bot,
+        cash_by_bot=cash_by_bot,
+    )
     out = {}
     for bot_id, share in shares.items():
         try:
@@ -817,20 +897,41 @@ def more_summary(root: str | None = None, *, bots: list | None = None, cfg: dict
     if root is not None:
         remember_sticky(root, sticky)
     meme_today = None
+    today_by_bot: dict[str, float] = {}
+    cash_by_bot: dict[str, float] = {}
     for bot in bots or []:
-        if isinstance(bot, dict) and bot.get("id") == "memecoin":
-            meme_today = _finite(bot.get("today"))
-            break
-    shares = effective_tower_shares(cfg, meme_today=meme_today)
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if not bot_id:
+            continue
+        t = _finite(bot.get("today"))
+        c = _finite(bot.get("cash"))
+        if t is not None:
+            today_by_bot[bot_id] = t
+        if c is not None:
+            cash_by_bot[bot_id] = c
+        if bot_id == "memecoin":
+            meme_today = t
+    shares = effective_tower_shares(
+        cfg, meme_today=meme_today, today_by_bot=today_by_bot, cash_by_bot=cash_by_bot,
+    )
     red = meme_today is not None and meme_today <= -float(MEME_RED_LOCK_USD)
     return {
         "paper_only": True,
         "version": 1,
         "skip_leaderboard": skip_leaderboard(root),
-        "tower_budgets": tower_budgets(cfg, meme_today=meme_today),
+        "tower_budgets": tower_budgets(
+            cfg, meme_today=meme_today, today_by_bot=today_by_bot, cash_by_bot=cash_by_bot,
+        ),
         "tower_shares": shares,
         "meme_red_day": red,
         "meme_red_share": MEME_RED_SHARE if red else None,
+        "fee_clear_towers": list(FEE_CLEAR_TOWERS),
+        "selective_volume": {
+            "note": "Green fee-clear towers may +1 buy/check; venue min_edge floors stay locked.",
+            "towers": list(FEE_CLEAR_TOWERS),
+        },
         "near_miss_count": len((load_more(root).get("near_miss") or [])),
         "near_miss_recent": list((load_more(root).get("near_miss") or []))[-12:],
         "sticky": sticky[:20],
@@ -864,7 +965,17 @@ def self_check() -> None:
     assert abs(red_shares["memecoin"] - MEME_RED_SHARE) < 1e-9
     assert red_shares["btc15m"] > DEFAULT_TOWER_BUDGET_SHARE["btc15m"]
     assert red_shares["commodity-15m"] > DEFAULT_TOWER_BUDGET_SHARE["commodity-15m"]
+    assert red_shares["sports-gap"] > DEFAULT_TOWER_BUDGET_SHARE["sports-gap"]
     assert abs(sum(red_shares.values()) - sum(DEFAULT_TOWER_BUDGET_SHARE.values())) < 1e-9
+    inx_shares = effective_tower_shares(
+        {"tower_risk_budgets": dict(DEFAULT_TOWER_BUDGET_SHARE)},
+        cash_by_bot={"kalshi-sp": 444.0, "kalshi-sized": 500.0},
+    )
+    assert abs(inx_shares["kalshi-sp"] - INX_LOSER_SHARE) < 1e-9
+    assert inx_shares["btc15m"] > DEFAULT_TOWER_BUDGET_SHARE["btc15m"]
+    assert selective_max_buys("btc15m", base=3, today=1.0) == 4
+    assert selective_max_buys("btc15m", base=3, today=-1.0) == 3
+    assert selective_max_buys("memecoin", base=2, today=5.0) == 2
     nm = is_near_miss(z=0.60, p=0.85, reasons=["z 0.60 < 0.65"])
     assert nm["near_miss"] is True and nm["shadow_only"] is True
     assert series_vol_prior("KXNATGAS15M-FOO") > series_vol_prior("KXGOLD15M")
