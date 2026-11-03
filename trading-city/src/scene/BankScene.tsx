@@ -138,15 +138,16 @@ function TellerPod({
       halo.current.scale.set(s, 1, s)
     }
     // Step sideways behind the counter when away — never through the desk.
-    const targetZ = recalling ? 0 : away ? 0.08 : 0
-    const targetX = recalling ? 0 : away ? (index % 2 === 0 ? -0.55 : 0.55) : 0
+    const targetZ = recalling ? 0 : away ? 0.1 : 0
+    const targetX = recalling ? 0 : away ? (index % 2 === 0 ? -0.62 : 0.62) : 0
     walk.current.z = MathUtils.damp(walk.current.z, targetZ, 5.5, dt)
     walk.current.x = MathUtils.damp(walk.current.x, targetX, 5.5, dt)
     if (botRoot.current) {
       botRoot.current.position.x = walk.current.x
-      botRoot.current.position.y = 0.18
+      botRoot.current.position.y = 0.18 + (away && !recalling ? Math.sin(t * 6) * 0.02 : 0)
       botRoot.current.position.z = BOT_Z + walk.current.z
-      botRoot.current.rotation.y = Math.PI
+      const face = away && !recalling ? Math.PI + (index % 2 === 0 ? -0.55 : 0.55) : Math.PI
+      botRoot.current.rotation.y = MathUtils.damp(botRoot.current.rotation.y, face, 4.5, dt)
     }
   })
 
@@ -280,8 +281,12 @@ function TellerPod({
       </mesh>
 
       {/* Teller behind the cabinet — standing height, clear of the desk body */}
-      <group ref={botRoot} position={[0, 0.18, BOT_Z]} rotation={[0, Math.PI, 0]} scale={0.88}>
-        <BotFigure pose={away && !recalling ? 'waiting' : pose} seated={false} />
+      <group ref={botRoot} position={[0, 0.18, BOT_Z]} rotation={[0, Math.PI, 0]} scale={0.9}>
+        <BotFigure
+          pose={away && !recalling ? 'waiting' : pose}
+          seated={false}
+          seed={index}
+        />
       </group>
 
       {/* Approach halo at the rope mouth — in the open lane, not on the desk */}
@@ -855,6 +860,80 @@ function BankEnclosure() {
           <mesh position={[0, 0.98, 0.1]}>
             <boxGeometry args={[0.35, 0.02, 0.25]} />
             <meshStandardMaterial color="#f4f0e4" roughness={0.9} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Wall clock above the vault */}
+      <group position={[0, ceilY - 1.15, zBack + 0.2]}>
+        <mesh>
+          <cylinderGeometry args={[0.38, 0.38, 0.06, 28]} />
+          <meshStandardMaterial color="#1a1424" metalness={0.5} roughness={0.4} />
+        </mesh>
+        <mesh position={[0, 0, 0.04]} rotation={[Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.32, 28]} />
+          <meshBasicMaterial color="#0a0614" toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0.12, 0.05]} rotation={[0, 0, 0.2]}>
+          <boxGeometry args={[0.02, 0.22, 0.02]} />
+          <meshBasicMaterial color="#f9c80e" toneMapped={false} />
+        </mesh>
+        <mesh position={[0.08, 0, 0.05]} rotation={[0, 0, 1.1]}>
+          <boxGeometry args={[0.016, 0.16, 0.016]} />
+          <meshBasicMaterial color="#2de2e6" toneMapped={false} />
+        </mesh>
+      </group>
+
+      {/* Security cameras in the corners */}
+      {([-1, 1] as const).map((side) => (
+        <group key={`cam-${side}`} position={[side * (halfW - 0.55), ceilY - 0.55, midZ]}>
+          <mesh>
+            <boxGeometry args={[0.18, 0.1, 0.22]} />
+            <meshStandardMaterial color="#1a1424" metalness={0.6} roughness={0.35} />
+          </mesh>
+          <mesh position={[0, -0.08, 0.06]} rotation={[0.4, 0, 0]}>
+            <sphereGeometry args={[0.07, 12, 12]} />
+            <meshStandardMaterial color="#0a1020" metalness={0.7} roughness={0.25} />
+          </mesh>
+          <mesh position={[0, -0.1, 0.1]}>
+            <sphereGeometry args={[0.025, 8, 8]} />
+            <meshBasicMaterial color="#ff2a6d" toneMapped={false} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Queue "NOW SERVING" placards along the aisle */}
+      {([-1, 1] as const).map((side) => (
+        <group key={`serve-${side}`} position={[side * 1.35, 0, midZ * 0.35]}>
+          <mesh position={[0, 1.05, 0]}>
+            <boxGeometry args={[0.06, 2.0, 0.06]} />
+            <meshStandardMaterial color="#2a2438" metalness={0.4} roughness={0.45} />
+          </mesh>
+          <mesh position={[0, 2.05, 0.04]}>
+            <boxGeometry args={[0.55, 0.28, 0.04]} />
+            <meshStandardMaterial color={INK} emissive="#2de2e6" emissiveIntensity={0.2} />
+          </mesh>
+          <mesh position={[0, 2.05, 0.07]}>
+            <planeGeometry args={[0.48, 0.2]} />
+            <meshBasicMaterial color="#39ff14" toneMapped={false} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Planter boxes near the portal */}
+      {([-1, 1] as const).map((side) => (
+        <group key={`plant-${side}`} position={[side * (portalW / 2 + 1.1), 0, zFront - 1.1]}>
+          <mesh position={[0, 0.28, 0]}>
+            <boxGeometry args={[0.7, 0.55, 0.45]} />
+            <meshStandardMaterial color="#1a1428" roughness={0.7} />
+          </mesh>
+          <mesh position={[0, 0.58, 0]}>
+            <sphereGeometry args={[0.28, 12, 10]} />
+            <meshStandardMaterial color="#1a4a2a" roughness={0.85} />
+          </mesh>
+          <mesh position={[0.1, 0.72, 0.05]}>
+            <sphereGeometry args={[0.16, 10, 8]} />
+            <meshStandardMaterial color="#2a6a38" roughness={0.8} />
           </mesh>
         </group>
       ))}

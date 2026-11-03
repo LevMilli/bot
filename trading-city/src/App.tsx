@@ -302,7 +302,7 @@ export default function App() {
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
               <span className={walkHint.startsWith('E') ? 'walk-hint-go' : undefined}>
-                {walkHint || 'Click to look · WASD / arrows walk · Space jump · E talk'}
+                {walkHint || 'Click to look · W/S walk · A/D turn · Space jump · E talk'}
               </span>
             </div>
             <nav className="floor-directory" aria-label="Office floors">
