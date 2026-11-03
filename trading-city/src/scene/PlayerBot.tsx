@@ -12,24 +12,28 @@ import {
 const EYE_H = 1.55
 const BODY_H = 1.45
 const CAPSULE_R = 0.32
-const WALK_SPEED = 5.1
-const SPRINT_MUL = 1.6
-const ACCEL = 42
-const FRICTION = 26
-const AIR_CTRL = 0.3
-const JUMP_V = 6.0
-const GRAVITY = 24
-const INTERACT_R = 2.85
+const WALK_SPEED = 5.25
+const SPRINT_MUL = 1.55
+const ACCEL = 38
+const FRICTION = 22
+const AIR_CTRL = 0.35
+const JUMP_V = 6.15
+const GRAVITY = 26
+const LAND_DAMP = 18
+const COYOTE = 0.12
+const JUMP_BUFFER = 0.14
+const INTERACT_R = 2.95
 const LOOK_SENS = 0.0021
 /** A/D turn — A turns character left (camera swings right). */
-const TURN_SPEED = 2.35
-const TURN_SPRINT = 2.9
+const TURN_SPEED = 2.45
+const TURN_SPRINT = 3.05
 /** Over-shoulder follow — reads as a person, not a free camera. */
-const CAM_BACK = 2.7
-const CAM_UP = 1.9
-const CAM_SIDE = 0.35
-const CAM_LERP = 12
-const BOB_AMT = 0.055
+const CAM_BACK = 2.65
+const CAM_UP = 1.88
+const CAM_SIDE = 0.38
+const CAM_LERP = 11
+const BOB_AMT = 0.06
+const CAM_WALL_PAD = 0.55
 
 export type PlayerBotProps = {
   active: boolean
@@ -41,6 +45,8 @@ export type PlayerBotProps = {
   tellerMouths: { x: number; z: number; id: string | null; index: number }[]
   onInteract: (id: string, index: number) => void
   onHintChange?: (hint: string) => void
+  /** Fires when the nearest interactable teller changes. */
+  onNearChange?: (index: number | null) => void
 }
 
 /**
@@ -56,16 +62,22 @@ export function PlayerBot({
   tellerMouths,
   onInteract,
   onHintChange,
+  onNearChange,
 }: PlayerBotProps) {
   const { camera, gl } = useThree()
   const body = useRef<Group>(null)
+  const leftFoot = useRef<Group>(null)
+  const rightFoot = useRef<Group>(null)
   const pos = useRef(new Vector3(0, 0, Math.min(zFront - 2.8, 5)))
   const vel = useRef(new Vector3())
   const yaw = useRef(Math.PI)
   const pitch = useRef(0.1)
   const grounded = useRef(true)
+  const coyote = useRef(0)
+  const jumpBuf = useRef(0)
   const keys = useRef<Record<string, boolean>>({})
   const nearest = useRef<{ id: string; index: number } | null>(null)
+  const nearIdx = useRef<number | null>(null)
   const locked = useRef(false)
   const dragging = useRef(false)
   const hintRef = useRef('')
@@ -90,12 +102,16 @@ export function PlayerBot({
     yaw.current = Math.PI
     pitch.current = 0.1
     grounded.current = true
+    coyote.current = 0
+    jumpBuf.current = 0
     bobPhase.current = 0
+    nearIdx.current = null
+    onNearChange?.(null)
     const backX = Math.sin(yaw.current) * -CAM_BACK
     const backZ = Math.cos(yaw.current) * -CAM_BACK
     camPos.current.set(pos.current.x + backX, CAM_UP, pos.current.z + backZ)
     camera.position.copy(camPos.current)
-  }, [active, zFront, onHintChange, camera])
+  }, [active, zFront, onHintChange, onNearChange, camera])
 
   useEffect(() => {
     if (!active) return
@@ -123,6 +139,9 @@ export function PlayerBot({
         e.preventDefault()
         const n = nearest.current
         if (n?.id) onInteract(n.id, n.index)
+      }
+      if (k === ' ' || k === 'spacebar') {
+        jumpBuf.current = JUMP_BUFFER
       }
     }
     const onKeyUp = (e: KeyboardEvent) => {
@@ -207,9 +226,15 @@ export function PlayerBot({
       }
     }
 
-    if ((k[' '] || k.spacebar) && grounded.current) {
+    if (grounded.current) coyote.current = COYOTE
+    else coyote.current = Math.max(0, coyote.current - dt)
+    jumpBuf.current = Math.max(0, jumpBuf.current - dt)
+
+    if (jumpBuf.current > 0 && coyote.current > 0) {
       vel.current.y = JUMP_V
       grounded.current = false
+      coyote.current = 0
+      jumpBuf.current = 0
     }
     vel.current.y -= GRAVITY * dt
 
@@ -219,7 +244,7 @@ export function PlayerBot({
     nx = hit.x
     nz = hit.z
     const bx = clampToBounds(nx, nz, bounds)
-    if (bx.x !== nx) vel.current.x = 0
+    if (bx.x !== nx) vel.current.x *= 0.2
     nx = bx.x
 
     nz = pos.current.z + vel.current.z * dt
@@ -227,7 +252,7 @@ export function PlayerBot({
     nx = hit.x
     nz = hit.z
     const bz = clampToBounds(nx, nz, bounds)
-    if (bz.z !== nz) vel.current.z = 0
+    if (bz.z !== nz) vel.current.z *= 0.2
     nx = bz.x
     nz = bz.z
 
@@ -235,33 +260,52 @@ export function PlayerBot({
     pos.current.z = nz
     pos.current.y += vel.current.y * dt
     if (pos.current.y <= 0) {
+      // Soft landing — bleed vertical speed instead of a hard stop.
+      if (vel.current.y < -0.5) vel.current.y = MathUtils.damp(vel.current.y, 0, LAND_DAMP, dt)
+      else vel.current.y = 0
       pos.current.y = 0
-      vel.current.y = 0
       grounded.current = true
     }
 
     const groundSpeed = Math.hypot(vel.current.x, vel.current.z)
     if (grounded.current && groundSpeed > 0.35) {
-      bobPhase.current += dt * (9.2 + groundSpeed)
+      bobPhase.current += dt * (8.6 + groundSpeed * 1.15)
     } else {
       bobPhase.current = MathUtils.damp(bobPhase.current, 0, 10, dt)
     }
-    const bob =
-      grounded.current ? Math.sin(bobPhase.current) * BOB_AMT * Math.min(1, groundSpeed / 2.8) : 0
-    const lean = turn !== 0 ? -turn * 0.08 : 0
+    const bobAmp = grounded.current ? Math.min(1, groundSpeed / 2.6) : 0
+    const bob = Math.sin(bobPhase.current) * BOB_AMT * bobAmp
+    const lean = turn !== 0 ? -turn * 0.09 : -vel.current.x * 0.01
+    const pitchLean = grounded.current ? -vel.current.z * 0.008 * Math.cos(yaw.current) : 0
 
     if (body.current) {
-      body.current.position.set(pos.current.x, pos.current.y + Math.abs(bob) * 0.15, pos.current.z)
+      body.current.position.set(pos.current.x, pos.current.y + Math.abs(bob) * 0.18, pos.current.z)
       body.current.rotation.y = yaw.current
       body.current.rotation.z = MathUtils.damp(body.current.rotation.z, lean, 10, dt)
+      body.current.rotation.x = MathUtils.damp(body.current.rotation.x, pitchLean, 8, dt)
+    }
+
+    // Walking gait on the feet groups.
+    const step = Math.sin(bobPhase.current) * bobAmp
+    const lift = Math.max(0, Math.sin(bobPhase.current)) * 0.05 * bobAmp
+    if (leftFoot.current) {
+      leftFoot.current.position.set(-0.12, 0.06 + lift, 0.06 + step * 0.12)
+      leftFoot.current.rotation.x = step * 0.35
+    }
+    if (rightFoot.current) {
+      rightFoot.current.position.set(0.12, 0.06 + Math.max(0, -Math.sin(bobPhase.current)) * 0.05 * bobAmp, 0.06 - step * 0.12)
+      rightFoot.current.rotation.x = -step * 0.35
     }
 
     // Follow cam: behind + slight right offset; turning left → cam arcs right.
     const backX = Math.sin(yaw.current) * -CAM_BACK + Math.cos(yaw.current) * CAM_SIDE
     const backZ = Math.cos(yaw.current) * -CAM_BACK - Math.sin(yaw.current) * CAM_SIDE
-    const wantCamX = pos.current.x + backX
+    let wantCamX = pos.current.x + backX
     const wantCamY = pos.current.y + CAM_UP + bob + pitch.current * 0.55
-    const wantCamZ = pos.current.z + backZ
+    let wantCamZ = pos.current.z + backZ
+    // Soft wall pad so the follow cam doesn't punch through the enclosure.
+    wantCamX = MathUtils.clamp(wantCamX, -hallHalfW + CAM_WALL_PAD, hallHalfW - CAM_WALL_PAD)
+    wantCamZ = MathUtils.clamp(wantCamZ, zBack + CAM_WALL_PAD + 0.8, zFront - CAM_WALL_PAD)
     camPos.current.x = MathUtils.damp(camPos.current.x, wantCamX, CAM_LERP, dt)
     camPos.current.y = MathUtils.damp(camPos.current.y, wantCamY, CAM_LERP, dt)
     camPos.current.z = MathUtils.damp(camPos.current.z, wantCamZ, CAM_LERP, dt)
@@ -278,6 +322,11 @@ export function PlayerBot({
       if (d <= INTERACT_R && (!best || d < best.d)) best = { id: t.id, index: t.index, d }
     }
     nearest.current = best ? { id: best.id, index: best.index } : null
+    const nextNear = best ? best.index : null
+    if (nextNear !== nearIdx.current) {
+      nearIdx.current = nextNear
+      onNearChange?.(nextNear)
+    }
     const hint = best
       ? 'E · talk to teller'
       : locked.current
@@ -311,13 +360,18 @@ export function PlayerBot({
         <boxGeometry args={[0.14, 0.04, 0.04]} />
         <meshStandardMaterial color="#061018" metalness={0.7} roughness={0.2} />
       </mesh>
-      {/* Simple feet so walk reads */}
-      {([-0.12, 0.12] as const).map((x) => (
-        <mesh key={x} position={[x, 0.06, 0.06]}>
+      <group ref={leftFoot} position={[-0.12, 0.06, 0.06]}>
+        <mesh>
           <boxGeometry args={[0.1, 0.08, 0.18]} />
           <meshStandardMaterial color="#0a1820" roughness={0.6} metalness={0.3} />
         </mesh>
-      ))}
+      </group>
+      <group ref={rightFoot} position={[0.12, 0.06, 0.06]}>
+        <mesh>
+          <boxGeometry args={[0.1, 0.08, 0.18]} />
+          <meshStandardMaterial color="#0a1820" roughness={0.6} metalness={0.3} />
+        </mesh>
+      </group>
     </group>
   )
 }
