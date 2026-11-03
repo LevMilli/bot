@@ -685,6 +685,13 @@ def adverse_cool_blocks(root: str | None, bot: str) -> str:
     )
 
 
+def latest_weekly_scorecard(root: str | None = None) -> dict | None:
+    path = _path(WEEKLY_SCORECARD, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
 def capture_weekly_scorecard(
     root: str | None,
     *,
@@ -741,12 +748,14 @@ def plan_summary(
             "n": 0, "decision": "reject", "auto_promote": False,
         },
         "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
+        "weekly_scorecard": latest_weekly_scorecard(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "sports latency + hard-stop shadow",
-            "sports hard-stop promote after n≥30",
-            "INX band research week",
+            "sports hard-stop promote after n≥30 (staff; live still False)",
+            "Master graduation checklist cards (M1–M7 × 2 weeks)",
+            "meme 20d retirement clock",
+            "INX band promote only after research week artifact",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -818,6 +827,8 @@ def self_check() -> None:
             cfg={"max_open_risk": 100}, label="W-test",
         )
         assert card["gate_a_ready_towers"] == 1
+        assert latest_weekly_scorecard(tmp)["label"] == "W-test"
+        assert latest_weekly_scorecard(tmp)["fee_floors_locked"] is True
 
 
 if __name__ == "__main__":

@@ -284,15 +284,11 @@ def master_summary(
                 baseline = None
         weekly = None
         try:
-            # Refresh weekly scorecard when missing or label day drifted.
+            # Refresh Chicago-day scorecard once per day for hillclimb reviews.
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            store = desk_roi_plan._load(
-                desk_roi_plan._path(desk_roi_plan.WEEKLY_SCORECARD, root),
-                {"latest": None},
-            ) if root else {"latest": None}
-            latest = store.get("latest") if isinstance(store, dict) else None
+            latest = desk_roi_plan.latest_weekly_scorecard(root)
             if root and bots and (
                 not isinstance(latest, dict) or str(latest.get("label") or "") != today
             ):

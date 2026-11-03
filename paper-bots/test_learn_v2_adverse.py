@@ -92,9 +92,40 @@ class WeeklyScorecard(unittest.TestCase):
                     {"id": "sports-gap", "today": 5, "gate_a": {"ready": True}},
                 ],
                 cfg={"max_open_risk": 100},
+                label="2026-11-03",
             )
             self.assertEqual(card["gate_a_ready_towers"], 1)
             self.assertTrue(card["fee_floors_locked"])
+            latest = desk_roi_plan.latest_weekly_scorecard(tmp)
+            self.assertEqual(latest["label"], "2026-11-03")
+            self.assertIsNone(desk_roi_plan.latest_weekly_scorecard(None))
+
+    def test_master_wires_weekly_scorecard(self):
+        import desk_master
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = desk_master.master_summary(
+                tmp,
+                bots=[
+                    {
+                        "id": "sports-gap",
+                        "label": "Sports",
+                        "cash": 500,
+                        "today": 2,
+                        "open_risk": 10,
+                        "gate_a": {"ready": True},
+                    }
+                ],
+                cfg={"max_open_risk": 100},
+            )
+            plan = summary.get("roi_plan") or {}
+            weekly = plan.get("weekly_scorecard")
+            self.assertIsInstance(weekly, dict)
+            self.assertTrue(weekly.get("fee_floors_locked"))
+            self.assertEqual(
+                weekly.get("label"),
+                desk_roi_plan.latest_weekly_scorecard(tmp)["label"],
+            )
 
 
 if __name__ == "__main__":
