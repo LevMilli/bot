@@ -276,6 +276,18 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
         "pnl": pnl,
     })
     state.setdefault("closed", []).append(closed)
+    try:
+        import desk_roi_plan
+        desk_roi_plan.record_incubation_settle(
+            DESK_ROOT,
+            series=str(pos.get("series") or ""),
+            bot="commodity-15m",
+            pnl=pnl,
+            contracts=pos.get("contracts"),
+            note=str(reason or "")[:80],
+        )
+    except Exception:
+        pass
     return pnl
 
 
@@ -360,6 +372,20 @@ def settle_account(state: dict) -> None:
                 result=str(result),
                 side=str(pos.get("side") or ""),
                 note="commodity-15m settle",
+            )
+        except Exception:
+            pass
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan
+            desk_roi_plan.record_incubation_settle(
+                DESK_ROOT,
+                series=str(pos.get("series") or ""),
+                bot="commodity-15m",
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                note="settled",
             )
         except Exception:
             pass
