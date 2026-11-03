@@ -7,7 +7,7 @@ import { Monitors } from './hud/Monitors'
 import { Ticker } from './hud/Ticker'
 import { TowerRail } from './hud/TowerRail'
 import { beamColorFor } from './data/format'
-import { parseCityHash } from './data/floorMap'
+import { FLOORS, parseCityHash } from './data/floorMap'
 import { CityScene } from './scene/CityScene'
 import { OfficeScene } from './scene/OfficeScene'
 import { BankScene } from './scene/BankScene'
@@ -248,6 +248,11 @@ export default function App() {
                     selected.blurb?.trim() ||
                     'No CARD why on this teller yet — waiting on the next paper check.'}
                 </p>
+                <p className="td-memory">
+                  {selected.memory_line?.trim() ||
+                    snap?.desk?.teller_memory?.recent?.[0]?.text ||
+                    'Shared memory quiet — paper facts land after checks.'}
+                </p>
                 <div className="td-meta">
                   <span>skip · {selected.skip?.trim() || 'none'}</span>
                   <span>next · {selected.next_run?.trim() || '—'}</span>
@@ -256,6 +261,11 @@ export default function App() {
                     {selected.today == null ? '—' : `$${Number(selected.today).toFixed(2)}`}
                   </span>
                   <span>open · {selected.open_count ?? 0}</span>
+                  <span>
+                    memory · f{snap?.desk?.teller_memory?.n_facts ?? 0}/m
+                    {snap?.desk?.teller_memory?.n_mistakes ?? 0}/w
+                    {snap?.desk?.teller_memory?.n_wins ?? 0}
+                  </span>
                 </div>
               </div>
             )}
@@ -284,6 +294,22 @@ export default function App() {
               <strong>APEX-CITY TRUST</strong>
               <span>A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look</span>
             </div>
+            <nav className="floor-directory" aria-label="Office floors">
+              {FLOORS.map((floor) => (
+                <button
+                  key={floor.id}
+                  type="button"
+                  className="floor-chip"
+                  onClick={() => {
+                    window.location.hash = `#/floor/${floor.id}`
+                  }}
+                >
+                  <span className="floor-chip-id">F{floor.id}</span>
+                  <span className="floor-chip-name">{floor.name}</span>
+                  <span className="floor-chip-wing">{floor.wing}</span>
+                </button>
+              ))}
+            </nav>
             {vaultOpsOpen && (
               <div className="vault-board" aria-label="Desk vault board">
                 <div className="vault-board-toolbar">

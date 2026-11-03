@@ -690,6 +690,18 @@ def _card(sentence):
     return 0
 
 
+def eth_early_should_buy(regime, reasons=None, *, delay_eth: bool = False) -> bool:
+    """
+    E1 #106 — ETH early singles under the same confident_early gates as BTC.
+    Not parlay-only: clear fee-aware early → single paper buy (unless lead-lag delay).
+    """
+    if str(regime or "") != "confident_early":
+        return False
+    if delay_eth:
+        return False
+    return not bool(reasons or [])
+
+
 def _sigma_for(price, min_left, closes, dvol):
     """Return (sigma, realized, sig_dvol) for this window's minutes-left."""
     realized = None
@@ -1304,11 +1316,12 @@ def main():
                 )
             except Exception:
                 pass
+        # Same fee-aware gates as BTC early singles (evaluate_window); not parlay-only.
+        delay_eth = False
+        btc_move = None
+        delay_sec = 45
         if regime == "confident_early" and not (ev_early.get("reasons") or []):
             # Top25 #10 — ETH lead-lag study: if BTC just spiked, delay ETH early buy.
-            delay_eth = False
-            btc_move = None
-            delay_sec = 45
             try:
                 if price and closes and len(closes) >= 2:
                     btc_move = abs(float(price) - float(closes[-1])) / max(float(closes[-1]), 1e-9) * 100.0
@@ -1326,29 +1339,102 @@ def main():
                 )
             except Exception:
                 delay_eth = False
-            if delay_eth:
-                mv = f"{btc_move:.3f}%" if btc_move is not None else "?"
-                print(f"  ETH early DELAYED ({delay_sec}s study) — BTC move {mv} (paper lead-lag)")
-                sentence = "ETH early delayed for BTC lead-lag study (no paper buy this pass)."
-            else:
-                sentence = paper_buy(
-                    account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
-                    ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
-                    vol_kwargs={
-                        "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
-                        "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
-                        "ask": ev_early.get("ask"), "ticker": m["ticker"], "series": "KXETH15M",
-                    },
-                )
+        if eth_early_should_buy(regime, ev_early.get("reasons"), delay_eth=delay_eth):
+            tp = min(round(float(ev_early["ask"]) + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
+            print(
+                f"  SIGNAL: BUY ETH {ev_early['side']} on {m['ticker']} at <= {ev_early['ask']:.2f} "
+                f"(fee {ev_early['fee']:.2f}). Suggested take-profit {tp:.2f}."
+            )
+            sentence = paper_buy(
+                account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
+                ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
+                vol_kwargs={
+                    "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
+                    "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
+                    "ask": ev_early.get("ask"), "ticker": m["ticker"], "series": "KXETH15M",
+                },
+            )
             print(f"  ETH early: {sentence}")
             if "Paper buy" in sentence and "No paper buy" not in sentence:
                 buys += 1
                 last_sentence = sentence
+                if kalshi_history is not None and not IS_SHADOW:
+                    try:
+                        kalshi_history.clear_hold(DESK_ROOT, str(m.get("ticker") or ""))
+                    except Exception:
+                        pass
+                if desk_brain and not IS_SHADOW:
+                    try:
+                        note = desk_brain.explain_buy(
+                            "btc15m", ev_early["side"], m["ticker"], ev_early.get("edge"),
+                            ev_early.get("p"), ev_early.get("depth"),
+                        )
+                        print(f"  BRAIN: {note}")
+                        desk_brain.record_decision(
+                            DESK_ROOT, bot="btc15m", action="buy",
+                            ticker=str(m.get("ticker") or ""), side=ev_early.get("side") or "",
+                            edge=ev_early.get("edge"), confidence=ev_early.get("p"),
+                            depth=ev_early.get("depth"), note=note,
+                        )
+                    except Exception:
+                        pass
                 try:
                     if DESK_ROOT not in sys.path:
                         sys.path.insert(0, DESK_ROOT)
                     import desk_top25 as _top25b
                     _top25b.remember_buy(DESK_ROOT)
+                    import teller_memory
+                    teller_memory.remember(
+                        DESK_ROOT, "wins",
+                        f"ETH early single {m['ticker']} cleared same gates as BTC.",
+                        bot_id="btc15m", source="btc15m_signal",
+                    )
+                except Exception:
+                    pass
+            else:
+                skips += 1
+                print(f"  ETH desk/account blocked fill: {sentence}")
+        elif regime == "confident_early" and delay_eth:
+            mv = f"{btc_move:.3f}%" if btc_move is not None else "?"
+            print(f"  ETH early DELAYED ({delay_sec}s study) — BTC move {mv} (paper lead-lag)")
+            skips += 1
+        elif regime == "confident_early":
+            reasons = list(ev_early.get("reasons") or []) or [regime]
+            print("  ETH SIGNAL: SKIP -> " + "; ".join(reasons))
+            skips += 1
+            if desk_brain and not IS_SHADOW:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        ticker=str(m.get("ticker") or ""), side=ev_early.get("side") or "",
+                        edge=ev_early.get("edge"), confidence=ev_early.get("p"),
+                        depth=ev_early.get("depth"), reasons=reasons,
+                    )
+                except Exception:
+                    pass
+                try:
+                    import desk_more
+                    z_val = ev_early.get("z")
+                    nm = desk_more.is_near_miss(
+                        reasons=reasons,
+                        z=z_val,
+                        p=ev_early.get("p"),
+                        edge=ev_early.get("edge"),
+                        min_edge=float(edge_buf),
+                    )
+                    if nm.get("near_miss"):
+                        desk_more.record_near_miss(DESK_ROOT, {
+                            "bot": "btc15m",
+                            "ticker": m.get("ticker"),
+                            "side": ev_early.get("side"),
+                            "soft": nm.get("soft"),
+                            "z": z_val,
+                            "p": ev_early.get("p"),
+                            "edge": ev_early.get("edge"),
+                            "note": f"ETH {nm.get('note')}",
+                            "series": "KXETH15M",
+                        })
+                        print(f"  ETH NEAR-MISS shadow logged ({nm.get('note')})")
                 except Exception:
                     pass
         elif regime == "parlay_window":
