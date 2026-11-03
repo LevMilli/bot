@@ -205,6 +205,19 @@ def paper_sell(state, pos, bid, fee, reason):
             })
         except Exception:
             pass
+        try:
+            import desk_roi_plan
+            series = str(pos.get("series") or "KXBTC15M")
+            desk_roi_plan.record_incubation_settle(
+                DESK_ROOT,
+                series=series,
+                bot="btc15m",
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                note=str(reason or "")[:80],
+            )
+        except Exception:
+            pass
     return pnl
 
 

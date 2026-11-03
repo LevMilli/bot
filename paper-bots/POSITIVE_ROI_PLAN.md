@@ -123,13 +123,21 @@ Interactive: Positive ROI Master Plan canvas.
 | BTC↔INX hard veto | existing `correlation_pairs` (unchanged) |
 | WTI↔Brent 0.5× haircut | `series_corr_haircut` in commodity `paper_buy` |
 
+### Incubation lane
+
+| Ticket | Where |
+| --- | --- |
+| New series settle counter | `record_incubation_settle` (n≥50) |
+| Staff graduate | `staff_graduate_incubation` (`auto_promote=False`) |
+| Masters board | `incubation_board` → `roi_plan.incubation` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Incubation lane | 50 fee-aware settles before promote |
 | Ruin drill UX | soft / hard / nuclear |
 | Tax/fee ledger completeness | true ROI ledger |
+| Clock-skew / stale-world skip | loop latency threshold |
 
 ## Hard rules unchanged
 

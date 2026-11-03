@@ -418,6 +418,10 @@ def master_summary(
             plan["correlation"] = desk_profit.correlation_matrix(bots, cfg=cfg)
         except Exception:
             plan["correlation"] = None
+        try:
+            plan["incubation"] = desk_roi_plan.incubation_board(root)
+        except Exception:
+            plan["incubation"] = None
     except Exception:
         plan = None
     return {

@@ -30,6 +30,7 @@ PROFIT_LOCK = "desk_profit_lock.json"
 SKIP_REGRET_WEEKLY = "desk_skip_regret_weekly.json"
 DAILY_R_NAME = "desk_daily_r.json"
 ANTI_REVENGE_NAME = "desk_anti_revenge.json"
+INCUBATION_NAME = "desk_incubation.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -67,6 +68,16 @@ DAILY_R_BUDGET = {
 
 # Phase 10: anti-revenge — same market blocked T minutes after stop/flip.
 ANTI_REVENGE_MINUTES = 30
+
+# Phase 7: incubation — new series paper-only until N fee-aware settles.
+INCUBATION_MIN_N = 50
+# Series already graduated / main tape (not incubated by default).
+INCUBATION_MAIN_SERIES = frozenset({
+    "KXBTC15M", "KXETH15M",
+    "KXGOLD15M", "KXSILVER15M", "KXPLATINUM15M", "KXPALLADIUM15M", "KXCOPPER15M",
+    "KXNATGAS15M", "KXBRENT15M", "KXWTI15M",
+    "KXINXU",
+})
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -1223,6 +1234,195 @@ def anti_revenge_blocks(root: str | None, bot: str, ticker: str) -> str:
     )
 
 
+# ---- Incubation lane (Phase 7) ---------------------------------------------
+
+def _series_key(series: str | None) -> str:
+    return str(series or "").strip().upper()
+
+
+def _empty_incubation() -> dict:
+    return {"paper_only": True, "series": {}, "graduated": [], "latest": None}
+
+
+def load_incubation(root: str | None = None) -> dict:
+    return _load(_path(INCUBATION_NAME, root), _empty_incubation())
+
+
+def incubation_status(root: str | None, series: str | None) -> dict:
+    """Lane for one series: main | incubation | ready_to_graduate | graduated."""
+    key = _series_key(series)
+    store = load_incubation(root)
+    graduated = {str(s).upper() for s in (store.get("graduated") or [])}
+    row = (store.get("series") or {}).get(key) if key else None
+    row = row if isinstance(row, dict) else {}
+    n = int(row.get("n") or 0)
+    pnls = [p for p in (row.get("pnls") or []) if _finite(p) is not None]
+    exp = round(sum(pnls) / len(pnls), 4) if pnls else None
+    if key and key in graduated:
+        lane = "graduated"
+    elif key and key in INCUBATION_MAIN_SERIES and not row:
+        lane = "main"
+    elif n >= INCUBATION_MIN_N:
+        lane = "ready_to_graduate"
+    else:
+        lane = "incubation" if key else "unknown"
+    return {
+        "paper_only": True,
+        "series": key,
+        "lane": lane,
+        "n": n,
+        "min_n": INCUBATION_MIN_N,
+        "expectancy_taxed": exp,
+        "promote_ready": lane == "ready_to_graduate",
+        "auto_promote": False,
+        "main_tape": key in INCUBATION_MAIN_SERIES or lane in ("main", "graduated"),
+        "fee_floors_locked": True,
+        "note": (
+            f"Incubation: need n≥{INCUBATION_MIN_N} fee-aware settles before staff graduate. "
+            "Paper trades allowed; no auto-promote."
+        ),
+    }
+
+
+def record_incubation_settle(
+    root: str | None,
+    *,
+    series: str,
+    bot: str = "",
+    pnl=None,
+    contracts=None,
+    fill_tax: float = 0.01,
+    note: str = "",
+) -> dict:
+    """Count a fee-aware settle toward incubation graduation."""
+    key = _series_key(series)
+    if not key:
+        return {"recorded": False, "reason": "no series"}
+    # Main tape series do not need incubation tracking unless explicitly enrolled.
+    store = load_incubation(root)
+    graduated = {str(s).upper() for s in (store.get("graduated") or [])}
+    if key in graduated or (key in INCUBATION_MAIN_SERIES and key not in (store.get("series") or {})):
+        return {"recorded": False, "reason": "main_or_graduated", "series": key}
+    p = _finite(pnl)
+    c = _finite(contracts) or 1.0
+    taxed = None if p is None else p - float(fill_tax) * max(1.0, c)
+    series_map = store.setdefault("series", {})
+    row = series_map.get(key) if isinstance(series_map.get(key), dict) else {
+        "series": key, "n": 0, "pnls": [], "bots": {},
+    }
+    row["n"] = int(row.get("n") or 0) + 1
+    if taxed is not None:
+        pnls = list(row.get("pnls") or [])
+        pnls.append(round(taxed, 4))
+        row["pnls"] = pnls[-200:]
+    bots = row.get("bots") if isinstance(row.get("bots"), dict) else {}
+    if bot:
+        bots[str(bot)] = int(bots.get(str(bot)) or 0) + 1
+    row["bots"] = bots
+    row["last_at"] = _now()
+    row["last_note"] = str(note or "")[:120]
+    series_map[key] = row
+    store["series"] = series_map
+    store["latest"] = {"series": key, "n": row["n"], "at": _now()}
+    _save(_path(INCUBATION_NAME, root), store)
+    status = incubation_status(root, key)
+    return {"recorded": True, **status}
+
+
+def enroll_incubation(root: str | None, series: str, *, note: str = "") -> dict:
+    """Force a series into incubation (even if it was on the main list)."""
+    key = _series_key(series)
+    if not key:
+        return {"ok": False, "reason": "no series"}
+    store = load_incubation(root)
+    graduated = [s for s in (store.get("graduated") or []) if str(s).upper() != key]
+    store["graduated"] = graduated
+    series_map = store.setdefault("series", {})
+    if key not in series_map:
+        series_map[key] = {"series": key, "n": 0, "pnls": [], "bots": {}, "enrolled_at": _now()}
+    series_map[key]["note"] = str(note or "")[:160]
+    store["series"] = series_map
+    _save(_path(INCUBATION_NAME, root), store)
+    return {"ok": True, **incubation_status(root, key)}
+
+
+def staff_graduate_incubation(
+    root: str | None,
+    series: str,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff promote series out of incubation after n≥50 (unless force)."""
+    key = _series_key(series)
+    status = incubation_status(root, key)
+    if not force and not status.get("promote_ready"):
+        return {
+            "ok": False,
+            "reason": f"need n≥{INCUBATION_MIN_N} (have {status.get('n')})",
+            "status": status,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    store = load_incubation(root)
+    graduated = [str(s).upper() for s in (store.get("graduated") or [])]
+    if key not in graduated:
+        graduated.append(key)
+    store["graduated"] = graduated[-200:]
+    store["last_graduate"] = {
+        "series": key, "at": _now(), "note": str(note or "")[:160],
+        "n": status.get("n"), "auto_promote": False,
+    }
+    _save(_path(INCUBATION_NAME, root), store)
+    return {
+        "ok": True,
+        "reason": "graduated",
+        "status": incubation_status(root, key),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def incubation_board(root: str | None = None) -> dict:
+    store = load_incubation(root)
+    rows = []
+    for key, row in (store.get("series") or {}).items():
+        if not isinstance(row, dict):
+            continue
+        rows.append(incubation_status(root, key))
+    rows.sort(key=lambda r: (-int(r.get("n") or 0), str(r.get("series") or "")))
+    return {
+        "paper_only": True,
+        "min_n": INCUBATION_MIN_N,
+        "incubating_n": sum(1 for r in rows if r.get("lane") == "incubation"),
+        "ready_n": sum(1 for r in rows if r.get("lane") == "ready_to_graduate"),
+        "graduated": list(store.get("graduated") or []),
+        "rows": rows[:40],
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "note": "New series stay paper-only in incubation until staff graduate after n≥50.",
+    }
+
+
+def incubation_blocks_promote(root: str | None, series: str | None) -> str:
+    """Non-empty when series must not leave paper incubation yet."""
+    status = incubation_status(root, series)
+    if status.get("lane") in ("main", "graduated", "ready_to_graduate", "unknown"):
+        # ready_to_graduate still needs staff — block auto-promote paths
+        if status.get("lane") == "ready_to_graduate":
+            return (
+                f"incubation: {status.get('series')} ready (n={status.get('n')}) "
+                "— staff graduate only, no auto-promote"
+            )
+        return ""
+    if status.get("lane") == "incubation":
+        return (
+            f"incubation: {status.get('series')} paper-only "
+            f"(n={status.get('n')}/{INCUBATION_MIN_N}) — no promote"
+        )
+    return ""
+
+
 def adverse_cool_blocks(root: str | None, bot: str) -> str:
     """Non-empty reason when bot is in adverse cool-off window."""
     path = _path(ADVERSE_COOL_NAME, root)
@@ -1819,13 +2019,14 @@ def plan_summary(
         "skip_regret_weekly": latest_skip_regret_weekly(root),
         "daily_r": latest_daily_r_board(root),
         "inx_band_promote": inx_band_promote_status(root),
+        "incubation": incubation_board(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "incubation lane 50 fee-aware settles",
             "ruin drill soft/hard/nuclear UX",
             "tax/fee ledger completeness pass",
             "clock-skew / stale-world skip",
+            "helper Gate A taxed EV gate",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1974,6 +2175,14 @@ def self_check() -> None:
         assert ar["cooled"] is True
         assert "anti-revenge" in anti_revenge_blocks(tmp, "btc15m", "KXTEST")
         assert anti_revenge_blocks(tmp, "btc15m", "OTHER") == ""
+        enroll_incubation(tmp, "KXNEON15M")
+        for _ in range(50):
+            record_incubation_settle(
+                tmp, series="KXNEON15M", bot="commodity-15m", pnl=0.2, contracts=1,
+            )
+        assert incubation_status(tmp, "KXNEON15M")["promote_ready"] is True
+        assert staff_graduate_incubation(tmp, "KXNEON15M")["ok"] is True
+        assert incubation_status(tmp, "KXNEON15M")["lane"] == "graduated"
 
 
 if __name__ == "__main__":
