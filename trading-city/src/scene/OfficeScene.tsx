@@ -25,6 +25,7 @@ type Props = {
   bots?: BotRow[]
   desk?: Desk
   onOpenScreens?: () => void
+  onEnterHall?: () => void
   onEnterBoss?: () => void
   onSelectBot?: (id: string) => void
   floorFocus?: FloorFocus
@@ -463,8 +464,9 @@ function OfficeFloor() {
 
 const HOME_POS: [number, number, number] = [0.15, 1.78, 3.35]
 const HOME_TARGET: [number, number, number] = [0, 1.42, 0.05]
-const HALL_POS: [number, number, number] = [0.2, 2.4, 2.2]
-const HALL_TARGET: [number, number, number] = [0, 1.4, 12]
+// Stand just inside the hall (glass is at z≈4.78) looking down the corridor.
+const HALL_POS: [number, number, number] = [0.15, 2.35, 6.4]
+const HALL_TARGET: [number, number, number] = [0, 1.45, 14]
 const BOSS_POS: [number, number, number] = [0.3, 2.6, 18]
 const BOSS_TARGET: [number, number, number] = [0, 1.5, 26]
 
@@ -816,6 +818,7 @@ export function OfficeScene({
   bots,
   desk,
   onOpenScreens,
+  onEnterHall,
   onEnterBoss,
   onSelectBot,
   floorFocus = 'suite',
@@ -962,21 +965,9 @@ export function OfficeScene({
         doorOpen={doorOpen}
         onToggleDoor={() => setDoorOpen((v) => !v)}
         onEnterHall={() => {
-          const orbit = controls.current
-          const cam = orbit?.object
-          if (!orbit || !cam) return
-          cam.position.set(...HALL_POS)
-          orbit.target.set(...HALL_TARGET)
-          orbit.update()
+          onEnterHall?.()
         }}
         onEnterBoss={() => {
-          const orbit = controls.current
-          const cam = orbit?.object
-          if (orbit && cam) {
-            cam.position.set(...BOSS_POS)
-            orbit.target.set(...BOSS_TARGET)
-            orbit.update()
-          }
           onEnterBoss?.()
         }}
         onEnterSuite={(id) => onSelectBot?.(id)}

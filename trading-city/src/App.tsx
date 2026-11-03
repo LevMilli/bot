@@ -1,6 +1,6 @@
 import { AdaptiveDpr, AdaptiveEvents } from '@react-three/drei'
 import { Canvas } from '@react-three/fiber'
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useSnapshot } from './data/useSnapshot'
 import { Banners } from './hud/Banners'
 import { Monitors } from './hud/Monitors'
@@ -54,13 +54,22 @@ function FloorNavMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
     }
-    document.addEventListener('mousedown', onDoc)
+    // click (not mousedown): mousedown-outside can race the option's click
+    // and close/unmount the panel before onHall/onBoss runs.
+    document.addEventListener('click', onDoc)
     window.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('click', onDoc)
       window.removeEventListener('keydown', onKey)
     }
   }, [open])
+
+  const pick = (fn: () => void) => (e: { preventDefault(): void; stopPropagation(): void }) => {
+    e.preventDefault()
+    e.stopPropagation()
+    fn()
+    setOpen(false)
+  }
 
   return (
     <div className={`floor-nav${open ? ' open' : ''}`}>
@@ -69,7 +78,10 @@ function FloorNavMenu({
         className="floor-nav-toggle"
         aria-expanded={open}
         aria-haspopup="listbox"
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
       >
         <span className="floor-nav-label">{label}</span>
         <span className="floor-nav-caret" aria-hidden>
@@ -83,10 +95,7 @@ function FloorNavMenu({
             type="button"
             role="option"
             className={floorFocus === 'suite' && !bossOpen ? 'active' : ''}
-            onClick={() => {
-              onSuite()
-              setOpen(false)
-            }}
+            onClick={pick(onSuite)}
           >
             This suite
           </button>
@@ -94,10 +103,7 @@ function FloorNavMenu({
             type="button"
             role="option"
             className={floorFocus === 'hall' && !bossOpen ? 'active' : ''}
-            onClick={() => {
-              onHall()
-              setOpen(false)
-            }}
+            onClick={pick(onHall)}
           >
             Hallway
           </button>
@@ -105,10 +111,7 @@ function FloorNavMenu({
             type="button"
             role="option"
             className={bossOpen || floorFocus === 'boss' ? 'active' : ''}
-            onClick={() => {
-              onBoss()
-              setOpen(false)
-            }}
+            onClick={pick(onBoss)}
           >
             Boss office
           </button>
@@ -120,10 +123,7 @@ function FloorNavMenu({
               role="option"
               className={bot.id === selected.id && floorFocus === 'suite' && !bossOpen ? 'active' : ''}
               style={{ borderLeftColor: beamColorFor(bot.id, i) }}
-              onClick={() => {
-                onPickBot(bot.id)
-                setOpen(false)
-              }}
+              onClick={pick(() => onPickBot(bot.id))}
             >
               {bot.name}
             </button>
@@ -219,13 +219,32 @@ export default function App() {
     [bots, selectedId],
   )
 
+  // Keep a ref so hash routing can read latest bots without re-applying on every
+  // snapshot poll (re-apply was resetting floorFocus → suite and closing the hall).
+  const botsRef = useRef(bots)
+  botsRef.current = bots
+
   useEffect(() => {
+    const apply = () =>
+      applyHashRoute(
+        setView,
+        setSelectedId,
+        setFromBank,
+        setFloorFocus,
+        setBossOpen,
+        botsRef.current,
+      )
+    apply()
+    window.addEventListener('hashchange', apply)
+    return () => window.removeEventListener('hashchange', apply)
+  }, [])
+
+  // Deep-link #/boss once bots exist (hash effect alone may run before fixture load).
+  useEffect(() => {
+    if (!bots.length) return
+    if (parseCityHash(window.location.hash || '').view !== 'boss') return
     applyHashRoute(setView, setSelectedId, setFromBank, setFloorFocus, setBossOpen, bots)
-    const onHash = () =>
-      applyHashRoute(setView, setSelectedId, setFromBank, setFloorFocus, setBossOpen, bots)
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [bots])
+  }, [bots.length])
 
   const openVault = () => {
     setSelectedId(null)
@@ -300,6 +319,10 @@ export default function App() {
                 desk={snap?.desk}
                 floorFocus={floorFocus}
                 onOpenScreens={() => setScreensOpen(true)}
+                onEnterHall={() => {
+                  setFloorFocus('hall')
+                  setBossOpen(false)
+                }}
                 onEnterBoss={() => {
                   setFloorFocus('boss')
                   setBossOpen(true)

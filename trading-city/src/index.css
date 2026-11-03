@@ -1003,7 +1003,8 @@ a {
 .floor-nav {
   position: relative;
   pointer-events: auto;
-  z-index: 6;
+  /* Above chrome/banners so the open panel stays clickable. */
+  z-index: 12;
 }
 
 .floor-nav-toggle {
