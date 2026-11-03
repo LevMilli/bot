@@ -1,96 +1,365 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, type MutableRefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group } from 'three'
+import type { Group, Mesh } from 'three'
 import { RAIL_GAUGE, RAIL_R, RAIL_Z_OFF } from './plazaLayout'
 
 const RAIL_Y = 0.2
 const Z_OFF = RAIL_Z_OFF
 const TIE_COUNT = 36
 const SEGMENTS = 56
+/** Fixed magnetic rings around the guideway. They stay put and trace the loop. */
+const PAD_COUNT = 28
+/** How close the consist must be before a ring lights. */
+const PAD_LIGHT_RAD = 0.1
+/** Fade-out after the consist leaves a ring. */
+const PAD_FADE_SEC = 0.85
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined' || !window.matchMedia) return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-/** Arc length between car centers. Lead and tail noses stick out past the body. */
-const CAR_ARCS = [0, 2.9, 4.95, 6.95] as const
-const STRIPES = ['#f9c80e', '#2de2e6', '#b967ff', '#ff2a6d'] as const
-const ROLES = ['lead', 'mid', 'mid', 'tail'] as const
-/** Clearance between the skid and the guideway. */
-const HOVER = 0.58
+/** One purple livery. Bogie spacing keeps both ends on the guideway. */
+const CARS = [
+  { arc: 0, role: 'lead' as const, len: 2.05 },
+  { arc: 2.08, role: 'mid' as const, len: 1.92 },
+  { arc: 4.08, role: 'mid' as const, len: 1.92 },
+  { arc: 6.04, role: 'tail' as const, len: 1.95 },
+]
+/** Gap from the rail head. Every car uses this same lift. */
+const HOVER = 0.11
 
-function BulletCar({ stripe, role }: { stripe: string; role: 'lead' | 'mid' | 'tail' }) {
-  const len = role === 'mid' ? 1.85 : 1.7
+const SHELL = '#efe7ff'
+const SHELL_DEEP = '#7c3aed'
+const BELLY = '#3b0764'
+const GLOW = '#c084fc'
+const GLOW_HOT = '#f3e8ff'
+const GLASS = '#07040e'
+const TAIL_LIGHT = '#ff4d6d'
+
+function railPoint(angle: number, radius: number) {
+  return {
+    x: Math.cos(angle) * radius,
+    z: Math.sin(angle) * radius + Z_OFF,
+  }
+}
+
+function wrapPi(d: number) {
+  let x = d
+  while (x > Math.PI) x -= Math.PI * 2
+  while (x < -Math.PI) x += Math.PI * 2
+  return x
+}
+
+/**
+ * Rigid car whose bogies sit on the loop. The body is the chord between them,
+ * so the ends stay over the rails instead of swinging inside the curve.
+ * Forward is local −X, toward increasing angle.
+ */
+function poseOnRail(angle: number, radius: number, bogie: number) {
+  const da = bogie / radius
+  const front = railPoint(angle + da, radius)
+  const rear = railPoint(angle - da, radius)
+  const dx = front.x - rear.x
+  const dz = front.z - rear.z
+  return {
+    x: (front.x + rear.x) / 2,
+    z: (front.z + rear.z) / 2,
+    rotY: Math.atan2(dz, -dx),
+  }
+}
+
+const shellMat = {
+  color: SHELL,
+  metalness: 0.22,
+  roughness: 0.32,
+  emissive: SHELL_DEEP,
+  emissiveIntensity: 0.42,
+} as const
+
+const glassMat = {
+  color: GLASS,
+  metalness: 0.72,
+  roughness: 0.08,
+  emissive: '#1a1030',
+  emissiveIntensity: 0.08,
+} as const
+
+function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }) {
   const half = len / 2
-  const nose = role === 'lead' || role === 'tail'
+  // Tail: shorten the box so a flat rear face never peeks past the taper.
+  const bodyLen = role === 'tail' ? len * 0.72 : len
+  const bodyShift = role === 'tail' ? -((len - bodyLen) / 2) : 0
+  const rearExtra = role === 'tail' ? 0.02 : 0.18
+  const frontExtra = role === 'lead' ? 0.16 : 0
+  const glassLen = bodyLen + rearExtra + frontExtra
+  const glassX = bodyShift + (rearExtra - frontExtra) / 2
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <planeGeometry args={[len * 0.96, 1.05]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.4} depthWrite={false} toneMapped={false} />
+      <mesh position={[bodyShift, 0.1, 0]}>
+        <boxGeometry args={[bodyLen, 0.045, 0.36]} />
+        <meshStandardMaterial
+          color={BELLY}
+          metalness={0.3}
+          roughness={0.4}
+          emissive="#4c1d95"
+          emissiveIntensity={0.2}
+        />
       </mesh>
-      {([-RAIL_GAUGE / 2, RAIL_GAUGE / 2] as const).map((z) => (
-        <mesh key={z} position={[0, 0.08, z]}>
-          <boxGeometry args={[len * 0.78, 0.05, 0.08]} />
-          <meshBasicMaterial color="#141820" />
-        </mesh>
-      ))}
-      <mesh position={[0, 0.22, 0]}>
-        <boxGeometry args={[len, 0.12, 0.66]} />
-        <meshStandardMaterial color="#12141c" metalness={0.7} roughness={0.32} />
+      <mesh position={[bodyShift, 0.22, 0]}>
+        <boxGeometry args={[bodyLen, 0.18, 0.4]} />
+        <meshStandardMaterial {...shellMat} />
       </mesh>
-      <mesh position={[0, 0.46, 0]}>
-        <boxGeometry args={[len - 0.06, 0.36, 0.6]} />
-        <meshStandardMaterial color="#f4f0d4" metalness={0.28} roughness={0.42} />
+      <mesh position={[bodyShift, 0.33, 0]}>
+        <boxGeometry args={[bodyLen * 0.98, 0.05, 0.34]} />
+        <meshStandardMaterial
+          color="#f5f3ff"
+          metalness={0.2}
+          roughness={0.28}
+          emissive={SHELL_DEEP}
+          emissiveIntensity={0.28}
+        />
       </mesh>
-      <mesh position={[0, 0.66, 0]}>
-        <boxGeometry args={[len - 0.1, 0.06, 0.48]} />
-        <meshStandardMaterial color="#f4f0d4" metalness={0.22} roughness={0.4} />
+      {/* Dark glass channel down the roof. */}
+      <mesh position={[glassX, 0.362, 0]}>
+        <boxGeometry args={[glassLen, 0.014, 0.12]} />
+        <meshStandardMaterial {...glassMat} />
       </mesh>
-      <mesh position={[0, 0.7, 0]}>
-        <boxGeometry args={[len * 0.72, 0.025, 0.07]} />
-        <meshBasicMaterial color={stripe} toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 0.3, 0]}>
-        <boxGeometry args={[len + 0.02, 0.055, 0.64]} />
-        <meshBasicMaterial color={stripe} toneMapped={false} />
-      </mesh>
+
       {([-1, 1] as const).map((side) => (
-        <mesh key={side} position={[role === 'lead' ? 0.12 : 0, 0.5, side * 0.31]}>
-          <boxGeometry args={[role === 'mid' ? len - 0.28 : len - 0.42, 0.12, 0.03]} />
-          <meshBasicMaterial color="#9fdfff" transparent opacity={0.85} toneMapped={false} />
-        </mesh>
+        <group key={side}>
+          <mesh position={[glassX, 0.23, side * 0.208]}>
+            <boxGeometry args={[glassLen, 0.11, 0.016]} />
+            <meshStandardMaterial {...glassMat} />
+          </mesh>
+          <mesh position={[glassX, 0.155, side * 0.214]}>
+            <boxGeometry args={[glassLen, 0.012, 0.008]} />
+            <meshBasicMaterial color={GLOW} toneMapped={false} />
+          </mesh>
+        </group>
       ))}
-      {nose && role === 'lead' && (
-        <mesh position={[-half - 0.42, 0.4, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <coneGeometry args={[0.26, 1.05, 10]} />
-          <meshStandardMaterial color="#f4f0d4" metalness={0.3} roughness={0.4} />
-        </mesh>
+
+      {role === 'lead' && (
+        <group>
+          <mesh position={[-half - 0.9, 0.2, 0]} rotation={[0, 0, Math.PI / 2]} scale={[0.5, 1, 1.05]}>
+            <coneGeometry args={[0.22, 2.15, 16]} />
+            <meshStandardMaterial {...shellMat} />
+          </mesh>
+          <mesh position={[-half - 0.62, 0.11, 0]} rotation={[0, 0, Math.PI / 2]} scale={[0.32, 1, 0.9]}>
+            <coneGeometry args={[0.18, 1.45, 12]} />
+            <meshStandardMaterial
+              color={SHELL_DEEP}
+              metalness={0.2}
+              roughness={0.34}
+              emissive="#5b21b6"
+              emissiveIntensity={0.35}
+            />
+          </mesh>
+          <mesh position={[-half - 0.42, 0.26, 0]} rotation={[0, 0, 0.5]}>
+            <boxGeometry args={[0.85, 0.04, 0.28]} />
+            <meshStandardMaterial {...glassMat} />
+          </mesh>
+          <mesh position={[-half - 0.12, 0.33, 0]} rotation={[0, 0, 0.32]}>
+            <boxGeometry args={[0.42, 0.012, 0.1]} />
+            <meshStandardMaterial {...glassMat} />
+          </mesh>
+          <mesh position={[-half - 1.92, 0.2, 0]}>
+            <boxGeometry args={[0.04, 0.03, 0.06]} />
+            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} />
+          </mesh>
+        </group>
       )}
-      {nose && role === 'lead' && (
-        <mesh position={[-half - 0.9, 0.4, 0]}>
-          <sphereGeometry args={[0.06, 8, 8]} />
-          <meshBasicMaterial color="#fff6c8" toneMapped={false} />
-        </mesh>
+
+      {/* Finished rear — long taper + rounded cap + bright taillights (no flat chop). */}
+      {role === 'tail' && (
+        <group>
+          {/* Start taper where the shortened body ends so no slab face shows. */}
+          <mesh
+            position={[bodyShift + bodyLen / 2 + 0.85, 0.21, 0]}
+            rotation={[0, 0, -Math.PI / 2]}
+            scale={[0.55, 1, 1.05]}
+          >
+            <coneGeometry args={[0.22, 2.05, 20]} />
+            <meshStandardMaterial {...shellMat} />
+          </mesh>
+          <mesh
+            position={[bodyShift + bodyLen / 2 + 0.7, 0.1, 0]}
+            rotation={[0, 0, -Math.PI / 2]}
+            scale={[0.36, 1, 0.92]}
+          >
+            <coneGeometry args={[0.19, 1.55, 14]} />
+            <meshStandardMaterial
+              color={SHELL_DEEP}
+              metalness={0.22}
+              roughness={0.34}
+              emissive="#5b21b6"
+              emissiveIntensity={0.4}
+            />
+          </mesh>
+          {/* Soft rounded end-cap — reads clearly past the body. */}
+          <mesh position={[bodyShift + bodyLen / 2 + 1.82, 0.2, 0]} scale={[0.85, 1.0, 1.05]}>
+            <sphereGeometry args={[0.19, 16, 14]} />
+            <meshStandardMaterial {...shellMat} />
+          </mesh>
+          <mesh position={[bodyShift + bodyLen / 2 + 1.88, 0.11, 0]} scale={[0.6, 0.5, 0.9]}>
+            <sphereGeometry args={[0.15, 12, 10]} />
+            <meshStandardMaterial
+              color={BELLY}
+              metalness={0.28}
+              roughness={0.4}
+              emissive="#4c1d95"
+              emissiveIntensity={0.3}
+            />
+          </mesh>
+          {/* Roof spine fade into the taper. */}
+          <mesh position={[bodyShift + bodyLen / 2 + 0.55, 0.33, 0]} rotation={[0, 0, -0.34]}>
+            <boxGeometry args={[1.05, 0.03, 0.2]} />
+            <meshStandardMaterial
+              color="#f5f3ff"
+              metalness={0.2}
+              roughness={0.28}
+              emissive={SHELL_DEEP}
+              emissiveIntensity={0.28}
+            />
+          </mesh>
+          {/* Twin taillights — oversized so they read at plaza distance. */}
+          {([-1, 1] as const).map((side) => (
+            <mesh key={side} position={[bodyShift + bodyLen / 2 + 1.95, 0.19, side * 0.09]}>
+              <boxGeometry args={[0.08, 0.08, 0.09]} />
+              <meshBasicMaterial color={TAIL_LIGHT} toneMapped={false} />
+            </mesh>
+          ))}
+          <mesh position={[bodyShift + bodyLen / 2 + 1.98, 0.2, 0]}>
+            <boxGeometry args={[0.05, 0.03, 0.14]} />
+            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} />
+          </mesh>
+          {/* Side fins taper with the rear. */}
+          {([-1, 1] as const).map((side) => (
+            <mesh
+              key={`fin-${side}`}
+              position={[bodyShift + bodyLen / 2 + 0.85, 0.15, side * 0.2]}
+              rotation={[side * 0.22, 0, -0.42]}
+            >
+              <boxGeometry args={[1.15, 0.02, 0.05]} />
+              <meshStandardMaterial
+                color={SHELL_DEEP}
+                metalness={0.25}
+                roughness={0.35}
+                emissive="#6d28d9"
+                emissiveIntensity={0.4}
+              />
+            </mesh>
+          ))}
+        </group>
       )}
-      {nose && role === 'tail' && (
-        <mesh position={[half + 0.36, 0.4, 0]} rotation={[0, 0, -Math.PI / 2]}>
-          <coneGeometry args={[0.24, 0.85, 10]} />
-          <meshStandardMaterial color="#f4f0d4" metalness={0.3} roughness={0.4} />
-        </mesh>
-      )}
-      {nose && role === 'tail' && (
-        <mesh position={[half + 0.74, 0.42, 0]}>
-          <boxGeometry args={[0.06, 0.08, 0.16]} />
-          <meshBasicMaterial color="#ff2a6d" toneMapped={false} />
+
+      {role !== 'tail' && (
+        <mesh position={[half + 0.09, 0.22, 0]}>
+          <boxGeometry args={[0.22, 0.14, 0.36]} />
+          <meshStandardMaterial {...shellMat} />
         </mesh>
       )}
     </group>
   )
 }
 
-/** Maglev bullet train. Same loop, held above the guideway. Forward is local −X. */
+/**
+ * Fixed pads on the guideway. The train lights each pad as it passes;
+ * pads pulse while lit, then fade out when the consist leaves.
+ */
+function MaglevPads({
+  radius,
+  y,
+  trainAngle,
+  reduced,
+}: {
+  radius: number
+  y: number
+  trainAngle: MutableRefObject<number>
+  reduced: boolean
+}) {
+  const pads = useMemo(() => {
+    const out: { angle: number; x: number; z: number }[] = []
+    for (let i = 0; i < PAD_COUNT; i++) {
+      const a = (i / PAD_COUNT) * Math.PI * 2
+      const p = railPoint(a, radius)
+      out.push({ angle: a, x: p.x, z: p.z })
+    }
+    return out
+  }, [radius])
+
+  const glowRefs = useRef<(Mesh | null)[]>([])
+  const coreRefs = useRef<(Mesh | null)[]>([])
+  const energy = useRef(new Float32Array(PAD_COUNT))
+  const carAngles = useRef(new Float32Array(CARS.length))
+
+  useFrame(({ clock }, dt) => {
+    const t = clock.getElapsedTime()
+    const a0 = trainAngle.current
+    for (let i = 0; i < CARS.length; i++) {
+      carAngles.current[i] = a0 - CARS[i].arc / radius
+    }
+      const pulse = reduced ? 0.85 : 0.55 + 0.45 * Math.sin(t * 7.4)
+      for (let i = 0; i < PAD_COUNT; i++) {
+        let nearest = Math.PI
+        for (let c = 0; c < CARS.length; c++) {
+          const d = Math.abs(wrapPi(pads[i].angle - carAngles.current[c]))
+          if (d < nearest) nearest = d
+        }
+        const target = nearest < PAD_LIGHT_RAD ? 1 - nearest / PAD_LIGHT_RAD : 0
+        const cur = energy.current[i]
+        const next =
+          target > cur
+            ? Math.min(1, cur + dt * 8)
+            : Math.max(0, cur - dt / PAD_FADE_SEC)
+        energy.current[i] = next
+        const lit = next * pulse
+        const glow = glowRefs.current[i]
+        const core = coreRefs.current[i]
+        if (glow) {
+          glow.visible = true
+          const mat = glow.material as { opacity: number }
+          mat.opacity = 0.38 + lit * 0.62
+          glow.scale.setScalar(1 + lit * 0.05)
+        }
+        if (core) {
+          core.visible = true
+          const mat = core.material as { opacity: number }
+          mat.opacity = 0.08 + lit * 0.9
+          core.scale.setScalar(1 + lit * 0.04)
+        }
+      }
+  })
+
+  return (
+    <group>
+      {pads.map((p, i) => (
+        <group key={i} position={[p.x, y, p.z]}>
+          <mesh
+            ref={(el) => {
+              glowRefs.current[i] = el
+            }}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <torusGeometry args={[0.3, 0.016, 8, 28]} />
+            <meshBasicMaterial color={GLOW} toneMapped={false} transparent opacity={0.38} depthWrite={false} />
+          </mesh>
+          <mesh
+            ref={(el) => {
+              coreRefs.current[i] = el
+            }}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <torusGeometry args={[0.16, 0.008, 6, 20]} />
+            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} transparent opacity={0.08} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  )
+}
+
+/** Sleek purple maglev. Bogies stay on the loop. The consist lifts as one piece. */
 export function PlazaTrain({
   radius = RAIL_R,
   y = RAIL_Y,
@@ -101,37 +370,54 @@ export function PlazaTrain({
   speed?: number
 }) {
   const carRefs = useRef<(Group | null)[]>([])
+  const bobRefs = useRef<(Group | null)[]>([])
   const reduced = useMemo(() => prefersReducedMotion(), [])
-  const angle = useRef(0.35)
+  const angle = useRef(1.15)
 
   useFrame(({ clock }, dt) => {
-    if (reduced) return
-    angle.current = (angle.current + dt * speed) % (Math.PI * 2)
+    if (!reduced) angle.current = (angle.current + dt * speed) % (Math.PI * 2)
+    const t = clock.getElapsedTime()
     const a0 = angle.current
-    const hoverY = y + HOVER + Math.sin(clock.getElapsedTime() * 1.5) * 0.03
-    for (let i = 0; i < CAR_ARCS.length; i++) {
+    for (let i = 0; i < CARS.length; i++) {
       const g = carRefs.current[i]
       if (!g) continue
-      const a = a0 - CAR_ARCS[i] / radius
-      g.position.set(Math.cos(a) * radius, hoverY, Math.sin(a) * radius + Z_OFF)
-      g.rotation.y = -a + Math.PI / 2
+      const car = CARS[i]
+      const a = a0 - car.arc / radius
+      const pose = poseOnRail(a, radius, car.len * 0.32)
+      g.position.set(pose.x, y, pose.z)
+      g.rotation.y = pose.rotY
+      const bob = bobRefs.current[i]
+      if (!bob) continue
+      const lift = reduced ? HOVER : HOVER + Math.sin(t * 1.35) * 0.011
+      bob.position.y = lift
+      bob.rotation.z = 0
     }
   })
 
   return (
     <group raycast={() => null}>
-      {CAR_ARCS.map((arc, i) => {
-        const a = 0.35 - arc / radius
+      {/* Pads sit on the guideway deck — lit only while the consist is overhead. */}
+      <MaglevPads radius={radius} y={0.03} trainAngle={angle} reduced={reduced} />
+      {CARS.map((car, i) => {
+        const a = 1.15 - car.arc / radius
+        const pose = poseOnRail(a, radius, car.len * 0.32)
         return (
           <group
-            key={i}
+            key={car.role + i}
             ref={(el) => {
               carRefs.current[i] = el
             }}
-            position={[Math.cos(a) * radius, y + HOVER, Math.sin(a) * radius + Z_OFF]}
-            rotation={[0, -a + Math.PI / 2, 0]}
+            position={[pose.x, y, pose.z]}
+            rotation={[0, pose.rotY, 0]}
           >
-            <BulletCar stripe={STRIPES[i]} role={ROLES[i]} />
+            <group
+              ref={(el) => {
+                bobRefs.current[i] = el
+              }}
+              position={[0, HOVER, 0]}
+            >
+              <BulletCar role={car.role} len={car.len} />
+            </group>
           </group>
         )
       })}
@@ -139,7 +425,7 @@ export function PlazaTrain({
   )
 }
 
-/** Maglev guideway on the same loop — dark beam, neon rails, no wooden ties. */
+/** Maglev guideway on the same loop — dark beam, neon rails, purple center. */
 export function PlazaRailroad({
   radius = RAIL_R,
   y = 0.06,
@@ -185,6 +471,20 @@ export function PlazaRailroad({
     return out
   }, [radius])
 
+  const stators = useMemo(() => {
+    const out: { x: number; z: number; rot: number }[] = []
+    const n = 28
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.PI / n
+      out.push({
+        x: Math.cos(a) * radius,
+        z: Math.sin(a) * radius + Z_OFF,
+        rot: -a,
+      })
+    }
+    return out
+  }, [radius])
+
   const innerR = radius - RAIL_GAUGE / 2
   const outerR = radius + RAIL_GAUGE / 2
 
@@ -206,7 +506,24 @@ export function PlazaRailroad({
         </mesh>
       ))}
 
-      {/* Twin guide rails — cyan inside, gold outside */}
+      {/* Reaction plate sits just above the ties, inside the guide rails. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, y + 0.062, Z_OFF]}>
+        <ringGeometry args={[radius - 0.3, radius + 0.3, SEGMENTS]} />
+        <meshBasicMaterial color="#14121c" />
+      </mesh>
+      {/* Stator poles between the magnetic rings — linear-motor teeth, clear of the rails. */}
+      {stators.map((s, i) => (
+        <group key={`st-${i}`} position={[s.x, y + 0.085, s.z]} rotation={[0, s.rot, 0]}>
+          {([-1, 1] as const).map((side) => (
+            <mesh key={side} position={[side * 0.16, 0, 0]}>
+              <boxGeometry args={[0.07, 0.028, 0.1]} />
+              <meshBasicMaterial color={i % 2 === 0 ? '#2a2438' : '#1c1828'} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+
+      {/* Twin guide rails stay cyan / gold. A slim purple beam runs the center. */}
       <mesh position={[0, y + 0.1, Z_OFF]} rotation={[-Math.PI / 2, 0, 0]}>
         <torusGeometry args={[innerR, 0.045, 8, SEGMENTS]} />
         <meshBasicMaterial color="#2de2e6" toneMapped={false} />
@@ -214,6 +531,10 @@ export function PlazaRailroad({
       <mesh position={[0, y + 0.1, Z_OFF]} rotation={[-Math.PI / 2, 0, 0]}>
         <torusGeometry args={[outerR, 0.045, 8, SEGMENTS]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
+      </mesh>
+      <mesh position={[0, y + 0.1, Z_OFF]} rotation={[-Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[radius, 0.014, 6, SEGMENTS]} />
+        <meshBasicMaterial color="#b967ff" toneMapped={false} />
       </mesh>
       <mesh position={[0, y + 0.14, Z_OFF]} rotation={[-Math.PI / 2, 0, 0]}>
         <torusGeometry args={[innerR, 0.018, 6, SEGMENTS]} />
@@ -224,7 +545,6 @@ export function PlazaRailroad({
         <meshBasicMaterial color="#ffe08a" toneMapped={false} />
       </mesh>
 
-      {/* Fishplates / joint hardware */}
       {plates.map((p, i) => (
         <group key={`pl-${i}`} position={[p.x, y + 0.1, p.z]} rotation={[0, p.rot, 0]}>
           <mesh position={[0, 0.02, -RAIL_GAUGE / 2]}>
@@ -243,12 +563,16 @@ export function PlazaRailroad({
             <boxGeometry args={[0.08, 0.03, 0.06]} />
             <meshBasicMaterial color="#f9c80e" toneMapped={false} />
           </mesh>
+          <mesh position={[0, 0.03, 0]}>
+            <boxGeometry args={[0.1, 0.025, 0.08]} />
+            <meshBasicMaterial color="#b967ff" toneMapped={false} />
+          </mesh>
         </group>
       ))}
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.028, Z_OFF]}>
-        <ringGeometry args={[innerR - 0.12, outerR + 0.12, 48]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.16} depthWrite={false} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, Z_OFF]}>
+        <ringGeometry args={[radius - 0.34, radius + 0.34, 48]} />
+        <meshBasicMaterial color="#6d28d9" transparent opacity={0.05} depthWrite={false} />
       </mesh>
 
       {signals.map(([x, , z, rot], i) => (
@@ -263,10 +587,7 @@ export function PlazaRailroad({
           </mesh>
           <mesh position={[0, 0.86, 0.05]}>
             <sphereGeometry args={[0.045, 8, 8]} />
-            <meshBasicMaterial
-              color={i % 3 === 0 ? '#39ff14' : i % 3 === 1 ? '#f9c80e' : '#ff2a6d'}
-              toneMapped={false}
-            />
+            <meshBasicMaterial color={i % 2 === 0 ? '#c084fc' : '#6d28d9'} toneMapped={false} />
           </mesh>
         </group>
       ))}

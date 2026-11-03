@@ -38,14 +38,19 @@ MIN_MINUTES_LEFT = 10        # early singles need ≥10 minutes before close
 PARLAY_MAX_MIN = 5.0         # late multi-leg window (staff: wait → parlay by ~5m left)
 PARLAY_MIN_MIN = 1.0
 EDGE_BUFFER = 0.05           # fallback if desk venue_min_edge missing
-MIN_MODEL_PROB = 0.80        # margin goal: model Φ(z) must be ≥ 80%
-MIN_CUSHION_USD = 40         # BTC cushion floor (was $50 — still fee-aware with venue edge)
-MIN_CUSHION_ETH = 2.0        # ETH 15m cushion (KXETH15M)
-MIN_Z = 0.65                 # cushion / sigma
-MIN_Z_COINBASE_ONLY = 0.80   # stricter if only Coinbase spot worked
-ASK_MIN, ASK_MAX = 0.75, 0.90  # only buy high-probability priced contracts
-MAX_SPREAD = 0.03
-MIN_DEPTH = 5                # contracts offered at or below the ask
+MIN_MODEL_ACCURATE = 0.80    # accurate lane
+MIN_MODEL_SPEED = 0.72       # speed lane (match sports; needs SPEED_EDGE_EXTRA)
+MIN_MODEL_PROB = MIN_MODEL_ACCURATE
+SPEED_EDGE_EXTRA = 0.02
+MIN_CUSHION_USD = 35         # BTC cushion floor
+MIN_CUSHION_ETH = 1.5        # ETH 15m cushion (KXETH15M)
+MIN_Z = 0.60                 # cushion / sigma (accurate lane)
+MIN_Z_SPEED = 0.55           # speed lane may sit in near-miss z band if edge clears
+MIN_Z_COINBASE_ONLY = 0.75   # stricter if only Coinbase spot worked
+ASK_MIN, ASK_MAX = 0.70, 0.92  # slightly wider book for more fee-aware fills
+MAX_SPREAD = 0.04
+MIN_DEPTH = 3                # contracts offered at or below the ask
+MAX_BUYS_PER_CHECK = 3       # spend idle desk margin across multiple windows
 NEWS_WINDOW_MIN = 30         # USD high-impact event within 30 min of the block -> skip
 TAKE_PROFIT_ADD, TAKE_PROFIT_CAP = 0.15, 0.99
 DVOL_FAIL_MULT = 1.2         # if DVOL fails: use realized sigma * 1.2
@@ -645,7 +650,26 @@ def dvol_latest():
 
 
 def usd_high_impact_near(block_start, block_end):
-    d = get_json("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers=UA)
+    """
+    High-impact USD events near the block.
+    Prefers helpers.calendar_cache last-good so a CDN blip does not fail-closed
+    every window. Returns [] for no hits, None only if calendar never loaded.
+    """
+    d = None
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        from helpers.calendar_cache import load_ff_calendar
+        d = load_ff_calendar(DESK_ROOT)
+    except Exception:
+        d = None
+    if d is None:
+        try:
+            d = get_json("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers=UA)
+        except Exception:
+            return None
+    if not isinstance(d, list):
+        return None
     w = dt.timedelta(minutes=NEWS_WINDOW_MIN)
     hits = []
     for ev in d:
@@ -781,11 +805,20 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         news = None
 
     reasons = list(cheap)
-    zmin = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
-    if p < MIN_MODEL_PROB:
-        reasons.append(f"p {p:.3f} < safer floor {MIN_MODEL_PROB:.2f}")
-    if p < need:
-        reasons.append(f"p {p:.3f} < ask+fee+{edge_buf:.2f} = {need:.3f}")
+    zmin_acc = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
+    lane = "accurate"
+    need_p = float(need)
+    if p + 1e-12 >= MIN_MODEL_ACCURATE:
+        lane = "accurate"
+    elif p + 1e-12 >= MIN_MODEL_SPEED:
+        lane = "speed"
+        need_p = float(need) + SPEED_EDGE_EXTRA
+    else:
+        reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED:.2f}")
+    if p < need_p:
+        reasons.append(f"p {p:.3f} < ask+fee+buf ({lane}) = {need_p:.3f}")
+    # Speed lane: allow near-miss z band only when extra fee-aware edge already clears.
+    zmin = zmin_acc if lane == "accurate" else min(zmin_acc, MIN_Z_SPEED)
     if z < zmin:
         reasons.append(f"z {z:.2f} < {zmin}")
     if not (ASK_MIN <= ask <= ASK_MAX):
@@ -794,17 +827,16 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         reasons.append(f"spread {spread:.2f} > {MAX_SPREAD:.2f}")
     if depth < MIN_DEPTH:
         reasons.append(f"only {depth:.0f} contracts at/below ask (< {MIN_DEPTH})")
-    if toward is None:
-        reasons.append("candle trend unknown")
-    elif toward:
+    # Soft: unknown candle trend does not block (only adverse toward-target does).
+    if toward:
         reasons.append("last 5 candles moving toward target")
-    if news is None:
-        reasons.append("news calendar unavailable")
-    elif news:
+    # Soft: calendar never loaded → do not block; known high-impact still blocks.
+    if news:
         reasons.append("USD high-impact news near this block")
 
     out.update({
         "reasons": reasons,
+        "lane": lane,
         "side": side,
         "p": p,
         "confidence": p,
@@ -815,6 +847,8 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         "edge": float(p) - float(ask) - float(fee),
         "toward": toward,
         "news": news,
+        "news_soft_unavailable": news is None,
+        "candle_soft_unknown": toward is None,
         "cushion": cushion,
         "z": z,
         "need": need,
@@ -969,8 +1003,34 @@ def main():
     parlays = 0
     parlay_legs = []  # candidates for ≤5m combo
     last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
+    # Selective volume: +1 fee-clear buy/check on green Chicago day (min_edge locked).
+    today_pnl = 0.0
+    today_tag = now.strftime("%Y-%m-%d")
+    for pos in account.get("closed") or []:
+        if not isinstance(pos, dict):
+            continue
+        if today_tag in str(pos.get("closed") or ""):
+            try:
+                today_pnl += float(pos.get("pnl") or 0)
+            except (TypeError, ValueError):
+                pass
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_more
+        max_buys_eff = int(
+            desk_more.selective_max_buys("btc15m", base=MAX_BUYS_PER_CHECK, today=today_pnl)
+        )
+    except Exception:
+        max_buys_eff = int(MAX_BUYS_PER_CHECK)
+    if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
+        print(f"Selective volume: max buys {max_buys_eff} (today ${today_pnl:.2f} ≥ 0, fee floors locked)")
 
     for ev in ranked:
+        if buys >= max_buys_eff:
+            skips += 1
+            print(f"--- {ev.get('ticker')}  skip: max buys this check ({max_buys_eff})")
+            continue
         m = ev.get("market") or {"ticker": ev.get("ticker"), "target": 0, "close_time": ev.get("close_time"),
                                  "yes_bid": None, "yes_ask": None, "no_bid": None, "no_ask": None}
         min_left = ev.get("min_left")

@@ -32,12 +32,21 @@ OLD_BANKROLL = 14.00
 MAX_OPEN = 12
 MIN_GAP = 0.06            # fee-aware edge floor AFTER the taker fee (desk venue can raise)
 MIN_GAP_MODEL = 0.08      # NHL model stays 2 points stricter
-MIN_FAIR_PROB = 0.80      # margin goal: ≥80% fair + fee-aware edge (not 82% alone)
+# Dual lanes on one tower: accurate (high fair) + speed (lower fair, extra edge).
+MIN_FAIR_ACCURATE = 0.80
+MIN_FAIR_SPEED = 0.72
+MIN_GAP_SPEED_EXTRA = 0.02   # speed lane needs +2¢ edge after fee vs desk venue
+MIN_FAIR_PROB = MIN_FAIR_ACCURATE  # legacy name used in logs
 DESK_ROOT = os.path.dirname(HERE)
 CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this band
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
 PRICE_BOUNDS = (0.05, 0.92)     # avoid near-worthless / near-locked contracts
-PREGAME_WINDOW_MIN = 90   # also scan tip-soon books so Sunday nights are not one-trade desks
+PREGAME_WINDOW_MIN = 180  # tip-soon window (3h) so Monday/weekday books fill earlier
+TIP_ALARM_WINDOWS_MIN = (15, 5)  # force-priority refresh bands before tip
+MAX_BUYS_PER_CHECK = 4    # more than one paper fill per timer tick when risk allows
+# E1 #112 — mid-game scale-out when fair moves +8¢ in our favor (fee still on sell).
+SCALE_OUT_FAIR_MOVE = 0.08
+SCALE_OUT_FRAC = 0.50
 
 def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None, spread=None, ticker=None):
     """Paper dollars for one sports fill — Kelly-lite + shared vol/learn adapt."""
@@ -268,19 +277,42 @@ def espn_pregame_fair_home(summary):
         return None
 
 
-def tip_within_minutes(game, minutes=PREGAME_WINDOW_MIN) -> bool:
-    """True when tip/start is within ±minutes of now (CT-aware via UTC date string)."""
+def tip_eta_minutes(game) -> float | None:
+    """Minutes until tip (negative if already tipped). None if date missing/bad."""
     raw = game.get("date")
     if not raw:
-        return False
+        return None
     try:
         when = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except ValueError:
-        return False
+        return None
     now = datetime.now(timezone.utc)
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
-    return abs((when - now).total_seconds()) <= float(minutes) * 60.0
+    return (when - now).total_seconds() / 60.0
+
+
+def tip_within_minutes(game, minutes=PREGAME_WINDOW_MIN) -> bool:
+    """True when tip/start is within ±minutes of now (CT-aware via UTC date string)."""
+    eta = tip_eta_minutes(game)
+    if eta is None:
+        return False
+    return abs(float(eta)) <= float(minutes)
+
+
+def tip_alarm_band(game) -> int | None:
+    """
+    Masters tip alarms: return 15 or 5 when tip is inside that forward window
+    (0 < eta <= band). Used to prioritize fee-aware buys near tip — does not
+    waive venue min_edge.
+    """
+    eta = tip_eta_minutes(game)
+    if eta is None or eta <= 0:
+        return None
+    for band in sorted(TIP_ALARM_WINDOWS_MIN):
+        if eta <= float(band):
+            return int(band)
+    return None
 
 
 def espn_fair_home(summary, game):
@@ -427,9 +459,9 @@ def _card_line(summary_out):
     if trades:
         word = "trade" if len(trades) == 1 else "trades"
         return f"CARD: Paper buy. {len(trades)} paper {word} this check."
-    if summary_out.get("live_games") == 0:
-        return "CARD: No live games, so this check bought nothing."
-    return "CARD: No paper buy."
+    if summary_out.get("live_games") == 0 and not summary_out.get("matched"):
+        return "CARD: No live or tip-soon games, so this check bought nothing."
+    return "CARD: No paper buy (lanes clear, no fee-aware edge)."
 
 
 def run():
@@ -556,42 +588,60 @@ def run():
                 lines.append(row + " | no prices - skip |"); continue
             gap, side, m, fair, bid, ask = max(cands, key=lambda c: c[0])
             gtxt = f"{gap*100:+.1f} pts on {m.get('yes_sub_title')} (fair {fair:.1%} vs ask {ask:.2f})"
-            need = need_edge if src == "espn" else round(need_edge + 0.02, 4)
+            base_need = need_edge if src == "espn" else round(need_edge + 0.02, 4)
             reason = None
-            # Top25 #15 — sport-split fair floors (NFL stricter by default).
+            lane = "accurate"
+            need = base_need
+            # Top25 #15 / E1 #113 — sport-split fair floors (NFL stricter both lanes).
             fair_floor = MIN_FAIR_PROB
+            speed_floor = MIN_FAIR_SPEED
             try:
                 if DESK_ROOT not in sys.path:
                     sys.path.insert(0, DESK_ROOT)
                 import desk_top25
                 fair_floor = float(desk_top25.league_fair_floor(league))
+                speed_floor = float(desk_top25.league_speed_floor(league))
             except Exception:
                 fair_floor = MIN_FAIR_PROB
+                speed_floor = MIN_FAIR_SPEED
+            accurate_floor = max(MIN_FAIR_ACCURATE, fair_floor)
+            speed_floor = max(float(speed_floor), float(MIN_FAIR_SPEED))
             if entries_off:
                 reason = entries_off
             elif key in open_by_game:
                 reason = "already holding this game"
             elif CLOSE_GAME_BAND[0] <= fair_home <= CLOSE_GAME_BAND[1]:
                 reason = "close game - skip"
-            elif fair + 1e-12 < fair_floor:
-                reason = f"fair {fair:.0%} < safer floor {fair_floor:.0%} ({league}) - skip"
-            elif gap < need:
-                reason = f"gap < {need*100:.0f} - no trade"
-            elif ask - bid > MAX_SPREAD:
+            elif fair + 1e-12 >= accurate_floor:
+                lane = "accurate"
+                need = base_need
+            elif fair + 1e-12 >= speed_floor:
+                # Speed lane: take the fill only with extra fee-aware edge.
+                lane = "speed"
+                need = round(base_need + MIN_GAP_SPEED_EXTRA, 4)
+            else:
+                reason = f"fair {fair:.0%} < speed floor {speed_floor:.0%} - skip"
+            if reason is None and gap < need:
+                reason = f"gap < {need*100:.0f} ({lane}) - no trade"
+            elif reason is None and ask - bid > MAX_SPREAD:
                 reason = "spread too wide - skip"
-            elif not (PRICE_BOUNDS[0] <= ask <= PRICE_BOUNDS[1]):
+            elif reason is None and not (PRICE_BOUNDS[0] <= ask <= PRICE_BOUNDS[1]):
                 reason = "price too extreme - skip"
-            elif desk is not None:
+            elif reason is None and desk is not None:
                 skip = desk.learning_skip(desk.load_learning(DESK_ROOT), league, desk.prob_bucket(fair))
                 if skip:
                     reason = skip
                     summary_out["skips"].append(skip)
             if reason:
                 lines.append(row + gtxt + f" | {reason} |"); continue
+            alarm = tip_alarm_band(g) if g.get("state") == "pre" else None
+            if alarm is not None:
+                print(f"  TIP-ALARM T−{alarm}: {league} {name} (fee-aware priority, edge still required)")
             buy_candidates.append({
                 "key": key, "league": league, "name": name, "m": m, "side": side, "fair": fair,
                 "bid": bid, "ask": ask, "gap": gap, "score": score, "path": path, "g": g,
-                "series": series, "row": row, "gtxt": gtxt,
+                "series": series, "row": row, "gtxt": gtxt, "lane": lane, "need": need,
+                "tip_alarm": alarm,
             })
 
     # ---- exits / settlement (before new paper buys) ----
@@ -667,7 +717,9 @@ def run():
                     gap_now = float(fair) - float(p.get("entry_price") or 0)
                 mins = None
                 try:
-                    from datetime import datetime, timezone
+                    # Use module-level datetime — a local import here shadows it for
+                    # the whole run() and crashed every check after tape sync
+                    # (UnboundLocalError on datetime.now(CT) for the day stamp).
                     opened = str(p.get("opened") or "")
                     if opened.endswith("Z"):
                         opened = opened[:-1] + "+00:00"
@@ -698,6 +750,45 @@ def run():
                     pass
             if exit_reason is None and bid is not None and bid > 0 and bid - fee(bid) >= fair:
                 exit_reason = "gap closed - sold at bid"
+            # Scale-out 50% when fair moved +8¢ since entry (keep runner; free risk).
+            if (
+                exit_reason is None
+                and bid is not None
+                and bid > 0
+                and not p.get("scaled_out")
+                and p.get("fair_at_entry") is not None
+                and float(fair) + 1e-12 >= float(p["fair_at_entry"]) + SCALE_OUT_FAIR_MOVE
+            ):
+                contracts = int(p.get("contracts") or 0)
+                if contracts >= 2:
+                    clip = max(1, int(round(contracts * SCALE_OUT_FRAC)))
+                    clip = min(clip, contracts - 1)
+                    px_net = bid - fee(bid)
+                    proceeds = round(clip * px_net, 2)
+                    cost_full = float(p.get("cost") or 0)
+                    cost_clip = round(cost_full * clip / contracts, 2)
+                    pnl = round(proceeds - cost_clip, 2)
+                    s["cash"] = round(s["cash"] + proceeds, 2)
+                    p["contracts"] = contracts - clip
+                    p["cost"] = round(cost_full - cost_clip, 2)
+                    if p.get("risk") is not None:
+                        try:
+                            p["risk"] = round(float(p["risk"]) * (contracts - clip) / contracts, 2)
+                        except (TypeError, ValueError):
+                            pass
+                    p["scaled_out"] = True
+                    p["scale_out_at"] = ts
+                    p["scale_out_fair"] = round(float(fair), 4)
+                    reason = f"scale-out +{SCALE_OUT_FAIR_MOVE*100:.0f}¢ fair (50%)"
+                    lines.append(
+                        f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | "
+                        f"**PAPER SELL** {clip} @ bid {bid:.2f} ({reason}), P&L ${pnl:+.2f}; "
+                        f"{p['contracts']} runner left |"
+                    )
+                    summary_out["closes"].append(f"SCALE {p.get('ticker')} pnl {pnl:+.2f}")
+                    still.append(p)
+                    continue
+                exit_reason = f"scale-out +{SCALE_OUT_FAIR_MOVE*100:.0f}¢ fair (full)"
             if exit_reason and bid is not None and bid > 0:
                 proceeds = round(p["contracts"] * (bid - fee(bid)), 2)
                 pnl = round(proceeds - p["cost"], 2)
@@ -755,9 +846,13 @@ def run():
                 import desk_more
                 import desk_top25
                 clv_avg = (desk_more.clv_summary(DESK_ROOT) or {}).get("avg_clv")
-                c["_brain_score"] = desk_top25.sports_rank_score(
+                base = float(desk_top25.sports_rank_score(
                     c.get("gap"), c.get("fair"), clv=clv_avg, depth=None,
-                )
+                ) or 0)
+                # Tip-alarm boost: T−5 > T−15 > none (still must clear fee gap).
+                alarm = c.get("tip_alarm")
+                boost = 0.15 if alarm == 5 else (0.08 if alarm == 15 else 0.0)
+                c["_brain_score"] = base + boost
             except Exception:
                 pass
         buy_candidates = desk_brain.rank_candidates(buy_candidates)
@@ -770,11 +865,32 @@ def run():
         desk_brain = None
         buy_candidates = sorted(buy_candidates, key=lambda c: -float(c.get("gap") or 0))
 
+    buys_this_check = 0
+    # Selective volume when green; ROI rescue caps when red — fee floors unchanged.
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_more
+        max_buys_eff = int(
+            desk_more.selective_max_buys(
+                "sports-gap", base=MAX_BUYS_PER_CHECK, today=today_pnl, green_boost=0,
+            )
+        )
+    except Exception:
+        max_buys_eff = int(MAX_BUYS_PER_CHECK)
+    if today_pnl < 0:
+        max_buys_eff = min(max_buys_eff, 2)
+    if today_pnl <= -10:
+        max_buys_eff = min(max_buys_eff, 1)
     for c in buy_candidates:
         key, m, fair, ask, bid, gap = c["key"], c["m"], c["fair"], c["ask"], c["bid"], c["gap"]
         row, gtxt = c["row"], c["gtxt"]
         reason = None
-        if key in open_by_game:
+        if buys_this_check >= max_buys_eff:
+            reason = f"max buys this check ({max_buys_eff})"
+        elif today_pnl < 0 and str(c.get("lane") or "") == "speed":
+            reason = f"speed lane off on red sports day (today ${today_pnl:.2f})"
+        elif key in open_by_game:
             reason = "already holding this game"
         elif len(s["open"]) >= max_open:
             reason = "max open positions"
@@ -826,7 +942,11 @@ def run():
         max_payout = round(n * 1.0, 2)
         reward = round(max_payout - cost, 2)
         ratio = round(reward / cost, 4) if cost else None
-        why = f"Paper buy. The fair price beat the ask by {gap * 100:.1f} points after the fee."
+        lane = str(c.get("lane") or "accurate")
+        why = (
+            f"Paper buy ({lane} lane). The fair price beat the ask by "
+            f"{gap * 100:.1f} points after the fee."
+        )
         try:
             import desk_profit
             risk_factor = desk_profit.risk_factor_for("sports-gap", c["side"])
@@ -835,7 +955,7 @@ def run():
         pos = {"game_key": key, "league": c["league"], "game": c["name"], "ticker": m["ticker"], "team": m.get("yes_sub_title"),
                "side": c["side"], "contracts": n, "entry_price": ask, "bid": bid, "ask": ask, "entry_fee": fee(ask),
                "fee": fee(ask), "cost": cost, "risk": cost, "reward": reward, "risk_reward": ratio,
-               "max_payout": max_payout, "why": why,
+               "max_payout": max_payout, "why": why, "lane": lane,
                "fair_at_entry": round(fair, 4), "gap_at_entry": round(gap, 4),
                "risk_factor": risk_factor,
                "opened": ts, "score_at_entry": c["score"], "espn_id": c["g"]["id"], "espn_path": c["path"],
@@ -844,8 +964,13 @@ def run():
                "fill_id": f"{m['ticker']}|{ts}"}
         s["open"].append(pos)
         open_by_game[key] = pos
-        lines.append(row + gtxt + f" | **PAPER BUY** {n} YES {m.get('yes_sub_title')} @ {ask:.2f} (+fee {fee(ask):.2f}) = ${cost:.2f} |")
-        summary_out["trades"].append(f"BUY {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")
+        buys_this_check += 1
+        lines.append(
+            row + gtxt
+            + f" | **PAPER BUY** [{lane}] {n} YES {m.get('yes_sub_title')} @ {ask:.2f} "
+            + f"(+fee {fee(ask):.2f}) = ${cost:.2f} |"
+        )
+        summary_out["trades"].append(f"BUY [{lane}] {n}x {m['ticker']} @ {ask:.2f} gap {gap*100:.1f}")
         if desk_brain is not None:
             try:
                 note = desk_brain.explain_buy(
@@ -888,4 +1013,11 @@ if __name__ == "__main__":
             elif os.path.exists(f):
                 os.remove(f)
         print("Paper state reset to $%.2f" % START_BANKROLL); sys.exit()
-    run()
+    try:
+        run()
+    except Exception as exc:
+        # Never leave the desk card as a raw Traceback — exits still matter next tick.
+        import traceback
+        traceback.print_exc()
+        print(f"CARD: Sports check error ({type(exc).__name__}). Buys skipped this tick.")
+        sys.exit(1)

@@ -13,6 +13,7 @@ import { PurpleHorizon, SkyEquityLine, Skyline, Starfield } from './Skyline'
 import { Vault } from './Vault'
 import { FillerTower, Tower } from './Tower'
 import { CityOrbitCamera } from './CityControls'
+import { BorderScreens } from './BorderScreens'
 
 /** Trade towers sit inside the rail loop — well clear of ballast. */
 export const RING_R = 7.15
@@ -264,6 +265,7 @@ export function CityContents({
       <PurpleHorizon />
       <Starfield count={160} />
       <GridFloor />
+      <BorderScreens bots={bots} />
       <Skyline z={-24} width={52} />
       <SkyEquityLine />
       <Vault desk={desk} workers={workers} onOpen={onOpenVault} />

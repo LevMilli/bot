@@ -374,6 +374,18 @@ a {
   font-size: 0.58rem;
 }
 
+.tower-holo-compact .tower-skips {
+  display: block;
+  font-size: 0.48rem;
+  letter-spacing: 0.03em;
+  color: #9aa8c4;
+  opacity: 0.9;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ticker {
   overflow: hidden;
   border-top: 1px solid rgba(255, 42, 109, 0.45);
@@ -654,6 +666,38 @@ a {
   color: #fff;
 }
 
+.teller-dialogue {
+  margin-top: 0.75rem;
+  max-width: min(36rem, 92vw);
+  padding: 0.7rem 0.85rem 0.75rem;
+  background: linear-gradient(165deg, rgba(10, 14, 32, 0.9), rgba(18, 8, 36, 0.82));
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  border-left: 3px solid var(--amber);
+  color: #e8eef6;
+  pointer-events: none;
+}
+
+.teller-dialogue .td-line {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  color: #f2f6ff;
+}
+
+.teller-dialogue .td-meta {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: #9aa8c4;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
 .vault-holo .vault-skips,
 .vault-holo .vault-budgets,
 .vault-holo .vault-adapt,
@@ -675,6 +719,30 @@ a {
   color: #d7e6f2;
   font-size: 0.78rem;
   letter-spacing: 0.02em;
+  pointer-events: auto;
+}
+
+.vault-board-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.vault-board-close {
+  appearance: none;
+  background: transparent;
+  border: 1px solid rgba(126, 200, 216, 0.4);
+  color: #9ad0dc;
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+}
+
+.vault-board-close:hover {
+  color: #fff;
+  border-color: rgba(45, 226, 230, 0.7);
 }
 
 .vault-board-row {

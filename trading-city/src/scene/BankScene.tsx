@@ -15,11 +15,14 @@ import {
 } from '../hud/monitorTextures'
 import { NeonBloom } from './Effects'
 import { BotFigure } from './BotFigure'
+import { clampBankWalk } from '../data/bankWalk'
 
 type Props = {
   bots: BotRow[]
   desk?: Desk
   onSelectTeller: (id: string) => void
+  /** Open the 2D desk ops board (budgets / adapt / fill tax) from a ledger click. */
+  onOpenDeskOps?: () => void
 }
 
 /** Office-matched synthwave trust hall — purple shell, cyan trim, amber chrome. */
@@ -32,32 +35,34 @@ const INK = '#050812'
 const FLOOR = '#0e061c'
 
 /**
- * T-hall: six tellers per side facing a center aisle; vault + boards at the far end.
- * Fixed 12 slots keep the room square and complete even when some buildings are dark.
+ * Dual banks + clear center aisle to the vault.
+ * Bots stand on the wall side; ropes sit on the aisle (inside); desks face the path.
+ * Fixed 12 slots (6 left + 6 right).
  */
 const SIDE_COUNT = 6
 const TOTAL_SLOTS = SIDE_COUNT * 2
 const TELLER_SPACING = 2.05
-const AISLE_HALF = 3.2
-const TELLER_Z0 = 2.4
-const HALL_W = 13.2
-const Z_BACK = -8.45
-const Z_FRONT = 5.75
-const HALL_HEIGHT = 4.55
-const HOME_POS: [number, number, number] = [0, 2.85, 5.2]
-const HOME_TARGET: [number, number, number] = [0, 1.4, -2.6]
+/** Desk origin distance from aisle centerline. */
+const AISLE_HALF = 3.25
+/** Frontmost row (toward portal); rows step toward the vault (−Z). */
+const TELLER_Z0 = 2.35
+/** Bigger enclosed hall so zoom-out stays inside walls/floor (no black void). */
+const HALL_W = 32
+const Z_BACK = -18
+const Z_FRONT = 14
+const HALL_HEIGHT = 7.2
+const HOME_POS: [number, number, number] = [0, 3.35, 7.6]
+const HOME_TARGET: [number, number, number] = [0, 1.55, -3.4]
 /** Half-width of each teller's private rope channel (local X). */
 const LANE_HALF = 0.7
-/** Mouth posts toward the aisle (local +Z) — open entry, no front bar. */
-const LANE_Z_MOUTH = 1.95
-/** Mid posts so long side-ropes read as finished lanes. */
-const LANE_Z_MID = 1.2
-/** Rear posts near the counter lip. */
+/** Mouth posts into the aisle (local +Z) — open entry, no front bar. */
+const LANE_Z_MOUTH = 1.85
+const LANE_Z_MID = 1.15
 const LANE_Z_BACK = 0.55
 const ROPE_Y = 0.82
-/** Dolly distance along the focused lane (far → near). */
-const ZOOM_DIST_FAR = 7.2
 const ZOOM_DIST_NEAR = 3.55
+/** Cap far zoom so the frame stays filled by the hall, not the fog void. */
+const ZOOM_DIST_MAX = 12.5
 
 type SlotPose = {
   side: -1 | 1
@@ -67,13 +72,19 @@ type SlotPose = {
   rotY: number
 }
 
-/** Left bank = 0..5, right bank = 6..11. Local +Z faces the center aisle. */
+/**
+ * Left = 0..5, right = 6..11.
+ * Local +Z = customer approach toward the aisle.
+ * Left rotY=+π/2 → local +Z maps to world +X (into the path).
+ * Right rotY=−π/2 → local +Z maps to world −X.
+ * Bot sits at local −Z (wall side); ropes extend local +Z (inside / aisle).
+ */
 function slotPose(index: number): SlotPose {
   const side: -1 | 1 = index < SIDE_COUNT ? -1 : 1
   const row = index % SIDE_COUNT
   const z = TELLER_Z0 - row * TELLER_SPACING
   const x = side * AISLE_HALF
-  const rotY = side < 0 ? -Math.PI / 2 : Math.PI / 2
+  const rotY = side < 0 ? Math.PI / 2 : -Math.PI / 2
   return { side, row, x, z, rotY }
 }
 
@@ -291,23 +302,23 @@ function ProfitBoard({ desk }: { desk?: Desk }) {
   useEffect(() => {
     sharpenBoardTexture(map, gl.capabilities.getMaxAnisotropy())
   }, [gl, map])
-  // No per-frame needsUpdate — canvas only changes when `desk` identity changes.
+  // Larger NET DESK board — readable when zoomed out in the bigger hall.
   return (
-    <group position={[0, 3.9, Z_BACK + 0.55]}>
+    <group position={[0, 4.15, Z_BACK + 0.55]}>
       <mesh>
-        <boxGeometry args={[5.2, 0.92, 0.14]} />
+        <boxGeometry args={[6.4, 1.12, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.5} roughness={0.28} />
       </mesh>
       <mesh position={[0, 0, 0.08]}>
-        <planeGeometry args={[4.85, 0.76]} />
+        <planeGeometry args={[6.0, 0.92]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.49, 0.05]}>
-        <boxGeometry args={[5.3, 0.04, 0.07]} />
+      <mesh position={[0, 0.6, 0.05]}>
+        <boxGeometry args={[6.5, 0.045, 0.07]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.49, 0.05]}>
-        <boxGeometry args={[5.3, 0.04, 0.07]} />
+      <mesh position={[0, -0.6, 0.05]}>
+        <boxGeometry args={[6.5, 0.045, 0.07]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
     </group>
@@ -559,10 +570,12 @@ function SideScreen({
   side,
   desk,
   bots,
+  onOpen,
 }: {
   side: -1 | 1
   desk?: Desk
   bots: BotRow[]
+  onOpen?: () => void
 }) {
   const map = useMemo(
     () => (side < 0 ? vaultLedgerTexture(desk, bots) : vaultComplianceTexture(desk, bots)),
@@ -572,26 +585,54 @@ function SideScreen({
   useEffect(() => {
     sharpenBoardTexture(map, gl.capabilities.getMaxAnisotropy())
   }, [gl, map])
-  // Flank the vault end — DESK LEDGER left, COMPLIANCE BAY right.
+  // Larger far-readable boards flanking the vault — click opens desk ops HUD.
   const accent = side < 0 ? '#f9c80e' : '#39ff14'
+  const open = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation()
+    onOpen?.()
+  }
   return (
-    <group position={[side * 3.55, 2.52, Z_BACK + 0.55]}>
-      <mesh>
-        <boxGeometry args={[2.7, 1.2, 0.12]} />
+    <group position={[side * 5.35, 3.05, Z_BACK + 0.58]}>
+      <mesh
+        onClick={open}
+        onPointerOver={() => {
+          document.body.style.cursor = onOpen ? 'pointer' : 'default'
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = 'default'
+        }}
+      >
+        <boxGeometry args={[3.7, 1.7, 0.14]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} />
       </mesh>
-      <mesh position={[0, 0, 0.07]}>
-        <planeGeometry args={[2.5, 1.05]} />
+      <mesh position={[0, 0, 0.08]} onClick={open}>
+        <planeGeometry args={[3.4, 1.48]} />
         <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.64, 0.05]}>
-        <boxGeometry args={[2.75, 0.04, 0.06]} />
+      <mesh position={[0, 0.9, 0.06]}>
+        <boxGeometry args={[3.75, 0.05, 0.06]} />
         <meshBasicMaterial color={accent} toneMapped={false} />
       </mesh>
-      <mesh position={[0, -0.64, 0.05]}>
-        <boxGeometry args={[2.75, 0.035, 0.05]} />
+      <mesh position={[0, -0.9, 0.06]}>
+        <boxGeometry args={[3.75, 0.04, 0.05]} />
         <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
+      {onOpen && (
+        <Html position={[0, -1.15, 0.1]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
+          <div
+            style={{
+              fontFamily: 'Share Tech Mono, monospace',
+              fontSize: '10px',
+              color: accent,
+              letterSpacing: '0.08em',
+              whiteSpace: 'nowrap',
+              opacity: 0.85,
+            }}
+          >
+            click · desk ops
+          </div>
+        </Html>
+      )}
     </group>
   )
 }
@@ -615,6 +656,12 @@ function BankEnclosure() {
 
   return (
     <group>
+      {/* Outer ground apron so zoom-out past the slab still shows floor, not void. */}
+      <mesh position={[0, -0.22, midZ]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[52, 64]} />
+        <meshStandardMaterial color="#0c0618" roughness={0.95} metalness={0.05} />
+      </mesh>
+
       {/* Thick floor slab */}
       <mesh position={[0, -0.08, midZ]} receiveShadow>
         <boxGeometry args={[width + 0.4, 0.18, depth + 0.4]} />
@@ -624,7 +671,7 @@ function BankEnclosure() {
         <boxGeometry args={[width - 0.35, 0.04, depth - 0.5]} />
         <meshStandardMaterial color="#160e2c" roughness={0.4} metalness={0.35} />
       </mesh>
-      <gridHelper args={[Math.min(width - 1.2, 12), 24, '#2de2e6', '#2a1060']} position={[0, 0.035, midZ * 0.15]} />
+      <gridHelper args={[Math.min(width - 1.8, 26), 36, '#2de2e6', '#2a1060']} position={[0, 0.035, midZ * 0.1]} />
 
       {/* Back wall + wainscot (vault end) */}
       <mesh position={[0, ceilY / 2, zBack - wallT / 2]}>
@@ -739,14 +786,14 @@ function BankEnclosure() {
       <Column x={-halfW + 0.35} z={zFront - 0.55} />
       <Column x={halfW - 0.35} z={zFront - 0.55} />
 
-      {/* Center aisle runner to the vault */}
+      {/* Clear center aisle to the vault */}
       <mesh position={[0, 0.018, midZ * 0.2]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[1.3, depth * 0.7]} />
+        <planeGeometry args={[1.45, depth * 0.72]} />
         <meshStandardMaterial color="#1a0e28" roughness={0.45} metalness={0.4} />
       </mesh>
       <mesh position={[0, 0.022, midZ * 0.2]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[0.08, depth * 0.7]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.4} toneMapped={false} />
+        <planeGeometry args={[0.09, depth * 0.72]} />
+        <meshBasicMaterial color="#2de2e6" transparent opacity={0.42} toneMapped={false} />
       </mesh>
     </group>
   )
@@ -808,17 +855,18 @@ function FloorGlowPaths({ tellers }: { tellers: (BotRow | null)[] }) {
     <group>
       {tellers.map((bot, i) => {
         const pose = slotPose(i)
+        // Tick from aisle center toward each bay mouth.
         return (
           <mesh
             key={bot?.id || i}
-            position={[pose.side * 0.5, 0.013, pose.z]}
+            position={[pose.side * 0.45, 0.013, pose.z]}
             rotation={[-Math.PI / 2, 0, Math.PI / 2]}
           >
-            <planeGeometry args={[0.05, 0.9]} />
+            <planeGeometry args={[0.05, 0.85]} />
             <meshBasicMaterial
               color={beamColorFor(bot?.id, i)}
               transparent
-              opacity={0.35}
+              opacity={0.38}
               depthWrite={false}
               toneMapped={false}
             />
@@ -992,7 +1040,7 @@ function Stanchion({ position, color }: { position: [number, number, number]; co
 }
 
 /** Interior APEX-CITY TRUST — detailed hall, tellers wrapped around a square. */
-export function BankScene({ bots, desk, onSelectTeller }: Props) {
+export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps }: Props) {
   const controls = useRef<OrbitControlsImpl>(null)
   // One detailed station per building, walked around the square.
   const tellers = useMemo(() => tellerSlots(bots), [bots])
@@ -1063,7 +1111,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     }
   }, [])
 
-  // A/D · ←/→ briefly snap to teller; W/S · ↑/↓ free-roam dolly; Enter / Space opens.
+  // A/D · ←/→ snap to teller; W/S · ↑/↓ walk aisle with collision; Enter / Space opens.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -1090,23 +1138,34 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         const orbit = controls.current
         if (!orbit) return
         const cam = orbit.object
-        const dx = cam.position.x - orbit.target.x
-        const dy = cam.position.y - orbit.target.y
-        const dz = cam.position.z - orbit.target.z
-        const dist = Math.hypot(dx, dy, dz) || 1
-        const pose = slotPose(focus)
-        orbit.target.x = MathUtils.lerp(orbit.target.x, pose.x * 0.4, 0.18)
-        orbit.target.z = MathUtils.lerp(orbit.target.z, pose.z, 0.18)
-        const nx = dx / dist
-        const ny = dy / dist
-        const nz = dz / dist
-        const step = key === 'arrowup' || key === 'w' ? -0.38 : 0.38
-        const nextDist = MathUtils.clamp(dist + step, ZOOM_DIST_NEAR - 0.15, ZOOM_DIST_FAR + 4.8)
-        cam.position.set(
-          orbit.target.x + nx * nextDist,
-          orbit.target.y + ny * nextDist,
-          orbit.target.z + nz * nextDist,
+        // Look vector on the floor: camera → target (into the hall).
+        const lx = orbit.target.x - cam.position.x
+        const lz = orbit.target.z - cam.position.z
+        const len = Math.hypot(lx, lz) || 1
+        const dir = key === 'arrowup' || key === 'w' ? 1 : -1
+        const step = 0.42 * dir
+        const nx = lx / len
+        const nz = lz / len
+        const nextTarget = clampBankWalk(
+          orbit.target.x + nx * step,
+          orbit.target.z + nz * step,
+          { aisleHalf: AISLE_HALF, laneHalf: LANE_HALF, zBack: Z_BACK, zFront: Z_FRONT },
         )
+        const ox = orbit.target.x
+        const oz = orbit.target.z
+        orbit.target.x = nextTarget.x
+        orbit.target.z = nextTarget.z
+        cam.position.x += nextTarget.x - ox
+        cam.position.z += nextTarget.z - oz
+        // Keep camera XZ inside a slightly wider aisle envelope.
+        const camClamp = clampBankWalk(cam.position.x, cam.position.z, {
+          aisleHalf: AISLE_HALF + 0.55,
+          laneHalf: LANE_HALF,
+          zBack: Z_BACK,
+          zFront: Z_FRONT,
+        })
+        cam.position.x = camClamp.x
+        cam.position.z = camClamp.z
         orbit.update()
       } else if (key === 'enter' || key === ' ') {
         const bot = tellers[focus]
@@ -1124,12 +1183,12 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     const orbit = controls.current
     if (!orbit) return
     orbit.minDistance = ZOOM_DIST_NEAR - 0.15
-    orbit.maxDistance = ZOOM_DIST_FAR + 4.8
+    orbit.maxDistance = ZOOM_DIST_MAX
     if (!snapRef.current.active) return
 
     const pose = slotPose(snapRef.current.focus)
-    // Stand in the aisle and look at the selected teller.
-    const targetX = pose.x * 0.5
+    // Stand in the clear aisle and look at the teller face (ropes on the inside).
+    const targetX = pose.x * 0.48
     const targetY = 1.32
     const targetZ = pose.z
     orbit.target.x = MathUtils.damp(orbit.target.x, targetX, 5.5, dt)
@@ -1137,9 +1196,9 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
     orbit.target.z = MathUtils.damp(orbit.target.z, targetZ, 5.5, dt)
 
     const cam = orbit.object
-    const wantX = pose.side * 0.2
+    const wantX = pose.side * 0.15
     const wantY = 2.35
-    const wantZ = pose.z + 0.4
+    const wantZ = pose.z + 0.35
     cam.position.x = MathUtils.damp(cam.position.x, wantX, 5.2, dt)
     cam.position.y = MathUtils.damp(cam.position.y, wantY, 5.2, dt)
     cam.position.z = MathUtils.damp(cam.position.z, wantZ, 5.2, dt)
@@ -1154,8 +1213,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
   return (
     <>
       <color attach="background" args={['#12082a']} />
-      <fog attach="fog" args={['#1a0a38', 12, 32]} />
-      <PerspectiveCamera makeDefault fov={46} near={0.08} far={90} position={HOME_POS} />
+      <fog attach="fog" args={['#1a0a38', 24, 72]} />
+      <PerspectiveCamera makeDefault fov={42} near={0.08} far={220} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault
@@ -1164,7 +1223,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
         dampingFactor={0.08}
         enablePan={false}
         minDistance={ZOOM_DIST_NEAR - 0.15}
-        maxDistance={ZOOM_DIST_FAR + 4.8}
+        maxDistance={ZOOM_DIST_MAX}
         minPolarAngle={0.7}
         maxPolarAngle={1.55}
         minAzimuthAngle={-2.6}
@@ -1184,8 +1243,8 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
       <ProfitBoard desk={desk} />
       <LockboxWall bots={bots} />
       <CountingCage />
-      <SideScreen side={-1} desk={desk} bots={bots} />
-      <SideScreen side={1} desk={desk} bots={bots} />
+      <SideScreen side={-1} desk={desk} bots={bots} onOpen={onOpenDeskOps} />
+      <SideScreen side={1} desk={desk} bots={bots} onOpen={onOpenDeskOps} />
       <TrustSeal workers={workers} />
       <Warden />
       <CompliancePillar />
@@ -1226,7 +1285,7 @@ export function BankScene({ bots, desk, onSelectTeller }: Props) {
             letterSpacing: '0.06em',
           }}
         >
-          A/D · ←→ snap · W/S · ↑↓ zoom free · Enter open · drag to look · cash {money(desk?.cash)}
+          A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look · cash {money(desk?.cash)}
         </div>
       </Html>
 

@@ -43,7 +43,17 @@ QUIET_START = "22:00"
 QUIET_END = "07:00"
 MANUAL_GAP_SEC = 30
 HEARTBEAT_STALE_SEC = 180
+# Weekday ops alert when timer has been dead longer than 10 Chicago minutes.
+HEARTBEAT_WEEKDAY_ALERT_SEC = 600
 IDLE_SPORTS_SEC = 900
+# Forced sports AUTO near tip (T−15 / T−5). Fee floors still apply inside gap_bot.
+SPORTS_TIP_FORCE_SEC = 45
+SPORTS_TIP_FORCE_WINDOW_MIN = 15
+# E2 #203 — manage-only pulse when memecoin has open paper (exits before bleed).
+MEME_MANAGE_OPEN_SEC = 120
+# E1 #110 — commodity calm cadence when ≥2 series already open.
+COMMODITY_CALM_OPEN_SEC = 60
+COMMODITY_CALM_OPEN_N = 2
 LOG_CAP_BYTES = 256 * 1024
 PAGE_SIZE = 20
 STALE_PRICE_SEC = 30
@@ -101,9 +111,9 @@ DEFAULTS = {
     ],
     "model_flip_delta": 0.06,
     "model_flip_exits": True,
-    "starve_min_n": 6,
+    "starve_min_n": 4,
     "starve_expectancy": 0.0,
-    "starve_factor": 0.25,
+    "starve_factor": 0.15,
     "expectancy_window_days": 20,
     # Phase 1: soft per-tower share of max_open_risk (sums to 1.0). Desk cap still hard.
     "tower_risk_budgets": {
@@ -201,24 +211,27 @@ ACTIONS = {
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
 # Daily slots run once per Chicago day, the first time the process is up inside
 # the window. The Kalshi scan uses the desk's paper scan (no --any-time) and
-# only starts from 12:30 to 14:55 CT, the script's own entry window. An earlier
-# scan would exit without a paper fill. The morning brief stays the desk's dry run.
-# Settle is the desk's paper settle, once at 4:00 PM CT, after the 3:00 PM
-# contract time, so a closed paper trade can land in the state file.
-# Memecoin manages open exits about every 10 minutes (same script still scans
-# for new tickets). Three daily slots were too sparse for stop/ladder/time exits.
+# forced INX scans at 12:05 / 13:05 / 14:20 CT (up to 3/day). The morning brief stays
+# the desk's dry run. Settle is the desk's paper settle, once at 4:00 PM CT,
+# after the 3:00 PM contract time, so a closed paper trade can land in the
+# state file. Memecoin manages open exits about every 3 minutes (same script
+# still scans for new tickets; dual accurate/speed lanes; stop-bleed exits).
 AUTO_RETRY_SEC = 900
 AUTO = (
-    # Phase 2: tip-soon sports wakes every 3m; commodity 90s with crypto.
+    # Faster sports polls so tip-soon + dual lanes can land multiple fills.
     {"id": "sports-gap", "action": "run", "every_sec": 180},
-    # BTC is the busiest Kalshi series — poll every 90s; guidelines unchanged, bid every fit.
-    {"id": "btc15m", "action": "run", "every_sec": 90},
+    # BTC is the busiest Kalshi series — poll every 60s; guidelines unchanged, bid every fit.
+    {"id": "btc15m", "action": "run", "every_sec": 60},
     {"id": "commodity-15m", "action": "run", "every_sec": 90},
-    {"id": "memecoin", "action": "run", "every_sec": 600},
-    {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "12:29"},
-    {"id": "kalshi-sp", "action": "run", "at_ct": "12:30", "until_ct": "14:55"},
+    # Faster manage ticks so −18% / model-flip stops fire before a full bleed.
+    {"id": "memecoin", "action": "run", "every_sec": 180},
+    {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
+    # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
+    {"id": "kalshi-sp", "action": "run", "at_ct": "12:05", "until_ct": "12:25"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "13:05", "until_ct": "13:25"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "14:20", "until_ct": "14:40"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
-    {"id": "kalshi-sized", "action": "run", "at_ct": "12:35", "until_ct": "14:55"},
+    {"id": "kalshi-sized", "action": "run", "at_ct": "12:05", "until_ct": "14:55"},
     # Model-flip / settle polls — offset from the scan window so one bot never double-locks.
     {"id": "kalshi-sized", "action": "settle", "at_ct": "13:00", "until_ct": "15:55"},
     {"id": "kalshi-sized", "action": "settle", "at_ct": "16:05", "until_ct": "23:30"},
@@ -285,7 +298,7 @@ BOTS = (
         "name": "Sized Kalshi",
         "folder": "kalshi-sized-paper",
         "script": "bot.py",
-        "blurb": "KXINXU paper bot with desk Kelly-lite stake (84–92¢ band). Own bankroll; model-flip + settle.",
+        "blurb": "KXINXU paper bot with desk Kelly-lite stake (80–92¢ band). Own bankroll; model-flip + settle.",
         "state": "paper_state.json",
         "kind": "kalshi",
         "log": "Trade_Ledger.md",
@@ -298,9 +311,9 @@ BOTS = (
 BOT_PLANS = {
     "sports-gap": {
         "buy": [
-            "Live or tip-soon (≤90m) ESPN game matched to a Kalshi series",
-            "Edge after fee ≥ venue kalshi_sports (NHL +0.02)",
-            "Selected-side fair ≥ 80%; home fair outside 0.40–0.60 close band",
+            "Live or tip-soon (≤180m) ESPN game matched to a Kalshi series",
+            "Dual lanes: accurate fair ≥80% OR speed fair ≥72% with +2¢ edge",
+            "Up to 4 paper buys per check; home fair outside 0.40–0.60 close band",
             "Spread ≤ 0.05; ask in 0.05–0.95",
             "Kelly-lite / desk stake; correlation + learning clear",
             "Adapt: safe on high vol; bigger only if ≥80% hit with enough settles",
@@ -324,8 +337,8 @@ BOT_PLANS = {
     },
     "kalshi-sp": {
         "buy": [
-            "Once per day 12:30–14:55 CT",
-            "Safest YES/NO ask in the 80–90¢ band; venue kalshi_inx edge",
+            "Up to 3 scans/day 12:00–14:55 CT",
+            "Safest YES/NO ask in the 80–92¢ band; venue kalshi_inx edge",
             "Stake floor($25 / ask); correlation + learning clear",
             "Adapt layer still logs vol/performance for desk study",
         ],
@@ -336,7 +349,7 @@ BOT_PLANS = {
         "failsafes": [
             "Desk entry_gate on scan (not settle/brief)",
             "Weekend + news/holiday calendar",
-            "Max 1 trade/day; bot daily loss −$50",
+            "Max 3 trades/day; bot daily loss −$50",
             "Kill switch bankroll ≤ $400; paper_mode required",
             "Correlation veto + starve; pause file",
         ],
@@ -393,9 +406,9 @@ BOT_PLANS = {
     "memecoin": {
         "buy": [
             "RugCheck facts fail-closed + scorer ≥ 0.8",
-            "Desk Kelly-lite ticket ($10–$25) capped by cash; max 4 open / 6 entries per day",
+            "Dual lanes: accurate conf ≥80% OR speed ≥72% (+venue); tickets $10–$25",
+            "Max 6 open / 12 entries per day; 12h cooldown",
             "Midnight broke reload (Chicago): out-of-ammo towers reset P&L + cash; winners left alone",
-            "24h cooldown after close; learning skip clear",
             "Adapt: high 5m move → safer size; ≥80% settled hit → size-up",
         ],
         "sell": [
@@ -418,8 +431,8 @@ BOT_PLANS = {
     },
     "kalshi-sized": {
         "buy": [
-            "KXINXU 3 PM CT; scan 12:35–14:55 CT",
-            "Ask band 84–92¢; order-book confirm",
+            "KXINXU 3 PM CT; forced scans 12:05 / 13:05 / 14:20 CT",
+            "Ask band 80–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
             "Correlation veto vs BTC / fixed Kalshi; learning skip clear",
             "Adapt: safe on high vol; bigger only on proven ≥80% record",
@@ -1337,10 +1350,53 @@ def _kalshi_skip(root: str, state: dict | None) -> str:
     if reasons:
         line = f"{key} CT skip: {', '.join(reasons)}."
     else:
-        line = f"{key} CT is not on the skip calendar."
+        # Tradable day — do not put a "not on skip calendar" line in why/skip (looks like a block).
+        line = ""
     if state and state.get("halted"):
-        line += " The paper account is halted by its own kill switch."
+        halt = "The paper account is halted by its own kill switch."
+        line = f"{line} {halt}".strip() if line else halt
     return line
+
+
+def next_inx_scan_line(bot_id: str, now: dt.datetime | None = None) -> str:
+    """
+    Heartbeat for KXINXU towers: next scan / settle window in America/Chicago.
+    Morning idle is schedule-true, not a broken desk.
+    """
+    now = now or dt.datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    else:
+        now = now.astimezone(CT)
+    slots = [s for s in AUTO if s.get("id") == bot_id and "at_ct" in s]
+    if not slots:
+        return ""
+    # Prefer run (scan) slots for the heartbeat; fall back to any.
+    runs = [s for s in slots if s.get("action") == "run"] or slots
+    hm = now.hour * 60 + now.minute
+
+    def _mins(hhmm: str) -> int:
+        h, m = str(hhmm).split(":")
+        return int(h) * 60 + int(m)
+
+    for s in runs:
+        start = _mins(s["at_ct"])
+        until = _mins(s.get("until_ct") or s["at_ct"])
+        if start <= hm <= until:
+            label = "scan" if s.get("action") == "run" else s.get("action")
+            return f"In {label} window until {s.get('until_ct')} CT."
+    # Next future run today, else first run tomorrow.
+    future = sorted(
+        (s for s in runs if _mins(s["at_ct"]) > hm),
+        key=lambda s: _mins(s["at_ct"]),
+    )
+    if future:
+        s = future[0]
+        label = "scan" if s.get("action") == "run" else s.get("action")
+        return f"Next {label} {s['at_ct']} CT."
+    s = sorted(runs, key=lambda x: _mins(x["at_ct"]))[0]
+    label = "scan" if s.get("action") == "run" else s.get("action")
+    return f"Next {label} tomorrow {s['at_ct']} CT."
 
 
 def _btc_skip(summary: str) -> str:
@@ -2256,6 +2312,18 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         # Surface skip board on brain too when journal empty.
         if isinstance(desk_row.get("brain"), dict) and not desk_row["brain"].get("skip_leaderboard"):
             desk_row["brain"]["skip_leaderboard"] = desk_row["more"].get("skip_leaderboard")
+        # E0 #3 — every tower card gets today's skip codes (by bot).
+        by_bot = ((desk_row["more"].get("skip_leaderboard") or {}).get("by_bot") or {})
+        for bot in public:
+            raw = by_bot.get(bot.get("id") or "") or {}
+            ranked = sorted(
+                ((str(code), int(n)) for code, n in raw.items()),
+                key=lambda kv: -kv[1],
+            )[:5]
+            bot["skip_board"] = [
+                {"code": desk_more.stable_skip_code(code), "n": n}
+                for code, n in ranked
+            ]
     except Exception as exc:  # noqa: BLE001
         desk_row["more"] = {"paper_only": True, "error": type(exc).__name__}
     try:
@@ -2280,6 +2348,21 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["phase3"] = {"paper_only": True, "error": type(exc).__name__}
     # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
     tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
+    try:
+        import desk_master
+        desk_row["master"] = desk_master.master_summary(
+            root, bots=public, cfg=cfg, fill_tax=tax,
+        )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["master"] = {"paper_only": True, "error": type(exc).__name__}
+    tip = sports_tip_alarm_from_cache(root)
+    desk_row["sports_tip"] = tip
+    if isinstance(desk_row.get("master"), dict):
+        desk_row["master"]["sports_tip"] = tip
+    try:
+        desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}
     gate_rows = []
     prove_rows = []
     for bot in public:
@@ -2373,6 +2456,10 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             "phase3": (
                 "Phase 3 expansion: KXBTCD ladder companion scoring + paper parlay "
                 "joint EV with same-direction crypto correlation haircut."
+            ),
+            "master": (
+                "Trading Masters scoreboard (M1–M7): taxed EV vs volume. "
+                "Stub — no profit guarantee; fee floors unchanged."
             ),
             "guest": "Guest mode (?guest=1) is read-only — no staff actions.",
         },
@@ -2508,13 +2595,17 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
 def timer_text() -> str:
     """Plain schedule for the desk. No forecast and no profit language."""
     return (
-        "On a timer, America/Chicago. Sports gap about every 5 minutes. "
-        "BTC 15-minute signal about every 90 seconds — scores every open KXBTC15M window "
+        "On a timer, America/Chicago. Sports gap about every 3 minutes (dual lanes); "
+        "about every 45 seconds when a cached tip is inside T−15 (fee-aware still). "
+        "BTC 15-minute signal about every 60 seconds — scores every open KXBTC15M window "
         "and syncs the Kalshi public trade tape for desk series. "
+        "Commodity 15m about every 90 seconds. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
-        "Kalshi paper scan once at 12:30 PM, inside that bot's own window. "
+        "Kalshi paper scans forced at 12:05, 13:05, and 14:20 CT (up to 3/day). "
         "Kalshi paper settle once at 4:00 PM. "
-        "Memecoin about every 10 minutes (manage exits, then scan). "
+        "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed); "
+        "about every 2 minutes when open paper needs manage. "
+        "Commodity about every 90 seconds; about every 60 seconds when ≥2 series are open. "
         "No edge is a finished check with zero paper trades. "
         "Numbers only move while the Discord bot paper timer is alive."
     )
@@ -2574,8 +2665,12 @@ def due_slots(now: dt.datetime, root: str) -> list:
         if "every_sec" in slot:
             prev = _parsed(saved.get(key) or "")
             gap = float(slot["every_sec"])
-            if slot["id"] == "sports-gap" and _sports_idle(root):
-                gap = max(gap, IDLE_SPORTS_SEC)
+            if slot["id"] == "sports-gap":
+                gap = _sports_auto_gap_sec(root, gap, now=now)
+            elif slot["id"] == "memecoin":
+                gap = _meme_auto_gap_sec(root, gap)
+            elif slot["id"] == "commodity-15m":
+                gap = _commodity_auto_gap_sec(root, gap)
             if prev is not None and (now - prev).total_seconds() < gap:
                 continue
             due.append(slot)
@@ -2639,6 +2734,12 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
                     handle.write(_iso(now) + "\n")
             except OSError:
                 pass
+    except Exception:
+        pass
+    # E3 helper — calendar scanner digest (never places).
+    try:
+        from helpers import calendar_scanner
+        calendar_scanner.run_if_due(root, now)
     except Exception:
         pass
     touch_heartbeat(root, now)
@@ -4099,6 +4200,124 @@ def _sports_idle(root: str) -> bool:
     return "no live games" in text or '"live_games": 0' in text or '"live_games":0' in text
 
 
+def sports_tip_alarm_from_cache(
+    root: str | None = None,
+    now: dt.datetime | None = None,
+    window_min: float | None = None,
+) -> dict:
+    """Offline tip-alarm from sports-gap quote_cache. No network. Fee floors unchanged.
+
+    Returns active=True when any pregame tip is inside the forward window (default T−15).
+    Band is 5 when nearest tip ≤5m, else 15 when ≤window.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    window = float(SPORTS_TIP_FORCE_WINDOW_MIN if window_min is None else window_min)
+    path = _under(root, "sports-gap-paper", "quote_cache.json")
+    data = _read_json(path)
+    nearest = None
+    n_pre = 0
+    n_tip = 0
+    sample = ""
+    if isinstance(data, dict):
+        for payload in data.values():
+            if not isinstance(payload, dict):
+                continue
+            body = payload.get("body")
+            if isinstance(body, str):
+                try:
+                    body = json.loads(body)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+            if not isinstance(body, dict):
+                continue
+            for event in body.get("events") or []:
+                if not isinstance(event, dict):
+                    continue
+                comps = (event.get("competitions") or [{}])
+                comp = comps[0] if comps and isinstance(comps[0], dict) else {}
+                status = (comp.get("status") or event.get("status") or {})
+                stype = status.get("type") if isinstance(status, dict) else {}
+                if not isinstance(stype, dict):
+                    stype = {}
+                if str(stype.get("state") or "") != "pre":
+                    continue
+                n_pre += 1
+                raw = comp.get("date") or event.get("date")
+                if not raw:
+                    continue
+                try:
+                    when = dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=dt.timezone.utc)
+                eta = (when - now).total_seconds() / 60.0
+                if eta <= 0 or eta > window:
+                    continue
+                n_tip += 1
+                if nearest is None or eta < nearest:
+                    nearest = eta
+                    sample = _clean(event.get("name") or event.get("shortName") or "", 80)
+    band = None
+    if nearest is not None:
+        if nearest <= 5:
+            band = 5
+        elif nearest <= window:
+            band = 15
+    return {
+        "paper_only": True,
+        "active": band is not None,
+        "band": band,
+        "n_pre": n_pre,
+        "n_tip": n_tip,
+        "nearest_eta_min": round(nearest, 2) if nearest is not None else None,
+        "sample": sample,
+        "force_sec": SPORTS_TIP_FORCE_SEC,
+        "window_min": window,
+        "note": "Forced AUTO cadence only — venue min_edge still required inside gap_bot.",
+    }
+
+
+def _sports_auto_gap_sec(root: str, base_gap: float, now: dt.datetime | None = None) -> float:
+    """Sports cadence: tip-force (45s) > normal > idle stretch. Never loosens fees."""
+    tip = sports_tip_alarm_from_cache(root, now=now)
+    if tip.get("active"):
+        return float(SPORTS_TIP_FORCE_SEC)
+    if _sports_idle(root):
+        return max(float(base_gap), float(IDLE_SPORTS_SEC))
+    return float(base_gap)
+
+
+def _meme_open_count(root: str) -> int:
+    state = _read_json(_under(root, "memecoin-paper", "positions.json"))
+    if not isinstance(state, dict):
+        return 0
+    return len([p for p in (state.get("open") or []) if isinstance(p, dict)])
+
+
+def _commodity_open_count(root: str) -> int:
+    state = _read_json(_under(root, "commodity-15m-paper", "paper_account.json"))
+    if not isinstance(state, dict):
+        return 0
+    return len([p for p in (state.get("open") or []) if isinstance(p, dict)])
+
+
+def _meme_auto_gap_sec(root: str, base_gap: float) -> float:
+    """Faster manage ticks when meme book is open — exits still fee-aware."""
+    if _meme_open_count(root) > 0:
+        return float(MEME_MANAGE_OPEN_SEC)
+    return float(base_gap)
+
+
+def _commodity_auto_gap_sec(root: str, base_gap: float) -> float:
+    """Calm-regime faster poll when ≥2 commodity series already open."""
+    if _commodity_open_count(root) >= int(COMMODITY_CALM_OPEN_N):
+        return float(COMMODITY_CALM_OPEN_SEC)
+    return float(base_gap)
+
+
 def _rate_ok(root: str, bot_id: str, now: dt.datetime | None = None) -> bool:
     now = now or dt.datetime.now(dt.timezone.utc)
     data = _read_json(manual_path(root)) or {}
@@ -4127,12 +4346,39 @@ def timer_health(root: str | None = None, now: dt.datetime | None = None) -> dic
         now = now.replace(tzinfo=dt.timezone.utc)
     data = _read_json(heartbeat_path(root)) or {}
     when = _parsed(str(data.get("at") or ""))
+    weekday = now.astimezone(CT).weekday() < 5
     if when is None:
-        return {"alive": False, "detail": "No timer loop yet.", "age": None, "alert": ""}
+        alert = "WEEKDAY ALERT: no paper timer heartbeat yet — start Discord paper_timer." if weekday else ""
+        if not alert:
+            alert = "No timer loop yet."
+        return {
+            "alive": False,
+            "detail": "No timer loop yet.",
+            "age": None,
+            "alert": alert,
+            "weekday": weekday,
+            "weekday_alert": bool(weekday),
+        }
     age = int((now - when).total_seconds())
     alive = age <= HEARTBEAT_STALE_SEC
-    alert = "" if alive else "Paper timer looks dead. The last loop is too old."
-    return {"alive": alive, "detail": "Timer alive." if alive else "Last loop is too old.", "age": age, "alert": alert}
+    alert = ""
+    weekday_alert = False
+    if not alive:
+        alert = "Paper timer looks dead. The last loop is too old."
+        if weekday and age >= HEARTBEAT_WEEKDAY_ALERT_SEC:
+            weekday_alert = True
+            alert = (
+                f"WEEKDAY ALERT: paper timer dead {age // 60}m "
+                f"(>{HEARTBEAT_WEEKDAY_ALERT_SEC // 60}m) — restart Discord paper_timer."
+            )
+    return {
+        "alive": alive,
+        "detail": "Timer alive." if alive else "Last loop is too old.",
+        "age": age,
+        "alert": alert,
+        "weekday": weekday,
+        "weekday_alert": weekday_alert,
+    }
 
 
 def _note_state_mtime(root: str, bot_id: str, folder: str, state_name: str) -> None:
@@ -4172,8 +4418,12 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
         if "every_sec" in slot:
             prev = _parsed(saved.get(_slot_key(slot)) or "")
             gap = float(slot["every_sec"])
-            if bot_id == "sports-gap" and _sports_idle(root):
-                gap = max(gap, float(IDLE_SPORTS_SEC))
+            if bot_id == "sports-gap":
+                gap = _sports_auto_gap_sec(root, gap, now=now)
+            elif bot_id == "memecoin":
+                gap = _meme_auto_gap_sec(root, gap)
+            elif bot_id == "commodity-15m":
+                gap = _commodity_auto_gap_sec(root, gap)
             when = now if prev is None else prev + dt.timedelta(seconds=gap)
             if when < now:
                 when = now
@@ -4276,6 +4526,20 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         view["idle_copy"] = f"No paper trades yet. Last check {view['central_check']}. No edge."
     else:
         view["idle_copy"] = ""
+    # INX towers: surface next scan heartbeat so morning idle is not read as broken.
+    if spec.get("id") in ("kalshi-sp", "kalshi-sized"):
+        heartbeat = next_inx_scan_line(str(spec.get("id")))
+        view["next_scan"] = heartbeat
+        if heartbeat:
+            if view.get("idle_copy"):
+                view["idle_copy"] = f"{view['idle_copy']} {heartbeat}"
+            why = str(view.get("why") or "")
+            if why and "Next scan" not in why and "In scan window" not in why and "Next " not in why:
+                # Keep CARD why; append schedule only when it looks like a no-buy finish.
+                if "no paper buy" in why.lower() or "check finished" in why.lower() or not why.strip():
+                    view["why"] = f"{why} {heartbeat}".strip()
+            elif not why:
+                view["why"] = heartbeat
     if not view.get("why") and view.get("skip"):
         view["why"] = plain_reason(view.get("skip") or "")
     summary = str(run.get("summary") or "")
