@@ -494,6 +494,7 @@ def snapshot_btcd_ladder(root, btc_spot: float):
             return 0
         d = get_json(f"{KALSHI}/markets?event_ticker={event_ticker}&limit=200")
         n = 0
+        candidates = []
         for m in d.get("markets") or []:
             try:
                 strike = float(m.get("floor_strike"))
@@ -505,13 +506,15 @@ def snapshot_btcd_ladder(root, btc_spot: float):
             no_ask = fnum(m.get("no_ask_dollars"))
             close = parse_ts(m["close_time"]) if m.get("close_time") else None
             min_left = (close - dt.datetime.now(dt.timezone.utc)).total_seconds() / 60 if close else None
+            side = "YES" if btc_spot >= strike else "NO"
+            ask = yes_ask if side == "YES" else no_ask
             kalshi_history.record_snapshot(
                 root,
                 series="KXBTCD",
                 ticker=str(m.get("ticker") or ""),
                 spot=float(btc_spot),
                 target=strike,
-                side="YES" if btc_spot >= strike else "NO",
+                side=side,
                 yes_ask=yes_ask,
                 no_ask=no_ask,
                 model_p=None,
@@ -520,9 +523,49 @@ def snapshot_btcd_ladder(root, btc_spot: float):
                 note=str(events[0].get("title") or "")[:120],
                 extra={"event": event_ticker},
             )
+            # Phase 3: ladder companion candidate (score only — paper buy still via desk gates).
+            if ask is not None:
+                depth = None
+                ticker = str(m.get("ticker") or "")
+                # Cheap depth: only for the nearest few strikes (API budget).
+                if len(candidates) < 6 and ticker:
+                    try:
+                        _bid, book_ask, book_depth = book_for_side(ticker, side)
+                        if book_ask is not None:
+                            ask = book_ask
+                        depth = float(book_depth) if book_depth else None
+                    except Exception:
+                        depth = None
+                candidates.append({
+                    "ticker": ticker,
+                    "spot": float(btc_spot),
+                    "strike": strike,
+                    "ask": ask,
+                    "fee": fee_per_contract(ask),
+                    "depth": depth,
+                    "model_p": None,  # Φ(z) not attached on daily ladder — shadow rank only
+                    "side": side,
+                    "series": "KXBTCD",
+                })
             n += 1
             if n >= 24:
                 break
+        if candidates:
+            try:
+                import desk_phase3
+                # Shadow rank when no model_p; ok=True only if a later pass attaches Φ≥80%.
+                pick = desk_phase3.pick_ladder_rung(
+                    candidates, min_edge=_edge_buffer(), require_ok=False,
+                )
+                if pick:
+                    desk_phase3.remember_ladder_pick(root, pick)
+                    tag = "ok" if pick.get("ok") else "shadow"
+                    print(
+                        f"  KXBTCD ladder companion {tag} {pick.get('ticker')} "
+                        f"strike={pick.get('strike')} score={pick.get('score')} (paper score only)"
+                    )
+            except Exception as exc:
+                print(f"  KXBTCD ladder companion score failed: {exc}")
         return n
     except Exception as e:
         print(f"  KXBTCD ladder history failed: {e}")
@@ -1360,10 +1403,33 @@ def main():
                 stake = 20.0
             cash = float(account.get("cash") or 0)
             stake = min(float(stake), cash)
-            row = kalshi_parlay.open_paper_parlay(
-                path, legs, stake_dollars=stake,
-                note="≤5m paper parlay after volatile hold (BTC+ETH or dual legs)",
-            )
+            # Phase 3: joint EV + same-direction crypto corr haircut before open.
+            try:
+                import desk_phase3
+                sim = desk_phase3.simulate_parlay(
+                    DESK_ROOT, legs,
+                    note="≤5m paper parlay pre-open sim",
+                )
+                if not desk_phase3.should_open_parlay(sim, min_ev=0.0):
+                    print(
+                        f"  PARLAY SKIP: joint EV {sim.get('ev')} "
+                        f"(corr haircut {sim.get('corr_haircut')}) — fee-aware combo gate"
+                    )
+                    row = None
+                else:
+                    row = kalshi_parlay.open_paper_parlay(
+                        path, legs, stake_dollars=stake,
+                        note=(
+                            "≤5m paper parlay after volatile hold "
+                            f"(joint_ev={sim.get('ev')})"
+                        ),
+                    )
+            except Exception as exc:
+                print(f"  PARLAY Phase3 sim failed ({exc}); opening without joint gate")
+                row = kalshi_parlay.open_paper_parlay(
+                    path, legs, stake_dollars=stake,
+                    note="≤5m paper parlay after volatile hold (BTC+ETH or dual legs)",
+                )
             if row:
                 # Deduct combined stake from paper cash; attach legs as open positions tagged parlay.
                 account["cash"] = round(cash - float(row["stake"]), 2)
