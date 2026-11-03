@@ -13,7 +13,7 @@ import {
   vaultLedgerTexture,
 } from '../hud/monitorTextures'
 import { NeonBloom } from './Effects'
-import { BotFigure } from './BotFigure'
+import { CityBotFigure } from './CityBotFigure'
 import { PlayerBot } from './PlayerBot'
 import type { FloorObstacle } from '../data/bankWalk'
 
@@ -282,10 +282,12 @@ function TellerPod({
 
       {/* Teller behind the cabinet — standing height, clear of the desk body */}
       <group ref={botRoot} position={[0, 0.18, BOT_Z]} rotation={[0, Math.PI, 0]} scale={0.9}>
-        <BotFigure
+        <CityBotFigure
+          context="bank"
           pose={away && !recalling ? 'waiting' : pose}
           seated={false}
           seed={index}
+          unitMark={String(index + 1).padStart(2, '0')}
         />
       </group>
 
@@ -979,7 +981,7 @@ function DataMotes() {
 function Warden() {
   return (
     <group position={[1.85, 0.05, Z_BACK + 1.85]} rotation={[0, Math.PI * 0.92, 0]} scale={0.88}>
-      <BotFigure pose="waiting" seated={false} />
+      <CityBotFigure context="bank" pose="waiting" seated={false} unitMark="00" />
       <mesh position={[0, 2.15, 0.05]}>
         <boxGeometry args={[0.9, 0.14, 0.04]} />
         <meshStandardMaterial color={INK} emissive="#ff2a6d" emissiveIntensity={0.45} />

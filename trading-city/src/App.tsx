@@ -12,6 +12,7 @@ import { CityScene } from './scene/CityScene'
 import { OfficeScene } from './scene/OfficeScene'
 import { BankScene } from './scene/BankScene'
 import { BossDashboard } from './hud/BossDashboard'
+import { BOT_REMODEL_APPROVED, BOT_REMODEL_PREVIEW_OFFICE } from './scene/botRemodelGate'
 import type { BotRow } from './types'
 
 type View = 'city' | 'bank' | 'office'
@@ -460,6 +461,11 @@ export default function App() {
                     ? 'Tellers menu · W/S walk · drag look'
                     : 'Floor menu · W/S walk · drag look · glass door → hall'}
                 </span>
+                {BOT_REMODEL_PREVIEW_OFFICE && !BOT_REMODEL_APPROVED && (
+                  <span className="bot-remodel-preview" role="status">
+                    Bot remodel preview · purple industrial · awaiting approval
+                  </span>
+                )}
               </div>
             </div>
             {fromBank && (

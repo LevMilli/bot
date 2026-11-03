@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import type { Group, MeshBasicMaterial } from 'three'
 import type { BotPose } from '../data/botPose'
-import { BotFigure } from './BotFigure'
+import { CityBotFigure } from './CityBotFigure'
 import { BACK_ROAD_HALF_LEN, BACK_ROAD_Z } from './plazaLayout'
 
 export type CarOccupancy = 'empty' | 'driver' | 'couple' | 'family'
@@ -186,7 +186,7 @@ export function CityCar({
 
         {passengers.map((p, i) => (
           <group key={i} position={[p.seat[0] - 0.02, 0.24, p.seat[2]]} scale={0.15} rotation={[0, -Math.PI / 2, 0]}>
-            <BotFigure pose={p.pose} seated />
+            <CityBotFigure context="city" pose={p.pose} seated />
           </group>
         ))}
       </group>

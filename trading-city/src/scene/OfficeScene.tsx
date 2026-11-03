@@ -11,7 +11,7 @@ import {
 } from '../hud/monitorTextures'
 import { botPose } from '../data/botPose'
 import { NeonBloom } from './Effects'
-import { BotFigure } from './BotFigure'
+import { CityBotFigure } from './CityBotFigure'
 import { StreetCity } from './WindowCity'
 import { KEY_TOP, MOUSE_TOP, mouseHand } from './deskReach'
 import { WallStockChart } from './WallCharts'
@@ -957,7 +957,7 @@ export function OfficeScene({
       <MonitorFrame position={[0.02, 1.4, -0.88]} rotation={[-0.08, 0, 0]} size={[1.22, 0.72]} edge="#2de2e6" map={maps.center} onOpen={onOpenScreens} />
       <MonitorFrame position={[1.58, 1.28, -0.62]} rotation={[0, -0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.right} onOpen={onOpenScreens} />
 
-      <BotFigure pose={pose} deskWork />
+      <CityBotFigure context="office" pose={pose} deskWork unitMark="22" seed={bot.id.length} />
 
       <OfficeFloorPlan
         bots={bots && bots.length ? bots : [bot]}
