@@ -100,11 +100,35 @@ def write_digest(digest: dict, root: str | None = None) -> str:
 def scan(root: str | None = None, *, force: bool = False) -> dict:
     """Refresh calendar cache (last-good) and write digest. No fills."""
     assert PAPER_ONLY and HELPER_ONLY
+    try:
+        from helpers import assert_helper_only
+        assert_helper_only("calendar_scanner")
+    except Exception:
+        pass
+    digest_note = "Helper digest — never places alone."
+    try:
+        import desk_roi_plan
+        # Surface Gate A status on digest; scanner still never places.
+        gate = desk_roi_plan.helper_gate_a(root, "calendar_scanner")
+        digest_note = (
+            f"Helper digest — never places alone. Gate A: {gate.get('reason')}"
+        )
+    except Exception:
+        gate = None
     state = calendar_cache.refresh_if_stale(root, force=force)
     events = list(state.get("events") or [])
     digest = build_digest(events)
     digest["cache_error"] = state.get("last_error")
     digest["cache_fetched_at"] = state.get("fetched_at")
+    digest["note"] = digest_note
+    digest["places_orders"] = False
+    if gate is not None:
+        digest["helper_gate_a"] = {
+            "ready": gate.get("ready"),
+            "n": gate.get("n"),
+            "expectancy_taxed": gate.get("expectancy_taxed"),
+            "auto_promote": False,
+        }
     write_digest(digest, root)
     return digest
 

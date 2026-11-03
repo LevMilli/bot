@@ -438,6 +438,10 @@ def master_summary(
             plan["stale_world"] = desk_roi_plan.stale_world_status(root, bots=bots)
         except Exception:
             plan["stale_world"] = None
+        try:
+            plan["helper_gate_a"] = desk_roi_plan.helper_promote_status(root)
+        except Exception:
+            plan["helper_gate_a"] = None
     except Exception:
         plan = None
     return {

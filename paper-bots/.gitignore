@@ -43,6 +43,8 @@ desk_anti_revenge.json
 desk_incubation.json
 desk_ruin_drill.json
 desk_fee_ledger.json
+desk_helper_fills.json
+desk_helper_promote.json
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json
 helpers/calendar_scanner_at.txt
