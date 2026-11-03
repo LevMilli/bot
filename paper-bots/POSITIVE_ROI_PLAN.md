@@ -68,13 +68,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Kill rule M3↑ M1↓ × 2 weeks | `capture_hillclimb_week` / `hillclimb_kill_status` — flag only, no auto param write |
 | Masters wire | `desk_master.master_summary` → `hillclimb_kill` |
 
+### Profit-lock harvest
+
+| Ticket | Where |
+| --- | --- |
+| Chicago-week firm PnL ledger | `desk_roi_plan.capture_profit_lock` |
+| Safe-mode 0.5× after $40 target | `profit_lock_size_mult` / `profit_lock_status` |
+| Masters wire | `desk_master.master_summary` → `profit_lock` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
 | INX band promote | only after research-week artifact |
-| Profit-lock harvest paper analog | cut size 50% after weekly target |
+| Wire `profit_lock_size_mult` into tower kelly paths | sports / BTC / commodity |
 | Skip-regret twin weekly review | wire into scorecard |
 
 ## Hard rules unchanged
