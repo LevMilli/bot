@@ -1194,10 +1194,14 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
           </group>
         )
       })}
-      {/* Ceiling plane spanning the teller hall — readable from eye height */}
+      {/* Ceiling plane — same bright purple family as service walls so FPV reads enclosure */}
       <mesh position={[0, HALL_HEIGHT - 0.08, TELLER_Z0 - ((SIDE_COUNT - 1) * TELLER_SPACING) / 2]} rotation={[Math.PI / 2, 0, 0]}>
         <planeGeometry args={[HALL_W - 0.6, SIDE_COUNT * TELLER_SPACING + 4]} />
-        <meshBasicMaterial color="#2a1a48" toneMapped={false} side={DoubleSide} />
+        <meshBasicMaterial color="#4a3278" toneMapped={false} side={DoubleSide} />
+      </mesh>
+      <mesh position={[0, HALL_HEIGHT - 0.12, TELLER_Z0 - ((SIDE_COUNT - 1) * TELLER_SPACING) / 2]}>
+        <boxGeometry args={[0.12, 0.06, SIDE_COUNT * TELLER_SPACING + 3.5]} />
+        <meshBasicMaterial color="#2de2e6" toneMapped={false} />
       </mesh>
       <FloorGlowPaths tellers={tellers} />
 
