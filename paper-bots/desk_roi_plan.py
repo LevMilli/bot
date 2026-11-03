@@ -35,6 +35,7 @@ RUIN_DRILL_NAME = "desk_ruin_drill.json"
 FEE_LEDGER_NAME = "desk_fee_ledger.json"
 HELPER_FILLS_NAME = "desk_helper_fills.json"
 HELPER_PROMOTE_NAME = "desk_helper_promote.json"
+COLD_HARVEST_NAME = "desk_cold_harvest.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -105,6 +106,11 @@ CLOCK_SKEW_MAX_SEC = 30.0  # matches pimp_desk.STALE_PRICE_SEC
 # Phase 8: helper Gate A — helper-attributed taxed EV ≥ 0 before any autonomy story.
 HELPER_GATE_A_MIN_N = 20
 MAX_HELPER_FILL_ROWS = 4000
+
+# Phase 10: weekly harvest → cold ledger (habit for live; 30–50% of green week PnL).
+COLD_HARVEST_PCT_DEFAULT = 0.40
+COLD_HARVEST_PCT_MIN = 0.30
+COLD_HARVEST_PCT_MAX = 0.50
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -2569,6 +2575,123 @@ def profit_lock_size_mult(root: str | None = None) -> float:
     return float(mult)
 
 
+def _clamp_harvest_pct(pct) -> float:
+    p = _finite(pct)
+    if p is None:
+        return float(COLD_HARVEST_PCT_DEFAULT)
+    return max(float(COLD_HARVEST_PCT_MIN), min(float(COLD_HARVEST_PCT_MAX), float(p)))
+
+
+def capture_cold_harvest(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+    pct: float = COLD_HARVEST_PCT_DEFAULT,
+) -> dict:
+    """Move 30–50% of positive Chicago-week firm PnL into a cold ledger (paper habit).
+
+    Idempotent per week: re-capture refreshes that week's harvest from current week_pnl.
+    Does not change stake sizing (profit-lock owns 0.5×). Fee floors untouched.
+    """
+    day = label or _chicago_day()
+    week_id = _chicago_week_id(day)
+    # Prefer profit-lock week accumulator when present; else firm today as thin proxy.
+    pl_store = _load(
+        _path(PROFIT_LOCK, root),
+        {"paper_only": True, "weeks": {}, "latest": None},
+    )
+    weeks_pl = pl_store.get("weeks") if isinstance(pl_store.get("weeks"), dict) else {}
+    week_row = weeks_pl.get(week_id) if isinstance(weeks_pl.get(week_id), dict) else {}
+    week_pnl = _finite(week_row.get("week_pnl"))
+    if week_pnl is None:
+        # Ensure profit-lock has today's snap, then re-read.
+        try:
+            capture_profit_lock(root, bots=bots, label=day)
+            pl_store = _load(
+                _path(PROFIT_LOCK, root),
+                {"paper_only": True, "weeks": {}, "latest": None},
+            )
+            weeks_pl = pl_store.get("weeks") if isinstance(pl_store.get("weeks"), dict) else {}
+            week_row = weeks_pl.get(week_id) if isinstance(weeks_pl.get(week_id), dict) else {}
+            week_pnl = _finite(week_row.get("week_pnl"))
+        except Exception:
+            week_pnl = None
+    if week_pnl is None:
+        week_pnl = float(firm_today_pnl(bots).get("firm_today") or 0.0)
+    harvest_pct = _clamp_harvest_pct(pct)
+    harvested = 0.0
+    if float(week_pnl) > 1e-12:
+        harvested = round(float(week_pnl) * harvest_pct, 2)
+    path = _path(COLD_HARVEST_NAME, root)
+    store = _load(
+        path,
+        {"paper_only": True, "weeks": {}, "cold_total": 0.0, "latest": None},
+    )
+    weeks = store.get("weeks") if isinstance(store.get("weeks"), dict) else {}
+    row = {
+        "paper_only": True,
+        "week": week_id,
+        "label": day,
+        "week_pnl": round(float(week_pnl), 2),
+        "harvest_pct": harvest_pct,
+        "harvested": harvested,
+        "skipped": harvested <= 0,
+        "at": _now(),
+        "fee_floors_locked": True,
+        "note": (
+            f"Cold harvest {harvest_pct:.0%} of week ${float(week_pnl):.2f} → "
+            f"${harvested:.2f} cold (paper habit for live)."
+            if harvested > 0
+            else "No cold harvest — week PnL ≤ 0."
+        ),
+    }
+    weeks[week_id] = row
+    if len(weeks) > 26:
+        for old in sorted(weeks.keys())[:-26]:
+            weeks.pop(old, None)
+    cold_total = round(
+        sum(
+            float(v.get("harvested") or 0)
+            for v in weeks.values()
+            if isinstance(v, dict)
+        ),
+        2,
+    )
+    store["weeks"] = weeks
+    store["cold_total"] = cold_total
+    store["latest"] = row
+    store["last_at"] = _now()
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    _save(path, store)
+    return {
+        **row,
+        "cold_total": cold_total,
+    }
+
+
+def cold_harvest_status(root: str | None = None) -> dict:
+    store = _load(
+        _path(COLD_HARVEST_NAME, root),
+        {"paper_only": True, "weeks": {}, "cold_total": 0.0, "latest": None},
+    )
+    latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    return {
+        "paper_only": True,
+        "cold_total": round(float(store.get("cold_total") or 0), 2),
+        "latest": latest,
+        "weeks_n": len(store.get("weeks") or {}),
+        "pct_band": [COLD_HARVEST_PCT_MIN, COLD_HARVEST_PCT_MAX],
+        "default_pct": COLD_HARVEST_PCT_DEFAULT,
+        "fee_floors_locked": True,
+        "note": (
+            "Weekly harvest 30–50% of green Chicago-week firm PnL into cold ledger. "
+            "Habit for live. Does not soften fee floors."
+        ),
+    }
+
+
 def capture_weekly_scorecard(
     root: str | None,
     *,
@@ -2638,11 +2761,10 @@ def plan_summary(
         "fee_ledger_completeness": fee_ledger_completeness(root, bots=bots),
         "stale_world": stale_world_status(root, bots=bots),
         "helper_gate_a": helper_promote_status(root),
+        "cold_harvest": cold_harvest_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
-        "next_tickets": [
-            "weekly harvest cold-ledger habit",
-        ],
+        "next_tickets": [],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
 
@@ -2852,6 +2974,29 @@ def self_check() -> None:
         assert helper_may_place_alone(tmp, "calendar_scanner") is True
         staff_set_helper_autonomy(tmp, "calendar_scanner", False, note="disarm")
         assert helper_may_place_alone(tmp, "calendar_scanner") is False
+        # Cold harvest: 40% of green week PnL → cold ledger.
+        capture_profit_lock(
+            tmp,
+            bots=[{"id": "sports-gap", "today": 30.0}, {"id": "btc15m", "today": 20.0}],
+            label="2026-11-03",
+        )
+        cold = capture_cold_harvest(
+            tmp,
+            bots=[{"id": "sports-gap", "today": 30.0}, {"id": "btc15m", "today": 20.0}],
+            label="2026-11-03",
+            pct=0.40,
+        )
+        assert cold["harvested"] == 20.0  # 40% of 50
+        assert cold["cold_total"] == 20.0
+        assert cold["fee_floors_locked"] is True
+        red = capture_cold_harvest(
+            tmp,
+            bots=[{"id": "memecoin", "today": -5.0}],
+            label="2026-11-10",
+            pct=0.40,
+        )
+        # New week with negative proxy — no add (week_pnl from that week's lock).
+        assert red["harvested"] == 0.0 or red.get("skipped") is True
 
 
 if __name__ == "__main__":
