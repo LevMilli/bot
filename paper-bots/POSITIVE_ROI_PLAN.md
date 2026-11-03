@@ -219,11 +219,21 @@ Interactive: Positive ROI Master Plan canvas.
 | 90d stale flag | `idea_review_status` |
 | Masters board | `roi_plan.opp_cost` + `idea_review` |
 
+### Sports green_boost + green-or-gone
+
+| Ticket | Where |
+| --- | --- |
+| Sports +1 gate | `sports_green_boost_status` — 2w M1≥0 + CLV≥52% n≥20 |
+| Runtime boost | `gap_bot` uses `sports_green_boost()` (default 0) |
+| Green-or-gone flags | `green_or_gone_status` — red+risk / loser Gate A |
+| Masters board | `roi_plan.sports_green_boost` + `green_or_gone` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| _(queue clear — observe / staff hillclimb pick)_ | paper observation |
+| Cross-tower rank queue | sports+btc+commodity best score |
+| BTC calibration report | Φ / hit vs label honesty |
 
 ## Hard rules unchanged
 

@@ -496,6 +496,16 @@ def master_summary(
             plan["idea_review"] = desk_roi_plan.idea_review_status(root)
         except Exception:
             plan["idea_review"] = None
+        try:
+            plan["sports_green_boost"] = desk_roi_plan.sports_green_boost_status(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["sports_green_boost"] = None
+        try:
+            plan["green_or_gone"] = desk_roi_plan.green_or_gone_status(bots)
+        except Exception:
+            plan["green_or_gone"] = None
     except Exception:
         plan = None
     return {
