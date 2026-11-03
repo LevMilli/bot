@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Html, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
-import { DoubleSide, MathUtils, type Group, type Mesh } from 'three'
+import { DoubleSide, MathUtils, type Group, type Mesh, type PointLight } from 'three'
 import type { BotRow, Desk } from '../types'
 import { BEAM_COLORS, beamColorFor, workersOnShift } from '../data/format'
 import { botPose } from '../data/botPose'
@@ -102,6 +102,7 @@ function TellerPod({
   bot,
   index,
   focused,
+  near,
   away,
   recalling,
   onSelect,
@@ -109,6 +110,7 @@ function TellerPod({
   bot: BotRow | null
   index: number
   focused: boolean
+  near: boolean
   away: boolean
   recalling: boolean
   onSelect: (id: string) => void
@@ -120,6 +122,8 @@ function TellerPod({
   const plate = useMemo(() => tellerPlateTexture(bot, index, color), [bot, index, color])
   const lamp = useRef<Mesh>(null)
   const halo = useRef<Mesh>(null)
+  const screen = useRef<Mesh>(null)
+  const pad = useRef<Mesh>(null)
   const botRoot = useRef<Group>(null)
   const walk = useRef({ z: 0, x: 0 })
 
@@ -129,13 +133,25 @@ function TellerPod({
     if (lamp.current) {
       const mat = lamp.current.material as { emissiveIntensity?: number }
       if (mat.emissiveIntensity != null) {
-        mat.emissiveIntensity = offline ? 0.2 : (focused ? 0.85 : 0.55) + Math.sin(t * 2.4 + index) * 0.18
+        mat.emissiveIntensity =
+          offline ? 0.2 : (focused || near ? 0.95 : 0.55) + Math.sin(t * 2.4 + index) * 0.18
       }
     }
     if (halo.current) {
-      const pulse = focused ? 0.08 : 0.035
-      const s = 1 + Math.sin(t * 1.9 + index) * pulse
+      const pulse = focused || near ? 0.1 : 0.035
+      const s = 1 + Math.sin(t * (near ? 3.2 : 1.9) + index) * pulse
       halo.current.scale.set(s, 1, s)
+      const mat = halo.current.material as { opacity?: number }
+      if (mat.opacity != null) mat.opacity = near || focused ? 0.9 : 0.55
+    }
+    if (screen.current && !offline) {
+      const mat = screen.current.material as { opacity?: number }
+      if (mat.opacity != null) {
+        mat.opacity = 0.45 + Math.sin(t * 5.5 + index * 1.7) * 0.12 + (near ? 0.12 : 0)
+      }
+    }
+    if (pad.current && !offline) {
+      pad.current.position.y = 0.96 + Math.sin(t * 3.4 + index) * 0.004
     }
     // Step sideways behind the counter when away — never through the desk.
     const targetZ = recalling ? 0 : away ? 0.1 : 0
@@ -146,7 +162,12 @@ function TellerPod({
       botRoot.current.position.x = walk.current.x
       botRoot.current.position.y = 0.18 + (away && !recalling ? Math.sin(t * 6) * 0.02 : 0)
       botRoot.current.position.z = BOT_Z + walk.current.z
-      const face = away && !recalling ? Math.PI + (index % 2 === 0 ? -0.55 : 0.55) : Math.PI
+      // Idle lean toward the transaction pad when on duty.
+      const workLean = !away && !offline && Math.sin(t * 0.55 + index) > 0.55 ? 0.12 : 0
+      const face =
+        away && !recalling
+          ? Math.PI + (index % 2 === 0 ? -0.55 : 0.55)
+          : Math.PI + workLean * (index % 2 === 0 ? -1 : 1)
       botRoot.current.rotation.y = MathUtils.damp(botRoot.current.rotation.y, face, 4.5, dt)
     }
   })
@@ -199,9 +220,9 @@ function TellerPod({
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={focused ? 0.3 : 0.14} />
       </mesh>
       {/* Transaction pad */}
-      <mesh position={[0.15, 0.96, -0.2]} rotation={[-Math.PI / 2, 0, 0.08]}>
+      <mesh ref={pad} position={[0.15, 0.96, -0.2]} rotation={[-Math.PI / 2, 0, 0.08]}>
         <planeGeometry args={[0.28, 0.2]} />
-        <meshStandardMaterial color="#f4f0e4" roughness={0.9} />
+        <meshStandardMaterial color="#f4f0e4" roughness={0.9} emissive={color} emissiveIntensity={near ? 0.18 : 0.05} />
       </mesh>
       {([-podW / 2 - 0.02, podW / 2 + 0.02] as const).map((sx) => (
         <mesh key={sx} position={[sx, 0.55, -0.58]}>
@@ -227,7 +248,7 @@ function TellerPod({
         <boxGeometry args={[0.34, 0.22, 0.028]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} emissive={color} emissiveIntensity={0.12} />
       </mesh>
-      <mesh position={[-0.28, 1.05, -0.2]} rotation={[-0.32, 0.08, 0]}>
+      <mesh ref={screen} position={[-0.28, 1.05, -0.2]} rotation={[-0.32, 0.08, 0]}>
         <planeGeometry args={[0.28, 0.16]} />
         <meshBasicMaterial color={offline ? '#2a1830' : color} transparent opacity={0.55} toneMapped={false} />
       </mesh>
@@ -300,8 +321,8 @@ function TellerPod({
           document.body.style.cursor = 'default'
         }}
       >
-        <ringGeometry args={[focused ? 0.36 : 0.42, focused ? 0.6 : 0.54, 28]} />
-        <meshBasicMaterial color={color} transparent opacity={focused ? 0.85 : 0.55} toneMapped={false} />
+        <ringGeometry args={[focused || near ? 0.34 : 0.42, focused || near ? 0.62 : 0.54, 28]} />
+        <meshBasicMaterial color={color} transparent opacity={focused || near ? 0.9 : 0.55} toneMapped={false} />
       </mesh>
       {away && !recalling && (
         <Html position={[0, 2.05, -0.7]} center distanceFactor={9} style={{ pointerEvents: 'none' }}>
@@ -513,19 +534,35 @@ function TrustSeal({ workers }: { workers: number }) {
 }
 
 function LockboxWall({ bots }: { bots: BotRow[] }) {
-  const cells = []
-  for (let row = 0; row < 5; row++) {
-    for (let col = 0; col < 3; col++) {
-      const i = row * 3 + col
-      const bot = bots[i % Math.max(bots.length, 1)]
-      cells.push({
-        x: col * 0.38 - 0.38,
-        y: row * 0.34 + 1.0,
-        lit: Boolean(bot && bot.present !== false),
-        color: beamColorFor(bot?.id, i),
-      })
+  const leds = useRef<(Mesh | null)[]>([])
+  const cells = useMemo(() => {
+    const out = []
+    for (let row = 0; row < 5; row++) {
+      for (let col = 0; col < 3; col++) {
+        const i = row * 3 + col
+        const bot = bots[i % Math.max(bots.length, 1)]
+        out.push({
+          x: col * 0.38 - 0.38,
+          y: row * 0.34 + 1.0,
+          lit: Boolean(bot && bot.present !== false),
+          color: beamColorFor(bot?.id, i),
+          phase: i * 0.73,
+        })
+      }
     }
-  }
+    return out
+  }, [bots])
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime()
+    leds.current.forEach((m, i) => {
+      if (!m) return
+      const c = cells[i]
+      if (!c?.lit) return
+      const blink = Math.sin(t * 2.1 + c.phase) > 0.82
+      const mat = m.material as { color?: { set: (v: string) => void } }
+      mat.color?.set(blink ? '#ffffff' : c.color)
+    })
+  })
   return (
     <group position={[-HALL_W / 2 + 0.85, 0, Z_BACK + 2.4]} rotation={[0, 0.55, 0]}>
       <mesh position={[0, 1.5, -0.05]}>
@@ -542,7 +579,12 @@ function LockboxWall({ bots }: { bots: BotRow[] }) {
             <boxGeometry args={[0.035, 0.05, 0.02]} />
             <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
           </mesh>
-          <mesh position={[-0.08, 0.06, 0.05]}>
+          <mesh
+            ref={(el) => {
+              leds.current[i] = el
+            }}
+            position={[-0.08, 0.06, 0.05]}
+          >
             <sphereGeometry args={[0.025, 8, 8]} />
             <meshBasicMaterial color={c.lit ? c.color : '#332240'} toneMapped={false} />
           </mesh>
@@ -864,79 +906,212 @@ function BankEnclosure() {
         </group>
       ))}
 
-      {/* Wall clock above the vault */}
-      <group position={[0, ceilY - 1.15, zBack + 0.2]}>
-        <mesh>
-          <cylinderGeometry args={[0.38, 0.38, 0.06, 28]} />
-          <meshStandardMaterial color="#1a1424" metalness={0.5} roughness={0.4} />
-        </mesh>
-        <mesh position={[0, 0, 0.04]} rotation={[Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[0.32, 28]} />
-          <meshBasicMaterial color="#0a0614" toneMapped={false} />
-        </mesh>
-        <mesh position={[0, 0.12, 0.05]} rotation={[0, 0, 0.2]}>
-          <boxGeometry args={[0.02, 0.22, 0.02]} />
+      <WallClock position={[0, ceilY - 1.15, zBack + 0.2]} />
+      <SecurityCam side={-1} x={-(halfW - 0.55)} y={ceilY - 0.55} z={midZ} />
+      <SecurityCam side={1} x={halfW - 0.55} y={ceilY - 0.55} z={midZ} />
+      <ServingSign side={-1} x={-1.35} z={midZ * 0.35} />
+      <ServingSign side={1} x={1.35} z={midZ * 0.35 + 1.8} />
+      <CeilingFan x={0} y={ceilY - 0.22} z={midZ * 0.15} />
+      <CeilingFan x={0} y={ceilY - 0.22} z={-4.2} />
+
+      {/* Planter boxes near the portal — soft leaf sway */}
+      {([-1, 1] as const).map((side) => (
+        <Planter key={`plant-${side}`} x={side * (portalW / 2 + 1.1)} z={zFront - 1.1} />
+      ))}
+    </group>
+  )
+}
+
+function WallClock({ position }: { position: [number, number, number] }) {
+  const hour = useRef<Group>(null)
+  const minute = useRef<Group>(null)
+  const second = useRef<Group>(null)
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime()
+    // Slow decorative clock — readable motion without needing real time.
+    if (hour.current) hour.current.rotation.z = -t * 0.04
+    if (minute.current) minute.current.rotation.z = -t * 0.22
+    if (second.current) second.current.rotation.z = -t * 1.15
+  })
+  return (
+    <group position={position}>
+      <mesh>
+        <cylinderGeometry args={[0.38, 0.38, 0.06, 28]} />
+        <meshStandardMaterial color="#1a1424" metalness={0.5} roughness={0.4} />
+      </mesh>
+      <mesh position={[0, 0, 0.04]} rotation={[Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.32, 28]} />
+        <meshBasicMaterial color="#0a0614" toneMapped={false} />
+      </mesh>
+      {Array.from({ length: 12 }, (_, i) => {
+        const a = (i / 12) * Math.PI * 2
+        return (
+          <mesh key={i} position={[Math.sin(a) * 0.26, Math.cos(a) * 0.26, 0.05]}>
+            <boxGeometry args={[0.018, 0.04, 0.01]} />
+            <meshBasicMaterial color="#7ec8d8" toneMapped={false} />
+          </mesh>
+        )
+      })}
+      <group ref={hour} position={[0, 0, 0.055]}>
+        <mesh position={[0, 0.09, 0]}>
+          <boxGeometry args={[0.028, 0.18, 0.012]} />
           <meshBasicMaterial color="#f9c80e" toneMapped={false} />
         </mesh>
-        <mesh position={[0.08, 0, 0.05]} rotation={[0, 0, 1.1]}>
-          <boxGeometry args={[0.016, 0.16, 0.016]} />
+      </group>
+      <group ref={minute} position={[0, 0, 0.06]}>
+        <mesh position={[0, 0.12, 0]}>
+          <boxGeometry args={[0.018, 0.24, 0.01]} />
           <meshBasicMaterial color="#2de2e6" toneMapped={false} />
         </mesh>
       </group>
+      <group ref={second} position={[0, 0, 0.065]}>
+        <mesh position={[0, 0.13, 0]}>
+          <boxGeometry args={[0.01, 0.26, 0.008]} />
+          <meshBasicMaterial color="#ff2a6d" toneMapped={false} />
+        </mesh>
+      </group>
+    </group>
+  )
+}
 
-      {/* Security cameras in the corners */}
-      {([-1, 1] as const).map((side) => (
-        <group key={`cam-${side}`} position={[side * (halfW - 0.55), ceilY - 0.55, midZ]}>
-          <mesh>
-            <boxGeometry args={[0.18, 0.1, 0.22]} />
-            <meshStandardMaterial color="#1a1424" metalness={0.6} roughness={0.35} />
-          </mesh>
-          <mesh position={[0, -0.08, 0.06]} rotation={[0.4, 0, 0]}>
-            <sphereGeometry args={[0.07, 12, 12]} />
-            <meshStandardMaterial color="#0a1020" metalness={0.7} roughness={0.25} />
-          </mesh>
-          <mesh position={[0, -0.1, 0.1]}>
-            <sphereGeometry args={[0.025, 8, 8]} />
-            <meshBasicMaterial color="#ff2a6d" toneMapped={false} />
-          </mesh>
-        </group>
-      ))}
+function SecurityCam({ side, x, y, z }: { side: -1 | 1; x: number; y: number; z: number }) {
+  const head = useRef<Group>(null)
+  const led = useRef<Mesh>(null)
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime()
+    if (head.current) {
+      head.current.rotation.y = side * (0.35 + Math.sin(t * 0.35 + side) * 0.55)
+      head.current.rotation.x = 0.35 + Math.sin(t * 0.55) * 0.08
+    }
+    if (led.current) {
+      const mat = led.current.material as { opacity?: number }
+      if (mat.opacity != null) mat.opacity = 0.55 + (Math.sin(t * 4.5 + side) > 0.7 ? 0.45 : 0)
+    }
+  })
+  return (
+    <group position={[x, y, z]}>
+      <mesh>
+        <boxGeometry args={[0.18, 0.1, 0.22]} />
+        <meshStandardMaterial color="#1a1424" metalness={0.6} roughness={0.35} />
+      </mesh>
+      <group ref={head} position={[0, -0.04, 0.02]}>
+        <mesh position={[0, -0.04, 0.06]} rotation={[0.4, 0, 0]}>
+          <sphereGeometry args={[0.07, 12, 12]} />
+          <meshStandardMaterial color="#0a1020" metalness={0.7} roughness={0.25} />
+        </mesh>
+        <mesh ref={led} position={[0, -0.06, 0.12]}>
+          <sphereGeometry args={[0.025, 8, 8]} />
+          <meshBasicMaterial color="#ff2a6d" transparent opacity={0.9} toneMapped={false} />
+        </mesh>
+      </group>
+    </group>
+  )
+}
 
-      {/* Queue "NOW SERVING" placards along the aisle */}
-      {([-1, 1] as const).map((side) => (
-        <group key={`serve-${side}`} position={[side * 1.35, 0, midZ * 0.35]}>
-          <mesh position={[0, 1.05, 0]}>
-            <boxGeometry args={[0.06, 2.0, 0.06]} />
-            <meshStandardMaterial color="#2a2438" metalness={0.4} roughness={0.45} />
-          </mesh>
-          <mesh position={[0, 2.05, 0.04]}>
-            <boxGeometry args={[0.55, 0.28, 0.04]} />
-            <meshStandardMaterial color={INK} emissive="#2de2e6" emissiveIntensity={0.2} />
-          </mesh>
-          <mesh position={[0, 2.05, 0.07]}>
-            <planeGeometry args={[0.48, 0.2]} />
-            <meshBasicMaterial color="#39ff14" toneMapped={false} />
-          </mesh>
-        </group>
-      ))}
+function ServingSign({ side, x, z }: { side: -1 | 1; x: number; z: number }) {
+  const glow = useRef<Mesh>(null)
+  const [ticket, setTicket] = useState(() => 100 + side * 12)
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setTicket((n) => n + 1 + (Math.random() > 0.7 ? 1 : 0))
+    }, 5200 + side * 900)
+    return () => window.clearInterval(id)
+  }, [side])
+  useFrame(({ clock }) => {
+    if (!glow.current) return
+    const mat = glow.current.material as { emissiveIntensity?: number }
+    if (mat.emissiveIntensity != null) {
+      mat.emissiveIntensity = 0.25 + Math.sin(clock.getElapsedTime() * 2.8 + side) * 0.12
+    }
+  })
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, 1.05, 0]}>
+        <boxGeometry args={[0.06, 2.0, 0.06]} />
+        <meshStandardMaterial color="#2a2438" metalness={0.4} roughness={0.45} />
+      </mesh>
+      <mesh ref={glow} position={[0, 2.05, 0.04]}>
+        <boxGeometry args={[0.62, 0.36, 0.04]} />
+        <meshStandardMaterial color={INK} emissive="#2de2e6" emissiveIntensity={0.28} />
+      </mesh>
+      <Html position={[0, 2.05, 0.08]} center distanceFactor={10} style={{ pointerEvents: 'none' }}>
+        <div
+          style={{
+            fontFamily: 'Share Tech Mono, monospace',
+            fontSize: '11px',
+            color: '#39ff14',
+            letterSpacing: '0.1em',
+            textAlign: 'center',
+            lineHeight: 1.25,
+            textShadow: '0 0 8px rgba(57,255,20,0.45)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          NOW SERVING
+          <div style={{ fontSize: '15px', color: '#f9c80e', marginTop: 2 }}>{String(ticket % 1000).padStart(3, '0')}</div>
+        </div>
+      </Html>
+    </group>
+  )
+}
 
-      {/* Planter boxes near the portal */}
-      {([-1, 1] as const).map((side) => (
-        <group key={`plant-${side}`} position={[side * (portalW / 2 + 1.1), 0, zFront - 1.1]}>
-          <mesh position={[0, 0.28, 0]}>
-            <boxGeometry args={[0.7, 0.55, 0.45]} />
-            <meshStandardMaterial color="#1a1428" roughness={0.7} />
+function CeilingFan({ x, y, z }: { x: number; y: number; z: number }) {
+  const blades = useRef<Group>(null)
+  useFrame((_, dt) => {
+    if (blades.current) blades.current.rotation.y += dt * 2.1
+  })
+  return (
+    <group position={[x, y, z]}>
+      <mesh>
+        <cylinderGeometry args={[0.08, 0.08, 0.14, 10]} />
+        <meshStandardMaterial color="#2a2438" metalness={0.5} roughness={0.4} />
+      </mesh>
+      <mesh position={[0, -0.1, 0]}>
+        <sphereGeometry args={[0.07, 10, 10]} />
+        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.55} toneMapped={false} />
+      </mesh>
+      <group ref={blades} position={[0, -0.08, 0]}>
+        {[0, 1, 2, 3].map((i) => (
+          <mesh key={i} rotation={[0, (i * Math.PI) / 2, 0]} position={[0.42, 0, 0]}>
+            <boxGeometry args={[0.84, 0.025, 0.14]} />
+            <meshStandardMaterial
+              color="#3a2860"
+              emissive="#2de2e6"
+              emissiveIntensity={0.22}
+              roughness={0.45}
+              metalness={0.3}
+            />
           </mesh>
-          <mesh position={[0, 0.58, 0]}>
-            <sphereGeometry args={[0.28, 12, 10]} />
-            <meshStandardMaterial color="#1a4a2a" roughness={0.85} />
-          </mesh>
-          <mesh position={[0.1, 0.72, 0.05]}>
-            <sphereGeometry args={[0.16, 10, 8]} />
-            <meshStandardMaterial color="#2a6a38" roughness={0.8} />
-          </mesh>
-        </group>
-      ))}
+        ))}
+      </group>
+    </group>
+  )
+}
+
+function Planter({ x, z }: { x: number; z: number }) {
+  const leaf = useRef<Group>(null)
+  useFrame(({ clock }) => {
+    if (!leaf.current) return
+    const t = clock.getElapsedTime()
+    leaf.current.rotation.z = Math.sin(t * 1.1 + x) * 0.06
+    leaf.current.rotation.x = Math.cos(t * 0.9) * 0.04
+  })
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, 0.28, 0]}>
+        <boxGeometry args={[0.7, 0.55, 0.45]} />
+        <meshStandardMaterial color="#1a1428" roughness={0.7} />
+      </mesh>
+      <group ref={leaf}>
+        <mesh position={[0, 0.58, 0]}>
+          <sphereGeometry args={[0.28, 12, 10]} />
+          <meshStandardMaterial color="#1a4a2a" roughness={0.85} />
+        </mesh>
+        <mesh position={[0.1, 0.72, 0.05]}>
+          <sphereGeometry args={[0.16, 10, 8]} />
+          <meshStandardMaterial color="#2a6a38" roughness={0.8} />
+        </mesh>
+      </group>
     </group>
   )
 }
@@ -946,12 +1121,14 @@ function DataMotes() {
   const ref = useRef<Group>(null)
   const motes = useMemo(
     () =>
-      Array.from({ length: 6 }, (_, i) => ({
-        x: ((i * 47) % 100) / 100 * 5 - 2.5,
-        z: ((i * 31) % 100) / 100 * 4 - 2.5,
-        phase: i * 0.9,
-        speed: 0.22 + (i % 3) * 0.05,
+      Array.from({ length: 14 }, (_, i) => ({
+        x: ((i * 47) % 100) / 100 * 8 - 4,
+        z: ((i * 31) % 100) / 100 * 12 - 6,
+        phase: i * 0.73,
+        speed: 0.18 + (i % 4) * 0.05,
+        drift: 0.15 + (i % 3) * 0.05,
         color: BEAM_COLORS[i % BEAM_COLORS.length],
+        size: 0.03 + (i % 3) * 0.012,
       })),
     [],
   )
@@ -960,7 +1137,9 @@ function DataMotes() {
     const t = clock.getElapsedTime()
     ref.current.children.forEach((child, i) => {
       const m = motes[i]
-      child.position.y = 1.6 + ((t * m.speed + m.phase) % 2.4)
+      child.position.x = m.x + Math.sin(t * m.drift + m.phase) * 0.55
+      child.position.y = 1.1 + ((t * m.speed + m.phase) % 3.2)
+      child.position.z = m.z + Math.cos(t * m.drift * 0.8 + m.phase) * 0.4
       child.rotation.y = t * 0.5 + m.phase
     })
   })
@@ -968,26 +1147,95 @@ function DataMotes() {
     <group ref={ref}>
       {motes.map((m, i) => (
         <mesh key={i} position={[m.x, 1.8, m.z]}>
-          <boxGeometry args={[0.04, 0.04, 0.04]} />
-          <meshBasicMaterial color={m.color} transparent opacity={0.4} toneMapped={false} />
+          <boxGeometry args={[m.size, m.size, m.size]} />
+          <meshBasicMaterial color={m.color} transparent opacity={0.38} toneMapped={false} />
         </mesh>
       ))}
     </group>
   )
 }
 
+/** Vault guard — short patrol along the back apron. */
 function Warden() {
+  const root = useRef<Group>(null)
+  const label = useRef<Group>(null)
+  useFrame(({ clock }, dt) => {
+    const t = clock.getElapsedTime()
+    if (!root.current) return
+    const x = 1.85 + Math.sin(t * 0.22) * 1.15
+    const z = Z_BACK + 1.85 + Math.cos(t * 0.22) * 0.15
+    root.current.position.x = MathUtils.damp(root.current.position.x, x, 2.2, dt)
+    root.current.position.z = MathUtils.damp(root.current.position.z, z, 2.2, dt)
+    // Face along the patrol arc, slightly toward the aisle.
+    root.current.rotation.y = MathUtils.damp(
+      root.current.rotation.y,
+      Math.PI * 0.92 + Math.sin(t * 0.22) * 0.7,
+      2.5,
+      dt,
+    )
+    if (label.current) label.current.rotation.y = -root.current.rotation.y + Math.PI
+  })
   return (
-    <group position={[1.85, 0.05, Z_BACK + 1.85]} rotation={[0, Math.PI * 0.92, 0]} scale={0.88}>
-      <BotFigure pose="waiting" seated={false} />
-      <mesh position={[0, 2.15, 0.05]}>
-        <boxGeometry args={[0.9, 0.14, 0.04]} />
-        <meshStandardMaterial color={INK} emissive="#ff2a6d" emissiveIntensity={0.45} />
-      </mesh>
-      <mesh position={[0, 2.15, 0.08]}>
-        <planeGeometry args={[0.82, 0.1]} />
-        <meshBasicMaterial color="#ff2a6d" toneMapped={false} />
-      </mesh>
+    <group ref={root} position={[1.85, 0.05, Z_BACK + 1.85]} rotation={[0, Math.PI * 0.92, 0]} scale={0.88}>
+      <BotFigure pose="waiting" seated={false} seed={21} />
+      <group ref={label}>
+        <mesh position={[0, 2.15, 0.05]}>
+          <boxGeometry args={[0.9, 0.14, 0.04]} />
+          <meshStandardMaterial color={INK} emissive="#ff2a6d" emissiveIntensity={0.45} />
+        </mesh>
+        <mesh position={[0, 2.15, 0.08]}>
+          <planeGeometry args={[0.82, 0.1]} />
+          <meshBasicMaterial color="#ff2a6d" toneMapped={false} />
+        </mesh>
+      </group>
+    </group>
+  )
+}
+
+/** Visual-only lobby patrons pacing the center aisle. */
+function LobbyPatrons() {
+  const paths = useMemo(
+    () => [
+      // Keep clear of player spawn (~z 5) so patrons don't read as the walker.
+      { xAmp: 0.45, z0: 2.8, z1: -3.4, speed: 0.18, phase: 0.2, seed: 4, side: -0.65 },
+      { xAmp: 0.35, z0: 1.6, z1: -6.2, speed: 0.14, phase: 2.4, seed: 9, side: 0.75 },
+      { xAmp: 0.3, z0: 0.4, z1: -2.2, speed: 0.22, phase: 4.1, seed: 14, side: -0.2 },
+    ],
+    [],
+  )
+  const roots = useRef<(Group | null)[]>([])
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime()
+    paths.forEach((p, i) => {
+      const g = roots.current[i]
+      if (!g) return
+      const u = (Math.sin(t * p.speed + p.phase) + 1) / 2
+      const z = p.z0 + (p.z1 - p.z0) * u
+      const x = p.side + Math.sin(t * p.speed * 1.4 + p.phase) * p.xAmp
+      const prevZ = g.position.z
+      g.position.x = x
+      g.position.z = z
+      g.position.y = 0.05 + Math.abs(Math.sin(t * 8 + p.phase)) * 0.02
+      const goingBack = z < prevZ - 0.001
+      const goingFwd = z > prevZ + 0.001
+      if (goingBack) g.rotation.y = Math.PI
+      else if (goingFwd) g.rotation.y = 0
+    })
+  })
+  return (
+    <group>
+      {paths.map((p, i) => (
+        <group
+          key={i}
+          ref={(el) => {
+            roots.current[i] = el
+          }}
+          position={[p.side, 0.05, p.z0]}
+          scale={0.82}
+        >
+          <BotFigure pose="waiting" seated={false} seed={p.seed} />
+        </group>
+      ))}
     </group>
   )
 }
@@ -1043,8 +1291,15 @@ function LaneFloorGuide({ color }: { color: string }) {
 function RopeSpan({ x, z0, z1, color }: { x: number; z0: number; z1: number; color: string }) {
   const len = Math.abs(z1 - z0)
   const midZ = (z0 + z1) / 2
+  const rope = useRef<Group>(null)
+  useFrame(({ clock }) => {
+    if (!rope.current) return
+    const sag = Math.sin(clock.getElapsedTime() * 1.4 + x * 3 + midZ) * 0.012
+    rope.current.position.y = sag
+    rope.current.rotation.z = sag * 0.8
+  })
   return (
-    <group>
+    <group ref={rope}>
       <mesh position={[x, ROPE_Y - 0.02, midZ]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.016, 0.016, len, 6]} />
         <meshBasicMaterial color={color} toneMapped={false} />
@@ -1186,9 +1441,11 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
   const tellers = useMemo(() => tellerSlots(bots), [bots])
   const workers = workersOnShift(bots)
   const [focus, setFocus] = useState(0)
+  const [nearIndex, setNearIndex] = useState<number | null>(null)
   const [awayIndex, setAwayIndex] = useState<number | null>(null)
   const [recalling, setRecalling] = useState(false)
   const recallTimer = useRef<number | null>(null)
+  const aisleLight = useRef<PointLight>(null)
 
   const tellerMouths = useMemo(
     () =>
@@ -1270,6 +1527,12 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
     }
   }, [])
 
+  useFrame(({ clock }) => {
+    if (!aisleLight.current) return
+    const t = clock.getElapsedTime()
+    aisleLight.current.intensity = 1.05 + Math.sin(t * 1.15) * 0.12
+  })
+
   return (
     <>
       <color attach="background" args={['#1a1030']} />
@@ -1288,11 +1551,12 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
           requestTeller(id, index)
         }}
         onHintChange={onWalkHint}
+        onNearChange={setNearIndex}
       />
 
       <ambientLight intensity={0.7} color="#d8ceff" />
       <directionalLight position={[2.8, 6.5, 2.2]} intensity={0.7} color="#ffe9c8" castShadow={false} />
-      <pointLight position={[0, 3.2, 0]} intensity={1.15} color="#fff0b0" distance={20} />
+      <pointLight ref={aisleLight} position={[0, 3.2, 0]} intensity={1.15} color="#fff0b0" distance={20} />
       <pointLight position={[0, 2.9, Z_BACK + 1.6]} intensity={0.65} color="#7ef9ff" distance={14} />
       <pointLight position={[-HALL_W / 2 + 1.2, 2.6, 0]} intensity={0.45} color="#b967ff" distance={9} />
       <pointLight position={[HALL_W / 2 - 1.2, 2.6, 0]} intensity={0.45} color="#b967ff" distance={9} />
@@ -1344,6 +1608,7 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
       <SideScreen side={1} desk={desk} bots={bots} onOpen={onOpenDeskOps} />
       <TrustSeal workers={workers} />
       <Warden />
+      <LobbyPatrons />
       <CompliancePillar />
       <NightDeposit />
       <WaitingBench x={-HALL_W / 2 + 2.2} />
@@ -1359,6 +1624,7 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
               bot={bot}
               index={i}
               focused={focus === i}
+              near={nearIndex === i}
               away={awayIndex === i}
               recalling={recalling && awayIndex === i}
               onSelect={(id) => {
