@@ -574,9 +574,35 @@ def main() -> int:
         desk_brain.remember_queue(DESK_ROOT, ranked, note="commodity-15m local queue")
     except Exception:
         ranked = candidates
+    today_pnl = 0.0
+    today_tag = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    for pos in account.get("closed") or []:
+        if not isinstance(pos, dict):
+            continue
+        if today_tag in str(pos.get("closed") or ""):
+            try:
+                today_pnl += float(pos.get("pnl") or 0)
+            except (TypeError, ValueError):
+                pass
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_more
+        max_buys_eff = int(
+            desk_more.selective_max_buys(
+                "commodity-15m", base=MAX_BUYS_PER_CHECK, today=today_pnl,
+            )
+        )
+    except Exception:
+        max_buys_eff = int(MAX_BUYS_PER_CHECK)
+    if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
+        print(
+            f"Selective volume: max buys {max_buys_eff} "
+            f"(today ${today_pnl:.2f} ≥ 0, fee floors locked)"
+        )
     for row in ranked:
-        if buys >= MAX_BUYS_PER_CHECK:
-            print(f"  → skip: max buys this check ({MAX_BUYS_PER_CHECK})")
+        if buys >= max_buys_eff:
+            print(f"  → skip: max buys this check ({max_buys_eff})")
             break
         ev = row.get("_ev") or row
         msg = paper_buy(account, ev)
