@@ -115,13 +115,37 @@ Interactive: Positive ROI Master Plan canvas.
 | Staff arm/clear artifact | `staff_promote_inx_band` / `staff_clear_inx_band_promote` |
 | Bots honor promote | `effective_inx_ask_band` in kalshi-sp / sized |
 
+### Correlation matrix + series haircut
+
+| Ticket | Where |
+| --- | --- |
+| Firm matrix board | `desk_profit.correlation_matrix` → Masters `roi_plan.correlation` |
+| BTC↔INX hard veto | existing `correlation_pairs` (unchanged) |
+| WTI↔Brent 0.5× haircut | `series_corr_haircut` in commodity `paper_buy` |
+
+### Incubation lane
+
+| Ticket | Where |
+| --- | --- |
+| New series settle counter | `record_incubation_settle` (n≥50) |
+| Staff graduate | `staff_graduate_incubation` (`auto_promote=False`) |
+| Masters board | `incubation_board` → `roi_plan.incubation` |
+
+### Ruin drill UX
+
+| Ticket | Where |
+| --- | --- |
+| Soft / hard / nuclear levels | `set_ruin_drill` / `clear_ruin_drill` |
+| Entry gate blocks on active drill | `pimp_desk.entry_gate` via `ruin_drill_blocks_entries` |
+| Hard/nuclear pauses all bots | uses existing `set_pause(all_bots=True)` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Correlation matrix firm haircut | BTC↔INX / WTI↔Brent |
-| Incubation lane | 50 fee-aware settles before promote |
-| Ruin drill UX | soft / hard / nuclear |
+| Tax/fee ledger completeness | true ROI ledger |
+| Clock-skew / stale-world skip | loop latency threshold |
+| Helper Gate A taxed EV | helper autonomy bar |
 
 ## Hard rules unchanged
 

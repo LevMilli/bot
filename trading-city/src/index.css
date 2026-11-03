@@ -716,27 +716,46 @@ a {
 }
 
 .floor-directory {
-  margin-top: 0.65rem;
+  margin-top: 0.4rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  max-width: min(42rem, 94vw);
+  gap: 0.28rem;
+  max-width: min(36rem, 70vw);
+  pointer-events: auto;
+}
+
+.bank-hud .floor-directory {
+  max-width: min(28rem, 55vw);
+  opacity: 0.82;
 }
 
 .floor-chip {
   display: grid;
   grid-template-columns: auto 1fr;
   grid-template-rows: auto auto;
-  column-gap: 0.45rem;
-  row-gap: 0.05rem;
+  column-gap: 0.35rem;
+  row-gap: 0.02rem;
   align-items: baseline;
-  padding: 0.35rem 0.55rem;
+  padding: 0.22rem 0.4rem;
   border: 1px solid rgba(45, 226, 230, 0.28);
   background: rgba(8, 12, 28, 0.72);
   color: #dce6f8;
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+
+.bank-hud .floor-chip {
+  grid-template-rows: auto;
+  padding: 0.18rem 0.35rem;
+}
+
+.bank-hud .floor-chip-wing {
+  display: none;
+}
+
+.bank-hud .floor-chip-name {
+  font-size: 0.65rem;
 }
 
 .floor-chip:hover,
@@ -779,6 +798,31 @@ a {
   font-size: 0.78rem;
   letter-spacing: 0.02em;
   pointer-events: auto;
+}
+
+.vault-walk-toolbar {
+  margin-top: 0.45rem;
+  pointer-events: auto;
+}
+
+.vault-walk-btn {
+  appearance: none;
+  background: rgba(4, 8, 20, 0.82);
+  border: 1px solid rgba(45, 226, 230, 0.55);
+  color: var(--cyan);
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.65rem;
+  cursor: pointer;
+}
+
+.vault-walk-btn:hover,
+.vault-walk-btn.active {
+  color: #fff;
+  border-color: rgba(57, 255, 20, 0.7);
+  background: rgba(57, 255, 20, 0.12);
 }
 
 .vault-board-toolbar {
@@ -830,6 +874,13 @@ a {
 
 .bank-hud .office-title strong {
   color: var(--amber);
+}
+
+.bank-hud .office-title .walk-hint-go {
+  color: var(--lime);
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 12px rgba(57, 255, 20, 0.45);
 }
 
 .monitors {

@@ -372,6 +372,7 @@ def master_summary(
             "clv_completeness": desk_roi_plan.clv_completeness(root),
             "sports_hard_stop_shadow": desk_roi_plan.sports_hard_stop_shadow_summary(root),
             "inx_band_promote": desk_roi_plan.inx_band_promote_status(root),
+            "correlation": None,
             "weekly_scorecard": weekly,
             "graduation": graduation,
             "meme_retirement": retirement,
@@ -412,6 +413,19 @@ def master_summary(
                 plan["daily_r"] = latest_r
         except Exception:
             plan["daily_r"] = None
+        try:
+            import desk_profit
+            plan["correlation"] = desk_profit.correlation_matrix(bots, cfg=cfg)
+        except Exception:
+            plan["correlation"] = None
+        try:
+            plan["incubation"] = desk_roi_plan.incubation_board(root)
+        except Exception:
+            plan["incubation"] = None
+        try:
+            plan["ruin_drill"] = desk_roi_plan.ruin_drill_status(root)
+        except Exception:
+            plan["ruin_drill"] = None
     except Exception:
         plan = None
     return {

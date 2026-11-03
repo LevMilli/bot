@@ -276,6 +276,18 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
         "pnl": pnl,
     })
     state.setdefault("closed", []).append(closed)
+    try:
+        import desk_roi_plan
+        desk_roi_plan.record_incubation_settle(
+            DESK_ROOT,
+            series=str(pos.get("series") or ""),
+            bot="commodity-15m",
+            pnl=pnl,
+            contracts=pos.get("contracts"),
+            note=str(reason or "")[:80],
+        )
+    except Exception:
+        pass
     return pnl
 
 
@@ -360,6 +372,20 @@ def settle_account(state: dict) -> None:
                 result=str(result),
                 side=str(pos.get("side") or ""),
                 note="commodity-15m settle",
+            )
+        except Exception:
+            pass
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan
+            desk_roi_plan.record_incubation_settle(
+                DESK_ROOT,
+                series=str(pos.get("series") or ""),
+                bot="commodity-15m",
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                note="settled",
             )
         except Exception:
             pass
@@ -509,6 +535,36 @@ def paper_buy(state: dict, ev: dict) -> str:
             },
             return_plan=True,
         )
+        # WTI↔Brent series haircut when sibling open or closed today.
+        try:
+            import desk_profit
+            today_tag = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+            open_series = [
+                str(p.get("series") or "")
+                for p in (state.get("open") or [])
+                if isinstance(p, dict)
+            ]
+            closed_today = []
+            for p in state.get("closed") or []:
+                if not isinstance(p, dict):
+                    continue
+                if today_tag not in str(p.get("closed") or p.get("at") or ""):
+                    continue
+                closed_today.append(str(p.get("series") or ""))
+            hair = desk_profit.series_corr_haircut(
+                ev.get("series"),
+                open_series=open_series,
+                closed_today_series=closed_today,
+            )
+            if hair.get("apply") and float(hair.get("mult") or 1) < 1.0 - 1e-12:
+                stake = round(float(stake) * float(hair["mult"]), 2)
+                plan = dict(plan or {})
+                notes = list(plan.get("notes") or [])
+                notes.append(str(hair.get("note") or "series corr haircut"))
+                plan["notes"] = notes
+                plan["series_corr_haircut"] = hair
+        except Exception:
+            pass
         contracts = desk.contracts_for_stake(per, stake)
     except Exception as exc:
         return f"Desk sizing failed: {type(exc).__name__}"
