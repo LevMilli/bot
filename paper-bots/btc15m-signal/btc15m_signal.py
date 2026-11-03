@@ -292,6 +292,9 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "btc15m")
             if cool:
                 return cool
+            revenge = desk_roi_plan.anti_revenge_blocks(DESK_ROOT, "btc15m", ticker)
+            if revenge:
+                return revenge
         except Exception:
             pass
     skip = ""
@@ -1096,6 +1099,17 @@ def main():
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
         print(f"Selective volume: max buys {max_buys_eff} (today ${today_pnl:.2f} ≥ 0, fee floors locked)")
+    # Daily R budget → settle-only after tower hits target (exits stay on).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        r_block = desk_roi_plan.daily_r_blocks("btc15m", today_pnl)
+        if r_block:
+            print(f"Settle-only: {r_block}")
+            max_buys_eff = 0
+    except Exception:
+        pass
 
     for ev in ranked:
         if buys >= max_buys_eff:
@@ -1149,6 +1163,15 @@ def main():
                             )
                         except Exception:
                             pass
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.record_anti_revenge(
+                        DESK_ROOT, bot="btc15m",
+                        ticker=str(ev.get("ticker") or ""), reason="take-profit",
+                        note=str(tp_sold[0])[:120],
+                    )
+                except Exception:
+                    pass
         if flip_on and account.get("open") and ev.get("side") and ev.get("bid") is not None and ev.get("p") is not None:
             sold = manage_model_flips(
                 account,
@@ -1172,6 +1195,15 @@ def main():
                             )
                         except Exception:
                             pass
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.record_anti_revenge(
+                        DESK_ROOT, bot="btc15m",
+                        ticker=str(ev.get("ticker") or ""), reason="model-flip",
+                        note=str(sold[0])[:120],
+                    )
+                except Exception:
+                    pass
 
         reasons = list(ev.get("reasons") or [])
         ml = float(min_left) if min_left is not None else 0.0

@@ -906,9 +906,10 @@ export function OfficeScene({
 
   return (
     <>
+      {/* Suite/hallway fog from office polish; far clip from main so wall/city charts stay visible. */}
       <color attach="background" args={['#0a0418']} />
       <fog attach="fog" args={['#100628', 22, 90]} />
-      <PerspectiveCamera makeDefault fov={48} near={0.08} far={140} position={HOME_POS} />
+      <PerspectiveCamera makeDefault fov={48} near={0.08} far={260} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault

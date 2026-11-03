@@ -68,14 +68,60 @@ Interactive: Positive ROI Master Plan canvas.
 | Kill rule M3↑ M1↓ × 2 weeks | `capture_hillclimb_week` / `hillclimb_kill_status` — flag only, no auto param write |
 | Masters wire | `desk_master.master_summary` → `hillclimb_kill` |
 
+### Profit-lock harvest
+
+| Ticket | Where |
+| --- | --- |
+| Chicago-week firm PnL ledger | `desk_roi_plan.capture_profit_lock` |
+| Safe-mode 0.5× after $40 target | `profit_lock_size_mult` / `profit_lock_status` |
+| Masters wire | `desk_master.master_summary` → `profit_lock` |
+| Kelly path applies 0.5× | `pimp_desk.stake_dollars_for` notes `profit_lock_mult` |
+
+### Skip-regret weekly review
+
+| Ticket | Where |
+| --- | --- |
+| Weekly twin card | `desk_roi_plan.skip_regret_weekly_card` (`auto_promote=False`) |
+| Masters wire | `desk_master.master_summary` → `roi_plan.skip_regret_weekly` |
+
+### Sports hard-stop staff promote
+
+| Ticket | Where |
+| --- | --- |
+| Promote readiness (n≥30, shadow EV≥0) | `sports_hard_stop_shadow_summary.promote_ready` |
+| Staff arm/disarm live sells | `staff_set_sports_hard_stop_live` → promote JSON |
+| Runtime live check | `sports_hard_stop_is_live` (gap_bot); code `SPORTS_HARD_STOP_LIVE` stays False |
+
+### Daily R budget
+
+| Ticket | Where |
+| --- | --- |
+| Per-tower R budgets (sports 1.5R …) | `desk_roi_plan.DAILY_R_BUDGET` / `daily_r_blocks` |
+| Fee-clear bots settle-only after target | sports / BTC / commodity buy loops |
+| Masters board | `roi_plan.daily_r` via `capture_daily_r_board` |
+
+### Anti-revenge cool
+
+| Ticket | Where |
+| --- | --- |
+| Same-market block after stop/flip | `record_anti_revenge` / `anti_revenge_blocks` (30m) |
+| Wired on exits + buys | sports / BTC / commodity |
+
+### INX band staff promote
+
+| Ticket | Where |
+| --- | --- |
+| Promote-ready after research leader n≥20 | `inx_band_promote_status` |
+| Staff arm/clear artifact | `staff_promote_inx_band` / `staff_clear_inx_band_promote` |
+| Bots honor promote | `effective_inx_ask_band` in kalshi-sp / sized |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
-| INX band promote | only after research-week artifact |
-| Profit-lock harvest paper analog | cut size 50% after weekly target |
-| Skip-regret twin weekly review | wire into scorecard |
+| Correlation matrix firm haircut | BTC↔INX / WTI↔Brent |
+| Incubation lane | 50 fee-aware settles before promote |
+| Ruin drill UX | soft / hard / nuclear |
 
 ## Hard rules unchanged
 

@@ -19,11 +19,17 @@ LATENCY_JOURNAL = "desk_latency_journal.json"
 BASELINE_NAME = "desk_roi_baseline.json"
 NEAR_MISS_WEEKLY = "desk_near_miss_weekly.json"
 INX_BAND_RESEARCH = "desk_inx_band_research.json"
+INX_BAND_PROMOTE = "desk_inx_band_promote.json"
 SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
+SPORTS_HARD_STOP_PROMOTE = "desk_sports_hard_stop_promote.json"
 ADVERSE_COOL_NAME = "desk_adverse_cool.json"
 WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 MASTER_GRAD = "desk_master_grad.json"
 HILLCLIMB_KILL = "desk_hillclimb_kill.json"
+PROFIT_LOCK = "desk_profit_lock.json"
+SKIP_REGRET_WEEKLY = "desk_skip_regret_weekly.json"
+DAILY_R_NAME = "desk_daily_r.json"
+ANTI_REVENGE_NAME = "desk_anti_revenge.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -44,6 +50,24 @@ MEME_RETIRE_MIN_N = 10
 # Phase 11: hillclimb kill — M3↑ with M1↓ for 2 Chicago weeks → revert lever.
 HILLCLIMB_KILL_WEEKS = 2
 
+# Phase 10: profit-lock harvest paper analog — hit weekly target → 0.5× size.
+PROFIT_LOCK_TARGET_USD = 40.0
+PROFIT_LOCK_SIZE_MULT = 0.5
+
+# Phase 7: daily R budget — hit +budget → settle-only for that tower (exits still on).
+DAILY_R_USD = 20.0  # 1R paper unit
+DAILY_R_BUDGET = {
+    "sports-gap": 1.5,
+    "btc15m": 2.0,
+    "commodity-15m": 1.5,
+    "kalshi-sp": 1.0,
+    "kalshi-sized": 1.0,
+    "memecoin": 0.5,
+}
+
+# Phase 10: anti-revenge — same market blocked T minutes after stop/flip.
+ANTI_REVENGE_MINUTES = 30
+
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
 
@@ -59,6 +83,8 @@ INX_RESEARCH_BANDS = (
     {"id": "80_90", "lo": 0.80, "hi": 0.90},  # live default (locked until research wins)
     {"id": "90_95", "lo": 0.90, "hi": 0.95},
 )
+INX_LIVE_BAND_DEFAULT = "80_90"
+INX_BAND_PROMOTE_MIN_N = 20
 
 
 def _root(root: str | None = None) -> str:
@@ -427,6 +453,165 @@ def near_miss_weekly_card(root: str | None = None) -> dict:
     return card
 
 
+# ---- Skip-regret weekly review (Phase 8 helper loop) -----------------------
+
+def skip_regret_weekly_card(
+    root: str | None = None,
+    *,
+    label: str | None = None,
+) -> dict:
+    """Weekly twin of soft-gate skip regret — never loosens fee floors."""
+    try:
+        import desk_top25
+        summary = desk_top25.skip_regret_summary(root)
+    except Exception:
+        summary = {
+            "n": 0, "labeled_n": 0, "avg_would_pnl": None,
+            "green_twin": False, "loosen_soft_gates": False,
+        }
+    n = int(summary.get("labeled_n") or 0)
+    green = bool(summary.get("green_twin"))
+    if n < 20:
+        decision = "reject"
+    elif green:
+        decision = "review"  # staff may loosen one non-fee soft gate
+    else:
+        decision = "reject"
+    day = label or _chicago_day()
+    card = {
+        "paper_only": True,
+        "label": day,
+        "n": int(summary.get("n") or 0),
+        "labeled_n": n,
+        "avg_would_pnl": summary.get("avg_would_pnl"),
+        "win_rate": summary.get("win_rate"),
+        "green_twin": green,
+        "promote_min_n": 20,
+        "auto_promote": False,
+        "loosen_soft_gates": False,  # never auto; staff only when green_twin
+        "decision": decision,
+        "fee_floors_locked": True,
+        "note": (
+            "Skip-regret twin: only consider loosening a non-fee soft gate after "
+            "n≥20 labeled with avg would_pnl ≥ 0. Fee floors stay locked. No auto-promote."
+        ),
+    }
+    path = _path(SKIP_REGRET_WEEKLY, root)
+    store = _load(path, {"paper_only": True, "cards": []})
+    store.setdefault("cards", []).append({**card, "at": _now()})
+    store["cards"] = store["cards"][-52:]
+    store["latest"] = card
+    store["last_at"] = _now()
+    _save(path, store)
+    return card
+
+
+def latest_skip_regret_weekly(root: str | None = None) -> dict | None:
+    store = _load(
+        _path(SKIP_REGRET_WEEKLY, root),
+        {"paper_only": True, "cards": [], "latest": None},
+    )
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+# ---- Daily R budget (settle-only after target) -----------------------------
+
+def daily_r_budget_for(bot_id: str) -> float:
+    return float(DAILY_R_BUDGET.get(str(bot_id), 1.0))
+
+
+def daily_r_status(
+    bot_id: str,
+    today_pnl=None,
+    *,
+    r_usd: float = DAILY_R_USD,
+) -> dict:
+    """Chicago-day R usage. settle_only when today PnL ≥ budget×R (lock the win)."""
+    today = _finite(today_pnl)
+    budget_r = daily_r_budget_for(bot_id)
+    r = float(r_usd) if _finite(r_usd) and float(r_usd) > 0 else DAILY_R_USD
+    target_usd = round(budget_r * r, 2)
+    used_r = round(today / r, 4) if today is not None else None
+    settle_only = bool(today is not None and today + 1e-12 >= target_usd)
+    return {
+        "paper_only": True,
+        "bot": str(bot_id),
+        "r_usd": r,
+        "budget_r": budget_r,
+        "target_usd": target_usd,
+        "today_pnl": today,
+        "used_r": used_r,
+        "settle_only": settle_only,
+        "entries_blocked": settle_only,
+        "fee_floors_locked": True,
+        "note": (
+            f"Daily R budget {budget_r}R (${target_usd:.0f}): "
+            "after target → settle-only (exits stay on). No profit guarantee."
+        ),
+    }
+
+
+def daily_r_blocks(bot_id: str, today_pnl=None, *, r_usd: float = DAILY_R_USD) -> str:
+    """Non-empty reason when tower is settle-only after hitting daily R."""
+    status = daily_r_status(bot_id, today_pnl, r_usd=r_usd)
+    if not status.get("settle_only"):
+        return ""
+    return (
+        f"daily R budget hit for {bot_id}: "
+        f"today ${float(status.get('today_pnl') or 0):.2f} ≥ "
+        f"{status.get('budget_r')}R (${status.get('target_usd'):.0f}) — settle-only"
+    )
+
+
+def capture_daily_r_board(
+    root: str | None,
+    bots: list | None = None,
+    *,
+    label: str | None = None,
+    r_usd: float = DAILY_R_USD,
+) -> dict:
+    """Persist per-tower daily R card for Masters / hillclimb review."""
+    day = label or _chicago_day()
+    towers = {}
+    settle_only = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if not bot_id:
+            continue
+        row = daily_r_status(bot_id, bot.get("today"), r_usd=r_usd)
+        towers[bot_id] = row
+        if row.get("settle_only"):
+            settle_only.append(bot_id)
+    board = {
+        "paper_only": True,
+        "label": day,
+        "captured_at": _now(),
+        "r_usd": float(r_usd),
+        "towers": towers,
+        "settle_only": sorted(settle_only),
+        "fee_floors_locked": True,
+        "note": "Daily R board — settle-only after tower hits budget×R. Exits remain on.",
+    }
+    path = _path(DAILY_R_NAME, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = [c for c in cards if str(c.get("label") or "") != day]
+    cards.append(board)
+    store["cards"] = cards[-60:]
+    store["latest"] = board
+    _save(path, store)
+    return board
+
+
+def latest_daily_r_board(root: str | None = None) -> dict | None:
+    store = _load(_path(DAILY_R_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
 # ---- Sports CLV completeness -----------------------------------------------
 
 def clv_row_complete(row: dict | None) -> bool:
@@ -498,12 +683,82 @@ def inx_band_research_score(rows: list, *, lo: float, hi: float, fill_tax: float
     }
 
 
+def inx_band_from_id(band_id: str | None) -> dict:
+    bid = str(band_id or INX_LIVE_BAND_DEFAULT)
+    for b in INX_RESEARCH_BANDS:
+        if b["id"] == bid:
+            return {"id": b["id"], "lo": float(b["lo"]), "hi": float(b["hi"])}
+    return {"id": "80_90", "lo": 0.80, "hi": 0.90}
+
+
+def inx_live_band(root: str | None = None) -> dict:
+    """Effective INX ask band: staff promote artifact or default 80–90."""
+    promote = _load(
+        _path(INX_BAND_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "band_id": INX_LIVE_BAND_DEFAULT},
+    )
+    if bool(promote.get("staff_approved")) and promote.get("band_id"):
+        base = inx_band_from_id(str(promote.get("band_id")))
+        return {
+            **base,
+            "staff_approved": True,
+            "source": "staff_promote",
+            "promoted_at": promote.get("at"),
+            "note": promote.get("note") or "",
+            "fee_floors_locked": True,
+            "live_changed": base["id"] != INX_LIVE_BAND_DEFAULT,
+        }
+    base = inx_band_from_id(INX_LIVE_BAND_DEFAULT)
+    return {
+        **base,
+        "staff_approved": False,
+        "source": "default",
+        "fee_floors_locked": True,
+        "live_changed": False,
+    }
+
+
+def effective_inx_ask_band(root: str | None, cfg: dict | None = None) -> dict:
+    """Band for bots: staff promote overrides CFG; else keep config.json values."""
+    cfg = cfg or {}
+    live = inx_live_band(root)
+    if live.get("staff_approved"):
+        return {
+            "lo": float(live["lo"]),
+            "hi": float(live["hi"]),
+            "id": live["id"],
+            "source": "staff_promote",
+            "staff_approved": True,
+            "fee_floors_locked": True,
+        }
+    lo = _finite(cfg.get("band_min_ask"))
+    hi = _finite(cfg.get("band_max_ask"))
+    if lo is None:
+        lo = 0.80
+    if hi is None:
+        hi = 0.90
+    return {
+        "lo": float(lo),
+        "hi": float(hi),
+        "id": INX_LIVE_BAND_DEFAULT,
+        "source": "config",
+        "staff_approved": False,
+        "fee_floors_locked": True,
+    }
+
+
 def run_inx_band_research(root: str | None, history: list | None = None) -> dict:
     """Score research bands; never writes live config. Live stays 80–90 until staff promote."""
+    live = inx_live_band(root)
     bands = []
     for b in INX_RESEARCH_BANDS:
         scored = inx_band_research_score(history or [], lo=b["lo"], hi=b["hi"])
-        bands.append({**b, **scored, "live_default": b["id"] == "80_90"})
+        bands.append({
+            **b,
+            **scored,
+            "live_default": b["id"] == INX_LIVE_BAND_DEFAULT,
+            "is_live": b["id"] == live.get("id"),
+        })
     ranked = sorted(
         [x for x in bands if x.get("n")],
         key=lambda x: (x.get("expectancy_taxed") is not None, x.get("expectancy_taxed") or -999),
@@ -511,14 +766,15 @@ def run_inx_band_research(root: str | None, history: list | None = None) -> dict
     )
     report = {
         "paper_only": True,
-        "live_band": "80_90",
-        "live_changed": False,
+        "live_band": live.get("id") or INX_LIVE_BAND_DEFAULT,
+        "live_changed": bool(live.get("live_changed")),
+        "staff_approved": bool(live.get("staff_approved")),
         "bands": bands,
         "leader": ranked[0]["id"] if ranked else None,
         "fee_floors_locked": True,
         "note": (
             "Research harness only — does not change kalshi-sp/sized ask band. "
-            "Promote only after staff review + Chicago week."
+            "Promote only via staff_promote_inx_band after artifact + Chicago week."
         ),
         "at": _now(),
     }
@@ -529,6 +785,143 @@ def run_inx_band_research(root: str | None, history: list | None = None) -> dict
     store["latest"] = report
     _save(path, store)
     return report
+
+
+def inx_band_promote_status(root: str | None = None) -> dict:
+    """Ready when research leader beats live band with n≥20 — never auto-promote."""
+    store = _load(_path(INX_BAND_RESEARCH, root), {"paper_only": True, "latest": None})
+    report = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    live = inx_live_band(root)
+    if not report:
+        return {
+            "paper_only": True,
+            "promote_ready": False,
+            "decision": "reject",
+            "reason": "no research artifact yet — run_inx_band_research first",
+            "live_band": live.get("id"),
+            "leader": None,
+            "auto_promote": False,
+            "staff_approved": bool(live.get("staff_approved")),
+            "fee_floors_locked": True,
+        }
+    bands = {b["id"]: b for b in (report.get("bands") or []) if isinstance(b, dict) and b.get("id")}
+    leader_id = report.get("leader")
+    leader = bands.get(leader_id) if leader_id else None
+    live_row = bands.get(live.get("id") or INX_LIVE_BAND_DEFAULT)
+    ready = False
+    reason = "leader missing or thin sample"
+    if isinstance(leader, dict):
+        n = int(leader.get("n") or 0)
+        exp = _finite(leader.get("expectancy_taxed"))
+        live_exp = _finite((live_row or {}).get("expectancy_taxed")) if live_row else None
+        if n < INX_BAND_PROMOTE_MIN_N:
+            reason = f"leader n={n} < {INX_BAND_PROMOTE_MIN_N}"
+        elif exp is None:
+            reason = "leader expectancy missing"
+        elif leader_id == (live.get("id") or INX_LIVE_BAND_DEFAULT):
+            reason = "leader already equals live band — no promote needed"
+        elif live_exp is not None and exp + 1e-12 < live_exp:
+            reason = "leader EV below live band EV"
+        else:
+            ready = True
+            reason = (
+                f"leader {leader_id} n={n} EV={exp} beats live "
+                f"{live.get('id')} — staff may promote"
+            )
+    return {
+        "paper_only": True,
+        "promote_ready": ready,
+        "decision": "review" if ready else "reject",
+        "reason": reason,
+        "live_band": live.get("id"),
+        "leader": leader_id,
+        "leader_n": int((leader or {}).get("n") or 0) if leader else 0,
+        "leader_ev": _finite((leader or {}).get("expectancy_taxed")) if leader else None,
+        "promote_min_n": INX_BAND_PROMOTE_MIN_N,
+        "auto_promote": False,
+        "staff_approved": bool(live.get("staff_approved")),
+        "effective": live,
+        "fee_floors_locked": True,
+        "note": (
+            "INX band promote requires research artifact + staff_promote_inx_band. "
+            "Never auto-changes config.json. Fee floors locked."
+        ),
+    }
+
+
+def staff_promote_inx_band(
+    root: str | None,
+    band_id: str,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff gate to lock a research band as live ask band (artifact only)."""
+    status = inx_band_promote_status(root)
+    bid = str(band_id or "").strip()
+    known = {b["id"] for b in INX_RESEARCH_BANDS}
+    if bid not in known:
+        return {
+            "ok": False,
+            "reason": f"unknown band_id {bid!r}; choose from {sorted(known)}",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    if not force:
+        if not status.get("promote_ready"):
+            return {
+                "ok": False,
+                "reason": status.get("reason") or "not promote_ready",
+                "status": status,
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+        if bid != status.get("leader"):
+            return {
+                "ok": False,
+                "reason": f"band_id {bid} is not research leader {status.get('leader')}",
+                "status": status,
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+    base = inx_band_from_id(bid)
+    row = {
+        "paper_only": True,
+        "staff_approved": True,
+        "band_id": base["id"],
+        "lo": base["lo"],
+        "hi": base["hi"],
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    _save(_path(INX_BAND_PROMOTE, root), row)
+    return {
+        "ok": True,
+        "reason": "armed",
+        "band": inx_live_band(root),
+        "status": inx_band_promote_status(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def staff_clear_inx_band_promote(root: str | None, *, note: str = "") -> dict:
+    """Disarm staff band promote — bots fall back to config.json / default 80–90."""
+    row = {
+        "paper_only": True,
+        "staff_approved": False,
+        "band_id": INX_LIVE_BAND_DEFAULT,
+        "lo": 0.80,
+        "hi": 0.90,
+        "at": _now(),
+        "note": str(note or "cleared")[:200],
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    _save(_path(INX_BAND_PROMOTE, root), row)
+    return {"ok": True, "band": inx_live_band(root), "fee_floors_locked": True}
 
 
 # ---- Sports hard-stop shadow -----------------------------------------------
@@ -605,7 +998,7 @@ def record_sports_hard_stop_shadow(
     rows.append(row)
     state["rows"] = rows[-MAX_HARD_STOP_ROWS:]
     state["last_at"] = row["at"]
-    state["live"] = bool(SPORTS_HARD_STOP_LIVE)
+    state["live"] = sports_hard_stop_is_live(root)
     _save(path, state)
     return {"recorded": True, "row": row, **gate}
 
@@ -621,6 +1014,11 @@ def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
     decision = "reject"
     if n >= SPORTS_HARD_STOP_PROMOTE_N and exp is not None and exp >= 0:
         decision = "review"  # staff may promote; never auto
+    live = sports_hard_stop_is_live(root)
+    promote = _load(
+        _path(SPORTS_HARD_STOP_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
     return {
         "paper_only": True,
         "n": len(rows),
@@ -628,14 +1026,80 @@ def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
         "shadow_expectancy": exp,
         "promote_min_n": SPORTS_HARD_STOP_PROMOTE_N,
         "drop": SPORTS_HARD_STOP_DROP,
-        "live": bool(SPORTS_HARD_STOP_LIVE),
+        "live": live,
+        "code_default_live": bool(SPORTS_HARD_STOP_LIVE),
+        "staff_approved": bool(promote.get("staff_approved")),
+        "promote_ready": decision == "review",
         "auto_promote": False,
         "decision": decision,
         "fee_floors_locked": True,
         "note": (
-            "Sports hard-stop is shadow-only. Promote to live sell only after "
-            f"n≥{SPORTS_HARD_STOP_PROMOTE_N} and shadow EV ≥ 0 — staff gate."
+            "Sports hard-stop stays shadow-only until staff_set_sports_hard_stop_live. "
+            f"Promote ready after n≥{SPORTS_HARD_STOP_PROMOTE_N} and shadow EV ≥ 0. "
+            "Code default SPORTS_HARD_STOP_LIVE stays False."
         ),
+    }
+
+
+def sports_hard_stop_is_live(root: str | None = None) -> bool:
+    """Live sells only when code flag OR explicit staff promote file says so."""
+    if SPORTS_HARD_STOP_LIVE:
+        return True
+    promote = _load(
+        _path(SPORTS_HARD_STOP_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    return bool(promote.get("staff_approved")) and bool(promote.get("live"))
+
+
+def staff_set_sports_hard_stop_live(
+    root: str | None,
+    enabled: bool,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff gate to arm/disarm live hard-stop sells.
+
+    Enabling requires promote_ready (n≥30, shadow EV≥0) unless force=True for tests.
+    Never auto-called. Code constant SPORTS_HARD_STOP_LIVE remains False.
+    """
+    summary = sports_hard_stop_shadow_summary(root)
+    if enabled and not force and not summary.get("promote_ready"):
+        return {
+            "ok": False,
+            "live": False,
+            "staff_approved": False,
+            "reason": (
+                f"not promote_ready (need n≥{SPORTS_HARD_STOP_PROMOTE_N} "
+                "with shadow EV ≥ 0)"
+            ),
+            "summary": summary,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    row = {
+        "paper_only": True,
+        "staff_approved": bool(enabled),
+        "live": bool(enabled),
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "shadow_n": summary.get("n_with_pnl"),
+        "shadow_expectancy": summary.get("shadow_expectancy"),
+        "decision": summary.get("decision"),
+        "auto_promote": False,
+        "code_default_live": bool(SPORTS_HARD_STOP_LIVE),
+        "fee_floors_locked": True,
+    }
+    _save(_path(SPORTS_HARD_STOP_PROMOTE, root), row)
+    return {
+        "ok": True,
+        "live": bool(enabled),
+        "staff_approved": bool(enabled),
+        "reason": "armed" if enabled else "disarmed",
+        "summary": sports_hard_stop_shadow_summary(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
     }
 
 
@@ -679,6 +1143,84 @@ def record_adverse_fill(
         "minutes": ADVERSE_COOL_MINUTES,
         "drop": round(drop, 4),
     }
+
+
+def _anti_revenge_key(bot: str, ticker: str) -> str:
+    return f"{str(bot)}|{str(ticker).strip().upper()}"
+
+
+def record_anti_revenge(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str,
+    reason: str = "stop",
+    note: str = "",
+    minutes: int = ANTI_REVENGE_MINUTES,
+) -> dict:
+    """Block re-entry on the same market for `minutes` after a stop/flip exit."""
+    tick = str(ticker or "").strip()
+    if not tick:
+        return {"cooled": False, "reason": "no ticker"}
+    path = _path(ANTI_REVENGE_NAME, root)
+    state = _load(path, {"paper_only": True, "markets": {}})
+    until = time.time() + max(1, int(minutes)) * 60
+    key = _anti_revenge_key(bot, tick)
+    state.setdefault("markets", {})[key] = {
+        "until": until,
+        "at": _now(),
+        "bot": str(bot),
+        "ticker": tick,
+        "reason": str(reason or "stop")[:80],
+        "note": str(note or "")[:160],
+        "minutes": int(minutes),
+    }
+    # Prune expired keys opportunistically.
+    now = time.time()
+    markets = state.get("markets") or {}
+    state["markets"] = {
+        k: v for k, v in markets.items()
+        if isinstance(v, dict) and (_finite(v.get("until")) or 0) > now
+    }
+    state["markets"][key] = {
+        "until": until,
+        "at": _now(),
+        "bot": str(bot),
+        "ticker": tick,
+        "reason": str(reason or "stop")[:80],
+        "note": str(note or "")[:160],
+        "minutes": int(minutes),
+    }
+    state["last_at"] = _now()
+    _save(path, state)
+    return {
+        "cooled": True,
+        "bot": str(bot),
+        "ticker": tick,
+        "until": until,
+        "minutes": int(minutes),
+        "reason": str(reason or "stop")[:80],
+    }
+
+
+def anti_revenge_blocks(root: str | None, bot: str, ticker: str) -> str:
+    """Non-empty reason when same market is in anti-revenge cool-off."""
+    tick = str(ticker or "").strip()
+    if not tick:
+        return ""
+    path = _path(ANTI_REVENGE_NAME, root)
+    state = _load(path, {"paper_only": True, "markets": {}})
+    row = (state.get("markets") or {}).get(_anti_revenge_key(bot, tick))
+    if not isinstance(row, dict):
+        return ""
+    until = _finite(row.get("until"))
+    if until is None or time.time() >= until:
+        return ""
+    left = int(max(1, (until - time.time()) / 60.0))
+    why = str(row.get("reason") or "stop")
+    return (
+        f"anti-revenge: {bot} blocked on {tick} ~{left}m after {why}"
+    )
 
 
 def adverse_cool_blocks(root: str | None, bot: str) -> str:
@@ -1060,6 +1602,160 @@ def hillclimb_kill_status(root: str | None = None) -> dict:
     }
 
 
+# ---- Profit-lock harvest (Phase 10 paper analog) ---------------------------
+
+def _chicago_week_id(day: str | None = None) -> str:
+    """ISO week id in America/Chicago (YYYY-Www)."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        if day:
+            now = datetime.strptime(str(day)[:10], "%Y-%m-%d").replace(
+                tzinfo=ZoneInfo("America/Chicago")
+            )
+        else:
+            now = datetime.now(ZoneInfo("America/Chicago"))
+        iso = now.isocalendar()
+        return f"{iso.year}-W{iso.week:02d}"
+    except Exception:
+        return time.strftime("%Y-W%W", time.gmtime())
+
+
+def firm_today_pnl(bots: list | None = None) -> dict:
+    total = 0.0
+    n = 0
+    by = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        today = _finite(bot.get("today"))
+        if today is None:
+            continue
+        bot_id = str(bot.get("id") or "")
+        total += today
+        n += 1
+        by.append({"bot": bot_id, "today": round(today, 2)})
+    return {
+        "paper_only": True,
+        "firm_today": round(total, 2),
+        "towers_n": n,
+        "by_tower": by,
+    }
+
+
+def capture_profit_lock(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+    target_usd: float = PROFIT_LOCK_TARGET_USD,
+) -> dict:
+    """Accumulate Chicago-week firm today PnL; lock to 0.5× size after target."""
+    day = label or _chicago_day()
+    week_id = _chicago_week_id(day)
+    snap = firm_today_pnl(bots)
+    path = _path(PROFIT_LOCK, root)
+    store = _load(
+        path,
+        {
+            "paper_only": True,
+            "weeks": {},
+            "latest": None,
+            "target_usd": float(target_usd),
+        },
+    )
+    weeks = store.get("weeks") if isinstance(store.get("weeks"), dict) else {}
+    week = weeks.get(week_id) if isinstance(weeks.get(week_id), dict) else {
+        "week": week_id, "days": {}, "locked": False,
+    }
+    days = week.get("days") if isinstance(week.get("days"), dict) else {}
+    days[day] = {
+        "firm_today": snap.get("firm_today"),
+        "captured_at": _now(),
+        "by_tower": snap.get("by_tower"),
+    }
+    week_pnl = round(
+        sum(
+            float(v.get("firm_today") or 0)
+            for v in days.values()
+            if isinstance(v, dict)
+        ),
+        2,
+    )
+    target = float(target_usd)
+    locked = week_pnl + 1e-12 >= target
+    status = {
+        "paper_only": True,
+        "week": week_id,
+        "label": day,
+        "week_pnl": week_pnl,
+        "target_usd": target,
+        "days_n": len(days),
+        "safe_mode": locked,
+        "size_mult": PROFIT_LOCK_SIZE_MULT if locked else 1.0,
+        "harvest_pct": 50 if locked else 0,
+        "fee_floors_locked": True,
+        "note": (
+            f"Profit-lock harvest: Chicago week PnL ≥ ${target:.0f} → "
+            f"{PROFIT_LOCK_SIZE_MULT}× size (paper safe-mode). Habit for live."
+        ),
+    }
+    week["days"] = days
+    week["week_pnl"] = week_pnl
+    week["locked"] = locked
+    week["status"] = status
+    weeks[week_id] = week
+    # Keep last ~12 weeks.
+    if len(weeks) > 12:
+        for old in sorted(weeks.keys())[:-12]:
+            weeks.pop(old, None)
+    store["weeks"] = weeks
+    store["latest"] = status
+    store["target_usd"] = target
+    store["last_at"] = _now()
+    _save(path, store)
+    return status
+
+
+def profit_lock_status(root: str | None = None) -> dict:
+    store = _load(
+        _path(PROFIT_LOCK, root),
+        {"paper_only": True, "latest": None, "target_usd": PROFIT_LOCK_TARGET_USD},
+    )
+    latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    if latest is None:
+        latest = {
+            "paper_only": True,
+            "week": _chicago_week_id(),
+            "week_pnl": 0.0,
+            "target_usd": float(store.get("target_usd") or PROFIT_LOCK_TARGET_USD),
+            "safe_mode": False,
+            "size_mult": 1.0,
+            "harvest_pct": 0,
+            "fee_floors_locked": True,
+            "note": "No profit-lock capture yet this Chicago week.",
+        }
+    return {
+        "paper_only": True,
+        "latest": latest,
+        "safe_mode": bool(latest.get("safe_mode")),
+        "size_mult": float(latest.get("size_mult") or 1.0),
+        "week_pnl": latest.get("week_pnl"),
+        "target_usd": latest.get("target_usd"),
+        "fee_floors_locked": True,
+        "note": latest.get("note"),
+    }
+
+
+def profit_lock_size_mult(root: str | None = None) -> float:
+    """Stake multiplier for bots: 0.5 in safe-mode after weekly target, else 1.0."""
+    status = profit_lock_status(root)
+    mult = _finite(status.get("size_mult"))
+    if mult is None or mult <= 0:
+        return 1.0
+    return float(mult)
+
+
 def capture_weekly_scorecard(
     root: str | None,
     *,
@@ -1119,13 +1815,17 @@ def plan_summary(
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root),
         "hillclimb_kill": hillclimb_kill_status(root),
+        "profit_lock": profit_lock_status(root),
+        "skip_regret_weekly": latest_skip_regret_weekly(root),
+        "daily_r": latest_daily_r_board(root),
+        "inx_band_promote": inx_band_promote_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "sports hard-stop promote after n≥30 (staff; live still False)",
-            "INX band promote only after research week artifact",
-            "profit-lock harvest paper analog",
-            "skip-regret twin weekly review wire",
+            "correlation matrix firm portfolio haircut",
+            "incubation lane 50 fee-aware settles",
+            "ruin drill soft/hard/nuclear UX",
+            "tax/fee ledger completeness pass",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1174,6 +1874,8 @@ def self_check() -> None:
         assert rep["live_changed"] is False
         assert rep["live_band"] == "80_90"
         assert len(rep["bands"]) == 3
+        assert inx_live_band(tmp)["staff_approved"] is False
+        assert inx_band_promote_status(tmp)["auto_promote"] is False
         hit = sports_hard_stop_hit(0.80, 0.65, drop=0.12)
         assert hit["hit"] is True
         miss = sports_hard_stop_hit(0.80, 0.72, drop=0.12)
@@ -1187,6 +1889,10 @@ def self_check() -> None:
         assert summ["n"] >= 1
         assert summ["live"] is False
         assert summ["auto_promote"] is False
+        assert summ["code_default_live"] is False
+        denied = staff_set_sports_hard_stop_live(tmp, True, note="too early")
+        assert denied["ok"] is False
+        assert sports_hard_stop_is_live(tmp) is False
         cool = record_adverse_fill(
             tmp, bot="btc15m", ticker="T", entry_price=0.80, mark_price=0.70,
         )
@@ -1235,6 +1941,39 @@ def self_check() -> None:
         assert out["status"]["action"] == "revert_lever"
         assert out["status"]["auto_revert"] is False
         assert hillclimb_kill_status(tmp)["kill"] is True
+        # Profit-lock: week PnL ≥ target → 0.5× size safe-mode.
+        lock = capture_profit_lock(
+            tmp,
+            bots=[
+                {"id": "sports-gap", "today": 25.0},
+                {"id": "btc15m", "today": 20.0},
+            ],
+            label="2026-11-03",
+            target_usd=40.0,
+        )
+        assert lock["safe_mode"] is True
+        assert lock["size_mult"] == 0.5
+        assert profit_lock_size_mult(tmp) == 0.5
+        sr = skip_regret_weekly_card(tmp, label="2026-11-03")
+        assert sr["auto_promote"] is False
+        assert sr["fee_floors_locked"] is True
+        assert latest_skip_regret_weekly(tmp)["label"] == "2026-11-03"
+        # Sports 1.5R × $20 = $30 → settle-only at today ≥ 30.
+        assert daily_r_blocks("sports-gap", 29.0) == ""
+        assert "settle-only" in daily_r_blocks("sports-gap", 30.0)
+        board = capture_daily_r_board(
+            tmp,
+            bots=[{"id": "sports-gap", "today": 35.0}, {"id": "btc15m", "today": 10.0}],
+            label="2026-11-03",
+        )
+        assert "sports-gap" in board["settle_only"]
+        assert "btc15m" not in board["settle_only"]
+        ar = record_anti_revenge(
+            tmp, bot="btc15m", ticker="KXTEST", reason="model-flip", minutes=30,
+        )
+        assert ar["cooled"] is True
+        assert "anti-revenge" in anti_revenge_blocks(tmp, "btc15m", "KXTEST")
+        assert anti_revenge_blocks(tmp, "btc15m", "OTHER") == ""
 
 
 if __name__ == "__main__":

@@ -1,15 +1,19 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { BotRow } from '../types'
 import { money } from '../data/format'
 
 /**
  * One trade chart per side of the world, four at most.
- * The box sits outside the farthest camera orbit (radius ~31) so the
- * view stays on the inner face, and in front of the far skyline.
+ * The box sits outside the farthest camera orbit so zoom-out still looks at the inner face.
  */
-const REACH = 24
-const HEIGHT = 16
+const REACH = 70
+const HEIGHT = 52
+
+const UP = '#3dff7a'
+const DOWN = '#ff3355'
+const FLAT = '#d7e2ff'
 
 type Edge = 'back' | 'right' | 'front' | 'left'
 
@@ -39,68 +43,87 @@ function hashId(id: string) {
   return h >>> 0
 }
 
-/** Cumulative pnl when the book has a real path; otherwise a jagged wall-chart shape. */
+function prefersReducedMotion() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+/** Cumulative pnl when the book has a path; otherwise a signed wave that finishes on today's return. */
 function seriesFor(bot: BotRow): number[] {
   const rows = (bot.history && bot.history.length ? bot.history : bot.trades) || []
   if (rows.length >= 2) {
     let run = 0
-    return rows.map((row) => {
+    const full = rows.map((row) => {
       run += Number(row.pnl || 0)
       return run
     })
+    return full.length > 42 ? full.slice(-42) : full
   }
-  const end = Number(bot.today || bot.realized || 0)
+  const end = Number(bot.today ?? bot.realized ?? 0)
   const seed = hashId(bot.id || bot.name || 'wall')
-  const n = 32
-  const out: number[] = []
-  let v = 0.86 + rand(seed) * 0.08
+  const n = 36
+  const raw: number[] = []
+  let v = (rand(seed) - 0.45) * 0.35
   for (let i = 0; i < n; i++) {
-    const kick = (rand(seed + i * 17) - 0.38) * 0.16
-    v += kick - 0.018
-    if (rand(seed + i * 29) > 0.84) v -= 0.14 + rand(seed + i) * 0.08
-    if (rand(seed + i * 11) > 0.9) v += 0.1
-    v = Math.max(0.12, Math.min(0.96, v))
-    out.push(v)
+    v += (rand(seed + i * 13) - 0.48) * 0.28
+    if (rand(seed + i * 19) > 0.86) v += rand(seed + i * 3) > 0.5 ? 0.22 : -0.22
+    raw.push(v)
   }
-  const scale = end === 0 ? 180 + rand(seed + 4) * 220 : end
-  const last = out[out.length - 1] || 1
-  return out.map((p) => (p / last) * scale)
+  const last = raw[n - 1] || 1
+  const amp = Math.max(Math.abs(end), 48)
+  return raw.map((p, i) => {
+    const t = i / (n - 1)
+    return (p - last) * amp * 0.85 + end * t
+  })
+}
+
+function returnOf(bot: BotRow, last: number) {
+  if (typeof bot.today === 'number' && !Number.isNaN(bot.today)) return bot.today
+  if (typeof bot.realized === 'number' && !Number.isNaN(bot.realized)) return bot.realized
+  return last
+}
+
+function tone(n: number) {
+  if (n > 0.005) return UP
+  if (n < -0.005) return DOWN
+  return FLAT
+}
+
+function signature(bot: BotRow) {
+  const rows = (bot.history && bot.history.length ? bot.history : bot.trades) || []
+  const tail = rows.length ? Number(rows[rows.length - 1].pnl || 0) : 0
+  return `${bot.id}|${bot.today}|${bot.realized}|${rows.length}|${tail}|${bot.name}`
 }
 
 /**
- * Full-bleed wall in the reference style: royal-blue field, dashed vertical
- * grid, a windowed skyline on the left, and one thick magenta trade line.
+ * Blue wall chart: dashed grid, left skyline, and a line that is green on the
+ * way up and red on the way down. `time` drives the live tip and scan.
  */
-function paintWall(bot: BotRow): THREE.CanvasTexture {
-  const W = 2048
-  const H = 1080
-  const canvas = document.createElement('canvas')
-  canvas.width = W
-  canvas.height = H
+function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
+  const W = canvas.width
+  const H = canvas.height
   const ctx = canvas.getContext('2d')!
   const seed = hashId(bot.id || bot.name || 'wall')
 
-  const sky = ctx.createLinearGradient(0, 0, W * 0.3, H)
-  sky.addColorStop(0, '#120a55')
-  sky.addColorStop(0.42, '#1a32b8')
-  sky.addColorStop(1, '#1d4ae0')
+  const sky = ctx.createLinearGradient(0, 0, W * 0.25, H)
+  sky.addColorStop(0, '#0e0848')
+  sky.addColorStop(0.4, '#1730b4')
+  sky.addColorStop(1, '#1c4ae6')
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, W, H)
 
   const ground = H - 2
   let bx = 0
   let bi = 0
-  const zone = W * 0.4
-  while (bx < zone) {
-    const bw = 54 + rand(seed + bi * 5) * 92
-    const bh = H * (0.22 + rand(seed + bi * 9 + 2) * 0.52)
+  while (bx < W * 0.36) {
+    const bw = 48 + rand(seed + bi * 5) * 86
+    const bh = H * (0.18 + rand(seed + bi * 9 + 2) * 0.46)
     ctx.fillStyle = '#070512'
     ctx.fillRect(bx, ground - bh, bw - 6, bh)
     ctx.fillStyle = '#eef3ff'
-    const win = 7
-    for (let wy = ground - bh + 22; wy < ground - 18; wy += 26) {
-      for (let wx = bx + 14; wx < bx + bw - 22; wx += 20) {
-        if (rand(seed + wx * 3 + wy + bi) > 0.38) ctx.fillRect(wx, wy, win, win + 3)
+    for (let wy = ground - bh + 18; wy < ground - 16; wy += 22) {
+      for (let wx = bx + 12; wx < bx + bw - 18; wx += 18) {
+        if (rand(seed + wx * 3 + wy + bi) > 0.42) ctx.fillRect(wx, wy, 6, 8)
       }
     }
     bx += bw
@@ -108,96 +131,182 @@ function paintWall(bot: BotRow): THREE.CanvasTexture {
   }
 
   ctx.save()
-  ctx.strokeStyle = 'rgba(255,255,255,0.8)'
-  ctx.lineWidth = 4
-  ctx.setLineDash([16, 26])
-  const cols = 15
-  for (let i = 1; i < cols; i++) {
-    const x = (i / cols) * W
+  ctx.strokeStyle = 'rgba(255,255,255,0.72)'
+  ctx.lineWidth = 3
+  ctx.setLineDash([14, 22])
+  for (let i = 1; i < 16; i++) {
+    const x = (i / 16) * W
     ctx.beginPath()
     ctx.moveTo(x, 0)
     ctx.lineTo(x, H)
     ctx.stroke()
   }
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)'
+  ctx.lineWidth = 2
+  ctx.setLineDash([8, 18])
+  for (let i = 1; i < 7; i++) {
+    const y = (i / 7) * H
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    ctx.lineTo(W, y)
+    ctx.stroke()
+  }
   ctx.restore()
 
   const points = seriesFor(bot)
-  const min = Math.min(...points)
-  const max = Math.max(...points)
+  let min = Math.min(...points, 0)
+  let max = Math.max(...points, 0)
+  const pad = (max - min) * 0.14 || 1
+  min -= pad
+  max += pad
   const span = max - min || 1
-  const plotL = 48
-  const plotR = W * 0.7
-  const plotT = H * 0.18
-  const plotB = H * 0.8
-  const xy = points.map((v, i) => {
-    const x = plotL + (i / Math.max(points.length - 1, 1)) * (plotR - plotL)
-    const y = plotB - ((v - min) / span) * (plotB - plotT)
-    return { x, y }
-  })
+  const plotL = 56
+  const plotR = W * 0.72
+  const plotT = H * 0.2
+  const plotB = H * 0.84
+  const yOf = (v: number) => plotB - ((v - min) / span) * (plotB - plotT)
+  const xy = points.map((v, i) => ({
+    x: plotL + (i / Math.max(points.length - 1, 1)) * (plotR - plotL),
+    y: yOf(v),
+    v,
+  }))
+  const zeroY = yOf(0)
 
+  ctx.save()
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+  ctx.lineWidth = 2
+  ctx.setLineDash([10, 12])
   ctx.beginPath()
-  xy.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
-  ctx.lineTo(xy[xy.length - 1].x, H)
-  ctx.lineTo(xy[0].x, H)
-  ctx.closePath()
-  const fill = ctx.createLinearGradient(0, plotT, 0, H)
-  fill.addColorStop(0, 'rgba(255,70,230,0.28)')
-  fill.addColorStop(1, 'rgba(40,10,120,0.02)')
-  ctx.fillStyle = fill
-  ctx.fill()
+  ctx.moveTo(plotL, zeroY)
+  ctx.lineTo(plotR + 36, zeroY)
+  ctx.stroke()
+  ctx.restore()
+  ctx.fillStyle = 'rgba(255,255,255,0.7)'
+  ctx.font = '600 28px sans-serif'
+  ctx.fillText('0', plotR + 44, zeroY + 8)
 
-  const stroke = () => {
+  for (let i = 1; i < xy.length; i++) {
+    const a = xy[i - 1]
+    const b = xy[i]
+    const up = b.v >= a.v
+    const color = up ? UP : DOWN
     ctx.beginPath()
-    xy.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.lineTo(b.x, zeroY)
+    ctx.lineTo(a.x, zeroY)
+    ctx.closePath()
+    ctx.fillStyle = up ? 'rgba(61,255,122,0.16)' : 'rgba(255,51,85,0.16)'
+    ctx.fill()
+    ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = up ? 'rgba(61,255,122,0.35)' : 'rgba(255,51,85,0.4)'
+    ctx.lineWidth = 26
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+    ctx.strokeStyle = color
+    ctx.lineWidth = 10
     ctx.stroke()
   }
-  ctx.lineJoin = 'round'
-  ctx.lineCap = 'round'
-  ctx.strokeStyle = 'rgba(255,150,255,0.45)'
-  ctx.lineWidth = 54
-  stroke()
-  ctx.strokeStyle = '#ff3ad6'
-  ctx.lineWidth = 22
-  stroke()
-  ctx.strokeStyle = '#ffe8ff'
-  ctx.lineWidth = 6
-  stroke()
+
+  let hi = 0
+  let lo = 0
+  xy.forEach((p, i) => {
+    if (p.v > xy[hi].v) hi = i
+    if (p.v < xy[lo].v) lo = i
+  })
+  const mark = (p: (typeof xy)[number], label: string, above: boolean) => {
+    ctx.fillStyle = tone(p.v)
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.font = '700 26px sans-serif'
+    ctx.fillText(label, p.x + 12, p.y + (above ? -16 : 28))
+  }
+  mark(xy[hi], 'HIGH', true)
+  if (lo !== hi) mark(xy[lo], 'LOW', false)
 
   const tip = xy[xy.length - 1]
-  const glow = ctx.createRadialGradient(tip.x, tip.y, 4, tip.x, tip.y, 54)
+  const lastStep = xy.length > 1 ? tip.v - xy[xy.length - 2].v : tip.v
+  const tipColor = tone(lastStep)
+  const pulse = 16 + Math.sin(time * 5.5) * 7
+  const glow = ctx.createRadialGradient(tip.x, tip.y, 2, tip.x, tip.y, 36 + pulse)
   glow.addColorStop(0, 'rgba(255,255,255,0.95)')
-  glow.addColorStop(0.35, 'rgba(255,220,255,0.55)')
-  glow.addColorStop(1, 'rgba(255,80,220,0)')
+  glow.addColorStop(0.35, tipColor)
+  glow.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = glow
   ctx.beginPath()
-  ctx.arc(tip.x, tip.y, 54, 0, Math.PI * 2)
+  ctx.arc(tip.x, tip.y, 36 + pulse, 0, Math.PI * 2)
   ctx.fill()
   ctx.beginPath()
-  ctx.arc(tip.x, tip.y, 12, 0, Math.PI * 2)
+  ctx.arc(tip.x, tip.y, 8, 0, Math.PI * 2)
   ctx.fillStyle = '#ffffff'
   ctx.fill()
 
-  const last = points[points.length - 1]
-  ctx.fillStyle = '#ff3355'
-  ctx.font = 'bold 54px monospace'
-  ctx.fillText('1W', W * 0.4, H * 0.15)
-  ctx.font = 'bold 46px monospace'
-  ctx.fillText(money(last, true), W * 0.4, H * 0.15 + 54)
-  ctx.fillStyle = 'rgba(255,255,255,0.94)'
-  ctx.font = '600 42px sans-serif'
-  ctx.fillText((bot.name || 'trade').slice(0, 20), 56, H * 0.15)
+  const scanX = plotL + ((time * 90) % (plotR - plotL))
+  ctx.fillStyle = 'rgba(255,255,255,0.14)'
+  ctx.fillRect(scanX, plotT - 20, 3, plotB - plotT + 40)
 
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.anisotropy = 8
-  tex.needsUpdate = true
-  return tex
+  const ret = returnOf(bot, tip.v)
+  const retColor = tone(ret)
+  const word = ret > 0.005 ? 'UP' : ret < -0.005 ? 'DOWN' : 'FLAT'
+  ctx.fillStyle = 'rgba(255,255,255,0.95)'
+  ctx.font = '700 42px sans-serif'
+  ctx.fillText((bot.name || 'trade').slice(0, 20), 48, 72)
+  ctx.fillStyle = retColor
+  ctx.font = '800 36px sans-serif'
+  ctx.fillText(word, W * 0.4, 68)
+  ctx.font = '700 48px monospace'
+  ctx.fillText(money(ret, true), W * 0.4, 124)
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'
+  ctx.font = '600 28px sans-serif'
+  ctx.fillText('TODAY', W * 0.4, 162)
+
+  const liveOn = Math.sin(time * 4) > 0
+  ctx.fillStyle = liveOn ? UP : 'rgba(61,255,122,0.35)'
+  ctx.beginPath()
+  ctx.arc(W - 150, 58, 8, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'
+  ctx.font = '700 28px sans-serif'
+  ctx.fillText('LIVE', W - 130, 68)
 }
 
 function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
   const wall = WALLS.find((w) => w.edge === edge)!
-  const map = useMemo(() => paintWall(bot), [bot])
+  const reduced = useMemo(() => prefersReducedMotion(), [])
+  const state = useRef({ acc: 0, sig: '', time: 0 })
+  const map = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1600
+    canvas.height = 900
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.anisotropy = 8
+    tex.userData.canvas = canvas
+    paintWall(canvas, bot, 0)
+    tex.needsUpdate = true
+    return tex
+  }, [bot.id])
+
   useEffect(() => () => map.dispose(), [map])
+
+  useFrame((_, dt) => {
+    const canvas = map.userData.canvas as HTMLCanvasElement | undefined
+    if (!canvas) return
+    const st = state.current
+    st.time += dt
+    st.acc += dt
+    const sig = signature(bot)
+    const dataChanged = sig !== st.sig
+    if (!dataChanged && (reduced || st.acc < 0.12)) return
+    st.acc = 0
+    st.sig = sig
+    paintWall(canvas, bot, reduced ? 0 : st.time)
+    map.needsUpdate = true
+  })
 
   return (
     <group position={wall.position} rotation={[0, wall.rot, 0]} raycast={() => null}>

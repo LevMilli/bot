@@ -737,8 +737,8 @@ def run():
                     summary_out.setdefault("hard_stop_shadow", []).append(
                         f"SHADOW STOP {p.get('ticker')} bid {bid}"
                     )
-                    # Live hard-stop only if staff promoted (default False).
-                    if desk_roi_plan.SPORTS_HARD_STOP_LIVE:
+                    # Live hard-stop only after staff promote file (code default False).
+                    if desk_roi_plan.sports_hard_stop_is_live(DESK_ROOT):
                         exit_reason = (
                             f"hard-stop bid {float(bid):.2f} ≤ "
                             f"{hs.get('threshold')}"
@@ -849,6 +849,15 @@ def run():
                         mark_price=bid,
                         note=str(exit_reason or "")[:120],
                     )
+                    why = str(exit_reason or "").lower()
+                    if any(k in why for k in ("hard-stop", "model-flip", "stop", "gap-decay")):
+                        desk_roi_plan.record_anti_revenge(
+                            DESK_ROOT,
+                            bot="sports-gap",
+                            ticker=str(p.get("ticker") or ""),
+                            reason=str(exit_reason or "stop")[:80],
+                            note=str(exit_reason or "")[:120],
+                        )
                 except Exception:
                     pass
                 if desk is not None:
@@ -947,6 +956,11 @@ def run():
             lines.append(f"| {ts} | | | | | | | | {cool} |")
             summary_out.setdefault("skips", []).append(cool)
             max_buys_eff = 0
+        r_block = desk_roi_plan.daily_r_blocks("sports-gap", today_pnl)
+        if r_block:
+            lines.append(f"| {ts} | | | | | | | | {r_block} |")
+            summary_out.setdefault("skips", []).append(r_block)
+            max_buys_eff = 0
     except Exception:
         pass
     for c in buy_candidates:
@@ -967,6 +981,18 @@ def run():
                 blocked = desk.correlation_blocks(DESK_ROOT, "sports-gap", c["side"], gap)
                 if blocked:
                     reason = blocked
+            except Exception:
+                pass
+        if reason is None:
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                revenge = desk_roi_plan.anti_revenge_blocks(
+                    DESK_ROOT, "sports-gap", str(m.get("ticker") or ""),
+                )
+                if revenge:
+                    reason = revenge
             except Exception:
                 pass
         spread = None

@@ -5,9 +5,9 @@ import type { PerspectiveCamera as Cam } from 'three'
 import * as THREE from 'three'
 
 const LOOK = new THREE.Vector3(0, 0.4, -0.5)
-const MIN_DIST = 8
-/** Stay inside the chart walls (they stand at 24). */
-const MAX_DIST = 22
+/** Close enough to read a tower face, far enough to see the wall charts and tower tops. */
+const MIN_DIST = 3.5
+const MAX_DIST = 64
 const MIN_PHI = 0.28
 const MAX_PHI = 1.35
 /** How quickly zoom eases toward the pinch/wheel target. */
@@ -166,7 +166,7 @@ export function CityOrbitCamera() {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const st = s()
-      st.targetDist = clamp(st.targetDist + e.deltaY * 0.022, MIN_DIST, MAX_DIST)
+      st.targetDist = clamp(st.targetDist + e.deltaY * 0.05, MIN_DIST, MAX_DIST)
     }
 
     // Block browser page-zoom / scroll gestures on the canvas.
@@ -217,6 +217,6 @@ export function CityOrbitCamera() {
   })
 
   return (
-    <PerspectiveCamera ref={cam} makeDefault fov={42} near={0.1} far={200} position={[0, 17, 15]} />
+    <PerspectiveCamera ref={cam} makeDefault fov={42} near={0.08} far={360} position={[0, 17, 15]} />
   )
 }

@@ -297,6 +297,7 @@ def master_summary(
     graduation = None
     retirement = None
     hillclimb = None
+    profit_lock = None
     try:
         import desk_roi_plan
         bleed = desk_roi_plan.firm_bleed_ratio(bots)
@@ -352,19 +353,65 @@ def master_summary(
             hillclimb = desk_roi_plan.hillclimb_kill_status(root)
         except Exception:
             hillclimb = None
+        profit_lock = None
+        try:
+            if root and bots:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+                latest_pl = desk_roi_plan.profit_lock_status(root).get("latest")
+                if not isinstance(latest_pl, dict) or str(latest_pl.get("label") or "") != today:
+                    desk_roi_plan.capture_profit_lock(root, bots=bots, label=today)
+            profit_lock = desk_roi_plan.profit_lock_status(root)
+        except Exception:
+            profit_lock = None
         plan = {
             "bleed": bleed,
             "capital_misplaced": misplaced,
             "fit_firm": desk_roi_plan.fit_buy_rate(root),
             "clv_completeness": desk_roi_plan.clv_completeness(root),
             "sports_hard_stop_shadow": desk_roi_plan.sports_hard_stop_shadow_summary(root),
+            "inx_band_promote": desk_roi_plan.inx_band_promote_status(root),
             "weekly_scorecard": weekly,
             "graduation": graduation,
             "meme_retirement": retirement,
             "hillclimb_kill": hillclimb,
+            "profit_lock": profit_lock,
             "baseline": baseline,
             "fee_floors_locked": True,
         }
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_sr = desk_roi_plan.latest_skip_regret_weekly(root)
+            if root and (
+                not isinstance(latest_sr, dict)
+                or str(latest_sr.get("label") or "") != today
+            ):
+                plan["skip_regret_weekly"] = desk_roi_plan.skip_regret_weekly_card(
+                    root, label=today,
+                )
+            else:
+                plan["skip_regret_weekly"] = latest_sr
+        except Exception:
+            plan["skip_regret_weekly"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_r = desk_roi_plan.latest_daily_r_board(root)
+            if root and bots and (
+                not isinstance(latest_r, dict)
+                or str(latest_r.get("label") or "") != today
+            ):
+                plan["daily_r"] = desk_roi_plan.capture_daily_r_board(
+                    root, bots, label=today,
+                )
+            else:
+                plan["daily_r"] = latest_r
+        except Exception:
+            plan["daily_r"] = None
     except Exception:
         plan = None
     return {
@@ -381,11 +428,14 @@ def master_summary(
         "graduation": graduation,
         "meme_retirement": retirement,
         "hillclimb_kill": hillclimb,
+        "profit_lock": profit_lock,
         "towers_m1_pass": m1_ready,
         "towers": rows,
         "stopbleed": stopbleed,
         "priority": [
             "revert last lever if hillclimb kill trips",
+            "profit-lock 0.5× after weekly target",
+            "daily R settle-only after tower budget",
             "memecoin retirement clock before any volume talk",
             "Master graduation = 2 Chicago weeks all M1–M7",
             "sports hard-stop shadow → promote after n≥30",
