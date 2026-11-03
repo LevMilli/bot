@@ -23,8 +23,8 @@ export function StreetCity({ bots, desk }: { bots: BotRow[]; desk?: Desk }) {
       {/* No park pads here — one of them crosses the glass and lands on the office floor. */}
       <GridFloor parks={false} />
       <BorderScreens bots={bots} />
-      <Skyline z={-48} width={72} />
-      <Skyline z={-56} width={88} />
+      <Skyline z={-88} width={72} />
+      <Skyline z={-100} width={88} />
       <SkyEquityLine />
       <Vault lights={false} showHolo={false} desk={desk} />
       {fillers.map((filler, i) => (

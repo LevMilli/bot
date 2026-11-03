@@ -526,7 +526,7 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
     <>
       <color attach="background" args={['#12082a']} />
       <fog attach="fog" args={['#14082e', 16, 62]} />
-      <PerspectiveCamera makeDefault fov={46} near={0.08} far={80} position={HOME_POS} />
+      <PerspectiveCamera makeDefault fov={46} near={0.08} far={260} position={HOME_POS} />
       <OrbitControls
         ref={controls}
         makeDefault

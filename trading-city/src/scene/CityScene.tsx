@@ -227,7 +227,7 @@ export function CityScene({ bots, desk, selectedId, onSelect, onOpenVault }: Pro
   return (
     <>
       <color attach="background" args={['#0a0320']} />
-      <fog attach="fog" args={['#1a0740', 26, 70]} />
+      <fog attach="fog" args={['#1a0740', 48, 190]} />
       <CityOrbitCamera />
       <CityContents
         bots={bots}
@@ -266,7 +266,7 @@ export function CityContents({
       <Starfield count={160} />
       <GridFloor />
       <BorderScreens bots={bots} />
-      <Skyline z={-46} width={52} />
+      <Skyline z={-82} width={52} />
       <SkyEquityLine />
       <Vault desk={desk} workers={workers} onOpen={onOpenVault} />
 
