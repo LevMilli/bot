@@ -282,12 +282,34 @@ def master_summary(
                 )
             except Exception:
                 baseline = None
+        weekly = None
+        try:
+            # Refresh weekly scorecard when missing or label day drifted.
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            store = desk_roi_plan._load(
+                desk_roi_plan._path(desk_roi_plan.WEEKLY_SCORECARD, root),
+                {"latest": None},
+            ) if root else {"latest": None}
+            latest = store.get("latest") if isinstance(store, dict) else None
+            if root and bots and (
+                not isinstance(latest, dict) or str(latest.get("label") or "") != today
+            ):
+                weekly = desk_roi_plan.capture_weekly_scorecard(
+                    root, bots=bots, cfg=cfg, label=today,
+                )
+            else:
+                weekly = latest
+        except Exception:
+            weekly = None
         plan = {
             "bleed": bleed,
             "capital_misplaced": misplaced,
             "fit_firm": desk_roi_plan.fit_buy_rate(root),
             "clv_completeness": desk_roi_plan.clv_completeness(root),
             "sports_hard_stop_shadow": desk_roi_plan.sports_hard_stop_shadow_summary(root),
+            "weekly_scorecard": weekly,
             "baseline": baseline,
             "fee_floors_locked": True,
         }
