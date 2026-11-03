@@ -23,6 +23,7 @@ SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
 ADVERSE_COOL_NAME = "desk_adverse_cool.json"
 WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 MASTER_GRAD = "desk_master_grad.json"
+HILLCLIMB_KILL = "desk_hillclimb_kill.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -39,6 +40,9 @@ GRADUATION_CODES = ("M1", "M2", "M3", "M4", "M5", "M6", "M7")
 # Phase 7: meme sleeve retirement clock (recommend pause; staff re-arms).
 MEME_RETIRE_WINDOW_DAYS = 20
 MEME_RETIRE_MIN_N = 10
+
+# Phase 11: hillclimb kill — M3↑ with M1↓ for 2 Chicago weeks → revert lever.
+HILLCLIMB_KILL_WEEKS = 2
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -902,6 +906,160 @@ def meme_retirement_clock(
     }
 
 
+def firm_taxed_m1(bots: list | None = None, *, fill_tax: float = 0.01) -> dict:
+    """Dollar-weighted firm taxed expectancy across tower histories (M1 proxy)."""
+    pnls: list[float] = []
+    by = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        local: list[float] = []
+        for h in bot.get("history") or []:
+            if not isinstance(h, dict):
+                continue
+            p = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if p is None:
+                continue
+            contracts = _finite(h.get("contracts")) or 1.0
+            taxed = p - float(fill_tax) * max(1.0, contracts)
+            local.append(taxed)
+            pnls.append(taxed)
+        if local:
+            by.append({
+                "bot": bot_id,
+                "n": len(local),
+                "expectancy_taxed": round(sum(local) / len(local), 4),
+            })
+    n = len(pnls)
+    exp = round(sum(pnls) / n, 4) if n else None
+    return {
+        "paper_only": True,
+        "n": n,
+        "expectancy_taxed": exp,
+        "by_tower": by,
+        "fee_floors_locked": True,
+        "note": "Firm M1 proxy = mean taxed PnL across all tower settles. No profit guarantee.",
+    }
+
+
+def evaluate_hillclimb_kill(weeks: list) -> dict:
+    """Kill when the last two cards show M3 up and M1 down (fills up preferred)."""
+    cards = [w for w in weeks if isinstance(w, dict)]
+    cards = sorted(cards, key=lambda w: str(w.get("label") or ""))
+    if len(cards) < HILLCLIMB_KILL_WEEKS:
+        return {
+            "kill": False,
+            "action": "observe",
+            "reason": f"need {HILLCLIMB_KILL_WEEKS} Chicago weeks of hillclimb cards",
+            "weeks_n": len(cards),
+            "auto_revert": False,
+        }
+    prev, cur = cards[-2], cards[-1]
+    m1_prev = _finite(prev.get("m1"))
+    m1_cur = _finite(cur.get("m1"))
+    m3_prev = _finite(prev.get("m3"))
+    m3_cur = _finite(cur.get("m3"))
+    fills_prev = _finite(prev.get("fills_n")) or 0.0
+    fills_cur = _finite(cur.get("fills_n")) or 0.0
+    if None in (m1_prev, m1_cur, m3_prev, m3_cur):
+        return {
+            "kill": False,
+            "action": "observe",
+            "reason": "incomplete M1/M3 on recent weeks",
+            "weeks_n": len(cards),
+            "auto_revert": False,
+        }
+    m3_up = m3_cur > m3_prev + 1e-12
+    m1_down = m1_cur < m1_prev - 1e-12
+    fills_up = fills_cur >= fills_prev
+    kill = bool(m3_up and m1_down and fills_up)
+    return {
+        "kill": kill,
+        "action": "revert_lever" if kill else "keep",
+        "reason": (
+            "M3↑ with M1↓ over 2 Chicago weeks while fills not down — revert last lever"
+            if kill
+            else "no kill: need M3↑ and M1↓ with fills not down"
+        ),
+        "m1_prev": m1_prev,
+        "m1_cur": m1_cur,
+        "m3_prev": m3_prev,
+        "m3_cur": m3_cur,
+        "fills_prev": int(fills_prev),
+        "fills_cur": int(fills_cur),
+        "weeks_n": len(cards),
+        "labels": [str(prev.get("label") or ""), str(cur.get("label") or "")],
+        "lever": cur.get("lever") or prev.get("lever"),
+        "auto_revert": False,  # flag only; staff/param thrash ban applies
+        "fee_floors_locked": True,
+    }
+
+
+def capture_hillclimb_week(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+    lever: str | None = None,
+    fill_tax: float = 0.01,
+) -> dict:
+    """Snapshot firm M1/M3/fills for the Chicago day and evaluate the kill rule."""
+    day = label or _chicago_day()
+    m1 = firm_taxed_m1(bots, fill_tax=fill_tax)
+    m3 = fit_buy_rate(root)
+    card = {
+        "paper_only": True,
+        "label": day,
+        "captured_at": _now(),
+        "m1": m1.get("expectancy_taxed"),
+        "m1_n": m1.get("n"),
+        "m3": m3.get("rate"),
+        "m3_n_fit": m3.get("n_fit"),
+        "fills_n": m3.get("n_buy"),
+        "lever": (str(lever).strip()[:80] if lever else None),
+        "fee_floors_locked": True,
+    }
+    path = _path(HILLCLIMB_KILL, root)
+    store = _load(path, {"paper_only": True, "weeks": [], "latest": None, "status": None})
+    weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+    weeks = [w for w in weeks if str(w.get("label") or "") != day]
+    weeks.append(card)
+    store["weeks"] = weeks[-52:]
+    store["latest"] = card
+    status = evaluate_hillclimb_kill(store["weeks"])
+    store["status"] = status
+    store["last_at"] = _now()
+    _save(path, store)
+    return {"card": card, "status": status}
+
+
+def hillclimb_kill_status(root: str | None = None) -> dict:
+    store = _load(
+        _path(HILLCLIMB_KILL, root),
+        {"paper_only": True, "weeks": [], "status": None},
+    )
+    status = store.get("status")
+    if not isinstance(status, dict):
+        status = evaluate_hillclimb_kill(
+            [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+        )
+    return {
+        "paper_only": True,
+        "weeks_n": len([w for w in (store.get("weeks") or []) if isinstance(w, dict)]),
+        "latest": store.get("latest") if isinstance(store.get("latest"), dict) else None,
+        "status": status,
+        "kill": bool(status.get("kill")),
+        "action": status.get("action"),
+        "auto_revert": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Hillclimb kill: if M3 rises while M1 falls for 2 Chicago weeks, "
+            "revert the last lever before the next idea. Flag only — no auto param write."
+        ),
+    }
+
+
 def capture_weekly_scorecard(
     root: str | None,
     *,
@@ -960,13 +1118,14 @@ def plan_summary(
         "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root),
+        "hillclimb_kill": hillclimb_kill_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
             "sports hard-stop promote after n≥30 (staff; live still False)",
             "INX band promote only after research week artifact",
-            "hillclimb kill detector (M3↑ M1↓ 2 weeks)",
             "profit-lock harvest paper analog",
+            "skip-regret twin weekly review wire",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1061,6 +1220,21 @@ def self_check() -> None:
         assert retire["recommend_pause"] is True
         assert retire["expand_volume"] is False
         assert retire["retired"] is False
+        # Hillclimb kill: M3↑ M1↓ with fills up → revert flag (no auto write).
+        bots_a = [{"id": "btc15m", "history": [{"pnl": 2.0, "contracts": 1}] * 10}]
+        for _ in range(6):
+            record_fit(tmp, bot="btc15m", outcome="fit")
+            record_fit(tmp, bot="btc15m", outcome="block")
+        capture_hillclimb_week(tmp, bots=bots_a, label="2026-11-01", lever="VOL_SAFE")
+        bots_b = [{"id": "btc15m", "history": [{"pnl": 0.5, "contracts": 1}] * 10}]
+        for _ in range(10):
+            record_fit(tmp, bot="btc15m", outcome="fit")
+            record_fit(tmp, bot="btc15m", outcome="buy")
+        out = capture_hillclimb_week(tmp, bots=bots_b, label="2026-11-08", lever="VOL_SAFE")
+        assert out["status"]["kill"] is True
+        assert out["status"]["action"] == "revert_lever"
+        assert out["status"]["auto_revert"] is False
+        assert hillclimb_kill_status(tmp)["kill"] is True
 
 
 if __name__ == "__main__":

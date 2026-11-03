@@ -60,14 +60,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Graduation checklist (2 Chicago weeks) | `desk_roi_plan.capture_graduation_week` / `graduation_board` |
 | Meme 20d retirement clock | `desk_roi_plan.meme_retirement_clock` — recommend pause, never auto-retire |
 
+### Hillclimb kill detector
+
+| Ticket | Where |
+| --- | --- |
+| Firm M1 proxy | `desk_roi_plan.firm_taxed_m1` |
+| Kill rule M3↑ M1↓ × 2 weeks | `capture_hillclimb_week` / `hillclimb_kill_status` — flag only, no auto param write |
+| Masters wire | `desk_master.master_summary` → `hillclimb_kill` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
 | INX band promote | only after research-week artifact |
-| Hillclimb kill detector | M3↑ with M1↓ for 2 Chicago weeks → revert flag |
 | Profit-lock harvest paper analog | cut size 50% after weekly target |
+| Skip-regret twin weekly review | wire into scorecard |
 
 ## Hard rules unchanged
 
