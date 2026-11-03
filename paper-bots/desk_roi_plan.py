@@ -1285,7 +1285,7 @@ def plan_summary(
             "sports hard-stop promote after n≥30 (staff; live still False)",
             "INX band promote only after research week artifact",
             "skip-regret twin weekly review wire",
-            "wire profit_lock_size_mult into tower kelly paths",
+            "daily R budget per tower after which settle-only",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
