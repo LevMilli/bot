@@ -62,6 +62,7 @@ export default function App() {
   const [screensOpen, setScreensOpen] = useState(false)
   /** Desk ops HUD (skips / budgets / adapt / fill tax) — opens from ledger/compliance click. */
   const [vaultOpsOpen, setVaultOpsOpen] = useState(false)
+  const [walkHint, setWalkHint] = useState('')
   const guest = useMemo(() => guestModeFromUrl(), [])
 
   const bots = snap?.bots || []
@@ -103,7 +104,10 @@ export default function App() {
   }, [selectedId, view])
 
   useEffect(() => {
-    if (view !== 'bank') setVaultOpsOpen(false)
+    if (view !== 'bank') {
+      setVaultOpsOpen(false)
+      setWalkHint('')
+    }
   }, [view])
 
   const backToCity = () => {
@@ -125,10 +129,14 @@ export default function App() {
     <div className={`app ${view !== 'city' ? 'office' : 'city'}${guest ? ' guest' : ''}`}>
       <div className="stage">
         <Canvas
-          dpr={[1, 1]}
-          gl={{ antialias: false, alpha: false, powerPreference: 'high-performance' }}
+          dpr={view === 'bank' ? [1, 1.75] : [1, 1.25]}
+          gl={{
+            antialias: view === 'bank',
+            alpha: false,
+            powerPreference: 'high-performance',
+          }}
           camera={{ position: [0, 12, 14], fov: 46 }}
-          performance={{ min: 0.4 }}
+          performance={{ min: 0.45 }}
         >
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
@@ -146,6 +154,7 @@ export default function App() {
                 desk={snap?.desk}
                 onSelectTeller={openTeller}
                 onOpenDeskOps={() => setVaultOpsOpen(true)}
+                onWalkHint={setWalkHint}
               />
             ) : (
               <CityScene
@@ -292,7 +301,9 @@ export default function App() {
           <div className="office-hud bank-hud">
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
-              <span>A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look</span>
+              <span className={walkHint.startsWith('E') ? 'walk-hint-go' : undefined}>
+                {walkHint || 'Click to look · WASD / arrows walk · Space jump · E talk'}
+              </span>
             </div>
             <nav className="floor-directory" aria-label="Office floors">
               {FLOORS.map((floor) => (
