@@ -77,14 +77,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Masters wire | `desk_master.master_summary` → `profit_lock` |
 | Kelly path applies 0.5× | `pimp_desk.stake_dollars_for` notes `profit_lock_mult` |
 
+### Skip-regret weekly review
+
+| Ticket | Where |
+| --- | --- |
+| Weekly twin card | `desk_roi_plan.skip_regret_weekly_card` (`auto_promote=False`) |
+| Masters wire | `desk_master.master_summary` → `roi_plan.skip_regret_weekly` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
 | INX band promote | only after research-week artifact |
-| Skip-regret twin weekly review | wire into scorecard |
 | Daily R budget per tower | settle-only after budget |
+| Anti-revenge same-market cool | after stop/flip |
 
 ## Hard rules unchanged
 

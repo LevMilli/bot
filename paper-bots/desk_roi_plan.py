@@ -25,6 +25,7 @@ WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 MASTER_GRAD = "desk_master_grad.json"
 HILLCLIMB_KILL = "desk_hillclimb_kill.json"
 PROFIT_LOCK = "desk_profit_lock.json"
+SKIP_REGRET_WEEKLY = "desk_skip_regret_weekly.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -430,6 +431,68 @@ def near_miss_weekly_card(root: str | None = None) -> dict:
     store["last_at"] = _now()
     _save(path, store)
     return card
+
+
+# ---- Skip-regret weekly review (Phase 8 helper loop) -----------------------
+
+def skip_regret_weekly_card(
+    root: str | None = None,
+    *,
+    label: str | None = None,
+) -> dict:
+    """Weekly twin of soft-gate skip regret — never loosens fee floors."""
+    try:
+        import desk_top25
+        summary = desk_top25.skip_regret_summary(root)
+    except Exception:
+        summary = {
+            "n": 0, "labeled_n": 0, "avg_would_pnl": None,
+            "green_twin": False, "loosen_soft_gates": False,
+        }
+    n = int(summary.get("labeled_n") or 0)
+    green = bool(summary.get("green_twin"))
+    if n < 20:
+        decision = "reject"
+    elif green:
+        decision = "review"  # staff may loosen one non-fee soft gate
+    else:
+        decision = "reject"
+    day = label or _chicago_day()
+    card = {
+        "paper_only": True,
+        "label": day,
+        "n": int(summary.get("n") or 0),
+        "labeled_n": n,
+        "avg_would_pnl": summary.get("avg_would_pnl"),
+        "win_rate": summary.get("win_rate"),
+        "green_twin": green,
+        "promote_min_n": 20,
+        "auto_promote": False,
+        "loosen_soft_gates": False,  # never auto; staff only when green_twin
+        "decision": decision,
+        "fee_floors_locked": True,
+        "note": (
+            "Skip-regret twin: only consider loosening a non-fee soft gate after "
+            "n≥20 labeled with avg would_pnl ≥ 0. Fee floors stay locked. No auto-promote."
+        ),
+    }
+    path = _path(SKIP_REGRET_WEEKLY, root)
+    store = _load(path, {"paper_only": True, "cards": []})
+    store.setdefault("cards", []).append({**card, "at": _now()})
+    store["cards"] = store["cards"][-52:]
+    store["latest"] = card
+    store["last_at"] = _now()
+    _save(path, store)
+    return card
+
+
+def latest_skip_regret_weekly(root: str | None = None) -> dict | None:
+    store = _load(
+        _path(SKIP_REGRET_WEEKLY, root),
+        {"paper_only": True, "cards": [], "latest": None},
+    )
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
 
 
 # ---- Sports CLV completeness -----------------------------------------------
@@ -1279,13 +1342,14 @@ def plan_summary(
         "graduation": graduation_board(root),
         "hillclimb_kill": hillclimb_kill_status(root),
         "profit_lock": profit_lock_status(root),
+        "skip_regret_weekly": latest_skip_regret_weekly(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
             "sports hard-stop promote after n≥30 (staff; live still False)",
             "INX band promote only after research week artifact",
-            "skip-regret twin weekly review wire",
             "daily R budget per tower after which settle-only",
+            "anti-revenge same-market cool after stop/flip",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1408,6 +1472,10 @@ def self_check() -> None:
         assert lock["safe_mode"] is True
         assert lock["size_mult"] == 0.5
         assert profit_lock_size_mult(tmp) == 0.5
+        sr = skip_regret_weekly_card(tmp, label="2026-11-03")
+        assert sr["auto_promote"] is False
+        assert sr["fee_floors_locked"] is True
+        assert latest_skip_regret_weekly(tmp)["label"] == "2026-11-03"
 
 
 if __name__ == "__main__":

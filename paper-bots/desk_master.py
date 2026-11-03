@@ -379,6 +379,22 @@ def master_summary(
             "baseline": baseline,
             "fee_floors_locked": True,
         }
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_sr = desk_roi_plan.latest_skip_regret_weekly(root)
+            if root and (
+                not isinstance(latest_sr, dict)
+                or str(latest_sr.get("label") or "") != today
+            ):
+                plan["skip_regret_weekly"] = desk_roi_plan.skip_regret_weekly_card(
+                    root, label=today,
+                )
+            else:
+                plan["skip_regret_weekly"] = latest_sr
+        except Exception:
+            plan["skip_regret_weekly"] = None
     except Exception:
         plan = None
     return {
