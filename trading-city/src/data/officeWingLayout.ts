@@ -28,13 +28,17 @@ export const WORKER_BOT_IDS = [
 
 export const BOSS_BOT_ID = 'kalshi-sized'
 
-/** Plan A — linear spine (shipping). */
+/**
+ * Plan A — linear spine (shipping).
+ * Room centers sit so the open doorway flush-meets the hallway edge
+ * (ROOM_HALF_D 4 + hall half-width 1.55 ≈ 5.55).
+ */
 export const SPINE_ROOMS: WingRoom[] = [
   {
     id: 'sports-gap',
     botId: 'sports-gap',
     label: 'Sports gap',
-    position: [4.2, 0, -6.4],
+    position: [5.2, 0, -5.55],
     yaw: 0,
     side: 'left',
   },
@@ -42,7 +46,7 @@ export const SPINE_ROOMS: WingRoom[] = [
     id: 'commodity-15m',
     botId: 'commodity-15m',
     label: 'Commodity 15m',
-    position: [4.2, 0, 6.4],
+    position: [5.2, 0, 5.55],
     yaw: Math.PI,
     side: 'right',
   },
@@ -50,7 +54,7 @@ export const SPINE_ROOMS: WingRoom[] = [
     id: 'kalshi-sp',
     botId: 'kalshi-sp',
     label: 'Kalshi S&P',
-    position: [12.2, 0, -6.4],
+    position: [13.2, 0, -5.55],
     yaw: 0,
     side: 'left',
   },
@@ -58,7 +62,7 @@ export const SPINE_ROOMS: WingRoom[] = [
     id: 'memecoin',
     botId: 'memecoin',
     label: 'Memecoin',
-    position: [12.2, 0, 6.4],
+    position: [13.2, 0, 5.55],
     yaw: Math.PI,
     side: 'right',
   },
@@ -66,7 +70,7 @@ export const SPINE_ROOMS: WingRoom[] = [
     id: 'btc15m',
     botId: 'btc15m',
     label: 'BTC 15m',
-    position: [20.2, 0, -6.4],
+    position: [21.2, 0, -5.55],
     yaw: 0,
     side: 'left',
   },
@@ -75,7 +79,8 @@ export const SPINE_ROOMS: WingRoom[] = [
     botId: BOSS_BOT_ID,
     label: 'Boss · Sized Kalshi',
     boss: true,
-    position: [28.4, 0, 0],
+    // Door at local +Z faces −X into the hall after yaw −90°.
+    position: [35.2, 0, 0],
     yaw: -Math.PI / 2,
     side: 'end',
   },

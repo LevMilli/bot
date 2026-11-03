@@ -1,282 +1,269 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import { useMemo } from 'react'
+import { PerspectiveCamera } from '@react-three/drei'
 import { DoubleSide } from 'three'
 import type { BotRow, Desk } from '../types'
 import { beamColorFor } from '../data/format'
 import { activeWingRooms, type WingRoom } from '../data/officeWingLayout'
+import { ROOM_HALF_D, ROOM_HALF_W, WING_HALL } from '../data/wingWalk'
 import { NeonBloom } from './Effects'
 import { OfficeInterior } from './OfficeScene'
+import { WingWalker } from './WingWalker'
 
 type Props = {
   bot: BotRow
   bots: BotRow[]
   desk?: Desk
-  hallView: boolean
+  /** Tower we entered from — walker spawns behind this bot once. */
+  spawnBotId: string
+  /** Proximity room change (does not re-spawn the walker). */
   onSelect: (id: string) => void
   onOpenScreens?: () => void
 }
 
-const HALL_LEN = 32
-const HALL_W = 3.6
-const ROOM_W = 10.5
-const ROOM_D = 8.2
-const WALL_H = 3.4
+const WALL_H = WING_HALL.wallH
 const SUITE_SCALE = 0.62
+const DOOR_W = 2.1
 
-/** Map a local office-suite point into wing world space. */
-function suiteWorld(room: WingRoom, local: [number, number, number]): [number, number, number] {
-  const [lx, ly, lz] = local
-  const s = SUITE_SCALE
-  const c = Math.cos(room.yaw)
-  const sn = Math.sin(room.yaw)
-  return [
-    room.position[0] + c * lx * s + sn * lz * s,
-    room.position[1] + ly * s,
-    room.position[2] - sn * lx * s + c * lz * s,
-  ]
-}
-
-function HallShell() {
+function HallCosmetics() {
+  const x0 = (WING_HALL.xMin + WING_HALL.xMax) / 2
+  const len = WING_HALL.xMax - WING_HALL.xMin
+  const width = WING_HALL.zMax - WING_HALL.zMin
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[HALL_LEN / 2 - 1.5, 0, 0]}>
-        <planeGeometry args={[HALL_LEN + 4, HALL_W + 0.4]} />
-        <meshStandardMaterial color="#0e0a1c" roughness={0.78} metalness={0.12} side={DoubleSide} />
+      {/* Continuous hall slab */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x0, 0, 0]} receiveShadow={false}>
+        <planeGeometry args={[len + 0.4, width + 0.2]} />
+        <meshStandardMaterial color="#0c0818" roughness={0.78} metalness={0.14} side={DoubleSide} />
       </mesh>
-      <mesh position={[HALL_LEN / 2 - 1.5, WALL_H, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[HALL_LEN + 4, HALL_W + 0.4]} />
-        <meshStandardMaterial color="#18122c" roughness={0.9} side={DoubleSide} />
+      {/* Neon runner */}
+      <mesh position={[x0, 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[len - 0.6, 0.42]} />
+        <meshStandardMaterial color="#152238" emissive="#2de2e6" emissiveIntensity={0.22} roughness={0.55} />
       </mesh>
-      <mesh position={[HALL_LEN / 2 - 1.5, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[HALL_LEN, 0.55]} />
-        <meshStandardMaterial
-          color="#1a2744"
-          emissive="#2de2e6"
-          emissiveIntensity={0.18}
-          roughness={0.65}
-          metalness={0.2}
-        />
-      </mesh>
-      {[4, 12, 20, 28].map((x) => (
-        <mesh key={x} position={[x, WALL_H - 0.04, 0]}>
-          <boxGeometry args={[1.6, 0.05, 0.35]} />
-          <meshBasicMaterial color="#e7f6ff" toneMapped={false} />
+      {/* Side baseboards */}
+      {([-1, 1] as const).map((s) => (
+        <mesh key={s} position={[x0, 0.08, s * (width / 2 - 0.04)]}>
+          <boxGeometry args={[len, 0.16, 0.06]} />
+          <meshStandardMaterial color="#7ec8d8" metalness={0.35} roughness={0.4} />
         </mesh>
       ))}
-      <group position={[-1.2, 1.6, 0]}>
-        <mesh>
-          <boxGeometry args={[0.12, 2.6, HALL_W + 0.2]} />
-          <meshStandardMaterial color="#1a2130" metalness={0.35} roughness={0.45} />
+      {/* Ceiling + troffers */}
+      <mesh position={[x0, WALL_H, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[len + 0.4, width + 0.2]} />
+        <meshStandardMaterial color="#161028" roughness={0.9} side={DoubleSide} />
+      </mesh>
+      {[4, 10, 16, 22, 28].map((x) => (
+        <group key={x}>
+          <mesh position={[x, WALL_H - 0.05, 0]}>
+            <boxGeometry args={[1.8, 0.06, 0.38]} />
+            <meshBasicMaterial color="#e8f7ff" toneMapped={false} />
+          </mesh>
+          <pointLight position={[x, WALL_H - 0.35, 0]} intensity={0.35} color="#dff6ff" distance={7} />
+        </group>
+      ))}
+      {/* Entry arch */}
+      <group position={[WING_HALL.xMin + 0.2, 0, 0]}>
+        <mesh position={[0, WALL_H / 2, 0]}>
+          <boxGeometry args={[0.18, WALL_H, width + 0.35]} />
+          <meshStandardMaterial color="#1a2130" metalness={0.4} roughness={0.4} />
         </mesh>
-        <mesh position={[0.18, 0.95, 0]}>
-          <boxGeometry args={[0.04, 0.35, 1.8]} />
-          <meshStandardMaterial color="#f9c80e" emissive="#f9c80e" emissiveIntensity={0.55} />
+        <mesh position={[0.2, 2.55, 0]}>
+          <boxGeometry args={[0.08, 0.28, 1.6]} />
+          <meshStandardMaterial color="#f9c80e" emissive="#f9c80e" emissiveIntensity={0.65} />
+        </mesh>
+        {/* Welcome kiosk */}
+        <mesh position={[1.1, 0.55, 0]}>
+          <boxGeometry args={[0.35, 1.1, 0.55]} />
+          <meshStandardMaterial color="#121820" metalness={0.35} roughness={0.45} />
+        </mesh>
+        <mesh position={[1.1, 1.2, 0.02]}>
+          <boxGeometry args={[0.28, 0.22, 0.04]} />
+          <meshBasicMaterial color="#39ff14" toneMapped={false} />
+        </mesh>
+      </group>
+      {/* Lounge nooks between door pairs */}
+      {[8, 16].map((x) => (
+        <group key={`lounge-${x}`} position={[x, 0, 0]}>
+          <mesh position={[0, 0.28, 0]}>
+            <boxGeometry args={[1.4, 0.55, 0.7]} />
+            <meshStandardMaterial color="#1a1030" roughness={0.7} />
+          </mesh>
+          <mesh position={[-0.55, 0.55, 0]}>
+            <cylinderGeometry args={[0.08, 0.1, 0.9, 10]} />
+            <meshStandardMaterial color="#1d6b45" roughness={0.65} />
+          </mesh>
+          <mesh position={[-0.55, 1.05, 0]}>
+            <sphereGeometry args={[0.22, 10, 10]} />
+            <meshStandardMaterial color="#2a8f5a" roughness={0.7} />
+          </mesh>
+          <pointLight position={[0, 1.4, 0]} intensity={0.25} color="#b967ff" distance={4} />
+        </group>
+      ))}
+      {/* Water cooler near boss end */}
+      <group position={[26.2, 0, 0.95]}>
+        <mesh position={[0, 0.55, 0]}>
+          <cylinderGeometry args={[0.18, 0.2, 1.1, 12]} />
+          <meshStandardMaterial color="#c5ccd8" metalness={0.55} roughness={0.3} />
+        </mesh>
+        <mesh position={[0, 1.25, 0]}>
+          <sphereGeometry args={[0.22, 12, 12]} />
+          <meshStandardMaterial color="#7ef9ff" transparent opacity={0.55} roughness={0.2} />
         </mesh>
       </group>
     </group>
   )
 }
 
-function DoorPlaque({
-  color,
-  label,
-  boss,
-  active,
-  onSelect,
-}: {
-  color: string
-  label: string
-  boss?: boolean
-  active: boolean
-  onSelect: () => void
-}) {
+function SuiteShell({ room, color, live }: { room: WingRoom; color: string; live: boolean }) {
+  const doorGap = DOOR_W
+  const wallSeg = (ROOM_HALF_W * 2 - doorGap) / 2
   return (
-    <group position={[0, 1.15, ROOM_D / 2 - 0.05]}>
-      <mesh
-        onClick={(e) => {
-          e.stopPropagation()
-          onSelect()
-        }}
-        onPointerOver={() => {
-          document.body.style.cursor = 'pointer'
-        }}
-        onPointerOut={() => {
-          document.body.style.cursor = 'default'
-        }}
-      >
-        <boxGeometry args={[1.35, 2.35, 0.1]} />
+    <group position={room.position} rotation={[0, room.yaw, 0]}>
+      {/* Floor */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <planeGeometry args={[ROOM_HALF_W * 2, ROOM_HALF_D * 2]} />
         <meshStandardMaterial
-          color={active ? '#0e1828' : '#0c1018'}
-          emissive={color}
-          emissiveIntensity={active ? 0.55 : 0.22}
-          metalness={0.35}
-          roughness={0.45}
+          color={room.boss ? '#1a1230' : '#12082a'}
+          roughness={0.72}
+          metalness={0.1}
+          side={DoubleSide}
         />
       </mesh>
-      {/* Name stripe — no Text/font loader (keeps WebGL stable). */}
-      <mesh position={[0, 1.35, 0.08]}>
-        <boxGeometry args={[1.15, 0.22, 0.04]} />
+      {/* Accent rug */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, -0.4]}>
+        <circleGeometry args={[1.35, 24]} />
+        <meshStandardMaterial color="#1a1038" emissive={color} emissiveIntensity={0.08} roughness={0.9} />
+      </mesh>
+      {/* Side walls */}
+      {([-ROOM_HALF_W, ROOM_HALF_W] as const).map((x) => (
+        <mesh key={`sx-${x}`} position={[x, WALL_H / 2, 0]}>
+          <boxGeometry args={[0.12, WALL_H, ROOM_HALF_D * 2]} />
+          <meshStandardMaterial color="#241848" roughness={0.88} />
+        </mesh>
+      ))}
+      {/* Window wall */}
+      <mesh position={[0, WALL_H / 2, -ROOM_HALF_D]}>
+        <boxGeometry args={[ROOM_HALF_W * 2, WALL_H, 0.12]} />
+        <meshStandardMaterial color="#241848" roughness={0.88} />
+      </mesh>
+      {/* Fake window glow */}
+      <mesh position={[0, 1.7, -ROOM_HALF_D + 0.08]}>
+        <planeGeometry args={[ROOM_HALF_W * 1.15, 1.8]} />
+        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.08} toneMapped={false} />
+      </mesh>
+      {/* Hall wall with OPEN doorway (walk through — no click teleport) */}
+      <mesh position={[-(doorGap / 2 + wallSeg / 2), WALL_H / 2, ROOM_HALF_D]}>
+        <boxGeometry args={[wallSeg, WALL_H, 0.12]} />
+        <meshStandardMaterial color="#1b2130" roughness={0.85} />
+      </mesh>
+      <mesh position={[doorGap / 2 + wallSeg / 2, WALL_H / 2, ROOM_HALF_D]}>
+        <boxGeometry args={[wallSeg, WALL_H, 0.12]} />
+        <meshStandardMaterial color="#1b2130" roughness={0.85} />
+      </mesh>
+      {/* Door frame glow */}
+      {([-doorGap / 2, doorGap / 2] as const).map((x) => (
+        <mesh key={`df-${x}`} position={[x, 1.15, ROOM_HALF_D]}>
+          <boxGeometry args={[0.06, 2.3, 0.08]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.55} />
+        </mesh>
+      ))}
+      <mesh position={[0, 2.35, ROOM_HALF_D]}>
+        <boxGeometry args={[doorGap + 0.08, 0.08, 0.08]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.55} />
+      </mesh>
+      {/* Name plate beside door */}
+      <mesh position={[doorGap / 2 + 0.55, 1.85, ROOM_HALF_D + 0.05]}>
+        <boxGeometry args={[0.7, 0.28, 0.04]} />
+        <meshStandardMaterial color="#10141c" metalness={0.35} roughness={0.4} />
+      </mesh>
+      <mesh position={[doorGap / 2 + 0.55, 1.85, ROOM_HALF_D + 0.08]}>
+        <boxGeometry args={[0.55, 0.12, 0.02]} />
         <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.95, 0.08]}>
-        <boxGeometry args={[0.95, 0.08, 0.03]} />
-        <meshBasicMaterial color="#f4f7ff" toneMapped={false} />
-      </mesh>
-      {boss && (
-        <mesh position={[0, -0.95, 0.08]}>
-          <boxGeometry args={[0.7, 0.12, 0.03]} />
+      {room.boss && (
+        <mesh position={[0, 2.7, ROOM_HALF_D + 0.06]}>
+          <boxGeometry args={[0.9, 0.16, 0.04]} />
           <meshBasicMaterial color="#f9c80e" toneMapped={false} />
         </mesh>
       )}
-      {/* Tiny label helper for a11y via title is HUD-side; keep mesh lean. */}
-      <group visible={false}>{label}</group>
-    </group>
-  )
-}
-
-function RoomShell({
-  room,
-  color,
-  active,
-  onSelect,
-}: {
-  room: WingRoom
-  color: string
-  active: boolean
-  onSelect: () => void
-}) {
-  return (
-    <group position={room.position} rotation={[0, room.yaw, 0]}>
-      {!active && (
-        <>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-            <planeGeometry args={[ROOM_W, ROOM_D]} />
-            <meshStandardMaterial
-              color={room.boss ? '#1a1230' : '#12082a'}
-              roughness={0.72}
-              metalness={0.1}
-              side={DoubleSide}
-            />
+      {/* Dim desk when not the live suite */}
+      {!live && (
+        <group position={[0, 0, -0.35]}>
+          <mesh position={[0, 0.76, 0]}>
+            <boxGeometry args={[2.6, 0.08, 1.05]} />
+            <meshStandardMaterial color="#12151c" metalness={0.3} roughness={0.5} />
           </mesh>
-          {([-ROOM_W / 2, ROOM_W / 2] as const).map((x) => (
-            <mesh key={`sx-${x}`} position={[x, WALL_H / 2, 0]}>
-              <boxGeometry args={[0.12, WALL_H, ROOM_D]} />
-              <meshStandardMaterial color="#241848" roughness={0.88} />
-            </mesh>
-          ))}
-          <mesh position={[0, WALL_H / 2, -ROOM_D / 2]}>
-            <boxGeometry args={[ROOM_W, WALL_H, 0.12]} />
-            <meshStandardMaterial color="#241848" roughness={0.88} />
+          <mesh position={[0, 1.15, -0.4]}>
+            <boxGeometry args={[1.5, 0.65, 0.05]} />
+            <meshStandardMaterial color="#0c1018" emissive={color} emissiveIntensity={0.22} />
           </mesh>
-          <mesh position={[-ROOM_W * 0.28, WALL_H / 2, ROOM_D / 2]}>
-            <boxGeometry args={[ROOM_W * 0.42, WALL_H, 0.12]} />
-            <meshStandardMaterial color="#1b2130" roughness={0.85} />
+          <mesh position={[0, 0.55, 0.7]}>
+            <boxGeometry args={[0.55, 0.7, 0.55]} />
+            <meshStandardMaterial color="#1c2433" roughness={0.6} />
           </mesh>
-          <mesh position={[ROOM_W * 0.28, WALL_H / 2, ROOM_D / 2]}>
-            <boxGeometry args={[ROOM_W * 0.42, WALL_H, 0.12]} />
-            <meshStandardMaterial color="#1b2130" roughness={0.85} />
-          </mesh>
-          <group position={[0, 0, -0.6]}>
-            <mesh position={[0, 0.76, 0]}>
-              <boxGeometry args={[2.8, 0.08, 1.1]} />
-              <meshStandardMaterial color="#12151c" metalness={0.3} roughness={0.5} />
-            </mesh>
-            <mesh position={[0, 1.2, -0.35]}>
-              <boxGeometry args={[1.6, 0.7, 0.05]} />
-              <meshStandardMaterial color="#0c1018" emissive={color} emissiveIntensity={0.25} />
-            </mesh>
-          </group>
-        </>
+        </group>
       )}
-      <DoorPlaque color={color} label={room.label} boss={room.boss} active={active} onSelect={onSelect} />
+      {/* Fun bits: plant + shelf */}
+      <mesh position={[-ROOM_HALF_W + 0.55, 0.35, -ROOM_HALF_D + 0.7]}>
+        <cylinderGeometry args={[0.12, 0.14, 0.7, 10]} />
+        <meshStandardMaterial color="#1d6b45" roughness={0.65} />
+      </mesh>
+      <mesh position={[-ROOM_HALF_W + 0.55, 0.85, -ROOM_HALF_D + 0.7]}>
+        <sphereGeometry args={[0.28, 10, 10]} />
+        <meshStandardMaterial color="#2a8f5a" roughness={0.7} />
+      </mesh>
+      <mesh position={[ROOM_HALF_W - 0.45, 1.1, -0.2]}>
+        <boxGeometry args={[0.35, 1.6, 0.9]} />
+        <meshStandardMaterial color="#161b26" roughness={0.55} />
+      </mesh>
+      <pointLight position={[0, 2.6, 0]} intensity={live ? 0.45 : 0.2} color={color} distance={6} />
     </group>
   )
 }
 
 /**
- * Full trading-wing 3D model: hallway + five worker offices + boss suite.
- * Hall overview orbits the spine; focusing a room drops into that desk.
+ * Continuous walkable trading wing — hallway + open suites + boss.
+ * Spawn behind the focused tower bot; WASD walks the whole floor (no room-click teleport).
  */
-export function OfficeHallScene({ bot, bots, desk, hallView, onSelect, onOpenScreens }: Props) {
-  const controls = useRef<OrbitControlsImpl>(null)
+export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenScreens }: Props) {
   const rooms = useMemo(() => activeWingRooms(), [])
-  const focus = useMemo(() => rooms.find((r) => r.botId === bot.id) || rooms[0], [rooms, bot.id])
-
-  const hallCam: [number, number, number] = [14, 11.5, 16]
-  const hallTarget: [number, number, number] = [14, 0.4, 0]
-  // Match the classic office home camera, transformed into the focused suite.
-  const focusCam = suiteWorld(focus, [0.15, 1.78, 3.35])
-  const focusTarget = suiteWorld(focus, [0, 1.42, 0.05])
-
-  useEffect(() => {
-    const orbit = controls.current
-    const cam = orbit?.object
-    if (!orbit || !cam) return
-    if (hallView) {
-      cam.position.set(...hallCam)
-      orbit.target.set(...hallTarget)
-    } else {
-      cam.position.set(...focusCam)
-      orbit.target.set(...focusTarget)
-    }
-    orbit.update()
-  }, [hallView, focus.botId, focusCam, focusTarget])
 
   return (
     <>
-      <color attach="background" args={['#0a0618']} />
-      <fog attach="fog" args={['#0a0618', hallView ? 28 : 14, hallView ? 70 : 36]} />
-      <PerspectiveCamera makeDefault fov={hallView ? 48 : 46} near={0.08} far={120} position={hallView ? hallCam : focusCam} />
-      <OrbitControls
-        ref={controls}
-        makeDefault
-        target={hallView ? hallTarget : focusTarget}
-        enableDamping
-        dampingFactor={0.08}
-        enablePan={hallView}
-        minDistance={hallView ? 6 : 1.45}
-        maxDistance={hallView ? 28 : 3.8}
-        minPolarAngle={hallView ? 0.35 : 1.02}
-        maxPolarAngle={hallView ? 1.35 : 1.75}
-        minAzimuthAngle={hallView ? -Infinity : -1.4}
-        maxAzimuthAngle={hallView ? Infinity : 1.4}
-      />
-      <ambientLight intensity={0.62} color="#c8b8ff" />
-      <directionalLight position={[8, 16, 6]} intensity={0.6} color="#f2e8ff" />
-      <pointLight position={[8, 3, 0]} intensity={0.55} color="#7ef9ff" distance={18} />
-      <pointLight position={[22, 3, 0]} intensity={0.45} color="#b967ff" distance={16} />
-      {!hallView && (
-        <>
-          <pointLight position={suiteWorld(focus, [-1.15, 3.15, 0.4])} intensity={0.85} color="#7ef9ff" distance={8} />
-          <pointLight position={suiteWorld(focus, [1.15, 3.15, 0.4])} intensity={0.85} color="#b967ff" distance={8} />
-          <pointLight position={suiteWorld(focus, [0, 1.9, -2.4])} intensity={0.65} color="#2de2e6" distance={7} />
-        </>
-      )}
+      <color attach="background" args={['#070412']} />
+      <fog attach="fog" args={['#070412', 18, 55]} />
+      <PerspectiveCamera makeDefault fov={55} near={0.08} far={120} position={[4, 1.8, 2]} />
+      <ambientLight intensity={0.48} color="#c8b8ff" />
+      <directionalLight position={[10, 18, 8]} intensity={0.45} color="#f2e8ff" />
 
-      <HallShell />
+      <HallCosmetics />
 
       {rooms.map((room, i) => {
         const color = beamColorFor(room.botId, i)
-        const active = !hallView && room.botId === bot.id
+        const live = room.botId === bot.id
+        return <SuiteShell key={room.id} room={room} color={color} live={live} />
+      })}
+
+      {/* Live desk kit for the suite you're currently in */}
+      {rooms.map((room) => {
+        if (room.botId !== bot.id) return null
+        const row = bots.find((b) => b.id === room.botId) || bot
         return (
-          <RoomShell
-            key={room.id}
-            room={room}
-            color={color}
-            active={active}
-            onSelect={() => onSelect(room.botId)}
-          />
+          <group key={`live-${room.id}`} position={room.position} rotation={[0, room.yaw, 0]} scale={SUITE_SCALE}>
+            <OfficeInterior bot={row} bots={bots} desk={desk} onOpenScreens={onOpenScreens} />
+          </group>
         )
       })}
 
-      {!hallView && (
-        <group position={focus.position} rotation={[0, focus.yaw, 0]} scale={SUITE_SCALE}>
-          <OfficeInterior bot={bot} bots={bots} desk={desk} onOpenScreens={onOpenScreens} />
-        </group>
-      )}
+      <WingWalker
+        active
+        focusBotId={spawnBotId}
+        onEnterRoom={(id) => {
+          if (id !== bot.id) onSelect(id)
+        }}
+      />
 
-      <NeonBloom strength={hallView ? 0.32 : 0.45} />
+      <NeonBloom strength={0.34} />
     </>
   )
 }

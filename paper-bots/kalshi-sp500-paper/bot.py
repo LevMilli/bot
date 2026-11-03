@@ -121,6 +121,21 @@ def step_scan(args, state, day):
         if not args.dry_run:
             logger.learn(f"{day}: no trade - {why}", "skip")
         return
+    # Positive-ROI: post-print / pre-FOMC calm (in addition to full-day calendar skips).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_inx
+        macro = desk_inx.inx_entry_blocks(
+            now=now, day=day, skip_days=risk_manager.SKIP_DAYS,
+        )
+        if macro:
+            print(alerts.format_skip_note(day, macro))
+            if not args.dry_run:
+                logger.learn(f"{day}: no trade - {macro}", "skip")
+            return
+    except Exception:
+        pass
     # 3) find the 3 PM CT contract family and read live prices
     ev = feed.find_event_for(CFG["series"], day, CFG["settle_time_ct"])
     if not ev:

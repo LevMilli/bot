@@ -24,6 +24,15 @@ desk_maker_taker_study.json
 desk_phase2_state.json
 desk_phase3_state.json
 desk_adapt_ab_ledger.json
+desk_fit_journal.json
+desk_latency_journal.json
+desk_roi_baseline.json
+desk_near_miss_weekly.json
+desk_inx_band_research.json
+desk_sports_hard_stop_shadow.json
+desk_adverse_cool.json
+desk_weekly_scorecard.json
+desk_master_grad.json
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json
 helpers/calendar_scanner_at.txt
@@ -32,3 +41,4 @@ commodity-15m-paper/paper_account.json
 *.tmp
 __pycache__/
 helpers/__pycache__/
+teller_memory.json

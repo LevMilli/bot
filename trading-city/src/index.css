@@ -756,6 +756,16 @@ a {
   color: #f2f6ff;
 }
 
+.teller-dialogue .td-memory {
+  margin: 0.45rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  letter-spacing: 0.03em;
+  color: #b8c4de;
+  opacity: 0.95;
+}
+
 .teller-dialogue .td-meta {
   margin-top: 0.55rem;
   display: flex;
@@ -776,6 +786,58 @@ a {
   font-size: 0.72em;
   opacity: 0.88;
   margin-top: 0.15rem;
+}
+
+.floor-directory {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: min(42rem, 94vw);
+}
+
+.floor-chip {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 0.45rem;
+  row-gap: 0.05rem;
+  align-items: baseline;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid rgba(45, 226, 230, 0.28);
+  background: rgba(8, 12, 28, 0.72);
+  color: #dce6f8;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.floor-chip:hover,
+.floor-chip:focus-visible {
+  border-color: rgba(201, 162, 39, 0.55);
+  outline: none;
+}
+
+.floor-chip-id {
+  grid-row: 1 / span 2;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--amber);
+  letter-spacing: 0.06em;
+}
+
+.floor-chip-name {
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+
+.floor-chip-wing {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: #8fa0c0;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .vault-board {

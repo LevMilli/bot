@@ -7,7 +7,7 @@ import { Monitors } from './hud/Monitors'
 import { Ticker } from './hud/Ticker'
 import { TowerRail } from './hud/TowerRail'
 import { beamColorFor } from './data/format'
-import { parseCityHash } from './data/floorMap'
+import { FLOORS, parseCityHash } from './data/floorMap'
 import { CityScene } from './scene/CityScene'
 import { OfficeHallScene } from './scene/OfficeHallScene'
 import { BankScene } from './scene/BankScene'
@@ -27,42 +27,42 @@ function applyHashRoute(
   setView: (v: View) => void,
   setSelectedId: (id: string | null) => void,
   setFromBank: (v: boolean) => void,
-  setHallView: (v: boolean) => void,
+  setSpawnBotId: (id: string | null) => void,
 ) {
   const route = parseCityHash(window.location.hash || '')
   if (route.view === 'bank') {
     setSelectedId(null)
+    setSpawnBotId(null)
     setFromBank(true)
-    setHallView(false)
     setView('bank')
     return
   }
   if (route.view === 'boss') {
-    // Boss suite lives at the end of the trading wing.
     setSelectedId('kalshi-sized')
+    setSpawnBotId('kalshi-sized')
     setFromBank(true)
-    setHallView(false)
     setView('office')
     return
   }
   if (route.view === 'office' && route.botId) {
     setSelectedId(route.botId)
+    setSpawnBotId(route.botId)
     setFromBank(true)
-    setHallView(false)
     setView('office')
     return
   }
   if (route.view === 'floor') {
-    // Trading wing hallway overview (Plan A spine).
-    setSelectedId(route.botId || 'sports-gap')
+    // Walkable trading wing — spawn at first suite (or hash bot).
+    const id = route.botId || 'sports-gap'
+    setSelectedId(id)
+    setSpawnBotId(id)
     setFromBank(true)
-    setHallView(true)
     setView('office')
     return
   }
   setSelectedId(null)
+  setSpawnBotId(null)
   setFromBank(false)
-  setHallView(false)
   setView('city')
 }
 
@@ -74,8 +74,8 @@ export default function App() {
   const [screensOpen, setScreensOpen] = useState(false)
   /** Desk ops HUD (skips / budgets / adapt / fill tax) — opens from ledger/compliance click. */
   const [vaultOpsOpen, setVaultOpsOpen] = useState(false)
-  /** Pull camera back to the wing hallway (5 workers + boss). */
-  const [hallView, setHallView] = useState(false)
+  /** Spawn-behind target — only changes when entering the wing from tower/bank/hash. */
+  const [spawnBotId, setSpawnBotId] = useState<string | null>(null)
   const guest = useMemo(() => guestModeFromUrl(), [])
 
   const bots = snap?.bots || []
@@ -85,14 +85,15 @@ export default function App() {
   )
 
   useEffect(() => {
-    applyHashRoute(setView, setSelectedId, setFromBank, setHallView)
-    const onHash = () => applyHashRoute(setView, setSelectedId, setFromBank, setHallView)
+    applyHashRoute(setView, setSelectedId, setFromBank, setSpawnBotId)
+    const onHash = () => applyHashRoute(setView, setSelectedId, setFromBank, setSpawnBotId)
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
   const openVault = () => {
     setSelectedId(null)
+    setSpawnBotId(null)
     setFromBank(true)
     setView('bank')
     window.location.hash = '#/bank'
@@ -100,23 +101,24 @@ export default function App() {
 
   const openTeller = (id: string) => {
     setSelectedId(id)
+    setSpawnBotId(id)
     setFromBank(true)
-    setHallView(false)
     setView('office')
     window.location.hash = `#/office/${id}`
   }
 
   const openTower = (id: string) => {
     setSelectedId(id)
+    setSpawnBotId(id)
     setFromBank(false)
-    setHallView(false)
     setView('office')
     window.location.hash = `#/office/${id}`
   }
 
   const openHall = () => {
-    setHallView(true)
-    if (!selectedId && bots[0]) setSelectedId(bots[0].id)
+    const id = selectedId || bots[0]?.id || 'sports-gap'
+    setSelectedId(id)
+    setSpawnBotId(id)
     setView('office')
     window.location.hash = '#/floor/1'
   }
@@ -131,6 +133,7 @@ export default function App() {
 
   const backToCity = () => {
     setSelectedId(null)
+    setSpawnBotId(null)
     setFromBank(false)
     setVaultOpsOpen(false)
     setView('city')
@@ -139,6 +142,7 @@ export default function App() {
 
   const backToBank = () => {
     setSelectedId(null)
+    setSpawnBotId(null)
     setFromBank(true)
     setView('bank')
     window.location.hash = '#/bank'
@@ -156,16 +160,16 @@ export default function App() {
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
           <Suspense fallback={null}>
-            {view === 'office' && selected ? (
+            {view === 'office' && selected && spawnBotId ? (
               <OfficeHallScene
                 bot={selected}
                 bots={bots}
                 desk={snap?.desk}
-                hallView={hallView}
+                spawnBotId={spawnBotId}
                 onSelect={(id) => {
+                  // Proximity walk into a suite — swap live desk, keep spawn (no teleport).
                   setSelectedId(id)
-                  setHallView(false)
-                  window.location.hash = `#/office/${id}`
+                  window.history.replaceState(null, '', `#/office/${id}`)
                 }}
                 onOpenScreens={() => setScreensOpen(true)}
               />
@@ -212,22 +216,6 @@ export default function App() {
                 <button type="button" className="back-btn ghost" onClick={backToCity}>
                   ← Go to city
                 </button>
-                {hallView ? (
-                  <button
-                    type="button"
-                    className="back-btn"
-                    onClick={() => {
-                      setHallView(false)
-                      if (selectedId) window.location.hash = `#/office/${selectedId}`
-                    }}
-                  >
-                    Enter desk
-                  </button>
-                ) : (
-                  <button type="button" className="back-btn" onClick={openHall}>
-                    Hallway
-                  </button>
-                )}
               </>
             )}
             {view !== 'city' && view !== 'office' && (
@@ -278,17 +266,9 @@ export default function App() {
         {view === 'office' && selected && (
           <div className="office-hud">
             <div className="office-title">
-              <strong>
-                {hallView
-                  ? 'Trading wing · hallway'
-                  : fromBank
-                    ? `Teller · ${selected.name}`
-                    : selected.name}
-              </strong>
-              <span>{hallView ? '5 workers · boss suite' : selected.id}</span>
-              <span className="screen-hint">
-                {hallView ? 'click a door plaque to enter' : 'click a screen for the trades'}
-              </span>
+              <strong>{fromBank ? `Teller · ${selected.name}` : selected.name}</strong>
+              <span>{selected.id}</span>
+              <span className="screen-hint">WASD walk · drag look · click screen for trades</span>
             </div>
             {fromBank && (
               <div className="teller-switch" role="tablist" aria-label="Switch teller">
@@ -315,6 +295,11 @@ export default function App() {
                     selected.blurb?.trim() ||
                     'No CARD why on this teller yet — waiting on the next paper check.'}
                 </p>
+                <p className="td-memory">
+                  {selected.memory_line?.trim() ||
+                    snap?.desk?.teller_memory?.recent?.[0]?.text ||
+                    'Shared memory quiet — paper facts land after checks.'}
+                </p>
                 <div className="td-meta">
                   <span>skip · {selected.skip?.trim() || 'none'}</span>
                   <span>next · {selected.next_run?.trim() || '—'}</span>
@@ -323,6 +308,11 @@ export default function App() {
                     {selected.today == null ? '—' : `$${Number(selected.today).toFixed(2)}`}
                   </span>
                   <span>open · {selected.open_count ?? 0}</span>
+                  <span>
+                    memory · f{snap?.desk?.teller_memory?.n_facts ?? 0}/m
+                    {snap?.desk?.teller_memory?.n_mistakes ?? 0}/w
+                    {snap?.desk?.teller_memory?.n_wins ?? 0}
+                  </span>
                 </div>
               </div>
             )}
@@ -351,6 +341,22 @@ export default function App() {
               <strong>APEX-CITY TRUST</strong>
               <span>A/D · ←→ snap · W/S · ↑↓ walk aisle · Enter open · drag to look</span>
             </div>
+            <nav className="floor-directory" aria-label="Office floors">
+              {FLOORS.map((floor) => (
+                <button
+                  key={floor.id}
+                  type="button"
+                  className="floor-chip"
+                  onClick={() => {
+                    window.location.hash = `#/floor/${floor.id}`
+                  }}
+                >
+                  <span className="floor-chip-id">F{floor.id}</span>
+                  <span className="floor-chip-name">{floor.name}</span>
+                  <span className="floor-chip-wing">{floor.wing}</span>
+                </button>
+              ))}
+            </nav>
             {vaultOpsOpen && (
               <div className="vault-board" aria-label="Desk vault board">
                 <div className="vault-board-toolbar">

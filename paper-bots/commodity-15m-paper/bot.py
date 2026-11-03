@@ -260,6 +260,59 @@ def kalshi_fee(price: float) -> float:
     return math.ceil(round(0.07 * float(price) * (1.0 - float(price)) * 100, 6)) / 100
 
 
+def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> float:
+    """Flatten one commodity paper position at bid − fee. No live order."""
+    contracts = float(pos.get("contracts") or 0)
+    per = max(0.0, float(bid) - float(fee or 0))
+    proceeds = round(contracts * per, 2)
+    pnl = round(proceeds - float(pos.get("cost") or 0), 2)
+    state["cash"] = round(float(state.get("cash") or 0) + proceeds, 2)
+    closed = dict(pos)
+    closed.update({
+        "closed": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "exit": reason,
+        "exit_price": round(float(bid), 4),
+        "payout": proceeds,
+        "pnl": pnl,
+    })
+    state.setdefault("closed", []).append(closed)
+    return pnl
+
+
+def manage_model_flips(state: dict, side_now, prob_now, bid, fee, delta, ticker=None) -> list[str]:
+    """Exit open commodity paper when the live model flips against the held side."""
+    still = []
+    sold = []
+    for pos in list(state.get("open") or []):
+        if ticker and pos.get("ticker") != ticker:
+            still.append(pos)
+            continue
+        held = str(pos.get("side") or "").upper()
+        fair_entry = pos.get("fair_at_entry")
+        flip = False
+        reason = ""
+        if held and side_now and held != str(side_now).upper():
+            flip = True
+            reason = f"model-flip side {held}→{side_now}"
+        else:
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_profit
+                if desk_profit.model_flip_adverse(held, fair_entry, prob_now, delta):
+                    flip = True
+                    reason = f"model-flip fair Δ≥{delta:g}"
+            except Exception:
+                pass
+        if flip and bid is not None and float(bid) > 0:
+            pnl = paper_sell(state, pos, bid, fee, reason)
+            sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
+        else:
+            still.append(pos)
+    state["open"] = still
+    return sold
+
+
 def settle_account(state: dict) -> None:
     still = []
     now = dt.datetime.now(dt.timezone.utc)
@@ -367,6 +420,19 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     edge = float(p) - float(ask) - float(fee) - float(edge_buf)
     if edge + 1e-12 < need_edge:
         reasons.append(f"edge {edge:.3f} < {need_edge:.3f} ({lane})")
+    # E1 #109 — EIA / inventory blackout for energy series only.
+    eia_hit = None
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        from helpers import eia_blackout
+        events = eia_blackout.load_calendar_events(DESK_ROOT)
+        gate = eia_blackout.energy_blackout(m.get("series"), events)
+        if gate.get("blocked"):
+            eia_hit = gate
+            reasons.append(str(gate.get("reason") or "EIA/inventory blackout"))
+    except Exception:
+        eia_hit = None
     return {
         "side": side,
         "ask": ask,
@@ -387,6 +453,7 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
         "close_time": m["close_time"],
         "target": target,
         "spot": spot,
+        "eia_blackout": eia_hit,
     }
 
 
@@ -494,6 +561,7 @@ def paper_buy(state: dict, ev: dict) -> str:
 
 def main() -> int:
     print("commodity-15m paper check (no live orders)")
+    t0 = time.perf_counter()
     account = load_account()
     settle_account(account)
     save_account(account)
@@ -518,9 +586,14 @@ def main() -> int:
 
     try:
         desk = _desk()
-        edge_buf = float(desk.venue_min_edge("kalshi_commodity15m", desk.load_settings(DESK_ROOT)))
+        cfg = desk.load_settings(DESK_ROOT)
+        edge_buf = float(desk.venue_min_edge("kalshi_commodity15m", cfg))
+        flip_delta = float(cfg.get("model_flip_delta") or 0.06)
+        flip_on = bool(cfg.get("model_flip_exits", True))
     except Exception:
         edge_buf = EDGE_BUFFER
+        flip_delta = 0.06
+        flip_on = True
 
     spots = spots_by_series()
     print(f"Spots ready: {len(spots)}/{len(SERIES)}  cash=${float(account.get('cash') or 0):.2f}")
@@ -537,6 +610,27 @@ def main() -> int:
                 f"  {series} {m['ticker']} spot={spot:.5f} target={m['target']} "
                 f"side={ev.get('side')} p={ev.get('p')} reasons={ev.get('reasons')}"
             )
+            # Exits before entries — model-flip when this window's model speaks.
+            if (
+                flip_on
+                and account.get("open")
+                and ev.get("side")
+                and ev.get("bid") is not None
+                and ev.get("p") is not None
+            ):
+                sold = manage_model_flips(
+                    account,
+                    ev["side"],
+                    ev["p"],
+                    ev["bid"],
+                    kalshi_fee(float(ev["bid"])) if ev.get("bid") else 0.0,
+                    flip_delta,
+                    ticker=ev.get("ticker"),
+                )
+                if sold:
+                    save_account(account)
+                    for line in sold:
+                        print(f"  MODEL-FLIP SELL: {line}")
             try:
                 import kalshi_history
                 kalshi_history.record_snapshot(
@@ -609,7 +703,34 @@ def main() -> int:
         print(f"  → {msg}")
         if msg.startswith("Paper buy"):
             buys += 1
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_fit(
+                    DESK_ROOT, bot="commodity-15m", outcome="buy",
+                    ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
+                    edge=ev.get("edge"),
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_fit(
+                    DESK_ROOT, bot="commodity-15m", outcome="block",
+                    ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
+                    edge=ev.get("edge"), note=msg[:160],
+                )
+            except Exception:
+                pass
     save_account(account)
+    try:
+        import desk_roi_plan
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=time.perf_counter() - t0,
+            note="commodity check",
+        )
+    except Exception:
+        pass
     print(f"Done. paper buys={buys} open={len(account.get('open') or [])}")
     if buys <= 0:
         print("CARD: Checked commodity 15m markets. No paper buy.")
