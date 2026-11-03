@@ -296,6 +296,7 @@ def master_summary(
     plan = None
     graduation = None
     retirement = None
+    hillclimb = None
     try:
         import desk_roi_plan
         bleed = desk_roi_plan.firm_bleed_ratio(bots)
@@ -339,6 +340,18 @@ def master_summary(
             retirement = desk_roi_plan.meme_retirement_clock(meme)
         except Exception:
             retirement = None
+        hillclimb = None
+        try:
+            if root and bots:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+                latest_hc = desk_roi_plan.hillclimb_kill_status(root).get("latest")
+                if not isinstance(latest_hc, dict) or str(latest_hc.get("label") or "") != today:
+                    desk_roi_plan.capture_hillclimb_week(root, bots=bots, label=today)
+            hillclimb = desk_roi_plan.hillclimb_kill_status(root)
+        except Exception:
+            hillclimb = None
         plan = {
             "bleed": bleed,
             "capital_misplaced": misplaced,
@@ -348,6 +361,7 @@ def master_summary(
             "weekly_scorecard": weekly,
             "graduation": graduation,
             "meme_retirement": retirement,
+            "hillclimb_kill": hillclimb,
             "baseline": baseline,
             "fee_floors_locked": True,
         }
@@ -366,10 +380,12 @@ def master_summary(
         "roi_plan": plan,
         "graduation": graduation,
         "meme_retirement": retirement,
+        "hillclimb_kill": hillclimb,
         "towers_m1_pass": m1_ready,
         "towers": rows,
         "stopbleed": stopbleed,
         "priority": [
+            "revert last lever if hillclimb kill trips",
             "memecoin retirement clock before any volume talk",
             "Master graduation = 2 Chicago weeks all M1–M7",
             "sports hard-stop shadow → promote after n≥30",
