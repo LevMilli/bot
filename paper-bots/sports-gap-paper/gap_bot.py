@@ -961,6 +961,39 @@ def run():
         desk_brain = None
         buy_candidates = sorted(buy_candidates, key=lambda c: -float(c.get("gap") or 0))
 
+    # Cross-tower firm queue: offer sports fits, then defer if desk risk
+    # is reserved for a higher btc/commodity score.
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        firm_offers = []
+        for c in buy_candidates:
+            m0 = c.get("m") or {}
+            firm_offers.append({
+                "bot": "sports-gap",
+                "ticker": str(m0.get("ticker") or c.get("key") or ""),
+                "side": c.get("side"),
+                "edge": c.get("gap") if c.get("gap") is not None else c.get("edge"),
+                "confidence": c.get("fair") if c.get("fair") is not None else c.get("confidence"),
+                "depth": c.get("depth"),
+                "stake_est": 25.0,
+            })
+        desk_roi_plan.offer_firm_candidates(
+            DESK_ROOT, firm_offers, bot="sports-gap",
+        )
+        local_open = sum(
+            float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0)
+            for p in s["open"]
+        )
+        desk_roi_plan.rebuild_firm_queue(
+            DESK_ROOT,
+            remaining_risk=max(0.0, float(max_open_risk) - float(local_open)),
+            note="sports-gap firm offer",
+        )
+    except Exception:
+        pass
+
     buys_this_check = 0
     # Selective volume when green; ROI rescue caps when red — fee floors unchanged.
     # green_boost stays 0 until sports_green_boost_status ready (2w M1≥0 + CLV bar).
@@ -1035,6 +1068,12 @@ def run():
                 )
                 if revenge:
                     reason = revenge
+                if reason is None:
+                    firm_block = desk_roi_plan.firm_queue_blocks(
+                        DESK_ROOT, "sports-gap", str(m.get("ticker") or ""),
+                    )
+                    if firm_block:
+                        reason = firm_block
             except Exception:
                 pass
         spread = None

@@ -237,11 +237,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Daily capture | `capture_btc_calibration` |
 | Masters board | `roi_plan.btc_calibration` |
 
+### Cross-tower firm rank queue
+
+| Ticket | Where |
+| --- | --- |
+| Shared offer book | `offer_firm_candidates` (sports+btc+commodity) |
+| Rank + allocate | `rebuild_firm_queue` via `desk_brain.rank_desk_queue` / `allocate_risk` |
+| Soft defer gate | `firm_queue_blocks` — deferred tickets skip new entries |
+| Runtime wire | `gap_bot` / `btc15m_signal` / `commodity-15m` offer → rebuild → gate |
+| Masters board | `roi_plan.firm_queue` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Cross-tower rank queue | sports+btc+commodity best score |
+| Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
 
 ## Hard rules unchanged
 

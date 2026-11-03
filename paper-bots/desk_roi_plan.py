@@ -42,6 +42,7 @@ CAPITAL_OS_NAME = "desk_capital_os.json"
 OPP_COST_NAME = "desk_opp_cost.json"
 IDEA_REVIEW_NAME = "desk_idea_review.json"
 BTC_CALIB_NAME = "desk_btc_calibration.json"
+FIRM_QUEUE_NAME = "desk_firm_queue.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -146,6 +147,13 @@ MAX_HELPER_FILL_ROWS = 4000
 COLD_HARVEST_PCT_DEFAULT = 0.40
 COLD_HARVEST_PCT_MIN = 0.30
 COLD_HARVEST_PCT_MAX = 0.50
+
+# Cross-tower firm rank queue — fee-clear sports+btc+commodity only.
+# Soft gate: deferred tickets skip new entries so desk risk buys best score.
+FIRM_QUEUE_BOTS = frozenset({"sports-gap", "btc15m", "commodity-15m"})
+FIRM_QUEUE_TTL_SEC = 180.0
+FIRM_QUEUE_DEFAULT_STAKE = 25.0
+MAX_FIRM_OFFERS = 200
 
 # Phase 2: capital allocation OS — barbell + midday util / zero-buy alerts.
 BARBELL_MEME_MAX = 0.15          # ≤15% desk risk to meme sleeve
@@ -835,6 +843,357 @@ def latest_btc_calibration(root: str | None = None) -> dict | None:
     store = _load(_path(BTC_CALIB_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
+
+
+# ---- Cross-tower firm rank queue (sports+btc+commodity) --------------------
+
+def _firm_queue_store(root: str | None) -> dict:
+    return _load(
+        _path(FIRM_QUEUE_NAME, root),
+        {"paper_only": True, "offers": {}, "latest": None, "passes": []},
+    )
+
+
+def _firm_offer_key(bot: str, ticker: str, side: str = "") -> str:
+    return f"{str(bot or '').strip()}|{str(ticker or '').strip()}|{str(side or '').strip().upper()}"
+
+
+def _seconds_since_iso(stamp: str | None) -> float | None:
+    hours = _hours_since_iso(stamp)
+    if hours is None:
+        return None
+    return float(hours) * 3600.0
+
+
+def remaining_desk_risk(
+    root: str | None = None,
+    *,
+    cfg: dict | None = None,
+    bots: list | None = None,
+) -> float:
+    """Desk open-risk headroom for firm queue allocate (fail-open to cap)."""
+    cap = 100.0
+    try:
+        if cfg is None:
+            import pimp_desk as desk
+            cfg = desk.load_settings(root)
+        cap = float((cfg or {}).get("max_open_risk") or 100.0)
+    except Exception:
+        cap = 100.0
+    used = 0.0
+    rows = bots
+    if rows is None:
+        try:
+            import pimp_desk as desk
+            rows = (desk.snapshot(root).get("bots") or [])
+        except Exception:
+            rows = []
+    for bot in rows or []:
+        if not isinstance(bot, dict) or bot.get("shadow_only"):
+            continue
+        try:
+            used += float(bot.get("open_risk") or 0)
+        except (TypeError, ValueError):
+            pass
+    return max(0.0, round(float(cap) - float(used), 2))
+
+
+def offer_firm_candidates(
+    root: str | None,
+    candidates: list | None,
+    *,
+    bot: str | None = None,
+) -> dict:
+    """Upsert fee-clear candidates into the shared firm offer book.
+
+    When ``bot`` is set, replace that tower's prior offers with this batch
+    so stale local tickets do not linger until TTL.
+    """
+    path = _path(FIRM_QUEUE_NAME, root)
+    store = _firm_queue_store(root)
+    offers = store.get("offers") if isinstance(store.get("offers"), dict) else {}
+    bot_id = str(bot or "").strip()
+    if bot_id:
+        offers = {
+            k: v for k, v in offers.items()
+            if not (isinstance(v, dict) and str(v.get("bot") or "") == bot_id)
+        }
+    now = _now()
+    accepted = 0
+    for row in candidates or []:
+        if not isinstance(row, dict):
+            continue
+        b = str(row.get("bot") or bot_id or "").strip()
+        tick = str(row.get("ticker") or "").strip()
+        if not b or not tick or b not in FIRM_QUEUE_BOTS:
+            continue
+        side = str(row.get("side") or "").strip()
+        edge = _finite(row.get("edge"))
+        conf = _finite(
+            row.get("confidence") if row.get("confidence") is not None else row.get("p")
+        )
+        depth = _finite(row.get("depth"))
+        stake = _finite(row.get("stake_est") if row.get("stake_est") is not None else row.get("stake"))
+        if stake is None or stake <= 0:
+            stake = FIRM_QUEUE_DEFAULT_STAKE
+        key = _firm_offer_key(b, tick, side)
+        offers[key] = {
+            "bot": b,
+            "ticker": tick[:80],
+            "side": side[:8],
+            "edge": edge,
+            "confidence": conf,
+            "depth": depth,
+            "stake_est": round(float(stake), 2),
+            "at": now,
+            "note": str(row.get("note") or "")[:120],
+            "paper_only": True,
+        }
+        accepted += 1
+    if len(offers) > MAX_FIRM_OFFERS:
+        oldest = sorted(
+            offers.items(),
+            key=lambda kv: str((kv[1] or {}).get("at") or ""),
+        )
+        offers = dict(oldest[-MAX_FIRM_OFFERS:])
+    store["offers"] = offers
+    store["paper_only"] = True
+    store["last_offer_at"] = now
+    _save(path, store)
+    return {"offered": accepted, "offers_n": len(offers), "bot": bot_id or None}
+
+
+def rebuild_firm_queue(
+    root: str | None,
+    *,
+    remaining_risk=None,
+    cfg: dict | None = None,
+    bots: list | None = None,
+    note: str = "",
+) -> dict:
+    """Prune TTL, rank sports+btc+commodity offers, allocate desk risk."""
+    path = _path(FIRM_QUEUE_NAME, root)
+    store = _firm_queue_store(root)
+    offers = store.get("offers") if isinstance(store.get("offers"), dict) else {}
+    kept = {}
+    cand = []
+    for key, row in list(offers.items()):
+        if not isinstance(row, dict):
+            continue
+        bot = str(row.get("bot") or "")
+        if bot not in FIRM_QUEUE_BOTS:
+            continue
+        age = _seconds_since_iso(row.get("at"))
+        if age is not None and age > FIRM_QUEUE_TTL_SEC:
+            continue
+        kept[key] = row
+        cand.append({
+            "bot": bot,
+            "ticker": row.get("ticker"),
+            "side": row.get("side"),
+            "edge": row.get("edge"),
+            "confidence": row.get("confidence"),
+            "depth": row.get("depth"),
+            "stake_est": row.get("stake_est"),
+            "offer_key": key,
+        })
+    rem = _finite(remaining_risk)
+    if rem is None:
+        rem = remaining_desk_risk(root, cfg=cfg, bots=bots)
+    ranked = []
+    alloc = []
+    try:
+        import desk_brain
+        ranked = desk_brain.rank_desk_queue(cand)
+        alloc = desk_brain.allocate_risk(ranked, float(rem))
+        try:
+            desk_brain.remember_queue(
+                root, alloc,
+                note=(note or "firm cross-tower queue")[:160],
+            )
+        except Exception:
+            pass
+    except Exception:
+        # Fail soft: mark all accepted so bots keep local rank behavior.
+        alloc = []
+        for i, row in enumerate(cand):
+            item = dict(row)
+            item["_queue_rank"] = i + 1
+            item["_brain_score"] = None
+            item["queue_status"] = "accepted"
+            item["queue_note"] = "brain unavailable — fail-open"
+            alloc.append(item)
+    slim = []
+    by_bot: dict[str, dict] = {}
+    accepted_n = 0
+    deferred_n = 0
+    for row in alloc:
+        status = str(row.get("queue_status") or "")
+        if status == "accepted":
+            accepted_n += 1
+        elif status == "deferred":
+            deferred_n += 1
+        bot = str(row.get("bot") or "")
+        bucket = by_bot.setdefault(bot, {"accepted": 0, "deferred": 0, "n": 0})
+        bucket["n"] += 1
+        if status == "accepted":
+            bucket["accepted"] += 1
+        elif status == "deferred":
+            bucket["deferred"] += 1
+        slim.append({
+            "bot": bot,
+            "ticker": row.get("ticker"),
+            "side": row.get("side"),
+            "edge": row.get("edge"),
+            "confidence": row.get("confidence"),
+            "depth": row.get("depth"),
+            "stake_est": row.get("stake_est"),
+            "score": row.get("_brain_score"),
+            "rank": row.get("_queue_rank"),
+            "status": status,
+            "note": row.get("queue_note"),
+            "offer_key": row.get("offer_key"),
+        })
+    card = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "at": _now(),
+        "ttl_sec": FIRM_QUEUE_TTL_SEC,
+        "remaining_risk": round(float(rem), 2),
+        "offers_n": len(kept),
+        "n": len(slim),
+        "accepted_n": accepted_n,
+        "deferred_n": deferred_n,
+        "by_bot": by_bot,
+        "towers": sorted(FIRM_QUEUE_BOTS),
+        "rows": slim[:40],
+        "note": (
+            note
+            or "Cross-tower firm queue: buy best sports/btc/commodity score inside desk risk."
+        )[:200],
+    }
+    store["offers"] = kept
+    store["latest"] = card
+    store["last_at"] = card["at"]
+    passes = [p for p in (store.get("passes") or []) if isinstance(p, dict)]
+    passes.append({
+        "at": card["at"],
+        "n": card["n"],
+        "accepted_n": accepted_n,
+        "deferred_n": deferred_n,
+        "remaining_risk": card["remaining_risk"],
+    })
+    store["passes"] = passes[-80:]
+    store["paper_only"] = True
+    _save(path, store)
+    return card
+
+
+def firm_queue_status(root: str | None = None) -> dict:
+    """Masters board: latest firm rank pass + offer book size."""
+    store = _firm_queue_store(root)
+    latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    offers = store.get("offers") if isinstance(store.get("offers"), dict) else {}
+    live_offers = 0
+    for row in offers.values():
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("bot") or "") not in FIRM_QUEUE_BOTS:
+            continue
+        age = _seconds_since_iso(row.get("at"))
+        if age is not None and age > FIRM_QUEUE_TTL_SEC:
+            continue
+        live_offers += 1
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "towers": sorted(FIRM_QUEUE_BOTS),
+        "ttl_sec": FIRM_QUEUE_TTL_SEC,
+        "offers_n": live_offers,
+        "latest": latest,
+        "accepted_n": None if not latest else latest.get("accepted_n"),
+        "deferred_n": None if not latest else latest.get("deferred_n"),
+        "remaining_risk": None if not latest else latest.get("remaining_risk"),
+        "top": (latest or {}).get("rows") or [],
+        "note": (
+            "Firm queue ranks fee-clear sports+btc+commodity by opportunity score; "
+            "deferred tickets skip so desk risk buys best edge first. Fee floors locked."
+        ),
+    }
+
+
+def firm_queue_allows(root: str | None, bot: str, ticker: str) -> dict:
+    """Soft allow check. Missing / non-fee-clear / unknown → allow (fail-open)."""
+    bot_id = str(bot or "").strip()
+    tick = str(ticker or "").strip()
+    if not bot_id or not tick or bot_id not in FIRM_QUEUE_BOTS:
+        return {"allowed": True, "status": "n/a", "reason": ""}
+    latest = firm_queue_status(root).get("latest")
+    if not isinstance(latest, dict):
+        return {"allowed": True, "status": "empty", "reason": ""}
+    age = _seconds_since_iso(latest.get("at"))
+    if age is not None and age > FIRM_QUEUE_TTL_SEC:
+        return {"allowed": True, "status": "stale", "reason": ""}
+    match = None
+    for row in latest.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("bot") or "") == bot_id and str(row.get("ticker") or "") == tick:
+            match = row
+            break
+    if match is None:
+        return {"allowed": True, "status": "missing", "reason": ""}
+    status = str(match.get("status") or "")
+    if status == "deferred":
+        rank = match.get("rank")
+        note = str(match.get("note") or "open-risk reserved for higher firm score")
+        return {
+            "allowed": False,
+            "status": "deferred",
+            "rank": rank,
+            "score": match.get("score"),
+            "reason": (
+                f"firm-queue deferred rank={rank}: {note}"
+            )[:160],
+        }
+    return {
+        "allowed": True,
+        "status": status or "accepted",
+        "rank": match.get("rank"),
+        "score": match.get("score"),
+        "reason": "",
+    }
+
+
+def firm_queue_blocks(root: str | None, bot: str, ticker: str) -> str:
+    """Non-empty reason when firm queue defers this fee-clear ticket."""
+    out = firm_queue_allows(root, bot, ticker)
+    if out.get("allowed"):
+        return ""
+    return str(out.get("reason") or "firm-queue deferred")
+
+
+def capture_firm_queue(
+    root: str | None,
+    *,
+    remaining_risk=None,
+    cfg: dict | None = None,
+    bots: list | None = None,
+    label: str | None = None,
+) -> dict:
+    """Rebuild + stamp a Masters capture of the firm queue."""
+    card = rebuild_firm_queue(
+        root, remaining_risk=remaining_risk, cfg=cfg, bots=bots,
+        note=f"Masters firm queue {label or _chicago_day()}",
+    )
+    card = {**card, "label": label or _chicago_day(), "captured_at": _now()}
+    path = _path(FIRM_QUEUE_NAME, root)
+    store = _firm_queue_store(root)
+    store["latest"] = card
+    store["last_capture"] = card
+    store["last_at"] = card["captured_at"]
+    _save(path, store)
+    return card
 
 
 # ---- Opportunity-cost clock (Phase 5) --------------------------------------
@@ -3982,10 +4341,11 @@ def plan_summary(
         "sports_green_boost": sports_green_boost_status(root, bots=bots),
         "green_or_gone": green_or_gone_status(bots),
         "btc_calibration": btc_calibration_report(bots),
+        "firm_queue": firm_queue_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "cross-tower rank queue (sports+btc+commodity)",
+            "observe Chicago weeks / staff hillclimb pick",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
