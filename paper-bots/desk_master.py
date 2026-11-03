@@ -488,6 +488,14 @@ def master_summary(
                 )
         except Exception:
             plan["capital_os"] = None
+        try:
+            plan["opp_cost"] = desk_roi_plan.opp_cost_summary(root)
+        except Exception:
+            plan["opp_cost"] = None
+        try:
+            plan["idea_review"] = desk_roi_plan.idea_review_status(root)
+        except Exception:
+            plan["idea_review"] = None
     except Exception:
         plan = None
     return {
