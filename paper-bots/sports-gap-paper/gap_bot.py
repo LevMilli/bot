@@ -704,6 +704,25 @@ def run():
                 )
             except Exception:
                 pass
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                desk_roi_plan.record_fee_ledger(
+                    DESK_ROOT,
+                    bot="sports-gap",
+                    ticker=str(p.get("ticker") or ""),
+                    side=str(p.get("side") or ""),
+                    price=p.get("entry_price"),
+                    contracts=p.get("contracts"),
+                    fee=0.0,
+                    pnl=pnl,
+                    fill_id=str(p.get("fill_id") or ""),
+                    kind="settle",
+                    note="settled",
+                )
+            except Exception:
+                pass
             lines.append(f"| {ts} | {p['league']} | {p['game']} | FINAL {as_}-{hs} | | | | | **PAPER SETTLE** {p['team']}: {'WON' if payout else 'LOST'} payout ${payout:.2f}, P&L ${pnl:+.2f} |")
             summary_out["closes"].append(f"SETTLE {p['ticker']} pnl {pnl:+.2f}")
             continue
@@ -858,6 +877,19 @@ def run():
                             reason=str(exit_reason or "stop")[:80],
                             note=str(exit_reason or "")[:120],
                         )
+                    desk_roi_plan.record_fee_ledger(
+                        DESK_ROOT,
+                        bot="sports-gap",
+                        ticker=str(p.get("ticker") or ""),
+                        side=str(p.get("side") or ""),
+                        price=bid,
+                        contracts=p.get("contracts"),
+                        fee=fee(bid) if bid else 0.0,
+                        pnl=pnl,
+                        fill_id=str(p.get("fill_id") or ""),
+                        kind="sell",
+                        note=str(exit_reason or "")[:120],
+                    )
                 except Exception:
                     pass
                 if desk is not None:

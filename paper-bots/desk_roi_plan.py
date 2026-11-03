@@ -32,6 +32,7 @@ DAILY_R_NAME = "desk_daily_r.json"
 ANTI_REVENGE_NAME = "desk_anti_revenge.json"
 INCUBATION_NAME = "desk_incubation.json"
 RUIN_DRILL_NAME = "desk_ruin_drill.json"
+FEE_LEDGER_NAME = "desk_fee_ledger.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -82,6 +83,10 @@ INCUBATION_MAIN_SERIES = frozenset({
 
 # Phase 10: ruin drill levels (paper UX — exits/settles still run unless nuclear pause).
 RUIN_LEVELS = ("soft", "hard", "nuclear")
+
+# Phase 10: tax/fee ledger — 1¢ fill tax + venue fee for true ROI honesty.
+FILL_TAX_DEFAULT = 0.01
+MAX_FEE_LEDGER_ROWS = 4000
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -1552,6 +1557,147 @@ def ruin_drill_blocks_entries(root: str | None = None) -> str:
     )
 
 
+# ---- Tax / fee ledger (Phase 10) -------------------------------------------
+
+def estimate_kalshi_fee(price, contracts=1.0) -> float:
+    """Kalshi-style ceil(0.07 * p * (1-p) * contracts) per contract aggregate."""
+    p = _finite(price)
+    n = _finite(contracts) or 1.0
+    if p is None or not (0.0 < p < 1.0) or n <= 0:
+        return 0.0
+    raw = 0.07 * float(p) * (1.0 - float(p)) * float(n)
+    return math.ceil(round(raw * 100, 6)) / 100.0
+
+
+def record_fee_ledger(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str = "",
+    side: str = "",
+    price=None,
+    contracts=None,
+    fee=None,
+    fill_tax: float = FILL_TAX_DEFAULT,
+    pnl=None,
+    fill_id: str = "",
+    kind: str = "fill",
+    note: str = "",
+) -> dict:
+    """Persist fee + fill-tax row so firm ROI can be audited."""
+    n = _finite(contracts) or 1.0
+    px = _finite(price)
+    fee_n = _finite(fee)
+    if fee_n is None:
+        fee_n = estimate_kalshi_fee(px, n) if px is not None else 0.0
+    tax_n = float(fill_tax) * max(1.0, n)
+    pnl_n = _finite(pnl)
+    taxed_pnl = None if pnl_n is None else round(pnl_n - tax_n, 4)
+    row = {
+        "at": _now(),
+        "bot": str(bot),
+        "ticker": str(ticker or "")[:80],
+        "side": str(side or "")[:20],
+        "kind": str(kind or "fill")[:40],
+        "price": px,
+        "contracts": n,
+        "fee": round(float(fee_n), 4),
+        "fill_tax": round(tax_n, 4),
+        "fee_plus_tax": round(float(fee_n) + tax_n, 4),
+        "pnl": pnl_n,
+        "pnl_taxed": taxed_pnl,
+        "fill_id": str(fill_id or "")[:80],
+        "note": str(note or "")[:160],
+        "paper_only": True,
+        "fee_floors_locked": True,
+    }
+    path = _path(FEE_LEDGER_NAME, root)
+    store = _load(path, {"paper_only": True, "rows": [], "by_bot": {}})
+    rows = list(store.get("rows") or [])
+    rows.append(row)
+    store["rows"] = rows[-MAX_FEE_LEDGER_ROWS:]
+    by = store.get("by_bot") if isinstance(store.get("by_bot"), dict) else {}
+    bot_rows = list(by.get(str(bot)) or [])
+    bot_rows.append(row)
+    by[str(bot)] = bot_rows[-500:]
+    store["by_bot"] = by
+    store["last_at"] = row["at"]
+    _save(path, store)
+    return {"recorded": True, "row": row}
+
+
+def fee_ledger_summary(root: str | None = None) -> dict:
+    store = _load(_path(FEE_LEDGER_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    fee_sum = round(sum(float(_finite(r.get("fee")) or 0) for r in rows), 4)
+    tax_sum = round(sum(float(_finite(r.get("fill_tax")) or 0) for r in rows), 4)
+    return {
+        "paper_only": True,
+        "n": len(rows),
+        "fee_sum": fee_sum,
+        "fill_tax_sum": tax_sum,
+        "fee_plus_tax_sum": round(fee_sum + tax_sum, 4),
+        "fee_floors_locked": True,
+        "note": "Tax/fee ledger for true ROI. Fill tax default 1¢×contracts.",
+    }
+
+
+def fee_ledger_completeness(root: str | None = None, bots: list | None = None) -> dict:
+    """Share of closed history rows that have a matching fee-ledger entry."""
+    store = _load(_path(FEE_LEDGER_NAME, root), {"paper_only": True, "rows": []})
+    ledger = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    ledger_keys = set()
+    for r in ledger:
+        fid = str(r.get("fill_id") or "").strip()
+        if fid:
+            ledger_keys.add(("id", fid))
+        tick = str(r.get("ticker") or "").strip()
+        bot = str(r.get("bot") or "").strip()
+        if tick and bot:
+            ledger_keys.add(("bt", bot, tick))
+    hist_n = 0
+    matched = 0
+    missing = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        for h in bot.get("history") or []:
+            if not isinstance(h, dict):
+                continue
+            pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if pnl is None:
+                continue
+            hist_n += 1
+            fid = str(h.get("fill_id") or "").strip()
+            tick = str(h.get("ticker") or h.get("what") or "").strip()
+            ok = False
+            if fid and ("id", fid) in ledger_keys:
+                ok = True
+            elif tick and bot_id and ("bt", bot_id, tick) in ledger_keys:
+                ok = True
+            if ok:
+                matched += 1
+            elif len(missing) < 12:
+                missing.append({"bot": bot_id, "ticker": tick, "fill_id": fid})
+    rate = round(matched / hist_n, 4) if hist_n else None
+    return {
+        "paper_only": True,
+        "history_n": hist_n,
+        "ledger_n": len(ledger),
+        "matched": matched,
+        "rate": rate,
+        "pass": hist_n == 0 or (rate is not None and rate >= 0.80 and hist_n >= 5),
+        "missing_sample": missing,
+        "fee_floors_locked": True,
+        "bar": 0.80,
+        "note": (
+            "Completeness = closed history rows with fee-ledger match by fill_id "
+            "or bot+ticker. Target ≥80% once n≥5."
+        ),
+    }
+
+
 def adverse_cool_blocks(root: str | None, bot: str) -> str:
     """Non-empty reason when bot is in adverse cool-off window."""
     path = _path(ADVERSE_COOL_NAME, root)
@@ -2150,10 +2296,11 @@ def plan_summary(
         "inx_band_promote": inx_band_promote_status(root),
         "incubation": incubation_board(root),
         "ruin_drill": ruin_drill_status(root),
+        "fee_ledger": fee_ledger_summary(root),
+        "fee_ledger_completeness": fee_ledger_completeness(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "tax/fee ledger completeness pass",
             "clock-skew / stale-world skip",
             "helper Gate A taxed EV gate",
             "weekly harvest cold-ledger habit",
@@ -2313,6 +2460,32 @@ def self_check() -> None:
         assert incubation_status(tmp, "KXNEON15M")["promote_ready"] is True
         assert staff_graduate_incubation(tmp, "KXNEON15M")["ok"] is True
         assert incubation_status(tmp, "KXNEON15M")["lane"] == "graduated"
+        # Fee ledger: Kalshi-style estimate + completeness vs closed history.
+        assert estimate_kalshi_fee(0.50, 1) == 0.02  # ceil(0.07*0.25)=0.02
+        bots_fee = []
+        for i in range(5):
+            tick = f"KXFEE-{i}"
+            record_fee_ledger(
+                tmp, bot="btc15m", ticker=tick, side="YES",
+                price=0.55, contracts=1, fee=0.02, pnl=0.10,
+                fill_id=f"fid-{i}", kind="sell",
+            )
+            bots_fee.append({
+                "id": "btc15m",
+                "history": [{"ticker": tick, "pnl": 0.10, "fill_id": f"fid-{i}"}],
+            })
+        # Flatten into one bot with 5 history rows.
+        hist = []
+        for b in bots_fee:
+            hist.extend(b["history"])
+        complete = fee_ledger_completeness(tmp, bots=[{"id": "btc15m", "history": hist}])
+        assert complete["matched"] == 5
+        assert complete["rate"] == 1.0
+        assert complete["pass"] is True
+        summ = fee_ledger_summary(tmp)
+        assert summ["n"] == 5
+        assert summ["fill_tax_sum"] == 0.05
+        assert summ["fee_floors_locked"] is True
 
 
 if __name__ == "__main__":
