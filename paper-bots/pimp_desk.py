@@ -342,6 +342,7 @@ BOT_PLANS = {
             "Safest YES/NO ask in the 80–92¢ band; venue kalshi_inx edge",
             "Stake floor($25 / ask); correlation + learning clear",
             "Adapt layer still logs vol/performance for desk study",
+            "Pre-FOMC calm after 12:00 CT day before; post-print +30m on macro days",
         ],
         "sell": [
             "Model-flip: bid under 50¢ → paper sell at bid when enabled",
@@ -439,8 +440,10 @@ BOT_PLANS = {
             "KXINXU 3 PM CT; forced scans 12:05 / 13:05 / 14:20 CT",
             "Ask band 80–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
+            "Anti-double vs kalshi-sp same ticker; residual edge ≥ venue + 1¢",
             "Correlation veto vs BTC / fixed Kalshi; learning skip clear",
             "Adapt: safe on high vol; bigger only on proven ≥80% record",
+            "Pre-FOMC calm / post-print +30m macro gates",
         ],
         "sell": [
             "Model-flip: side bid collapses under 50¢ → paper sell",
