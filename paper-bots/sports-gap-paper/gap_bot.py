@@ -866,8 +866,18 @@ def run():
         buy_candidates = sorted(buy_candidates, key=lambda c: -float(c.get("gap") or 0))
 
     buys_this_check = 0
-    # ROI rescue: after a red sports day, fewer fills / accurate-only — don't dig.
-    max_buys_eff = int(MAX_BUYS_PER_CHECK)
+    # Selective volume when green; ROI rescue caps when red — fee floors unchanged.
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_more
+        max_buys_eff = int(
+            desk_more.selective_max_buys(
+                "sports-gap", base=MAX_BUYS_PER_CHECK, today=today_pnl, green_boost=0,
+            )
+        )
+    except Exception:
+        max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl < 0:
         max_buys_eff = min(max_buys_eff, 2)
     if today_pnl <= -10:

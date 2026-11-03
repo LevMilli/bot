@@ -111,9 +111,9 @@ DEFAULTS = {
     ],
     "model_flip_delta": 0.06,
     "model_flip_exits": True,
-    "starve_min_n": 6,
+    "starve_min_n": 4,
     "starve_expectancy": 0.0,
-    "starve_factor": 0.25,
+    "starve_factor": 0.15,
     "expectancy_window_days": 20,
     # Phase 1: soft per-tower share of max_open_risk (sums to 1.0). Desk cap still hard.
     "tower_risk_budgets": {
@@ -2353,6 +2353,10 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     desk_row["sports_tip"] = tip
     if isinstance(desk_row.get("master"), dict):
         desk_row["master"]["sports_tip"] = tip
+    try:
+        desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}
     gate_rows = []
     prove_rows = []
     for bot in public:
