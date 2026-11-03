@@ -73,15 +73,15 @@ export function Starfield({ count = 900 }: { count?: number }) {
 export function SkyEquityLine() {
   const curve = useMemo(() => {
     const pts = [
-      new THREE.Vector3(-28, 10.5, -86),
-      new THREE.Vector3(-20, 12.2, -86),
-      new THREE.Vector3(-12, 9.4, -86),
-      new THREE.Vector3(-5, 13.5, -86),
-      new THREE.Vector3(1, 11.2, -86),
-      new THREE.Vector3(7, 15.2, -86),
-      new THREE.Vector3(14, 12.8, -86),
-      new THREE.Vector3(22, 16.4, -86),
-      new THREE.Vector3(28, 13.6, -86),
+      new THREE.Vector3(-28, 10.5, -50),
+      new THREE.Vector3(-20, 12.2, -50),
+      new THREE.Vector3(-12, 9.4, -50),
+      new THREE.Vector3(-5, 13.5, -50),
+      new THREE.Vector3(1, 11.2, -50),
+      new THREE.Vector3(7, 15.2, -50),
+      new THREE.Vector3(14, 12.8, -50),
+      new THREE.Vector3(22, 16.4, -50),
+      new THREE.Vector3(28, 13.6, -50),
     ]
     return new THREE.CatmullRomCurve3(pts)
   }, [])
@@ -103,12 +103,12 @@ export function SkyEquityLine() {
 export function PurpleHorizon() {
   return (
     <group>
-      <mesh position={[0, 14, -86]}>
-        <planeGeometry args={[220, 70]} />
+      <mesh position={[0, 14, -40]}>
+        <planeGeometry args={[180, 55]} />
         <meshBasicMaterial color="#1c0642" transparent opacity={0.7} depthWrite={false} />
       </mesh>
-      <mesh position={[0, 4, -84]}>
-        <planeGeometry args={[220, 22]} />
+      <mesh position={[0, 4, -38]}>
+        <planeGeometry args={[180, 18]} />
         <meshBasicMaterial color="#3a1280" transparent opacity={0.35} depthWrite={false} />
       </mesh>
     </group>
