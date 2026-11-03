@@ -336,6 +336,9 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "btc15m")
             if cool:
                 return cool
+            stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "btc15m")
+            if stale:
+                return stale
             revenge = desk_roi_plan.anti_revenge_blocks(DESK_ROOT, "btc15m", ticker)
             if revenge:
                 return revenge

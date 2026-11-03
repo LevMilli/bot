@@ -988,6 +988,11 @@ def run():
             lines.append(f"| {ts} | | | | | | | | {cool} |")
             summary_out.setdefault("skips", []).append(cool)
             max_buys_eff = 0
+        stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "sports-gap")
+        if stale:
+            lines.append(f"| {ts} | | | | | | | | {stale} |")
+            summary_out.setdefault("skips", []).append(stale)
+            max_buys_eff = 0
         r_block = desk_roi_plan.daily_r_blocks("sports-gap", today_pnl)
         if r_block:
             lines.append(f"| {ts} | | | | | | | | {r_block} |")
