@@ -10,7 +10,7 @@ import {
 } from '../data/format'
 
 /**
- * Quiet name tag on each tower. Full details live in the edge TowerRail —
+ * Quiet name tag on each tower. Full details live in the Towers dropdown —
  * these stay in-world without crowding the orbit.
  */
 export function TowerHologram({

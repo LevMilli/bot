@@ -1187,6 +1187,35 @@ def main():
     except Exception:
         pass
 
+    # Cross-tower firm queue: offer fee-clear BTC fits for desk-wide rank.
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        firm_offers = []
+        for ev in ranked:
+            if ev.get("reasons"):
+                continue
+            if ev.get("edge") is None or not ev.get("side"):
+                continue
+            firm_offers.append({
+                "bot": "btc15m",
+                "ticker": str(ev.get("ticker") or ""),
+                "side": ev.get("side"),
+                "edge": ev.get("edge"),
+                "confidence": ev.get("confidence") if ev.get("confidence") is not None else ev.get("p"),
+                "depth": ev.get("depth"),
+                "stake_est": 25.0,
+            })
+        desk_roi_plan.offer_firm_candidates(DESK_ROOT, firm_offers, bot="btc15m")
+        desk_roi_plan.rebuild_firm_queue(
+            DESK_ROOT,
+            remaining_risk=desk_roi_plan.remaining_desk_risk(DESK_ROOT),
+            note="btc15m firm offer",
+        )
+    except Exception:
+        pass
+
     for ev in ranked:
         if buys >= max_buys_eff:
             skips += 1
@@ -1410,6 +1439,32 @@ def main():
                 continue
 
         # Confident early (≥10m) and clears guidelines → single paper buy now.
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan
+            firm_block = desk_roi_plan.firm_queue_blocks(
+                DESK_ROOT, "btc15m", str(ev.get("ticker") or ""),
+            )
+        except Exception:
+            firm_block = ""
+        if firm_block:
+            print(f"  SIGNAL: SKIP -> {firm_block}")
+            skips += 1
+            last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
+            if desk_brain and not IS_SHADOW:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                        edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
+                        depth=ev.get("depth"), reasons=[firm_block],
+                        score=ev.get("_brain_score"),
+                    )
+                except Exception:
+                    pass
+            print()
+            continue
         tp = min(round(ev["ask"] + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
         print(
             f"  SIGNAL: BUY {ev['side']} on {ev['ticker']} at <= {ev['ask']:.2f} "
@@ -1792,13 +1847,19 @@ def main():
                         except Exception:
                             pass
 
+    elapsed = time.perf_counter() - t0
     if not IS_SHADOW:
         try:
             import desk_roi_plan
             desk_roi_plan.record_latency(
-                DESK_ROOT, bot="btc15m", seconds=time.perf_counter() - t0,
+                DESK_ROOT, bot="btc15m", seconds=elapsed,
                 note="btc15m check",
             )
+            if not markets and not eth_markets:
+                desk_roi_plan.record_empty_card(
+                    DESK_ROOT, bot="btc15m", seconds=elapsed, markets_n=0,
+                    note="no open BTC/ETH 15m windows",
+                )
         except Exception:
             pass
     print(

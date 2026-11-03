@@ -49,6 +49,11 @@ desk_cold_harvest.json
 desk_hillclimb_lever.json
 desk_dual_control.json
 desk_capital_os.json
+desk_opp_cost.json
+desk_idea_review.json
+desk_btc_calibration.json
+desk_firm_queue.json
+desk_empty_card.json
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json
 helpers/calendar_scanner_at.txt

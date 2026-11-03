@@ -208,12 +208,60 @@ Interactive: Positive ROI Master Plan canvas.
 | Zero-buy alert | ≥6h weekday fee-clear quiet + BUDGET skips |
 | Masters board | `roi_plan.capital_os` |
 
+### Opportunity-cost clock + idea review
+
+| Ticket | Where |
+| --- | --- |
+| Pending high-edge | `note_pending_high_edge` (sports budget/max-buys skips) |
+| Flush on buy | `flush_opp_cost_on_buy` when wait ≥90s + higher edge |
+| Opp-cost board | `opp_cost_summary` → Masters |
+| Idea register/close | `staff_register_idea` / `staff_close_idea` |
+| 90d stale flag | `idea_review_status` |
+| Masters board | `roi_plan.opp_cost` + `idea_review` |
+
+### Sports green_boost + green-or-gone
+
+| Ticket | Where |
+| --- | --- |
+| Sports +1 gate | `sports_green_boost_status` — 2w M1≥0 + CLV≥52% n≥20 |
+| Runtime boost | `gap_bot` uses `sports_green_boost()` (default 0) |
+| Green-or-gone flags | `green_or_gone_status` — red+risk / loser Gate A |
+| Masters board | `roi_plan.sports_green_boost` + `green_or_gone` |
+
+### BTC calibration report
+
+| Ticket | Where |
+| --- | --- |
+| p-bucket vs hit rate | `btc_calibration_report` |
+| Hi-p miscalibration | labeled ≥80% with hit &lt;70% (n≥20) → `raise_phi` |
+| Daily capture | `capture_btc_calibration` |
+| Masters board | `roi_plan.btc_calibration` |
+
+### Cross-tower firm rank queue
+
+| Ticket | Where |
+| --- | --- |
+| Shared offer book | `offer_firm_candidates` (sports+btc+commodity) |
+| Rank + allocate | `rebuild_firm_queue` via `desk_brain.rank_desk_queue` / `allocate_risk` |
+| Soft defer gate | `firm_queue_blocks` — deferred tickets skip new entries |
+| Runtime wire | `gap_bot` / `btc15m_signal` / `commodity-15m` offer → rebuild → gate |
+| Masters board | `roi_plan.firm_queue` |
+
+### Parallel book prefetch + empty CARD &lt;3s
+
+| Ticket | Where |
+| --- | --- |
+| Shared parallel map | `desk_more.prefetch_map` |
+| Commodity books | `prefetch_commodity_books` + `evaluate(..., book=)` |
+| Empty CARD log | `record_empty_card` / `empty_card_status` (bar 3s) |
+| Runtime | commodity empty fast-exit; BTC logs empty CARD latency |
+| Masters board | `roi_plan.empty_card` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Idea review cadence 90d | kill stale experiments |
-| Opportunity-cost clock | log when low-edge blocks high-edge &gt;90s |
+| Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
 
 ## Hard rules unchanged
 

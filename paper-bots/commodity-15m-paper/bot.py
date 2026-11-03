@@ -220,10 +220,13 @@ def list_open(series: str, limit: int = 4) -> list[dict]:
     return rows
 
 
-def book_depth(ticker: str, side: str, ask: float) -> tuple[float | None, int]:
-    try:
-        data = get_json(f"{KALSHI}/markets/{ticker}/orderbook")
-    except Exception:
+def _fetch_orderbook_raw(ticker: str):
+    return get_json(f"{KALSHI}/markets/{ticker}/orderbook")
+
+
+def depth_from_book(data, side: str, ask: float) -> tuple[float | None, int]:
+    """Spread + depth from a raw Kalshi orderbook payload (or None)."""
+    if not data:
         return None, 0
     book = data.get("orderbook") if isinstance(data, dict) else data
     if not isinstance(book, dict):
@@ -254,6 +257,42 @@ def book_depth(ticker: str, side: str, ask: float) -> tuple[float | None, int]:
     if best_bid is not None and ask is not None:
         spread = max(0.0, float(ask) - float(best_bid))
     return spread, depth
+
+
+def book_depth(ticker: str, side: str, ask: float) -> tuple[float | None, int]:
+    try:
+        data = _fetch_orderbook_raw(ticker)
+    except Exception:
+        return None, 0
+    return depth_from_book(data, side, ask)
+
+
+def prefetch_commodity_books(jobs: list[tuple[str, str, float]]) -> dict:
+    """Parallel orderbook fetch. jobs = [(ticker, side, ask), ...].
+
+    Returns {ticker: (spread, depth)}.
+    """
+    if not jobs:
+        return {}
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_more
+        tickers = sorted({str(t) for t, _s, _a in jobs if t})
+        raw_ok, _errs = desk_more.prefetch_map(tickers, _fetch_orderbook_raw, max_workers=8)
+    except Exception:
+        raw_ok = {}
+        for ticker, _side, _ask in jobs:
+            if ticker in raw_ok:
+                continue
+            try:
+                raw_ok[ticker] = _fetch_orderbook_raw(str(ticker))
+            except Exception:
+                raw_ok[ticker] = None
+    out = {}
+    for ticker, side, ask in jobs:
+        out[str(ticker)] = depth_from_book(raw_ok.get(str(ticker)), side, ask)
+    return out
 
 
 def kalshi_fee(price: float) -> float:
@@ -430,7 +469,7 @@ def settle_account(state: dict) -> None:
     state["open"] = still
 
 
-def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
+def evaluate(m: dict, spot: float, edge_buf: float, book=None) -> dict:
     target = float(m["target"])
     side = "YES" if spot > target else "NO"
     ask = m["yes_ask"] if side == "YES" else m["no_ask"]
@@ -450,9 +489,9 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_top25
-        book = desk_top25.commodity_playbook(m.get("series"))
-        min_cush *= float(book.get("min_cushion_mult") or 1.0)
-        z_floor = float(book.get("min_z") or MIN_Z)
+        playbook = desk_top25.commodity_playbook(m.get("series"))
+        min_cush *= float(playbook.get("min_cushion_mult") or 1.0)
+        z_floor = float(playbook.get("min_z") or MIN_Z)
     except Exception:
         z_floor = MIN_Z
     # Conservative σ: ~0.15% of spot * sqrt(minutes_left / 15) for 15m commodities.
@@ -460,7 +499,10 @@ def evaluate(m: dict, spot: float, edge_buf: float) -> dict:
     z = cushion / sigma if sigma > 1e-12 else 0.0
     p = phi(z)
     fee = kalshi_fee(ask)
-    spread, depth = book_depth(str(m["ticker"]), side, ask)
+    if book is not None and isinstance(book, (tuple, list)) and len(book) >= 2:
+        spread, depth = book[0], int(book[1] or 0)
+    else:
+        spread, depth = book_depth(str(m["ticker"]), side, ask)
     if cushion + 1e-12 < min_cush:
         reasons.append(f"cushion {cushion:.5f} < {min_cush:.5f}")
     lane = "accurate"
@@ -701,78 +743,107 @@ def main() -> int:
 
     spots = spots_by_series()
     print(f"Spots ready: {len(spots)}/{len(SERIES)}  cash=${float(account.get('cash') or 0):.2f}")
-    candidates = []
-    buys = 0
+    windows = []
     for series in SERIES:
         spot = spots.get(series)
         if spot is None:
             print(f"  {series}: no spot — skip")
             continue
         for m in list_open(series, limit=3):
-            ev = evaluate(m, spot, edge_buf)
-            print(
-                f"  {series} {m['ticker']} spot={spot:.5f} target={m['target']} "
-                f"side={ev.get('side')} p={ev.get('p')} reasons={ev.get('reasons')}"
+            windows.append((series, spot, m))
+    if not windows:
+        elapsed = time.perf_counter() - t0
+        print("CARD: Checked commodity 15m markets. No open windows.")
+        try:
+            import desk_roi_plan
+            desk_roi_plan.record_empty_card(
+                DESK_ROOT, bot="commodity-15m", seconds=elapsed, markets_n=0,
+                note="no open commodity windows",
             )
-            # Exits before entries — model-flip when this window's model speaks.
-            if (
-                flip_on
-                and account.get("open")
-                and ev.get("side")
-                and ev.get("bid") is not None
-                and ev.get("p") is not None
-            ):
-                sold = manage_model_flips(
-                    account,
-                    ev["side"],
-                    ev["p"],
-                    ev["bid"],
-                    kalshi_fee(float(ev["bid"])) if ev.get("bid") else 0.0,
-                    flip_delta,
-                    ticker=ev.get("ticker"),
-                )
-                if sold:
-                    save_account(account)
-                    for line in sold:
-                        print(f"  MODEL-FLIP SELL: {line}")
-                    try:
-                        import desk_roi_plan
-                        desk_roi_plan.record_anti_revenge(
-                            DESK_ROOT, bot="commodity-15m",
-                            ticker=str(ev.get("ticker") or ""), reason="model-flip",
-                            note=str(sold[0])[:120],
-                        )
-                    except Exception:
-                        pass
-            try:
-                import kalshi_history
-                kalshi_history.record_snapshot(
-                    DESK_ROOT,
-                    series=series,
-                    ticker=str(m["ticker"]),
-                    spot=spot,
-                    target=m["target"],
-                    side=ev.get("side"),
-                    yes_ask=m.get("yes_ask"),
-                    no_ask=m.get("no_ask"),
-                    model_p=ev.get("p"),
-                    minutes_left=ev.get("min_left"),
-                    regime="skip" if ev.get("reasons") else "confident_early",
-                    note="; ".join(ev.get("reasons") or [])[:160],
-                )
-            except Exception:
-                pass
-            if not ev.get("reasons"):
-                candidates.append({
-                    "bot": "commodity-15m",
-                    "ticker": ev.get("ticker"),
-                    "side": ev.get("side"),
-                    "edge": ev.get("edge"),
-                    "confidence": ev.get("p"),
-                    "depth": ev.get("depth"),
-                    "stake_est": 25.0,
-                    "_ev": ev,
-                })
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="commodity-15m", seconds=elapsed, note="empty card",
+            )
+        except Exception:
+            pass
+        print(f"Empty-market CARD in {elapsed:.2f}s (bar 3s)")
+        return 0
+    # Parallel books for every window's model side (speed).
+    book_jobs = []
+    for series, spot, m in windows:
+        side0 = "YES" if float(spot) > float(m["target"]) else "NO"
+        ask0 = m["yes_ask"] if side0 == "YES" else m["no_ask"]
+        if ask0 is None:
+            continue
+        book_jobs.append((str(m["ticker"]), side0, float(ask0)))
+    books = prefetch_commodity_books(book_jobs)
+    print(f"Prefetched {len(books)} commodity orderbook(s) in parallel")
+    candidates = []
+    buys = 0
+    for series, spot, m in windows:
+        ev = evaluate(m, spot, edge_buf, book=books.get(str(m["ticker"])))
+        print(
+            f"  {series} {m['ticker']} spot={spot:.5f} target={m['target']} "
+            f"side={ev.get('side')} p={ev.get('p')} reasons={ev.get('reasons')}"
+        )
+        # Exits before entries — model-flip when this window's model speaks.
+        if (
+            flip_on
+            and account.get("open")
+            and ev.get("side")
+            and ev.get("bid") is not None
+            and ev.get("p") is not None
+        ):
+            sold = manage_model_flips(
+                account,
+                ev["side"],
+                ev["p"],
+                ev["bid"],
+                kalshi_fee(float(ev["bid"])) if ev.get("bid") else 0.0,
+                flip_delta,
+                ticker=ev.get("ticker"),
+            )
+            if sold:
+                save_account(account)
+                for line in sold:
+                    print(f"  MODEL-FLIP SELL: {line}")
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.record_anti_revenge(
+                        DESK_ROOT, bot="commodity-15m",
+                        ticker=str(ev.get("ticker") or ""), reason="model-flip",
+                        note=str(sold[0])[:120],
+                    )
+                except Exception:
+                    pass
+        try:
+            import kalshi_history
+            kalshi_history.record_snapshot(
+                DESK_ROOT,
+                series=series,
+                ticker=str(m["ticker"]),
+                spot=spot,
+                target=m["target"],
+                side=ev.get("side"),
+                yes_ask=m.get("yes_ask"),
+                no_ask=m.get("no_ask"),
+                model_p=ev.get("p"),
+                minutes_left=ev.get("min_left"),
+                regime="skip" if ev.get("reasons") else "confident_early",
+                note="; ".join(ev.get("reasons") or [])[:160],
+            )
+        except Exception:
+            pass
+        if not ev.get("reasons"):
+            candidates.append({
+                "bot": "commodity-15m",
+                "ticker": ev.get("ticker"),
+                "side": ev.get("side"),
+                "edge": ev.get("edge"),
+                "confidence": ev.get("p"),
+                "depth": ev.get("depth"),
+                "stake_est": 25.0,
+                "_ev": ev,
+            })
 
     # Global rank soft pass — fill best commodity edges first under local loop.
     try:
@@ -781,6 +852,33 @@ def main() -> int:
         desk_brain.remember_queue(DESK_ROOT, ranked, note="commodity-15m local queue")
     except Exception:
         ranked = candidates
+    # Cross-tower firm queue: merge commodity fits with sports/btc offers.
+    try:
+        import desk_roi_plan
+        desk_roi_plan.offer_firm_candidates(
+            DESK_ROOT,
+            [
+                {
+                    "bot": "commodity-15m",
+                    "ticker": r.get("ticker"),
+                    "side": r.get("side"),
+                    "edge": r.get("edge"),
+                    "confidence": r.get("confidence") if r.get("confidence") is not None else r.get("p"),
+                    "depth": r.get("depth"),
+                    "stake_est": r.get("stake_est") or 25.0,
+                }
+                for r in ranked
+                if r.get("ticker")
+            ],
+            bot="commodity-15m",
+        )
+        desk_roi_plan.rebuild_firm_queue(
+            DESK_ROOT,
+            remaining_risk=desk_roi_plan.remaining_desk_risk(DESK_ROOT),
+            note="commodity-15m firm offer",
+        )
+    except Exception:
+        pass
     today_pnl = 0.0
     today_tag = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
     for pos in account.get("closed") or []:
@@ -823,6 +921,25 @@ def main() -> int:
             print(f"  → skip: max buys this check ({max_buys_eff})")
             break
         ev = row.get("_ev") or row
+        try:
+            import desk_roi_plan
+            firm_block = desk_roi_plan.firm_queue_blocks(
+                DESK_ROOT, "commodity-15m", str(ev.get("ticker") or ""),
+            )
+        except Exception:
+            firm_block = ""
+        if firm_block:
+            print(f"  → skip: {firm_block}")
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_fit(
+                    DESK_ROOT, bot="commodity-15m", outcome="block",
+                    ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
+                    edge=ev.get("edge"), note=firm_block[:160],
+                )
+            except Exception:
+                pass
+            continue
         msg = paper_buy(account, ev)
         print(f"  → {msg}")
         if msg.startswith("Paper buy"):
