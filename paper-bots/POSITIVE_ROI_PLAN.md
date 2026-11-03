@@ -158,11 +158,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Wired on buys | sports / BTC / commodity |
 | Masters board | `roi_plan.stale_world` |
 
+### Helper Gate A
+
+| Ticket | Where |
+| --- | --- |
+| Helper-attributed fills | `record_helper_fill` (BTC tags `calendar_scanner`) |
+| Taxed EV Gate A | `helper_gate_a` (n≥20, EV≥0) |
+| Staff autonomy arm | `staff_set_helper_autonomy` (`auto_promote=False`) |
+| Place-alone block | `helper_autonomy_blocks` / `helpers.may_place_alone` |
+| Masters board | `roi_plan.helper_gate_a` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Helper Gate A taxed EV | helper autonomy bar |
 | Weekly harvest cold ledger | paper profit → cold habit |
 
 ## Hard rules unchanged

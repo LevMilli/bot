@@ -299,6 +299,18 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
             kind="sell",
             note=str(reason or "")[:120],
         )
+        helper = str(pos.get("helper_source") or "").strip()
+        if helper:
+            desk_roi_plan.record_helper_fill(
+                DESK_ROOT,
+                helper=helper,
+                bot="commodity-15m",
+                ticker=str(pos.get("ticker") or ""),
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                fill_id=str(pos.get("fill_id") or ""),
+                note=str(reason or "")[:120],
+            )
     except Exception:
         pass
     return pnl

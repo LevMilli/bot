@@ -189,6 +189,18 @@ def settle_account(state):
                     kind="settle",
                     note="settled",
                 )
+                helper = str(pos.get("helper_source") or "").strip()
+                if helper:
+                    desk_roi_plan.record_helper_fill(
+                        DESK_ROOT,
+                        helper=helper,
+                        bot="btc15m",
+                        ticker=str(pos.get("ticker") or ""),
+                        pnl=pnl,
+                        contracts=pos.get("contracts"),
+                        fill_id=str(pos.get("fill_id") or ""),
+                        note="settled",
+                    )
             except Exception:
                 pass
     state["open"] = still
@@ -247,6 +259,18 @@ def paper_sell(state, pos, bid, fee, reason):
                 kind="sell",
                 note=str(reason or "")[:120],
             )
+            helper = str(pos.get("helper_source") or "").strip()
+            if helper:
+                desk_roi_plan.record_helper_fill(
+                    DESK_ROOT,
+                    helper=helper,
+                    bot="btc15m",
+                    ticker=str(pos.get("ticker") or ""),
+                    pnl=pnl,
+                    contracts=pos.get("contracts"),
+                    fill_id=str(pos.get("fill_id") or ""),
+                    note=str(reason or "")[:120],
+                )
         except Exception:
             pass
     return pnl
@@ -450,6 +474,10 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "history_hit": perf.get("hit_rate"),
         "history_ci_low": perf.get("hit_ci_low"),
         "fill_tax": 0.01,
+        # Calendar consulted (loaded) → attribute close to helper for Gate A evidence.
+        "helper_source": (
+            "calendar_scanner" if vk.get("calendar_loaded") else str(vk.get("helper_source") or "")
+        ),
         "take_profit": min(round(float(ask) + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP),
         "exit_plan": {
             "kind": "take_profit+model_flip+settle",
@@ -967,6 +995,7 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         "edge": float(p) - float(ask) - float(fee),
         "toward": toward,
         "news": news,
+        "calendar_loaded": news is not None,
         "news_soft_unavailable": news is None,
         "candle_soft_unknown": toward is None,
         "cushion": cushion,
@@ -1393,6 +1422,7 @@ def main():
                 "cushion": ev.get("cushion"), "sigma": ev.get("sigma"),
                 "spread": ev.get("spread"), "minutes_left": ev.get("min_left"),
                 "ask": ev.get("ask"), "ticker": ev.get("ticker"),
+                "calendar_loaded": bool(ev.get("calendar_loaded")),
             },
         )
         if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
@@ -1558,6 +1588,7 @@ def main():
                     "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
                     "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
                     "ask": ev_early.get("ask"), "ticker": m["ticker"], "series": "KXETH15M",
+                    "calendar_loaded": bool(ev_early.get("calendar_loaded")),
                 },
             )
             print(f"  ETH early: {sentence}")

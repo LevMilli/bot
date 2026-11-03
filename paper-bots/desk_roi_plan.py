@@ -33,6 +33,8 @@ ANTI_REVENGE_NAME = "desk_anti_revenge.json"
 INCUBATION_NAME = "desk_incubation.json"
 RUIN_DRILL_NAME = "desk_ruin_drill.json"
 FEE_LEDGER_NAME = "desk_fee_ledger.json"
+HELPER_FILLS_NAME = "desk_helper_fills.json"
+HELPER_PROMOTE_NAME = "desk_helper_promote.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -99,6 +101,10 @@ STALE_LOOP_SEC = {
 }
 STALE_LOOP_DEFAULT = 40.0
 CLOCK_SKEW_MAX_SEC = 30.0  # matches pimp_desk.STALE_PRICE_SEC
+
+# Phase 8: helper Gate A — helper-attributed taxed EV ≥ 0 before any autonomy story.
+HELPER_GATE_A_MIN_N = 20
+MAX_HELPER_FILL_ROWS = 4000
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -1665,6 +1671,230 @@ def stale_world_status(root: str | None = None, bots: list | None = None) -> dic
     }
 
 
+# ---- Helper Gate A (Phase 8) -----------------------------------------------
+
+def record_helper_fill(
+    root: str | None,
+    *,
+    helper: str,
+    bot: str = "",
+    ticker: str = "",
+    pnl=None,
+    contracts=None,
+    fill_tax: float = FILL_TAX_DEFAULT,
+    fill_id: str = "",
+    note: str = "",
+) -> dict:
+    """Persist a helper-attributed close for Gate A evidence. Never places alone."""
+    helper_id = str(helper or "").strip()
+    if not helper_id:
+        return {"recorded": False, "reason": "helper required"}
+    n = _finite(contracts) or 1.0
+    pnl_n = _finite(pnl)
+    tax_n = float(fill_tax) * max(1.0, n)
+    taxed = None if pnl_n is None else round(pnl_n - tax_n, 4)
+    row = {
+        "at": _now(),
+        "helper": helper_id[:60],
+        "bot": str(bot or "")[:40],
+        "ticker": str(ticker or "")[:80],
+        "pnl": pnl_n,
+        "contracts": n,
+        "fill_tax": round(tax_n, 4),
+        "pnl_taxed": taxed,
+        "fill_id": str(fill_id or "")[:80],
+        "note": str(note or "")[:160],
+        "paper_only": True,
+        "helper_only": True,
+        "places_orders": False,
+        "fee_floors_locked": True,
+    }
+    path = _path(HELPER_FILLS_NAME, root)
+    store = _load(path, {"paper_only": True, "rows": [], "by_helper": {}})
+    rows = list(store.get("rows") or [])
+    rows.append(row)
+    store["rows"] = rows[-MAX_HELPER_FILL_ROWS:]
+    by = store.get("by_helper") if isinstance(store.get("by_helper"), dict) else {}
+    hrows = list(by.get(helper_id) or [])
+    hrows.append(row)
+    by[helper_id] = hrows[-800:]
+    store["by_helper"] = by
+    store["last_at"] = row["at"]
+    _save(path, store)
+    return {"recorded": True, "row": row}
+
+
+def helper_gate_a(
+    root: str | None = None,
+    helper: str | None = None,
+    *,
+    min_n: int = HELPER_GATE_A_MIN_N,
+    fill_tax: float = FILL_TAX_DEFAULT,
+) -> dict:
+    """Gate A for one helper (or firm helpers): n≥min_n and taxed EV ≥ 0."""
+    store = _load(_path(HELPER_FILLS_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    if helper:
+        rows = [r for r in rows if str(r.get("helper") or "") == str(helper)]
+    taxed = []
+    for r in rows:
+        pt = _finite(r.get("pnl_taxed"))
+        if pt is not None:
+            taxed.append(float(pt))
+            continue
+        pnl = _finite(r.get("pnl"))
+        if pnl is None:
+            continue
+        n = _finite(r.get("contracts")) or 1.0
+        taxed.append(float(pnl) - float(fill_tax) * max(1.0, n))
+    n = len(taxed)
+    exp = round(sum(taxed) / n, 4) if n else None
+    ready = bool(n >= int(min_n) and exp is not None and exp + 1e-12 >= 0.0)
+    return {
+        "gate": "A",
+        "helper": helper,
+        "ready": ready,
+        "min_n": int(min_n),
+        "n": n,
+        "expectancy_taxed": exp,
+        "fill_tax": float(fill_tax),
+        "paper_only": True,
+        "helper_only": True,
+        "places_orders": False,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "reason": (
+            "helper taxed EV ≥ 0 with enough attributed fills"
+            if ready
+            else f"need n≥{min_n} and taxed EV≥0 (have n={n}, EV={exp})"
+        ),
+        "note": "Helpers never place alone until Gate A + staff promote.",
+    }
+
+
+def helper_promote_status(root: str | None = None, helper: str | None = None) -> dict:
+    store = _load(
+        _path(HELPER_PROMOTE_NAME, root),
+        {"paper_only": True, "helpers": {}, "auto_promote": False},
+    )
+    helpers = store.get("helpers") if isinstance(store.get("helpers"), dict) else {}
+    if helper:
+        row = helpers.get(str(helper)) if isinstance(helpers.get(str(helper)), dict) else {}
+        gate = helper_gate_a(root, helper)
+        armed = bool(row.get("staff_approved")) and bool(row.get("autonomy"))
+        return {
+            "paper_only": True,
+            "helper": str(helper),
+            "staff_approved": bool(row.get("staff_approved")),
+            "autonomy": bool(row.get("autonomy")),
+            "armed": armed,
+            "gate_a": gate,
+            "promote_ready": bool(gate.get("ready")),
+            "auto_promote": False,
+            "places_orders": False,
+            "fee_floors_locked": True,
+            "note": row.get("note") or "",
+            "at": row.get("at"),
+        }
+    board = []
+    for hid in sorted(set(list(helpers.keys()) + [
+        str(r.get("helper") or "")
+        for r in (_load(_path(HELPER_FILLS_NAME, root), {"rows": []}).get("rows") or [])
+        if isinstance(r, dict) and r.get("helper")
+    ])):
+        if not hid:
+            continue
+        board.append(helper_promote_status(root, hid))
+    return {
+        "paper_only": True,
+        "helpers": board,
+        "auto_promote": False,
+        "places_orders": False,
+        "fee_floors_locked": True,
+        "note": "Helper Gate A board. Autonomy requires Gate A ready + staff arm.",
+    }
+
+
+def staff_set_helper_autonomy(
+    root: str | None,
+    helper: str,
+    enabled: bool,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff arm/disarm helper autonomy. Requires Gate A unless force (tests)."""
+    helper_id = str(helper or "").strip()
+    if not helper_id:
+        return {"ok": False, "reason": "helper required", "auto_promote": False}
+    gate = helper_gate_a(root, helper_id)
+    if enabled and not force and not gate.get("ready"):
+        return {
+            "ok": False,
+            "helper": helper_id,
+            "autonomy": False,
+            "staff_approved": False,
+            "reason": gate.get("reason"),
+            "gate_a": gate,
+            "auto_promote": False,
+            "places_orders": False,
+            "fee_floors_locked": True,
+        }
+    path = _path(HELPER_PROMOTE_NAME, root)
+    store = _load(path, {"paper_only": True, "helpers": {}, "auto_promote": False})
+    helpers = store.get("helpers") if isinstance(store.get("helpers"), dict) else {}
+    helpers[helper_id] = {
+        "staff_approved": bool(enabled),
+        "autonomy": bool(enabled),
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "gate_n": gate.get("n"),
+        "gate_ev": gate.get("expectancy_taxed"),
+        "auto_promote": False,
+        "places_orders": False,
+        "fee_floors_locked": True,
+    }
+    store["helpers"] = helpers
+    store["auto_promote"] = False
+    store["paper_only"] = True
+    _save(path, store)
+    return {
+        "ok": True,
+        "helper": helper_id,
+        "autonomy": bool(enabled),
+        "staff_approved": bool(enabled),
+        "gate_a": gate,
+        "auto_promote": False,
+        "places_orders": False,
+        "fee_floors_locked": True,
+        "reason": "armed" if enabled else "disarmed",
+    }
+
+
+def helper_autonomy_blocks(root: str | None, helper: str) -> str:
+    """Non-empty when helper must not place alone / claim autonomy."""
+    helper_id = str(helper or "").strip()
+    if not helper_id:
+        return "helper autonomy blocked: helper id required"
+    st = helper_promote_status(root, helper_id)
+    if st.get("armed") and (st.get("gate_a") or {}).get("ready"):
+        return ""
+    if not (st.get("gate_a") or {}).get("ready"):
+        return (
+            f"helper Gate A not ready for {helper_id}: "
+            f"{(st.get('gate_a') or {}).get('reason')}"
+        )
+    return (
+        f"helper {helper_id} Gate A ready but staff autonomy not armed "
+        "(auto_promote=False)"
+    )
+
+
+def helper_may_place_alone(root: str | None, helper: str) -> bool:
+    """True only when Gate A ready AND staff armed. Default False forever for scanners."""
+    return helper_autonomy_blocks(root, helper) == ""
+
+
 # ---- Tax / fee ledger (Phase 10) -------------------------------------------
 
 def estimate_kalshi_fee(price, contracts=1.0) -> float:
@@ -2407,10 +2637,10 @@ def plan_summary(
         "fee_ledger": fee_ledger_summary(root),
         "fee_ledger_completeness": fee_ledger_completeness(root, bots=bots),
         "stale_world": stale_world_status(root, bots=bots),
+        "helper_gate_a": helper_promote_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "helper Gate A taxed EV gate",
             "weekly harvest cold-ledger habit",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
@@ -2605,6 +2835,23 @@ def self_check() -> None:
         sw = stale_world_status(tmp, bots=[{"id": "btc15m"}])
         assert "btc15m" in sw["blocked"]
         assert sw["fee_floors_locked"] is True
+        # Helper Gate A: thin sample blocked; n≥20 taxed EV≥0 + staff arm.
+        assert helper_may_place_alone(tmp, "calendar_scanner") is False
+        assert "Gate A" in helper_autonomy_blocks(tmp, "calendar_scanner")
+        for i in range(HELPER_GATE_A_MIN_N):
+            record_helper_fill(
+                tmp, helper="calendar_scanner", bot="btc15m",
+                ticker=f"KXCAL-{i}", pnl=0.05, contracts=1, fill_id=f"h-{i}",
+            )
+        gate = helper_gate_a(tmp, "calendar_scanner")
+        assert gate["ready"] is True
+        assert gate["auto_promote"] is False
+        denied = staff_set_helper_autonomy(tmp, "calendar_scanner", True)
+        # Without force still ok when ready.
+        assert denied["ok"] is True
+        assert helper_may_place_alone(tmp, "calendar_scanner") is True
+        staff_set_helper_autonomy(tmp, "calendar_scanner", False, note="disarm")
+        assert helper_may_place_alone(tmp, "calendar_scanner") is False
 
 
 if __name__ == "__main__":
