@@ -36,6 +36,7 @@ FEE_LEDGER_NAME = "desk_fee_ledger.json"
 HELPER_FILLS_NAME = "desk_helper_fills.json"
 HELPER_PROMOTE_NAME = "desk_helper_promote.json"
 COLD_HARVEST_NAME = "desk_cold_harvest.json"
+HILLCLIMB_LEVER_NAME = "desk_hillclimb_lever.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -55,6 +56,35 @@ MEME_RETIRE_MIN_N = 10
 
 # Phase 11: hillclimb kill — M3↑ with M1↓ for 2 Chicago weeks → revert lever.
 HILLCLIMB_KILL_WEEKS = 2
+# Phase 11: one lever per Chicago week from allowlist (raise-only on fee floors).
+HILLCLIMB_ALLOWLIST = {
+    "VOL_SAFE": {
+        "kind": "adapt_threshold",
+        "raise_only": False,
+        "note": "desk_adapt VOL_SAFE play-safe threshold experiment",
+    },
+    "HIT_FOR_BIG": {
+        "kind": "adapt_threshold",
+        "raise_only": False,
+        "note": "desk_adapt HIT_FOR_BIG proven-80 threshold experiment",
+    },
+    "venue_min_edge_btc": {
+        "kind": "venue_floor",
+        "raise_only": True,
+        "venue": "kalshi_btc15m",
+        "note": "BTC venue min_edge — raise only, never soften floor",
+    },
+    "min_cushion_btc": {
+        "kind": "btc_gate",
+        "raise_only": True,
+        "note": "BTC min cushion — raise only",
+    },
+    "kelly_fraction": {
+        "kind": "sizing",
+        "raise_only": False,
+        "note": "Kelly fraction within desk bounds (0.05–1.0)",
+    },
+}
 
 # Phase 10: profit-lock harvest paper analog — hit weekly target → 0.5× size.
 PROFIT_LOCK_TARGET_USD = 40.0
@@ -2369,6 +2399,11 @@ def capture_hillclimb_week(
     day = label or _chicago_day()
     m1 = firm_taxed_m1(bots, fill_tax=fill_tax)
     m3 = fit_buy_rate(root)
+    lever_name = str(lever).strip()[:80] if lever else None
+    if not lever_name:
+        active = active_hillclimb_lever(root)
+        if active and str(active.get("lever") or ""):
+            lever_name = str(active.get("lever"))[:80]
     card = {
         "paper_only": True,
         "label": day,
@@ -2378,7 +2413,7 @@ def capture_hillclimb_week(
         "m3": m3.get("rate"),
         "m3_n_fit": m3.get("n_fit"),
         "fills_n": m3.get("n_buy"),
-        "lever": (str(lever).strip()[:80] if lever else None),
+        "lever": lever_name,
         "fee_floors_locked": True,
     }
     path = _path(HILLCLIMB_KILL, root)
@@ -2418,6 +2453,184 @@ def hillclimb_kill_status(root: str | None = None) -> dict:
             "Hillclimb kill: if M3 rises while M1 falls for 2 Chicago weeks, "
             "revert the last lever before the next idea. Flag only — no auto param write."
         ),
+    }
+
+
+# ---- Hillclimb lever allowlist (Phase 11) ----------------------------------
+
+def hillclimb_allowlist() -> dict:
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "levers": {
+            k: dict(v, name=k) for k, v in HILLCLIMB_ALLOWLIST.items()
+        },
+        "note": (
+            "One lever per Chicago week. venue_min_edge_btc / min_cushion_btc "
+            "are raise-only. Midweek thrash banned."
+        ),
+    }
+
+
+def active_hillclimb_lever(root: str | None = None) -> dict | None:
+    store = _load(
+        _path(HILLCLIMB_LEVER_NAME, root),
+        {"paper_only": True, "active": None, "history": []},
+    )
+    active = store.get("active")
+    return active if isinstance(active, dict) else None
+
+
+def hillclimb_lever_status(root: str | None = None) -> dict:
+    active = active_hillclimb_lever(root)
+    kill = hillclimb_kill_status(root)
+    week = _chicago_week_id()
+    same_week = bool(active and str(active.get("week") or "") == week)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
+        "active": active,
+        "week": week,
+        "active_this_week": same_week,
+        "kill": bool(kill.get("kill")),
+        "kill_action": (kill.get("status") or {}).get("action") if isinstance(kill.get("status"), dict) else kill.get("action"),
+        "auto_promote": False,
+        "auto_revert": False,
+        "note": (
+            "Staff picks one allowlisted lever per Chicago week. "
+            "Kill flag → demote before next idea. No auto param write; floors locked."
+        ),
+    }
+
+
+def staff_pick_hillclimb_lever(
+    root: str | None,
+    lever: str,
+    *,
+    note: str = "",
+    proposed_value=None,
+    force: bool = False,
+) -> dict:
+    """Staff picks the single hillclimb lever for this Chicago week.
+
+    Midweek thrash banned unless force=True (tests) or demote first.
+    Raise-only levers reject proposed_value below locked floor.
+    """
+    name = str(lever or "").strip()
+    meta = HILLCLIMB_ALLOWLIST.get(name)
+    if not meta:
+        return {
+            "ok": False,
+            "reason": f"lever not on allowlist: {name}",
+            "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    week = _chicago_week_id()
+    path = _path(HILLCLIMB_LEVER_NAME, root)
+    store = _load(path, {"paper_only": True, "active": None, "history": []})
+    active = store.get("active") if isinstance(store.get("active"), dict) else None
+    if (
+        active
+        and str(active.get("week") or "") == week
+        and str(active.get("lever") or "") != name
+        and not force
+    ):
+        return {
+            "ok": False,
+            "reason": (
+                f"midweek thrash banned — active lever this week is "
+                f"{active.get('lever')}; demote first or wait for next Chicago week"
+            ),
+            "active": active,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    proposed = _finite(proposed_value)
+    if meta.get("raise_only") and proposed is not None:
+        # Never record a soften below locked BTC floor / cushion habit.
+        if name == "venue_min_edge_btc" and proposed + 1e-12 < 0.05:
+            return {
+                "ok": False,
+                "reason": "venue_min_edge_btc raise-only: proposed < locked 0.05 floor",
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+        if name == "min_cushion_btc" and proposed + 1e-12 < 0:
+            return {
+                "ok": False,
+                "reason": "min_cushion_btc raise-only: proposed must be ≥ 0",
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+    row = {
+        "paper_only": True,
+        "lever": name,
+        "kind": meta.get("kind"),
+        "raise_only": bool(meta.get("raise_only")),
+        "proposed_value": proposed,
+        "week": week,
+        "at": _now(),
+        "note": str(note or "")[:200] or str(meta.get("note") or "")[:200],
+        "staff_approved": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    if active:
+        hist.append({**active, "demoted_at": _now(), "demote_reason": "replaced"})
+    hist.append(row)
+    store["active"] = row
+    store["history"] = hist[-52:]
+    store["last_at"] = row["at"]
+    store["paper_only"] = True
+    _save(path, store)
+    return {
+        "ok": True,
+        "active": row,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "reason": f"picked {name} for {week}",
+    }
+
+
+def staff_demote_hillclimb_lever(
+    root: str | None,
+    *,
+    note: str = "",
+    reason: str = "staff demote",
+) -> dict:
+    """Clear the active lever (Sunday demote / kill-rule follow-through)."""
+    path = _path(HILLCLIMB_LEVER_NAME, root)
+    store = _load(path, {"paper_only": True, "active": None, "history": []})
+    active = store.get("active") if isinstance(store.get("active"), dict) else None
+    if not active:
+        return {
+            "ok": True,
+            "active": None,
+            "reason": "no active lever",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    hist.append({
+        **active,
+        "demoted_at": _now(),
+        "demote_reason": str(reason or "staff demote")[:120],
+        "demote_note": str(note or "")[:200],
+    })
+    store["active"] = None
+    store["history"] = hist[-52:]
+    store["last_at"] = _now()
+    _save(path, store)
+    return {
+        "ok": True,
+        "active": None,
+        "demoted": active.get("lever"),
+        "reason": "demoted",
+        "auto_promote": False,
+        "fee_floors_locked": True,
     }
 
 
@@ -2762,9 +2975,13 @@ def plan_summary(
         "stale_world": stale_world_status(root, bots=bots),
         "helper_gate_a": helper_promote_status(root),
         "cold_harvest": cold_harvest_status(root),
+        "hillclimb_lever": hillclimb_lever_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
-        "next_tickets": [],
+        "next_tickets": [
+            "dual-control live checklist stub",
+            "quarterly W-number re-baseline",
+        ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
 
@@ -2997,6 +3214,22 @@ def self_check() -> None:
         )
         # New week with negative proxy — no add (week_pnl from that week's lock).
         assert red["harvested"] == 0.0 or red.get("skipped") is True
+        # Hillclimb lever allowlist: one per week, raise-only floors.
+        al = hillclimb_allowlist()
+        assert "VOL_SAFE" in al["levers"]
+        assert al["levers"]["venue_min_edge_btc"]["raise_only"] is True
+        pick = staff_pick_hillclimb_lever(tmp, "VOL_SAFE", note="week experiment")
+        assert pick["ok"] is True
+        thrash = staff_pick_hillclimb_lever(tmp, "HIT_FOR_BIG")
+        assert thrash["ok"] is False
+        soft = staff_pick_hillclimb_lever(
+            tmp, "venue_min_edge_btc", proposed_value=0.03, force=True,
+        )
+        assert soft["ok"] is False
+        assert "0.05" in soft["reason"]
+        dem = staff_demote_hillclimb_lever(tmp, note="sunday")
+        assert dem["ok"] is True
+        assert active_hillclimb_lever(tmp) is None
 
 
 if __name__ == "__main__":
