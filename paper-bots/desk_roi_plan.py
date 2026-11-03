@@ -19,12 +19,20 @@ LATENCY_JOURNAL = "desk_latency_journal.json"
 BASELINE_NAME = "desk_roi_baseline.json"
 NEAR_MISS_WEEKLY = "desk_near_miss_weekly.json"
 INX_BAND_RESEARCH = "desk_inx_band_research.json"
+SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
+MAX_HARD_STOP_ROWS = 2000
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
+
+# Sports hard-stop shadow: bid ≤ entry − drop triggers a would-have-stopped log.
+# Live sell stays OFF until n≥30 and shadow EV ≥ settle baseline (staff promote).
+SPORTS_HARD_STOP_DROP = 0.12
+SPORTS_HARD_STOP_LIVE = False  # never auto-sell until staff promote
+SPORTS_HARD_STOP_PROMOTE_N = 30
 
 # Fee-aware INX research bands only — does NOT change live 80–90¢ config.
 INX_RESEARCH_BANDS = (
@@ -504,6 +512,114 @@ def run_inx_band_research(root: str | None, history: list | None = None) -> dict
     return report
 
 
+# ---- Sports hard-stop shadow -----------------------------------------------
+
+def sports_hard_stop_hit(
+    entry_price,
+    bid,
+    *,
+    drop: float = SPORTS_HARD_STOP_DROP,
+) -> dict:
+    """True when live bid has fallen `drop` below entry ask (fee-aware later on sell)."""
+    entry = _finite(entry_price)
+    b = _finite(bid)
+    d = _finite(drop)
+    if entry is None or b is None or d is None or entry <= 0 or b <= 0:
+        return {"hit": False, "drop": d, "entry": entry, "bid": b, "threshold": None}
+    threshold = round(entry - float(d), 4)
+    hit = b <= threshold + 1e-12
+    return {
+        "hit": hit,
+        "drop": float(d),
+        "entry": entry,
+        "bid": b,
+        "threshold": threshold,
+        "shadow_only": not SPORTS_HARD_STOP_LIVE,
+        "live": bool(SPORTS_HARD_STOP_LIVE),
+    }
+
+
+def record_sports_hard_stop_shadow(
+    root: str | None,
+    *,
+    ticker: str,
+    side: str = "",
+    league: str = "",
+    entry_price=None,
+    bid=None,
+    fair=None,
+    contracts=None,
+    cost=None,
+    note: str = "",
+) -> dict:
+    """Log a would-have hard-stopped sports open. Does not sell unless LIVE flag on."""
+    gate = sports_hard_stop_hit(entry_price, bid)
+    if not gate.get("hit"):
+        return {"recorded": False, **gate}
+    path = _path(SPORTS_HARD_STOP_SHADOW, root)
+    state = _load(path, {"paper_only": True, "version": 1, "rows": [], "live": False})
+    # Shadow PnL if we sold at bid − approx fee (Kalshi-style ceil omitted; 1¢ tax).
+    contracts_n = _finite(contracts) or 1.0
+    cost_n = _finite(cost)
+    bid_n = _finite(bid) or 0.0
+    fee_approx = math.ceil(round(0.07 * bid_n * (1.0 - bid_n) * 100, 6)) / 100 if bid_n else 0.0
+    proceeds = round(contracts_n * max(0.0, bid_n - fee_approx), 2)
+    shadow_pnl = None if cost_n is None else round(proceeds - cost_n, 2)
+    row = {
+        "at": _now(),
+        "ticker": ticker,
+        "side": side,
+        "league": league,
+        "entry_price": gate.get("entry"),
+        "bid": gate.get("bid"),
+        "threshold": gate.get("threshold"),
+        "drop": gate.get("drop"),
+        "fair": _finite(fair),
+        "contracts": contracts_n,
+        "cost": cost_n,
+        "shadow_pnl": shadow_pnl,
+        "shadow_only": True,
+        "live_sell": False,
+        "note": str(note or "")[:160],
+    }
+    rows = list(state.get("rows") or [])
+    rows.append(row)
+    state["rows"] = rows[-MAX_HARD_STOP_ROWS:]
+    state["last_at"] = row["at"]
+    state["live"] = bool(SPORTS_HARD_STOP_LIVE)
+    _save(path, state)
+    return {"recorded": True, "row": row, **gate}
+
+
+def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
+    path = _path(SPORTS_HARD_STOP_SHADOW, root)
+    state = _load(path, {"paper_only": True, "rows": []})
+    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict)]
+    pnls = [_finite(r.get("shadow_pnl")) for r in rows]
+    pnls = [p for p in pnls if p is not None]
+    n = len(pnls)
+    exp = round(sum(pnls) / n, 4) if n else None
+    decision = "reject"
+    if n >= SPORTS_HARD_STOP_PROMOTE_N and exp is not None and exp >= 0:
+        decision = "review"  # staff may promote; never auto
+    return {
+        "paper_only": True,
+        "n": len(rows),
+        "n_with_pnl": n,
+        "shadow_expectancy": exp,
+        "promote_min_n": SPORTS_HARD_STOP_PROMOTE_N,
+        "drop": SPORTS_HARD_STOP_DROP,
+        "live": bool(SPORTS_HARD_STOP_LIVE),
+        "auto_promote": False,
+        "decision": decision,
+        "fee_floors_locked": True,
+        "note": (
+            "Sports hard-stop is shadow-only. Promote to live sell only after "
+            f"n≥{SPORTS_HARD_STOP_PROMOTE_N} and shadow EV ≥ 0 — staff gate."
+        ),
+    }
+
+
 # ---- Plan summary for master board -----------------------------------------
 
 def plan_summary(
@@ -517,7 +633,7 @@ def plan_summary(
     baseline = load_baseline(root).get("latest")
     return {
         "paper_only": True,
-        "version": 1,
+        "version": 2,
         "bleed": bleed,
         "capital_misplaced": misplaced,
         "baseline": baseline,
@@ -525,14 +641,13 @@ def plan_summary(
         "near_miss_weekly": near_miss_weekly_card(root) if root is not None else {
             "n": 0, "decision": "reject", "auto_promote": False,
         },
+        "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "M3 fit journals",
-            "M4 latency timers",
-            "commodity model-flip",
-            "BTC real TP",
-            "bleed + capital misplaced",
+            "sports latency + hard-stop shadow",
+            "sports hard-stop promote after n≥30",
+            "INX band research week",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -581,6 +696,19 @@ def self_check() -> None:
         assert rep["live_changed"] is False
         assert rep["live_band"] == "80_90"
         assert len(rep["bands"]) == 3
+        hit = sports_hard_stop_hit(0.80, 0.65, drop=0.12)
+        assert hit["hit"] is True
+        miss = sports_hard_stop_hit(0.80, 0.72, drop=0.12)
+        assert miss["hit"] is False
+        rec = record_sports_hard_stop_shadow(
+            tmp, ticker="KXTEST", side="home", entry_price=0.80, bid=0.65,
+            contracts=10, cost=8.5,
+        )
+        assert rec["recorded"] is True
+        summ = sports_hard_stop_shadow_summary(tmp)
+        assert summ["n"] >= 1
+        assert summ["live"] is False
+        assert summ["auto_promote"] is False
 
 
 if __name__ == "__main__":

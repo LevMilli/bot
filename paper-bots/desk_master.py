@@ -287,6 +287,7 @@ def master_summary(
             "capital_misplaced": misplaced,
             "fit_firm": desk_roi_plan.fit_buy_rate(root),
             "clv_completeness": desk_roi_plan.clv_completeness(root),
+            "sports_hard_stop_shadow": desk_roi_plan.sports_hard_stop_shadow_summary(root),
             "baseline": baseline,
             "fee_floors_locked": True,
         }
@@ -308,7 +309,7 @@ def master_summary(
         "stopbleed": stopbleed,
         "priority": [
             "memecoin stop-bleed before volume",
-            "exit quality: commodity flip + BTC real TP",
+            "sports hard-stop shadow → promote after n≥30",
             "feed idle BTC/commodity risk when gates clear",
         ],
         "note": (
