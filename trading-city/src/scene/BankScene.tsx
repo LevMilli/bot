@@ -64,7 +64,7 @@ const LANE_Z_MID = 1.95
 const LANE_Z_BACK = 1.4
 const ROPE_Y = 0.82
 /** Bot stands behind the cabinet (local −Z), clear of the desk body. */
-const BOT_Z = -1.55
+const BOT_Z = -1.62
 /** Desk collision half-depth from slot origin toward aisle / wall. */
 const DESK_COLLIDE = { aisle: 0.35, wall: 1.05, halfW: 0.75 }
 
@@ -144,6 +144,7 @@ function TellerPod({
     walk.current.x = MathUtils.damp(walk.current.x, targetX, 5.5, dt)
     if (botRoot.current) {
       botRoot.current.position.x = walk.current.x
+      botRoot.current.position.y = 0.18
       botRoot.current.position.z = BOT_Z + walk.current.z
       botRoot.current.rotation.y = Math.PI
     }
@@ -278,8 +279,8 @@ function TellerPod({
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.45} toneMapped={false} />
       </mesh>
 
-      {/* Teller behind the cabinet — clear gap from the desk body */}
-      <group ref={botRoot} position={[0, 0.02, BOT_Z]} rotation={[0, Math.PI, 0]} scale={0.72}>
+      {/* Teller behind the cabinet — standing height, clear of the desk body */}
+      <group ref={botRoot} position={[0, 0.18, BOT_Z]} rotation={[0, Math.PI, 0]} scale={0.88}>
         <BotFigure pose={away && !recalling ? 'waiting' : pose} seated={false} />
       </group>
 

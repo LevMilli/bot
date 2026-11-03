@@ -301,7 +301,7 @@ export default function App() {
           <div className="office-hud bank-hud">
             <div className="office-title">
               <strong>APEX-CITY TRUST</strong>
-              <span>
+              <span className={walkHint.startsWith('E') ? 'walk-hint-go' : undefined}>
                 {walkHint || 'Click to look · WASD / arrows walk · Space jump · E talk'}
               </span>
             </div>

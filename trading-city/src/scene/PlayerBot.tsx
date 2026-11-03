@@ -19,7 +19,7 @@ const FRICTION = 22
 const AIR_CTRL = 0.28
 const JUMP_V = 5.8
 const GRAVITY = 24
-const INTERACT_R = 2.4
+const INTERACT_R = 2.85
 const LOOK_SENS = 0.0021
 /** Over-shoulder follow — reads as a person, not a free camera. */
 const CAM_BACK = 2.55
