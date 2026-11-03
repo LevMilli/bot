@@ -168,11 +168,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Place-alone block | `helper_autonomy_blocks` / `helpers.may_place_alone` |
 | Masters board | `roi_plan.helper_gate_a` |
 
+### Weekly cold harvest
+
+| Ticket | Where |
+| --- | --- |
+| 30–50% of green week PnL | `capture_cold_harvest` (default 40%) |
+| Cold ledger total | `cold_harvest_status` → `desk_cold_harvest.json` |
+| Masters board | `roi_plan.cold_harvest` (daily refresh) |
+| Distinct from profit-lock | size 0.5× stays on profit-lock; cold is habit ledger |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Weekly harvest cold ledger | paper profit → cold habit |
+| _(queue clear — re-baseline / next plan tickets)_ | staff pick |
 
 ## Hard rules unchanged
 

@@ -45,6 +45,7 @@ desk_ruin_drill.json
 desk_fee_ledger.json
 desk_helper_fills.json
 desk_helper_promote.json
+desk_cold_harvest.json
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json
 helpers/calendar_scanner_at.txt

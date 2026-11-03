@@ -442,6 +442,22 @@ def master_summary(
             plan["helper_gate_a"] = desk_roi_plan.helper_promote_status(root)
         except Exception:
             plan["helper_gate_a"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_ch = desk_roi_plan.cold_harvest_status(root).get("latest")
+            if root and bots and (
+                not isinstance(latest_ch, dict)
+                or str(latest_ch.get("label") or "") != today
+            ):
+                plan["cold_harvest"] = desk_roi_plan.capture_cold_harvest(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["cold_harvest"] = desk_roi_plan.cold_harvest_status(root)
+        except Exception:
+            plan["cold_harvest"] = None
     except Exception:
         plan = None
     return {
