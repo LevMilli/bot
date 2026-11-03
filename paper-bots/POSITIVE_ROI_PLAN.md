@@ -52,14 +52,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Chicago-day scorecard on master | `desk_master.master_summary` → `roi_plan.weekly_scorecard` |
 | Public latest reader | `desk_roi_plan.latest_weekly_scorecard` |
 
+### Master graduation + meme retirement
+
+| Ticket | Where |
+| --- | --- |
+| M5 util + M7 Gate B on tower rows | `desk_master.tower_master_row` (v3) |
+| Graduation checklist (2 Chicago weeks) | `desk_roi_plan.capture_graduation_week` / `graduation_board` |
+| Meme 20d retirement clock | `desk_roi_plan.meme_retirement_clock` — recommend pause, never auto-retire |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
-| Master graduation checklist | M1–M7 × 2 Chicago weeks per tower |
-| Meme 20d retirement clock | pause sleeve on negative expectancy |
 | INX band promote | only after research-week artifact |
+| Hillclimb kill detector | M3↑ with M1↓ for 2 Chicago weeks → revert flag |
+| Profit-lock harvest paper analog | cut size 50% after weekly target |
 
 ## Hard rules unchanged
 
