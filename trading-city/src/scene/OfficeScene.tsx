@@ -494,8 +494,8 @@ function DeskKit() {
   )
 }
 
-export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
-  const controls = useRef<OrbitControlsImpl>(null)
+/** Desk suite content at local origin — used alone or inside the wing hallway. */
+export function OfficeInterior({ bot, bots, desk, onOpenScreens }: Props) {
   const pose = useMemo(() => botPose(bot), [bot])
 
   const maps = useMemo(() => {
@@ -512,6 +512,39 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
       maps.right.dispose()
     }
   }, [maps])
+
+  return (
+    <group>
+      <OfficeFloor />
+      <Ceiling />
+      <SideWall x={-7.9} rot={Math.PI / 2} />
+      <SideWall x={7.9} rot={-Math.PI / 2} />
+      <WallStockChart bot={bot} desk={desk} side="left" />
+      <WallStockChart bot={bot} desk={desk} side="right" />
+      <mesh position={[0, 1.69, 4.8]} rotation={[0, Math.PI, 0]}>
+        <planeGeometry args={[16, 3.38]} />
+        <meshStandardMaterial color="#160e2c" roughness={0.92} side={DoubleSide} />
+      </mesh>
+      <Door />
+      <Credenza />
+      <WindowWall />
+      {/* City vista only — border plaza screens stay on the outdoor plaza, not here. */}
+      <StreetCity bots={bots && bots.length ? bots : [bot]} desk={desk} />
+      <Desk />
+      <DeskKit />
+      <OfficeChair />
+
+      <MonitorFrame position={[-1.55, 1.28, -0.62]} rotation={[0, 0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.left} onOpen={onOpenScreens} />
+      <MonitorFrame position={[0.02, 1.4, -0.88]} rotation={[-0.08, 0, 0]} size={[1.22, 0.72]} edge="#2de2e6" map={maps.center} onOpen={onOpenScreens} />
+      <MonitorFrame position={[1.58, 1.28, -0.62]} rotation={[0, -0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.right} onOpen={onOpenScreens} />
+
+      <BotFigure pose={pose} deskWork />
+    </group>
+  )
+}
+
+export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
+  const controls = useRef<OrbitControlsImpl>(null)
 
   useEffect(() => {
     const orbit = controls.current
@@ -548,29 +581,7 @@ export function OfficeScene({ bot, bots, desk, onOpenScreens }: Props) {
       <pointLight position={[0, 1.9, -2.4]} intensity={0.55} color="#2de2e6" distance={7} />
       <pointLight position={[0, 5.5, -10]} intensity={0.7} color="#9ecbff" distance={14} />
 
-      <OfficeFloor />
-      <Ceiling />
-      <SideWall x={-7.9} rot={Math.PI / 2} />
-      <SideWall x={7.9} rot={-Math.PI / 2} />
-      <WallStockChart bot={bot} desk={desk} side="left" />
-      <WallStockChart bot={bot} desk={desk} side="right" />
-      <mesh position={[0, 1.69, 4.8]} rotation={[0, Math.PI, 0]}>
-        <planeGeometry args={[16, 3.38]} />
-        <meshStandardMaterial color="#160e2c" roughness={0.92} side={DoubleSide} />
-      </mesh>
-      <Door />
-      <Credenza />
-      <WindowWall />
-      <StreetCity bots={bots && bots.length ? bots : [bot]} desk={desk} />
-      <Desk />
-      <DeskKit />
-      <OfficeChair />
-
-      <MonitorFrame position={[-1.55, 1.28, -0.62]} rotation={[0, 0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.left} onOpen={onOpenScreens} />
-      <MonitorFrame position={[0.02, 1.4, -0.88]} rotation={[-0.08, 0, 0]} size={[1.22, 0.72]} edge="#2de2e6" map={maps.center} onOpen={onOpenScreens} />
-      <MonitorFrame position={[1.58, 1.28, -0.62]} rotation={[0, -0.22, 0]} size={[1.02, 0.64]} edge="#39ff14" map={maps.right} onOpen={onOpenScreens} />
-
-      <BotFigure pose={pose} deskWork />
+      <OfficeInterior bot={bot} bots={bots} desk={desk} onOpenScreens={onOpenScreens} />
       <NeonBloom strength={0.48} />
     </>
   )

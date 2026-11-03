@@ -9,7 +9,7 @@ import { TowerRail } from './hud/TowerRail'
 import { beamColorFor } from './data/format'
 import { parseCityHash } from './data/floorMap'
 import { CityScene } from './scene/CityScene'
-import { OfficeScene } from './scene/OfficeScene'
+import { OfficeHallScene } from './scene/OfficeHallScene'
 import { BankScene } from './scene/BankScene'
 import type { BotRow } from './types'
 
@@ -27,30 +27,42 @@ function applyHashRoute(
   setView: (v: View) => void,
   setSelectedId: (id: string | null) => void,
   setFromBank: (v: boolean) => void,
+  setHallView: (v: boolean) => void,
 ) {
   const route = parseCityHash(window.location.hash || '')
-  if (route.view === 'bank' || route.view === 'boss') {
-    // Boss suite stub → vault hall until Floor 6 scene ships.
+  if (route.view === 'bank') {
     setSelectedId(null)
     setFromBank(true)
+    setHallView(false)
     setView('bank')
+    return
+  }
+  if (route.view === 'boss') {
+    // Boss suite lives at the end of the trading wing.
+    setSelectedId('kalshi-sized')
+    setFromBank(true)
+    setHallView(false)
+    setView('office')
     return
   }
   if (route.view === 'office' && route.botId) {
     setSelectedId(route.botId)
     setFromBank(true)
+    setHallView(false)
     setView('office')
     return
   }
   if (route.view === 'floor') {
-    // Floor scenes stub: open vault for now; FloorMap still drives directory.
-    setSelectedId(null)
+    // Trading wing hallway overview (Plan A spine).
+    setSelectedId(route.botId || 'sports-gap')
     setFromBank(true)
-    setView('bank')
+    setHallView(true)
+    setView('office')
     return
   }
   setSelectedId(null)
   setFromBank(false)
+  setHallView(false)
   setView('city')
 }
 
@@ -62,6 +74,8 @@ export default function App() {
   const [screensOpen, setScreensOpen] = useState(false)
   /** Desk ops HUD (skips / budgets / adapt / fill tax) — opens from ledger/compliance click. */
   const [vaultOpsOpen, setVaultOpsOpen] = useState(false)
+  /** Pull camera back to the wing hallway (5 workers + boss). */
+  const [hallView, setHallView] = useState(false)
   const guest = useMemo(() => guestModeFromUrl(), [])
 
   const bots = snap?.bots || []
@@ -71,8 +85,8 @@ export default function App() {
   )
 
   useEffect(() => {
-    applyHashRoute(setView, setSelectedId, setFromBank)
-    const onHash = () => applyHashRoute(setView, setSelectedId, setFromBank)
+    applyHashRoute(setView, setSelectedId, setFromBank, setHallView)
+    const onHash = () => applyHashRoute(setView, setSelectedId, setFromBank, setHallView)
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -87,6 +101,7 @@ export default function App() {
   const openTeller = (id: string) => {
     setSelectedId(id)
     setFromBank(true)
+    setHallView(false)
     setView('office')
     window.location.hash = `#/office/${id}`
   }
@@ -94,8 +109,16 @@ export default function App() {
   const openTower = (id: string) => {
     setSelectedId(id)
     setFromBank(false)
+    setHallView(false)
     setView('office')
     window.location.hash = `#/office/${id}`
+  }
+
+  const openHall = () => {
+    setHallView(true)
+    if (!selectedId && bots[0]) setSelectedId(bots[0].id)
+    setView('office')
+    window.location.hash = '#/floor/1'
   }
 
   useEffect(() => {
@@ -134,10 +157,16 @@ export default function App() {
           <AdaptiveEvents />
           <Suspense fallback={null}>
             {view === 'office' && selected ? (
-              <OfficeScene
+              <OfficeHallScene
                 bot={selected}
                 bots={bots}
                 desk={snap?.desk}
+                hallView={hallView}
+                onSelect={(id) => {
+                  setSelectedId(id)
+                  setHallView(false)
+                  window.location.hash = `#/office/${id}`
+                }}
                 onOpenScreens={() => setScreensOpen(true)}
               />
             ) : view === 'bank' ? (
@@ -173,23 +202,53 @@ export default function App() {
             </p>
           </div>
           <div className="chrome-actions">
-            {view === 'office' && fromBank ? (
-              <button type="button" className="back-btn" onClick={backToBank}>
-                ← Back to bank
-              </button>
-            ) : view !== 'city' ? (
+            {view === 'office' && (
+              <>
+                {fromBank && (
+                  <button type="button" className="back-btn" onClick={backToBank}>
+                    ← Back to bank
+                  </button>
+                )}
+                <button type="button" className="back-btn ghost" onClick={backToCity}>
+                  ← Go to city
+                </button>
+                {hallView ? (
+                  <button
+                    type="button"
+                    className="back-btn"
+                    onClick={() => {
+                      setHallView(false)
+                      if (selectedId) window.location.hash = `#/office/${selectedId}`
+                    }}
+                  >
+                    Enter desk
+                  </button>
+                ) : (
+                  <button type="button" className="back-btn" onClick={openHall}>
+                    Hallway
+                  </button>
+                )}
+              </>
+            )}
+            {view !== 'city' && view !== 'office' && (
               <button type="button" className="back-btn" onClick={backToCity}>
-                ← Back to city
+                ← Go to city
               </button>
-            ) : guest ? null : (
-              <a className="back-btn ghost" href="/pimp-trading">
-                PIMP-TRADING
-              </a>
             )}
             {view === 'city' && (
-              <button type="button" className="back-btn ghost" onClick={openVault}>
-                Enter vault
-              </button>
+              <>
+                {guest ? null : (
+                  <a className="back-btn ghost" href="/pimp-trading">
+                    PIMP-TRADING
+                  </a>
+                )}
+                <button type="button" className="back-btn ghost" onClick={openVault}>
+                  Enter vault
+                </button>
+                <button type="button" className="back-btn" onClick={openHall}>
+                  Trading wing
+                </button>
+              </>
             )}
             <span className="meta">
               {guest ? 'guest · ' : ''}
@@ -219,9 +278,17 @@ export default function App() {
         {view === 'office' && selected && (
           <div className="office-hud">
             <div className="office-title">
-              <strong>{fromBank ? `Teller · ${selected.name}` : selected.name}</strong>
-              <span>{selected.id}</span>
-              <span className="screen-hint">click a screen for the trades</span>
+              <strong>
+                {hallView
+                  ? 'Trading wing · hallway'
+                  : fromBank
+                    ? `Teller · ${selected.name}`
+                    : selected.name}
+              </strong>
+              <span>{hallView ? '5 workers · boss suite' : selected.id}</span>
+              <span className="screen-hint">
+                {hallView ? 'click a door plaque to enter' : 'click a screen for the trades'}
+              </span>
             </div>
             {fromBank && (
               <div className="teller-switch" role="tablist" aria-label="Switch teller">
@@ -365,14 +432,20 @@ export default function App() {
           </div>
         )}
 
+        {(view === 'city' || view === 'office') && (
+          <TowerRail
+            bots={bots}
+            onSelect={(id) => {
+              if (fromBank) openTeller(id)
+              else openTower(id)
+            }}
+          />
+        )}
         {view === 'city' && (
-          <>
-            <TowerRail bots={bots} onSelect={openTower} />
-            <div className="day-strip" aria-hidden={false}>
-              <span>{snap?.desk?.central_check || 'Central clock pending'}</span>
-              <span>{snap?.desk?.status_line || ''}</span>
-            </div>
-          </>
+          <div className="day-strip" aria-hidden={false}>
+            <span>{snap?.desk?.central_check || 'Central clock pending'}</span>
+            <span>{snap?.desk?.status_line || ''}</span>
+          </div>
         )}
       </div>
 
