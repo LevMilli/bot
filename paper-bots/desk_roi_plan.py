@@ -1822,10 +1822,10 @@ def plan_summary(
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "correlation matrix firm portfolio haircut",
             "incubation lane 50 fee-aware settles",
             "ruin drill soft/hard/nuclear UX",
             "tax/fee ledger completeness pass",
+            "clock-skew / stale-world skip",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
