@@ -84,11 +84,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Weekly twin card | `desk_roi_plan.skip_regret_weekly_card` (`auto_promote=False`) |
 | Masters wire | `desk_master.master_summary` → `roi_plan.skip_regret_weekly` |
 
+### Sports hard-stop staff promote
+
+| Ticket | Where |
+| --- | --- |
+| Promote readiness (n≥30, shadow EV≥0) | `sports_hard_stop_shadow_summary.promote_ready` |
+| Staff arm/disarm live sells | `staff_set_sports_hard_stop_live` → promote JSON |
+| Runtime live check | `sports_hard_stop_is_live` (gap_bot); code `SPORTS_HARD_STOP_LIVE` stays False |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
 | INX band promote | only after research-week artifact |
 | Daily R budget per tower | settle-only after budget |
 | Anti-revenge same-market cool | after stop/flip |

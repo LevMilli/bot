@@ -20,6 +20,7 @@ BASELINE_NAME = "desk_roi_baseline.json"
 NEAR_MISS_WEEKLY = "desk_near_miss_weekly.json"
 INX_BAND_RESEARCH = "desk_inx_band_research.json"
 SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
+SPORTS_HARD_STOP_PROMOTE = "desk_sports_hard_stop_promote.json"
 ADVERSE_COOL_NAME = "desk_adverse_cool.json"
 WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 MASTER_GRAD = "desk_master_grad.json"
@@ -673,7 +674,7 @@ def record_sports_hard_stop_shadow(
     rows.append(row)
     state["rows"] = rows[-MAX_HARD_STOP_ROWS:]
     state["last_at"] = row["at"]
-    state["live"] = bool(SPORTS_HARD_STOP_LIVE)
+    state["live"] = sports_hard_stop_is_live(root)
     _save(path, state)
     return {"recorded": True, "row": row, **gate}
 
@@ -689,6 +690,11 @@ def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
     decision = "reject"
     if n >= SPORTS_HARD_STOP_PROMOTE_N and exp is not None and exp >= 0:
         decision = "review"  # staff may promote; never auto
+    live = sports_hard_stop_is_live(root)
+    promote = _load(
+        _path(SPORTS_HARD_STOP_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
     return {
         "paper_only": True,
         "n": len(rows),
@@ -696,14 +702,80 @@ def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
         "shadow_expectancy": exp,
         "promote_min_n": SPORTS_HARD_STOP_PROMOTE_N,
         "drop": SPORTS_HARD_STOP_DROP,
-        "live": bool(SPORTS_HARD_STOP_LIVE),
+        "live": live,
+        "code_default_live": bool(SPORTS_HARD_STOP_LIVE),
+        "staff_approved": bool(promote.get("staff_approved")),
+        "promote_ready": decision == "review",
         "auto_promote": False,
         "decision": decision,
         "fee_floors_locked": True,
         "note": (
-            "Sports hard-stop is shadow-only. Promote to live sell only after "
-            f"n≥{SPORTS_HARD_STOP_PROMOTE_N} and shadow EV ≥ 0 — staff gate."
+            "Sports hard-stop stays shadow-only until staff_set_sports_hard_stop_live. "
+            f"Promote ready after n≥{SPORTS_HARD_STOP_PROMOTE_N} and shadow EV ≥ 0. "
+            "Code default SPORTS_HARD_STOP_LIVE stays False."
         ),
+    }
+
+
+def sports_hard_stop_is_live(root: str | None = None) -> bool:
+    """Live sells only when code flag OR explicit staff promote file says so."""
+    if SPORTS_HARD_STOP_LIVE:
+        return True
+    promote = _load(
+        _path(SPORTS_HARD_STOP_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    return bool(promote.get("staff_approved")) and bool(promote.get("live"))
+
+
+def staff_set_sports_hard_stop_live(
+    root: str | None,
+    enabled: bool,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff gate to arm/disarm live hard-stop sells.
+
+    Enabling requires promote_ready (n≥30, shadow EV≥0) unless force=True for tests.
+    Never auto-called. Code constant SPORTS_HARD_STOP_LIVE remains False.
+    """
+    summary = sports_hard_stop_shadow_summary(root)
+    if enabled and not force and not summary.get("promote_ready"):
+        return {
+            "ok": False,
+            "live": False,
+            "staff_approved": False,
+            "reason": (
+                f"not promote_ready (need n≥{SPORTS_HARD_STOP_PROMOTE_N} "
+                "with shadow EV ≥ 0)"
+            ),
+            "summary": summary,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    row = {
+        "paper_only": True,
+        "staff_approved": bool(enabled),
+        "live": bool(enabled),
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "shadow_n": summary.get("n_with_pnl"),
+        "shadow_expectancy": summary.get("shadow_expectancy"),
+        "decision": summary.get("decision"),
+        "auto_promote": False,
+        "code_default_live": bool(SPORTS_HARD_STOP_LIVE),
+        "fee_floors_locked": True,
+    }
+    _save(_path(SPORTS_HARD_STOP_PROMOTE, root), row)
+    return {
+        "ok": True,
+        "live": bool(enabled),
+        "staff_approved": bool(enabled),
+        "reason": "armed" if enabled else "disarmed",
+        "summary": sports_hard_stop_shadow_summary(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
     }
 
 
@@ -1346,10 +1418,10 @@ def plan_summary(
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "sports hard-stop promote after n≥30 (staff; live still False)",
             "INX band promote only after research week artifact",
             "daily R budget per tower after which settle-only",
             "anti-revenge same-market cool after stop/flip",
+            "correlation matrix / daily R harvest ritual",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1411,6 +1483,10 @@ def self_check() -> None:
         assert summ["n"] >= 1
         assert summ["live"] is False
         assert summ["auto_promote"] is False
+        assert summ["code_default_live"] is False
+        denied = staff_set_sports_hard_stop_live(tmp, True, note="too early")
+        assert denied["ok"] is False
+        assert sports_hard_stop_is_live(tmp) is False
         cool = record_adverse_fill(
             tmp, bot="btc15m", ticker="T", entry_price=0.80, mark_price=0.70,
         )
