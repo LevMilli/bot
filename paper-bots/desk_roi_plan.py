@@ -182,6 +182,12 @@ SPORTS_HARD_STOP_DROP = 0.12
 SPORTS_HARD_STOP_LIVE = False  # never auto-sell until staff promote
 SPORTS_HARD_STOP_PROMOTE_N = 30
 
+# Phase 5: sports green_boost only after 2 Chicago weeks M1≥0 + CLV bar.
+SPORTS_GREEN_BOOST_WEEKS = 2
+SPORTS_CLV_BAR = 0.52
+SPORTS_CLV_MIN_N = 20
+SPORTS_M1_MIN_N = 20
+
 # Fee-aware INX research bands only — does NOT change live 80–90¢ config.
 INX_RESEARCH_BANDS = (
     {"id": "70_80", "lo": 0.70, "hi": 0.80},
@@ -1234,6 +1240,132 @@ def latest_daily_r_board(root: str | None = None) -> dict | None:
     store = _load(_path(DAILY_R_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
+
+
+# ---- Sports green_boost gate (Phase 5) -------------------------------------
+
+def sports_green_boost_status(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """green_boost=1 only when sports M1≥0 for 2 Chicago weeks and CLV≥52%.
+
+    Default boost stays 0 until ready. auto_promote=False forever.
+    """
+    m1 = firm_taxed_m1(bots)
+    sports = next(
+        (r for r in (m1.get("by_tower") or []) if r.get("bot") == "sports-gap"),
+        None,
+    )
+    sports_exp = _finite((sports or {}).get("expectancy_taxed"))
+    sports_n = int((sports or {}).get("n") or 0)
+    clv = {"n": 0, "beat_close_rate": None}
+    try:
+        import desk_more
+        clv = desk_more.clv_summary(root)
+    except Exception:
+        pass
+    clv_n = int(clv.get("n") or 0)
+    clv_rate = _finite(clv.get("beat_close_rate"))
+    # Last two weekly scorecards with sports_m1.
+    store = _load(_path(WEEKLY_SCORECARD, root), {"paper_only": True, "cards": []})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = sorted(cards, key=lambda c: str(c.get("label") or ""))
+    sports_weeks = [
+        c for c in cards
+        if _finite(c.get("sports_m1")) is not None
+    ][-SPORTS_GREEN_BOOST_WEEKS:]
+    weeks_ok = (
+        len(sports_weeks) >= SPORTS_GREEN_BOOST_WEEKS
+        and all(
+            (_finite(c.get("sports_m1")) or -1) + 1e-12 >= 0.0
+            for c in sports_weeks
+        )
+    )
+    hist_ok = sports_n >= SPORTS_M1_MIN_N and sports_exp is not None and sports_exp + 1e-12 >= 0.0
+    clv_ok = (
+        clv_n >= SPORTS_CLV_MIN_N
+        and clv_rate is not None
+        and clv_rate + 1e-12 >= SPORTS_CLV_BAR
+    )
+    ready = bool(weeks_ok and hist_ok and clv_ok)
+    boost = 1 if ready else 0
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "ready": ready,
+        "green_boost": boost,
+        "sports_m1": sports_exp,
+        "sports_m1_n": sports_n,
+        "hist_ok": hist_ok,
+        "clv_n": clv_n,
+        "clv_beat_rate": clv_rate,
+        "clv_bar": SPORTS_CLV_BAR,
+        "clv_ok": clv_ok,
+        "weeks_n": len(sports_weeks),
+        "weeks_required": SPORTS_GREEN_BOOST_WEEKS,
+        "weeks_ok": weeks_ok,
+        "week_labels": [str(c.get("label") or "") for c in sports_weeks],
+        "note": (
+            "Sports selective +1 only after 2 Chicago weeks sports M1≥0, "
+            f"history n≥{SPORTS_M1_MIN_N}, and CLV beat-close ≥{SPORTS_CLV_BAR:.0%} "
+            f"(n≥{SPORTS_CLV_MIN_N}). Default boost=0."
+        ),
+    }
+
+
+def sports_green_boost(root: str | None = None, bots: list | None = None) -> int:
+    """Runtime boost for selective_max_buys — 0 until gate ready."""
+    try:
+        return int(sports_green_boost_status(root, bots=bots).get("green_boost") or 0)
+    except Exception:
+        return 0
+
+
+# ---- Green-or-gone Masters flags (Phase 7) ---------------------------------
+
+def green_or_gone_status(bots: list | None = None) -> dict:
+    """Flag towers that are red today with open risk or Gate A false on losers."""
+    flags = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if not bot_id:
+            continue
+        today = _finite(bot.get("today"))
+        open_risk = float(_finite(bot.get("open_risk")) or 0.0)
+        ga = bot.get("gate_a") if isinstance(bot.get("gate_a"), dict) else {}
+        gate_ready = bool(ga.get("ready"))
+        reasons = []
+        if today is not None and today < 0 and open_risk > 0:
+            reasons.append("red_today_with_open_risk")
+        if bot_id in LOSER_IDS and today is not None and today < 0:
+            reasons.append("loser_red")
+        if bot_id in LOSER_IDS and not gate_ready and open_risk > 0:
+            reasons.append("loser_gate_a_false_with_risk")
+        if reasons:
+            flags.append({
+                "bot": bot_id,
+                "today": today,
+                "open_risk": round(open_risk, 2),
+                "gate_a": gate_ready,
+                "reasons": reasons,
+                "action": "starve_or_exit" if open_risk > 0 else "pause_entries",
+            })
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "flagged_n": len(flags),
+        "flags": flags,
+        "pass": len(flags) == 0,
+        "note": (
+            "Green-or-gone: red towers with open risk / loser Gate A false get "
+            "starve-or-exit flags on Masters. No volume expand."
+        ),
+    }
 
 
 # ---- Sports CLV completeness -----------------------------------------------
@@ -3646,6 +3778,16 @@ def capture_weekly_scorecard(
     cfg = cfg or {}
     bleed = firm_bleed_ratio(bots)
     misplaced = capital_misplaced(bots, cfg)
+    m1 = firm_taxed_m1(bots)
+    sports_row = next(
+        (r for r in (m1.get("by_tower") or []) if r.get("bot") == "sports-gap"),
+        None,
+    )
+    sports_today = None
+    for bot in bots or []:
+        if isinstance(bot, dict) and bot.get("id") == "sports-gap":
+            sports_today = _finite(bot.get("today"))
+            break
     gate_a_n = 0
     for bot in bots or []:
         if isinstance(bot, dict) and isinstance(bot.get("gate_a"), dict) and bot["gate_a"].get("ready"):
@@ -3656,6 +3798,10 @@ def capture_weekly_scorecard(
         "captured_at": _now(),
         "bleed": bleed,
         "capital_misplaced": misplaced,
+        "m1": m1.get("expectancy_taxed"),
+        "sports_m1": (sports_row or {}).get("expectancy_taxed"),
+        "sports_m1_n": (sports_row or {}).get("n"),
+        "sports_today": sports_today,
         "gate_a_ready_towers": gate_a_n,
         "fee_floors_locked": True,
         "note": "Weekly scorecard for hillclimb kill rule. No profit guarantee.",
@@ -3711,9 +3857,14 @@ def plan_summary(
         "capital_os": capital_os_status(root, bots=bots, cfg=cfg),
         "opp_cost": opp_cost_summary(root),
         "idea_review": idea_review_status(root),
+        "sports_green_boost": sports_green_boost_status(root, bots=bots),
+        "green_or_gone": green_or_gone_status(bots),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
-        "next_tickets": [],
+        "next_tickets": [
+            "cross-tower rank queue (sports+btc+commodity)",
+            "BTC calibration report card",
+        ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
 

@@ -963,15 +963,20 @@ def run():
 
     buys_this_check = 0
     # Selective volume when green; ROI rescue caps when red — fee floors unchanged.
+    # green_boost stays 0 until sports_green_boost_status ready (2w M1≥0 + CLV bar).
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_more
+        import desk_roi_plan
+        boost = int(desk_roi_plan.sports_green_boost(DESK_ROOT))
         max_buys_eff = int(
             desk_more.selective_max_buys(
-                "sports-gap", base=MAX_BUYS_PER_CHECK, today=today_pnl, green_boost=0,
+                "sports-gap", base=MAX_BUYS_PER_CHECK, today=today_pnl, green_boost=boost,
             )
         )
+        if boost:
+            print(f"Sports green_boost={boost} (CLV+M1 gate ready; fee floors locked)")
     except Exception:
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl < 0:
