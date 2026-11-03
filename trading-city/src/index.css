@@ -719,27 +719,46 @@ a {
 }
 
 .floor-directory {
-  margin-top: 0.65rem;
+  margin-top: 0.4rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  max-width: min(42rem, 94vw);
+  gap: 0.28rem;
+  max-width: min(36rem, 70vw);
+  pointer-events: auto;
+}
+
+.bank-hud .floor-directory {
+  max-width: min(28rem, 55vw);
+  opacity: 0.82;
 }
 
 .floor-chip {
   display: grid;
   grid-template-columns: auto 1fr;
   grid-template-rows: auto auto;
-  column-gap: 0.45rem;
-  row-gap: 0.05rem;
+  column-gap: 0.35rem;
+  row-gap: 0.02rem;
   align-items: baseline;
-  padding: 0.35rem 0.55rem;
+  padding: 0.22rem 0.4rem;
   border: 1px solid rgba(45, 226, 230, 0.28);
   background: rgba(8, 12, 28, 0.72);
   color: #dce6f8;
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+
+.bank-hud .floor-chip {
+  grid-template-rows: auto;
+  padding: 0.18rem 0.35rem;
+}
+
+.bank-hud .floor-chip-wing {
+  display: none;
+}
+
+.bank-hud .floor-chip-name {
+  font-size: 0.65rem;
 }
 
 .floor-chip:hover,

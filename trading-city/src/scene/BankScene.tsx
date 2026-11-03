@@ -59,9 +59,9 @@ const LANE_HALF = 0.55
  * Queue ropes live entirely in the aisle — well forward of the counter lip.
  * Desk cabinet ends ≈ local Z −0.15; keep LANE_Z_BACK ≥ 1.35.
  */
-const LANE_Z_MOUTH = 2.55
-const LANE_Z_MID = 1.95
-const LANE_Z_BACK = 1.4
+const LANE_Z_MOUTH = 2.7
+const LANE_Z_MID = 2.1
+const LANE_Z_BACK = 1.55
 const ROPE_Y = 0.82
 /** Bot stands behind the cabinet (local −Z), clear of the desk body. */
 const BOT_Z = -1.62
