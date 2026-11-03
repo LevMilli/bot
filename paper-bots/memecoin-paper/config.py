@@ -6,16 +6,20 @@ PAPER = True                # week one: fake fills at real prices. bot.py refuse
 
 TICKET_USD = 25             # default ticket; desk Kelly-lite may size down to cash
 MIN_TICKET_USD = 10         # still trade when cash is thin but edge clears
+RED_DAY_TICKET_USD = 10     # red-day ticket ceiling — lose less per knife
 MAX_OPEN = 6                # green-day concurrent paper tickets
-MAX_OPEN_RED = 2            # red-day cap — stop bleeding open risk
-MAX_ENTRIES_PER_DAY = 12    # more fills per Chicago day when edge clears
+MAX_OPEN_RED = 1            # red-day: one open max (ROI rescue — was 2)
+MAX_ENTRIES_PER_DAY = 8     # fewer attempts while stop-bleed week runs
 # Desk daily stop stays $150; meme locks new entries earlier to protect the tower.
 DAILY_LOSS_HALT_USD = 150
-RED_DAY_ENTRY_LOCK_USD = 20  # today ≤ −$20 → entries off (exits still run)
+RED_DAY_ENTRY_LOCK_USD = 8  # today ≤ −$8 → entries off (was −$20; overnight still bought at −$10)
 COOLDOWN_HOURS = 12         # half-day cooldown so the tower can re-enter winners faster
 # Speed lane only when Chicago-day realized PnL is non-negative (accurate still allowed).
 SPEED_ONLY_IF_TODAY_NONNEG = True
+SPEED_REQUIRE_M5_NONNEG = True  # no speed entries into a falling 5m knife
 SPEED_MIN_LIQUIDITY_USD = 50000  # speed lane needs deeper pool than accurate floor
+# Soft red: today < 0 → accurate-only already; also shrink tickets (see bot).
+ACCURATE_ONLY_WHEN_TODAY_NEG = True
 
 FACTS = {                   # the rug filter. code only, no model
     "max_risk_score": 40,       # rugcheck score_normalised, 0-100, higher = riskier
@@ -35,15 +39,15 @@ MIN_CONFIDENCE_SPEED = 0.72
 MIN_CONFIDENCE = MIN_CONFIDENCE_ACCURATE  # legacy alias
 
 EXIT = {
-    "stop_pct": -18,                        # Masters stop-bleed: cut earlier than −35%
+    "stop_pct": -12,                        # ROI rescue: cut earlier than −18% Masters week-0
     "ladder": [(100, 0.50), (200, 0.25)],   # +100% sells half, +200% sells a quarter
-    "trail_pct": 30,                        # the rest: out when price falls 30% from its peak
-    "time_stop_hours": 6,                   # not up 20% after 6 hours -> out, dead money
+    "trail_pct": 25,                        # tighter trail so winners keep more
+    "time_stop_hours": 4,                   # dead money out faster (was 6h)
     "time_stop_min_pct": 20,
-    "liq_drop_pct": 40,                     # pool liquidity down 40% from entry -> out now
+    "liq_drop_pct": 35,                     # pool bleed → exit sooner
     # Model-flip: leave before the hard stop when momentum collapses.
     "model_flip_confidence_floor": 0.45,
-    "model_flip_momentum_h1_floor": -8,
+    "model_flip_momentum_h1_floor": -6,
 }
 
 LOG = "checks.csv"
@@ -68,14 +72,14 @@ SCORER = {
     # momentum = DexScreener priceChange.h1 (%). <= bad -> 0, >= good -> 1
     "momentum_h1_bad": -10, "momentum_h1_good": 40,
     "momentum_m5_floor": -5,        # 5-min change below this -> momentum score halved (falling knife)
-    "momentum_h1_too_hot": 120,     # anti-top: h1 pump above this -> momentum score halved
+    "momentum_h1_too_hot": 80,      # anti-top: reject hotter pumps earlier (was 120)
     # volume = 1h volume / liquidity (turnover)
     "vol_turnover_bad": 0.1, "vol_turnover_good": 1.5,
     # liquidity in USD
     "liq_bad": 30000, "liq_good": 250000,
     # buy pressure = buys / (buys + sells) over 1h
     "buy_ratio_bad": 0.45, "buy_ratio_good": 0.65,
-    "min_txns_h1": 80,              # fewer 1h txns than this -> buy pressure score 0 (too thin)
+    "min_txns_h1": 100,             # thinner books out (was 80)
 }
 
 # OPTIONAL Grok hook -- DISABLED. Grok API is paid (console.x.ai).

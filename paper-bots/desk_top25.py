@@ -49,14 +49,25 @@ PLAYBOOKS = {
     },
 }
 
-# Sport-split fair floors (idea #15).
+# Sport-split fair floors (idea #15 / E1 #113). NFL stricter on both lanes.
 LEAGUE_FAIR_FLOOR = {
     "nhl": 0.80,
     "nba": 0.80,
     "nfl": 0.82,
+    "ncaaf": 0.81,
     "mlb": 0.80,
     "default": 0.80,
 }
+LEAGUE_SPEED_FLOOR = {
+    "nfl": 0.74,
+    "ncaaf": 0.73,
+    "default": 0.72,
+}
+
+
+def league_speed_floor(league: str | None) -> float:
+    key = str(league or "").strip().lower()
+    return float(LEAGUE_SPEED_FLOOR.get(key, LEAGUE_SPEED_FLOOR["default"]))
 
 # Near-miss promote ladder (idea #16).
 NEAR_MISS_PROMOTE_N = 30
@@ -1000,6 +1011,9 @@ def top25_summary(
 def self_check() -> None:
     assert clv_adjusted_edge(0.06, 0.04) > 0.06
     assert league_fair_floor("nfl") >= league_fair_floor("nhl")
+    assert league_fair_floor("nfl") == 0.82
+    assert league_speed_floor("nfl") >= league_speed_floor("nhl")
+    assert league_speed_floor("nfl") == 0.74
     pb = commodity_playbook("KXNATGAS15M-FOO")
     assert pb["family"] == "energy"
     assert commodity_playbook("KXGOLD15M")["family"] == "metal"

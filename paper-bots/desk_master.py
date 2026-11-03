@@ -95,8 +95,8 @@ def tower_master_row(bot: dict, *, fill_tax: float = 0.01, cfg: dict | None = No
     }
 
 
-def meme_stopbleed_measure(bot: dict | None = None, *, red_lock_usd: float = 20.0) -> dict:
-    """Measure memecoin stop-bleed week after Masters exits (−18% / model-flip −8% / red lock).
+def meme_stopbleed_measure(bot: dict | None = None, *, red_lock_usd: float = 8.0) -> dict:
+    """Measure memecoin stop-bleed week after ROI-rescue exits (−12% / flip −6% / red −$8).
 
     Paper only. Does not expand volume. Counts SELL exits from history reasons.
     """
@@ -150,15 +150,62 @@ def meme_stopbleed_measure(bot: dict | None = None, *, red_lock_usd: float = 20.
         "red_day_locked": red_locked,
         "red_lock_usd": float(red_lock_usd),
         "policy": {
-            "stop_pct": -18,
-            "model_flip_momentum_h1_floor": -8,
+            "stop_pct": -12,
+            "model_flip_momentum_h1_floor": -6,
             "red_day_entry_lock_usd": float(red_lock_usd),
+            "max_open_red": 1,
         },
         "expand_volume": expand_volume,
         "volume_ok_to_discuss": volume_ok,
         "note": (
             "Stop-bleed measure only — do not expand memecoin volume until a Chicago "
             "week clears with taxed EV ≥ 0 and red-day lock proven. No profit guarantee."
+        ),
+    }
+
+
+def firm_roi_rescue(bots: list | None = None, *, cfg: dict | None = None) -> dict:
+    """Overnight ROI rescue flags — which towers should refuse new entries."""
+    cfg = cfg or {}
+    flags = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        today = _finite(bot.get("today"))
+        cash = _finite(bot.get("cash"))
+        realized = _finite(bot.get("realized"))
+        if bot_id == "memecoin" and today is not None and today <= -8:
+            flags.append({
+                "bot": bot_id,
+                "action": "entries_off",
+                "why": f"meme red-day lock (today ${today:.2f} ≤ −$8)",
+            })
+        if bot_id in ("kalshi-sp", "kalshi-sized") and cash is not None and cash <= 460:
+            flags.append({
+                "bot": bot_id,
+                "action": "entries_off",
+                "why": f"INX drawdown halt (cash ${cash:.2f} ≤ $460)",
+            })
+        if bot_id == "sports-gap" and today is not None and today <= -10:
+            flags.append({
+                "bot": bot_id,
+                "action": "accurate_only_cap1",
+                "why": f"sports red rescue (today ${today:.2f} ≤ −$10)",
+            })
+        if realized is not None and realized <= -40 and bot_id.startswith("kalshi"):
+            flags.append({
+                "bot": bot_id,
+                "action": "review",
+                "why": f"deep realized ${realized:.2f} — human review before volume",
+            })
+    return {
+        "paper_only": True,
+        "n_flags": len(flags),
+        "flags": flags[:20],
+        "note": (
+            "Rescue = stop bleed / starve losers / keep fee floors. "
+            "No profit guarantee. Quiet commodity/sized with no edge is OK."
         ),
     }
 
@@ -180,6 +227,7 @@ def master_summary(
     m1_ready = sum(1 for r in rows if (r.get("passing") or {}).get("M1"))
     meme = next((b for b in (bots or []) if isinstance(b, dict) and b.get("id") == "memecoin"), None)
     stopbleed = meme_stopbleed_measure(meme)
+    rescue = firm_roi_rescue(bots, cfg=cfg)
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -187,6 +235,7 @@ def master_summary(
         "desk_open_risk": desk_open,
         "desk_cap": desk_cap,
         "M5_desk_util": desk_util,
+        "roi_rescue": rescue,
         "towers_m1_pass": m1_ready,
         "towers": rows,
         "stopbleed": stopbleed,
@@ -222,6 +271,7 @@ def self_check() -> None:
     assert summary["version"] == MASTER_VERSION
     assert "towers" in summary
     assert isinstance(summary.get("stopbleed"), dict)
+    assert isinstance(summary.get("roi_rescue"), dict)
     bleed = meme_stopbleed_measure(
         {
             "id": "memecoin",
@@ -237,6 +287,14 @@ def self_check() -> None:
     assert bleed["model_flip_exits"] == 1
     assert bleed["red_day_locked"] is True
     assert bleed["expand_volume"] is False
+    rescue = firm_roi_rescue(
+        [
+            {"id": "memecoin", "today": -10.58, "cash": 7.01},
+            {"id": "kalshi-sp", "cash": 444.37, "realized": -55.63},
+            {"id": "sports-gap", "today": -16.25},
+        ]
+    )
+    assert rescue["n_flags"] >= 3
 
 
 if __name__ == "__main__":

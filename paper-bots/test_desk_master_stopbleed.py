@@ -21,14 +21,14 @@ def _load(name, path):
 class StopBleedTests(unittest.TestCase):
     def test_meme_exit_and_lock_constants(self):
         cfg = _load("meme_cfg", os.path.join(ROOT, "memecoin-paper", "config.py"))
-        self.assertEqual(cfg.EXIT["stop_pct"], -18)
-        self.assertEqual(cfg.EXIT["model_flip_momentum_h1_floor"], -8)
-        self.assertEqual(cfg.RED_DAY_ENTRY_LOCK_USD, 20)
-        self.assertEqual(cfg.MAX_OPEN_RED, 2)
+        self.assertEqual(cfg.EXIT["stop_pct"], -12)
+        self.assertEqual(cfg.EXIT["model_flip_momentum_h1_floor"], -6)
+        self.assertEqual(cfg.RED_DAY_ENTRY_LOCK_USD, 8)
+        self.assertEqual(cfg.MAX_OPEN_RED, 1)
         self.assertTrue(cfg.SPEED_ONLY_IF_TODAY_NONNEG)
         self.assertEqual(cfg.SPEED_MIN_LIQUIDITY_USD, 50000)
-        self.assertEqual(cfg.SCORER["momentum_h1_too_hot"], 120)
-        self.assertEqual(cfg.SCORER["min_txns_h1"], 80)
+        self.assertEqual(cfg.SCORER["momentum_h1_too_hot"], 80)
+        self.assertEqual(cfg.SCORER["min_txns_h1"], 100)
 
     def test_sports_tip_alarm_bands(self):
         gap = _load("gap_bot_alarms", os.path.join(ROOT, "sports-gap-paper", "gap_bot.py"))
