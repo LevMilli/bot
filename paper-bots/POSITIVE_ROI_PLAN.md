@@ -188,12 +188,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Kill card uses active | `capture_hillclimb_week` reads active lever |
 | Masters board | `roi_plan.hillclimb_lever` |
 
+### Dual-control + quarterly re-baseline
+
+| Ticket | Where |
+| --- | --- |
+| Live checklist stub | `dual_control_status` / `staff_sign_dual_control` |
+| Two-staff confirm | primary ≠ secondary required for `arm_ready_paper` |
+| Hard live lock | `LIVE_ORDERS_ENABLED=False` (stub never arms create-order) |
+| Quarterly W-baseline | `capture_quarterly_rebaseline` / `quarterly_rebaseline_status` |
+| Masters board | `roi_plan.dual_control` + `quarterly_rebaseline` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Dual-control live checklist stub | paper arm hygiene |
-| Quarterly W-number re-baseline | habit artifact |
+| _(queue clear — observe Chicago weeks / staff pick)_ | paper observation |
 
 ## Hard rules unchanged
 

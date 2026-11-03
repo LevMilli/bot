@@ -37,6 +37,7 @@ HELPER_FILLS_NAME = "desk_helper_fills.json"
 HELPER_PROMOTE_NAME = "desk_helper_promote.json"
 COLD_HARVEST_NAME = "desk_cold_harvest.json"
 HILLCLIMB_LEVER_NAME = "desk_hillclimb_lever.json"
+DUAL_CONTROL_NAME = "desk_dual_control.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -141,6 +142,19 @@ MAX_HELPER_FILL_ROWS = 4000
 COLD_HARVEST_PCT_DEFAULT = 0.40
 COLD_HARVEST_PCT_MIN = 0.30
 COLD_HARVEST_PCT_MAX = 0.50
+
+# Phase 9: dual-control live checklist — paper stub; never enables live orders.
+LIVE_ORDERS_ENABLED = False  # hard lock — stub cannot arm create-order
+DUAL_CONTROL_ITEMS = (
+    ("gate_a_pilot", "Paper Gate A ready on pilot tower"),
+    ("gate_b_pilot", "Gate B twin green on pilot (DD/n)"),
+    ("fee_parity", "Live fee table matches paper (+ fill tax)"),
+    ("read_only_first", "Read-only armed mode before create-order"),
+    ("daily_stop", "Daily live stop ≤ paper stop"),
+    ("kill_floor", "Live kill ≤ sleeve floor; cancel-on-pause"),
+    ("no_meme_fund", "No funding live from meme sleeve"),
+    ("disaster_drill", "Ruin drill soft/hard practiced this month"),
+)
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -2595,6 +2609,186 @@ def staff_pick_hillclimb_lever(
     }
 
 
+def dual_control_status(root: str | None = None) -> dict:
+    """Paper dual-control checklist. Live orders stay hard-disabled."""
+    store = _load(
+        _path(DUAL_CONTROL_NAME, root),
+        {
+            "paper_only": True,
+            "items": {},
+            "primary": None,
+            "secondary": None,
+            "live_orders_enabled": False,
+        },
+    )
+    items_state = store.get("items") if isinstance(store.get("items"), dict) else {}
+    items = []
+    signed_n = 0
+    for item_id, label in DUAL_CONTROL_ITEMS:
+        row = items_state.get(item_id) if isinstance(items_state.get(item_id), dict) else {}
+        ok = bool(row.get("signed"))
+        if ok:
+            signed_n += 1
+        items.append({
+            "id": item_id,
+            "label": label,
+            "signed": ok,
+            "who": row.get("who") or "",
+            "at": row.get("at"),
+        })
+    primary = store.get("primary") if isinstance(store.get("primary"), dict) else None
+    secondary = store.get("secondary") if isinstance(store.get("secondary"), dict) else None
+    two_staff = bool(primary and secondary and primary.get("who") and secondary.get("who")
+                     and str(primary.get("who")) != str(secondary.get("who")))
+    checklist_complete = signed_n >= len(DUAL_CONTROL_ITEMS)
+    # Even if complete + dual signed, live stays False in this stub.
+    arm_ready_paper = checklist_complete and two_staff
+    return {
+        "paper_only": True,
+        "live_orders_enabled": bool(LIVE_ORDERS_ENABLED),
+        "code_live_lock": True,
+        "items": items,
+        "signed_n": signed_n,
+        "items_n": len(DUAL_CONTROL_ITEMS),
+        "checklist_complete": checklist_complete,
+        "primary": primary,
+        "secondary": secondary,
+        "two_staff": two_staff,
+        "arm_ready_paper": arm_ready_paper,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Dual-control stub: both staff + full checklist required before any "
+            "future live path. LIVE_ORDERS_ENABLED stays False in code."
+        ),
+    }
+
+
+def staff_sign_dual_control(
+    root: str | None,
+    *,
+    who: str,
+    role: str = "primary",
+    item_id: str | None = None,
+    note: str = "",
+) -> dict:
+    """Sign one checklist item and/or a dual-control role. Never enables live."""
+    who_s = str(who or "").strip()
+    if not who_s:
+        return {"ok": False, "reason": "who required", "live_orders_enabled": False}
+    role_s = str(role or "primary").strip().lower()
+    if role_s not in ("primary", "secondary"):
+        return {"ok": False, "reason": "role must be primary or secondary", "live_orders_enabled": False}
+    path = _path(DUAL_CONTROL_NAME, root)
+    store = _load(
+        path,
+        {
+            "paper_only": True,
+            "items": {},
+            "primary": None,
+            "secondary": None,
+            "live_orders_enabled": False,
+        },
+    )
+    items = store.get("items") if isinstance(store.get("items"), dict) else {}
+    if item_id:
+        iid = str(item_id).strip()
+        known = {k for k, _ in DUAL_CONTROL_ITEMS}
+        if iid not in known:
+            return {
+                "ok": False,
+                "reason": f"unknown checklist item: {iid}",
+                "live_orders_enabled": False,
+            }
+        items[iid] = {
+            "signed": True,
+            "who": who_s[:80],
+            "at": _now(),
+            "note": str(note or "")[:160],
+        }
+        store["items"] = items
+    store[role_s] = {
+        "who": who_s[:80],
+        "at": _now(),
+        "note": str(note or "")[:160],
+    }
+    store["live_orders_enabled"] = False  # hard lock
+    store["paper_only"] = True
+    store["last_at"] = _now()
+    _save(path, store)
+    status = dual_control_status(root)
+    return {
+        "ok": True,
+        "status": status,
+        "live_orders_enabled": False,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def staff_clear_dual_control(root: str | None, *, who: str = "", note: str = "") -> dict:
+    """Reset dual-control signatures (paper hygiene)."""
+    path = _path(DUAL_CONTROL_NAME, root)
+    store = {
+        "paper_only": True,
+        "items": {},
+        "primary": None,
+        "secondary": None,
+        "live_orders_enabled": False,
+        "cleared_by": str(who or "")[:80],
+        "cleared_note": str(note or "")[:160],
+        "cleared_at": _now(),
+        "fee_floors_locked": True,
+    }
+    _save(path, store)
+    return {"ok": True, "status": dual_control_status(root), "live_orders_enabled": False}
+
+
+def capture_quarterly_rebaseline(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    label: str | None = None,
+) -> dict:
+    """Quarterly W-number re-baseline habit (never mythologize a lucky week)."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/Chicago"))
+        q = (now.month - 1) // 3 + 1
+        default_label = f"W-{now.year}-Q{q}"
+    except Exception:
+        default_label = f"W-{time.strftime('%Y')}-Q?"
+    tag = str(label or default_label)[:40]
+    artifact = capture_baseline(root, bots=bots, cfg=cfg, label=tag)
+    artifact["quarterly"] = True
+    artifact["fee_floors_locked"] = True
+    artifact["note"] = (
+        f"Quarterly re-baseline {tag}. Compare future weeks to this artifact — "
+        "do not mythologize a lucky week."
+    )
+    # Also stamp into baseline store meta.
+    path = _path(BASELINE_NAME, root)
+    store = load_baseline(root)
+    store["quarterly_latest"] = artifact
+    store["last_quarterly_at"] = _now()
+    _save(path, store)
+    return artifact
+
+
+def quarterly_rebaseline_status(root: str | None = None) -> dict:
+    store = load_baseline(root)
+    latest = store.get("quarterly_latest") if isinstance(store.get("quarterly_latest"), dict) else None
+    return {
+        "paper_only": True,
+        "latest": latest,
+        "has_quarterly": latest is not None,
+        "fee_floors_locked": True,
+        "note": "Quarterly W-number re-baseline habit. Fee floors locked.",
+    }
+
+
 def staff_demote_hillclimb_lever(
     root: str | None,
     *,
@@ -2976,12 +3170,11 @@ def plan_summary(
         "helper_gate_a": helper_promote_status(root),
         "cold_harvest": cold_harvest_status(root),
         "hillclimb_lever": hillclimb_lever_status(root),
+        "dual_control": dual_control_status(root),
+        "quarterly_rebaseline": quarterly_rebaseline_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
-        "next_tickets": [
-            "dual-control live checklist stub",
-            "quarterly W-number re-baseline",
-        ],
+        "next_tickets": [],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
 
@@ -3230,6 +3423,21 @@ def self_check() -> None:
         dem = staff_demote_hillclimb_lever(tmp, note="sunday")
         assert dem["ok"] is True
         assert active_hillclimb_lever(tmp) is None
+        # Dual-control stub: two staff + all items; live stays False.
+        assert LIVE_ORDERS_ENABLED is False
+        for iid, _ in DUAL_CONTROL_ITEMS:
+            staff_sign_dual_control(tmp, who="alice", role="primary", item_id=iid)
+        staff_sign_dual_control(tmp, who="bob", role="secondary")
+        dc = dual_control_status(tmp)
+        assert dc["checklist_complete"] is True
+        assert dc["two_staff"] is True
+        assert dc["arm_ready_paper"] is True
+        assert dc["live_orders_enabled"] is False
+        qb = capture_quarterly_rebaseline(
+            tmp, bots=[{"id": "btc15m", "today": 1, "cash": 100}], label="W-2026-Q4",
+        )
+        assert qb["quarterly"] is True
+        assert quarterly_rebaseline_status(tmp)["has_quarterly"] is True
 
 
 if __name__ == "__main__":

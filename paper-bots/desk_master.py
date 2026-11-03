@@ -462,6 +462,14 @@ def master_summary(
             plan["hillclimb_lever"] = desk_roi_plan.hillclimb_lever_status(root)
         except Exception:
             plan["hillclimb_lever"] = None
+        try:
+            plan["dual_control"] = desk_roi_plan.dual_control_status(root)
+        except Exception:
+            plan["dual_control"] = None
+        try:
+            plan["quarterly_rebaseline"] = desk_roi_plan.quarterly_rebaseline_status(root)
+        except Exception:
+            plan["quarterly_rebaseline"] = None
     except Exception:
         plan = None
     return {
