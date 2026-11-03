@@ -131,13 +131,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Staff graduate | `staff_graduate_incubation` (`auto_promote=False`) |
 | Masters board | `incubation_board` → `roi_plan.incubation` |
 
+### Ruin drill UX
+
+| Ticket | Where |
+| --- | --- |
+| Soft / hard / nuclear levels | `set_ruin_drill` / `clear_ruin_drill` |
+| Entry gate blocks on active drill | `pimp_desk.entry_gate` via `ruin_drill_blocks_entries` |
+| Hard/nuclear pauses all bots | uses existing `set_pause(all_bots=True)` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Ruin drill UX | soft / hard / nuclear |
 | Tax/fee ledger completeness | true ROI ledger |
 | Clock-skew / stale-world skip | loop latency threshold |
+| Helper Gate A taxed EV | helper autonomy bar |
 
 ## Hard rules unchanged
 

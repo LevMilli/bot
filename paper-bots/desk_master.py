@@ -422,6 +422,10 @@ def master_summary(
             plan["incubation"] = desk_roi_plan.incubation_board(root)
         except Exception:
             plan["incubation"] = None
+        try:
+            plan["ruin_drill"] = desk_roi_plan.ruin_drill_status(root)
+        except Exception:
+            plan["ruin_drill"] = None
     except Exception:
         plan = None
     return {

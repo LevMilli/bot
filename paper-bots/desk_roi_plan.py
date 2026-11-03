@@ -31,6 +31,7 @@ SKIP_REGRET_WEEKLY = "desk_skip_regret_weekly.json"
 DAILY_R_NAME = "desk_daily_r.json"
 ANTI_REVENGE_NAME = "desk_anti_revenge.json"
 INCUBATION_NAME = "desk_incubation.json"
+RUIN_DRILL_NAME = "desk_ruin_drill.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -78,6 +79,9 @@ INCUBATION_MAIN_SERIES = frozenset({
     "KXNATGAS15M", "KXBRENT15M", "KXWTI15M",
     "KXINXU",
 })
+
+# Phase 10: ruin drill levels (paper UX — exits/settles still run unless nuclear pause).
+RUIN_LEVELS = ("soft", "hard", "nuclear")
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -1423,6 +1427,131 @@ def incubation_blocks_promote(root: str | None, series: str | None) -> str:
     return ""
 
 
+# ---- Ruin drill UX (Phase 10) ----------------------------------------------
+
+def ruin_drill_status(root: str | None = None) -> dict:
+    store = _load(
+        _path(RUIN_DRILL_NAME, root),
+        {"paper_only": True, "active": False, "level": None, "history": []},
+    )
+    level = store.get("level") if store.get("active") else None
+    if level not in RUIN_LEVELS:
+        level = None
+    return {
+        "paper_only": True,
+        "active": bool(store.get("active")) and level is not None,
+        "level": level,
+        "block_entries": level in ("soft", "hard", "nuclear"),
+        "pause_all_bots": level in ("hard", "nuclear"),
+        "flatten_recommended": level == "nuclear",
+        "who": store.get("who") or "",
+        "staff_note": store.get("note") or "",
+        "at": store.get("at"),
+        "history_n": len([h for h in (store.get("history") or []) if isinstance(h, dict)]),
+        "fee_floors_locked": True,
+        "levels": {
+            "soft": "block new entries; exits/settles still run",
+            "hard": "soft + pause every paper bot",
+            "nuclear": "hard + recommend flatten / cancel-on-pause habit",
+        },
+        "note": (
+            "Ruin drill UX for vault. Soft/hard/nuclear. "
+            "No profit guarantee. Exits stay available under soft."
+        ),
+    }
+
+
+def set_ruin_drill(
+    root: str | None,
+    level: str,
+    *,
+    who: str = "",
+    note: str = "",
+) -> dict:
+    """Arm a ruin drill level. Soft/hard/nuclear only."""
+    lvl = str(level or "").strip().lower()
+    if lvl not in RUIN_LEVELS:
+        return {
+            "ok": False,
+            "reason": f"level must be one of {RUIN_LEVELS}",
+            "fee_floors_locked": True,
+        }
+    path = _path(RUIN_DRILL_NAME, root)
+    store = _load(path, {"paper_only": True, "active": False, "history": []})
+    row = {
+        "paper_only": True,
+        "active": True,
+        "level": lvl,
+        "who": str(who or "staff")[:80],
+        "note": str(note or "")[:200],
+        "at": _now(),
+        "block_entries": True,
+        "pause_all_bots": lvl in ("hard", "nuclear"),
+        "flatten_recommended": lvl == "nuclear",
+        "fee_floors_locked": True,
+    }
+    history = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    history.append({**row, "action": "arm"})
+    store.update(row)
+    store["history"] = history[-40:]
+    _save(path, store)
+    # Hard/nuclear also pause every bot via existing pause file when available.
+    if row["pause_all_bots"]:
+        try:
+            import pimp_desk
+            pimp_desk.set_pause(root, on=True, all_bots=True, who=f"ruin:{lvl}")
+        except Exception:
+            pass
+    return {"ok": True, **ruin_drill_status(root)}
+
+
+def clear_ruin_drill(root: str | None, *, who: str = "", note: str = "") -> dict:
+    """Clear active ruin drill and resume bots if we paused them."""
+    path = _path(RUIN_DRILL_NAME, root)
+    store = _load(path, {"paper_only": True, "active": False, "history": []})
+    was = store.get("level") if store.get("active") else None
+    history = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    history.append({
+        "action": "clear",
+        "was_level": was,
+        "who": str(who or "staff")[:80],
+        "note": str(note or "")[:200],
+        "at": _now(),
+    })
+    store = {
+        "paper_only": True,
+        "active": False,
+        "level": None,
+        "who": str(who or "staff")[:80],
+        "note": str(note or "cleared")[:200],
+        "at": _now(),
+        "history": history[-40:],
+        "fee_floors_locked": True,
+    }
+    _save(path, store)
+    if was in ("hard", "nuclear"):
+        try:
+            import pimp_desk
+            pimp_desk.set_pause(root, on=False, all_bots=True, who="ruin:clear")
+        except Exception:
+            pass
+    return {"ok": True, **ruin_drill_status(root)}
+
+
+def ruin_drill_blocks_entries(root: str | None = None) -> str:
+    """Non-empty when a ruin drill is blocking new entries."""
+    status = ruin_drill_status(root)
+    if not status.get("active"):
+        return ""
+    lvl = status.get("level") or "soft"
+    return (
+        f"ruin drill {lvl}: new entries off"
+        + ("; bots paused" if status.get("pause_all_bots") else "")
+        + ("; flatten recommended" if status.get("flatten_recommended") else "")
+        + ". Settles/exits still run under soft."
+    )
+
+
 def adverse_cool_blocks(root: str | None, bot: str) -> str:
     """Non-empty reason when bot is in adverse cool-off window."""
     path = _path(ADVERSE_COOL_NAME, root)
@@ -2020,13 +2149,14 @@ def plan_summary(
         "daily_r": latest_daily_r_board(root),
         "inx_band_promote": inx_band_promote_status(root),
         "incubation": incubation_board(root),
+        "ruin_drill": ruin_drill_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "ruin drill soft/hard/nuclear UX",
             "tax/fee ledger completeness pass",
             "clock-skew / stale-world skip",
             "helper Gate A taxed EV gate",
+            "weekly harvest cold-ledger habit",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
