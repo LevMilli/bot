@@ -37,13 +37,29 @@ Interactive: Positive ROI Master Plan canvas.
 | Twin edge ≥ venue + 1¢ | `desk_inx.twin_edge_blocks` |
 | Pre-FOMC calm / post-print +30m | `desk_inx.inx_entry_blocks` on both INX bots |
 
-### Next — learn v2 / adverse cool
+### #108 — learn v2 / adverse cool
 
 | Ticket | Where |
 | --- | --- |
 | Learning skip v2 | `pimp_desk.learning_skip(..., side, hour_ct)` |
 | Adverse cool-off | `desk_roi_plan.record_adverse_fill` / `adverse_cool_blocks` |
-| Weekly scorecard | `desk_roi_plan.capture_weekly_scorecard` |
+| Weekly scorecard API | `desk_roi_plan.capture_weekly_scorecard` |
+
+### Scorecard wire — daily Masters board
+
+| Ticket | Where |
+| --- | --- |
+| Chicago-day scorecard on master | `desk_master.master_summary` → `roi_plan.weekly_scorecard` |
+| Public latest reader | `desk_roi_plan.latest_weekly_scorecard` |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
+| Master graduation checklist | M1–M7 × 2 Chicago weeks per tower |
+| Meme 20d retirement clock | pause sleeve on negative expectancy |
+| INX band promote | only after research-week artifact |
 
 ## Hard rules unchanged
 
