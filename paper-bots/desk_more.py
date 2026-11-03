@@ -998,6 +998,8 @@ def self_check() -> None:
     assert depth_adjusted_edge(0.10, 5, need=10) == round(0.05, 6)
     assert depth_adjusted_edge(0.10, 20, need=10) == round(0.10, 6)
     assert opportunity_score_v2(0.10, 0.8, 5, need=10) < opportunity_score_v2(0.10, 0.8, 20, need=10)
+    ok_map, err_map = prefetch_map([1, 2], lambda j: j + 1)
+    assert ok_map == {1: 2, 2: 3} and err_map == {}
     budgets = tower_budgets({"max_open_risk": 100})
     assert abs(sum(budgets.values()) - 100) < 0.05
     block = tower_budget_blocks("memecoin", 4.0, 3.0, {"max_open_risk": 100})
