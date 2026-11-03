@@ -257,6 +257,17 @@ Interactive: Positive ROI Master Plan canvas.
 | Runtime | commodity empty fast-exit; BTC logs empty CARD latency |
 | Masters board | `roi_plan.empty_card` |
 
+### Near-miss soft-gate staff promote
+
+| Ticket | Where |
+| --- | --- |
+| Label shadow outcomes | `label_near_miss_outcome` (would_pnl) |
+| Promote ready | n≥30 labeled + shadow EV ≥ 0 → `near_miss_promote_status` |
+| Staff arm z\|p only | `staff_promote_near_miss_soft` / `staff_clear_near_miss_promote` |
+| Paper relax | `effective_near_miss_relax` — z−0.05 / p−0.02; **edge forever 0** |
+| Runtime | BTC `evaluate_window` applies relax when staff-armed |
+| Masters board | `roi_plan.near_miss_promote` |
+
 ### Next
 
 | Ticket | Where |

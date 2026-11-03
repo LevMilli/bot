@@ -44,6 +44,7 @@ IDEA_REVIEW_NAME = "desk_idea_review.json"
 BTC_CALIB_NAME = "desk_btc_calibration.json"
 FIRM_QUEUE_NAME = "desk_firm_queue.json"
 EMPTY_CARD_NAME = "desk_empty_card.json"
+NEAR_MISS_PROMOTE_NAME = "desk_near_miss_promote.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -159,6 +160,14 @@ MAX_FIRM_OFFERS = 200
 # Empty-market CARD bar — fee-clear towers should exit idle loops fast.
 EMPTY_CARD_BAR_SEC = 3.0
 MAX_EMPTY_CARD_ROWS = 500
+
+# Phase 5: near-miss soft-gate promote (never fee / edge floors).
+NEAR_MISS_PROMOTE_N = 30
+NEAR_MISS_PROMOTE_MIN_EV = 0.0
+NEAR_MISS_SOFT_ALLOW = frozenset({"z", "p"})  # edge forever forbidden
+NEAR_MISS_Z_RELAX = 0.05
+NEAR_MISS_P_RELAX = 0.02
+NEAR_MISS_LIVE = False  # code default — staff file only
 
 # Phase 2: capital allocation OS — barbell + midday util / zero-buy alerts.
 BARBELL_MEME_MAX = 0.15          # ≤15% desk risk to meme sleeve
@@ -1604,20 +1613,74 @@ def load_baseline(root: str | None = None) -> dict:
     return _load(_path(BASELINE_NAME, root), {"paper_only": True, "baselines": [], "latest": None})
 
 
-# ---- Near-miss weekly card -------------------------------------------------
+# ---- Near-miss weekly card + staff soft-gate promote -----------------------
 
-def near_miss_weekly_card(root: str | None = None) -> dict:
-    """
-    Staff promote/reject card from shadow near-miss log.
-    auto_promote stays False — never softens floors.
-    """
+def _near_miss_rows(root: str | None) -> list[dict]:
     try:
         import desk_more
         state = desk_more.load_more(root)
-        rows = [r for r in (state.get("near_miss") or []) if isinstance(r, dict)]
+        return [r for r in (state.get("near_miss") or []) if isinstance(r, dict)]
     except Exception:
-        rows = []
+        return []
+
+
+def label_near_miss_outcome(
+    root: str | None,
+    *,
+    ticker: str,
+    would_pnl,
+    bot: str | None = None,
+    note: str = "",
+) -> dict:
+    """Attach settle / would-have PnL to shadow near-miss rows (staff or settle hook)."""
+    tick = str(ticker or "").strip()
+    pnl = _finite(would_pnl)
+    if not tick or pnl is None:
+        return {"labeled": 0, "reason": "need ticker + would_pnl"}
+    try:
+        import desk_more
+        state = desk_more.load_more(root)
+        rows = list(state.get("near_miss") or [])
+    except Exception:
+        return {"labeled": 0, "reason": "no near_miss store"}
+    n = 0
+    bot_id = str(bot or "").strip()
+    out_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            out_rows.append(row)
+            continue
+        item = dict(row)
+        if str(item.get("ticker") or "") == tick and (
+            not bot_id or str(item.get("bot") or "") == bot_id
+        ):
+            item["would_pnl"] = round(float(pnl), 4)
+            item["labeled_at"] = _now()
+            if note:
+                item["label_note"] = str(note)[:120]
+            n += 1
+        out_rows.append(item)
+    if n:
+        try:
+            import desk_more
+            state["near_miss"] = out_rows
+            state["last_at"] = _now()
+            desk_more.save_more(state, root)
+        except Exception:
+            return {"labeled": 0, "reason": "save failed"}
+    return {"labeled": n, "ticker": tick, "would_pnl": round(float(pnl), 4)}
+
+
+def near_miss_promote_status(root: str | None = None) -> dict:
+    """Masters board: n≥30 + shadow EV ≥ baseline before staff may arm one soft gate.
+
+    Soft allowlist is z|p only — never edge / fee floors. auto_promote=False forever.
+    """
+    rows = _near_miss_rows(root)
     n = len(rows)
+    labeled = [r for r in rows if _finite(r.get("would_pnl")) is not None]
+    pnls = [float(_finite(r.get("would_pnl")) or 0) for r in labeled]
+    shadow_ev = round(sum(pnls) / len(pnls), 4) if pnls else None
     by_soft: dict[str, int] = {}
     by_bot: dict[str, int] = {}
     for r in rows:
@@ -1626,20 +1689,185 @@ def near_miss_weekly_card(root: str | None = None) -> dict:
         by_soft[key] = int(by_soft.get(key) or 0) + 1
         bot = str(r.get("bot") or "?")
         by_bot[bot] = int(by_bot.get(bot) or 0) + 1
-    decision = "reject" if n < 30 else "review"
-    card = {
+    baseline = float(NEAR_MISS_PROMOTE_MIN_EV)
+    ready = bool(
+        n >= int(NEAR_MISS_PROMOTE_N)
+        and len(labeled) >= int(NEAR_MISS_PROMOTE_N)
+        and shadow_ev is not None
+        and shadow_ev + 1e-12 >= baseline
+    )
+    if n < NEAR_MISS_PROMOTE_N or len(labeled) < NEAR_MISS_PROMOTE_N:
+        decision = "reject"
+    elif shadow_ev is not None and shadow_ev + 1e-12 >= baseline:
+        decision = "review"
+    else:
+        decision = "reject"
+    promote = _load(
+        _path(NEAR_MISS_PROMOTE_NAME, root),
+        {"paper_only": True, "staff_approved": False, "live": False, "soft": None},
+    )
+    soft_live = None
+    if bool(promote.get("staff_approved")) and bool(promote.get("live")):
+        soft = str(promote.get("soft") or "").strip().lower()
+        if soft in NEAR_MISS_SOFT_ALLOW:
+            soft_live = soft
+    return {
         "paper_only": True,
+        "fee_floors_locked": True,
         "n": n,
-        "promote_min_n": 30,
-        "auto_promote": False,
+        "labeled_n": len(labeled),
+        "shadow_ev": shadow_ev,
+        "baseline_ev": baseline,
+        "promote_min_n": NEAR_MISS_PROMOTE_N,
+        "promote_ready": ready,
         "decision": decision,
+        "auto_promote": False,
+        "code_default_live": bool(NEAR_MISS_LIVE),
+        "staff_approved": bool(promote.get("staff_approved")),
+        "live": bool(soft_live),
+        "soft_live": soft_live,
+        "soft_allow": sorted(NEAR_MISS_SOFT_ALLOW),
+        "z_relax": NEAR_MISS_Z_RELAX if soft_live == "z" else 0.0,
+        "p_relax": NEAR_MISS_P_RELAX if soft_live == "p" else 0.0,
         "by_soft": by_soft,
         "by_bot": by_bot,
-        "fee_floors_locked": True,
         "note": (
-            "Shadow near-miss only. Promote a soft gate only after n≥30 and "
-            "shadow EV ≥ baseline — staff review. Never auto-lower min_edge."
+            "Near-miss shadow: staff may arm one soft gate (z|p) after "
+            f"n≥{NEAR_MISS_PROMOTE_N} labeled with shadow EV ≥ {baseline}. "
+            "Never auto-promote; never lower fee/edge floors."
         ),
+    }
+
+
+def near_miss_soft_live(root: str | None = None) -> str | None:
+    """Return armed soft key (z|p) or None. Code NEAR_MISS_LIVE stays False."""
+    if NEAR_MISS_LIVE:
+        return None  # code path never forces a soft; staff file only
+    st = near_miss_promote_status(root)
+    soft = st.get("soft_live")
+    return str(soft) if soft else None
+
+
+def effective_near_miss_relax(root: str | None = None) -> dict:
+    """Paper z/p floor relax when staff armed a soft near-miss gate."""
+    soft = near_miss_soft_live(root)
+    return {
+        "soft": soft,
+        "z_relax": float(NEAR_MISS_Z_RELAX) if soft == "z" else 0.0,
+        "p_relax": float(NEAR_MISS_P_RELAX) if soft == "p" else 0.0,
+        "edge_relax": 0.0,  # forever zero — fee floors locked
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def staff_promote_near_miss_soft(
+    root: str | None,
+    soft: str,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff arm one soft near-miss gate (z|p). Requires promote_ready unless force."""
+    key = str(soft or "").strip().lower()
+    if key not in NEAR_MISS_SOFT_ALLOW:
+        return {
+            "ok": False,
+            "live": False,
+            "reason": f"soft '{key}' not allowed — use one of {sorted(NEAR_MISS_SOFT_ALLOW)}",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    summary = near_miss_promote_status(root)
+    if not force and not summary.get("promote_ready"):
+        return {
+            "ok": False,
+            "live": False,
+            "staff_approved": False,
+            "reason": (
+                f"not promote_ready (need labeled n≥{NEAR_MISS_PROMOTE_N} "
+                f"with shadow EV ≥ {NEAR_MISS_PROMOTE_MIN_EV})"
+            ),
+            "summary": summary,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    row = {
+        "paper_only": True,
+        "staff_approved": True,
+        "live": True,
+        "soft": key,
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "shadow_n": summary.get("labeled_n"),
+        "shadow_ev": summary.get("shadow_ev"),
+        "decision": summary.get("decision"),
+        "auto_promote": False,
+        "code_default_live": bool(NEAR_MISS_LIVE),
+        "fee_floors_locked": True,
+        "z_relax": NEAR_MISS_Z_RELAX if key == "z" else 0.0,
+        "p_relax": NEAR_MISS_P_RELAX if key == "p" else 0.0,
+        "edge_relax": 0.0,
+    }
+    _save(_path(NEAR_MISS_PROMOTE_NAME, root), row)
+    return {
+        "ok": True,
+        "live": True,
+        "staff_approved": True,
+        "soft": key,
+        "reason": f"armed soft={key}",
+        "summary": near_miss_promote_status(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def staff_clear_near_miss_promote(root: str | None, *, note: str = "") -> dict:
+    """Staff disarm any near-miss soft promote."""
+    row = {
+        "paper_only": True,
+        "staff_approved": False,
+        "live": False,
+        "soft": None,
+        "at": _now(),
+        "note": str(note or "cleared")[:200],
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "edge_relax": 0.0,
+    }
+    _save(_path(NEAR_MISS_PROMOTE_NAME, root), row)
+    return {
+        "ok": True,
+        "live": False,
+        "staff_approved": False,
+        "reason": "disarmed",
+        "summary": near_miss_promote_status(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def near_miss_weekly_card(root: str | None = None) -> dict:
+    """
+    Staff promote/reject card from shadow near-miss log.
+    auto_promote stays False — never softens floors.
+    """
+    status = near_miss_promote_status(root)
+    card = {
+        "paper_only": True,
+        "n": status.get("n"),
+        "labeled_n": status.get("labeled_n"),
+        "shadow_ev": status.get("shadow_ev"),
+        "baseline_ev": status.get("baseline_ev"),
+        "promote_min_n": NEAR_MISS_PROMOTE_N,
+        "promote_ready": status.get("promote_ready"),
+        "soft_live": status.get("soft_live"),
+        "auto_promote": False,
+        "decision": status.get("decision"),
+        "by_soft": status.get("by_soft"),
+        "by_bot": status.get("by_bot"),
+        "fee_floors_locked": True,
+        "note": status.get("note"),
     }
     path = _path(NEAR_MISS_WEEKLY, root)
     store = _load(path, {"paper_only": True, "cards": []})
@@ -4430,6 +4658,7 @@ def plan_summary(
         "btc_calibration": btc_calibration_report(bots),
         "firm_queue": firm_queue_status(root),
         "empty_card": empty_card_status(root),
+        "near_miss_promote": near_miss_promote_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [

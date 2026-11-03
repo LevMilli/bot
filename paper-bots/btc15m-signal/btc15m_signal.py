@@ -953,20 +953,36 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         news = None
 
     reasons = list(cheap)
+    # Staff near-miss soft promote may relax z/p floors slightly — never edge/fee.
+    z_relax = 0.0
+    p_relax = 0.0
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        relax = desk_roi_plan.effective_near_miss_relax(DESK_ROOT)
+        z_relax = float(relax.get("z_relax") or 0.0)
+        p_relax = float(relax.get("p_relax") or 0.0)
+    except Exception:
+        z_relax = 0.0
+        p_relax = 0.0
     zmin_acc = MIN_Z_COINBASE_ONLY if coinbase_only else MIN_Z
+    p_acc = max(0.50, float(MIN_MODEL_ACCURATE) - p_relax)
+    p_speed = max(0.50, float(MIN_MODEL_SPEED) - p_relax)
     lane = "accurate"
     need_p = float(need)
-    if p + 1e-12 >= MIN_MODEL_ACCURATE:
+    if p + 1e-12 >= p_acc:
         lane = "accurate"
-    elif p + 1e-12 >= MIN_MODEL_SPEED:
+    elif p + 1e-12 >= p_speed:
         lane = "speed"
         need_p = float(need) + SPEED_EDGE_EXTRA
     else:
-        reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED:.2f}")
+        reasons.append(f"p {p:.3f} < speed floor {p_speed:.2f}")
     if p < need_p:
         reasons.append(f"p {p:.3f} < ask+fee+buf ({lane}) = {need_p:.3f}")
     # Speed lane: allow near-miss z band only when extra fee-aware edge already clears.
     zmin = zmin_acc if lane == "accurate" else min(zmin_acc, MIN_Z_SPEED)
+    zmin = max(0.40, float(zmin) - z_relax)
     if z < zmin:
         reasons.append(f"z {z:.2f} < {zmin}")
     if not (ASK_MIN <= ask <= ASK_MAX):

@@ -762,21 +762,34 @@ def league_fair_floor(league: str | None) -> float:
 # --- 16. Near-miss promote ladder -----------------------------------------
 
 def near_miss_promote_check(root: str | None = None) -> dict:
+    """Delegate to desk_roi_plan: n≥30 labeled + shadow EV ≥ baseline; staff only."""
     try:
-        import desk_more
-        misses = list((desk_more.load_more(root).get("near_miss") or []))
+        import desk_roi_plan
+        status = desk_roi_plan.near_miss_promote_status(root)
     except Exception:
-        misses = []
-    n = len(misses)
-    # Without settle labels on near-misses yet, require n≥30 and staff review flag.
-    ready = n >= NEAR_MISS_PROMOTE_N
+        status = {
+            "n": 0,
+            "labeled_n": 0,
+            "promote_ready": False,
+            "shadow_ev": None,
+            "auto_promote": False,
+        }
+    ready = bool(status.get("promote_ready"))
     row = {
         "at": _now(),
-        "n": n,
+        "n": int(status.get("n") or 0),
+        "labeled_n": int(status.get("labeled_n") or 0),
         "need_n": NEAR_MISS_PROMOTE_N,
+        "shadow_ev": status.get("shadow_ev"),
+        "min_ev": NEAR_MISS_PROMOTE_MIN_EV,
         "ready_for_review": ready,
+        "soft_live": status.get("soft_live"),
         "auto_promote": False,  # never auto-loosen fee floors
-        "note": "Promote soft-gate loosen to shadow twin only after staff review.",
+        "fee_floors_locked": True,
+        "note": (
+            "Staff may arm one soft gate (z|p) via staff_promote_near_miss_soft "
+            "after labeled n≥30 and shadow EV ≥ baseline. Never edge/fee floors."
+        ),
     }
     if ready:
         state = load_top25(root)

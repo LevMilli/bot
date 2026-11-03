@@ -494,6 +494,19 @@ def evaluate(m: dict, spot: float, edge_buf: float, book=None) -> dict:
         z_floor = float(playbook.get("min_z") or MIN_Z)
     except Exception:
         z_floor = MIN_Z
+    # Staff near-miss soft promote may relax z/p — never edge/fee floors.
+    z_relax = 0.0
+    p_relax = 0.0
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        relax = desk_roi_plan.effective_near_miss_relax(DESK_ROOT)
+        z_relax = float(relax.get("z_relax") or 0.0)
+        p_relax = float(relax.get("p_relax") or 0.0)
+    except Exception:
+        z_relax = 0.0
+        p_relax = 0.0
     # Conservative σ: ~0.15% of spot * sqrt(minutes_left / 15) for 15m commodities.
     sigma = spot * 0.0015 * math.sqrt(max(minutes_left, 1.0) / 15.0)
     z = cushion / sigma if sigma > 1e-12 else 0.0
@@ -507,14 +520,17 @@ def evaluate(m: dict, spot: float, edge_buf: float, book=None) -> dict:
         reasons.append(f"cushion {cushion:.5f} < {min_cush:.5f}")
     lane = "accurate"
     need_edge = 0.0
-    if p + 1e-12 >= MIN_MODEL_ACCURATE:
+    p_acc = max(0.50, float(MIN_MODEL_ACCURATE) - p_relax)
+    p_speed = max(0.50, float(MIN_MODEL_SPEED) - p_relax)
+    if p + 1e-12 >= p_acc:
         lane = "accurate"
-    elif p + 1e-12 >= MIN_MODEL_SPEED:
+    elif p + 1e-12 >= p_speed:
         lane = "speed"
         need_edge = SPEED_EDGE_EXTRA
         z_floor = min(float(z_floor), MIN_Z_SPEED)
     else:
-        reasons.append(f"p {p:.3f} < speed floor {MIN_MODEL_SPEED}")
+        reasons.append(f"p {p:.3f} < speed floor {p_speed}")
+    z_floor = max(0.40, float(z_floor) - z_relax)
     if z + 1e-12 < z_floor:
         reasons.append(f"z {z:.2f} < {z_floor}")
     if not (ASK_MIN - 1e-12 <= float(ask) <= ASK_MAX + 1e-12):

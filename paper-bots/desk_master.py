@@ -536,6 +536,10 @@ def master_summary(
             plan["empty_card"] = desk_roi_plan.empty_card_status(root)
         except Exception:
             plan["empty_card"] = None
+        try:
+            plan["near_miss_promote"] = desk_roi_plan.near_miss_promote_status(root)
+        except Exception:
+            plan["near_miss_promote"] = None
     except Exception:
         plan = None
     return {
