@@ -3518,7 +3518,10 @@ def load_learning(root: str | None = None) -> list:
 
 
 def record_learning(root: str | None, row: dict) -> None:
-    """Append one real settle. A missing result, market, or bucket is not invented."""
+    """Append one real settle. A missing result, market, or bucket is not invented.
+
+    Optional side + hour_ct enable learning-skip v2 (market × side × hour).
+    """
     if not isinstance(row, dict):
         return
     result = str(row.get("result") or "")
@@ -3530,40 +3533,92 @@ def record_learning(root: str | None, row: dict) -> None:
     if not market or not bucket or stake is None:
         return
     fill_id = _clean(row.get("fill_id"), 80)
+    side = _clean(str(row.get("side") or "").upper(), 8)
+    hour_ct = row.get("hour_ct")
+    try:
+        hour_ct = int(hour_ct) if hour_ct is not None else None
+        if hour_ct is not None and not (0 <= hour_ct <= 23):
+            hour_ct = None
+    except (TypeError, ValueError):
+        hour_ct = None
+    if hour_ct is None:
+        when = _ct_when(row.get("at") or "")
+        if when is not None:
+            hour_ct = int(when.astimezone(CT).hour)
     with _FILE_LOCK:
         rows = load_learning(root)
         if fill_id and any(str(item.get("fill_id") or "") == fill_id for item in rows):
             return
-        rows.append({
+        item = {
             "at": _clean(row.get("at") or central_text(), 40),
             "result": result,
             "market": market,
             "bucket": bucket,
             "stake": round(stake, 2),
             "fill_id": fill_id,
-        })
+        }
+        if side:
+            item["side"] = side
+        if hour_ct is not None:
+            item["hour_ct"] = hour_ct
+        rows.append(item)
         _write_json(learning_path(root), {"paper_only": True, "rows": rows[-2000:]})
 
 
-def learning_skip(rows, market, bucket) -> str:
-    """Skip a paper bucket that is under 40% hits after at least 8 settles. This is a count, not a smarter model."""
+def learning_skip(rows, market, bucket, side=None, hour_ct=None) -> str:
+    """Skip cold paper buckets under 40% hits after ≥8 settles.
+
+    v2 (when side + hour_ct provided): market × side × hour × bucket first;
+    falls back to classic market × bucket when the fine sample is thin.
+    Count only — not a smarter model. Fee floors unchanged.
+    """
     market = _clean(market, 40)
     bucket = _clean(bucket, 16)
     if not market or not bucket or not isinstance(rows, list):
         return ""
+    side_n = _clean(str(side or "").upper(), 8)
+    try:
+        hour_n = int(hour_ct) if hour_ct is not None else None
+        if hour_n is not None and not (0 <= hour_n <= 23):
+            hour_n = None
+    except (TypeError, ValueError):
+        hour_n = None
+
+    def _rate(same: list) -> tuple[int, int]:
+        hits = sum(1 for row in same if row.get("result") == "hit")
+        return hits, len(same)
+
+    # Fine key first (ROI plan Phase 4 learning skip v2).
+    if side_n and hour_n is not None:
+        fine = [
+            row for row in rows
+            if isinstance(row, dict)
+            and row.get("market") == market
+            and row.get("bucket") == bucket
+            and str(row.get("side") or "").upper() == side_n
+            and row.get("hour_ct") == hour_n
+            and row.get("result") in ("hit", "miss")
+        ]
+        hits, n = _rate(fine)
+        if n >= LEARN_MIN_SETTLES and (hits / n) + 1e-12 < LEARN_HIT_RATE:
+            return (
+                f"Skipping {market} {side_n} hour={hour_n} CT in {bucket}. "
+                f"Fine paper bucket has {hits}/{n} hits under 40% (learn v2)."
+            )
+
     same = [
         row for row in rows
         if isinstance(row, dict) and row.get("market") == market and row.get("bucket") == bucket
         and row.get("result") in ("hit", "miss")
     ]
-    if len(same) < LEARN_MIN_SETTLES:
+    hits, n = _rate(same)
+    if n < LEARN_MIN_SETTLES:
         return ""
-    hits = sum(1 for row in same if row.get("result") == "hit")
-    if (hits / len(same)) + 1e-12 >= LEARN_HIT_RATE:
+    if (hits / n) + 1e-12 >= LEARN_HIT_RATE:
         return ""
     return (
         f"Skipping {market} in the {bucket} probability bucket. "
-        f"That paper bucket has {hits} hits out of {len(same)} settles, which is under 40%. "
+        f"That paper bucket has {hits} hits out of {n} settles, which is under 40%. "
         "This is only a count of paper settles."
     )
 

@@ -20,10 +20,16 @@ BASELINE_NAME = "desk_roi_baseline.json"
 NEAR_MISS_WEEKLY = "desk_near_miss_weekly.json"
 INX_BAND_RESEARCH = "desk_inx_band_research.json"
 SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
+ADVERSE_COOL_NAME = "desk_adverse_cool.json"
+WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
 MAX_HARD_STOP_ROWS = 2000
+
+# Adverse selection cool-off: fast mark-down after entry → pause that bot briefly.
+ADVERSE_MARK_DROP = 0.05  # 5¢ adverse vs entry ask/bid
+ADVERSE_COOL_MINUTES = 20
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -620,6 +626,99 @@ def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
     }
 
 
+# ---- Adverse selection cool-off --------------------------------------------
+
+def record_adverse_fill(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str = "",
+    entry_price=None,
+    mark_price=None,
+    note: str = "",
+) -> dict:
+    """If mark dropped ≥ ADVERSE_MARK_DROP vs entry, cool the bot for ADVERSE_COOL_MINUTES."""
+    entry = _finite(entry_price)
+    mark = _finite(mark_price)
+    if entry is None or mark is None or entry <= 0:
+        return {"cooled": False, "reason": "bad prices"}
+    drop = entry - mark
+    if drop + 1e-12 < ADVERSE_MARK_DROP:
+        return {"cooled": False, "drop": round(drop, 4)}
+    path = _path(ADVERSE_COOL_NAME, root)
+    state = _load(path, {"paper_only": True, "bots": {}})
+    until = time.time() + ADVERSE_COOL_MINUTES * 60
+    state.setdefault("bots", {})[str(bot)] = {
+        "until": until,
+        "at": _now(),
+        "ticker": ticker,
+        "entry": entry,
+        "mark": mark,
+        "drop": round(drop, 4),
+        "note": str(note or "")[:160],
+    }
+    state["last_at"] = _now()
+    _save(path, state)
+    return {
+        "cooled": True,
+        "bot": bot,
+        "until": until,
+        "minutes": ADVERSE_COOL_MINUTES,
+        "drop": round(drop, 4),
+    }
+
+
+def adverse_cool_blocks(root: str | None, bot: str) -> str:
+    """Non-empty reason when bot is in adverse cool-off window."""
+    path = _path(ADVERSE_COOL_NAME, root)
+    state = _load(path, {"paper_only": True, "bots": {}})
+    row = (state.get("bots") or {}).get(str(bot))
+    if not isinstance(row, dict):
+        return ""
+    until = _finite(row.get("until"))
+    if until is None or time.time() >= until:
+        return ""
+    left = int(max(1, (until - time.time()) / 60.0))
+    return (
+        f"adverse cool-off: {bot} paused ~{left}m after "
+        f"{row.get('drop')} drop on {row.get('ticker') or 'fill'}"
+    )
+
+
+def capture_weekly_scorecard(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    label: str | None = None,
+) -> dict:
+    """Persist a Chicago-week firm scorecard (bleed, M1 proxy, Gate A counts)."""
+    cfg = cfg or {}
+    bleed = firm_bleed_ratio(bots)
+    misplaced = capital_misplaced(bots, cfg)
+    gate_a_n = 0
+    for bot in bots or []:
+        if isinstance(bot, dict) and isinstance(bot.get("gate_a"), dict) and bot["gate_a"].get("ready"):
+            gate_a_n += 1
+    card = {
+        "paper_only": True,
+        "label": label or _now()[:10],
+        "captured_at": _now(),
+        "bleed": bleed,
+        "capital_misplaced": misplaced,
+        "gate_a_ready_towers": gate_a_n,
+        "fee_floors_locked": True,
+        "note": "Weekly scorecard for hillclimb kill rule. No profit guarantee.",
+    }
+    path = _path(WEEKLY_SCORECARD, root)
+    store = _load(path, {"paper_only": True, "cards": []})
+    store.setdefault("cards", []).append(card)
+    store["cards"] = store["cards"][-52:]
+    store["latest"] = card
+    _save(path, store)
+    return card
+
+
 # ---- Plan summary for master board -----------------------------------------
 
 def plan_summary(
@@ -709,6 +808,16 @@ def self_check() -> None:
         assert summ["n"] >= 1
         assert summ["live"] is False
         assert summ["auto_promote"] is False
+        cool = record_adverse_fill(
+            tmp, bot="btc15m", ticker="T", entry_price=0.80, mark_price=0.70,
+        )
+        assert cool["cooled"] is True
+        assert adverse_cool_blocks(tmp, "btc15m")
+        card = capture_weekly_scorecard(
+            tmp, bots=[{"id": "sports-gap", "today": 2, "gate_a": {"ready": True}}],
+            cfg={"max_open_risk": 100}, label="W-test",
+        )
+        assert card["gate_a_ready_towers"] == 1
 
 
 if __name__ == "__main__":
