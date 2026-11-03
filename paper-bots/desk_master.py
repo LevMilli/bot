@@ -522,6 +522,16 @@ def master_summary(
                 plan["btc_calibration"] = latest_bc or desk_roi_plan.btc_calibration_report(bots)
         except Exception:
             plan["btc_calibration"] = None
+        try:
+            status_fq = desk_roi_plan.firm_queue_status(root)
+            offers_n = int((status_fq or {}).get("offers_n") or 0)
+            latest_fq = (status_fq or {}).get("latest")
+            if root and offers_n > 0 and not isinstance(latest_fq, dict):
+                desk_roi_plan.capture_firm_queue(root, bots=bots, cfg=cfg)
+                status_fq = desk_roi_plan.firm_queue_status(root)
+            plan["firm_queue"] = status_fq
+        except Exception:
+            plan["firm_queue"] = None
     except Exception:
         plan = None
     return {

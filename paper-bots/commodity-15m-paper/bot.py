@@ -781,6 +781,33 @@ def main() -> int:
         desk_brain.remember_queue(DESK_ROOT, ranked, note="commodity-15m local queue")
     except Exception:
         ranked = candidates
+    # Cross-tower firm queue: merge commodity fits with sports/btc offers.
+    try:
+        import desk_roi_plan
+        desk_roi_plan.offer_firm_candidates(
+            DESK_ROOT,
+            [
+                {
+                    "bot": "commodity-15m",
+                    "ticker": r.get("ticker"),
+                    "side": r.get("side"),
+                    "edge": r.get("edge"),
+                    "confidence": r.get("confidence") if r.get("confidence") is not None else r.get("p"),
+                    "depth": r.get("depth"),
+                    "stake_est": r.get("stake_est") or 25.0,
+                }
+                for r in ranked
+                if r.get("ticker")
+            ],
+            bot="commodity-15m",
+        )
+        desk_roi_plan.rebuild_firm_queue(
+            DESK_ROOT,
+            remaining_risk=desk_roi_plan.remaining_desk_risk(DESK_ROOT),
+            note="commodity-15m firm offer",
+        )
+    except Exception:
+        pass
     today_pnl = 0.0
     today_tag = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
     for pos in account.get("closed") or []:
@@ -823,6 +850,25 @@ def main() -> int:
             print(f"  → skip: max buys this check ({max_buys_eff})")
             break
         ev = row.get("_ev") or row
+        try:
+            import desk_roi_plan
+            firm_block = desk_roi_plan.firm_queue_blocks(
+                DESK_ROOT, "commodity-15m", str(ev.get("ticker") or ""),
+            )
+        except Exception:
+            firm_block = ""
+        if firm_block:
+            print(f"  → skip: {firm_block}")
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_fit(
+                    DESK_ROOT, bot="commodity-15m", outcome="block",
+                    ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
+                    edge=ev.get("edge"), note=firm_block[:160],
+                )
+            except Exception:
+                pass
+            continue
         msg = paper_buy(account, ev)
         print(f"  → {msg}")
         if msg.startswith("Paper buy"):

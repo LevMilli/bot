@@ -52,6 +52,7 @@ desk_capital_os.json
 desk_opp_cost.json
 desk_idea_review.json
 desk_btc_calibration.json
+desk_firm_queue.json
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json
 helpers/calendar_scanner_at.txt
