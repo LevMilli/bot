@@ -1,15 +1,23 @@
 /**
- * Vault hall walk bounds — free movement on the floor, blocked by walls.
- * Designed so the same helper can later bound plaza / tower floors.
+ * Vault hall walk bounds + simple obstacle capsules for the grounded player.
+ * Same helpers can later bound plaza / tower floors.
  */
 
-export const BANK_AISLE_HALF = 3.25
-export const BANK_LANE_HALF = 0.7
-export const BANK_Z_BACK = -18
-export const BANK_Z_FRONT = 14
-export const BANK_HALL_HALF_W = 15.6
+export const BANK_AISLE_HALF = 3.35
+export const BANK_LANE_HALF = 0.58
+export const BANK_Z_BACK = -11.5
+export const BANK_Z_FRONT = 7.5
+export const BANK_HALL_HALF_W = 6.1
 
 export type WalkBounds = {
+  minX: number
+  maxX: number
+  minZ: number
+  maxZ: number
+}
+
+/** Axis-aligned obstacle on the floor (desk cabinets, vault door slab, etc.). */
+export type FloorObstacle = {
   minX: number
   maxX: number
   minZ: number
@@ -29,10 +37,10 @@ export function vaultFloorBounds(
   radius = 0.35,
 ): WalkBounds {
   return {
-    minX: -hallHalfW + radius + 0.35,
-    maxX: hallHalfW - radius - 0.35,
-    minZ: zBack + 1.5 + radius,
-    maxZ: zFront - 1.1 - radius,
+    minX: -hallHalfW + radius + 0.25,
+    maxX: hallHalfW - radius - 0.25,
+    minZ: zBack + 1.6 + radius,
+    maxZ: zFront - 0.85 - radius,
   }
 }
 
@@ -41,6 +49,54 @@ export function clampToBounds(x: number, z: number, b: WalkBounds): { x: number;
     x: Math.min(b.maxX, Math.max(b.minX, x)),
     z: Math.min(b.maxZ, Math.max(b.minZ, z)),
   }
+}
+
+/** Push a point out of an AABB, preferring the shallowest axis. */
+export function resolveObstacle(
+  x: number,
+  z: number,
+  radius: number,
+  ob: FloorObstacle,
+): { x: number; z: number; hit: boolean } {
+  const nearestX = Math.min(ob.maxX, Math.max(ob.minX, x))
+  const nearestZ = Math.min(ob.maxZ, Math.max(ob.minZ, z))
+  // If center is inside the box, push out on the shallowest face.
+  if (x >= ob.minX && x <= ob.maxX && z >= ob.minZ && z <= ob.maxZ) {
+    const left = x - ob.minX
+    const right = ob.maxX - x
+    const back = z - ob.minZ
+    const front = ob.maxZ - z
+    const m = Math.min(left, right, back, front)
+    if (m === left) return { x: ob.minX - radius, z, hit: true }
+    if (m === right) return { x: ob.maxX + radius, z, hit: true }
+    if (m === back) return { x, z: ob.minZ - radius, hit: true }
+    return { x, z: ob.maxZ + radius, hit: true }
+  }
+  const dx = x - nearestX
+  const dz = z - nearestZ
+  const d2 = dx * dx + dz * dz
+  if (d2 >= radius * radius || d2 < 1e-8) return { x, z, hit: false }
+  const d = Math.sqrt(d2)
+  const push = (radius - d) / d
+  return { x: x + dx * push, z: z + dz * push, hit: true }
+}
+
+export function resolveObstacles(
+  x: number,
+  z: number,
+  radius: number,
+  obstacles: FloorObstacle[],
+): { x: number; z: number } {
+  let nx = x
+  let nz = z
+  for (let pass = 0; pass < 2; pass++) {
+    for (const ob of obstacles) {
+      const r = resolveObstacle(nx, nz, radius, ob)
+      nx = r.x
+      nz = r.z
+    }
+  }
+  return { x: nx, z: nz }
 }
 
 /** @deprecated Prefer vaultFloorBounds + clampToBounds for free player walk. */

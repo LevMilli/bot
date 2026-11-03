@@ -1,26 +1,38 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { MathUtils, Vector3, type Group } from 'three'
-import { vaultFloorBounds, type WalkBounds } from '../data/bankWalk'
+import {
+  clampToBounds,
+  resolveObstacles,
+  vaultFloorBounds,
+  type FloorObstacle,
+  type WalkBounds,
+} from '../data/bankWalk'
 
-const EYE_H = 1.62
-const BODY_H = 1.35
-const CAPSULE_R = 0.28
-const WALK_SPEED = 5.4
-const SPRINT_MUL = 1.65
-const ACCEL = 28
-const FRICTION = 14
-const AIR_CTRL = 0.35
-const JUMP_V = 6.2
-const GRAVITY = 22
-const INTERACT_R = 2.5
-const LOOK_SENS = 0.0024
+const EYE_H = 1.55
+const BODY_H = 1.4
+const CAPSULE_R = 0.32
+const WALK_SPEED = 4.8
+const SPRINT_MUL = 1.55
+const ACCEL = 38
+const FRICTION = 22
+const AIR_CTRL = 0.28
+const JUMP_V = 5.8
+const GRAVITY = 24
+const INTERACT_R = 2.4
+const LOOK_SENS = 0.0021
+/** Over-shoulder follow — reads as a person, not a free camera. */
+const CAM_BACK = 2.55
+const CAM_UP = 1.85
+const CAM_LERP = 10
+const BOB_AMT = 0.045
 
 export type PlayerBotProps = {
   active: boolean
   hallHalfW: number
   zBack: number
   zFront: number
+  obstacles?: FloorObstacle[]
   /** World positions of teller rope mouths (interact points). */
   tellerMouths: { x: number; z: number; id: string | null; index: number }[]
   onInteract: (id: string, index: number) => void
@@ -28,15 +40,16 @@ export type PlayerBotProps = {
 }
 
 /**
- * Grounded player controller for the vault (and later plaza / floors).
- * Smooth accel/friction, jump, free floor walk, mouse look, E interact.
- * Simple capsule body — graphics are intentionally minimal.
+ * Grounded third-person player for the vault (and later plaza / floors).
+ * WASD / arrows move the body; mouse looks; Space jumps; E talks to tellers.
+ * No teller snap / orbit pan — the body walks the floor.
  */
 export function PlayerBot({
   active,
   hallHalfW,
   zBack,
   zFront,
+  obstacles = [],
   tellerMouths,
   onInteract,
   onHintChange,
@@ -46,13 +59,15 @@ export function PlayerBot({
   const pos = useRef(new Vector3(0, 0, Math.min(zFront - 2.8, 5)))
   const vel = useRef(new Vector3())
   const yaw = useRef(Math.PI)
-  const pitch = useRef(-0.08)
+  const pitch = useRef(0.12)
   const grounded = useRef(true)
   const keys = useRef<Record<string, boolean>>({})
   const nearest = useRef<{ id: string; index: number } | null>(null)
   const locked = useRef(false)
   const dragging = useRef(false)
   const hintRef = useRef('')
+  const bobPhase = useRef(0)
+  const camPos = useRef(new Vector3(0, 2, 6))
   const bounds = useMemo<WalkBounds>(
     () => vaultFloorBounds(hallHalfW, zBack, zFront, CAPSULE_R),
     [hallHalfW, zBack, zFront],
@@ -70,9 +85,14 @@ export function PlayerBot({
     pos.current.set(0, 0, Math.min(zFront - 2.8, 5))
     vel.current.set(0, 0, 0)
     yaw.current = Math.PI
-    pitch.current = -0.08
+    pitch.current = 0.12
     grounded.current = true
-  }, [active, zFront, onHintChange])
+    bobPhase.current = 0
+    const backX = Math.sin(yaw.current) * -CAM_BACK
+    const backZ = Math.cos(yaw.current) * -CAM_BACK
+    camPos.current.set(pos.current.x + backX, CAM_UP, pos.current.z + backZ)
+    camera.position.copy(camPos.current)
+  }, [active, zFront, onHintChange, camera])
 
   useEffect(() => {
     if (!active) return
@@ -84,7 +104,14 @@ export function PlayerBot({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'BUTTON') return
       const k = e.key.toLowerCase()
       keys.current[k] = true
-      if (k === ' ' || k === 'spacebar' || k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright') {
+      if (
+        k === ' ' ||
+        k === 'spacebar' ||
+        k === 'arrowup' ||
+        k === 'arrowdown' ||
+        k === 'arrowleft' ||
+        k === 'arrowright'
+      ) {
         e.preventDefault()
       }
       if (k === 'e') {
@@ -98,9 +125,7 @@ export function PlayerBot({
     }
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return
-      if (!document.pointerLockElement) {
-        el.requestPointerLock()
-      }
+      if (!document.pointerLockElement) el.requestPointerLock()
       dragging.current = true
     }
     const onPointerUp = () => {
@@ -112,7 +137,7 @@ export function PlayerBot({
     const onMouseMove = (e: MouseEvent) => {
       if (!locked.current && !dragging.current) return
       yaw.current -= e.movementX * LOOK_SENS
-      pitch.current = MathUtils.clamp(pitch.current - e.movementY * LOOK_SENS, -1.2, 1.2)
+      pitch.current = MathUtils.clamp(pitch.current - e.movementY * LOOK_SENS, -0.35, 0.55)
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -135,7 +160,7 @@ export function PlayerBot({
 
   useFrame((_, rawDt) => {
     if (!active) return
-    const dt = Math.min(0.05, rawDt)
+    const dt = Math.min(0.033, rawDt)
     const k = keys.current
     const forward = (k.w || k.arrowup ? 1 : 0) - (k.s || k.arrowdown ? 1 : 0)
     const strafe = (k.d || k.arrowright ? 1 : 0) - (k.a || k.arrowleft ? 1 : 0)
@@ -145,23 +170,30 @@ export function PlayerBot({
 
     const sin = Math.sin(yaw.current)
     const cos = Math.cos(yaw.current)
+    // Body moves relative to look yaw — walk where you face.
     const wishX = sx * cos + fx * sin
     const wishZ = -sx * sin + fx * cos
     const maxSpeed = WALK_SPEED * (k.shift ? SPRINT_MUL : 1)
-    const wishSpeed = (forward || strafe ? 1 : 0) * maxSpeed
+    const wishSpeed = forward || strafe ? maxSpeed : 0
 
     const control = grounded.current ? 1 : AIR_CTRL
-    const accel = ACCEL * control
-    const targetVx = wishX * wishSpeed
-    const targetVz = wishZ * wishSpeed
-
     if (wishSpeed > 0) {
-      vel.current.x = MathUtils.damp(vel.current.x, targetVx, accel, dt)
-      vel.current.z = MathUtils.damp(vel.current.z, targetVz, accel, dt)
+      const ax = wishX * ACCEL * control
+      const az = wishZ * ACCEL * control
+      vel.current.x += ax * dt
+      vel.current.z += az * dt
+      const spd = Math.hypot(vel.current.x, vel.current.z)
+      if (spd > maxSpeed) {
+        vel.current.x = (vel.current.x / spd) * maxSpeed
+        vel.current.z = (vel.current.z / spd) * maxSpeed
+      }
     } else if (grounded.current) {
-      vel.current.x = MathUtils.damp(vel.current.x, 0, FRICTION, dt)
-      vel.current.z = MathUtils.damp(vel.current.z, 0, FRICTION, dt)
-      if (Math.hypot(vel.current.x, vel.current.z) < 0.02) {
+      const spd = Math.hypot(vel.current.x, vel.current.z)
+      if (spd > 0.01) {
+        const drop = Math.min(spd, FRICTION * dt)
+        vel.current.x *= (spd - drop) / spd
+        vel.current.z *= (spd - drop) / spd
+      } else {
         vel.current.x = 0
         vel.current.z = 0
       }
@@ -171,18 +203,26 @@ export function PlayerBot({
       vel.current.y = JUMP_V
       grounded.current = false
     }
-
     vel.current.y -= GRAVITY * dt
 
-    // Separate axis resolve so walls don't stick.
+    // Integrate X then Z so wall slides feel natural.
     let nx = pos.current.x + vel.current.x * dt
-    let nz = pos.current.z + vel.current.z * dt
-    const clampedX = Math.min(bounds.maxX, Math.max(bounds.minX, nx))
-    if (clampedX !== nx) vel.current.x = 0
-    nx = clampedX
-    const clampedZ = Math.min(bounds.maxZ, Math.max(bounds.minZ, nz))
-    if (clampedZ !== nz) vel.current.z = 0
-    nz = clampedZ
+    let nz = pos.current.z
+    let hit = resolveObstacles(nx, nz, CAPSULE_R, obstacles)
+    nx = hit.x
+    nz = hit.z
+    const bx = clampToBounds(nx, nz, bounds)
+    if (bx.x !== nx) vel.current.x = 0
+    nx = bx.x
+
+    nz = pos.current.z + vel.current.z * dt
+    hit = resolveObstacles(nx, nz, CAPSULE_R, obstacles)
+    nx = hit.x
+    nz = hit.z
+    const bz = clampToBounds(nx, nz, bounds)
+    if (bz.z !== nz) vel.current.z = 0
+    nx = bz.x
+    nz = bz.z
 
     pos.current.x = nx
     pos.current.z = nz
@@ -193,17 +233,33 @@ export function PlayerBot({
       grounded.current = true
     }
 
-    const eyeY = pos.current.y + EYE_H
-    camera.position.set(pos.current.x, eyeY, pos.current.z)
-    const lookX = pos.current.x + Math.sin(yaw.current) * Math.cos(pitch.current)
-    const lookY = eyeY + Math.sin(pitch.current)
-    const lookZ = pos.current.z + Math.cos(yaw.current) * Math.cos(pitch.current)
-    camera.lookAt(lookX, lookY, lookZ)
+    const groundSpeed = Math.hypot(vel.current.x, vel.current.z)
+    if (grounded.current && groundSpeed > 0.4) {
+      bobPhase.current += dt * (8.5 + groundSpeed * 0.9)
+    } else {
+      bobPhase.current = MathUtils.damp(bobPhase.current, 0, 8, dt)
+    }
+    const bob = grounded.current ? Math.sin(bobPhase.current) * BOB_AMT * Math.min(1, groundSpeed / 3) : 0
 
     if (body.current) {
       body.current.position.set(pos.current.x, pos.current.y, pos.current.z)
       body.current.rotation.y = yaw.current
     }
+
+    // Over-shoulder follow camera — lags slightly so motion reads as a body.
+    const backX = Math.sin(yaw.current) * -CAM_BACK
+    const backZ = Math.cos(yaw.current) * -CAM_BACK
+    const wantCamX = pos.current.x + backX
+    const wantCamY = pos.current.y + CAM_UP + bob + pitch.current * 0.6
+    const wantCamZ = pos.current.z + backZ
+    camPos.current.x = MathUtils.damp(camPos.current.x, wantCamX, CAM_LERP, dt)
+    camPos.current.y = MathUtils.damp(camPos.current.y, wantCamY, CAM_LERP, dt)
+    camPos.current.z = MathUtils.damp(camPos.current.z, wantCamZ, CAM_LERP, dt)
+    camera.position.copy(camPos.current)
+    const lookX = pos.current.x + Math.sin(yaw.current) * 4
+    const lookY = pos.current.y + EYE_H + pitch.current * 2.2
+    const lookZ = pos.current.z + Math.cos(yaw.current) * 4
+    camera.lookAt(lookX, lookY, lookZ)
 
     let best: { id: string; index: number; d: number } | null = null
     for (const t of tellerMouths) {
@@ -227,14 +283,18 @@ export function PlayerBot({
 
   return (
     <group ref={body} position={[0, 0, Math.min(zFront - 2.8, 5)]}>
-      {/* Minimal capsule body — intentional low-detail stand-in for future tower walk. */}
-      <mesh position={[0, BODY_H * 0.45, 0]} castShadow>
-        <capsuleGeometry args={[CAPSULE_R * 0.85, BODY_H * 0.55, 4, 8]} />
-        <meshStandardMaterial color="#7ef9ff" roughness={0.45} metalness={0.25} transparent opacity={0.35} />
+      {/* Simple body — enough silhouette to read as a walker, not a free cam. */}
+      <mesh position={[0, BODY_H * 0.42, 0]} castShadow>
+        <capsuleGeometry args={[CAPSULE_R * 0.75, BODY_H * 0.5, 5, 10]} />
+        <meshStandardMaterial color="#5ad4e8" roughness={0.4} metalness={0.35} emissive="#1a8098" emissiveIntensity={0.25} />
       </mesh>
-      <mesh position={[0, BODY_H * 0.95, 0]}>
-        <sphereGeometry args={[0.18, 10, 10]} />
-        <meshStandardMaterial color="#d7fbff" roughness={0.3} metalness={0.4} transparent opacity={0.4} />
+      <mesh position={[0, BODY_H * 0.92, 0]} castShadow>
+        <sphereGeometry args={[0.2, 12, 12]} />
+        <meshStandardMaterial color="#e8fdff" roughness={0.25} metalness={0.45} />
+      </mesh>
+      <mesh position={[0, BODY_H * 0.95, 0.16]}>
+        <boxGeometry args={[0.14, 0.04, 0.04]} />
+        <meshStandardMaterial color="#061018" metalness={0.7} roughness={0.2} />
       </mesh>
     </group>
   )
