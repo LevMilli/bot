@@ -87,10 +87,11 @@ const glassMat = {
 
 function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }) {
   const half = len / 2
-  // Tail: shorten the box so a flat rear face never peeks past the taper.
-  const bodyLen = role === 'tail' ? len * 0.72 : len
-  const bodyShift = role === 'tail' ? -((len - bodyLen) / 2) : 0
-  const rearExtra = role === 'tail' ? 0.02 : 0.18
+  // Tail body ends early. A taller cone covers that end and runs out to a point.
+  const bodyLen = role === 'tail' ? len * 0.78 : len
+  const bodyShift = role === 'tail' ? -(len - bodyLen) / 2 : 0
+  const rearFace = bodyShift + bodyLen / 2
+  const rearExtra = role === 'tail' ? 0 : 0.18
   const frontExtra = role === 'lead' ? 0.16 : 0
   const glassLen = bodyLen + rearExtra + frontExtra
   const glassX = bodyShift + (rearExtra - frontExtra) / 2
@@ -170,84 +171,31 @@ function BulletCar({ role, len }: { role: 'lead' | 'mid' | 'tail'; len: number }
         </group>
       )}
 
-      {/* Finished rear — long taper + rounded cap + bright taillights (no flat chop). */}
+      {/* Rear taper. Base is taller than the body and starts over the cut, so the end is a point. */}
       {role === 'tail' && (
         <group>
-          {/* Start taper where the shortened body ends so no slab face shows. */}
-          <mesh
-            position={[bodyShift + bodyLen / 2 + 0.85, 0.21, 0]}
-            rotation={[0, 0, -Math.PI / 2]}
-            scale={[0.55, 1, 1.05]}
-          >
-            <coneGeometry args={[0.22, 2.05, 20]} />
+          <mesh position={[rearFace + 1.02, 0.22, 0]} rotation={[0, 0, -Math.PI / 2]} scale={[1.15, 1, 1.35]}>
+            <coneGeometry args={[0.3, 2.2, 20]} />
             <meshStandardMaterial {...shellMat} />
           </mesh>
-          <mesh
-            position={[bodyShift + bodyLen / 2 + 0.7, 0.1, 0]}
-            rotation={[0, 0, -Math.PI / 2]}
-            scale={[0.36, 1, 0.92]}
-          >
-            <coneGeometry args={[0.19, 1.55, 14]} />
+          <mesh position={[rearFace + 0.72, 0.12, 0]} rotation={[0, 0, -Math.PI / 2]} scale={[0.55, 1, 1.1]}>
+            <coneGeometry args={[0.22, 1.55, 14]} />
             <meshStandardMaterial
               color={SHELL_DEEP}
               metalness={0.22}
               roughness={0.34}
               emissive="#5b21b6"
-              emissiveIntensity={0.4}
+              emissiveIntensity={0.35}
             />
           </mesh>
-          {/* Soft rounded end-cap — reads clearly past the body. */}
-          <mesh position={[bodyShift + bodyLen / 2 + 1.82, 0.2, 0]} scale={[0.85, 1.0, 1.05]}>
-            <sphereGeometry args={[0.19, 16, 14]} />
-            <meshStandardMaterial {...shellMat} />
+          <mesh position={[rearFace + 0.15, 0.32, 0]} rotation={[0, 0, -0.55]}>
+            <boxGeometry args={[0.7, 0.028, 0.16]} />
+            <meshStandardMaterial {...glassMat} />
           </mesh>
-          <mesh position={[bodyShift + bodyLen / 2 + 1.88, 0.11, 0]} scale={[0.6, 0.5, 0.9]}>
-            <sphereGeometry args={[0.15, 12, 10]} />
-            <meshStandardMaterial
-              color={BELLY}
-              metalness={0.28}
-              roughness={0.4}
-              emissive="#4c1d95"
-              emissiveIntensity={0.3}
-            />
-          </mesh>
-          {/* Roof spine fade into the taper. */}
-          <mesh position={[bodyShift + bodyLen / 2 + 0.55, 0.33, 0]} rotation={[0, 0, -0.34]}>
-            <boxGeometry args={[1.05, 0.03, 0.2]} />
-            <meshStandardMaterial
-              color="#f5f3ff"
-              metalness={0.2}
-              roughness={0.28}
-              emissive={SHELL_DEEP}
-              emissiveIntensity={0.28}
-            />
-          </mesh>
-          {/* Twin taillights — oversized so they read at plaza distance. */}
           {([-1, 1] as const).map((side) => (
-            <mesh key={side} position={[bodyShift + bodyLen / 2 + 1.95, 0.19, side * 0.09]}>
-              <boxGeometry args={[0.08, 0.08, 0.09]} />
+            <mesh key={side} position={[rearFace + 1.85, 0.26, side * 0.045]}>
+              <sphereGeometry args={[0.04, 10, 8]} />
               <meshBasicMaterial color={TAIL_LIGHT} toneMapped={false} />
-            </mesh>
-          ))}
-          <mesh position={[bodyShift + bodyLen / 2 + 1.98, 0.2, 0]}>
-            <boxGeometry args={[0.05, 0.03, 0.14]} />
-            <meshBasicMaterial color={GLOW_HOT} toneMapped={false} />
-          </mesh>
-          {/* Side fins taper with the rear. */}
-          {([-1, 1] as const).map((side) => (
-            <mesh
-              key={`fin-${side}`}
-              position={[bodyShift + bodyLen / 2 + 0.85, 0.15, side * 0.2]}
-              rotation={[side * 0.22, 0, -0.42]}
-            >
-              <boxGeometry args={[1.15, 0.02, 0.05]} />
-              <meshStandardMaterial
-                color={SHELL_DEEP}
-                metalness={0.25}
-                roughness={0.35}
-                emissive="#6d28d9"
-                emissiveIntensity={0.4}
-              />
             </mesh>
           ))}
         </group>

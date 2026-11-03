@@ -171,6 +171,7 @@ SETTLEMENT_FILES = (
     "desk_top25_state.json",
     "desk_maker_taker_study.json",
     "desk_phase2_state.json",
+    "desk_phase3_state.json",
     "desk_adapt_ab_ledger.json",
     "btc15m-signal/paper_parlays.json",
     "pimp-learning.json",
@@ -359,10 +360,10 @@ BOT_PLANS = {
     "btc15m": {
         "buy": [
             "Track KXBTC15M + KXETH15M + KXBTCD ladder history each check",
-            "Confident early (≥10m): single paper buy if gates clear",
+            "Confident early (≥10m): BTC + ETH singles under the same fee-aware gates",
             "Volatile: hold + history; ≤5m fee-aware paper parlay (BTC+ETH legs)",
             "p ≥ ask + fee + venue kalshi_btc15m; model p ≥ 80%; brain journal",
-            "BTC cushion ≥ $40 / ETH ≥ $2; z ≥ 0.65; ask 75–90¢; depth ≥ 5",
+            "BTC cushion ≥ $35 / ETH ≥ $1.50; z ≥ 0.60; ask 70–92¢; dual lane",
             "Kelly-lite stake; correlation + learning clear; desk open-risk cap",
             "Adapt: recognize vol → play safe; proven ≥80% record → play bigger",
             "History sweep: metals/energy 15m (palladium, natgas, copper, brent, WTI, silver…)",
@@ -387,8 +388,9 @@ BOT_PLANS = {
             "Open KX*15M metals/energy windows (Pd/NatGas/Cu/Brent/WTI/Ag/Au/Pt)",
             "Spot vs floor_strike; side YES if above else NO",
             "p ≥ ask + fee + venue kalshi_commodity15m; model p ≥ 80%",
-            "Cushion/σ gate; ask 75–90¢; ≥10m for early single (else skip)",
+            "Cushion/σ gate; ask 70–92¢; ≥8m for early single (else skip)",
             "Kelly-lite + adapt: safe on high/false-conf vol; Wilson CI ≥70% for play-big",
+            "Max 1 energy + 1 metal; EIA/inventory blackout on NatGas/Oil",
         ],
         "sell": [
             "Settle when Kalshi resolves yes/no (history settle harness labels windows)",
@@ -396,6 +398,7 @@ BOT_PLANS = {
         "failsafes": [
             "Desk entry_gate (daily loss / max open / open risk)",
             "No spot / no σ → skip",
+            "EIA/inventory ±45m blackout for energy series",
             "Commodity tape family budget; correlation + starve; pause file",
         ],
         "exit_quality": "partial",
@@ -2340,6 +2343,11 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["phase2"] = desk_phase2.phase2_summary(root)
     except Exception as exc:  # noqa: BLE001
         desk_row["phase2"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_phase3
+        desk_row["phase3"] = desk_phase3.phase3_summary(root)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["phase3"] = {"paper_only": True, "error": type(exc).__name__}
     # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
     tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
     try:
@@ -2349,6 +2357,14 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         )
     except Exception as exc:  # noqa: BLE001
         desk_row["master"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import teller_memory
+        teller_memory.ingest_from_bots(root, public)
+        desk_row["teller_memory"] = teller_memory.memory_summary(root)
+        for bot in public:
+            bot["memory_line"] = teller_memory.dialogue_line(root, bot.get("id"))
+    except Exception as exc:  # noqa: BLE001
+        desk_row["teller_memory"] = {"paper_only": True, "error": type(exc).__name__}
     tip = sports_tip_alarm_from_cache(root)
     desk_row["sports_tip"] = tip
     if isinstance(desk_row.get("master"), dict):
@@ -2447,11 +2463,19 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             ),
             "gate_b": "Gate B = peak-to-trough drawdown within bound with enough settles — readiness only.",
             "top25": "Top-25 shortlist hooks: skip-regret, budgets, watchdog, playbooks, doctor.",
+            "phase3": (
+                "Phase 3 expansion: KXBTCD ladder companion scoring + paper parlay "
+                "joint EV with same-direction crypto correlation haircut."
+            ),
             "master": (
                 "Trading Masters scoreboard (M1–M7): taxed EV vs volume. "
                 "Stub — no profit guarantee; fee floors unchanged."
             ),
             "guest": "Guest mode (?guest=1) is read-only — no staff actions.",
+            "teller_memory": (
+                "Shared vault memory (facts/mistakes/wins) grounded in paper cards — "
+                "consciousness v0, not a live advisor."
+            ),
         },
         "audit": audit_rows(root)[:12],
         "bots": public,
