@@ -198,11 +198,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Quarterly W-baseline | `capture_quarterly_rebaseline` / `quarterly_rebaseline_status` |
 | Masters board | `roi_plan.dual_control` + `quarterly_rebaseline` |
 
+### Capital OS barbell + alerts
+
+| Ticket | Where |
+| --- | --- |
+| Barbell audit | meme ≤15% desk cap; fee-clear ≥70% of open (`barbell_status`) |
+| Share clamp | `effective_tower_shares` caps meme at 15% even when green |
+| Midday util alert | util &lt;20% + EDGE-heavy skips (`midday_util_alert`) |
+| Zero-buy alert | ≥6h weekday fee-clear quiet + BUDGET skips |
+| Masters board | `roi_plan.capital_os` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| _(queue clear — observe Chicago weeks / staff pick)_ | paper observation |
+| Idea review cadence 90d | kill stale experiments |
+| Opportunity-cost clock | log when low-edge blocks high-edge &gt;90s |
 
 ## Hard rules unchanged
 

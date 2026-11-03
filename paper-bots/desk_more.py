@@ -495,6 +495,15 @@ def effective_tower_shares(
         cut_total += _cut_share(shares, "sports-gap", float(SPORTS_RED_SHARE))
         exclude.add("sports-gap")
     _feed_fee_clear(shares, cut_total, exclude=exclude)
+    # Barbell: meme sleeve ≤15% of desk even when green — never expand to use margin.
+    try:
+        import desk_roi_plan
+        meme_cap = float(desk_roi_plan.BARBELL_MEME_MAX)
+    except Exception:
+        meme_cap = 0.15
+    cut_meme = _cut_share(shares, "memecoin", meme_cap)
+    if cut_meme > 1e-12:
+        _feed_fee_clear(shares, cut_meme, exclude=exclude | {"memecoin"})
     return shares
 
 
