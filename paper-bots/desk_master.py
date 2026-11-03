@@ -458,6 +458,10 @@ def master_summary(
                 plan["cold_harvest"] = desk_roi_plan.cold_harvest_status(root)
         except Exception:
             plan["cold_harvest"] = None
+        try:
+            plan["hillclimb_lever"] = desk_roi_plan.hillclimb_lever_status(root)
+        except Exception:
+            plan["hillclimb_lever"] = None
     except Exception:
         plan = None
     return {

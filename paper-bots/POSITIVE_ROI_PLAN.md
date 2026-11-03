@@ -177,11 +177,23 @@ Interactive: Positive ROI Master Plan canvas.
 | Masters board | `roi_plan.cold_harvest` (daily refresh) |
 | Distinct from profit-lock | size 0.5× stays on profit-lock; cold is habit ledger |
 
+### Hillclimb lever allowlist
+
+| Ticket | Where |
+| --- | --- |
+| Allowlist | `VOL_SAFE` / `HIT_FOR_BIG` / `venue_min_edge_btc` / `min_cushion_btc` / `kelly_fraction` |
+| One per Chicago week | `staff_pick_hillclimb_lever` (midweek thrash banned) |
+| Raise-only floors | BTC edge/cushion reject soften proposals |
+| Sunday demote | `staff_demote_hillclimb_lever` |
+| Kill card uses active | `capture_hillclimb_week` reads active lever |
+| Masters board | `roi_plan.hillclimb_lever` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| _(queue clear — re-baseline / next plan tickets)_ | staff pick |
+| Dual-control live checklist stub | paper arm hygiene |
+| Quarterly W-number re-baseline | habit artifact |
 
 ## Hard rules unchanged
 
