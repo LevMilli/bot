@@ -426,6 +426,14 @@ def master_summary(
             plan["ruin_drill"] = desk_roi_plan.ruin_drill_status(root)
         except Exception:
             plan["ruin_drill"] = None
+        try:
+            plan["fee_ledger"] = desk_roi_plan.fee_ledger_summary(root)
+            plan["fee_ledger_completeness"] = desk_roi_plan.fee_ledger_completeness(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["fee_ledger"] = None
+            plan["fee_ledger_completeness"] = None
     except Exception:
         plan = None
     return {
