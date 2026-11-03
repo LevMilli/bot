@@ -286,10 +286,27 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         return none_msg
     if any(isinstance(pos, dict) and pos.get("ticker") == ticker for pos in state.get("open") or []):
         return none_msg
+    if not IS_SHADOW:
+        try:
+            import desk_roi_plan
+            cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "btc15m")
+            if cool:
+                return cool
+        except Exception:
+            pass
     skip = ""
     try:
         desk = _desk()
-        skip = desk.learning_skip(desk.load_learning(DESK_ROOT), "BTC", desk.prob_bucket(prob))
+        hour_ct = None
+        try:
+            from zoneinfo import ZoneInfo
+            hour_ct = dt.datetime.now(ZoneInfo("America/Chicago")).hour
+        except Exception:
+            hour_ct = None
+        skip = desk.learning_skip(
+            desk.load_learning(DESK_ROOT), "BTC", desk.prob_bucket(prob),
+            side=side, hour_ct=hour_ct,
+        )
     except Exception:
         pass
     if skip:
