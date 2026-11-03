@@ -12,7 +12,7 @@ import math
 import os
 from typing import Any
 
-MASTER_VERSION = 2
+MASTER_VERSION = 3
 
 # Bars from docs/trading-masters-per-bot-plan.md (Chicago weeks).
 MASTER_BARS = {
@@ -24,6 +24,8 @@ MASTER_BARS = {
     "M5_util_lo": 0.40,
     "M5_util_hi": 0.80,
     "M6_gate_a_n": 20,
+    "M7_gate_b_dd": 40.0,
+    "M7_gate_b_n": 20,
 }
 
 
@@ -101,12 +103,34 @@ def tower_master_row(
         if bot_id == "sports-gap"
         else MASTER_BARS["M4_latency_15m_s"]
     )
+    # M5: tower util in band when measured; idle with no open risk counts as calm pass.
+    m5_pass = False
+    if util is not None:
+        m5_pass = MASTER_BARS["M5_util_lo"] <= util <= MASTER_BARS["M5_util_hi"]
+    elif open_risk <= 0:
+        m5_pass = True
+    # M7: Gate B twin ($40 DD / n≥20) via desk_top25 when available.
+    m7 = None
+    m7_pass = False
+    try:
+        import desk_top25
+        m7 = desk_top25.gate_b(
+            hist,
+            max_drawdown=MASTER_BARS["M7_gate_b_dd"],
+            min_n=int(MASTER_BARS["M7_gate_b_n"]),
+        )
+        m7_pass = bool(m7.get("ready"))
+    except Exception:
+        m7 = None
+        m7_pass = False
     ready_bits = {
         "M1": m1 is not None and m1 >= MASTER_BARS["M1_taxed_ev"] and n >= 5,
         "M2": m2 is not None and m2 >= MASTER_BARS["M2_hit_rate"] and n >= 10,
         "M3": m3 is not None and m3_n >= 10 and m3 >= MASTER_BARS["M3_fit_buy"],
         "M4": m4 is not None and m4_n >= 5 and m4 <= m4_bar,
+        "M5": m5_pass,
         "M6": bool(ga.get("ready")),
+        "M7": m7_pass,
     }
     return {
         "bot": bot_id,
@@ -121,11 +145,13 @@ def tower_master_row(
         "M4_bar_s": m4_bar,
         "M5_tower_util": util,
         "M6_gate_a": bool(ga.get("ready")),
+        "M7_gate_b": m7,
         "open_risk": round(open_risk, 2),
         "tower_cap": tower_cap,
         "today": bot.get("today"),
         "passing": ready_bits,
-        "note": "M3/M4 from desk_roi_plan journals when present",
+        "all_codes": all(ready_bits.values()),
+        "note": "M3/M4 from desk_roi_plan; M7 Gate B twin $40/n≥20",
     }
 
 
@@ -268,6 +294,8 @@ def master_summary(
     bleed = None
     misplaced = None
     plan = None
+    graduation = None
+    retirement = None
     try:
         import desk_roi_plan
         bleed = desk_roi_plan.firm_bleed_ratio(bots)
@@ -283,6 +311,8 @@ def master_summary(
             except Exception:
                 baseline = None
         weekly = None
+        graduation = None
+        retirement = None
         try:
             # Refresh Chicago-day scorecard once per day for hillclimb reviews.
             from datetime import datetime
@@ -299,6 +329,16 @@ def master_summary(
                 weekly = latest
         except Exception:
             weekly = None
+        try:
+            if root and rows:
+                desk_roi_plan.capture_graduation_week(root, rows)
+            graduation = desk_roi_plan.graduation_board(root)
+        except Exception:
+            graduation = None
+        try:
+            retirement = desk_roi_plan.meme_retirement_clock(meme)
+        except Exception:
+            retirement = None
         plan = {
             "bleed": bleed,
             "capital_misplaced": misplaced,
@@ -306,6 +346,8 @@ def master_summary(
             "clv_completeness": desk_roi_plan.clv_completeness(root),
             "sports_hard_stop_shadow": desk_roi_plan.sports_hard_stop_shadow_summary(root),
             "weekly_scorecard": weekly,
+            "graduation": graduation,
+            "meme_retirement": retirement,
             "baseline": baseline,
             "fee_floors_locked": True,
         }
@@ -322,11 +364,14 @@ def master_summary(
         "bleed": bleed,
         "capital_misplaced": misplaced,
         "roi_plan": plan,
+        "graduation": graduation,
+        "meme_retirement": retirement,
         "towers_m1_pass": m1_ready,
         "towers": rows,
         "stopbleed": stopbleed,
         "priority": [
-            "memecoin stop-bleed before volume",
+            "memecoin retirement clock before any volume talk",
+            "Master graduation = 2 Chicago weeks all M1–M7",
             "sports hard-stop shadow → promote after n≥30",
             "feed idle BTC/commodity risk when gates clear",
         ],

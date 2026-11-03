@@ -22,6 +22,7 @@ INX_BAND_RESEARCH = "desk_inx_band_research.json"
 SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
 ADVERSE_COOL_NAME = "desk_adverse_cool.json"
 WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
+MASTER_GRAD = "desk_master_grad.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -30,6 +31,14 @@ MAX_HARD_STOP_ROWS = 2000
 # Adverse selection cool-off: fast mark-down after entry → pause that bot briefly.
 ADVERSE_MARK_DROP = 0.05  # 5¢ adverse vs entry ask/bid
 ADVERSE_COOL_MINUTES = 20
+
+# Phase 6: Master only after 2 consecutive Chicago weeks of all M-codes.
+GRADUATION_WEEKS_REQUIRED = 2
+GRADUATION_CODES = ("M1", "M2", "M3", "M4", "M5", "M6", "M7")
+
+# Phase 7: meme sleeve retirement clock (recommend pause; staff re-arms).
+MEME_RETIRE_WINDOW_DAYS = 20
+MEME_RETIRE_MIN_N = 10
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -692,6 +701,207 @@ def latest_weekly_scorecard(root: str | None = None) -> dict | None:
     return latest if isinstance(latest, dict) else None
 
 
+# ---- Master graduation checklist (Phase 6) ---------------------------------
+
+def _chicago_day() -> str:
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+    except Exception:
+        return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def tower_codes_from_row(row: dict | None) -> dict:
+    """Normalize a tower_master_row into M1–M7 pass bits + all flag."""
+    row = row if isinstance(row, dict) else {}
+    passing = row.get("passing") if isinstance(row.get("passing"), dict) else {}
+    codes = {code: bool(passing.get(code)) for code in GRADUATION_CODES}
+    return {
+        "bot": str(row.get("bot") or ""),
+        "codes": codes,
+        "all": all(codes.values()),
+        "n_pass": sum(1 for v in codes.values() if v),
+        "n_codes": len(GRADUATION_CODES),
+    }
+
+
+def capture_graduation_week(
+    root: str | None,
+    towers: list | None = None,
+    *,
+    label: str | None = None,
+) -> dict:
+    """Persist one Chicago-day graduation card from master tower rows."""
+    day = label or _chicago_day()
+    tower_map = {}
+    for row in towers or []:
+        if not isinstance(row, dict):
+            continue
+        card = tower_codes_from_row(row)
+        bot = card.get("bot") or ""
+        if not bot:
+            continue
+        tower_map[bot] = card
+    week = {
+        "paper_only": True,
+        "label": day,
+        "captured_at": _now(),
+        "towers": tower_map,
+        "masters_ready": sorted(
+            b for b, c in tower_map.items() if isinstance(c, dict) and c.get("all")
+        ),
+        "weeks_required": GRADUATION_WEEKS_REQUIRED,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Master only after "
+            f"{GRADUATION_WEEKS_REQUIRED} consecutive Chicago weeks with all M1–M7. "
+            "Staff gate — never auto-promote."
+        ),
+    }
+    path = _path(MASTER_GRAD, root)
+    store = _load(path, {"paper_only": True, "weeks": [], "latest": None})
+    weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+    # Replace same-day card; keep history short.
+    weeks = [w for w in weeks if str(w.get("label") or "") != day]
+    weeks.append(week)
+    store["weeks"] = weeks[-60:]
+    store["latest"] = week
+    store["board"] = graduation_board(root=None, store=store)
+    _save(path, store)
+    return week
+
+
+def graduation_board(root: str | None = None, *, store: dict | None = None) -> dict:
+    """Consecutive all-pass weeks per tower → master / week_1 / not_ready."""
+    if store is None:
+        store = _load(_path(MASTER_GRAD, root), {"paper_only": True, "weeks": []})
+    weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+    weeks = sorted(weeks, key=lambda w: str(w.get("label") or ""))
+    bots: set[str] = set()
+    for w in weeks:
+        towers = w.get("towers") if isinstance(w.get("towers"), dict) else {}
+        bots.update(str(b) for b in towers.keys())
+    board = {}
+    for bot in sorted(bots):
+        streak = 0
+        for w in reversed(weeks):
+            towers = w.get("towers") if isinstance(w.get("towers"), dict) else {}
+            card = towers.get(bot) if isinstance(towers.get(bot), dict) else None
+            if card and card.get("all"):
+                streak += 1
+            else:
+                break
+        if streak >= GRADUATION_WEEKS_REQUIRED:
+            status = "master"
+        elif streak == 1:
+            status = "week_1"
+        else:
+            status = "not_ready"
+        board[bot] = {
+            "bot": bot,
+            "consecutive_all_pass_weeks": streak,
+            "weeks_required": GRADUATION_WEEKS_REQUIRED,
+            "status": status,
+            "graduated": status == "master",
+            "auto_promote": False,
+        }
+    masters = sorted(b for b, r in board.items() if r.get("graduated"))
+    return {
+        "paper_only": True,
+        "weeks_n": len(weeks),
+        "weeks_required": GRADUATION_WEEKS_REQUIRED,
+        "towers": board,
+        "masters": masters,
+        "masters_n": len(masters),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Phase 6 graduation board. Master = "
+            f"{GRADUATION_WEEKS_REQUIRED} consecutive all-pass weeks. No auto-promote."
+        ),
+    }
+
+
+# ---- Meme 20d retirement clock (Phase 7) -----------------------------------
+
+def meme_retirement_clock(
+    bot: dict | None = None,
+    *,
+    window_days: int = MEME_RETIRE_WINDOW_DAYS,
+    min_n: int = MEME_RETIRE_MIN_N,
+    fill_tax: float = 0.01,
+) -> dict:
+    """Recommend pausing meme entries after window_days of negative taxed EV.
+
+    Never auto-retires and never expands volume — staff must re-arm with a written fix.
+    """
+    bot = bot if isinstance(bot, dict) else {}
+    hist = [h for h in (bot.get("history") or []) if isinstance(h, dict)]
+    # Prefer last window_days by closed_at/when when parseable; else last min_n*3 settles.
+    cutoff = None
+    try:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        cutoff = datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=int(window_days))
+    except Exception:
+        cutoff = None
+
+    def _row_day(row: dict):
+        raw = str(row.get("closed_at") or row.get("when") or row.get("at") or "")[:10]
+        if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+            try:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                return datetime.strptime(raw[:10], "%Y-%m-%d").replace(
+                    tzinfo=ZoneInfo("America/Chicago")
+                )
+            except Exception:
+                return None
+        return None
+
+    windowed = []
+    for h in hist:
+        pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+        if pnl is None:
+            continue
+        day = _row_day(h)
+        if cutoff is not None and day is not None and day < cutoff:
+            continue
+        contracts = _finite(h.get("contracts")) or 1.0
+        windowed.append(pnl - float(fill_tax) * max(1.0, contracts))
+    if cutoff is not None and not any(_row_day(h) for h in hist):
+        # No dates → use most recent settles as proxy for the window.
+        windowed = []
+        for h in hist[-(max(int(min_n) * 3, int(min_n))):]:
+            pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if pnl is None:
+                continue
+            contracts = _finite(h.get("contracts")) or 1.0
+            windowed.append(pnl - float(fill_tax) * max(1.0, contracts))
+    n = len(windowed)
+    exp = round(sum(windowed) / n, 4) if n else None
+    recommend_pause = bool(n >= int(min_n) and exp is not None and exp < 0)
+    return {
+        "paper_only": True,
+        "bot": str(bot.get("id") or "memecoin"),
+        "window_days": int(window_days),
+        "min_n": int(min_n),
+        "n": n,
+        "expectancy_taxed": exp,
+        "recommend_pause": recommend_pause,
+        "retired": False,  # staff must confirm; never auto-retire
+        "expand_volume": False,
+        "action": "pause_entries" if recommend_pause else "keep_measuring",
+        "fee_floors_locked": True,
+        "note": (
+            f"Meme retirement clock: after {window_days}d with n≥{min_n} and "
+            "taxed EV < 0 → recommend pause_entries. Staff re-arm only. No volume expand."
+        ),
+    }
+
+
 def capture_weekly_scorecard(
     root: str | None,
     *,
@@ -749,13 +959,14 @@ def plan_summary(
         },
         "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
         "weekly_scorecard": latest_weekly_scorecard(root),
+        "graduation": graduation_board(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
             "sports hard-stop promote after n≥30 (staff; live still False)",
-            "Master graduation checklist cards (M1–M7 × 2 weeks)",
-            "meme 20d retirement clock",
             "INX band promote only after research week artifact",
+            "hillclimb kill detector (M3↑ M1↓ 2 weeks)",
+            "profit-lock harvest paper analog",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -829,6 +1040,27 @@ def self_check() -> None:
         assert card["gate_a_ready_towers"] == 1
         assert latest_weekly_scorecard(tmp)["label"] == "W-test"
         assert latest_weekly_scorecard(tmp)["fee_floors_locked"] is True
+        # Graduation: one all-pass week → week_1; two → master (still no auto-promote).
+        all_pass = {
+            "bot": "sports-gap",
+            "passing": {c: True for c in GRADUATION_CODES},
+        }
+        capture_graduation_week(tmp, [all_pass], label="2026-11-02")
+        board1 = graduation_board(tmp)
+        assert board1["towers"]["sports-gap"]["status"] == "week_1"
+        capture_graduation_week(tmp, [all_pass], label="2026-11-03")
+        board2 = graduation_board(tmp)
+        assert board2["towers"]["sports-gap"]["status"] == "master"
+        assert board2["towers"]["sports-gap"]["auto_promote"] is False
+        retire = meme_retirement_clock(
+            {
+                "id": "memecoin",
+                "history": [{"pnl": -2.0, "contracts": 1} for _ in range(12)],
+            }
+        )
+        assert retire["recommend_pause"] is True
+        assert retire["expand_volume"] is False
+        assert retire["retired"] is False
 
 
 if __name__ == "__main__":

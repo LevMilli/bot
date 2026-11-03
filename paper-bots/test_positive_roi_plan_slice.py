@@ -63,7 +63,7 @@ class FirmBleedCapital(unittest.TestCase):
                 ],
                 cfg={"max_open_risk": 100, "tower_risk_budgets": {"memecoin": 0.05, "sports-gap": 0.35}},
             )
-            self.assertEqual(summary["version"], 2)
+            self.assertEqual(summary["version"], 3)
             self.assertIsInstance(summary.get("bleed"), dict)
             self.assertIsInstance(summary.get("capital_misplaced"), dict)
             self.assertIsInstance(summary.get("roi_plan"), dict)
