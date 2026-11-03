@@ -737,8 +737,8 @@ def run():
                     summary_out.setdefault("hard_stop_shadow", []).append(
                         f"SHADOW STOP {p.get('ticker')} bid {bid}"
                     )
-                    # Live hard-stop only if staff promoted (default False).
-                    if desk_roi_plan.SPORTS_HARD_STOP_LIVE:
+                    # Live hard-stop only after staff promote file (code default False).
+                    if desk_roi_plan.sports_hard_stop_is_live(DESK_ROOT):
                         exit_reason = (
                             f"hard-stop bid {float(bid):.2f} ≤ "
                             f"{hs.get('threshold')}"
