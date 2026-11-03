@@ -107,13 +107,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Same-market block after stop/flip | `record_anti_revenge` / `anti_revenge_blocks` (30m) |
 | Wired on exits + buys | sports / BTC / commodity |
 
+### INX band staff promote
+
+| Ticket | Where |
+| --- | --- |
+| Promote-ready after research leader n≥20 | `inx_band_promote_status` |
+| Staff arm/clear artifact | `staff_promote_inx_band` / `staff_clear_inx_band_promote` |
+| Bots honor promote | `effective_inx_ask_band` in kalshi-sp / sized |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| INX band promote | only after research-week artifact |
 | Correlation matrix firm haircut | BTC↔INX / WTI↔Brent |
 | Incubation lane | 50 fee-aware settles before promote |
+| Ruin drill UX | soft / hard / nuclear |
 
 ## Hard rules unchanged
 

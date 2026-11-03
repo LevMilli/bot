@@ -19,6 +19,7 @@ LATENCY_JOURNAL = "desk_latency_journal.json"
 BASELINE_NAME = "desk_roi_baseline.json"
 NEAR_MISS_WEEKLY = "desk_near_miss_weekly.json"
 INX_BAND_RESEARCH = "desk_inx_band_research.json"
+INX_BAND_PROMOTE = "desk_inx_band_promote.json"
 SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
 SPORTS_HARD_STOP_PROMOTE = "desk_sports_hard_stop_promote.json"
 ADVERSE_COOL_NAME = "desk_adverse_cool.json"
@@ -82,6 +83,8 @@ INX_RESEARCH_BANDS = (
     {"id": "80_90", "lo": 0.80, "hi": 0.90},  # live default (locked until research wins)
     {"id": "90_95", "lo": 0.90, "hi": 0.95},
 )
+INX_LIVE_BAND_DEFAULT = "80_90"
+INX_BAND_PROMOTE_MIN_N = 20
 
 
 def _root(root: str | None = None) -> str:
@@ -680,12 +683,82 @@ def inx_band_research_score(rows: list, *, lo: float, hi: float, fill_tax: float
     }
 
 
+def inx_band_from_id(band_id: str | None) -> dict:
+    bid = str(band_id or INX_LIVE_BAND_DEFAULT)
+    for b in INX_RESEARCH_BANDS:
+        if b["id"] == bid:
+            return {"id": b["id"], "lo": float(b["lo"]), "hi": float(b["hi"])}
+    return {"id": "80_90", "lo": 0.80, "hi": 0.90}
+
+
+def inx_live_band(root: str | None = None) -> dict:
+    """Effective INX ask band: staff promote artifact or default 80–90."""
+    promote = _load(
+        _path(INX_BAND_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "band_id": INX_LIVE_BAND_DEFAULT},
+    )
+    if bool(promote.get("staff_approved")) and promote.get("band_id"):
+        base = inx_band_from_id(str(promote.get("band_id")))
+        return {
+            **base,
+            "staff_approved": True,
+            "source": "staff_promote",
+            "promoted_at": promote.get("at"),
+            "note": promote.get("note") or "",
+            "fee_floors_locked": True,
+            "live_changed": base["id"] != INX_LIVE_BAND_DEFAULT,
+        }
+    base = inx_band_from_id(INX_LIVE_BAND_DEFAULT)
+    return {
+        **base,
+        "staff_approved": False,
+        "source": "default",
+        "fee_floors_locked": True,
+        "live_changed": False,
+    }
+
+
+def effective_inx_ask_band(root: str | None, cfg: dict | None = None) -> dict:
+    """Band for bots: staff promote overrides CFG; else keep config.json values."""
+    cfg = cfg or {}
+    live = inx_live_band(root)
+    if live.get("staff_approved"):
+        return {
+            "lo": float(live["lo"]),
+            "hi": float(live["hi"]),
+            "id": live["id"],
+            "source": "staff_promote",
+            "staff_approved": True,
+            "fee_floors_locked": True,
+        }
+    lo = _finite(cfg.get("band_min_ask"))
+    hi = _finite(cfg.get("band_max_ask"))
+    if lo is None:
+        lo = 0.80
+    if hi is None:
+        hi = 0.90
+    return {
+        "lo": float(lo),
+        "hi": float(hi),
+        "id": INX_LIVE_BAND_DEFAULT,
+        "source": "config",
+        "staff_approved": False,
+        "fee_floors_locked": True,
+    }
+
+
 def run_inx_band_research(root: str | None, history: list | None = None) -> dict:
     """Score research bands; never writes live config. Live stays 80–90 until staff promote."""
+    live = inx_live_band(root)
     bands = []
     for b in INX_RESEARCH_BANDS:
         scored = inx_band_research_score(history or [], lo=b["lo"], hi=b["hi"])
-        bands.append({**b, **scored, "live_default": b["id"] == "80_90"})
+        bands.append({
+            **b,
+            **scored,
+            "live_default": b["id"] == INX_LIVE_BAND_DEFAULT,
+            "is_live": b["id"] == live.get("id"),
+        })
     ranked = sorted(
         [x for x in bands if x.get("n")],
         key=lambda x: (x.get("expectancy_taxed") is not None, x.get("expectancy_taxed") or -999),
@@ -693,14 +766,15 @@ def run_inx_band_research(root: str | None, history: list | None = None) -> dict
     )
     report = {
         "paper_only": True,
-        "live_band": "80_90",
-        "live_changed": False,
+        "live_band": live.get("id") or INX_LIVE_BAND_DEFAULT,
+        "live_changed": bool(live.get("live_changed")),
+        "staff_approved": bool(live.get("staff_approved")),
         "bands": bands,
         "leader": ranked[0]["id"] if ranked else None,
         "fee_floors_locked": True,
         "note": (
             "Research harness only — does not change kalshi-sp/sized ask band. "
-            "Promote only after staff review + Chicago week."
+            "Promote only via staff_promote_inx_band after artifact + Chicago week."
         ),
         "at": _now(),
     }
@@ -711,6 +785,143 @@ def run_inx_band_research(root: str | None, history: list | None = None) -> dict
     store["latest"] = report
     _save(path, store)
     return report
+
+
+def inx_band_promote_status(root: str | None = None) -> dict:
+    """Ready when research leader beats live band with n≥20 — never auto-promote."""
+    store = _load(_path(INX_BAND_RESEARCH, root), {"paper_only": True, "latest": None})
+    report = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    live = inx_live_band(root)
+    if not report:
+        return {
+            "paper_only": True,
+            "promote_ready": False,
+            "decision": "reject",
+            "reason": "no research artifact yet — run_inx_band_research first",
+            "live_band": live.get("id"),
+            "leader": None,
+            "auto_promote": False,
+            "staff_approved": bool(live.get("staff_approved")),
+            "fee_floors_locked": True,
+        }
+    bands = {b["id"]: b for b in (report.get("bands") or []) if isinstance(b, dict) and b.get("id")}
+    leader_id = report.get("leader")
+    leader = bands.get(leader_id) if leader_id else None
+    live_row = bands.get(live.get("id") or INX_LIVE_BAND_DEFAULT)
+    ready = False
+    reason = "leader missing or thin sample"
+    if isinstance(leader, dict):
+        n = int(leader.get("n") or 0)
+        exp = _finite(leader.get("expectancy_taxed"))
+        live_exp = _finite((live_row or {}).get("expectancy_taxed")) if live_row else None
+        if n < INX_BAND_PROMOTE_MIN_N:
+            reason = f"leader n={n} < {INX_BAND_PROMOTE_MIN_N}"
+        elif exp is None:
+            reason = "leader expectancy missing"
+        elif leader_id == (live.get("id") or INX_LIVE_BAND_DEFAULT):
+            reason = "leader already equals live band — no promote needed"
+        elif live_exp is not None and exp + 1e-12 < live_exp:
+            reason = "leader EV below live band EV"
+        else:
+            ready = True
+            reason = (
+                f"leader {leader_id} n={n} EV={exp} beats live "
+                f"{live.get('id')} — staff may promote"
+            )
+    return {
+        "paper_only": True,
+        "promote_ready": ready,
+        "decision": "review" if ready else "reject",
+        "reason": reason,
+        "live_band": live.get("id"),
+        "leader": leader_id,
+        "leader_n": int((leader or {}).get("n") or 0) if leader else 0,
+        "leader_ev": _finite((leader or {}).get("expectancy_taxed")) if leader else None,
+        "promote_min_n": INX_BAND_PROMOTE_MIN_N,
+        "auto_promote": False,
+        "staff_approved": bool(live.get("staff_approved")),
+        "effective": live,
+        "fee_floors_locked": True,
+        "note": (
+            "INX band promote requires research artifact + staff_promote_inx_band. "
+            "Never auto-changes config.json. Fee floors locked."
+        ),
+    }
+
+
+def staff_promote_inx_band(
+    root: str | None,
+    band_id: str,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff gate to lock a research band as live ask band (artifact only)."""
+    status = inx_band_promote_status(root)
+    bid = str(band_id or "").strip()
+    known = {b["id"] for b in INX_RESEARCH_BANDS}
+    if bid not in known:
+        return {
+            "ok": False,
+            "reason": f"unknown band_id {bid!r}; choose from {sorted(known)}",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    if not force:
+        if not status.get("promote_ready"):
+            return {
+                "ok": False,
+                "reason": status.get("reason") or "not promote_ready",
+                "status": status,
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+        if bid != status.get("leader"):
+            return {
+                "ok": False,
+                "reason": f"band_id {bid} is not research leader {status.get('leader')}",
+                "status": status,
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+    base = inx_band_from_id(bid)
+    row = {
+        "paper_only": True,
+        "staff_approved": True,
+        "band_id": base["id"],
+        "lo": base["lo"],
+        "hi": base["hi"],
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    _save(_path(INX_BAND_PROMOTE, root), row)
+    return {
+        "ok": True,
+        "reason": "armed",
+        "band": inx_live_band(root),
+        "status": inx_band_promote_status(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def staff_clear_inx_band_promote(root: str | None, *, note: str = "") -> dict:
+    """Disarm staff band promote — bots fall back to config.json / default 80–90."""
+    row = {
+        "paper_only": True,
+        "staff_approved": False,
+        "band_id": INX_LIVE_BAND_DEFAULT,
+        "lo": 0.80,
+        "hi": 0.90,
+        "at": _now(),
+        "note": str(note or "cleared")[:200],
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    _save(_path(INX_BAND_PROMOTE, root), row)
+    return {"ok": True, "band": inx_live_band(root), "fee_floors_locked": True}
 
 
 # ---- Sports hard-stop shadow -----------------------------------------------
@@ -1607,13 +1818,14 @@ def plan_summary(
         "profit_lock": profit_lock_status(root),
         "skip_regret_weekly": latest_skip_regret_weekly(root),
         "daily_r": latest_daily_r_board(root),
+        "inx_band_promote": inx_band_promote_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "INX band promote only after research week artifact",
             "correlation matrix firm portfolio haircut",
             "incubation lane 50 fee-aware settles",
             "ruin drill soft/hard/nuclear UX",
+            "tax/fee ledger completeness pass",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1662,6 +1874,8 @@ def self_check() -> None:
         assert rep["live_changed"] is False
         assert rep["live_band"] == "80_90"
         assert len(rep["bands"]) == 3
+        assert inx_live_band(tmp)["staff_approved"] is False
+        assert inx_band_promote_status(tmp)["auto_promote"] is False
         hit = sports_hard_stop_hit(0.80, 0.65, drop=0.12)
         assert hit["hit"] is True
         miss = sports_hard_stop_hit(0.80, 0.72, drop=0.12)
