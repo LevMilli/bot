@@ -244,6 +244,41 @@ def manage_model_flips(state, side_now, prob_now, bid, fee, delta, ticker=None):
     return sold
 
 
+def manage_take_profits(state, bid, fee, ticker=None):
+    """Execute stored take-profit when bid reaches fill+TAKE_PROFIT_ADD (paper only).
+
+    Replaces the old advisory-only TP print. Fee floors unchanged.
+    """
+    still = []
+    sold = []
+    if bid is None or float(bid) <= 0:
+        return sold
+    for pos in list(state.get("open") or []):
+        if ticker and pos.get("ticker") != ticker:
+            still.append(pos)
+            continue
+        tp = pos.get("take_profit")
+        try:
+            tp_f = float(tp) if tp is not None else None
+        except (TypeError, ValueError):
+            tp_f = None
+        if tp_f is None:
+            # Backfill legacy opens that only had a printed suggestion.
+            try:
+                ask0 = float(pos.get("ask") or 0)
+                tp_f = min(round(ask0 + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP) if ask0 > 0 else None
+            except (TypeError, ValueError):
+                tp_f = None
+        if tp_f is not None and float(bid) + 1e-12 >= tp_f:
+            reason = f"take-profit bid {float(bid):.2f} ≥ {tp_f:.2f}"
+            pnl = paper_sell(state, pos, bid, fee, reason)
+            sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
+        else:
+            still.append(pos)
+    state["open"] = still
+    return sold
+
+
 def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None, vol_kwargs=None):
     """Paper fill only when the signal cleared the edge after fees. No order is sent."""
     none_msg = "Checked all open BTC 15-minute markets. No paper buy."
@@ -348,6 +383,12 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "history_hit": perf.get("hit_rate"),
         "history_ci_low": perf.get("hit_ci_low"),
         "fill_tax": 0.01,
+        "take_profit": min(round(float(ask) + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP),
+        "exit_plan": {
+            "kind": "take_profit+model_flip+settle",
+            "take_profit_add": TAKE_PROFIT_ADD,
+            "take_profit_cap": TAKE_PROFIT_CAP,
+        },
     })
     save_account(state)
     return "Checked all open BTC 15-minute markets. Paper buy."
@@ -871,6 +912,7 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
 
 
 def main():
+    t0 = time.perf_counter()
     now = dt.datetime.now(dt.timezone.utc)
     account = load_account()
     if not os.path.exists(ACCOUNT):
@@ -1072,6 +1114,24 @@ def main():
             )
             print(f"  Depth offered at or below ask: {ev.get('depth', 0):,.0f} contracts")
 
+        if account.get("open") and ev.get("bid") is not None:
+            tp_fee = fee_per_contract(ev["bid"]) if ev["bid"] else 0
+            tp_sold = manage_take_profits(
+                account, ev["bid"], tp_fee, ticker=ev.get("ticker"),
+            )
+            if tp_sold:
+                save_account(account)
+                for line in tp_sold:
+                    print(f"  TAKE-PROFIT SELL: {line}")
+                    if desk_brain and not IS_SHADOW:
+                        try:
+                            desk_brain.record_decision(
+                                DESK_ROOT, bot="btc15m", action="flip",
+                                ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                                note=line,
+                            )
+                        except Exception:
+                            pass
         if flip_on and account.get("open") and ev.get("side") and ev.get("bid") is not None and ev.get("p") is not None:
             sold = manage_model_flips(
                 account,
@@ -1228,7 +1288,7 @@ def main():
         tp = min(round(ev["ask"] + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
         print(
             f"  SIGNAL: BUY {ev['side']} on {ev['ticker']} at <= {ev['ask']:.2f} "
-            f"(fee {ev['fee']:.2f}). Suggested take-profit {tp:.2f} (fill + 0.15, max 0.99)."
+            f"(fee {ev['fee']:.2f}). Take-profit {tp:.2f} will paper-sell (fill + 0.15, max 0.99)."
         )
         last_sentence = paper_buy(
             account, ev["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
@@ -1241,6 +1301,16 @@ def main():
         )
         if "Paper buy" in last_sentence and "No paper buy" not in last_sentence:
             buys += 1
+            if not IS_SHADOW:
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.record_fit(
+                        DESK_ROOT, bot="btc15m", outcome="buy",
+                        ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
+                        edge=ev.get("edge"),
+                    )
+                except Exception:
+                    pass
             if kalshi_history is not None and not IS_SHADOW:
                 try:
                     kalshi_history.clear_hold(DESK_ROOT, str(ev.get("ticker") or ""))
@@ -1264,6 +1334,16 @@ def main():
         else:
             skips += 1
             print(f"  desk/account blocked fill: {last_sentence}")
+            if not IS_SHADOW:
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.record_fit(
+                        DESK_ROOT, bot="btc15m", outcome="block",
+                        ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
+                        edge=ev.get("edge"), note=str(last_sentence)[:160],
+                    )
+                except Exception:
+                    pass
         print()
 
     # ---- ETH 15m: history + optional late parlay leg (same fee-aware gates) ----
@@ -1305,6 +1385,36 @@ def main():
                 min_p=MIN_MODEL_PROB,
             )
         print(f"--- ETH {m['ticker']} regime={regime} p={ev_early.get('p')} cushion={ev_early.get('cushion')}")
+        if account.get("open") and ev_early.get("bid") is not None:
+            eth_bid = ev_early["bid"]
+            eth_tp_fee = fee_per_contract(eth_bid) if eth_bid else 0
+            eth_tp_sold = manage_take_profits(
+                account, eth_bid, eth_tp_fee, ticker=m.get("ticker"),
+            )
+            if eth_tp_sold:
+                save_account(account)
+                for line in eth_tp_sold:
+                    print(f"  TAKE-PROFIT SELL: {line}")
+        if (
+            flip_on
+            and account.get("open")
+            and ev_early.get("side")
+            and ev_early.get("bid") is not None
+            and ev_early.get("p") is not None
+        ):
+            eth_flip_sold = manage_model_flips(
+                account,
+                ev_early["side"],
+                ev_early["p"],
+                ev_early["bid"],
+                fee_per_contract(ev_early["bid"]) if ev_early.get("bid") else 0,
+                flip_delta,
+                ticker=m.get("ticker"),
+            )
+            if eth_flip_sold:
+                save_account(account)
+                for line in eth_flip_sold:
+                    print(f"  MODEL-FLIP SELL: {line}")
         if kalshi_history is not None and not IS_SHADOW:
             try:
                 kalshi_history.record_snapshot(
@@ -1343,7 +1453,7 @@ def main():
             tp = min(round(float(ev_early["ask"]) + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
             print(
                 f"  SIGNAL: BUY ETH {ev_early['side']} on {m['ticker']} at <= {ev_early['ask']:.2f} "
-                f"(fee {ev_early['fee']:.2f}). Suggested take-profit {tp:.2f}."
+                f"(fee {ev_early['fee']:.2f}). Take-profit {tp:.2f} will paper-sell."
             )
             sentence = paper_buy(
                 account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
@@ -1555,6 +1665,15 @@ def main():
                         except Exception:
                             pass
 
+    if not IS_SHADOW:
+        try:
+            import desk_roi_plan
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="btc15m", seconds=time.perf_counter() - t0,
+                note="btc15m check",
+            )
+        except Exception:
+            pass
     print(
         f"Windows scored: BTC {len(markets)} ETH {len(eth_markets)}  "
         f"paper buys: {buys}  parlays: {parlays}  skips/blocks: {skips}"

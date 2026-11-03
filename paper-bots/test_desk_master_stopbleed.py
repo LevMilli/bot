@@ -45,7 +45,7 @@ class StopBleedTests(unittest.TestCase):
 
     def test_master_summary_on_empty_bots(self):
         s = desk_master.master_summary(bots=[], cfg={"max_open_risk": 100})
-        self.assertEqual(s["version"], 1)
+        self.assertEqual(s["version"], 2)
         self.assertTrue(s["paper_only"])
         self.assertEqual(s["towers"], [])
 
