@@ -32,15 +32,16 @@ function HallCosmetics() {
   const width = WING_HALL.zMax - WING_HALL.zMin
   return (
     <group>
-      {/* Continuous hall slab */}
+      {/* Continuous hall slab — light enough to read in FPV */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x0, 0, 0]} receiveShadow={false}>
         <planeGeometry args={[len + 0.4, width + 0.2]} />
-        <meshStandardMaterial color="#0c0818" roughness={0.78} metalness={0.14} side={DoubleSide} />
+        <meshStandardMaterial color="#1a1432" roughness={0.72} metalness={0.12} side={DoubleSide} />
       </mesh>
+      <gridHelper args={[len + 0.2, Math.max(8, Math.floor(len / 1.2)), '#3a2a68', '#241848']} position={[x0, 0.012, 0]} />
       {/* Neon runner */}
-      <mesh position={[x0, 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[len - 0.6, 0.42]} />
-        <meshStandardMaterial color="#152238" emissive="#2de2e6" emissiveIntensity={0.22} roughness={0.55} />
+      <mesh position={[x0, 0.018, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[len - 0.6, 0.48]} />
+        <meshStandardMaterial color="#1a3048" emissive="#2de2e6" emissiveIntensity={0.38} roughness={0.5} />
       </mesh>
       {/* Side baseboards */}
       {([-1, 1] as const).map((s) => (
@@ -121,12 +122,12 @@ function SuiteShell({ room, color, live }: { room: WingRoom; color: string; live
   const wallSeg = (ROOM_HALF_W * 2 - doorGap) / 2
   return (
     <group position={room.position} rotation={[0, room.yaw, 0]}>
-      {/* Floor */}
+      {/* Floor — readable under FPV lighting */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
         <planeGeometry args={[ROOM_HALF_W * 2, ROOM_HALF_D * 2]} />
         <meshStandardMaterial
-          color={room.boss ? '#1a1230' : '#12082a'}
-          roughness={0.72}
+          color={room.boss ? '#241838' : '#1c1634'}
+          roughness={0.68}
           metalness={0.1}
           side={DoubleSide}
         />
@@ -134,7 +135,7 @@ function SuiteShell({ room, color, live }: { room: WingRoom; color: string; live
       {/* Accent rug */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, -0.4]}>
         <circleGeometry args={[1.35, 24]} />
-        <meshStandardMaterial color="#1a1038" emissive={color} emissiveIntensity={0.08} roughness={0.9} />
+        <meshStandardMaterial color="#221848" emissive={color} emissiveIntensity={0.16} roughness={0.85} />
       </mesh>
       {/* Side walls */}
       {([-ROOM_HALF_W, ROOM_HALF_W] as const).map((x) => (
@@ -232,11 +233,13 @@ export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenS
 
   return (
     <>
-      <color attach="background" args={['#070412']} />
-      <fog attach="fog" args={['#070412', 18, 55]} />
-      <PerspectiveCamera makeDefault fov={55} near={0.08} far={120} position={[4, 1.8, 2]} />
-      <ambientLight intensity={0.48} color="#c8b8ff" />
-      <directionalLight position={[10, 18, 8]} intensity={0.45} color="#f2e8ff" />
+      <color attach="background" args={['#100628']} />
+      {/* Softer fog so hall + suite floors stay visible in FPV */}
+      <fog attach="fog" args={['#12082e', 32, 78]} />
+      <PerspectiveCamera makeDefault fov={62} near={0.06} far={120} position={[4, 1.58, 2]} />
+      <ambientLight intensity={0.62} color="#d0c4ff" />
+      <directionalLight position={[10, 18, 8]} intensity={0.55} color="#f2e8ff" />
+      <hemisphereLight args={['#b8d4ff', '#1a1030', 0.35]} />
 
       <HallCosmetics />
 
