@@ -29,13 +29,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Sports M3 fit journals | buy/block → `record_fit` |
 | Sports hard-stop **shadow** | bid ≤ entry − 12¢ logs would-stop; `SPORTS_HARD_STOP_LIVE=False` |
 
-### Next — INX twin / macro
+### #106 — INX twin / macro
 
 | Ticket | Where |
 | --- | --- |
 | Anti-double sized vs S&P | `desk_inx.anti_double_blocks` in sized `step_scan` |
 | Twin edge ≥ venue + 1¢ | `desk_inx.twin_edge_blocks` |
 | Pre-FOMC calm / post-print +30m | `desk_inx.inx_entry_blocks` on both INX bots |
+
+### Next — learn v2 / adverse cool
+
+| Ticket | Where |
+| --- | --- |
+| Learning skip v2 | `pimp_desk.learning_skip(..., side, hour_ct)` |
+| Adverse cool-off | `desk_roi_plan.record_adverse_fill` / `adverse_cool_blocks` |
+| Weekly scorecard | `desk_roi_plan.capture_weekly_scorecard` |
 
 ## Hard rules unchanged
 
