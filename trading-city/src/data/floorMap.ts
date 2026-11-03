@@ -31,12 +31,15 @@ export const FLOORS: FloorDef[] = [
   },
   {
     id: '1',
-    name: 'Sports & Macro',
-    wing: 'Macro',
+    name: 'Trading wing',
+    wing: 'Spine hall',
     offices: [
       { officeId: 'sports-gap', botId: 'sports-gap', label: 'Sports gap' },
       { officeId: 'kalshi-sp', botId: 'kalshi-sp', label: 'Kalshi S&P' },
-      { officeId: 'kalshi-sized', botId: 'kalshi-sized', label: 'Sized Kalshi' },
+      { officeId: 'btc15m', botId: 'btc15m', label: 'BTC 15m' },
+      { officeId: 'commodity-15m', botId: 'commodity-15m', label: 'Commodity 15m' },
+      { officeId: 'memecoin', botId: 'memecoin', label: 'Memecoin' },
+      { officeId: 'boss', botId: 'kalshi-sized', label: 'Boss · Sized Kalshi', boss: true },
     ],
   },
   {
