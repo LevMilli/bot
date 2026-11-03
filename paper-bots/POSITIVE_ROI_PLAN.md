@@ -208,12 +208,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Zero-buy alert | ≥6h weekday fee-clear quiet + BUDGET skips |
 | Masters board | `roi_plan.capital_os` |
 
+### Opportunity-cost clock + idea review
+
+| Ticket | Where |
+| --- | --- |
+| Pending high-edge | `note_pending_high_edge` (sports budget/max-buys skips) |
+| Flush on buy | `flush_opp_cost_on_buy` when wait ≥90s + higher edge |
+| Opp-cost board | `opp_cost_summary` → Masters |
+| Idea register/close | `staff_register_idea` / `staff_close_idea` |
+| 90d stale flag | `idea_review_status` |
+| Masters board | `roi_plan.opp_cost` + `idea_review` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Idea review cadence 90d | kill stale experiments |
-| Opportunity-cost clock | log when low-edge blocks high-edge &gt;90s |
+| _(queue clear — observe / staff hillclimb pick)_ | paper observation |
 
 ## Hard rules unchanged
 
