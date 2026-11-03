@@ -247,6 +247,16 @@ Interactive: Positive ROI Master Plan canvas.
 | Runtime wire | `gap_bot` / `btc15m_signal` / `commodity-15m` offer → rebuild → gate |
 | Masters board | `roi_plan.firm_queue` |
 
+### Parallel book prefetch + empty CARD &lt;3s
+
+| Ticket | Where |
+| --- | --- |
+| Shared parallel map | `desk_more.prefetch_map` |
+| Commodity books | `prefetch_commodity_books` + `evaluate(..., book=)` |
+| Empty CARD log | `record_empty_card` / `empty_card_status` (bar 3s) |
+| Runtime | commodity empty fast-exit; BTC logs empty CARD latency |
+| Masters board | `roi_plan.empty_card` |
+
 ### Next
 
 | Ticket | Where |

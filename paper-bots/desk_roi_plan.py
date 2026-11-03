@@ -43,6 +43,7 @@ OPP_COST_NAME = "desk_opp_cost.json"
 IDEA_REVIEW_NAME = "desk_idea_review.json"
 BTC_CALIB_NAME = "desk_btc_calibration.json"
 FIRM_QUEUE_NAME = "desk_firm_queue.json"
+EMPTY_CARD_NAME = "desk_empty_card.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -154,6 +155,10 @@ FIRM_QUEUE_BOTS = frozenset({"sports-gap", "btc15m", "commodity-15m"})
 FIRM_QUEUE_TTL_SEC = 180.0
 FIRM_QUEUE_DEFAULT_STAKE = 25.0
 MAX_FIRM_OFFERS = 200
+
+# Empty-market CARD bar — fee-clear towers should exit idle loops fast.
+EMPTY_CARD_BAR_SEC = 3.0
+MAX_EMPTY_CARD_ROWS = 500
 
 # Phase 2: capital allocation OS — barbell + midday util / zero-buy alerts.
 BARBELL_MEME_MAX = 0.15          # ≤15% desk risk to meme sleeve
@@ -1194,6 +1199,88 @@ def capture_firm_queue(
     store["last_at"] = card["captured_at"]
     _save(path, store)
     return card
+
+
+# ---- Empty-market CARD latency (Phase 5) -----------------------------------
+
+def record_empty_card(
+    root: str | None,
+    *,
+    bot: str,
+    seconds,
+    markets_n: int = 0,
+    note: str = "",
+) -> dict:
+    """Log an idle/empty-market CARD loop for the <3s bar."""
+    sec = _finite(seconds)
+    if sec is None or sec < 0:
+        return {"recorded": False, "reason": "bad seconds"}
+    bot_id = str(bot or "").strip()
+    if not bot_id:
+        return {"recorded": False, "reason": "missing bot"}
+    row = {
+        "at": _now(),
+        "bot": bot_id[:40],
+        "seconds": round(float(sec), 3),
+        "markets_n": int(markets_n or 0),
+        "bar_sec": EMPTY_CARD_BAR_SEC,
+        "pass": float(sec) + 1e-12 <= EMPTY_CARD_BAR_SEC,
+        "note": str(note or "")[:160],
+        "paper_only": True,
+        "fee_floors_locked": True,
+    }
+    path = _path(EMPTY_CARD_NAME, root)
+    store = _load(path, {"paper_only": True, "rows": [], "latest": None})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_EMPTY_CARD_ROWS:]
+    store["latest"] = row
+    store["last_at"] = row["at"]
+    store["paper_only"] = True
+    _save(path, store)
+    return {"recorded": True, "row": row}
+
+
+def empty_card_status(root: str | None = None, *, bot: str | None = None) -> dict:
+    """Masters board: empty-market CARD p50 vs 3s bar."""
+    store = _load(_path(EMPTY_CARD_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    if bot:
+        rows = [r for r in rows if str(r.get("bot") or "") == str(bot)]
+    secs = sorted(
+        float(_finite(r.get("seconds")) or 0)
+        for r in rows
+        if _finite(r.get("seconds")) is not None
+    )
+    p50 = None
+    if secs:
+        mid = (len(secs) - 1) // 2
+        p50 = round(secs[mid], 3)
+    by_bot: dict[str, int] = {}
+    for r in rows:
+        b = str(r.get("bot") or "")
+        by_bot[b] = int(by_bot.get(b) or 0) + 1
+    ok = p50 is None or p50 + 1e-12 <= EMPTY_CARD_BAR_SEC
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": len(secs),
+        "p50_s": p50,
+        "max_s": round(max(secs), 3) if secs else None,
+        "bar_sec": EMPTY_CARD_BAR_SEC,
+        "pass": ok,
+        "by_bot": by_bot,
+        "recent": rows[-8:],
+        "note": (
+            f"Empty-market CARD bar {EMPTY_CARD_BAR_SEC:.0f}s — "
+            "prefetch books; idle loops should exit fast."
+            if ok
+            else (
+                f"Empty-market CARD p50 {p50}s > {EMPTY_CARD_BAR_SEC:.0f}s bar — "
+                "speed up idle path / prefetch."
+            )
+        ),
+    }
 
 
 # ---- Opportunity-cost clock (Phase 5) --------------------------------------
@@ -4342,6 +4429,7 @@ def plan_summary(
         "green_or_gone": green_or_gone_status(bots),
         "btc_calibration": btc_calibration_report(bots),
         "firm_queue": firm_queue_status(root),
+        "empty_card": empty_card_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [

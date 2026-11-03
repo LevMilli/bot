@@ -532,6 +532,10 @@ def master_summary(
             plan["firm_queue"] = status_fq
         except Exception:
             plan["firm_queue"] = None
+        try:
+            plan["empty_card"] = desk_roi_plan.empty_card_status(root)
+        except Exception:
+            plan["empty_card"] = None
     except Exception:
         plan = None
     return {
