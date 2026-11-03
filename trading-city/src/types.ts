@@ -84,6 +84,7 @@ export type BotRow = {
   would_have?: unknown[]
   has_state?: boolean
   blurb?: string
+  memory_line?: string
   plans?: BotPlans
   gates_hit?: string[]
   expectancy?: number | null
@@ -206,6 +207,16 @@ export type Desk = {
     sports_tip?: Desk['sports_tip']
     towers?: unknown[]
     note?: string
+  }
+  teller_memory?: {
+    paper_only?: boolean
+    n_facts?: number
+    n_mistakes?: number
+    n_wins?: number
+    updated_at?: string | null
+    recent?: { kind?: string; bot?: string | null; text?: string; at?: string }[]
+    note?: string
+    error?: string
   }
   chart?: {
     zone?: string

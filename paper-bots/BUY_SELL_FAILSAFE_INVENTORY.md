@@ -143,7 +143,7 @@ Hard skips if any fail:
 
 ### Exit / SELL
 **Settle only** when Kalshi `result` ∈ {yes,no} after close_time.  
-`TAKE_PROFIT_ADD=0.15` / `CAP=0.99` is **printed suggestion only — never executed**. No stop/trail.
+`TAKE_PROFIT_ADD=0.15` / `CAP=0.99` is **executed** via `manage_take_profits` when bid ≥ TP (stored on the open). Model-flip + settle remain. No stop/trail.
 
 ### Failsafes
 Signal checklist above; no spot/σ → skip; desk learning_skip; cash/open cap. **Subject to desk `entry_gate`** (`entry: True`, ROI system). No bot-local daily loss stop.
@@ -208,7 +208,7 @@ Live Tower 5: KXINXU with desk **Kelly-lite** stake (84–92¢ band), model-flip
 
 | Gap | Detail |
 |---|---|
-| **Weak / missing sells** | Kalshi S&P: settle-only, invalidation log-only. BTC: settle-only; TP is advisory print. Sports: gap-close or settle; no stop/trail. |
+| **Weak / missing sells** | Kalshi S&P: model-flip &lt;50¢ + settle. BTC: real TP + model-flip + settle. Commodity: model-flip + settle. Sports: gap-close or settle; no stop/trail yet. |
 | **Strong sells** | Memecoin only (stop / ladder / trail / time / liq). |
 | **Desk-only failsafes** | Desk daily $150 / max open 12 / max risk $100 gate sports, kalshi scan, memecoin, **and BTC**. Quiet hours ≠ trade halt. Pace does not loosen edge. |
 | **Bot vs desk mismatch** | Kalshi daily $50 + $25 stake vs desk $150 + $20–$100 curve. Memecoin $25 flat + max 4. BTC max-open hardcoded 12. |
@@ -223,6 +223,6 @@ Live Tower 5: KXINXU with desk **Kelly-lite** stake (84–92¢ band), model-flip
 |---|---|---|---|---|---|
 | sports-gap | Yes | Yes | Yes ($150 via desk cfg) | Yes (desk) | Partial (gap/settle) |
 | kalshi-sp scan | Yes | No ($25) | Yes ($50) | 1/day | Weak (settle only) |
-| btc15m | **Yes** | Yes | No | Hardcoded 12 | Weak (settle; TP print-only) |
+| btc15m | **Yes** | Yes | No | Hardcoded 12 | Partial (TP + model-flip + settle) |
 | memecoin | Yes | No ($25 flat) | Yes ($50) | 4 | Strong |
 | kalshi-sized | Kelly-lite KXINXU 84–92¢ | Model-flip &lt;50¢ / settle | Calendar + desk gate + kill | Partial |
