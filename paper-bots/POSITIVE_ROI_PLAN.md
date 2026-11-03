@@ -75,6 +75,7 @@ Interactive: Positive ROI Master Plan canvas.
 | Chicago-week firm PnL ledger | `desk_roi_plan.capture_profit_lock` |
 | Safe-mode 0.5× after $40 target | `profit_lock_size_mult` / `profit_lock_status` |
 | Masters wire | `desk_master.master_summary` → `profit_lock` |
+| Kelly path applies 0.5× | `pimp_desk.stake_dollars_for` notes `profit_lock_mult` |
 
 ### Next
 
@@ -82,8 +83,8 @@ Interactive: Positive ROI Master Plan canvas.
 | --- | --- |
 | Sports hard-stop promote after n≥30 | staff gate; `SPORTS_HARD_STOP_LIVE` stays False |
 | INX band promote | only after research-week artifact |
-| Wire `profit_lock_size_mult` into tower kelly paths | sports / BTC / commodity |
 | Skip-regret twin weekly review | wire into scorecard |
+| Daily R budget per tower | settle-only after budget |
 
 ## Hard rules unchanged
 
