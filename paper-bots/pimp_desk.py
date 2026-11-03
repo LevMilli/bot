@@ -1832,6 +1832,13 @@ def entry_gate(root: str | None = None, bots: list | None = None) -> str:
     open_risk = round(sum(float(b.get("open_risk") or 0) for b in live), 2)
     open_count = int(sum(int(b.get("open_count") or 0) for b in live))
     today = round(sum(float(b.get("today") or 0) for b in live), 2)
+    try:
+        import desk_roi_plan
+        ruin = desk_roi_plan.ruin_drill_blocks_entries(root)
+        if ruin:
+            return ruin
+    except Exception:
+        pass
     if today <= -float(cfg["daily_loss_stop"]):
         return (
             f"Daily loss stop is hit (${abs(today):.2f} against ${cfg['daily_loss_stop']:.2f}). "
