@@ -1076,6 +1076,15 @@ def run():
                     ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
                     edge=gap, note=str(reason)[:160],
                 )
+                why = str(reason or "").lower()
+                if any(k in why for k in ("max buys", "max open risk", "budget", "open risk")):
+                    desk_roi_plan.note_pending_high_edge(
+                        DESK_ROOT,
+                        bot="sports-gap",
+                        ticker=str(m.get("ticker") or ""),
+                        edge=gap,
+                        reason=str(reason)[:120],
+                    )
             except Exception:
                 pass
             continue
@@ -1131,6 +1140,12 @@ def run():
             desk_roi_plan.record_fit(
                 DESK_ROOT, bot="sports-gap", outcome="buy",
                 ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
+                edge=gap,
+            )
+            desk_roi_plan.flush_opp_cost_on_buy(
+                DESK_ROOT,
+                bot="sports-gap",
+                ticker=str(m.get("ticker") or ""),
                 edge=gap,
             )
         except Exception:

@@ -39,6 +39,8 @@ COLD_HARVEST_NAME = "desk_cold_harvest.json"
 HILLCLIMB_LEVER_NAME = "desk_hillclimb_lever.json"
 DUAL_CONTROL_NAME = "desk_dual_control.json"
 CAPITAL_OS_NAME = "desk_capital_os.json"
+OPP_COST_NAME = "desk_opp_cost.json"
+IDEA_REVIEW_NAME = "desk_idea_review.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -149,6 +151,14 @@ BARBELL_MEME_MAX = 0.15          # ≤15% desk risk to meme sleeve
 BARBELL_FEE_CLEAR_MIN = 0.70     # ≥70% of open risk in fee-clear towers
 MIDDAY_UTIL_ALERT_LT = 0.20      # util below this + EDGE-only skips → starvation alert
 ZERO_BUY_ALERT_HOURS = 6.0       # weekday fee-clear quiet with BUDGET skips
+
+# Phase 5: opportunity-cost clock — low-edge blocks high-edge >90s.
+OPP_COST_WAIT_SEC = 90.0
+MAX_OPP_COST_ROWS = 2000
+
+# Phase 11: idea review cadence — kill stale experiments after 90 Chicago days.
+IDEA_REVIEW_DAYS = 90
+MAX_IDEA_ROWS = 200
 
 # Phase 9: dual-control live checklist — paper stub; never enables live orders.
 LIVE_ORDERS_ENABLED = False  # hard lock — stub cannot arm create-order
@@ -697,6 +707,277 @@ def latest_capital_os(root: str | None = None) -> dict | None:
     store = _load(_path(CAPITAL_OS_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
+
+
+# ---- Opportunity-cost clock (Phase 5) --------------------------------------
+
+def _opp_store(root: str | None) -> dict:
+    return _load(
+        _path(OPP_COST_NAME, root),
+        {"paper_only": True, "rows": [], "pending": {}},
+    )
+
+
+def note_pending_high_edge(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str,
+    edge=None,
+    reason: str = "",
+) -> dict:
+    """Remember a high-edge ticket blocked by budget/max-buys for opp-cost clock."""
+    tick = str(ticker or "").strip()
+    bot_id = str(bot or "").strip()
+    if not tick or not bot_id:
+        return {"pending": False}
+    path = _path(OPP_COST_NAME, root)
+    store = _opp_store(root)
+    pending = store.get("pending") if isinstance(store.get("pending"), dict) else {}
+    key = f"{bot_id}|{tick}"
+    prev = pending.get(key) if isinstance(pending.get(key), dict) else None
+    if prev and prev.get("first_at"):
+        row = prev
+    else:
+        row = {
+            "bot": bot_id,
+            "ticker": tick[:80],
+            "edge": _finite(edge),
+            "first_at": _now(),
+            "reason": str(reason or "")[:120],
+        }
+    row["edge"] = _finite(edge) if _finite(edge) is not None else row.get("edge")
+    row["last_at"] = _now()
+    row["reason"] = str(reason or row.get("reason") or "")[:120]
+    pending[key] = row
+    # Cap pending map.
+    if len(pending) > 200:
+        oldest = sorted(
+            pending.items(),
+            key=lambda kv: str((kv[1] or {}).get("first_at") or ""),
+        )
+        pending = dict(oldest[-200:])
+    store["pending"] = pending
+    store["paper_only"] = True
+    _save(path, store)
+    return {"pending": True, "key": key, "row": row}
+
+
+def record_opp_cost(
+    root: str | None,
+    *,
+    bot: str,
+    blocked_ticker: str = "",
+    blocked_edge=None,
+    taken_ticker: str = "",
+    taken_edge=None,
+    wait_sec=None,
+    note: str = "",
+) -> dict:
+    """Log when a lower-edge fill blocked / delayed a higher-edge ticket > bar."""
+    wait = _finite(wait_sec)
+    be = _finite(blocked_edge)
+    te = _finite(taken_edge)
+    if wait is None or wait + 1e-12 < OPP_COST_WAIT_SEC:
+        return {"recorded": False, "reason": f"wait < {OPP_COST_WAIT_SEC:.0f}s"}
+    # Opportunity cost only if blocked edge clearly beats what was taken/held.
+    if be is not None and te is not None and be <= te + 1e-12:
+        return {"recorded": False, "reason": "blocked edge not higher than taken"}
+    row = {
+        "at": _now(),
+        "bot": str(bot or "")[:40],
+        "blocked_ticker": str(blocked_ticker or "")[:80],
+        "blocked_edge": be,
+        "taken_ticker": str(taken_ticker or "")[:80],
+        "taken_edge": te,
+        "wait_sec": round(float(wait), 2),
+        "bar_sec": OPP_COST_WAIT_SEC,
+        "note": str(note or "")[:160],
+        "paper_only": True,
+        "fee_floors_locked": True,
+    }
+    path = _path(OPP_COST_NAME, root)
+    store = _opp_store(root)
+    rows = list(store.get("rows") or [])
+    rows.append(row)
+    store["rows"] = rows[-MAX_OPP_COST_ROWS:]
+    store["last_at"] = row["at"]
+    store.setdefault("pending", store.get("pending") if isinstance(store.get("pending"), dict) else {})
+    _save(path, store)
+    return {"recorded": True, "row": row}
+
+
+def flush_opp_cost_on_buy(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str = "",
+    edge=None,
+) -> dict:
+    """After a paper buy, emit opp-cost rows for pending higher-edge tickets past bar."""
+    bot_id = str(bot or "").strip()
+    te = _finite(edge)
+    path = _path(OPP_COST_NAME, root)
+    store = _opp_store(root)
+    pending = store.get("pending") if isinstance(store.get("pending"), dict) else {}
+    kept = {}
+    emitted = []
+    for key, row in list(pending.items()):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("bot") or "") != bot_id:
+            kept[key] = row
+            continue
+        # Clear matching ticker (filled or gone).
+        if ticker and str(row.get("ticker") or "") == str(ticker):
+            continue
+        be = _finite(row.get("edge"))
+        age_h = _hours_since_iso(row.get("first_at"))
+        wait = None if age_h is None else age_h * 3600.0
+        if (
+            wait is not None
+            and wait + 1e-12 >= OPP_COST_WAIT_SEC
+            and be is not None
+            and (te is None or be > te + 1e-12)
+        ):
+            out = record_opp_cost(
+                root,
+                bot=bot_id,
+                blocked_ticker=str(row.get("ticker") or ""),
+                blocked_edge=be,
+                taken_ticker=str(ticker or ""),
+                taken_edge=te,
+                wait_sec=wait,
+                note=str(row.get("reason") or "pending high-edge blocked")[:120],
+            )
+            if out.get("recorded"):
+                emitted.append(out.get("row"))
+            continue
+        kept[key] = row
+    store = _opp_store(root)
+    store["pending"] = kept
+    _save(path, store)
+    return {"emitted": len(emitted), "pending_n": len(kept)}
+
+
+def opp_cost_summary(root: str | None = None) -> dict:
+    store = _load(_path(OPP_COST_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    waits = [float(_finite(r.get("wait_sec")) or 0) for r in rows]
+    return {
+        "paper_only": True,
+        "n": len(rows),
+        "bar_sec": OPP_COST_WAIT_SEC,
+        "mean_wait_s": round(sum(waits) / len(waits), 2) if waits else None,
+        "max_wait_s": round(max(waits), 2) if waits else None,
+        "recent": rows[-8:],
+        "fee_floors_locked": True,
+        "note": (
+            f"Opportunity-cost clock: low-edge blocks high-edge for >{OPP_COST_WAIT_SEC:.0f}s. "
+            "Rank queue should buy best score inside risk."
+        ),
+    }
+
+
+# ---- Idea review cadence 90d (Phase 11) ------------------------------------
+
+def staff_register_idea(
+    root: str | None,
+    *,
+    idea: str,
+    lever: str = "",
+    note: str = "",
+    who: str = "",
+) -> dict:
+    """Register a hillclimb/experiment idea for 90-day review cadence."""
+    title = str(idea or "").strip()
+    if not title:
+        return {"ok": False, "reason": "idea required"}
+    path = _path(IDEA_REVIEW_NAME, root)
+    store = _load(path, {"paper_only": True, "ideas": []})
+    row = {
+        "id": f"idea-{int(time.time())}",
+        "idea": title[:120],
+        "lever": str(lever or "")[:80],
+        "note": str(note or "")[:200],
+        "who": str(who or "")[:80],
+        "opened_at": _now(),
+        "status": "open",
+        "paper_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    ideas = [i for i in (store.get("ideas") or []) if isinstance(i, dict)]
+    ideas.append(row)
+    store["ideas"] = ideas[-MAX_IDEA_ROWS:]
+    store["last_at"] = row["opened_at"]
+    _save(path, store)
+    return {"ok": True, "idea": row}
+
+
+def staff_close_idea(
+    root: str | None,
+    idea_id: str,
+    *,
+    decision: str = "kill",
+    note: str = "",
+    who: str = "",
+) -> dict:
+    """Close/kill/keep an idea after review."""
+    path = _path(IDEA_REVIEW_NAME, root)
+    store = _load(path, {"paper_only": True, "ideas": []})
+    ideas = [i for i in (store.get("ideas") or []) if isinstance(i, dict)]
+    hit = None
+    for row in ideas:
+        if str(row.get("id") or "") == str(idea_id):
+            row["status"] = str(decision or "kill")[:40]
+            row["closed_at"] = _now()
+            row["close_note"] = str(note or "")[:200]
+            row["closed_by"] = str(who or "")[:80]
+            hit = row
+            break
+    if hit is None:
+        return {"ok": False, "reason": "idea not found"}
+    store["ideas"] = ideas
+    store["last_at"] = _now()
+    _save(path, store)
+    return {"ok": True, "idea": hit}
+
+
+def idea_review_status(root: str | None = None) -> dict:
+    """Flag open ideas older than IDEA_REVIEW_DAYS as stale."""
+    store = _load(_path(IDEA_REVIEW_NAME, root), {"paper_only": True, "ideas": []})
+    ideas = [i for i in (store.get("ideas") or []) if isinstance(i, dict)]
+    open_rows = []
+    stale = []
+    for row in ideas:
+        status = str(row.get("status") or "open")
+        if status not in ("open", "active", ""):
+            continue
+        age_h = _hours_since_iso(row.get("opened_at"))
+        age_d = None if age_h is None else age_h / 24.0
+        item = {
+            **row,
+            "age_days": round(age_d, 1) if age_d is not None else None,
+            "stale": bool(age_d is not None and age_d + 1e-12 >= IDEA_REVIEW_DAYS),
+        }
+        open_rows.append(item)
+        if item["stale"]:
+            stale.append(item)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "review_days": IDEA_REVIEW_DAYS,
+        "open_n": len(open_rows),
+        "stale_n": len(stale),
+        "open": open_rows[-20:],
+        "stale": stale[-12:],
+        "auto_promote": False,
+        "note": (
+            f"Idea review cadence: kill or promote within {IDEA_REVIEW_DAYS}d. "
+            "Stale experiments must not linger."
+        ),
+    }
 
 
 # ---- W0 baseline -----------------------------------------------------------
@@ -3428,12 +3709,11 @@ def plan_summary(
         "dual_control": dual_control_status(root),
         "quarterly_rebaseline": quarterly_rebaseline_status(root),
         "capital_os": capital_os_status(root, bots=bots, cfg=cfg),
+        "opp_cost": opp_cost_summary(root),
+        "idea_review": idea_review_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
-        "next_tickets": [
-            "idea review cadence 90d",
-            "opportunity-cost clock (>90s)",
-        ],
+        "next_tickets": [],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
 
@@ -3717,6 +3997,27 @@ def self_check() -> None:
             0.10, skip_board={"stable_top": [{"code": "WEEKEND", "n": 5}]},
         )
         assert mid_idle["alert"] is False
+        # Opp-cost: pending high-edge then buy lower after bar.
+        note_pending_high_edge(
+            tmp, bot="sports-gap", ticker="HIGH", edge=0.12, reason="max buys",
+        )
+        # Backdate pending first_at past bar.
+        path = _path(OPP_COST_NAME, tmp)
+        store = _opp_store(tmp)
+        for row in (store.get("pending") or {}).values():
+            if isinstance(row, dict):
+                row["first_at"] = "2026-11-01T00:00:00+00:00"
+        _save(path, store)
+        flushed = flush_opp_cost_on_buy(
+            tmp, bot="sports-gap", ticker="LOW", edge=0.04,
+        )
+        assert flushed["emitted"] >= 1
+        assert opp_cost_summary(tmp)["n"] >= 1
+        idea = staff_register_idea(tmp, idea="test edge08", lever="VOL_SAFE", who="ops")
+        assert idea["ok"] is True
+        ir = idea_review_status(tmp)
+        assert ir["open_n"] >= 1
+        assert ir["auto_promote"] is False
 
 
 if __name__ == "__main__":
