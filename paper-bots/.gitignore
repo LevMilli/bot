@@ -30,6 +30,10 @@ desk_roi_baseline.json
 desk_near_miss_weekly.json
 desk_inx_band_research.json
 desk_sports_hard_stop_shadow.json
+desk_adverse_cool.json
+desk_weekly_scorecard.json
+desk_master_grad.json
+desk_hillclimb_kill.json
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json
 helpers/calendar_scanner_at.txt

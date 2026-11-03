@@ -73,15 +73,15 @@ export function Starfield({ count = 900 }: { count?: number }) {
 export function SkyEquityLine() {
   const curve = useMemo(() => {
     const pts = [
-      new THREE.Vector3(-28, 10.5, -21),
-      new THREE.Vector3(-20, 12.2, -21),
-      new THREE.Vector3(-12, 9.4, -21),
-      new THREE.Vector3(-5, 13.5, -21),
-      new THREE.Vector3(1, 11.2, -21),
-      new THREE.Vector3(7, 15.2, -21),
-      new THREE.Vector3(14, 12.8, -21),
-      new THREE.Vector3(22, 16.4, -21),
-      new THREE.Vector3(28, 13.6, -21),
+      new THREE.Vector3(-28, 10.5, -50),
+      new THREE.Vector3(-20, 12.2, -50),
+      new THREE.Vector3(-12, 9.4, -50),
+      new THREE.Vector3(-5, 13.5, -50),
+      new THREE.Vector3(1, 11.2, -50),
+      new THREE.Vector3(7, 15.2, -50),
+      new THREE.Vector3(14, 12.8, -50),
+      new THREE.Vector3(22, 16.4, -50),
+      new THREE.Vector3(28, 13.6, -50),
     ]
     return new THREE.CatmullRomCurve3(pts)
   }, [])

@@ -20,10 +20,29 @@ BASELINE_NAME = "desk_roi_baseline.json"
 NEAR_MISS_WEEKLY = "desk_near_miss_weekly.json"
 INX_BAND_RESEARCH = "desk_inx_band_research.json"
 SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
+ADVERSE_COOL_NAME = "desk_adverse_cool.json"
+WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
+MASTER_GRAD = "desk_master_grad.json"
+HILLCLIMB_KILL = "desk_hillclimb_kill.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
 MAX_HARD_STOP_ROWS = 2000
+
+# Adverse selection cool-off: fast mark-down after entry → pause that bot briefly.
+ADVERSE_MARK_DROP = 0.05  # 5¢ adverse vs entry ask/bid
+ADVERSE_COOL_MINUTES = 20
+
+# Phase 6: Master only after 2 consecutive Chicago weeks of all M-codes.
+GRADUATION_WEEKS_REQUIRED = 2
+GRADUATION_CODES = ("M1", "M2", "M3", "M4", "M5", "M6", "M7")
+
+# Phase 7: meme sleeve retirement clock (recommend pause; staff re-arms).
+MEME_RETIRE_WINDOW_DAYS = 20
+MEME_RETIRE_MIN_N = 10
+
+# Phase 11: hillclimb kill — M3↑ with M1↓ for 2 Chicago weeks → revert lever.
+HILLCLIMB_KILL_WEEKS = 2
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -620,6 +639,461 @@ def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
     }
 
 
+# ---- Adverse selection cool-off --------------------------------------------
+
+def record_adverse_fill(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str = "",
+    entry_price=None,
+    mark_price=None,
+    note: str = "",
+) -> dict:
+    """If mark dropped ≥ ADVERSE_MARK_DROP vs entry, cool the bot for ADVERSE_COOL_MINUTES."""
+    entry = _finite(entry_price)
+    mark = _finite(mark_price)
+    if entry is None or mark is None or entry <= 0:
+        return {"cooled": False, "reason": "bad prices"}
+    drop = entry - mark
+    if drop + 1e-12 < ADVERSE_MARK_DROP:
+        return {"cooled": False, "drop": round(drop, 4)}
+    path = _path(ADVERSE_COOL_NAME, root)
+    state = _load(path, {"paper_only": True, "bots": {}})
+    until = time.time() + ADVERSE_COOL_MINUTES * 60
+    state.setdefault("bots", {})[str(bot)] = {
+        "until": until,
+        "at": _now(),
+        "ticker": ticker,
+        "entry": entry,
+        "mark": mark,
+        "drop": round(drop, 4),
+        "note": str(note or "")[:160],
+    }
+    state["last_at"] = _now()
+    _save(path, state)
+    return {
+        "cooled": True,
+        "bot": bot,
+        "until": until,
+        "minutes": ADVERSE_COOL_MINUTES,
+        "drop": round(drop, 4),
+    }
+
+
+def adverse_cool_blocks(root: str | None, bot: str) -> str:
+    """Non-empty reason when bot is in adverse cool-off window."""
+    path = _path(ADVERSE_COOL_NAME, root)
+    state = _load(path, {"paper_only": True, "bots": {}})
+    row = (state.get("bots") or {}).get(str(bot))
+    if not isinstance(row, dict):
+        return ""
+    until = _finite(row.get("until"))
+    if until is None or time.time() >= until:
+        return ""
+    left = int(max(1, (until - time.time()) / 60.0))
+    return (
+        f"adverse cool-off: {bot} paused ~{left}m after "
+        f"{row.get('drop')} drop on {row.get('ticker') or 'fill'}"
+    )
+
+
+def latest_weekly_scorecard(root: str | None = None) -> dict | None:
+    path = _path(WEEKLY_SCORECARD, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+# ---- Master graduation checklist (Phase 6) ---------------------------------
+
+def _chicago_day() -> str:
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+    except Exception:
+        return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def tower_codes_from_row(row: dict | None) -> dict:
+    """Normalize a tower_master_row into M1–M7 pass bits + all flag."""
+    row = row if isinstance(row, dict) else {}
+    passing = row.get("passing") if isinstance(row.get("passing"), dict) else {}
+    codes = {code: bool(passing.get(code)) for code in GRADUATION_CODES}
+    return {
+        "bot": str(row.get("bot") or ""),
+        "codes": codes,
+        "all": all(codes.values()),
+        "n_pass": sum(1 for v in codes.values() if v),
+        "n_codes": len(GRADUATION_CODES),
+    }
+
+
+def capture_graduation_week(
+    root: str | None,
+    towers: list | None = None,
+    *,
+    label: str | None = None,
+) -> dict:
+    """Persist one Chicago-day graduation card from master tower rows."""
+    day = label or _chicago_day()
+    tower_map = {}
+    for row in towers or []:
+        if not isinstance(row, dict):
+            continue
+        card = tower_codes_from_row(row)
+        bot = card.get("bot") or ""
+        if not bot:
+            continue
+        tower_map[bot] = card
+    week = {
+        "paper_only": True,
+        "label": day,
+        "captured_at": _now(),
+        "towers": tower_map,
+        "masters_ready": sorted(
+            b for b, c in tower_map.items() if isinstance(c, dict) and c.get("all")
+        ),
+        "weeks_required": GRADUATION_WEEKS_REQUIRED,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Master only after "
+            f"{GRADUATION_WEEKS_REQUIRED} consecutive Chicago weeks with all M1–M7. "
+            "Staff gate — never auto-promote."
+        ),
+    }
+    path = _path(MASTER_GRAD, root)
+    store = _load(path, {"paper_only": True, "weeks": [], "latest": None})
+    weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+    # Replace same-day card; keep history short.
+    weeks = [w for w in weeks if str(w.get("label") or "") != day]
+    weeks.append(week)
+    store["weeks"] = weeks[-60:]
+    store["latest"] = week
+    store["board"] = graduation_board(root=None, store=store)
+    _save(path, store)
+    return week
+
+
+def graduation_board(root: str | None = None, *, store: dict | None = None) -> dict:
+    """Consecutive all-pass weeks per tower → master / week_1 / not_ready."""
+    if store is None:
+        store = _load(_path(MASTER_GRAD, root), {"paper_only": True, "weeks": []})
+    weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+    weeks = sorted(weeks, key=lambda w: str(w.get("label") or ""))
+    bots: set[str] = set()
+    for w in weeks:
+        towers = w.get("towers") if isinstance(w.get("towers"), dict) else {}
+        bots.update(str(b) for b in towers.keys())
+    board = {}
+    for bot in sorted(bots):
+        streak = 0
+        for w in reversed(weeks):
+            towers = w.get("towers") if isinstance(w.get("towers"), dict) else {}
+            card = towers.get(bot) if isinstance(towers.get(bot), dict) else None
+            if card and card.get("all"):
+                streak += 1
+            else:
+                break
+        if streak >= GRADUATION_WEEKS_REQUIRED:
+            status = "master"
+        elif streak == 1:
+            status = "week_1"
+        else:
+            status = "not_ready"
+        board[bot] = {
+            "bot": bot,
+            "consecutive_all_pass_weeks": streak,
+            "weeks_required": GRADUATION_WEEKS_REQUIRED,
+            "status": status,
+            "graduated": status == "master",
+            "auto_promote": False,
+        }
+    masters = sorted(b for b, r in board.items() if r.get("graduated"))
+    return {
+        "paper_only": True,
+        "weeks_n": len(weeks),
+        "weeks_required": GRADUATION_WEEKS_REQUIRED,
+        "towers": board,
+        "masters": masters,
+        "masters_n": len(masters),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Phase 6 graduation board. Master = "
+            f"{GRADUATION_WEEKS_REQUIRED} consecutive all-pass weeks. No auto-promote."
+        ),
+    }
+
+
+# ---- Meme 20d retirement clock (Phase 7) -----------------------------------
+
+def meme_retirement_clock(
+    bot: dict | None = None,
+    *,
+    window_days: int = MEME_RETIRE_WINDOW_DAYS,
+    min_n: int = MEME_RETIRE_MIN_N,
+    fill_tax: float = 0.01,
+) -> dict:
+    """Recommend pausing meme entries after window_days of negative taxed EV.
+
+    Never auto-retires and never expands volume — staff must re-arm with a written fix.
+    """
+    bot = bot if isinstance(bot, dict) else {}
+    hist = [h for h in (bot.get("history") or []) if isinstance(h, dict)]
+    # Prefer last window_days by closed_at/when when parseable; else last min_n*3 settles.
+    cutoff = None
+    try:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        cutoff = datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=int(window_days))
+    except Exception:
+        cutoff = None
+
+    def _row_day(row: dict):
+        raw = str(row.get("closed_at") or row.get("when") or row.get("at") or "")[:10]
+        if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+            try:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                return datetime.strptime(raw[:10], "%Y-%m-%d").replace(
+                    tzinfo=ZoneInfo("America/Chicago")
+                )
+            except Exception:
+                return None
+        return None
+
+    windowed = []
+    for h in hist:
+        pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+        if pnl is None:
+            continue
+        day = _row_day(h)
+        if cutoff is not None and day is not None and day < cutoff:
+            continue
+        contracts = _finite(h.get("contracts")) or 1.0
+        windowed.append(pnl - float(fill_tax) * max(1.0, contracts))
+    if cutoff is not None and not any(_row_day(h) for h in hist):
+        # No dates → use most recent settles as proxy for the window.
+        windowed = []
+        for h in hist[-(max(int(min_n) * 3, int(min_n))):]:
+            pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if pnl is None:
+                continue
+            contracts = _finite(h.get("contracts")) or 1.0
+            windowed.append(pnl - float(fill_tax) * max(1.0, contracts))
+    n = len(windowed)
+    exp = round(sum(windowed) / n, 4) if n else None
+    recommend_pause = bool(n >= int(min_n) and exp is not None and exp < 0)
+    return {
+        "paper_only": True,
+        "bot": str(bot.get("id") or "memecoin"),
+        "window_days": int(window_days),
+        "min_n": int(min_n),
+        "n": n,
+        "expectancy_taxed": exp,
+        "recommend_pause": recommend_pause,
+        "retired": False,  # staff must confirm; never auto-retire
+        "expand_volume": False,
+        "action": "pause_entries" if recommend_pause else "keep_measuring",
+        "fee_floors_locked": True,
+        "note": (
+            f"Meme retirement clock: after {window_days}d with n≥{min_n} and "
+            "taxed EV < 0 → recommend pause_entries. Staff re-arm only. No volume expand."
+        ),
+    }
+
+
+def firm_taxed_m1(bots: list | None = None, *, fill_tax: float = 0.01) -> dict:
+    """Dollar-weighted firm taxed expectancy across tower histories (M1 proxy)."""
+    pnls: list[float] = []
+    by = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        local: list[float] = []
+        for h in bot.get("history") or []:
+            if not isinstance(h, dict):
+                continue
+            p = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if p is None:
+                continue
+            contracts = _finite(h.get("contracts")) or 1.0
+            taxed = p - float(fill_tax) * max(1.0, contracts)
+            local.append(taxed)
+            pnls.append(taxed)
+        if local:
+            by.append({
+                "bot": bot_id,
+                "n": len(local),
+                "expectancy_taxed": round(sum(local) / len(local), 4),
+            })
+    n = len(pnls)
+    exp = round(sum(pnls) / n, 4) if n else None
+    return {
+        "paper_only": True,
+        "n": n,
+        "expectancy_taxed": exp,
+        "by_tower": by,
+        "fee_floors_locked": True,
+        "note": "Firm M1 proxy = mean taxed PnL across all tower settles. No profit guarantee.",
+    }
+
+
+def evaluate_hillclimb_kill(weeks: list) -> dict:
+    """Kill when the last two cards show M3 up and M1 down (fills up preferred)."""
+    cards = [w for w in weeks if isinstance(w, dict)]
+    cards = sorted(cards, key=lambda w: str(w.get("label") or ""))
+    if len(cards) < HILLCLIMB_KILL_WEEKS:
+        return {
+            "kill": False,
+            "action": "observe",
+            "reason": f"need {HILLCLIMB_KILL_WEEKS} Chicago weeks of hillclimb cards",
+            "weeks_n": len(cards),
+            "auto_revert": False,
+        }
+    prev, cur = cards[-2], cards[-1]
+    m1_prev = _finite(prev.get("m1"))
+    m1_cur = _finite(cur.get("m1"))
+    m3_prev = _finite(prev.get("m3"))
+    m3_cur = _finite(cur.get("m3"))
+    fills_prev = _finite(prev.get("fills_n")) or 0.0
+    fills_cur = _finite(cur.get("fills_n")) or 0.0
+    if None in (m1_prev, m1_cur, m3_prev, m3_cur):
+        return {
+            "kill": False,
+            "action": "observe",
+            "reason": "incomplete M1/M3 on recent weeks",
+            "weeks_n": len(cards),
+            "auto_revert": False,
+        }
+    m3_up = m3_cur > m3_prev + 1e-12
+    m1_down = m1_cur < m1_prev - 1e-12
+    fills_up = fills_cur >= fills_prev
+    kill = bool(m3_up and m1_down and fills_up)
+    return {
+        "kill": kill,
+        "action": "revert_lever" if kill else "keep",
+        "reason": (
+            "M3↑ with M1↓ over 2 Chicago weeks while fills not down — revert last lever"
+            if kill
+            else "no kill: need M3↑ and M1↓ with fills not down"
+        ),
+        "m1_prev": m1_prev,
+        "m1_cur": m1_cur,
+        "m3_prev": m3_prev,
+        "m3_cur": m3_cur,
+        "fills_prev": int(fills_prev),
+        "fills_cur": int(fills_cur),
+        "weeks_n": len(cards),
+        "labels": [str(prev.get("label") or ""), str(cur.get("label") or "")],
+        "lever": cur.get("lever") or prev.get("lever"),
+        "auto_revert": False,  # flag only; staff/param thrash ban applies
+        "fee_floors_locked": True,
+    }
+
+
+def capture_hillclimb_week(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+    lever: str | None = None,
+    fill_tax: float = 0.01,
+) -> dict:
+    """Snapshot firm M1/M3/fills for the Chicago day and evaluate the kill rule."""
+    day = label or _chicago_day()
+    m1 = firm_taxed_m1(bots, fill_tax=fill_tax)
+    m3 = fit_buy_rate(root)
+    card = {
+        "paper_only": True,
+        "label": day,
+        "captured_at": _now(),
+        "m1": m1.get("expectancy_taxed"),
+        "m1_n": m1.get("n"),
+        "m3": m3.get("rate"),
+        "m3_n_fit": m3.get("n_fit"),
+        "fills_n": m3.get("n_buy"),
+        "lever": (str(lever).strip()[:80] if lever else None),
+        "fee_floors_locked": True,
+    }
+    path = _path(HILLCLIMB_KILL, root)
+    store = _load(path, {"paper_only": True, "weeks": [], "latest": None, "status": None})
+    weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+    weeks = [w for w in weeks if str(w.get("label") or "") != day]
+    weeks.append(card)
+    store["weeks"] = weeks[-52:]
+    store["latest"] = card
+    status = evaluate_hillclimb_kill(store["weeks"])
+    store["status"] = status
+    store["last_at"] = _now()
+    _save(path, store)
+    return {"card": card, "status": status}
+
+
+def hillclimb_kill_status(root: str | None = None) -> dict:
+    store = _load(
+        _path(HILLCLIMB_KILL, root),
+        {"paper_only": True, "weeks": [], "status": None},
+    )
+    status = store.get("status")
+    if not isinstance(status, dict):
+        status = evaluate_hillclimb_kill(
+            [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+        )
+    return {
+        "paper_only": True,
+        "weeks_n": len([w for w in (store.get("weeks") or []) if isinstance(w, dict)]),
+        "latest": store.get("latest") if isinstance(store.get("latest"), dict) else None,
+        "status": status,
+        "kill": bool(status.get("kill")),
+        "action": status.get("action"),
+        "auto_revert": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Hillclimb kill: if M3 rises while M1 falls for 2 Chicago weeks, "
+            "revert the last lever before the next idea. Flag only — no auto param write."
+        ),
+    }
+
+
+def capture_weekly_scorecard(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    label: str | None = None,
+) -> dict:
+    """Persist a Chicago-week firm scorecard (bleed, M1 proxy, Gate A counts)."""
+    cfg = cfg or {}
+    bleed = firm_bleed_ratio(bots)
+    misplaced = capital_misplaced(bots, cfg)
+    gate_a_n = 0
+    for bot in bots or []:
+        if isinstance(bot, dict) and isinstance(bot.get("gate_a"), dict) and bot["gate_a"].get("ready"):
+            gate_a_n += 1
+    card = {
+        "paper_only": True,
+        "label": label or _now()[:10],
+        "captured_at": _now(),
+        "bleed": bleed,
+        "capital_misplaced": misplaced,
+        "gate_a_ready_towers": gate_a_n,
+        "fee_floors_locked": True,
+        "note": "Weekly scorecard for hillclimb kill rule. No profit guarantee.",
+    }
+    path = _path(WEEKLY_SCORECARD, root)
+    store = _load(path, {"paper_only": True, "cards": []})
+    store.setdefault("cards", []).append(card)
+    store["cards"] = store["cards"][-52:]
+    store["latest"] = card
+    _save(path, store)
+    return card
+
+
 # ---- Plan summary for master board -----------------------------------------
 
 def plan_summary(
@@ -642,12 +1116,16 @@ def plan_summary(
             "n": 0, "decision": "reject", "auto_promote": False,
         },
         "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
+        "weekly_scorecard": latest_weekly_scorecard(root),
+        "graduation": graduation_board(root),
+        "hillclimb_kill": hillclimb_kill_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
-            "sports latency + hard-stop shadow",
-            "sports hard-stop promote after n≥30",
-            "INX band research week",
+            "sports hard-stop promote after n≥30 (staff; live still False)",
+            "INX band promote only after research week artifact",
+            "profit-lock harvest paper analog",
+            "skip-regret twin weekly review wire",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -709,6 +1187,54 @@ def self_check() -> None:
         assert summ["n"] >= 1
         assert summ["live"] is False
         assert summ["auto_promote"] is False
+        cool = record_adverse_fill(
+            tmp, bot="btc15m", ticker="T", entry_price=0.80, mark_price=0.70,
+        )
+        assert cool["cooled"] is True
+        assert adverse_cool_blocks(tmp, "btc15m")
+        card = capture_weekly_scorecard(
+            tmp, bots=[{"id": "sports-gap", "today": 2, "gate_a": {"ready": True}}],
+            cfg={"max_open_risk": 100}, label="W-test",
+        )
+        assert card["gate_a_ready_towers"] == 1
+        assert latest_weekly_scorecard(tmp)["label"] == "W-test"
+        assert latest_weekly_scorecard(tmp)["fee_floors_locked"] is True
+        # Graduation: one all-pass week → week_1; two → master (still no auto-promote).
+        all_pass = {
+            "bot": "sports-gap",
+            "passing": {c: True for c in GRADUATION_CODES},
+        }
+        capture_graduation_week(tmp, [all_pass], label="2026-11-02")
+        board1 = graduation_board(tmp)
+        assert board1["towers"]["sports-gap"]["status"] == "week_1"
+        capture_graduation_week(tmp, [all_pass], label="2026-11-03")
+        board2 = graduation_board(tmp)
+        assert board2["towers"]["sports-gap"]["status"] == "master"
+        assert board2["towers"]["sports-gap"]["auto_promote"] is False
+        retire = meme_retirement_clock(
+            {
+                "id": "memecoin",
+                "history": [{"pnl": -2.0, "contracts": 1} for _ in range(12)],
+            }
+        )
+        assert retire["recommend_pause"] is True
+        assert retire["expand_volume"] is False
+        assert retire["retired"] is False
+        # Hillclimb kill: M3↑ M1↓ with fills up → revert flag (no auto write).
+        bots_a = [{"id": "btc15m", "history": [{"pnl": 2.0, "contracts": 1}] * 10}]
+        for _ in range(6):
+            record_fit(tmp, bot="btc15m", outcome="fit")
+            record_fit(tmp, bot="btc15m", outcome="block")
+        capture_hillclimb_week(tmp, bots=bots_a, label="2026-11-01", lever="VOL_SAFE")
+        bots_b = [{"id": "btc15m", "history": [{"pnl": 0.5, "contracts": 1}] * 10}]
+        for _ in range(10):
+            record_fit(tmp, bot="btc15m", outcome="fit")
+            record_fit(tmp, bot="btc15m", outcome="buy")
+        out = capture_hillclimb_week(tmp, bots=bots_b, label="2026-11-08", lever="VOL_SAFE")
+        assert out["status"]["kill"] is True
+        assert out["status"]["action"] == "revert_lever"
+        assert out["status"]["auto_revert"] is False
+        assert hillclimb_kill_status(tmp)["kill"] is True
 
 
 if __name__ == "__main__":

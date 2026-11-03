@@ -629,7 +629,13 @@ def run():
             elif reason is None and not (PRICE_BOUNDS[0] <= ask <= PRICE_BOUNDS[1]):
                 reason = "price too extreme - skip"
             elif reason is None and desk is not None:
-                skip = desk.learning_skip(desk.load_learning(DESK_ROOT), league, desk.prob_bucket(fair))
+                skip = desk.learning_skip(
+                    desk.load_learning(DESK_ROOT),
+                    league,
+                    desk.prob_bucket(fair),
+                    side=side,
+                    hour_ct=datetime.now(CT).hour,
+                )
                 if skip:
                     reason = skip
                     summary_out["skips"].append(skip)
@@ -830,6 +836,21 @@ def run():
                 p.update({"closed": ts, "exit": exit_reason, "exit_price": bid, "payout": proceeds,
                           "pnl": pnl, "fair_at_exit": round(fair, 4)})
                 s["closed"].append(p)
+                # Adverse cool-off when mark dropped hard vs entry ask.
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_roi_plan
+                    desk_roi_plan.record_adverse_fill(
+                        DESK_ROOT,
+                        bot="sports-gap",
+                        ticker=str(p.get("ticker") or ""),
+                        entry_price=p.get("entry_price"),
+                        mark_price=bid,
+                        note=str(exit_reason or "")[:120],
+                    )
+                except Exception:
+                    pass
                 if desk is not None:
                     desk.record_learning(DESK_ROOT, {
                         "result": "hit" if pnl > 0 else "miss",
@@ -916,6 +937,18 @@ def run():
         max_buys_eff = min(max_buys_eff, 2)
     if today_pnl <= -10:
         max_buys_eff = min(max_buys_eff, 1)
+    # Adverse cool-off after fast mark-downs (ROI plan Phase 4).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "sports-gap")
+        if cool:
+            lines.append(f"| {ts} | | | | | | | | {cool} |")
+            summary_out.setdefault("skips", []).append(cool)
+            max_buys_eff = 0
+    except Exception:
+        pass
     for c in buy_candidates:
         key, m, fair, ask, bid, gap = c["key"], c["m"], c["fair"], c["ask"], c["bid"], c["gap"]
         row, gtxt = c["row"], c["gtxt"]

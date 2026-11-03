@@ -6,7 +6,8 @@ import * as THREE from 'three'
 
 const LOOK = new THREE.Vector3(0, 0.4, -0.5)
 const MIN_DIST = 8
-const MAX_DIST = 32
+/** Stay inside the chart walls (they stand at 24). */
+const MAX_DIST = 22
 const MIN_PHI = 0.28
 const MAX_PHI = 1.35
 /** How quickly zoom eases toward the pinch/wheel target. */
@@ -37,9 +38,9 @@ export function CityOrbitCamera() {
 
   const state = useRef({
     theta: Math.PI / 4,
-    phi: 0.82,
-    dist: 21.5,
-    targetDist: 21.5,
+    phi: 1.2,
+    dist: 20,
+    targetDist: 20,
     /** Active pointers (mouse + touch share Pointer Events). */
     pointers: new Map<number, Ptr>(),
     /** One-finger / mouse orbit */
@@ -51,7 +52,7 @@ export function CityOrbitCamera() {
     /** Two-finger pinch */
     pinching: false,
     pinchStartSpan: 0,
-    pinchStartDist: 21.5,
+    pinchStartDist: 20,
     /** Ignore tiny moves so a tap still selects towers. */
     moved: false,
   })
