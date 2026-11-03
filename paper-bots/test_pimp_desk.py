@@ -277,9 +277,11 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(btc["every_sec"], 60)
         self.assertEqual(meme["every_sec"], 180)
         brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")
-        scan = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run")
+        scans = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run"]
         settle = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle")
-        self.assertEqual((brief["at_ct"], scan["at_ct"], settle["at_ct"]), ("08:00", "12:00", "16:00"))
+        self.assertEqual(brief["at_ct"], "08:00")
+        self.assertEqual([s["at_ct"] for s in scans], ["12:05", "13:05", "14:20"])
+        self.assertEqual(settle["at_ct"], "16:00")
         self.assertEqual(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["argv"], ("bot.py", "brief", "--dry-run"))
         self.assertFalse(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["entry"])
         self.assertTrue(pimp_desk.ACTIONS["kalshi-sp"]["run"]["entry"])
@@ -292,27 +294,33 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("stop-bleed", text)
         self.assertIn("dual lanes", text)
         self.assertIn("8:00", text)
-        self.assertIn("12:00", text)
+        self.assertIn("12:05", text)
+        self.assertIn("13:05", text)
+        self.assertIn("14:20", text)
         self.assertIn("dry run", text)
         self.assertNotIn("guarantee", text)
         with tempfile.TemporaryDirectory() as tmp:
             def names(when):
                 return [(s["id"], s["action"], s.get("at_ct")) for s in pimp_desk.due_slots(when, tmp)]
             morning = dt.datetime(2026, 10, 30, 8, 5, tzinfo=pimp_desk.CT)
-            noon = dt.datetime(2026, 10, 30, 12, 30, tzinfo=pimp_desk.CT)
+            noon = dt.datetime(2026, 10, 30, 12, 10, tzinfo=pimp_desk.CT)
+            mid = dt.datetime(2026, 10, 30, 13, 10, tzinfo=pimp_desk.CT)
+            late_slot = dt.datetime(2026, 10, 30, 14, 25, tzinfo=pimp_desk.CT)
             late = dt.datetime(2026, 10, 30, 14, 56, tzinfo=pimp_desk.CT)
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
-            saturday = dt.datetime(2026, 10, 31, 12, 30, tzinfo=pimp_desk.CT)
+            saturday = dt.datetime(2026, 10, 31, 12, 10, tzinfo=pimp_desk.CT)
             self.assertIn(("kalshi-sp", "brief", "08:00"), names(morning))
-            self.assertNotIn(("kalshi-sp", "run", "12:00"), names(morning))
-            self.assertIn(("kalshi-sp", "run", "12:00"), names(noon))
+            self.assertNotIn(("kalshi-sp", "run", "12:05"), names(morning))
+            self.assertIn(("kalshi-sp", "run", "12:05"), names(noon))
+            self.assertIn(("kalshi-sp", "run", "13:05"), names(mid))
+            self.assertIn(("kalshi-sp", "run", "14:20"), names(late_slot))
             self.assertNotIn(("kalshi-sp", "brief", "08:00"), names(noon))
             self.assertIn(("memecoin", "run", None), names(noon))
-            self.assertNotIn(("kalshi-sp", "run", "12:00"), names(late))
+            self.assertNotIn(("kalshi-sp", "run", "12:05"), names(late))
             self.assertEqual([row[0] for row in names(night)],
                              ["sports-gap", "btc15m", "commodity-15m", "memecoin"])
             self.assertNotIn(("kalshi-sized", "settle", "13:00"), names(night))
-            self.assertIn(("kalshi-sp", "run", "12:00"), names(saturday))
+            self.assertIn(("kalshi-sp", "run", "12:05"), names(saturday))
             saturday_scan = dt.datetime(2026, 10, 31, 12, 35, tzinfo=pimp_desk.CT)
             self.assertIn(("kalshi-sized", "run", "12:05"), names(saturday_scan))
         snap = _checkout_snapshot()
@@ -324,7 +332,7 @@ class PimpDeskTests(unittest.TestCase):
     def test_scheduler_once_places_no_orders(self):
         with tempfile.TemporaryDirectory() as tmp:
             _tree(tmp, QUIET)
-            noon = dt.datetime(2026, 10, 30, 12, 30, tzinfo=pimp_desk.CT)
+            noon = dt.datetime(2026, 10, 30, 12, 10, tzinfo=pimp_desk.CT)
             rows = pimp_desk.run_scheduled(noon, tmp)
             by = {(row["bot"], row["action"]): row for row in rows}
             self.assertEqual(set(by), {
@@ -381,7 +389,7 @@ class PimpDeskTests(unittest.TestCase):
                           "cost": 3, "opened": "2026-10-30 12:00:00 CT"}] * pimp_desk.DEFAULTS["max_open_positions"],
                 "closed": [],
             }))
-            noon = dt.datetime(2026, 10, 30, 12, 30, tzinfo=pimp_desk.CT)
+            noon = dt.datetime(2026, 10, 30, 12, 10, tzinfo=pimp_desk.CT)
             rows = pimp_desk.run_scheduled(noon, tmp)
             by = {(row["bot"], row["action"]): row for row in rows}
             # Kalshi scan stays hard-blocked. Sports/BTC/memecoin still run exits
@@ -1226,7 +1234,7 @@ class PimpDeskTests(unittest.TestCase):
             "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
             "min_edge": 0.06,
             "venue_min_edge": {"kalshi_sports": 0.07, "kalshi_btc15m": 0.05,
-                               "kalshi_inx": 0.0, "solana_dex": 0.02},
+                               "kalshi_inx": 0.02, "solana_dex": 0.02},
             "sizing": "kelly_lite",
             "kelly_fraction": 0.25,
         })
@@ -1240,6 +1248,13 @@ class PimpDeskTests(unittest.TestCase):
         })
         self.assertIsNone(bad)
         self.assertIn("Unknown venue", err)
+        soft, soft_err = pimp_desk.parse_settings({
+            "stake_hi_min": 20, "stake_hi_max": 100, "stake_lo_max": 20,
+            "daily_loss_stop": 50, "max_open_risk": 100, "max_open_positions": 4,
+            "venue_min_edge": {"kalshi_btc15m": 0.01},
+        })
+        self.assertIsNone(soft)
+        self.assertIn("locked floor", soft_err)
         small = pimp_desk.kelly_lite_dollars(0.85, 0.04, cfg=cfg, open_risk_used=0, ask=0.75)
         big = pimp_desk.kelly_lite_dollars(0.92, 0.10, cfg=cfg, open_risk_used=0, ask=0.75)
         self.assertGreater(big, small)

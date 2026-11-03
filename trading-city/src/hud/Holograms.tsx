@@ -54,6 +54,14 @@ export function TowerHologram({
         <span className={`holo-pnl tone-${pnlToneClass}`}>
           {offline ? 'offline' : hologramPnl(bot)}
         </span>
+        {!offline && (bot.skip_board?.length ?? 0) > 0 && (
+          <span className="tower-skips">
+            {(bot.skip_board || [])
+              .slice(0, 3)
+              .map((s) => `${s.code}×${s.n}`)
+              .join(' · ')}
+          </span>
+        )}
       </button>
     </Html>
   )

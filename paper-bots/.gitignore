@@ -25,6 +25,8 @@ desk_phase2_state.json
 desk_phase3_state.json
 desk_adapt_ab_ledger.json
 helpers/ff_calendar_cache.json
+helpers/calendar_digest.json
+helpers/calendar_scanner_at.txt
 btc15m-signal/paper_parlays.json
 commodity-15m-paper/paper_account.json
 *.tmp

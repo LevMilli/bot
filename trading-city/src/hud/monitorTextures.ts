@@ -279,36 +279,36 @@ export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
 /** Left lobby — live desk ledger / teller cash (logical size × TEXTURE_SCALE). */
 export function vaultLedgerTexture(desk?: Desk, bots: BotRow[] = []): THREE.CanvasTexture {
   // Large logical canvas → 4× backing store so glyphs stay sharp at lobby distance.
-  const { canvas, ctx, w, h } = makeCanvas(1100, 820)
+  const { canvas, ctx, w, h } = makeCanvas(1200, 900)
   paintBase(ctx, w, h)
   ctx.fillStyle = '#f9c80e'
-  ctx.font = 'bold 64px monospace'
-  ctx.fillText('DESK LEDGER', 36, 72)
+  ctx.font = 'bold 78px monospace'
+  ctx.fillText('DESK LEDGER', 40, 88)
   ctx.fillStyle = '#7ef9ff'
-  ctx.font = 'bold 44px monospace'
-  ctx.fillText(`vault cash ${money(desk?.cash)}`, 36, 138)
+  ctx.font = 'bold 52px monospace'
+  ctx.fillText(`vault cash ${money(desk?.cash)}`, 40, 168)
   ctx.fillStyle = '#e8eefc'
-  ctx.font = 'bold 30px monospace'
-  ctx.fillText(`open risk ${money(desk?.open_risk)} · positions ${desk?.open_count ?? 0}`, 36, 184)
+  ctx.font = 'bold 36px monospace'
+  ctx.fillText(`open risk ${money(desk?.open_risk)} · positions ${desk?.open_count ?? 0}`, 40, 224)
 
-  let y = 250
+  let y = 300
   for (const bot of bots.slice(0, 5)) {
     const offline = bot.present === false
     ctx.fillStyle = offline ? '#9a88aa' : '#ffffff'
-    ctx.font = 'bold 40px monospace'
-    ctx.fillText(String(bot.name || bot.id).slice(0, 18), 36, y)
+    ctx.font = 'bold 48px monospace'
+    ctx.fillText(String(bot.name || bot.id).slice(0, 18), 40, y)
     ctx.fillStyle = offline ? '#9a88aa' : Number(bot.today || 0) >= 0 ? '#39ff14' : '#ff2a6d'
-    ctx.font = 'bold 40px monospace'
+    ctx.font = 'bold 48px monospace'
     const figure = offline ? 'offline' : money(bot.today != null && bot.today !== 0 ? bot.today : bot.realized, true)
-    ctx.fillText(figure, w - 36 - ctx.measureText(figure).width, y)
-    y += 72
+    ctx.fillText(figure, w - 40 - ctx.measureText(figure).width, y)
+    y += 82
     ctx.fillStyle = '#4a5568'
-    ctx.fillRect(36, y - 48, w - 72, 3)
+    ctx.fillRect(40, y - 54, w - 80, 3)
   }
 
   ctx.fillStyle = '#7ef9ff'
-  ctx.font = 'bold 28px monospace'
-  wrapText(ctx, desk?.status_line || desk?.pace_line || 'Paper reserve synced to snapshot.', 36, h - 56, w - 72, 32, 2)
+  ctx.font = 'bold 32px monospace'
+  wrapText(ctx, desk?.status_line || desk?.pace_line || 'Paper reserve synced to snapshot.', 40, h - 64, w - 80, 36, 2)
 
   return screenTexture(canvas)
 }
@@ -357,52 +357,52 @@ export function tellerPlateTexture(
 
 /** Right lobby — ROI / paper compliance (logical size × TEXTURE_SCALE). */
 export function vaultComplianceTexture(desk?: Desk, bots: BotRow[] = []): THREE.CanvasTexture {
-  const { canvas, ctx, w, h } = makeCanvas(1100, 820)
+  const { canvas, ctx, w, h } = makeCanvas(1200, 900)
   paintBase(ctx, w, h)
   ctx.fillStyle = '#39ff14'
-  ctx.font = 'bold 64px monospace'
-  ctx.fillText('COMPLIANCE BAY', 36, 72)
+  ctx.font = 'bold 78px monospace'
+  ctx.fillText('COMPLIANCE BAY', 40, 88)
 
   const roiOk = desk?.ops?.roi_ok
   ctx.fillStyle = roiOk === false ? '#ff2a6d' : '#39ff14'
-  ctx.font = 'bold 42px monospace'
-  ctx.fillText(roiOk === false ? 'ROI SYSTEM · gaps' : 'ROI SYSTEM · compliance ok', 36, 138)
+  ctx.font = 'bold 50px monospace'
+  ctx.fillText(roiOk === false ? 'ROI SYSTEM · gaps' : 'ROI SYSTEM · compliance ok', 40, 168)
 
   ctx.fillStyle = '#f9c80e'
-  ctx.font = 'bold 30px monospace'
-  ctx.fillText('PAPER ONLY · no wallet · no live orders', 36, 186)
+  ctx.font = 'bold 36px monospace'
+  ctx.fillText('PAPER ONLY · no wallet · no live orders', 40, 226)
 
   ctx.fillStyle = '#e8eefc'
-  ctx.font = 'bold 30px monospace'
+  ctx.font = 'bold 36px monospace'
   const gated = desk?.ops?.entry_gated_bots?.length ?? 0
   const strong = desk?.ops?.strong_exits?.length ?? 0
   const weak = desk?.ops?.weak_exits?.length ?? 0
-  ctx.fillText(`entry gated ${gated} · strong exits ${strong} · weak ${weak}`, 36, 230)
+  ctx.fillText(`entry gated ${gated} · strong exits ${strong} · weak ${weak}`, 40, 280)
 
-  let y = 300
+  let y = 360
   for (const bot of bots.slice(0, 5)) {
     const offline = bot.present === false
     const exit = bot.plans?.exit_quality || '—'
     ctx.fillStyle = offline ? '#9a88aa' : '#ffffff'
-    ctx.font = 'bold 36px monospace'
-    ctx.fillText(String(bot.id).slice(0, 14), 36, y)
+    ctx.font = 'bold 44px monospace'
+    ctx.fillText(String(bot.id).slice(0, 14), 40, y)
     ctx.fillStyle = exit === 'strong' ? '#39ff14' : exit === 'weak' ? '#ff2a6d' : '#f9c80e'
-    ctx.font = 'bold 36px monospace'
-    ctx.fillText(String(exit), 340, y)
+    ctx.font = 'bold 44px monospace'
+    ctx.fillText(String(exit), 380, y)
     ctx.fillStyle = bot.plans?.entry_gated ? '#ff2a6d' : '#2de2e6'
-    ctx.fillText(bot.plans?.entry_gated ? 'gated' : 'open', 540, y)
-    y += 64
+    ctx.fillText(bot.plans?.entry_gated ? 'gated' : 'open', 600, y)
+    y += 74
   }
 
   ctx.fillStyle = '#7ef9ff'
-  ctx.font = 'bold 28px monospace'
+  ctx.font = 'bold 32px monospace'
   wrapText(
     ctx,
     desk?.gate || 'Desk gates live from snapshot — vault does not invent fills.',
+    40,
+    h - 64,
+    w - 80,
     36,
-    h - 56,
-    w - 72,
-    32,
     2,
   )
 

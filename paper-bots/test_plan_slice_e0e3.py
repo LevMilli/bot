@@ -70,8 +70,8 @@ class PlanSliceTests(unittest.TestCase):
     def test_next_inx_scan_heartbeat(self):
         morning = datetime(2026, 11, 2, 9, 30, tzinfo=CT)
         line = pimp_desk.next_inx_scan_line("kalshi-sp", morning)
-        self.assertIn("12:00", line)
-        noon = datetime(2026, 11, 2, 13, 0, tzinfo=CT)
+        self.assertIn("12:05", line)
+        noon = datetime(2026, 11, 2, 13, 10, tzinfo=CT)
         mid = pimp_desk.next_inx_scan_line("kalshi-sp", noon)
         self.assertIn("until", mid.lower())
 
