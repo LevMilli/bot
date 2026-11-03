@@ -171,6 +171,7 @@ SETTLEMENT_FILES = (
     "desk_top25_state.json",
     "desk_maker_taker_study.json",
     "desk_phase2_state.json",
+    "desk_phase3_state.json",
     "desk_adapt_ab_ledger.json",
     "btc15m-signal/paper_parlays.json",
     "pimp-learning.json",
@@ -2342,6 +2343,11 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["phase2"] = desk_phase2.phase2_summary(root)
     except Exception as exc:  # noqa: BLE001
         desk_row["phase2"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_phase3
+        desk_row["phase3"] = desk_phase3.phase3_summary(root)
+    except Exception as exc:  # noqa: BLE001
+        desk_row["phase3"] = {"paper_only": True, "error": type(exc).__name__}
     # Gate A live-readiness + prove-it drawer + fill-tax board honesty.
     tax = float(cfg.get("fill_adverse_tax") if cfg.get("fill_adverse_tax") is not None else desk_profit.FILL_ADVERSE_TAX)
     try:
@@ -2457,6 +2463,10 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             ),
             "gate_b": "Gate B = peak-to-trough drawdown within bound with enough settles — readiness only.",
             "top25": "Top-25 shortlist hooks: skip-regret, budgets, watchdog, playbooks, doctor.",
+            "phase3": (
+                "Phase 3 expansion: KXBTCD ladder companion scoring + paper parlay "
+                "joint EV with same-direction crypto correlation haircut."
+            ),
             "master": (
                 "Trading Masters scoreboard (M1–M7): taxed EV vs volume. "
                 "Stub — no profit guarantee; fee floors unchanged."
