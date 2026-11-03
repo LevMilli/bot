@@ -465,6 +465,7 @@ def _card_line(summary_out):
 
 
 def run():
+    t0 = time.perf_counter()
     existed = os.path.exists(STATE)
     s = load_state()
     if not existed:
@@ -628,7 +629,13 @@ def run():
             elif reason is None and not (PRICE_BOUNDS[0] <= ask <= PRICE_BOUNDS[1]):
                 reason = "price too extreme - skip"
             elif reason is None and desk is not None:
-                skip = desk.learning_skip(desk.load_learning(DESK_ROOT), league, desk.prob_bucket(fair))
+                skip = desk.learning_skip(
+                    desk.load_learning(DESK_ROOT),
+                    league,
+                    desk.prob_bucket(fair),
+                    side=side,
+                    hour_ct=datetime.now(CT).hour,
+                )
                 if skip:
                     reason = skip
                     summary_out["skips"].append(skip)
@@ -705,6 +712,39 @@ def run():
             fair = info["fair_home"] if p["side"] == "home" else 1 - info["fair_home"]
             bid = px(m, "yes_bid_dollars")
             exit_reason = None
+            # Hard-stop shadow: log would-have stops; live sell stays off until promote.
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                hs = desk_roi_plan.sports_hard_stop_hit(
+                    p.get("entry_price"), bid,
+                )
+                if hs.get("hit") and not p.get("hard_stop_shadowed"):
+                    desk_roi_plan.record_sports_hard_stop_shadow(
+                        DESK_ROOT,
+                        ticker=str(p.get("ticker") or ""),
+                        side=str(p.get("side") or ""),
+                        league=str(p.get("league") or ""),
+                        entry_price=p.get("entry_price"),
+                        bid=bid,
+                        fair=fair,
+                        contracts=p.get("contracts"),
+                        cost=p.get("cost"),
+                        note="shadow hard-stop — no live sell",
+                    )
+                    p["hard_stop_shadowed"] = True
+                    summary_out.setdefault("hard_stop_shadow", []).append(
+                        f"SHADOW STOP {p.get('ticker')} bid {bid}"
+                    )
+                    # Live hard-stop only after staff promote file (code default False).
+                    if desk_roi_plan.sports_hard_stop_is_live(DESK_ROOT):
+                        exit_reason = (
+                            f"hard-stop bid {float(bid):.2f} ≤ "
+                            f"{hs.get('threshold')}"
+                        )
+            except Exception:
+                pass
             # Phase 2: gap-decay — tip edge that died mid-game frees risk.
             try:
                 if DESK_ROOT not in sys.path:
@@ -796,6 +836,30 @@ def run():
                 p.update({"closed": ts, "exit": exit_reason, "exit_price": bid, "payout": proceeds,
                           "pnl": pnl, "fair_at_exit": round(fair, 4)})
                 s["closed"].append(p)
+                # Adverse cool-off when mark dropped hard vs entry ask.
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_roi_plan
+                    desk_roi_plan.record_adverse_fill(
+                        DESK_ROOT,
+                        bot="sports-gap",
+                        ticker=str(p.get("ticker") or ""),
+                        entry_price=p.get("entry_price"),
+                        mark_price=bid,
+                        note=str(exit_reason or "")[:120],
+                    )
+                    why = str(exit_reason or "").lower()
+                    if any(k in why for k in ("hard-stop", "model-flip", "stop", "gap-decay")):
+                        desk_roi_plan.record_anti_revenge(
+                            DESK_ROOT,
+                            bot="sports-gap",
+                            ticker=str(p.get("ticker") or ""),
+                            reason=str(exit_reason or "stop")[:80],
+                            note=str(exit_reason or "")[:120],
+                        )
+                except Exception:
+                    pass
                 if desk is not None:
                     desk.record_learning(DESK_ROOT, {
                         "result": "hit" if pnl > 0 else "miss",
@@ -882,6 +946,23 @@ def run():
         max_buys_eff = min(max_buys_eff, 2)
     if today_pnl <= -10:
         max_buys_eff = min(max_buys_eff, 1)
+    # Adverse cool-off after fast mark-downs (ROI plan Phase 4).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "sports-gap")
+        if cool:
+            lines.append(f"| {ts} | | | | | | | | {cool} |")
+            summary_out.setdefault("skips", []).append(cool)
+            max_buys_eff = 0
+        r_block = desk_roi_plan.daily_r_blocks("sports-gap", today_pnl)
+        if r_block:
+            lines.append(f"| {ts} | | | | | | | | {r_block} |")
+            summary_out.setdefault("skips", []).append(r_block)
+            max_buys_eff = 0
+    except Exception:
+        pass
     for c in buy_candidates:
         key, m, fair, ask, bid, gap = c["key"], c["m"], c["fair"], c["ask"], c["bid"], c["gap"]
         row, gtxt = c["row"], c["gtxt"]
@@ -900,6 +981,18 @@ def run():
                 blocked = desk.correlation_blocks(DESK_ROOT, "sports-gap", c["side"], gap)
                 if blocked:
                     reason = blocked
+            except Exception:
+                pass
+        if reason is None:
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                revenge = desk_roi_plan.anti_revenge_blocks(
+                    DESK_ROOT, "sports-gap", str(m.get("ticker") or ""),
+                )
+                if revenge:
+                    reason = revenge
             except Exception:
                 pass
         spread = None
@@ -937,6 +1030,17 @@ def run():
                     )
                 except Exception:
                     pass
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                desk_roi_plan.record_fit(
+                    DESK_ROOT, bot="sports-gap", outcome="block",
+                    ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
+                    edge=gap, note=str(reason)[:160],
+                )
+            except Exception:
+                pass
             continue
         s["cash"] = round(s["cash"] - cost, 2)
         max_payout = round(n * 1.0, 2)
@@ -983,6 +1087,17 @@ def run():
                 )
             except Exception:
                 pass
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan
+            desk_roi_plan.record_fit(
+                DESK_ROOT, bot="sports-gap", outcome="buy",
+                ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
+                edge=gap,
+            )
+        except Exception:
+            pass
 
     equity_open = sum(p["cost"] for p in s["open"])
     realized = round(sum(p["pnl"] for p in s["closed"]), 2)
@@ -994,6 +1109,16 @@ def run():
         {"cash": s.get("cash"), "open": s.get("open"), "closed": s.get("closed")},
         sort_keys=True, default=str)
     summary_out.update({"cash": s["cash"], "open": [f"{p['contracts']}x {p['ticker']} @ {p['entry_price']}" for p in s["open"]], "realized_pnl": realized})
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="sports-gap", seconds=time.perf_counter() - t0,
+            note="sports-gap check",
+        )
+    except Exception:
+        pass
     print(_card_line(summary_out))
     if before_book == after_book:
         print(json.dumps(summary_out, indent=2))

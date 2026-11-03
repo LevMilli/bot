@@ -5,8 +5,9 @@ import type { PerspectiveCamera as Cam } from 'three'
 import * as THREE from 'three'
 
 const LOOK = new THREE.Vector3(0, 0.4, -0.5)
-const MIN_DIST = 8
-const MAX_DIST = 32
+/** Close enough to read a tower face, far enough to see the wall charts and tower tops. */
+const MIN_DIST = 3.5
+const MAX_DIST = 64
 const MIN_PHI = 0.28
 const MAX_PHI = 1.35
 /** How quickly zoom eases toward the pinch/wheel target. */
@@ -37,9 +38,9 @@ export function CityOrbitCamera() {
 
   const state = useRef({
     theta: Math.PI / 4,
-    phi: 0.82,
-    dist: 21.5,
-    targetDist: 21.5,
+    phi: 1.2,
+    dist: 20,
+    targetDist: 20,
     /** Active pointers (mouse + touch share Pointer Events). */
     pointers: new Map<number, Ptr>(),
     /** One-finger / mouse orbit */
@@ -51,7 +52,7 @@ export function CityOrbitCamera() {
     /** Two-finger pinch */
     pinching: false,
     pinchStartSpan: 0,
-    pinchStartDist: 21.5,
+    pinchStartDist: 20,
     /** Ignore tiny moves so a tap still selects towers. */
     moved: false,
   })
@@ -165,7 +166,7 @@ export function CityOrbitCamera() {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const st = s()
-      st.targetDist = clamp(st.targetDist + e.deltaY * 0.022, MIN_DIST, MAX_DIST)
+      st.targetDist = clamp(st.targetDist + e.deltaY * 0.05, MIN_DIST, MAX_DIST)
     }
 
     // Block browser page-zoom / scroll gestures on the canvas.
@@ -216,6 +217,6 @@ export function CityOrbitCamera() {
   })
 
   return (
-    <PerspectiveCamera ref={cam} makeDefault fov={42} near={0.1} far={200} position={[0, 17, 15]} />
+    <PerspectiveCamera ref={cam} makeDefault fov={42} near={0.08} far={360} position={[0, 17, 15]} />
   )
 }
