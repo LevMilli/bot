@@ -24,6 +24,7 @@ ADVERSE_COOL_NAME = "desk_adverse_cool.json"
 WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 MASTER_GRAD = "desk_master_grad.json"
 HILLCLIMB_KILL = "desk_hillclimb_kill.json"
+PROFIT_LOCK = "desk_profit_lock.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -43,6 +44,10 @@ MEME_RETIRE_MIN_N = 10
 
 # Phase 11: hillclimb kill — M3↑ with M1↓ for 2 Chicago weeks → revert lever.
 HILLCLIMB_KILL_WEEKS = 2
+
+# Phase 10: profit-lock harvest paper analog — hit weekly target → 0.5× size.
+PROFIT_LOCK_TARGET_USD = 40.0
+PROFIT_LOCK_SIZE_MULT = 0.5
 
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
@@ -1060,6 +1065,160 @@ def hillclimb_kill_status(root: str | None = None) -> dict:
     }
 
 
+# ---- Profit-lock harvest (Phase 10 paper analog) ---------------------------
+
+def _chicago_week_id(day: str | None = None) -> str:
+    """ISO week id in America/Chicago (YYYY-Www)."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        if day:
+            now = datetime.strptime(str(day)[:10], "%Y-%m-%d").replace(
+                tzinfo=ZoneInfo("America/Chicago")
+            )
+        else:
+            now = datetime.now(ZoneInfo("America/Chicago"))
+        iso = now.isocalendar()
+        return f"{iso.year}-W{iso.week:02d}"
+    except Exception:
+        return time.strftime("%Y-W%W", time.gmtime())
+
+
+def firm_today_pnl(bots: list | None = None) -> dict:
+    total = 0.0
+    n = 0
+    by = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        today = _finite(bot.get("today"))
+        if today is None:
+            continue
+        bot_id = str(bot.get("id") or "")
+        total += today
+        n += 1
+        by.append({"bot": bot_id, "today": round(today, 2)})
+    return {
+        "paper_only": True,
+        "firm_today": round(total, 2),
+        "towers_n": n,
+        "by_tower": by,
+    }
+
+
+def capture_profit_lock(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+    target_usd: float = PROFIT_LOCK_TARGET_USD,
+) -> dict:
+    """Accumulate Chicago-week firm today PnL; lock to 0.5× size after target."""
+    day = label or _chicago_day()
+    week_id = _chicago_week_id(day)
+    snap = firm_today_pnl(bots)
+    path = _path(PROFIT_LOCK, root)
+    store = _load(
+        path,
+        {
+            "paper_only": True,
+            "weeks": {},
+            "latest": None,
+            "target_usd": float(target_usd),
+        },
+    )
+    weeks = store.get("weeks") if isinstance(store.get("weeks"), dict) else {}
+    week = weeks.get(week_id) if isinstance(weeks.get(week_id), dict) else {
+        "week": week_id, "days": {}, "locked": False,
+    }
+    days = week.get("days") if isinstance(week.get("days"), dict) else {}
+    days[day] = {
+        "firm_today": snap.get("firm_today"),
+        "captured_at": _now(),
+        "by_tower": snap.get("by_tower"),
+    }
+    week_pnl = round(
+        sum(
+            float(v.get("firm_today") or 0)
+            for v in days.values()
+            if isinstance(v, dict)
+        ),
+        2,
+    )
+    target = float(target_usd)
+    locked = week_pnl + 1e-12 >= target
+    status = {
+        "paper_only": True,
+        "week": week_id,
+        "label": day,
+        "week_pnl": week_pnl,
+        "target_usd": target,
+        "days_n": len(days),
+        "safe_mode": locked,
+        "size_mult": PROFIT_LOCK_SIZE_MULT if locked else 1.0,
+        "harvest_pct": 50 if locked else 0,
+        "fee_floors_locked": True,
+        "note": (
+            f"Profit-lock harvest: Chicago week PnL ≥ ${target:.0f} → "
+            f"{PROFIT_LOCK_SIZE_MULT}× size (paper safe-mode). Habit for live."
+        ),
+    }
+    week["days"] = days
+    week["week_pnl"] = week_pnl
+    week["locked"] = locked
+    week["status"] = status
+    weeks[week_id] = week
+    # Keep last ~12 weeks.
+    if len(weeks) > 12:
+        for old in sorted(weeks.keys())[:-12]:
+            weeks.pop(old, None)
+    store["weeks"] = weeks
+    store["latest"] = status
+    store["target_usd"] = target
+    store["last_at"] = _now()
+    _save(path, store)
+    return status
+
+
+def profit_lock_status(root: str | None = None) -> dict:
+    store = _load(
+        _path(PROFIT_LOCK, root),
+        {"paper_only": True, "latest": None, "target_usd": PROFIT_LOCK_TARGET_USD},
+    )
+    latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    if latest is None:
+        latest = {
+            "paper_only": True,
+            "week": _chicago_week_id(),
+            "week_pnl": 0.0,
+            "target_usd": float(store.get("target_usd") or PROFIT_LOCK_TARGET_USD),
+            "safe_mode": False,
+            "size_mult": 1.0,
+            "harvest_pct": 0,
+            "fee_floors_locked": True,
+            "note": "No profit-lock capture yet this Chicago week.",
+        }
+    return {
+        "paper_only": True,
+        "latest": latest,
+        "safe_mode": bool(latest.get("safe_mode")),
+        "size_mult": float(latest.get("size_mult") or 1.0),
+        "week_pnl": latest.get("week_pnl"),
+        "target_usd": latest.get("target_usd"),
+        "fee_floors_locked": True,
+        "note": latest.get("note"),
+    }
+
+
+def profit_lock_size_mult(root: str | None = None) -> float:
+    """Stake multiplier for bots: 0.5 in safe-mode after weekly target, else 1.0."""
+    status = profit_lock_status(root)
+    mult = _finite(status.get("size_mult"))
+    if mult is None or mult <= 0:
+        return 1.0
+    return float(mult)
+
+
 def capture_weekly_scorecard(
     root: str | None,
     *,
@@ -1119,13 +1278,14 @@ def plan_summary(
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root),
         "hillclimb_kill": hillclimb_kill_status(root),
+        "profit_lock": profit_lock_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
         "next_tickets": [
             "sports hard-stop promote after n≥30 (staff; live still False)",
             "INX band promote only after research week artifact",
-            "profit-lock harvest paper analog",
             "skip-regret twin weekly review wire",
+            "wire profit_lock_size_mult into tower kelly paths",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
@@ -1235,6 +1395,19 @@ def self_check() -> None:
         assert out["status"]["action"] == "revert_lever"
         assert out["status"]["auto_revert"] is False
         assert hillclimb_kill_status(tmp)["kill"] is True
+        # Profit-lock: week PnL ≥ target → 0.5× size safe-mode.
+        lock = capture_profit_lock(
+            tmp,
+            bots=[
+                {"id": "sports-gap", "today": 25.0},
+                {"id": "btc15m", "today": 20.0},
+            ],
+            label="2026-11-03",
+            target_usd=40.0,
+        )
+        assert lock["safe_mode"] is True
+        assert lock["size_mult"] == 0.5
+        assert profit_lock_size_mult(tmp) == 0.5
 
 
 if __name__ == "__main__":
