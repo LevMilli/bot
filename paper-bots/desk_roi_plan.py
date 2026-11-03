@@ -38,6 +38,7 @@ HELPER_PROMOTE_NAME = "desk_helper_promote.json"
 COLD_HARVEST_NAME = "desk_cold_harvest.json"
 HILLCLIMB_LEVER_NAME = "desk_hillclimb_lever.json"
 DUAL_CONTROL_NAME = "desk_dual_control.json"
+CAPITAL_OS_NAME = "desk_capital_os.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -142,6 +143,12 @@ MAX_HELPER_FILL_ROWS = 4000
 COLD_HARVEST_PCT_DEFAULT = 0.40
 COLD_HARVEST_PCT_MIN = 0.30
 COLD_HARVEST_PCT_MAX = 0.50
+
+# Phase 2: capital allocation OS — barbell + midday util / zero-buy alerts.
+BARBELL_MEME_MAX = 0.15          # ≤15% desk risk to meme sleeve
+BARBELL_FEE_CLEAR_MIN = 0.70     # ≥70% of open risk in fee-clear towers
+MIDDAY_UTIL_ALERT_LT = 0.20      # util below this + EDGE-only skips → starvation alert
+ZERO_BUY_ALERT_HOURS = 6.0       # weekday fee-clear quiet with BUDGET skips
 
 # Phase 9: dual-control live checklist — paper stub; never enables live orders.
 LIVE_ORDERS_ENABLED = False  # hard lock — stub cannot arm create-order
@@ -442,6 +449,254 @@ def capital_misplaced(bots: list | None = None, cfg: dict | None = None) -> dict
         "rows": rows[:20],
         "note": "Misplaced = open risk on towers with today < 0. Recycle toward fee-clear.",
     }
+
+
+# ---- Phase 2 capital OS (barbell + util / zero-buy alerts) -----------------
+
+def barbell_status(bots: list | None = None, cfg: dict | None = None) -> dict:
+    """Audit open-risk barbell: meme ≤15% of desk cap; fee-clear ≥70% of open."""
+    cfg = cfg or {}
+    desk_cap = _finite(cfg.get("max_open_risk")) or 100.0
+    meme_risk = 0.0
+    fee_clear_risk = 0.0
+    total_open = 0.0
+    by = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        risk = float(_finite(bot.get("open_risk")) or 0.0)
+        if risk <= 0:
+            continue
+        total_open += risk
+        if bot_id == "memecoin":
+            meme_risk += risk
+        if bot_id in FEE_CLEAR:
+            fee_clear_risk += risk
+        by.append({"bot": bot_id, "open_risk": round(risk, 2)})
+    meme_of_cap = round(meme_risk / desk_cap, 4) if desk_cap else None
+    fee_of_open = (
+        round(fee_clear_risk / total_open, 4) if total_open > 1e-9 else None
+    )
+    meme_ok = meme_of_cap is None or meme_of_cap <= BARBELL_MEME_MAX + 1e-12
+    # Idle desk (no open) passes fee-clear share; once risk is on, need ≥70% fee-clear.
+    fee_ok = fee_of_open is None or fee_of_open + 1e-12 >= BARBELL_FEE_CLEAR_MIN
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "desk_cap": desk_cap,
+        "total_open": round(total_open, 2),
+        "meme_risk": round(meme_risk, 2),
+        "fee_clear_risk": round(fee_clear_risk, 2),
+        "meme_of_cap": meme_of_cap,
+        "fee_clear_of_open": fee_of_open,
+        "meme_max": BARBELL_MEME_MAX,
+        "fee_clear_min": BARBELL_FEE_CLEAR_MIN,
+        "meme_ok": meme_ok,
+        "fee_clear_ok": fee_ok,
+        "pass": bool(meme_ok and fee_ok),
+        "by_tower": by[:12],
+        "note": (
+            f"Barbell: meme ≤{BARBELL_MEME_MAX:.0%} of desk cap; "
+            f"fee-clear ≥{BARBELL_FEE_CLEAR_MIN:.0%} of open risk when deployed."
+        ),
+    }
+
+
+def midday_util_alert(
+    desk_util=None,
+    *,
+    skip_board: dict | None = None,
+) -> dict:
+    """Alert when util <20% and skip board is EDGE-heavy (true starvation).
+
+    DATA/NEWS/WEEKEND dominant → correct idle (no alert).
+    """
+    util = _finite(desk_util)
+    board = skip_board if isinstance(skip_board, dict) else {}
+    stable = board.get("stable_top") if isinstance(board.get("stable_top"), list) else []
+    top_codes = [
+        str(r.get("code") or "").upper()
+        for r in stable[:3]
+        if isinstance(r, dict)
+    ]
+    idle_ok = any(c in ("DATA", "NEWS", "WEEKEND", "CAL") for c in top_codes)
+    edge_heavy = bool(top_codes) and top_codes[0] == "EDGE"
+    alert = bool(
+        util is not None
+        and util + 1e-12 < MIDDAY_UTIL_ALERT_LT
+        and edge_heavy
+        and not idle_ok
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "desk_util": util,
+        "bar_lt": MIDDAY_UTIL_ALERT_LT,
+        "top_codes": top_codes,
+        "edge_heavy": edge_heavy,
+        "correct_idle": idle_ok and util is not None and util < MIDDAY_UTIL_ALERT_LT,
+        "alert": alert,
+        "note": (
+            "Low util + EDGE-only skips → capital starvation alert. "
+            "DATA/NEWS/WEEKEND idle is correct."
+            if alert
+            else "No midday starvation alert."
+        ),
+    }
+
+
+def _hours_since_iso(stamp: str | None) -> float | None:
+    if not stamp:
+        return None
+    try:
+        from datetime import datetime, timezone
+        text = str(stamp).replace("Z", "+00:00")
+        when = datetime.fromisoformat(text)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        return max(0.0, (now - when).total_seconds() / 3600.0)
+    except Exception:
+        return None
+
+
+def zero_buy_alert(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    skip_board: dict | None = None,
+    hours: float = ZERO_BUY_ALERT_HOURS,
+) -> dict:
+    """Weekday alert: fee-clear quiet ≥6h while BUDGET skips dominate.
+
+    Uses fit-journal last buy for fee-clear towers. Not an alert on WEEKEND.
+    """
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now_ct = datetime.now(ZoneInfo("America/Chicago"))
+        weekday = now_ct.weekday()  # Mon=0 … Sun=6
+    except Exception:
+        weekday = time.gmtime().tm_wday
+    is_weekend = weekday >= 5
+    state = load_fit(root)
+    last_buy_at = None
+    for r in state.get("rows") or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("outcome") or "") != "buy":
+            continue
+        if str(r.get("bot") or "") not in FEE_CLEAR:
+            continue
+        at = str(r.get("at") or "")
+        if at and (last_buy_at is None or at > last_buy_at):
+            last_buy_at = at
+    age_h = _hours_since_iso(last_buy_at)
+    board = skip_board if isinstance(skip_board, dict) else {}
+    stable = board.get("stable_top") if isinstance(board.get("stable_top"), list) else []
+    top = [
+        str(r.get("code") or "").upper()
+        for r in stable[:5]
+        if isinstance(r, dict)
+    ]
+    budget_heavy = "BUDGET" in top[:2]
+    quiet = age_h is None or age_h + 1e-12 >= float(hours)
+    alert = bool(not is_weekend and quiet and budget_heavy)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "is_weekend": is_weekend,
+        "last_fee_clear_buy_at": last_buy_at,
+        "hours_since_buy": round(age_h, 2) if age_h is not None else None,
+        "bar_hours": float(hours),
+        "budget_heavy": budget_heavy,
+        "top_codes": top,
+        "alert": alert,
+        "note": (
+            f"Zero-buy alert: ≥{hours:.0f}h weekday quiet on fee-clear with BUDGET skips."
+            if alert
+            else "No zero-buy capital alert."
+        ),
+    }
+
+
+def capital_os_status(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    desk_util=None,
+) -> dict:
+    """Masters board: barbell + midday util + zero-buy capital alerts."""
+    skip_board = None
+    try:
+        import desk_more
+        skip_board = desk_more.skip_leaderboard(root)
+    except Exception:
+        skip_board = None
+    barbell = barbell_status(bots, cfg)
+    util = desk_util
+    if util is None and bots and cfg:
+        desk_open = sum(float(_finite(b.get("open_risk")) or 0) for b in bots if isinstance(b, dict))
+        cap = _finite(cfg.get("max_open_risk")) or 100.0
+        util = round(desk_open / cap, 4) if cap else None
+    midday = midday_util_alert(util, skip_board=skip_board)
+    zero = zero_buy_alert(root, bots=bots, skip_board=skip_board)
+    alerts = []
+    if midday.get("alert"):
+        alerts.append("midday_util")
+    if zero.get("alert"):
+        alerts.append("zero_buy")
+    if not barbell.get("pass"):
+        alerts.append("barbell")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "barbell": barbell,
+        "midday_util": midday,
+        "zero_buy": zero,
+        "alerts": alerts,
+        "ok": len(alerts) == 0,
+        "note": (
+            "Phase 2 capital OS. Starve losers → feed fee-clear; "
+            "never raise meme budget to use margin."
+        ),
+    }
+
+
+def capture_capital_os(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    desk_util=None,
+    label: str | None = None,
+) -> dict:
+    """Persist today's capital OS snapshot for staff review."""
+    day = label or _chicago_day()
+    status = capital_os_status(root, bots=bots, cfg=cfg, desk_util=desk_util)
+    row = {
+        **status,
+        "label": day,
+        "captured_at": _now(),
+    }
+    path = _path(CAPITAL_OS_NAME, root)
+    store = _load(path, {"paper_only": True, "days": [], "latest": None})
+    days = [d for d in (store.get("days") or []) if isinstance(d, dict)]
+    days = [d for d in days if str(d.get("label") or "") != day]
+    days.append(row)
+    store["days"] = days[-60:]
+    store["latest"] = row
+    store["last_at"] = _now()
+    _save(path, store)
+    return row
+
+
+def latest_capital_os(root: str | None = None) -> dict | None:
+    store = _load(_path(CAPITAL_OS_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
 
 
 # ---- W0 baseline -----------------------------------------------------------
@@ -3172,9 +3427,13 @@ def plan_summary(
         "hillclimb_lever": hillclimb_lever_status(root),
         "dual_control": dual_control_status(root),
         "quarterly_rebaseline": quarterly_rebaseline_status(root),
+        "capital_os": capital_os_status(root, bots=bots, cfg=cfg),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
-        "next_tickets": [],
+        "next_tickets": [
+            "idea review cadence 90d",
+            "opportunity-cost clock (>90s)",
+        ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
 
@@ -3438,6 +3697,26 @@ def self_check() -> None:
         )
         assert qb["quarterly"] is True
         assert quarterly_rebaseline_status(tmp)["has_quarterly"] is True
+        # Barbell: heavy meme open fails; fee-clear heavy passes.
+        bad_bar = barbell_status(
+            [{"id": "memecoin", "open_risk": 40}, {"id": "btc15m", "open_risk": 10}],
+            {"max_open_risk": 100},
+        )
+        assert bad_bar["meme_ok"] is False
+        assert bad_bar["pass"] is False
+        good_bar = barbell_status(
+            [{"id": "btc15m", "open_risk": 40}, {"id": "sports-gap", "open_risk": 30}],
+            {"max_open_risk": 100},
+        )
+        assert good_bar["pass"] is True
+        mid = midday_util_alert(
+            0.10, skip_board={"stable_top": [{"code": "EDGE", "n": 5}]},
+        )
+        assert mid["alert"] is True
+        mid_idle = midday_util_alert(
+            0.10, skip_board={"stable_top": [{"code": "WEEKEND", "n": 5}]},
+        )
+        assert mid_idle["alert"] is False
 
 
 if __name__ == "__main__":

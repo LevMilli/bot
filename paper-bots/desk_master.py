@@ -470,6 +470,24 @@ def master_summary(
             plan["quarterly_rebaseline"] = desk_roi_plan.quarterly_rebaseline_status(root)
         except Exception:
             plan["quarterly_rebaseline"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_os = desk_roi_plan.latest_capital_os(root)
+            if root and bots and (
+                not isinstance(latest_os, dict)
+                or str(latest_os.get("label") or "") != today
+            ):
+                plan["capital_os"] = desk_roi_plan.capture_capital_os(
+                    root, bots=bots, cfg=cfg, desk_util=desk_util, label=today,
+                )
+            else:
+                plan["capital_os"] = latest_os or desk_roi_plan.capital_os_status(
+                    root, bots=bots, cfg=cfg, desk_util=desk_util,
+                )
+        except Exception:
+            plan["capital_os"] = None
     except Exception:
         plan = None
     return {
