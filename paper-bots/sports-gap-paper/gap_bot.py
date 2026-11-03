@@ -947,6 +947,11 @@ def run():
             lines.append(f"| {ts} | | | | | | | | {cool} |")
             summary_out.setdefault("skips", []).append(cool)
             max_buys_eff = 0
+        r_block = desk_roi_plan.daily_r_blocks("sports-gap", today_pnl)
+        if r_block:
+            lines.append(f"| {ts} | | | | | | | | {r_block} |")
+            summary_out.setdefault("skips", []).append(r_block)
+            max_buys_eff = 0
     except Exception:
         pass
     for c in buy_candidates:

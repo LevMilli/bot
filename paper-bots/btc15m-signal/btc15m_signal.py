@@ -1096,6 +1096,17 @@ def main():
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
         print(f"Selective volume: max buys {max_buys_eff} (today ${today_pnl:.2f} ≥ 0, fee floors locked)")
+    # Daily R budget → settle-only after tower hits target (exits stay on).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        r_block = desk_roi_plan.daily_r_blocks("btc15m", today_pnl)
+        if r_block:
+            print(f"Settle-only: {r_block}")
+            max_buys_eff = 0
+    except Exception:
+        pass
 
     for ev in ranked:
         if buys >= max_buys_eff:

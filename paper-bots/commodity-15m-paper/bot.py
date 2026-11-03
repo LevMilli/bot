@@ -694,6 +694,17 @@ def main() -> int:
             f"Selective volume: max buys {max_buys_eff} "
             f"(today ${today_pnl:.2f} ≥ 0, fee floors locked)"
         )
+    # Daily R budget → settle-only after tower hits target (exits stay on).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        r_block = desk_roi_plan.daily_r_blocks("commodity-15m", today_pnl)
+        if r_block:
+            print(f"Settle-only: {r_block}")
+            max_buys_eff = 0
+    except Exception:
+        pass
     for row in ranked:
         if buys >= max_buys_eff:
             print(f"  → skip: max buys this check ({max_buys_eff})")
