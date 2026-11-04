@@ -29,6 +29,8 @@ export function CityBotFigure({
         deskWork={deskWork}
         seed={seed}
         unitMark={unitMark}
+        /** Tiny plaza car riders — silhouette only to keep WebGL light. */
+        lite={context === 'city'}
       />
     )
   }
