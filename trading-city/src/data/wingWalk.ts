@@ -1,7 +1,8 @@
 /**
  * Trading-wing walk geometry for Plan A (linear spine).
  * Continuous floor: hallway + open doorways into five worker suites + boss.
- * Physics agent can swap the body controller; these bounds/obstacles stay shared.
+ * Locomotion is shared vault UX via groundedWalk (W/S · A/D turn · jump);
+ * this module owns bounds / obstacles / spawn / room detection only.
  */
 
 import type { FloorObstacle, WalkBounds } from './bankWalk'
