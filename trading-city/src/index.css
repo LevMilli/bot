@@ -694,6 +694,18 @@ a {
   letter-spacing: 0.04em;
 }
 
+.office-title .bot-remodel-preview {
+  display: inline-block;
+  margin-left: 0.65rem;
+  padding: 0.18rem 0.55rem;
+  border: 1px solid rgba(196, 77, 255, 0.55);
+  background: rgba(20, 4, 36, 0.82);
+  color: #e085ff;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .screen-lightbox {
   position: absolute;
   inset: 0;

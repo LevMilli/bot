@@ -1,6 +1,6 @@
 import { DoubleSide } from 'three'
 import type { BotRow, Desk } from '../types'
-import { BotFigure } from './BotFigure'
+import { CityBotFigure } from './CityBotFigure'
 import { botPose } from '../data/botPose'
 import { beamColorFor } from '../data/format'
 
@@ -127,7 +127,7 @@ function NeighborSuite({
         <meshStandardMaterial color="#12151c" roughness={0.7} />
       </mesh>
       <group position={[0, 0.35, 0.55]} scale={0.82}>
-        <BotFigure pose={pose} seated />
+        <CityBotFigure context="hall" pose={pose} seated />
       </group>
       {/* name plate */}
       <mesh position={[0, 2.85, 2.1]}>

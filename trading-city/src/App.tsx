@@ -12,6 +12,7 @@ import { CityScene } from './scene/CityScene'
 import { OfficeHallScene } from './scene/OfficeHallScene'
 import { BankScene } from './scene/BankScene'
 import { BossDashboard } from './hud/BossDashboard'
+import { BOT_REMODEL_APPROVED, BOT_REMODEL_PREVIEW_OFFICE } from './scene/botRemodelGate'
 import type { BotRow } from './types'
 
 type View = 'city' | 'bank' | 'office'
@@ -475,6 +476,11 @@ export default function App() {
                 <span className="screen-hint">
                   W/S walk · A/D turn · mouse look · click screen for trades
                 </span>
+                {BOT_REMODEL_PREVIEW_OFFICE && !BOT_REMODEL_APPROVED && (
+                  <span className="bot-remodel-preview" role="status">
+                    Bot remodel preview · purple industrial · awaiting approval
+                  </span>
+                )}
               </div>
             </div>
             {fromBank && (
