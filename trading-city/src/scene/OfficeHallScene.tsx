@@ -234,9 +234,9 @@ export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenS
   return (
     <>
       <color attach="background" args={['#100628']} />
-      {/* Softer fog so hall + suite floors stay visible in FPV */}
+      {/* Softer fog so hall + suite floors stay visible over-shoulder */}
       <fog attach="fog" args={['#12082e', 32, 78]} />
-      <PerspectiveCamera makeDefault fov={62} near={0.06} far={120} position={[4, 1.58, 2]} />
+      <PerspectiveCamera makeDefault fov={58} near={0.06} far={120} position={[4, 1.8, 2]} />
       <ambientLight intensity={0.62} color="#d0c4ff" />
       <directionalLight position={[10, 18, 8]} intensity={0.55} color="#f2e8ff" />
       <hemisphereLight args={['#b8d4ff', '#1a1030', 0.35]} />
@@ -249,7 +249,7 @@ export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenS
         return <SuiteShell key={room.id} room={room} color={color} live={live} />
       })}
 
-      {/* Live desk kit for the suite you're currently in */}
+      {/* LOD: full OfficeInterior only for the suite you're in; others stay shells. */}
       {rooms.map((room) => {
         if (room.botId !== bot.id) return null
         const row = bots.find((b) => b.id === room.botId) || bot
@@ -266,6 +266,7 @@ export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenS
         onEnterRoom={(id) => {
           if (id !== bot.id) onSelect(id)
         }}
+        onOpenScreens={onOpenScreens}
         onHintChange={onWalkHint}
       />
 

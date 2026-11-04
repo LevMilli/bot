@@ -26,6 +26,18 @@ export const PLAYER_R = 0.32
 /** Local-space spawn: stand behind the seated bot, looking at their back / screens. */
 export const SPAWN_BEHIND_LOCAL: [number, number, number] = [0.05, 0, 1.85]
 export const SPAWN_LOOK_LOCAL: [number, number, number] = [0, 1.35, -0.4]
+/** Desk / monitor interact point (suite local, before SUITE_SCALE). */
+export const DESK_INTERACT_LOCAL: [number, number, number] = [0.05, 0, 0.35]
+/** Reach for E · open desk screens. */
+export const DESK_INTERACT_R = 2.6
+
+/** World XZ of the desk interact point for a tower bot's suite. */
+export function deskInteractPoint(botId: string): { x: number; z: number } | null {
+  const room = activeWingRooms().find((r) => r.botId === botId) || null
+  if (!room) return null
+  const [x, , z] = suiteWorld(room, DESK_INTERACT_LOCAL)
+  return { x, z }
+}
 
 export function suiteWorld(
   room: WingRoom,
