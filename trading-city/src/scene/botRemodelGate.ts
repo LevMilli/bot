@@ -1,11 +1,11 @@
 /**
  * Purple industrial bot remodel rollout gate.
  *
- * PREVIEW: office desk bots only (`BOT_REMODEL_PREVIEW_OFFICE`).
- * FULL CITY: flip `BOT_REMODEL_APPROVED` after user sign-off — cars, tellers, hallway.
+ * User approved city-wide: cars, tellers, hallway, and office desks all use
+ * IndustrialBotFigure via CityBotFigure.
  */
 export const BOT_REMODEL_PREVIEW_OFFICE = true
-export const BOT_REMODEL_APPROVED = false
+export const BOT_REMODEL_APPROVED = true
 
 export function shouldUseIndustrialBot(context: 'office' | 'city' | 'bank' | 'hall') {
   if (BOT_REMODEL_APPROVED) return true
