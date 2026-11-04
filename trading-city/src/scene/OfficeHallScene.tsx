@@ -18,6 +18,8 @@ type Props = {
   /** Proximity room change (does not re-spawn the walker). */
   onSelect: (id: string) => void
   onOpenScreens?: () => void
+  /** Live control hint — same vault teller UX strings. */
+  onWalkHint?: (hint: string) => void
 }
 
 const WALL_H = WING_HALL.wallH
@@ -225,7 +227,7 @@ function SuiteShell({ room, color, live }: { room: WingRoom; color: string; live
  * Continuous walkable trading wing — hallway + open suites + boss.
  * Spawn behind the focused tower bot; WASD walks the whole floor (no room-click teleport).
  */
-export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenScreens }: Props) {
+export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenScreens, onWalkHint }: Props) {
   const rooms = useMemo(() => activeWingRooms(), [])
 
   return (
@@ -261,6 +263,7 @@ export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenS
         onEnterRoom={(id) => {
           if (id !== bot.id) onSelect(id)
         }}
+        onHintChange={onWalkHint}
       />
 
       <NeonBloom strength={0.34} />

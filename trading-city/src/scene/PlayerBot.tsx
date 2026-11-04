@@ -1,39 +1,20 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { MathUtils, Vector3, type Group } from 'three'
+import { MathUtils, type Group } from 'three'
+import { vaultFloorBounds, type FloorObstacle } from '../data/bankWalk'
 import {
-  clampToBounds,
-  resolveObstacles,
-  vaultFloorBounds,
-  type FloorObstacle,
-  type WalkBounds,
-} from '../data/bankWalk'
+  GROUNDED,
+  aabbClamp,
+  applyLookDelta,
+  createGroundedState,
+  defaultWalkHint,
+  queueJump,
+  resetGroundedState,
+  stepGroundedWalk,
+  type GroundedState,
+} from '../data/groundedWalk'
 
-const EYE_H = 1.55
-const BODY_H = 1.45
-const CAPSULE_R = 0.32
-const WALK_SPEED = 5.25
-const SPRINT_MUL = 1.55
-const ACCEL = 38
-const FRICTION = 22
-const AIR_CTRL = 0.35
-const JUMP_V = 6.15
-const GRAVITY = 26
-const LAND_DAMP = 18
-const COYOTE = 0.12
-const JUMP_BUFFER = 0.14
 const INTERACT_R = 2.95
-const LOOK_SENS = 0.0021
-/** A/D turn — A turns character left (camera swings right). */
-const TURN_SPEED = 2.45
-const TURN_SPRINT = 3.05
-/** Over-shoulder follow — reads as a person, not a free camera. */
-const CAM_BACK = 2.65
-const CAM_UP = 1.88
-const CAM_SIDE = 0.38
-const CAM_LERP = 11
-const BOB_AMT = 0.06
-const CAM_WALL_PAD = 0.55
 
 export type PlayerBotProps = {
   active: boolean
@@ -50,8 +31,8 @@ export type PlayerBotProps = {
 }
 
 /**
- * Grounded third-person player for the vault (and later plaza / floors).
- * W/S walk · A/D turn (A=left / cam right) · mouse look · Space jump · E talk.
+ * Vault third-person player — thin wrapper over shared groundedWalk physics
+ * (same locomotion the office / wing walker should use).
  */
 export function PlayerBot({
   active,
@@ -68,23 +49,25 @@ export function PlayerBot({
   const body = useRef<Group>(null)
   const leftFoot = useRef<Group>(null)
   const rightFoot = useRef<Group>(null)
-  const pos = useRef(new Vector3(0, 0, Math.min(zFront - 2.8, 5)))
-  const vel = useRef(new Vector3())
-  const yaw = useRef(Math.PI)
-  const pitch = useRef(0.1)
-  const grounded = useRef(true)
-  const coyote = useRef(0)
-  const jumpBuf = useRef(0)
+  const state = useRef<GroundedState>(createGroundedState(0, Math.min(zFront - 2.8, 5), Math.PI))
   const keys = useRef<Record<string, boolean>>({})
   const nearest = useRef<{ id: string; index: number } | null>(null)
   const nearIdx = useRef<number | null>(null)
   const locked = useRef(false)
   const dragging = useRef(false)
   const hintRef = useRef('')
-  const bobPhase = useRef(0)
-  const camPos = useRef(new Vector3(0, 2, 6))
-  const bounds = useMemo<WalkBounds>(
-    () => vaultFloorBounds(hallHalfW, zBack, zFront, CAPSULE_R),
+  const bounds = useMemo(
+    () => vaultFloorBounds(hallHalfW, zBack, zFront, GROUNDED.capsuleR),
+    [hallHalfW, zBack, zFront],
+  )
+  const clampXZ = useMemo(() => aabbClamp(bounds), [bounds])
+  const camClamp = useMemo(
+    () => ({
+      minX: -hallHalfW + GROUNDED.camWallPad,
+      maxX: hallHalfW - GROUNDED.camWallPad,
+      minZ: zBack + GROUNDED.camWallPad + 0.8,
+      maxZ: zFront - GROUNDED.camWallPad,
+    }),
     [hallHalfW, zBack, zFront],
   )
 
@@ -97,20 +80,10 @@ export function PlayerBot({
       onHintChange?.('')
       return
     }
-    pos.current.set(0, 0, Math.min(zFront - 2.8, 5))
-    vel.current.set(0, 0, 0)
-    yaw.current = Math.PI
-    pitch.current = 0.1
-    grounded.current = true
-    coyote.current = 0
-    jumpBuf.current = 0
-    bobPhase.current = 0
+    resetGroundedState(state.current, 0, Math.min(zFront - 2.8, 5), Math.PI)
     nearIdx.current = null
     onNearChange?.(null)
-    const backX = Math.sin(yaw.current) * -CAM_BACK
-    const backZ = Math.cos(yaw.current) * -CAM_BACK
-    camPos.current.set(pos.current.x + backX, CAM_UP, pos.current.z + backZ)
-    camera.position.copy(camPos.current)
+    camera.position.copy(state.current.camPos)
   }, [active, zFront, onHintChange, onNearChange, camera])
 
   useEffect(() => {
@@ -140,9 +113,7 @@ export function PlayerBot({
         const n = nearest.current
         if (n?.id) onInteract(n.id, n.index)
       }
-      if (k === ' ' || k === 'spacebar') {
-        jumpBuf.current = JUMP_BUFFER
-      }
+      if (k === ' ' || k === 'spacebar') queueJump(state.current)
     }
     const onKeyUp = (e: KeyboardEvent) => {
       keys.current[e.key.toLowerCase()] = false
@@ -160,8 +131,7 @@ export function PlayerBot({
     }
     const onMouseMove = (e: MouseEvent) => {
       if (!locked.current && !dragging.current) return
-      yaw.current -= e.movementX * LOOK_SENS
-      pitch.current = MathUtils.clamp(pitch.current - e.movementY * LOOK_SENS, -0.35, 0.55)
+      applyLookDelta(state.current, e.movementX, e.movementY)
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -184,141 +154,41 @@ export function PlayerBot({
 
   useFrame((_, rawDt) => {
     if (!active) return
-    const dt = Math.min(0.033, rawDt)
-    const k = keys.current
-
-    // A / ← = turn left (yaw+); D / → = turn right (yaw−).
-    // Turning left swings the follow-cam to the character's right.
-    const turn =
-      (k.a || k.arrowleft ? 1 : 0) - (k.d || k.arrowright ? 1 : 0)
-    if (turn !== 0) {
-      const rate = (k.shift ? TURN_SPRINT : TURN_SPEED) * turn
-      yaw.current += rate * dt
-    }
-
-    const forward = (k.w || k.arrowup ? 1 : 0) - (k.s || k.arrowdown ? 1 : 0)
-    const sin = Math.sin(yaw.current)
-    const cos = Math.cos(yaw.current)
-    // Walk only along facing — A/D turn the body instead of strafing.
-    const wishX = forward * sin
-    const wishZ = forward * cos
-    const maxSpeed = WALK_SPEED * (k.shift ? SPRINT_MUL : 1)
-    const wishSpeed = forward ? maxSpeed : 0
-
-    const control = grounded.current ? 1 : AIR_CTRL
-    if (wishSpeed > 0) {
-      vel.current.x += wishX * ACCEL * control * dt
-      vel.current.z += wishZ * ACCEL * control * dt
-      const spd = Math.hypot(vel.current.x, vel.current.z)
-      if (spd > maxSpeed) {
-        vel.current.x = (vel.current.x / spd) * maxSpeed
-        vel.current.z = (vel.current.z / spd) * maxSpeed
-      }
-    } else if (grounded.current) {
-      const spd = Math.hypot(vel.current.x, vel.current.z)
-      if (spd > 0.01) {
-        const drop = Math.min(spd, FRICTION * dt)
-        vel.current.x *= (spd - drop) / spd
-        vel.current.z *= (spd - drop) / spd
-      } else {
-        vel.current.x = 0
-        vel.current.z = 0
-      }
-    }
-
-    if (grounded.current) coyote.current = COYOTE
-    else coyote.current = Math.max(0, coyote.current - dt)
-    jumpBuf.current = Math.max(0, jumpBuf.current - dt)
-
-    if (jumpBuf.current > 0 && coyote.current > 0) {
-      vel.current.y = JUMP_V
-      grounded.current = false
-      coyote.current = 0
-      jumpBuf.current = 0
-    }
-    vel.current.y -= GRAVITY * dt
-
-    let nx = pos.current.x + vel.current.x * dt
-    let nz = pos.current.z
-    let hit = resolveObstacles(nx, nz, CAPSULE_R, obstacles)
-    nx = hit.x
-    nz = hit.z
-    const bx = clampToBounds(nx, nz, bounds)
-    if (bx.x !== nx) vel.current.x *= 0.2
-    nx = bx.x
-
-    nz = pos.current.z + vel.current.z * dt
-    hit = resolveObstacles(nx, nz, CAPSULE_R, obstacles)
-    nx = hit.x
-    nz = hit.z
-    const bz = clampToBounds(nx, nz, bounds)
-    if (bz.z !== nz) vel.current.z *= 0.2
-    nx = bz.x
-    nz = bz.z
-
-    pos.current.x = nx
-    pos.current.z = nz
-    pos.current.y += vel.current.y * dt
-    if (pos.current.y <= 0) {
-      // Soft landing — bleed vertical speed instead of a hard stop.
-      if (vel.current.y < -0.5) vel.current.y = MathUtils.damp(vel.current.y, 0, LAND_DAMP, dt)
-      else vel.current.y = 0
-      pos.current.y = 0
-      grounded.current = true
-    }
-
-    const groundSpeed = Math.hypot(vel.current.x, vel.current.z)
-    if (grounded.current && groundSpeed > 0.35) {
-      bobPhase.current += dt * (8.6 + groundSpeed * 1.15)
-    } else {
-      bobPhase.current = MathUtils.damp(bobPhase.current, 0, 10, dt)
-    }
-    const bobAmp = grounded.current ? Math.min(1, groundSpeed / 2.6) : 0
-    const bob = Math.sin(bobPhase.current) * BOB_AMT * bobAmp
-    const lean = turn !== 0 ? -turn * 0.09 : -vel.current.x * 0.01
-    const pitchLean = grounded.current ? -vel.current.z * 0.008 * Math.cos(yaw.current) : 0
+    const s = state.current
+    const pose = stepGroundedWalk(s, {
+      dt: rawDt,
+      keys: keys.current,
+      obstacles,
+      clampXZ,
+      camClamp,
+    })
 
     if (body.current) {
-      body.current.position.set(pos.current.x, pos.current.y + Math.abs(bob) * 0.18, pos.current.z)
-      body.current.rotation.y = yaw.current
-      body.current.rotation.z = MathUtils.damp(body.current.rotation.z, lean, 10, dt)
-      body.current.rotation.x = MathUtils.damp(body.current.rotation.x, pitchLean, 8, dt)
+      body.current.position.set(s.pos.x, s.pos.y + Math.abs(pose.bob) * 0.18, s.pos.z)
+      body.current.rotation.y = s.yaw
+      body.current.rotation.z = MathUtils.damp(body.current.rotation.z, pose.lean, 10, Math.min(0.033, rawDt))
+      body.current.rotation.x = MathUtils.damp(body.current.rotation.x, pose.pitchLean, 8, Math.min(0.033, rawDt))
     }
-
-    // Walking gait on the feet groups.
-    const step = Math.sin(bobPhase.current) * bobAmp
-    const lift = Math.max(0, Math.sin(bobPhase.current)) * 0.05 * bobAmp
     if (leftFoot.current) {
-      leftFoot.current.position.set(-0.12, 0.06 + lift, 0.06 + step * 0.12)
-      leftFoot.current.rotation.x = step * 0.35
+      leftFoot.current.position.set(-0.12, 0.06 + pose.leftLift, 0.06 + pose.step * 0.12)
+      leftFoot.current.rotation.x = pose.step * 0.35
     }
     if (rightFoot.current) {
-      rightFoot.current.position.set(0.12, 0.06 + Math.max(0, -Math.sin(bobPhase.current)) * 0.05 * bobAmp, 0.06 - step * 0.12)
-      rightFoot.current.rotation.x = -step * 0.35
+      rightFoot.current.position.set(0.12, 0.06 + pose.rightLift, 0.06 - pose.step * 0.12)
+      rightFoot.current.rotation.x = -pose.step * 0.35
     }
 
-    // Follow cam: behind + slight right offset; turning left → cam arcs right.
-    const backX = Math.sin(yaw.current) * -CAM_BACK + Math.cos(yaw.current) * CAM_SIDE
-    const backZ = Math.cos(yaw.current) * -CAM_BACK - Math.sin(yaw.current) * CAM_SIDE
-    let wantCamX = pos.current.x + backX
-    const wantCamY = pos.current.y + CAM_UP + bob + pitch.current * 0.55
-    let wantCamZ = pos.current.z + backZ
-    // Soft wall pad so the follow cam doesn't punch through the enclosure.
-    wantCamX = MathUtils.clamp(wantCamX, -hallHalfW + CAM_WALL_PAD, hallHalfW - CAM_WALL_PAD)
-    wantCamZ = MathUtils.clamp(wantCamZ, zBack + CAM_WALL_PAD + 0.8, zFront - CAM_WALL_PAD)
-    camPos.current.x = MathUtils.damp(camPos.current.x, wantCamX, CAM_LERP, dt)
-    camPos.current.y = MathUtils.damp(camPos.current.y, wantCamY, CAM_LERP, dt)
-    camPos.current.z = MathUtils.damp(camPos.current.z, wantCamZ, CAM_LERP, dt)
-    camera.position.copy(camPos.current)
-    const lookX = pos.current.x + Math.sin(yaw.current) * 4.2
-    const lookY = pos.current.y + EYE_H + pitch.current * 2.2
-    const lookZ = pos.current.z + Math.cos(yaw.current) * 4.2
-    camera.lookAt(lookX, lookY, lookZ)
+    camera.position.copy(s.camPos)
+    camera.lookAt(
+      s.pos.x + Math.sin(s.yaw) * 4.2,
+      s.pos.y + GROUNDED.eyeH + s.pitch * 2.2,
+      s.pos.z + Math.cos(s.yaw) * 4.2,
+    )
 
     let best: { id: string; index: number; d: number } | null = null
     for (const t of tellerMouths) {
       if (!t.id) continue
-      const d = Math.hypot(t.x - pos.current.x, t.z - pos.current.z)
+      const d = Math.hypot(t.x - s.pos.x, t.z - s.pos.z)
       if (d <= INTERACT_R && (!best || d < best.d)) best = { id: t.id, index: t.index, d }
     }
     nearest.current = best ? { id: best.id, index: best.index } : null
@@ -327,11 +197,7 @@ export function PlayerBot({
       nearIdx.current = nextNear
       onNearChange?.(nextNear)
     }
-    const hint = best
-      ? 'E · talk to teller'
-      : locked.current
-        ? 'W/S walk · A/D turn · Space jump · Shift sprint · Esc unlock'
-        : 'Click to look · W/S walk · A/D turn · Space jump · E talk'
+    const hint = defaultWalkHint(locked.current, best ? 'E · talk to teller' : null)
     if (hint !== hintRef.current) {
       hintRef.current = hint
       onHintChange?.(hint)
@@ -342,8 +208,8 @@ export function PlayerBot({
 
   return (
     <group ref={body} position={[0, 0, Math.min(zFront - 2.8, 5)]}>
-      <mesh position={[0, BODY_H * 0.42, 0]} castShadow>
-        <capsuleGeometry args={[CAPSULE_R * 0.75, BODY_H * 0.5, 5, 10]} />
+      <mesh position={[0, GROUNDED.bodyH * 0.42, 0]} castShadow>
+        <capsuleGeometry args={[GROUNDED.capsuleR * 0.75, GROUNDED.bodyH * 0.5, 5, 10]} />
         <meshStandardMaterial
           color="#5ad4e8"
           roughness={0.4}
@@ -352,11 +218,11 @@ export function PlayerBot({
           emissiveIntensity={0.25}
         />
       </mesh>
-      <mesh position={[0, BODY_H * 0.92, 0]} castShadow>
+      <mesh position={[0, GROUNDED.bodyH * 0.92, 0]} castShadow>
         <sphereGeometry args={[0.2, 12, 12]} />
         <meshStandardMaterial color="#e8fdff" roughness={0.25} metalness={0.45} />
       </mesh>
-      <mesh position={[0, BODY_H * 0.95, 0.16]}>
+      <mesh position={[0, GROUNDED.bodyH * 0.95, 0.16]}>
         <boxGeometry args={[0.14, 0.04, 0.04]} />
         <meshStandardMaterial color="#061018" metalness={0.7} roughness={0.2} />
       </mesh>

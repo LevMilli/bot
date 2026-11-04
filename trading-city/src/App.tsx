@@ -356,6 +356,7 @@ export default function App() {
                   window.history.replaceState(null, '', `#/office/${id}`)
                 }}
                 onOpenScreens={() => setScreensOpen(true)}
+                onWalkHint={setWalkHint}
               />
             ) : view === 'bank' ? (
               <BankScene
