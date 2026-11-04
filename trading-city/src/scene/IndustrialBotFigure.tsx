@@ -1,9 +1,11 @@
 import { useMemo, useRef, type RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Text } from '@react-three/drei'
 import { CanvasTexture, Matrix4, Quaternion, Vector3, type Group, type MeshStandardMaterial } from 'three'
 import type { BotPose } from '../data/botPose'
 import { mouseHand, typingHand } from './deskReach'
+
+/** Shared canvas decals — one texture per kind/mark, not per bot instance. */
+const TEX_CACHE = new Map<string, CanvasTexture>()
 
 /** Matte gunmetal armor — used-future black, not glossy. */
 const ARMOR = '#121218'
@@ -11,7 +13,6 @@ const ARMOR_DARK = '#08080c'
 const ARMOR_EDGE = '#1c1c24'
 const METAL = '#2a2a32'
 const PURPLE = '#c44dff'
-const PURPLE_HOT = '#e085ff'
 const PURPLE_DIM = '#7a2fb8'
 const GRAFFITI = '#f2f2f0'
 
@@ -115,7 +116,11 @@ function LedDot({ position, r = 0.012 }: { position: [number, number, number]; r
   )
 }
 
-function graffitiTexture(kind: 'pauldron' | 'tally' | 'unit', mark: string) {
+function graffitiTexture(kind: 'pauldron' | 'unit', mark: string) {
+  const key = `${kind}:${mark}`
+  const hit = TEX_CACHE.get(key)
+  if (hit) return hit
+
   const c = document.createElement('canvas')
   c.width = kind === 'pauldron' ? 256 : 128
   c.height = kind === 'pauldron' ? 256 : 128
@@ -126,7 +131,6 @@ function graffitiTexture(kind: 'pauldron' | 'tally' | 'unit', mark: string) {
   ctx.textBaseline = 'middle'
 
   if (kind === 'pauldron') {
-    // Three-point crown
     ctx.beginPath()
     ctx.moveTo(128, 48)
     ctx.lineTo(98, 88)
@@ -137,7 +141,6 @@ function graffitiTexture(kind: 'pauldron' | 'tally' | 'unit', mark: string) {
     ctx.lineTo(158, 88)
     ctx.closePath()
     ctx.fill()
-    // Side spikes
     ctx.beginPath()
     ctx.moveTo(98, 88)
     ctx.lineTo(78, 58)
@@ -151,26 +154,11 @@ function graffitiTexture(kind: 'pauldron' | 'tally' | 'unit', mark: string) {
     ctx.font = 'bold 36px Impact, Haettenschweiler, sans-serif'
     ctx.fillText('PIMPS', 128, 155)
     ctx.font = 'bold 34px Impact, Haettenschweiler, sans-serif'
-    // Drip effect under ONLY
     ctx.fillText('ONLY', 128, 195)
     ctx.fillRect(95, 210, 4, 18)
     ctx.fillRect(118, 208, 3, 22)
     ctx.fillRect(145, 212, 4, 14)
     ctx.fillRect(162, 210, 3, 16)
-  } else if (kind === 'tally') {
-    ctx.lineWidth = 6
-    ctx.strokeStyle = GRAFFITI
-    const xs = [28, 48, 68, 88]
-    for (const x of xs) {
-      ctx.beginPath()
-      ctx.moveTo(x, 30)
-      ctx.lineTo(x, 98)
-      ctx.stroke()
-    }
-    ctx.beginPath()
-    ctx.moveTo(22, 90)
-    ctx.lineTo(98, 38)
-    ctx.stroke()
   } else {
     ctx.font = 'bold 72px Impact, Haettenschweiler, sans-serif'
     ctx.fillText(mark.slice(0, 2), 64, 68)
@@ -178,6 +166,7 @@ function graffitiTexture(kind: 'pauldron' | 'tally' | 'unit', mark: string) {
 
   const tex = new CanvasTexture(c)
   tex.needsUpdate = true
+  TEX_CACHE.set(key, tex)
   return tex
 }
 
@@ -242,12 +231,10 @@ function IndustrialArm({
   side,
   pose,
   work = false,
-  tallyMap,
 }: {
   side: -1 | 1
   pose: ArmPose
   work?: boolean
-  tallyMap: CanvasTexture
 }) {
   const ref = useRef<Group>(null)
   const fore = useRef<Group>(null)
@@ -399,11 +386,6 @@ function IndustrialArm({
         <group position={[side * 0.052, 0.14, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
           <TallyMark />
         </group>
-        {/* keep canvas map warm for future decals */}
-        <mesh position={[0, -2, 0]} visible={false}>
-          <planeGeometry args={[0.01, 0.01]} />
-          <meshBasicMaterial map={tallyMap} />
-        </mesh>
         <mesh position={[0, 0.32, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.048, 0.008, 8, 18]} />
           <meshStandardMaterial {...neon(1.2)} />
@@ -450,6 +432,7 @@ export function IndustrialBotFigure({
   deskWork = false,
   seed = 0,
   unitMark,
+  lite = false,
 }: {
   pose?: BotPose
   seated?: boolean
@@ -457,6 +440,8 @@ export function IndustrialBotFigure({
   seed?: number
   /** Alphanumeric unit ID painted on helmet (refs use "22"). */
   unitMark?: string
+  /** Low-poly silhouette for distant plaza car riders — no lights / heavy decals. */
+  lite?: boolean
 }) {
   const body = useRef<Group>(null)
   const torso = useRef<Group>(null)
@@ -465,13 +450,14 @@ export function IndustrialBotFigure({
   const stripPulse = useRef<MeshStandardMaterial>(null)
   const mark = unitMark ?? String(20 + (Math.abs(Math.floor(seed * 10)) % 80)).padStart(2, '0')
   const maps = useMemo(
-    () => ({
-      pauldron: graffitiTexture('pauldron', mark),
-      tally: graffitiTexture('tally', mark),
-      unit: graffitiTexture('unit', mark),
-      unitFade: graffitiTexture('unit', mark),
-    }),
-    [mark],
+    () =>
+      lite
+        ? null
+        : {
+            pauldron: graffitiTexture('pauldron', mark),
+            unit: graffitiTexture('unit', mark),
+          },
+    [mark, lite],
   )
   const anchor: [number, number, number] = deskWork ? [0, 0.49, 0.86] : seated ? [0, 0, 0.42] : [0, 0.28, 0]
   const phase = seed * 1.37
@@ -530,6 +516,56 @@ export function IndustrialBotFigure({
       stripPulse.current.emissiveIntensity = 1.35 + Math.sin(t * 2.6) * 0.35
     }
   })
+
+  // Plaza car riders: black+purple silhouette only — no point lights / Text / heavy plates.
+  if (lite) {
+    return (
+      <group ref={body} position={anchor}>
+        <mesh position={[0, 0.55, 0]}>
+          <boxGeometry args={[0.36, 0.5, 0.26]} />
+          <meshStandardMaterial {...armor(0.55, 0.65)} />
+        </mesh>
+        <mesh position={[0, 0.55, 0.14]}>
+          <boxGeometry args={[0.2, 0.02, 0.01]} />
+          <meshStandardMaterial {...neon(1.2)} />
+        </mesh>
+        <group ref={head} position={[0, 1.0, 0.02]}>
+          <mesh position={[0, 0.14, 0]}>
+            <boxGeometry args={[0.28, 0.26, 0.3]} />
+            <meshStandardMaterial {...armor(0.5, 0.7)} />
+          </mesh>
+          <LedDot position={[-0.05, 0.14, 0.16]} r={0.016} />
+          <LedDot position={[0.05, 0.14, 0.16]} r={0.016} />
+          <mesh position={[-0.07, 0.36, -0.08]} rotation={[0.3, 0, -0.15]}>
+            <boxGeometry args={[0.02, 0.28, 0.035]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.35} />
+          </mesh>
+          <mesh position={[0.07, 0.36, -0.08]} rotation={[0.3, 0, 0.15]}>
+            <boxGeometry args={[0.02, 0.28, 0.035]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.35} />
+          </mesh>
+        </group>
+        {([-1, 1] as const).map((side) => (
+          <mesh key={side} position={[side * 0.28, 0.7, 0]} rotation={[0.2, 0, side * 0.4]}>
+            <boxGeometry args={[0.12, 0.4, 0.1]} />
+            <meshStandardMaterial {...armor(0.55, 0.6)} />
+          </mesh>
+        ))}
+        {seated || deskWork ? (
+          <SeatedLegs />
+        ) : (
+          <group ref={legs}>
+            {([-1, 1] as const).map((side) => (
+              <mesh key={side} position={[side * 0.12, -0.12, 0.02]}>
+                <boxGeometry args={[0.09, 0.32, 0.09]} />
+                <meshStandardMaterial {...armor(0.6, 0.55)} />
+              </mesh>
+            ))}
+          </group>
+        )}
+      </group>
+    )
+  }
 
   return (
     <group ref={body} position={anchor}>
@@ -601,44 +637,14 @@ export function IndustrialBotFigure({
             <Bolt position={[side * 0.08, 0.05, 0.1]} />
             <Bolt position={[side * 0.08, -0.03, 0.1]} />
             <Bolt position={[side * 0.08, 0.05, -0.06]} />
-            {/* Crown + PIMPS ONLY facing outward */}
-            <group position={[side * 0.135, 0.04, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
-              <CrownMark scale={1.15} />
-              <Text
-                position={[0, -0.055, 0.01]}
-                fontSize={0.038}
-                color={GRAFFITI}
-                anchorX="center"
-                anchorY="middle"
-                outlineWidth={0.002}
-                outlineColor="#000000"
-              >
-                PIMPS
-              </Text>
-              <Text
-                position={[0, -0.095, 0.01]}
-                fontSize={0.036}
-                color={GRAFFITI}
-                anchorX="center"
-                anchorY="middle"
-                outlineWidth={0.002}
-                outlineColor="#000000"
-              >
-                ONLY
-              </Text>
-              {/* Drip ticks under ONLY */}
-              {([-0.04, -0.015, 0.01, 0.035] as const).map((x, i) => (
-                <mesh key={x} position={[x, -0.12 - i * 0.004, 0.008]}>
-                  <boxGeometry args={[0.006, 0.018 + (i % 2) * 0.01, 0.004]} />
-                  <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
-                </mesh>
-              ))}
-            </group>
-            {/* Fallback canvas decal for rear glance */}
-            <mesh position={[side * 0.02, 0.02, -0.14]} rotation={[0, side > 0 ? Math.PI : 0, 0]}>
-              <planeGeometry args={[0.16, 0.16]} />
-              <meshBasicMaterial map={maps.pauldron} transparent toneMapped={false} depthWrite={false} />
+            {/* Crown + PIMPS ONLY — canvas decal (no troika Text / CDN fonts). */}
+            <mesh position={[side * 0.135, 0.02, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
+              <planeGeometry args={[0.2, 0.2]} />
+              <meshBasicMaterial map={maps!.pauldron} transparent toneMapped={false} depthWrite={false} />
             </mesh>
+            <group position={[side * 0.138, 0.07, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
+              <CrownMark scale={0.9} />
+            </group>
           </group>
         ))}
 
@@ -742,55 +748,29 @@ export function IndustrialBotFigure({
             </group>
           ))}
 
-          {/* Unit mark — crisp Text on both cheeks + faded rear */}
-          <Text
-            position={[0.17, 0.05, 0.1]}
-            rotation={[0, Math.PI / 2, 0]}
-            fontSize={0.07}
-            color={GRAFFITI}
-            anchorX="center"
-            anchorY="middle"
-            outlineWidth={0.003}
-            outlineColor="#000000"
-          >
-            {mark}
-          </Text>
-          <Text
-            position={[-0.17, 0.05, 0.1]}
-            rotation={[0, -Math.PI / 2, 0]}
-            fontSize={0.07}
-            color={GRAFFITI}
-            anchorX="center"
-            anchorY="middle"
-            outlineWidth={0.003}
-            outlineColor="#000000"
-          >
-            {mark}
-          </Text>
-          <Text
-            position={[0, 0.14, -0.18]}
-            rotation={[0, Math.PI, 0]}
-            fontSize={0.1}
-            color="#9a9a9a"
-            anchorX="center"
-            anchorY="middle"
-            fillOpacity={0.55}
-          >
-            {mark}
-          </Text>
+          {/* Unit mark — canvas planes only (CSP-safe; no per-bot lights). */}
+          <mesh position={[0.17, 0.05, 0.1]} rotation={[0, Math.PI / 2, 0]}>
+            <planeGeometry args={[0.1, 0.1]} />
+            <meshBasicMaterial map={maps!.unit} transparent toneMapped={false} depthWrite={false} />
+          </mesh>
+          <mesh position={[-0.17, 0.05, 0.1]} rotation={[0, -Math.PI / 2, 0]}>
+            <planeGeometry args={[0.1, 0.1]} />
+            <meshBasicMaterial map={maps!.unit} transparent toneMapped={false} depthWrite={false} />
+          </mesh>
+          <mesh position={[0, 0.14, -0.18]} rotation={[0, Math.PI, 0]}>
+            <planeGeometry args={[0.14, 0.14]} />
+            <meshBasicMaterial map={maps!.unit} transparent opacity={0.45} toneMapped={false} depthWrite={false} />
+          </mesh>
 
           {/* Helmet bolts */}
           <Bolt position={[-0.12, 0.26, 0.1]} />
           <Bolt position={[0.12, 0.26, 0.1]} />
           <Bolt position={[-0.12, 0.26, -0.08]} />
           <Bolt position={[0.12, 0.26, -0.08]} />
-
-          {/* Hot tip glow on antenna pulse via shared stripPulse already on chest */}
-          <pointLight position={[0, 0.15, 0.25]} intensity={0.35} color={PURPLE_HOT} distance={1.4} />
         </group>
 
-        <IndustrialArm side={-1} pose={pose} work={deskWork} tallyMap={maps.tally} />
-        <IndustrialArm side={1} pose={pose} work={deskWork} tallyMap={maps.tally} />
+        <IndustrialArm side={-1} pose={pose} work={deskWork} />
+        <IndustrialArm side={1} pose={pose} work={deskWork} />
       </group>
 
       {deskWork ? (
