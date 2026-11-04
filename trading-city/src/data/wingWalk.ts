@@ -23,9 +23,10 @@ export const ROOM_HALF_D = 4.0
 export const DOOR_HALF = 1.05
 export const PLAYER_R = 0.32
 
-/** Local-space spawn: stand behind the seated bot, looking at their back / screens. */
-export const SPAWN_BEHIND_LOCAL: [number, number, number] = [0.05, 0, 1.85]
-export const SPAWN_LOOK_LOCAL: [number, number, number] = [0, 1.35, -0.4]
+/** Local-space spawn: stand behind the seated bot, looking at their back / screens.
+ * Slightly closer than hall door so FPV fills with monitors, not the city glass. */
+export const SPAWN_BEHIND_LOCAL: [number, number, number] = [0.05, 0, 1.15]
+export const SPAWN_LOOK_LOCAL: [number, number, number] = [0, 1.15, -0.55]
 /** Desk / monitor interact point (suite local, before SUITE_SCALE). */
 export const DESK_INTERACT_LOCAL: [number, number, number] = [0.05, 0, 0.35]
 /** Reach for E · open desk screens. */

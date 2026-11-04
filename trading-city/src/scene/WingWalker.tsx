@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { MathUtils, type Group } from 'three'
 import { clampToBounds, type FloorObstacle, type WalkBounds } from '../data/bankWalk'
 import {
   GROUNDED,
@@ -36,10 +35,16 @@ type Props = {
   onHintChange?: (hint: string) => void
 }
 
+/** Suite/boss: slight down-pitch so monitors fill the frame, not the city window. */
+function spawnPitchFor(mode: WingSpawnMode) {
+  return mode === 'hall' ? 0.02 : -0.18
+}
+
 /**
  * Trading-wing free walk using the same vault teller grounded physics
  * (W/S walk · A/D turn · Space jump · mouse look · Shift sprint).
- * Bounds/obstacles stay in wingWalk; locomotion is shared via groundedWalk.
+ * Camera is first-person (no body mesh) so the suite desk reads as the hero —
+ * vault PlayerBot stays over-shoulder; locomotion still comes only from groundedWalk.
  */
 export function WingWalker({
   active,
@@ -50,9 +55,6 @@ export function WingWalker({
   onHintChange,
 }: Props) {
   const { camera, gl } = useThree()
-  const body = useRef<Group>(null)
-  const leftFoot = useRef<Group>(null)
-  const rightFoot = useRef<Group>(null)
   const state = useRef<GroundedState>(createGroundedState())
   const keys = useRef<Record<string, boolean>>({})
   const dragging = useRef(false)
@@ -60,6 +62,7 @@ export function WingWalker({
   const lastRoom = useRef<string | null>(null)
   const nearDesk = useRef(false)
   const hintRef = useRef('')
+  const bobY = useRef(0)
 
   const obstacles = useMemo<FloorObstacle[]>(() => wingDeskObstacles(), [])
   const outer = useMemo<WalkBounds>(() => wingOuterBounds(PLAYER_R), [])
@@ -83,11 +86,28 @@ export function WingWalker({
     [outer],
   )
 
+  const snapEyeCam = (mode: WingSpawnMode) => {
+    const s = state.current
+    const look = mode === 'hall' ? 5.5 : 2.35
+    camera.position.set(s.pos.x, s.pos.y + GROUNDED.eyeH, s.pos.z)
+    camera.lookAt(
+      s.pos.x + Math.sin(s.yaw) * look,
+      s.pos.y + GROUNDED.eyeH + s.pitch * 2.2,
+      s.pos.z + Math.cos(s.yaw) * look,
+    )
+  }
+
   const respawn = (botId: string, mode: WingSpawnMode) => {
     const spawn = spawnForMode(mode, botId)
-    resetGroundedState(state.current, spawn.position[0], spawn.position[2], spawn.yaw, 0.08)
-    // Snap follow-cam immediately so Hallway/Boss never flash a black void.
-    camera.position.copy(state.current.camPos)
+    resetGroundedState(
+      state.current,
+      spawn.position[0],
+      spawn.position[2],
+      spawn.yaw,
+      spawnPitchFor(mode),
+    )
+    // Snap eye cam immediately so Hallway/Boss never flash a black void.
+    snapEyeCam(mode)
     lastRoom.current = spawn.room?.botId ?? null
   }
 
@@ -185,26 +205,14 @@ export function WingWalker({
       radius: PLAYER_R,
     })
 
-    if (body.current) {
-      body.current.position.set(s.pos.x, s.pos.y + Math.abs(pose.bob) * 0.18, s.pos.z)
-      body.current.rotation.y = s.yaw
-      body.current.rotation.z = MathUtils.damp(body.current.rotation.z, pose.lean, 10, Math.min(0.033, rawDt))
-      body.current.rotation.x = MathUtils.damp(body.current.rotation.x, pose.pitchLean, 8, Math.min(0.033, rawDt))
-    }
-    if (leftFoot.current) {
-      leftFoot.current.position.set(-0.12, 0.06 + pose.leftLift, 0.06 + pose.step * 0.12)
-      leftFoot.current.rotation.x = pose.step * 0.35
-    }
-    if (rightFoot.current) {
-      rightFoot.current.position.set(0.12, 0.06 + pose.rightLift, 0.06 - pose.step * 0.12)
-      rightFoot.current.rotation.x = -pose.step * 0.35
-    }
-
-    camera.position.copy(s.camPos)
+    bobY.current = Math.abs(pose.bob) * 0.12
+    // First-person eye cam — ignore over-shoulder camPos from groundedWalk.
+    const lookDist = 2.6
+    camera.position.set(s.pos.x, s.pos.y + GROUNDED.eyeH + bobY.current, s.pos.z)
     camera.lookAt(
-      s.pos.x + Math.sin(s.yaw) * 4.2,
-      s.pos.y + GROUNDED.eyeH + s.pitch * 2.2,
-      s.pos.z + Math.cos(s.yaw) * 4.2,
+      s.pos.x + Math.sin(s.yaw) * lookDist,
+      s.pos.y + GROUNDED.eyeH + s.pitch * 2.4,
+      s.pos.z + Math.cos(s.yaw) * lookDist,
     )
 
     const room = roomAtPosition(s.pos.x, s.pos.z)
@@ -228,41 +236,6 @@ export function WingWalker({
     }
   })
 
-  if (!active) return null
-
-  // Slightly smaller mesh than vault so the suite desk still reads as the hero.
-  return (
-    <group ref={body} scale={0.88}>
-      <mesh position={[0, GROUNDED.bodyH * 0.42, 0]} castShadow={false}>
-        <capsuleGeometry args={[GROUNDED.capsuleR * 0.75, GROUNDED.bodyH * 0.5, 5, 10]} />
-        <meshStandardMaterial
-          color="#5ad4e8"
-          roughness={0.4}
-          metalness={0.35}
-          emissive="#1a8098"
-          emissiveIntensity={0.25}
-        />
-      </mesh>
-      <mesh position={[0, GROUNDED.bodyH * 0.92, 0]}>
-        <sphereGeometry args={[0.2, 12, 12]} />
-        <meshStandardMaterial color="#e8fdff" roughness={0.25} metalness={0.45} />
-      </mesh>
-      <mesh position={[0, GROUNDED.bodyH * 0.95, 0.16]}>
-        <boxGeometry args={[0.14, 0.04, 0.04]} />
-        <meshStandardMaterial color="#061018" metalness={0.7} roughness={0.2} />
-      </mesh>
-      <group ref={leftFoot} position={[-0.12, 0.06, 0.06]}>
-        <mesh>
-          <boxGeometry args={[0.1, 0.08, 0.18]} />
-          <meshStandardMaterial color="#0a1820" roughness={0.6} metalness={0.3} />
-        </mesh>
-      </group>
-      <group ref={rightFoot} position={[0.12, 0.06, 0.06]}>
-        <mesh>
-          <boxGeometry args={[0.1, 0.08, 0.18]} />
-          <meshStandardMaterial color="#0a1820" roughness={0.6} metalness={0.3} />
-        </mesh>
-      </group>
-    </group>
-  )
+  // No body mesh — FPV keeps the suite desk / hall as the visual hero.
+  return null
 }
