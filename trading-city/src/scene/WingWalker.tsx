@@ -18,15 +18,18 @@ import {
   clampWingWalk,
   deskInteractPoint,
   roomAtPosition,
-  spawnBehindBot,
+  spawnForMode,
   wingDeskObstacles,
   wingOuterBounds,
+  type WingSpawnMode,
 } from '../data/wingWalk'
 
 type Props = {
   active: boolean
   /** Tower / teller bot we entered from — spawn behind this desk bot (once per entry). */
   focusBotId: string
+  /** FloorNavMenu zone — hall/boss teleport without leaving the wing. */
+  spawnMode?: WingSpawnMode
   onEnterRoom?: (botId: string) => void
   /** E near the live desk opens monitor lightbox (vault-style interact). */
   onOpenScreens?: () => void
@@ -38,7 +41,14 @@ type Props = {
  * (W/S walk · A/D turn · Space jump · mouse look · Shift sprint).
  * Bounds/obstacles stay in wingWalk; locomotion is shared via groundedWalk.
  */
-export function WingWalker({ active, focusBotId, onEnterRoom, onOpenScreens, onHintChange }: Props) {
+export function WingWalker({
+  active,
+  focusBotId,
+  spawnMode = 'suite',
+  onEnterRoom,
+  onOpenScreens,
+  onHintChange,
+}: Props) {
   const { camera, gl } = useThree()
   const body = useRef<Group>(null)
   const leftFoot = useRef<Group>(null)
@@ -73,9 +83,10 @@ export function WingWalker({ active, focusBotId, onEnterRoom, onOpenScreens, onH
     [outer],
   )
 
-  const respawn = (botId: string) => {
-    const spawn = spawnBehindBot(botId)
+  const respawn = (botId: string, mode: WingSpawnMode) => {
+    const spawn = spawnForMode(mode, botId)
     resetGroundedState(state.current, spawn.position[0], spawn.position[2], spawn.yaw, 0.08)
+    // Snap follow-cam immediately so Hallway/Boss never flash a black void.
     camera.position.copy(state.current.camPos)
     lastRoom.current = spawn.room?.botId ?? null
   }
@@ -89,9 +100,9 @@ export function WingWalker({ active, focusBotId, onEnterRoom, onOpenScreens, onH
       onHintChange?.('')
       return
     }
-    respawn(focusBotId)
+    respawn(focusBotId, spawnMode)
     onHintChange?.(defaultWalkHint(false))
-  }, [active, focusBotId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, focusBotId, spawnMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!active) return

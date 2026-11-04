@@ -12,7 +12,6 @@ import { CityScene } from './scene/CityScene'
 import { OfficeHallScene } from './scene/OfficeHallScene'
 import { BankScene } from './scene/BankScene'
 import { BossDashboard } from './hud/BossDashboard'
-import { BOT_REMODEL_APPROVED, BOT_REMODEL_PREVIEW_OFFICE } from './scene/botRemodelGate'
 import type { BotRow } from './types'
 
 type View = 'city' | 'bank' | 'office'
@@ -350,6 +349,7 @@ export default function App() {
                 bots={bots}
                 desk={snap?.desk}
                 spawnBotId={spawnBotId}
+                spawnMode={bossOpen || floorFocus === 'boss' ? 'boss' : floorFocus === 'hall' ? 'hall' : 'suite'}
                 onSelect={(id) => {
                   setSelectedId(id)
                   setFloorFocus('suite')
@@ -455,11 +455,11 @@ export default function App() {
                 onSuite={() => {
                   setFloorFocus('suite')
                   setBossOpen(false)
+                  if (selectedId) setSpawnBotId(selectedId)
                 }}
                 onHall={() => {
                   setFloorFocus('hall')
                   setBossOpen(false)
-                  if (selectedId) setSpawnBotId(selectedId)
                 }}
                 onBoss={() => {
                   setFloorFocus('boss')
@@ -474,43 +474,19 @@ export default function App() {
               />
               <div className="office-title">
                 <span className="screen-hint">
-                  W/S walk · A/D turn · mouse look · click screen for trades
+                  {walkHint || 'W/S walk · A/D turn · Space jump · mouse look'}
                 </span>
-                {BOT_REMODEL_PREVIEW_OFFICE && !BOT_REMODEL_APPROVED && (
-                  <span className="bot-remodel-preview" role="status">
-                    Bot remodel preview · purple industrial · awaiting approval
-                  </span>
-                )}
               </div>
             </div>
-            {fromBank && (
-              <div className="teller-dialogue" role="status" aria-label="Teller dialogue">
-                <p className="td-line">
-                  {selected.why?.trim() ||
-                    selected.idle_copy?.trim() ||
-                    selected.blurb?.trim() ||
-                    'No CARD why on this teller yet — waiting on the next paper check.'}
-                </p>
-                <p className="td-memory">
-                  {selected.memory_line?.trim() ||
-                    snap?.desk?.teller_memory?.recent?.[0]?.text ||
-                    'Shared memory quiet — paper facts land after checks.'}
-                </p>
-                <div className="td-meta">
-                  <span>skip · {selected.skip?.trim() || 'none'}</span>
-                  <span>next · {selected.next_run?.trim() || '—'}</span>
-                  <span>
-                    today ·{' '}
-                    {selected.today == null ? '—' : `$${Number(selected.today).toFixed(2)}`}
-                  </span>
-                  <span>open · {selected.open_count ?? 0}</span>
-                  <span>
-                    memory · f{snap?.desk?.teller_memory?.n_facts ?? 0}/m
-                    {snap?.desk?.teller_memory?.n_mistakes ?? 0}/w
-                    {snap?.desk?.teller_memory?.n_wins ?? 0}
-                  </span>
-                </div>
-              </div>
+            {/* Compact one-liner only in suite — no half-screen status box over the wing. */}
+            {fromBank && floorFocus === 'suite' && !bossOpen && (
+              <p className="teller-status-line" role="status">
+                {(selected.why?.trim() ||
+                  selected.idle_copy?.trim() ||
+                  selected.blurb?.trim() ||
+                  'Waiting on next paper check.') +
+                  ` · today ${selected.today == null ? '—' : `$${Number(selected.today).toFixed(2)}`}`}
+              </p>
             )}
           </div>
         )}
