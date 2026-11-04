@@ -303,10 +303,16 @@ export function BotFigure({
       body.current.scale.set(1, breathe, 1)
     }
     if (legs.current && !seated && !deskWork) {
-      // Weight shift — standing tellers rock heel-to-heel.
-      const shift = Math.sin(t * 0.9) * 0.04
+      // Weight shift — standing tellers rock heel-to-heel, with a soft knee bend.
+      const shift = Math.sin(t * 0.9) * 0.045
       legs.current.rotation.z = shift
       legs.current.position.x = -shift * 0.15
+      legs.current.rotation.x = Math.sin(t * 1.15) * 0.03
+      const kids = legs.current.children
+      if (kids.length >= 2) {
+        kids[0].rotation.x = 0.12 + Math.sin(t * 1.4) * 0.05
+        kids[1].rotation.x = 0.12 + Math.sin(t * 1.4 + 1.7) * 0.05
+      }
     }
     if (torso.current) {
       if (pose === 'losing') {

@@ -356,6 +356,38 @@ def opportunity_score_v2(edge, confidence, depth=None, need: float = DEFAULT_DEP
     return round(adj * c, 6)
 
 
+def prefetch_map(jobs: Iterable, worker, *, max_workers: int = 8) -> tuple[dict, dict]:
+    """Parallel map for orderbook / spot jobs.
+
+    ``jobs`` are hashable keys (or any hashable). ``worker(job) -> value``.
+    Returns ``({job: value}, {job: error_str})``. Empty jobs → empty maps.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    jobs_list = list(jobs or [])
+    ok: dict = {}
+    errors: dict = {}
+    if not jobs_list:
+        return ok, errors
+
+    def _one(job):
+        try:
+            return job, worker(job), None
+        except Exception as exc:  # noqa: BLE001
+            return job, None, str(exc)
+
+    workers = min(int(max_workers) if max_workers else 1, max(1, len(jobs_list)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_one, job) for job in jobs_list]
+        for fut in as_completed(futs):
+            job, value, err = fut.result()
+            if err:
+                errors[job] = err
+            else:
+                ok[job] = value
+    return ok, errors
+
+
 def record_skip_codes(
     root: str | None,
     *,
@@ -495,6 +527,15 @@ def effective_tower_shares(
         cut_total += _cut_share(shares, "sports-gap", float(SPORTS_RED_SHARE))
         exclude.add("sports-gap")
     _feed_fee_clear(shares, cut_total, exclude=exclude)
+    # Barbell: meme sleeve ≤15% of desk even when green — never expand to use margin.
+    try:
+        import desk_roi_plan
+        meme_cap = float(desk_roi_plan.BARBELL_MEME_MAX)
+    except Exception:
+        meme_cap = 0.15
+    cut_meme = _cut_share(shares, "memecoin", meme_cap)
+    if cut_meme > 1e-12:
+        _feed_fee_clear(shares, cut_meme, exclude=exclude | {"memecoin"})
     return shares
 
 
@@ -957,6 +998,8 @@ def self_check() -> None:
     assert depth_adjusted_edge(0.10, 5, need=10) == round(0.05, 6)
     assert depth_adjusted_edge(0.10, 20, need=10) == round(0.10, 6)
     assert opportunity_score_v2(0.10, 0.8, 5, need=10) < opportunity_score_v2(0.10, 0.8, 20, need=10)
+    ok_map, err_map = prefetch_map([1, 2], lambda j: j + 1)
+    assert ok_map == {1: 2, 2: 3} and err_map == {}
     budgets = tower_budgets({"max_open_risk": 100})
     assert abs(sum(budgets.values()) - 100) < 0.05
     block = tower_budget_blocks("memecoin", 4.0, 3.0, {"max_open_risk": 100})

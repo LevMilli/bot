@@ -1,6 +1,6 @@
 /**
- * Vault hall walk bounds + simple obstacle capsules for the grounded player.
- * Same helpers can later bound plaza / tower floors.
+ * Vault hall walk bounds + obstacle helpers for the grounded player.
+ * Shared WalkBounds / resolveObstacles also power the trading-wing walker.
  */
 
 export const BANK_AISLE_HALF = 3.35
@@ -16,7 +16,7 @@ export type WalkBounds = {
   maxZ: number
 }
 
-/** Axis-aligned obstacle on the floor (desk cabinets, vault door slab, etc.). */
+/** Axis-aligned obstacle on the floor (desks, cabinets, door slabs). */
 export type FloorObstacle = {
   minX: number
   maxX: number

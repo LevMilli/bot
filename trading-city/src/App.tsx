@@ -9,7 +9,7 @@ import { TowerRail } from './hud/TowerRail'
 import { beamColorFor } from './data/format'
 import { FLOORS, parseCityHash } from './data/floorMap'
 import { CityScene } from './scene/CityScene'
-import { OfficeScene } from './scene/OfficeScene'
+import { OfficeHallScene } from './scene/OfficeHallScene'
 import { BankScene } from './scene/BankScene'
 import { BossDashboard } from './hud/BossDashboard'
 import { BOT_REMODEL_APPROVED, BOT_REMODEL_PREVIEW_OFFICE } from './scene/botRemodelGate'
@@ -159,6 +159,7 @@ function applyHashRoute(
   setFromBank: (v: boolean) => void,
   setFloorFocus: (v: FloorFocus) => void,
   setBossOpen: (v: boolean) => void,
+  setSpawnBotId: (id: string | null) => void,
   bots: BotRow[],
 ) {
   const route = parseCityHash(window.location.hash || '')
@@ -167,6 +168,7 @@ function applyHashRoute(
     const fallback = bots.find((b) => b.present !== false)?.id || bots[0]?.id || null
     if (fallback) {
       setSelectedId(fallback)
+      setSpawnBotId(fallback)
       setFromBank(false)
       setFloorFocus('boss')
       setBossOpen(true)
@@ -182,6 +184,7 @@ function applyHashRoute(
   }
   if (route.view === 'bank') {
     setSelectedId(null)
+    setSpawnBotId(null)
     setFromBank(true)
     setFloorFocus('suite')
     setBossOpen(false)
@@ -190,6 +193,7 @@ function applyHashRoute(
   }
   if (route.view === 'office' && route.botId) {
     setSelectedId(route.botId)
+    setSpawnBotId(route.botId)
     setFromBank(true)
     setFloorFocus('suite')
     setBossOpen(false)
@@ -197,15 +201,17 @@ function applyHashRoute(
     return
   }
   if (route.view === 'floor') {
-    // Multi-floor campus stub still lands in vault; in-suite hallway is live via HUD.
-    setSelectedId(null)
+    const id = route.botId || bots.find((b) => b.present !== false)?.id || bots[0]?.id || 'sports-gap'
+    setSelectedId(id)
+    setSpawnBotId(id)
     setFromBank(true)
-    setFloorFocus('suite')
+    setFloorFocus('hall')
     setBossOpen(false)
-    setView('bank')
+    setView('office')
     return
   }
   setSelectedId(null)
+  setSpawnBotId(null)
   setFromBank(false)
   setFloorFocus('suite')
   setBossOpen(false)
@@ -220,6 +226,7 @@ export default function App() {
   const [screensOpen, setScreensOpen] = useState(false)
   const [floorFocus, setFloorFocus] = useState<FloorFocus>('suite')
   const [bossOpen, setBossOpen] = useState(false)
+  const [spawnBotId, setSpawnBotId] = useState<string | null>(null)
   /** Desk ops HUD (skips / budgets / adapt / fill tax) — opens from ledger/compliance click. */
   const [vaultOpsOpen, setVaultOpsOpen] = useState(false)
   const [walkHint, setWalkHint] = useState('')
@@ -244,6 +251,7 @@ export default function App() {
         setFromBank,
         setFloorFocus,
         setBossOpen,
+        setSpawnBotId,
         botsRef.current,
       )
     apply()
@@ -255,11 +263,12 @@ export default function App() {
   useEffect(() => {
     if (!bots.length) return
     if (parseCityHash(window.location.hash || '').view !== 'boss') return
-    applyHashRoute(setView, setSelectedId, setFromBank, setFloorFocus, setBossOpen, bots)
+    applyHashRoute(setView, setSelectedId, setFromBank, setFloorFocus, setBossOpen, setSpawnBotId, bots)
   }, [bots.length])
 
   const openVault = () => {
     setSelectedId(null)
+    setSpawnBotId(null)
     setFromBank(true)
     setFloorFocus('suite')
     setBossOpen(false)
@@ -269,6 +278,7 @@ export default function App() {
 
   const openTeller = (id: string) => {
     setSelectedId(id)
+    setSpawnBotId(id)
     setFromBank(true)
     setFloorFocus('suite')
     setBossOpen(false)
@@ -278,6 +288,7 @@ export default function App() {
 
   const openTower = (id: string) => {
     setSelectedId(id)
+    setSpawnBotId(id)
     setFromBank(false)
     setFloorFocus('suite')
     setBossOpen(false)
@@ -298,6 +309,7 @@ export default function App() {
 
   const backToCity = () => {
     setSelectedId(null)
+    setSpawnBotId(null)
     setFromBank(false)
     setFloorFocus('suite')
     setBossOpen(false)
@@ -308,6 +320,7 @@ export default function App() {
 
   const backToBank = () => {
     setSelectedId(null)
+    setSpawnBotId(null)
     setFromBank(true)
     setFloorFocus('suite')
     setBossOpen(false)
@@ -331,26 +344,20 @@ export default function App() {
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
           <Suspense fallback={null}>
-            {view === 'office' && selected ? (
-              <OfficeScene
+            {view === 'office' && selected && spawnBotId ? (
+              <OfficeHallScene
                 bot={selected}
                 bots={bots}
                 desk={snap?.desk}
-                floorFocus={floorFocus}
-                onOpenScreens={() => setScreensOpen(true)}
-                onEnterHall={() => {
-                  setFloorFocus('hall')
-                  setBossOpen(false)
-                }}
-                onEnterBoss={() => {
-                  setFloorFocus('boss')
-                  setBossOpen(true)
-                }}
-                onSelectBot={(id) => {
+                spawnBotId={spawnBotId}
+                onSelect={(id) => {
                   setSelectedId(id)
                   setFloorFocus('suite')
                   setBossOpen(false)
+                  window.history.replaceState(null, '', `#/office/${id}`)
                 }}
+                onOpenScreens={() => setScreensOpen(true)}
+                onWalkHint={setWalkHint}
               />
             ) : view === 'bank' ? (
               <BankScene
@@ -386,13 +393,20 @@ export default function App() {
             </p>
           </div>
           <div className="chrome-actions">
-            {view === 'office' && fromBank ? (
-              <button type="button" className="back-btn" onClick={backToBank}>
-                ← Back to bank
-              </button>
+            {view === 'office' ? (
+              <>
+                {fromBank && (
+                  <button type="button" className="back-btn" onClick={backToBank}>
+                    ← Back to bank
+                  </button>
+                )}
+                <button type="button" className="back-btn ghost" onClick={backToCity}>
+                  ← Go to city
+                </button>
+              </>
             ) : view !== 'city' ? (
               <button type="button" className="back-btn" onClick={backToCity}>
-                ← Back to city
+                ← Go to city
               </button>
             ) : guest ? null : (
               <a className="back-btn ghost" href="/pimp-trading">
@@ -445,10 +459,13 @@ export default function App() {
                 onHall={() => {
                   setFloorFocus('hall')
                   setBossOpen(false)
+                  if (selectedId) setSpawnBotId(selectedId)
                 }}
                 onBoss={() => {
                   setFloorFocus('boss')
                   setBossOpen(true)
+                  setSpawnBotId('kalshi-sized')
+                  setSelectedId('kalshi-sized')
                 }}
                 onPickBot={(id) => {
                   if (fromBank) openTeller(id)
@@ -457,9 +474,7 @@ export default function App() {
               />
               <div className="office-title">
                 <span className="screen-hint">
-                  {fromBank
-                    ? 'Tellers menu · W/S walk · drag look'
-                    : 'Floor menu · W/S walk · drag look · glass door → hall'}
+                  W/S walk · A/D turn · mouse look · click screen for trades
                 </span>
                 {BOT_REMODEL_PREVIEW_OFFICE && !BOT_REMODEL_APPROVED && (
                   <span className="bot-remodel-preview" role="status">
@@ -641,7 +656,12 @@ export default function App() {
 
         {view === 'city' && (
           <>
-            <TowerRail bots={bots} onSelect={openTower} />
+            <TowerRail
+              bots={bots}
+              onSelect={(id) => {
+                openTower(id)
+              }}
+            />
             <div className="day-strip" aria-hidden={false}>
               <span>{snap?.desk?.central_check || 'Central clock pending'}</span>
               <span>{snap?.desk?.status_line || ''}</span>

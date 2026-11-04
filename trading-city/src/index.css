@@ -230,41 +230,111 @@ a {
   z-index: 3;
 }
 
-/* Edge tower tabs — readable, out of the orbit path */
-.tower-rail {
+/* Compact tower dropdown — plaza stays clear until opened */
+.tower-menu {
   position: absolute;
-  top: 5.4rem;
-  left: 0.65rem;
-  bottom: 2.4rem;
+  top: 5.35rem;
+  left: 0.75rem;
   z-index: 6;
-  width: min(13.5rem, 34vw);
+  width: min(15.5rem, 78vw);
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 0.35rem;
   pointer-events: none;
-  padding: 0.35rem 0.2rem 0.35rem 0;
-  background: linear-gradient(90deg, rgba(4, 2, 16, 0.72), rgba(4, 2, 16, 0.28), transparent);
 }
 
-.tower-rail-label {
-  pointer-events: none;
+.tower-menu > * {
+  pointer-events: auto;
+}
+
+.tower-menu-toggle {
+  appearance: none;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid rgba(154, 163, 199, 0.35);
+  background: rgba(6, 10, 24, 0.88);
+  color: var(--text);
+  padding: 0.42rem 0.55rem;
+  font-family: var(--font-mono);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+}
+
+.tower-menu-toggle:hover,
+.tower-menu-toggle:focus-visible {
+  border-color: var(--cyan);
+  outline: none;
+}
+
+.tower-menu.open .tower-menu-toggle {
+  border-color: color-mix(in srgb, var(--cyan) 70%, #fff 10%);
+}
+
+.tower-menu-beams {
+  display: flex;
+  gap: 0.18rem;
+  align-items: stretch;
+  height: 1.35rem;
+}
+
+.tower-menu-beams i {
+  display: block;
+  width: 0.22rem;
+  border-radius: 1px;
+  box-shadow: 0 0 8px color-mix(in srgb, currentColor 40%, transparent);
+}
+
+.tower-menu-copy {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.tower-menu-copy strong {
   font-family: var(--font-display);
-  font-size: 0.58rem;
-  letter-spacing: 0.18em;
-  color: var(--muted);
-  padding-left: 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
-.tower-rail-list {
+.tower-menu-copy em {
+  font-style: normal;
+  font-size: 0.58rem;
+  color: var(--muted);
+}
+
+.tower-menu-caret {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.tower-menu-panel {
+  max-height: min(42vh, 22rem);
+  overflow: auto;
+  border: 1px solid rgba(154, 163, 199, 0.28);
+  background: rgba(4, 8, 22, 0.94);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+  scrollbar-width: thin;
+}
+
+.app.office .tower-menu {
+  top: 4.6rem;
+  width: min(14.5rem, 72vw);
+}
+
+.tower-menu-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0.35rem;
   display: flex;
   flex-direction: column;
   gap: 0.28rem;
-  overflow: auto;
-  pointer-events: auto;
-  scrollbar-width: thin;
 }
 
 .tower-tab {
@@ -1078,29 +1148,16 @@ a {
     top: 5.2rem;
   }
 
-  .tower-rail {
+  .tower-menu {
     top: auto;
-    left: 0;
-    right: 0;
-    bottom: 2.1rem;
+    left: 0.55rem;
+    right: 0.55rem;
+    bottom: 2.35rem;
     width: auto;
-    max-height: none;
-    flex-direction: column;
-    background: linear-gradient(0deg, rgba(4, 2, 16, 0.88), rgba(4, 2, 16, 0.45), transparent);
-    padding: 0.35rem 0.55rem 0.2rem;
   }
 
-  .tower-rail-list {
-    flex-direction: row;
-    overflow-x: auto;
-    gap: 0.35rem;
-  }
-
-  .tower-tab {
-    min-width: 9.5rem;
-    grid-template-columns: 0.22rem 1fr;
-    border-left: none;
-    border: 1px solid rgba(154, 163, 199, 0.28);
+  .tower-menu-panel {
+    max-height: min(42vh, 22rem);
   }
 
   .tower-tab-status {

@@ -961,17 +961,55 @@ def run():
         desk_brain = None
         buy_candidates = sorted(buy_candidates, key=lambda c: -float(c.get("gap") or 0))
 
+    # Cross-tower firm queue: offer sports fits, then defer if desk risk
+    # is reserved for a higher btc/commodity score.
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        firm_offers = []
+        for c in buy_candidates:
+            m0 = c.get("m") or {}
+            firm_offers.append({
+                "bot": "sports-gap",
+                "ticker": str(m0.get("ticker") or c.get("key") or ""),
+                "side": c.get("side"),
+                "edge": c.get("gap") if c.get("gap") is not None else c.get("edge"),
+                "confidence": c.get("fair") if c.get("fair") is not None else c.get("confidence"),
+                "depth": c.get("depth"),
+                "stake_est": 25.0,
+            })
+        desk_roi_plan.offer_firm_candidates(
+            DESK_ROOT, firm_offers, bot="sports-gap",
+        )
+        local_open = sum(
+            float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0)
+            for p in s["open"]
+        )
+        desk_roi_plan.rebuild_firm_queue(
+            DESK_ROOT,
+            remaining_risk=max(0.0, float(max_open_risk) - float(local_open)),
+            note="sports-gap firm offer",
+        )
+    except Exception:
+        pass
+
     buys_this_check = 0
     # Selective volume when green; ROI rescue caps when red — fee floors unchanged.
+    # green_boost stays 0 until sports_green_boost_status ready (2w M1≥0 + CLV bar).
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_more
+        import desk_roi_plan
+        boost = int(desk_roi_plan.sports_green_boost(DESK_ROOT))
         max_buys_eff = int(
             desk_more.selective_max_buys(
-                "sports-gap", base=MAX_BUYS_PER_CHECK, today=today_pnl, green_boost=0,
+                "sports-gap", base=MAX_BUYS_PER_CHECK, today=today_pnl, green_boost=boost,
             )
         )
+        if boost:
+            print(f"Sports green_boost={boost} (CLV+M1 gate ready; fee floors locked)")
     except Exception:
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl < 0:
@@ -1030,6 +1068,12 @@ def run():
                 )
                 if revenge:
                     reason = revenge
+                if reason is None:
+                    firm_block = desk_roi_plan.firm_queue_blocks(
+                        DESK_ROOT, "sports-gap", str(m.get("ticker") or ""),
+                    )
+                    if firm_block:
+                        reason = firm_block
             except Exception:
                 pass
         spread = None
@@ -1076,6 +1120,15 @@ def run():
                     ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
                     edge=gap, note=str(reason)[:160],
                 )
+                why = str(reason or "").lower()
+                if any(k in why for k in ("max buys", "max open risk", "budget", "open risk")):
+                    desk_roi_plan.note_pending_high_edge(
+                        DESK_ROOT,
+                        bot="sports-gap",
+                        ticker=str(m.get("ticker") or ""),
+                        edge=gap,
+                        reason=str(reason)[:120],
+                    )
             except Exception:
                 pass
             continue
@@ -1131,6 +1184,12 @@ def run():
             desk_roi_plan.record_fit(
                 DESK_ROOT, bot="sports-gap", outcome="buy",
                 ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
+                edge=gap,
+            )
+            desk_roi_plan.flush_opp_cost_on_buy(
+                DESK_ROOT,
+                bot="sports-gap",
+                ticker=str(m.get("ticker") or ""),
                 edge=gap,
             )
         except Exception:

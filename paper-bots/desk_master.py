@@ -458,6 +458,88 @@ def master_summary(
                 plan["cold_harvest"] = desk_roi_plan.cold_harvest_status(root)
         except Exception:
             plan["cold_harvest"] = None
+        try:
+            plan["hillclimb_lever"] = desk_roi_plan.hillclimb_lever_status(root)
+        except Exception:
+            plan["hillclimb_lever"] = None
+        try:
+            plan["dual_control"] = desk_roi_plan.dual_control_status(root)
+        except Exception:
+            plan["dual_control"] = None
+        try:
+            plan["quarterly_rebaseline"] = desk_roi_plan.quarterly_rebaseline_status(root)
+        except Exception:
+            plan["quarterly_rebaseline"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_os = desk_roi_plan.latest_capital_os(root)
+            if root and bots and (
+                not isinstance(latest_os, dict)
+                or str(latest_os.get("label") or "") != today
+            ):
+                plan["capital_os"] = desk_roi_plan.capture_capital_os(
+                    root, bots=bots, cfg=cfg, desk_util=desk_util, label=today,
+                )
+            else:
+                plan["capital_os"] = latest_os or desk_roi_plan.capital_os_status(
+                    root, bots=bots, cfg=cfg, desk_util=desk_util,
+                )
+        except Exception:
+            plan["capital_os"] = None
+        try:
+            plan["opp_cost"] = desk_roi_plan.opp_cost_summary(root)
+        except Exception:
+            plan["opp_cost"] = None
+        try:
+            plan["idea_review"] = desk_roi_plan.idea_review_status(root)
+        except Exception:
+            plan["idea_review"] = None
+        try:
+            plan["sports_green_boost"] = desk_roi_plan.sports_green_boost_status(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["sports_green_boost"] = None
+        try:
+            plan["green_or_gone"] = desk_roi_plan.green_or_gone_status(bots)
+        except Exception:
+            plan["green_or_gone"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_bc = desk_roi_plan.latest_btc_calibration(root)
+            if root and bots and (
+                not isinstance(latest_bc, dict)
+                or str(latest_bc.get("label") or "") != today
+            ):
+                plan["btc_calibration"] = desk_roi_plan.capture_btc_calibration(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["btc_calibration"] = latest_bc or desk_roi_plan.btc_calibration_report(bots)
+        except Exception:
+            plan["btc_calibration"] = None
+        try:
+            status_fq = desk_roi_plan.firm_queue_status(root)
+            offers_n = int((status_fq or {}).get("offers_n") or 0)
+            latest_fq = (status_fq or {}).get("latest")
+            if root and offers_n > 0 and not isinstance(latest_fq, dict):
+                desk_roi_plan.capture_firm_queue(root, bots=bots, cfg=cfg)
+                status_fq = desk_roi_plan.firm_queue_status(root)
+            plan["firm_queue"] = status_fq
+        except Exception:
+            plan["firm_queue"] = None
+        try:
+            plan["empty_card"] = desk_roi_plan.empty_card_status(root)
+        except Exception:
+            plan["empty_card"] = None
+        try:
+            plan["near_miss_promote"] = desk_roi_plan.near_miss_promote_status(root)
+        except Exception:
+            plan["near_miss_promote"] = None
     except Exception:
         plan = None
     return {

@@ -2,14 +2,14 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { BotRow } from '../types'
-import { money } from '../data/format'
+import { hologramPnlValue, money } from '../data/format'
 
 /**
  * One trade chart per side of the world, four at most.
  * The box sits outside the farthest camera orbit so zoom-out still looks at the inner face.
  */
-const REACH = 70
-const HEIGHT = 52
+const REACH = 24
+const HEIGHT = 16
 
 const UP = '#3dff7a'
 const DOWN = '#ff3355'
@@ -59,7 +59,8 @@ function seriesFor(bot: BotRow): number[] {
     })
     return full.length > 42 ? full.slice(-42) : full
   }
-  const end = Number(bot.today ?? bot.realized ?? 0)
+  const shown = hologramPnlValue(bot)
+  const end = shown == null ? 0 : shown
   const seed = hashId(bot.id || bot.name || 'wall')
   const n = 36
   const raw: number[] = []
@@ -78,9 +79,12 @@ function seriesFor(bot: BotRow): number[] {
 }
 
 function returnOf(bot: BotRow, last: number) {
-  if (typeof bot.today === 'number' && !Number.isNaN(bot.today)) return bot.today
-  if (typeof bot.realized === 'number' && !Number.isNaN(bot.realized)) return bot.realized
-  return last
+  const shown = hologramPnlValue(bot)
+  return shown == null ? last : shown
+}
+
+function periodOf(bot: BotRow) {
+  return bot.today != null && bot.today !== 0 ? 'TODAY' : 'REALIZED'
 }
 
 function tone(n: number) {
@@ -160,10 +164,10 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   min -= pad
   max += pad
   const span = max - min || 1
-  const plotL = 56
-  const plotR = W * 0.72
-  const plotT = H * 0.2
-  const plotB = H * 0.84
+  const plotL = 48
+  const plotR = W * 0.78
+  const plotT = H * 0.4
+  const plotB = H * 0.9
   const yOf = (v: number) => plotB - ((v - min) / span) * (plotB - plotT)
   const xy = points.map((v, i) => ({
     x: plotL + (i / Math.max(points.length - 1, 1)) * (plotR - plotL),
@@ -181,9 +185,9 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   ctx.lineTo(plotR + 36, zeroY)
   ctx.stroke()
   ctx.restore()
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'
-  ctx.font = '600 28px sans-serif'
-  ctx.fillText('0', plotR + 44, zeroY + 8)
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'
+  ctx.font = '700 36px sans-serif'
+  ctx.fillText('0', plotR + 16, zeroY + 12)
 
   for (let i = 1; i < xy.length; i++) {
     const a = xy[i - 1]
@@ -200,33 +204,19 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
     ctx.fill()
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
-    ctx.strokeStyle = up ? 'rgba(61,255,122,0.35)' : 'rgba(255,51,85,0.4)'
-    ctx.lineWidth = 26
+    ctx.strokeStyle = up ? 'rgba(120,255,170,0.55)' : 'rgba(255,90,110,0.55)'
+    ctx.lineWidth = 28
     ctx.beginPath()
     ctx.moveTo(a.x, a.y)
     ctx.lineTo(b.x, b.y)
     ctx.stroke()
     ctx.strokeStyle = color
-    ctx.lineWidth = 10
+    ctx.lineWidth = 12
+    ctx.stroke()
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)'
+    ctx.lineWidth = 3
     ctx.stroke()
   }
-
-  let hi = 0
-  let lo = 0
-  xy.forEach((p, i) => {
-    if (p.v > xy[hi].v) hi = i
-    if (p.v < xy[lo].v) lo = i
-  })
-  const mark = (p: (typeof xy)[number], label: string, above: boolean) => {
-    ctx.fillStyle = tone(p.v)
-    ctx.beginPath()
-    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.font = '700 26px sans-serif'
-    ctx.fillText(label, p.x + 12, p.y + (above ? -16 : 28))
-  }
-  mark(xy[hi], 'HIGH', true)
-  if (lo !== hi) mark(xy[lo], 'LOW', false)
 
   const tip = xy[xy.length - 1]
   const lastStep = xy.length > 1 ? tip.v - xy[xy.length - 2].v : tip.v
@@ -252,26 +242,43 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   const ret = returnOf(bot, tip.v)
   const retColor = tone(ret)
   const word = ret > 0.005 ? 'UP' : ret < -0.005 ? 'DOWN' : 'FLAT'
-  ctx.fillStyle = 'rgba(255,255,255,0.95)'
-  ctx.font = '700 42px sans-serif'
-  ctx.fillText((bot.name || 'trade').slice(0, 20), 48, 72)
+  const figure = money(ret, true)
+  ctx.fillStyle = 'rgba(4,2,16,0.82)'
+  ctx.fillRect(0, 0, W, 118)
   ctx.fillStyle = retColor
-  ctx.font = '800 36px sans-serif'
-  ctx.fillText(word, W * 0.4, 68)
-  ctx.font = '700 48px monospace'
-  ctx.fillText(money(ret, true), W * 0.4, 124)
-  ctx.fillStyle = 'rgba(255,255,255,0.75)'
-  ctx.font = '600 28px sans-serif'
-  ctx.fillText('TODAY', W * 0.4, 162)
-
+  ctx.fillRect(0, 114, W, 6)
+  ctx.fillStyle = '#ffffff'
+  ctx.font = '700 58px sans-serif'
+  ctx.fillText((bot.name || 'trade').slice(0, 16), 28, 74)
+  ctx.font = '800 28px sans-serif'
+  ctx.fillStyle = retColor
+  ctx.fillText(word, 620, 42)
+  ctx.font = '700 54px monospace'
+  ctx.fillText(figure, 620, 96)
+  const figureW = ctx.measureText(figure).width
+  ctx.fillStyle = 'rgba(255,255,255,0.72)'
+  ctx.font = '600 24px sans-serif'
+  ctx.fillText(periodOf(bot), 620 + figureW + 18, 90)
   const liveOn = Math.sin(time * 4) > 0
-  ctx.fillStyle = liveOn ? UP : 'rgba(61,255,122,0.35)'
+  ctx.fillStyle = liveOn ? retColor : 'rgba(255,255,255,0.35)'
   ctx.beginPath()
-  ctx.arc(W - 150, 58, 8, 0, Math.PI * 2)
+  ctx.arc(W - 148, 58, 11, 0, Math.PI * 2)
   ctx.fill()
-  ctx.fillStyle = 'rgba(255,255,255,0.85)'
-  ctx.font = '700 28px sans-serif'
-  ctx.fillText('LIVE', W - 130, 68)
+  ctx.fillStyle = '#ffffff'
+  ctx.font = '700 32px sans-serif'
+  ctx.fillText('LIVE', W - 124, 70)
+
+  ctx.font = '700 32px monospace'
+  const tag = figure
+  const tagW = ctx.measureText(tag).width + 28
+  const tagX = tip.x + 18 + tagW > W - 12 ? tip.x - tagW - 16 : tip.x + 18
+  const tagY = Math.min(Math.max(tip.y - 22, 132), H - 56)
+  ctx.fillStyle = 'rgba(4,2,16,0.88)'
+  ctx.fillRect(tagX, tagY, tagW, 44)
+  ctx.fillStyle = retColor
+  ctx.fillRect(tagX, tagY, 6, 44)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText(tag, tagX + 16, tagY + 31)
 }
 
 function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
@@ -280,8 +287,8 @@ function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
   const state = useRef({ acc: 0, sig: '', time: 0 })
   const map = useMemo(() => {
     const canvas = document.createElement('canvas')
-    canvas.width = 1600
-    canvas.height = 900
+    canvas.width = 1800
+    canvas.height = 600
     const tex = new THREE.CanvasTexture(canvas)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.anisotropy = 8
@@ -310,13 +317,9 @@ function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
 
   return (
     <group position={wall.position} rotation={[0, wall.rot, 0]} raycast={() => null}>
-      <mesh position={[0, 0, -0.12]}>
-        <boxGeometry args={[wall.size[0], wall.size[1], 0.18]} />
-        <meshBasicMaterial color="#07061a" />
-      </mesh>
-      <mesh position={[0, 0, 0.02]}>
+      <mesh position={[0, 0, 0]}>
         <planeGeometry args={[wall.size[0], wall.size[1]]} />
-        <meshBasicMaterial map={map} toneMapped={false} fog={false} />
+        <meshBasicMaterial map={map} toneMapped={false} fog={false} side={THREE.FrontSide} />
       </mesh>
     </group>
   )

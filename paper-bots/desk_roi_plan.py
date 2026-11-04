@@ -36,6 +36,15 @@ FEE_LEDGER_NAME = "desk_fee_ledger.json"
 HELPER_FILLS_NAME = "desk_helper_fills.json"
 HELPER_PROMOTE_NAME = "desk_helper_promote.json"
 COLD_HARVEST_NAME = "desk_cold_harvest.json"
+HILLCLIMB_LEVER_NAME = "desk_hillclimb_lever.json"
+DUAL_CONTROL_NAME = "desk_dual_control.json"
+CAPITAL_OS_NAME = "desk_capital_os.json"
+OPP_COST_NAME = "desk_opp_cost.json"
+IDEA_REVIEW_NAME = "desk_idea_review.json"
+BTC_CALIB_NAME = "desk_btc_calibration.json"
+FIRM_QUEUE_NAME = "desk_firm_queue.json"
+EMPTY_CARD_NAME = "desk_empty_card.json"
+NEAR_MISS_PROMOTE_NAME = "desk_near_miss_promote.json"
 
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
@@ -55,6 +64,35 @@ MEME_RETIRE_MIN_N = 10
 
 # Phase 11: hillclimb kill — M3↑ with M1↓ for 2 Chicago weeks → revert lever.
 HILLCLIMB_KILL_WEEKS = 2
+# Phase 11: one lever per Chicago week from allowlist (raise-only on fee floors).
+HILLCLIMB_ALLOWLIST = {
+    "VOL_SAFE": {
+        "kind": "adapt_threshold",
+        "raise_only": False,
+        "note": "desk_adapt VOL_SAFE play-safe threshold experiment",
+    },
+    "HIT_FOR_BIG": {
+        "kind": "adapt_threshold",
+        "raise_only": False,
+        "note": "desk_adapt HIT_FOR_BIG proven-80 threshold experiment",
+    },
+    "venue_min_edge_btc": {
+        "kind": "venue_floor",
+        "raise_only": True,
+        "venue": "kalshi_btc15m",
+        "note": "BTC venue min_edge — raise only, never soften floor",
+    },
+    "min_cushion_btc": {
+        "kind": "btc_gate",
+        "raise_only": True,
+        "note": "BTC min cushion — raise only",
+    },
+    "kelly_fraction": {
+        "kind": "sizing",
+        "raise_only": False,
+        "note": "Kelly fraction within desk bounds (0.05–1.0)",
+    },
+}
 
 # Phase 10: profit-lock harvest paper analog — hit weekly target → 0.5× size.
 PROFIT_LOCK_TARGET_USD = 40.0
@@ -112,6 +150,64 @@ COLD_HARVEST_PCT_DEFAULT = 0.40
 COLD_HARVEST_PCT_MIN = 0.30
 COLD_HARVEST_PCT_MAX = 0.50
 
+# Cross-tower firm rank queue — fee-clear sports+btc+commodity only.
+# Soft gate: deferred tickets skip new entries so desk risk buys best score.
+FIRM_QUEUE_BOTS = frozenset({"sports-gap", "btc15m", "commodity-15m"})
+FIRM_QUEUE_TTL_SEC = 180.0
+FIRM_QUEUE_DEFAULT_STAKE = 25.0
+MAX_FIRM_OFFERS = 200
+
+# Empty-market CARD bar — fee-clear towers should exit idle loops fast.
+EMPTY_CARD_BAR_SEC = 3.0
+MAX_EMPTY_CARD_ROWS = 500
+
+# Phase 5: near-miss soft-gate promote (never fee / edge floors).
+NEAR_MISS_PROMOTE_N = 30
+NEAR_MISS_PROMOTE_MIN_EV = 0.0
+NEAR_MISS_SOFT_ALLOW = frozenset({"z", "p"})  # edge forever forbidden
+NEAR_MISS_Z_RELAX = 0.05
+NEAR_MISS_P_RELAX = 0.02
+NEAR_MISS_LIVE = False  # code default — staff file only
+
+# Phase 2: capital allocation OS — barbell + midday util / zero-buy alerts.
+BARBELL_MEME_MAX = 0.15          # ≤15% desk risk to meme sleeve
+BARBELL_FEE_CLEAR_MIN = 0.70     # ≥70% of open risk in fee-clear towers
+MIDDAY_UTIL_ALERT_LT = 0.20      # util below this + EDGE-only skips → starvation alert
+ZERO_BUY_ALERT_HOURS = 6.0       # weekday fee-clear quiet with BUDGET skips
+
+# Phase 5: opportunity-cost clock — low-edge blocks high-edge >90s.
+OPP_COST_WAIT_SEC = 90.0
+MAX_OPP_COST_ROWS = 2000
+
+# Phase 11: idea review cadence — kill stale experiments after 90 Chicago days.
+IDEA_REVIEW_DAYS = 90
+MAX_IDEA_ROWS = 200
+
+# Phase 4: BTC calibration — labeled high-p buckets must roughly hit.
+BTC_CALIB_MIN_N = 20
+BTC_CALIB_HI_LABEL = 0.80
+BTC_CALIB_HI_HIT_FLOOR = 0.70  # if labeled ≥80% but hits <70% → raise Φ
+BTC_CALIB_BUCKETS = (
+    (0.50, 0.60),
+    (0.60, 0.70),
+    (0.70, 0.80),
+    (0.80, 0.90),
+    (0.90, 1.01),
+)
+
+# Phase 9: dual-control live checklist — paper stub; never enables live orders.
+LIVE_ORDERS_ENABLED = False  # hard lock — stub cannot arm create-order
+DUAL_CONTROL_ITEMS = (
+    ("gate_a_pilot", "Paper Gate A ready on pilot tower"),
+    ("gate_b_pilot", "Gate B twin green on pilot (DD/n)"),
+    ("fee_parity", "Live fee table matches paper (+ fill tax)"),
+    ("read_only_first", "Read-only armed mode before create-order"),
+    ("daily_stop", "Daily live stop ≤ paper stop"),
+    ("kill_floor", "Live kill ≤ sleeve floor; cancel-on-pause"),
+    ("no_meme_fund", "No funding live from meme sleeve"),
+    ("disaster_drill", "Ruin drill soft/hard practiced this month"),
+)
+
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
 
@@ -120,6 +216,12 @@ LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
 SPORTS_HARD_STOP_DROP = 0.12
 SPORTS_HARD_STOP_LIVE = False  # never auto-sell until staff promote
 SPORTS_HARD_STOP_PROMOTE_N = 30
+
+# Phase 5: sports green_boost only after 2 Chicago weeks M1≥0 + CLV bar.
+SPORTS_GREEN_BOOST_WEEKS = 2
+SPORTS_CLV_BAR = 0.52
+SPORTS_CLV_MIN_N = 20
+SPORTS_M1_MIN_N = 20
 
 # Fee-aware INX research bands only — does NOT change live 80–90¢ config.
 INX_RESEARCH_BANDS = (
@@ -400,6 +502,1067 @@ def capital_misplaced(bots: list | None = None, cfg: dict | None = None) -> dict
     }
 
 
+# ---- Phase 2 capital OS (barbell + util / zero-buy alerts) -----------------
+
+def barbell_status(bots: list | None = None, cfg: dict | None = None) -> dict:
+    """Audit open-risk barbell: meme ≤15% of desk cap; fee-clear ≥70% of open."""
+    cfg = cfg or {}
+    desk_cap = _finite(cfg.get("max_open_risk")) or 100.0
+    meme_risk = 0.0
+    fee_clear_risk = 0.0
+    total_open = 0.0
+    by = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        risk = float(_finite(bot.get("open_risk")) or 0.0)
+        if risk <= 0:
+            continue
+        total_open += risk
+        if bot_id == "memecoin":
+            meme_risk += risk
+        if bot_id in FEE_CLEAR:
+            fee_clear_risk += risk
+        by.append({"bot": bot_id, "open_risk": round(risk, 2)})
+    meme_of_cap = round(meme_risk / desk_cap, 4) if desk_cap else None
+    fee_of_open = (
+        round(fee_clear_risk / total_open, 4) if total_open > 1e-9 else None
+    )
+    meme_ok = meme_of_cap is None or meme_of_cap <= BARBELL_MEME_MAX + 1e-12
+    # Idle desk (no open) passes fee-clear share; once risk is on, need ≥70% fee-clear.
+    fee_ok = fee_of_open is None or fee_of_open + 1e-12 >= BARBELL_FEE_CLEAR_MIN
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "desk_cap": desk_cap,
+        "total_open": round(total_open, 2),
+        "meme_risk": round(meme_risk, 2),
+        "fee_clear_risk": round(fee_clear_risk, 2),
+        "meme_of_cap": meme_of_cap,
+        "fee_clear_of_open": fee_of_open,
+        "meme_max": BARBELL_MEME_MAX,
+        "fee_clear_min": BARBELL_FEE_CLEAR_MIN,
+        "meme_ok": meme_ok,
+        "fee_clear_ok": fee_ok,
+        "pass": bool(meme_ok and fee_ok),
+        "by_tower": by[:12],
+        "note": (
+            f"Barbell: meme ≤{BARBELL_MEME_MAX:.0%} of desk cap; "
+            f"fee-clear ≥{BARBELL_FEE_CLEAR_MIN:.0%} of open risk when deployed."
+        ),
+    }
+
+
+def midday_util_alert(
+    desk_util=None,
+    *,
+    skip_board: dict | None = None,
+) -> dict:
+    """Alert when util <20% and skip board is EDGE-heavy (true starvation).
+
+    DATA/NEWS/WEEKEND dominant → correct idle (no alert).
+    """
+    util = _finite(desk_util)
+    board = skip_board if isinstance(skip_board, dict) else {}
+    stable = board.get("stable_top") if isinstance(board.get("stable_top"), list) else []
+    top_codes = [
+        str(r.get("code") or "").upper()
+        for r in stable[:3]
+        if isinstance(r, dict)
+    ]
+    idle_ok = any(c in ("DATA", "NEWS", "WEEKEND", "CAL") for c in top_codes)
+    edge_heavy = bool(top_codes) and top_codes[0] == "EDGE"
+    alert = bool(
+        util is not None
+        and util + 1e-12 < MIDDAY_UTIL_ALERT_LT
+        and edge_heavy
+        and not idle_ok
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "desk_util": util,
+        "bar_lt": MIDDAY_UTIL_ALERT_LT,
+        "top_codes": top_codes,
+        "edge_heavy": edge_heavy,
+        "correct_idle": idle_ok and util is not None and util < MIDDAY_UTIL_ALERT_LT,
+        "alert": alert,
+        "note": (
+            "Low util + EDGE-only skips → capital starvation alert. "
+            "DATA/NEWS/WEEKEND idle is correct."
+            if alert
+            else "No midday starvation alert."
+        ),
+    }
+
+
+def _hours_since_iso(stamp: str | None) -> float | None:
+    if not stamp:
+        return None
+    try:
+        from datetime import datetime, timezone
+        text = str(stamp).replace("Z", "+00:00")
+        when = datetime.fromisoformat(text)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        return max(0.0, (now - when).total_seconds() / 3600.0)
+    except Exception:
+        return None
+
+
+def zero_buy_alert(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    skip_board: dict | None = None,
+    hours: float = ZERO_BUY_ALERT_HOURS,
+) -> dict:
+    """Weekday alert: fee-clear quiet ≥6h while BUDGET skips dominate.
+
+    Uses fit-journal last buy for fee-clear towers. Not an alert on WEEKEND.
+    """
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now_ct = datetime.now(ZoneInfo("America/Chicago"))
+        weekday = now_ct.weekday()  # Mon=0 … Sun=6
+    except Exception:
+        weekday = time.gmtime().tm_wday
+    is_weekend = weekday >= 5
+    state = load_fit(root)
+    last_buy_at = None
+    for r in state.get("rows") or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("outcome") or "") != "buy":
+            continue
+        if str(r.get("bot") or "") not in FEE_CLEAR:
+            continue
+        at = str(r.get("at") or "")
+        if at and (last_buy_at is None or at > last_buy_at):
+            last_buy_at = at
+    age_h = _hours_since_iso(last_buy_at)
+    board = skip_board if isinstance(skip_board, dict) else {}
+    stable = board.get("stable_top") if isinstance(board.get("stable_top"), list) else []
+    top = [
+        str(r.get("code") or "").upper()
+        for r in stable[:5]
+        if isinstance(r, dict)
+    ]
+    budget_heavy = "BUDGET" in top[:2]
+    quiet = age_h is None or age_h + 1e-12 >= float(hours)
+    alert = bool(not is_weekend and quiet and budget_heavy)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "is_weekend": is_weekend,
+        "last_fee_clear_buy_at": last_buy_at,
+        "hours_since_buy": round(age_h, 2) if age_h is not None else None,
+        "bar_hours": float(hours),
+        "budget_heavy": budget_heavy,
+        "top_codes": top,
+        "alert": alert,
+        "note": (
+            f"Zero-buy alert: ≥{hours:.0f}h weekday quiet on fee-clear with BUDGET skips."
+            if alert
+            else "No zero-buy capital alert."
+        ),
+    }
+
+
+def capital_os_status(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    desk_util=None,
+) -> dict:
+    """Masters board: barbell + midday util + zero-buy capital alerts."""
+    skip_board = None
+    try:
+        import desk_more
+        skip_board = desk_more.skip_leaderboard(root)
+    except Exception:
+        skip_board = None
+    barbell = barbell_status(bots, cfg)
+    util = desk_util
+    if util is None and bots and cfg:
+        desk_open = sum(float(_finite(b.get("open_risk")) or 0) for b in bots if isinstance(b, dict))
+        cap = _finite(cfg.get("max_open_risk")) or 100.0
+        util = round(desk_open / cap, 4) if cap else None
+    midday = midday_util_alert(util, skip_board=skip_board)
+    zero = zero_buy_alert(root, bots=bots, skip_board=skip_board)
+    alerts = []
+    if midday.get("alert"):
+        alerts.append("midday_util")
+    if zero.get("alert"):
+        alerts.append("zero_buy")
+    if not barbell.get("pass"):
+        alerts.append("barbell")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "barbell": barbell,
+        "midday_util": midday,
+        "zero_buy": zero,
+        "alerts": alerts,
+        "ok": len(alerts) == 0,
+        "note": (
+            "Phase 2 capital OS. Starve losers → feed fee-clear; "
+            "never raise meme budget to use margin."
+        ),
+    }
+
+
+def capture_capital_os(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    desk_util=None,
+    label: str | None = None,
+) -> dict:
+    """Persist today's capital OS snapshot for staff review."""
+    day = label or _chicago_day()
+    status = capital_os_status(root, bots=bots, cfg=cfg, desk_util=desk_util)
+    row = {
+        **status,
+        "label": day,
+        "captured_at": _now(),
+    }
+    path = _path(CAPITAL_OS_NAME, root)
+    store = _load(path, {"paper_only": True, "days": [], "latest": None})
+    days = [d for d in (store.get("days") or []) if isinstance(d, dict)]
+    days = [d for d in days if str(d.get("label") or "") != day]
+    days.append(row)
+    store["days"] = days[-60:]
+    store["latest"] = row
+    store["last_at"] = _now()
+    _save(path, store)
+    return row
+
+
+def latest_capital_os(root: str | None = None) -> dict | None:
+    store = _load(_path(CAPITAL_OS_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+# ---- BTC calibration report (Phase 4) --------------------------------------
+
+def _btc_history_rows(bots: list | None) -> list:
+    rows = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        if str(bot.get("id") or "") not in ("btc15m", "btc"):
+            continue
+        for h in bot.get("history") or []:
+            if isinstance(h, dict):
+                rows.append(h)
+    return rows
+
+
+def btc_calibration_report(
+    bots: list | None = None,
+    *,
+    min_n: int = BTC_CALIB_MIN_N,
+) -> dict:
+    """Bucket BTC model-p vs realized hit rate. Flag high-p miscalibration.
+
+    Plan: if labeled ~80% wins ~55%, raise Φ — never size on miscalibration.
+    """
+    rows = _btc_history_rows(bots)
+    buckets = []
+    hi_hits = 0
+    hi_n = 0
+    for lo, hi in BTC_CALIB_BUCKETS:
+        local = []
+        for h in rows:
+            p = _finite(h.get("prob") if h.get("prob") is not None else h.get("fair_at_entry"))
+            pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if p is None or pnl is None:
+                continue
+            if not (lo <= float(p) < hi):
+                continue
+            hit = 1.0 if pnl > 0 else 0.0
+            local.append(hit)
+            if lo + 1e-12 >= BTC_CALIB_HI_LABEL:
+                hi_n += 1
+                hi_hits += int(hit)
+        n = len(local)
+        rate = round(sum(local) / n, 4) if n else None
+        buckets.append({
+            "lo": lo,
+            "hi": hi,
+            "label_mid": round((lo + min(hi, 1.0)) / 2, 3),
+            "n": n,
+            "hit_rate": rate,
+            "gap": None if rate is None else round(rate - ((lo + min(hi, 1.0)) / 2), 4),
+        })
+    hi_rate = round(hi_hits / hi_n, 4) if hi_n else None
+    miscal = bool(
+        hi_n >= int(min_n)
+        and hi_rate is not None
+        and hi_rate + 1e-12 < BTC_CALIB_HI_HIT_FLOOR
+    )
+    action = "raise_phi" if miscal else ("observe" if hi_n < int(min_n) else "keep")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bot": "btc15m",
+        "n": sum(b["n"] for b in buckets),
+        "hi_label": BTC_CALIB_HI_LABEL,
+        "hi_n": hi_n,
+        "hi_hit_rate": hi_rate,
+        "hi_hit_floor": BTC_CALIB_HI_HIT_FLOOR,
+        "miscalibrated": miscal,
+        "action": action,
+        "buckets": buckets,
+        "auto_promote": False,
+        "note": (
+            "BTC calibration: high-p (≥80%) bucket must hit ≥70% once n≥20. "
+            "Miscalibration → raise Φ / fix model — never size up on fake confidence."
+            if miscal
+            else "BTC calibration board. Fee floors locked; no auto param write."
+        ),
+    }
+
+
+def capture_btc_calibration(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+) -> dict:
+    """Persist today's BTC calibration card for Masters / Sunday review."""
+    day = label or _chicago_day()
+    report = btc_calibration_report(bots)
+    card = {**report, "label": day, "captured_at": _now()}
+    path = _path(BTC_CALIB_NAME, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = [c for c in cards if str(c.get("label") or "") != day]
+    cards.append(card)
+    store["cards"] = cards[-60:]
+    store["latest"] = card
+    store["last_at"] = _now()
+    _save(path, store)
+    return card
+
+
+def latest_btc_calibration(root: str | None = None) -> dict | None:
+    store = _load(_path(BTC_CALIB_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+# ---- Cross-tower firm rank queue (sports+btc+commodity) --------------------
+
+def _firm_queue_store(root: str | None) -> dict:
+    return _load(
+        _path(FIRM_QUEUE_NAME, root),
+        {"paper_only": True, "offers": {}, "latest": None, "passes": []},
+    )
+
+
+def _firm_offer_key(bot: str, ticker: str, side: str = "") -> str:
+    return f"{str(bot or '').strip()}|{str(ticker or '').strip()}|{str(side or '').strip().upper()}"
+
+
+def _seconds_since_iso(stamp: str | None) -> float | None:
+    hours = _hours_since_iso(stamp)
+    if hours is None:
+        return None
+    return float(hours) * 3600.0
+
+
+def remaining_desk_risk(
+    root: str | None = None,
+    *,
+    cfg: dict | None = None,
+    bots: list | None = None,
+) -> float:
+    """Desk open-risk headroom for firm queue allocate (fail-open to cap)."""
+    cap = 100.0
+    try:
+        if cfg is None:
+            import pimp_desk as desk
+            cfg = desk.load_settings(root)
+        cap = float((cfg or {}).get("max_open_risk") or 100.0)
+    except Exception:
+        cap = 100.0
+    used = 0.0
+    rows = bots
+    if rows is None:
+        try:
+            import pimp_desk as desk
+            rows = (desk.snapshot(root).get("bots") or [])
+        except Exception:
+            rows = []
+    for bot in rows or []:
+        if not isinstance(bot, dict) or bot.get("shadow_only"):
+            continue
+        try:
+            used += float(bot.get("open_risk") or 0)
+        except (TypeError, ValueError):
+            pass
+    return max(0.0, round(float(cap) - float(used), 2))
+
+
+def offer_firm_candidates(
+    root: str | None,
+    candidates: list | None,
+    *,
+    bot: str | None = None,
+) -> dict:
+    """Upsert fee-clear candidates into the shared firm offer book.
+
+    When ``bot`` is set, replace that tower's prior offers with this batch
+    so stale local tickets do not linger until TTL.
+    """
+    path = _path(FIRM_QUEUE_NAME, root)
+    store = _firm_queue_store(root)
+    offers = store.get("offers") if isinstance(store.get("offers"), dict) else {}
+    bot_id = str(bot or "").strip()
+    if bot_id:
+        offers = {
+            k: v for k, v in offers.items()
+            if not (isinstance(v, dict) and str(v.get("bot") or "") == bot_id)
+        }
+    now = _now()
+    accepted = 0
+    for row in candidates or []:
+        if not isinstance(row, dict):
+            continue
+        b = str(row.get("bot") or bot_id or "").strip()
+        tick = str(row.get("ticker") or "").strip()
+        if not b or not tick or b not in FIRM_QUEUE_BOTS:
+            continue
+        side = str(row.get("side") or "").strip()
+        edge = _finite(row.get("edge"))
+        conf = _finite(
+            row.get("confidence") if row.get("confidence") is not None else row.get("p")
+        )
+        depth = _finite(row.get("depth"))
+        stake = _finite(row.get("stake_est") if row.get("stake_est") is not None else row.get("stake"))
+        if stake is None or stake <= 0:
+            stake = FIRM_QUEUE_DEFAULT_STAKE
+        key = _firm_offer_key(b, tick, side)
+        offers[key] = {
+            "bot": b,
+            "ticker": tick[:80],
+            "side": side[:8],
+            "edge": edge,
+            "confidence": conf,
+            "depth": depth,
+            "stake_est": round(float(stake), 2),
+            "at": now,
+            "note": str(row.get("note") or "")[:120],
+            "paper_only": True,
+        }
+        accepted += 1
+    if len(offers) > MAX_FIRM_OFFERS:
+        oldest = sorted(
+            offers.items(),
+            key=lambda kv: str((kv[1] or {}).get("at") or ""),
+        )
+        offers = dict(oldest[-MAX_FIRM_OFFERS:])
+    store["offers"] = offers
+    store["paper_only"] = True
+    store["last_offer_at"] = now
+    _save(path, store)
+    return {"offered": accepted, "offers_n": len(offers), "bot": bot_id or None}
+
+
+def rebuild_firm_queue(
+    root: str | None,
+    *,
+    remaining_risk=None,
+    cfg: dict | None = None,
+    bots: list | None = None,
+    note: str = "",
+) -> dict:
+    """Prune TTL, rank sports+btc+commodity offers, allocate desk risk."""
+    path = _path(FIRM_QUEUE_NAME, root)
+    store = _firm_queue_store(root)
+    offers = store.get("offers") if isinstance(store.get("offers"), dict) else {}
+    kept = {}
+    cand = []
+    for key, row in list(offers.items()):
+        if not isinstance(row, dict):
+            continue
+        bot = str(row.get("bot") or "")
+        if bot not in FIRM_QUEUE_BOTS:
+            continue
+        age = _seconds_since_iso(row.get("at"))
+        if age is not None and age > FIRM_QUEUE_TTL_SEC:
+            continue
+        kept[key] = row
+        cand.append({
+            "bot": bot,
+            "ticker": row.get("ticker"),
+            "side": row.get("side"),
+            "edge": row.get("edge"),
+            "confidence": row.get("confidence"),
+            "depth": row.get("depth"),
+            "stake_est": row.get("stake_est"),
+            "offer_key": key,
+        })
+    rem = _finite(remaining_risk)
+    if rem is None:
+        rem = remaining_desk_risk(root, cfg=cfg, bots=bots)
+    ranked = []
+    alloc = []
+    try:
+        import desk_brain
+        ranked = desk_brain.rank_desk_queue(cand)
+        alloc = desk_brain.allocate_risk(ranked, float(rem))
+        try:
+            desk_brain.remember_queue(
+                root, alloc,
+                note=(note or "firm cross-tower queue")[:160],
+            )
+        except Exception:
+            pass
+    except Exception:
+        # Fail soft: mark all accepted so bots keep local rank behavior.
+        alloc = []
+        for i, row in enumerate(cand):
+            item = dict(row)
+            item["_queue_rank"] = i + 1
+            item["_brain_score"] = None
+            item["queue_status"] = "accepted"
+            item["queue_note"] = "brain unavailable — fail-open"
+            alloc.append(item)
+    slim = []
+    by_bot: dict[str, dict] = {}
+    accepted_n = 0
+    deferred_n = 0
+    for row in alloc:
+        status = str(row.get("queue_status") or "")
+        if status == "accepted":
+            accepted_n += 1
+        elif status == "deferred":
+            deferred_n += 1
+        bot = str(row.get("bot") or "")
+        bucket = by_bot.setdefault(bot, {"accepted": 0, "deferred": 0, "n": 0})
+        bucket["n"] += 1
+        if status == "accepted":
+            bucket["accepted"] += 1
+        elif status == "deferred":
+            bucket["deferred"] += 1
+        slim.append({
+            "bot": bot,
+            "ticker": row.get("ticker"),
+            "side": row.get("side"),
+            "edge": row.get("edge"),
+            "confidence": row.get("confidence"),
+            "depth": row.get("depth"),
+            "stake_est": row.get("stake_est"),
+            "score": row.get("_brain_score"),
+            "rank": row.get("_queue_rank"),
+            "status": status,
+            "note": row.get("queue_note"),
+            "offer_key": row.get("offer_key"),
+        })
+    card = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "at": _now(),
+        "ttl_sec": FIRM_QUEUE_TTL_SEC,
+        "remaining_risk": round(float(rem), 2),
+        "offers_n": len(kept),
+        "n": len(slim),
+        "accepted_n": accepted_n,
+        "deferred_n": deferred_n,
+        "by_bot": by_bot,
+        "towers": sorted(FIRM_QUEUE_BOTS),
+        "rows": slim[:40],
+        "note": (
+            note
+            or "Cross-tower firm queue: buy best sports/btc/commodity score inside desk risk."
+        )[:200],
+    }
+    store["offers"] = kept
+    store["latest"] = card
+    store["last_at"] = card["at"]
+    passes = [p for p in (store.get("passes") or []) if isinstance(p, dict)]
+    passes.append({
+        "at": card["at"],
+        "n": card["n"],
+        "accepted_n": accepted_n,
+        "deferred_n": deferred_n,
+        "remaining_risk": card["remaining_risk"],
+    })
+    store["passes"] = passes[-80:]
+    store["paper_only"] = True
+    _save(path, store)
+    return card
+
+
+def firm_queue_status(root: str | None = None) -> dict:
+    """Masters board: latest firm rank pass + offer book size."""
+    store = _firm_queue_store(root)
+    latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    offers = store.get("offers") if isinstance(store.get("offers"), dict) else {}
+    live_offers = 0
+    for row in offers.values():
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("bot") or "") not in FIRM_QUEUE_BOTS:
+            continue
+        age = _seconds_since_iso(row.get("at"))
+        if age is not None and age > FIRM_QUEUE_TTL_SEC:
+            continue
+        live_offers += 1
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "towers": sorted(FIRM_QUEUE_BOTS),
+        "ttl_sec": FIRM_QUEUE_TTL_SEC,
+        "offers_n": live_offers,
+        "latest": latest,
+        "accepted_n": None if not latest else latest.get("accepted_n"),
+        "deferred_n": None if not latest else latest.get("deferred_n"),
+        "remaining_risk": None if not latest else latest.get("remaining_risk"),
+        "top": (latest or {}).get("rows") or [],
+        "note": (
+            "Firm queue ranks fee-clear sports+btc+commodity by opportunity score; "
+            "deferred tickets skip so desk risk buys best edge first. Fee floors locked."
+        ),
+    }
+
+
+def firm_queue_allows(root: str | None, bot: str, ticker: str) -> dict:
+    """Soft allow check. Missing / non-fee-clear / unknown → allow (fail-open)."""
+    bot_id = str(bot or "").strip()
+    tick = str(ticker or "").strip()
+    if not bot_id or not tick or bot_id not in FIRM_QUEUE_BOTS:
+        return {"allowed": True, "status": "n/a", "reason": ""}
+    latest = firm_queue_status(root).get("latest")
+    if not isinstance(latest, dict):
+        return {"allowed": True, "status": "empty", "reason": ""}
+    age = _seconds_since_iso(latest.get("at"))
+    if age is not None and age > FIRM_QUEUE_TTL_SEC:
+        return {"allowed": True, "status": "stale", "reason": ""}
+    match = None
+    for row in latest.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("bot") or "") == bot_id and str(row.get("ticker") or "") == tick:
+            match = row
+            break
+    if match is None:
+        return {"allowed": True, "status": "missing", "reason": ""}
+    status = str(match.get("status") or "")
+    if status == "deferred":
+        rank = match.get("rank")
+        note = str(match.get("note") or "open-risk reserved for higher firm score")
+        return {
+            "allowed": False,
+            "status": "deferred",
+            "rank": rank,
+            "score": match.get("score"),
+            "reason": (
+                f"firm-queue deferred rank={rank}: {note}"
+            )[:160],
+        }
+    return {
+        "allowed": True,
+        "status": status or "accepted",
+        "rank": match.get("rank"),
+        "score": match.get("score"),
+        "reason": "",
+    }
+
+
+def firm_queue_blocks(root: str | None, bot: str, ticker: str) -> str:
+    """Non-empty reason when firm queue defers this fee-clear ticket."""
+    out = firm_queue_allows(root, bot, ticker)
+    if out.get("allowed"):
+        return ""
+    return str(out.get("reason") or "firm-queue deferred")
+
+
+def capture_firm_queue(
+    root: str | None,
+    *,
+    remaining_risk=None,
+    cfg: dict | None = None,
+    bots: list | None = None,
+    label: str | None = None,
+) -> dict:
+    """Rebuild + stamp a Masters capture of the firm queue."""
+    card = rebuild_firm_queue(
+        root, remaining_risk=remaining_risk, cfg=cfg, bots=bots,
+        note=f"Masters firm queue {label or _chicago_day()}",
+    )
+    card = {**card, "label": label or _chicago_day(), "captured_at": _now()}
+    path = _path(FIRM_QUEUE_NAME, root)
+    store = _firm_queue_store(root)
+    store["latest"] = card
+    store["last_capture"] = card
+    store["last_at"] = card["captured_at"]
+    _save(path, store)
+    return card
+
+
+# ---- Empty-market CARD latency (Phase 5) -----------------------------------
+
+def record_empty_card(
+    root: str | None,
+    *,
+    bot: str,
+    seconds,
+    markets_n: int = 0,
+    note: str = "",
+) -> dict:
+    """Log an idle/empty-market CARD loop for the <3s bar."""
+    sec = _finite(seconds)
+    if sec is None or sec < 0:
+        return {"recorded": False, "reason": "bad seconds"}
+    bot_id = str(bot or "").strip()
+    if not bot_id:
+        return {"recorded": False, "reason": "missing bot"}
+    row = {
+        "at": _now(),
+        "bot": bot_id[:40],
+        "seconds": round(float(sec), 3),
+        "markets_n": int(markets_n or 0),
+        "bar_sec": EMPTY_CARD_BAR_SEC,
+        "pass": float(sec) + 1e-12 <= EMPTY_CARD_BAR_SEC,
+        "note": str(note or "")[:160],
+        "paper_only": True,
+        "fee_floors_locked": True,
+    }
+    path = _path(EMPTY_CARD_NAME, root)
+    store = _load(path, {"paper_only": True, "rows": [], "latest": None})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_EMPTY_CARD_ROWS:]
+    store["latest"] = row
+    store["last_at"] = row["at"]
+    store["paper_only"] = True
+    _save(path, store)
+    return {"recorded": True, "row": row}
+
+
+def empty_card_status(root: str | None = None, *, bot: str | None = None) -> dict:
+    """Masters board: empty-market CARD p50 vs 3s bar."""
+    store = _load(_path(EMPTY_CARD_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    if bot:
+        rows = [r for r in rows if str(r.get("bot") or "") == str(bot)]
+    secs = sorted(
+        float(_finite(r.get("seconds")) or 0)
+        for r in rows
+        if _finite(r.get("seconds")) is not None
+    )
+    p50 = None
+    if secs:
+        mid = (len(secs) - 1) // 2
+        p50 = round(secs[mid], 3)
+    by_bot: dict[str, int] = {}
+    for r in rows:
+        b = str(r.get("bot") or "")
+        by_bot[b] = int(by_bot.get(b) or 0) + 1
+    ok = p50 is None or p50 + 1e-12 <= EMPTY_CARD_BAR_SEC
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": len(secs),
+        "p50_s": p50,
+        "max_s": round(max(secs), 3) if secs else None,
+        "bar_sec": EMPTY_CARD_BAR_SEC,
+        "pass": ok,
+        "by_bot": by_bot,
+        "recent": rows[-8:],
+        "note": (
+            f"Empty-market CARD bar {EMPTY_CARD_BAR_SEC:.0f}s — "
+            "prefetch books; idle loops should exit fast."
+            if ok
+            else (
+                f"Empty-market CARD p50 {p50}s > {EMPTY_CARD_BAR_SEC:.0f}s bar — "
+                "speed up idle path / prefetch."
+            )
+        ),
+    }
+
+
+# ---- Opportunity-cost clock (Phase 5) --------------------------------------
+
+def _opp_store(root: str | None) -> dict:
+    return _load(
+        _path(OPP_COST_NAME, root),
+        {"paper_only": True, "rows": [], "pending": {}},
+    )
+
+
+def note_pending_high_edge(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str,
+    edge=None,
+    reason: str = "",
+) -> dict:
+    """Remember a high-edge ticket blocked by budget/max-buys for opp-cost clock."""
+    tick = str(ticker or "").strip()
+    bot_id = str(bot or "").strip()
+    if not tick or not bot_id:
+        return {"pending": False}
+    path = _path(OPP_COST_NAME, root)
+    store = _opp_store(root)
+    pending = store.get("pending") if isinstance(store.get("pending"), dict) else {}
+    key = f"{bot_id}|{tick}"
+    prev = pending.get(key) if isinstance(pending.get(key), dict) else None
+    if prev and prev.get("first_at"):
+        row = prev
+    else:
+        row = {
+            "bot": bot_id,
+            "ticker": tick[:80],
+            "edge": _finite(edge),
+            "first_at": _now(),
+            "reason": str(reason or "")[:120],
+        }
+    row["edge"] = _finite(edge) if _finite(edge) is not None else row.get("edge")
+    row["last_at"] = _now()
+    row["reason"] = str(reason or row.get("reason") or "")[:120]
+    pending[key] = row
+    # Cap pending map.
+    if len(pending) > 200:
+        oldest = sorted(
+            pending.items(),
+            key=lambda kv: str((kv[1] or {}).get("first_at") or ""),
+        )
+        pending = dict(oldest[-200:])
+    store["pending"] = pending
+    store["paper_only"] = True
+    _save(path, store)
+    return {"pending": True, "key": key, "row": row}
+
+
+def record_opp_cost(
+    root: str | None,
+    *,
+    bot: str,
+    blocked_ticker: str = "",
+    blocked_edge=None,
+    taken_ticker: str = "",
+    taken_edge=None,
+    wait_sec=None,
+    note: str = "",
+) -> dict:
+    """Log when a lower-edge fill blocked / delayed a higher-edge ticket > bar."""
+    wait = _finite(wait_sec)
+    be = _finite(blocked_edge)
+    te = _finite(taken_edge)
+    if wait is None or wait + 1e-12 < OPP_COST_WAIT_SEC:
+        return {"recorded": False, "reason": f"wait < {OPP_COST_WAIT_SEC:.0f}s"}
+    # Opportunity cost only if blocked edge clearly beats what was taken/held.
+    if be is not None and te is not None and be <= te + 1e-12:
+        return {"recorded": False, "reason": "blocked edge not higher than taken"}
+    row = {
+        "at": _now(),
+        "bot": str(bot or "")[:40],
+        "blocked_ticker": str(blocked_ticker or "")[:80],
+        "blocked_edge": be,
+        "taken_ticker": str(taken_ticker or "")[:80],
+        "taken_edge": te,
+        "wait_sec": round(float(wait), 2),
+        "bar_sec": OPP_COST_WAIT_SEC,
+        "note": str(note or "")[:160],
+        "paper_only": True,
+        "fee_floors_locked": True,
+    }
+    path = _path(OPP_COST_NAME, root)
+    store = _opp_store(root)
+    rows = list(store.get("rows") or [])
+    rows.append(row)
+    store["rows"] = rows[-MAX_OPP_COST_ROWS:]
+    store["last_at"] = row["at"]
+    store.setdefault("pending", store.get("pending") if isinstance(store.get("pending"), dict) else {})
+    _save(path, store)
+    return {"recorded": True, "row": row}
+
+
+def flush_opp_cost_on_buy(
+    root: str | None,
+    *,
+    bot: str,
+    ticker: str = "",
+    edge=None,
+) -> dict:
+    """After a paper buy, emit opp-cost rows for pending higher-edge tickets past bar."""
+    bot_id = str(bot or "").strip()
+    te = _finite(edge)
+    path = _path(OPP_COST_NAME, root)
+    store = _opp_store(root)
+    pending = store.get("pending") if isinstance(store.get("pending"), dict) else {}
+    kept = {}
+    emitted = []
+    for key, row in list(pending.items()):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("bot") or "") != bot_id:
+            kept[key] = row
+            continue
+        # Clear matching ticker (filled or gone).
+        if ticker and str(row.get("ticker") or "") == str(ticker):
+            continue
+        be = _finite(row.get("edge"))
+        age_h = _hours_since_iso(row.get("first_at"))
+        wait = None if age_h is None else age_h * 3600.0
+        if (
+            wait is not None
+            and wait + 1e-12 >= OPP_COST_WAIT_SEC
+            and be is not None
+            and (te is None or be > te + 1e-12)
+        ):
+            out = record_opp_cost(
+                root,
+                bot=bot_id,
+                blocked_ticker=str(row.get("ticker") or ""),
+                blocked_edge=be,
+                taken_ticker=str(ticker or ""),
+                taken_edge=te,
+                wait_sec=wait,
+                note=str(row.get("reason") or "pending high-edge blocked")[:120],
+            )
+            if out.get("recorded"):
+                emitted.append(out.get("row"))
+            continue
+        kept[key] = row
+    store = _opp_store(root)
+    store["pending"] = kept
+    _save(path, store)
+    return {"emitted": len(emitted), "pending_n": len(kept)}
+
+
+def opp_cost_summary(root: str | None = None) -> dict:
+    store = _load(_path(OPP_COST_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    waits = [float(_finite(r.get("wait_sec")) or 0) for r in rows]
+    return {
+        "paper_only": True,
+        "n": len(rows),
+        "bar_sec": OPP_COST_WAIT_SEC,
+        "mean_wait_s": round(sum(waits) / len(waits), 2) if waits else None,
+        "max_wait_s": round(max(waits), 2) if waits else None,
+        "recent": rows[-8:],
+        "fee_floors_locked": True,
+        "note": (
+            f"Opportunity-cost clock: low-edge blocks high-edge for >{OPP_COST_WAIT_SEC:.0f}s. "
+            "Rank queue should buy best score inside risk."
+        ),
+    }
+
+
+# ---- Idea review cadence 90d (Phase 11) ------------------------------------
+
+def staff_register_idea(
+    root: str | None,
+    *,
+    idea: str,
+    lever: str = "",
+    note: str = "",
+    who: str = "",
+) -> dict:
+    """Register a hillclimb/experiment idea for 90-day review cadence."""
+    title = str(idea or "").strip()
+    if not title:
+        return {"ok": False, "reason": "idea required"}
+    path = _path(IDEA_REVIEW_NAME, root)
+    store = _load(path, {"paper_only": True, "ideas": []})
+    row = {
+        "id": f"idea-{int(time.time())}",
+        "idea": title[:120],
+        "lever": str(lever or "")[:80],
+        "note": str(note or "")[:200],
+        "who": str(who or "")[:80],
+        "opened_at": _now(),
+        "status": "open",
+        "paper_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    ideas = [i for i in (store.get("ideas") or []) if isinstance(i, dict)]
+    ideas.append(row)
+    store["ideas"] = ideas[-MAX_IDEA_ROWS:]
+    store["last_at"] = row["opened_at"]
+    _save(path, store)
+    return {"ok": True, "idea": row}
+
+
+def staff_close_idea(
+    root: str | None,
+    idea_id: str,
+    *,
+    decision: str = "kill",
+    note: str = "",
+    who: str = "",
+) -> dict:
+    """Close/kill/keep an idea after review."""
+    path = _path(IDEA_REVIEW_NAME, root)
+    store = _load(path, {"paper_only": True, "ideas": []})
+    ideas = [i for i in (store.get("ideas") or []) if isinstance(i, dict)]
+    hit = None
+    for row in ideas:
+        if str(row.get("id") or "") == str(idea_id):
+            row["status"] = str(decision or "kill")[:40]
+            row["closed_at"] = _now()
+            row["close_note"] = str(note or "")[:200]
+            row["closed_by"] = str(who or "")[:80]
+            hit = row
+            break
+    if hit is None:
+        return {"ok": False, "reason": "idea not found"}
+    store["ideas"] = ideas
+    store["last_at"] = _now()
+    _save(path, store)
+    return {"ok": True, "idea": hit}
+
+
+def idea_review_status(root: str | None = None) -> dict:
+    """Flag open ideas older than IDEA_REVIEW_DAYS as stale."""
+    store = _load(_path(IDEA_REVIEW_NAME, root), {"paper_only": True, "ideas": []})
+    ideas = [i for i in (store.get("ideas") or []) if isinstance(i, dict)]
+    open_rows = []
+    stale = []
+    for row in ideas:
+        status = str(row.get("status") or "open")
+        if status not in ("open", "active", ""):
+            continue
+        age_h = _hours_since_iso(row.get("opened_at"))
+        age_d = None if age_h is None else age_h / 24.0
+        item = {
+            **row,
+            "age_days": round(age_d, 1) if age_d is not None else None,
+            "stale": bool(age_d is not None and age_d + 1e-12 >= IDEA_REVIEW_DAYS),
+        }
+        open_rows.append(item)
+        if item["stale"]:
+            stale.append(item)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "review_days": IDEA_REVIEW_DAYS,
+        "open_n": len(open_rows),
+        "stale_n": len(stale),
+        "open": open_rows[-20:],
+        "stale": stale[-12:],
+        "auto_promote": False,
+        "note": (
+            f"Idea review cadence: kill or promote within {IDEA_REVIEW_DAYS}d. "
+            "Stale experiments must not linger."
+        ),
+    }
+
+
 # ---- W0 baseline -----------------------------------------------------------
 
 def capture_baseline(
@@ -450,20 +1613,74 @@ def load_baseline(root: str | None = None) -> dict:
     return _load(_path(BASELINE_NAME, root), {"paper_only": True, "baselines": [], "latest": None})
 
 
-# ---- Near-miss weekly card -------------------------------------------------
+# ---- Near-miss weekly card + staff soft-gate promote -----------------------
 
-def near_miss_weekly_card(root: str | None = None) -> dict:
-    """
-    Staff promote/reject card from shadow near-miss log.
-    auto_promote stays False — never softens floors.
-    """
+def _near_miss_rows(root: str | None) -> list[dict]:
     try:
         import desk_more
         state = desk_more.load_more(root)
-        rows = [r for r in (state.get("near_miss") or []) if isinstance(r, dict)]
+        return [r for r in (state.get("near_miss") or []) if isinstance(r, dict)]
     except Exception:
-        rows = []
+        return []
+
+
+def label_near_miss_outcome(
+    root: str | None,
+    *,
+    ticker: str,
+    would_pnl,
+    bot: str | None = None,
+    note: str = "",
+) -> dict:
+    """Attach settle / would-have PnL to shadow near-miss rows (staff or settle hook)."""
+    tick = str(ticker or "").strip()
+    pnl = _finite(would_pnl)
+    if not tick or pnl is None:
+        return {"labeled": 0, "reason": "need ticker + would_pnl"}
+    try:
+        import desk_more
+        state = desk_more.load_more(root)
+        rows = list(state.get("near_miss") or [])
+    except Exception:
+        return {"labeled": 0, "reason": "no near_miss store"}
+    n = 0
+    bot_id = str(bot or "").strip()
+    out_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            out_rows.append(row)
+            continue
+        item = dict(row)
+        if str(item.get("ticker") or "") == tick and (
+            not bot_id or str(item.get("bot") or "") == bot_id
+        ):
+            item["would_pnl"] = round(float(pnl), 4)
+            item["labeled_at"] = _now()
+            if note:
+                item["label_note"] = str(note)[:120]
+            n += 1
+        out_rows.append(item)
+    if n:
+        try:
+            import desk_more
+            state["near_miss"] = out_rows
+            state["last_at"] = _now()
+            desk_more.save_more(state, root)
+        except Exception:
+            return {"labeled": 0, "reason": "save failed"}
+    return {"labeled": n, "ticker": tick, "would_pnl": round(float(pnl), 4)}
+
+
+def near_miss_promote_status(root: str | None = None) -> dict:
+    """Masters board: n≥30 + shadow EV ≥ baseline before staff may arm one soft gate.
+
+    Soft allowlist is z|p only — never edge / fee floors. auto_promote=False forever.
+    """
+    rows = _near_miss_rows(root)
     n = len(rows)
+    labeled = [r for r in rows if _finite(r.get("would_pnl")) is not None]
+    pnls = [float(_finite(r.get("would_pnl")) or 0) for r in labeled]
+    shadow_ev = round(sum(pnls) / len(pnls), 4) if pnls else None
     by_soft: dict[str, int] = {}
     by_bot: dict[str, int] = {}
     for r in rows:
@@ -472,20 +1689,185 @@ def near_miss_weekly_card(root: str | None = None) -> dict:
         by_soft[key] = int(by_soft.get(key) or 0) + 1
         bot = str(r.get("bot") or "?")
         by_bot[bot] = int(by_bot.get(bot) or 0) + 1
-    decision = "reject" if n < 30 else "review"
-    card = {
+    baseline = float(NEAR_MISS_PROMOTE_MIN_EV)
+    ready = bool(
+        n >= int(NEAR_MISS_PROMOTE_N)
+        and len(labeled) >= int(NEAR_MISS_PROMOTE_N)
+        and shadow_ev is not None
+        and shadow_ev + 1e-12 >= baseline
+    )
+    if n < NEAR_MISS_PROMOTE_N or len(labeled) < NEAR_MISS_PROMOTE_N:
+        decision = "reject"
+    elif shadow_ev is not None and shadow_ev + 1e-12 >= baseline:
+        decision = "review"
+    else:
+        decision = "reject"
+    promote = _load(
+        _path(NEAR_MISS_PROMOTE_NAME, root),
+        {"paper_only": True, "staff_approved": False, "live": False, "soft": None},
+    )
+    soft_live = None
+    if bool(promote.get("staff_approved")) and bool(promote.get("live")):
+        soft = str(promote.get("soft") or "").strip().lower()
+        if soft in NEAR_MISS_SOFT_ALLOW:
+            soft_live = soft
+    return {
         "paper_only": True,
+        "fee_floors_locked": True,
         "n": n,
-        "promote_min_n": 30,
-        "auto_promote": False,
+        "labeled_n": len(labeled),
+        "shadow_ev": shadow_ev,
+        "baseline_ev": baseline,
+        "promote_min_n": NEAR_MISS_PROMOTE_N,
+        "promote_ready": ready,
         "decision": decision,
+        "auto_promote": False,
+        "code_default_live": bool(NEAR_MISS_LIVE),
+        "staff_approved": bool(promote.get("staff_approved")),
+        "live": bool(soft_live),
+        "soft_live": soft_live,
+        "soft_allow": sorted(NEAR_MISS_SOFT_ALLOW),
+        "z_relax": NEAR_MISS_Z_RELAX if soft_live == "z" else 0.0,
+        "p_relax": NEAR_MISS_P_RELAX if soft_live == "p" else 0.0,
         "by_soft": by_soft,
         "by_bot": by_bot,
-        "fee_floors_locked": True,
         "note": (
-            "Shadow near-miss only. Promote a soft gate only after n≥30 and "
-            "shadow EV ≥ baseline — staff review. Never auto-lower min_edge."
+            "Near-miss shadow: staff may arm one soft gate (z|p) after "
+            f"n≥{NEAR_MISS_PROMOTE_N} labeled with shadow EV ≥ {baseline}. "
+            "Never auto-promote; never lower fee/edge floors."
         ),
+    }
+
+
+def near_miss_soft_live(root: str | None = None) -> str | None:
+    """Return armed soft key (z|p) or None. Code NEAR_MISS_LIVE stays False."""
+    if NEAR_MISS_LIVE:
+        return None  # code path never forces a soft; staff file only
+    st = near_miss_promote_status(root)
+    soft = st.get("soft_live")
+    return str(soft) if soft else None
+
+
+def effective_near_miss_relax(root: str | None = None) -> dict:
+    """Paper z/p floor relax when staff armed a soft near-miss gate."""
+    soft = near_miss_soft_live(root)
+    return {
+        "soft": soft,
+        "z_relax": float(NEAR_MISS_Z_RELAX) if soft == "z" else 0.0,
+        "p_relax": float(NEAR_MISS_P_RELAX) if soft == "p" else 0.0,
+        "edge_relax": 0.0,  # forever zero — fee floors locked
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def staff_promote_near_miss_soft(
+    root: str | None,
+    soft: str,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff arm one soft near-miss gate (z|p). Requires promote_ready unless force."""
+    key = str(soft or "").strip().lower()
+    if key not in NEAR_MISS_SOFT_ALLOW:
+        return {
+            "ok": False,
+            "live": False,
+            "reason": f"soft '{key}' not allowed — use one of {sorted(NEAR_MISS_SOFT_ALLOW)}",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    summary = near_miss_promote_status(root)
+    if not force and not summary.get("promote_ready"):
+        return {
+            "ok": False,
+            "live": False,
+            "staff_approved": False,
+            "reason": (
+                f"not promote_ready (need labeled n≥{NEAR_MISS_PROMOTE_N} "
+                f"with shadow EV ≥ {NEAR_MISS_PROMOTE_MIN_EV})"
+            ),
+            "summary": summary,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    row = {
+        "paper_only": True,
+        "staff_approved": True,
+        "live": True,
+        "soft": key,
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "shadow_n": summary.get("labeled_n"),
+        "shadow_ev": summary.get("shadow_ev"),
+        "decision": summary.get("decision"),
+        "auto_promote": False,
+        "code_default_live": bool(NEAR_MISS_LIVE),
+        "fee_floors_locked": True,
+        "z_relax": NEAR_MISS_Z_RELAX if key == "z" else 0.0,
+        "p_relax": NEAR_MISS_P_RELAX if key == "p" else 0.0,
+        "edge_relax": 0.0,
+    }
+    _save(_path(NEAR_MISS_PROMOTE_NAME, root), row)
+    return {
+        "ok": True,
+        "live": True,
+        "staff_approved": True,
+        "soft": key,
+        "reason": f"armed soft={key}",
+        "summary": near_miss_promote_status(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def staff_clear_near_miss_promote(root: str | None, *, note: str = "") -> dict:
+    """Staff disarm any near-miss soft promote."""
+    row = {
+        "paper_only": True,
+        "staff_approved": False,
+        "live": False,
+        "soft": None,
+        "at": _now(),
+        "note": str(note or "cleared")[:200],
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "edge_relax": 0.0,
+    }
+    _save(_path(NEAR_MISS_PROMOTE_NAME, root), row)
+    return {
+        "ok": True,
+        "live": False,
+        "staff_approved": False,
+        "reason": "disarmed",
+        "summary": near_miss_promote_status(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def near_miss_weekly_card(root: str | None = None) -> dict:
+    """
+    Staff promote/reject card from shadow near-miss log.
+    auto_promote stays False — never softens floors.
+    """
+    status = near_miss_promote_status(root)
+    card = {
+        "paper_only": True,
+        "n": status.get("n"),
+        "labeled_n": status.get("labeled_n"),
+        "shadow_ev": status.get("shadow_ev"),
+        "baseline_ev": status.get("baseline_ev"),
+        "promote_min_n": NEAR_MISS_PROMOTE_N,
+        "promote_ready": status.get("promote_ready"),
+        "soft_live": status.get("soft_live"),
+        "auto_promote": False,
+        "decision": status.get("decision"),
+        "by_soft": status.get("by_soft"),
+        "by_bot": status.get("by_bot"),
+        "fee_floors_locked": True,
+        "note": status.get("note"),
     }
     path = _path(NEAR_MISS_WEEKLY, root)
     store = _load(path, {"paper_only": True, "cards": []})
@@ -654,6 +2036,132 @@ def latest_daily_r_board(root: str | None = None) -> dict | None:
     store = _load(_path(DAILY_R_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
+
+
+# ---- Sports green_boost gate (Phase 5) -------------------------------------
+
+def sports_green_boost_status(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """green_boost=1 only when sports M1≥0 for 2 Chicago weeks and CLV≥52%.
+
+    Default boost stays 0 until ready. auto_promote=False forever.
+    """
+    m1 = firm_taxed_m1(bots)
+    sports = next(
+        (r for r in (m1.get("by_tower") or []) if r.get("bot") == "sports-gap"),
+        None,
+    )
+    sports_exp = _finite((sports or {}).get("expectancy_taxed"))
+    sports_n = int((sports or {}).get("n") or 0)
+    clv = {"n": 0, "beat_close_rate": None}
+    try:
+        import desk_more
+        clv = desk_more.clv_summary(root)
+    except Exception:
+        pass
+    clv_n = int(clv.get("n") or 0)
+    clv_rate = _finite(clv.get("beat_close_rate"))
+    # Last two weekly scorecards with sports_m1.
+    store = _load(_path(WEEKLY_SCORECARD, root), {"paper_only": True, "cards": []})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = sorted(cards, key=lambda c: str(c.get("label") or ""))
+    sports_weeks = [
+        c for c in cards
+        if _finite(c.get("sports_m1")) is not None
+    ][-SPORTS_GREEN_BOOST_WEEKS:]
+    weeks_ok = (
+        len(sports_weeks) >= SPORTS_GREEN_BOOST_WEEKS
+        and all(
+            (_finite(c.get("sports_m1")) or -1) + 1e-12 >= 0.0
+            for c in sports_weeks
+        )
+    )
+    hist_ok = sports_n >= SPORTS_M1_MIN_N and sports_exp is not None and sports_exp + 1e-12 >= 0.0
+    clv_ok = (
+        clv_n >= SPORTS_CLV_MIN_N
+        and clv_rate is not None
+        and clv_rate + 1e-12 >= SPORTS_CLV_BAR
+    )
+    ready = bool(weeks_ok and hist_ok and clv_ok)
+    boost = 1 if ready else 0
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "ready": ready,
+        "green_boost": boost,
+        "sports_m1": sports_exp,
+        "sports_m1_n": sports_n,
+        "hist_ok": hist_ok,
+        "clv_n": clv_n,
+        "clv_beat_rate": clv_rate,
+        "clv_bar": SPORTS_CLV_BAR,
+        "clv_ok": clv_ok,
+        "weeks_n": len(sports_weeks),
+        "weeks_required": SPORTS_GREEN_BOOST_WEEKS,
+        "weeks_ok": weeks_ok,
+        "week_labels": [str(c.get("label") or "") for c in sports_weeks],
+        "note": (
+            "Sports selective +1 only after 2 Chicago weeks sports M1≥0, "
+            f"history n≥{SPORTS_M1_MIN_N}, and CLV beat-close ≥{SPORTS_CLV_BAR:.0%} "
+            f"(n≥{SPORTS_CLV_MIN_N}). Default boost=0."
+        ),
+    }
+
+
+def sports_green_boost(root: str | None = None, bots: list | None = None) -> int:
+    """Runtime boost for selective_max_buys — 0 until gate ready."""
+    try:
+        return int(sports_green_boost_status(root, bots=bots).get("green_boost") or 0)
+    except Exception:
+        return 0
+
+
+# ---- Green-or-gone Masters flags (Phase 7) ---------------------------------
+
+def green_or_gone_status(bots: list | None = None) -> dict:
+    """Flag towers that are red today with open risk or Gate A false on losers."""
+    flags = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if not bot_id:
+            continue
+        today = _finite(bot.get("today"))
+        open_risk = float(_finite(bot.get("open_risk")) or 0.0)
+        ga = bot.get("gate_a") if isinstance(bot.get("gate_a"), dict) else {}
+        gate_ready = bool(ga.get("ready"))
+        reasons = []
+        if today is not None and today < 0 and open_risk > 0:
+            reasons.append("red_today_with_open_risk")
+        if bot_id in LOSER_IDS and today is not None and today < 0:
+            reasons.append("loser_red")
+        if bot_id in LOSER_IDS and not gate_ready and open_risk > 0:
+            reasons.append("loser_gate_a_false_with_risk")
+        if reasons:
+            flags.append({
+                "bot": bot_id,
+                "today": today,
+                "open_risk": round(open_risk, 2),
+                "gate_a": gate_ready,
+                "reasons": reasons,
+                "action": "starve_or_exit" if open_risk > 0 else "pause_entries",
+            })
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "flagged_n": len(flags),
+        "flags": flags,
+        "pass": len(flags) == 0,
+        "note": (
+            "Green-or-gone: red towers with open risk / loser Gate A false get "
+            "starve-or-exit flags on Masters. No volume expand."
+        ),
+    }
 
 
 # ---- Sports CLV completeness -----------------------------------------------
@@ -2369,6 +3877,11 @@ def capture_hillclimb_week(
     day = label or _chicago_day()
     m1 = firm_taxed_m1(bots, fill_tax=fill_tax)
     m3 = fit_buy_rate(root)
+    lever_name = str(lever).strip()[:80] if lever else None
+    if not lever_name:
+        active = active_hillclimb_lever(root)
+        if active and str(active.get("lever") or ""):
+            lever_name = str(active.get("lever"))[:80]
     card = {
         "paper_only": True,
         "label": day,
@@ -2378,7 +3891,7 @@ def capture_hillclimb_week(
         "m3": m3.get("rate"),
         "m3_n_fit": m3.get("n_fit"),
         "fills_n": m3.get("n_buy"),
-        "lever": (str(lever).strip()[:80] if lever else None),
+        "lever": lever_name,
         "fee_floors_locked": True,
     }
     path = _path(HILLCLIMB_KILL, root)
@@ -2418,6 +3931,364 @@ def hillclimb_kill_status(root: str | None = None) -> dict:
             "Hillclimb kill: if M3 rises while M1 falls for 2 Chicago weeks, "
             "revert the last lever before the next idea. Flag only — no auto param write."
         ),
+    }
+
+
+# ---- Hillclimb lever allowlist (Phase 11) ----------------------------------
+
+def hillclimb_allowlist() -> dict:
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "levers": {
+            k: dict(v, name=k) for k, v in HILLCLIMB_ALLOWLIST.items()
+        },
+        "note": (
+            "One lever per Chicago week. venue_min_edge_btc / min_cushion_btc "
+            "are raise-only. Midweek thrash banned."
+        ),
+    }
+
+
+def active_hillclimb_lever(root: str | None = None) -> dict | None:
+    store = _load(
+        _path(HILLCLIMB_LEVER_NAME, root),
+        {"paper_only": True, "active": None, "history": []},
+    )
+    active = store.get("active")
+    return active if isinstance(active, dict) else None
+
+
+def hillclimb_lever_status(root: str | None = None) -> dict:
+    active = active_hillclimb_lever(root)
+    kill = hillclimb_kill_status(root)
+    week = _chicago_week_id()
+    same_week = bool(active and str(active.get("week") or "") == week)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
+        "active": active,
+        "week": week,
+        "active_this_week": same_week,
+        "kill": bool(kill.get("kill")),
+        "kill_action": (kill.get("status") or {}).get("action") if isinstance(kill.get("status"), dict) else kill.get("action"),
+        "auto_promote": False,
+        "auto_revert": False,
+        "note": (
+            "Staff picks one allowlisted lever per Chicago week. "
+            "Kill flag → demote before next idea. No auto param write; floors locked."
+        ),
+    }
+
+
+def staff_pick_hillclimb_lever(
+    root: str | None,
+    lever: str,
+    *,
+    note: str = "",
+    proposed_value=None,
+    force: bool = False,
+) -> dict:
+    """Staff picks the single hillclimb lever for this Chicago week.
+
+    Midweek thrash banned unless force=True (tests) or demote first.
+    Raise-only levers reject proposed_value below locked floor.
+    """
+    name = str(lever or "").strip()
+    meta = HILLCLIMB_ALLOWLIST.get(name)
+    if not meta:
+        return {
+            "ok": False,
+            "reason": f"lever not on allowlist: {name}",
+            "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    week = _chicago_week_id()
+    path = _path(HILLCLIMB_LEVER_NAME, root)
+    store = _load(path, {"paper_only": True, "active": None, "history": []})
+    active = store.get("active") if isinstance(store.get("active"), dict) else None
+    if (
+        active
+        and str(active.get("week") or "") == week
+        and str(active.get("lever") or "") != name
+        and not force
+    ):
+        return {
+            "ok": False,
+            "reason": (
+                f"midweek thrash banned — active lever this week is "
+                f"{active.get('lever')}; demote first or wait for next Chicago week"
+            ),
+            "active": active,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    proposed = _finite(proposed_value)
+    if meta.get("raise_only") and proposed is not None:
+        # Never record a soften below locked BTC floor / cushion habit.
+        if name == "venue_min_edge_btc" and proposed + 1e-12 < 0.05:
+            return {
+                "ok": False,
+                "reason": "venue_min_edge_btc raise-only: proposed < locked 0.05 floor",
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+        if name == "min_cushion_btc" and proposed + 1e-12 < 0:
+            return {
+                "ok": False,
+                "reason": "min_cushion_btc raise-only: proposed must be ≥ 0",
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+    row = {
+        "paper_only": True,
+        "lever": name,
+        "kind": meta.get("kind"),
+        "raise_only": bool(meta.get("raise_only")),
+        "proposed_value": proposed,
+        "week": week,
+        "at": _now(),
+        "note": str(note or "")[:200] or str(meta.get("note") or "")[:200],
+        "staff_approved": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    if active:
+        hist.append({**active, "demoted_at": _now(), "demote_reason": "replaced"})
+    hist.append(row)
+    store["active"] = row
+    store["history"] = hist[-52:]
+    store["last_at"] = row["at"]
+    store["paper_only"] = True
+    _save(path, store)
+    return {
+        "ok": True,
+        "active": row,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "reason": f"picked {name} for {week}",
+    }
+
+
+def dual_control_status(root: str | None = None) -> dict:
+    """Paper dual-control checklist. Live orders stay hard-disabled."""
+    store = _load(
+        _path(DUAL_CONTROL_NAME, root),
+        {
+            "paper_only": True,
+            "items": {},
+            "primary": None,
+            "secondary": None,
+            "live_orders_enabled": False,
+        },
+    )
+    items_state = store.get("items") if isinstance(store.get("items"), dict) else {}
+    items = []
+    signed_n = 0
+    for item_id, label in DUAL_CONTROL_ITEMS:
+        row = items_state.get(item_id) if isinstance(items_state.get(item_id), dict) else {}
+        ok = bool(row.get("signed"))
+        if ok:
+            signed_n += 1
+        items.append({
+            "id": item_id,
+            "label": label,
+            "signed": ok,
+            "who": row.get("who") or "",
+            "at": row.get("at"),
+        })
+    primary = store.get("primary") if isinstance(store.get("primary"), dict) else None
+    secondary = store.get("secondary") if isinstance(store.get("secondary"), dict) else None
+    two_staff = bool(primary and secondary and primary.get("who") and secondary.get("who")
+                     and str(primary.get("who")) != str(secondary.get("who")))
+    checklist_complete = signed_n >= len(DUAL_CONTROL_ITEMS)
+    # Even if complete + dual signed, live stays False in this stub.
+    arm_ready_paper = checklist_complete and two_staff
+    return {
+        "paper_only": True,
+        "live_orders_enabled": bool(LIVE_ORDERS_ENABLED),
+        "code_live_lock": True,
+        "items": items,
+        "signed_n": signed_n,
+        "items_n": len(DUAL_CONTROL_ITEMS),
+        "checklist_complete": checklist_complete,
+        "primary": primary,
+        "secondary": secondary,
+        "two_staff": two_staff,
+        "arm_ready_paper": arm_ready_paper,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Dual-control stub: both staff + full checklist required before any "
+            "future live path. LIVE_ORDERS_ENABLED stays False in code."
+        ),
+    }
+
+
+def staff_sign_dual_control(
+    root: str | None,
+    *,
+    who: str,
+    role: str = "primary",
+    item_id: str | None = None,
+    note: str = "",
+) -> dict:
+    """Sign one checklist item and/or a dual-control role. Never enables live."""
+    who_s = str(who or "").strip()
+    if not who_s:
+        return {"ok": False, "reason": "who required", "live_orders_enabled": False}
+    role_s = str(role or "primary").strip().lower()
+    if role_s not in ("primary", "secondary"):
+        return {"ok": False, "reason": "role must be primary or secondary", "live_orders_enabled": False}
+    path = _path(DUAL_CONTROL_NAME, root)
+    store = _load(
+        path,
+        {
+            "paper_only": True,
+            "items": {},
+            "primary": None,
+            "secondary": None,
+            "live_orders_enabled": False,
+        },
+    )
+    items = store.get("items") if isinstance(store.get("items"), dict) else {}
+    if item_id:
+        iid = str(item_id).strip()
+        known = {k for k, _ in DUAL_CONTROL_ITEMS}
+        if iid not in known:
+            return {
+                "ok": False,
+                "reason": f"unknown checklist item: {iid}",
+                "live_orders_enabled": False,
+            }
+        items[iid] = {
+            "signed": True,
+            "who": who_s[:80],
+            "at": _now(),
+            "note": str(note or "")[:160],
+        }
+        store["items"] = items
+    store[role_s] = {
+        "who": who_s[:80],
+        "at": _now(),
+        "note": str(note or "")[:160],
+    }
+    store["live_orders_enabled"] = False  # hard lock
+    store["paper_only"] = True
+    store["last_at"] = _now()
+    _save(path, store)
+    status = dual_control_status(root)
+    return {
+        "ok": True,
+        "status": status,
+        "live_orders_enabled": False,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+def staff_clear_dual_control(root: str | None, *, who: str = "", note: str = "") -> dict:
+    """Reset dual-control signatures (paper hygiene)."""
+    path = _path(DUAL_CONTROL_NAME, root)
+    store = {
+        "paper_only": True,
+        "items": {},
+        "primary": None,
+        "secondary": None,
+        "live_orders_enabled": False,
+        "cleared_by": str(who or "")[:80],
+        "cleared_note": str(note or "")[:160],
+        "cleared_at": _now(),
+        "fee_floors_locked": True,
+    }
+    _save(path, store)
+    return {"ok": True, "status": dual_control_status(root), "live_orders_enabled": False}
+
+
+def capture_quarterly_rebaseline(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    label: str | None = None,
+) -> dict:
+    """Quarterly W-number re-baseline habit (never mythologize a lucky week)."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/Chicago"))
+        q = (now.month - 1) // 3 + 1
+        default_label = f"W-{now.year}-Q{q}"
+    except Exception:
+        default_label = f"W-{time.strftime('%Y')}-Q?"
+    tag = str(label or default_label)[:40]
+    artifact = capture_baseline(root, bots=bots, cfg=cfg, label=tag)
+    artifact["quarterly"] = True
+    artifact["fee_floors_locked"] = True
+    artifact["note"] = (
+        f"Quarterly re-baseline {tag}. Compare future weeks to this artifact — "
+        "do not mythologize a lucky week."
+    )
+    # Also stamp into baseline store meta.
+    path = _path(BASELINE_NAME, root)
+    store = load_baseline(root)
+    store["quarterly_latest"] = artifact
+    store["last_quarterly_at"] = _now()
+    _save(path, store)
+    return artifact
+
+
+def quarterly_rebaseline_status(root: str | None = None) -> dict:
+    store = load_baseline(root)
+    latest = store.get("quarterly_latest") if isinstance(store.get("quarterly_latest"), dict) else None
+    return {
+        "paper_only": True,
+        "latest": latest,
+        "has_quarterly": latest is not None,
+        "fee_floors_locked": True,
+        "note": "Quarterly W-number re-baseline habit. Fee floors locked.",
+    }
+
+
+def staff_demote_hillclimb_lever(
+    root: str | None,
+    *,
+    note: str = "",
+    reason: str = "staff demote",
+) -> dict:
+    """Clear the active lever (Sunday demote / kill-rule follow-through)."""
+    path = _path(HILLCLIMB_LEVER_NAME, root)
+    store = _load(path, {"paper_only": True, "active": None, "history": []})
+    active = store.get("active") if isinstance(store.get("active"), dict) else None
+    if not active:
+        return {
+            "ok": True,
+            "active": None,
+            "reason": "no active lever",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    hist.append({
+        **active,
+        "demoted_at": _now(),
+        "demote_reason": str(reason or "staff demote")[:120],
+        "demote_note": str(note or "")[:200],
+    })
+    store["active"] = None
+    store["history"] = hist[-52:]
+    store["last_at"] = _now()
+    _save(path, store)
+    return {
+        "ok": True,
+        "active": None,
+        "demoted": active.get("lever"),
+        "reason": "demoted",
+        "auto_promote": False,
+        "fee_floors_locked": True,
     }
 
 
@@ -2703,6 +4574,16 @@ def capture_weekly_scorecard(
     cfg = cfg or {}
     bleed = firm_bleed_ratio(bots)
     misplaced = capital_misplaced(bots, cfg)
+    m1 = firm_taxed_m1(bots)
+    sports_row = next(
+        (r for r in (m1.get("by_tower") or []) if r.get("bot") == "sports-gap"),
+        None,
+    )
+    sports_today = None
+    for bot in bots or []:
+        if isinstance(bot, dict) and bot.get("id") == "sports-gap":
+            sports_today = _finite(bot.get("today"))
+            break
     gate_a_n = 0
     for bot in bots or []:
         if isinstance(bot, dict) and isinstance(bot.get("gate_a"), dict) and bot["gate_a"].get("ready"):
@@ -2713,6 +4594,10 @@ def capture_weekly_scorecard(
         "captured_at": _now(),
         "bleed": bleed,
         "capital_misplaced": misplaced,
+        "m1": m1.get("expectancy_taxed"),
+        "sports_m1": (sports_row or {}).get("expectancy_taxed"),
+        "sports_m1_n": (sports_row or {}).get("n"),
+        "sports_today": sports_today,
         "gate_a_ready_towers": gate_a_n,
         "fee_floors_locked": True,
         "note": "Weekly scorecard for hillclimb kill rule. No profit guarantee.",
@@ -2762,9 +4647,23 @@ def plan_summary(
         "stale_world": stale_world_status(root, bots=bots),
         "helper_gate_a": helper_promote_status(root),
         "cold_harvest": cold_harvest_status(root),
+        "hillclimb_lever": hillclimb_lever_status(root),
+        "dual_control": dual_control_status(root),
+        "quarterly_rebaseline": quarterly_rebaseline_status(root),
+        "capital_os": capital_os_status(root, bots=bots, cfg=cfg),
+        "opp_cost": opp_cost_summary(root),
+        "idea_review": idea_review_status(root),
+        "sports_green_boost": sports_green_boost_status(root, bots=bots),
+        "green_or_gone": green_or_gone_status(bots),
+        "btc_calibration": btc_calibration_report(bots),
+        "firm_queue": firm_queue_status(root),
+        "empty_card": empty_card_status(root),
+        "near_miss_promote": near_miss_promote_status(root),
         "fit_firm": fit_buy_rate(root),
         "fee_floors_locked": True,
-        "next_tickets": [],
+        "next_tickets": [
+            "observe Chicago weeks / staff hillclimb pick",
+        ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
 
@@ -2997,6 +4896,78 @@ def self_check() -> None:
         )
         # New week with negative proxy — no add (week_pnl from that week's lock).
         assert red["harvested"] == 0.0 or red.get("skipped") is True
+        # Hillclimb lever allowlist: one per week, raise-only floors.
+        al = hillclimb_allowlist()
+        assert "VOL_SAFE" in al["levers"]
+        assert al["levers"]["venue_min_edge_btc"]["raise_only"] is True
+        pick = staff_pick_hillclimb_lever(tmp, "VOL_SAFE", note="week experiment")
+        assert pick["ok"] is True
+        thrash = staff_pick_hillclimb_lever(tmp, "HIT_FOR_BIG")
+        assert thrash["ok"] is False
+        soft = staff_pick_hillclimb_lever(
+            tmp, "venue_min_edge_btc", proposed_value=0.03, force=True,
+        )
+        assert soft["ok"] is False
+        assert "0.05" in soft["reason"]
+        dem = staff_demote_hillclimb_lever(tmp, note="sunday")
+        assert dem["ok"] is True
+        assert active_hillclimb_lever(tmp) is None
+        # Dual-control stub: two staff + all items; live stays False.
+        assert LIVE_ORDERS_ENABLED is False
+        for iid, _ in DUAL_CONTROL_ITEMS:
+            staff_sign_dual_control(tmp, who="alice", role="primary", item_id=iid)
+        staff_sign_dual_control(tmp, who="bob", role="secondary")
+        dc = dual_control_status(tmp)
+        assert dc["checklist_complete"] is True
+        assert dc["two_staff"] is True
+        assert dc["arm_ready_paper"] is True
+        assert dc["live_orders_enabled"] is False
+        qb = capture_quarterly_rebaseline(
+            tmp, bots=[{"id": "btc15m", "today": 1, "cash": 100}], label="W-2026-Q4",
+        )
+        assert qb["quarterly"] is True
+        assert quarterly_rebaseline_status(tmp)["has_quarterly"] is True
+        # Barbell: heavy meme open fails; fee-clear heavy passes.
+        bad_bar = barbell_status(
+            [{"id": "memecoin", "open_risk": 40}, {"id": "btc15m", "open_risk": 10}],
+            {"max_open_risk": 100},
+        )
+        assert bad_bar["meme_ok"] is False
+        assert bad_bar["pass"] is False
+        good_bar = barbell_status(
+            [{"id": "btc15m", "open_risk": 40}, {"id": "sports-gap", "open_risk": 30}],
+            {"max_open_risk": 100},
+        )
+        assert good_bar["pass"] is True
+        mid = midday_util_alert(
+            0.10, skip_board={"stable_top": [{"code": "EDGE", "n": 5}]},
+        )
+        assert mid["alert"] is True
+        mid_idle = midday_util_alert(
+            0.10, skip_board={"stable_top": [{"code": "WEEKEND", "n": 5}]},
+        )
+        assert mid_idle["alert"] is False
+        # Opp-cost: pending high-edge then buy lower after bar.
+        note_pending_high_edge(
+            tmp, bot="sports-gap", ticker="HIGH", edge=0.12, reason="max buys",
+        )
+        # Backdate pending first_at past bar.
+        path = _path(OPP_COST_NAME, tmp)
+        store = _opp_store(tmp)
+        for row in (store.get("pending") or {}).values():
+            if isinstance(row, dict):
+                row["first_at"] = "2026-11-01T00:00:00+00:00"
+        _save(path, store)
+        flushed = flush_opp_cost_on_buy(
+            tmp, bot="sports-gap", ticker="LOW", edge=0.04,
+        )
+        assert flushed["emitted"] >= 1
+        assert opp_cost_summary(tmp)["n"] >= 1
+        idea = staff_register_idea(tmp, idea="test edge08", lever="VOL_SAFE", who="ops")
+        assert idea["ok"] is True
+        ir = idea_review_status(tmp)
+        assert ir["open_n"] >= 1
+        assert ir["auto_promote"] is False
 
 
 if __name__ == "__main__":
