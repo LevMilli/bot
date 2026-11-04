@@ -13,8 +13,10 @@ import {
   type GroundedState,
 } from '../data/groundedWalk'
 import {
+  DESK_INTERACT_R,
   PLAYER_R,
   clampWingWalk,
+  deskInteractPoint,
   roomAtPosition,
   spawnBehindBot,
   wingDeskObstacles,
@@ -26,6 +28,8 @@ type Props = {
   /** Tower / teller bot we entered from — spawn behind this desk bot (once per entry). */
   focusBotId: string
   onEnterRoom?: (botId: string) => void
+  /** E near the live desk opens monitor lightbox (vault-style interact). */
+  onOpenScreens?: () => void
   onHintChange?: (hint: string) => void
 }
 
@@ -34,7 +38,7 @@ type Props = {
  * (W/S walk · A/D turn · Space jump · mouse look · Shift sprint).
  * Bounds/obstacles stay in wingWalk; locomotion is shared via groundedWalk.
  */
-export function WingWalker({ active, focusBotId, onEnterRoom, onHintChange }: Props) {
+export function WingWalker({ active, focusBotId, onEnterRoom, onOpenScreens, onHintChange }: Props) {
   const { camera, gl } = useThree()
   const body = useRef<Group>(null)
   const leftFoot = useRef<Group>(null)
@@ -44,6 +48,7 @@ export function WingWalker({ active, focusBotId, onEnterRoom, onHintChange }: Pr
   const dragging = useRef(false)
   const locked = useRef(false)
   const lastRoom = useRef<string | null>(null)
+  const nearDesk = useRef(false)
   const hintRef = useRef('')
 
   const obstacles = useMemo<FloorObstacle[]>(() => wingDeskObstacles(), [])
@@ -110,6 +115,10 @@ export function WingWalker({ active, focusBotId, onEnterRoom, onHintChange }: Pr
       ) {
         e.preventDefault()
       }
+      if (k === 'e') {
+        e.preventDefault()
+        if (nearDesk.current) onOpenScreens?.()
+      }
       if (k === ' ' || k === 'spacebar') queueJump(state.current)
     }
     const onKeyUp = (e: KeyboardEvent) => {
@@ -151,7 +160,7 @@ export function WingWalker({ active, focusBotId, onEnterRoom, onHintChange }: Pr
       if (document.pointerLockElement === el) document.exitPointerLock()
       keys.current = {}
     }
-  }, [active, gl])
+  }, [active, gl, onOpenScreens])
 
   useFrame((_, rawDt) => {
     if (!active) return
@@ -193,7 +202,15 @@ export function WingWalker({ active, focusBotId, onEnterRoom, onHintChange }: Pr
       onEnterRoom?.(room.botId)
     }
 
-    const hint = defaultWalkHint(locked.current)
+    // E · open screens when standing at the live suite desk (vault-style nearest interact).
+    const liveId = room?.botId ?? lastRoom.current
+    const desk = liveId ? deskInteractPoint(liveId) : null
+    const atDesk = Boolean(
+      desk && Math.hypot(desk.x - s.pos.x, desk.z - s.pos.z) <= DESK_INTERACT_R,
+    )
+    nearDesk.current = atDesk
+
+    const hint = defaultWalkHint(locked.current, atDesk ? 'E · open desk screens' : null)
     if (hint !== hintRef.current) {
       hintRef.current = hint
       onHintChange?.(hint)
@@ -202,8 +219,9 @@ export function WingWalker({ active, focusBotId, onEnterRoom, onHintChange }: Pr
 
   if (!active) return null
 
+  // Slightly smaller mesh than vault so the suite desk still reads as the hero.
   return (
-    <group ref={body}>
+    <group ref={body} scale={0.88}>
       <mesh position={[0, GROUNDED.bodyH * 0.42, 0]} castShadow={false}>
         <capsuleGeometry args={[GROUNDED.capsuleR * 0.75, GROUNDED.bodyH * 0.5, 5, 10]} />
         <meshStandardMaterial

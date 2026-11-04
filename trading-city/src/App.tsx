@@ -473,7 +473,7 @@ export default function App() {
               />
               <div className="office-title">
                 <span className="screen-hint">
-                  WASD walk · drag look · click screen for trades · free wing
+                  W/S walk · A/D turn · mouse look · click screen for trades
                 </span>
               </div>
             </div>
@@ -648,17 +648,14 @@ export default function App() {
           </div>
         )}
 
-        {(view === 'city' || view === 'office') && (
-          <TowerRail
-            bots={bots}
-            onSelect={(id) => {
-              if (fromBank) openTeller(id)
-              else openTower(id)
-            }}
-          />
-        )}
         {view === 'city' && (
           <>
+            <TowerRail
+              bots={bots}
+              onSelect={(id) => {
+                openTower(id)
+              }}
+            />
             <div className="day-strip" aria-hidden={false}>
               <span>{snap?.desk?.central_check || 'Central clock pending'}</span>
               <span>{snap?.desk?.status_line || ''}</span>
