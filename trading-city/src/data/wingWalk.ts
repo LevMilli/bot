@@ -67,6 +67,32 @@ export function spawnBehindBot(botId: string): {
   return { position, yaw, room }
 }
 
+export type WingSpawnMode = 'suite' | 'hall' | 'boss'
+
+/** Mid-hall spawn looking toward the boss end (+X) so the corridor reads immediately. */
+export function spawnInHall(): {
+  position: [number, number, number]
+  yaw: number
+  room: WingRoom | null
+} {
+  const x = Math.min(WING_HALL.xMax - 4, Math.max(WING_HALL.xMin + 3.5, 10))
+  return { position: [x, 0, 0], yaw: Math.PI / 2, room: null }
+}
+
+/** Resolve suite / hall / boss spawn for FloorNavMenu teleports. */
+export function spawnForMode(
+  mode: WingSpawnMode,
+  focusBotId: string,
+): {
+  position: [number, number, number]
+  yaw: number
+  room: WingRoom | null
+} {
+  if (mode === 'hall') return spawnInHall()
+  if (mode === 'boss') return spawnBehindBot('kalshi-sized')
+  return spawnBehindBot(focusBotId)
+}
+
 /** Loose AABB covering hall + all suites (coarse clamp before corridor filter). */
 export function wingOuterBounds(radius = PLAYER_R): WalkBounds {
   return {

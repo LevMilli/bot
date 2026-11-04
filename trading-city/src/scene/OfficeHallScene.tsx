@@ -4,7 +4,7 @@ import { DoubleSide } from 'three'
 import type { BotRow, Desk } from '../types'
 import { beamColorFor } from '../data/format'
 import { activeWingRooms, type WingRoom } from '../data/officeWingLayout'
-import { ROOM_HALF_D, ROOM_HALF_W, WING_HALL } from '../data/wingWalk'
+import { ROOM_HALF_D, ROOM_HALF_W, WING_HALL, type WingSpawnMode } from '../data/wingWalk'
 import { NeonBloom } from './Effects'
 import { OfficeInterior } from './OfficeScene'
 import { WingWalker } from './WingWalker'
@@ -15,6 +15,8 @@ type Props = {
   desk?: Desk
   /** Tower we entered from — walker spawns behind this bot once. */
   spawnBotId: string
+  /** Suite / hall / boss — FloorNavMenu teleports. */
+  spawnMode?: WingSpawnMode
   /** Proximity room change (does not re-spawn the walker). */
   onSelect: (id: string) => void
   onOpenScreens?: () => void
@@ -32,17 +34,24 @@ function HallCosmetics() {
   const width = WING_HALL.zMax - WING_HALL.zMin
   return (
     <group>
-      {/* Continuous hall slab — light enough to read in FPV */}
+      {/* Continuous hall slab — bright enough to survive bloom/vignette */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x0, 0, 0]} receiveShadow={false}>
         <planeGeometry args={[len + 0.4, width + 0.2]} />
-        <meshStandardMaterial color="#1a1432" roughness={0.72} metalness={0.12} side={DoubleSide} />
+        <meshStandardMaterial color="#2a2048" roughness={0.65} metalness={0.1} side={DoubleSide} />
       </mesh>
-      <gridHelper args={[len + 0.2, Math.max(8, Math.floor(len / 1.2)), '#3a2a68', '#241848']} position={[x0, 0.012, 0]} />
+      <gridHelper args={[len + 0.2, Math.max(8, Math.floor(len / 1.2)), '#5a4a88', '#3a2a68']} position={[x0, 0.012, 0]} />
       {/* Neon runner */}
       <mesh position={[x0, 0.018, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[len - 0.6, 0.48]} />
-        <meshStandardMaterial color="#1a3048" emissive="#2de2e6" emissiveIntensity={0.38} roughness={0.5} />
+        <planeGeometry args={[len - 0.6, 0.55]} />
+        <meshStandardMaterial color="#1a4058" emissive="#2de2e6" emissiveIntensity={0.55} roughness={0.45} />
       </mesh>
+      {/* Hall dash marks so the corridor always reads in dark themes */}
+      {[6, 12, 18, 24].map((x) => (
+        <mesh key={`dash-${x}`} position={[x, 0.022, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.55, 0.18]} />
+          <meshBasicMaterial color="#b967ff" toneMapped={false} />
+        </mesh>
+      ))}
       {/* Side baseboards */}
       {([-1, 1] as const).map((s) => (
         <mesh key={s} position={[x0, 0.08, s * (width / 2 - 0.04)]}>
@@ -228,18 +237,28 @@ function SuiteShell({ room, color, live }: { room: WingRoom; color: string; live
  * Continuous walkable trading wing — hallway + open suites + boss.
  * Spawn behind the focused tower bot; WASD walks the whole floor (no room-click teleport).
  */
-export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenScreens, onWalkHint }: Props) {
+export function OfficeHallScene({
+  bot,
+  bots,
+  desk,
+  spawnBotId,
+  spawnMode = 'suite',
+  onSelect,
+  onOpenScreens,
+  onWalkHint,
+}: Props) {
   const rooms = useMemo(() => activeWingRooms(), [])
 
   return (
     <>
-      <color attach="background" args={['#100628']} />
-      {/* Softer fog so hall + suite floors stay visible over-shoulder */}
-      <fog attach="fog" args={['#12082e', 32, 78]} />
-      <PerspectiveCamera makeDefault fov={58} near={0.06} far={120} position={[4, 1.8, 2]} />
-      <ambientLight intensity={0.62} color="#d0c4ff" />
-      <directionalLight position={[10, 18, 8]} intensity={0.55} color="#f2e8ff" />
-      <hemisphereLight args={['#b8d4ff', '#1a1030', 0.35]} />
+      <color attach="background" args={['#140a2e']} />
+      {/* Long fog range — short fog was crushing the corridor to a black void. */}
+      <fog attach="fog" args={['#160a32', 40, 95]} />
+      <PerspectiveCamera makeDefault fov={58} near={0.06} far={140} position={[10, 1.9, 0]} />
+      <ambientLight intensity={0.78} color="#d8ceff" />
+      <directionalLight position={[10, 18, 8]} intensity={0.7} color="#f2e8ff" />
+      <hemisphereLight args={['#c4dcff', '#1a1030', 0.45]} />
+      <pointLight position={[10, 2.4, 0]} intensity={0.55} color="#7ef9ff" distance={18} />
 
       <HallCosmetics />
 
@@ -263,6 +282,7 @@ export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenS
       <WingWalker
         active
         focusBotId={spawnBotId}
+        spawnMode={spawnMode}
         onEnterRoom={(id) => {
           if (id !== bot.id) onSelect(id)
         }}
@@ -270,7 +290,8 @@ export function OfficeHallScene({ bot, bots, desk, spawnBotId, onSelect, onOpenS
         onHintChange={onWalkHint}
       />
 
-      <NeonBloom strength={0.34} />
+      {/* Mild bloom — heavy vignette was eating the dark wing. */}
+      <NeonBloom strength={0.22} />
     </>
   )
 }
