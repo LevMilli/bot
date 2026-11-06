@@ -281,6 +281,8 @@ export type Desk = {
     fee_floors_locked?: boolean
     label?: string
     parts?: string[]
+    ritual_ok?: boolean | null
+    ritual_label?: string
     note?: string
     error?: string
   }

@@ -778,13 +778,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Compact quiet+ritual order | HUD part order tweak |
 | Ritual observe Makefile note | LIVING_UPGRADE tip |
 
-### Next
+### Living upgrade — status ritual draft / doctor link / vault compact
 
 | Ticket | Where |
 | --- | --- |
 | Status export ritual draft | status --json ritual_soft_copy |
 | Doctor soft_copy Masters link | cross-link ritual draft |
 | Vault compact ritual order | city compact HUD mirror |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Ritual draft copy button note | vault hint paste path |
+| Sunday packet ritual_ok | packet observe field |
+| Teller memory ritual nag | teller_living ritual line |
 
 ## Hard rules unchanged
 

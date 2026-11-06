@@ -230,6 +230,18 @@ def main() -> int:
                 if isinstance(board.get("ritual_observe"), dict)
                 else None
             ),
+            "ritual_soft_copy": (
+                (
+                    f"**Masters ritual** (paper · floors locked · live=False)\n"
+                    f"ritual_ok={(board.get('ritual_observe') or {}).get('ritual_ok')} "
+                    f"exit_ok={(board.get('ritual_observe') or {}).get('exit_ok')} "
+                    f"doctor_fresh={(board.get('ritual_observe') or {}).get('doctor_fresh')}\n"
+                    f"{(board.get('ritual_observe') or {}).get('label') or 'ritual observe'}\n"
+                    f"_staff paste only · never auto-posts · never enables live_"
+                )
+                if isinstance(board.get("ritual_observe"), dict)
+                else None
+            ),
             "sunday_packet": board.get("sunday_packet"),
             "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),

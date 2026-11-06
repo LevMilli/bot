@@ -2019,6 +2019,14 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["export"] = "living_board_v1"
     slim["ritual_ok"] = ritual.get("ritual_ok")
     slim["ritual_exit_ok"] = ritual.get("exit_ok")
+    if ritual:
+        slim["ritual_soft_copy"] = (
+            f"**Masters ritual** (paper · floors locked · live=False)\n"
+            f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')} "
+            f"doctor_fresh={ritual.get('doctor_fresh')}\n"
+            f"{ritual.get('label') or 'ritual observe'}\n"
+            f"_staff paste only · never auto-posts · never enables live_"
+        )
     slim["note"] = "Staff export — never invent fills; never soften floors; never enable live."
     return slim
 
@@ -2308,10 +2316,12 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         f"**Living doctor** (paper · floors locked · live=False)\n"
         f"{doc['label']} · failed=[{failed_ids}]\n"
         f"{ritual_line}\n"
+        f"ritual draft: make living-ritual-discord (staff paste · never auto-posts)\n"
         f"_never places · never softens floors · never enables live_"
     )
     doc["soft_copy"] = soft_copy
     doc["discord"] = soft_copy
+    doc["ritual_draft_cmd"] = "make living-ritual-discord"
     if record:
         try:
             marker = record_doctor_run(root, doc)
