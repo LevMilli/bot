@@ -683,6 +683,14 @@ def master_summary(
         elif quiet_age_label and age_h is not None:
             # Soft observe label when age known but under the warn threshold.
             priority.append(f"{quiet_age_label} (observe)")
+    sunday_pkt = (living or {}).get("sunday_packet") if isinstance(living, dict) else None
+    if isinstance(sunday_pkt, dict) and sunday_pkt.get("quiet_age_label"):
+        sun_label = str(sunday_pkt.get("quiet_age_label"))[:80]
+        # Soft observe rail — never pages; staff Sunday cross-check only.
+        if sun_label and not any(
+            sun_label in str(p) or "sunday quiet" in str(p).lower() for p in priority
+        ):
+            priority.append(f"sunday quiet {sun_label} (observe)")
     feature_pager = (living or {}).get("feature_quiet_pager") if isinstance(living, dict) else None
     if isinstance(feature_pager, dict) and feature_pager.get("page"):
         priority.insert(0, str(feature_pager.get("label") or "feature quiet PAGE")[:120])

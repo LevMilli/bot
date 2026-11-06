@@ -597,6 +597,10 @@ export type Desk = {
     eligible_completions_today?: number
     ritual_ok?: boolean | null
     ritual_nag?: boolean
+    quiet_nag?: boolean
+    quiet_age?: string
+    quiet_age_h?: number | null
+    quiet_age_label?: string
     note?: string
     error?: string
   }

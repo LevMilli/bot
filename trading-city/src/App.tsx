@@ -2066,6 +2066,13 @@ export default function App() {
                         const t = snap?.desk?.teller_living
                         if (!t) return undefined
                         if (t.ritual_nag || t.ritual_ok === false) return '#d4a017'
+                        if (t.quiet_nag) return '#d4a017'
+                        const ageH =
+                          t.quiet_age_h ??
+                          (typeof t.quiet_age === 'string' && t.quiet_age.endsWith('h')
+                            ? Number(t.quiet_age.slice(0, -1))
+                            : null)
+                        if (ageH != null && Number.isFinite(ageH) && ageH >= 6) return '#d4a017'
                         return undefined
                       })(),
                     }}
@@ -2077,10 +2084,10 @@ export default function App() {
                         snap?.desk?.teller_memory?.recent?.[0]?.text ||
                         'living teller pending'
                       const t = snap?.desk?.teller_living
-                      if (t?.ritual_nag || t?.ritual_ok === false) {
-                        return `${line} · ritual_nag`
-                      }
-                      return line
+                      const bits: string[] = []
+                      if (t?.ritual_nag || t?.ritual_ok === false) bits.push('ritual_nag')
+                      if (t?.quiet_nag) bits.push(t.quiet_age_label || 'quiet_nag')
+                      return bits.length ? `${line} · ${bits.join(' · ')}` : line
                     })()}
                   </span>
                 </div>
