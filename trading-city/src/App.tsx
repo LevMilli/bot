@@ -909,13 +909,32 @@ export default function App() {
                 </div>
                 <div className="vault-board-row">
                   <span className="vb-label">compact</span>
-                  <span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.living_compact ||
+                          (snap?.desk?.master as {
+                            compact?: { ritual_ok?: boolean | null }
+                          } | undefined)?.compact
+                        if (!c || c.ritual_ok == null) return undefined
+                        return c.ritual_ok ? undefined : '#d4a017'
+                      })(),
+                    }}
+                  >
                     {(() => {
                       const c =
                         snap?.desk?.living_compact ||
-                        (snap?.desk?.master as { compact?: { label?: string } } | undefined)
-                          ?.compact
+                        (snap?.desk?.master as {
+                          compact?: {
+                            label?: string
+                            ritual_label?: string
+                            ritual_ok?: boolean | null
+                            parts?: string[]
+                          }
+                        } | undefined)?.compact
                       if (!c) return 'living compact pending'
+                      // Prefer full label (quiet → ritual → expand order from living_compact_card).
                       return c.label || 'living compact'
                     })()}
                   </span>
