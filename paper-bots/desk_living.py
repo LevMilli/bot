@@ -2042,6 +2042,10 @@ def living_self_check(root: str | None = None) -> dict:
             for k, v in board.items()
             if isinstance(v, dict) and v.get("fee_floors_locked") is True
         ),
+        "chip_catalog": sorted(
+            k for k, v in board.items()
+            if isinstance(v, dict) and v.get("fee_floors_locked") is True
+        ),
         "chicago_today": board.get("chicago_today"),
         "note": "Living self_check — observe-only. Floors must stay locked.",
     }

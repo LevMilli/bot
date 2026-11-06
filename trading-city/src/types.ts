@@ -213,6 +213,27 @@ export type Desk = {
     note?: string
     error?: string
   }
+  teller_living?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    memory_line?: string
+    label?: string
+    swarm_pass?: boolean
+    floors_ok?: boolean
+    eligible_completions_today?: number
+    note?: string
+    error?: string
+  }
+  living_memory_line?: string
+  fee_floors_assert?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    all_ok?: boolean
+    label?: string
+    venues?: Record<string, { floor?: number; live?: number; ok?: boolean }>
+    note?: string
+    error?: string
+  }
   master?: {
     paper_only?: boolean
     version?: number
