@@ -74,6 +74,10 @@ def main() -> int:
                 f"floors_ok={chip.get('floors_ok')} expand_ok={chip.get('expand_ok')} "
                 f"doctor_fresh={chip.get('doctor_fresh')}"
             )
+            print(
+                "doctor soft: make living-doctor · draft: make living-ritual-discord "
+                "(staff paste · never auto-posts)"
+            )
             print(chip.get("note") or "")
         return 0 if chip.get("exit_ok") else 2
 

@@ -93,6 +93,10 @@ def _text(board: dict) -> str:
             f"doctor_fresh={doctor_fresh} "
             f"{compact.get('doctor_label') or ('doctor=fresh' if doctor_fresh else 'doctor=stale' if doctor_fresh is False else 'doctor=n/a')}"
         ),
+        (
+            "doctor draft: make living-doctor · paste living-ritual-discord "
+            "(never auto-posts)"
+        ),
         f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')}",
         f"ritual: {ritual.get('label') or '—'}",
         f"sunday: {sunday.get('label') or '—'}",
@@ -225,6 +229,26 @@ def main() -> int:
             "fee_floors_locked": True,
             "live_orders_enabled": False,
             "compact": board.get("compact"),
+            "compact_ritual_ok": (
+                (board.get("compact") or {}).get("ritual_ok")
+                if isinstance(board.get("compact"), dict)
+                else None
+            ),
+            "compact_ritual_label": (
+                (board.get("compact") or {}).get("ritual_label")
+                if isinstance(board.get("compact"), dict)
+                else None
+            ),
+            "compact_doctor_fresh": (
+                (board.get("compact") or {}).get("doctor_fresh")
+                if isinstance(board.get("compact"), dict)
+                else None
+            ),
+            "compact_doctor_label": (
+                (board.get("compact") or {}).get("doctor_label")
+                if isinstance(board.get("compact"), dict)
+                else None
+            ),
             "insight_swarm": board.get("insight_swarm"),
             "feature_quiet": board.get("feature_quiet"),
             "feature_quiet_pager": board.get("feature_quiet_pager"),
