@@ -18,13 +18,16 @@ PRIORITY_MAX = 16
 _PRIORITY_FAMILY_PREFIXES = (
     ("timer", ("timer",)),
     ("bleed", ("bleed",)),
-    ("near-miss", ("near-miss",)),
+    ("near-miss", ("near-miss", "skip-twin")),
     ("hard-stop", ("hard-stop", "sports hard-stop")),
     ("clv", ("clv",)),
     ("dual", ("dual-control",)),
-    ("ruin", ("ruin drill",)),
+    ("ruin", ("ruin",)),
     ("empty", ("empty card", "empty bee", "distance empty")),
     ("eia", ("eia ",)),
+    ("feature", ("feature quiet", "weekday alert: feature")),
+    ("expand", ("betting expand",)),
+    ("doctor", ("doctor", "living doctor")),
 )
 
 # Bars from docs/trading-masters-per-bot-plan.md (Chicago weeks).
@@ -747,24 +750,18 @@ def master_summary(
     book = (living or {}).get("bookkeeper") if isinstance(living, dict) else None
     if isinstance(book, dict) and book.get("fee_ledger_complete") is False:
         priority.append(str(book.get("label") or "fee ledger gaps")[:120])
-    nm_clerk = (living or {}).get("near_miss_clerk") if isinstance(living, dict) else None
-    if isinstance(nm_clerk, dict) and nm_clerk.get("promote_ready"):
-        priority.append("near-miss clerk promote_ready — staff z|p only")
-    hs_clerk = (living or {}).get("hard_stop_clerk") if isinstance(living, dict) else None
-    if isinstance(hs_clerk, dict) and hs_clerk.get("promote_ready"):
-        priority.append("hard-stop clerk promote_ready — staff arm only")
-    bleed_clerk = (living or {}).get("bleed_clerk") if isinstance(living, dict) else None
-    if isinstance(bleed_clerk, dict) and bleed_clerk.get("bleed_pass") is False:
-        priority.insert(0, str(bleed_clerk.get("label") or "bleed clerk hot")[:120])
+    # Clerk digest twins are pruned when ROI chip already covers the family
+    # (finalize_living_priority also dedupes by family prefixes).
     twin = (living or {}).get("skip_twin_clerk") if isinstance(living, dict) else None
-    if isinstance(twin, dict) and twin.get("promote_ready"):
+    if (
+        isinstance(twin, dict)
+        and twin.get("promote_ready")
+        and not (isinstance(near_miss, dict) and near_miss.get("promote_ready"))
+    ):
         priority.append("skip-twin promote_ready — staff z|p only")
-    clv_closer = (living or {}).get("clv_closer") if isinstance(living, dict) else None
-    if isinstance(clv_closer, dict) and clv_closer.get("pass") is False:
-        priority.append(str(clv_closer.get("label") or "CLV closer gaps")[:120])
-    timer_digest = (living or {}).get("timer_digest") if isinstance(living, dict) else None
-    if isinstance(timer_digest, dict) and timer_digest.get("alive") is False:
-        priority.insert(0, str(timer_digest.get("label") or "timer digest DEAD")[:120])
+    doctor_age = (living or {}).get("doctor_age") if isinstance(living, dict) else None
+    if isinstance(doctor_age, dict) and doctor_age.get("stale"):
+        priority.append(str(doctor_age.get("label") or "doctor stale")[:120])
     eia_bo = (living or {}).get("eia_blackout") if isinstance(living, dict) else None
     if isinstance(eia_bo, dict) and eia_bo.get("blocked"):
         priority.insert(0, str(eia_bo.get("label") or "EIA blackout ACTIVE")[:120])
@@ -786,6 +783,9 @@ def master_summary(
     digest_inv = (living or {}).get("digest_inventory") if isinstance(living, dict) else None
     if isinstance(digest_inv, dict) and digest_inv.get("pass") is False:
         priority.append(str(digest_inv.get("label") or "digest inventory thin")[:120])
+    expand = (living or {}).get("betting_expand_gate") if isinstance(living, dict) else None
+    if isinstance(expand, dict) and expand.get("blocked"):
+        priority.insert(0, str(expand.get("label") or "betting expand BLOCKED")[:120])
     priority = finalize_living_priority(priority)
     return {
         "paper_only": True,
@@ -818,6 +818,16 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "teller_living": (
+            (living or {}).get("teller_living")
+            if isinstance(living, dict)
+            else None
+        ),
+        "fee_floors_assert": (
+            (living or {}).get("fee_floors_assert")
+            if isinstance(living, dict)
+            else None
+        ),
         "feature_quiet": feature_quiet,
         "feature_quiet_pager": (
             (living or {}).get("feature_quiet_pager")
@@ -843,6 +853,16 @@ def master_summary(
         ),
         "ruin_drill_page": (
             (living or {}).get("ruin_drill_page")
+            if isinstance(living, dict)
+            else None
+        ),
+        "betting_expand_gate": (
+            (living or {}).get("betting_expand_gate")
+            if isinstance(living, dict)
+            else None
+        ),
+        "doctor_age": (
+            (living or {}).get("doctor_age")
             if isinstance(living, dict)
             else None
         ),

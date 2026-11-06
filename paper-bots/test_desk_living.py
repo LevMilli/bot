@@ -142,6 +142,12 @@ class DeskLivingTests(unittest.TestCase):
                 "timer digest dead",
                 "bleed ratio=2 hot",
                 "bleed clerk ratio=2",
+                "near-miss promote_ready — staff z|p only",
+                "skip-twin promote_ready — staff z|p only",
+                "doctor never run",
+                "living doctor FAIL n=2",
+                "empty card bee hot",
+                "empty bee stale",
                 "insight swarm ≥3:1 before betting expand",
                 "dual-control paper 0/8 signed; live_orders=False",
                 "dual-control signed=0/8 two_staff=False arm_ready_paper=False",
@@ -150,6 +156,9 @@ class DeskLivingTests(unittest.TestCase):
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("timer")), 1)
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("bleed")), 1)
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("dual")), 1)
+            self.assertEqual(sum(1 for t in trimmed if "near-miss" in t.lower() or t.lower().startswith("skip-twin")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("doctor") or t.lower().startswith("living doctor")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("empty")), 1)
             self.assertIn("completions_chip", board2)
             self.assertTrue(board2["completions_chip"]["fee_floors_locked"])
             from helpers import injury_wire
@@ -184,6 +193,59 @@ class DeskLivingTests(unittest.TestCase):
             self.assertEqual(export.get("export"), "living_board_v1")
             self.assertTrue(export.get("fee_floors_locked"))
             self.assertIn("ruin_drill_page", board2)
+            map_path = os.path.join(
+                os.path.dirname(os.path.abspath(desk_living.__file__)),
+                "LIVING_UPGRADE.md",
+            )
+            self.assertTrue(os.path.isfile(map_path))
+            teller = desk_living.teller_living_chip(tmp, remember=False)
+            self.assertIn("swarm", teller.get("memory_line") or "")
+            self.assertTrue(teller["fee_floors_locked"])
+            floors = desk_living.fee_floors_assert(tmp)
+            self.assertTrue(floors.get("all_ok"))
+            self.assertIn("teller_living", board2)
+            self.assertIn("fee_floors_assert", board2)
+            health2 = desk_living.living_self_check(tmp)
+            self.assertIn("chip_catalog", health2)
+            self.assertGreaterEqual(len(health2.get("chip_catalog") or []), 5)
+            self.assertIn("board_size", health2)
+            self.assertFalse(health2["board_size"].get("over"))
+            doc = desk_living.living_doctor(tmp, record=True)
+            self.assertTrue(doc["fee_floors_locked"])
+            self.assertIn("checks", doc)
+            self.assertFalse(doc.get("live_orders_enabled"))
+            self.assertTrue(os.path.isfile(desk_living.doctor_run_path(tmp)))
+            age = desk_living.doctor_age_chip(tmp)
+            self.assertFalse(age.get("stale"))
+            self.assertIsNotNone(age.get("age_sec"))
+            self.assertIn("doctor_age", board2)
+            peek = desk_living.living_doctor(tmp, record=False)
+            self.assertIn("doctor_age", peek)
+            self.assertIn("board_size", board2)
+            gaps = desk_living.dual_control_gaps_page(tmp)
+            self.assertIn("copy", gaps)
+            self.assertFalse(gaps.get("live_orders_enabled"))
+            self.assertTrue(os.path.isfile(os.path.join(
+                os.path.dirname(os.path.abspath(desk_living.__file__)),
+                "tools", "staff_living_ritual.py",
+            )))
+            gate = desk_living.betting_expand_gate(tmp)
+            self.assertTrue(gate["fee_floors_locked"])
+            self.assertIn("betting_expand_gate", board2)
+            self.assertIn(gate.get("blocked"), (True, False))
+            self.assertEqual(bool(gate.get("allow_betting_expand")), not bool(gate.get("blocked")))
+            # Fresh empty root → blocked until seed fills digests.
+            with tempfile.TemporaryDirectory() as empty:
+                thin = desk_living.betting_expand_gate(empty)
+                self.assertTrue(thin.get("blocked"))
+                seeded = desk_living.seed_missing_digests(empty)
+                fat = desk_living.betting_expand_gate(empty)
+                if seeded.get("after", {}).get("pass"):
+                    self.assertTrue(fat.get("allow_betting_expand"))
+            with open(map_path, encoding="utf-8") as handle:
+                body = handle.read()
+            self.assertIn("auto_publish", body)
+            self.assertIn("staff_sunday_packet", body)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
@@ -385,12 +447,45 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("insight swarm ≥3:1", " ".join(summary.get("priority") or []))
             self.assertIn("living_ai", summary)
             self.assertLessEqual(len(summary.get("priority") or []), desk_master.PRIORITY_MAX)
+            # Living desk keys expected on Masters / living board path.
+            living = desk_living.living_upgrade_board(tmp)
+            for key in ("teller_living", "fee_floors_assert", "betting_expand_gate", "insight_swarm"):
+                self.assertIn(key, living)
+            self.assertIn("betting_expand_gate", summary)
+            self.assertIn("teller_living", summary)
             # Completions line only when today > 0 (trimmed noise otherwise).
             comps = (summary.get("completions") or {}).get("eligible_completions_today") or 0
             if int(comps) > 0:
                 self.assertTrue(
                     any("eligible completions today" in str(p) for p in (summary.get("priority") or []))
                 )
+
+    def test_ritual_discord_export(self):
+        from tools import staff_living_ritual
+        with tempfile.TemporaryDirectory() as tmp:
+            steps = {
+                "gaps": {"copy": "**DUAL-CONTROL GAPS**\n- [ ] a"},
+                "ruin": {"copy": "**RUIN DRILL**\nok"},
+                "floors": {"label": "floors locked ok", "all_ok": True},
+                "expand": {"label": "expand ok", "blocked": False},
+                "doctor": {"label": "living doctor OK", "ok": True},
+            }
+            text = staff_living_ritual.format_discord({
+                "ok": True,
+                "live_orders_enabled": False,
+                "steps": steps,
+                "note": "Never invent fills.",
+            })
+            self.assertIn("Living weekly ritual", text)
+            self.assertIn("DUAL-CONTROL GAPS", text)
+            self.assertIn("floors", text)
+            age = desk_living.doctor_age_chip(tmp)
+            self.assertTrue(age.get("stale"))
+            desk_living.record_doctor_run(tmp, {"ok": True, "label": "living doctor OK", "failed_n": 0})
+            age2 = desk_living.doctor_age_chip(tmp)
+            self.assertFalse(age2.get("stale"))
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("doctor_age", export)
 
     def test_tip_radar_from_quote_cache(self):
         from helpers import tip_radar

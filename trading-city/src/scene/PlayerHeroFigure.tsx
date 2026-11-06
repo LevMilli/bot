@@ -1,25 +1,22 @@
 import { useMemo, useRef, type MutableRefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { CanvasTexture, MathUtils, type Group, type MeshStandardMaterial } from 'three'
+import { CanvasTexture, MathUtils, type Group, type Mesh, type MeshStandardMaterial } from 'three'
 
 /**
- * Master player avatar — industrial bank-bot DNA with a guest-VIP upgrade.
- * Same gunmetal + neon language as IndustrialBotFigure, but denser plating,
- * guest heraldry, backpack pack, and locomotion-driven limbs for third-person.
+ * Vault guest hero v2 — industrial DNA with denser plating, thrusters,
+ * HUD visor scan, cape flutter, and locomotion-driven limbs.
  */
 
-const ARMOR = '#121218'
-const ARMOR_DARK = '#08080c'
-const ARMOR_EDGE = '#1c1c24'
-const METAL = '#2a2a32'
-/** Guest accent — cyan trust chrome so the player reads above purple tellers. */
-const ACCENT = '#2de2e6'
-const ACCENT_DIM = '#1a8890'
-const GOLD = '#f9c80e'
-const GRAFFITI = '#f2f2f0'
+const ARMOR = '#14141c'
+const ARMOR_DARK = '#07070b'
+const ARMOR_EDGE = '#22222c'
+const METAL = '#34343e'
+const ACCENT = '#5af0ff'
+const ACCENT_DIM = '#1a9aaa'
+const GOLD = '#ffd24a'
+const GRAFFITI = '#f6f4ef'
 
 export type PlayerHeroMotion = {
-  /** −1..1 gait sine from groundedWalk */
   step: number
   bobAmp: number
   groundSpeed: number
@@ -27,25 +24,27 @@ export type PlayerHeroMotion = {
   jumping: boolean
   sprinting: boolean
   turn: number
+  /** Vertical velocity for thruster / squash. */
+  velY?: number
 }
 
-function armor(roughness = 0.55, metalness = 0.68) {
+function armor(roughness = 0.5, metalness = 0.72) {
   return {
     color: ARMOR,
     roughness,
     metalness,
-    emissive: '#041018',
-    emissiveIntensity: 0.1,
+    emissive: '#061820',
+    emissiveIntensity: 0.14,
   }
 }
 
-function neon(color: string = ACCENT, intensity = 2.1) {
+function neon(color: string = ACCENT, intensity = 2.4) {
   return {
     color,
     emissive: color,
     emissiveIntensity: intensity,
-    roughness: 0.18,
-    metalness: 0.22,
+    roughness: 0.15,
+    metalness: 0.2,
     toneMapped: false as const,
   }
 }
@@ -64,14 +63,14 @@ function LedStrip({
   return (
     <mesh position={position} rotation={rotation}>
       <boxGeometry args={size} />
-      <meshStandardMaterial {...neon(color, 1.65)} />
+      <meshStandardMaterial {...neon(color, 2.0)} />
     </mesh>
   )
 }
 
 function LedDot({
   position,
-  r = 0.012,
+  r = 0.013,
   color = ACCENT,
 }: {
   position: [number, number, number]
@@ -80,8 +79,8 @@ function LedDot({
 }) {
   return (
     <mesh position={position}>
-      <sphereGeometry args={[r, 10, 10]} />
-      <meshStandardMaterial {...neon(color, 1.9)} />
+      <sphereGeometry args={[r, 12, 12]} />
+      <meshStandardMaterial {...neon(color, 2.2)} />
     </mesh>
   )
 }
@@ -89,8 +88,8 @@ function LedDot({
 function Bolt({ position }: { position: [number, number, number] }) {
   return (
     <mesh position={position}>
-      <cylinderGeometry args={[0.009, 0.009, 0.012, 8]} />
-      <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.28} />
+      <cylinderGeometry args={[0.01, 0.01, 0.014, 8]} />
+      <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.24} />
     </mesh>
   )
 }
@@ -99,20 +98,20 @@ function CrownMark({ scale = 1 }: { scale?: number }) {
   return (
     <group scale={scale}>
       <mesh position={[0, 0.01, 0]}>
-        <boxGeometry args={[0.08, 0.022, 0.012]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+        <boxGeometry args={[0.09, 0.024, 0.014]} />
+        <meshBasicMaterial color={GOLD} toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.04, 0]}>
-        <boxGeometry args={[0.02, 0.045, 0.012]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+      <mesh position={[0, 0.045, 0]}>
+        <boxGeometry args={[0.022, 0.05, 0.014]} />
+        <meshBasicMaterial color={GOLD} toneMapped={false} />
       </mesh>
-      <mesh position={[-0.03, 0.032, 0]} rotation={[0, 0, 0.35]}>
-        <boxGeometry args={[0.018, 0.04, 0.012]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+      <mesh position={[-0.032, 0.035, 0]} rotation={[0, 0, 0.35]}>
+        <boxGeometry args={[0.02, 0.044, 0.014]} />
+        <meshBasicMaterial color={GOLD} toneMapped={false} />
       </mesh>
-      <mesh position={[0.03, 0.032, 0]} rotation={[0, 0, -0.35]}>
-        <boxGeometry args={[0.018, 0.04, 0.012]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+      <mesh position={[0.032, 0.035, 0]} rotation={[0, 0, -0.35]}>
+        <boxGeometry args={[0.02, 0.044, 0.014]} />
+        <meshBasicMaterial color={GOLD} toneMapped={false} />
       </mesh>
     </group>
   )
@@ -120,42 +119,47 @@ function CrownMark({ scale = 1 }: { scale?: number }) {
 
 const TEX_CACHE = new Map<string, CanvasTexture>()
 
-function guestTexture(kind: 'pauldron' | 'unit' | 'pack') {
-  const key = `guest:${kind}`
+function guestTexture(kind: 'pauldron' | 'unit' | 'pack' | 'chest') {
+  const key = `guest-v2:${kind}`
   const hit = TEX_CACHE.get(key)
   if (hit) return hit
   const c = document.createElement('canvas')
-  c.width = kind === 'pauldron' ? 256 : 128
-  c.height = kind === 'pauldron' ? 256 : 128
+  c.width = kind === 'pauldron' || kind === 'chest' ? 256 : 128
+  c.height = kind === 'pauldron' || kind === 'chest' ? 256 : 128
   const ctx = c.getContext('2d')!
   ctx.clearRect(0, 0, c.width, c.height)
-  ctx.fillStyle = GRAFFITI
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   if (kind === 'pauldron') {
-    ctx.font = 'bold 34px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('APEX', 128, 70)
-    ctx.font = 'bold 30px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('TRUST', 128, 110)
-    ctx.fillStyle = GOLD
-    ctx.font = 'bold 28px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('GUEST', 128, 160)
-    ctx.fillStyle = ACCENT
-    ctx.fillRect(70, 190, 116, 8)
     ctx.fillStyle = GRAFFITI
-    ctx.fillRect(88, 210, 4, 18)
-    ctx.fillRect(118, 208, 3, 22)
-    ctx.fillRect(148, 212, 4, 14)
+    ctx.font = 'bold 36px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('APEX', 128, 64)
+    ctx.font = 'bold 32px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('TRUST', 128, 104)
+    ctx.fillStyle = GOLD
+    ctx.font = 'bold 34px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('GUEST', 128, 155)
+    ctx.fillStyle = ACCENT
+    ctx.fillRect(64, 185, 128, 10)
+    ctx.fillStyle = GRAFFITI
+    ;[88, 118, 148].forEach((x, i) => ctx.fillRect(x, 208, 4, 16 + i * 2))
   } else if (kind === 'pack') {
     ctx.fillStyle = ACCENT
-    ctx.font = 'bold 42px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('VAULT', 64, 48)
+    ctx.font = 'bold 40px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('VAULT', 64, 44)
     ctx.fillStyle = GOLD
-    ctx.font = 'bold 36px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('01', 64, 92)
+    ctx.font = 'bold 48px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('01', 64, 96)
+  } else if (kind === 'chest') {
+    ctx.fillStyle = ACCENT
+    ctx.font = 'bold 48px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('GUEST', 128, 100)
+    ctx.fillStyle = GOLD
+    ctx.font = 'bold 56px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('01', 128, 170)
   } else {
     ctx.fillStyle = GOLD
-    ctx.font = 'bold 64px Impact, Haettenschweiler, sans-serif'
+    ctx.font = 'bold 68px Impact, Haettenschweiler, sans-serif'
     ctx.fillText('01', 64, 68)
   }
   const tex = new CanvasTexture(c)
@@ -177,95 +181,98 @@ function HeroArm({
   useFrame((_, dt) => {
     if (!ref.current || !fore.current) return
     const m = motion.current
-    const swing = m.step * (side < 0 ? 1 : -1) * (0.55 + m.bobAmp * 0.5)
-    const hang = m.jumping ? -0.35 : -0.15
-    const wantX = hang + swing * 0.9
-    const wantZ = -side * (0.22 + (m.sprinting ? 0.08 : 0)) + m.turn * side * -0.06
-    ref.current.rotation.x = MathUtils.damp(ref.current.rotation.x, wantX, 14, dt)
-    ref.current.rotation.z = MathUtils.damp(ref.current.rotation.z, wantZ, 12, dt)
+    const swing = m.step * (side < 0 ? 1 : -1) * (0.7 + m.bobAmp * 0.55)
+    const hang = m.jumping ? -0.42 : -0.12
+    const wantX = hang + swing
+    const wantZ = -side * (0.18 + (m.sprinting ? 0.12 : 0)) + m.turn * side * -0.1
+    ref.current.rotation.x = MathUtils.damp(ref.current.rotation.x, wantX, 16, dt)
+    ref.current.rotation.z = MathUtils.damp(ref.current.rotation.z, wantZ, 14, dt)
     fore.current.rotation.x = MathUtils.damp(
       fore.current.rotation.x,
-      -0.35 + Math.abs(swing) * 0.55 + (m.jumping ? 0.2 : 0),
-      14,
+      -0.4 + Math.abs(swing) * 0.65 + (m.jumping ? 0.25 : 0),
+      16,
       dt,
     )
   })
 
   return (
-    <group ref={ref} position={[side * 0.36, 0.82, 0]} rotation={[-0.15, 0, -side * 0.22]}>
+    <group ref={ref} position={[side * 0.38, 0.86, 0]} rotation={[-0.12, 0, -side * 0.2]}>
       <mesh>
-        <sphereGeometry args={[0.078, 16, 14]} />
-        <meshStandardMaterial color={ARMOR_DARK} metalness={0.78} roughness={0.38} />
+        <sphereGeometry args={[0.085, 16, 14]} />
+        <meshStandardMaterial color={ARMOR_DARK} metalness={0.82} roughness={0.34} />
       </mesh>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.088, 0.014, 8, 26]} />
-        <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.25} />
+        <torusGeometry args={[0.095, 0.016, 8, 28]} />
+        <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.22} />
       </mesh>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.1, 0.006, 6, 24]} />
-        <meshStandardMaterial {...neon(GOLD, 1.1)} />
+        <torusGeometry args={[0.11, 0.007, 6, 26]} />
+        <meshStandardMaterial {...neon(GOLD, 1.4)} />
       </mesh>
-      <LedDot position={[0, 0.02, 0.085]} r={0.012} color={GOLD} />
+      <LedDot position={[0, 0.025, 0.09]} r={0.014} color={GOLD} />
 
-      <mesh position={[0, 0.18, 0]}>
-        <boxGeometry args={[0.12, 0.36, 0.12]} />
-        <meshStandardMaterial {...armor(0.5, 0.72)} />
+      {/* Layered upper arm */}
+      <mesh position={[0, 0.19, 0]}>
+        <boxGeometry args={[0.13, 0.38, 0.13]} />
+        <meshStandardMaterial {...armor(0.46, 0.76)} />
       </mesh>
-      <mesh position={[0, 0.18, 0]}>
-        <boxGeometry args={[0.095, 0.34, 0.095]} />
-        <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.65} />
+      <mesh position={[0, 0.19, 0]}>
+        <boxGeometry args={[0.1, 0.35, 0.1]} />
+        <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.62} />
       </mesh>
-      <LedStrip position={[side * 0.062, 0.18, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.24, 0.016, 0.01]} />
+      <mesh position={[side * 0.07, 0.19, 0]}>
+        <boxGeometry args={[0.03, 0.3, 0.08]} />
+        <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.35} />
+      </mesh>
+      <LedStrip position={[side * 0.07, 0.19, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.26, 0.018, 0.012]} />
       <LedStrip
-        position={[side * 0.062, 0.18, 0]}
+        position={[side * 0.07, 0.19, 0]}
         rotation={[0, 0, Math.PI / 2]}
-        size={[0.18, 0.01, 0.008]}
+        size={[0.2, 0.01, 0.008]}
         color={GOLD}
       />
-      <Bolt position={[side * 0.05, 0.08, 0.05]} />
-      <Bolt position={[side * 0.05, 0.26, 0.05]} />
+      <Bolt position={[side * 0.055, 0.08, 0.055]} />
+      <Bolt position={[side * 0.055, 0.28, 0.055]} />
 
-      <mesh position={[0, 0.38, 0]}>
-        <sphereGeometry args={[0.06, 14, 12]} />
-        <meshStandardMaterial color={ARMOR_DARK} metalness={0.82} roughness={0.32} />
+      <mesh position={[0, 0.4, 0]}>
+        <sphereGeometry args={[0.065, 14, 12]} />
+        <meshStandardMaterial color={ARMOR_DARK} metalness={0.85} roughness={0.3} />
       </mesh>
-      <mesh position={[0, 0.38, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.068, 0.011, 8, 22]} />
-        <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.24} />
+      <mesh position={[0, 0.4, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.074, 0.012, 8, 22]} />
+        <meshStandardMaterial {...neon(ACCENT, 1.5)} />
       </mesh>
 
-      <group ref={fore} position={[0, 0.38, 0]} rotation={[-0.4, 0, 0]}>
-        <mesh position={[0, 0.16, 0]}>
-          <boxGeometry args={[0.1, 0.32, 0.1]} />
-          <meshStandardMaterial {...armor(0.48, 0.74)} />
+      <group ref={fore} position={[0, 0.4, 0]} rotation={[-0.42, 0, 0]}>
+        <mesh position={[0, 0.17, 0]}>
+          <boxGeometry args={[0.11, 0.34, 0.11]} />
+          <meshStandardMaterial {...armor(0.44, 0.78)} />
         </mesh>
-        <mesh position={[-side * 0.045, 0.16, 0]}>
-          <boxGeometry args={[0.022, 0.24, 0.055]} />
+        <mesh position={[-side * 0.05, 0.17, 0]}>
+          <boxGeometry args={[0.024, 0.26, 0.06]} />
           <meshStandardMaterial
-            color="#050508"
+            color="#04060a"
             metalness={0.4}
-            roughness={0.65}
+            roughness={0.6}
             emissive={ACCENT_DIM}
-            emissiveIntensity={0.45}
+            emissiveIntensity={0.55}
           />
         </mesh>
-        <LedStrip position={[side * 0.055, 0.16, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.24, 0.014, 0.01]} />
-        {/* Guest cuff band */}
-        <mesh position={[0, 0.3, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.055, 0.01, 8, 20]} />
-          <meshStandardMaterial {...neon(GOLD, 1.35)} />
+        <LedStrip position={[side * 0.06, 0.17, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.26, 0.016, 0.01]} />
+        <mesh position={[0, 0.32, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.06, 0.012, 8, 20]} />
+          <meshStandardMaterial {...neon(GOLD, 1.6)} />
         </mesh>
-        {/* Mechanical hand */}
-        <group position={[0, 0.36, 0]}>
+        <group position={[0, 0.38, 0]}>
           <mesh>
-            <boxGeometry args={[0.08, 0.055, 0.06]} />
-            <meshStandardMaterial {...armor(0.45, 0.75)} />
+            <boxGeometry args={[0.09, 0.06, 0.07]} />
+            <meshStandardMaterial {...armor(0.4, 0.8)} />
           </mesh>
-          <LedStrip position={[0, 0, 0.034]} size={[0.055, 0.012, 0.008]} color={GOLD} />
-          {([-1, 0, 1] as const).map((f) => (
-            <mesh key={f} position={[f * 0.024, 0.06, 0.012]} rotation={[0.2, 0, f * 0.1]}>
-              <boxGeometry args={[0.02, 0.1, 0.024]} />
-              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.72} roughness={0.4} />
+          <LedStrip position={[0, 0, 0.038]} size={[0.06, 0.014, 0.01]} color={GOLD} />
+          {([-1, -0.33, 0.33, 1] as const).map((f) => (
+            <mesh key={f} position={[f * 0.02, 0.065, 0.014]} rotation={[0.22, 0, f * 0.08]}>
+              <boxGeometry args={[0.018, 0.11, 0.022]} />
+              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.38} />
             </mesh>
           ))}
         </group>
@@ -283,58 +290,68 @@ function HeroLeg({
 }) {
   const thigh = useRef<Group>(null)
   const shin = useRef<Group>(null)
+  const jet = useRef<MeshStandardMaterial>(null)
 
-  useFrame((_, dt) => {
+  useFrame(({ clock }, dt) => {
     if (!thigh.current || !shin.current) return
     const m = motion.current
     const swing = m.step * (side < 0 ? 1 : -1)
-    const wantThigh = m.jumping ? -0.55 : swing * 0.7 * (0.4 + m.bobAmp)
-    const wantShin = m.jumping ? 0.85 : Math.max(0, -swing) * 0.9 * m.bobAmp + 0.12
-    thigh.current.rotation.x = MathUtils.damp(thigh.current.rotation.x, wantThigh, 16, dt)
-    shin.current.rotation.x = MathUtils.damp(shin.current.rotation.x, wantShin, 16, dt)
+    const wantThigh = m.jumping ? -0.62 : swing * 0.85 * (0.45 + m.bobAmp)
+    const wantShin = m.jumping ? 0.95 : Math.max(0, -swing) * 1.05 * m.bobAmp + 0.1
+    thigh.current.rotation.x = MathUtils.damp(thigh.current.rotation.x, wantThigh, 18, dt)
+    shin.current.rotation.x = MathUtils.damp(shin.current.rotation.x, wantShin, 18, dt)
+    if (jet.current) {
+      const power = m.jumping || m.sprinting ? 2.4 : 0.35
+      jet.current.emissiveIntensity = power + Math.sin(clock.getElapsedTime() * 12) * 0.3
+    }
   })
 
   return (
-    <group position={[side * 0.13, 0.08, 0]}>
+    <group position={[side * 0.14, 0.08, 0]}>
       <group ref={thigh}>
-        <mesh position={[0, -0.16, 0.02]} rotation={[0.08, 0, side * 0.04]}>
-          <boxGeometry args={[0.115, 0.34, 0.12]} />
-          <meshStandardMaterial {...armor(0.55, 0.6)} />
+        <mesh position={[0, -0.17, 0.02]} rotation={[0.08, 0, side * 0.04]}>
+          <boxGeometry args={[0.125, 0.36, 0.13]} />
+          <meshStandardMaterial {...armor(0.5, 0.65)} />
         </mesh>
-        <mesh position={[0, -0.16, 0.02]}>
-          <boxGeometry args={[0.09, 0.3, 0.09]} />
-          <meshStandardMaterial color={ARMOR_DARK} metalness={0.45} roughness={0.7} />
+        <mesh position={[0, -0.17, 0.02]}>
+          <boxGeometry args={[0.095, 0.32, 0.095]} />
+          <meshStandardMaterial color={ARMOR_DARK} metalness={0.45} roughness={0.68} />
         </mesh>
-        <LedStrip position={[side * 0.06, -0.14, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.18, 0.012, 0.009]} />
-        <Bolt position={[side * 0.05, -0.05, 0.05]} />
-        <Bolt position={[side * 0.05, -0.22, 0.05]} />
+        <LedStrip position={[side * 0.065, -0.14, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.2, 0.014, 0.01]} />
+        <Bolt position={[side * 0.055, -0.05, 0.055]} />
+        <Bolt position={[side * 0.055, -0.24, 0.055]} />
 
-        <group ref={shin} position={[0, -0.34, 0.04]}>
-          <mesh position={[0, -0.16, 0.02]} rotation={[0.18, 0, 0]}>
-            <boxGeometry args={[0.1, 0.3, 0.11]} />
-            <meshStandardMaterial {...armor(0.58, 0.58)} />
+        <group ref={shin} position={[0, -0.36, 0.04]}>
+          <mesh position={[0, -0.17, 0.02]} rotation={[0.18, 0, 0]}>
+            <boxGeometry args={[0.11, 0.32, 0.12]} />
+            <meshStandardMaterial {...armor(0.52, 0.62)} />
           </mesh>
-          <LedStrip position={[side * 0.055, -0.14, 0.02]} rotation={[0, 0, Math.PI / 2]} size={[0.16, 0.01, 0.008]} color={GOLD} />
-          {/* Boot */}
-          <mesh position={[0, -0.34, 0.08]} rotation={[0.28, 0, 0]}>
-            <boxGeometry args={[0.12, 0.08, 0.22]} />
-            <meshStandardMaterial color={ARMOR_DARK} roughness={0.5} metalness={0.5} />
+          <LedStrip
+            position={[side * 0.06, -0.15, 0.02]}
+            rotation={[0, 0, Math.PI / 2]}
+            size={[0.18, 0.012, 0.009]}
+            color={GOLD}
+          />
+          {/* Armor boot + thruster sole */}
+          <mesh position={[0, -0.36, 0.09]} rotation={[0.28, 0, 0]}>
+            <boxGeometry args={[0.13, 0.09, 0.24]} />
+            <meshStandardMaterial color={ARMOR_DARK} roughness={0.48} metalness={0.55} />
           </mesh>
-          <mesh position={[0, -0.3, 0.16]} rotation={[0.28, 0, 0]}>
-            <boxGeometry args={[0.11, 0.05, 0.08]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.35} />
+          <mesh position={[0, -0.32, 0.18]} rotation={[0.28, 0, 0]}>
+            <boxGeometry args={[0.12, 0.055, 0.09]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.32} />
           </mesh>
-          <LedStrip position={[0, -0.32, 0.18]} size={[0.08, 0.012, 0.01]} />
+          <mesh position={[0, -0.4, 0.02]} rotation={[0.28, 0, 0]}>
+            <boxGeometry args={[0.08, 0.03, 0.1]} />
+            <meshStandardMaterial ref={jet} {...neon(ACCENT, 0.5)} />
+          </mesh>
+          <LedStrip position={[0, -0.34, 0.2]} size={[0.09, 0.014, 0.01]} />
         </group>
       </group>
     </group>
   )
 }
 
-/**
- * Hero guest bot for vault third-person control.
- * Drive limbs with `motion` ref updated each frame from groundedWalk.
- */
 export function PlayerHeroFigure({
   motion,
 }: {
@@ -343,13 +360,20 @@ export function PlayerHeroFigure({
   const root = useRef<Group>(null)
   const torso = useRef<Group>(null)
   const head = useRef<Group>(null)
+  const capeL = useRef<Group>(null)
+  const capeR = useRef<Group>(null)
   const packGlow = useRef<MeshStandardMaterial>(null)
   const chestPulse = useRef<MeshStandardMaterial>(null)
+  const visorScan = useRef<Mesh>(null)
+  const holo = useRef<Group>(null)
+  const thrusterL = useRef<MeshStandardMaterial>(null)
+  const thrusterR = useRef<MeshStandardMaterial>(null)
   const maps = useMemo(
     () => ({
       pauldron: guestTexture('pauldron'),
       unit: guestTexture('unit'),
       pack: guestTexture('pack'),
+      chest: guestTexture('chest'),
     }),
     [],
   )
@@ -357,296 +381,356 @@ export function PlayerHeroFigure({
   useFrame(({ clock }, dt) => {
     const t = clock.getElapsedTime()
     const m = motion.current
+    const velY = m.velY ?? 0
     if (root.current) {
-      const squash = m.jumping ? 0.94 : 1 + Math.sin(t * 1.4) * 0.008 * (1 - m.bobAmp * 0.5)
-      const stretch = m.jumping ? 1.05 : 1
-      root.current.scale.set(1 / Math.sqrt(squash), squash * stretch, 1 / Math.sqrt(squash))
+      const landSquash = m.grounded && Math.abs(velY) < 0.1 ? 1 : 1
+      const jumpStretch = m.jumping ? 1.06 : 1
+      const breath = 1 + Math.sin(t * 1.5) * 0.01 * (1 - m.bobAmp * 0.4)
+      const yScale = breath * jumpStretch * landSquash
+      root.current.scale.set(1 / Math.sqrt(yScale), yScale, 1 / Math.sqrt(yScale))
     }
     if (torso.current) {
-      const pitch = m.sprinting ? 0.08 : m.jumping ? -0.06 : m.groundSpeed * 0.012
-      torso.current.rotation.x = MathUtils.damp(torso.current.rotation.x, pitch, 10, dt)
-      torso.current.rotation.z = MathUtils.damp(torso.current.rotation.z, -m.turn * 0.05, 10, dt)
+      const pitch = m.sprinting ? 0.12 : m.jumping ? -0.08 : m.groundSpeed * 0.015
+      torso.current.rotation.x = MathUtils.damp(torso.current.rotation.x, pitch, 12, dt)
+      torso.current.rotation.z = MathUtils.damp(torso.current.rotation.z, -m.turn * 0.08, 12, dt)
     }
     if (head.current) {
-      head.current.rotation.y = Math.sin(t * 0.55) * 0.06 * (1 - m.bobAmp * 0.4)
+      head.current.rotation.y = Math.sin(t * 0.6) * 0.05 * (1 - m.bobAmp * 0.5)
       head.current.rotation.x = MathUtils.damp(
         head.current.rotation.x,
-        m.sprinting ? 0.08 : Math.sin(t * 0.7) * 0.04,
-        8,
+        m.sprinting ? 0.1 : Math.sin(t * 0.75) * 0.035,
+        10,
         dt,
       )
     }
+    const flutter = m.groundSpeed * 0.04 + (m.sprinting ? 0.15 : 0) + Math.sin(t * 6) * 0.04 * m.bobAmp
+    if (capeL.current) capeL.current.rotation.x = MathUtils.damp(capeL.current.rotation.x, 0.2 + flutter, 8, dt)
+    if (capeR.current) capeR.current.rotation.x = MathUtils.damp(capeR.current.rotation.x, 0.2 + flutter * 0.9, 8, dt)
+
     if (chestPulse.current) {
-      chestPulse.current.emissiveIntensity = 1.4 + Math.sin(t * 2.8) * 0.35 + (m.sprinting ? 0.4 : 0)
+      chestPulse.current.emissiveIntensity =
+        1.6 + Math.sin(t * 3.2) * 0.45 + (m.sprinting ? 0.55 : 0) + (m.jumping ? 0.35 : 0)
     }
     if (packGlow.current) {
       packGlow.current.emissiveIntensity =
-        (m.sprinting ? 2.2 : m.jumping ? 1.8 : 1.1) + Math.sin(t * 4.2) * 0.25
+        (m.sprinting ? 2.6 : m.jumping ? 2.1 : 1.2) + Math.sin(t * 5) * 0.35
+    }
+    const thrust = (m.sprinting || m.jumping ? 3.2 : 0.2) + Math.sin(t * 14) * 0.4
+    if (thrusterL.current) thrusterL.current.emissiveIntensity = thrust
+    if (thrusterR.current) thrusterR.current.emissiveIntensity = thrust
+    if (visorScan.current) {
+      visorScan.current.position.x = Math.sin(t * 2.4) * 0.08
+    }
+    if (holo.current) {
+      holo.current.rotation.y = t * 1.4
+      holo.current.position.y = 0.62 + Math.sin(t * 2.1) * 0.02
     }
   })
 
-  // Feet sit on y=0: boot sole ≈ −0.64 in local space → lift root.
   return (
     <group ref={root} position={[0, 0.64, 0]} scale={1} frustumCulled={false}>
-      {/* Soft self-key so gunmetal reads against the dark hall */}
-      <pointLight position={[0, 1.2, 0.55]} intensity={0.55} color="#9ef6ff" distance={3.8} />
-      <pointLight position={[0, 0.9, -0.5]} intensity={0.35} color="#f9c80e" distance={2.8} />
+      <pointLight position={[0, 1.25, 0.6]} intensity={0.7} color="#9ef8ff" distance={4.2} />
+      <pointLight position={[0, 0.95, -0.55]} intensity={0.45} color="#ffd24a" distance={3.2} />
+      <pointLight position={[0, 0.4, -0.35]} intensity={0.35} color="#5af0ff" distance={2.4} />
+
       <group ref={torso}>
-        {/* Hip / pelvis cage */}
+        {/* Hip cage + skirt plates */}
         <mesh position={[0, 0.16, 0]}>
-          <boxGeometry args={[0.32, 0.18, 0.24]} />
-          <meshStandardMaterial {...armor(0.58, 0.62)} />
+          <boxGeometry args={[0.34, 0.2, 0.26]} />
+          <meshStandardMaterial {...armor(0.55, 0.65)} />
         </mesh>
-        <LedStrip position={[0, 0.16, 0.13]} size={[0.18, 0.014, 0.01]} color={GOLD} />
-        {/* Utility belt */}
-        <mesh position={[0, 0.24, 0]}>
-          <boxGeometry args={[0.36, 0.05, 0.28]} />
-          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.35} />
+        <LedStrip position={[0, 0.16, 0.14]} size={[0.2, 0.016, 0.012]} color={GOLD} />
+        {([-1, 1] as const).map((side) => (
+          <mesh key={side} position={[side * 0.18, 0.12, 0.02]} rotation={[0.15, 0, side * 0.2]}>
+            <boxGeometry args={[0.1, 0.18, 0.04]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.4} />
+          </mesh>
+        ))}
+        <mesh position={[0, 0.26, 0]}>
+          <boxGeometry args={[0.38, 0.055, 0.3]} />
+          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.8} roughness={0.3} />
         </mesh>
-        {([-0.12, 0, 0.12] as const).map((x) => (
-          <mesh key={x} position={[x, 0.24, 0.145]}>
-            <boxGeometry args={[0.05, 0.04, 0.03]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.6} roughness={0.45} />
+        {([-0.14, 0, 0.14] as const).map((x) => (
+          <mesh key={x} position={[x, 0.26, 0.155]}>
+            <boxGeometry args={[0.055, 0.045, 0.035]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.65} roughness={0.42} />
           </mesh>
         ))}
 
-        {/* Heavy chest */}
-        <mesh position={[0, 0.58, 0.02]}>
-          <boxGeometry args={[0.48, 0.58, 0.34]} />
-          <meshStandardMaterial {...armor(0.5, 0.7)} />
+        {/* Heavy chest with bevel plates */}
+        <mesh position={[0, 0.6, 0.02]}>
+          <boxGeometry args={[0.5, 0.62, 0.36]} />
+          <meshStandardMaterial {...armor(0.46, 0.74)} />
         </mesh>
         {([-1, 1] as const).map((side) => (
-          <mesh key={side} position={[side * 0.26, 0.58, 0.02]}>
-            <boxGeometry args={[0.07, 0.46, 0.28]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.72} roughness={0.38} />
+          <mesh key={side} position={[side * 0.28, 0.6, 0.02]}>
+            <boxGeometry args={[0.08, 0.5, 0.3]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.34} />
           </mesh>
         ))}
-        <mesh position={[0, 0.58, 0]}>
-          <boxGeometry args={[0.36, 0.5, 0.24]} />
+        <mesh position={[0, 0.6, 0]}>
+          <boxGeometry args={[0.38, 0.52, 0.26]} />
           <meshStandardMaterial
             color={ARMOR_DARK}
-            metalness={0.45}
-            roughness={0.68}
+            metalness={0.48}
+            roughness={0.62}
             emissive={ACCENT_DIM}
-            emissiveIntensity={0.32}
+            emissiveIntensity={0.4}
           />
         </mesh>
-        {/* Spine stack */}
-        <mesh position={[0, 0.58, -0.14]}>
-          <boxGeometry args={[0.07, 0.52, 0.06]} />
-          <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.3} />
+        {/* Spine */}
+        <mesh position={[0, 0.6, -0.15]}>
+          <boxGeometry args={[0.08, 0.56, 0.07]} />
+          <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.28} />
         </mesh>
-        {[0.4, 0.5, 0.6, 0.7].map((y) => (
-          <mesh key={y} position={[0, y, -0.16]} rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.05, 0.009, 6, 16]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.28} />
+        {[0.42, 0.52, 0.62, 0.72].map((y) => (
+          <mesh key={y} position={[0, y, -0.175]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.055, 0.01, 6, 16]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.8} roughness={0.26} />
           </mesh>
         ))}
-        <LedStrip position={[0, 0.58, -0.175]} rotation={[Math.PI / 2, 0, 0]} size={[0.045, 0.4, 0.012]} />
+        <LedStrip position={[0, 0.6, -0.19]} rotation={[Math.PI / 2, 0, 0]} size={[0.05, 0.44, 0.014]} />
 
-        {/* Chest hero plate */}
-        <mesh position={[0, 0.62, 0.175]}>
-          <boxGeometry args={[0.22, 0.16, 0.03]} />
-          <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.35} />
+        {/* Chest hero HUD */}
+        <mesh position={[0, 0.64, 0.19]}>
+          <boxGeometry args={[0.26, 0.2, 0.035]} />
+          <meshStandardMaterial color={ARMOR_DARK} metalness={0.75} roughness={0.3} />
         </mesh>
-        <mesh position={[0, 0.62, 0.195]}>
-          <boxGeometry args={[0.16, 0.1, 0.012]} />
-          <meshStandardMaterial ref={chestPulse} {...neon(ACCENT, 1.5)} />
+        <mesh position={[0, 0.64, 0.215]}>
+          <boxGeometry args={[0.2, 0.14, 0.014]} />
+          <meshStandardMaterial ref={chestPulse} {...neon(ACCENT, 1.8)} />
         </mesh>
-        <LedStrip position={[-0.15, 0.72, 0.175]} size={[0.09, 0.014, 0.01]} color={GOLD} />
-        <LedStrip position={[0.15, 0.72, 0.175]} size={[0.09, 0.014, 0.01]} color={GOLD} />
-        <mesh position={[0, 0.48, 0.175]}>
-          <boxGeometry args={[0.24, 0.016, 0.01]} />
-          <meshStandardMaterial {...neon(GOLD, 1.3)} />
+        <mesh position={[0, 0.64, 0.225]}>
+          <planeGeometry args={[0.16, 0.12]} />
+          <meshBasicMaterial map={maps.chest} transparent toneMapped={false} depthWrite={false} />
         </mesh>
-
-        {/* Shoulder collar ring */}
-        <mesh position={[0, 0.88, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <torusGeometry args={[0.22, 0.02, 8, 30]} />
-          <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.25} />
-        </mesh>
-        <mesh position={[0, 0.88, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <torusGeometry args={[0.245, 0.008, 6, 28]} />
-          <meshStandardMaterial {...neon(GOLD, 1.0)} />
+        <LedStrip position={[-0.16, 0.76, 0.185]} size={[0.1, 0.016, 0.012]} color={GOLD} />
+        <LedStrip position={[0.16, 0.76, 0.185]} size={[0.1, 0.016, 0.012]} color={GOLD} />
+        <mesh position={[0, 0.5, 0.185]}>
+          <boxGeometry args={[0.28, 0.018, 0.012]} />
+          <meshStandardMaterial {...neon(GOLD, 1.5)} />
         </mesh>
 
-        {/* Pauldrons — guest heraldry */}
+        {/* Floating chest holo */}
+        <group ref={holo} position={[0, 0.62, 0.28]} scale={0.35}>
+          <mesh>
+            <octahedronGeometry args={[0.12, 0]} />
+            <meshBasicMaterial color={ACCENT} transparent opacity={0.75} toneMapped={false} />
+          </mesh>
+          <mesh>
+            <octahedronGeometry args={[0.06, 0]} />
+            <meshBasicMaterial color={GOLD} toneMapped={false} />
+          </mesh>
+        </group>
+
+        {/* Collar rings */}
+        <mesh position={[0, 0.92, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.24, 0.022, 8, 32]} />
+          <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.22} />
+        </mesh>
+        <mesh position={[0, 0.92, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.27, 0.009, 6, 30]} />
+          <meshStandardMaterial {...neon(GOLD, 1.25)} />
+        </mesh>
+
+        {/* Pauldrons */}
         {([-1, 1] as const).map((side) => (
-          <group key={side} position={[side * 0.34, 0.94, 0.04]}>
-            <mesh rotation={[0.14, side * 0.22, side * 0.45]}>
-              <boxGeometry args={[0.3, 0.18, 0.34]} />
-              <meshStandardMaterial {...armor(0.45, 0.76)} />
+          <group key={side} position={[side * 0.36, 0.98, 0.04]}>
+            <mesh rotation={[0.14, side * 0.24, side * 0.48]}>
+              <boxGeometry args={[0.32, 0.2, 0.36]} />
+              <meshStandardMaterial {...armor(0.42, 0.8)} />
             </mesh>
-            <mesh position={[0, 0.07, 0]} rotation={[0.14, side * 0.22, side * 0.45]}>
-              <boxGeometry args={[0.32, 0.035, 0.36]} />
-              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.32} />
+            <mesh position={[0, 0.08, 0]} rotation={[0.14, side * 0.24, side * 0.48]}>
+              <boxGeometry args={[0.34, 0.04, 0.38]} />
+              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.82} roughness={0.28} />
             </mesh>
-            {/* Gold rim edge */}
-            <mesh position={[0, 0.09, 0.02]} rotation={[0.14, side * 0.22, side * 0.45]}>
-              <boxGeometry args={[0.28, 0.015, 0.02]} />
-              <meshStandardMaterial {...neon(GOLD, 1.15)} />
+            <mesh position={[0, 0.1, 0.02]} rotation={[0.14, side * 0.24, side * 0.48]}>
+              <boxGeometry args={[0.3, 0.016, 0.025]} />
+              <meshStandardMaterial {...neon(GOLD, 1.35)} />
             </mesh>
-            <LedStrip position={[side * 0.02, 0.0, 0.14]} size={[0.16, 0.014, 0.01]} />
-            <LedStrip position={[side * 0.02, -0.045, 0.14]} size={[0.12, 0.01, 0.008]} color={GOLD} />
-            <Bolt position={[side * 0.09, 0.05, 0.12]} />
-            <Bolt position={[side * 0.09, -0.04, 0.12]} />
-            <Bolt position={[side * 0.09, 0.05, -0.08]} />
-            <mesh position={[side * 0.15, 0.02, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
-              <planeGeometry args={[0.22, 0.22]} />
+            {/* Thruster pod on shoulder */}
+            <mesh position={[side * 0.02, -0.02, -0.14]} rotation={[0.5, 0, side * 0.2]}>
+              <cylinderGeometry args={[0.045, 0.055, 0.12, 10]} />
+              <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.4} />
+            </mesh>
+            <LedStrip position={[side * 0.02, 0.0, 0.15]} size={[0.18, 0.016, 0.012]} />
+            <LedStrip position={[side * 0.02, -0.05, 0.15]} size={[0.14, 0.012, 0.01]} color={GOLD} />
+            <Bolt position={[side * 0.1, 0.05, 0.12]} />
+            <Bolt position={[side * 0.1, -0.04, 0.12]} />
+            <mesh position={[side * 0.16, 0.02, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
+              <planeGeometry args={[0.24, 0.24]} />
               <meshBasicMaterial map={maps.pauldron} transparent toneMapped={false} depthWrite={false} />
             </mesh>
-            <group position={[side * 0.155, 0.08, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
-              <CrownMark scale={1.05} />
+            <group position={[side * 0.165, 0.09, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
+              <CrownMark scale={1.15} />
             </group>
           </group>
         ))}
 
-        {/* Guest backpack / vault pack */}
-        <group position={[0, 0.58, -0.28]}>
+        {/* Backpack + thrusters */}
+        <group position={[0, 0.6, -0.3]}>
           <mesh>
-            <boxGeometry args={[0.3, 0.42, 0.16]} />
-            <meshStandardMaterial {...armor(0.5, 0.7)} />
+            <boxGeometry args={[0.34, 0.46, 0.18]} />
+            <meshStandardMaterial {...armor(0.48, 0.74)} />
           </mesh>
-          <mesh position={[0, 0, -0.02]}>
-            <boxGeometry args={[0.24, 0.34, 0.12]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.6} />
+          <mesh position={[0, 0, -0.03]}>
+            <boxGeometry args={[0.26, 0.36, 0.14]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.55} roughness={0.55} />
           </mesh>
-          <mesh position={[0, -0.05, -0.1]}>
-            <cylinderGeometry args={[0.06, 0.08, 0.08, 12]} />
-            <meshStandardMaterial ref={packGlow} {...neon(ACCENT, 1.4)} />
+          <mesh position={[0, -0.04, -0.12]}>
+            <cylinderGeometry args={[0.07, 0.09, 0.1, 12]} />
+            <meshStandardMaterial ref={packGlow} {...neon(ACCENT, 1.6)} />
           </mesh>
-          <mesh position={[0, 0.12, -0.09]}>
-            <planeGeometry args={[0.16, 0.16]} />
+          {/* Dual exhaust */}
+          {([-1, 1] as const).map((side) => (
+            <group key={side} position={[side * 0.1, -0.18, -0.08]}>
+              <mesh>
+                <cylinderGeometry args={[0.035, 0.045, 0.1, 10]} />
+                <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.35} />
+              </mesh>
+              <mesh position={[0, -0.07, 0]}>
+                <cylinderGeometry args={[0.028, 0.032, 0.04, 10]} />
+                <meshStandardMaterial ref={side < 0 ? thrusterL : thrusterR} {...neon(ACCENT, 0.4)} />
+              </mesh>
+            </group>
+          ))}
+          <mesh position={[0, 0.14, -0.1]}>
+            <planeGeometry args={[0.18, 0.18]} />
             <meshBasicMaterial map={maps.pack} transparent toneMapped={false} depthWrite={false} />
           </mesh>
-          <LedStrip position={[0, 0.18, -0.09]} size={[0.14, 0.012, 0.01]} color={GOLD} />
-          {([-1, 1] as const).map((side) => (
-            <mesh key={side} position={[side * 0.1, 0.05, -0.12]} rotation={[0.4, 0, side * 0.15]}>
-              <boxGeometry args={[0.04, 0.16, 0.03]} />
-              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.4} />
-            </mesh>
-          ))}
+          <LedStrip position={[0, 0.2, -0.1]} size={[0.16, 0.014, 0.012]} color={GOLD} />
         </group>
 
-        {/* Capelet panels */}
-        {([-1, 1] as const).map((side) => (
-          <mesh key={side} position={[side * 0.2, 0.42, -0.08]} rotation={[0.25, side * 0.15, side * 0.35]}>
-            <boxGeometry args={[0.12, 0.36, 0.02]} />
-            <meshStandardMaterial
-              color={ARMOR_DARK}
-              metalness={0.35}
-              roughness={0.7}
-              transparent
-              opacity={0.92}
-            />
+        {/* Cape panels */}
+        <group ref={capeL} position={[-0.2, 0.78, -0.1]}>
+          <mesh rotation={[0.25, 0.12, -0.35]}>
+            <boxGeometry args={[0.14, 0.48, 0.02]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.3} roughness={0.75} transparent opacity={0.9} />
           </mesh>
-        ))}
+          <LedStrip position={[0, -0.1, 0.015]} rotation={[0.25, 0.12, -0.35]} size={[0.04, 0.3, 0.008]} color={GOLD} />
+        </group>
+        <group ref={capeR} position={[0.2, 0.78, -0.1]}>
+          <mesh rotation={[0.25, -0.12, 0.35]}>
+            <boxGeometry args={[0.14, 0.48, 0.02]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.3} roughness={0.75} transparent opacity={0.9} />
+          </mesh>
+          <LedStrip position={[0, -0.1, 0.015]} rotation={[0.25, -0.12, 0.35]} size={[0.04, 0.3, 0.008]} color={GOLD} />
+        </group>
 
-        <LedDot position={[-0.12, 0.98, 0.1]} r={0.012} color={GOLD} />
-        <LedDot position={[0.12, 0.98, 0.1]} r={0.012} color={GOLD} />
+        <LedDot position={[-0.13, 1.02, 0.12]} r={0.014} color={GOLD} />
+        <LedDot position={[0.13, 1.02, 0.12]} r={0.014} color={GOLD} />
 
-        {/* Helmet */}
-        <group ref={head} position={[0, 1.08, 0.02]}>
+        {/* Helmet v2 */}
+        <group ref={head} position={[0, 1.12, 0.02]}>
           <mesh position={[0, -0.05, 0]}>
-            <cylinderGeometry args={[0.05, 0.06, 0.11, 12]} />
+            <cylinderGeometry args={[0.055, 0.065, 0.12, 12]} />
             <meshStandardMaterial
               color={ARMOR_DARK}
-              metalness={0.72}
-              roughness={0.38}
+              metalness={0.75}
+              roughness={0.35}
               emissive={ACCENT_DIM}
-              emissiveIntensity={0.5}
+              emissiveIntensity={0.55}
             />
           </mesh>
           {([-1, 1] as const).map((side) => (
-            <mesh key={side} position={[side * 0.038, -0.04, 0.02]}>
-              <cylinderGeometry args={[0.011, 0.011, 0.1, 6]} />
-              <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.22} />
+            <mesh key={side} position={[side * 0.04, -0.04, 0.02]}>
+              <cylinderGeometry args={[0.012, 0.012, 0.11, 6]} />
+              <meshStandardMaterial color={METAL} metalness={0.92} roughness={0.2} />
             </mesh>
           ))}
 
-          <mesh position={[0, 0.16, 0.02]}>
-            <boxGeometry args={[0.4, 0.34, 0.42]} />
-            <meshStandardMaterial {...armor(0.45, 0.76)} />
+          <mesh position={[0, 0.17, 0.02]}>
+            <boxGeometry args={[0.42, 0.36, 0.44]} />
+            <meshStandardMaterial {...armor(0.4, 0.8)} />
           </mesh>
-          <mesh position={[0, 0.16, 0.02]}>
-            <boxGeometry args={[0.012, 0.32, 0.43]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.55} />
+          <mesh position={[0, 0.17, 0.02]}>
+            <boxGeometry args={[0.014, 0.34, 0.45]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.5} />
           </mesh>
-          <mesh position={[0, 0.34, 0.02]}>
-            <boxGeometry args={[0.36, 0.08, 0.38]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.74} roughness={0.36} />
+          <mesh position={[0, 0.36, 0.02]}>
+            <boxGeometry args={[0.38, 0.09, 0.4]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.32} />
           </mesh>
-          {/* Visor HUD bar */}
-          <mesh position={[0, 0.15, 0.2]} rotation={[-0.35, 0, 0]}>
-            <boxGeometry args={[0.34, 0.14, 0.06]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.3} />
+
+          {/* Visor + scan bar */}
+          <mesh position={[0, 0.16, 0.21]} rotation={[-0.32, 0, 0]}>
+            <boxGeometry args={[0.36, 0.16, 0.07]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.75} roughness={0.28} />
           </mesh>
-          <mesh position={[0, 0.15, 0.235]} rotation={[-0.35, 0, 0]}>
-            <boxGeometry args={[0.28, 0.05, 0.02]} />
-            <meshStandardMaterial {...neon(ACCENT, 1.8)} />
+          <mesh position={[0, 0.16, 0.25]} rotation={[-0.32, 0, 0]}>
+            <boxGeometry args={[0.3, 0.06, 0.025]} />
+            <meshStandardMaterial {...neon(ACCENT, 2.2)} />
           </mesh>
-          <LedDot position={[-0.07, 0.17, 0.24]} r={0.022} />
-          <LedDot position={[0.07, 0.17, 0.24]} r={0.022} />
-          <LedDot position={[0, 0.11, 0.245]} r={0.015} color={GOLD} />
+          <mesh ref={visorScan} position={[0, 0.16, 0.265]} rotation={[-0.32, 0, 0]}>
+            <boxGeometry args={[0.04, 0.05, 0.02]} />
+            <meshStandardMaterial {...neon(GOLD, 2.5)} />
+          </mesh>
+          <LedDot position={[-0.08, 0.18, 0.255]} r={0.024} />
+          <LedDot position={[0.08, 0.18, 0.255]} r={0.024} />
+          <LedDot position={[0, 0.12, 0.26]} r={0.016} color={GOLD} />
 
           {([-1, 1] as const).map((side) => (
-            <group key={side} position={[side * 0.185, 0.15, 0.02]}>
+            <group key={side} position={[side * 0.2, 0.16, 0.02]}>
               <mesh>
-                <boxGeometry args={[0.024, 0.07, 0.16]} />
-                <meshStandardMaterial color="#050508" metalness={0.5} roughness={0.5} />
+                <boxGeometry args={[0.028, 0.08, 0.18]} />
+                <meshStandardMaterial color="#04060a" metalness={0.5} roughness={0.48} />
               </mesh>
-              {([-0.05, -0.017, 0.017, 0.05] as const).map((z) => (
-                <LedDot key={z} position={[side * 0.014, 0, z]} r={0.012} color={z === 0.05 ? GOLD : ACCENT} />
+              {([-0.055, -0.018, 0.018, 0.055] as const).map((z) => (
+                <LedDot key={z} position={[side * 0.016, 0, z]} r={0.013} color={z > 0.04 ? GOLD : ACCENT} />
               ))}
             </group>
           ))}
 
-          <LedStrip position={[0, 0.02, 0.16]} size={[0.16, 0.022, 0.012]} color={GOLD} />
-          <mesh position={[0, 0.02, 0.14]}>
-            <boxGeometry args={[0.2, 0.045, 0.09]} />
+          <LedStrip position={[0, 0.02, 0.17]} size={[0.18, 0.024, 0.014]} color={GOLD} />
+          <mesh position={[0, 0.02, 0.15]}>
+            <boxGeometry args={[0.22, 0.05, 0.1]} />
             <meshStandardMaterial
               color={ARMOR_DARK}
-              metalness={0.72}
-              roughness={0.38}
+              metalness={0.75}
+              roughness={0.35}
               emissive={ACCENT_DIM}
-              emissiveIntensity={0.35}
+              emissiveIntensity={0.4}
             />
           </mesh>
 
-          {/* Twin blade antennae — longer + gold tips */}
+          {/* Longer twin blades */}
           {([-1, 1] as const).map((side) => (
-            <group key={side} position={[side * 0.1, 0.3, -0.14]} rotation={[0.45, 0, side * 0.25]}>
-              <mesh position={[0, 0.24, 0]}>
-                <boxGeometry args={[0.032, 0.5, 0.055]} />
-                <meshStandardMaterial color={ARMOR_EDGE} metalness={0.8} roughness={0.3} />
+            <group key={side} position={[side * 0.11, 0.32, -0.15]} rotation={[0.48, 0, side * 0.28]}>
+              <mesh position={[0, 0.28, 0]}>
+                <boxGeometry args={[0.034, 0.58, 0.06]} />
+                <meshStandardMaterial color={ARMOR_EDGE} metalness={0.84} roughness={0.28} />
               </mesh>
-              {[0.08, 0.2, 0.32].map((y) => (
-                <mesh key={y} position={[0, y, 0.01]}>
-                  <boxGeometry args={[0.036, 0.055, 0.025]} />
+              {[0.1, 0.24, 0.38].map((y) => (
+                <mesh key={y} position={[0, y, 0.012]}>
+                  <boxGeometry args={[0.04, 0.06, 0.028]} />
                   <meshStandardMaterial color={ARMOR_DARK} />
                 </mesh>
               ))}
               <mesh position={[0, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.034, 0.034, 0.022, 10]} />
-                <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.25} />
+                <cylinderGeometry args={[0.038, 0.038, 0.024, 10]} />
+                <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.22} />
               </mesh>
-              <LedDot position={[0, 0.5, 0]} r={0.014} color={GOLD} />
+              <LedDot position={[0, 0.58, 0]} r={0.016} color={GOLD} />
+              <mesh position={[0, 0.52, 0]}>
+                <sphereGeometry args={[0.022, 10, 10]} />
+                <meshBasicMaterial color={ACCENT} transparent opacity={0.55} toneMapped={false} />
+              </mesh>
             </group>
           ))}
 
-          <mesh position={[0.19, 0.05, 0.12]} rotation={[0, Math.PI / 2, 0]}>
-            <planeGeometry args={[0.11, 0.11]} />
+          <mesh position={[0.2, 0.05, 0.13]} rotation={[0, Math.PI / 2, 0]}>
+            <planeGeometry args={[0.12, 0.12]} />
             <meshBasicMaterial map={maps.unit} transparent toneMapped={false} depthWrite={false} />
           </mesh>
-          <mesh position={[-0.19, 0.05, 0.12]} rotation={[0, -Math.PI / 2, 0]}>
-            <planeGeometry args={[0.11, 0.11]} />
+          <mesh position={[-0.2, 0.05, 0.13]} rotation={[0, -Math.PI / 2, 0]}>
+            <planeGeometry args={[0.12, 0.12]} />
             <meshBasicMaterial map={maps.unit} transparent toneMapped={false} depthWrite={false} />
           </mesh>
 
-          <Bolt position={[-0.14, 0.3, 0.12]} />
-          <Bolt position={[0.14, 0.3, 0.12]} />
-          <Bolt position={[-0.14, 0.3, -0.1]} />
-          <Bolt position={[0.14, 0.3, -0.1]} />
+          <Bolt position={[-0.15, 0.32, 0.13]} />
+          <Bolt position={[0.15, 0.32, 0.13]} />
+          <Bolt position={[-0.15, 0.32, -0.1]} />
+          <Bolt position={[0.15, 0.32, -0.1]} />
         </group>
 
         <HeroArm side={-1} motion={motion} />

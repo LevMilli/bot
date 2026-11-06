@@ -525,13 +525,74 @@ Interactive: Positive ROI Master Plan canvas.
 | Living board export | `desk_living.living_board_export` + CLI `export` |
 | Digest seed | `desk_living.seed_missing_digests` + CLI `seed` |
 
+### Living upgrade — staff map + pulse CLI
+
+| Ticket | Where |
+| --- | --- |
+| Staff map | `paper-bots/LIVING_UPGRADE.md` |
+| Pulse force refresh | `staff_living_status.py pulse` |
+
+### Living upgrade — teller chip + floors assert + Sunday note
+
+| Ticket | Where |
+| --- | --- |
+| Teller living chip | `desk_living.teller_living_chip` |
+| Fee floors assert | `desk_living.fee_floors_assert` + CLI `floors` |
+| Sunday draft note | `LIVING_UPGRADE.md` (no auto publish) |
+
+### Living upgrade — vault teller/floors + chip catalog
+
+| Ticket | Where |
+| --- | --- |
+| City vault teller/floors | trading-city vault board rows |
+| Floors CLI exit 2 | `staff_living_status.py floors` |
+| Chip catalog | `living_self_check.chip_catalog` |
+
+### Living upgrade — smoke Makefile + betting expand gate
+
+| Ticket | Where |
+| --- | --- |
+| Smoke Makefile | `paper-bots/Makefile` living-* targets |
+| Betting expand gate | `desk_living.betting_expand_gate` + CLI `expand` |
+
+### Living upgrade — vault expand + gaps exit + living keys test
+
+| Ticket | Where |
+| --- | --- |
+| Expand on city vault | trading-city vault `expand` row |
+| Living keys unit | master teller/swarm/expand keys |
+| Gaps CLI exit 2 | `staff_living_status.py gaps` |
+
+### Living upgrade — doctor + size guard + expand teller fact
+
+| Ticket | Where |
+| --- | --- |
+| Living doctor | `desk_living.living_doctor` + CLI/make |
+| Board size guard | `living_board_size_guard` soft max 64 |
+| Expand teller fact | remember mistake when blocked |
+
+### Living upgrade — vault doctor + weekly ritual
+
+| Ticket | Where |
+| --- | --- |
+| Doctor on city vault | trading-city vault `doctor` row |
+| Weekly ritual script | `tools/staff_living_ritual.py` + make |
+
+### Living upgrade — prune + ritual Discord + doctor age
+
+| Ticket | Where |
+| --- | --- |
+| Living chip prune pass | `finalize_living_priority` family prefixes + clerk twin trim |
+| Ritual Discord copy | `staff_living_ritual.py --discord` + make |
+| Desk doctor age chip | `doctor_age_chip` + vault/Masters stale rail |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Living upgrade README slice | paper-bots/LIVING_UPGRADE.md staff map |
-| Clerk pulse force refresh CLI | staff_living_status pulse |
-| Masters priority unit file | test_finalize_living_priority |
+| Sunday ritual cross-link | mention ritual in sunday packet Discord |
+| Living tip-feed vault row | tip radar on city vault |
+| Clerk pulse age soft warn | pulse stale before hard insert |
 
 ## Hard rules unchanged
 

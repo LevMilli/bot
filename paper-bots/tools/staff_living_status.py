@@ -14,6 +14,9 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py ruin
   python3 tools/staff_living_status.py export
   python3 tools/staff_living_status.py seed
+  python3 tools/staff_living_status.py pulse
+  python3 tools/staff_living_status.py floors
+  python3 tools/staff_living_status.py teller
 """
 from __future__ import annotations
 
@@ -43,6 +46,8 @@ def _text(board: dict) -> str:
     ruin = board.get("ruin_drill_chip") if isinstance(board.get("ruin_drill_chip"), dict) else {}
     inv = board.get("digest_inventory") if isinstance(board.get("digest_inventory"), dict) else {}
     hill = board.get("hillclimb_chip") if isinstance(board.get("hillclimb_chip"), dict) else {}
+    floors = board.get("fee_floors_assert") if isinstance(board.get("fee_floors_assert"), dict) else {}
+    teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     lines = [
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
@@ -58,6 +63,8 @@ def _text(board: dict) -> str:
         f"ruin: {ruin.get('label') or '—'}",
         f"hillclimb: {hill.get('label') or '—'}",
         f"digests: {inv.get('label') or '—'}",
+        f"floors: {floors.get('label') or '—'}",
+        f"teller: {teller.get('memory_line') or '—'}",
         f"chicago_today: {board.get('chicago_today')}",
     ]
     return "\n".join(lines)
@@ -71,7 +78,8 @@ def main() -> int:
         default="text",
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
-            "gaps", "inventory", "hillclimb", "ruin", "export", "seed",
+            "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
+            "floors", "teller", "expand", "doctor",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -90,7 +98,7 @@ def main() -> int:
             print(gaps["copy"])
         else:
             print(json.dumps(gaps, indent=2, sort_keys=True, default=str))
-        return 0
+        return 2 if gaps.get("page") else 0
     if args.action == "inventory":
         inv = board.get("digest_inventory")
         if not isinstance(inv, dict):
@@ -118,6 +126,44 @@ def main() -> int:
     if args.action == "seed":
         print(json.dumps(desk_living.seed_missing_digests(root), indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "pulse":
+        from helpers import clerk_pulse
+        # Force refresh: clear cadence marker then run.
+        marker = os.path.join(root, "helpers", getattr(clerk_pulse, "RUN_MARKER", "clerk_pulse_at.txt"))
+        try:
+            if os.path.isfile(marker):
+                os.remove(marker)
+        except OSError:
+            pass
+        digest = clerk_pulse.refresh_clerks(root)
+        chip = desk_living.clerk_pulse_chip(root)
+        print(json.dumps({
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "may_place_alone": False,
+            "refreshed_n": (digest or {}).get("refreshed_n") if isinstance(digest, dict) else None,
+            "chip": chip,
+            "note": "Forced clerk pulse refresh — observe digests only.",
+        }, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "floors":
+        payload = desk_living.fee_floors_assert(root)
+        print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        return 0 if payload.get("all_ok") else 2
+    if args.action == "teller":
+        print(json.dumps(
+            desk_living.teller_living_chip(root, remember=False),
+            indent=2, sort_keys=True, default=str,
+        ))
+        return 0
+    if args.action == "expand":
+        gate = desk_living.betting_expand_gate(root)
+        print(json.dumps(gate, indent=2, sort_keys=True, default=str))
+        return 0 if gate.get("allow_betting_expand") else 2
+    if args.action == "doctor":
+        doc = desk_living.living_doctor(root)
+        print(json.dumps(doc, indent=2, sort_keys=True, default=str))
+        return 0 if doc.get("ok") else 2
     if args.action == "json":
         print(json.dumps({
             "paper_only": True,
@@ -133,8 +179,14 @@ def main() -> int:
             "digest_inventory": board.get("digest_inventory"),
             "ruin_drill_chip": board.get("ruin_drill_chip"),
             "ruin_drill_page": board.get("ruin_drill_page"),
+            "fee_floors_assert": board.get("fee_floors_assert"),
+            "teller_living": board.get("teller_living"),
             "timer_heartbeat": board.get("timer_heartbeat"),
             "chicago_today": board.get("chicago_today"),
+            "chip_catalog": sorted(
+                k for k, v in board.items()
+                if isinstance(v, dict) and v.get("fee_floors_locked") is True
+            ),
         }, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "pager":

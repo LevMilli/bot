@@ -647,6 +647,113 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">teller</span>
+                  <span>
+                    {snap?.desk?.living_memory_line ||
+                      snap?.desk?.teller_living?.memory_line ||
+                      snap?.desk?.teller_memory?.recent?.[0]?.text ||
+                      'living teller pending'}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">floors</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const f =
+                          snap?.desk?.fee_floors_assert ||
+                          (snap?.desk?.master as { fee_floors_assert?: { all_ok?: boolean } } | undefined)
+                            ?.fee_floors_assert
+                        if (!f) return undefined
+                        return f.all_ok === false ? '#c45c26' : '#6fbf73'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const f =
+                        snap?.desk?.fee_floors_assert ||
+                        (snap?.desk?.master as { fee_floors_assert?: { label?: string; all_ok?: boolean } } | undefined)
+                          ?.fee_floors_assert
+                      if (!f) return 'fee floors pending'
+                      return f.label || (f.all_ok ? 'floors locked ok' : 'floors CHECK')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">expand</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.betting_expand_gate ||
+                          (snap?.desk?.master as { betting_expand_gate?: { blocked?: boolean } } | undefined)
+                            ?.betting_expand_gate
+                        if (!g) return undefined
+                        return g.blocked ? '#c45c26' : '#6fbf73'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.betting_expand_gate ||
+                        (snap?.desk?.master as {
+                          betting_expand_gate?: { label?: string; blocked?: boolean }
+                        } | undefined)?.betting_expand_gate
+                      if (!g) return 'expand gate pending'
+                      return g.label || (g.blocked ? 'betting expand BLOCKED' : 'expand ok (paper)')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">doctor</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const d =
+                          snap?.desk?.living_doctor ||
+                          (snap?.desk?.master as { living_doctor?: { ok?: boolean } } | undefined)
+                            ?.living_doctor
+                        if (!d) return undefined
+                        return d.ok ? '#6fbf73' : '#c45c26'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const d =
+                        snap?.desk?.living_doctor ||
+                        (snap?.desk?.master as { living_doctor?: { label?: string; ok?: boolean } } | undefined)
+                          ?.living_doctor
+                      if (!d) return 'living doctor pending'
+                      return d.label || (d.ok ? 'doctor OK' : 'doctor FAIL')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">doc age</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const a =
+                          snap?.desk?.doctor_age ||
+                          (snap?.desk?.master as { doctor_age?: { stale?: boolean } } | undefined)
+                            ?.doctor_age
+                        if (!a) return undefined
+                        return a.stale ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const a =
+                        snap?.desk?.doctor_age ||
+                        (snap?.desk?.master as {
+                          doctor_age?: { label?: string; stale?: boolean }
+                        } | undefined)?.doctor_age
+                      if (!a) return 'doctor age pending'
+                      return a.label || (a.stale ? 'doctor stale' : 'doctor age ok')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">bleed</span>
                   <span>
                     {(() => {

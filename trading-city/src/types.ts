@@ -213,6 +213,58 @@ export type Desk = {
     note?: string
     error?: string
   }
+  teller_living?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    memory_line?: string
+    label?: string
+    swarm_pass?: boolean
+    floors_ok?: boolean
+    eligible_completions_today?: number
+    note?: string
+    error?: string
+  }
+  living_memory_line?: string
+  fee_floors_assert?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    all_ok?: boolean
+    label?: string
+    venues?: Record<string, { floor?: number; live?: number; ok?: boolean }>
+    note?: string
+    error?: string
+  }
+  betting_expand_gate?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    allow_betting_expand?: boolean
+    blocked?: boolean
+    swarm_pass?: boolean
+    swarm_ratio?: number | null
+    label?: string
+    reason?: string
+    note?: string
+    error?: string
+  }
+  living_doctor?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    ok?: boolean
+    failed_n?: number
+    label?: string
+    note?: string
+    error?: string
+  }
+  doctor_age?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    at?: string | null
+    age_sec?: number | null
+    ok_last?: boolean | null
+    stale?: boolean
+    label?: string
+    note?: string
+  }
   master?: {
     paper_only?: boolean
     version?: number
