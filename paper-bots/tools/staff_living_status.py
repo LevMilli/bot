@@ -71,6 +71,10 @@ def _text(board: dict) -> str:
         f"floors: {floors.get('label') or '—'}",
         f"teller: {teller.get('memory_line') or '—'}",
         (
+            f"ritual_nag={bool(teller.get('ritual_nag'))} "
+            f"teller_ritual_ok={teller.get('ritual_ok')}"
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         f"doctor_age: {doctor_age.get('label') or '—'}",

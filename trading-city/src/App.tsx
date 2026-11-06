@@ -1220,10 +1220,15 @@ export default function App() {
                         const s =
                           snap?.desk?.sunday_packet ||
                           (snap?.desk?.master as {
-                            sunday_packet?: { present?: boolean }
+                            sunday_packet?: {
+                              present?: boolean
+                              ritual_ok?: boolean | null
+                            }
                           } | undefined)?.sunday_packet
                         if (!s) return undefined
-                        return s.present ? undefined : '#d4a017'
+                        if (s.ritual_ok === false) return '#d4a017'
+                        if (!s.present) return '#d4a017'
+                        return undefined
                       })(),
                     }}
                   >
@@ -1234,12 +1239,14 @@ export default function App() {
                           sunday_packet?: {
                             label?: string
                             present?: boolean
+                            ritual_ok?: boolean | null
                             auto_publish?: boolean
                           }
                         } | undefined)?.sunday_packet
                       if (!s) return 'sunday packet pending'
                       return (
                         (s.label || `sunday packet=${s.present ? 'yes' : 'no'}`) +
+                        (s.ritual_ok == null ? '' : ` · ritual_ok=${Boolean(s.ritual_ok)}`) +
                         ' · auto_publish=False'
                       )
                     })()}

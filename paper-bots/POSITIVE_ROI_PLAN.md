@@ -794,13 +794,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Sunday packet ritual_ok | packet observe field |
 | Teller memory ritual nag | teller_living ritual line |
 
-### Next
+### Living upgrade — status ritual_nag / vault sunday tint / export compact ritual
 
 | Ticket | Where |
 | --- | --- |
 | Status text ritual_nag | teller line in status |
 | Vault sunday ritual_ok | city sunday row tint |
 | Compact export ritual_ok | export compact.ritual_ok |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Doctor age + ritual HUD | compact doctor_fresh part |
+| Ritual CLI text exit_ok | plain text exit flags |
+| City vault teller ritual_nag | teller row tint |
 
 ## Hard rules unchanged
 
