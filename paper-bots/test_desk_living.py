@@ -120,6 +120,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue(board2["skip_historian"]["fee_floors_locked"])
             self.assertIn("bookkeeper", board2)
             self.assertIn("reporter", board2)
+            self.assertIn("sunday_packet", board2)
+            self.assertFalse(board2["sunday_packet"].get("auto_publish"))
             self.assertIn("empty_card_bee", board2)
             self.assertFalse(board2["reporter"].get("auto_publish"))
             self.assertTrue(board2["bookkeeper"]["fee_floors_locked"])

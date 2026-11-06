@@ -1191,6 +1191,39 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">sunday</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const s =
+                          snap?.desk?.sunday_packet ||
+                          (snap?.desk?.master as {
+                            sunday_packet?: { present?: boolean }
+                          } | undefined)?.sunday_packet
+                        if (!s) return undefined
+                        return s.present ? undefined : '#d4a017'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const s =
+                        snap?.desk?.sunday_packet ||
+                        (snap?.desk?.master as {
+                          sunday_packet?: {
+                            label?: string
+                            present?: boolean
+                            auto_publish?: boolean
+                          }
+                        } | undefined)?.sunday_packet
+                      if (!s) return 'sunday packet pending'
+                      return (
+                        (s.label || `sunday packet=${s.present ? 'yes' : 'no'}`) +
+                        ' · auto_publish=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">empty bee</span>
                   <span
                     style={{
