@@ -1172,13 +1172,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault Gate A sunday quiet | Gate A row hint |
 | Vault AI sunday quiet | AI row hint |
 
-### Next
+### Living upgrade — tip/blackout/injury sunday (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Vault tip feed sunday quiet | tip feed row hint |
 | Vault blackout sunday quiet | blackout row hint |
 | Vault injury sunday quiet | injury row hint |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault empty/near-miss sunday | empty + near-miss hints |
+| Vault EIA/calendar sunday | EIA + calendar hints |
+| Vault pager/books sunday | pager + books hints |
 
 ## Hard rules unchanged
 
