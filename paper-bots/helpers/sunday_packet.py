@@ -173,6 +173,11 @@ def format_discord(packet: dict | None = None) -> str:
             f"• {p.get('quiet_age_label') or quiet.get('quiet_age_label') or 'quiet_age=n/a'} "
             f"(staff observe — never softens floors)"
         ),
+        (
+            f"• Masters sunday: sunday quiet "
+            f"{p.get('quiet_age_label') or quiet.get('quiet_age_label') or 'quiet_age=n/a'} "
+            f"(observe · never pages)"
+        ),
         f"• Doctor age: {doctor_age.get('label') or '—'}",
         (
             f"• Weekly ritual draft: `{ritual.get('make') or 'make living-ritual-discord'}` "

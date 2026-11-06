@@ -2139,6 +2139,11 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["masters_sunday_quiet"] = (
         f"sunday quiet {slim['sunday_quiet_age_label']} (observe)"
     )
+    slim["sunday_quiet_tip"] = (
+        f"Sunday quiet tip: {slim['sunday_quiet_age_label']} · "
+        "cross-check python3 tools/staff_sunday_packet.py discord "
+        "(staff paste · never auto-posts)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]

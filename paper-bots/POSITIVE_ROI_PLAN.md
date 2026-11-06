@@ -998,13 +998,44 @@ Interactive: Positive ROI Master Plan canvas.
 | Compact sunday quiet twin | compact.sunday_quiet_age* |
 | Vault toolbar sunday quiet hint | ritual hint extend |
 
+### Living upgrade — export masters / discord always / teller·sunday
+
+| Ticket | Where |
+| --- | --- |
+| Export masters_sunday_quiet | living_board_export (landed) |
+| Discord sunday quiet always | ritual tip always on |
+| Teller vault sunday quiet link | tip under teller |
+
+### Living upgrade — discord always / teller·sunday / masters text
+
+| Ticket | Where |
+| --- | --- |
+| Discord sunday quiet always | ritual tip always on |
+| Teller vault sunday quiet link | tip under teller |
+| Status text masters sunday | print masters sunday |
+| Ritual json sunday tip always | --json + plain sunday_quiet_tip |
+
+### Living upgrade — sunday packet masters / status tip / teller link
+
+| Ticket | Where |
+| --- | --- |
+| Sunday packet masters line | sunday discord |
+| Status json sunday_quiet_tip | flatten tip |
+| Teller·sunday vault link | under teller |
+
+### Living upgrade — export sunday_quiet_tip (this batch)
+
+| Ticket | Where |
+| --- | --- |
+| Export sunday_quiet_tip | living_board_export |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Export masters_sunday_quiet | living_board_export |
-| Discord sunday quiet always | ritual tip always on |
-| Teller vault sunday quiet link | tip under teller |
+| Vault expand sunday quiet | expand row hint |
+| Compact masters sunday part | optional part |
+| Ritual observe masters sunday | observe plain |
 
 ## Hard rules unchanged
 

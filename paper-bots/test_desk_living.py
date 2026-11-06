@@ -115,6 +115,7 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("quiet_age_label", packet)
             self.assertTrue(str(packet.get("quiet_age_label") or "").startswith("quiet_age="))
             self.assertIn("quiet_age=", md)
+            self.assertIn("Masters sunday", md)
             self.assertIn("Doctor age", md)
             self.assertIn("Weekly ritual", md)
             self.assertIn("living-ritual-discord", md)
@@ -293,6 +294,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("masters_sunday_quiet", export2)
             self.assertIn("sunday quiet", export2.get("masters_sunday_quiet") or "")
             self.assertIn("compact_sunday_quiet_age_label", export2)
+            self.assertIn("sunday_quiet_tip", export2)
+            self.assertIn("Sunday quiet tip", export2.get("sunday_quiet_tip") or "")
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))
@@ -352,6 +355,7 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("quiet_line:", status_txt)
             self.assertIn("Feature quiet", status_txt)
             self.assertIn("sunday quiet:", status_txt)
+            self.assertIn("masters sunday:", status_txt)
             self.assertIn("teller_quiet_nag=", status_txt)
             self.assertIn("sunday_quiet_age_label", compact)
             self.assertIn("sunday_quiet_age", compact)
@@ -713,6 +717,8 @@ class InsightHelpers(unittest.TestCase):
             })
             self.assertIn("Feature quiet", text4)
             self.assertIn("age=n/a", text4)
+            self.assertIn("Sunday quiet tip", text4)
+            self.assertIn("quiet_age=n/a", text4)
             text5 = staff_living_ritual.format_discord({
                 "ok": True,
                 "ritual_ok": True,

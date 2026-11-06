@@ -171,6 +171,16 @@ def _text(board: dict) -> str:
             + " (observe — never softens floors)"
         ),
         (
+            "masters sunday: sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("sunday_quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
             f"teller_quiet_nag={bool(teller.get('quiet_nag'))} "
             + str(teller.get("quiet_age_label") or "quiet_age=n/a")
         ),
@@ -448,6 +458,19 @@ def main() -> int:
             or compact_j.get("quiet_age"),
             "compact_sunday_quiet_age_label": compact_j.get("sunday_quiet_age_label")
             or compact_j.get("quiet_age_label"),
+            "sunday_quiet_tip": (
+                "Sunday quiet tip: "
+                + str(
+                    (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    if isinstance(board.get("sunday_packet"), dict)
+                    and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    else compact_j.get("sunday_quiet_age_label")
+                    or compact_j.get("quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " · cross-check python3 tools/staff_sunday_packet.py discord "
+                "(staff paste · never auto-posts)"
+            ),
             "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),
             "chip_catalog": sorted(
