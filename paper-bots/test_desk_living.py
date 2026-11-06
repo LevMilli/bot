@@ -241,6 +241,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("discord", doc)
             self.assertIn("Living doctor", doc.get("soft_copy") or "")
             self.assertIn("ritual_ok=", doc.get("soft_copy") or "")
+            self.assertIn("doctor=", doc.get("soft_copy") or "")
+            self.assertIn("doctor_fresh=", doc.get("soft_copy") or "")
             self.assertIn("living-ritual-discord", doc.get("soft_copy") or "")
             self.assertEqual(doc.get("ritual_draft_cmd"), "make living-ritual-discord")
             self.assertTrue(any(c.get("id") == "ritual_observe" for c in (doc.get("checks") or [])))
