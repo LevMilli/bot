@@ -1714,6 +1714,79 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">dual</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const d =
+                          snap?.desk?.dual_control_chip ||
+                          (snap?.desk?.master as {
+                            dual_control_chip?: { checklist_complete?: boolean; arm_ready_paper?: boolean }
+                          } | undefined)?.dual_control_chip
+                        if (!d) return undefined
+                        if (d.arm_ready_paper) return '#6fbf73'
+                        if (d.checklist_complete === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const d =
+                        snap?.desk?.dual_control_chip ||
+                        (snap?.desk?.master as {
+                          dual_control_chip?: {
+                            label?: string
+                            signed_n?: number
+                            items_n?: number
+                            live_orders_enabled?: boolean
+                          }
+                        } | undefined)?.dual_control_chip
+                      if (!d) return 'dual-control pending'
+                      return (
+                        (d.label ||
+                          `dual-control signed=${d.signed_n ?? '—'}/${d.items_n ?? '—'}`) +
+                        ' · live=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">ruin</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const r =
+                          snap?.desk?.ruin_drill_chip ||
+                          (snap?.desk?.master as {
+                            ruin_drill_chip?: { active?: boolean; practiced_this_month?: boolean }
+                          } | undefined)?.ruin_drill_chip
+                        if (!r) return undefined
+                        if (r.active) return '#c45c26'
+                        if (r.practiced_this_month === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const r =
+                        snap?.desk?.ruin_drill_chip ||
+                        (snap?.desk?.master as {
+                          ruin_drill_chip?: {
+                            label?: string
+                            active?: boolean
+                            practiced_this_month?: boolean
+                            level?: string
+                          }
+                        } | undefined)?.ruin_drill_chip
+                      if (!r) return 'ruin drill pending'
+                      return (
+                        r.label ||
+                        `ruin drill active=${Boolean(r.active)} practiced_month=${Boolean(r.practiced_this_month)}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">expand</span>
                   <span
                     style={{
@@ -1731,10 +1804,18 @@ export default function App() {
                       const g =
                         snap?.desk?.betting_expand_gate ||
                         (snap?.desk?.master as {
-                          betting_expand_gate?: { label?: string; blocked?: boolean }
+                          betting_expand_gate?: {
+                            label?: string
+                            blocked?: boolean
+                            soft_copy?: string
+                            reason?: string
+                          }
                         } | undefined)?.betting_expand_gate
                       if (!g) return 'expand gate pending'
-                      return g.label || (g.blocked ? 'betting expand BLOCKED' : 'expand ok (paper)')
+                      if (g.blocked) {
+                        return g.soft_copy || g.reason || g.label || 'betting expand BLOCKED'
+                      }
+                      return g.label || 'expand ok (paper)'
                     })()}
                   </span>
                 </div>

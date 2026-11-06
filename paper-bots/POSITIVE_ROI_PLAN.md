@@ -706,13 +706,21 @@ Interactive: Positive ROI Master Plan canvas.
 | CLV closer vault row | closer digest |
 | Timer digest vault tint | digest dead |
 
-### Next
+### Living upgrade — dual / ruin chips + expand soft_copy vault
 
 | Ticket | Where |
 | --- | --- |
 | Dual-control chip vault | signed checklist |
 | Ruin drill chip vault | active practice |
 | Expand gate vault polish | soft_copy on blocked |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Sunday packet vault row | packet present observe |
+| Living export CLI note | doctor_age in status json |
+| Vault board scroll polish | dense row readability |
 
 ## Hard rules unchanged
 
