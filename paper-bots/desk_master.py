@@ -696,6 +696,15 @@ def master_summary(
     skip_hist = (living or {}).get("skip_historian") if isinstance(living, dict) else None
     if isinstance(skip_hist, dict) and int(skip_hist.get("n_events") or 0) > 0:
         priority.append(str(skip_hist.get("label") or "skip historian")[:120])
+    bee = (living or {}).get("empty_card_bee") if isinstance(living, dict) else None
+    if isinstance(bee, dict) and int(bee.get("breaches") or 0) > 0:
+        priority.insert(0, str(bee.get("label") or "empty CARD breaches")[:120])
+    book = (living or {}).get("bookkeeper") if isinstance(living, dict) else None
+    if isinstance(book, dict) and book.get("fee_ledger_complete") is False:
+        priority.append(str(book.get("label") or "fee ledger gaps")[:120])
+    reporter = (living or {}).get("reporter") if isinstance(living, dict) else None
+    if isinstance(reporter, dict) and reporter.get("present"):
+        priority.append(str(reporter.get("label") or "scorecard present")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -813,6 +822,21 @@ def master_summary(
         ),
         "quant_clerk": (
             (living or {}).get("quant_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "bookkeeper": (
+            (living or {}).get("bookkeeper")
+            if isinstance(living, dict)
+            else None
+        ),
+        "reporter": (
+            (living or {}).get("reporter")
+            if isinstance(living, dict)
+            else None
+        ),
+        "empty_card_bee": (
+            (living or {}).get("empty_card_bee")
             if isinstance(living, dict)
             else None
         ),

@@ -445,6 +445,95 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def bookkeeper_chip(root: str | None = None) -> dict:
+    """Completions + fee-ledger completeness chip."""
+    digest: dict = {}
+    try:
+        from helpers import bookkeeper_clerk
+        path = bookkeeper_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("eligible_completions_today") is None:
+            digest = bookkeeper_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "eligible_completions_today": digest.get("eligible_completions_today"),
+        "eligible_pnl_today": digest.get("eligible_pnl_today"),
+        "fee_ledger_n": digest.get("fee_ledger_n"),
+        "fee_ledger_complete": digest.get("fee_ledger_complete"),
+        "label": (
+            f"bookkeeper fills={digest.get('eligible_completions_today')} "
+            f"fee_ledger={digest.get('fee_ledger_n')} "
+            f"complete={digest.get('fee_ledger_complete')}"
+        ),
+        "note": digest.get("note") or (
+            "Taxed Completions + fee ledger — never invent fills or soften floors."
+        ),
+    }
+
+
+def reporter_chip(root: str | None = None) -> dict:
+    """Weekly scorecard / Sunday packet mirror chip."""
+    digest: dict = {}
+    try:
+        from helpers import reporter_clerk
+        path = reporter_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("present") is None:
+            digest = reporter_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_publish": False,
+        "present": bool(digest.get("present")),
+        "label_week": digest.get("label"),
+        "m1": digest.get("m1"),
+        "keys": digest.get("keys") if isinstance(digest.get("keys"), list) else [],
+        "label": (
+            f"reporter scorecard={'yes' if digest.get('present') else 'no'} "
+            f"week={digest.get('label')} m1={digest.get('m1')}"
+        ),
+        "note": digest.get("note") or (
+            "Sunday packet mirror — staff publishes; never paints PnL."
+        ),
+    }
+
+
+def empty_card_bee_chip(root: str | None = None) -> dict:
+    """Empty CARD 3s latency bee digest chip."""
+    digest: dict = {}
+    try:
+        from helpers import empty_card_bee
+        path = empty_card_bee.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = empty_card_bee.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bar_sec": digest.get("bar_sec") or 3.0,
+        "n": digest.get("n"),
+        "breaches": digest.get("breaches"),
+        "label": (
+            f"empty bee n={digest.get('n')} breaches={digest.get('breaches')} "
+            f"bar={digest.get('bar_sec') or 3.0}s"
+        ),
+        "note": digest.get("note") or "Empty CARD bee — speed without softer floors.",
+    }
+
+
 def skip_historian_chip(root: str | None = None) -> dict:
     """Top skip-code frequencies chip (BUDGET≠EDGE)."""
     digest: dict = {}
@@ -1104,6 +1193,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "skip_historian": skip_historian_chip(root),
         "distance_clerk": distance_clerk_chip(root),
         "quant_clerk": quant_clerk_chip(root),
+        "bookkeeper": bookkeeper_chip(root),
+        "reporter": reporter_chip(root),
+        "empty_card_bee": empty_card_bee_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
