@@ -866,13 +866,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual discord doctor_fresh | format_discord line |
 | City doctor draft tint | stale color on draft row |
 
-### Next
+### Living upgrade — quiet_doctor json / ritual floors_ok header / ritual draft tint
 
 | Ticket | Where |
 | --- | --- |
 | Status json quiet_doctor | flatten quiet+doctor line |
 | Ritual discord floors_ok | flags in draft header |
 | Vault ritual draft tint | exit_ok false color |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Export quiet_doctor | living_board_export field |
+| Status text floors_ok | ritual flags line |
+| Vault doctor draft label | stale badge text |
 
 ## Hard rules unchanged
 
