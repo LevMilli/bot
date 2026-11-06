@@ -1,4 +1,4 @@
-import { useMemo, useRef, type RefObject } from 'react'
+import { createContext, useContext, useMemo, useRef, type RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { CanvasTexture, Matrix4, Quaternion, Vector3, type Group, type MeshStandardMaterial } from 'three'
 import type { BotPose } from '../data/botPose'
@@ -22,7 +22,13 @@ const ARMOR_EDGE = '#2a2a34'
 const METAL = '#3a3a46'
 const PURPLE = '#d060ff'
 const PURPLE_DIM = '#7a30b8'
+const TELLER_CYAN = '#2de2e6'
+const TELLER_CYAN_DIM = '#1a8a90'
+const TELLER_BRASS = '#c9a227'
 const GRAFFITI = '#f4f4f0'
+
+/** Bank tellers inherit cyan/brass via context so every LED picks it up. */
+const NeonColorCtx = createContext(PURPLE)
 
 function armor(roughness = 0.58, metalness = 0.65) {
   return {
@@ -34,10 +40,10 @@ function armor(roughness = 0.58, metalness = 0.65) {
   }
 }
 
-function neon(intensity = 1.55) {
+function neon(intensity = 1.55, color: string = PURPLE) {
   return {
-    color: PURPLE,
-    emissive: PURPLE,
+    color,
+    emissive: color,
     emissiveIntensity: intensity,
     roughness: 0.22,
     metalness: 0.18,
@@ -49,15 +55,18 @@ function LedStrip({
   position,
   rotation,
   size = [0.12, 0.018, 0.012],
+  color,
 }: {
   position: [number, number, number]
   rotation?: [number, number, number]
   size?: [number, number, number]
+  color?: string
 }) {
+  const accent = useContext(NeonColorCtx)
   return (
     <mesh position={position} rotation={rotation}>
       <boxGeometry args={size} />
-      <meshStandardMaterial {...neon(1.65)} />
+      <meshStandardMaterial {...neon(1.65, color ?? accent)} />
     </mesh>
   )
 }
@@ -74,6 +83,7 @@ function LedChannel({
   length?: number
   width?: number
 }) {
+  const accent = useContext(NeonColorCtx)
   return (
     <group position={position} rotation={rotation}>
       <mesh>
@@ -82,7 +92,7 @@ function LedChannel({
       </mesh>
       <mesh position={[0, 0, 0.006]}>
         <boxGeometry args={[width * 0.55, length * 0.88, 0.01]} />
-        <meshStandardMaterial {...neon(1.7)} />
+        <meshStandardMaterial {...neon(1.7, accent)} />
       </mesh>
     </group>
   )
@@ -97,11 +107,20 @@ function Bolt({ position, r = 0.008 }: { position: [number, number, number]; r?:
   )
 }
 
-function LedDot({ position, r = 0.012 }: { position: [number, number, number]; r?: number }) {
+function LedDot({
+  position,
+  r = 0.012,
+  color,
+}: {
+  position: [number, number, number]
+  r?: number
+  color?: string
+}) {
+  const accent = useContext(NeonColorCtx)
   return (
     <mesh position={position}>
       <sphereGeometry args={[r, 10, 10]} />
-      <meshStandardMaterial {...neon(1.9)} />
+      <meshStandardMaterial {...neon(1.9, color ?? accent)} />
     </mesh>
   )
 }
@@ -210,8 +229,8 @@ function ScratchMarks({ position, rotation }: { position: [number, number, numbe
   )
 }
 
-function graffitiTexture(kind: 'pauldron' | 'unit', mark: string) {
-  const key = `${kind}:${mark}`
+function graffitiTexture(kind: 'pauldron' | 'unit', mark: string, style: 'default' | 'teller' = 'default') {
+  const key = `${style}:${kind}:${mark}`
   const hit = TEX_CACHE.get(key)
   if (hit) return hit
 
@@ -220,49 +239,69 @@ function graffitiTexture(kind: 'pauldron' | 'unit', mark: string) {
   c.height = kind === 'pauldron' ? 384 : 160
   const ctx = c.getContext('2d')!
   ctx.clearRect(0, 0, c.width, c.height)
-  ctx.fillStyle = GRAFFITI
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
-  if (kind === 'pauldron') {
-    // Crown outline
-    ctx.lineWidth = 8
-    ctx.strokeStyle = GRAFFITI
-    ctx.beginPath()
-    ctx.moveTo(192, 58)
-    ctx.lineTo(148, 118)
-    ctx.lineTo(162, 118)
-    ctx.lineTo(162, 148)
-    ctx.lineTo(222, 148)
-    ctx.lineTo(222, 118)
-    ctx.lineTo(236, 118)
-    ctx.closePath()
-    ctx.fill()
-    ctx.beginPath()
-    ctx.moveTo(148, 118)
-    ctx.lineTo(118, 72)
-    ctx.lineTo(140, 118)
-    ctx.fill()
-    ctx.beginPath()
-    ctx.moveTo(236, 118)
-    ctx.lineTo(266, 72)
-    ctx.lineTo(244, 118)
-    ctx.fill()
-    // Dripping PIMPS ONLY
-    ctx.font = 'bold 58px Impact, Haettenschweiler, Arial Black, sans-serif'
-    ctx.fillText('PIMPS', 192, 220)
-    ctx.font = 'bold 54px Impact, Haettenschweiler, Arial Black, sans-serif'
-    ctx.fillText('ONLY', 192, 280)
-    // Drips
-    ;[
-      [140, 300, 6, 28],
-      [175, 298, 5, 36],
-      [210, 302, 6, 22],
-      [245, 300, 5, 30],
-    ].forEach(([x, y, w, h]) => ctx.fillRect(x, y, w, h))
+  if (style === 'teller') {
+    ctx.fillStyle = TELLER_CYAN
+    if (kind === 'pauldron') {
+      ctx.strokeStyle = TELLER_BRASS
+      ctx.lineWidth = 10
+      ctx.strokeRect(36, 36, 312, 312)
+      ctx.font = 'bold 58px Impact, Haettenschweiler, Arial Black, sans-serif'
+      ctx.fillText('VAULT', 192, 130)
+      ctx.fillStyle = TELLER_BRASS
+      ctx.font = 'bold 64px Impact, Haettenschweiler, Arial Black, sans-serif'
+      ctx.fillText('TELLER', 192, 210)
+      ctx.fillStyle = TELLER_CYAN
+      ctx.fillRect(80, 250, 224, 14)
+      ctx.fillStyle = GRAFFITI
+      ctx.font = 'bold 52px Impact, Haettenschweiler, Arial Black, sans-serif'
+      ctx.fillText(mark.slice(0, 2), 192, 310)
+    } else {
+      ctx.fillStyle = TELLER_BRASS
+      ctx.font = 'bold 96px Impact, Haettenschweiler, Arial Black, sans-serif'
+      ctx.fillText(mark.slice(0, 2), 80, 84)
+    }
   } else {
-    ctx.font = 'bold 96px Impact, Haettenschweiler, Arial Black, sans-serif'
-    ctx.fillText(mark.slice(0, 2), 80, 84)
+    ctx.fillStyle = GRAFFITI
+    if (kind === 'pauldron') {
+      ctx.lineWidth = 8
+      ctx.strokeStyle = GRAFFITI
+      ctx.beginPath()
+      ctx.moveTo(192, 58)
+      ctx.lineTo(148, 118)
+      ctx.lineTo(162, 118)
+      ctx.lineTo(162, 148)
+      ctx.lineTo(222, 148)
+      ctx.lineTo(222, 118)
+      ctx.lineTo(236, 118)
+      ctx.closePath()
+      ctx.fill()
+      ctx.beginPath()
+      ctx.moveTo(148, 118)
+      ctx.lineTo(118, 72)
+      ctx.lineTo(140, 118)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.moveTo(236, 118)
+      ctx.lineTo(266, 72)
+      ctx.lineTo(244, 118)
+      ctx.fill()
+      ctx.font = 'bold 58px Impact, Haettenschweiler, Arial Black, sans-serif'
+      ctx.fillText('PIMPS', 192, 220)
+      ctx.font = 'bold 54px Impact, Haettenschweiler, Arial Black, sans-serif'
+      ctx.fillText('ONLY', 192, 280)
+      ;[
+        [140, 300, 6, 28],
+        [175, 298, 5, 36],
+        [210, 302, 6, 22],
+        [245, 300, 5, 30],
+      ].forEach(([x, y, w, h]) => ctx.fillRect(x, y, w, h))
+    } else {
+      ctx.font = 'bold 96px Impact, Haettenschweiler, Arial Black, sans-serif'
+      ctx.fillText(mark.slice(0, 2), 80, 84)
+    }
   }
 
   const tex = new CanvasTexture(c)
@@ -606,6 +645,7 @@ export function IndustrialBotFigure({
   seed = 0,
   unitMark,
   lite = false,
+  variant = 'default',
 }: {
   pose?: BotPose
   seated?: boolean
@@ -613,22 +653,28 @@ export function IndustrialBotFigure({
   seed?: number
   unitMark?: string
   lite?: boolean
+  /** Bank window staff get cyan/brass trust-hall accents. */
+  variant?: 'default' | 'teller'
 }) {
   const body = useRef<Group>(null)
   const torso = useRef<Group>(null)
   const head = useRef<Group>(null)
   const legs = useRef<Group>(null)
   const stripPulse = useRef<MeshStandardMaterial>(null)
+  const badgePulse = useRef<MeshStandardMaterial>(null)
+  const teller = variant === 'teller'
+  const accent = teller ? TELLER_CYAN : PURPLE
+  const accentDim = teller ? TELLER_CYAN_DIM : PURPLE_DIM
   const mark = unitMark ?? String(20 + (Math.abs(Math.floor(seed * 10)) % 80)).padStart(2, '0')
   const maps = useMemo(
     () =>
       lite
         ? null
         : {
-            pauldron: graffitiTexture('pauldron', mark),
-            unit: graffitiTexture('unit', mark),
+            pauldron: graffitiTexture('pauldron', mark, teller ? 'teller' : 'default'),
+            unit: graffitiTexture('unit', mark, teller ? 'teller' : 'default'),
           },
-    [mark, lite],
+    [mark, lite, teller],
   )
   const anchor: [number, number, number] = deskWork ? [0, 0.49, 0.86] : seated ? [0, 0, 0.42] : [0, 0.28, 0]
   const phase = seed * 1.37
@@ -686,11 +732,15 @@ export function IndustrialBotFigure({
     if (stripPulse.current) {
       stripPulse.current.emissiveIntensity = 1.4 + Math.sin(t * 2.6) * 0.4
     }
+    if (badgePulse.current) {
+      badgePulse.current.emissiveIntensity = 1.15 + Math.sin(t * 3.1) * 0.4
+    }
   })
 
   // Plaza car LOD — black+purple silhouette only.
   if (lite) {
     return (
+      <NeonColorCtx.Provider value={accent}>
       <group ref={body} position={anchor}>
         <mesh position={[0, 0.55, 0]}>
           <boxGeometry args={[0.4, 0.52, 0.28]} />
@@ -698,7 +748,7 @@ export function IndustrialBotFigure({
         </mesh>
         <mesh position={[0, 0.55, 0.15]}>
           <boxGeometry args={[0.22, 0.02, 0.01]} />
-          <meshStandardMaterial {...neon(1.3)} />
+          <meshStandardMaterial {...neon(1.3, accent)} />
         </mesh>
         <group ref={head} position={[0, 1.0, 0.02]}>
           <mesh position={[0, 0.14, 0]}>
@@ -724,6 +774,7 @@ export function IndustrialBotFigure({
         ))}
         {seated || deskWork ? <SeatedLegs /> : null}
       </group>
+      </NeonColorCtx.Provider>
     )
   }
 
@@ -731,6 +782,7 @@ export function IndustrialBotFigure({
   const suiteBoost = deskWork ? 1.14 : 1
 
   return (
+    <NeonColorCtx.Provider value={accent}>
     <group ref={body} position={anchor} scale={suiteBoost}>
       <group ref={torso}>
         {/* Pelvis */}
@@ -740,7 +792,7 @@ export function IndustrialBotFigure({
         </mesh>
         <mesh position={[0, deskWork ? 0.36 : 0.2, deskWork ? 0.04 : 0]} rotation={[0, 0, Math.PI / 2]}>
           <torusGeometry args={[0.15, 0.014, 6, 22]} />
-          <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.26} />
+          <meshStandardMaterial color={teller ? TELLER_BRASS : METAL} metalness={0.88} roughness={0.26} />
         </mesh>
 
         {/* Thick torso cage — photo: wide powerful frame */}
@@ -750,7 +802,7 @@ export function IndustrialBotFigure({
         </mesh>
         <mesh position={[0, 0.56, 0]}>
           <boxGeometry args={[0.36, 0.48, 0.24]} />
-          <meshStandardMaterial color={ARMOR_DARK} metalness={0.45} roughness={0.68} emissive={PURPLE_DIM} emissiveIntensity={0.32} />
+          <meshStandardMaterial color={ARMOR_DARK} metalness={0.45} roughness={0.68} emissive={accentDim} emissiveIntensity={teller ? 0.42 : 0.32} />
         </mesh>
         {/* Front plate stack */}
         <mesh position={[0, 0.7, 0.16]}>
@@ -806,7 +858,7 @@ export function IndustrialBotFigure({
             </mesh>
             <mesh position={[side * 0.3, 0.56, 0.02]}>
               <boxGeometry args={[0.022, 0.4, 0.22]} />
-              <meshStandardMaterial color={ARMOR_DARK} metalness={0.4} roughness={0.65} emissive={PURPLE_DIM} emissiveIntensity={0.28} />
+              <meshStandardMaterial color={ARMOR_DARK} metalness={0.4} roughness={0.65} emissive={accentDim} emissiveIntensity={0.28} />
             </mesh>
             <LedChannel
               position={[side * 0.305, 0.62, 0.08]}
@@ -826,9 +878,25 @@ export function IndustrialBotFigure({
         <LedChannel position={[0.14, 0.68, 0.195]} length={0.1} width={0.05} rotation={[Math.PI / 2, 0, 0]} />
         <mesh position={[0, 0.48, 0.195]}>
           <boxGeometry args={[0.24, 0.016, 0.012]} />
-          <meshStandardMaterial ref={stripPulse} {...neon(1.5)} />
+          <meshStandardMaterial ref={stripPulse} {...neon(1.5, accent)} />
         </mesh>
         <LedDot position={[0, 0.62, 0.195]} r={0.011} />
+        {teller && (
+          <group position={[0, 0.6, 0.21]}>
+            <mesh>
+              <boxGeometry args={[0.18, 0.12, 0.03]} />
+              <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.3} />
+            </mesh>
+            <mesh position={[0, 0, 0.02]}>
+              <boxGeometry args={[0.13, 0.08, 0.012]} />
+              <meshStandardMaterial ref={badgePulse} {...neon(1.6, accent)} />
+            </mesh>
+            <mesh position={[0, -0.1, 0]}>
+              <boxGeometry args={[0.22, 0.03, 0.02]} />
+              <meshStandardMaterial color={TELLER_BRASS} metalness={0.9} roughness={0.2} />
+            </mesh>
+          </group>
+        )}
 
         {/* Oversized graffiti pauldrons — photo hero surface */}
         {([-1, 1] as const).map((side) => (
@@ -840,11 +908,11 @@ export function IndustrialBotFigure({
             </mesh>
             <mesh position={[0, 0.08, 0]} rotation={[0.1, side * 0.18, side * 0.48]}>
               <boxGeometry args={[0.34, 0.04, 0.4]} />
-              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.32} />
+              <meshStandardMaterial color={teller ? TELLER_BRASS : ARMOR_EDGE} metalness={0.82} roughness={teller ? 0.22 : 0.32} />
             </mesh>
             <mesh position={[0, -0.02, 0.05]} rotation={[0.1, side * 0.18, side * 0.48]}>
               <boxGeometry args={[0.24, 0.07, 0.24]} />
-              <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.55} emissive={PURPLE_DIM} emissiveIntensity={0.2} />
+              <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.55} emissive={accentDim} emissiveIntensity={0.2} />
             </mesh>
             <LedChannel position={[side * 0.02, 0.02, 0.16]} length={0.18} width={0.04} rotation={[Math.PI / 2, 0, 0]} />
             <LedChannel position={[side * 0.02, -0.04, 0.16]} length={0.12} width={0.032} rotation={[Math.PI / 2, 0, 0]} />
@@ -853,14 +921,15 @@ export function IndustrialBotFigure({
             <Bolt position={[side * 0.1, 0.07, -0.06]} />
             <Bolt position={[side * 0.1, -0.02, -0.06]} />
             <ScratchMarks position={[side * 0.14, 0.02, 0.1]} rotation={[0, side * (Math.PI / 2), 0]} />
-            {/* Crown + PIMPS ONLY facing outward */}
             <mesh position={[side * 0.165, 0.02, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
               <planeGeometry args={[0.26, 0.26]} />
               <meshBasicMaterial map={maps!.pauldron} transparent toneMapped={false} depthWrite={false} />
             </mesh>
-            <group position={[side * 0.168, 0.09, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
-              <CrownMark scale={1.15} />
-            </group>
+            {!teller && (
+              <group position={[side * 0.168, 0.09, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
+                <CrownMark scale={1.15} />
+              </group>
+            )}
           </group>
         ))}
 
@@ -878,18 +947,18 @@ export function IndustrialBotFigure({
           {/* Exposed hydraulic neck */}
           <mesh position={[0, -0.07, 0]}>
             <cylinderGeometry args={[0.055, 0.065, 0.12, 12]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.72} roughness={0.4} emissive={PURPLE_DIM} emissiveIntensity={0.55} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.72} roughness={0.4} emissive={accentDim} emissiveIntensity={0.55} />
           </mesh>
           <mesh position={[0, -0.07, 0]} rotation={[Math.PI / 2, 0, 0]}>
             <torusGeometry args={[0.062, 0.01, 6, 16]} />
-            <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.24} />
+            <meshStandardMaterial color={teller ? TELLER_BRASS : METAL} metalness={0.9} roughness={0.24} />
           </mesh>
           <Hydraulic position={[-0.038, -0.055, 0.025]} length={0.1} />
           <Hydraulic position={[0.038, -0.055, 0.025]} length={0.1} />
           <Hydraulic position={[0, -0.055, -0.04]} rotation={[0.2, 0, 0]} length={0.095} />
           <mesh position={[0, -0.055, -0.045]}>
             <cylinderGeometry args={[0.015, 0.015, 0.09, 6]} />
-            <meshStandardMaterial color="#1a1020" metalness={0.4} roughness={0.55} emissive={PURPLE} emissiveIntensity={0.6} />
+            <meshStandardMaterial color="#1a1020" metalness={0.4} roughness={0.55} emissive={accent} emissiveIntensity={0.6} />
           </mesh>
           <Cable position={[-0.05, -0.045, -0.02]} rotation={[0.3, 0, 0.4]} length={0.09} />
           <Cable position={[0.05, -0.045, -0.02]} rotation={[0.3, 0, -0.4]} length={0.09} />
@@ -919,8 +988,14 @@ export function IndustrialBotFigure({
           {/* Crown plate */}
           <mesh position={[0, 0.33, 0.02]}>
             <boxGeometry args={[0.36, 0.08, 0.38]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.74} roughness={0.36} />
+            <meshStandardMaterial color={teller ? TELLER_BRASS : ARMOR_EDGE} metalness={0.78} roughness={teller ? 0.24 : 0.36} />
           </mesh>
+          {teller && (
+            <mesh position={[0, 0.38, 0.1]}>
+              <boxGeometry args={[0.16, 0.03, 0.04]} />
+              <meshStandardMaterial {...neon(1.8, accent)} />
+            </mesh>
+          )}
           <Bolt position={[-0.13, 0.36, 0.14]} />
           <Bolt position={[0.13, 0.36, 0.14]} />
           <Bolt position={[-0.13, 0.36, -0.1]} />
@@ -944,7 +1019,7 @@ export function IndustrialBotFigure({
           </mesh>
           <mesh position={[0, 0.145, 0.246]}>
             <boxGeometry args={[0.22, 0.022, 0.01]} />
-            <meshStandardMaterial {...neon(1.35)} />
+            <meshStandardMaterial {...neon(1.35, accent)} />
           </mesh>
           {([-0.08, -0.04, 0.04, 0.08] as const).map((x) => (
             <LedDot key={x} position={[x, 0.145, 0.255]} r={0.009} />
@@ -968,7 +1043,7 @@ export function IndustrialBotFigure({
           <LedChannel position={[0, 0.015, 0.16]} length={0.16} width={0.05} rotation={[Math.PI / 2, 0, 0]} />
           <mesh position={[0, 0.015, 0.13]}>
             <boxGeometry args={[0.22, 0.05, 0.1]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.4} emissive={PURPLE_DIM} emissiveIntensity={0.4} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.4} emissive={accentDim} emissiveIntensity={0.4} />
           </mesh>
           <Hydraulic position={[-0.065, -0.005, 0.09]} rotation={[1.15, 0, 0]} length={0.055} />
           <Hydraulic position={[0.065, -0.005, 0.09]} rotation={[1.15, 0, 0]} length={0.055} />
@@ -978,7 +1053,7 @@ export function IndustrialBotFigure({
             <group key={side} position={[side * 0.1, 0.32, -0.16]} rotation={[0.55, 0, side * 0.22]}>
               <mesh position={[0, 0.28, 0]}>
                 <boxGeometry args={[0.036, 0.58, 0.068]} />
-                <meshStandardMaterial color={ARMOR_EDGE} metalness={0.8} roughness={0.3} />
+                <meshStandardMaterial color={teller ? TELLER_BRASS : ARMOR_EDGE} metalness={0.82} roughness={0.28} />
               </mesh>
               {[0.08, 0.18, 0.28, 0.38, 0.48].map((y) => (
                 <mesh key={y} position={[0, y, 0.014]}>
@@ -1062,5 +1137,6 @@ export function IndustrialBotFigure({
         </group>
       )}
     </group>
+    </NeonColorCtx.Provider>
   )
 }
