@@ -199,6 +199,15 @@ class DeskLivingTests(unittest.TestCase):
             health2 = desk_living.living_self_check(tmp)
             self.assertIn("chip_catalog", health2)
             self.assertGreaterEqual(len(health2.get("chip_catalog") or []), 5)
+            gate = desk_living.betting_expand_gate(tmp)
+            self.assertTrue(gate["fee_floors_locked"])
+            self.assertIn("betting_expand_gate", board2)
+            # Empty tmp digests → blocked until seed.
+            self.assertTrue(gate.get("blocked"))
+            seeded = desk_living.seed_missing_digests(tmp)
+            gate2 = desk_living.betting_expand_gate(tmp)
+            if seeded.get("after", {}).get("pass"):
+                self.assertTrue(gate2.get("allow_betting_expand"))
             with open(map_path, encoding="utf-8") as handle:
                 body = handle.read()
             self.assertIn("auto_publish", body)

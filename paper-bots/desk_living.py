@@ -1731,6 +1731,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "hillclimb_chip": hillclimb_chip(root),
         "digest_inventory": digest_inventory(root),
         "ruin_drill_page": ruin_drill_page(root),
+        "betting_expand_gate": betting_expand_gate(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -1984,6 +1985,40 @@ def digest_inventory(root: str | None = None) -> dict:
         "note": (
             "Insight digests present vs expected. Hire observe clerks first — floors locked."
         ),
+    }
+
+
+def betting_expand_gate(root: str | None = None) -> dict:
+    """Insight-first hire blocker: refuse betting expand while swarm < 3:1."""
+    swarm = insight_swarm_ratio(root)
+    inv = digest_inventory(root)
+    ok = bool(swarm.get("pass")) and bool(inv.get("pass") or swarm.get("pass"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "allow_betting_expand": ok,
+        "blocked": not ok,
+        "swarm_pass": swarm.get("pass"),
+        "swarm_ratio": swarm.get("ratio"),
+        "min_ratio": swarm.get("min_ratio") or INSIGHT_BETTING_MIN_RATIO,
+        "digest_pass": inv.get("pass"),
+        "reason": (
+            "insight swarm meets ≥3:1 — betting expand still staff/paper only"
+            if ok
+            else (
+                f"BLOCK betting expand: insight swarm "
+                f"{swarm.get('insight_n')}:{swarm.get('betting_n')} "
+                f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1). "
+                "Hire observe clerks / seed digests first."
+            )
+        ),
+        "label": (
+            "betting expand allowed (paper)"
+            if ok
+            else "betting expand BLOCKED — insight swarm thin"
+        ),
+        "note": "Insight-first living hire order. Never softens venue floors.",
     }
 
 
