@@ -965,6 +965,42 @@ def living_compact_card(
             if isinstance(src.get("calib_nag"), dict)
             else f"calib observe · sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
         ),
+        "queue_sunday_quiet": (
+            f"{(src.get('firm_queue') or {}).get('label') or 'queue observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never promotes)"
+            if isinstance(src.get("firm_queue"), dict)
+            else f"queue observe · sunday quiet {quiet_age_part} (observe · never promotes)"
+        ),
+        "gate_a_sunday_quiet": (
+            f"{(src.get('helper_gate_a') or {}).get('label') or 'Gate A observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("helper_gate_a"), dict)
+            else f"Gate A observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "ai_sunday_quiet": (
+            f"{(src.get('living_ai') or {}).get('label') or 'AI observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+            if isinstance(src.get("living_ai"), dict)
+            else f"AI observe · sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+        ),
+        "tip_sunday_quiet": (
+            f"{(src.get('tip_radar') or {}).get('label') or 'tip feed observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("tip_radar"), dict)
+            else f"tip feed observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "blackout_sunday_quiet": (
+            f"{(src.get('eia_blackout') or {}).get('label') or 'blackout observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("eia_blackout"), dict)
+            else f"blackout observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "injury_sunday_quiet": (
+            f"{(src.get('injury_wire') or {}).get('label') or 'injury observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("injury_wire"), dict)
+            else f"injury observe · sunday quiet {quiet_age_part} (observe)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2314,6 +2350,36 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{calib.get('label') or 'calib observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never auto-writes Φ)"
     )
+    queue = board.get("firm_queue") if isinstance(board.get("firm_queue"), dict) else {}
+    slim["queue_sunday_quiet"] = (
+        f"{queue.get('label') or 'queue observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never promotes)"
+    )
+    gate_a = board.get("helper_gate_a") if isinstance(board.get("helper_gate_a"), dict) else {}
+    slim["gate_a_sunday_quiet"] = (
+        f"{gate_a.get('label') or 'Gate A observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    ai = board.get("living_ai") if isinstance(board.get("living_ai"), dict) else {}
+    slim["ai_sunday_quiet"] = (
+        f"{ai.get('label') or 'AI observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-writes Φ)"
+    )
+    tip = board.get("tip_radar") if isinstance(board.get("tip_radar"), dict) else {}
+    slim["tip_sunday_quiet"] = (
+        f"{tip.get('label') or 'tip feed observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    blackout = board.get("eia_blackout") if isinstance(board.get("eia_blackout"), dict) else {}
+    slim["blackout_sunday_quiet"] = (
+        f"{blackout.get('label') or 'blackout observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    injury = board.get("injury_wire") if isinstance(board.get("injury_wire"), dict) else {}
+    slim["injury_sunday_quiet"] = (
+        f"{injury.get('label') or 'injury observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2371,6 +2437,24 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_calib_sunday_quiet"] = (
             compact.get("calib_sunday_quiet") or slim.get("calib_sunday_quiet")
+        )
+        slim["compact_queue_sunday_quiet"] = (
+            compact.get("queue_sunday_quiet") or slim.get("queue_sunday_quiet")
+        )
+        slim["compact_gate_a_sunday_quiet"] = (
+            compact.get("gate_a_sunday_quiet") or slim.get("gate_a_sunday_quiet")
+        )
+        slim["compact_ai_sunday_quiet"] = (
+            compact.get("ai_sunday_quiet") or slim.get("ai_sunday_quiet")
+        )
+        slim["compact_tip_sunday_quiet"] = (
+            compact.get("tip_sunday_quiet") or slim.get("tip_sunday_quiet")
+        )
+        slim["compact_blackout_sunday_quiet"] = (
+            compact.get("blackout_sunday_quiet") or slim.get("blackout_sunday_quiet")
+        )
+        slim["compact_injury_sunday_quiet"] = (
+            compact.get("injury_sunday_quiet") or slim.get("injury_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
