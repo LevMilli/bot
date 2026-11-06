@@ -908,6 +908,13 @@ a {
   max-width: 70%;
 }
 
+.vault-ritual-draft {
+  color: #9ab0bc;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  white-space: normal;
+}
+
 .vault-board-close {
   appearance: none;
   background: transparent;

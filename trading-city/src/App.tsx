@@ -1942,6 +1942,28 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">ritual draft</span>
+                  <span className="vault-ritual-draft">
+                    {(() => {
+                      const copy =
+                        snap?.desk?.ritual_soft_copy ||
+                        snap?.desk?.ritual_discord ||
+                        (snap?.desk?.master as {
+                          ritual_soft_copy?: string
+                          ritual_discord?: string
+                        } | undefined)?.ritual_soft_copy ||
+                        (snap?.desk?.master as {
+                          ritual_discord?: string
+                        } | undefined)?.ritual_discord
+                      if (!copy) {
+                        return 'make living-ritual-discord · staff paste only · never auto-posts'
+                      }
+                      const one = String(copy).split('\n').filter(Boolean).slice(0, 2).join(' · ')
+                      return one.length > 160 ? `${one.slice(0, 157)}…` : one
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">bleed</span>
                   <span>
                     {(() => {

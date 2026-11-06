@@ -280,6 +280,12 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue(any(str(p).startswith("expand=") for p in (compact.get("parts") or [])))
             self.assertTrue(any(str(p).startswith("ritual=") for p in (compact.get("parts") or [])))
             self.assertIn("ritual_label", compact)
+            parts = [str(p) for p in (compact.get("parts") or [])]
+            quiet_i = next(i for i, p in enumerate(parts) if "quiet" in p.lower())
+            ritual_i = next(i for i, p in enumerate(parts) if p.startswith("ritual="))
+            expand_i = next(i for i, p in enumerate(parts) if p.startswith("expand="))
+            self.assertLess(quiet_i, ritual_i)
+            self.assertLess(ritual_i, expand_i)
             ritual = desk_living.ritual_observe_chip(tmp)
             self.assertIn("ritual_ok", ritual)
             self.assertIn("exit_ok", ritual)

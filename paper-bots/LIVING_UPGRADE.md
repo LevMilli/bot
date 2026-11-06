@@ -23,6 +23,8 @@ make living-doctor
 make living-ritual
 make living-ritual-discord
 make living-ritual-observe
+# observe = readiness chip only (never records doctor / never posts)
+# full ritual records doctor; --discord is staff paste only
 make living-floors-discord
 make living-doctor-discord
 make living-gaps-discord
@@ -57,9 +59,12 @@ python3 tools/staff_dual_control.py status|sign|clear
 python3 tools/staff_ruin_drill.py status|set|clear
 python3 tools/staff_living_ritual.py            # weekly staff checklist
 python3 tools/staff_living_ritual.py --discord  # paste-ready Discord draft
+python3 tools/staff_living_ritual.py --observe  # readiness only (exit 2 if floors soft / expand blocked)
+python3 tools/staff_living_ritual.py --observe --json  # flatten ritual_ok / exit_ok
 ```
 
-Doctor age marker: `desk_living_doctor.json` (gitignored). Snapshot observes without rewriting; CLI/ritual records.
+Doctor age marker: `desk_living_doctor.json` (gitignored). Snapshot observes without rewriting; CLI/ritual records.  
+`make living-ritual-observe` never writes the doctor marker — use full `make living-ritual` weekly.
 
 ## Hire order
 
