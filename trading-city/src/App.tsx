@@ -1850,7 +1850,14 @@ export default function App() {
                           digest_inventory?: { label?: string; pass?: boolean }
                         } | undefined)?.digest_inventory
                       if (!inv) return 'digest inventory pending'
-                      return inv.label || (inv.pass === false ? 'digests thin' : 'digests ok')
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        inv.label || (inv.pass === false ? 'digests thin' : 'digests ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -1970,11 +1977,17 @@ export default function App() {
                       const c =
                         snap?.desk?.completions || snap?.desk?.master?.completions
                       if (!c || c.error) return 'completions pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       const n = c.eligible_completions_today
                       const pnl = c.eligible_pnl_today
                       return (
                         `eligible today ${n ?? '—'}` +
-                        (pnl != null ? ` · pnl ${Number(pnl).toFixed(2)}` : '')
+                        (pnl != null ? ` · pnl ${Number(pnl).toFixed(2)}` : '') +
+                        ` · sunday quiet ${sundayBit} (observe · never invents PnL)`
                       )
                     })()}
                   </span>
