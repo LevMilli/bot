@@ -479,6 +479,25 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def completions_chip(root: str | None = None) -> dict:
+    """Eligible completions today — teller / Masters one-liner."""
+    summary = completions_summary(root) or {}
+    n = summary.get("eligible_completions_today")
+    pnl = summary.get("eligible_pnl_today")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "chicago_day": summary.get("chicago_day"),
+        "eligible_completions_today": n,
+        "eligible_pnl_today": pnl,
+        "completions_today": summary.get("completions_today"),
+        "label": f"completions today eligible={n} pnl={pnl}",
+        "note": summary.get("note") or (
+            "CompletedEligibleFills = fee-clear closes today. Never softer floors."
+        ),
+    }
+
+
 def clerk_pulse_chip(root: str | None = None) -> dict:
     """Last clerk-pulse age / digest health chip."""
     digest: dict = {}
@@ -1654,6 +1673,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "clerk_pulse": clerk_pulse_chip(root),
         "dual_control_chip": dual_control_chip(root),
         "ruin_drill_chip": ruin_drill_chip(root),
+        "completions_chip": completions_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
