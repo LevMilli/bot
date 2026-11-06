@@ -698,13 +698,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Hard-stop clerk vault | clerk promote_ready |
 | Bleed clerk vault tint | clerk bleed hot |
 
-### Next
+### Living upgrade — skip-twin / CLV closer / timer digest vault
 
 | Ticket | Where |
 | --- | --- |
 | Skip-twin clerk vault | promote_ready twin |
 | CLV closer vault row | closer digest |
 | Timer digest vault tint | digest dead |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Dual-control chip vault | signed checklist |
+| Ruin drill chip vault | active practice |
+| Expand gate vault polish | soft_copy on blocked |
 
 ## Hard rules unchanged
 

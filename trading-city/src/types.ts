@@ -449,6 +449,34 @@ export type Desk = {
     note?: string
     error?: string
   }
+  skip_twin_clerk?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    promote_ready?: boolean
+    auto_promote?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  clv_closer?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    complete?: number
+    pass?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  timer_digest?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    alive?: boolean
+    status?: string
+    label?: string
+    note?: string
+    error?: string
+  }
   clerk_pulse?: {
     paper_only?: boolean
     fee_floors_locked?: boolean

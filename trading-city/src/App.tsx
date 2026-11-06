@@ -1317,6 +1317,96 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">skip-twin</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const s =
+                          snap?.desk?.skip_twin_clerk ||
+                          (snap?.desk?.master as {
+                            skip_twin_clerk?: { promote_ready?: boolean }
+                          } | undefined)?.skip_twin_clerk
+                        if (!s) return undefined
+                        return s.promote_ready ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const s =
+                        snap?.desk?.skip_twin_clerk ||
+                        (snap?.desk?.master as {
+                          skip_twin_clerk?: {
+                            label?: string
+                            promote_ready?: boolean
+                            auto_promote?: boolean
+                          }
+                        } | undefined)?.skip_twin_clerk
+                      if (!s) return 'skip-twin clerk pending'
+                      return (
+                        (s.label || `skip-twin ready=${Boolean(s.promote_ready)}`) +
+                        ' · auto_promote=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">CLV close</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.clv_closer ||
+                          (snap?.desk?.master as { clv_closer?: { pass?: boolean } } | undefined)
+                            ?.clv_closer
+                        if (!c || c.pass == null) return undefined
+                        return c.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c =
+                        snap?.desk?.clv_closer ||
+                        (snap?.desk?.master as {
+                          clv_closer?: { label?: string; pass?: boolean; complete?: number; n?: number }
+                        } | undefined)?.clv_closer
+                      if (!c) return 'CLV closer pending'
+                      return (
+                        c.label ||
+                        `CLV closer n=${c.n ?? '—'} complete=${c.complete ?? '—'} ${
+                          c.pass === false ? 'gaps' : 'ok'
+                        }`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">t-digest</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const t =
+                          snap?.desk?.timer_digest ||
+                          (snap?.desk?.master as {
+                            timer_digest?: { alive?: boolean; status?: string }
+                          } | undefined)?.timer_digest
+                        if (!t) return undefined
+                        if (t.alive === false || t.status === 'dead') return '#c45c26'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const t =
+                        snap?.desk?.timer_digest ||
+                        (snap?.desk?.master as {
+                          timer_digest?: { label?: string; alive?: boolean; status?: string }
+                        } | undefined)?.timer_digest
+                      if (!t) return 'timer digest pending'
+                      return t.label || `timer digest ${t.status || (t.alive === false ? 'dead' : 'alive')}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">digests</span>
                   <span
                     style={{
