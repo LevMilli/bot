@@ -1628,6 +1628,10 @@ def green_day_board(root: str | None = None, bots: list | None = None) -> dict:
             "green_boost": int(boost.get("green_boost") or 0),
             "auto_promote": False,
         },
+        "label": (
+            f"green-day green={green_n} red={red_n}"
+            + (" ALL_GREEN" if fee_clear and red_n == 0 and green_n == len(fee_clear) else "")
+        ),
         "note": (
             "Selective +1 only on fee-clear green days; sports green_boost stays 0 "
             "until CLV+M1 gate ready. Never softens venue floors."

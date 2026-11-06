@@ -626,13 +626,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Dual gaps vault tint | unsigned gaps amber |
 | Living ritual Makefile note | README pulse + make *-discord targets |
 
+### Living upgrade — completions/green/bleed vault tints
+
+| Ticket | Where |
+| --- | --- |
+| Completions vault tint | eligible=0 amber on fills |
+| Green-day vault strip | green_n / red_n observe |
+| Bleed hot vault tint | bleed fail red |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Completions vault tint | eligible=0 weekday amber |
-| Green-day vault strip | green_n / red_n observe |
-| Bleed hot vault tint | bleed fail amber |
+| CLV vault row | sports CLV completeness |
+| Calib nag vault tint | raise_Φ tickets amber |
+| Timer dead vault tint | timer heartbeat DEAD |
 
 ## Hard rules unchanged
 
