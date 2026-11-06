@@ -1908,6 +1908,24 @@ def label_near_miss_outcome(
             desk_more.save_more(state, root)
         except Exception:
             return {"labeled": 0, "reason": "save failed"}
+        # Living upgrade: join labeled twin into feature store (observe-only).
+        try:
+            import desk_living
+            soft = None
+            for row in out_rows:
+                if isinstance(row, dict) and str(row.get("ticker") or "") == tick:
+                    soft = row.get("soft")
+                    break
+            desk_living.record_skip_twin_features(
+                root,
+                bot=bot_id or "unknown",
+                ticker=tick,
+                would_pnl=pnl,
+                soft=soft,
+                note=str(note or "")[:120],
+            )
+        except Exception:
+            pass
     return {"labeled": n, "ticker": tick, "would_pnl": round(float(pnl), 4)}
 
 

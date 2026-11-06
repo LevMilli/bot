@@ -44,6 +44,7 @@ INSIGHT_HELPER_DIGESTS = (
     "reporter_clerk_digest.json",
     "quant_clerk_digest.json",
     "skip_twin_clerk_digest.json",
+    "clerk_pulse_digest.json",
     "calendar_digest.json",
 )
 INSIGHT_BETTING_MIN_RATIO = 3.0
@@ -140,6 +141,45 @@ def record_decision_features(
     except OSError:
         return {"recorded": False, "row": row}
     return {"recorded": True, "row": row}
+
+
+def record_skip_twin_features(
+    root: str | None = None,
+    *,
+    bot: str,
+    ticker: str,
+    would_pnl,
+    soft: str | list | None = None,
+    note: str = "",
+    extra: dict | None = None,
+) -> dict:
+    """Join a labeled near-miss / skip-twin outcome into the feature store.
+
+    Observe-only learn row — does not arm soft gates or soften floors.
+    """
+    pnl = _f(would_pnl)
+    soft_key = (
+        ",".join(str(x) for x in soft)
+        if isinstance(soft, (list, tuple))
+        else str(soft or "")
+    )[:40]
+    payload = {
+        "twin": True,
+        "would_pnl": pnl,
+        "soft": soft_key,
+        "ticker": str(ticker or "")[:80],
+    }
+    if isinstance(extra, dict):
+        payload.update({str(k)[:40]: v for k, v in list(extra.items())[:8]})
+    return record_decision_features(
+        root,
+        bot=bot or "unknown",
+        action="skip_twin",
+        fill_id=str(ticker or "")[:80],
+        skip_codes=["SKIP_TWIN", soft_key] if soft_key else ["SKIP_TWIN"],
+        note=str(note or f"skip twin would_pnl={pnl}")[:160],
+        extra=payload,
+    )
 
 
 def record_eval_features(
