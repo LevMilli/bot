@@ -2358,10 +2358,15 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     )
     if any(c.get("id") == "ritual_observe" for c in failed):
         ritual_line = f"ritual FAIL — {ritual_line}"
+    doctor_line = (
+        f"doctor={'fresh' if ritual.get('doctor_fresh') else 'stale' if ritual.get('doctor_fresh') is False else 'n/a'} "
+        f"doctor_fresh={ritual.get('doctor_fresh')}"
+    )
     soft_copy = (
         f"**Living doctor** (paper · floors locked · live=False)\n"
         f"{doc['label']} · failed=[{failed_ids}]\n"
         f"{ritual_line}\n"
+        f"{doctor_line}\n"
         f"ritual draft: make living-ritual-discord (staff paste · never auto-posts)\n"
         f"_never places · never softens floors · never enables live_"
     )

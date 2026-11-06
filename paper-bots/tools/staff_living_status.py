@@ -233,6 +233,16 @@ def main() -> int:
             "teller_living": board.get("teller_living"),
             "timer_heartbeat": board.get("timer_heartbeat"),
             "doctor_age": board.get("doctor_age"),
+            "doctor_fresh": (
+                (board.get("ritual_observe") or {}).get("doctor_fresh")
+                if isinstance(board.get("ritual_observe"), dict)
+                and (board.get("ritual_observe") or {}).get("doctor_fresh") is not None
+                else (
+                    not bool((board.get("doctor_age") or {}).get("stale"))
+                    if isinstance(board.get("doctor_age"), dict)
+                    else None
+                )
+            ),
             "ritual_observe": board.get("ritual_observe"),
             "ritual_ok": (
                 (board.get("ritual_observe") or {}).get("ritual_ok")

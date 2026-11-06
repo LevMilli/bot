@@ -947,6 +947,31 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">doc age</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const a =
+                          snap?.desk?.doctor_age ||
+                          (snap?.desk?.master as { doctor_age?: { stale?: boolean } } | undefined)
+                            ?.doctor_age
+                        if (!a) return undefined
+                        return a.stale ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const a =
+                        snap?.desk?.doctor_age ||
+                        (snap?.desk?.master as {
+                          doctor_age?: { label?: string; stale?: boolean }
+                        } | undefined)?.doctor_age
+                      if (!a) return 'doctor age pending'
+                      return a.label || (a.stale ? 'doctor stale' : 'doctor age ok')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">AI</span>
                   <span
                     style={{
@@ -1926,31 +1951,6 @@ export default function App() {
                           ?.living_doctor
                       if (!d) return 'living doctor pending'
                       return d.label || (d.ok ? 'doctor OK' : 'doctor FAIL')
-                    })()}
-                  </span>
-                </div>
-                <div className="vault-board-row">
-                  <span className="vb-label">doc age</span>
-                  <span
-                    style={{
-                      color: (() => {
-                        const a =
-                          snap?.desk?.doctor_age ||
-                          (snap?.desk?.master as { doctor_age?: { stale?: boolean } } | undefined)
-                            ?.doctor_age
-                        if (!a) return undefined
-                        return a.stale ? '#c45c26' : undefined
-                      })(),
-                    }}
-                  >
-                    {(() => {
-                      const a =
-                        snap?.desk?.doctor_age ||
-                        (snap?.desk?.master as {
-                          doctor_age?: { label?: string; stale?: boolean }
-                        } | undefined)?.doctor_age
-                      if (!a) return 'doctor age pending'
-                      return a.label || (a.stale ? 'doctor stale' : 'doctor age ok')
                     })()}
                   </span>
                 </div>

@@ -818,13 +818,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Export doctor_fresh flat | living_board_export |
 | Status text doctor= | staff status doctor_fresh |
 
-### Next
+### Living upgrade — status json doctor_fresh / soft_copy doctor / vault row order
 
 | Ticket | Where |
 | --- | --- |
 | Status json doctor_fresh | flatten status --json |
 | Doctor soft_copy doctor= | discord doctor_fresh line |
 | Vault doctor_age near compact | row order nudge |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Compact+doc age HUD pair | status text compact doctor |
+| Ritual vault after doc age | row order ritual under doc |
+| Export doctor_line soft | export soft_copy twin |
 
 ## Hard rules unchanged
 
