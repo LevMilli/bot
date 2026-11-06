@@ -445,6 +445,65 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def empty_card_chip(root: str | None = None) -> dict:
+    """Empty-market CARD latency chip (3s bar) for HUD."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.empty_card_status(root) or {}
+    except Exception:
+        status = {}
+    p50 = status.get("p50_s") or status.get("p50") or status.get("last_sec")
+    ok = status.get("pass")
+    if ok is None and p50 is not None:
+        try:
+            ok = float(p50) <= 3.0
+        except (TypeError, ValueError):
+            ok = None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": status.get("n"),
+        "p50_s": p50,
+        "max_s": status.get("max_s"),
+        "pass": ok,
+        "bar_sec": status.get("bar_sec") or 3.0,
+        "label": (
+            f"empty CARD p50={p50}s "
+            + ("ok" if ok else "slow" if ok is False else "n/a")
+        ),
+        "note": status.get("note") or "Empty CARD <3s bar — speed without softer floors.",
+    }
+
+
+def near_miss_chip(root: str | None = None) -> dict:
+    """Near-miss soft z|p promote readiness chip (observe-only)."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.near_miss_promote_status(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": status.get("n"),
+        "labeled_n": status.get("labeled_n"),
+        "shadow_ev": status.get("shadow_ev"),
+        "promote_ready": bool(status.get("promote_ready")),
+        "soft_live": status.get("soft_live"),
+        "decision": status.get("decision"),
+        "auto_promote": False,
+        "label": (
+            f"near-miss n={status.get('n')} labeled={status.get('labeled_n')} "
+            f"ev={status.get('shadow_ev')} ready={bool(status.get('promote_ready'))}"
+        ),
+        "note": status.get("note") or (
+            "Soft allowlist z|p only — never edge / fee floors."
+        ),
+    }
+
+
 def firm_queue_chip(root: str | None = None) -> dict:
     """Compact firm-queue HUD: offers / accepted / deferred / remaining risk."""
     status = {}
@@ -616,6 +675,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "skip_taxonomy": skip_taxonomy_chip(root),
         "green_day": green_day_board(root, bots=bots),
         "firm_queue": firm_queue_chip(root),
+        "empty_card": empty_card_chip(root),
+        "near_miss": near_miss_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),

@@ -72,6 +72,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("label", fq)
             board2 = desk_living.living_upgrade_board(tmp)
             self.assertIn("firm_queue", board2)
+            self.assertIn("empty_card", board2)
+            self.assertIn("near_miss", board2)
+            self.assertFalse(board2["near_miss"].get("auto_promote"))
+            self.assertTrue(board2["empty_card"]["fee_floors_locked"])
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
