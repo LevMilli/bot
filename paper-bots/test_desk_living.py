@@ -101,6 +101,7 @@ class InsightHelpers(unittest.TestCase):
         from helpers import clv_closer, injury_wire, eia_scout
         from helpers import calib_nag, hard_stop_clerk, near_miss_clerk, bleed_clerk
         from helpers import distance_clerk, bookkeeper_clerk, reporter_clerk, quant_clerk
+        from helpers import skip_twin_clerk
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "helpers"), exist_ok=True)
             d = tip_radar.write_digest(tmp, games=[
@@ -163,7 +164,16 @@ class InsightHelpers(unittest.TestCase):
                 tmp, fit={"rate": 0.5, "n_fit": 12, "pass": True}, latency={"p50": 0.9, "pass": True},
             )
             self.assertFalse(qt["auto_write"])
+            st = skip_twin_clerk.write_digest(tmp, status={
+                "n": 8, "labeled_n": 4, "shadow_ev": 0.01, "decision": "reject",
+            })
+            self.assertEqual(st["helper"], "skip_twin_clerk")
+            self.assertFalse(st["auto_promote"])
             board = desk_living.living_upgrade_board(tmp)
+            swarm = board.get("insight_swarm") or {}
+            self.assertIn("ratio", swarm)
+            self.assertEqual(swarm.get("min_ratio"), 3.0)
+            self.assertTrue(board["insight_helper_digests"].get("skip_twin_clerk"))
             self.assertTrue(board["insight_helper_digests"].get("eia_scout"))
             self.assertTrue(board["insight_helper_digests"].get("calib_nag"))
             self.assertTrue(board["insight_helper_digests"].get("hard_stop_clerk"))

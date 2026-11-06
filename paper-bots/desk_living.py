@@ -19,6 +19,34 @@ COMPLETIONS_NAME = "desk_completions.json"
 MAX_FEATURE_ROWS_READ = 5000
 MAX_COMPLETION_ROWS = 2000
 FEE_CLEAR = frozenset({"sports-gap", "btc15m", "commodity-15m"})
+BETTING_TOWERS = (
+    "sports-gap",
+    "btc15m",
+    "commodity-15m",
+    "memecoin",
+    "kalshi-sp",
+    "kalshi-sized",
+)
+INSIGHT_HELPER_DIGESTS = (
+    "tip_radar_digest.json",
+    "skip_historian_digest.json",
+    "timer_heartbeat_digest.json",
+    "empty_card_bee_digest.json",
+    "clv_closer_digest.json",
+    "injury_wire_digest.json",
+    "eia_scout_digest.json",
+    "calib_nag_digest.json",
+    "hard_stop_clerk_digest.json",
+    "near_miss_clerk_digest.json",
+    "bleed_clerk_digest.json",
+    "distance_clerk_digest.json",
+    "bookkeeper_clerk_digest.json",
+    "reporter_clerk_digest.json",
+    "quant_clerk_digest.json",
+    "skip_twin_clerk_digest.json",
+    "calendar_digest.json",
+)
+INSIGHT_BETTING_MIN_RATIO = 3.0
 
 
 def _root(root: str | None = None) -> str:
@@ -322,39 +350,51 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def insight_swarm_ratio(root: str | None = None) -> dict:
+    """Insight:betting headcount audit — living hire order requires ≥3:1 until M1≥0."""
+    helpers = {}
+    for name in INSIGHT_HELPER_DIGESTS:
+        path = os.path.join(_root(root), "helpers", name)
+        key = name.replace("_digest.json", "").replace(".json", "")
+        helpers[key] = os.path.isfile(path)
+    insight_n = sum(1 for v in helpers.values() if v)
+    betting_n = len(BETTING_TOWERS)
+    ratio = round(insight_n / betting_n, 4) if betting_n else None
+    ok = bool(ratio is not None and ratio + 1e-12 >= INSIGHT_BETTING_MIN_RATIO)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "insight_n": insight_n,
+        "betting_n": betting_n,
+        "ratio": ratio,
+        "min_ratio": INSIGHT_BETTING_MIN_RATIO,
+        "pass": ok,
+        "insight_helpers": helpers,
+        "betting_towers": list(BETTING_TOWERS),
+        "note": (
+            "Insight swarm ≥3:1 vs betting towers until firm M1 ≥ 0. "
+            "Hire observe-only clerks first — never meme/INX spam."
+            if not ok
+            else "Insight:betting headcount meets ≥3:1 living hire order. Floors locked."
+        ),
+    }
+
+
 def living_upgrade_board(root: str | None = None, bots: list | None = None) -> dict:
     """Masters card: data + completions health for the living upgrade."""
     feat = feature_store_coverage(root)
     comp = completions_summary(root)
     ai = living_ai_health(root, bots=bots)
-    helpers = {}
-    for name in (
-        "tip_radar_digest.json",
-        "skip_historian_digest.json",
-        "timer_heartbeat_digest.json",
-        "empty_card_bee_digest.json",
-        "clv_closer_digest.json",
-        "injury_wire_digest.json",
-        "eia_scout_digest.json",
-        "calib_nag_digest.json",
-        "hard_stop_clerk_digest.json",
-        "near_miss_clerk_digest.json",
-        "bleed_clerk_digest.json",
-        "distance_clerk_digest.json",
-        "bookkeeper_clerk_digest.json",
-        "reporter_clerk_digest.json",
-        "quant_clerk_digest.json",
-        "calendar_digest.json",
-    ):
-        path = os.path.join(_root(root), "helpers", name)
-        helpers[name.replace("_digest.json", "").replace(".json", "")] = os.path.isfile(path)
+    swarm = insight_swarm_ratio(root)
+    helpers = swarm.get("insight_helpers") or {}
     return {
         "paper_only": True,
         "feature_store": feat,
         "completions": comp,
         "living_ai": ai,
+        "insight_swarm": swarm,
         "insight_helper_digests": helpers,
-        "insight_helpers_present": sum(1 for v in helpers.values() if v),
+        "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
         "fee_floors_locked": True,
         "insight_first": True,
