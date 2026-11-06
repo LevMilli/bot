@@ -682,13 +682,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Distance empty vault | empty_card_pass fail |
 | Quant fit vault tint | fit_pass fail amber |
 
-### Next
+### Living upgrade — bookkeeper / reporter / empty-bee vault
 
 | Ticket | Where |
 | --- | --- |
 | Bookkeeper vault row | fee ledger gaps |
 | Reporter vault tint | auto_publish False assert |
 | Empty-card bee vault | breaches amber |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Near-miss clerk vault | twin promote_ready |
+| Hard-stop clerk vault | clerk promote_ready |
+| Bleed clerk vault tint | clerk bleed hot |
 
 ## Hard rules unchanged
 
