@@ -2080,12 +2080,17 @@ export default function App() {
                           clv?: { label?: string; pass?: boolean; complete?: number; n?: number }
                         } | undefined)?.clv
                       if (!c) return 'CLV pending'
-                      return (
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
                         c.label ||
                         `CLV complete=${c.complete ?? '—'}/${c.n ?? '—'} ${
                           c.pass === false ? 'gaps' : 'ok'
                         }`
-                      )
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -2139,11 +2144,16 @@ export default function App() {
                           timer_heartbeat?: { label?: string; alive?: boolean; age_sec?: number }
                         } | undefined)?.timer_heartbeat
                       if (!t) return 'timer heartbeat pending'
-                      return (
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
                         t.label ||
                         `timer ${t.alive === false ? 'DEAD' : 'alive'}` +
                           (t.age_sec != null ? ` age=${t.age_sec}s` : '')
-                      )
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>

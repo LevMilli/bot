@@ -198,6 +198,10 @@ def main() -> int:
                 f"gaps observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never softens floors)"
             )
+            flat["digests_sunday_quiet"] = (
+                f"digests observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -259,6 +263,10 @@ def main() -> int:
             )
             print(
                 f"gaps sunday: gaps observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"digests sunday: digests observe · sunday quiet {sunday_label} "
                 "(observe · never softens floors)"
             )
             print(
