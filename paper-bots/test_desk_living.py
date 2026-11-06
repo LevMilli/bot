@@ -124,6 +124,11 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("timer_digest", board2)
             self.assertFalse(board2["skip_twin_clerk"].get("auto_promote"))
             self.assertTrue(board2["clv_closer"]["fee_floors_locked"])
+            self.assertIn("calendar_scanner", board2)
+            self.assertIn("eia_blackout", board2)
+            self.assertIn("compact", board2)
+            self.assertTrue(board2["eia_blackout"]["fee_floors_locked"])
+            self.assertIn("swarm", board2["compact"].get("label") or "")
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

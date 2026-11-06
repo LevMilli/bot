@@ -445,6 +445,119 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def calendar_scanner_chip(root: str | None = None) -> dict:
+    """Upcoming high-impact calendar events chip."""
+    digest: dict = {}
+    try:
+        from helpers import calendar_scanner
+        path = calendar_scanner.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = calendar_scanner.scan(root) or {}
+    except Exception:
+        digest = {}
+    events = digest.get("events") if isinstance(digest.get("events"), list) else []
+    if not events and isinstance(digest.get("upcoming"), list):
+        events = digest.get("upcoming") or []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n") if digest.get("n") is not None else len(events),
+        "events": events[:8],
+        "nearest": events[0] if events else None,
+        "label": (
+            f"calendar n={digest.get('n') if digest.get('n') is not None else len(events)} "
+            f"next={(events[0] or {}).get('title') if events else None}"
+        ),
+        "note": digest.get("note") or "Observe-only calendar scanner — never places alone.",
+    }
+
+
+def eia_blackout_chip(root: str | None = None) -> dict:
+    """Commodity ±45m EIA/inventory blackout chip."""
+    status: dict = {}
+    try:
+        from helpers import eia_blackout
+        events = eia_blackout.load_calendar_events(root)
+        # Probe primary energy series used on commodity tower.
+        crude = eia_blackout.energy_blackout("CL", events)
+        gas = eia_blackout.energy_blackout("NG", events)
+        blocked = bool(crude.get("blocked") or gas.get("blocked"))
+        hits = list(crude.get("hits") or []) + list(gas.get("hits") or [])
+        status = {
+            "blocked": blocked,
+            "window_min": getattr(eia_blackout, "EIA_WINDOW_MIN", 45),
+            "crude": crude,
+            "natgas": gas,
+            "hits_n": len(hits),
+            "note": (
+                "Commodity blackout ±45m around inventory prints — never softens 0.05."
+            ),
+        }
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "blocked": bool(status.get("blocked")),
+        "window_min": status.get("window_min") or 45,
+        "hits_n": status.get("hits_n"),
+        "crude_blocked": bool((status.get("crude") or {}).get("blocked")),
+        "natgas_blocked": bool((status.get("natgas") or {}).get("blocked")),
+        "label": (
+            f"EIA blackout {'ACTIVE' if status.get('blocked') else 'clear'} "
+            f"hits={status.get('hits_n')} window={status.get('window_min') or 45}m"
+        ),
+        "note": status.get("note") or "±45m inventory blackout for energy series.",
+    }
+
+
+def living_compact_card(
+    root: str | None = None,
+    bots: list | None = None,
+    *,
+    board: dict | None = None,
+) -> dict:
+    """One-line Masters summary across living chips (no recursive board build)."""
+    if isinstance(board, dict):
+        src = board
+    else:
+        swarm = insight_swarm_ratio(root)
+        timer = timer_heartbeat_chip(root)
+        green = green_day_board(root, bots=bots)
+        bleed = bleed_chip(root, bots=bots)
+        quiet = feature_store_quiet_alert(root)
+        src = {
+            "insight_swarm": swarm,
+            "timer_heartbeat": timer,
+            "green_day": green,
+            "bleed": bleed,
+            "feature_quiet": quiet,
+        }
+    swarm = src.get("insight_swarm") if isinstance(src.get("insight_swarm"), dict) else {}
+    timer = src.get("timer_heartbeat") if isinstance(src.get("timer_heartbeat"), dict) else {}
+    green = src.get("green_day") if isinstance(src.get("green_day"), dict) else {}
+    bleed = src.get("bleed") if isinstance(src.get("bleed"), dict) else {}
+    quiet = src.get("feature_quiet") if isinstance(src.get("feature_quiet"), dict) else {}
+    parts = [
+        f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')}",
+        f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'}",
+        f"green={green.get('green_n')}",
+        f"bleed={bleed.get('ratio')}",
+        f"quiet={'yes' if quiet.get('quiet') else 'no'}",
+    ]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "parts": parts,
+        "label": " · ".join(str(p) for p in parts),
+        "note": "Compact living card — floors locked; paper only.",
+    }
+
+
 def skip_twin_clerk_chip(root: str | None = None) -> dict:
     """Skip-twin clerk digest — labeled near-miss feature join."""
     digest: dict = {}
@@ -1365,7 +1478,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         hillclimb = None
         dual = None
         ruin = None
-    return {
+    board = {
         "paper_only": True,
         "feature_store": feat,
         "feature_quiet": quiet,
@@ -1402,6 +1515,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "skip_twin_clerk": skip_twin_clerk_chip(root),
         "clv_closer": clv_closer_chip(root),
         "timer_digest": timer_digest_chip(root),
+        "calendar_scanner": calendar_scanner_chip(root),
+        "eia_blackout": eia_blackout_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -1411,6 +1526,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "live_orders_enabled": False,
         "note": "Living Trading Upgrade board — more eligible completions + learn data.",
     }
+    board["compact"] = living_compact_card(root, bots=bots, board=board)
+    return board
 
 
 def _f(v: Any):

@@ -470,13 +470,21 @@ Interactive: Positive ROI Master Plan canvas.
 | CLV closer chip | `desk_living.clv_closer_chip` |
 | Timer digest chip | `desk_living.timer_digest_chip` |
 
+### Living upgrade — calendar / EIA blackout / compact card
+
+| Ticket | Where |
+| --- | --- |
+| Calendar scanner chip | `desk_living.calendar_scanner_chip` |
+| EIA blackout chip | `desk_living.eia_blackout_chip` |
+| Compact living card | `desk_living.living_compact_card` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Calendar scanner chip | upcoming events digest |
-| EIA blackout chip | ±45m commodity window |
-| Living board compact card | one-line Masters summary |
+| Clerk pulse health chip | last pulse age on HUD |
+| Dual-control signed chip | signed_n/items_n rail |
+| Ruin drill month chip | practiced_this_month alert |
 
 ## Hard rules unchanged
 

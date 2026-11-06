@@ -723,6 +723,15 @@ def master_summary(
     timer_digest = (living or {}).get("timer_digest") if isinstance(living, dict) else None
     if isinstance(timer_digest, dict) and timer_digest.get("alive") is False:
         priority.insert(0, str(timer_digest.get("label") or "timer digest DEAD")[:120])
+    eia_bo = (living or {}).get("eia_blackout") if isinstance(living, dict) else None
+    if isinstance(eia_bo, dict) and eia_bo.get("blocked"):
+        priority.insert(0, str(eia_bo.get("label") or "EIA blackout ACTIVE")[:120])
+    cal = (living or {}).get("calendar_scanner") if isinstance(living, dict) else None
+    if isinstance(cal, dict) and int(cal.get("n") or 0) > 0:
+        priority.append(str(cal.get("label") or "calendar events")[:120])
+    compact = (living or {}).get("compact") if isinstance(living, dict) else None
+    if isinstance(compact, dict) and compact.get("label"):
+        priority.append(str(compact.get("label"))[:160])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -885,6 +894,21 @@ def master_summary(
         ),
         "timer_digest": (
             (living or {}).get("timer_digest")
+            if isinstance(living, dict)
+            else None
+        ),
+        "calendar_scanner": (
+            (living or {}).get("calendar_scanner")
+            if isinstance(living, dict)
+            else None
+        ),
+        "eia_blackout": (
+            (living or {}).get("eia_blackout")
+            if isinstance(living, dict)
+            else None
+        ),
+        "compact": (
+            (living or {}).get("compact")
             if isinstance(living, dict)
             else None
         ),
