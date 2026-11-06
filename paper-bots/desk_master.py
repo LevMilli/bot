@@ -669,6 +669,12 @@ def master_summary(
     clv = (living or {}).get("clv") if isinstance(living, dict) else None
     if isinstance(clv, dict) and clv.get("pass") is False:
         priority.append(str(clv.get("label") or "CLV gaps")[:120])
+    tip = (living or {}).get("tip_radar") if isinstance(living, dict) else None
+    if isinstance(tip, dict) and int(tip.get("t5") or 0) > 0:
+        priority.append(str(tip.get("label") or "tip T-5")[:120])
+    calib = (living or {}).get("calib_nag") if isinstance(living, dict) else None
+    if isinstance(calib, dict) and int(calib.get("tickets_n") or 0) > 0:
+        priority.insert(0, str(calib.get("label") or "raise_phi tickets")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -751,6 +757,16 @@ def master_summary(
         ),
         "clv": (
             (living or {}).get("clv")
+            if isinstance(living, dict)
+            else None
+        ),
+        "tip_radar": (
+            (living or {}).get("tip_radar")
+            if isinstance(living, dict)
+            else None
+        ),
+        "calib_nag": (
+            (living or {}).get("calib_nag")
             if isinstance(living, dict)
             else None
         ),

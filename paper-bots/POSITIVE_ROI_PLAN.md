@@ -417,13 +417,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Bleed chip | `desk_living.bleed_chip` |
 | CLV chip | `desk_living.clv_chip` |
 
+### Living upgrade — tip radar + calib nag chips
+
+| Ticket | Where |
+| --- | --- |
+| Tip radar chip | `desk_living.tip_radar_chip` |
+| Calib nag chip | `desk_living.calib_nag_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Tip radar chip | T-5/T-15/T-180 windows on HUD |
-| Calib nag chip | raise_phi ticket count on rail |
+| Injury wire chip | open inbox / digest on HUD |
+| EIA scout chip | 7-day inventory calendar |
 
 ## Hard rules unchanged
 

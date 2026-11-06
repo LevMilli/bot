@@ -2581,6 +2581,18 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["bleed"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["clv"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        tr = desk_living.tip_radar_chip(root)
+        cn = desk_living.calib_nag_chip(root, bots=bots)
+        desk_row["tip_radar"] = tr
+        desk_row["calib_nag"] = cn
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["tip_radar"] = desk_row["master"].get("tip_radar") or tr
+            desk_row["master"]["calib_nag"] = desk_row["master"].get("calib_nag") or cn
+    except Exception as exc:  # noqa: BLE001
+        desk_row["tip_radar"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["calib_nag"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}
