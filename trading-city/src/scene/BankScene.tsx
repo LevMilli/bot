@@ -454,40 +454,46 @@ function HeroVaultDoor() {
     return [Math.cos(a) * 1.18, Math.sin(a) * 1.18] as const
   })
   return (
-    <group position={[0, 1.35, Z_BACK + 0.72]}>
-      {/* Recessed vault alcove frame */}
-      <mesh position={[0, 0.05, -0.35]}>
-        <boxGeometry args={[4.4, 3.6, 0.5]} />
-        <meshStandardMaterial color="#0c0814" metalness={0.45} roughness={0.55} />
+    <group position={[0, 1.35, Z_BACK + 0.98]}>
+      {/* Open alcove surround — rim only, door stays fully visible */}
+      <mesh position={[0, 1.72, -0.12]}>
+        <boxGeometry args={[4.2, 0.35, 0.42]} />
+        <meshStandardMaterial color="#0c0814" metalness={0.5} roughness={0.45} />
       </mesh>
-      <mesh position={[0, 0.05, -0.08]}>
-        <boxGeometry args={[3.9, 3.2, 0.18]} />
-        <meshStandardMaterial color="#16101f" metalness={0.55} roughness={0.4} />
+      <mesh position={[0, -1.68, -0.12]}>
+        <boxGeometry args={[4.2, 0.38, 0.42]} />
+        <meshStandardMaterial color="#0c0814" metalness={0.5} roughness={0.45} />
       </mesh>
+      {([-1, 1] as const).map((side) => (
+        <mesh key={`jamb-${side}`} position={[side * 2.0, 0.05, -0.12]}>
+          <boxGeometry args={[0.38, 3.5, 0.42]} />
+          <meshStandardMaterial color="#121018" metalness={0.55} roughness={0.4} />
+        </mesh>
+      ))}
       {/* Brass arch trim */}
-      <mesh position={[0, 1.55, 0.05]}>
-        <boxGeometry args={[3.95, 0.08, 0.12]} />
+      <mesh position={[0, 1.55, 0.12]}>
+        <boxGeometry args={[4.15, 0.1, 0.14]} />
         <meshStandardMaterial color={BRASS} metalness={0.88} roughness={0.2} />
       </mesh>
-      <mesh position={[0, -1.5, 0.05]}>
-        <boxGeometry args={[3.95, 0.1, 0.14]} />
+      <mesh position={[0, -1.5, 0.12]}>
+        <boxGeometry args={[4.15, 0.12, 0.16]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
       </mesh>
       {([-1, 1] as const).map((side) => (
-        <mesh key={side} position={[side * 1.95, 0.05, 0.05]}>
-          <boxGeometry args={[0.1, 3.15, 0.12]} />
+        <mesh key={side} position={[side * 2.05, 0.05, 0.12]}>
+          <boxGeometry args={[0.12, 3.2, 0.14]} />
           <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
         </mesh>
       ))}
-      {/* Inner chamber glow */}
-      <mesh position={[0, 0.05, -0.55]}>
-        <circleGeometry args={[1.15, 48]} />
+      {/* Inner chamber glow behind the wheel */}
+      <mesh position={[0, 0.05, -0.28]}>
+        <circleGeometry args={[1.25, 48]} />
         <meshBasicMaterial color="#3a1860" toneMapped={false} />
       </mesh>
-      <pointLight position={[0, 0.2, -0.2]} intensity={0.85} color="#ffd080" distance={6} />
-      <pointLight position={[0, 0.1, 0.5]} intensity={0.45} color="#7ef9ff" distance={5} />
+      <pointLight position={[0, 0.2, -0.1]} intensity={1.0} color="#ffd080" distance={7} />
+      <pointLight position={[0, 0.1, 0.65]} intensity={0.55} color="#7ef9ff" distance={5.5} />
 
-      <group scale={1.05}>
+      <group scale={1.12}>
         <mesh position={[0, 0, -0.08]}>
           <cylinderGeometry args={[1.55, 1.55, 0.22, 56]} />
           <meshStandardMaterial color="#080510" metalness={0.65} roughness={0.3} />
@@ -555,13 +561,13 @@ function HeroVaultDoor() {
           <meshBasicMaterial color="#2de2e6" transparent opacity={0.3} depthWrite={false} toneMapped={false} />
         </mesh>
       </group>
-      {/* SECURE status plaque */}
-      <mesh position={[0, -1.85, 0.12]}>
-        <boxGeometry args={[1.4, 0.28, 0.06]} />
+      {/* SECURE status plaque — above floor, under the wheel */}
+      <mesh position={[0, -1.72, 0.22]}>
+        <boxGeometry args={[1.5, 0.3, 0.08]} />
         <meshStandardMaterial color={INK} metalness={0.5} roughness={0.35} />
       </mesh>
-      <mesh position={[0, -1.85, 0.16]}>
-        <boxGeometry args={[1.2, 0.14, 0.02]} />
+      <mesh position={[0, -1.72, 0.28]}>
+        <boxGeometry args={[1.28, 0.16, 0.025]} />
         <meshStandardMaterial ref={status} color="#39ff14" emissive="#39ff14" emissiveIntensity={0.8} toneMapped={false} />
       </mesh>
     </group>
