@@ -47,7 +47,7 @@ function hallWallSegments(side: 'left' | 'right'): { x: number; w: number }[] {
     .map((r) => r.position[0])
     .sort((a, b) => a - b)
 
-  const gap = DOOR_W + 0.15
+  const gap = DOOR_W + 0.05
   const xStart = WING_HALL.xMin
   const xEnd = WING_HALL.xMax
   const segs: { x: number; w: number }[] = []
@@ -100,39 +100,78 @@ function HallCosmetics() {
           <meshStandardMaterial color="#7ec8d8" metalness={0.35} roughness={0.4} />
         </mesh>
       ))}
-      {/* Enclosed hall side walls — gaps only at suite doors so the camera stays inside the model */}
+      {/* Enclosed hall side walls — inset slightly so they read against suite door faces */}
       {leftSegs.map((seg) => (
-        <mesh key={`hl-${seg.x}`} position={[seg.x, WALL_H / 2, WING_HALL.zMin]}>
-          <boxGeometry args={[seg.w, WALL_H, 0.14]} />
-          <meshStandardMaterial color="#1a1430" roughness={0.88} metalness={0.08} />
+        <mesh key={`hl-${seg.x}`} position={[seg.x, WALL_H / 2, WING_HALL.zMin + 0.06]}>
+          <boxGeometry args={[Math.max(0.2, seg.w), WALL_H, 0.18]} />
+          <meshStandardMaterial color="#2a2048" roughness={0.82} metalness={0.1} />
         </mesh>
       ))}
       {rightSegs.map((seg) => (
-        <mesh key={`hr-${seg.x}`} position={[seg.x, WALL_H / 2, WING_HALL.zMax]}>
-          <boxGeometry args={[seg.w, WALL_H, 0.14]} />
-          <meshStandardMaterial color="#1a1430" roughness={0.88} metalness={0.08} />
+        <mesh key={`hr-${seg.x}`} position={[seg.x, WALL_H / 2, WING_HALL.zMax - 0.06]}>
+          <boxGeometry args={[Math.max(0.2, seg.w), WALL_H, 0.18]} />
+          <meshStandardMaterial color="#2a2048" roughness={0.82} metalness={0.1} />
         </mesh>
       ))}
+      {/* Outer building skin — continuous hull around the whole wing so FPV never sees infinite void */}
+      {(() => {
+        const pad = 0.35
+        const minX = WING_HALL.xMin - pad
+        const maxX = 35.2 + ROOM_HALF_W + pad
+        const minZ = -ROOM_HALF_D - ROOM_HALF_W - pad
+        const maxZ = ROOM_HALF_D + ROOM_HALF_W + pad
+        const midX = (minX + maxX) / 2
+        const midZ = (minZ + maxZ) / 2
+        const spanX = maxX - minX
+        const spanZ = maxZ - minZ
+        const t = 0.28
+        return (
+          <group>
+            <mesh position={[midX, WALL_H / 2, minZ - t / 2]}>
+              <boxGeometry args={[spanX + t * 2, WALL_H + 0.2, t]} />
+              <meshStandardMaterial color="#120a24" roughness={0.92} />
+            </mesh>
+            <mesh position={[midX, WALL_H / 2, maxZ + t / 2]}>
+              <boxGeometry args={[spanX + t * 2, WALL_H + 0.2, t]} />
+              <meshStandardMaterial color="#120a24" roughness={0.92} />
+            </mesh>
+            <mesh position={[minX - t / 2, WALL_H / 2, midZ]}>
+              <boxGeometry args={[t, WALL_H + 0.2, spanZ]} />
+              <meshStandardMaterial color="#120a24" roughness={0.92} />
+            </mesh>
+            <mesh position={[maxX + t / 2, WALL_H / 2, midZ]}>
+              <boxGeometry args={[t, WALL_H + 0.2, spanZ]} />
+              <meshStandardMaterial color="#120a24" roughness={0.92} />
+            </mesh>
+            {/* Roof slab over the whole wing footprint */}
+            <mesh position={[midX, WALL_H + 0.08, midZ]} rotation={[Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[spanX + t * 2, spanZ + t * 2]} />
+              <meshStandardMaterial color="#0e081c" roughness={0.95} side={DoubleSide} />
+            </mesh>
+          </group>
+        )
+      })()}
       {/* Door threshold bridges — continuous floor from hall into each suite */}
       {rooms
         .filter((r) => r.side !== 'end')
         .map((r) => {
+          const hallZ = r.position[2] < 0 ? WING_HALL.zMin : WING_HALL.zMax
           const doorZ = r.position[2] + Math.cos(r.yaw) * (ROOM_HALF_D - 0.05)
           return (
             <mesh
               key={`th-${r.id}`}
-              position={[r.position[0], 0.015, (doorZ + (doorZ > 0 ? WING_HALL.zMax : WING_HALL.zMin)) / 2]}
+              position={[r.position[0], 0.016, (doorZ + hallZ) / 2]}
               rotation={[-Math.PI / 2, 0, 0]}
             >
-              <planeGeometry args={[DOOR_W + 0.35, Math.abs(doorZ) - width / 2 + 0.35]} />
-              <meshStandardMaterial color="#322850" roughness={0.6} metalness={0.12} side={DoubleSide} />
+              <planeGeometry args={[DOOR_W + 0.5, Math.abs(doorZ - hallZ) + 0.55]} />
+              <meshStandardMaterial color="#3a2a68" roughness={0.55} metalness={0.14} side={DoubleSide} />
             </mesh>
           )
         })}
       {/* Boss threshold at hall +X end */}
-      <mesh position={[WING_HALL.xMax + 0.35, 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[1.1, DOOR_W + 0.4]} />
-        <meshStandardMaterial color="#322850" roughness={0.6} metalness={0.12} side={DoubleSide} />
+      <mesh position={[WING_HALL.xMax + 0.35, 0.016, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1.1, DOOR_W + 0.5]} />
+        <meshStandardMaterial color="#3a2a68" roughness={0.55} metalness={0.14} side={DoubleSide} />
       </mesh>
       {/* Ceiling + troffers */}
       <mesh position={[x0, WALL_H, 0]} rotation={[Math.PI / 2, 0, 0]}>
@@ -233,10 +272,19 @@ function SuiteShell({ room, color, live }: { room: WingRoom; color: string; live
         <boxGeometry args={[ROOM_HALF_W * 2, WALL_H, 0.12]} />
         <meshStandardMaterial color="#241848" roughness={0.88} />
       </mesh>
-      {/* Fake window glow */}
-      <mesh position={[0, 1.7, -ROOM_HALF_D + 0.08]}>
+      {/* Opaque window pane + glow — never an open hole into void */}
+      <mesh position={[0, 1.7, -ROOM_HALF_D + 0.06]}>
         <planeGeometry args={[ROOM_HALF_W * 1.15, 1.8]} />
-        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.08} toneMapped={false} />
+        <meshStandardMaterial color="#0a1828" roughness={0.35} metalness={0.4} />
+      </mesh>
+      <mesh position={[0, 1.7, -ROOM_HALF_D + 0.1]}>
+        <planeGeometry args={[ROOM_HALF_W * 1.05, 1.6]} />
+        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.12} toneMapped={false} />
+      </mesh>
+      {/* Ceiling over suite so looking up through a doorway stays enclosed */}
+      <mesh position={[0, WALL_H, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[ROOM_HALF_W * 2 + 0.1, ROOM_HALF_D * 2 + 0.1]} />
+        <meshStandardMaterial color="#161028" roughness={0.9} side={DoubleSide} />
       </mesh>
       {/* Hall wall with OPEN doorway (walk through — no click teleport) */}
       <mesh position={[-(doorGap / 2 + wallSeg / 2), WALL_H / 2, ROOM_HALF_D]}>
