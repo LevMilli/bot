@@ -248,6 +248,13 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("betting_expand_gate", board2)
             self.assertIn(gate.get("blocked"), (True, False))
             self.assertEqual(bool(gate.get("allow_betting_expand")), not bool(gate.get("blocked")))
+            self.assertIn("soft_copy", gate)
+            self.assertIn(gate.get("label") or "", gate.get("soft_copy") or "")
+            ruin_page = desk_living.ruin_drill_page(tmp)
+            self.assertEqual(ruin_page.get("discord"), ruin_page.get("copy"))
+            self.assertFalse(ruin_page.get("auto_publish"))
+            compact = desk_living.living_compact_card(tmp)
+            self.assertIn("swarm", compact.get("label") or "")
             # Fresh empty root → blocked until seed fills digests.
             with tempfile.TemporaryDirectory() as empty:
                 thin = desk_living.betting_expand_gate(empty)

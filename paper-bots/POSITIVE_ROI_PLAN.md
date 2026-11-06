@@ -602,13 +602,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Feature quiet vault tint | quiet amber on vault |
 | Dual gaps Discord shortcut | `staff_living_status.py gaps --discord` |
 
-### Next
+### Living upgrade — ruin Discord + compact vault + expand copy
 
 | Ticket | Where |
 | --- | --- |
 | Ruin Discord shortcut | `status ruin --discord` |
 | Living compact vault row | one-line compact on vault |
-| Expand gate soft copy | blocked reason in status text |
+| Expand gate soft copy | blocked reason in status / `--discord` |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Floors Discord soft assert | `status floors --discord` |
+| Doctor Discord one-liner | `status doctor --discord` |
+| Inventory thin vault tint | digest inventory on vault |
 
 ## Hard rules unchanged
 
