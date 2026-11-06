@@ -62,6 +62,18 @@ def format_discord(payload: dict) -> str:
         f"(staff paste · never auto-posts)"
     )
     lines.append(f"• Masters sunday: sunday quiet {tip_age} (observe · never pages)")
+    expand_ok = payload.get("expand_ok")
+    expand_bit = (
+        "expand=ok"
+        if expand_ok
+        else "expand=blocked"
+        if expand_ok is False
+        else "expand=n/a"
+    )
+    lines.append(
+        f"• Expand sunday: {expand_bit} · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -125,6 +137,17 @@ def main() -> int:
             flat["masters_sunday_quiet"] = (
                 f"sunday quiet {flat['sunday_quiet_age_label']} (observe)"
             )
+            expand_bit = (
+                "expand=ok"
+                if chip.get("expand_ok")
+                else "expand=blocked"
+                if chip.get("expand_ok") is False
+                else "expand=n/a"
+            )
+            flat["expand_sunday_quiet"] = (
+                f"{expand_bit} · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -158,6 +181,17 @@ def main() -> int:
                 "(staff paste · never auto-posts)"
             )
             print(f"masters sunday: sunday quiet {sunday_label} (observe)")
+            expand_bit = (
+                "expand=ok"
+                if chip.get("expand_ok")
+                else "expand=blocked"
+                if chip.get("expand_ok") is False
+                else "expand=n/a"
+            )
+            print(
+                f"expand sunday: {expand_bit} · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
@@ -232,6 +266,11 @@ def main() -> int:
         f"Sunday quiet tip: {sunday_quiet_age_label} · "
         "cross-check python3 tools/staff_sunday_packet.py discord "
         "(staff paste · never auto-posts)"
+    )
+    payload["expand_sunday_quiet"] = (
+        f"{'expand=ok' if expand_ok else 'expand=blocked' if expand_ok is False else 'expand=n/a'} "
+        f"· sunday quiet {sunday_quiet_age_label} "
+        "(observe · never softens floors)"
     )
     if args.discord:
         print(format_discord(payload))
