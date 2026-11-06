@@ -509,13 +509,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Living self_check | `desk_living.living_self_check` |
 | Swarm vault color | city vault green/amber from pass |
 
+### Living upgrade — dual gaps / hillclimb / digest inventory
+
+| Ticket | Where |
+| --- | --- |
+| Dual-control gaps page | `desk_living.dual_control_gaps_page` + CLI `gaps` |
+| Hillclimb chip | `desk_living.hillclimb_chip` + CLI `hillclimb` |
+| Digest inventory | `desk_living.digest_inventory` + CLI `inventory` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Dual-control incomplete page | staff checklist gaps copy |
-| Hillclimb staff status line | tools/staff_hillclimb_pick status on living |
-| Living digest inventory | count helpers present vs expected |
+| Ruin drill page copy | staff markdown when not practiced |
+| Living board export | tools/staff_living_status.py export |
+| Empty digest seed helper | staff seed missing insight digests |
 
 ## Hard rules unchanged
 

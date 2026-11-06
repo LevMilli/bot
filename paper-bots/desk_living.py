@@ -1674,6 +1674,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "dual_control_chip": dual_control_chip(root),
         "ruin_drill_chip": ruin_drill_chip(root),
         "completions_chip": completions_chip(root),
+        "dual_control_gaps": dual_control_gaps_page(root),
+        "hillclimb_chip": hillclimb_chip(root),
+        "digest_inventory": digest_inventory(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -1685,6 +1688,128 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
     }
     board["compact"] = living_compact_card(root, bots=bots, board=board)
     return board
+
+
+def dual_control_gaps_page(root: str | None = None) -> dict:
+    """Staff checklist gaps copy for unsigned dual-control items (never auto-pages)."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.dual_control_status(root) or {}
+    except Exception:
+        status = {}
+    items = status.get("items") if isinstance(status.get("items"), list) else []
+    gaps = [
+        {
+            "id": str(it.get("id") or ""),
+            "label": str(it.get("label") or "")[:120],
+        }
+        for it in items
+        if isinstance(it, dict) and not it.get("signed")
+    ]
+    page = bool(gaps) and not bool(status.get("arm_ready_paper"))
+    lines = [
+        "**DUAL-CONTROL GAPS** (paper checklist — never enables live)",
+        f"signed={status.get('signed_n')}/{status.get('items_n')} "
+        f"two_staff={bool(status.get('two_staff'))} "
+        f"arm_ready_paper={bool(status.get('arm_ready_paper'))}",
+        "",
+    ]
+    for g in gaps:
+        lines.append(f"- [ ] `{g.get('id')}` — {g.get('label')}")
+    if not gaps:
+        lines.append("- all checklist items signed (still paper-only; live lock stays False)")
+    lines.append("")
+    lines.append("_floors locked · LIVE_ORDERS_ENABLED=False · staff ack only_")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_page": False,
+        "page": page,
+        "gaps_n": len(gaps),
+        "gaps": gaps,
+        "signed_n": status.get("signed_n"),
+        "items_n": status.get("items_n"),
+        "copy": "\n".join(lines),
+        "label": (
+            f"dual-control gaps={len(gaps)} signed={status.get('signed_n')}/{status.get('items_n')}"
+        ),
+        "note": status.get("note") or (
+            "Unsigned dual-control items — staff signs via tools/staff_dual_control.py."
+        ),
+    }
+
+
+def hillclimb_chip(root: str | None = None) -> dict:
+    """Hillclimb lever status chip — active lever only when staff-set."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.hillclimb_lever_status(root) or {}
+    except Exception:
+        status = {}
+    active = status.get("active") if isinstance(status.get("active"), dict) else None
+    name = None
+    if active:
+        name = active.get("name") or active.get("lever") or active.get("id")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "auto_revert": bool(status.get("auto_revert")),
+        "week": status.get("week"),
+        "active": active,
+        "active_name": name,
+        "active_this_week": bool(status.get("active_this_week") or active),
+        "kill": status.get("kill"),
+        "label": (
+            f"hillclimb lever={name} week={status.get('week')}"
+            if name
+            else f"hillclimb none week={status.get('week')}"
+        ),
+        "note": status.get("note") or (
+            "One allowlisted lever per Chicago week — floors locked."
+        ),
+    }
+
+
+def digest_inventory(root: str | None = None) -> dict:
+    """Count insight helper digests present vs expected (≥3:1 hire order)."""
+    present = []
+    missing = []
+    base = os.path.join(_root(root), "helpers")
+    for name in INSIGHT_HELPER_DIGESTS:
+        path = os.path.join(base, name)
+        key = name.replace("_digest.json", "").replace(".json", "")
+        if os.path.isfile(path):
+            present.append(key)
+        else:
+            missing.append(key)
+    expected_n = len(INSIGHT_HELPER_DIGESTS)
+    present_n = len(present)
+    betting_n = len(BETTING_TOWERS)
+    ratio = round(present_n / betting_n, 4) if betting_n else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "expected_n": expected_n,
+        "present_n": present_n,
+        "missing_n": len(missing),
+        "present": present,
+        "missing": missing,
+        "betting_n": betting_n,
+        "ratio": ratio,
+        "min_ratio": INSIGHT_BETTING_MIN_RATIO,
+        "pass": bool(ratio is not None and ratio + 1e-12 >= INSIGHT_BETTING_MIN_RATIO),
+        "label": (
+            f"digest inventory {present_n}/{expected_n} "
+            f"missing={len(missing)} ratio={ratio}"
+        ),
+        "note": (
+            "Insight digests present vs expected. Hire observe clerks first — floors locked."
+        ),
+    }
 
 
 def living_self_check(root: str | None = None) -> dict:

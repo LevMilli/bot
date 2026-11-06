@@ -2748,6 +2748,28 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     except Exception as exc:  # noqa: BLE001
         desk_row["completions_chip"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        gaps = desk_living.dual_control_gaps_page(root)
+        hc = desk_living.hillclimb_chip(root)
+        inv = desk_living.digest_inventory(root)
+        desk_row["dual_control_gaps"] = gaps
+        desk_row["hillclimb_chip"] = hc
+        desk_row["digest_inventory"] = inv
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["dual_control_gaps"] = (
+                desk_row["master"].get("dual_control_gaps") or gaps
+            )
+            desk_row["master"]["hillclimb_chip"] = (
+                desk_row["master"].get("hillclimb_chip") or hc
+            )
+            desk_row["master"]["digest_inventory"] = (
+                desk_row["master"].get("digest_inventory") or inv
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["dual_control_gaps"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["hillclimb_chip"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["digest_inventory"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

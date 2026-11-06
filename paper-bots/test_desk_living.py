@@ -161,6 +161,18 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue(health["ok"])
             self.assertTrue(health["fee_floors_locked"])
             self.assertFalse(health["live_orders_enabled"])
+            gaps = desk_living.dual_control_gaps_page(tmp)
+            self.assertFalse(gaps.get("auto_page"))
+            self.assertFalse(gaps.get("live_orders_enabled"))
+            self.assertIn("DUAL-CONTROL GAPS", gaps.get("copy") or "")
+            hill = desk_living.hillclimb_chip(tmp)
+            self.assertTrue(hill["fee_floors_locked"])
+            self.assertIn("hillclimb", hill.get("label") or "")
+            inv = desk_living.digest_inventory(tmp)
+            self.assertEqual(inv["expected_n"], len(desk_living.INSIGHT_HELPER_DIGESTS))
+            self.assertIn("digest_inventory", board2)
+            self.assertIn("dual_control_gaps", board2)
+            self.assertIn("hillclimb_chip", board2)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
