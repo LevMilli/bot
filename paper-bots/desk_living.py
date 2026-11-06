@@ -2148,6 +2148,18 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "cross-check python3 tools/staff_sunday_packet.py discord "
         "(staff paste · never auto-posts)"
     )
+    expand = board.get("betting_expand_gate") if isinstance(board.get("betting_expand_gate"), dict) else {}
+    expand_bit = (
+        "expand=blocked"
+        if expand.get("blocked")
+        else "expand=ok"
+        if expand.get("blocked") is False
+        else str(compact.get("expand_label") or "expand=n/a")
+    )
+    slim["expand_sunday_quiet"] = (
+        f"{expand_bit} · sunday quiet {slim['sunday_quiet_age_label']} "
+        "(observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]

@@ -140,6 +140,23 @@ def _text(board: dict) -> str:
         (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
+        (
+            "expand sunday: "
+            + (
+                "expand=blocked"
+                if expand.get("blocked")
+                else "expand=ok"
+                if expand.get("blocked") is False
+                else str(compact.get("expand_label") or "expand=n/a")
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
         f"doctor_age: {doctor_age.get('label') or '—'}",
         (
             f"doctor_fresh={doctor_fresh} "
@@ -495,6 +512,27 @@ def main() -> int:
                 "(staff paste · never auto-posts)"
             ),
             "betting_expand_gate": board.get("betting_expand_gate"),
+            "expand_sunday_quiet": (
+                str(
+                    (board.get("betting_expand_gate") or {}).get("label")
+                    or (
+                        "expand=blocked"
+                        if (board.get("betting_expand_gate") or {}).get("blocked")
+                        else "expand=ok"
+                        if (board.get("betting_expand_gate") or {}).get("blocked") is False
+                        else "expand=n/a"
+                    )
+                )
+                + " · sunday quiet "
+                + str(
+                    (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    if isinstance(board.get("sunday_packet"), dict)
+                    and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    else compact_j.get("quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " (observe · never softens floors)"
+            ),
             "chicago_today": board.get("chicago_today"),
             "chip_catalog": sorted(
                 k for k, v in board.items()

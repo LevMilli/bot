@@ -1058,13 +1058,29 @@ Interactive: Positive ROI Master Plan canvas.
 | --- | --- |
 | Compact part order assert | quiet_age→masters_sunday→ritual |
 
-### Next
+### Living upgrade — doctor/expand sunday quiet batch
 
 | Ticket | Where |
 | --- | --- |
 | Vault doctor sunday quiet | doctor row hint |
-| Status json expand sunday bit | flatten |
-| Ritual observe expand sunday | observe tip |
+| Status json expand sunday bit | flatten expand_sunday_quiet |
+| Ritual observe expand sunday | observe plain + --json |
+
+### Living upgrade — expand sunday export/discord/text (this batch)
+
+| Ticket | Where |
+| --- | --- |
+| Export expand_sunday_quiet | living_board_export |
+| Ritual discord expand sunday | discord line |
+| Status text expand sunday | print line |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault floors sunday quiet | floors row hint |
+| Compact expand sunday twin | compact field |
+| Doctor soft_copy sunday bit | soft_copy tip |
 
 ## Hard rules unchanged
 

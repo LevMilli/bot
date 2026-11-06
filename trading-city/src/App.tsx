@@ -2312,7 +2312,13 @@ export default function App() {
                         (snap?.desk?.master as { living_doctor?: { label?: string; ok?: boolean } } | undefined)
                           ?.living_doctor
                       if (!d) return 'living doctor pending'
-                      return d.label || (d.ok ? 'doctor OK' : 'doctor FAIL')
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = d.label || (d.ok ? 'doctor OK' : 'doctor FAIL')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>
