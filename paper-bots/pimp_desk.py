@@ -2783,6 +2783,29 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             )
         desk_row["ritual_soft_copy"] = ritual_soft
         desk_row["ritual_discord"] = ritual_soft
+        doctor_soft = None
+        if isinstance(desk_row.get("master"), dict):
+            doctor_soft = desk_row["master"].get("doctor_soft_copy")
+        if not doctor_soft:
+            age = desk_row.get("doctor_age") if isinstance(desk_row.get("doctor_age"), dict) else {}
+            r = desk_row.get("ritual_observe") if isinstance(desk_row.get("ritual_observe"), dict) else {}
+            fresh = r.get("doctor_fresh")
+            if fresh is None and age:
+                fresh = not bool(age.get("stale"))
+            doctor_soft = (
+                f"**Living doctor age** (paper · floors locked · live=False)\n"
+                f"doctor={'fresh' if fresh else 'stale' if fresh is False else 'n/a'} "
+                f"doctor_fresh={fresh}\n"
+                f"{age.get('label') or 'doctor age'}\n"
+                f"ritual draft: make living-ritual-discord\n"
+                f"_staff paste only · never auto-posts · never enables live_"
+            )
+        desk_row["doctor_soft_copy"] = doctor_soft
+        desk_row["doctor_fresh"] = (
+            (desk_row.get("ritual_observe") or {}).get("doctor_fresh")
+            if isinstance(desk_row.get("ritual_observe"), dict)
+            else None
+        )
         desk_row["living_ai"] = desk_living.living_ai_health(root, bots=bots)
         desk_row["feature_quiet"] = desk_living.feature_store_quiet_alert(root)
         desk_row["feature_quiet_pager"] = desk_living.feature_quiet_pager(root)
@@ -2811,6 +2834,11 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             desk_row["master"]["ritual_discord"] = (
                 desk_row["master"].get("ritual_discord") or ritual_soft
             )
+            desk_row["master"]["doctor_soft_copy"] = (
+                desk_row["master"].get("doctor_soft_copy") or doctor_soft
+            )
+            if desk_row["master"].get("doctor_fresh") is None:
+                desk_row["master"]["doctor_fresh"] = desk_row.get("doctor_fresh")
             desk_row["master"]["living_ai"] = (
                 desk_row["master"].get("living_ai") or desk_row["living_ai"]
             )

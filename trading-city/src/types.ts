@@ -673,6 +673,8 @@ export type Desk = {
   }
   ritual_soft_copy?: string
   ritual_discord?: string
+  doctor_soft_copy?: string
+  doctor_fresh?: boolean | null
   master?: {
     paper_only?: boolean
     version?: number
@@ -693,6 +695,8 @@ export type Desk = {
     ritual_observe?: Desk['ritual_observe']
     ritual_soft_copy?: string
     ritual_discord?: string
+    doctor_soft_copy?: string
+    doctor_fresh?: boolean | null
     note?: string
   }
   teller_memory?: {

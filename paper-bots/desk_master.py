@@ -763,20 +763,44 @@ def master_summary(
     ):
         priority.append("skip-twin promote_ready — staff z|p only")
     doctor_age = (living or {}).get("doctor_age") if isinstance(living, dict) else None
-    if isinstance(doctor_age, dict) and doctor_age.get("stale"):
-        priority.append(str(doctor_age.get("label") or "doctor stale")[:120])
     ritual = (living or {}).get("ritual_observe") if isinstance(living, dict) else None
+    doctor_fresh = None
+    if isinstance(ritual, dict) and ritual.get("doctor_fresh") is not None:
+        doctor_fresh = bool(ritual.get("doctor_fresh"))
+    elif isinstance(doctor_age, dict):
+        doctor_fresh = not bool(doctor_age.get("stale"))
+    # Stale weekly doctor marker — front the rail (family-deduped with doctor_age).
+    if doctor_fresh is False:
+        priority.insert(
+            0,
+            (
+                f"doctor_fresh=False · "
+                f"{(doctor_age or {}).get('label') or 'doctor stale'} · "
+                f"make living-doctor"
+            )[:120],
+        )
+    elif isinstance(doctor_age, dict) and doctor_age.get("stale"):
+        priority.append(str(doctor_age.get("label") or "doctor stale")[:120])
     if isinstance(ritual, dict) and (
         ritual.get("ritual_ok") is False or ritual.get("exit_ok") is False
     ):
         priority.append(str(ritual.get("label") or "ritual not ready")[:120])
     ritual_soft_copy = None
+    doctor_soft_copy = None
     if isinstance(ritual, dict):
         ritual_soft_copy = (
             f"**Masters ritual** (paper · floors locked · live=False)\n"
             f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')} "
             f"doctor_fresh={ritual.get('doctor_fresh')}\n"
             f"{ritual.get('label') or 'ritual observe'}\n"
+            f"_staff paste only · never auto-posts · never enables live_"
+        )
+        doctor_soft_copy = (
+            f"**Living doctor age** (paper · floors locked · live=False)\n"
+            f"doctor={'fresh' if doctor_fresh else 'stale' if doctor_fresh is False else 'n/a'} "
+            f"doctor_fresh={doctor_fresh}\n"
+            f"{(doctor_age or {}).get('label') or 'doctor age'}\n"
+            f"ritual draft: make living-ritual-discord\n"
             f"_staff paste only · never auto-posts · never enables live_"
         )
     eia_bo = (living or {}).get("eia_blackout") if isinstance(living, dict) else None
@@ -893,6 +917,8 @@ def master_summary(
         ),
         "ritual_soft_copy": ritual_soft_copy,
         "ritual_discord": ritual_soft_copy,
+        "doctor_soft_copy": doctor_soft_copy,
+        "doctor_fresh": doctor_fresh,
         "dual_control": dual_control,
         "ruin_drill": ruin_drill,
         "skip_taxonomy": (

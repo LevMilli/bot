@@ -834,13 +834,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual vault after doc age | row order ritual under doc |
 | Export doctor_line soft | export soft_copy twin |
 
-### Next
+### Living upgrade — doctor_soft_copy json / vault doctor draft / Masters doctor_fresh
 
 | Ticket | Where |
 | --- | --- |
 | Status json doctor_soft_copy | flatten draft twin |
 | Vault AI after ritual block | keep HUD cluster tight |
 | Masters priority doctor_fresh | stale doctor rail |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Status text doctor draft | staff text doctor_soft hint |
+| Compact doctor_fresh export json | status --json compact flats |
+| Ritual CLI doctor_soft note | observe tip line |
 
 ## Hard rules unchanged
 

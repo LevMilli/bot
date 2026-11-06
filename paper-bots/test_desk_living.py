@@ -332,6 +332,13 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("ritual_soft_copy", masters)
             self.assertIn("ritual_ok=", masters.get("ritual_soft_copy") or "")
             self.assertEqual(masters.get("ritual_discord"), masters.get("ritual_soft_copy"))
+            self.assertIn("doctor_soft_copy", masters)
+            self.assertIn("doctor_fresh", masters)
+            self.assertIn("doctor_fresh=", masters.get("doctor_soft_copy") or "")
+            if masters.get("doctor_fresh") is False:
+                self.assertTrue(
+                    any("doctor_fresh=False" in str(p) for p in (masters.get("priority") or []))
+                )
             # Fresh empty root → blocked until seed fills digests.
             with tempfile.TemporaryDirectory() as empty:
                 thin = desk_living.betting_expand_gate(empty)
