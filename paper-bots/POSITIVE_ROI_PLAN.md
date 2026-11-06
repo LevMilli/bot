@@ -1164,13 +1164,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault pulse sunday quiet | pulse row hint |
 | Ritual discord timer sunday | discord line |
 
-### Next
+### Living upgrade — queue/Gate A/AI sunday (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Vault queue sunday quiet | queue row hint |
 | Vault Gate A sunday quiet | Gate A row hint |
 | Vault AI sunday quiet | AI row hint |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault tip feed sunday quiet | tip feed row hint |
+| Vault blackout sunday quiet | blackout row hint |
+| Vault injury sunday quiet | injury row hint |
 
 ## Hard rules unchanged
 

@@ -1255,10 +1255,14 @@ export default function App() {
                           living_ai?: { label?: string; raise_phi_n?: number }
                         } | undefined)?.living_ai
                       if (!ai) return 'living AI pending'
-                      return (
-                        ai.label ||
-                        `raise_Φ=${ai.raise_phi_n ?? 0} · auto_write=False`
-                      )
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        ai.label || `raise_Φ=${ai.raise_phi_n ?? 0} · auto_write=False`
+                      return `${base} · sunday quiet ${sundayBit} (observe · never auto-writes Φ)`
                     })()}
                   </span>
                 </div>
@@ -1347,10 +1351,15 @@ export default function App() {
                           }
                         } | undefined)?.firm_queue
                       if (!q) return 'firm queue pending'
-                      return (
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
                         q.label ||
                         `firm queue offers=${q.offers_n ?? '—'} def=${q.deferred_n ?? '—'} risk_left=${q.remaining_risk ?? '—'}`
-                      )
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -1382,10 +1391,16 @@ export default function App() {
                           }
                         } | undefined)?.helper_gate_a
                       if (!g) return 'helper Gate A pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (g.label ||
                           `helper Gate A ready=${g.ready_n ?? 0}/${g.helpers_n ?? 0}`) +
-                        ' · auto_promote=False · places=False'
+                        ' · auto_promote=False · places=False' +
+                        ` · sunday quiet ${sundayBit} (observe · never promotes)`
                       )
                     })()}
                   </span>
