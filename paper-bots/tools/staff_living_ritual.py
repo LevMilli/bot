@@ -121,6 +121,18 @@ def format_discord(payload: dict) -> str:
         f"• Swarm sunday: swarm observe · sunday quiet {tip_age} "
         f"(observe)"
     )
+    lines.append(
+        f"• Green sunday: green-day observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Bleed sunday: bleed observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• CLV sunday: CLV observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
     timer_alive = payload.get("timer_alive")
     timer_bit = (
         "timer=alive"
@@ -132,6 +144,10 @@ def format_discord(payload: dict) -> str:
     lines.append(
         f"• Timer sunday: {timer_bit} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Calib sunday: calib observe · sunday quiet {tip_age} "
+        f"(observe · never auto-writes Φ)"
     )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
@@ -230,6 +246,18 @@ def main() -> int:
                 f"fills observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never invents PnL)"
             )
+            flat["green_sunday_quiet"] = (
+                f"green-day observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["bleed_sunday_quiet"] = (
+                f"bleed observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["clv_sunday_quiet"] = (
+                f"CLV observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -300,6 +328,18 @@ def main() -> int:
             print(
                 f"fills sunday: fills observe · sunday quiet {sunday_label} "
                 "(observe · never invents PnL)"
+            )
+            print(
+                f"green sunday: green-day observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"bleed sunday: bleed observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"CLV sunday: CLV observe · sunday quiet {sunday_label} "
+                "(observe)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
