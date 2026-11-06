@@ -621,6 +621,13 @@ def master_summary(
             priority.append(f"hillclimb lever active: {active.get('name') or active.get('lever')}")
         else:
             priority.append("hillclimb: no staff lever this Chicago week (observe)")
+    dual_control = (living or {}).get("dual_control") if isinstance(living, dict) else None
+    if isinstance(dual_control, dict):
+        priority.append(
+            f"dual-control paper {dual_control.get('signed_n') or 0}/"
+            f"{dual_control.get('items_n') or 0} signed; "
+            f"live_orders={bool(dual_control.get('live_orders_enabled'))}"
+        )
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -649,6 +656,8 @@ def master_summary(
         "completions": completions,
         "feature_quiet": feature_quiet,
         "hillclimb_lever": hillclimb_lever,
+        "dual_control": dual_control,
+        "live_orders_enabled": False,
         "note": (
             "Trading Masters — dual scoreboard for volume vs taxed EV. "
             "No profit guarantee. Fee floors unchanged."

@@ -2474,6 +2474,16 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             pass
     except Exception as exc:  # noqa: BLE001
         desk_row["completions"] = {"paper_only": True, "error": type(exc).__name__}
+    # Dual-control paper checklist HUD — live orders stay hard-disabled.
+    try:
+        import desk_roi_plan
+        dc = desk_roi_plan.dual_control_status(root)
+        desk_row["dual_control"] = dc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["dual_control"] = desk_row["master"].get("dual_control") or dc
+            desk_row["master"]["live_orders_enabled"] = False
+    except Exception as exc:  # noqa: BLE001
+        desk_row["dual_control"] = {"paper_only": True, "live_orders_enabled": False, "error": type(exc).__name__}
     try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001

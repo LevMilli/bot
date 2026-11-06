@@ -45,6 +45,9 @@ class DeskLivingTests(unittest.TestCase):
             board = desk_living.living_upgrade_board(tmp)
             self.assertIn("feature_quiet", board)
             self.assertIn("hillclimb_lever", board)
+            self.assertIn("dual_control", board)
+            self.assertFalse(board.get("live_orders_enabled"))
+            self.assertTrue((board.get("dual_control") or {}).get("fee_floors_locked", True))
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
