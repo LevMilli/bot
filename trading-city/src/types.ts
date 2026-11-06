@@ -234,6 +234,18 @@ export type Desk = {
     note?: string
     error?: string
   }
+  betting_expand_gate?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    allow_betting_expand?: boolean
+    blocked?: boolean
+    swarm_pass?: boolean
+    swarm_ratio?: number | null
+    label?: string
+    reason?: string
+    note?: string
+    error?: string
+  }
   master?: {
     paper_only?: boolean
     version?: number

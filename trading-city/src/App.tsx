@@ -680,6 +680,31 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">expand</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.betting_expand_gate ||
+                          (snap?.desk?.master as { betting_expand_gate?: { blocked?: boolean } } | undefined)
+                            ?.betting_expand_gate
+                        if (!g) return undefined
+                        return g.blocked ? '#c45c26' : '#6fbf73'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.betting_expand_gate ||
+                        (snap?.desk?.master as {
+                          betting_expand_gate?: { label?: string; blocked?: boolean }
+                        } | undefined)?.betting_expand_gate
+                      if (!g) return 'expand gate pending'
+                      return g.label || (g.blocked ? 'betting expand BLOCKED' : 'expand ok (paper)')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">bleed</span>
                   <span>
                     {(() => {
