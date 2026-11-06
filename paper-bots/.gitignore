@@ -64,6 +64,8 @@ helpers/tip_radar_digest.json
 helpers/skip_historian_digest.json
 helpers/timer_heartbeat_digest.json
 helpers/empty_card_bee_digest.json
+helpers/clv_closer_digest.json
+helpers/injury_wire_digest.json
 btc15m-signal/paper_parlays.json
 commodity-15m-paper/paper_account.json
 *.tmp
