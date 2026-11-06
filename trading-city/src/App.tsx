@@ -937,12 +937,20 @@ export default function App() {
                             ritual_ok?: boolean | null
                             doctor_fresh?: boolean | null
                             doctor_label?: string
+                            quiet_age?: string
+                            quiet_age_h?: number | null
                             parts?: string[]
                           }
                         } | undefined)?.compact
                       if (!c) return 'living compact pending'
                       // Prefer full label (quiet → ritual → doctor → expand).
-                      return c.label || 'living compact'
+                      const base = c.label || 'living compact'
+                      const age =
+                        c.quiet_age ||
+                        (c.quiet_age_h != null ? `${c.quiet_age_h}h` : null)
+                      return age && !String(base).includes('quiet_age=')
+                        ? `${base} · quiet_age=${age}`
+                        : base
                     })()}
                   </span>
                 </div>

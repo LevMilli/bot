@@ -313,6 +313,11 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue(any(str(p).startswith("doctor=") for p in (compact.get("parts") or [])))
             self.assertIn("doctor_label", compact)
             self.assertIn("doctor_fresh", compact)
+            self.assertIn("quiet_age", compact)
+            self.assertTrue(
+                str(compact.get("quiet_age") or "").endswith("h")
+                or compact.get("quiet_age") == "n/a"
+            )
             parts = [str(p) for p in (compact.get("parts") or [])]
             quiet_i = next(i for i, p in enumerate(parts) if "quiet" in p.lower())
             ritual_i = next(i for i, p in enumerate(parts) if p.startswith("ritual="))
@@ -634,6 +639,22 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("floors_ok=True", text2)
             self.assertIn("expand_ok=True", text2)
             self.assertIn("doctor_fresh=False", text2)
+            text3 = staff_living_ritual.format_discord({
+                "ok": True,
+                "ritual_ok": True,
+                "exit_ok": True,
+                "floors_ok": True,
+                "expand_ok": True,
+                "doctor_ok": True,
+                "doctor_fresh": True,
+                "quiet_age": "3h",
+                "feature_quiet": {"quiet": True, "age_hours": 3},
+                "live_orders_enabled": False,
+                "steps": steps,
+                "note": "Never invent fills.",
+            })
+            self.assertIn("Feature quiet", text3)
+            self.assertIn("age=3h", text3)
             # --json flatten fields on observe chip path
             obs = desk_living.ritual_observe_chip(tmp)
             self.assertIn("ritual_ok", obs)

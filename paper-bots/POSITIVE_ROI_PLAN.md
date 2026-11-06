@@ -906,13 +906,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Status json quiet_age always | mirror text n/a |
 | Ritual CLI doctor_fresh observe | observe end flag |
 
-### Next
+### Living upgrade — compact quiet_age / ritual discord quiet / status quiet_age
 
 | Ticket | Where |
 | --- | --- |
 | Compact HUD quiet_age chip | city compact age |
 | Ritual discord quiet hint | optional quiet line |
 | Staff status quiet_age field | text quiet_age= |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Compact quiet_age export | export compact.quiet_age |
+| Ritual json quiet_age | ritual --json field |
+| Vault compact quiet tint | age-based color |
 
 ## Hard rules unchanged
 

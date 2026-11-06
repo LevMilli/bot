@@ -37,6 +37,19 @@ def format_discord(payload: dict) -> str:
         f"doctor_fresh={payload.get('doctor_fresh')}",
         "",
     ]
+    quiet = payload.get("feature_quiet") if isinstance(payload.get("feature_quiet"), dict) else {}
+    if quiet or payload.get("quiet_age") is not None:
+        age = quiet.get("age_hours")
+        age_s = (
+            f"{age}h"
+            if age is not None
+            else str(payload.get("quiet_age") or "n/a")
+        )
+        lines.append(
+            f"• Feature quiet: quiet={quiet.get('quiet')} age={age_s} "
+            f"(staff observe — never softens floors)"
+        )
+        lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
         if name in ("gaps", "ruin") and row.get("copy"):
@@ -112,6 +125,8 @@ def main() -> int:
         age = doctor_row.get("doctor_age")
         if doctor_fresh is None and isinstance(age, dict):
             doctor_fresh = not bool(age.get("stale"))
+    feature_quiet = desk_living.feature_store_quiet_alert(root)
+    quiet_age_h = feature_quiet.get("age_hours") if isinstance(feature_quiet, dict) else None
     payload = {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -125,6 +140,9 @@ def main() -> int:
         "expand_ok": expand_ok,
         "doctor_ok": doctor_ok,
         "doctor_fresh": doctor_fresh,
+        "feature_quiet": feature_quiet if isinstance(feature_quiet, dict) else {},
+        "quiet_age": f"{quiet_age_h}h" if quiet_age_h is not None else "n/a",
+        "quiet_age_h": quiet_age_h,
         "note": (
             "Weekly ritual draft — staff reviews gaps/ruin/floors/expand/doctor. "
             "Never invent fills; never soften floors; never enable live."

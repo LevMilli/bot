@@ -285,6 +285,9 @@ export type Desk = {
     ritual_label?: string
     doctor_fresh?: boolean | null
     doctor_label?: string
+    quiet_age?: string
+    quiet_age_h?: number | null
+    quiet_label?: string
     note?: string
     error?: string
   }
