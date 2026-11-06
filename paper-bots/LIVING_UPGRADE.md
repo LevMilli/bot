@@ -20,6 +20,7 @@ make living-status
 make living-floors
 make living-selfcheck
 make living-doctor
+make living-ritual
 make living-test
 
 python3 tools/staff_living_status.py              # compact text

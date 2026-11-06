@@ -705,6 +705,30 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">doctor</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const d =
+                          snap?.desk?.living_doctor ||
+                          (snap?.desk?.master as { living_doctor?: { ok?: boolean } } | undefined)
+                            ?.living_doctor
+                        if (!d) return undefined
+                        return d.ok ? '#6fbf73' : '#c45c26'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const d =
+                        snap?.desk?.living_doctor ||
+                        (snap?.desk?.master as { living_doctor?: { label?: string; ok?: boolean } } | undefined)
+                          ?.living_doctor
+                      if (!d) return 'living doctor pending'
+                      return d.label || (d.ok ? 'doctor OK' : 'doctor FAIL')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">bleed</span>
                   <span>
                     {(() => {

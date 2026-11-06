@@ -206,6 +206,13 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("checks", doc)
             self.assertFalse(doc.get("live_orders_enabled"))
             self.assertIn("board_size", board2)
+            gaps = desk_living.dual_control_gaps_page(tmp)
+            self.assertIn("copy", gaps)
+            self.assertFalse(gaps.get("live_orders_enabled"))
+            self.assertTrue(os.path.isfile(os.path.join(
+                os.path.dirname(os.path.abspath(desk_living.__file__)),
+                "tools", "staff_living_ritual.py",
+            )))
             gate = desk_living.betting_expand_gate(tmp)
             self.assertTrue(gate["fee_floors_locked"])
             self.assertIn("betting_expand_gate", board2)

@@ -571,13 +571,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Board size guard | `living_board_size_guard` soft max 64 |
 | Expand teller fact | remember mistake when blocked |
 
+### Living upgrade — vault doctor + weekly ritual
+
+| Ticket | Where |
+| --- | --- |
+| Doctor on city vault | trading-city vault `doctor` row |
+| Weekly ritual script | `tools/staff_living_ritual.py` + make |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Doctor on city vault | vault row doctor OK/FAIL |
-| Living chip prune pass | drop duplicate clerk/roi pairs |
-| Staff weekly ritual script | gaps+ruin+floors+expand+doctor |
+| Living chip prune pass | drop duplicate clerk/roi pairs on rail |
+| Ritual Discord copy | markdown export for staff paste |
+| Desk doctor age chip | last doctor run timestamp |
 
 ## Hard rules unchanged
 

@@ -2756,6 +2756,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["betting_expand_gate"] = desk_living.betting_expand_gate(
             root, remember=True,
         )
+        desk_row["living_doctor"] = desk_living.living_doctor(root)
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["teller_living"] = (
                 desk_row["master"].get("teller_living") or tl
@@ -2767,6 +2768,10 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             desk_row["master"]["betting_expand_gate"] = (
                 desk_row["master"].get("betting_expand_gate")
                 or desk_row["betting_expand_gate"]
+            )
+            desk_row["master"]["living_doctor"] = (
+                desk_row["master"].get("living_doctor")
+                or desk_row["living_doctor"]
             )
         # Prefer living line on desk teller when present.
         for bot in bots or []:
