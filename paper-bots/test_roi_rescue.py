@@ -11,13 +11,15 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 class RoiRescueTests(unittest.TestCase):
-    def test_meme_red_lock_fires_at_minus_eight(self):
+    def test_meme_red_lock_fires_at_minus_five(self):
         shares = desk_more.effective_tower_shares(meme_today=-10.58)
         self.assertAlmostEqual(shares["memecoin"], desk_more.MEME_RED_SHARE)
-        self.assertEqual(desk_more.MEME_RED_LOCK_USD, 8.0)
-        soft = desk_more.effective_tower_shares(meme_today=-5)
+        self.assertEqual(desk_more.MEME_RED_LOCK_USD, 5.0)
+        soft = desk_more.effective_tower_shares(meme_today=-4)
         base = desk_more.DEFAULT_TOWER_BUDGET_SHARE["memecoin"]
         self.assertAlmostEqual(soft["memecoin"], base)
+        locked = desk_more.effective_tower_shares(meme_today=-5)
+        self.assertAlmostEqual(locked["memecoin"], desk_more.MEME_RED_SHARE)
 
     def test_inx_drawdown_halt(self):
         import importlib.util
@@ -59,11 +61,25 @@ class RoiRescueTests(unittest.TestCase):
         self.assertNotIn("commodity-15m", bots)
         self.assertTrue(rescue["paper_only"])
 
+    def test_sports_red_rescue_uses_sticky_realized(self):
+        # today flat, sticky realized −16.62 → still red-rescue.
+        rescue = desk_master.firm_roi_rescue(
+            [{"id": "sports-gap", "today": 0.0, "realized": -16.62, "cash": 83.38}]
+        )
+        sports = [f for f in rescue["flags"] if f["bot"] == "sports-gap"]
+        self.assertEqual(len(sports), 1)
+        self.assertIn("realized", sports[0]["why"])
+        shares = desk_more.effective_tower_shares(
+            today_by_bot={"sports-gap": 0.0},
+            realized_by_bot={"sports-gap": -16.62},
+        )
+        self.assertAlmostEqual(shares["sports-gap"], desk_more.SPORTS_RED_SHARE)
+
     def test_meme_policy_on_master_board(self):
         bleed = desk_master.meme_stopbleed_measure({"id": "memecoin", "today": -10.58, "history": []})
         self.assertTrue(bleed["red_day_locked"])
         self.assertEqual(bleed["policy"]["stop_pct"], -12)
-        self.assertEqual(bleed["policy"]["red_day_entry_lock_usd"], 8.0)
+        self.assertEqual(bleed["policy"]["red_day_entry_lock_usd"], 5.0)
 
 
 if __name__ == "__main__":

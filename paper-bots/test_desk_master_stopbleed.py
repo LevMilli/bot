@@ -23,7 +23,7 @@ class StopBleedTests(unittest.TestCase):
         cfg = _load("meme_cfg", os.path.join(ROOT, "memecoin-paper", "config.py"))
         self.assertEqual(cfg.EXIT["stop_pct"], -12)
         self.assertEqual(cfg.EXIT["model_flip_momentum_h1_floor"], -6)
-        self.assertEqual(cfg.RED_DAY_ENTRY_LOCK_USD, 8)
+        self.assertEqual(cfg.RED_DAY_ENTRY_LOCK_USD, 5)
         self.assertEqual(cfg.MAX_OPEN_RED, 1)
         self.assertTrue(cfg.SPEED_ONLY_IF_TODAY_NONNEG)
         self.assertEqual(cfg.SPEED_MIN_LIQUIDITY_USD, 50000)
@@ -45,7 +45,7 @@ class StopBleedTests(unittest.TestCase):
 
     def test_master_summary_on_empty_bots(self):
         s = desk_master.master_summary(bots=[], cfg={"max_open_risk": 100})
-        self.assertEqual(s["version"], 2)
+        self.assertEqual(s["version"], 3)
         self.assertTrue(s["paper_only"])
         self.assertEqual(s["towers"], [])
 

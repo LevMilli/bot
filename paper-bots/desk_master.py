@@ -207,8 +207,8 @@ def tower_master_row(
     }
 
 
-def meme_stopbleed_measure(bot: dict | None = None, *, red_lock_usd: float = 8.0) -> dict:
-    """Measure memecoin stop-bleed week after ROI-rescue exits (−12% / flip −6% / red −$8).
+def meme_stopbleed_measure(bot: dict | None = None, *, red_lock_usd: float = 5.0) -> dict:
+    """Measure memecoin stop-bleed week after ROI-rescue exits (−12% / flip −6% / red −$5).
 
     Paper only. Does not expand volume. Counts SELL exits from history reasons.
     """
@@ -287,11 +287,11 @@ def firm_roi_rescue(bots: list | None = None, *, cfg: dict | None = None) -> dic
         today = _finite(bot.get("today"))
         cash = _finite(bot.get("cash"))
         realized = _finite(bot.get("realized"))
-        if bot_id == "memecoin" and today is not None and today <= -8:
+        if bot_id == "memecoin" and today is not None and today <= -5:
             flags.append({
                 "bot": bot_id,
                 "action": "entries_off",
-                "why": f"meme red-day lock (today ${today:.2f} ≤ −$8)",
+                "why": f"meme red-day lock (today ${today:.2f} ≤ −$5)",
             })
         if bot_id in ("kalshi-sp", "kalshi-sized") and cash is not None and cash <= 460:
             flags.append({
@@ -299,12 +299,20 @@ def firm_roi_rescue(bots: list | None = None, *, cfg: dict | None = None) -> dic
                 "action": "entries_off",
                 "why": f"INX drawdown halt (cash ${cash:.2f} ≤ $460)",
             })
-        if bot_id == "sports-gap" and today is not None and today <= -10:
-            flags.append({
-                "bot": bot_id,
-                "action": "accurate_only_cap1",
-                "why": f"sports red rescue (today ${today:.2f} ≤ −$10)",
-            })
+        if bot_id == "sports-gap":
+            red = None
+            if today is not None and realized is not None:
+                red = min(today, realized)
+            elif today is not None:
+                red = today
+            elif realized is not None:
+                red = realized
+            if red is not None and red <= -10:
+                flags.append({
+                    "bot": bot_id,
+                    "action": "accurate_only_cap1",
+                    "why": f"sports red rescue (min(today,realized) ${red:.2f} ≤ −$10)",
+                })
         if realized is not None and realized <= -40 and bot_id.startswith("kalshi"):
             flags.append({
                 "bot": bot_id,
