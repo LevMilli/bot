@@ -314,13 +314,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Living AI health | `desk_living.living_ai_health` on living board (adapt + raise_Φ) |
 | Calib nag covers commodity | `helpers/calib_nag` boards include commodity |
 
+### Living upgrade — swarm ratio + skip-twin clerk
+
+| Ticket | Where |
+| --- | --- |
+| Insight≥3:1 audit | `desk_living.insight_swarm_ratio` on living board |
+| Skip-twin clerk | `helpers/skip_twin_clerk` — near-miss would_pnl twin digest |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Skip-twin labels | closed-loop twin labels into feature store |
-| Insight≥3:1 headcount audit | Masters living swarm ratio |
+| Feature-store skip-twin join | join labeled twins into feature rows |
+| Timer cadence for clerk digests | schedule write_digest_from_desk for swarm |
 
 ## Hard rules unchanged
 
