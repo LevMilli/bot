@@ -921,6 +921,22 @@ def living_compact_card(
             if isinstance(src.get("dual_control_gaps"), dict)
             else f"gaps observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "digests_sunday_quiet": (
+            f"{(src.get('digest_inventory') or {}).get('label') or 'digests observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("digest_inventory"), dict)
+            else f"digests observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "fills_sunday_quiet": (
+            (
+                f"eligible today {(src.get('completions') or {}).get('eligible_completions_today')}"
+                if isinstance(src.get("completions"), dict)
+                and (src.get("completions") or {}).get("eligible_completions_today")
+                is not None
+                else "eligible fills n/a"
+            )
+            + f" · sunday quiet {quiet_age_part} (observe · never invents PnL)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2226,6 +2242,21 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{gaps.get('label') or 'gaps observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    inv = board.get("digest_inventory") if isinstance(board.get("digest_inventory"), dict) else {}
+    slim["digests_sunday_quiet"] = (
+        f"{inv.get('label') or 'digests observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    comp = board.get("completions") if isinstance(board.get("completions"), dict) else {}
+    fills_bit = (
+        f"eligible today {comp.get('eligible_completions_today')}"
+        if comp.get("eligible_completions_today") is not None
+        else "eligible fills n/a"
+    )
+    slim["fills_sunday_quiet"] = (
+        f"{fills_bit} · sunday quiet {slim['sunday_quiet_age_label']} "
+        "(observe · never invents PnL)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2262,6 +2293,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_gaps_sunday_quiet"] = (
             compact.get("gaps_sunday_quiet") or slim.get("gaps_sunday_quiet")
+        )
+        slim["compact_digests_sunday_quiet"] = (
+            compact.get("digests_sunday_quiet") or slim.get("digests_sunday_quiet")
+        )
+        slim["compact_fills_sunday_quiet"] = (
+            compact.get("fills_sunday_quiet") or slim.get("fills_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="

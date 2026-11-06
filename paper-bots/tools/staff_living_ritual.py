@@ -109,6 +109,18 @@ def format_discord(payload: dict) -> str:
         f"• Digests sunday: digests observe · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    lines.append(
+        f"• Fills sunday: fills observe · sunday quiet {tip_age} "
+        f"(observe · never invents PnL)"
+    )
+    lines.append(
+        f"• Hill sunday: hillclimb none · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Swarm sunday: swarm observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
     timer_alive = payload.get("timer_alive")
     timer_bit = (
         "timer=alive"
@@ -214,6 +226,10 @@ def main() -> int:
                 f"digests observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never softens floors)"
             )
+            flat["fills_sunday_quiet"] = (
+                f"fills observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never invents PnL)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -280,6 +296,10 @@ def main() -> int:
             print(
                 f"digests sunday: digests observe · sunday quiet {sunday_label} "
                 "(observe · never softens floors)"
+            )
+            print(
+                f"fills sunday: fills observe · sunday quiet {sunday_label} "
+                "(observe · never invents PnL)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "

@@ -142,6 +142,34 @@ def _text(board: dict) -> str:
         ),
         f"hillclimb: {hill.get('label') or '—'}",
         f"digests: {inv.get('label') or '—'}",
+        (
+            "digests sunday: "
+            + str(inv.get("label") or "digests observe")
+            + " Â· sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe Â· never softens floors)"
+        ),
+        (
+            "fills sunday: "
+            + (
+                f"eligible today {(board.get('completions') or {}).get('eligible_completions_today')}"
+                if isinstance(board.get("completions"), dict)
+                and (board.get("completions") or {}).get("eligible_completions_today")
+                is not None
+                else "eligible fills n/a"
+            )
+            + " Â· sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe Â· never invents PnL)"
+        ),
         f"floors: {floors.get('label') or '—'}",
         f"teller: {teller.get('memory_line') or '—'}",
         (
@@ -546,6 +574,40 @@ def main() -> int:
                 + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
                 + " (observe · never softens floors)"
             ),
+            "digests_sunday_quiet": compact_j.get("digests_sunday_quiet")
+            or (
+                str((board.get("digest_inventory") or {}).get("label") or "digests observe")
+                + " · sunday quiet "
+                + str(
+                    (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    if isinstance(board.get("sunday_packet"), dict)
+                    and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    else compact_j.get("quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " (observe · never softens floors)"
+            ),
+            "fills_sunday_quiet": compact_j.get("fills_sunday_quiet")
+            or (
+                (
+                    f"eligible today {(board.get('completions') or {}).get('eligible_completions_today')}"
+                    if isinstance(board.get("completions"), dict)
+                    and (board.get("completions") or {}).get("eligible_completions_today")
+                    is not None
+                    else "eligible fills n/a"
+                )
+                + " · sunday quiet "
+                + str(
+                    (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    if isinstance(board.get("sunday_packet"), dict)
+                    and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    else compact_j.get("quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " (observe · never invents PnL)"
+            ),
+            "compact_digests_sunday_quiet": compact_j.get("digests_sunday_quiet"),
+            "compact_fills_sunday_quiet": compact_j.get("fills_sunday_quiet"),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "

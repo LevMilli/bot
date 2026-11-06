@@ -1188,9 +1188,23 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault EIA/calendar sunday | EIA + calendar hints |
 | Vault pager/books sunday | pager + books hints |
 
+### Living upgrade — digests/fills sunday twins (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Compact digests+fills sunday | living_compact_card twins |
+| Export/status digests+fills sunday | board export + status text/json |
+| Ritual Discord hill/swarm/fills | discord lines |
+| Ritual observe fills sunday | observe plain + --json |
+
 ### Next
 
-_(empty — living sunday quiet plan tickets cleared; fee floors locked; paper-only; Discord never auto-posts)_
+| Ticket | Where |
+| --- | --- |
+| Compact green+bleed sunday | living_compact_card twins |
+| Export/status green+bleed sunday | board export + status flatten |
+| Ritual Discord green/bleed/CLV | discord lines |
+| Compact CLV+timer+calib sunday | living_compact_card twins |
 
 ## Hard rules unchanged
 
