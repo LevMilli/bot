@@ -445,6 +445,63 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def bleed_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """Firm bleed ratio + misplaced capital chip."""
+    bleed = {}
+    misplaced = {}
+    try:
+        import desk_roi_plan
+        bleed = desk_roi_plan.firm_bleed_ratio(bots) or {}
+        misplaced = desk_roi_plan.capital_misplaced(bots) or {}
+    except Exception:
+        bleed, misplaced = {}, {}
+    ratio = bleed.get("ratio")
+    ok = bleed.get("pass")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "ratio": ratio,
+        "red_usd": bleed.get("red_usd"),
+        "green_usd": bleed.get("green_usd"),
+        "target_lt": bleed.get("target_lt") or 0.5,
+        "pass": ok,
+        "misplaced_usd": misplaced.get("misplaced_usd") or misplaced.get("misplaced"),
+        "label": (
+            f"bleed ratio={ratio} "
+            + ("ok" if ok else "hot" if ok is False else "n/a")
+            + f" misplaced={misplaced.get('misplaced_usd') or misplaced.get('misplaced')}"
+        ),
+        "note": bleed.get("note") or "Bleed uses Chicago today PnL; quiet $0 ignored.",
+    }
+
+
+def clv_chip(root: str | None = None) -> dict:
+    """Sports CLV completeness / beat-close evidence chip."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.clv_completeness(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": status.get("n"),
+        "complete": status.get("complete"),
+        "rate": status.get("rate"),
+        "settled_rate": status.get("settled_rate"),
+        "pass": status.get("pass"),
+        "label": (
+            f"CLV complete={status.get('complete')}/{status.get('n')} "
+            f"rate={status.get('rate')} "
+            + ("ok" if status.get("pass") else "gaps" if status.get("pass") is False else "n/a")
+        ),
+        "note": status.get("note") or (
+            "Every sports settle should log entry fair + clv — never softens 0.06."
+        ),
+    }
+
+
 def skip_regret_chip(root: str | None = None) -> dict:
     """Labeled skip-regret twin chip — never auto-loosens floors."""
     card = {}
@@ -809,6 +866,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "helper_gate_a": helper_gate_a_board(root),
         "skip_regret": skip_regret_chip(root),
         "hard_stop": hard_stop_chip(root),
+        "bleed": bleed_chip(root, bots=bots),
+        "clv": clv_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),

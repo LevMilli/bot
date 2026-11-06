@@ -663,6 +663,12 @@ def master_summary(
     hard_stop = (living or {}).get("hard_stop") if isinstance(living, dict) else None
     if isinstance(hard_stop, dict) and hard_stop.get("promote_ready"):
         priority.append("sports hard-stop promote_ready — staff arm only")
+    bleed = (living or {}).get("bleed") if isinstance(living, dict) else None
+    if isinstance(bleed, dict) and bleed.get("pass") is False:
+        priority.insert(0, str(bleed.get("label") or "bleed hot")[:120])
+    clv = (living or {}).get("clv") if isinstance(living, dict) else None
+    if isinstance(clv, dict) and clv.get("pass") is False:
+        priority.append(str(clv.get("label") or "CLV gaps")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -735,6 +741,16 @@ def master_summary(
         ),
         "hard_stop": (
             (living or {}).get("hard_stop")
+            if isinstance(living, dict)
+            else None
+        ),
+        "bleed": (
+            (living or {}).get("bleed")
+            if isinstance(living, dict)
+            else None
+        ),
+        "clv": (
+            (living or {}).get("clv")
             if isinstance(living, dict)
             else None
         ),

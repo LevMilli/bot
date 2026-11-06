@@ -410,13 +410,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Skip-regret chip | `desk_living.skip_regret_chip` |
 | Hard-stop chip | `desk_living.hard_stop_chip` |
 
+### Living upgrade — bleed + CLV chips
+
+| Ticket | Where |
+| --- | --- |
+| Bleed chip | `desk_living.bleed_chip` |
+| CLV chip | `desk_living.clv_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Bleed ratio chip | firm bleed / red-tower capital |
-| CLV closer chip | sports beat-close rate |
+| Tip radar chip | T-5/T-15/T-180 windows on HUD |
+| Calib nag chip | raise_phi ticket count on rail |
 
 ## Hard rules unchanged
 

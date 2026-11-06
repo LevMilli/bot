@@ -85,6 +85,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertFalse(board2["skip_regret"].get("loosen_soft_gates"))
             self.assertFalse(board2["hard_stop"].get("auto_promote"))
             self.assertTrue(board2["skip_regret"]["fee_floors_locked"])
+            self.assertIn("bleed", board2)
+            self.assertIn("clv", board2)
+            self.assertTrue(board2["bleed"]["fee_floors_locked"])
+            self.assertTrue(board2["clv"]["fee_floors_locked"])
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
