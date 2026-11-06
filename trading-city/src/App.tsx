@@ -915,10 +915,15 @@ export default function App() {
                         const c =
                           snap?.desk?.living_compact ||
                           (snap?.desk?.master as {
-                            compact?: { ritual_ok?: boolean | null }
+                            compact?: {
+                              ritual_ok?: boolean | null
+                              doctor_fresh?: boolean | null
+                            }
                           } | undefined)?.compact
-                        if (!c || c.ritual_ok == null) return undefined
-                        return c.ritual_ok ? undefined : '#d4a017'
+                        if (!c) return undefined
+                        if (c.doctor_fresh === false) return '#c45c26'
+                        if (c.ritual_ok === false) return '#d4a017'
+                        return undefined
                       })(),
                     }}
                   >
@@ -930,11 +935,13 @@ export default function App() {
                             label?: string
                             ritual_label?: string
                             ritual_ok?: boolean | null
+                            doctor_fresh?: boolean | null
+                            doctor_label?: string
                             parts?: string[]
                           }
                         } | undefined)?.compact
                       if (!c) return 'living compact pending'
-                      // Prefer full label (quiet → ritual → expand order from living_compact_card).
+                      // Prefer full label (quiet → ritual → doctor → expand).
                       return c.label || 'living compact'
                     })()}
                   </span>

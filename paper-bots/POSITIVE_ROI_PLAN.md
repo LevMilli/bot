@@ -810,13 +810,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual CLI text exit_ok | plain text exit flags |
 | City vault teller ritual_nag | teller row tint |
 
-### Next
+### Living upgrade — compact doctor tint / export doctor_fresh / status doctor
 
 | Ticket | Where |
 | --- | --- |
 | Compact tint doctor stale | vault compact doctor color |
 | Export doctor_fresh flat | living_board_export |
 | Status text doctor= | staff status doctor_fresh |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Status json doctor_fresh | flatten status --json |
+| Doctor soft_copy doctor= | discord doctor_fresh line |
+| Vault doctor_age near compact | row order nudge |
 
 ## Hard rules unchanged
 
