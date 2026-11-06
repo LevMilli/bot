@@ -210,6 +210,18 @@ export type Desk = {
     note?: string
     error?: string
   }
+  digest_inventory?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    present_n?: number
+    expected_n?: number
+    missing_n?: number
+    ratio?: number | null
+    pass?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
   living_ai?: {
     paper_only?: boolean
     fee_floors_locked?: boolean

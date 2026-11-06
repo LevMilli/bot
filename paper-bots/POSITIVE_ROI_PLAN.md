@@ -610,13 +610,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Living compact vault row | one-line compact on vault |
 | Expand gate soft copy | blocked reason in status / `--discord` |
 
-### Next
+### Living upgrade — floors/doctor Discord + inventory vault
 
 | Ticket | Where |
 | --- | --- |
 | Floors Discord soft assert | `status floors --discord` |
 | Doctor Discord one-liner | `status doctor --discord` |
 | Inventory thin vault tint | digest inventory on vault |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Hillclimb vault row | active lever on vault |
+| Dual gaps vault tint | unsigned gaps amber |
+| Living ritual Makefile note | ritual targets in README pulse |
 
 ## Hard rules unchanged
 

@@ -30,6 +30,8 @@ python3 tools/staff_living_status.py gaps         # dual-control unsigned
 python3 tools/staff_living_status.py gaps --discord  # paste-ready gaps (never auto-posts)
 python3 tools/staff_living_status.py ruin --discord  # paste-ready ruin page
 python3 tools/staff_living_status.py expand --discord
+python3 tools/staff_living_status.py floors --discord
+python3 tools/staff_living_status.py doctor --discord
 python3 tools/staff_living_status.py ruin         # monthly practice page
 python3 tools/staff_living_status.py inventory
 python3 tools/staff_living_status.py seed         # empty observe digests
