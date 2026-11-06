@@ -918,11 +918,20 @@ export default function App() {
                             compact?: {
                               ritual_ok?: boolean | null
                               doctor_fresh?: boolean | null
+                              quiet_age?: string
+                              quiet_age_h?: number | null
                             }
                           } | undefined)?.compact
                         if (!c) return undefined
                         if (c.doctor_fresh === false) return '#c45c26'
                         if (c.ritual_ok === false) return '#d4a017'
+                        const ageH =
+                          c.quiet_age_h ??
+                          (typeof c.quiet_age === 'string' && c.quiet_age.endsWith('h')
+                            ? Number(c.quiet_age.slice(0, -1))
+                            : null)
+                        // Quiet store starved (≥6h) — amber nudge on compact HUD.
+                        if (ageH != null && Number.isFinite(ageH) && ageH >= 6) return '#d4a017'
                         return undefined
                       })(),
                     }}

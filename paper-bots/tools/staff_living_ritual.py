@@ -78,12 +78,17 @@ def main() -> int:
     if args.observe:
         chip = desk_living.ritual_observe_chip(root)
         if args.json:
+            quiet = desk_living.feature_store_quiet_alert(root)
+            age_h = quiet.get("age_hours") if isinstance(quiet, dict) else None
             flat = dict(chip)
             flat["ritual_ok"] = chip.get("ritual_ok")
             flat["exit_ok"] = chip.get("exit_ok")
             flat["floors_ok"] = chip.get("floors_ok")
             flat["expand_ok"] = chip.get("expand_ok")
             flat["doctor_fresh"] = chip.get("doctor_fresh")
+            flat["feature_quiet"] = quiet if isinstance(quiet, dict) else {}
+            flat["quiet_age_h"] = age_h
+            flat["quiet_age"] = f"{age_h}h" if age_h is not None else "n/a"
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             print(chip.get("label") or "ritual observe")

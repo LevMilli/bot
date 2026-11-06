@@ -914,13 +914,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual discord quiet hint | optional quiet line |
 | Staff status quiet_age field | text quiet_age= |
 
-### Next
+### Living upgrade — compact quiet_age export / ritual json / vault tint
 
 | Ticket | Where |
 | --- | --- |
 | Compact quiet_age export | export compact.quiet_age |
 | Ritual json quiet_age | ritual --json field |
 | Vault compact quiet tint | age-based color |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Status json compact_quiet_age | flatten status --json |
+| Ritual observe quiet_age text | observe plain age |
+| Masters quiet_age priority | soft quiet rail |
 
 ## Hard rules unchanged
 
