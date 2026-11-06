@@ -2569,6 +2569,18 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["skip_regret"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["hard_stop"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        bl = desk_living.bleed_chip(root, bots=bots)
+        cv = desk_living.clv_chip(root)
+        desk_row["bleed"] = bl
+        desk_row["clv"] = cv
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["bleed"] = desk_row["master"].get("bleed") or bl
+            desk_row["master"]["clv"] = desk_row["master"].get("clv") or cv
+    except Exception as exc:  # noqa: BLE001
+        desk_row["bleed"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["clv"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}
