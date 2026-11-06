@@ -382,13 +382,20 @@ Interactive: Positive ROI Master Plan canvas.
 | --- | --- |
 | Green-day HUD | `desk_living.green_day_board` + Masters/desk |
 
+### Living upgrade — firm queue chip + Sunday packet CLI
+
+| Ticket | Where |
+| --- | --- |
+| Firm queue HUD | `desk_living.firm_queue_chip` on desk/Masters |
+| Sunday packet CLI | `tools/staff_sunday_packet.py` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Packet Discord draft helper | tools/staff_sunday_packet.py |
-| Firm queue HUD chip | remaining desk risk + deferred n |
+| Empty-CARD latency chip | last empty book sec on HUD |
+| Near-miss promote chip | n/labeled/shadow EV on Masters |
 
 ## Hard rules unchanged
 

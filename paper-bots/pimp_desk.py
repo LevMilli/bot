@@ -2521,6 +2521,14 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     except Exception as exc:  # noqa: BLE001
         desk_row["green_day"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        fq = desk_living.firm_queue_chip(root)
+        desk_row["firm_queue"] = fq
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["firm_queue"] = desk_row["master"].get("firm_queue") or fq
+    except Exception as exc:  # noqa: BLE001
+        desk_row["firm_queue"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}
