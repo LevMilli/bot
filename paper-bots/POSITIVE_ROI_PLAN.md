@@ -462,13 +462,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Hard-stop clerk chip | `desk_living.hard_stop_clerk_chip` |
 | Bleed clerk chip | `desk_living.bleed_clerk_chip` |
 
+### Living upgrade — skip-twin / CLV closer / timer digest chips
+
+| Ticket | Where |
+| --- | --- |
+| Skip-twin clerk chip | `desk_living.skip_twin_clerk_chip` |
+| CLV closer chip | `desk_living.clv_closer_chip` |
+| Timer digest chip | `desk_living.timer_digest_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Skip-twin clerk chip | labeled twin feature join |
-| CLV closer clerk chip | digest beat-close completeness |
-| Timer heartbeat digest chip | helper digest alive/dead |
+| Calendar scanner chip | upcoming events digest |
+| EIA blackout chip | ±45m commodity window |
+| Living board compact card | one-line Masters summary |
 
 ## Hard rules unchanged
 

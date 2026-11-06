@@ -445,6 +445,108 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def skip_twin_clerk_chip(root: str | None = None) -> dict:
+    """Skip-twin clerk digest — labeled near-miss feature join."""
+    digest: dict = {}
+    try:
+        from helpers import skip_twin_clerk
+        path = skip_twin_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = skip_twin_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "n": digest.get("n"),
+        "labeled_n": digest.get("labeled_n"),
+        "shadow_ev": digest.get("shadow_ev"),
+        "promote_ready": bool(digest.get("promote_ready")),
+        "decision": digest.get("decision") or "",
+        "label": (
+            f"skip-twin n={digest.get('n')} labeled={digest.get('labeled_n')} "
+            f"ev={digest.get('shadow_ev')} ready={bool(digest.get('promote_ready'))}"
+        ),
+        "note": digest.get("note") or (
+            "Near-miss would_pnl twins for learn — soft allowlist stays z|p."
+        ),
+    }
+
+
+def clv_closer_chip(root: str | None = None) -> dict:
+    """CLV closer clerk digest chip (sports beat-close completeness)."""
+    digest: dict = {}
+    try:
+        from helpers import clv_closer
+        path = clv_closer.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = clv_closer.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n"),
+        "complete": digest.get("complete"),
+        "completeness": digest.get("completeness"),
+        "pass": digest.get("pass"),
+        "label": (
+            f"CLV closer n={digest.get('n')} complete={digest.get('complete')} "
+            f"rate={digest.get('completeness')} "
+            + ("ok" if digest.get("pass") else "gaps" if digest.get("pass") is False else "n/a")
+        ),
+        "note": digest.get("note") or (
+            "Feeds green_boost evidence — never softens sports 0.06."
+        ),
+    }
+
+
+def timer_digest_chip(root: str | None = None) -> dict:
+    """Timer heartbeat helper digest chip (alive/dead)."""
+    digest: dict = {}
+    try:
+        from helpers import timer_heartbeat
+        path = timer_heartbeat.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("alive") is None:
+            # Prefer lightweight health without full snapshot when possible.
+            try:
+                import pimp_desk
+                health = pimp_desk.timer_health(root) or {}
+                digest = timer_heartbeat.write_digest(
+                    root,
+                    alive=bool(health.get("alive")),
+                    detail=str(health.get("detail") or health.get("alert") or ""),
+                )
+            except Exception:
+                digest = timer_heartbeat.probe_from_snapshot(root)
+    except Exception:
+        digest = {}
+    alive = digest.get("alive")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "alive": alive,
+        "status": digest.get("status") or (
+            "unknown" if alive is None else ("alive" if alive else "dead")
+        ),
+        "detail": digest.get("detail") or "",
+        "label": (
+            f"timer digest {digest.get('status') or ('alive' if alive else 'dead' if alive is False else 'n/a')}"
+        ),
+        "note": digest.get("note") or "Life support #1 — dead timer = dead city.",
+    }
+
+
 def near_miss_clerk_chip(root: str | None = None) -> dict:
     """Near-miss clerk digest chip (z|p soft allowlist observe)."""
     digest: dict = {}
@@ -1297,6 +1399,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "near_miss_clerk": near_miss_clerk_chip(root),
         "hard_stop_clerk": hard_stop_clerk_chip(root),
         "bleed_clerk": bleed_clerk_chip(root, bots=bots),
+        "skip_twin_clerk": skip_twin_clerk_chip(root),
+        "clv_closer": clv_closer_chip(root),
+        "timer_digest": timer_digest_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),

@@ -714,6 +714,15 @@ def master_summary(
     bleed_clerk = (living or {}).get("bleed_clerk") if isinstance(living, dict) else None
     if isinstance(bleed_clerk, dict) and bleed_clerk.get("bleed_pass") is False:
         priority.insert(0, str(bleed_clerk.get("label") or "bleed clerk hot")[:120])
+    twin = (living or {}).get("skip_twin_clerk") if isinstance(living, dict) else None
+    if isinstance(twin, dict) and twin.get("promote_ready"):
+        priority.append("skip-twin promote_ready — staff z|p only")
+    clv_closer = (living or {}).get("clv_closer") if isinstance(living, dict) else None
+    if isinstance(clv_closer, dict) and clv_closer.get("pass") is False:
+        priority.append(str(clv_closer.get("label") or "CLV closer gaps")[:120])
+    timer_digest = (living or {}).get("timer_digest") if isinstance(living, dict) else None
+    if isinstance(timer_digest, dict) and timer_digest.get("alive") is False:
+        priority.insert(0, str(timer_digest.get("label") or "timer digest DEAD")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -861,6 +870,21 @@ def master_summary(
         ),
         "bleed_clerk": (
             (living or {}).get("bleed_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "skip_twin_clerk": (
+            (living or {}).get("skip_twin_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "clv_closer": (
+            (living or {}).get("clv_closer")
+            if isinstance(living, dict)
+            else None
+        ),
+        "timer_digest": (
+            (living or {}).get("timer_digest")
             if isinstance(living, dict)
             else None
         ),
