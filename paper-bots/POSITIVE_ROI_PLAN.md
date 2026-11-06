@@ -328,13 +328,19 @@ Interactive: Positive ROI Master Plan canvas.
 | Clerk pulse timer | `helpers/clerk_pulse.run_if_due` from `pimp_desk.run_scheduled` |
 | Skip-twin → feature store | `desk_living.record_skip_twin_features` via `label_near_miss_outcome` |
 
+### Living upgrade — tip radar quote-cache feed
+
+| Ticket | Where |
+| --- | --- |
+| Tip radar from quote_cache | `helpers.tip_radar.games_from_quote_cache` → digests |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Tip radar live game feed | wire tip windows into tip_radar digests |
 | City lights for swarm ratio | Masters / tellers show insight≥3:1 |
+| Injury wire staff ingest | optional headline drop path |
 
 ## Hard rules unchanged
 

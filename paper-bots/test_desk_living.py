@@ -1,6 +1,7 @@
 """Living Trading Upgrade — desk_living + P0 guards. Floors stay locked."""
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -215,6 +216,37 @@ class InsightHelpers(unittest.TestCase):
             # Due marker: second call within cadence returns None
             again = clerk_pulse.run_if_due(tmp)
             self.assertIsNone(again)
+
+    def test_tip_radar_from_quote_cache(self):
+        from helpers import tip_radar
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as tmp:
+            sports = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports, exist_ok=True)
+            tip = datetime.now(timezone.utc) + timedelta(minutes=8)
+            cache = {
+                "NBA": {
+                    "league": "NBA",
+                    "body": {
+                        "events": [{
+                            "id": "evt1",
+                            "name": "A @ B",
+                            "competitions": [{
+                                "date": tip.isoformat(),
+                                "status": {"type": {"state": "pre"}},
+                            }],
+                        }],
+                    },
+                },
+            }
+            with open(os.path.join(sports, "quote_cache.json"), "w", encoding="utf-8") as handle:
+                json.dump(cache, handle)
+            games = tip_radar.games_from_quote_cache(tmp)
+            self.assertEqual(len(games), 1)
+            self.assertEqual(games[0]["priority"] if False else games[0]["tip_in_min"] > 0, True)
+            digest = tip_radar.write_digest_from_desk(tmp)
+            self.assertEqual(digest["n"], 1)
+            self.assertEqual(digest["games"][0]["priority"], "T-15")
 
 
 class MemeChicagoDay(unittest.TestCase):
