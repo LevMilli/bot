@@ -724,12 +724,19 @@ def paper_buy(state: dict, ev: dict) -> str:
 def main() -> int:
     print("commodity-15m paper check (no live orders)")
     t0 = time.perf_counter()
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    try:
+        import desk_living
+        blocked = desk_living.honor_desk_entry_gate(DESK_ROOT)
+        if blocked:
+            print(f"Desk entry_gate (CLI honor): {blocked[:160]}")
+    except Exception:
+        pass
     account = load_account()
     settle_account(account)
     save_account(account)
 
-    if DESK_ROOT not in sys.path:
-        sys.path.insert(0, DESK_ROOT)
     try:
         import kalshi_tape
         tape = kalshi_tape.sync_tape_family(DESK_ROOT, "commodity15m")

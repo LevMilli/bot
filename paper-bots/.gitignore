@@ -55,9 +55,15 @@ desk_btc_calibration.json
 desk_firm_queue.json
 desk_empty_card.json
 desk_near_miss_promote.json
+desk_completions.json
+desk_feature_store.jsonl
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json
 helpers/calendar_scanner_at.txt
+helpers/tip_radar_digest.json
+helpers/skip_historian_digest.json
+helpers/timer_heartbeat_digest.json
+helpers/empty_card_bee_digest.json
 btc15m-signal/paper_parlays.json
 commodity-15m-paper/paper_account.json
 *.tmp
