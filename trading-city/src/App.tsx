@@ -1031,6 +1031,23 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">doctor draft</span>
+                  <span className="vault-ritual-draft">
+                    {(() => {
+                      const copy =
+                        snap?.desk?.doctor_soft_copy ||
+                        (snap?.desk?.master as {
+                          doctor_soft_copy?: string
+                        } | undefined)?.doctor_soft_copy
+                      if (!copy) {
+                        return 'make living-doctor · staff paste only · never auto-posts'
+                      }
+                      const one = String(copy).split('\n').filter(Boolean).slice(0, 2).join(' · ')
+                      return one.length > 160 ? `${one.slice(0, 157)}…` : one
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">AI</span>
                   <span
                     style={{

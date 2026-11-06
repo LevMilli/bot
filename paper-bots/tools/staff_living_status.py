@@ -271,6 +271,20 @@ def main() -> int:
                 if isinstance(board.get("ritual_observe"), dict)
                 else None
             ),
+            "doctor_soft_copy": (
+                (
+                    f"**Living doctor age** (paper · floors locked · live=False)\n"
+                    f"doctor="
+                    f"{'fresh' if (board.get('ritual_observe') or {}).get('doctor_fresh') else 'stale' if (board.get('ritual_observe') or {}).get('doctor_fresh') is False else 'n/a'} "
+                    f"doctor_fresh={(board.get('ritual_observe') or {}).get('doctor_fresh')}\n"
+                    f"{(board.get('doctor_age') or {}).get('label') or 'doctor age'}\n"
+                    f"ritual draft: make living-ritual-discord\n"
+                    f"_staff paste only · never auto-posts · never enables live_"
+                )
+                if isinstance(board.get("ritual_observe"), dict)
+                or isinstance(board.get("doctor_age"), dict)
+                else None
+            ),
             "sunday_packet": board.get("sunday_packet"),
             "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),
