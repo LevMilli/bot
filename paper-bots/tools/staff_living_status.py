@@ -8,6 +8,9 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py pager
   python3 tools/staff_living_status.py priority
   python3 tools/staff_living_status.py selfcheck
+  python3 tools/staff_living_status.py gaps
+  python3 tools/staff_living_status.py inventory
+  python3 tools/staff_living_status.py hillclimb
 """
 from __future__ import annotations
 
@@ -35,6 +38,8 @@ def _text(board: dict) -> str:
     quiet = board.get("feature_quiet") if isinstance(board.get("feature_quiet"), dict) else {}
     dual = board.get("dual_control_chip") if isinstance(board.get("dual_control_chip"), dict) else {}
     ruin = board.get("ruin_drill_chip") if isinstance(board.get("ruin_drill_chip"), dict) else {}
+    inv = board.get("digest_inventory") if isinstance(board.get("digest_inventory"), dict) else {}
+    hill = board.get("hillclimb_chip") if isinstance(board.get("hillclimb_chip"), dict) else {}
     lines = [
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
@@ -48,6 +53,8 @@ def _text(board: dict) -> str:
         ),
         f"dual-control: {dual.get('label') or '—'}",
         f"ruin: {ruin.get('label') or '—'}",
+        f"hillclimb: {hill.get('label') or '—'}",
+        f"digests: {inv.get('label') or '—'}",
         f"chicago_today: {board.get('chicago_today')}",
     ]
     return "\n".join(lines)
@@ -59,7 +66,10 @@ def main() -> int:
         "action",
         nargs="?",
         default="text",
-        choices=("text", "json", "pager", "priority", "selfcheck"),
+        choices=(
+            "text", "json", "pager", "priority", "selfcheck",
+            "gaps", "inventory", "hillclimb",
+        ),
     )
     parser.add_argument("--root", default=ROOT)
     args = parser.parse_args()
@@ -68,6 +78,27 @@ def main() -> int:
 
     if args.action == "selfcheck":
         print(json.dumps(desk_living.living_self_check(root), indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "gaps":
+        gaps = board.get("dual_control_gaps")
+        if not isinstance(gaps, dict):
+            gaps = desk_living.dual_control_gaps_page(root)
+        if gaps.get("copy"):
+            print(gaps["copy"])
+        else:
+            print(json.dumps(gaps, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "inventory":
+        inv = board.get("digest_inventory")
+        if not isinstance(inv, dict):
+            inv = desk_living.digest_inventory(root)
+        print(json.dumps(inv, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb":
+        hill = board.get("hillclimb_chip")
+        if not isinstance(hill, dict):
+            hill = desk_living.hillclimb_chip(root)
+        print(json.dumps(hill, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "json":
         print(json.dumps({
@@ -79,6 +110,9 @@ def main() -> int:
             "feature_quiet": board.get("feature_quiet"),
             "feature_quiet_pager": board.get("feature_quiet_pager"),
             "dual_control_chip": board.get("dual_control_chip"),
+            "dual_control_gaps": board.get("dual_control_gaps"),
+            "hillclimb_chip": board.get("hillclimb_chip"),
+            "digest_inventory": board.get("digest_inventory"),
             "ruin_drill_chip": board.get("ruin_drill_chip"),
             "timer_heartbeat": board.get("timer_heartbeat"),
             "chicago_today": board.get("chicago_today"),

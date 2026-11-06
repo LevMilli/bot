@@ -777,6 +777,15 @@ def master_summary(
     ruin_chip = (living or {}).get("ruin_drill_chip") if isinstance(living, dict) else None
     if isinstance(ruin_chip, dict) and ruin_chip.get("active"):
         priority.insert(0, str(ruin_chip.get("label") or "ruin drill ACTIVE")[:120])
+    dual_gaps = (living or {}).get("dual_control_gaps") if isinstance(living, dict) else None
+    if isinstance(dual_gaps, dict) and dual_gaps.get("page") and int(dual_gaps.get("gaps_n") or 0) > 0:
+        priority.append(str(dual_gaps.get("label") or "dual-control gaps")[:120])
+    hill_chip = (living or {}).get("hillclimb_chip") if isinstance(living, dict) else None
+    if isinstance(hill_chip, dict) and hill_chip.get("active_name"):
+        priority.append(str(hill_chip.get("label") or "hillclimb lever")[:120])
+    digest_inv = (living or {}).get("digest_inventory") if isinstance(living, dict) else None
+    if isinstance(digest_inv, dict) and digest_inv.get("pass") is False:
+        priority.append(str(digest_inv.get("label") or "digest inventory thin")[:120])
     priority = finalize_living_priority(priority)
     return {
         "paper_only": True,
@@ -817,6 +826,21 @@ def master_summary(
         ),
         "priority_max": PRIORITY_MAX,
         "hillclimb_lever": hillclimb_lever,
+        "hillclimb_chip": (
+            (living or {}).get("hillclimb_chip")
+            if isinstance(living, dict)
+            else None
+        ),
+        "dual_control_gaps": (
+            (living or {}).get("dual_control_gaps")
+            if isinstance(living, dict)
+            else None
+        ),
+        "digest_inventory": (
+            (living or {}).get("digest_inventory")
+            if isinstance(living, dict)
+            else None
+        ),
         "dual_control": dual_control,
         "ruin_drill": ruin_drill,
         "skip_taxonomy": (
