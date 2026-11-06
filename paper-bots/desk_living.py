@@ -1687,6 +1687,37 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
     return board
 
 
+def living_self_check(root: str | None = None) -> dict:
+    """Staff health probe for living spine (never places / never softens)."""
+    board = living_upgrade_board(root)
+    swarm = board.get("insight_swarm") if isinstance(board.get("insight_swarm"), dict) else {}
+    quiet = board.get("feature_quiet") if isinstance(board.get("feature_quiet"), dict) else {}
+    timer = board.get("timer_heartbeat") if isinstance(board.get("timer_heartbeat"), dict) else {}
+    floors = bool(board.get("fee_floors_locked"))
+    ok = bool(
+        floors
+        and board.get("live_orders_enabled") is False
+        and board.get("grok_buys") is False
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": floors,
+        "live_orders_enabled": False,
+        "ok": ok,
+        "swarm_pass": swarm.get("pass"),
+        "swarm_ratio": swarm.get("ratio"),
+        "feature_quiet": bool(quiet.get("quiet")),
+        "timer_alive": timer.get("alive"),
+        "chips_n": sum(
+            1
+            for k, v in board.items()
+            if isinstance(v, dict) and v.get("fee_floors_locked") is True
+        ),
+        "chicago_today": board.get("chicago_today"),
+        "note": "Living self_check — observe-only. Floors must stay locked.",
+    }
+
+
 def _f(v: Any):
     try:
         if v is None or v == "":

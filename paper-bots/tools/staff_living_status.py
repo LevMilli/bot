@@ -7,6 +7,7 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py json
   python3 tools/staff_living_status.py pager
   python3 tools/staff_living_status.py priority
+  python3 tools/staff_living_status.py selfcheck
 """
 from __future__ import annotations
 
@@ -58,13 +59,16 @@ def main() -> int:
         "action",
         nargs="?",
         default="text",
-        choices=("text", "json", "pager", "priority"),
+        choices=("text", "json", "pager", "priority", "selfcheck"),
     )
     parser.add_argument("--root", default=ROOT)
     args = parser.parse_args()
     root = args.root
     board = _board(root)
 
+    if args.action == "selfcheck":
+        print(json.dumps(desk_living.living_self_check(root), indent=2, sort_keys=True, default=str))
+        return 0
     if args.action == "json":
         print(json.dumps({
             "paper_only": True,
