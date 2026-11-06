@@ -52,6 +52,7 @@ desk_capital_os.json
 desk_opp_cost.json
 desk_idea_review.json
 desk_btc_calibration.json
+desk_sports_calibration.json
 desk_firm_queue.json
 desk_empty_card.json
 desk_near_miss_promote.json
@@ -66,6 +67,7 @@ helpers/timer_heartbeat_digest.json
 helpers/empty_card_bee_digest.json
 helpers/clv_closer_digest.json
 helpers/injury_wire_digest.json
+helpers/eia_scout_digest.json
 btc15m-signal/paper_parlays.json
 commodity-15m-paper/paper_account.json
 *.tmp

@@ -530,6 +530,24 @@ def master_summary(
         except Exception:
             plan["btc_calibration"] = None
         try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_sc = desk_roi_plan.latest_sports_calibration(root)
+            if root and bots and (
+                not isinstance(latest_sc, dict)
+                or str(latest_sc.get("label") or "") != today
+            ):
+                plan["sports_calibration"] = desk_roi_plan.capture_sports_calibration(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["sports_calibration"] = (
+                    latest_sc or desk_roi_plan.sports_calibration_report(bots)
+                )
+        except Exception:
+            plan["sports_calibration"] = None
+        try:
             status_fq = desk_roi_plan.firm_queue_status(root)
             offers_n = int((status_fq or {}).get("offers_n") or 0)
             latest_fq = (status_fq or {}).get("latest")
