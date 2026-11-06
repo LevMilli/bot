@@ -2513,6 +2513,14 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     except Exception as exc:  # noqa: BLE001
         desk_row["skip_taxonomy"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        gd = desk_living.green_day_board(root, bots=public)
+        desk_row["green_day"] = gd
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["green_day"] = desk_row["master"].get("green_day") or gd
+    except Exception as exc:  # noqa: BLE001
+        desk_row["green_day"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

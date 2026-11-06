@@ -445,6 +445,57 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def green_day_board(root: str | None = None, bots: list | None = None) -> dict:
+    """Fee-clear green-day / selective +1 readiness for HUD (floors locked)."""
+    fee_clear = []
+    green_n = 0
+    red_n = 0
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if bot_id not in FEE_CLEAR:
+            continue
+        today = _f(bot.get("today"))
+        row = {
+            "bot": bot_id,
+            "today": today,
+            "green": today is not None and today >= 0,
+            "selective_eligible": today is not None and today >= 0,
+        }
+        fee_clear.append(row)
+        if today is None:
+            continue
+        if today >= 0:
+            green_n += 1
+        else:
+            red_n += 1
+    boost = {}
+    try:
+        import desk_roi_plan
+        boost = desk_roi_plan.sports_green_boost_status(root, bots=bots) or {}
+    except Exception:
+        boost = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "fee_clear_towers": sorted(FEE_CLEAR),
+        "towers": fee_clear,
+        "green_n": green_n,
+        "red_n": red_n,
+        "all_fee_clear_green": bool(fee_clear) and red_n == 0 and green_n == len(fee_clear),
+        "sports_green_boost": {
+            "ready": bool(boost.get("ready")),
+            "green_boost": int(boost.get("green_boost") or 0),
+            "auto_promote": False,
+        },
+        "note": (
+            "Selective +1 only on fee-clear green days; sports green_boost stays 0 "
+            "until CLV+M1 gate ready. Never softens venue floors."
+        ),
+    }
+
+
 def skip_taxonomy_chip(root: str | None = None) -> dict:
     """Top stable skip codes for teller rail / city chip (observe-only)."""
     board = {}
@@ -533,6 +584,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "dual_control": dual,
         "ruin_drill": ruin,
         "skip_taxonomy": skip_taxonomy_chip(root),
+        "green_day": green_day_board(root, bots=bots),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),

@@ -634,6 +634,14 @@ def master_summary(
             priority.insert(0, f"ruin drill ACTIVE level={ruin_drill.get('level')}")
         elif not ruin_drill.get("practiced_this_month"):
             priority.append("ruin drill: practice soft/hard this Chicago month")
+    green_day = (living or {}).get("green_day") if isinstance(living, dict) else None
+    if isinstance(green_day, dict):
+        sg = green_day.get("sports_green_boost") or {}
+        priority.append(
+            f"fee-clear green {green_day.get('green_n') or 0}/"
+            f"{len(green_day.get('towers') or [])}; "
+            f"sports_green_boost={sg.get('green_boost') or 0}"
+        )
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -666,6 +674,11 @@ def master_summary(
         "ruin_drill": ruin_drill,
         "skip_taxonomy": (
             (living or {}).get("skip_taxonomy")
+            if isinstance(living, dict)
+            else None
+        ),
+        "green_day": (
+            (living or {}).get("green_day")
             if isinstance(living, dict)
             else None
         ),
