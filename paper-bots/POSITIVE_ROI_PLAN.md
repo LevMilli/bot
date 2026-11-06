@@ -424,13 +424,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Tip radar chip | `desk_living.tip_radar_chip` |
 | Calib nag chip | `desk_living.calib_nag_chip` |
 
+### Living upgrade — injury wire + EIA scout chips
+
+| Ticket | Where |
+| --- | --- |
+| Injury wire chip | `desk_living.injury_wire_chip` |
+| EIA scout chip | `desk_living.eia_scout_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Injury wire chip | open inbox / digest on HUD |
-| EIA scout chip | 7-day inventory calendar |
+| Swarm lights teller line | teller_memory swarm flash |
+| Sunday packet Discord copy | markdown export on CLI |
 
 ## Hard rules unchanged
 

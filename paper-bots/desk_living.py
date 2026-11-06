@@ -445,6 +445,75 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def injury_wire_chip(root: str | None = None) -> dict:
+    """Injury/news wire + staff inbox chip."""
+    digest: dict = {}
+    inbox_n = 0
+    try:
+        from helpers import injury_wire
+        path = injury_wire.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict):
+            digest = {}
+        if digest.get("n") is None:
+            digest = injury_wire.write_digest_from_desk(root)
+        inbox = injury_wire.load_inbox(root) or {}
+        rows = inbox.get("rows") if isinstance(inbox, dict) else None
+        if isinstance(rows, list):
+            inbox_n = len(rows)
+        elif isinstance(inbox, list):
+            inbox_n = len(inbox)
+    except Exception:
+        digest = {}
+    headlines = digest.get("headlines") if isinstance(digest.get("headlines"), list) else []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n") if digest.get("n") is not None else len(headlines),
+        "inbox_n": inbox_n,
+        "headlines": headlines[:6],
+        "label": (
+            f"injury wire n={digest.get('n') or len(headlines)} inbox={inbox_n}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only injury/news wire. Never buys; never waives sports floor."
+        ),
+    }
+
+
+def eia_scout_chip(root: str | None = None) -> dict:
+    """7-day crude/natgas inventory calendar chip."""
+    digest: dict = {}
+    try:
+        from helpers import eia_scout
+        path = eia_scout.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = eia_scout.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    events = digest.get("events") if isinstance(digest.get("events"), list) else []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n") if digest.get("n") is not None else len(events),
+        "next_eta_hours": digest.get("next_eta_hours"),
+        "scout_days": digest.get("scout_days"),
+        "events": events[:6],
+        "label": (
+            f"EIA scout n={digest.get('n') or len(events)} "
+            f"next={digest.get('next_eta_hours')}h"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only EIA week scout — never softens commodity 0.05."
+        ),
+    }
+
+
 def tip_radar_chip(root: str | None = None) -> dict:
     """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
     digest = {}
@@ -929,6 +998,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "clv": clv_chip(root),
         "tip_radar": tip_radar_chip(root),
         "calib_nag": calib_nag_chip(root, bots=bots),
+        "injury_wire": injury_wire_chip(root),
+        "eia_scout": eia_scout_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
