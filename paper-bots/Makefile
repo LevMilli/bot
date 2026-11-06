@@ -28,6 +28,7 @@ living-ritual:
 living-ritual-discord:
 	python3 tools/staff_living_ritual.py --discord
 
+# Observe-only readiness (never records doctor / never auto-posts). Exit 2 if floors soft or expand blocked.
 living-ritual-observe:
 	python3 tools/staff_living_ritual.py --observe
 

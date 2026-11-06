@@ -815,8 +815,8 @@ def living_compact_card(
         f"green={green.get('green_n')}",
         f"bleed={bleed.get('ratio')}",
         quiet_part,
-        expand_part,
         ritual_part,
+        expand_part,
     ]
     return {
         "paper_only": True,

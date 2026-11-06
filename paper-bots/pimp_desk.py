@@ -2766,6 +2766,23 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["living_doctor"] = desk_living.living_doctor(root, record=False)
         desk_row["doctor_age"] = desk_living.doctor_age_chip(root)
         desk_row["ritual_observe"] = desk_living.ritual_observe_chip(root)
+        # Prefer Masters-built soft_copy when present; else build observe draft.
+        ritual_soft = None
+        if isinstance(desk_row.get("master"), dict):
+            ritual_soft = desk_row["master"].get("ritual_soft_copy") or desk_row["master"].get(
+                "ritual_discord"
+            )
+        if not ritual_soft and isinstance(desk_row.get("ritual_observe"), dict):
+            r = desk_row["ritual_observe"]
+            ritual_soft = (
+                f"**Masters ritual** (paper · floors locked · live=False)\n"
+                f"ritual_ok={r.get('ritual_ok')} exit_ok={r.get('exit_ok')} "
+                f"doctor_fresh={r.get('doctor_fresh')}\n"
+                f"{r.get('label') or 'ritual observe'}\n"
+                f"_staff paste only · never auto-posts · never enables live_"
+            )
+        desk_row["ritual_soft_copy"] = ritual_soft
+        desk_row["ritual_discord"] = ritual_soft
         desk_row["living_ai"] = desk_living.living_ai_health(root, bots=bots)
         desk_row["feature_quiet"] = desk_living.feature_store_quiet_alert(root)
         desk_row["feature_quiet_pager"] = desk_living.feature_quiet_pager(root)
@@ -2787,6 +2804,12 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             )
             desk_row["master"]["ritual_observe"] = (
                 desk_row["master"].get("ritual_observe") or desk_row["ritual_observe"]
+            )
+            desk_row["master"]["ritual_soft_copy"] = (
+                desk_row["master"].get("ritual_soft_copy") or ritual_soft
+            )
+            desk_row["master"]["ritual_discord"] = (
+                desk_row["master"].get("ritual_discord") or ritual_soft
             )
             desk_row["master"]["living_ai"] = (
                 desk_row["master"].get("living_ai") or desk_row["living_ai"]

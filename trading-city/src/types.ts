@@ -658,6 +658,8 @@ export type Desk = {
     note?: string
     error?: string
   }
+  ritual_soft_copy?: string
+  ritual_discord?: string
   master?: {
     paper_only?: boolean
     version?: number
@@ -675,6 +677,9 @@ export type Desk = {
     swarm_lights?: Desk['swarm_lights']
     completions?: Desk['completions']
     towers?: unknown[]
+    ritual_observe?: Desk['ritual_observe']
+    ritual_soft_copy?: string
+    ritual_discord?: string
     note?: string
   }
   teller_memory?: {
