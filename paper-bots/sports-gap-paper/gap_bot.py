@@ -1183,10 +1183,30 @@ def run():
                 if DESK_ROOT not in sys.path:
                     sys.path.insert(0, DESK_ROOT)
                 import desk_roi_plan
+                import desk_living
                 desk_roi_plan.record_fit(
                     DESK_ROOT, bot="sports-gap", outcome="block",
                     ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
                     edge=gap, note=str(reason)[:160],
+                )
+                desk_living.record_eval_features(
+                    DESK_ROOT,
+                    bot="sports-gap",
+                    action="skip",
+                    ticker=str(m.get("ticker") or ""),
+                    series=str(c.get("series") or ""),
+                    ev={
+                        "side": c.get("side"),
+                        "ask": ask,
+                        "bid": bid,
+                        "fee": fee(ask) if ask else None,
+                        "confidence": fair,
+                        "edge": gap,
+                        "lane": c.get("lane"),
+                        "ticker": m.get("ticker"),
+                    },
+                    reasons=[reason],
+                    note=str(reason)[:160],
                 )
                 why = str(reason or "").lower()
                 if any(k in why for k in ("max buys", "max open risk", "budget", "open risk")):
@@ -1249,10 +1269,30 @@ def run():
             if DESK_ROOT not in sys.path:
                 sys.path.insert(0, DESK_ROOT)
             import desk_roi_plan
+            import desk_living
             desk_roi_plan.record_fit(
                 DESK_ROOT, bot="sports-gap", outcome="buy",
                 ticker=str(m.get("ticker") or ""), side=str(c.get("side") or ""),
                 edge=gap,
+            )
+            desk_living.record_eval_features(
+                DESK_ROOT,
+                bot="sports-gap",
+                action="buy",
+                ticker=str(m.get("ticker") or ""),
+                series=str(c.get("series") or ""),
+                ev={
+                    "side": c.get("side"),
+                    "ask": ask,
+                    "bid": bid,
+                    "fee": fee(ask) if ask else None,
+                    "confidence": fair,
+                    "edge": gap,
+                    "lane": lane,
+                    "ticker": m.get("ticker"),
+                    "fill_id": pos.get("fill_id"),
+                },
+                note=why[:160],
             )
             desk_roi_plan.flush_opp_cost_on_buy(
                 DESK_ROOT,

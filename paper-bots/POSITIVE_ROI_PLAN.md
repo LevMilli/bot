@@ -280,13 +280,187 @@ Interactive: Positive ROI Master Plan canvas.
 | Insight helpers (observe-only) | `helpers/{tip_radar,skip_historian,timer_heartbeat,empty_card_bee}` |
 | Teller memory on closes | sports / BTC / INX / meme settles & sells |
 
+### Living upgrade — EIA scout + sports calib + loser features
+
+| Ticket | Where |
+| --- | --- |
+| EIA week scout | `helpers/eia_scout` — observe-only inventory horizon |
+| Sports calibration board | `sports_calibration_report` / Masters `sports_calibration` |
+| Feature rows on loser towers | meme + INX (sp/sized) skip/buy → living feature store |
+
+### Living upgrade — Tier-2 insight clerks
+
+| Ticket | Where |
+| --- | --- |
+| Calib nag | `helpers/calib_nag` — BTC+sports raise_Φ tickets (no silent write) |
+| Hard-stop clerk | `helpers/hard_stop_clerk` — sports shadow promote readiness |
+| Near-miss clerk | `helpers/near_miss_clerk` — soft z\|p promote readiness |
+| Bleed clerk | `helpers/bleed_clerk` — firm bleed + misplaced capital |
+
+### Living upgrade — ops insight clerks
+
+| Ticket | Where |
+| --- | --- |
+| Distance clerk | `helpers/distance_clerk` — empty CARD + firm queue |
+| Bookkeeper clerk | `helpers/bookkeeper_clerk` — Completions + fee ledger |
+| Reporter clerk | `helpers/reporter_clerk` — weekly scorecard mirror |
+| Quant clerk | `helpers/quant_clerk` — M3 fit + M4 latency (walk-forward) |
+
+### Living upgrade — commodity calib + AI health
+
+| Ticket | Where |
+| --- | --- |
+| Commodity calibration | `commodity_calibration_report` / Masters `commodity_calibration` |
+| Living AI health | `desk_living.living_ai_health` on living board (adapt + raise_Φ) |
+| Calib nag covers commodity | `helpers/calib_nag` boards include commodity |
+
+### Living upgrade — swarm ratio + skip-twin clerk
+
+| Ticket | Where |
+| --- | --- |
+| Insight≥3:1 audit | `desk_living.insight_swarm_ratio` on living board |
+| Skip-twin clerk | `helpers/skip_twin_clerk` — near-miss would_pnl twin digest |
+
+### Living upgrade — clerk pulse + skip-twin feature join
+
+| Ticket | Where |
+| --- | --- |
+| Clerk pulse timer | `helpers/clerk_pulse.run_if_due` from `pimp_desk.run_scheduled` |
+| Skip-twin → feature store | `desk_living.record_skip_twin_features` via `label_near_miss_outcome` |
+
+### Living upgrade — tip radar quote-cache feed
+
+| Ticket | Where |
+| --- | --- |
+| Tip radar from quote_cache | `helpers.tip_radar.games_from_quote_cache` → digests |
+
+### Living upgrade — swarm lights + injury inbox
+
+| Ticket | Where |
+| --- | --- |
+| Swarm city lights | `desk_row.swarm_lights` + Masters `swarm_lights` |
+| Injury staff inbox | `helpers/injury_wire_inbox.json` via `staff_ingest` |
+
+### Living upgrade — AI / completions HUD
+
+| Ticket | Where |
+| --- | --- |
+| raise_Φ on Masters priority | `master_summary.priority` from `living_ai` |
+| Completions on desk/tellers | `desk_row.completions` + teller_memory fact |
+
+### Living upgrade — feature quiet alert + hillclimb card
+
+| Ticket | Where |
+| --- | --- |
+| Feature quiet alert | `desk_living.feature_store_quiet_alert` (≥6h weekday) |
+| Hillclimb lever card | living board + Masters `hillclimb_lever` status |
+
+### Living upgrade — dual-control HUD + hillclimb CLI
+
+| Ticket | Where |
+| --- | --- |
+| Dual-control on Masters/desk | `dual_control_status` on living + desk_row |
+| Hillclimb staff CLI | `tools/staff_hillclimb_pick.py` + `staff_clear_hillclimb_lever` |
+
+### Living upgrade — dual-control / ruin staff CLIs
+
+| Ticket | Where |
+| --- | --- |
+| Dual-control CLI | `tools/staff_dual_control.py` |
+| Ruin drill CLI + HUD | `tools/staff_ruin_drill.py` + `practiced_this_month` |
+
+### Living upgrade — Sunday packet + skip taxonomy chip
+
+| Ticket | Where |
+| --- | --- |
+| Sunday living packet | `helpers/sunday_packet` (staff draft; auto_publish=False) |
+| Skip taxonomy chip | `desk_living.skip_taxonomy_chip` on desk/Masters/teller facts |
+
+### Living upgrade — green-day / selective +1 board
+
+| Ticket | Where |
+| --- | --- |
+| Green-day HUD | `desk_living.green_day_board` + Masters/desk |
+
+### Living upgrade — firm queue chip + Sunday packet CLI
+
+| Ticket | Where |
+| --- | --- |
+| Firm queue HUD | `desk_living.firm_queue_chip` on desk/Masters |
+| Sunday packet CLI | `tools/staff_sunday_packet.py` |
+
+### Living upgrade — empty CARD + near-miss chips
+
+| Ticket | Where |
+| --- | --- |
+| Empty CARD chip | `desk_living.empty_card_chip` |
+| Near-miss chip | `desk_living.near_miss_chip` |
+
+### Living upgrade — timer heartbeat + helper Gate A
+
+| Ticket | Where |
+| --- | --- |
+| Timer heartbeat chip | `desk_living.timer_heartbeat_chip` |
+| Helper Gate A board | `desk_living.helper_gate_a_board` |
+
+### Living upgrade — skip-regret + hard-stop chips
+
+| Ticket | Where |
+| --- | --- |
+| Skip-regret chip | `desk_living.skip_regret_chip` |
+| Hard-stop chip | `desk_living.hard_stop_chip` |
+
+### Living upgrade — bleed + CLV chips
+
+| Ticket | Where |
+| --- | --- |
+| Bleed chip | `desk_living.bleed_chip` |
+| CLV chip | `desk_living.clv_chip` |
+
+### Living upgrade — tip radar + calib nag chips
+
+| Ticket | Where |
+| --- | --- |
+| Tip radar chip | `desk_living.tip_radar_chip` |
+| Calib nag chip | `desk_living.calib_nag_chip` |
+
+### Living upgrade — injury wire + EIA scout chips
+
+| Ticket | Where |
+| --- | --- |
+| Injury wire chip | `desk_living.injury_wire_chip` |
+| EIA scout chip | `desk_living.eia_scout_chip` |
+
+### Living upgrade — city swarm vault + Discord packet
+
+| Ticket | Where |
+| --- | --- |
+| City vault swarm/fills | `trading-city` Desk types + vault board |
+| Sunday Discord copy | `sunday_packet.format_discord` + CLI |
+
+### Living upgrade — skip / distance / quant chips
+
+| Ticket | Where |
+| --- | --- |
+| Skip historian chip | `desk_living.skip_historian_chip` |
+| Distance clerk chip | `desk_living.distance_clerk_chip` |
+| Quant clerk chip | `desk_living.quant_clerk_chip` |
+
+### Living upgrade — bookkeeper / reporter / empty-bee chips
+
+| Ticket | Where |
+| --- | --- |
+| Bookkeeper chip | `desk_living.bookkeeper_chip` |
+| Reporter chip | `desk_living.reporter_chip` |
+| Empty-card bee chip | `desk_living.empty_card_bee_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Wire feature rows on every evaluate | sports/BTC/commodity hot path |
-| More insight swarm | CLV closer, injury wire, EIA week scout |
+| Near-miss clerk chip | labeled near-miss digest |
+| Hard-stop clerk chip | shadow exits digest |
+| Bleed clerk chip | firm bleed digest |
 
 ## Hard rules unchanged
 

@@ -338,6 +338,29 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
             kind="sell",
             note=str(reason or "")[:120],
         )
+        try:
+            import desk_living
+            import teller_memory
+            desk_living.record_completion(
+                DESK_ROOT,
+                bot="commodity-15m",
+                ticker=str(pos.get("ticker") or ""),
+                side=str(pos.get("side") or ""),
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                fill_id=str(pos.get("fill_id") or ""),
+                kind="sell",
+                eligible=True,
+                note=str(reason or "")[:120],
+            )
+            teller_memory.remember(
+                DESK_ROOT,
+                kind="wins" if float(pnl) > 0 else "mistakes",
+                text=f"commodity {reason} {pos.get('ticker')} pnl {float(pnl):+.2f}"[:200],
+                bot_id="commodity-15m",
+            )
+        except Exception:
+            pass
         helper = str(pos.get("helper_source") or "").strip()
         if helper:
             desk_roi_plan.record_helper_fill(
@@ -853,6 +876,20 @@ def main() -> int:
                 minutes_left=ev.get("min_left"),
                 regime="skip" if ev.get("reasons") else "confident_early",
                 note="; ".join(ev.get("reasons") or [])[:160],
+            )
+        except Exception:
+            pass
+        try:
+            import desk_living
+            desk_living.record_eval_features(
+                DESK_ROOT,
+                bot="commodity-15m",
+                action="skip" if ev.get("reasons") else "fit",
+                series=series,
+                ticker=str(m.get("ticker") or ""),
+                ev=ev,
+                reasons=list(ev.get("reasons") or []),
+                note="; ".join(ev.get("reasons") or ["fit"])[:160],
             )
         except Exception:
             pass
