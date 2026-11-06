@@ -49,6 +49,7 @@ def _text(board: dict) -> str:
     hill = board.get("hillclimb_chip") if isinstance(board.get("hillclimb_chip"), dict) else {}
     floors = board.get("fee_floors_assert") if isinstance(board.get("fee_floors_assert"), dict) else {}
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
+    expand = board.get("betting_expand_gate") if isinstance(board.get("betting_expand_gate"), dict) else {}
     lines = [
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
@@ -66,6 +67,9 @@ def _text(board: dict) -> str:
         f"digests: {inv.get('label') or '—'}",
         f"floors: {floors.get('label') or '—'}",
         f"teller: {teller.get('memory_line') or '—'}",
+        (
+            f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
+        ),
         f"chicago_today: {board.get('chicago_today')}",
     ]
     return "\n".join(lines)
@@ -124,7 +128,10 @@ def main() -> int:
         ruin = board.get("ruin_drill_page")
         if not isinstance(ruin, dict):
             ruin = desk_living.ruin_drill_page(root)
-        if ruin.get("copy"):
+        if args.discord:
+            body = ruin.get("discord") or ruin.get("copy") or ""
+            print(body if body else json.dumps(ruin, indent=2, sort_keys=True, default=str))
+        elif ruin.get("copy"):
             print(ruin["copy"])
         else:
             print(json.dumps(ruin, indent=2, sort_keys=True, default=str))
@@ -167,7 +174,14 @@ def main() -> int:
         return 0
     if args.action == "expand":
         gate = desk_living.betting_expand_gate(root)
-        print(json.dumps(gate, indent=2, sort_keys=True, default=str))
+        if args.discord:
+            print(
+                f"**Betting expand gate** (paper only · never softens floors)\n"
+                f"{gate.get('soft_copy') or gate.get('label') or '—'}\n"
+                f"_auto_publish=False · live=False_"
+            )
+        else:
+            print(json.dumps(gate, indent=2, sort_keys=True, default=str))
         return 0 if gate.get("allow_betting_expand") else 2
     if args.action == "doctor":
         doc = desk_living.living_doctor(root)

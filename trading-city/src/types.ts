@@ -202,6 +202,14 @@ export type Desk = {
     note?: string
     error?: string
   }
+  living_compact?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    label?: string
+    parts?: string[]
+    note?: string
+    error?: string
+  }
   living_ai?: {
     paper_only?: boolean
     fee_floors_locked?: boolean

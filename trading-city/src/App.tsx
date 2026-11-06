@@ -661,6 +661,19 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">compact</span>
+                  <span>
+                    {(() => {
+                      const c =
+                        snap?.desk?.living_compact ||
+                        (snap?.desk?.master as { compact?: { label?: string } } | undefined)
+                          ?.compact
+                      if (!c) return 'living compact pending'
+                      return c.label || 'living compact'
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">AI</span>
                   <span
                     style={{

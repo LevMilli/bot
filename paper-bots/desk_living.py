@@ -1804,16 +1804,19 @@ def ruin_drill_page(root: str | None = None) -> dict:
         "",
         "_floors locked · LIVE_ORDERS_ENABLED=False · staff ack only_",
     ]
+    copy = "\n".join(lines)
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "live_orders_enabled": False,
         "auto_page": False,
+        "auto_publish": False,
         "page": page,
         "practiced_this_month": practiced,
         "active": active,
         "level": status.get("level"),
-        "copy": "\n".join(lines),
+        "copy": copy,
+        "discord": copy,  # staff paste only
         "label": (
             f"ruin page active={active} practiced_month={practiced}"
         ),
@@ -2187,6 +2190,11 @@ def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> d
         if ok
         else "betting expand BLOCKED — insight swarm thin"
     )
+    soft_copy = (
+        f"{label} — {reason}"
+        if not ok
+        else f"{label} — {reason}"
+    )
     if remember and not ok:
         try:
             import teller_memory
@@ -2210,6 +2218,7 @@ def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> d
         "min_ratio": swarm.get("min_ratio") or INSIGHT_BETTING_MIN_RATIO,
         "digest_pass": inv.get("pass"),
         "reason": reason,
+        "soft_copy": soft_copy,
         "label": label,
         "note": "Insight-first living hire order. Never softens venue floors.",
     }
