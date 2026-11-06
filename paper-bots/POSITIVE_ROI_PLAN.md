@@ -369,13 +369,26 @@ Interactive: Positive ROI Master Plan canvas.
 | Dual-control CLI | `tools/staff_dual_control.py` |
 | Ruin drill CLI + HUD | `tools/staff_ruin_drill.py` + `practiced_this_month` |
 
+### Living upgrade — Sunday packet + skip taxonomy chip
+
+| Ticket | Where |
+| --- | --- |
+| Sunday living packet | `helpers/sunday_packet` (staff draft; auto_publish=False) |
+| Skip taxonomy chip | `desk_living.skip_taxonomy_chip` on desk/Masters/teller facts |
+
+### Living upgrade — green-day / selective +1 board
+
+| Ticket | Where |
+| --- | --- |
+| Green-day HUD | `desk_living.green_day_board` + Masters/desk |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Sunday living packet auto | reporter_clerk → staff packet draft |
-| Skip taxonomy city chip | top skip codes on teller rail |
+| Packet Discord draft helper | tools/staff_sunday_packet.py |
+| Firm queue HUD chip | remaining desk risk + deferred n |
 
 ## Hard rules unchanged
 

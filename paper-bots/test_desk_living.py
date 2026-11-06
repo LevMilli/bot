@@ -50,6 +50,23 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue((board.get("dual_control") or {}).get("fee_floors_locked", True))
             self.assertIn("ruin_drill", board)
             self.assertIn("practiced_this_month", board.get("ruin_drill") or {})
+            self.assertIn("skip_taxonomy", board)
+            from helpers import sunday_packet
+            packet = sunday_packet.write_packet(tmp)
+            self.assertFalse(packet["auto_publish"])
+            self.assertFalse(packet["live_orders_enabled"])
+            self.assertTrue(os.path.isfile(sunday_packet.packet_path(tmp)))
+            self.assertIn("staff_checklist", packet)
+            gd = desk_living.green_day_board(tmp, bots=[
+                {"id": "btc15m", "today": 1.5},
+                {"id": "sports-gap", "today": -0.5},
+                {"id": "memecoin", "today": 9.0},
+            ])
+            self.assertEqual(gd["green_n"], 1)
+            self.assertEqual(gd["red_n"], 1)
+            self.assertEqual(len(gd["towers"]), 2)
+            self.assertTrue(gd["fee_floors_locked"])
+            self.assertEqual(gd["sports_green_boost"]["green_boost"], 0)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

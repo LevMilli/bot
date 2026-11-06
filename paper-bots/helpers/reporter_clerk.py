@@ -61,7 +61,14 @@ def write_digest_from_desk(root: str | None = None) -> dict:
         scorecard = desk_roi_plan.latest_weekly_scorecard(root or DESK_ROOT) or {}
     except Exception:
         scorecard = {}
-    return write_digest(root, scorecard if isinstance(scorecard, dict) else {})
+    digest = write_digest(root, scorecard if isinstance(scorecard, dict) else {})
+    # Also refresh Sunday living packet draft (staff publish only).
+    try:
+        from helpers import sunday_packet
+        sunday_packet.write_packet(root)
+    except Exception:
+        pass
+    return digest
 
 
 if __name__ == "__main__":

@@ -2492,6 +2492,34 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             desk_row["master"]["ruin_drill"] = desk_row["master"].get("ruin_drill") or ruin
     except Exception as exc:  # noqa: BLE001
         desk_row["ruin_drill"] = {"paper_only": True, "error": type(exc).__name__}
+    # Skip taxonomy chip for teller rail / city HUD.
+    try:
+        import desk_living
+        chip = desk_living.skip_taxonomy_chip(root)
+        desk_row["skip_taxonomy"] = chip
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_taxonomy"] = chip
+        try:
+            import teller_memory
+            if chip.get("top_code"):
+                teller_memory.remember(
+                    root,
+                    kind="facts",
+                    text=f"desk {chip.get('label')}"[:200],
+                    bot_id="desk",
+                )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_taxonomy"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        gd = desk_living.green_day_board(root, bots=public)
+        desk_row["green_day"] = gd
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["green_day"] = desk_row["master"].get("green_day") or gd
+    except Exception as exc:  # noqa: BLE001
+        desk_row["green_day"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
