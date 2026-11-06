@@ -204,8 +204,17 @@ function Credenza() {
   )
 }
 
+/** Heavy command chair — purple neon piping to match the industrial bot refs. */
 function OfficeChair() {
   const spokes = [0, 1, 2, 3, 4]
+  const pipe = {
+    color: '#c44dff',
+    emissive: '#c44dff',
+    emissiveIntensity: 0.85,
+    roughness: 0.25,
+    metalness: 0.2,
+    toneMapped: false as const,
+  }
   return (
     <group position={[0, 0, 0.86]}>
       <mesh position={[0, 0.31, 0]}>
@@ -227,25 +236,52 @@ function OfficeChair() {
           </group>
         )
       })}
-      {/* Cushion under the hips and thighs. The front lip stops at the knees. */}
-      <mesh position={[0, 0.6, 0.1]}>
-        <boxGeometry args={[0.98, 0.08, 0.36]} />
-        <meshStandardMaterial color="#12151c" roughness={0.7} />
+      {/* Wide racing seat + high back */}
+      <mesh position={[0, 0.6, 0.08]}>
+        <boxGeometry args={[1.05, 0.1, 0.42]} />
+        <meshStandardMaterial color="#0c0e14" roughness={0.72} />
       </mesh>
-      {/* Backrest sits behind the pack. */}
-      <mesh position={[0, 1.02, 0.36]}>
-        <boxGeometry args={[0.52, 0.58, 0.06]} />
-        <meshStandardMaterial color="#1c2433" roughness={0.6} />
+      <mesh position={[0, 0.62, 0.08]}>
+        <boxGeometry args={[1.08, 0.02, 0.44]} />
+        <meshStandardMaterial {...pipe} />
+      </mesh>
+      <mesh position={[0, 1.15, 0.38]}>
+        <boxGeometry args={[0.62, 0.95, 0.08]} />
+        <meshStandardMaterial color="#12151c" roughness={0.58} />
+      </mesh>
+      {/* Purple edge piping */}
+      {([-0.32, 0.32] as const).map((x) => (
+        <mesh key={x} position={[x, 1.15, 0.42]}>
+          <boxGeometry args={[0.03, 0.9, 0.02]} />
+          <meshStandardMaterial {...pipe} />
+        </mesh>
+      ))}
+      <mesh position={[0, 1.62, 0.42]}>
+        <boxGeometry args={[0.64, 0.03, 0.02]} />
+        <meshStandardMaterial {...pipe} />
+      </mesh>
+      {/* Headrest with crown accent */}
+      <mesh position={[0, 1.72, 0.36]}>
+        <boxGeometry args={[0.42, 0.22, 0.1]} />
+        <meshStandardMaterial color="#1a1f2a" roughness={0.55} />
+      </mesh>
+      <mesh position={[0, 1.78, 0.42]}>
+        <boxGeometry args={[0.08, 0.06, 0.02]} />
+        <meshStandardMaterial color="#f4f4f0" emissive="#f4f4f0" emissiveIntensity={0.35} toneMapped={false} />
       </mesh>
       {([-0.58, 0.58] as const).map((x) => (
         <group key={x}>
-          <mesh position={[x, 0.78, 0.16]}>
-            <boxGeometry args={[0.04, 0.28, 0.04]} />
+          <mesh position={[x, 0.78, 0.14]}>
+            <boxGeometry args={[0.05, 0.3, 0.05]} />
             <meshStandardMaterial color="#1c222e" metalness={0.4} roughness={0.4} />
           </mesh>
-          <mesh position={[x, 0.92, 0.16]}>
-            <boxGeometry args={[0.06, 0.028, 0.26]} />
+          <mesh position={[x, 0.94, 0.14]}>
+            <boxGeometry args={[0.08, 0.03, 0.28]} />
             <meshStandardMaterial color="#1c222e" metalness={0.4} roughness={0.4} />
+          </mesh>
+          <mesh position={[x, 0.94, 0.14]}>
+            <boxGeometry args={[0.09, 0.012, 0.3]} />
+            <meshStandardMaterial {...pipe} />
           </mesh>
         </group>
       ))}
@@ -399,9 +435,9 @@ function DeskKit() {
           <mesh key={`${col}-${row}`} position={[-0.22 + col * 0.04, 0.016, -0.06 + row * 0.038]}>
             <boxGeometry args={[0.03, 0.012, 0.028]} />
             <meshStandardMaterial
-              color={row === 0 ? '#d7fff8' : '#c5d0e0'}
-              emissive={row === 0 ? '#2de2e6' : '#1a2433'}
-              emissiveIntensity={row === 0 ? 0.45 : 0.15}
+              color={row === 0 ? '#f0d8ff' : '#c5d0e0'}
+              emissive={row === 0 ? '#c44dff' : '#3a1858'}
+              emissiveIntensity={row === 0 ? 0.7 : 0.35}
               metalness={0.2}
               roughness={0.4}
             />

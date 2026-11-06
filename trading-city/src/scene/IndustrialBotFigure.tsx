@@ -15,12 +15,13 @@ import { mouseHand, typingHand } from './deskReach'
 
 const TEX_CACHE = new Map<string, CanvasTexture>()
 
-const ARMOR = '#101016'
-const ARMOR_DARK = '#060608'
-const ARMOR_EDGE = '#1a1a22'
-const METAL = '#2c2c36'
-const PURPLE = '#c44dff'
-const PURPLE_DIM = '#6a28a8'
+/** Slightly lifted gunmetal so the figure reads against black chairs/desks. */
+const ARMOR = '#18181f'
+const ARMOR_DARK = '#0a0a0e'
+const ARMOR_EDGE = '#2a2a34'
+const METAL = '#3a3a46'
+const PURPLE = '#d060ff'
+const PURPLE_DIM = '#7a30b8'
 const GRAFFITI = '#f4f4f0'
 
 function armor(roughness = 0.58, metalness = 0.65) {
@@ -726,8 +727,11 @@ export function IndustrialBotFigure({
     )
   }
 
+  // Suite interiors are scaled ~0.62 — nudge desk bots up so armor/antennae still read.
+  const suiteBoost = deskWork ? 1.14 : 1
+
   return (
-    <group ref={body} position={anchor}>
+    <group ref={body} position={anchor} scale={suiteBoost}>
       <group ref={torso}>
         {/* Pelvis */}
         <mesh position={[0, deskWork ? 0.3 : 0.14, deskWork ? 0.04 : 0]}>
@@ -828,10 +832,10 @@ export function IndustrialBotFigure({
 
         {/* Oversized graffiti pauldrons — photo hero surface */}
         {([-1, 1] as const).map((side) => (
-          <group key={side} position={[side * 0.38, 0.9, 0.04]}>
+          <group key={side} position={[side * 0.42, 0.92, 0.05]}>
             {/* Flat angular pauldron plate */}
-            <mesh rotation={[0.1, side * 0.18, side * 0.48]}>
-              <boxGeometry args={[0.32, 0.18, 0.38]} />
+            <mesh rotation={[0.1, side * 0.18, side * 0.5]}>
+              <boxGeometry args={[0.36, 0.2, 0.42]} />
               <meshStandardMaterial {...armor(0.45, 0.75)} />
             </mesh>
             <mesh position={[0, 0.08, 0]} rotation={[0.1, side * 0.18, side * 0.48]}>
@@ -966,26 +970,26 @@ export function IndustrialBotFigure({
           <Hydraulic position={[-0.065, -0.005, 0.09]} rotation={[1.15, 0, 0]} length={0.055} />
           <Hydraulic position={[0.065, -0.005, 0.09]} rotation={[1.15, 0, 0]} length={0.055} />
 
-          {/* Twin long rear blade antennae — photo signature */}
+          {/* Twin long rear blade antennae — photo signature (tall enough to read at suite scale) */}
           {([-1, 1] as const).map((side) => (
-            <group key={side} position={[side * 0.095, 0.3, -0.14]} rotation={[0.48, 0, side * 0.2]}>
-              <mesh position={[0, 0.22, 0]}>
-                <boxGeometry args={[0.032, 0.48, 0.06]} />
+            <group key={side} position={[side * 0.1, 0.32, -0.16]} rotation={[0.55, 0, side * 0.22]}>
+              <mesh position={[0, 0.28, 0]}>
+                <boxGeometry args={[0.036, 0.58, 0.068]} />
                 <meshStandardMaterial color={ARMOR_EDGE} metalness={0.8} roughness={0.3} />
               </mesh>
-              {[0.06, 0.15, 0.24, 0.33].map((y) => (
-                <mesh key={y} position={[0, y, 0.012]}>
-                  <boxGeometry args={[0.036, 0.05, 0.028]} />
+              {[0.08, 0.18, 0.28, 0.38, 0.48].map((y) => (
+                <mesh key={y} position={[0, y, 0.014]}>
+                  <boxGeometry args={[0.04, 0.055, 0.03]} />
                   <meshStandardMaterial color={ARMOR_DARK} />
                 </mesh>
               ))}
               <mesh position={[0, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.035, 0.035, 0.024, 10]} />
+                <cylinderGeometry args={[0.04, 0.04, 0.028, 10]} />
                 <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.24} />
               </mesh>
-              <Bolt position={[0, 0.02, 0.03]} />
-              <LedDot position={[0, 0.47, 0]} r={0.012} />
-              <LedChannel position={[0, 0.22, 0.032]} length={0.28} width={0.018} />
+              <Bolt position={[0, 0.02, 0.035]} />
+              <LedDot position={[0, 0.58, 0]} r={0.014} />
+              <LedChannel position={[0, 0.28, 0.036]} length={0.36} width={0.02} />
             </group>
           ))}
 
