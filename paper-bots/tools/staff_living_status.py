@@ -155,6 +155,25 @@ def _text(board: dict) -> str:
         ),
         f"ritual: {ritual.get('label') or '—'}",
         f"sunday: {sunday.get('label') or '—'}",
+        (
+            "sunday quiet: "
+            + str(
+                sunday.get("quiet_age_label")
+                or (
+                    f"quiet_age={sunday.get('quiet_age')}"
+                    if sunday.get("quiet_age")
+                    else (
+                        compact.get("quiet_age_label")
+                        or f"quiet_age={compact.get('quiet_age') or 'n/a'}"
+                    )
+                )
+            )
+            + " (observe — never softens floors)"
+        ),
+        (
+            f"teller_quiet_nag={bool(teller.get('quiet_nag'))} "
+            + str(teller.get("quiet_age_label") or "quiet_age=n/a")
+        ),
         f"chicago_today: {board.get('chicago_today')}",
     ]
     return "\n".join(lines)
@@ -413,6 +432,22 @@ def main() -> int:
                 if isinstance(board.get("sunday_packet"), dict)
                 else None
             ),
+            "masters_sunday_quiet": (
+                "sunday quiet "
+                + str(
+                    (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    if isinstance(board.get("sunday_packet"), dict)
+                    and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    else compact_j.get("sunday_quiet_age_label")
+                    or compact_j.get("quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " (observe)"
+            ),
+            "compact_sunday_quiet_age": compact_j.get("sunday_quiet_age")
+            or compact_j.get("quiet_age"),
+            "compact_sunday_quiet_age_label": compact_j.get("sunday_quiet_age_label")
+            or compact_j.get("quiet_age_label"),
             "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),
             "chip_catalog": sorted(

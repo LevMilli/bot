@@ -288,6 +288,8 @@ export type Desk = {
     quiet_age?: string
     quiet_age_h?: number | null
     quiet_age_label?: string
+    sunday_quiet_age?: string
+    sunday_quiet_age_label?: string
     quiet_label?: string
     note?: string
     error?: string
@@ -688,6 +690,8 @@ export type Desk = {
   master?: {
     paper_only?: boolean
     version?: number
+    priority?: string[]
+    sunday_packet?: Desk['sunday_packet']
     stopbleed?: {
       stop_exits?: number
       model_flip_exits?: number

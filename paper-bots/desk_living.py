@@ -880,6 +880,8 @@ def living_compact_card(
         "quiet_age_label": quiet_age_part,
         "quiet_age": quiet_age,
         "quiet_age_h": quiet_age_h,
+        "sunday_quiet_age": quiet_age,
+        "sunday_quiet_age_label": quiet_age_part,
         "expand_label": expand_part,
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
@@ -2134,6 +2136,17 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         or slim.get("compact_quiet_age_label")
         or f"quiet_age={slim['quiet_age']}"
     )
+    slim["masters_sunday_quiet"] = (
+        f"sunday quiet {slim['sunday_quiet_age_label']} (observe)"
+    )
+    if compact:
+        slim["compact_sunday_quiet_age"] = (
+            compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
+        )
+        slim["compact_sunday_quiet_age_label"] = (
+            compact.get("sunday_quiet_age_label")
+            or slim["sunday_quiet_age_label"]
+        )
     slim["quiet_doctor"] = (
         "quiet="
         + ("yes" if quiet.get("quiet") else "no")

@@ -107,11 +107,30 @@ def main() -> int:
             flat["quiet_age_h"] = age_h
             flat["quiet_age"] = f"{age_h}h" if age_h is not None else "n/a"
             flat["quiet_line"] = quiet_line(flat)
+            sunday = desk_living.sunday_packet_chip(root)
+            flat["sunday_quiet_age"] = (
+                sunday.get("quiet_age") if isinstance(sunday, dict) else None
+            )
+            flat["sunday_quiet_age_label"] = (
+                sunday.get("quiet_age_label")
+                if isinstance(sunday, dict)
+                else None
+            ) or f"quiet_age={flat['quiet_age']}"
+            flat["sunday_quiet_tip"] = (
+                f"Sunday quiet tip: {flat['sunday_quiet_age_label']} · "
+                "cross-check python3 tools/staff_sunday_packet.py discord "
+                "(staff paste · never auto-posts)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
             age_h = quiet.get("age_hours") if isinstance(quiet, dict) else None
             quiet_age = f"{age_h}h" if age_h is not None else "n/a"
+            sunday = desk_living.sunday_packet_chip(root)
+            sunday_label = (
+                (sunday.get("quiet_age_label") if isinstance(sunday, dict) else None)
+                or f"quiet_age={quiet_age}"
+            )
             print(chip.get("label") or "ritual observe")
             print(
                 f"floors_ok={chip.get('floors_ok')} expand_ok={chip.get('expand_ok')} "
@@ -128,6 +147,11 @@ def main() -> int:
                     "feature_quiet": quiet if isinstance(quiet, dict) else {},
                     "quiet_age": quiet_age,
                 })
+            )
+            print(
+                f"Sunday quiet tip: {sunday_label} · "
+                "cross-check python3 tools/staff_sunday_packet.py discord "
+                "(staff paste · never auto-posts)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "

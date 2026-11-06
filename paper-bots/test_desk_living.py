@@ -290,6 +290,9 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue(
                 str(export2.get("sunday_quiet_age_label") or "").startswith("quiet_age=")
             )
+            self.assertIn("masters_sunday_quiet", export2)
+            self.assertIn("sunday quiet", export2.get("masters_sunday_quiet") or "")
+            self.assertIn("compact_sunday_quiet_age_label", export2)
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))
@@ -348,6 +351,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("quiet_age=", status_txt)
             self.assertIn("quiet_line:", status_txt)
             self.assertIn("Feature quiet", status_txt)
+            self.assertIn("sunday quiet:", status_txt)
+            self.assertIn("teller_quiet_nag=", status_txt)
+            self.assertIn("sunday_quiet_age_label", compact)
+            self.assertIn("sunday_quiet_age", compact)
             from tools import staff_living_ritual as _ritual_mod
             # Status --json twin of ritual quiet_line (same observe wording).
             quiet_line_expect = _ritual_mod.quiet_line({
