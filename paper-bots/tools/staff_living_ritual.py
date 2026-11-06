@@ -149,6 +149,30 @@ def format_discord(payload: dict) -> str:
         f"• Calib sunday: calib observe · sunday quiet {tip_age} "
         f"(observe · never auto-writes Φ)"
     )
+    lines.append(
+        f"• Queue sunday: queue observe · sunday quiet {tip_age} "
+        f"(observe · never promotes)"
+    )
+    lines.append(
+        f"• Gate A sunday: Gate A observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• AI sunday: AI observe · sunday quiet {tip_age} "
+        f"(observe · never auto-writes Φ)"
+    )
+    lines.append(
+        f"• Tip sunday: tip feed observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Blackout sunday: blackout observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Injury sunday: injury observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -258,6 +282,30 @@ def main() -> int:
                 f"CLV observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe)"
             )
+            flat["queue_sunday_quiet"] = (
+                f"queue observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never promotes)"
+            )
+            flat["gate_a_sunday_quiet"] = (
+                f"Gate A observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["ai_sunday_quiet"] = (
+                f"AI observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-writes Φ)"
+            )
+            flat["tip_sunday_quiet"] = (
+                f"tip feed observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["blackout_sunday_quiet"] = (
+                f"blackout observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["injury_sunday_quiet"] = (
+                f"injury observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -339,6 +387,30 @@ def main() -> int:
             )
             print(
                 f"CLV sunday: CLV observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"queue sunday: queue observe · sunday quiet {sunday_label} "
+                "(observe · never promotes)"
+            )
+            print(
+                f"Gate A sunday: Gate A observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"AI sunday: AI observe · sunday quiet {sunday_label} "
+                "(observe · never auto-writes Φ)"
+            )
+            print(
+                f"tip sunday: tip feed observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"blackout sunday: blackout observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"injury sunday: injury observe · sunday quiet {sunday_label} "
                 "(observe)"
             )
             print(

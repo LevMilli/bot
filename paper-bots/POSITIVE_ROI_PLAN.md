@@ -1206,14 +1206,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual Discord green/bleed/CLV/calib | discord lines |
 | Compact CLV+timer+calib sunday | living_compact_card twins |
 
-### Next
+### Living upgrade — queue/GateA/AI/tip sunday twins (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Compact queue+GateA+AI sunday | living_compact_card twins |
 | Export/status queue/GateA/AI | board export + status flatten |
-| Ritual Discord queue/GateA/AI | discord lines |
+| Ritual Discord queue/GateA/AI/tip | discord lines |
 | Compact tip/blackout/injury sunday | living_compact_card twins |
+
+### Next
+
+_(empty — living sunday quiet twin backfill cleared; fee floors locked; paper-only; Discord never auto-posts)_
 
 ## Hard rules unchanged
 
