@@ -86,6 +86,15 @@ def format_discord(payload: dict) -> str:
         f"• Floors sunday: {floors_bit} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    ruin_label = "ruin observe"
+    steps_pre = payload.get("steps") if isinstance(payload.get("steps"), dict) else {}
+    ruin_row = steps_pre.get("ruin") if isinstance(steps_pre.get("ruin"), dict) else {}
+    if ruin_row.get("label"):
+        ruin_label = str(ruin_row.get("label"))
+    lines.append(
+        f"• Ruin sunday: {ruin_label} · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -312,6 +321,12 @@ def main() -> int:
     )
     payload["floors_sunday_quiet"] = (
         f"{'floors=ok' if floors_ok else 'floors=soft' if floors_ok is False else 'floors=n/a'} "
+        f"· sunday quiet {sunday_quiet_age_label} "
+        "(observe · never softens floors)"
+    )
+    ruin_step = steps[1][1] if len(steps) > 1 else {}
+    payload["ruin_sunday_quiet"] = (
+        f"{(ruin_step.get('label') if isinstance(ruin_step, dict) else None) or 'ruin observe'} "
         f"· sunday quiet {sunday_quiet_age_label} "
         "(observe · never softens floors)"
     )

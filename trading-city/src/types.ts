@@ -294,6 +294,7 @@ export type Desk = {
     masters_sunday_quiet?: string
     expand_sunday_quiet?: string
     floors_sunday_quiet?: string
+    ruin_sunday_quiet?: string
     quiet_label?: string
     note?: string
     error?: string

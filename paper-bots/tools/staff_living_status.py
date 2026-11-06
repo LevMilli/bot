@@ -539,6 +539,25 @@ def main() -> int:
                 + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
                 + " (observe · never softens floors)"
             ),
+            "compact_ruin_sunday_quiet": compact_j.get("ruin_sunday_quiet")
+            or (
+                str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
+                + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe · never softens floors)"
+            ),
+            "ruin_sunday_quiet": (
+                str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
+                + " · sunday quiet "
+                + str(
+                    (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    if isinstance(board.get("sunday_packet"), dict)
+                    and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    else compact_j.get("quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " (observe · never softens floors)"
+            ),
             "sunday_quiet_tip": (
                 "Sunday quiet tip: "
                 + str(
