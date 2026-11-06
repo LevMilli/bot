@@ -2016,10 +2016,14 @@ export default function App() {
                           green_day?: { label?: string; green_n?: number; red_n?: number }
                         } | undefined)?.green_day
                       if (!g) return 'green-day pending'
-                      return (
-                        g.label ||
-                        `green=${g.green_n ?? '—'} red=${g.red_n ?? '—'}`
-                      )
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        g.label || `green=${g.green_n ?? '—'} red=${g.red_n ?? '—'}`
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -2044,7 +2048,15 @@ export default function App() {
                           bleed?: { label?: string; pass?: boolean; ratio?: number | null }
                         } | undefined)?.bleed
                       if (!b) return 'bleed pending'
-                      return b.label || `bleed ratio=${b.ratio ?? '—'} ${b.pass === false ? 'hot' : 'ok'}`
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        b.label ||
+                        `bleed ratio=${b.ratio ?? '—'} ${b.pass === false ? 'hot' : 'ok'}`
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>

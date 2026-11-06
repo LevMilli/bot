@@ -105,6 +105,10 @@ def format_discord(payload: dict) -> str:
         f"• Gaps sunday: {gaps_label} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    lines.append(
+        f"• Digests sunday: digests observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}

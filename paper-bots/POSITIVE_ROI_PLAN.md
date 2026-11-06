@@ -1140,13 +1140,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault fills sunday quiet | fills row hint |
 | Ritual observe gaps sunday | observe plain + --json |
 
-### Next
+### Living upgrade — green/bleed/digests sunday (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Vault green sunday quiet | green row hint |
 | Vault bleed sunday quiet | bleed row hint |
 | Ritual discord digests sunday | discord line |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault CLV sunday quiet | CLV row hint |
+| Vault timer sunday quiet | timer row hint |
+| Ritual observe digests sunday | observe tip |
 
 ## Hard rules unchanged
 

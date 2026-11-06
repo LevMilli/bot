@@ -766,6 +766,7 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("Floors sunday", text4)
             self.assertIn("Ruin sunday", text4)
             self.assertIn("Gaps sunday", text4)
+            self.assertIn("Digests sunday", text4)
             text5 = staff_living_ritual.format_discord({
                 "ok": True,
                 "ritual_ok": True,
