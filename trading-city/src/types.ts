@@ -589,6 +589,29 @@ export type Desk = {
     swarm_ratio?: number | null
     label?: string
     reason?: string
+    soft_copy?: string
+    note?: string
+    error?: string
+  }
+  dual_control_chip?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    signed_n?: number
+    items_n?: number
+    checklist_complete?: boolean
+    arm_ready_paper?: boolean
+    live_orders_enabled?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  ruin_drill_chip?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    active?: boolean
+    practiced_this_month?: boolean
+    level?: string
+    label?: string
     note?: string
     error?: string
   }
