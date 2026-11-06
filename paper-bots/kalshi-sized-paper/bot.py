@@ -204,6 +204,17 @@ def step_scan(args, state, day):
         skip = ""
     if skip:
         print(skip)
+        try:
+            import desk_living
+            desk_living.record_eval_features(
+                DESK_ROOT, bot="kalshi-sized", action="skip",
+                series=CFG.get("series") or "KXINXU",
+                ticker=str(pick.get("ticker") or ""),
+                ev={"side": pick.get("side"), "ask": pick.get("ask"), "confidence": pick.get("ask")},
+                reasons=[skip], note=str(skip)[:160],
+            )
+        except Exception:
+            pass
         return
     edge_proxy = 0.0
     try:
@@ -213,7 +224,20 @@ def step_scan(args, state, day):
         fee_one = paper_sim.taker_fee(1, pick["ask"])
         edge_proxy = max(0.0, (1.0 - float(pick["ask"]) - float(fee_one)))
         if venue_edge > 0 and edge_proxy + 1e-12 < venue_edge:
-            print(alerts.format_skip_note(day, f"venue kalshi_inx edge {edge_proxy:.3f} < {venue_edge:.3f}"))
+            reason = f"venue kalshi_inx edge {edge_proxy:.3f} < {venue_edge:.3f}"
+            print(alerts.format_skip_note(day, reason))
+            try:
+                import desk_living
+                desk_living.record_eval_features(
+                    DESK_ROOT, bot="kalshi-sized", action="skip",
+                    series=CFG.get("series") or "KXINXU",
+                    ticker=str(pick.get("ticker") or ""),
+                    ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": edge_proxy,
+                        "fee": fee_one, "confidence": pick.get("ask")},
+                    reasons=[reason], note=reason[:160],
+                )
+            except Exception:
+                pass
             return
         # Twin +1¢: sized must clear venue floor + 0.01 vs residual edge.
         try:
@@ -225,12 +249,34 @@ def step_scan(args, state, day):
                 print(alerts.format_skip_note(day, twin_block))
                 if not args.dry_run:
                     logger.learn(f"{day}: no trade - {twin_block}", "skip")
+                try:
+                    import desk_living
+                    desk_living.record_eval_features(
+                        DESK_ROOT, bot="kalshi-sized", action="skip",
+                        series=CFG.get("series") or "KXINXU",
+                        ticker=str(pick.get("ticker") or ""),
+                        ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": edge_proxy},
+                        reasons=[twin_block], note=str(twin_block)[:160],
+                    )
+                except Exception:
+                    pass
                 return
         except Exception:
             pass
         blocked = desk.correlation_blocks(DESK_ROOT, "kalshi-sized", pick["side"], edge_proxy)
         if blocked:
             print(blocked)
+            try:
+                import desk_living
+                desk_living.record_eval_features(
+                    DESK_ROOT, bot="kalshi-sized", action="skip",
+                    series=CFG.get("series") or "KXINXU",
+                    ticker=str(pick.get("ticker") or ""),
+                    ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": edge_proxy},
+                    reasons=[blocked], note=str(blocked)[:160],
+                )
+            except Exception:
+                pass
             return
         gate = desk.entry_gate(DESK_ROOT)
         if gate:
@@ -279,6 +325,19 @@ def step_scan(args, state, day):
         pos["risk_factor"] = desk_profit.risk_factor_for("kalshi-sized", pick["side"])
         pos["gap_at_entry"] = round(edge_proxy, 4)
         pos["fair_at_entry"] = round(float(pick["ask"]), 4)
+    except Exception:
+        pass
+    try:
+        import desk_living
+        fee_one = paper_sim.taker_fee(1, pick["ask"])
+        desk_living.record_eval_features(
+            DESK_ROOT, bot="kalshi-sized", action="buy",
+            series=CFG.get("series") or "KXINXU",
+            ticker=str(pick.get("ticker") or ""),
+            ev={"side": pick.get("side"), "ask": pick.get("ask"), "fee": fee_one,
+                "edge": edge_proxy, "confidence": pick.get("ask")},
+            note="paper buy kalshi-sized",
+        )
     except Exception:
         pass
     paper_sim.save_state(state)
