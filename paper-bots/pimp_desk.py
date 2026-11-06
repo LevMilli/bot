@@ -2557,6 +2557,18 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["timer_heartbeat"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["helper_gate_a"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        sr = desk_living.skip_regret_chip(root)
+        hs = desk_living.hard_stop_chip(root)
+        desk_row["skip_regret"] = sr
+        desk_row["hard_stop"] = hs
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_regret"] = desk_row["master"].get("skip_regret") or sr
+            desk_row["master"]["hard_stop"] = desk_row["master"].get("hard_stop") or hs
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_regret"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["hard_stop"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}
