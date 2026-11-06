@@ -1001,6 +1001,55 @@ def living_compact_card(
             if isinstance(src.get("injury_wire"), dict)
             else f"injury observe · sunday quiet {quiet_age_part} (observe)"
         ),
+
+        "empty_sunday_quiet": (
+            f"{(src.get('empty_card') or {}).get('label') or 'empty CARD observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("empty_card"), dict)
+            else f"empty CARD observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "near_miss_sunday_quiet": (
+            f"{(src.get('near_miss') or {}).get('label') or 'near-miss observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never promotes)"
+            if isinstance(src.get("near_miss"), dict)
+            else f"near-miss observe · sunday quiet {quiet_age_part} (observe · never promotes)"
+        ),
+        "eia_sunday_quiet": (
+            f"{(src.get('eia_scout') or {}).get('label') or 'EIA observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("eia_scout"), dict)
+            else f"EIA observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "calendar_sunday_quiet": (
+            f"{(src.get('calendar_scanner') or {}).get('label') or 'calendar observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("calendar_scanner"), dict)
+            else f"calendar observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "pager_sunday_quiet": (
+            f"{(src.get('feature_quiet_pager') or {}).get('label') or 'pager observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-pages)"
+            if isinstance(src.get("feature_quiet_pager"), dict)
+            else f"pager observe · sunday quiet {quiet_age_part} (observe · never auto-pages)"
+        ),
+        "books_sunday_quiet": (
+            f"{(src.get('bookkeeper') or {}).get('label') or 'books observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never invents PnL)"
+            if isinstance(src.get("bookkeeper"), dict)
+            else f"books observe · sunday quiet {quiet_age_part} (observe · never invents PnL)"
+        ),
+        "pulse_sunday_quiet": (
+            f"{(src.get('clerk_pulse') or {}).get('label') or 'pulse observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("clerk_pulse"), dict)
+            else f"pulse observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "dual_sunday_quiet": (
+            f"{(src.get('dual_control') or {}).get('label') or 'dual observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("dual_control"), dict)
+            else f"dual observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2380,6 +2429,47 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{injury.get('label') or 'injury observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe)"
     )
+
+    empty = board.get("empty_card") if isinstance(board.get("empty_card"), dict) else {}
+    slim["empty_sunday_quiet"] = (
+        f"{empty.get('label') or 'empty CARD observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    near = board.get("near_miss") if isinstance(board.get("near_miss"), dict) else {}
+    slim["near_miss_sunday_quiet"] = (
+        f"{near.get('label') or 'near-miss observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never promotes)"
+    )
+    eia = board.get("eia_scout") if isinstance(board.get("eia_scout"), dict) else {}
+    slim["eia_sunday_quiet"] = (
+        f"{eia.get('label') or 'EIA observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    cal = board.get("calendar_scanner") if isinstance(board.get("calendar_scanner"), dict) else {}
+    slim["calendar_sunday_quiet"] = (
+        f"{cal.get('label') or 'calendar observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    pager = board.get("feature_quiet_pager") if isinstance(board.get("feature_quiet_pager"), dict) else {}
+    slim["pager_sunday_quiet"] = (
+        f"{pager.get('label') or 'pager observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-pages)"
+    )
+    books = board.get("bookkeeper") if isinstance(board.get("bookkeeper"), dict) else {}
+    slim["books_sunday_quiet"] = (
+        f"{books.get('label') or 'books observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never invents PnL)"
+    )
+    pulse = board.get("clerk_pulse") if isinstance(board.get("clerk_pulse"), dict) else {}
+    slim["pulse_sunday_quiet"] = (
+        f"{pulse.get('label') or 'pulse observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    dual = board.get("dual_control") if isinstance(board.get("dual_control"), dict) else {}
+    slim["dual_sunday_quiet"] = (
+        f"{dual.get('label') or 'dual observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2455,6 +2545,30 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_injury_sunday_quiet"] = (
             compact.get("injury_sunday_quiet") or slim.get("injury_sunday_quiet")
+        )
+        slim["compact_empty_sunday_quiet"] = (
+            compact.get("empty_sunday_quiet") or slim.get("empty_sunday_quiet")
+        )
+        slim["compact_near_miss_sunday_quiet"] = (
+            compact.get("near_miss_sunday_quiet") or slim.get("near_miss_sunday_quiet")
+        )
+        slim["compact_eia_sunday_quiet"] = (
+            compact.get("eia_sunday_quiet") or slim.get("eia_sunday_quiet")
+        )
+        slim["compact_calendar_sunday_quiet"] = (
+            compact.get("calendar_sunday_quiet") or slim.get("calendar_sunday_quiet")
+        )
+        slim["compact_pager_sunday_quiet"] = (
+            compact.get("pager_sunday_quiet") or slim.get("pager_sunday_quiet")
+        )
+        slim["compact_books_sunday_quiet"] = (
+            compact.get("books_sunday_quiet") or slim.get("books_sunday_quiet")
+        )
+        slim["compact_pulse_sunday_quiet"] = (
+            compact.get("pulse_sunday_quiet") or slim.get("pulse_sunday_quiet")
+        )
+        slim["compact_dual_sunday_quiet"] = (
+            compact.get("dual_sunday_quiet") or slim.get("dual_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="

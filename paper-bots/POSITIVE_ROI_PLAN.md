@@ -1215,9 +1215,23 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual Discord queue/GateA/AI/tip | discord lines |
 | Compact tip/blackout/injury sunday | living_compact_card twins |
 
+### Living upgrade — empty/EIA/pager/pulse/dual sunday twins (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Compact empty+near-miss sunday | living_compact_card twins |
+| Compact EIA+calendar+pager+books | living_compact_card twins |
+| Compact pulse+dual sunday | living_compact_card twins |
+| Export/status/ritual empty…dual | export + status + Discord/observe |
+
 ### Next
 
-_(empty — living sunday quiet twin backfill cleared; fee floors locked; paper-only; Discord never auto-posts)_
+| Ticket | Where |
+| --- | --- |
+| Compact skip-reg+hard-stop sunday | living_compact_card twins |
+| Compact distance+quant sunday | living_compact_card twins |
+| Compact clerk twins (nm/hs/bleed/skip-twin) | living_compact_card twins |
+| Ritual Discord skip-reg/clerks + vault gaps | discord + vault sunday for remaining |
 
 ## Hard rules unchanged
 

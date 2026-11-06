@@ -313,6 +313,134 @@ def _text(board: dict) -> str:
             )
             + " (observe)"
         ),
+        (
+            "empty sunday: "
+            + str(
+                (board.get("empty_card") or {}).get("label")
+                if isinstance(board.get("empty_card"), dict)
+                and (board.get("empty_card") or {}).get("label")
+                else "empty CARD observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "near-miss sunday: "
+            + str(
+                (board.get("near_miss") or {}).get("label")
+                if isinstance(board.get("near_miss"), dict)
+                and (board.get("near_miss") or {}).get("label")
+                else "near-miss observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "EIA sunday: "
+            + str(
+                (board.get("eia_scout") or {}).get("label")
+                if isinstance(board.get("eia_scout"), dict)
+                and (board.get("eia_scout") or {}).get("label")
+                else "EIA observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "calendar sunday: "
+            + str(
+                (board.get("calendar_scanner") or {}).get("label")
+                if isinstance(board.get("calendar_scanner"), dict)
+                and (board.get("calendar_scanner") or {}).get("label")
+                else "calendar observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "pager sunday: "
+            + str(
+                (board.get("feature_quiet_pager") or {}).get("label")
+                if isinstance(board.get("feature_quiet_pager"), dict)
+                and (board.get("feature_quiet_pager") or {}).get("label")
+                else "pager observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never auto-pages)"
+        ),
+        (
+            "books sunday: "
+            + str(
+                (board.get("bookkeeper") or {}).get("label")
+                if isinstance(board.get("bookkeeper"), dict)
+                and (board.get("bookkeeper") or {}).get("label")
+                else "books observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never invents PnL)"
+        ),
+        (
+            "pulse sunday: "
+            + str(
+                (board.get("clerk_pulse") or {}).get("label")
+                if isinstance(board.get("clerk_pulse"), dict)
+                and (board.get("clerk_pulse") or {}).get("label")
+                else "pulse observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "dual sunday: "
+            + str(
+                (board.get("dual_control") or {}).get("label")
+                if isinstance(board.get("dual_control"), dict)
+                and (board.get("dual_control") or {}).get("label")
+                else "dual observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
         f"floors: {floors.get('label') or '—'}",
         f"teller: {teller.get('memory_line') or '—'}",
         (
@@ -812,6 +940,22 @@ def main() -> int:
             "compact_tip_sunday_quiet": compact_j.get("tip_sunday_quiet"),
             "compact_blackout_sunday_quiet": compact_j.get("blackout_sunday_quiet"),
             "compact_injury_sunday_quiet": compact_j.get("injury_sunday_quiet"),
+            "empty_sunday_quiet": compact_j.get("empty_sunday_quiet"),
+            "near_miss_sunday_quiet": compact_j.get("near_miss_sunday_quiet"),
+            "eia_sunday_quiet": compact_j.get("eia_sunday_quiet"),
+            "calendar_sunday_quiet": compact_j.get("calendar_sunday_quiet"),
+            "pager_sunday_quiet": compact_j.get("pager_sunday_quiet"),
+            "books_sunday_quiet": compact_j.get("books_sunday_quiet"),
+            "pulse_sunday_quiet": compact_j.get("pulse_sunday_quiet"),
+            "dual_sunday_quiet": compact_j.get("dual_sunday_quiet"),
+            "compact_empty_sunday_quiet": compact_j.get("empty_sunday_quiet"),
+            "compact_near_miss_sunday_quiet": compact_j.get("near_miss_sunday_quiet"),
+            "compact_eia_sunday_quiet": compact_j.get("eia_sunday_quiet"),
+            "compact_calendar_sunday_quiet": compact_j.get("calendar_sunday_quiet"),
+            "compact_pager_sunday_quiet": compact_j.get("pager_sunday_quiet"),
+            "compact_books_sunday_quiet": compact_j.get("books_sunday_quiet"),
+            "compact_pulse_sunday_quiet": compact_j.get("pulse_sunday_quiet"),
+            "compact_dual_sunday_quiet": compact_j.get("dual_sunday_quiet"),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "

@@ -173,6 +173,38 @@ def format_discord(payload: dict) -> str:
         f"• Injury sunday: injury observe · sunday quiet {tip_age} "
         f"(observe)"
     )
+    lines.append(
+        f"• Empty sunday: empty CARD observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Near-miss sunday: near-miss observe · sunday quiet {tip_age} "
+        f"(observe · never promotes)"
+    )
+    lines.append(
+        f"• EIA sunday: EIA observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Calendar sunday: calendar observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Pager sunday: pager observe · sunday quiet {tip_age} "
+        f"(observe · never auto-pages)"
+    )
+    lines.append(
+        f"• Books sunday: books observe · sunday quiet {tip_age} "
+        f"(observe · never invents PnL)"
+    )
+    lines.append(
+        f"• Pulse sunday: pulse observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Dual sunday: dual observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -306,6 +338,38 @@ def main() -> int:
                 f"injury observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe)"
             )
+            flat["empty_sunday_quiet"] = (
+                f"empty CARD observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["near_miss_sunday_quiet"] = (
+                f"near-miss observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never promotes)"
+            )
+            flat["eia_sunday_quiet"] = (
+                f"EIA observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["calendar_sunday_quiet"] = (
+                f"calendar observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["pager_sunday_quiet"] = (
+                f"pager observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-pages)"
+            )
+            flat["books_sunday_quiet"] = (
+                f"books observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never invents PnL)"
+            )
+            flat["pulse_sunday_quiet"] = (
+                f"pulse observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["dual_sunday_quiet"] = (
+                f"dual observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -412,6 +476,38 @@ def main() -> int:
             print(
                 f"injury sunday: injury observe · sunday quiet {sunday_label} "
                 "(observe)"
+            )
+            print(
+                f"empty sunday: empty CARD observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"near-miss sunday: near-miss observe · sunday quiet {sunday_label} "
+                "(observe · never promotes)"
+            )
+            print(
+                f"EIA sunday: EIA observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"calendar sunday: calendar observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"pager sunday: pager observe · sunday quiet {sunday_label} "
+                "(observe · never auto-pages)"
+            )
+            print(
+                f"books sunday: books observe · sunday quiet {sunday_label} "
+                "(observe · never invents PnL)"
+            )
+            print(
+                f"pulse sunday: pulse observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"dual sunday: dual observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
