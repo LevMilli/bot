@@ -75,6 +75,10 @@ def main() -> int:
         else:
             print(chip.get("label") or "ritual observe")
             print(
+                f"floors_ok={chip.get('floors_ok')} expand_ok={chip.get('expand_ok')} "
+                f"(exit_ok={chip.get('exit_ok')})"
+            )
+            print(
                 f"ritual_ok={chip.get('ritual_ok')} exit_ok={chip.get('exit_ok')} "
                 f"floors_ok={chip.get('floors_ok')} expand_ok={chip.get('expand_ok')} "
                 f"doctor_fresh={chip.get('doctor_fresh')}"

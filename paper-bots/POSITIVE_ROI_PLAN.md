@@ -890,13 +890,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual CLI floors in text | full ritual plain flags |
 | City ritual draft badge | exit_ok badge text |
 
-### Next
+### Living upgrade — status quiet age / observe floors / draft badge CSS
 
 | Ticket | Where |
 | --- | --- |
 | Status text quiet age | quiet+doctor age= |
 | Ritual observe floors line | observe plain floors_ok |
 | Vault draft badge CSS | EXIT/SOFT class |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Doctor draft badge CSS | STALE class twin |
+| Status json quiet_age always | mirror text n/a |
+| Ritual CLI doctor_fresh observe | observe end flag |
 
 ## Hard rules unchanged
 

@@ -915,6 +915,31 @@ a {
   white-space: normal;
 }
 
+.vault-ritual-draft.is-exit {
+  color: #c45c26;
+}
+
+.vault-ritual-draft.is-soft {
+  color: #d4a017;
+}
+
+.vault-draft-badge {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.vault-draft-badge.is-exit {
+  color: #c45c26;
+}
+
+.vault-draft-badge.is-soft {
+  color: #d4a017;
+}
+
+.vault-draft-badge.is-ok {
+  color: #6fbf73;
+}
+
 .vault-board-close {
   appearance: none;
   background: transparent;
