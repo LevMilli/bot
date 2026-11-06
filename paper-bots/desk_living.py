@@ -270,6 +270,40 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
     }
 
 
+def feature_quiet_pager(
+    root: str | None = None,
+    *,
+    now: datetime | None = None,
+    quiet_hours: float = FEATURE_QUIET_HOURS,
+) -> dict:
+    """Weekday pager copy when feature store is quiet ≥ threshold (never auto-pages)."""
+    alert = feature_store_quiet_alert(root, now=now, quiet_hours=quiet_hours)
+    page = bool(alert.get("quiet") and alert.get("alert"))
+    copy = ""
+    if page:
+        copy = (
+            f"**FEATURE QUIET PAGE** (Chicago weekday)\n"
+            f"{alert.get('alert')}\n"
+            f"age_hours={alert.get('age_hours')} n={alert.get('n')} "
+            f"last_at={alert.get('last_at')}\n"
+            f"_floors locked · paper only · staff ack — never invent fills_"
+        )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_page": False,
+        "page": page,
+        "copy": copy,
+        "alert": alert,
+        "label": (
+            "feature quiet PAGE"
+            if page
+            else "feature quiet ok"
+        ),
+        "note": "Staff pager copy only — never auto-posts; never softens floors.",
+    }
+
+
 def feature_store_quiet_alert(
     root: str | None = None,
     *,
@@ -1581,6 +1615,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "paper_only": True,
         "feature_store": feat,
         "feature_quiet": quiet,
+        "feature_quiet_pager": feature_quiet_pager(root),
         "completions": comp,
         "living_ai": ai,
         "insight_swarm": swarm,

@@ -486,13 +486,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Dual-control chip | `desk_living.dual_control_chip` |
 | Ruin drill chip | `desk_living.ruin_drill_chip` |
 
+### Living upgrade — priority trim + status CLI + quiet pager
+
+| Ticket | Where |
+| --- | --- |
+| Priority trim | `desk_master.finalize_living_priority` (max 16) |
+| Staff living status | `tools/staff_living_status.py` |
+| Feature quiet pager | `desk_living.feature_quiet_pager` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Living Masters priority trim | dedupe noisy rail lines |
-| Staff living status CLI | tools/staff_living_status.py |
-| Feature quiet weekday page | pager copy for ≥6h silence |
+| Living board snapshot test | assert priority ≤16 under full chips |
+| Staff injury ingest CLI | tools/staff_injury_ingest.py |
+| Completions today chip | teller one-liner |
 
 ## Hard rules unchanged
 
