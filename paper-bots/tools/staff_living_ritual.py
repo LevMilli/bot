@@ -109,6 +109,18 @@ def format_discord(payload: dict) -> str:
         f"• Digests sunday: digests observe · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    timer_alive = payload.get("timer_alive")
+    timer_bit = (
+        "timer=alive"
+        if timer_alive
+        else "timer=DEAD"
+        if timer_alive is False
+        else "timer=n/a"
+    )
+    lines.append(
+        f"• Timer sunday: {timer_bit} · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
