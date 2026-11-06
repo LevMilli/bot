@@ -19,6 +19,7 @@ Paper only. Venue floors stay locked (sports `0.06` / BTC+commodity `0.05` / INX
 make living-status
 make living-floors
 make living-selfcheck
+make living-doctor
 make living-test
 
 python3 tools/staff_living_status.py              # compact text
