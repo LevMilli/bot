@@ -964,6 +964,61 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">quiet age</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.living_compact ||
+                          (snap?.desk?.master as {
+                            compact?: { quiet_age_h?: number | null; quiet_age?: string }
+                          } | undefined)?.compact
+                        const fq = snap?.desk?.feature_quiet as
+                          | { age_hours?: number | null; quiet?: boolean }
+                          | undefined
+                        const ageH =
+                          c?.quiet_age_h ??
+                          fq?.age_hours ??
+                          (typeof c?.quiet_age === 'string' && c.quiet_age.endsWith('h')
+                            ? Number(c.quiet_age.slice(0, -1))
+                            : null)
+                        if (ageH != null && Number.isFinite(ageH) && ageH >= 6) return '#d4a017'
+                        if (fq?.quiet) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c =
+                        snap?.desk?.living_compact ||
+                        (snap?.desk?.master as {
+                          compact?: {
+                            quiet_age?: string
+                            quiet_age_h?: number | null
+                            quiet_age_label?: string
+                          }
+                        } | undefined)?.compact
+                      const fq = snap?.desk?.feature_quiet as
+                        | { age_hours?: number | null; quiet?: boolean; alert?: string }
+                        | undefined
+                      const age =
+                        c?.quiet_age ||
+                        (c?.quiet_age_h != null
+                          ? `${c.quiet_age_h}h`
+                          : fq?.age_hours != null
+                            ? `${fq.age_hours}h`
+                            : 'n/a')
+                      const quietBit =
+                        fq?.quiet === true ? 'quiet=yes' : fq?.quiet === false ? 'quiet=no' : 'quiet=?'
+                      return (
+                        (c?.quiet_age_label || `quiet_age=${age}`) +
+                        ` · ${quietBit}` +
+                        (fq?.alert ? ` · ${fq.alert}` : '')
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">doc age</span>
                   <span
                     style={{

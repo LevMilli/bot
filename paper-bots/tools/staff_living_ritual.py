@@ -38,18 +38,17 @@ def format_discord(payload: dict) -> str:
         "",
     ]
     quiet = payload.get("feature_quiet") if isinstance(payload.get("feature_quiet"), dict) else {}
-    if quiet or payload.get("quiet_age") is not None:
-        age = quiet.get("age_hours")
-        age_s = (
-            f"{age}h"
-            if age is not None
-            else str(payload.get("quiet_age") or "n/a")
-        )
-        lines.append(
-            f"• Feature quiet: quiet={quiet.get('quiet')} age={age_s} "
-            f"(staff observe — never softens floors)"
-        )
-        lines.append("")
+    age = quiet.get("age_hours") if quiet else None
+    age_s = (
+        f"{age}h"
+        if age is not None
+        else str(payload.get("quiet_age") or "n/a")
+    )
+    lines.append(
+        f"• Feature quiet: quiet={quiet.get('quiet') if quiet else None} age={age_s} "
+        f"(staff observe — never softens floors)"
+    )
+    lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
         if name in ("gaps", "ruin") and row.get("copy"):
