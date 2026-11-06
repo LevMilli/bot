@@ -986,13 +986,25 @@ Interactive: Positive ROI Master Plan canvas.
 | Export sunday_quiet_age_label | living_board_export |
 | Masters sunday quiet soft rail | priority observe |
 
-### Next
+### Living upgrade — status/ritual/vault sunday quiet batch
 
 | Ticket | Where |
 | --- | --- |
 | Status text sunday quiet line | print sunday quiet |
-| Ritual observe sunday quiet | observe plain tip |
-| Vault Masters sunday quiet | city masters row |
+| Ritual observe sunday quiet | observe plain + --json tip |
+| Vault Masters sunday quiet | city masters sunday row |
+| Status text teller quiet nag | teller_quiet_nag line |
+| Status json masters sunday hit | flatten masters_sunday_quiet |
+| Compact sunday quiet twin | compact.sunday_quiet_age* |
+| Vault toolbar sunday quiet hint | ritual hint extend |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Export masters_sunday_quiet | living_board_export |
+| Discord sunday quiet always | ritual tip always on |
+| Teller vault sunday quiet link | tip under teller |
 
 ## Hard rules unchanged
 

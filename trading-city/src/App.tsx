@@ -553,7 +553,7 @@ export default function App() {
               <div className="vault-board" aria-label="Desk vault board">
                 <div className="vault-board-toolbar">
                   <span className="vault-ritual-hint">
-                    ritual: make living-ritual / --discord · observe: make living-ritual-observe · doctor: make living-doctor · paste from ritual/doctor draft rows (never auto-posts)
+                    ritual: make living-ritual / --discord · observe: make living-ritual-observe · doctor: make living-doctor · sunday quiet: staff_sunday_packet.py discord · paste from ritual/doctor/sunday draft rows (never auto-posts)
                   </span>
                   <button
                     type="button"
@@ -1565,6 +1565,42 @@ export default function App() {
                           (s.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')) +
                         ' · sunday observe · never softens floors'
                       )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">masters sunday</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const pri = snap?.desk?.master?.priority
+                        const hit = (pri || []).find((p) =>
+                          String(p).toLowerCase().includes('sunday quiet'),
+                        )
+                        if (hit) return '#d4a017'
+                        const s =
+                          snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                        const age = s?.quiet_age
+                        if (typeof age === 'string' && age.endsWith('h')) {
+                          const n = Number(age.slice(0, -1))
+                          if (Number.isFinite(n) && n >= 6) return '#d4a017'
+                        }
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const pri = snap?.desk?.master?.priority
+                      const hit = (pri || []).find((p) =>
+                        String(p).toLowerCase().includes('sunday quiet'),
+                      )
+                      if (hit) return `${hit} · Masters soft rail · never pages`
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const label =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return `sunday quiet ${label} (observe) · Masters soft rail · never pages`
                     })()}
                   </span>
                 </div>
