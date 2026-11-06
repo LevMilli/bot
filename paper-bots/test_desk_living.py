@@ -237,6 +237,10 @@ class InsightHelpers(unittest.TestCase):
             summary = desk_master.master_summary(tmp, bots=[], cfg={"max_open_risk": 100})
             self.assertIn("swarm_lights", summary)
             self.assertIn("insight swarm ≥3:1", " ".join(summary.get("priority") or []))
+            self.assertIn("living_ai", summary)
+            self.assertTrue(
+                any("eligible completions today" in str(p) for p in (summary.get("priority") or []))
+            )
 
     def test_tip_radar_from_quote_cache(self):
         from helpers import tip_radar
