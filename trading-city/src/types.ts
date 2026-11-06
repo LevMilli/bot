@@ -333,6 +333,39 @@ export type Desk = {
     note?: string
     error?: string
   }
+  feature_quiet_pager?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    page?: boolean
+    auto_page?: boolean
+    label?: string
+    copy?: string
+    note?: string
+    error?: string
+  }
+  firm_queue?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    offers_n?: number
+    accepted_n?: number
+    deferred_n?: number
+    remaining_risk?: number | null
+    label?: string
+    note?: string
+    error?: string
+  }
+  helper_gate_a?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    ready_n?: number
+    helpers_n?: number
+    armed_n?: number
+    auto_promote?: boolean
+    places_orders?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
   clerk_pulse?: {
     paper_only?: boolean
     fee_floors_locked?: boolean

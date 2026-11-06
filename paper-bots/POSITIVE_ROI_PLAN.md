@@ -666,13 +666,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Calendar vault tint | events n>0 amber |
 | EIA blackout vault | ACTIVE red |
 
-### Next
+### Living upgrade — firm queue / Gate A / quiet pager vault
 
 | Ticket | Where |
 | --- | --- |
 | Firm queue vault row | queue depth observe |
 | Helper Gate A vault | promote_ready helpers |
 | Feature quiet pager vault | pager copy soft |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Skip taxonomy vault | top skip codes observe |
+| Distance empty vault | empty_card_pass fail |
+| Quant fit vault tint | fit_pass fail amber |
 
 ## Hard rules unchanged
 
