@@ -618,13 +618,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Doctor Discord one-liner | `status doctor --discord` |
 | Inventory thin vault tint | digest inventory on vault |
 
-### Next
+### Living upgrade — hillclimb/gaps vault + ritual make pulse
 
 | Ticket | Where |
 | --- | --- |
 | Hillclimb vault row | active lever on vault |
 | Dual gaps vault tint | unsigned gaps amber |
-| Living ritual Makefile note | ritual targets in README pulse |
+| Living ritual Makefile note | README pulse + make *-discord targets |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Completions vault tint | eligible=0 weekday amber |
+| Green-day vault strip | green_n / red_n observe |
+| Bleed hot vault tint | bleed fail amber |
 
 ## Hard rules unchanged
 

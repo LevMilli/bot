@@ -779,6 +779,58 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">hill</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const h =
+                          snap?.desk?.hillclimb_chip ||
+                          (snap?.desk?.master as {
+                            hillclimb_chip?: { active_name?: string | null }
+                          } | undefined)?.hillclimb_chip
+                        if (!h) return undefined
+                        return h.active_name ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const h =
+                        snap?.desk?.hillclimb_chip ||
+                        (snap?.desk?.master as {
+                          hillclimb_chip?: { label?: string; active_name?: string | null }
+                        } | undefined)?.hillclimb_chip
+                      if (!h) return 'hillclimb pending'
+                      return h.label || (h.active_name ? `lever=${h.active_name}` : 'hillclimb none')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">gaps</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.dual_control_gaps ||
+                          (snap?.desk?.master as {
+                            dual_control_gaps?: { page?: boolean; gaps_n?: number }
+                          } | undefined)?.dual_control_gaps
+                        if (!g) return undefined
+                        return g.page || Number(g.gaps_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.dual_control_gaps ||
+                        (snap?.desk?.master as {
+                          dual_control_gaps?: { label?: string; page?: boolean; gaps_n?: number }
+                        } | undefined)?.dual_control_gaps
+                      if (!g) return 'dual gaps pending'
+                      return g.label || (g.page ? 'dual-control gaps' : 'dual gaps clear')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">fills</span>
                   <span>
                     {(() => {

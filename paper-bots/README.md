@@ -74,6 +74,18 @@ empty paper account: no trade history or saved state is included in this pack.
 - Suggested take-profit if you were filled: fill + 15¢, capped at 99¢ (print-only — not executed).
 - On the PIMP desk, BTC `run` is an **entry** action: desk daily loss / max open / open risk gate it like the other towers. See `DESK_ROI_SYSTEM.md`.
 
+## Living Trading Upgrade (staff pulse)
+Paper-only living spine — floors locked, never auto-publishes Discord.
+
+```
+make living-status
+make living-ritual-discord   # paste draft only
+make living-doctor
+make living-test
+```
+
+Staff map: `LIVING_UPGRADE.md`. Plan tickets: `POSITIVE_ROI_PLAN.md`.
+
 ## Notes
 - All times are shown in US Central (CT) or UTC as labeled.
 - The meme-coin bot has an optional, **disabled** hook for a paid AI API (needs your own key in an
