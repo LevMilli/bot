@@ -804,6 +804,11 @@ def living_compact_card(
         if isinstance(src.get("ritual_observe"), dict)
         else {}
     )
+    doctor_age = (
+        src.get("doctor_age")
+        if isinstance(src.get("doctor_age"), dict)
+        else {}
+    )
     quiet_part = (
         str(quiet.get("label") or "").strip()
         or (
@@ -826,6 +831,15 @@ def living_compact_card(
         ritual_part = "ritual=n/a"
     else:
         ritual_part = "ritual=n/a"
+    doctor_fresh = ritual.get("doctor_fresh")
+    if doctor_fresh is None and doctor_age:
+        doctor_fresh = not bool(doctor_age.get("stale"))
+    if doctor_fresh is True:
+        doctor_part = "doctor=fresh"
+    elif doctor_fresh is False:
+        doctor_part = "doctor=stale"
+    else:
+        doctor_part = "doctor=n/a"
     parts = [
         f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')}",
         f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'}",
@@ -833,6 +847,7 @@ def living_compact_card(
         f"bleed={bleed.get('ratio')}",
         quiet_part,
         ritual_part,
+        doctor_part,
         expand_part,
     ]
     return {
@@ -844,6 +859,8 @@ def living_compact_card(
         "expand_label": expand_part,
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
+        "doctor_label": doctor_part,
+        "doctor_fresh": doctor_fresh,
         "label": " · ".join(str(p) for p in parts),
         "note": "Compact living card — floors locked; paper only.",
     }
