@@ -1197,14 +1197,23 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual Discord hill/swarm/fills | discord lines |
 | Ritual observe fills sunday | observe plain + --json |
 
-### Next
+### Living upgrade — green/bleed/CLV sunday twins (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Compact green+bleed sunday | living_compact_card twins |
-| Export/status green+bleed sunday | board export + status flatten |
-| Ritual Discord green/bleed/CLV | discord lines |
+| Export/status green+bleed/CLV | board export + status flatten |
+| Ritual Discord green/bleed/CLV/calib | discord lines |
 | Compact CLV+timer+calib sunday | living_compact_card twins |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Compact queue+GateA+AI sunday | living_compact_card twins |
+| Export/status queue/GateA/AI | board export + status flatten |
+| Ritual Discord queue/GateA/AI | discord lines |
+| Compact tip/blackout/injury sunday | living_compact_card twins |
 
 ## Hard rules unchanged
 

@@ -937,6 +937,34 @@ def living_compact_card(
             )
             + f" · sunday quiet {quiet_age_part} (observe · never invents PnL)"
         ),
+        "green_sunday_quiet": (
+            f"{green.get('label') or ('green=' + str(green.get('green_n')))} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if green
+            else f"green-day n/a · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "bleed_sunday_quiet": (
+            f"{bleed.get('label') or ('bleed=' + str(bleed.get('ratio')))} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if bleed
+            else f"bleed n/a · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "clv_sunday_quiet": (
+            f"{(src.get('clv') or src.get('clv_closer') or {}).get('label') or 'CLV observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("clv"), dict) or isinstance(src.get("clv_closer"), dict)
+            else f"CLV observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "timer_sunday_quiet": (
+            f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "calib_sunday_quiet": (
+            f"{(src.get('calib_nag') or {}).get('label') or 'calib observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+            if isinstance(src.get("calib_nag"), dict)
+            else f"calib observe · sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2257,6 +2285,35 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{fills_bit} · sunday quiet {slim['sunday_quiet_age_label']} "
         "(observe · never invents PnL)"
     )
+    green = board.get("green_day") if isinstance(board.get("green_day"), dict) else {}
+    slim["green_sunday_quiet"] = (
+        f"{green.get('label') or (('green=' + str(green.get('green_n'))) if green else 'green-day n/a')} "
+        f"· sunday quiet {slim['sunday_quiet_age_label']} (observe)"
+    )
+    bleed = board.get("bleed") if isinstance(board.get("bleed"), dict) else {}
+    slim["bleed_sunday_quiet"] = (
+        f"{bleed.get('label') or (('bleed=' + str(bleed.get('ratio'))) if bleed else 'bleed n/a')} "
+        f"· sunday quiet {slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    clv = (
+        board.get("clv")
+        if isinstance(board.get("clv"), dict)
+        else board.get("clv_closer") if isinstance(board.get("clv_closer"), dict) else {}
+    )
+    slim["clv_sunday_quiet"] = (
+        f"{clv.get('label') or 'CLV observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    timer = board.get("timer_heartbeat") if isinstance(board.get("timer_heartbeat"), dict) else {}
+    slim["timer_sunday_quiet"] = (
+        f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'} "
+        f"· sunday quiet {slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    calib = board.get("calib_nag") if isinstance(board.get("calib_nag"), dict) else {}
+    slim["calib_sunday_quiet"] = (
+        f"{calib.get('label') or 'calib observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-writes Φ)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2299,6 +2356,21 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_fills_sunday_quiet"] = (
             compact.get("fills_sunday_quiet") or slim.get("fills_sunday_quiet")
+        )
+        slim["compact_green_sunday_quiet"] = (
+            compact.get("green_sunday_quiet") or slim.get("green_sunday_quiet")
+        )
+        slim["compact_bleed_sunday_quiet"] = (
+            compact.get("bleed_sunday_quiet") or slim.get("bleed_sunday_quiet")
+        )
+        slim["compact_clv_sunday_quiet"] = (
+            compact.get("clv_sunday_quiet") or slim.get("clv_sunday_quiet")
+        )
+        slim["compact_timer_sunday_quiet"] = (
+            compact.get("timer_sunday_quiet") or slim.get("timer_sunday_quiet")
+        )
+        slim["compact_calib_sunday_quiet"] = (
+            compact.get("calib_sunday_quiet") or slim.get("calib_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
