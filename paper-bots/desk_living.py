@@ -782,6 +782,11 @@ def living_compact_card(
         if isinstance(src.get("betting_expand_gate"), dict)
         else {}
     )
+    ritual = (
+        src.get("ritual_observe")
+        if isinstance(src.get("ritual_observe"), dict)
+        else {}
+    )
     quiet_part = (
         str(quiet.get("label") or "").strip()
         or (
@@ -796,6 +801,14 @@ def living_compact_card(
         if expand.get("allow_betting_expand") or expand.get("blocked") is False
         else "expand=n/a"
     )
+    if ritual.get("ritual_ok") is True:
+        ritual_part = "ritual=ok"
+    elif ritual.get("ritual_ok") is False:
+        ritual_part = "ritual=no"
+    elif ritual:
+        ritual_part = "ritual=n/a"
+    else:
+        ritual_part = "ritual=n/a"
     parts = [
         f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')}",
         f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'}",
@@ -803,6 +816,7 @@ def living_compact_card(
         f"bleed={bleed.get('ratio')}",
         quiet_part,
         expand_part,
+        ritual_part,
     ]
     return {
         "paper_only": True,
@@ -811,6 +825,8 @@ def living_compact_card(
         "parts": parts,
         "quiet_label": quiet_part,
         "expand_label": expand_part,
+        "ritual_label": ritual_part,
+        "ritual_ok": ritual.get("ritual_ok"),
         "label": " · ".join(str(p) for p in parts),
         "note": "Compact living card — floors locked; paper only.",
     }
