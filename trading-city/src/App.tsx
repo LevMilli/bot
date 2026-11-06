@@ -1872,10 +1872,16 @@ export default function App() {
                       const sw =
                         snap?.desk?.swarm_lights || snap?.desk?.master?.swarm_lights
                       if (!sw || sw.error) return 'insight swarm pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       const mark = sw.pass ? '●' : '◐'
                       return (
                         `${mark} ${sw.label || `insight ${sw.insight_n}:${sw.betting_n}`}` +
-                        (sw.color ? ` · ${sw.color}` : '')
+                        (sw.color ? ` · ${sw.color}` : '') +
+                        ` · sunday quiet ${sundayBit} (observe)`
                       )
                     })()}
                   </span>
@@ -1902,7 +1908,14 @@ export default function App() {
                           hillclimb_chip?: { label?: string; active_name?: string | null }
                         } | undefined)?.hillclimb_chip
                       if (!h) return 'hillclimb pending'
-                      return h.label || (h.active_name ? `lever=${h.active_name}` : 'hillclimb none')
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        h.label || (h.active_name ? `lever=${h.active_name}` : 'hillclimb none')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>

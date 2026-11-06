@@ -1123,13 +1123,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Compact ruin sunday twin | compact.ruin_sunday_quiet |
 | Status flatten ruin sunday | status --json |
 
-### Next
+### Living upgrade — hill/swarm/gaps sunday (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Vault hill sunday quiet | hill row hint |
 | Vault swarm sunday quiet | swarm row hint |
 | Ritual discord gaps sunday | discord line |
+| Compact/export hill+swarm+gaps | sunday twins |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault digests sunday quiet | digests row hint |
+| Vault fills sunday quiet | fills row hint |
+| Ritual observe gaps sunday | observe tip |
 
 ## Hard rules unchanged
 
