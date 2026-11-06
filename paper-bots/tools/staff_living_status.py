@@ -74,6 +74,7 @@ def _text(board: dict) -> str:
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         f"doctor_age: {doctor_age.get('label') or '—'}",
+        f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')}",
         f"ritual: {ritual.get('label') or '—'}",
         f"sunday: {sunday.get('label') or '—'}",
         f"chicago_today: {board.get('chicago_today')}",

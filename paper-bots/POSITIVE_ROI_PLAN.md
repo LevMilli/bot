@@ -754,13 +754,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Status json ritual_ok top-level | flatten ritual_ok |
 | City vault ritual sticky note | short make living-ritual hint |
 
-### Next
+### Living upgrade — doctor soft_copy ritual / export ritual_ok / status flag
 
 | Ticket | Where |
 | --- | --- |
 | Doctor soft_copy ritual line | failed ritual in discord |
 | Living export ritual_ok | export top-level |
 | Staff status ritual_ok flag | text ritual_ok= |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Compact card ritual_ok | compact parts ritual= |
+| Masters ritual soft_copy | priority discord ritual |
+| Ritual CLI --json ritual_ok | flatten exit fields |
 
 ## Hard rules unchanged
 
