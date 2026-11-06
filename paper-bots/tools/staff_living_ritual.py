@@ -29,7 +29,10 @@ def format_discord(payload: dict) -> str:
         "**Living weekly ritual** (draft — staff paste only)",
         f"_paper only · floors locked · live={bool(payload.get('live_orders_enabled'))} · auto_publish=False_",
         "",
-        f"ritual_ok={payload.get('ok')}",
+        f"ritual_ok={payload.get('ritual_ok', payload.get('ok'))} "
+        f"exit_ok={payload.get('exit_ok')} "
+        f"doctor_ok={payload.get('doctor_ok')} "
+        f"doctor_fresh={payload.get('doctor_fresh')}",
         "",
     ]
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
@@ -93,6 +96,15 @@ def main() -> int:
     doctor_ok = bool(steps[4][1].get("ok"))
     exit_ok = floors_ok and expand_ok
     ritual_ok = exit_ok and doctor_ok
+    doctor_row = steps[4][1] if len(steps) > 4 else {}
+    doctor_fresh = None
+    if isinstance(doctor_row, dict):
+        ritual_obs = doctor_row.get("ritual_observe")
+        if isinstance(ritual_obs, dict) and ritual_obs.get("doctor_fresh") is not None:
+            doctor_fresh = bool(ritual_obs.get("doctor_fresh"))
+        age = doctor_row.get("doctor_age")
+        if doctor_fresh is None and isinstance(age, dict):
+            doctor_fresh = not bool(age.get("stale"))
     payload = {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -105,6 +117,7 @@ def main() -> int:
         "floors_ok": floors_ok,
         "expand_ok": expand_ok,
         "doctor_ok": doctor_ok,
+        "doctor_fresh": doctor_fresh,
         "note": (
             "Weekly ritual draft — staff reviews gaps/ruin/floors/expand/doctor. "
             "Never invent fills; never soften floors; never enable live."

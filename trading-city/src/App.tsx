@@ -1032,7 +1032,26 @@ export default function App() {
                 </div>
                 <div className="vault-board-row">
                   <span className="vb-label">doctor draft</span>
-                  <span className="vault-ritual-draft">
+                  <span
+                    className="vault-ritual-draft"
+                    style={{
+                      color: (() => {
+                        const fresh =
+                          snap?.desk?.doctor_fresh ??
+                          (snap?.desk?.master as { doctor_fresh?: boolean | null } | undefined)
+                            ?.doctor_fresh ??
+                          snap?.desk?.living_compact?.doctor_fresh ??
+                          (snap?.desk?.doctor_age?.stale === true
+                            ? false
+                            : snap?.desk?.doctor_age?.stale === false
+                              ? true
+                              : null)
+                        if (fresh === false) return '#c45c26'
+                        if (fresh === true) return undefined
+                        return undefined
+                      })(),
+                    }}
+                  >
                     {(() => {
                       const copy =
                         snap?.desk?.doctor_soft_copy ||

@@ -600,6 +600,10 @@ class InsightHelpers(unittest.TestCase):
             }
             text = staff_living_ritual.format_discord({
                 "ok": True,
+                "ritual_ok": True,
+                "exit_ok": True,
+                "doctor_ok": True,
+                "doctor_fresh": True,
                 "live_orders_enabled": False,
                 "steps": steps,
                 "note": "Never invent fills.",
@@ -607,6 +611,8 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("Living weekly ritual", text)
             self.assertIn("DUAL-CONTROL GAPS", text)
             self.assertIn("floors", text)
+            self.assertIn("doctor_fresh=True", text)
+            self.assertIn("exit_ok=True", text)
             # --json flatten fields on observe chip path
             obs = desk_living.ritual_observe_chip(tmp)
             self.assertIn("ritual_ok", obs)
