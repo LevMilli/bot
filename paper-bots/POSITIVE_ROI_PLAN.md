@@ -362,13 +362,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Dual-control on Masters/desk | `dual_control_status` on living + desk_row |
 | Hillclimb staff CLI | `tools/staff_hillclimb_pick.py` + `staff_clear_hillclimb_lever` |
 
+### Living upgrade — dual-control / ruin staff CLIs
+
+| Ticket | Where |
+| --- | --- |
+| Dual-control CLI | `tools/staff_dual_control.py` |
+| Ruin drill CLI + HUD | `tools/staff_ruin_drill.py` + `practiced_this_month` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Dual-control staff sign CLI | mirror hillclimb pick UX |
-| Ruin-drill reminder on HUD | monthly soft/hard practice flag |
+| Sunday living packet auto | reporter_clerk → staff packet draft |
+| Skip taxonomy city chip | top skip codes on teller rail |
 
 ## Hard rules unchanged
 

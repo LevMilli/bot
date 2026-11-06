@@ -628,6 +628,12 @@ def master_summary(
             f"{dual_control.get('items_n') or 0} signed; "
             f"live_orders={bool(dual_control.get('live_orders_enabled'))}"
         )
+    ruin_drill = (living or {}).get("ruin_drill") if isinstance(living, dict) else None
+    if isinstance(ruin_drill, dict):
+        if ruin_drill.get("active"):
+            priority.insert(0, f"ruin drill ACTIVE level={ruin_drill.get('level')}")
+        elif not ruin_drill.get("practiced_this_month"):
+            priority.append("ruin drill: practice soft/hard this Chicago month")
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -657,6 +663,7 @@ def master_summary(
         "feature_quiet": feature_quiet,
         "hillclimb_lever": hillclimb_lever,
         "dual_control": dual_control,
+        "ruin_drill": ruin_drill,
         "live_orders_enabled": False,
         "note": (
             "Trading Masters — dual scoreboard for volume vs taxed EV. "

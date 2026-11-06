@@ -3232,6 +3232,34 @@ def ruin_drill_status(root: str | None = None) -> dict:
     level = store.get("level") if store.get("active") else None
     if level not in RUIN_LEVELS:
         level = None
+    history = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    # Dual-control checklist wants a practice this Chicago month.
+    practiced_this_month = False
+    last_practice_at = None
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/Chicago"))
+        ym = f"{now.year}-{now.month:02d}"
+        for h in reversed(history):
+            stamp = str(h.get("at") or "")
+            if not stamp:
+                continue
+            if ym in stamp or stamp.startswith(ym):
+                practiced_this_month = True
+                last_practice_at = stamp
+                break
+            # Also accept ISO stamps in current month via parse.
+            try:
+                when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                if when.astimezone(ZoneInfo("America/Chicago")).strftime("%Y-%m") == ym:
+                    practiced_this_month = True
+                    last_practice_at = stamp
+                    break
+            except ValueError:
+                continue
+    except Exception:
+        practiced_this_month = False
     return {
         "paper_only": True,
         "active": bool(store.get("active")) and level is not None,
@@ -3242,8 +3270,11 @@ def ruin_drill_status(root: str | None = None) -> dict:
         "who": store.get("who") or "",
         "staff_note": store.get("note") or "",
         "at": store.get("at"),
-        "history_n": len([h for h in (store.get("history") or []) if isinstance(h, dict)]),
+        "history_n": len(history),
+        "practiced_this_month": practiced_this_month,
+        "last_practice_at": last_practice_at,
         "fee_floors_locked": True,
+        "live_orders_enabled": False,
         "levels": {
             "soft": "block new entries; exits/settles still run",
             "hard": "soft + pause every paper bot",
@@ -3252,6 +3283,11 @@ def ruin_drill_status(root: str | None = None) -> dict:
         "note": (
             "Ruin drill UX for vault. Soft/hard/nuclear. "
             "No profit guarantee. Exits stay available under soft."
+            + (
+                ""
+                if practiced_this_month
+                else " Reminder: practice soft/hard this Chicago month for dual-control."
+            )
         ),
     }
 
