@@ -42,6 +42,7 @@ CAPITAL_OS_NAME = "desk_capital_os.json"
 OPP_COST_NAME = "desk_opp_cost.json"
 IDEA_REVIEW_NAME = "desk_idea_review.json"
 BTC_CALIB_NAME = "desk_btc_calibration.json"
+SPORTS_CALIB_NAME = "desk_sports_calibration.json"
 FIRM_QUEUE_NAME = "desk_firm_queue.json"
 EMPTY_CARD_NAME = "desk_empty_card.json"
 NEAR_MISS_PROMOTE_NAME = "desk_near_miss_promote.json"
@@ -194,6 +195,12 @@ BTC_CALIB_BUCKETS = (
     (0.80, 0.90),
     (0.90, 1.01),
 )
+
+# Sports calibration — fair_at_entry buckets vs hit (parallel to BTC; observe-only).
+SPORTS_CALIB_MIN_N = 20
+SPORTS_CALIB_HI_LABEL = 0.80
+SPORTS_CALIB_HI_HIT_FLOOR = 0.70
+SPORTS_CALIB_BUCKETS = BTC_CALIB_BUCKETS
 
 # Phase 9: dual-control live checklist — paper stub; never enables live orders.
 LIVE_ORDERS_ENABLED = False  # hard lock — stub cannot arm create-order
@@ -855,6 +862,119 @@ def capture_btc_calibration(
 
 def latest_btc_calibration(root: str | None = None) -> dict | None:
     store = _load(_path(BTC_CALIB_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+# ---- Sports calibration report (living upgrade — parallel to BTC) ----------
+
+def _sports_history_rows(bots: list | None) -> list:
+    rows = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        if str(bot.get("id") or "") not in ("sports-gap", "sports"):
+            continue
+        for h in bot.get("history") or []:
+            if isinstance(h, dict):
+                rows.append(h)
+    return rows
+
+
+def sports_calibration_report(
+    bots: list | None = None,
+    *,
+    min_n: int = SPORTS_CALIB_MIN_N,
+) -> dict:
+    """Bucket sports fair_at_entry vs realized hit. Flag high-p miscalibration.
+
+    Observe-only — never softens 0.06 floor; never auto-writes params.
+    """
+    rows = _sports_history_rows(bots)
+    buckets = []
+    hi_hits = 0
+    hi_n = 0
+    for lo, hi in SPORTS_CALIB_BUCKETS:
+        local = []
+        for h in rows:
+            p = _finite(
+                h.get("fair_at_entry")
+                if h.get("fair_at_entry") is not None
+                else h.get("prob") or h.get("confidence")
+            )
+            pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if p is None or pnl is None:
+                continue
+            if not (lo <= float(p) < hi):
+                continue
+            hit = 1.0 if pnl > 0 else 0.0
+            local.append(hit)
+            if lo + 1e-12 >= SPORTS_CALIB_HI_LABEL:
+                hi_n += 1
+                hi_hits += int(hit)
+        n = len(local)
+        rate = round(sum(local) / n, 4) if n else None
+        buckets.append({
+            "lo": lo,
+            "hi": hi,
+            "label_mid": round((lo + min(hi, 1.0)) / 2, 3),
+            "n": n,
+            "hit_rate": rate,
+            "gap": None if rate is None else round(rate - ((lo + min(hi, 1.0)) / 2), 4),
+        })
+    hi_rate = round(hi_hits / hi_n, 4) if hi_n else None
+    miscal = bool(
+        hi_n >= int(min_n)
+        and hi_rate is not None
+        and hi_rate + 1e-12 < SPORTS_CALIB_HI_HIT_FLOOR
+    )
+    action = "raise_phi" if miscal else ("observe" if hi_n < int(min_n) else "keep")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bot": "sports-gap",
+        "n": sum(b["n"] for b in buckets),
+        "hi_label": SPORTS_CALIB_HI_LABEL,
+        "hi_n": hi_n,
+        "hi_hit_rate": hi_rate,
+        "hi_hit_floor": SPORTS_CALIB_HI_HIT_FLOOR,
+        "miscalibrated": miscal,
+        "action": action,
+        "buckets": buckets,
+        "auto_promote": False,
+        "note": (
+            "Sports calibration: high-fair (≥80%) bucket must hit ≥70% once n≥20. "
+            "Miscalibration → fix fair/model — never soften 0.06 or size up on fake confidence."
+            if miscal
+            else "Sports calibration board (parallel to BTC). Floors locked; no auto param write."
+        ),
+    }
+
+
+def capture_sports_calibration(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+) -> dict:
+    """Persist today's sports calibration card for Masters / Sunday review."""
+    day = label or _chicago_day()
+    report = sports_calibration_report(bots)
+    card = {**report, "label": day, "captured_at": _now()}
+    path = _path(SPORTS_CALIB_NAME, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = [c for c in cards if str(c.get("label") or "") != day]
+    cards.append(card)
+    store["cards"] = cards[-60:]
+    store["latest"] = card
+    store["last_at"] = _now()
+    _save(path, store)
+    return card
+
+
+def latest_sports_calibration(root: str | None = None) -> dict | None:
+    store = _load(_path(SPORTS_CALIB_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
 

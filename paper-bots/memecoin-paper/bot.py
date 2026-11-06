@@ -544,6 +544,29 @@ def scan(st, stats):
         row["risk_gates_ok"] = "PASS" if not gate_reason else "FAIL"
         if gate_reason:
             record("SKIP", gate_reason)
+            try:
+                desk_root = os.path.dirname(BASE)
+                if desk_root not in sys.path:
+                    sys.path.insert(0, desk_root)
+                import desk_living
+                residual = max(0.0, float(conf) - 0.5)
+                desk_living.record_eval_features(
+                    desk_root,
+                    bot="memecoin",
+                    action="skip",
+                    series="solana_dex",
+                    ev={
+                        "ticker": mint or row.get("symbol"),
+                        "confidence": conf,
+                        "edge": residual,
+                        "lane": lane,
+                        "depth": liq,
+                    },
+                    reasons=[gate_reason],
+                    note=str(gate_reason)[:160],
+                )
+            except Exception:
+                pass
             continue
         ticket = ticket_for(st, conf)
         if ticket < C.MIN_TICKET_USD:
@@ -577,6 +600,30 @@ def scan(st, stats):
                    fill_price_usd=fill, tokens=round(tokens, 4), usd=ticket, fee_usd=round(fee, 4),
                    impact_pct=round(imp * 100, 3), liquidity_usd=liq))
         record("BUY", f"PAPER BUY ${ticket:.2f} @ market {price} (fill est {fill:.10g})")
+        try:
+            desk_root = os.path.dirname(BASE)
+            if desk_root not in sys.path:
+                sys.path.insert(0, desk_root)
+            import desk_living
+            residual = max(0.0, float(conf) - 0.5)
+            desk_living.record_eval_features(
+                desk_root,
+                bot="memecoin",
+                action="buy",
+                series="solana_dex",
+                ev={
+                    "ticker": mint or row.get("symbol"),
+                    "ask": fill,
+                    "fee": fee,
+                    "confidence": conf,
+                    "edge": residual,
+                    "lane": lane,
+                    "depth": liq,
+                },
+                note=f"paper buy {lane}",
+            )
+        except Exception:
+            pass
         print(f"  PAPER BUY {row['symbol']} ${ticket:.2f} @ {price} conf {conf}")
 
 

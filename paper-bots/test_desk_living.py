@@ -98,7 +98,7 @@ class BtcNewsFailClosed(unittest.TestCase):
 class InsightHelpers(unittest.TestCase):
     def test_tip_radar_and_skip_historian(self):
         from helpers import tip_radar, skip_historian, timer_heartbeat, empty_card_bee
-        from helpers import clv_closer, injury_wire
+        from helpers import clv_closer, injury_wire, eia_scout
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "helpers"), exist_ok=True)
             d = tip_radar.write_digest(tmp, games=[
@@ -119,6 +119,17 @@ class InsightHelpers(unittest.TestCase):
             self.assertFalse(c["may_place_alone"])
             iw = injury_wire.write_digest(tmp, headlines=[{"league": "NFL", "text": "QB out"}])
             self.assertEqual(iw["n"], 1)
+            from datetime import datetime, timedelta, timezone
+            eia = eia_scout.write_digest(tmp, events=[{
+                "country": "USD",
+                "impact": "High",
+                "title": "Crude Oil Inventories",
+                "date": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            }])
+            self.assertEqual(eia["n"], 1)
+            self.assertFalse(eia["may_place_alone"])
+            board = desk_living.living_upgrade_board(tmp)
+            self.assertTrue(board["insight_helper_digests"].get("eia_scout"))
 
     def test_record_eval_features(self):
         with tempfile.TemporaryDirectory() as tmp:
