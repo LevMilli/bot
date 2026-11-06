@@ -131,6 +131,30 @@ function emaSeries(values: number[], period = 8): number[] {
   return out
 }
 
+function channelOf(values: number[], period = 8) {
+  const mid = emaSeries(values, period)
+  return values.map((_, i) => {
+    const from = Math.max(0, i - period + 1)
+    let sum = 0
+    let sum2 = 0
+    const n = i - from + 1
+    for (let j = from; j <= i; j++) {
+      sum += values[j]
+      sum2 += values[j] * values[j]
+    }
+    const mean = sum / n
+    const sd = Math.sqrt(Math.max(0, sum2 / n - mean * mean))
+    return { mid: mid[i], upper: mid[i] + sd * 1.7, lower: mid[i] - sd * 1.7 }
+  })
+}
+
+function shortWhen(row: TradeOrHistory) {
+  return String(row.when || row.closed_at || row.closed || '')
+    .replace(/\s+Central$/i, '')
+    .trim()
+    .slice(0, 22)
+}
+
 function recordOf(rows: TradeOrHistory[]) {
   let wins = 0
   let losses = 0
@@ -208,6 +232,9 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
     const bh = (ground - 150) * (0.28 + rand(seed + bi * 9 + 2) * 0.72)
     ctx.fillStyle = 'rgba(5, 3, 14, 0.9)'
     ctx.fillRect(bx, ground - bh, bw - 5, bh)
+    const roof = ground - bh
+    ctx.fillStyle = 'rgba(236, 242, 255, 0.75)'
+    ctx.fillRect(bx + bw * 0.45, roof - 18 - rand(seed + bi) * 28, 3, 18 + rand(seed + bi) * 28)
     ctx.fillStyle = 'rgba(236, 242, 255, 0.9)'
     for (let wy = ground - bh + 16; wy < ground - 14; wy += 20) {
       for (let wx = bx + 10; wx < bx + bw - 16; wx += 16) {
@@ -281,6 +308,50 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
     ink(ctx, '0', plotR + 14, zeroY + 8, '#ffffff', 5)
   }
 
+  const band = channelOf(points, 8)
+  const bandY = band.map((row) => ({ upper: yOf(row.upper), lower: yOf(row.lower), mid: yOf(row.mid) }))
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(plotL, plotT, plotR - plotL, plotB - plotT)
+  ctx.clip()
+  ctx.beginPath()
+  bandY.forEach((row, i) => (i === 0 ? ctx.moveTo(xy[i].x, row.upper) : ctx.lineTo(xy[i].x, row.upper)))
+  for (let i = bandY.length - 1; i >= 0; i--) ctx.lineTo(xy[i].x, bandY[i].lower)
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(255,255,255,0.1)'
+  ctx.fill()
+  let maxStep = 1
+  for (let i = 1; i < xy.length; i++) maxStep = Math.max(maxStep, Math.abs(xy[i].v - xy[i - 1].v))
+  const colW = Math.max(6, ((xy[1]?.x ?? plotL + 20) - xy[0].x) * 0.42)
+  for (let i = 1; i < xy.length; i++) {
+    const delta = xy[i].v - xy[i - 1].v
+    const h = (Math.abs(delta) / maxStep) * (plotB - plotT) * 0.46
+    ctx.fillStyle = delta >= 0 ? `${beam}99` : 'rgba(255, 51, 85, 0.55)'
+    ctx.fillRect(xy[i].x - colW / 2, plotB - h, colW, h)
+  }
+  ctx.beginPath()
+  xy.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+  for (let i = xy.length - 1; i >= 0; i--) ctx.lineTo(xy[i].x, bandY[i].mid)
+  ctx.closePath()
+  ctx.fillStyle = `${beam}44`
+  ctx.fill()
+  let peak = points[0]
+  for (let i = 1; i < xy.length; i++) {
+    peak = Math.max(peak, points[i])
+    if (points[i] >= peak - span * 0.01) continue
+    const a = xy[i - 1]
+    const b = xy[i]
+    ctx.beginPath()
+    ctx.moveTo(a.x, yOf(Math.max(peak, a.v)))
+    ctx.lineTo(b.x, yOf(peak))
+    ctx.lineTo(b.x, b.y)
+    ctx.lineTo(a.x, a.y)
+    ctx.closePath()
+    ctx.fillStyle = 'rgba(255, 51, 85, 0.16)'
+    ctx.fill()
+  }
+  ctx.restore()
+
   ctx.save()
   for (let i = 1; i < xy.length; i++) {
     const a = xy[i - 1]
@@ -324,6 +395,18 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   ctx.lineWidth = 3
   trace(0, xy.length - 1)
 
+  ctx.save()
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.lineWidth = 2
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+  for (const key of ['upper', 'lower'] as const) {
+    ctx.beginPath()
+    bandY.forEach((row, i) => (i === 0 ? ctx.moveTo(xy[i].x, row[key]) : ctx.lineTo(xy[i].x, row[key])))
+    ctx.stroke()
+  }
+  ctx.restore()
+
   const ema = emaSeries(points, 8)
   ctx.save()
   ctx.lineJoin = 'round'
@@ -349,6 +432,31 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
     ctx.beginPath()
     ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2)
     ctx.fillStyle = xy[i].v >= (xy[i - 1]?.v ?? p.v) ? '#ffffff' : DOWN
+    ctx.fill()
+  }
+
+  const swing = span * 0.14
+  for (let i = 1; i < xy.length - 1; i++) {
+    const prev = xy[i - 1].v
+    const cur = xy[i].v
+    const next = xy[i + 1].v
+    const peakTurn = cur >= prev && cur >= next && cur - Math.min(prev, next) >= swing
+    const troughTurn = cur <= prev && cur <= next && Math.max(prev, next) - cur >= swing
+    if (!peakTurn && !troughTurn) continue
+    const p = xy[i]
+    ctx.beginPath()
+    if (peakTurn) {
+      ctx.moveTo(p.x, p.y - 16)
+      ctx.lineTo(p.x + 7, p.y - 5)
+      ctx.lineTo(p.x - 7, p.y - 5)
+      ctx.fillStyle = UP
+    } else {
+      ctx.moveTo(p.x, p.y + 16)
+      ctx.lineTo(p.x + 7, p.y + 5)
+      ctx.lineTo(p.x - 7, p.y + 5)
+      ctx.fillStyle = DOWN
+    }
+    ctx.closePath()
     ctx.fill()
   }
 
@@ -386,6 +494,22 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   ctx.arc(tip.x, tip.y, 7, 0, Math.PI * 2)
   ctx.fillStyle = '#ffffff'
   ctx.fill()
+  ctx.save()
+  ctx.setLineDash([7, 9])
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(plotL, tip.y)
+  ctx.lineTo(plotR, tip.y)
+  ctx.stroke()
+  ctx.restore()
+  ctx.beginPath()
+  ctx.moveTo(plotR + 2, tip.y)
+  ctx.lineTo(plotR + 16, tip.y - 8)
+  ctx.lineTo(plotR + 16, tip.y + 8)
+  ctx.closePath()
+  ctx.fillStyle = tipColor
+  ctx.fill()
 
   const scanX = plotL + ((time * 120) % (plotR - plotL))
   ctx.fillStyle = 'rgba(255,255,255,0.18)'
@@ -403,6 +527,23 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
       const v = max - (span * i) / 3
       const y = plotT + ((plotB - plotT) * i) / 3
       ink(ctx, money(v, true), plotR + 16, y + 8, 'rgba(255,255,255,0.92)', 4)
+    }
+  }
+  if (series.quoted) {
+    const book = rowsOf(bot)
+    const pathRows = book.length > points.length ? book.slice(-points.length) : book
+    const opened = pathRows[0] ? shortWhen(pathRows[0]) : ''
+    const closed = pathRows.length ? shortWhen(pathRows[pathRows.length - 1]) : ''
+    ctx.font = '700 20px sans-serif'
+    if (opened) ink(ctx, opened, plotL + 8, plotB - 8, 'rgba(255,255,255,0.88)', 4)
+    if (closed) {
+      const cw = ctx.measureText(closed).width
+      ink(ctx, closed, plotR - cw - 8, plotB - 8, 'rgba(255,255,255,0.88)', 4)
+    }
+    const offHigh = max - points[points.length - 1]
+    if (offHigh > span * 0.04) {
+      ctx.font = '700 22px sans-serif'
+      ink(ctx, `OFF HIGH ${money(-offHigh, true)}`, plotL + 10, plotT + 28, DOWN, 4)
     }
   }
 
@@ -424,11 +565,30 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   ink(ctx, period, 32 + nameW + 52, 72, 'rgba(255,255,255,0.8)', 4)
   ctx.font = '700 64px monospace'
   const figure = money(ret, true)
-  ink(ctx, figure, W - 36 - ctx.measureText(figure).width, 72, retColor, 8)
+  const figureW = ctx.measureText(figure).width
+  ink(ctx, figure, W - 36 - figureW, 72, retColor, 8)
 
   ctx.font = '600 26px sans-serif'
   const rows = rowsOf(bot)
   const record = recordOf(rows)
+  const settled = record.wins + record.losses
+  if (settled > 0) {
+    const barW = 240
+    const barX = W - 36 - figureW - barW - 30
+    if (barX > 520) {
+      const winW = barW * (record.wins / settled)
+      ctx.fillStyle = 'rgba(4, 2, 18, 0.45)'
+      ctx.fillRect(barX - 4, 40, barW + 8, 28)
+      ctx.fillStyle = UP
+      ctx.fillRect(barX, 48, winW, 14)
+      ctx.fillStyle = DOWN
+      ctx.fillRect(barX + winW, 48, barW - winW, 14)
+      ctx.font = '700 20px sans-serif'
+      ink(ctx, `${record.wins}W`, barX, 36, UP, 4)
+      const lossLabel = `${record.losses}L`
+      ink(ctx, lossLabel, barX + barW - ctx.measureText(lossLabel).width, 36, DOWN, 4)
+    }
+  }
   const last = [...rows].reverse().find((row) => row.pnl != null)
   const row1: { text: string; color: string }[] = [
     { text: `OPEN ${bot.open_count ?? 0}`, color: '#ffffff' },
