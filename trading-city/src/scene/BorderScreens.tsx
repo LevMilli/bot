@@ -6,7 +6,7 @@ import { hologramPnlValue, money } from '../data/format'
 
 /**
  * One trade chart per side of the world, four at most.
- * The box sits outside the farthest camera orbit so zoom-out still looks at the inner face.
+ * Walls stay at the plaza edge. The face is a glass panel, so the city reads through it.
  */
 const REACH = 24
 const HEIGHT = 16
@@ -83,10 +83,6 @@ function returnOf(bot: BotRow, last: number) {
   return shown == null ? last : shown
 }
 
-function periodOf(bot: BotRow) {
-  return bot.today != null && bot.today !== 0 ? 'TODAY' : 'REALIZED'
-}
-
 function tone(n: number) {
   if (n > 0.005) return UP
   if (n < -0.005) return DOWN
@@ -100,8 +96,9 @@ function signature(bot: BotRow) {
 }
 
 /**
- * Blue wall chart: dashed grid, left skyline, and a line that is green on the
- * way up and red on the way down. `time` drives the live tip and scan.
+ * Glass chart in the reference photo: a see-through blue field, vertical
+ * dashes, a left skyline, and one thick magenta line with a white tip.
+ * `time` only breathes the tip.
  */
 function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   const W = canvas.width
@@ -109,25 +106,26 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   const ctx = canvas.getContext('2d')!
   const seed = hashId(bot.id || bot.name || 'wall')
 
-  const sky = ctx.createLinearGradient(0, 0, W * 0.25, H)
-  sky.addColorStop(0, '#0e0848')
-  sky.addColorStop(0.4, '#1730b4')
-  sky.addColorStop(1, '#1c4ae6')
+  ctx.clearRect(0, 0, W, H)
+  const sky = ctx.createLinearGradient(0, 0, W * 0.12, H)
+  sky.addColorStop(0, 'rgba(14, 18, 96, 0.5)')
+  sky.addColorStop(0.42, 'rgba(22, 52, 196, 0.6)')
+  sky.addColorStop(1, 'rgba(32, 88, 240, 0.7)')
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, W, H)
 
   const ground = H - 2
   let bx = 0
   let bi = 0
-  while (bx < W * 0.36) {
-    const bw = 48 + rand(seed + bi * 5) * 86
-    const bh = H * (0.18 + rand(seed + bi * 9 + 2) * 0.46)
-    ctx.fillStyle = '#070512'
-    ctx.fillRect(bx, ground - bh, bw - 6, bh)
-    ctx.fillStyle = '#eef3ff'
-    for (let wy = ground - bh + 18; wy < ground - 16; wy += 22) {
-      for (let wx = bx + 12; wx < bx + bw - 18; wx += 18) {
-        if (rand(seed + wx * 3 + wy + bi) > 0.42) ctx.fillRect(wx, wy, 6, 8)
+  while (bx < W * 0.38) {
+    const bw = 46 + rand(seed + bi * 5) * 78
+    const bh = H * (0.22 + rand(seed + bi * 9 + 2) * 0.5)
+    ctx.fillStyle = 'rgba(5, 3, 14, 0.9)'
+    ctx.fillRect(bx, ground - bh, bw - 5, bh)
+    ctx.fillStyle = 'rgba(236, 242, 255, 0.9)'
+    for (let wy = ground - bh + 16; wy < ground - 14; wy += 20) {
+      for (let wx = bx + 10; wx < bx + bw - 16; wx += 16) {
+        if (rand(seed + wx * 3 + wy + bi) > 0.4) ctx.fillRect(wx, wy, 4, 6)
       }
     }
     bx += bw
@@ -135,150 +133,85 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   }
 
   ctx.save()
-  ctx.strokeStyle = 'rgba(255,255,255,0.72)'
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.88)'
   ctx.lineWidth = 3
-  ctx.setLineDash([14, 22])
-  for (let i = 1; i < 16; i++) {
-    const x = (i / 16) * W
+  ctx.setLineDash([9, 20])
+  for (let i = 1; i < 15; i++) {
+    const x = (i / 15) * W
     ctx.beginPath()
     ctx.moveTo(x, 0)
     ctx.lineTo(x, H)
     ctx.stroke()
   }
-  ctx.strokeStyle = 'rgba(255,255,255,0.22)'
-  ctx.lineWidth = 2
-  ctx.setLineDash([8, 18])
-  for (let i = 1; i < 7; i++) {
-    const y = (i / 7) * H
-    ctx.beginPath()
-    ctx.moveTo(0, y)
-    ctx.lineTo(W, y)
-    ctx.stroke()
-  }
   ctx.restore()
 
   const points = seriesFor(bot)
-  let min = Math.min(...points, 0)
-  let max = Math.max(...points, 0)
-  const pad = (max - min) * 0.14 || 1
-  min -= pad
-  max += pad
+  const min = Math.min(...points)
+  const max = Math.max(...points)
   const span = max - min || 1
-  const plotL = 48
-  const plotR = W * 0.78
-  const plotT = H * 0.4
-  const plotB = H * 0.9
-  const yOf = (v: number) => plotB - ((v - min) / span) * (plotB - plotT)
+  const plotL = 36
+  const plotR = W * 0.7
+  const plotT = H * 0.16
+  const plotB = H * 0.78
   const xy = points.map((v, i) => ({
     x: plotL + (i / Math.max(points.length - 1, 1)) * (plotR - plotL),
-    y: yOf(v),
+    y: plotB - ((v - min) / span) * (plotB - plotT),
     v,
   }))
-  const zeroY = yOf(0)
 
-  ctx.save()
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)'
-  ctx.lineWidth = 2
-  ctx.setLineDash([10, 12])
   ctx.beginPath()
-  ctx.moveTo(plotL, zeroY)
-  ctx.lineTo(plotR + 36, zeroY)
-  ctx.stroke()
-  ctx.restore()
-  ctx.fillStyle = 'rgba(255,255,255,0.85)'
-  ctx.font = '700 36px sans-serif'
-  ctx.fillText('0', plotR + 16, zeroY + 12)
+  xy.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+  ctx.lineTo(xy[xy.length - 1].x, H)
+  ctx.lineTo(xy[0].x, H)
+  ctx.closePath()
+  const wash = ctx.createLinearGradient(0, plotT, 0, H)
+  wash.addColorStop(0, 'rgba(255, 70, 220, 0.28)')
+  wash.addColorStop(1, 'rgba(80, 20, 160, 0)')
+  ctx.fillStyle = wash
+  ctx.fill()
 
-  for (let i = 1; i < xy.length; i++) {
-    const a = xy[i - 1]
-    const b = xy[i]
-    const up = b.v >= a.v
-    const color = up ? UP : DOWN
+  const stroke = () => {
     ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.lineTo(b.x, zeroY)
-    ctx.lineTo(a.x, zeroY)
-    ctx.closePath()
-    ctx.fillStyle = up ? 'rgba(61,255,122,0.16)' : 'rgba(255,51,85,0.16)'
-    ctx.fill()
-    ctx.lineJoin = 'round'
-    ctx.lineCap = 'round'
-    ctx.strokeStyle = up ? 'rgba(120,255,170,0.55)' : 'rgba(255,90,110,0.55)'
-    ctx.lineWidth = 28
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-    ctx.strokeStyle = color
-    ctx.lineWidth = 12
-    ctx.stroke()
-    ctx.strokeStyle = 'rgba(255,255,255,0.92)'
-    ctx.lineWidth = 3
+    xy.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
     ctx.stroke()
   }
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.strokeStyle = 'rgba(255, 170, 255, 0.55)'
+  ctx.lineWidth = 36
+  stroke()
+  ctx.strokeStyle = '#ff3ad4'
+  ctx.lineWidth = 14
+  stroke()
+  ctx.strokeStyle = '#ffe6ff'
+  ctx.lineWidth = 4
+  stroke()
 
   const tip = xy[xy.length - 1]
-  const lastStep = xy.length > 1 ? tip.v - xy[xy.length - 2].v : tip.v
-  const tipColor = tone(lastStep)
-  const pulse = 16 + Math.sin(time * 5.5) * 7
-  const glow = ctx.createRadialGradient(tip.x, tip.y, 2, tip.x, tip.y, 36 + pulse)
+  const pulse = 18 + Math.sin(time * 5.2) * 6
+  const glow = ctx.createRadialGradient(tip.x, tip.y, 2, tip.x, tip.y, 28 + pulse)
   glow.addColorStop(0, 'rgba(255,255,255,0.95)')
-  glow.addColorStop(0.35, tipColor)
-  glow.addColorStop(1, 'rgba(0,0,0,0)')
+  glow.addColorStop(0.4, 'rgba(255,180,255,0.55)')
+  glow.addColorStop(1, 'rgba(255,60,210,0)')
   ctx.fillStyle = glow
   ctx.beginPath()
-  ctx.arc(tip.x, tip.y, 36 + pulse, 0, Math.PI * 2)
+  ctx.arc(tip.x, tip.y, 28 + pulse, 0, Math.PI * 2)
   ctx.fill()
   ctx.beginPath()
-  ctx.arc(tip.x, tip.y, 8, 0, Math.PI * 2)
+  ctx.arc(tip.x, tip.y, 7, 0, Math.PI * 2)
   ctx.fillStyle = '#ffffff'
   ctx.fill()
-
-  const scanX = plotL + ((time * 90) % (plotR - plotL))
-  ctx.fillStyle = 'rgba(255,255,255,0.14)'
-  ctx.fillRect(scanX, plotT - 20, 3, plotB - plotT + 40)
 
   const ret = returnOf(bot, tip.v)
-  const retColor = tone(ret)
-  const word = ret > 0.005 ? 'UP' : ret < -0.005 ? 'DOWN' : 'FLAT'
-  const figure = money(ret, true)
-  ctx.fillStyle = 'rgba(4,2,16,0.82)'
-  ctx.fillRect(0, 0, W, 118)
-  ctx.fillStyle = retColor
-  ctx.fillRect(0, 114, W, 6)
-  ctx.fillStyle = '#ffffff'
-  ctx.font = '700 58px sans-serif'
-  ctx.fillText((bot.name || 'trade').slice(0, 16), 28, 74)
-  ctx.font = '800 28px sans-serif'
-  ctx.fillStyle = retColor
-  ctx.fillText(word, 620, 42)
-  ctx.font = '700 54px monospace'
-  ctx.fillText(figure, 620, 96)
-  const figureW = ctx.measureText(figure).width
-  ctx.fillStyle = 'rgba(255,255,255,0.72)'
-  ctx.font = '600 24px sans-serif'
-  ctx.fillText(periodOf(bot), 620 + figureW + 18, 90)
-  const liveOn = Math.sin(time * 4) > 0
-  ctx.fillStyle = liveOn ? retColor : 'rgba(255,255,255,0.35)'
-  ctx.beginPath()
-  ctx.arc(W - 148, 58, 11, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = '#ffffff'
-  ctx.font = '700 32px sans-serif'
-  ctx.fillText('LIVE', W - 124, 70)
-
-  ctx.font = '700 32px monospace'
-  const tag = figure
-  const tagW = ctx.measureText(tag).width + 28
-  const tagX = tip.x + 18 + tagW > W - 12 ? tip.x - tagW - 16 : tip.x + 18
-  const tagY = Math.min(Math.max(tip.y - 22, 132), H - 56)
-  ctx.fillStyle = 'rgba(4,2,16,0.88)'
-  ctx.fillRect(tagX, tagY, tagW, 44)
-  ctx.fillStyle = retColor
-  ctx.fillRect(tagX, tagY, 6, 44)
-  ctx.fillStyle = '#ffffff'
-  ctx.fillText(tag, tagX + 16, tagY + 31)
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'
+  ctx.font = '600 34px sans-serif'
+  ctx.fillText((bot.name || 'trade').slice(0, 18), 28, 48)
+  ctx.fillStyle = DOWN
+  ctx.font = 'bold 32px monospace'
+  ctx.fillText('1W', W * 0.4, 46)
+  ctx.fillStyle = tone(ret)
+  ctx.font = 'bold 40px monospace'
+  ctx.fillText(money(ret, true), W * 0.4, 92)
 }
 
 function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
@@ -319,7 +252,14 @@ function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
     <group position={wall.position} rotation={[0, wall.rot, 0]} raycast={() => null}>
       <mesh position={[0, 0, 0]}>
         <planeGeometry args={[wall.size[0], wall.size[1]]} />
-        <meshBasicMaterial map={map} toneMapped={false} fog={false} side={THREE.FrontSide} />
+        <meshBasicMaterial
+          map={map}
+          transparent
+          depthWrite={false}
+          toneMapped={false}
+          fog={false}
+          side={THREE.FrontSide}
+        />
       </mesh>
     </group>
   )
