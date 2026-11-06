@@ -971,6 +971,109 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">pager</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const p =
+                          snap?.desk?.feature_quiet_pager ||
+                          (snap?.desk?.master as {
+                            feature_quiet_pager?: { page?: boolean }
+                          } | undefined)?.feature_quiet_pager
+                        if (!p) return undefined
+                        return p.page ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const p =
+                        snap?.desk?.feature_quiet_pager ||
+                        (snap?.desk?.master as {
+                          feature_quiet_pager?: {
+                            label?: string
+                            page?: boolean
+                            auto_page?: boolean
+                          }
+                        } | undefined)?.feature_quiet_pager
+                      if (!p) return 'feature quiet pager pending'
+                      return (
+                        (p.label || (p.page ? 'feature quiet PAGE' : 'feature quiet ok')) +
+                        ' · auto_page=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">queue</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const q =
+                          snap?.desk?.firm_queue ||
+                          (snap?.desk?.master as {
+                            firm_queue?: { deferred_n?: number; offers_n?: number }
+                          } | undefined)?.firm_queue
+                        if (!q) return undefined
+                        return Number(q.deferred_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const q =
+                        snap?.desk?.firm_queue ||
+                        (snap?.desk?.master as {
+                          firm_queue?: {
+                            label?: string
+                            offers_n?: number
+                            deferred_n?: number
+                            remaining_risk?: number | null
+                          }
+                        } | undefined)?.firm_queue
+                      if (!q) return 'firm queue pending'
+                      return (
+                        q.label ||
+                        `firm queue offers=${q.offers_n ?? '—'} def=${q.deferred_n ?? '—'} risk_left=${q.remaining_risk ?? '—'}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">Gate A</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.helper_gate_a ||
+                          (snap?.desk?.master as {
+                            helper_gate_a?: { ready_n?: number }
+                          } | undefined)?.helper_gate_a
+                        if (!g) return undefined
+                        return Number(g.ready_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.helper_gate_a ||
+                        (snap?.desk?.master as {
+                          helper_gate_a?: {
+                            label?: string
+                            ready_n?: number
+                            helpers_n?: number
+                            auto_promote?: boolean
+                            places_orders?: boolean
+                          }
+                        } | undefined)?.helper_gate_a
+                      if (!g) return 'helper Gate A pending'
+                      return (
+                        (g.label ||
+                          `helper Gate A ready=${g.ready_n ?? 0}/${g.helpers_n ?? 0}`) +
+                        ' · auto_promote=False · places=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">digests</span>
                   <span
                     style={{
