@@ -334,13 +334,20 @@ Interactive: Positive ROI Master Plan canvas.
 | --- | --- |
 | Tip radar from quote_cache | `helpers.tip_radar.games_from_quote_cache` → digests |
 
+### Living upgrade — swarm lights + injury inbox
+
+| Ticket | Where |
+| --- | --- |
+| Swarm city lights | `desk_row.swarm_lights` + Masters `swarm_lights` |
+| Injury staff inbox | `helpers/injury_wire_inbox.json` via `staff_ingest` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| City lights for swarm ratio | Masters / tellers show insight≥3:1 |
-| Injury wire staff ingest | optional headline drop path |
+| Masters HUD copy for living_ai | surface raise_Φ tickets in priority |
+| Completions KPI on tellers | memory line for eligible fills today |
 
 ## Hard rules unchanged
 
