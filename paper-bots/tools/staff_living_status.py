@@ -14,6 +14,7 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py ruin
   python3 tools/staff_living_status.py export
   python3 tools/staff_living_status.py seed
+  python3 tools/staff_living_status.py pulse
 """
 from __future__ import annotations
 
@@ -71,7 +72,7 @@ def main() -> int:
         default="text",
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
-            "gaps", "inventory", "hillclimb", "ruin", "export", "seed",
+            "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -117,6 +118,26 @@ def main() -> int:
         return 0
     if args.action == "seed":
         print(json.dumps(desk_living.seed_missing_digests(root), indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "pulse":
+        from helpers import clerk_pulse
+        # Force refresh: clear cadence marker then run.
+        marker = os.path.join(root, "helpers", getattr(clerk_pulse, "RUN_MARKER", "clerk_pulse_at.txt"))
+        try:
+            if os.path.isfile(marker):
+                os.remove(marker)
+        except OSError:
+            pass
+        digest = clerk_pulse.refresh_clerks(root)
+        chip = desk_living.clerk_pulse_chip(root)
+        print(json.dumps({
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "may_place_alone": False,
+            "refreshed_n": (digest or {}).get("refreshed_n") if isinstance(digest, dict) else None,
+            "chip": chip,
+            "note": "Forced clerk pulse refresh — observe digests only.",
+        }, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "json":
         print(json.dumps({
