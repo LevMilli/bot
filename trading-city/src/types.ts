@@ -222,6 +222,23 @@ export type Desk = {
     note?: string
     error?: string
   }
+  hillclimb_chip?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    active_name?: string | null
+    label?: string
+    note?: string
+    error?: string
+  }
+  dual_control_gaps?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    page?: boolean
+    gaps_n?: number
+    label?: string
+    note?: string
+    error?: string
+  }
   living_ai?: {
     paper_only?: boolean
     fee_floors_locked?: boolean
