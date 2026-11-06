@@ -802,13 +802,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault sunday ritual_ok | city sunday row tint |
 | Compact export ritual_ok | export compact.ritual_ok |
 
-### Next
+### Living upgrade — compact doctor_fresh / ritual CLI flags / teller tint
 
 | Ticket | Where |
 | --- | --- |
 | Doctor age + ritual HUD | compact doctor_fresh part |
 | Ritual CLI text exit_ok | plain text exit flags |
 | City vault teller ritual_nag | teller row tint |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Compact tint doctor stale | vault compact doctor color |
+| Export doctor_fresh flat | living_board_export |
+| Status text doctor= | staff status doctor_fresh |
 
 ## Hard rules unchanged
 

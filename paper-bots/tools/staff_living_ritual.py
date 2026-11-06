@@ -69,6 +69,11 @@ def main() -> int:
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             print(chip.get("label") or "ritual observe")
+            print(
+                f"ritual_ok={chip.get('ritual_ok')} exit_ok={chip.get('exit_ok')} "
+                f"floors_ok={chip.get('floors_ok')} expand_ok={chip.get('expand_ok')} "
+                f"doctor_fresh={chip.get('doctor_fresh')}"
+            )
             print(chip.get("note") or "")
         return 0 if chip.get("exit_ok") else 2
 
@@ -113,7 +118,11 @@ def main() -> int:
                 print(f"\n## {name}\n{row.get('copy')}")
             else:
                 print(f"- {name}: {label}")
-        print(f"\nritual_ok={payload['ok']}")
+        print(
+            f"\nritual_ok={payload['ritual_ok']} exit_ok={payload['exit_ok']} "
+            f"floors_ok={payload['floors_ok']} expand_ok={payload['expand_ok']} "
+            f"doctor_ok={payload['doctor_ok']}"
+        )
         print(payload["note"])
     # Fail if floors soft or expand blocked (doctor may still fail on quiet/gaps).
     if not steps[2][1].get("all_ok"):

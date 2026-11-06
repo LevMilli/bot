@@ -283,6 +283,8 @@ export type Desk = {
     parts?: string[]
     ritual_ok?: boolean | null
     ritual_label?: string
+    doctor_fresh?: boolean | null
+    doctor_label?: string
     note?: string
     error?: string
   }
@@ -587,6 +589,8 @@ export type Desk = {
     swarm_pass?: boolean
     floors_ok?: boolean
     eligible_completions_today?: number
+    ritual_ok?: boolean | null
+    ritual_nag?: boolean
     note?: string
     error?: string
   }

@@ -1744,11 +1744,28 @@ export default function App() {
                 </div>
                 <div className="vault-board-row">
                   <span className="vb-label">teller</span>
-                  <span>
-                    {snap?.desk?.living_memory_line ||
-                      snap?.desk?.teller_living?.memory_line ||
-                      snap?.desk?.teller_memory?.recent?.[0]?.text ||
-                      'living teller pending'}
+                  <span
+                    style={{
+                      color: (() => {
+                        const t = snap?.desk?.teller_living
+                        if (!t) return undefined
+                        if (t.ritual_nag || t.ritual_ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const line =
+                        snap?.desk?.living_memory_line ||
+                        snap?.desk?.teller_living?.memory_line ||
+                        snap?.desk?.teller_memory?.recent?.[0]?.text ||
+                        'living teller pending'
+                      const t = snap?.desk?.teller_living
+                      if (t?.ritual_nag || t?.ritual_ok === false) {
+                        return `${line} · ritual_nag`
+                      }
+                      return line
+                    })()}
                   </span>
                 </div>
                 <div className="vault-board-row">
