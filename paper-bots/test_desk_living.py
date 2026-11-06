@@ -233,6 +233,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertFalse(doc.get("live_orders_enabled"))
             self.assertIn("discord", doc)
             self.assertIn("Living doctor", doc.get("soft_copy") or "")
+            self.assertTrue(any(c.get("id") == "ritual_observe" for c in (doc.get("checks") or [])))
+            self.assertIn("ritual_observe", doc)
             self.assertTrue(os.path.isfile(desk_living.doctor_run_path(tmp)))
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))

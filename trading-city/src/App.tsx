@@ -552,6 +552,9 @@ export default function App() {
             {vaultOpsOpen && (
               <div className="vault-board" aria-label="Desk vault board">
                 <div className="vault-board-toolbar">
+                  <span className="vault-ritual-hint">
+                    ritual: make living-ritual / --discord · observe: make living-ritual-observe
+                  </span>
                   <button
                     type="button"
                     className="vault-board-close"
