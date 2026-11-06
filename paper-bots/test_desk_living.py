@@ -173,6 +173,17 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("digest_inventory", board2)
             self.assertIn("dual_control_gaps", board2)
             self.assertIn("hillclimb_chip", board2)
+            ruin_page = desk_living.ruin_drill_page(tmp)
+            self.assertFalse(ruin_page.get("auto_page"))
+            self.assertIn("RUIN DRILL", ruin_page.get("copy") or "")
+            seeded = desk_living.seed_missing_digests(tmp)
+            self.assertTrue(seeded["fee_floors_locked"])
+            self.assertFalse(seeded.get("may_place_alone"))
+            self.assertGreaterEqual(int(seeded.get("seeded_n") or 0), 0)
+            export = desk_living.living_board_export(tmp)
+            self.assertEqual(export.get("export"), "living_board_v1")
+            self.assertTrue(export.get("fee_floors_locked"))
+            self.assertIn("ruin_drill_page", board2)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

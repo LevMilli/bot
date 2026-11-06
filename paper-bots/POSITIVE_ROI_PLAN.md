@@ -517,13 +517,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Hillclimb chip | `desk_living.hillclimb_chip` + CLI `hillclimb` |
 | Digest inventory | `desk_living.digest_inventory` + CLI `inventory` |
 
+### Living upgrade — ruin page / export / digest seed
+
+| Ticket | Where |
+| --- | --- |
+| Ruin drill page | `desk_living.ruin_drill_page` + CLI `ruin` |
+| Living board export | `desk_living.living_board_export` + CLI `export` |
+| Digest seed | `desk_living.seed_missing_digests` + CLI `seed` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Ruin drill page copy | staff markdown when not practiced |
-| Living board export | tools/staff_living_status.py export |
-| Empty digest seed helper | staff seed missing insight digests |
+| Living upgrade README slice | paper-bots/LIVING_UPGRADE.md staff map |
+| Clerk pulse force refresh CLI | staff_living_status pulse |
+| Masters priority unit file | test_finalize_living_priority |
 
 ## Hard rules unchanged
 
