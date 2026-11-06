@@ -287,6 +287,7 @@ export type Desk = {
     doctor_label?: string
     quiet_age?: string
     quiet_age_h?: number | null
+    quiet_age_label?: string
     quiet_label?: string
     note?: string
     error?: string

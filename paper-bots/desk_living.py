@@ -818,8 +818,7 @@ def living_compact_card(
             + f" age={quiet_age}"
         )
     )
-    if quiet.get("label") and "age=" not in str(quiet.get("label") or "").lower():
-        quiet_part = f"{quiet_part} · quiet_age={quiet_age}"
+    quiet_age_part = f"quiet_age={quiet_age}"
     expand_part = (
         "expand=blocked"
         if expand.get("blocked")
@@ -850,6 +849,7 @@ def living_compact_card(
         f"green={green.get('green_n')}",
         f"bleed={bleed.get('ratio')}",
         quiet_part,
+        quiet_age_part,
         ritual_part,
         doctor_part,
         expand_part,
@@ -860,6 +860,7 @@ def living_compact_card(
         "live_orders_enabled": False,
         "parts": parts,
         "quiet_label": quiet_part,
+        "quiet_age_label": quiet_age_part,
         "quiet_age": quiet_age,
         "quiet_age_h": quiet_age_h,
         "expand_label": expand_part,
