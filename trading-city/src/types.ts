@@ -255,6 +255,16 @@ export type Desk = {
     note?: string
     error?: string
   }
+  doctor_age?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    at?: string | null
+    age_sec?: number | null
+    ok_last?: boolean | null
+    stale?: boolean
+    label?: string
+    note?: string
+  }
   master?: {
     paper_only?: boolean
     version?: number

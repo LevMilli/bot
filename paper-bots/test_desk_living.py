@@ -142,6 +142,12 @@ class DeskLivingTests(unittest.TestCase):
                 "timer digest dead",
                 "bleed ratio=2 hot",
                 "bleed clerk ratio=2",
+                "near-miss promote_ready — staff z|p only",
+                "skip-twin promote_ready — staff z|p only",
+                "doctor never run",
+                "living doctor FAIL n=2",
+                "empty card bee hot",
+                "empty bee stale",
                 "insight swarm ≥3:1 before betting expand",
                 "dual-control paper 0/8 signed; live_orders=False",
                 "dual-control signed=0/8 two_staff=False arm_ready_paper=False",
@@ -150,6 +156,9 @@ class DeskLivingTests(unittest.TestCase):
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("timer")), 1)
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("bleed")), 1)
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("dual")), 1)
+            self.assertEqual(sum(1 for t in trimmed if "near-miss" in t.lower() or t.lower().startswith("skip-twin")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("doctor") or t.lower().startswith("living doctor")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("empty")), 1)
             self.assertIn("completions_chip", board2)
             self.assertTrue(board2["completions_chip"]["fee_floors_locked"])
             from helpers import injury_wire
@@ -201,10 +210,17 @@ class DeskLivingTests(unittest.TestCase):
             self.assertGreaterEqual(len(health2.get("chip_catalog") or []), 5)
             self.assertIn("board_size", health2)
             self.assertFalse(health2["board_size"].get("over"))
-            doc = desk_living.living_doctor(tmp)
+            doc = desk_living.living_doctor(tmp, record=True)
             self.assertTrue(doc["fee_floors_locked"])
             self.assertIn("checks", doc)
             self.assertFalse(doc.get("live_orders_enabled"))
+            self.assertTrue(os.path.isfile(desk_living.doctor_run_path(tmp)))
+            age = desk_living.doctor_age_chip(tmp)
+            self.assertFalse(age.get("stale"))
+            self.assertIsNotNone(age.get("age_sec"))
+            self.assertIn("doctor_age", board2)
+            peek = desk_living.living_doctor(tmp, record=False)
+            self.assertIn("doctor_age", peek)
             self.assertIn("board_size", board2)
             gaps = desk_living.dual_control_gaps_page(tmp)
             self.assertIn("copy", gaps)
@@ -443,6 +459,33 @@ class InsightHelpers(unittest.TestCase):
                 self.assertTrue(
                     any("eligible completions today" in str(p) for p in (summary.get("priority") or []))
                 )
+
+    def test_ritual_discord_export(self):
+        from tools import staff_living_ritual
+        with tempfile.TemporaryDirectory() as tmp:
+            steps = {
+                "gaps": {"copy": "**DUAL-CONTROL GAPS**\n- [ ] a"},
+                "ruin": {"copy": "**RUIN DRILL**\nok"},
+                "floors": {"label": "floors locked ok", "all_ok": True},
+                "expand": {"label": "expand ok", "blocked": False},
+                "doctor": {"label": "living doctor OK", "ok": True},
+            }
+            text = staff_living_ritual.format_discord({
+                "ok": True,
+                "live_orders_enabled": False,
+                "steps": steps,
+                "note": "Never invent fills.",
+            })
+            self.assertIn("Living weekly ritual", text)
+            self.assertIn("DUAL-CONTROL GAPS", text)
+            self.assertIn("floors", text)
+            age = desk_living.doctor_age_chip(tmp)
+            self.assertTrue(age.get("stale"))
+            desk_living.record_doctor_run(tmp, {"ok": True, "label": "living doctor OK", "failed_n": 0})
+            age2 = desk_living.doctor_age_chip(tmp)
+            self.assertFalse(age2.get("stale"))
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("doctor_age", export)
 
     def test_tip_radar_from_quote_cache(self):
         from helpers import tip_radar

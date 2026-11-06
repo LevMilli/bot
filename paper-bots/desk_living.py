@@ -49,6 +49,7 @@ INSIGHT_HELPER_DIGESTS = (
     "calendar_digest.json",
 )
 INSIGHT_BETTING_MIN_RATIO = 3.0
+DOCTOR_RUN_NAME = "desk_living_doctor.json"
 
 
 def _root(root: str | None = None) -> str:
@@ -1732,6 +1733,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "digest_inventory": digest_inventory(root),
         "ruin_drill_page": ruin_drill_page(root),
         "betting_expand_gate": betting_expand_gate(root),
+        "doctor_age": doctor_age_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -1859,6 +1861,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "insight_swarm", "digest_inventory", "feature_quiet", "feature_quiet_pager",
         "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
         "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
+        "betting_expand_gate", "doctor_age", "fee_floors_assert",
     )
     slim = {k: board.get(k) for k in keep if k in board}
     slim["paper_only"] = True
@@ -2027,7 +2030,58 @@ def living_board_size_guard(*, chips_n: int | None = None) -> dict:
     }
 
 
-def living_doctor(root: str | None = None) -> dict:
+def doctor_run_path(root: str | None = None) -> str:
+    return os.path.join(_root(root), DOCTOR_RUN_NAME)
+
+
+def record_doctor_run(root: str | None, doc: dict | None) -> dict:
+    """Persist last living doctor run (staff observe marker)."""
+    now = datetime.now(CT)
+    row = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "at": now.isoformat(),
+        "ok": bool((doc or {}).get("ok")),
+        "failed_n": int((doc or {}).get("failed_n") or 0),
+        "label": str((doc or {}).get("label") or "")[:160],
+    }
+    _save_json(doctor_run_path(root), row)
+    return row
+
+
+def doctor_age_chip(root: str | None = None) -> dict:
+    """Age since last living doctor run."""
+    path = doctor_run_path(root)
+    data = _load_json(path, {})
+    at = data.get("at") if isinstance(data, dict) else None
+    age_sec = None
+    if at:
+        try:
+            stamp = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=CT)
+            age_sec = int(max(0.0, (datetime.now(CT) - stamp.astimezone(CT)).total_seconds()))
+        except ValueError:
+            age_sec = None
+    stale = age_sec is None or age_sec >= 7 * 24 * 3600
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "at": at,
+        "age_sec": age_sec,
+        "ok_last": data.get("ok") if isinstance(data, dict) else None,
+        "stale": stale,
+        "label": (
+            f"doctor age={age_sec}s last_ok={data.get('ok') if isinstance(data, dict) else None}"
+            if age_sec is not None
+            else "doctor never run"
+        ),
+        "note": "Staff doctor marker — run make living-doctor weekly.",
+    }
+
+
+def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     """One-shot staff doctor: floors + expand + selfcheck + quiet/timer."""
     floors = fee_floors_assert(root)
     expand = betting_expand_gate(root)
@@ -2051,7 +2105,7 @@ def living_doctor(root: str | None = None) -> dict:
         {"id": "dual_gaps", "ok": not bool(gaps.get("page")), "label": gaps.get("label")},
     ]
     failed = [c for c in checks if not c.get("ok")]
-    return {
+    doc = {
         "paper_only": True,
         "fee_floors_locked": True,
         "live_orders_enabled": False,
@@ -2070,6 +2124,14 @@ def living_doctor(root: str | None = None) -> dict:
         ),
         "note": "Staff one-shot doctor — never places; never softens floors; never enables live.",
     }
+    if record:
+        try:
+            marker = record_doctor_run(root, doc)
+            doc["recorded_at"] = marker.get("at")
+        except Exception:
+            doc["recorded_at"] = None
+    doc["doctor_age"] = doctor_age_chip(root)
+    return doc
 
 
 def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> dict:

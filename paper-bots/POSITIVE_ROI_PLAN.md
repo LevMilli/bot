@@ -578,13 +578,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Doctor on city vault | trading-city vault `doctor` row |
 | Weekly ritual script | `tools/staff_living_ritual.py` + make |
 
+### Living upgrade — prune + ritual Discord + doctor age
+
+| Ticket | Where |
+| --- | --- |
+| Living chip prune pass | `finalize_living_priority` family prefixes + clerk twin trim |
+| Ritual Discord copy | `staff_living_ritual.py --discord` + make |
+| Desk doctor age chip | `doctor_age_chip` + vault/Masters stale rail |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Living chip prune pass | drop duplicate clerk/roi pairs on rail |
-| Ritual Discord copy | markdown export for staff paste |
-| Desk doctor age chip | last doctor run timestamp |
+| Sunday ritual cross-link | mention ritual in sunday packet Discord |
+| Living tip-feed vault row | tip radar on city vault |
+| Clerk pulse age soft warn | pulse stale before hard insert |
 
 ## Hard rules unchanged
 

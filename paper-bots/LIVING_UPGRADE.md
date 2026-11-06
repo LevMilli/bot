@@ -21,6 +21,7 @@ make living-floors
 make living-selfcheck
 make living-doctor
 make living-ritual
+make living-ritual-discord
 make living-test
 
 python3 tools/staff_living_status.py              # compact text
@@ -43,7 +44,11 @@ python3 tools/staff_calib_tickets.py
 python3 tools/staff_hillclimb_pick.py status|list|pick|clear
 python3 tools/staff_dual_control.py status|sign|clear
 python3 tools/staff_ruin_drill.py status|set|clear
+python3 tools/staff_living_ritual.py            # weekly staff checklist
+python3 tools/staff_living_ritual.py --discord  # paste-ready Discord draft
 ```
+
+Doctor age marker: `desk_living_doctor.json` (gitignored). Snapshot observes without rewriting; CLI/ritual records.
 
 ## Hire order
 
