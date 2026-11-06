@@ -1148,6 +1148,75 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">books</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const b =
+                          snap?.desk?.bookkeeper ||
+                          (snap?.desk?.master as {
+                            bookkeeper?: { fee_ledger_complete?: boolean }
+                          } | undefined)?.bookkeeper
+                        if (!b || b.fee_ledger_complete == null) return undefined
+                        return b.fee_ledger_complete === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const b =
+                        snap?.desk?.bookkeeper ||
+                        (snap?.desk?.master as {
+                          bookkeeper?: { label?: string; fee_ledger_complete?: boolean }
+                        } | undefined)?.bookkeeper
+                      if (!b) return 'bookkeeper pending'
+                      return b.label || `bookkeeper complete=${b.fee_ledger_complete ?? '—'}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">report</span>
+                  <span>
+                    {(() => {
+                      const r =
+                        snap?.desk?.reporter ||
+                        (snap?.desk?.master as {
+                          reporter?: { label?: string; present?: boolean; auto_publish?: boolean }
+                        } | undefined)?.reporter
+                      if (!r) return 'reporter pending'
+                      return (
+                        (r.label || `reporter scorecard=${r.present ? 'yes' : 'no'}`) +
+                        ' · auto_publish=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">empty bee</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const e =
+                          snap?.desk?.empty_card_bee ||
+                          (snap?.desk?.master as {
+                            empty_card_bee?: { breaches?: number }
+                          } | undefined)?.empty_card_bee
+                        if (!e) return undefined
+                        return Number(e.breaches || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const e =
+                        snap?.desk?.empty_card_bee ||
+                        (snap?.desk?.master as {
+                          empty_card_bee?: { label?: string; breaches?: number; n?: number }
+                        } | undefined)?.empty_card_bee
+                      if (!e) return 'empty bee pending'
+                      return e.label || `empty bee n=${e.n ?? 0} breaches=${e.breaches ?? 0}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">digests</span>
                   <span
                     style={{

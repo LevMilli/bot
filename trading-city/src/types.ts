@@ -394,6 +394,33 @@ export type Desk = {
     note?: string
     error?: string
   }
+  bookkeeper?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    fee_ledger_complete?: boolean
+    eligible_completions_today?: number
+    label?: string
+    note?: string
+    error?: string
+  }
+  reporter?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    present?: boolean
+    auto_publish?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  empty_card_bee?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    breaches?: number
+    label?: string
+    note?: string
+    error?: string
+  }
   clerk_pulse?: {
     paper_only?: boolean
     fee_floors_locked?: boolean
