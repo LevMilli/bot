@@ -202,6 +202,26 @@ export type Desk = {
     note?: string
     error?: string
   }
+  empty_card?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    p50_s?: number | null
+    pass?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  near_miss?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    promote_ready?: boolean
+    auto_promote?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
   living_compact?: {
     paper_only?: boolean
     fee_floors_locked?: boolean
