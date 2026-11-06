@@ -1998,8 +1998,11 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "sunday_packet", "reporter", "ritual_observe",
     )
     slim = {k: board.get(k) for k in keep if k in board}
+    ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
     slim["paper_only"] = True
     slim["export"] = "living_board_v1"
+    slim["ritual_ok"] = ritual.get("ritual_ok")
+    slim["ritual_exit_ok"] = ritual.get("exit_ok")
     slim["note"] = "Staff export — never invent fills; never soften floors; never enable live."
     return slim
 
@@ -2279,9 +2282,16 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         "note": "Staff one-shot doctor — never places; never softens floors; never enables live.",
     }
     failed_ids = ",".join(str(c.get("id") or "") for c in failed) or "none"
+    ritual_line = (
+        f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')} "
+        f"doctor_fresh={ritual.get('doctor_fresh')}"
+    )
+    if any(c.get("id") == "ritual_observe" for c in failed):
+        ritual_line = f"ritual FAIL — {ritual_line}"
     soft_copy = (
         f"**Living doctor** (paper · floors locked · live=False)\n"
         f"{doc['label']} · failed=[{failed_ids}]\n"
+        f"{ritual_line}\n"
         f"_never places · never softens floors · never enables live_"
     )
     doc["soft_copy"] = soft_copy
