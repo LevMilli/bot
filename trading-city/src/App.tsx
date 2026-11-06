@@ -696,6 +696,102 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">skip-reg</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const s =
+                          snap?.desk?.skip_regret ||
+                          (snap?.desk?.master as {
+                            skip_regret?: { green_twin?: boolean }
+                          } | undefined)?.skip_regret
+                        if (!s) return undefined
+                        return s.green_twin ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const s =
+                        snap?.desk?.skip_regret ||
+                        (snap?.desk?.master as {
+                          skip_regret?: {
+                            label?: string
+                            green_twin?: boolean
+                            loosen_soft_gates?: boolean
+                          }
+                        } | undefined)?.skip_regret
+                      if (!s) return 'skip-regret pending'
+                      return (
+                        (s.label || `skip-regret green_twin=${Boolean(s.green_twin)}`) +
+                        ' · floors locked'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">hard-stop</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const h =
+                          snap?.desk?.hard_stop ||
+                          (snap?.desk?.master as {
+                            hard_stop?: { promote_ready?: boolean }
+                          } | undefined)?.hard_stop
+                        if (!h) return undefined
+                        return h.promote_ready ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const h =
+                        snap?.desk?.hard_stop ||
+                        (snap?.desk?.master as {
+                          hard_stop?: {
+                            label?: string
+                            promote_ready?: boolean
+                            auto_promote?: boolean
+                            live?: boolean
+                          }
+                        } | undefined)?.hard_stop
+                      if (!h) return 'hard-stop pending'
+                      return (
+                        (h.label ||
+                          `hard-stop ready=${Boolean(h.promote_ready)}`) +
+                        ' · auto_promote=False · live=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">injury</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const iw =
+                          snap?.desk?.injury_wire ||
+                          (snap?.desk?.master as {
+                            injury_wire?: { n?: number; inbox_n?: number }
+                          } | undefined)?.injury_wire
+                        if (!iw) return undefined
+                        return Number(iw.n || 0) + Number(iw.inbox_n || 0) > 0
+                          ? '#d4a017'
+                          : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const iw =
+                        snap?.desk?.injury_wire ||
+                        (snap?.desk?.master as {
+                          injury_wire?: { label?: string; n?: number; inbox_n?: number }
+                        } | undefined)?.injury_wire
+                      if (!iw) return 'injury wire pending'
+                      return iw.label || `injury wire n=${iw.n ?? 0} inbox=${iw.inbox_n ?? 0}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">pulse</span>
                   <span
                     style={{

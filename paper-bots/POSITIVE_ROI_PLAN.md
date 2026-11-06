@@ -650,13 +650,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Empty-card vault tint | empty CARD slow amber |
 | Near-miss promote vault | promote_ready observe only |
 
-### Next
+### Living upgrade — skip-regret / hard-stop / injury vault
 
 | Ticket | Where |
 | --- | --- |
 | Skip-regret vault row | green_twin soft review |
 | Hard-stop vault tint | sports promote_ready |
 | Injury wire vault row | inbox headlines observe |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| EIA scout vault row | next inventory ETA |
+| Calendar vault tint | events n>0 amber |
+| EIA blackout vault | ACTIVE red |
 
 ## Hard rules unchanged
 

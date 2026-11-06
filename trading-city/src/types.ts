@@ -222,6 +222,34 @@ export type Desk = {
     note?: string
     error?: string
   }
+  skip_regret?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    green_twin?: boolean
+    loosen_soft_gates?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  hard_stop?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    promote_ready?: boolean
+    auto_promote?: boolean
+    live?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  injury_wire?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    inbox_n?: number
+    label?: string
+    note?: string
+    error?: string
+  }
   living_compact?: {
     paper_only?: boolean
     fee_floors_locked?: boolean
