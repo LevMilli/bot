@@ -298,6 +298,7 @@ def master_summary(
     retirement = None
     hillclimb = None
     profit_lock = None
+    living = None
     try:
         import desk_roi_plan
         bleed = desk_roi_plan.firm_bleed_ratio(bots)
@@ -611,7 +612,13 @@ def master_summary(
             "Master graduation = 2 Chicago weeks all M1–M7",
             "sports hard-stop shadow → promote after n≥30",
             "feed idle BTC/commodity risk when gates clear",
+            "insight swarm ≥3:1 before betting expand",
         ],
+        "swarm_lights": (
+            (living or {}).get("insight_swarm")
+            if isinstance(living, dict)
+            else None
+        ),
         "note": (
             "Trading Masters — dual scoreboard for volume vs taxed EV. "
             "No profit guarantee. Fee floors unchanged."
