@@ -665,7 +665,13 @@ export default function App() {
                           empty_card?: { label?: string; pass?: boolean; p50_s?: number }
                         } | undefined)?.empty_card
                       if (!e) return 'empty CARD pending'
-                      return e.label || `empty CARD p50=${e.p50_s ?? '—'}s`
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = e.label || `empty CARD p50=${e.p50_s ?? '—'}s`
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -695,10 +701,16 @@ export default function App() {
                           }
                         } | undefined)?.near_miss
                       if (!n) return 'near-miss pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (n.label ||
                           `near-miss ready=${Boolean(n.promote_ready)}`) +
-                        ' · auto_promote=False'
+                        ' · auto_promote=False' +
+                        ` · sunday quiet ${sundayBit} (observe · never promotes)`
                       )
                     })()}
                   </span>
@@ -832,10 +844,15 @@ export default function App() {
                           }
                         } | undefined)?.eia_scout
                       if (!e) return 'EIA scout pending'
-                      return (
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
                         e.label ||
                         `EIA scout n=${e.n ?? 0} next=${e.next_eta_hours ?? '—'}h`
-                      )
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -861,7 +878,13 @@ export default function App() {
                           calendar_scanner?: { label?: string; n?: number }
                         } | undefined)?.calendar_scanner
                       if (!c) return 'calendar pending'
-                      return c.label || `calendar events n=${c.n ?? 0}`
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = c.label || `calendar events n=${c.n ?? 0}`
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -1336,9 +1359,15 @@ export default function App() {
                           }
                         } | undefined)?.feature_quiet_pager
                       if (!p) return 'feature quiet pager pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (p.label || (p.page ? 'feature quiet PAGE' : 'feature quiet ok')) +
-                        ' · auto_page=False'
+                        ' · auto_page=False' +
+                        ` · sunday quiet ${sundayBit} (observe · never auto-pages)`
                       )
                     })()}
                   </span>
@@ -1520,7 +1549,14 @@ export default function App() {
                           bookkeeper?: { label?: string; fee_ledger_complete?: boolean }
                         } | undefined)?.bookkeeper
                       if (!b) return 'bookkeeper pending'
-                      return b.label || `bookkeeper complete=${b.fee_ledger_complete ?? '—'}`
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        b.label || `bookkeeper complete=${b.fee_ledger_complete ?? '—'}`
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>

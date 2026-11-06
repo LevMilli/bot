@@ -1180,13 +1180,17 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault blackout sunday quiet | blackout row hint |
 | Vault injury sunday quiet | injury row hint |
 
-### Next
+### Living upgrade — empty/EIA/pager sunday vault pass (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Vault empty/near-miss sunday | empty + near-miss hints |
 | Vault EIA/calendar sunday | EIA + calendar hints |
 | Vault pager/books sunday | pager + books hints |
+
+### Next
+
+_(empty — living sunday quiet plan tickets cleared; fee floors locked; paper-only; Discord never auto-posts)_
 
 ## Hard rules unchanged
 
