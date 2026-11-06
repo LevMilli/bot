@@ -632,10 +632,15 @@ export default function App() {
                           tip_radar?: { label?: string; t5?: number; t15?: number; n?: number }
                         } | undefined)?.tip_radar
                       if (!tr) return 'tip radar pending'
-                      return (
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
                         tr.label ||
                         `tip radar n=${tr.n ?? '—'} T-5=${tr.t5 ?? 0} T-15=${tr.t15 ?? 0}`
-                      )
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -790,7 +795,14 @@ export default function App() {
                           injury_wire?: { label?: string; n?: number; inbox_n?: number }
                         } | undefined)?.injury_wire
                       if (!iw) return 'injury wire pending'
-                      return iw.label || `injury wire n=${iw.n ?? 0} inbox=${iw.inbox_n ?? 0}`
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        iw.label || `injury wire n=${iw.n ?? 0} inbox=${iw.inbox_n ?? 0}`
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -875,7 +887,14 @@ export default function App() {
                           eia_blackout?: { label?: string; blocked?: boolean }
                         } | undefined)?.eia_blackout
                       if (!b) return 'EIA blackout pending'
-                      return b.label || (b.blocked ? 'EIA blackout ACTIVE' : 'EIA blackout clear')
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        b.label || (b.blocked ? 'EIA blackout ACTIVE' : 'EIA blackout clear')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>
