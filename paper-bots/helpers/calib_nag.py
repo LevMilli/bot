@@ -35,13 +35,14 @@ def _card(name: str, report: dict | None) -> dict:
 def build_digest(
     btc: dict | None = None,
     sports: dict | None = None,
+    commodity: dict | None = None,
     *,
     now: datetime | None = None,
 ) -> dict:
     assert_helper_only("calib_nag")
     assert PAPER_ONLY and HELPER_ONLY
     now = now or datetime.now(timezone.utc)
-    cards = [_card("btc", btc), _card("sports", sports)]
+    cards = [_card("btc", btc), _card("sports", sports), _card("commodity", commodity)]
     tickets = [c for c in cards if c.get("raise_phi")]
     return {
         "helper": "calib_nag",
@@ -65,8 +66,9 @@ def write_digest(
     *,
     btc: dict | None = None,
     sports: dict | None = None,
+    commodity: dict | None = None,
 ) -> dict:
-    digest = build_digest(btc, sports)
+    digest = build_digest(btc, sports, commodity)
     path = digest_path(root)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
@@ -78,7 +80,7 @@ def write_digest(
 
 
 def write_digest_from_desk(root: str | None = None, bots: list | None = None) -> dict:
-    btc = sports = {}
+    btc = sports = commodity = {}
     try:
         import desk_roi_plan
         base = root or DESK_ROOT
@@ -87,9 +89,18 @@ def write_digest_from_desk(root: str | None = None, bots: list | None = None) ->
             desk_roi_plan.latest_sports_calibration(base)
             or desk_roi_plan.sports_calibration_report(bots)
         )
+        commodity = (
+            desk_roi_plan.latest_commodity_calibration(base)
+            or desk_roi_plan.commodity_calibration_report(bots)
+        )
     except Exception:
-        btc = sports = {}
-    return write_digest(root, btc=btc if isinstance(btc, dict) else {}, sports=sports if isinstance(sports, dict) else {})
+        btc = sports = commodity = {}
+    return write_digest(
+        root,
+        btc=btc if isinstance(btc, dict) else {},
+        sports=sports if isinstance(sports, dict) else {},
+        commodity=commodity if isinstance(commodity, dict) else {},
+    )
 
 
 if __name__ == "__main__":

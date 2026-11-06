@@ -306,13 +306,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Reporter clerk | `helpers/reporter_clerk` — weekly scorecard mirror |
 | Quant clerk | `helpers/quant_clerk` — M3 fit + M4 latency (walk-forward) |
 
+### Living upgrade — commodity calib + AI health
+
+| Ticket | Where |
+| --- | --- |
+| Commodity calibration | `commodity_calibration_report` / Masters `commodity_calibration` |
+| Living AI health | `desk_living.living_ai_health` on living board (adapt + raise_Φ) |
+| Calib nag covers commodity | `helpers/calib_nag` boards include commodity |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Commodity calib board | parallel to BTC/sports |
-| Living AI health card | adapt_wins + calib raise_phi on Masters |
+| Skip-twin labels | closed-loop twin labels into feature store |
+| Insight≥3:1 headcount audit | Masters living swarm ratio |
 
 ## Hard rules unchanged
 
