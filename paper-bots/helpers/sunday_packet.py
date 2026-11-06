@@ -41,6 +41,7 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
     quiet = living.get("feature_quiet") if isinstance(living.get("feature_quiet"), dict) else {}
     dual = living.get("dual_control") if isinstance(living.get("dual_control"), dict) else {}
     ruin = living.get("ruin_drill") if isinstance(living.get("ruin_drill"), dict) else {}
+    doctor_age = living.get("doctor_age") if isinstance(living.get("doctor_age"), dict) else {}
     return {
         "helper": "sunday_packet",
         "at": now.isoformat(),
@@ -83,6 +84,16 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
             "practiced_this_month": ruin.get("practiced_this_month"),
             "active": ruin.get("active"),
         },
+        "doctor_age": {
+            "stale": doctor_age.get("stale"),
+            "age_sec": doctor_age.get("age_sec"),
+            "label": doctor_age.get("label"),
+        },
+        "ritual": {
+            "cli": "python3 tools/staff_living_ritual.py --discord",
+            "make": "make living-ritual-discord",
+            "auto_publish": False,
+        },
         "staff_checklist": [
             "Confirm venue floors still locked (0.06/0.05/0.02)",
             "Review raise_Φ tickets — staff dual-control only",
@@ -90,9 +101,11 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
             "Insight swarm ≥3:1 before betting expand",
             "Ruin drill soft/hard practiced this Chicago month",
             "One hillclimb lever max this week if allowlisted",
+            "Run weekly living ritual (make living-ritual / --discord) — paste only, never auto-post",
         ],
         "note": (
             "Sunday living packet draft — staff publishes. "
+            "Cross-check weekly ritual Discord before paste. "
             "Never invent fills; never soften floors; never enable live."
         ),
     }
@@ -107,6 +120,8 @@ def format_discord(packet: dict | None = None) -> str:
     dual = p.get("dual_control") if isinstance(p.get("dual_control"), dict) else {}
     ruin = p.get("ruin_drill") if isinstance(p.get("ruin_drill"), dict) else {}
     quiet = p.get("feature_quiet") if isinstance(p.get("feature_quiet"), dict) else {}
+    doctor_age = p.get("doctor_age") if isinstance(p.get("doctor_age"), dict) else {}
+    ritual = p.get("ritual") if isinstance(p.get("ritual"), dict) else {}
     lines = [
         "**Sunday living packet** (draft — staff publishes)",
         f"_paper only · floors locked · live={bool(p.get('live_orders_enabled'))}_",
@@ -131,6 +146,11 @@ def format_discord(packet: dict | None = None) -> str:
             f"active={ruin.get('active')}"
         ),
         f"• Feature quiet: {quiet.get('alert') or ('quiet' if quiet.get('quiet') else 'ok')}",
+        f"• Doctor age: {doctor_age.get('label') or '—'}",
+        (
+            f"• Weekly ritual draft: `{ritual.get('make') or 'make living-ritual-discord'}` "
+            f"(paste only · auto_publish=False)"
+        ),
         "",
         "**Staff checklist**",
     ]

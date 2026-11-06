@@ -596,17 +596,666 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
-                  <span className="vb-label">tip</span>
-                  <span>
+                  <span className="vb-label">tip force</span>
+                  <span
+                    style={{
+                      color: snap?.desk?.sports_tip?.active ? '#d4a017' : undefined,
+                    }}
+                  >
                     {snap?.desk?.sports_tip?.active
-                      ? `T−${snap.desk.sports_tip.band} force ${snap.desk.sports_tip.force_sec || 45}s` +
+                      ? `tip-force T−${snap.desk.sports_tip.band} · ${snap.desk.sports_tip.force_sec || 45}s` +
                         (snap.desk.sports_tip.sample ? ` · ${snap.desk.sports_tip.sample}` : '')
-                      : 'no tip-force · sports on normal cadence'}
+                      : 'tip-force off · sports normal cadence'}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">tip feed</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const tr =
+                          snap?.desk?.tip_radar ||
+                          (snap?.desk?.master as { tip_radar?: { t5?: number } } | undefined)
+                            ?.tip_radar
+                        if (!tr) return undefined
+                        return Number(tr.t5 || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const tr =
+                        snap?.desk?.tip_radar ||
+                        (snap?.desk?.master as {
+                          tip_radar?: { label?: string; t5?: number; t15?: number; n?: number }
+                        } | undefined)?.tip_radar
+                      if (!tr) return 'tip radar pending'
+                      return (
+                        tr.label ||
+                        `tip radar n=${tr.n ?? '—'} T-5=${tr.t5 ?? 0} T-15=${tr.t15 ?? 0}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">empty</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const e =
+                          snap?.desk?.empty_card ||
+                          (snap?.desk?.master as { empty_card?: { pass?: boolean } } | undefined)
+                            ?.empty_card
+                        if (!e || e.pass == null) return undefined
+                        return e.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const e =
+                        snap?.desk?.empty_card ||
+                        (snap?.desk?.master as {
+                          empty_card?: { label?: string; pass?: boolean; p50_s?: number }
+                        } | undefined)?.empty_card
+                      if (!e) return 'empty CARD pending'
+                      return e.label || `empty CARD p50=${e.p50_s ?? '—'}s`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">near-miss</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const n =
+                          snap?.desk?.near_miss ||
+                          (snap?.desk?.master as {
+                            near_miss?: { promote_ready?: boolean }
+                          } | undefined)?.near_miss
+                        if (!n) return undefined
+                        return n.promote_ready ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const n =
+                        snap?.desk?.near_miss ||
+                        (snap?.desk?.master as {
+                          near_miss?: {
+                            label?: string
+                            promote_ready?: boolean
+                            auto_promote?: boolean
+                          }
+                        } | undefined)?.near_miss
+                      if (!n) return 'near-miss pending'
+                      return (
+                        (n.label ||
+                          `near-miss ready=${Boolean(n.promote_ready)}`) +
+                        ' · auto_promote=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">skip-reg</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const s =
+                          snap?.desk?.skip_regret ||
+                          (snap?.desk?.master as {
+                            skip_regret?: { green_twin?: boolean }
+                          } | undefined)?.skip_regret
+                        if (!s) return undefined
+                        return s.green_twin ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const s =
+                        snap?.desk?.skip_regret ||
+                        (snap?.desk?.master as {
+                          skip_regret?: {
+                            label?: string
+                            green_twin?: boolean
+                            loosen_soft_gates?: boolean
+                          }
+                        } | undefined)?.skip_regret
+                      if (!s) return 'skip-regret pending'
+                      return (
+                        (s.label || `skip-regret green_twin=${Boolean(s.green_twin)}`) +
+                        ' · floors locked'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">hard-stop</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const h =
+                          snap?.desk?.hard_stop ||
+                          (snap?.desk?.master as {
+                            hard_stop?: { promote_ready?: boolean }
+                          } | undefined)?.hard_stop
+                        if (!h) return undefined
+                        return h.promote_ready ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const h =
+                        snap?.desk?.hard_stop ||
+                        (snap?.desk?.master as {
+                          hard_stop?: {
+                            label?: string
+                            promote_ready?: boolean
+                            auto_promote?: boolean
+                            live?: boolean
+                          }
+                        } | undefined)?.hard_stop
+                      if (!h) return 'hard-stop pending'
+                      return (
+                        (h.label ||
+                          `hard-stop ready=${Boolean(h.promote_ready)}`) +
+                        ' · auto_promote=False · live=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">injury</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const iw =
+                          snap?.desk?.injury_wire ||
+                          (snap?.desk?.master as {
+                            injury_wire?: { n?: number; inbox_n?: number }
+                          } | undefined)?.injury_wire
+                        if (!iw) return undefined
+                        return Number(iw.n || 0) + Number(iw.inbox_n || 0) > 0
+                          ? '#d4a017'
+                          : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const iw =
+                        snap?.desk?.injury_wire ||
+                        (snap?.desk?.master as {
+                          injury_wire?: { label?: string; n?: number; inbox_n?: number }
+                        } | undefined)?.injury_wire
+                      if (!iw) return 'injury wire pending'
+                      return iw.label || `injury wire n=${iw.n ?? 0} inbox=${iw.inbox_n ?? 0}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">EIA</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const e =
+                          snap?.desk?.eia_scout ||
+                          (snap?.desk?.master as {
+                            eia_scout?: { next_eta_hours?: number | null }
+                          } | undefined)?.eia_scout
+                        if (!e || e.next_eta_hours == null) return undefined
+                        return Number(e.next_eta_hours) <= 24 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const e =
+                        snap?.desk?.eia_scout ||
+                        (snap?.desk?.master as {
+                          eia_scout?: {
+                            label?: string
+                            n?: number
+                            next_eta_hours?: number | null
+                          }
+                        } | undefined)?.eia_scout
+                      if (!e) return 'EIA scout pending'
+                      return (
+                        e.label ||
+                        `EIA scout n=${e.n ?? 0} next=${e.next_eta_hours ?? '—'}h`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">calendar</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.calendar_scanner ||
+                          (snap?.desk?.master as {
+                            calendar_scanner?: { n?: number }
+                          } | undefined)?.calendar_scanner
+                        if (!c) return undefined
+                        return Number(c.n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c =
+                        snap?.desk?.calendar_scanner ||
+                        (snap?.desk?.master as {
+                          calendar_scanner?: { label?: string; n?: number }
+                        } | undefined)?.calendar_scanner
+                      if (!c) return 'calendar pending'
+                      return c.label || `calendar events n=${c.n ?? 0}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">blackout</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const b =
+                          snap?.desk?.eia_blackout ||
+                          (snap?.desk?.master as {
+                            eia_blackout?: { blocked?: boolean }
+                          } | undefined)?.eia_blackout
+                        if (!b) return undefined
+                        return b.blocked ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const b =
+                        snap?.desk?.eia_blackout ||
+                        (snap?.desk?.master as {
+                          eia_blackout?: { label?: string; blocked?: boolean }
+                        } | undefined)?.eia_blackout
+                      if (!b) return 'EIA blackout pending'
+                      return b.label || (b.blocked ? 'EIA blackout ACTIVE' : 'EIA blackout clear')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">pulse</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const p =
+                          snap?.desk?.clerk_pulse ||
+                          (snap?.desk?.master as {
+                            clerk_pulse?: { stale?: boolean; soft_warn?: boolean }
+                          } | undefined)?.clerk_pulse
+                        if (!p) return undefined
+                        if (p.stale) return '#c45c26'
+                        if (p.soft_warn) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const p =
+                        snap?.desk?.clerk_pulse ||
+                        (snap?.desk?.master as {
+                          clerk_pulse?: { label?: string; stale?: boolean; soft_warn?: boolean }
+                        } | undefined)?.clerk_pulse
+                      if (!p) return 'clerk pulse pending'
+                      return p.label || (p.stale ? 'pulse STALE' : p.soft_warn ? 'pulse WARN' : 'pulse ok')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">compact</span>
+                  <span>
+                    {(() => {
+                      const c =
+                        snap?.desk?.living_compact ||
+                        (snap?.desk?.master as { compact?: { label?: string } } | undefined)
+                          ?.compact
+                      if (!c) return 'living compact pending'
+                      return c.label || 'living compact'
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">AI</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const ai =
+                          snap?.desk?.living_ai ||
+                          (snap?.desk?.master as { living_ai?: { raise_phi_n?: number } } | undefined)
+                            ?.living_ai
+                        if (!ai) return undefined
+                        return Number(ai.raise_phi_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const ai =
+                        snap?.desk?.living_ai ||
+                        (snap?.desk?.master as {
+                          living_ai?: { label?: string; raise_phi_n?: number }
+                        } | undefined)?.living_ai
+                      if (!ai) return 'living AI pending'
+                      return (
+                        ai.label ||
+                        `raise_Φ=${ai.raise_phi_n ?? 0} · auto_write=False`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">quiet</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const q =
+                          snap?.desk?.feature_quiet ||
+                          (snap?.desk?.master as { feature_quiet?: { quiet?: boolean } } | undefined)
+                            ?.feature_quiet
+                        if (!q) return undefined
+                        return q.quiet ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const q =
+                        snap?.desk?.feature_quiet ||
+                        (snap?.desk?.master as {
+                          feature_quiet?: { label?: string; quiet?: boolean; alert?: string }
+                        } | undefined)?.feature_quiet
+                      if (!q) return 'feature quiet pending'
+                      return q.label || q.alert || (q.quiet ? 'feature QUIET' : 'feature quiet ok')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">pager</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const p =
+                          snap?.desk?.feature_quiet_pager ||
+                          (snap?.desk?.master as {
+                            feature_quiet_pager?: { page?: boolean }
+                          } | undefined)?.feature_quiet_pager
+                        if (!p) return undefined
+                        return p.page ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const p =
+                        snap?.desk?.feature_quiet_pager ||
+                        (snap?.desk?.master as {
+                          feature_quiet_pager?: {
+                            label?: string
+                            page?: boolean
+                            auto_page?: boolean
+                          }
+                        } | undefined)?.feature_quiet_pager
+                      if (!p) return 'feature quiet pager pending'
+                      return (
+                        (p.label || (p.page ? 'feature quiet PAGE' : 'feature quiet ok')) +
+                        ' · auto_page=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">queue</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const q =
+                          snap?.desk?.firm_queue ||
+                          (snap?.desk?.master as {
+                            firm_queue?: { deferred_n?: number; offers_n?: number }
+                          } | undefined)?.firm_queue
+                        if (!q) return undefined
+                        return Number(q.deferred_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const q =
+                        snap?.desk?.firm_queue ||
+                        (snap?.desk?.master as {
+                          firm_queue?: {
+                            label?: string
+                            offers_n?: number
+                            deferred_n?: number
+                            remaining_risk?: number | null
+                          }
+                        } | undefined)?.firm_queue
+                      if (!q) return 'firm queue pending'
+                      return (
+                        q.label ||
+                        `firm queue offers=${q.offers_n ?? '—'} def=${q.deferred_n ?? '—'} risk_left=${q.remaining_risk ?? '—'}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">Gate A</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.helper_gate_a ||
+                          (snap?.desk?.master as {
+                            helper_gate_a?: { ready_n?: number }
+                          } | undefined)?.helper_gate_a
+                        if (!g) return undefined
+                        return Number(g.ready_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.helper_gate_a ||
+                        (snap?.desk?.master as {
+                          helper_gate_a?: {
+                            label?: string
+                            ready_n?: number
+                            helpers_n?: number
+                            auto_promote?: boolean
+                            places_orders?: boolean
+                          }
+                        } | undefined)?.helper_gate_a
+                      if (!g) return 'helper Gate A pending'
+                      return (
+                        (g.label ||
+                          `helper Gate A ready=${g.ready_n ?? 0}/${g.helpers_n ?? 0}`) +
+                        ' · auto_promote=False · places=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">skips</span>
+                  <span>
+                    {(() => {
+                      const s =
+                        snap?.desk?.skip_taxonomy ||
+                        (snap?.desk?.master as {
+                          skip_taxonomy?: { label?: string; top_code?: string; top_n?: number }
+                        } | undefined)?.skip_taxonomy
+                      if (!s) return 'skip taxonomy pending'
+                      return s.label || (s.top_code ? `top skip ${s.top_code} ×${s.top_n ?? 0}` : 'skip taxonomy quiet')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">distance</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const d =
+                          snap?.desk?.distance_clerk ||
+                          (snap?.desk?.master as {
+                            distance_clerk?: { empty_card_pass?: boolean }
+                          } | undefined)?.distance_clerk
+                        if (!d || d.empty_card_pass == null) return undefined
+                        return d.empty_card_pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const d =
+                        snap?.desk?.distance_clerk ||
+                        (snap?.desk?.master as {
+                          distance_clerk?: { label?: string; empty_card_pass?: boolean }
+                        } | undefined)?.distance_clerk
+                      if (!d) return 'distance clerk pending'
+                      return d.label || `distance empty_ok=${d.empty_card_pass ?? '—'}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">quant</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const q =
+                          snap?.desk?.quant_clerk ||
+                          (snap?.desk?.master as {
+                            quant_clerk?: { fit_pass?: boolean }
+                          } | undefined)?.quant_clerk
+                        if (!q || q.fit_pass == null) return undefined
+                        return q.fit_pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const q =
+                        snap?.desk?.quant_clerk ||
+                        (snap?.desk?.master as {
+                          quant_clerk?: {
+                            label?: string
+                            fit_pass?: boolean
+                            fit_rate?: number | null
+                            auto_write?: boolean
+                          }
+                        } | undefined)?.quant_clerk
+                      if (!q) return 'quant clerk pending'
+                      return (
+                        (q.label || `quant fit_pass=${q.fit_pass ?? '—'} rate=${q.fit_rate ?? '—'}`) +
+                        ' · auto_write=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">books</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const b =
+                          snap?.desk?.bookkeeper ||
+                          (snap?.desk?.master as {
+                            bookkeeper?: { fee_ledger_complete?: boolean }
+                          } | undefined)?.bookkeeper
+                        if (!b || b.fee_ledger_complete == null) return undefined
+                        return b.fee_ledger_complete === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const b =
+                        snap?.desk?.bookkeeper ||
+                        (snap?.desk?.master as {
+                          bookkeeper?: { label?: string; fee_ledger_complete?: boolean }
+                        } | undefined)?.bookkeeper
+                      if (!b) return 'bookkeeper pending'
+                      return b.label || `bookkeeper complete=${b.fee_ledger_complete ?? '—'}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">report</span>
+                  <span>
+                    {(() => {
+                      const r =
+                        snap?.desk?.reporter ||
+                        (snap?.desk?.master as {
+                          reporter?: { label?: string; present?: boolean; auto_publish?: boolean }
+                        } | undefined)?.reporter
+                      if (!r) return 'reporter pending'
+                      return (
+                        (r.label || `reporter scorecard=${r.present ? 'yes' : 'no'}`) +
+                        ' · auto_publish=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">empty bee</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const e =
+                          snap?.desk?.empty_card_bee ||
+                          (snap?.desk?.master as {
+                            empty_card_bee?: { breaches?: number }
+                          } | undefined)?.empty_card_bee
+                        if (!e) return undefined
+                        return Number(e.breaches || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const e =
+                        snap?.desk?.empty_card_bee ||
+                        (snap?.desk?.master as {
+                          empty_card_bee?: { label?: string; breaches?: number; n?: number }
+                        } | undefined)?.empty_card_bee
+                      if (!e) return 'empty bee pending'
+                      return e.label || `empty bee n=${e.n ?? 0} breaches=${e.breaches ?? 0}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">digests</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const inv =
+                          snap?.desk?.digest_inventory ||
+                          (snap?.desk?.master as {
+                            digest_inventory?: { pass?: boolean }
+                          } | undefined)?.digest_inventory
+                        if (!inv) return undefined
+                        return inv.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const inv =
+                        snap?.desk?.digest_inventory ||
+                        (snap?.desk?.master as {
+                          digest_inventory?: { label?: string; pass?: boolean }
+                        } | undefined)?.digest_inventory
+                      if (!inv) return 'digest inventory pending'
+                      return inv.label || (inv.pass === false ? 'digests thin' : 'digests ok')
+                    })()}
                   </span>
                 </div>
                 <div className="vault-board-row">
                   <span className="vb-label">swarm</span>
-                  <span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const sw =
+                          snap?.desk?.swarm_lights || snap?.desk?.master?.swarm_lights
+                        if (!sw || sw.error) return undefined
+                        if (sw.pass || sw.color === 'green') return '#6fbf73'
+                        if (sw.color === 'amber' || sw.pass === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
                     {(() => {
                       const sw =
                         snap?.desk?.swarm_lights || snap?.desk?.master?.swarm_lights
@@ -620,8 +1269,71 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">hill</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const h =
+                          snap?.desk?.hillclimb_chip ||
+                          (snap?.desk?.master as {
+                            hillclimb_chip?: { active_name?: string | null }
+                          } | undefined)?.hillclimb_chip
+                        if (!h) return undefined
+                        return h.active_name ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const h =
+                        snap?.desk?.hillclimb_chip ||
+                        (snap?.desk?.master as {
+                          hillclimb_chip?: { label?: string; active_name?: string | null }
+                        } | undefined)?.hillclimb_chip
+                      if (!h) return 'hillclimb pending'
+                      return h.label || (h.active_name ? `lever=${h.active_name}` : 'hillclimb none')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">gaps</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.dual_control_gaps ||
+                          (snap?.desk?.master as {
+                            dual_control_gaps?: { page?: boolean; gaps_n?: number }
+                          } | undefined)?.dual_control_gaps
+                        if (!g) return undefined
+                        return g.page || Number(g.gaps_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.dual_control_gaps ||
+                        (snap?.desk?.master as {
+                          dual_control_gaps?: { label?: string; page?: boolean; gaps_n?: number }
+                        } | undefined)?.dual_control_gaps
+                      if (!g) return 'dual gaps pending'
+                      return g.label || (g.page ? 'dual-control gaps' : 'dual gaps clear')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">fills</span>
-                  <span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.completions || snap?.desk?.master?.completions
+                        if (!c || c.error) return undefined
+                        const n = Number(c.eligible_completions_today ?? 0)
+                        // Observe thin: no eligible completions yet today.
+                        return n === 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
                     {(() => {
                       const c =
                         snap?.desk?.completions || snap?.desk?.master?.completions
@@ -632,6 +1344,256 @@ export default function App() {
                         `eligible today ${n ?? '—'}` +
                         (pnl != null ? ` · pnl ${Number(pnl).toFixed(2)}` : '')
                       )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">green</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.green_day ||
+                          (snap?.desk?.master as {
+                            green_day?: { red_n?: number; all_fee_clear_green?: boolean }
+                          } | undefined)?.green_day
+                        if (!g) return undefined
+                        if (g.all_fee_clear_green) return '#6fbf73'
+                        if (Number(g.red_n || 0) > 0) return '#c45c26'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.green_day ||
+                        (snap?.desk?.master as {
+                          green_day?: { label?: string; green_n?: number; red_n?: number }
+                        } | undefined)?.green_day
+                      if (!g) return 'green-day pending'
+                      return (
+                        g.label ||
+                        `green=${g.green_n ?? '—'} red=${g.red_n ?? '—'}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">bleed</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const b =
+                          snap?.desk?.bleed ||
+                          (snap?.desk?.master as { bleed?: { pass?: boolean } } | undefined)
+                            ?.bleed
+                        if (!b || b.pass == null) return undefined
+                        return b.pass === false ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const b =
+                        snap?.desk?.bleed ||
+                        (snap?.desk?.master as {
+                          bleed?: { label?: string; pass?: boolean; ratio?: number | null }
+                        } | undefined)?.bleed
+                      if (!b) return 'bleed pending'
+                      return b.label || `bleed ratio=${b.ratio ?? '—'} ${b.pass === false ? 'hot' : 'ok'}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">CLV</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.clv ||
+                          (snap?.desk?.master as { clv?: { pass?: boolean } } | undefined)?.clv
+                        if (!c || c.pass == null) return undefined
+                        return c.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c =
+                        snap?.desk?.clv ||
+                        (snap?.desk?.master as {
+                          clv?: { label?: string; pass?: boolean; complete?: number; n?: number }
+                        } | undefined)?.clv
+                      if (!c) return 'CLV pending'
+                      return (
+                        c.label ||
+                        `CLV complete=${c.complete ?? '—'}/${c.n ?? '—'} ${
+                          c.pass === false ? 'gaps' : 'ok'
+                        }`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">calib</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.calib_nag ||
+                          (snap?.desk?.master as { calib_nag?: { tickets_n?: number } } | undefined)
+                            ?.calib_nag
+                        if (!c) return undefined
+                        return Number(c.tickets_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c =
+                        snap?.desk?.calib_nag ||
+                        (snap?.desk?.master as {
+                          calib_nag?: { label?: string; tickets_n?: number; auto_write_phi?: boolean }
+                        } | undefined)?.calib_nag
+                      if (!c) return 'calib nag pending'
+                      return (
+                        c.label ||
+                        `calib raise_Φ=${c.tickets_n ?? 0} · auto_write=${c.auto_write_phi === true}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">timer</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const t =
+                          snap?.desk?.timer_heartbeat ||
+                          (snap?.desk?.master as {
+                            timer_heartbeat?: { alive?: boolean }
+                          } | undefined)?.timer_heartbeat
+                        if (!t || t.alive == null) return undefined
+                        return t.alive === false ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const t =
+                        snap?.desk?.timer_heartbeat ||
+                        (snap?.desk?.master as {
+                          timer_heartbeat?: { label?: string; alive?: boolean; age_sec?: number }
+                        } | undefined)?.timer_heartbeat
+                      if (!t) return 'timer heartbeat pending'
+                      return (
+                        t.label ||
+                        `timer ${t.alive === false ? 'DEAD' : 'alive'}` +
+                          (t.age_sec != null ? ` age=${t.age_sec}s` : '')
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">teller</span>
+                  <span>
+                    {snap?.desk?.living_memory_line ||
+                      snap?.desk?.teller_living?.memory_line ||
+                      snap?.desk?.teller_memory?.recent?.[0]?.text ||
+                      'living teller pending'}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">floors</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const f =
+                          snap?.desk?.fee_floors_assert ||
+                          (snap?.desk?.master as { fee_floors_assert?: { all_ok?: boolean } } | undefined)
+                            ?.fee_floors_assert
+                        if (!f) return undefined
+                        return f.all_ok === false ? '#c45c26' : '#6fbf73'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const f =
+                        snap?.desk?.fee_floors_assert ||
+                        (snap?.desk?.master as { fee_floors_assert?: { label?: string; all_ok?: boolean } } | undefined)
+                          ?.fee_floors_assert
+                      if (!f) return 'fee floors pending'
+                      return f.label || (f.all_ok ? 'floors locked ok' : 'floors CHECK')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">expand</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.betting_expand_gate ||
+                          (snap?.desk?.master as { betting_expand_gate?: { blocked?: boolean } } | undefined)
+                            ?.betting_expand_gate
+                        if (!g) return undefined
+                        return g.blocked ? '#c45c26' : '#6fbf73'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.betting_expand_gate ||
+                        (snap?.desk?.master as {
+                          betting_expand_gate?: { label?: string; blocked?: boolean }
+                        } | undefined)?.betting_expand_gate
+                      if (!g) return 'expand gate pending'
+                      return g.label || (g.blocked ? 'betting expand BLOCKED' : 'expand ok (paper)')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">doctor</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const d =
+                          snap?.desk?.living_doctor ||
+                          (snap?.desk?.master as { living_doctor?: { ok?: boolean } } | undefined)
+                            ?.living_doctor
+                        if (!d) return undefined
+                        return d.ok ? '#6fbf73' : '#c45c26'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const d =
+                        snap?.desk?.living_doctor ||
+                        (snap?.desk?.master as { living_doctor?: { label?: string; ok?: boolean } } | undefined)
+                          ?.living_doctor
+                      if (!d) return 'living doctor pending'
+                      return d.label || (d.ok ? 'doctor OK' : 'doctor FAIL')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">doc age</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const a =
+                          snap?.desk?.doctor_age ||
+                          (snap?.desk?.master as { doctor_age?: { stale?: boolean } } | undefined)
+                            ?.doctor_age
+                        if (!a) return undefined
+                        return a.stale ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const a =
+                        snap?.desk?.doctor_age ||
+                        (snap?.desk?.master as {
+                          doctor_age?: { label?: string; stale?: boolean }
+                        } | undefined)?.doctor_age
+                      if (!a) return 'doctor age pending'
+                      return a.label || (a.stale ? 'doctor stale' : 'doctor age ok')
                     })()}
                   </span>
                 </div>

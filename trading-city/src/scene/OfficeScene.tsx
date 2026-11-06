@@ -21,6 +21,11 @@ type Props = {
   bots?: BotRow[]
   desk?: Desk
   onOpenScreens?: () => void
+  /**
+   * When true (wing hallway embed), drop the sealed outer box so SuiteShell
+   * walls + open doorway connect the trading desk to the rest of the floor.
+   */
+  embedded?: boolean
 }
 
 const FRAME = '#3a2a68'
@@ -531,7 +536,7 @@ function DeskKit() {
 }
 
 /** Desk suite content at local origin — used alone or inside the wing hallway. */
-export function OfficeInterior({ bot, bots, desk, onOpenScreens }: Props) {
+export function OfficeInterior({ bot, bots, desk, onOpenScreens, embedded = false }: Props) {
   const pose = useMemo(() => botPose(bot), [bot])
 
   const maps = useMemo(() => {
@@ -551,17 +556,22 @@ export function OfficeInterior({ bot, bots, desk, onOpenScreens }: Props) {
 
   return (
     <group>
-      <OfficeFloor />
-      <Ceiling />
-      <SideWall x={-7.9} rot={Math.PI / 2} />
-      <SideWall x={7.9} rot={-Math.PI / 2} />
+      {/* Standalone orbit office keeps its own sealed box. Wing embed uses SuiteShell. */}
+      {!embedded && (
+        <>
+          <OfficeFloor />
+          <Ceiling />
+          <SideWall x={-7.9} rot={Math.PI / 2} />
+          <SideWall x={7.9} rot={-Math.PI / 2} />
+          <mesh position={[0, 1.69, 4.8]} rotation={[0, Math.PI, 0]}>
+            <planeGeometry args={[16, 3.38]} />
+            <meshStandardMaterial color="#160e2c" roughness={0.92} side={DoubleSide} />
+          </mesh>
+          <Door />
+        </>
+      )}
       <WallStockChart bot={bot} desk={desk} side="left" />
       <WallStockChart bot={bot} desk={desk} side="right" />
-      <mesh position={[0, 1.69, 4.8]} rotation={[0, Math.PI, 0]}>
-        <planeGeometry args={[16, 3.38]} />
-        <meshStandardMaterial color="#160e2c" roughness={0.92} side={DoubleSide} />
-      </mesh>
-      <Door />
       <Credenza />
       <WindowWall />
       {/* City vista only — border plaza screens stay on the outdoor plaza, not here. */}

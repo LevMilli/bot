@@ -13,6 +13,24 @@ import os
 from typing import Any
 
 MASTER_VERSION = 3
+# Keep Masters rail readable — urgent inserts stay first; drop near-dupes.
+PRIORITY_MAX = 16
+_PRIORITY_FAMILY_PREFIXES = (
+    ("timer", ("timer",)),
+    ("bleed", ("bleed",)),
+    ("near-miss", ("near-miss", "skip-twin")),
+    ("hard-stop", ("hard-stop", "sports hard-stop")),
+    ("clv", ("clv",)),
+    ("dual", ("dual-control",)),
+    ("ruin", ("ruin",)),
+    ("empty", ("empty card", "empty bee", "distance empty")),
+    ("eia", ("eia ",)),
+    ("feature", ("feature quiet", "weekday alert: feature")),
+    ("expand", ("betting expand",)),
+    ("doctor", ("doctor", "living doctor")),
+    ("tip", ("tip radar", "tip T")),
+    ("pulse", ("clerk pulse",)),
+)
 
 # Bars from docs/trading-masters-per-bot-plan.md (Chicago weeks).
 MASTER_BARS = {
@@ -27,6 +45,39 @@ MASTER_BARS = {
     "M7_gate_b_dd": 40.0,
     "M7_gate_b_n": 20,
 }
+
+
+def _priority_family(line: str) -> str | None:
+    low = str(line or "").strip().lower()
+    for family, prefixes in _PRIORITY_FAMILY_PREFIXES:
+        for prefix in prefixes:
+            if low.startswith(prefix):
+                return family
+    return None
+
+
+def finalize_living_priority(lines: list | None, *, max_n: int = PRIORITY_MAX) -> list[str]:
+    """Dedupe noisy living rail lines; keep first (urgent inserts already front)."""
+    out: list[str] = []
+    seen_exact: set[str] = set()
+    seen_family: set[str] = set()
+    for raw in lines or []:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen_exact:
+            continue
+        family = _priority_family(text)
+        if family and family in seen_family:
+            continue
+        seen_exact.add(key)
+        if family:
+            seen_family.add(family)
+        out.append(text[:160])
+        if len(out) >= int(max_n):
+            break
+    return out
 
 
 def _finite(x) -> float | None:
@@ -605,24 +656,26 @@ def master_summary(
                 0,
                 "staff raise_Φ tickets: " + ",".join(str(t) for t in tickets[:6]),
             )
-        else:
-            priority.append("living AI calib observe (no raise_Φ tickets)")
-    if isinstance(completions, dict):
+    if isinstance(completions, dict) and int(completions.get("eligible_completions_today") or 0) > 0:
         priority.append(
             f"eligible completions today {completions.get('eligible_completions_today') or 0}"
         )
     feature_quiet = (living or {}).get("feature_quiet") if isinstance(living, dict) else None
     if isinstance(feature_quiet, dict) and feature_quiet.get("quiet") and feature_quiet.get("alert"):
         priority.insert(0, str(feature_quiet.get("alert"))[:120])
+    feature_pager = (living or {}).get("feature_quiet_pager") if isinstance(living, dict) else None
+    if isinstance(feature_pager, dict) and feature_pager.get("page"):
+        priority.insert(0, str(feature_pager.get("label") or "feature quiet PAGE")[:120])
     hillclimb_lever = (living or {}).get("hillclimb_lever") if isinstance(living, dict) else None
     if isinstance(hillclimb_lever, dict):
         active = hillclimb_lever.get("active") if isinstance(hillclimb_lever.get("active"), dict) else None
         if active:
             priority.append(f"hillclimb lever active: {active.get('name') or active.get('lever')}")
-        else:
-            priority.append("hillclimb: no staff lever this Chicago week (observe)")
     dual_control = (living or {}).get("dual_control") if isinstance(living, dict) else None
-    if isinstance(dual_control, dict):
+    if isinstance(dual_control, dict) and (
+        int(dual_control.get("signed_n") or 0) > 0
+        or bool(dual_control.get("arm_ready_paper"))
+    ):
         priority.append(
             f"dual-control paper {dual_control.get('signed_n') or 0}/"
             f"{dual_control.get('items_n') or 0} signed; "
@@ -693,18 +746,52 @@ def master_summary(
     quant = (living or {}).get("quant_clerk") if isinstance(living, dict) else None
     if isinstance(quant, dict) and quant.get("fit_pass") is False:
         priority.append(str(quant.get("label") or "quant fit weak")[:120])
-    skip_hist = (living or {}).get("skip_historian") if isinstance(living, dict) else None
-    if isinstance(skip_hist, dict) and int(skip_hist.get("n_events") or 0) > 0:
-        priority.append(str(skip_hist.get("label") or "skip historian")[:120])
     bee = (living or {}).get("empty_card_bee") if isinstance(living, dict) else None
     if isinstance(bee, dict) and int(bee.get("breaches") or 0) > 0:
         priority.insert(0, str(bee.get("label") or "empty CARD breaches")[:120])
     book = (living or {}).get("bookkeeper") if isinstance(living, dict) else None
     if isinstance(book, dict) and book.get("fee_ledger_complete") is False:
         priority.append(str(book.get("label") or "fee ledger gaps")[:120])
-    reporter = (living or {}).get("reporter") if isinstance(living, dict) else None
-    if isinstance(reporter, dict) and reporter.get("present"):
-        priority.append(str(reporter.get("label") or "scorecard present")[:120])
+    # Clerk digest twins are pruned when ROI chip already covers the family
+    # (finalize_living_priority also dedupes by family prefixes).
+    twin = (living or {}).get("skip_twin_clerk") if isinstance(living, dict) else None
+    if (
+        isinstance(twin, dict)
+        and twin.get("promote_ready")
+        and not (isinstance(near_miss, dict) and near_miss.get("promote_ready"))
+    ):
+        priority.append("skip-twin promote_ready — staff z|p only")
+    doctor_age = (living or {}).get("doctor_age") if isinstance(living, dict) else None
+    if isinstance(doctor_age, dict) and doctor_age.get("stale"):
+        priority.append(str(doctor_age.get("label") or "doctor stale")[:120])
+    eia_bo = (living or {}).get("eia_blackout") if isinstance(living, dict) else None
+    if isinstance(eia_bo, dict) and eia_bo.get("blocked"):
+        priority.insert(0, str(eia_bo.get("label") or "EIA blackout ACTIVE")[:120])
+    cal = (living or {}).get("calendar_scanner") if isinstance(living, dict) else None
+    if isinstance(cal, dict) and int(cal.get("n") or 0) > 0:
+        priority.append(str(cal.get("label") or "calendar events")[:120])
+    pulse = (living or {}).get("clerk_pulse") if isinstance(living, dict) else None
+    if isinstance(pulse, dict) and pulse.get("stale"):
+        priority.insert(0, str(pulse.get("label") or "clerk pulse STALE")[:120])
+    elif isinstance(pulse, dict) and pulse.get("soft_warn"):
+        # Soft warn (past cadence, before 2×) — append, do not front the rail.
+        priority.append(str(pulse.get("label") or "clerk pulse WARN")[:120])
+    ruin_chip = (living or {}).get("ruin_drill_chip") if isinstance(living, dict) else None
+    if isinstance(ruin_chip, dict) and ruin_chip.get("active"):
+        priority.insert(0, str(ruin_chip.get("label") or "ruin drill ACTIVE")[:120])
+    dual_gaps = (living or {}).get("dual_control_gaps") if isinstance(living, dict) else None
+    if isinstance(dual_gaps, dict) and dual_gaps.get("page") and int(dual_gaps.get("gaps_n") or 0) > 0:
+        priority.append(str(dual_gaps.get("label") or "dual-control gaps")[:120])
+    hill_chip = (living or {}).get("hillclimb_chip") if isinstance(living, dict) else None
+    if isinstance(hill_chip, dict) and hill_chip.get("active_name"):
+        priority.append(str(hill_chip.get("label") or "hillclimb lever")[:120])
+    digest_inv = (living or {}).get("digest_inventory") if isinstance(living, dict) else None
+    if isinstance(digest_inv, dict) and digest_inv.get("pass") is False:
+        priority.append(str(digest_inv.get("label") or "digest inventory thin")[:120])
+    expand = (living or {}).get("betting_expand_gate") if isinstance(living, dict) else None
+    if isinstance(expand, dict) and expand.get("blocked"):
+        priority.insert(0, str(expand.get("label") or "betting expand BLOCKED")[:120])
+    priority = finalize_living_priority(priority)
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -731,8 +818,59 @@ def master_summary(
         ),
         "living_ai": living_ai,
         "completions": completions,
+        "completions_chip": (
+            (living or {}).get("completions_chip")
+            if isinstance(living, dict)
+            else None
+        ),
+        "teller_living": (
+            (living or {}).get("teller_living")
+            if isinstance(living, dict)
+            else None
+        ),
+        "fee_floors_assert": (
+            (living or {}).get("fee_floors_assert")
+            if isinstance(living, dict)
+            else None
+        ),
         "feature_quiet": feature_quiet,
+        "feature_quiet_pager": (
+            (living or {}).get("feature_quiet_pager")
+            if isinstance(living, dict)
+            else None
+        ),
+        "priority_max": PRIORITY_MAX,
         "hillclimb_lever": hillclimb_lever,
+        "hillclimb_chip": (
+            (living or {}).get("hillclimb_chip")
+            if isinstance(living, dict)
+            else None
+        ),
+        "dual_control_gaps": (
+            (living or {}).get("dual_control_gaps")
+            if isinstance(living, dict)
+            else None
+        ),
+        "digest_inventory": (
+            (living or {}).get("digest_inventory")
+            if isinstance(living, dict)
+            else None
+        ),
+        "ruin_drill_page": (
+            (living or {}).get("ruin_drill_page")
+            if isinstance(living, dict)
+            else None
+        ),
+        "betting_expand_gate": (
+            (living or {}).get("betting_expand_gate")
+            if isinstance(living, dict)
+            else None
+        ),
+        "doctor_age": (
+            (living or {}).get("doctor_age")
+            if isinstance(living, dict)
+            else None
+        ),
         "dual_control": dual_control,
         "ruin_drill": ruin_drill,
         "skip_taxonomy": (
@@ -837,6 +975,66 @@ def master_summary(
         ),
         "empty_card_bee": (
             (living or {}).get("empty_card_bee")
+            if isinstance(living, dict)
+            else None
+        ),
+        "near_miss_clerk": (
+            (living or {}).get("near_miss_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "hard_stop_clerk": (
+            (living or {}).get("hard_stop_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "bleed_clerk": (
+            (living or {}).get("bleed_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "skip_twin_clerk": (
+            (living or {}).get("skip_twin_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "clv_closer": (
+            (living or {}).get("clv_closer")
+            if isinstance(living, dict)
+            else None
+        ),
+        "timer_digest": (
+            (living or {}).get("timer_digest")
+            if isinstance(living, dict)
+            else None
+        ),
+        "calendar_scanner": (
+            (living or {}).get("calendar_scanner")
+            if isinstance(living, dict)
+            else None
+        ),
+        "eia_blackout": (
+            (living or {}).get("eia_blackout")
+            if isinstance(living, dict)
+            else None
+        ),
+        "compact": (
+            (living or {}).get("compact")
+            if isinstance(living, dict)
+            else None
+        ),
+        "clerk_pulse": (
+            (living or {}).get("clerk_pulse")
+            if isinstance(living, dict)
+            else None
+        ),
+        "dual_control_chip": (
+            (living or {}).get("dual_control_chip")
+            if isinstance(living, dict)
+            else None
+        ),
+        "ruin_drill_chip": (
+            (living or {}).get("ruin_drill_chip")
             if isinstance(living, dict)
             else None
         ),

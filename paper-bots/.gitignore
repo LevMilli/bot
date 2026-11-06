@@ -58,6 +58,7 @@ desk_firm_queue.json
 desk_empty_card.json
 desk_near_miss_promote.json
 desk_completions.json
+desk_living_doctor.json
 desk_feature_store.jsonl
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json

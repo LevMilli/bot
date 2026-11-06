@@ -49,6 +49,7 @@ INSIGHT_HELPER_DIGESTS = (
     "calendar_digest.json",
 )
 INSIGHT_BETTING_MIN_RATIO = 3.0
+DOCTOR_RUN_NAME = "desk_living_doctor.json"
 
 
 def _root(root: str | None = None) -> str:
@@ -270,6 +271,40 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
     }
 
 
+def feature_quiet_pager(
+    root: str | None = None,
+    *,
+    now: datetime | None = None,
+    quiet_hours: float = FEATURE_QUIET_HOURS,
+) -> dict:
+    """Weekday pager copy when feature store is quiet ≥ threshold (never auto-pages)."""
+    alert = feature_store_quiet_alert(root, now=now, quiet_hours=quiet_hours)
+    page = bool(alert.get("quiet") and alert.get("alert"))
+    copy = ""
+    if page:
+        copy = (
+            f"**FEATURE QUIET PAGE** (Chicago weekday)\n"
+            f"{alert.get('alert')}\n"
+            f"age_hours={alert.get('age_hours')} n={alert.get('n')} "
+            f"last_at={alert.get('last_at')}\n"
+            f"_floors locked · paper only · staff ack — never invent fills_"
+        )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_page": False,
+        "page": page,
+        "copy": copy,
+        "alert": alert,
+        "label": (
+            "feature quiet PAGE"
+            if page
+            else "feature quiet ok"
+        ),
+        "note": "Staff pager copy only — never auto-posts; never softens floors.",
+    }
+
+
 def feature_store_quiet_alert(
     root: str | None = None,
     *,
@@ -311,6 +346,15 @@ def feature_store_quiet_alert(
             "learn loop starved (floors still locked)."
             if quiet
             else ""
+        ),
+        "label": (
+            f"feature quiet age={age_h}h QUIET"
+            if quiet
+            else (
+                f"feature quiet age={age_h}h ok"
+                if age_h is not None
+                else "feature quiet n/a"
+            )
         ),
         "note": "Observe-only coverage alert. Never softens venue floors.",
     }
@@ -427,6 +471,7 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     except Exception:
         boards = {}
         raise_phi = []
+    n = len(raise_phi)
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -436,11 +481,513 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
         "adapt_recent_vol_n": len(adapt.get("recent_vol") or []),
         "calib_boards": boards,
         "raise_phi_tickets": raise_phi,
-        "raise_phi_n": len(raise_phi),
+        "raise_phi_n": n,
         "auto_write_phi": False,
+        "label": (
+            f"living AI raise_Φ={n}"
+            + (f" ({','.join(raise_phi)})" if raise_phi else " clear")
+            + " · auto_write=False"
+        ),
         "note": (
             "Living AI health — Wilson adapt + calib raise_Φ tickets. "
             "Staff dual-control only; never silent Φ write; never softer floors."
+        ),
+    }
+
+
+def teller_living_chip(
+    root: str | None = None,
+    bots: list | None = None,
+    *,
+    remember: bool = False,
+) -> dict:
+    """One teller memory_line from swarm + completions (paper observe)."""
+    swarm = insight_swarm_ratio(root)
+    comp = completions_chip(root)
+    floors_ok = True
+    try:
+        import desk_profit
+        floors = desk_profit.venue_floors_locked() or {}
+        floors_ok = bool(floors.get("all_ok"))
+    except Exception:
+        floors_ok = True
+    swarm_bit = (
+        f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+        f"{'ok' if swarm.get('pass') else 'thin'}"
+    )
+    fill_bit = (
+        f"eligible fills today {comp.get('eligible_completions_today')}"
+        if comp.get("eligible_completions_today") is not None
+        else "eligible fills n/a"
+    )
+    line = f"{swarm_bit} · {fill_bit} · floors={'locked' if floors_ok else 'CHECK'}"
+    if remember:
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="facts",
+                text=line[:200],
+                bot_id="desk",
+                source="living_teller_chip",
+            )
+        except Exception:
+            pass
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "swarm_pass": swarm.get("pass"),
+        "eligible_completions_today": comp.get("eligible_completions_today"),
+        "floors_ok": floors_ok,
+        "memory_line": line,
+        "label": line,
+        "note": "Teller living chip — grounded on swarm + Completions; never invents PnL.",
+    }
+
+
+def completions_chip(root: str | None = None) -> dict:
+    """Eligible completions today — teller / Masters one-liner."""
+    summary = completions_summary(root) or {}
+    n = summary.get("eligible_completions_today")
+    pnl = summary.get("eligible_pnl_today")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "chicago_day": summary.get("chicago_day"),
+        "eligible_completions_today": n,
+        "eligible_pnl_today": pnl,
+        "completions_today": summary.get("completions_today"),
+        "label": f"completions today eligible={n} pnl={pnl}",
+        "note": summary.get("note") or (
+            "CompletedEligibleFills = fee-clear closes today. Never softer floors."
+        ),
+    }
+
+
+def clerk_pulse_chip(root: str | None = None) -> dict:
+    """Last clerk-pulse age / digest health chip."""
+    digest: dict = {}
+    age_sec = None
+    try:
+        from helpers import clerk_pulse
+        path = clerk_pulse.digest_path(root)
+        marker = os.path.join(
+            os.path.dirname(path),
+            getattr(clerk_pulse, "RUN_MARKER", "clerk_pulse_at.txt"),
+        )
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if os.path.isfile(marker):
+            age_sec = int(max(0.0, time.time() - os.path.getmtime(marker)))
+        if not isinstance(digest, dict):
+            digest = {}
+    except Exception:
+        digest = {}
+    cadence = None
+    try:
+        from helpers import clerk_pulse as _cp
+        cadence = getattr(_cp, "CADENCE_SEC", 300)
+    except Exception:
+        cadence = 300
+    stale = age_sec is not None and cadence is not None and age_sec > int(cadence) * 2
+    soft_warn = (
+        age_sec is not None
+        and cadence is not None
+        and not stale
+        and age_sec > int(cadence)
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "age_sec": age_sec,
+        "cadence_sec": cadence,
+        "stale": stale,
+        "soft_warn": soft_warn,
+        "refreshed_n": digest.get("refreshed_n") or digest.get("n"),
+        "at": digest.get("at"),
+        "label": (
+            f"clerk pulse age={age_sec}s "
+            + (
+                "STALE"
+                if stale
+                else "WARN"
+                if soft_warn
+                else "ok"
+                if age_sec is not None
+                else "n/a"
+            )
+        ),
+        "note": digest.get("note") or "5m insight clerk pulse — observe-only digests.",
+    }
+
+
+def dual_control_chip(root: str | None = None) -> dict:
+    """Dual-control signed checklist chip (paper arm only)."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.dual_control_status(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_promote": False,
+        "signed_n": status.get("signed_n"),
+        "items_n": status.get("items_n"),
+        "checklist_complete": bool(status.get("checklist_complete")),
+        "two_staff": bool(status.get("two_staff")),
+        "arm_ready_paper": bool(status.get("arm_ready_paper")),
+        "label": (
+            f"dual-control signed={status.get('signed_n')}/{status.get('items_n')} "
+            f"two_staff={bool(status.get('two_staff'))} "
+            f"arm_ready_paper={bool(status.get('arm_ready_paper'))}"
+        ),
+        "note": status.get("note") or (
+            "Both staff + full checklist before any future live path."
+        ),
+    }
+
+
+def ruin_drill_chip(root: str | None = None) -> dict:
+    """Ruin drill monthly practice chip."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.ruin_drill_status(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "active": bool(status.get("active")),
+        "level": status.get("level"),
+        "practiced_this_month": bool(status.get("practiced_this_month")),
+        "last_practice_at": status.get("last_practice_at"),
+        "label": (
+            f"ruin drill active={bool(status.get('active'))} "
+            f"level={status.get('level')} "
+            f"practiced_month={bool(status.get('practiced_this_month'))}"
+        ),
+        "note": status.get("note") or (
+            "Practice soft/hard this Chicago month for dual-control."
+        ),
+    }
+
+
+def calendar_scanner_chip(root: str | None = None) -> dict:
+    """Upcoming high-impact calendar events chip."""
+    digest: dict = {}
+    try:
+        from helpers import calendar_scanner
+        path = calendar_scanner.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = calendar_scanner.scan(root) or {}
+    except Exception:
+        digest = {}
+    events = digest.get("events") if isinstance(digest.get("events"), list) else []
+    if not events and isinstance(digest.get("upcoming"), list):
+        events = digest.get("upcoming") or []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n") if digest.get("n") is not None else len(events),
+        "events": events[:8],
+        "nearest": events[0] if events else None,
+        "label": (
+            f"calendar n={digest.get('n') if digest.get('n') is not None else len(events)} "
+            f"next={(events[0] or {}).get('title') if events else None}"
+        ),
+        "note": digest.get("note") or "Observe-only calendar scanner — never places alone.",
+    }
+
+
+def eia_blackout_chip(root: str | None = None) -> dict:
+    """Commodity ±45m EIA/inventory blackout chip."""
+    status: dict = {}
+    try:
+        from helpers import eia_blackout
+        events = eia_blackout.load_calendar_events(root)
+        # Probe primary energy series used on commodity tower.
+        crude = eia_blackout.energy_blackout("CL", events)
+        gas = eia_blackout.energy_blackout("NG", events)
+        blocked = bool(crude.get("blocked") or gas.get("blocked"))
+        hits = list(crude.get("hits") or []) + list(gas.get("hits") or [])
+        status = {
+            "blocked": blocked,
+            "window_min": getattr(eia_blackout, "EIA_WINDOW_MIN", 45),
+            "crude": crude,
+            "natgas": gas,
+            "hits_n": len(hits),
+            "note": (
+                "Commodity blackout ±45m around inventory prints — never softens 0.05."
+            ),
+        }
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "blocked": bool(status.get("blocked")),
+        "window_min": status.get("window_min") or 45,
+        "hits_n": status.get("hits_n"),
+        "crude_blocked": bool((status.get("crude") or {}).get("blocked")),
+        "natgas_blocked": bool((status.get("natgas") or {}).get("blocked")),
+        "label": (
+            f"EIA blackout {'ACTIVE' if status.get('blocked') else 'clear'} "
+            f"hits={status.get('hits_n')} window={status.get('window_min') or 45}m"
+        ),
+        "note": status.get("note") or "±45m inventory blackout for energy series.",
+    }
+
+
+def living_compact_card(
+    root: str | None = None,
+    bots: list | None = None,
+    *,
+    board: dict | None = None,
+) -> dict:
+    """One-line Masters summary across living chips (no recursive board build)."""
+    if isinstance(board, dict):
+        src = board
+    else:
+        swarm = insight_swarm_ratio(root)
+        timer = timer_heartbeat_chip(root)
+        green = green_day_board(root, bots=bots)
+        bleed = bleed_chip(root, bots=bots)
+        quiet = feature_store_quiet_alert(root)
+        src = {
+            "insight_swarm": swarm,
+            "timer_heartbeat": timer,
+            "green_day": green,
+            "bleed": bleed,
+            "feature_quiet": quiet,
+        }
+    swarm = src.get("insight_swarm") if isinstance(src.get("insight_swarm"), dict) else {}
+    timer = src.get("timer_heartbeat") if isinstance(src.get("timer_heartbeat"), dict) else {}
+    green = src.get("green_day") if isinstance(src.get("green_day"), dict) else {}
+    bleed = src.get("bleed") if isinstance(src.get("bleed"), dict) else {}
+    quiet = src.get("feature_quiet") if isinstance(src.get("feature_quiet"), dict) else {}
+    parts = [
+        f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')}",
+        f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'}",
+        f"green={green.get('green_n')}",
+        f"bleed={bleed.get('ratio')}",
+        f"quiet={'yes' if quiet.get('quiet') else 'no'}",
+    ]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "parts": parts,
+        "label": " · ".join(str(p) for p in parts),
+        "note": "Compact living card — floors locked; paper only.",
+    }
+
+
+def skip_twin_clerk_chip(root: str | None = None) -> dict:
+    """Skip-twin clerk digest — labeled near-miss feature join."""
+    digest: dict = {}
+    try:
+        from helpers import skip_twin_clerk
+        path = skip_twin_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = skip_twin_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "n": digest.get("n"),
+        "labeled_n": digest.get("labeled_n"),
+        "shadow_ev": digest.get("shadow_ev"),
+        "promote_ready": bool(digest.get("promote_ready")),
+        "decision": digest.get("decision") or "",
+        "label": (
+            f"skip-twin n={digest.get('n')} labeled={digest.get('labeled_n')} "
+            f"ev={digest.get('shadow_ev')} ready={bool(digest.get('promote_ready'))}"
+        ),
+        "note": digest.get("note") or (
+            "Near-miss would_pnl twins for learn — soft allowlist stays z|p."
+        ),
+    }
+
+
+def clv_closer_chip(root: str | None = None) -> dict:
+    """CLV closer clerk digest chip (sports beat-close completeness)."""
+    digest: dict = {}
+    try:
+        from helpers import clv_closer
+        path = clv_closer.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = clv_closer.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n"),
+        "complete": digest.get("complete"),
+        "completeness": digest.get("completeness"),
+        "pass": digest.get("pass"),
+        "label": (
+            f"CLV closer n={digest.get('n')} complete={digest.get('complete')} "
+            f"rate={digest.get('completeness')} "
+            + ("ok" if digest.get("pass") else "gaps" if digest.get("pass") is False else "n/a")
+        ),
+        "note": digest.get("note") or (
+            "Feeds green_boost evidence — never softens sports 0.06."
+        ),
+    }
+
+
+def timer_digest_chip(root: str | None = None) -> dict:
+    """Timer heartbeat helper digest chip (alive/dead)."""
+    digest: dict = {}
+    try:
+        from helpers import timer_heartbeat
+        path = timer_heartbeat.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("alive") is None:
+            # Prefer lightweight health without full snapshot when possible.
+            try:
+                import pimp_desk
+                health = pimp_desk.timer_health(root) or {}
+                digest = timer_heartbeat.write_digest(
+                    root,
+                    alive=bool(health.get("alive")),
+                    detail=str(health.get("detail") or health.get("alert") or ""),
+                )
+            except Exception:
+                digest = timer_heartbeat.probe_from_snapshot(root)
+    except Exception:
+        digest = {}
+    alive = digest.get("alive")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "alive": alive,
+        "status": digest.get("status") or (
+            "unknown" if alive is None else ("alive" if alive else "dead")
+        ),
+        "detail": digest.get("detail") or "",
+        "label": (
+            f"timer digest {digest.get('status') or ('alive' if alive else 'dead' if alive is False else 'n/a')}"
+        ),
+        "note": digest.get("note") or "Life support #1 — dead timer = dead city.",
+    }
+
+
+def near_miss_clerk_chip(root: str | None = None) -> dict:
+    """Near-miss clerk digest chip (z|p soft allowlist observe)."""
+    digest: dict = {}
+    try:
+        from helpers import near_miss_clerk
+        path = near_miss_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = near_miss_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "n": digest.get("n"),
+        "labeled_n": digest.get("labeled_n"),
+        "shadow_ev": digest.get("shadow_ev"),
+        "promote_ready": bool(digest.get("promote_ready")),
+        "decision": digest.get("decision") or "",
+        "label": (
+            f"near-miss clerk n={digest.get('n')} labeled={digest.get('labeled_n')} "
+            f"ev={digest.get('shadow_ev')} ready={bool(digest.get('promote_ready'))}"
+        ),
+        "note": digest.get("note") or (
+            "Soft allowlist z|p only — never edge, never softer fee floors."
+        ),
+    }
+
+
+def hard_stop_clerk_chip(root: str | None = None) -> dict:
+    """Sports hard-stop clerk digest chip (shadow until staff)."""
+    digest: dict = {}
+    try:
+        from helpers import hard_stop_clerk
+        path = hard_stop_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = hard_stop_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "n": digest.get("n"),
+        "n_with_pnl": digest.get("n_with_pnl"),
+        "shadow_expectancy": digest.get("shadow_expectancy"),
+        "promote_ready": bool(digest.get("promote_ready")),
+        "live": bool(digest.get("live")),
+        "staff_approved": bool(digest.get("staff_approved")),
+        "decision": digest.get("decision") or "",
+        "label": (
+            f"hard-stop clerk n={digest.get('n_with_pnl')} "
+            f"ev={digest.get('shadow_expectancy')} "
+            f"ready={bool(digest.get('promote_ready'))} live={bool(digest.get('live'))}"
+        ),
+        "note": digest.get("note") or (
+            "Live sells stay staff-gated; code default SPORTS_HARD_STOP_LIVE=False."
+        ),
+    }
+
+
+def bleed_clerk_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """Bleed clerk digest chip (ratio + misplaced capital)."""
+    digest: dict = {}
+    try:
+        from helpers import bleed_clerk
+        path = bleed_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("bleed_ratio") is None:
+            digest = bleed_clerk.write_digest_from_desk(root, bots=bots)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bleed_ratio": digest.get("bleed_ratio"),
+        "bleed_pass": digest.get("bleed_pass"),
+        "misplaced_usd": digest.get("misplaced_usd"),
+        "share_of_cap": digest.get("share_of_cap"),
+        "label": (
+            f"bleed clerk ratio={digest.get('bleed_ratio')} "
+            f"pass={digest.get('bleed_pass')} "
+            f"misplaced={digest.get('misplaced_usd')}"
+        ),
+        "note": digest.get("note") or (
+            "Recycle open risk on red towers toward fee-clear — floors locked."
         ),
     }
 
@@ -1081,6 +1628,10 @@ def green_day_board(root: str | None = None, bots: list | None = None) -> dict:
             "green_boost": int(boost.get("green_boost") or 0),
             "auto_promote": False,
         },
+        "label": (
+            f"green-day green={green_n} red={red_n}"
+            + (" ALL_GREEN" if fee_clear and red_n == 0 and green_n == len(fee_clear) else "")
+        ),
         "note": (
             "Selective +1 only on fee-clear green days; sports green_boost stays 0 "
             "until CLV+M1 gate ready. Never softens venue floors."
@@ -1165,10 +1716,11 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         hillclimb = None
         dual = None
         ruin = None
-    return {
+    board = {
         "paper_only": True,
         "feature_store": feat,
         "feature_quiet": quiet,
+        "feature_quiet_pager": feature_quiet_pager(root),
         "completions": comp,
         "living_ai": ai,
         "insight_swarm": swarm,
@@ -1196,6 +1748,26 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "bookkeeper": bookkeeper_chip(root),
         "reporter": reporter_chip(root),
         "empty_card_bee": empty_card_bee_chip(root),
+        "near_miss_clerk": near_miss_clerk_chip(root),
+        "hard_stop_clerk": hard_stop_clerk_chip(root),
+        "bleed_clerk": bleed_clerk_chip(root, bots=bots),
+        "skip_twin_clerk": skip_twin_clerk_chip(root),
+        "clv_closer": clv_closer_chip(root),
+        "timer_digest": timer_digest_chip(root),
+        "calendar_scanner": calendar_scanner_chip(root),
+        "eia_blackout": eia_blackout_chip(root),
+        "clerk_pulse": clerk_pulse_chip(root),
+        "dual_control_chip": dual_control_chip(root),
+        "ruin_drill_chip": ruin_drill_chip(root),
+        "completions_chip": completions_chip(root),
+        "teller_living": teller_living_chip(root, bots=bots),
+        "fee_floors_assert": fee_floors_assert(root),
+        "dual_control_gaps": dual_control_gaps_page(root),
+        "hillclimb_chip": hillclimb_chip(root),
+        "digest_inventory": digest_inventory(root),
+        "ruin_drill_page": ruin_drill_page(root),
+        "betting_expand_gate": betting_expand_gate(root),
+        "doctor_age": doctor_age_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -1204,6 +1776,537 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "grok_buys": False,
         "live_orders_enabled": False,
         "note": "Living Trading Upgrade board — more eligible completions + learn data.",
+    }
+    board["compact"] = living_compact_card(root, bots=bots, board=board)
+    board["board_size"] = living_board_size_guard(chips_n=_count_living_chips(board))
+    return board
+
+
+def ruin_drill_page(root: str | None = None) -> dict:
+    """Staff markdown when ruin drill not practiced this Chicago month."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.ruin_drill_status(root) or {}
+    except Exception:
+        status = {}
+    practiced = bool(status.get("practiced_this_month"))
+    active = bool(status.get("active"))
+    page = bool(active or not practiced)
+    lines = [
+        "**RUIN DRILL** (paper vault practice — never enables live)",
+        f"active={active} level={status.get('level')} "
+        f"practiced_this_month={practiced} "
+        f"last={status.get('last_practice_at')}",
+        "",
+        "Levels:",
+        "- soft — block new entries; exits/settles still run",
+        "- hard — soft + pause every paper bot",
+        "- nuclear — hard + recommend flatten / cancel-on-pause habit",
+        "",
+        "Staff: `python3 tools/staff_ruin_drill.py set soft` then clear when done.",
+        "",
+        "_floors locked · LIVE_ORDERS_ENABLED=False · staff ack only_",
+    ]
+    copy = "\n".join(lines)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_page": False,
+        "auto_publish": False,
+        "page": page,
+        "practiced_this_month": practiced,
+        "active": active,
+        "level": status.get("level"),
+        "copy": copy,
+        "discord": copy,  # staff paste only
+        "label": (
+            f"ruin page active={active} practiced_month={practiced}"
+        ),
+        "note": status.get("note") or (
+            "Practice soft/hard this Chicago month for dual-control."
+        ),
+    }
+
+
+def seed_missing_digests(root: str | None = None, *, bots: list | None = None) -> dict:
+    """Staff seed empty observe digests for missing insight helpers (never places)."""
+    inv_before = digest_inventory(root)
+    seeded: list[str] = []
+    errors: list[dict] = []
+    for key in inv_before.get("missing") or []:
+        try:
+            if key == "sunday_living_packet":
+                from helpers import sunday_packet
+                sunday_packet.write_packet(root)
+                seeded.append(key)
+                continue
+            if key == "calendar":
+                from helpers import calendar_scanner
+                calendar_scanner.scan(root)
+                seeded.append(key)
+                continue
+            if key == "clerk_pulse":
+                from helpers import clerk_pulse
+                clerk_pulse.refresh_clerks(root, bots=bots)
+                seeded.append(key)
+                continue
+            if key == "timer_heartbeat":
+                from helpers import timer_heartbeat
+                timer_heartbeat.probe_from_snapshot(root)
+                seeded.append(key)
+                continue
+            mod = __import__(f"helpers.{key}", fromlist=["*"])
+            if hasattr(mod, "write_digest_from_desk"):
+                mod.write_digest_from_desk(root)
+                seeded.append(key)
+            elif hasattr(mod, "write_digest"):
+                mod.write_digest(root)
+                seeded.append(key)
+            else:
+                errors.append({"helper": key, "error": "no_write"})
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"helper": key, "error": type(exc).__name__})
+    inv_after = digest_inventory(root)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "seeded": seeded,
+        "seeded_n": len(seeded),
+        "errors": errors,
+        "before": {
+            "present_n": inv_before.get("present_n"),
+            "missing": inv_before.get("missing"),
+        },
+        "after": {
+            "present_n": inv_after.get("present_n"),
+            "missing": inv_after.get("missing"),
+            "pass": inv_after.get("pass"),
+            "ratio": inv_after.get("ratio"),
+        },
+        "note": "Seeded empty observe digests only — never places; floors locked.",
+    }
+
+
+def living_board_export(root: str | None = None, bots: list | None = None) -> dict:
+    """Compact JSON export of living board for staff paste / archive."""
+    board = living_upgrade_board(root, bots=bots)
+    keep = (
+        "chicago_today", "fee_floors_locked", "live_orders_enabled", "compact",
+        "insight_swarm", "digest_inventory", "feature_quiet", "feature_quiet_pager",
+        "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
+        "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
+        "betting_expand_gate", "doctor_age", "fee_floors_assert",
+    )
+    slim = {k: board.get(k) for k in keep if k in board}
+    slim["paper_only"] = True
+    slim["export"] = "living_board_v1"
+    slim["note"] = "Staff export — never invent fills; never soften floors; never enable live."
+    return slim
+
+
+def dual_control_gaps_page(root: str | None = None) -> dict:
+    """Staff checklist gaps copy for unsigned dual-control items (never auto-pages)."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.dual_control_status(root) or {}
+    except Exception:
+        status = {}
+    items = status.get("items") if isinstance(status.get("items"), list) else []
+    gaps = [
+        {
+            "id": str(it.get("id") or ""),
+            "label": str(it.get("label") or "")[:120],
+        }
+        for it in items
+        if isinstance(it, dict) and not it.get("signed")
+    ]
+    page = bool(gaps) and not bool(status.get("arm_ready_paper"))
+    lines = [
+        "**DUAL-CONTROL GAPS** (paper checklist — never enables live)",
+        f"signed={status.get('signed_n')}/{status.get('items_n')} "
+        f"two_staff={bool(status.get('two_staff'))} "
+        f"arm_ready_paper={bool(status.get('arm_ready_paper'))}",
+        "",
+    ]
+    for g in gaps:
+        lines.append(f"- [ ] `{g.get('id')}` — {g.get('label')}")
+    if not gaps:
+        lines.append("- all checklist items signed (still paper-only; live lock stays False)")
+    lines.append("")
+    lines.append("_floors locked · LIVE_ORDERS_ENABLED=False · staff ack only_")
+    copy = "\n".join(lines)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_page": False,
+        "auto_publish": False,
+        "page": page,
+        "gaps_n": len(gaps),
+        "gaps": gaps,
+        "signed_n": status.get("signed_n"),
+        "items_n": status.get("items_n"),
+        "copy": copy,
+        "discord": copy,  # same markdown — staff paste only
+        "label": (
+            f"dual-control gaps={len(gaps)} signed={status.get('signed_n')}/{status.get('items_n')}"
+        ),
+        "note": status.get("note") or (
+            "Unsigned dual-control items — staff signs via tools/staff_dual_control.py."
+        ),
+    }
+
+
+def hillclimb_chip(root: str | None = None) -> dict:
+    """Hillclimb lever status chip — active lever only when staff-set."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.hillclimb_lever_status(root) or {}
+    except Exception:
+        status = {}
+    active = status.get("active") if isinstance(status.get("active"), dict) else None
+    name = None
+    if active:
+        name = active.get("name") or active.get("lever") or active.get("id")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "auto_revert": bool(status.get("auto_revert")),
+        "week": status.get("week"),
+        "active": active,
+        "active_name": name,
+        "active_this_week": bool(status.get("active_this_week") or active),
+        "kill": status.get("kill"),
+        "label": (
+            f"hillclimb lever={name} week={status.get('week')}"
+            if name
+            else f"hillclimb none week={status.get('week')}"
+        ),
+        "note": status.get("note") or (
+            "One allowlisted lever per Chicago week — floors locked."
+        ),
+    }
+
+
+def digest_inventory(root: str | None = None) -> dict:
+    """Count insight helper digests present vs expected (≥3:1 hire order)."""
+    present = []
+    missing = []
+    base = os.path.join(_root(root), "helpers")
+    for name in INSIGHT_HELPER_DIGESTS:
+        path = os.path.join(base, name)
+        key = name.replace("_digest.json", "").replace(".json", "")
+        if os.path.isfile(path):
+            present.append(key)
+        else:
+            missing.append(key)
+    expected_n = len(INSIGHT_HELPER_DIGESTS)
+    present_n = len(present)
+    betting_n = len(BETTING_TOWERS)
+    ratio = round(present_n / betting_n, 4) if betting_n else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "expected_n": expected_n,
+        "present_n": present_n,
+        "missing_n": len(missing),
+        "present": present,
+        "missing": missing,
+        "betting_n": betting_n,
+        "ratio": ratio,
+        "min_ratio": INSIGHT_BETTING_MIN_RATIO,
+        "pass": bool(ratio is not None and ratio + 1e-12 >= INSIGHT_BETTING_MIN_RATIO),
+        "label": (
+            f"digest inventory {present_n}/{expected_n} "
+            f"missing={len(missing)} ratio={ratio}"
+        ),
+        "note": (
+            "Insight digests present vs expected. Hire observe clerks first — floors locked."
+        ),
+    }
+
+
+CHIP_CATALOG_SOFT_MAX = 64
+_BOARD_SIZE_SKIP = frozenset({
+    "board_size", "compact", "insight_helper_digests", "feature_store",
+    "feature_quiet", "completions", "living_ai", "insight_swarm",
+    "hillclimb_lever", "dual_control", "ruin_drill",
+})
+
+
+def _count_living_chips(board: dict | None) -> int:
+    return sum(
+        1
+        for k, v in (board or {}).items()
+        if (
+            k not in _BOARD_SIZE_SKIP
+            and isinstance(v, dict)
+            and v.get("fee_floors_locked") is True
+        )
+    )
+
+
+def living_board_size_guard(*, chips_n: int | None = None) -> dict:
+    """Warn when living chip count balloons (rail noise risk)."""
+    n = int(chips_n or 0)
+    over = n > CHIP_CATALOG_SOFT_MAX
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "chips_n": n,
+        "soft_max": CHIP_CATALOG_SOFT_MAX,
+        "over": over,
+        "label": (
+            f"chip catalog {n}/{CHIP_CATALOG_SOFT_MAX}"
+            + (" OVER" if over else " ok")
+        ),
+        "note": "Prefer finalize_living_priority over unbounded chip growth.",
+    }
+
+
+def doctor_run_path(root: str | None = None) -> str:
+    return os.path.join(_root(root), DOCTOR_RUN_NAME)
+
+
+def record_doctor_run(root: str | None, doc: dict | None) -> dict:
+    """Persist last living doctor run (staff observe marker)."""
+    now = datetime.now(CT)
+    row = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "at": now.isoformat(),
+        "ok": bool((doc or {}).get("ok")),
+        "failed_n": int((doc or {}).get("failed_n") or 0),
+        "label": str((doc or {}).get("label") or "")[:160],
+    }
+    _save_json(doctor_run_path(root), row)
+    return row
+
+
+def doctor_age_chip(root: str | None = None) -> dict:
+    """Age since last living doctor run."""
+    path = doctor_run_path(root)
+    data = _load_json(path, {})
+    at = data.get("at") if isinstance(data, dict) else None
+    age_sec = None
+    if at:
+        try:
+            stamp = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=CT)
+            age_sec = int(max(0.0, (datetime.now(CT) - stamp.astimezone(CT)).total_seconds()))
+        except ValueError:
+            age_sec = None
+    stale = age_sec is None or age_sec >= 7 * 24 * 3600
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "at": at,
+        "age_sec": age_sec,
+        "ok_last": data.get("ok") if isinstance(data, dict) else None,
+        "stale": stale,
+        "label": (
+            f"doctor age={age_sec}s last_ok={data.get('ok') if isinstance(data, dict) else None}"
+            if age_sec is not None
+            else "doctor never run"
+        ),
+        "note": "Staff doctor marker — run make living-doctor weekly.",
+    }
+
+
+def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
+    """One-shot staff doctor: floors + expand + selfcheck + quiet/timer."""
+    floors = fee_floors_assert(root)
+    expand = betting_expand_gate(root)
+    health = living_self_check(root)
+    quiet = feature_store_quiet_alert(root)
+    timer = timer_heartbeat_chip(root)
+    gaps = dual_control_gaps_page(root)
+    ok = bool(
+        floors.get("all_ok")
+        and health.get("ok")
+        and not expand.get("blocked")
+        and not quiet.get("quiet")
+        and timer.get("alive") is not False
+    )
+    checks = [
+        {"id": "floors", "ok": bool(floors.get("all_ok")), "label": floors.get("label")},
+        {"id": "expand", "ok": not bool(expand.get("blocked")), "label": expand.get("label")},
+        {"id": "selfcheck", "ok": bool(health.get("ok")), "label": "living selfcheck"},
+        {"id": "feature_quiet", "ok": not bool(quiet.get("quiet")), "label": quiet.get("alert") or "feature quiet ok"},
+        {"id": "timer", "ok": timer.get("alive") is not False, "label": timer.get("label")},
+        {"id": "dual_gaps", "ok": not bool(gaps.get("page")), "label": gaps.get("label")},
+    ]
+    failed = [c for c in checks if not c.get("ok")]
+    doc = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "ok": ok and not failed,
+        "failed_n": len(failed),
+        "failed": failed,
+        "checks": checks,
+        "chip_catalog": health.get("chip_catalog") or [],
+        "chips_n": health.get("chips_n"),
+        "chips_soft_max": CHIP_CATALOG_SOFT_MAX,
+        "chips_over": bool(int(health.get("chips_n") or 0) > CHIP_CATALOG_SOFT_MAX),
+        "label": (
+            "living doctor OK"
+            if ok and not failed
+            else f"living doctor FAIL n={len(failed)}"
+        ),
+        "note": "Staff one-shot doctor — never places; never softens floors; never enables live.",
+    }
+    failed_ids = ",".join(str(c.get("id") or "") for c in failed) or "none"
+    soft_copy = (
+        f"**Living doctor** (paper · floors locked · live=False)\n"
+        f"{doc['label']} · failed=[{failed_ids}]\n"
+        f"_never places · never softens floors · never enables live_"
+    )
+    doc["soft_copy"] = soft_copy
+    doc["discord"] = soft_copy
+    if record:
+        try:
+            marker = record_doctor_run(root, doc)
+            doc["recorded_at"] = marker.get("at")
+        except Exception:
+            doc["recorded_at"] = None
+    doc["doctor_age"] = doctor_age_chip(root)
+    return doc
+
+
+def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> dict:
+    """Insight-first hire blocker: refuse betting expand while swarm < 3:1."""
+    swarm = insight_swarm_ratio(root)
+    inv = digest_inventory(root)
+    ok = bool(swarm.get("pass")) and bool(inv.get("pass") or swarm.get("pass"))
+    reason = (
+        "insight swarm meets ≥3:1 — betting expand still staff/paper only"
+        if ok
+        else (
+            f"BLOCK betting expand: insight swarm "
+            f"{swarm.get('insight_n')}:{swarm.get('betting_n')} "
+            f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1). "
+            "Hire observe clerks / seed digests first."
+        )
+    )
+    label = (
+        "betting expand allowed (paper)"
+        if ok
+        else "betting expand BLOCKED — insight swarm thin"
+    )
+    soft_copy = (
+        f"{label} — {reason}"
+        if not ok
+        else f"{label} — {reason}"
+    )
+    if remember and not ok:
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="mistakes",
+                text=str(label)[:200],
+                bot_id="desk",
+                source="betting_expand_gate",
+            )
+        except Exception:
+            pass
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "allow_betting_expand": ok,
+        "blocked": not ok,
+        "swarm_pass": swarm.get("pass"),
+        "swarm_ratio": swarm.get("ratio"),
+        "min_ratio": swarm.get("min_ratio") or INSIGHT_BETTING_MIN_RATIO,
+        "digest_pass": inv.get("pass"),
+        "reason": reason,
+        "soft_copy": soft_copy,
+        "label": label,
+        "note": "Insight-first living hire order. Never softens venue floors.",
+    }
+
+
+def fee_floors_assert(root: str | None = None, cfg: dict | None = None) -> dict:
+    """Staff assert: runtime venue edges at/above locked floors."""
+    floors: dict = {}
+    try:
+        import desk_profit
+        # Prefer explicit cfg; avoid heavy snapshot loads during board builds/tests.
+        floors = desk_profit.venue_floors_locked(cfg if isinstance(cfg, dict) else None) or {}
+    except Exception as exc:  # noqa: BLE001
+        floors = {"paper_only": True, "locked": True, "all_ok": False, "error": type(exc).__name__}
+    all_ok = bool(floors.get("all_ok"))
+    label = (
+        "fee floors OK (0.06/0.05/0.02)"
+        if all_ok
+        else "fee floors CHECK — live edge below locked floor"
+    )
+    soft_copy = (
+        f"**Fee floors assert** (locked · never soften)\n"
+        f"{label}\n"
+        f"_sports 0.06 · BTC/commodity 0.05 · INX/DEX 0.02 · live=False_"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "all_ok": all_ok,
+        "venues": floors.get("venues") if isinstance(floors.get("venues"), dict) else {},
+        "label": label,
+        "soft_copy": soft_copy,
+        "discord": soft_copy,
+        "note": floors.get("note") or (
+            "Venue min_edge floors are locked — selective volume never softens them."
+        ),
+    }
+
+
+def living_self_check(root: str | None = None) -> dict:
+    """Staff health probe for living spine (never places / never softens)."""
+    board = living_upgrade_board(root)
+    swarm = board.get("insight_swarm") if isinstance(board.get("insight_swarm"), dict) else {}
+    quiet = board.get("feature_quiet") if isinstance(board.get("feature_quiet"), dict) else {}
+    timer = board.get("timer_heartbeat") if isinstance(board.get("timer_heartbeat"), dict) else {}
+    floors = bool(board.get("fee_floors_locked"))
+    floors_assert = fee_floors_assert(root)
+    ok = bool(
+        floors
+        and board.get("live_orders_enabled") is False
+        and board.get("grok_buys") is False
+        and floors_assert.get("all_ok")
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": floors,
+        "live_orders_enabled": False,
+        "ok": ok,
+        "swarm_pass": swarm.get("pass"),
+        "swarm_ratio": swarm.get("ratio"),
+        "feature_quiet": bool(quiet.get("quiet")),
+        "timer_alive": timer.get("alive"),
+        "floors_assert": floors_assert,
+        "chips_n": _count_living_chips(board),
+        "chip_catalog": sorted(
+            k for k, v in board.items()
+            if (
+                k not in _BOARD_SIZE_SKIP
+                and isinstance(v, dict)
+                and v.get("fee_floors_locked") is True
+            )
+        ),
+        "board_size": living_board_size_guard(chips_n=_count_living_chips(board)),
+        "chicago_today": board.get("chicago_today"),
+        "note": "Living self_check — observe-only. Floors must stay locked.",
     }
 
 

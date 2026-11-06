@@ -454,13 +454,249 @@ Interactive: Positive ROI Master Plan canvas.
 | Reporter chip | `desk_living.reporter_chip` |
 | Empty-card bee chip | `desk_living.empty_card_bee_chip` |
 
+### Living upgrade — near-miss / hard-stop / bleed clerk chips
+
+| Ticket | Where |
+| --- | --- |
+| Near-miss clerk chip | `desk_living.near_miss_clerk_chip` |
+| Hard-stop clerk chip | `desk_living.hard_stop_clerk_chip` |
+| Bleed clerk chip | `desk_living.bleed_clerk_chip` |
+
+### Living upgrade — skip-twin / CLV closer / timer digest chips
+
+| Ticket | Where |
+| --- | --- |
+| Skip-twin clerk chip | `desk_living.skip_twin_clerk_chip` |
+| CLV closer chip | `desk_living.clv_closer_chip` |
+| Timer digest chip | `desk_living.timer_digest_chip` |
+
+### Living upgrade — calendar / EIA blackout / compact card
+
+| Ticket | Where |
+| --- | --- |
+| Calendar scanner chip | `desk_living.calendar_scanner_chip` |
+| EIA blackout chip | `desk_living.eia_blackout_chip` |
+| Compact living card | `desk_living.living_compact_card` |
+
+### Living upgrade — pulse / dual-control / ruin chips
+
+| Ticket | Where |
+| --- | --- |
+| Clerk pulse chip | `desk_living.clerk_pulse_chip` |
+| Dual-control chip | `desk_living.dual_control_chip` |
+| Ruin drill chip | `desk_living.ruin_drill_chip` |
+
+### Living upgrade — priority trim + status CLI + quiet pager
+
+| Ticket | Where |
+| --- | --- |
+| Priority trim | `desk_master.finalize_living_priority` (max 16) |
+| Staff living status | `tools/staff_living_status.py` |
+| Feature quiet pager | `desk_living.feature_quiet_pager` |
+
+### Living upgrade — injury ingest CLI + completions chip
+
+| Ticket | Where |
+| --- | --- |
+| Injury ingest CLI | `tools/staff_injury_ingest.py` |
+| Completions chip | `desk_living.completions_chip` + teller fact |
+
+### Living upgrade — calib tickets CLI + self_check + vault color
+
+| Ticket | Where |
+| --- | --- |
+| Calib tickets CLI | `tools/staff_calib_tickets.py` |
+| Living self_check | `desk_living.living_self_check` |
+| Swarm vault color | city vault green/amber from pass |
+
+### Living upgrade — dual gaps / hillclimb / digest inventory
+
+| Ticket | Where |
+| --- | --- |
+| Dual-control gaps page | `desk_living.dual_control_gaps_page` + CLI `gaps` |
+| Hillclimb chip | `desk_living.hillclimb_chip` + CLI `hillclimb` |
+| Digest inventory | `desk_living.digest_inventory` + CLI `inventory` |
+
+### Living upgrade — ruin page / export / digest seed
+
+| Ticket | Where |
+| --- | --- |
+| Ruin drill page | `desk_living.ruin_drill_page` + CLI `ruin` |
+| Living board export | `desk_living.living_board_export` + CLI `export` |
+| Digest seed | `desk_living.seed_missing_digests` + CLI `seed` |
+
+### Living upgrade — staff map + pulse CLI
+
+| Ticket | Where |
+| --- | --- |
+| Staff map | `paper-bots/LIVING_UPGRADE.md` |
+| Pulse force refresh | `staff_living_status.py pulse` |
+
+### Living upgrade — teller chip + floors assert + Sunday note
+
+| Ticket | Where |
+| --- | --- |
+| Teller living chip | `desk_living.teller_living_chip` |
+| Fee floors assert | `desk_living.fee_floors_assert` + CLI `floors` |
+| Sunday draft note | `LIVING_UPGRADE.md` (no auto publish) |
+
+### Living upgrade — vault teller/floors + chip catalog
+
+| Ticket | Where |
+| --- | --- |
+| City vault teller/floors | trading-city vault board rows |
+| Floors CLI exit 2 | `staff_living_status.py floors` |
+| Chip catalog | `living_self_check.chip_catalog` |
+
+### Living upgrade — smoke Makefile + betting expand gate
+
+| Ticket | Where |
+| --- | --- |
+| Smoke Makefile | `paper-bots/Makefile` living-* targets |
+| Betting expand gate | `desk_living.betting_expand_gate` + CLI `expand` |
+
+### Living upgrade — vault expand + gaps exit + living keys test
+
+| Ticket | Where |
+| --- | --- |
+| Expand on city vault | trading-city vault `expand` row |
+| Living keys unit | master teller/swarm/expand keys |
+| Gaps CLI exit 2 | `staff_living_status.py gaps` |
+
+### Living upgrade — doctor + size guard + expand teller fact
+
+| Ticket | Where |
+| --- | --- |
+| Living doctor | `desk_living.living_doctor` + CLI/make |
+| Board size guard | `living_board_size_guard` soft max 64 |
+| Expand teller fact | remember mistake when blocked |
+
+### Living upgrade — vault doctor + weekly ritual
+
+| Ticket | Where |
+| --- | --- |
+| Doctor on city vault | trading-city vault `doctor` row |
+| Weekly ritual script | `tools/staff_living_ritual.py` + make |
+
+### Living upgrade — prune + ritual Discord + doctor age
+
+| Ticket | Where |
+| --- | --- |
+| Living chip prune pass | `finalize_living_priority` family prefixes + clerk twin trim |
+| Ritual Discord copy | `staff_living_ritual.py --discord` + make |
+| Desk doctor age chip | `doctor_age_chip` + vault/Masters stale rail |
+
+### Living upgrade — sunday ritual + tip feed + pulse warn
+
+| Ticket | Where |
+| --- | --- |
+| Sunday ritual cross-link | sunday packet Discord + checklist |
+| Living tip-feed vault row | tip radar on city vault |
+| Clerk pulse age soft warn | soft WARN before STALE hard insert |
+
+### Living upgrade — AI vault + quiet tint + gaps Discord
+
+| Ticket | Where |
+| --- | --- |
+| Living AI vault row | raise_Φ ticket count on vault |
+| Feature quiet vault tint | quiet amber on vault |
+| Dual gaps Discord shortcut | `staff_living_status.py gaps --discord` |
+
+### Living upgrade — ruin Discord + compact vault + expand copy
+
+| Ticket | Where |
+| --- | --- |
+| Ruin Discord shortcut | `status ruin --discord` |
+| Living compact vault row | one-line compact on vault |
+| Expand gate soft copy | blocked reason in status / `--discord` |
+
+### Living upgrade — floors/doctor Discord + inventory vault
+
+| Ticket | Where |
+| --- | --- |
+| Floors Discord soft assert | `status floors --discord` |
+| Doctor Discord one-liner | `status doctor --discord` |
+| Inventory thin vault tint | digest inventory on vault |
+
+### Living upgrade — hillclimb/gaps vault + ritual make pulse
+
+| Ticket | Where |
+| --- | --- |
+| Hillclimb vault row | active lever on vault |
+| Dual gaps vault tint | unsigned gaps amber |
+| Living ritual Makefile note | README pulse + make *-discord targets |
+
+### Living upgrade — completions/green/bleed vault tints
+
+| Ticket | Where |
+| --- | --- |
+| Completions vault tint | eligible=0 amber on fills |
+| Green-day vault strip | green_n / red_n observe |
+| Bleed hot vault tint | bleed fail red |
+
+### Living upgrade — CLV / calib / timer vault
+
+| Ticket | Where |
+| --- | --- |
+| CLV vault row | sports CLV completeness |
+| Calib nag vault tint | raise_Φ tickets amber |
+| Timer dead vault tint | timer heartbeat DEAD |
+
+### Living upgrade — tip labels + empty/near-miss vault
+
+| Ticket | Where |
+| --- | --- |
+| Tip-force vs tip-feed polish | clarify tip labels on vault |
+| Empty-card vault tint | empty CARD slow amber |
+| Near-miss promote vault | promote_ready observe only |
+
+### Living upgrade — skip-regret / hard-stop / injury vault
+
+| Ticket | Where |
+| --- | --- |
+| Skip-regret vault row | green_twin soft review |
+| Hard-stop vault tint | sports promote_ready |
+| Injury wire vault row | inbox headlines observe |
+
+### Living upgrade — EIA scout / calendar / blackout vault
+
+| Ticket | Where |
+| --- | --- |
+| EIA scout vault row | next inventory ETA |
+| Calendar vault tint | events n>0 amber |
+| EIA blackout vault | ACTIVE red |
+
+### Living upgrade — firm queue / Gate A / quiet pager vault
+
+| Ticket | Where |
+| --- | --- |
+| Firm queue vault row | queue depth observe |
+| Helper Gate A vault | promote_ready helpers |
+| Feature quiet pager vault | pager copy soft |
+
+### Living upgrade — skip taxonomy / distance / quant vault
+
+| Ticket | Where |
+| --- | --- |
+| Skip taxonomy vault | top skip codes observe |
+| Distance empty vault | empty_card_pass fail |
+| Quant fit vault tint | fit_pass fail amber |
+
+### Living upgrade — bookkeeper / reporter / empty-bee vault
+
+| Ticket | Where |
+| --- | --- |
+| Bookkeeper vault row | fee ledger gaps |
+| Reporter vault tint | auto_publish False assert |
+| Empty-card bee vault | breaches amber |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Near-miss clerk chip | labeled near-miss digest |
-| Hard-stop clerk chip | shadow exits digest |
-| Bleed clerk chip | firm bleed digest |
+| Near-miss clerk vault | twin promote_ready |
+| Hard-stop clerk vault | clerk promote_ready |
+| Bleed clerk vault tint | clerk bleed hot |
 
 ## Hard rules unchanged
 

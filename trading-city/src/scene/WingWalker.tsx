@@ -19,6 +19,7 @@ import {
   roomAtPosition,
   spawnForMode,
   wingDeskObstacles,
+  wingEnclosureObstacles,
   wingOuterBounds,
   type WingSpawnMode,
 } from '../data/wingWalk'
@@ -64,7 +65,10 @@ export function WingWalker({
   const hintRef = useRef('')
   const bobY = useRef(0)
 
-  const obstacles = useMemo<FloorObstacle[]>(() => wingDeskObstacles(), [])
+  const obstacles = useMemo<FloorObstacle[]>(
+    () => [...wingDeskObstacles(), ...wingEnclosureObstacles()],
+    [],
+  )
   const outer = useMemo<WalkBounds>(() => wingOuterBounds(PLAYER_R), [])
 
   const clampXZ = useMemo(
@@ -206,13 +210,15 @@ export function WingWalker({
     })
 
     bobY.current = Math.abs(pose.bob) * 0.12
-    // First-person eye cam — ignore over-shoulder camPos from groundedWalk.
+    // First-person eye cam — stay inside the enclosed floor plan (same clamp as feet).
     const lookDist = 2.6
-    camera.position.set(s.pos.x, s.pos.y + GROUNDED.eyeH + bobY.current, s.pos.z)
+    const eye = clampWingWalk(s.pos.x, s.pos.z, PLAYER_R)
+    const eyeY = Math.min(GROUNDED.eyeH + 0.35, Math.max(0.35, s.pos.y + GROUNDED.eyeH + bobY.current))
+    camera.position.set(eye.x, eyeY, eye.z)
     camera.lookAt(
-      s.pos.x + Math.sin(s.yaw) * lookDist,
-      s.pos.y + GROUNDED.eyeH + s.pitch * 2.4,
-      s.pos.z + Math.cos(s.yaw) * lookDist,
+      eye.x + Math.sin(s.yaw) * lookDist,
+      eyeY + s.pitch * 2.4,
+      eye.z + Math.cos(s.yaw) * lookDist,
     )
 
     const room = roomAtPosition(s.pos.x, s.pos.z)

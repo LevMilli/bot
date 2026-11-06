@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""
+Staff UX — compact living upgrade status (never enables live / never softens floors).
+
+Usage (from paper-bots/):
+  python3 tools/staff_living_status.py
+  python3 tools/staff_living_status.py json
+  python3 tools/staff_living_status.py pager
+  python3 tools/staff_living_status.py priority
+  python3 tools/staff_living_status.py selfcheck
+  python3 tools/staff_living_status.py gaps
+  python3 tools/staff_living_status.py gaps --discord
+  python3 tools/staff_living_status.py inventory
+  python3 tools/staff_living_status.py hillclimb
+  python3 tools/staff_living_status.py ruin
+  python3 tools/staff_living_status.py export
+  python3 tools/staff_living_status.py seed
+  python3 tools/staff_living_status.py pulse
+  python3 tools/staff_living_status.py floors
+  python3 tools/staff_living_status.py teller
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+import desk_living
+import desk_master
+
+
+def _board(root: str) -> dict:
+    return desk_living.living_upgrade_board(root) or {}
+
+
+def _text(board: dict) -> str:
+    compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+    swarm = board.get("insight_swarm") if isinstance(board.get("insight_swarm"), dict) else {}
+    quiet = board.get("feature_quiet") if isinstance(board.get("feature_quiet"), dict) else {}
+    dual = board.get("dual_control_chip") if isinstance(board.get("dual_control_chip"), dict) else {}
+    ruin = board.get("ruin_drill_chip") if isinstance(board.get("ruin_drill_chip"), dict) else {}
+    inv = board.get("digest_inventory") if isinstance(board.get("digest_inventory"), dict) else {}
+    hill = board.get("hillclimb_chip") if isinstance(board.get("hillclimb_chip"), dict) else {}
+    floors = board.get("fee_floors_assert") if isinstance(board.get("fee_floors_assert"), dict) else {}
+    teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
+    expand = board.get("betting_expand_gate") if isinstance(board.get("betting_expand_gate"), dict) else {}
+    lines = [
+        "Living upgrade status (paper only · floors locked · live=False)",
+        f"compact: {compact.get('label') or '—'}",
+        (
+            f"swarm: {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+            f"pass={swarm.get('pass')}"
+        ),
+        (
+            f"feature quiet: quiet={quiet.get('quiet')} "
+            f"age_h={quiet.get('age_hours')} alert={quiet.get('alert') or 'ok'}"
+        ),
+        f"dual-control: {dual.get('label') or '—'}",
+        f"ruin: {ruin.get('label') or '—'}",
+        f"hillclimb: {hill.get('label') or '—'}",
+        f"digests: {inv.get('label') or '—'}",
+        f"floors: {floors.get('label') or '—'}",
+        f"teller: {teller.get('memory_line') or '—'}",
+        (
+            f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
+        ),
+        f"chicago_today: {board.get('chicago_today')}",
+    ]
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Staff living upgrade status.")
+    parser.add_argument(
+        "action",
+        nargs="?",
+        default="text",
+        choices=(
+            "text", "json", "pager", "priority", "selfcheck",
+            "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
+            "floors", "teller", "expand", "doctor",
+        ),
+    )
+    parser.add_argument("--root", default=ROOT)
+    parser.add_argument(
+        "--discord",
+        action="store_true",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor); never auto-posts.",
+    )
+    args = parser.parse_args()
+    root = args.root
+    board = _board(root)
+
+    if args.action == "selfcheck":
+        print(json.dumps(desk_living.living_self_check(root), indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "gaps":
+        gaps = board.get("dual_control_gaps")
+        if not isinstance(gaps, dict):
+            gaps = desk_living.dual_control_gaps_page(root)
+        if args.discord:
+            body = gaps.get("discord") or gaps.get("copy") or ""
+            print(body if body else json.dumps(gaps, indent=2, sort_keys=True, default=str))
+        elif gaps.get("copy"):
+            print(gaps["copy"])
+        else:
+            print(json.dumps(gaps, indent=2, sort_keys=True, default=str))
+        return 2 if gaps.get("page") else 0
+    if args.action == "inventory":
+        inv = board.get("digest_inventory")
+        if not isinstance(inv, dict):
+            inv = desk_living.digest_inventory(root)
+        print(json.dumps(inv, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb":
+        hill = board.get("hillclimb_chip")
+        if not isinstance(hill, dict):
+            hill = desk_living.hillclimb_chip(root)
+        print(json.dumps(hill, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "ruin":
+        ruin = board.get("ruin_drill_page")
+        if not isinstance(ruin, dict):
+            ruin = desk_living.ruin_drill_page(root)
+        if args.discord:
+            body = ruin.get("discord") or ruin.get("copy") or ""
+            print(body if body else json.dumps(ruin, indent=2, sort_keys=True, default=str))
+        elif ruin.get("copy"):
+            print(ruin["copy"])
+        else:
+            print(json.dumps(ruin, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "export":
+        print(json.dumps(desk_living.living_board_export(root), indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "seed":
+        print(json.dumps(desk_living.seed_missing_digests(root), indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "pulse":
+        from helpers import clerk_pulse
+        # Force refresh: clear cadence marker then run.
+        marker = os.path.join(root, "helpers", getattr(clerk_pulse, "RUN_MARKER", "clerk_pulse_at.txt"))
+        try:
+            if os.path.isfile(marker):
+                os.remove(marker)
+        except OSError:
+            pass
+        digest = clerk_pulse.refresh_clerks(root)
+        chip = desk_living.clerk_pulse_chip(root)
+        print(json.dumps({
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "may_place_alone": False,
+            "refreshed_n": (digest or {}).get("refreshed_n") if isinstance(digest, dict) else None,
+            "chip": chip,
+            "note": "Forced clerk pulse refresh — observe digests only.",
+        }, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "floors":
+        payload = desk_living.fee_floors_assert(root)
+        if args.discord:
+            print(payload.get("discord") or payload.get("soft_copy") or payload.get("label") or "—")
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        return 0 if payload.get("all_ok") else 2
+    if args.action == "teller":
+        print(json.dumps(
+            desk_living.teller_living_chip(root, remember=False),
+            indent=2, sort_keys=True, default=str,
+        ))
+        return 0
+    if args.action == "expand":
+        gate = desk_living.betting_expand_gate(root)
+        if args.discord:
+            print(
+                f"**Betting expand gate** (paper only · never softens floors)\n"
+                f"{gate.get('soft_copy') or gate.get('label') or '—'}\n"
+                f"_auto_publish=False · live=False_"
+            )
+        else:
+            print(json.dumps(gate, indent=2, sort_keys=True, default=str))
+        return 0 if gate.get("allow_betting_expand") else 2
+    if args.action == "doctor":
+        doc = desk_living.living_doctor(root)
+        if args.discord:
+            print(doc.get("discord") or doc.get("soft_copy") or doc.get("label") or "—")
+        else:
+            print(json.dumps(doc, indent=2, sort_keys=True, default=str))
+        return 0 if doc.get("ok") else 2
+    if args.action == "json":
+        print(json.dumps({
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "live_orders_enabled": False,
+            "compact": board.get("compact"),
+            "insight_swarm": board.get("insight_swarm"),
+            "feature_quiet": board.get("feature_quiet"),
+            "feature_quiet_pager": board.get("feature_quiet_pager"),
+            "dual_control_chip": board.get("dual_control_chip"),
+            "dual_control_gaps": board.get("dual_control_gaps"),
+            "hillclimb_chip": board.get("hillclimb_chip"),
+            "digest_inventory": board.get("digest_inventory"),
+            "ruin_drill_chip": board.get("ruin_drill_chip"),
+            "ruin_drill_page": board.get("ruin_drill_page"),
+            "fee_floors_assert": board.get("fee_floors_assert"),
+            "teller_living": board.get("teller_living"),
+            "timer_heartbeat": board.get("timer_heartbeat"),
+            "chicago_today": board.get("chicago_today"),
+            "chip_catalog": sorted(
+                k for k, v in board.items()
+                if isinstance(v, dict) and v.get("fee_floors_locked") is True
+            ),
+        }, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "pager":
+        pager = board.get("feature_quiet_pager")
+        if not isinstance(pager, dict):
+            pager = desk_living.feature_quiet_pager(root)
+        if pager.get("page") and pager.get("copy"):
+            print(pager["copy"])
+        else:
+            print(json.dumps({
+                "page": False,
+                "auto_page": False,
+                "fee_floors_locked": True,
+                "note": pager.get("note") or "No feature-quiet page.",
+            }, indent=2))
+        return 0
+    if args.action == "priority":
+        living = board
+        raw: list[str] = []
+        fq = living.get("feature_quiet") if isinstance(living.get("feature_quiet"), dict) else {}
+        if fq.get("quiet") and fq.get("alert"):
+            raw.insert(0, str(fq.get("alert"))[:120])
+        timer = living.get("timer_heartbeat") if isinstance(living.get("timer_heartbeat"), dict) else {}
+        if timer.get("alive") is False:
+            raw.insert(0, str(timer.get("label") or "timer DEAD")[:120])
+        swarm = living.get("insight_swarm") if isinstance(living.get("insight_swarm"), dict) else {}
+        if swarm.get("pass") is False:
+            raw.append(
+                f"insight swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+                f"(need ≥{swarm.get('min_ratio')}:1)"
+            )
+        ruin = living.get("ruin_drill_chip") if isinstance(living.get("ruin_drill_chip"), dict) else {}
+        if ruin.get("active"):
+            raw.insert(0, str(ruin.get("label") or "ruin ACTIVE")[:120])
+        elif not ruin.get("practiced_this_month"):
+            raw.append("ruin drill: practice soft/hard this Chicago month")
+        raw.extend([
+            "insight swarm ≥3:1 before betting expand",
+            "revert last lever if hillclimb kill trips",
+            "fee floors locked 0.06/0.05/0.02",
+        ])
+        print(json.dumps({
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "priority": desk_master.finalize_living_priority(raw),
+            "max_n": desk_master.PRIORITY_MAX,
+        }, indent=2))
+        return 0
+    print(_text(board))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

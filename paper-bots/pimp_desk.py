@@ -2645,6 +2645,179 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["reporter"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["empty_card_bee"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        nmc = desk_living.near_miss_clerk_chip(root)
+        hsc = desk_living.hard_stop_clerk_chip(root)
+        blc = desk_living.bleed_clerk_chip(root, bots=bots)
+        desk_row["near_miss_clerk"] = nmc
+        desk_row["hard_stop_clerk"] = hsc
+        desk_row["bleed_clerk"] = blc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["near_miss_clerk"] = (
+                desk_row["master"].get("near_miss_clerk") or nmc
+            )
+            desk_row["master"]["hard_stop_clerk"] = (
+                desk_row["master"].get("hard_stop_clerk") or hsc
+            )
+            desk_row["master"]["bleed_clerk"] = desk_row["master"].get("bleed_clerk") or blc
+    except Exception as exc:  # noqa: BLE001
+        desk_row["near_miss_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["hard_stop_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["bleed_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        stc = desk_living.skip_twin_clerk_chip(root)
+        clc = desk_living.clv_closer_chip(root)
+        tdc = desk_living.timer_digest_chip(root)
+        desk_row["skip_twin_clerk"] = stc
+        desk_row["clv_closer"] = clc
+        desk_row["timer_digest"] = tdc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_twin_clerk"] = (
+                desk_row["master"].get("skip_twin_clerk") or stc
+            )
+            desk_row["master"]["clv_closer"] = desk_row["master"].get("clv_closer") or clc
+            desk_row["master"]["timer_digest"] = desk_row["master"].get("timer_digest") or tdc
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_twin_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["clv_closer"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["timer_digest"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        cal = desk_living.calendar_scanner_chip(root)
+        ebo = desk_living.eia_blackout_chip(root)
+        living_board = None
+        if isinstance(desk_row.get("master"), dict):
+            plan = (desk_row["master"].get("roi_plan") or {})
+            living_board = plan.get("living_upgrade") if isinstance(plan, dict) else None
+        compact = desk_living.living_compact_card(root, bots=bots, board=living_board)
+        desk_row["calendar_scanner"] = cal
+        desk_row["eia_blackout"] = ebo
+        desk_row["living_compact"] = compact
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["calendar_scanner"] = (
+                desk_row["master"].get("calendar_scanner") or cal
+            )
+            desk_row["master"]["eia_blackout"] = (
+                desk_row["master"].get("eia_blackout") or ebo
+            )
+            desk_row["master"]["compact"] = desk_row["master"].get("compact") or compact
+    except Exception as exc:  # noqa: BLE001
+        desk_row["calendar_scanner"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["eia_blackout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["living_compact"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        pulse = desk_living.clerk_pulse_chip(root)
+        dcc = desk_living.dual_control_chip(root)
+        rdc = desk_living.ruin_drill_chip(root)
+        desk_row["clerk_pulse"] = pulse
+        desk_row["dual_control_chip"] = dcc
+        desk_row["ruin_drill_chip"] = rdc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["clerk_pulse"] = desk_row["master"].get("clerk_pulse") or pulse
+            desk_row["master"]["dual_control_chip"] = (
+                desk_row["master"].get("dual_control_chip") or dcc
+            )
+            desk_row["master"]["ruin_drill_chip"] = (
+                desk_row["master"].get("ruin_drill_chip") or rdc
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["clerk_pulse"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["dual_control_chip"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["ruin_drill_chip"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        cc = desk_living.completions_chip(root)
+        desk_row["completions_chip"] = cc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["completions_chip"] = (
+                desk_row["master"].get("completions_chip") or cc
+            )
+        try:
+            import teller_memory
+            if int(cc.get("eligible_completions_today") or 0) > 0:
+                teller_memory.remember(
+                    root,
+                    kind="facts",
+                    text=str(cc.get("label") or "completions")[:200],
+                    bot_id="desk",
+                )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["completions_chip"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        tl = desk_living.teller_living_chip(root, bots=bots, remember=True)
+        desk_row["teller_living"] = tl
+        desk_row["living_memory_line"] = tl.get("memory_line")
+        desk_row["fee_floors_assert"] = desk_living.fee_floors_assert(root)
+        desk_row["betting_expand_gate"] = desk_living.betting_expand_gate(
+            root, remember=True,
+        )
+        # Snapshot path observes doctor without rewriting the weekly marker.
+        desk_row["living_doctor"] = desk_living.living_doctor(root, record=False)
+        desk_row["doctor_age"] = desk_living.doctor_age_chip(root)
+        desk_row["living_ai"] = desk_living.living_ai_health(root, bots=bots)
+        desk_row["feature_quiet"] = desk_living.feature_store_quiet_alert(root)
+        desk_row["feature_quiet_pager"] = desk_living.feature_quiet_pager(root)
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["teller_living"] = (
+                desk_row["master"].get("teller_living") or tl
+            )
+            desk_row["master"]["fee_floors_assert"] = (
+                desk_row["master"].get("fee_floors_assert")
+                or desk_row["fee_floors_assert"]
+            )
+            desk_row["master"]["betting_expand_gate"] = (
+                desk_row["master"].get("betting_expand_gate")
+                or desk_row["betting_expand_gate"]
+            )
+            desk_row["master"]["living_doctor"] = (
+                desk_row["master"].get("living_doctor")
+                or desk_row["living_doctor"]
+            )
+            desk_row["master"]["living_ai"] = (
+                desk_row["master"].get("living_ai") or desk_row["living_ai"]
+            )
+            desk_row["master"]["feature_quiet"] = (
+                desk_row["master"].get("feature_quiet") or desk_row["feature_quiet"]
+            )
+            desk_row["master"]["feature_quiet_pager"] = (
+                desk_row["master"].get("feature_quiet_pager")
+                or desk_row["feature_quiet_pager"]
+            )
+        # Prefer living line on desk teller when present.
+        for bot in bots or []:
+            if isinstance(bot, dict) and str(bot.get("id") or "") == "desk":
+                bot["memory_line"] = tl.get("memory_line") or bot.get("memory_line")
+    except Exception as exc:  # noqa: BLE001
+        desk_row["teller_living"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["betting_expand_gate"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        gaps = desk_living.dual_control_gaps_page(root)
+        hc = desk_living.hillclimb_chip(root)
+        inv = desk_living.digest_inventory(root)
+        desk_row["dual_control_gaps"] = gaps
+        desk_row["hillclimb_chip"] = hc
+        desk_row["digest_inventory"] = inv
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["dual_control_gaps"] = (
+                desk_row["master"].get("dual_control_gaps") or gaps
+            )
+            desk_row["master"]["hillclimb_chip"] = (
+                desk_row["master"].get("hillclimb_chip") or hc
+            )
+            desk_row["master"]["digest_inventory"] = (
+                desk_row["master"].get("digest_inventory") or inv
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["dual_control_gaps"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["hillclimb_chip"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["digest_inventory"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

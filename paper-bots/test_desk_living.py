@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -89,9 +90,13 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("clv", board2)
             self.assertTrue(board2["bleed"]["fee_floors_locked"])
             self.assertTrue(board2["clv"]["fee_floors_locked"])
+            self.assertIn("label", board2["clv"])
+            self.assertIn("timer_heartbeat", board2)
+            self.assertIn("label", board2["timer_heartbeat"])
             self.assertIn("tip_radar", board2)
             self.assertIn("calib_nag", board2)
             self.assertFalse(board2["calib_nag"].get("auto_write_phi"))
+            self.assertIn("tickets_n", board2["calib_nag"])
             self.assertTrue(board2["tip_radar"]["fee_floors_locked"])
             self.assertIn("injury_wire", board2)
             self.assertIn("eia_scout", board2)
@@ -103,6 +108,11 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("Sunday living packet", md)
             self.assertIn("floors locked", md)
             self.assertIn("Staff checklist", md)
+            self.assertIn("living ritual", " ".join(packet.get("staff_checklist") or []).lower())
+            self.assertIn("ritual", packet)
+            self.assertIn("Doctor age", md)
+            self.assertIn("Weekly ritual", md)
+            self.assertIn("living-ritual-discord", md)
             self.assertIn("skip_historian", board2)
             self.assertIn("distance_clerk", board2)
             self.assertIn("quant_clerk", board2)
@@ -113,6 +123,158 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("empty_card_bee", board2)
             self.assertFalse(board2["reporter"].get("auto_publish"))
             self.assertTrue(board2["bookkeeper"]["fee_floors_locked"])
+            self.assertIn("near_miss_clerk", board2)
+            self.assertIn("hard_stop_clerk", board2)
+            self.assertIn("bleed_clerk", board2)
+            self.assertFalse(board2["near_miss_clerk"].get("auto_promote"))
+            self.assertFalse(board2["hard_stop_clerk"].get("auto_promote"))
+            self.assertTrue(board2["bleed_clerk"]["fee_floors_locked"])
+            self.assertIn("skip_twin_clerk", board2)
+            self.assertIn("clv_closer", board2)
+            self.assertIn("timer_digest", board2)
+            self.assertFalse(board2["skip_twin_clerk"].get("auto_promote"))
+            self.assertTrue(board2["clv_closer"]["fee_floors_locked"])
+            self.assertIn("calendar_scanner", board2)
+            self.assertIn("eia_blackout", board2)
+            self.assertIn("compact", board2)
+            self.assertTrue(board2["eia_blackout"]["fee_floors_locked"])
+            self.assertIn("swarm", board2["compact"].get("label") or "")
+            self.assertIn("clerk_pulse", board2)
+            self.assertIn("dual_control_chip", board2)
+            self.assertIn("ruin_drill_chip", board2)
+            self.assertFalse(board2["dual_control_chip"].get("live_orders_enabled"))
+            self.assertTrue(board2["ruin_drill_chip"]["fee_floors_locked"])
+            self.assertIn("feature_quiet_pager", board2)
+            self.assertFalse(board2["feature_quiet_pager"].get("auto_page"))
+            import desk_master
+            trimmed = desk_master.finalize_living_priority([
+                "timer DEAD age=999s",
+                "timer digest dead",
+                "bleed ratio=2 hot",
+                "bleed clerk ratio=2",
+                "near-miss promote_ready — staff z|p only",
+                "skip-twin promote_ready — staff z|p only",
+                "doctor never run",
+                "living doctor FAIL n=2",
+                "empty card bee hot",
+                "empty bee stale",
+                "insight swarm ≥3:1 before betting expand",
+                "dual-control paper 0/8 signed; live_orders=False",
+                "dual-control signed=0/8 two_staff=False arm_ready_paper=False",
+            ] + [f"noise {i}" for i in range(20)])
+            self.assertLessEqual(len(trimmed), desk_master.PRIORITY_MAX)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("timer")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("bleed")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("dual")), 1)
+            self.assertEqual(sum(1 for t in trimmed if "near-miss" in t.lower() or t.lower().startswith("skip-twin")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("doctor") or t.lower().startswith("living doctor")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("empty")), 1)
+            self.assertIn("completions_chip", board2)
+            self.assertTrue(board2["completions_chip"]["fee_floors_locked"])
+            from helpers import injury_wire
+            dig = injury_wire.staff_ingest(
+                tmp, headlines=[{"league": "NBA", "text": "star out"}], replace=True,
+            )
+            self.assertEqual(dig.get("n"), 1)
+            health = desk_living.living_self_check(tmp)
+            self.assertTrue(health["ok"])
+            self.assertTrue(health["fee_floors_locked"])
+            self.assertFalse(health["live_orders_enabled"])
+            gaps = desk_living.dual_control_gaps_page(tmp)
+            self.assertFalse(gaps.get("auto_page"))
+            self.assertFalse(gaps.get("live_orders_enabled"))
+            self.assertIn("DUAL-CONTROL GAPS", gaps.get("copy") or "")
+            hill = desk_living.hillclimb_chip(tmp)
+            self.assertTrue(hill["fee_floors_locked"])
+            self.assertIn("hillclimb", hill.get("label") or "")
+            inv = desk_living.digest_inventory(tmp)
+            self.assertEqual(inv["expected_n"], len(desk_living.INSIGHT_HELPER_DIGESTS))
+            self.assertIn("digest_inventory", board2)
+            self.assertIn("dual_control_gaps", board2)
+            self.assertIn("hillclimb_chip", board2)
+            ruin_page = desk_living.ruin_drill_page(tmp)
+            self.assertFalse(ruin_page.get("auto_page"))
+            self.assertIn("RUIN DRILL", ruin_page.get("copy") or "")
+            seeded = desk_living.seed_missing_digests(tmp)
+            self.assertTrue(seeded["fee_floors_locked"])
+            self.assertFalse(seeded.get("may_place_alone"))
+            self.assertGreaterEqual(int(seeded.get("seeded_n") or 0), 0)
+            export = desk_living.living_board_export(tmp)
+            self.assertEqual(export.get("export"), "living_board_v1")
+            self.assertTrue(export.get("fee_floors_locked"))
+            self.assertIn("ruin_drill_page", board2)
+            map_path = os.path.join(
+                os.path.dirname(os.path.abspath(desk_living.__file__)),
+                "LIVING_UPGRADE.md",
+            )
+            self.assertTrue(os.path.isfile(map_path))
+            teller = desk_living.teller_living_chip(tmp, remember=False)
+            self.assertIn("swarm", teller.get("memory_line") or "")
+            self.assertTrue(teller["fee_floors_locked"])
+            floors = desk_living.fee_floors_assert(tmp)
+            self.assertTrue(floors.get("all_ok"))
+            self.assertIn("discord", floors)
+            self.assertIn("0.06", floors.get("soft_copy") or "")
+            self.assertIn("teller_living", board2)
+            self.assertIn("fee_floors_assert", board2)
+            health2 = desk_living.living_self_check(tmp)
+            self.assertIn("chip_catalog", health2)
+            self.assertGreaterEqual(len(health2.get("chip_catalog") or []), 5)
+            self.assertIn("board_size", health2)
+            self.assertFalse(health2["board_size"].get("over"))
+            doc = desk_living.living_doctor(tmp, record=True)
+            self.assertTrue(doc["fee_floors_locked"])
+            self.assertIn("checks", doc)
+            self.assertFalse(doc.get("live_orders_enabled"))
+            self.assertIn("discord", doc)
+            self.assertIn("Living doctor", doc.get("soft_copy") or "")
+            self.assertTrue(os.path.isfile(desk_living.doctor_run_path(tmp)))
+            age = desk_living.doctor_age_chip(tmp)
+            self.assertFalse(age.get("stale"))
+            self.assertIsNotNone(age.get("age_sec"))
+            self.assertIn("doctor_age", board2)
+            peek = desk_living.living_doctor(tmp, record=False)
+            self.assertIn("doctor_age", peek)
+            self.assertIn("board_size", board2)
+            gaps = desk_living.dual_control_gaps_page(tmp)
+            self.assertIn("copy", gaps)
+            self.assertEqual(gaps.get("discord"), gaps.get("copy"))
+            self.assertFalse(gaps.get("live_orders_enabled"))
+            self.assertFalse(gaps.get("auto_publish"))
+            ai = desk_living.living_ai_health(tmp)
+            self.assertIn("label", ai)
+            self.assertFalse(ai.get("auto_write_phi"))
+            self.assertTrue(ai["fee_floors_locked"])
+            quiet = desk_living.feature_store_quiet_alert(tmp)
+            self.assertIn("label", quiet)
+            self.assertTrue(os.path.isfile(os.path.join(
+                os.path.dirname(os.path.abspath(desk_living.__file__)),
+                "tools", "staff_living_ritual.py",
+            )))
+            gate = desk_living.betting_expand_gate(tmp)
+            self.assertTrue(gate["fee_floors_locked"])
+            self.assertIn("betting_expand_gate", board2)
+            self.assertIn(gate.get("blocked"), (True, False))
+            self.assertEqual(bool(gate.get("allow_betting_expand")), not bool(gate.get("blocked")))
+            self.assertIn("soft_copy", gate)
+            self.assertIn(gate.get("label") or "", gate.get("soft_copy") or "")
+            ruin_page = desk_living.ruin_drill_page(tmp)
+            self.assertEqual(ruin_page.get("discord"), ruin_page.get("copy"))
+            self.assertFalse(ruin_page.get("auto_publish"))
+            compact = desk_living.living_compact_card(tmp)
+            self.assertIn("swarm", compact.get("label") or "")
+            # Fresh empty root → blocked until seed fills digests.
+            with tempfile.TemporaryDirectory() as empty:
+                thin = desk_living.betting_expand_gate(empty)
+                self.assertTrue(thin.get("blocked"))
+                seeded = desk_living.seed_missing_digests(empty)
+                fat = desk_living.betting_expand_gate(empty)
+                if seeded.get("after", {}).get("pass"):
+                    self.assertTrue(fat.get("allow_betting_expand"))
+            with open(map_path, encoding="utf-8") as handle:
+                body = handle.read()
+            self.assertIn("auto_publish", body)
+            self.assertIn("staff_sunday_packet", body)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
@@ -291,6 +453,25 @@ class InsightHelpers(unittest.TestCase):
             # Due marker: second call within cadence returns None
             again = clerk_pulse.run_if_due(tmp)
             self.assertIsNone(again)
+            chip = desk_living.clerk_pulse_chip(tmp)
+            self.assertFalse(chip.get("stale"))
+            self.assertFalse(chip.get("soft_warn"))
+            # Soft warn: past cadence, before 2×.
+            marker = os.path.join(tmp, "helpers", getattr(clerk_pulse, "RUN_MARKER", "clerk_pulse_at.txt"))
+            cadence = int(getattr(clerk_pulse, "CADENCE_SEC", 300))
+            past = time.time() - (cadence + 30)
+            os.utime(marker, (past, past))
+            warn = desk_living.clerk_pulse_chip(tmp)
+            self.assertTrue(warn.get("soft_warn"))
+            self.assertFalse(warn.get("stale"))
+            self.assertIn("WARN", warn.get("label") or "")
+            # Hard stale at >2× cadence.
+            older = time.time() - (cadence * 2 + 30)
+            os.utime(marker, (older, older))
+            stale = desk_living.clerk_pulse_chip(tmp)
+            self.assertTrue(stale.get("stale"))
+            self.assertFalse(stale.get("soft_warn"))
+            self.assertIn("STALE", stale.get("label") or "")
 
     def test_injury_staff_ingest_and_swarm_lights(self):
         from helpers import injury_wire
@@ -313,9 +494,46 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("swarm_lights", summary)
             self.assertIn("insight swarm ≥3:1", " ".join(summary.get("priority") or []))
             self.assertIn("living_ai", summary)
-            self.assertTrue(
-                any("eligible completions today" in str(p) for p in (summary.get("priority") or []))
-            )
+            self.assertLessEqual(len(summary.get("priority") or []), desk_master.PRIORITY_MAX)
+            # Living desk keys expected on Masters / living board path.
+            living = desk_living.living_upgrade_board(tmp)
+            for key in ("teller_living", "fee_floors_assert", "betting_expand_gate", "insight_swarm"):
+                self.assertIn(key, living)
+            self.assertIn("betting_expand_gate", summary)
+            self.assertIn("teller_living", summary)
+            # Completions line only when today > 0 (trimmed noise otherwise).
+            comps = (summary.get("completions") or {}).get("eligible_completions_today") or 0
+            if int(comps) > 0:
+                self.assertTrue(
+                    any("eligible completions today" in str(p) for p in (summary.get("priority") or []))
+                )
+
+    def test_ritual_discord_export(self):
+        from tools import staff_living_ritual
+        with tempfile.TemporaryDirectory() as tmp:
+            steps = {
+                "gaps": {"copy": "**DUAL-CONTROL GAPS**\n- [ ] a"},
+                "ruin": {"copy": "**RUIN DRILL**\nok"},
+                "floors": {"label": "floors locked ok", "all_ok": True},
+                "expand": {"label": "expand ok", "blocked": False},
+                "doctor": {"label": "living doctor OK", "ok": True},
+            }
+            text = staff_living_ritual.format_discord({
+                "ok": True,
+                "live_orders_enabled": False,
+                "steps": steps,
+                "note": "Never invent fills.",
+            })
+            self.assertIn("Living weekly ritual", text)
+            self.assertIn("DUAL-CONTROL GAPS", text)
+            self.assertIn("floors", text)
+            age = desk_living.doctor_age_chip(tmp)
+            self.assertTrue(age.get("stale"))
+            desk_living.record_doctor_run(tmp, {"ok": True, "label": "living doctor OK", "failed_n": 0})
+            age2 = desk_living.doctor_age_chip(tmp)
+            self.assertFalse(age2.get("stale"))
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("doctor_age", export)
 
     def test_tip_radar_from_quote_cache(self):
         from helpers import tip_radar
