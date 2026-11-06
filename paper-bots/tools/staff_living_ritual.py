@@ -88,6 +88,7 @@ def main() -> int:
                 "(staff paste · never auto-posts)"
             )
             print(chip.get("note") or "")
+            print(f"doctor_fresh={chip.get('doctor_fresh')}")
         return 0 if chip.get("exit_ok") else 2
 
     steps = [

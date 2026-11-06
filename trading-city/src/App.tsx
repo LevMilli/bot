@@ -1081,24 +1081,20 @@ export default function App() {
                 <div className="vault-board-row">
                   <span className="vb-label">doctor draft</span>
                   <span
-                    className="vault-ritual-draft"
-                    style={{
-                      color: (() => {
-                        const fresh =
-                          snap?.desk?.doctor_fresh ??
-                          (snap?.desk?.master as { doctor_fresh?: boolean | null } | undefined)
-                            ?.doctor_fresh ??
-                          snap?.desk?.living_compact?.doctor_fresh ??
-                          (snap?.desk?.doctor_age?.stale === true
-                            ? false
-                            : snap?.desk?.doctor_age?.stale === false
-                              ? true
-                              : null)
-                        if (fresh === false) return '#c45c26'
-                        if (fresh === true) return undefined
-                        return undefined
-                      })(),
-                    }}
+                    className={(() => {
+                      const fresh =
+                        snap?.desk?.doctor_fresh ??
+                        (snap?.desk?.master as { doctor_fresh?: boolean | null } | undefined)
+                          ?.doctor_fresh ??
+                        snap?.desk?.living_compact?.doctor_fresh ??
+                        (snap?.desk?.doctor_age?.stale === true
+                          ? false
+                          : snap?.desk?.doctor_age?.stale === false
+                            ? true
+                            : null)
+                      if (fresh === false) return 'vault-ritual-draft is-stale'
+                      return 'vault-ritual-draft'
+                    })()}
                   >
                     {(() => {
                       const fresh =
@@ -1111,25 +1107,36 @@ export default function App() {
                           : snap?.desk?.doctor_age?.stale === false
                             ? true
                             : null)
-                      const badge =
-                        fresh === false
-                          ? ' · STALE'
-                          : fresh === true
-                            ? ' · fresh'
-                            : ''
+                      const badgeKind =
+                        fresh === false ? 'stale' : fresh === true ? 'fresh' : ''
+                      const badgeText =
+                        badgeKind === 'stale' ? 'STALE' : badgeKind === 'fresh' ? 'fresh' : ''
                       const copy =
                         snap?.desk?.doctor_soft_copy ||
                         (snap?.desk?.master as {
                           doctor_soft_copy?: string
                         } | undefined)?.doctor_soft_copy
-                      if (!copy) {
-                        return (
-                          'make living-doctor · staff paste only · never auto-posts' + badge
-                        )
-                      }
-                      const one = String(copy).split('\n').filter(Boolean).slice(0, 2).join(' · ')
-                      const clipped = one.length > 160 ? `${one.slice(0, 157)}…` : one
-                      return clipped + badge
+                      const body = !copy
+                        ? 'make living-doctor · staff paste only · never auto-posts'
+                        : (() => {
+                            const one = String(copy)
+                              .split('\n')
+                              .filter(Boolean)
+                              .slice(0, 2)
+                              .join(' · ')
+                            return one.length > 160 ? `${one.slice(0, 157)}…` : one
+                          })()
+                      return (
+                        <>
+                          {body}
+                          {badgeText ? (
+                            <span className={`vault-draft-badge is-${badgeKind}`}>
+                              {' · '}
+                              {badgeText}
+                            </span>
+                          ) : null}
+                        </>
+                      )
                     })()}
                   </span>
                 </div>
