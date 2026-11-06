@@ -134,6 +134,22 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("ruin_drill_chip", board2)
             self.assertFalse(board2["dual_control_chip"].get("live_orders_enabled"))
             self.assertTrue(board2["ruin_drill_chip"]["fee_floors_locked"])
+            self.assertIn("feature_quiet_pager", board2)
+            self.assertFalse(board2["feature_quiet_pager"].get("auto_page"))
+            import desk_master
+            trimmed = desk_master.finalize_living_priority([
+                "timer DEAD age=999s",
+                "timer digest dead",
+                "bleed ratio=2 hot",
+                "bleed clerk ratio=2",
+                "insight swarm ≥3:1 before betting expand",
+                "dual-control paper 0/8 signed; live_orders=False",
+                "dual-control signed=0/8 two_staff=False arm_ready_paper=False",
+            ] + [f"noise {i}" for i in range(20)])
+            self.assertLessEqual(len(trimmed), desk_master.PRIORITY_MAX)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("timer")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("bleed")), 1)
+            self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("dual")), 1)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
@@ -334,9 +350,13 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("swarm_lights", summary)
             self.assertIn("insight swarm ≥3:1", " ".join(summary.get("priority") or []))
             self.assertIn("living_ai", summary)
-            self.assertTrue(
-                any("eligible completions today" in str(p) for p in (summary.get("priority") or []))
-            )
+            self.assertLessEqual(len(summary.get("priority") or []), desk_master.PRIORITY_MAX)
+            # Completions line only when today > 0 (trimmed noise otherwise).
+            comps = (summary.get("completions") or {}).get("eligible_completions_today") or 0
+            if int(comps) > 0:
+                self.assertTrue(
+                    any("eligible completions today" in str(p) for p in (summary.get("priority") or []))
+                )
 
     def test_tip_radar_from_quote_cache(self):
         from helpers import tip_radar
