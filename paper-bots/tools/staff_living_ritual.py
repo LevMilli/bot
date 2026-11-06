@@ -109,6 +109,30 @@ def format_discord(payload: dict) -> str:
         f"• Digests sunday: digests observe · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    lines.append(
+        f"• Fills sunday: fills observe · sunday quiet {tip_age} "
+        f"(observe · never invents PnL)"
+    )
+    lines.append(
+        f"• Hill sunday: hillclimb none · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Swarm sunday: swarm observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Green sunday: green-day observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Bleed sunday: bleed observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• CLV sunday: CLV observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
     timer_alive = payload.get("timer_alive")
     timer_bit = (
         "timer=alive"
@@ -120,6 +144,138 @@ def format_discord(payload: dict) -> str:
     lines.append(
         f"• Timer sunday: {timer_bit} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Calib sunday: calib observe · sunday quiet {tip_age} "
+        f"(observe · never auto-writes Φ)"
+    )
+    lines.append(
+        f"• Queue sunday: queue observe · sunday quiet {tip_age} "
+        f"(observe · never promotes)"
+    )
+    lines.append(
+        f"• Gate A sunday: Gate A observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• AI sunday: AI observe · sunday quiet {tip_age} "
+        f"(observe · never auto-writes Φ)"
+    )
+    lines.append(
+        f"• Tip sunday: tip feed observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Blackout sunday: blackout observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Injury sunday: injury observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Empty sunday: empty CARD observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Near-miss sunday: near-miss observe · sunday quiet {tip_age} "
+        f"(observe · never promotes)"
+    )
+    lines.append(
+        f"• EIA sunday: EIA observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Calendar sunday: calendar observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Pager sunday: pager observe · sunday quiet {tip_age} "
+        f"(observe · never auto-pages)"
+    )
+    lines.append(
+        f"• Books sunday: books observe · sunday quiet {tip_age} "
+        f"(observe · never invents PnL)"
+    )
+    lines.append(
+        f"• Pulse sunday: pulse observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Dual sunday: dual observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Skip-reg sunday: skip-regret observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Hard-stop sunday: hard-stop observe · sunday quiet {tip_age} "
+        f"(observe · never promotes)"
+    )
+    lines.append(
+        f"• Distance sunday: distance observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Quant sunday: quant observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Report sunday: report observe · sunday quiet {tip_age} "
+        f"(observe · never auto-posts)"
+    )
+    lines.append(
+        f"• Empty-bee sunday: empty bee observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• NM-clerk sunday: nm clerk observe · sunday quiet {tip_age} "
+        f"(observe · never promotes)"
+    )
+    lines.append(
+        f"• HS-clerk sunday: hs clerk observe · sunday quiet {tip_age} "
+        f"(observe · never promotes)"
+    )
+    lines.append(
+        f"• Bleed-clerk sunday: bleed clerk observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Skip-twin sunday: skip-twin observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• CLV-closer sunday: CLV closer observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• T-digest sunday: t-digest observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Skips sunday: skips observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Adapt sunday: adapt observe · sunday quiet {tip_age} "
+        f"(observe · never auto-writes Φ)"
+    )
+    lines.append(
+        f"• Teller sunday: teller observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Quiet sunday: feature quiet observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Doc-age sunday: doctor age observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Ritual sunday: ritual observe · sunday quiet {tip_age} "
+        f"(observe · never auto-posts)"
     )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
@@ -214,6 +370,150 @@ def main() -> int:
                 f"digests observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never softens floors)"
             )
+            flat["fills_sunday_quiet"] = (
+                f"fills observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never invents PnL)"
+            )
+            flat["green_sunday_quiet"] = (
+                f"green-day observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["bleed_sunday_quiet"] = (
+                f"bleed observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["clv_sunday_quiet"] = (
+                f"CLV observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["queue_sunday_quiet"] = (
+                f"queue observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never promotes)"
+            )
+            flat["gate_a_sunday_quiet"] = (
+                f"Gate A observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["ai_sunday_quiet"] = (
+                f"AI observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-writes Φ)"
+            )
+            flat["tip_sunday_quiet"] = (
+                f"tip feed observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["blackout_sunday_quiet"] = (
+                f"blackout observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["injury_sunday_quiet"] = (
+                f"injury observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["empty_sunday_quiet"] = (
+                f"empty CARD observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["near_miss_sunday_quiet"] = (
+                f"near-miss observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never promotes)"
+            )
+            flat["eia_sunday_quiet"] = (
+                f"EIA observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["calendar_sunday_quiet"] = (
+                f"calendar observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["pager_sunday_quiet"] = (
+                f"pager observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-pages)"
+            )
+            flat["books_sunday_quiet"] = (
+                f"books observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never invents PnL)"
+            )
+            flat["pulse_sunday_quiet"] = (
+                f"pulse observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["dual_sunday_quiet"] = (
+                f"dual observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["skip_reg_sunday_quiet"] = (
+                f"skip-regret observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["hard_stop_sunday_quiet"] = (
+                f"hard-stop observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never promotes)"
+            )
+            flat["distance_sunday_quiet"] = (
+                f"distance observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["quant_sunday_quiet"] = (
+                f"quant observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["report_sunday_quiet"] = (
+                f"report observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-posts)"
+            )
+            flat["empty_bee_sunday_quiet"] = (
+                f"empty bee observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["nm_clerk_sunday_quiet"] = (
+                f"nm clerk observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never promotes)"
+            )
+            flat["hs_clerk_sunday_quiet"] = (
+                f"hs clerk observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never promotes)"
+            )
+            flat["bleed_clerk_sunday_quiet"] = (
+                f"bleed clerk observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["skip_twin_sunday_quiet"] = (
+                f"skip-twin observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["clv_closer_sunday_quiet"] = (
+                f"CLV closer observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["tdigest_sunday_quiet"] = (
+                f"t-digest observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["skips_sunday_quiet"] = (
+                f"skips observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["adapt_sunday_quiet"] = (
+                f"adapt observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-writes Φ)"
+            )
+            flat["teller_sunday_quiet"] = (
+                f"teller observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["quiet_sunday_quiet"] = (
+                f"feature quiet observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["doc_age_sunday_quiet"] = (
+                f"doctor age observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["ritual_sunday_quiet"] = (
+                f"ritual observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-posts)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -280,6 +580,150 @@ def main() -> int:
             print(
                 f"digests sunday: digests observe · sunday quiet {sunday_label} "
                 "(observe · never softens floors)"
+            )
+            print(
+                f"fills sunday: fills observe · sunday quiet {sunday_label} "
+                "(observe · never invents PnL)"
+            )
+            print(
+                f"green sunday: green-day observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"bleed sunday: bleed observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"CLV sunday: CLV observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"queue sunday: queue observe · sunday quiet {sunday_label} "
+                "(observe · never promotes)"
+            )
+            print(
+                f"Gate A sunday: Gate A observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"AI sunday: AI observe · sunday quiet {sunday_label} "
+                "(observe · never auto-writes Φ)"
+            )
+            print(
+                f"tip sunday: tip feed observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"blackout sunday: blackout observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"injury sunday: injury observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"empty sunday: empty CARD observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"near-miss sunday: near-miss observe · sunday quiet {sunday_label} "
+                "(observe · never promotes)"
+            )
+            print(
+                f"EIA sunday: EIA observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"calendar sunday: calendar observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"pager sunday: pager observe · sunday quiet {sunday_label} "
+                "(observe · never auto-pages)"
+            )
+            print(
+                f"books sunday: books observe · sunday quiet {sunday_label} "
+                "(observe · never invents PnL)"
+            )
+            print(
+                f"pulse sunday: pulse observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"dual sunday: dual observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"skip-reg sunday: skip-regret observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"hard-stop sunday: hard-stop observe · sunday quiet {sunday_label} "
+                "(observe · never promotes)"
+            )
+            print(
+                f"distance sunday: distance observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"quant sunday: quant observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"report sunday: report observe · sunday quiet {sunday_label} "
+                "(observe · never auto-posts)"
+            )
+            print(
+                f"empty-bee sunday: empty bee observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"nm-clerk sunday: nm clerk observe · sunday quiet {sunday_label} "
+                "(observe · never promotes)"
+            )
+            print(
+                f"hs-clerk sunday: hs clerk observe · sunday quiet {sunday_label} "
+                "(observe · never promotes)"
+            )
+            print(
+                f"bleed-clerk sunday: bleed clerk observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"skip-twin sunday: skip-twin observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"CLV-closer sunday: CLV closer observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"t-digest sunday: t-digest observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"skips sunday: skips observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"adapt sunday: adapt observe · sunday quiet {sunday_label} "
+                "(observe · never auto-writes Φ)"
+            )
+            print(
+                f"teller sunday: teller observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"quiet sunday: feature quiet observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"doc-age sunday: doctor age observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"ritual sunday: ritual observe · sunday quiet {sunday_label} "
+                "(observe · never auto-posts)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "

@@ -142,6 +142,593 @@ def _text(board: dict) -> str:
         ),
         f"hillclimb: {hill.get('label') or '—'}",
         f"digests: {inv.get('label') or '—'}",
+        (
+            "digests sunday: "
+            + str(inv.get("label") or "digests observe")
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "fills sunday: "
+            + (
+                f"eligible today {(board.get('completions') or {}).get('eligible_completions_today')}"
+                if isinstance(board.get("completions"), dict)
+                and (board.get("completions") or {}).get("eligible_completions_today")
+                is not None
+                else "eligible fills n/a"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never invents PnL)"
+        ),
+        (
+            "green sunday: "
+            + str(
+                (board.get("green_day") or {}).get("label")
+                if isinstance(board.get("green_day"), dict)
+                and (board.get("green_day") or {}).get("label")
+                else "green-day observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "bleed sunday: "
+            + str(
+                (board.get("bleed") or {}).get("label")
+                if isinstance(board.get("bleed"), dict)
+                and (board.get("bleed") or {}).get("label")
+                else "bleed observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "CLV sunday: "
+            + str(
+                (board.get("clv") or board.get("clv_closer") or {}).get("label")
+                if isinstance(board.get("clv"), dict) or isinstance(board.get("clv_closer"), dict)
+                else "CLV observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "queue sunday: "
+            + str(
+                (board.get("firm_queue") or {}).get("label")
+                if isinstance(board.get("firm_queue"), dict)
+                and (board.get("firm_queue") or {}).get("label")
+                else "queue observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "Gate A sunday: "
+            + str(
+                (board.get("helper_gate_a") or {}).get("label")
+                if isinstance(board.get("helper_gate_a"), dict)
+                and (board.get("helper_gate_a") or {}).get("label")
+                else "Gate A observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "AI sunday: "
+            + str(
+                (board.get("living_ai") or {}).get("label")
+                if isinstance(board.get("living_ai"), dict)
+                and (board.get("living_ai") or {}).get("label")
+                else "AI observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never auto-writes Φ)"
+        ),
+        (
+            "tip sunday: "
+            + str(
+                (board.get("tip_radar") or {}).get("label")
+                if isinstance(board.get("tip_radar"), dict)
+                and (board.get("tip_radar") or {}).get("label")
+                else "tip feed observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "blackout sunday: "
+            + str(
+                (board.get("eia_blackout") or {}).get("label")
+                if isinstance(board.get("eia_blackout"), dict)
+                and (board.get("eia_blackout") or {}).get("label")
+                else "blackout observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "injury sunday: "
+            + str(
+                (board.get("injury_wire") or {}).get("label")
+                if isinstance(board.get("injury_wire"), dict)
+                and (board.get("injury_wire") or {}).get("label")
+                else "injury observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "empty sunday: "
+            + str(
+                (board.get("empty_card") or {}).get("label")
+                if isinstance(board.get("empty_card"), dict)
+                and (board.get("empty_card") or {}).get("label")
+                else "empty CARD observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "near-miss sunday: "
+            + str(
+                (board.get("near_miss") or {}).get("label")
+                if isinstance(board.get("near_miss"), dict)
+                and (board.get("near_miss") or {}).get("label")
+                else "near-miss observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "EIA sunday: "
+            + str(
+                (board.get("eia_scout") or {}).get("label")
+                if isinstance(board.get("eia_scout"), dict)
+                and (board.get("eia_scout") or {}).get("label")
+                else "EIA observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "calendar sunday: "
+            + str(
+                (board.get("calendar_scanner") or {}).get("label")
+                if isinstance(board.get("calendar_scanner"), dict)
+                and (board.get("calendar_scanner") or {}).get("label")
+                else "calendar observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "pager sunday: "
+            + str(
+                (board.get("feature_quiet_pager") or {}).get("label")
+                if isinstance(board.get("feature_quiet_pager"), dict)
+                and (board.get("feature_quiet_pager") or {}).get("label")
+                else "pager observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never auto-pages)"
+        ),
+        (
+            "books sunday: "
+            + str(
+                (board.get("bookkeeper") or {}).get("label")
+                if isinstance(board.get("bookkeeper"), dict)
+                and (board.get("bookkeeper") or {}).get("label")
+                else "books observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never invents PnL)"
+        ),
+        (
+            "pulse sunday: "
+            + str(
+                (board.get("clerk_pulse") or {}).get("label")
+                if isinstance(board.get("clerk_pulse"), dict)
+                and (board.get("clerk_pulse") or {}).get("label")
+                else "pulse observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "dual sunday: "
+            + str(
+                (board.get("dual_control") or {}).get("label")
+                if isinstance(board.get("dual_control"), dict)
+                and (board.get("dual_control") or {}).get("label")
+                else "dual observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "skip-reg sunday: "
+            + str(
+                (board.get("skip_regret") or {}).get("label")
+                if isinstance(board.get("skip_regret"), dict)
+                and (board.get("skip_regret") or {}).get("label")
+                else "skip-regret observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "hard-stop sunday: "
+            + str(
+                (board.get("hard_stop") or {}).get("label")
+                if isinstance(board.get("hard_stop"), dict)
+                and (board.get("hard_stop") or {}).get("label")
+                else "hard-stop observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "distance sunday: "
+            + str(
+                (board.get("distance_clerk") or {}).get("label")
+                if isinstance(board.get("distance_clerk"), dict)
+                and (board.get("distance_clerk") or {}).get("label")
+                else "distance observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "quant sunday: "
+            + str(
+                (board.get("quant_clerk") or {}).get("label")
+                if isinstance(board.get("quant_clerk"), dict)
+                and (board.get("quant_clerk") or {}).get("label")
+                else "quant observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "report sunday: "
+            + str(
+                (board.get("reporter") or {}).get("label")
+                if isinstance(board.get("reporter"), dict)
+                and (board.get("reporter") or {}).get("label")
+                else "report observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never auto-posts)"
+        ),
+        (
+            "empty-bee sunday: "
+            + str(
+                (board.get("empty_card_bee") or {}).get("label")
+                if isinstance(board.get("empty_card_bee"), dict)
+                and (board.get("empty_card_bee") or {}).get("label")
+                else "empty bee observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "nm-clerk sunday: "
+            + str(
+                (board.get("near_miss_clerk") or {}).get("label")
+                if isinstance(board.get("near_miss_clerk"), dict)
+                and (board.get("near_miss_clerk") or {}).get("label")
+                else "nm clerk observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "hs-clerk sunday: "
+            + str(
+                (board.get("hard_stop_clerk") or {}).get("label")
+                if isinstance(board.get("hard_stop_clerk"), dict)
+                and (board.get("hard_stop_clerk") or {}).get("label")
+                else "hs clerk observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "bleed-clerk sunday: "
+            + str(
+                (board.get("bleed_clerk") or {}).get("label")
+                if isinstance(board.get("bleed_clerk"), dict)
+                and (board.get("bleed_clerk") or {}).get("label")
+                else "bleed clerk observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "skip-twin sunday: "
+            + str(
+                (board.get("skip_twin_clerk") or {}).get("label")
+                if isinstance(board.get("skip_twin_clerk"), dict)
+                and (board.get("skip_twin_clerk") or {}).get("label")
+                else "skip-twin observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "CLV-closer sunday: "
+            + str(
+                (board.get("clv_closer") or {}).get("label")
+                if isinstance(board.get("clv_closer"), dict)
+                and (board.get("clv_closer") or {}).get("label")
+                else "CLV closer observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "t-digest sunday: "
+            + str(
+                (board.get("timer_digest") or {}).get("label")
+                if isinstance(board.get("timer_digest"), dict)
+                and (board.get("timer_digest") or {}).get("label")
+                else "t-digest observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "skips sunday: "
+            + str(
+                (board.get("skip_taxonomy") or {}).get("label")
+                if isinstance(board.get("skip_taxonomy"), dict)
+                and (board.get("skip_taxonomy") or {}).get("label")
+                else "skips observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "adapt sunday: "
+            + str(
+                (board.get("living_ai") or {}).get("label")
+                if isinstance(board.get("living_ai"), dict)
+                and (board.get("living_ai") or {}).get("label")
+                else "adapt observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never auto-writes Φ)"
+        ),
+        (
+            "teller sunday: "
+            + str(
+                (board.get("teller_living") or {}).get("label")
+                if isinstance(board.get("teller_living"), dict)
+                and (board.get("teller_living") or {}).get("label")
+                else "teller observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "quiet sunday: "
+            + str(
+                (board.get("feature_quiet") or {}).get("label")
+                if isinstance(board.get("feature_quiet"), dict)
+                and (board.get("feature_quiet") or {}).get("label")
+                else "feature quiet observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "doc-age sunday: "
+            + str(
+                (board.get("doctor_age") or {}).get("label")
+                if isinstance(board.get("doctor_age"), dict)
+                and (board.get("doctor_age") or {}).get("label")
+                else "doctor age observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "ritual sunday: "
+            + str(
+                (board.get("ritual_observe") or {}).get("label")
+                if isinstance(board.get("ritual_observe"), dict)
+                and (board.get("ritual_observe") or {}).get("label")
+                else "ritual observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never auto-posts)"
+        ),
         f"floors: {floors.get('label') or '—'}",
         f"teller: {teller.get('memory_line') or '—'}",
         (
@@ -546,6 +1133,153 @@ def main() -> int:
                 + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
                 + " (observe · never softens floors)"
             ),
+            "digests_sunday_quiet": compact_j.get("digests_sunday_quiet")
+            or (
+                str((board.get("digest_inventory") or {}).get("label") or "digests observe")
+                + " · sunday quiet "
+                + str(
+                    (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    if isinstance(board.get("sunday_packet"), dict)
+                    and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    else compact_j.get("quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " (observe · never softens floors)"
+            ),
+            "fills_sunday_quiet": compact_j.get("fills_sunday_quiet")
+            or (
+                (
+                    f"eligible today {(board.get('completions') or {}).get('eligible_completions_today')}"
+                    if isinstance(board.get("completions"), dict)
+                    and (board.get("completions") or {}).get("eligible_completions_today")
+                    is not None
+                    else "eligible fills n/a"
+                )
+                + " · sunday quiet "
+                + str(
+                    (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    if isinstance(board.get("sunday_packet"), dict)
+                    and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                    else compact_j.get("quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " (observe · never invents PnL)"
+            ),
+            "compact_digests_sunday_quiet": compact_j.get("digests_sunday_quiet"),
+            "compact_fills_sunday_quiet": compact_j.get("fills_sunday_quiet"),
+            "green_sunday_quiet": compact_j.get("green_sunday_quiet")
+            or (
+                str((board.get("green_day") or {}).get("label") or "green-day observe")
+                + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe)"
+            ),
+            "bleed_sunday_quiet": compact_j.get("bleed_sunday_quiet")
+            or (
+                str((board.get("bleed") or {}).get("label") or "bleed observe")
+                + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe · never softens floors)"
+            ),
+            "clv_sunday_quiet": compact_j.get("clv_sunday_quiet")
+            or (
+                str(
+                    (board.get("clv") or board.get("clv_closer") or {}).get("label")
+                    or "CLV observe"
+                )
+                + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe)"
+            ),
+            "timer_sunday_quiet": compact_j.get("timer_sunday_quiet"),
+            "calib_sunday_quiet": compact_j.get("calib_sunday_quiet"),
+            "compact_green_sunday_quiet": compact_j.get("green_sunday_quiet"),
+            "compact_bleed_sunday_quiet": compact_j.get("bleed_sunday_quiet"),
+            "compact_clv_sunday_quiet": compact_j.get("clv_sunday_quiet"),
+            "compact_timer_sunday_quiet": compact_j.get("timer_sunday_quiet"),
+            "compact_calib_sunday_quiet": compact_j.get("calib_sunday_quiet"),
+            "queue_sunday_quiet": compact_j.get("queue_sunday_quiet")
+            or (
+                str((board.get("firm_queue") or {}).get("label") or "queue observe")
+                + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe · never promotes)"
+            ),
+            "gate_a_sunday_quiet": compact_j.get("gate_a_sunday_quiet")
+            or (
+                str((board.get("helper_gate_a") or {}).get("label") or "Gate A observe")
+                + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe · never softens floors)"
+            ),
+            "ai_sunday_quiet": compact_j.get("ai_sunday_quiet")
+            or (
+                str((board.get("living_ai") or {}).get("label") or "AI observe")
+                + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe · never auto-writes Φ)"
+            ),
+            "tip_sunday_quiet": compact_j.get("tip_sunday_quiet"),
+            "blackout_sunday_quiet": compact_j.get("blackout_sunday_quiet"),
+            "injury_sunday_quiet": compact_j.get("injury_sunday_quiet"),
+            "compact_queue_sunday_quiet": compact_j.get("queue_sunday_quiet"),
+            "compact_gate_a_sunday_quiet": compact_j.get("gate_a_sunday_quiet"),
+            "compact_ai_sunday_quiet": compact_j.get("ai_sunday_quiet"),
+            "compact_tip_sunday_quiet": compact_j.get("tip_sunday_quiet"),
+            "compact_blackout_sunday_quiet": compact_j.get("blackout_sunday_quiet"),
+            "compact_injury_sunday_quiet": compact_j.get("injury_sunday_quiet"),
+            "empty_sunday_quiet": compact_j.get("empty_sunday_quiet"),
+            "near_miss_sunday_quiet": compact_j.get("near_miss_sunday_quiet"),
+            "eia_sunday_quiet": compact_j.get("eia_sunday_quiet"),
+            "calendar_sunday_quiet": compact_j.get("calendar_sunday_quiet"),
+            "pager_sunday_quiet": compact_j.get("pager_sunday_quiet"),
+            "books_sunday_quiet": compact_j.get("books_sunday_quiet"),
+            "pulse_sunday_quiet": compact_j.get("pulse_sunday_quiet"),
+            "dual_sunday_quiet": compact_j.get("dual_sunday_quiet"),
+            "compact_empty_sunday_quiet": compact_j.get("empty_sunday_quiet"),
+            "compact_near_miss_sunday_quiet": compact_j.get("near_miss_sunday_quiet"),
+            "compact_eia_sunday_quiet": compact_j.get("eia_sunday_quiet"),
+            "compact_calendar_sunday_quiet": compact_j.get("calendar_sunday_quiet"),
+            "compact_pager_sunday_quiet": compact_j.get("pager_sunday_quiet"),
+            "compact_books_sunday_quiet": compact_j.get("books_sunday_quiet"),
+            "compact_pulse_sunday_quiet": compact_j.get("pulse_sunday_quiet"),
+            "compact_dual_sunday_quiet": compact_j.get("dual_sunday_quiet"),
+            "skip_reg_sunday_quiet": compact_j.get("skip_reg_sunday_quiet"),
+            "compact_skip_reg_sunday_quiet": compact_j.get("skip_reg_sunday_quiet"),
+            "hard_stop_sunday_quiet": compact_j.get("hard_stop_sunday_quiet"),
+            "compact_hard_stop_sunday_quiet": compact_j.get("hard_stop_sunday_quiet"),
+            "distance_sunday_quiet": compact_j.get("distance_sunday_quiet"),
+            "compact_distance_sunday_quiet": compact_j.get("distance_sunday_quiet"),
+            "quant_sunday_quiet": compact_j.get("quant_sunday_quiet"),
+            "compact_quant_sunday_quiet": compact_j.get("quant_sunday_quiet"),
+            "report_sunday_quiet": compact_j.get("report_sunday_quiet"),
+            "compact_report_sunday_quiet": compact_j.get("report_sunday_quiet"),
+            "empty_bee_sunday_quiet": compact_j.get("empty_bee_sunday_quiet"),
+            "compact_empty_bee_sunday_quiet": compact_j.get("empty_bee_sunday_quiet"),
+            "nm_clerk_sunday_quiet": compact_j.get("nm_clerk_sunday_quiet"),
+            "compact_nm_clerk_sunday_quiet": compact_j.get("nm_clerk_sunday_quiet"),
+            "hs_clerk_sunday_quiet": compact_j.get("hs_clerk_sunday_quiet"),
+            "compact_hs_clerk_sunday_quiet": compact_j.get("hs_clerk_sunday_quiet"),
+            "bleed_clerk_sunday_quiet": compact_j.get("bleed_clerk_sunday_quiet"),
+            "compact_bleed_clerk_sunday_quiet": compact_j.get("bleed_clerk_sunday_quiet"),
+            "skip_twin_sunday_quiet": compact_j.get("skip_twin_sunday_quiet"),
+            "compact_skip_twin_sunday_quiet": compact_j.get("skip_twin_sunday_quiet"),
+            "clv_closer_sunday_quiet": compact_j.get("clv_closer_sunday_quiet"),
+            "compact_clv_closer_sunday_quiet": compact_j.get("clv_closer_sunday_quiet"),
+            "tdigest_sunday_quiet": compact_j.get("tdigest_sunday_quiet"),
+            "compact_tdigest_sunday_quiet": compact_j.get("tdigest_sunday_quiet"),
+            "skips_sunday_quiet": compact_j.get("skips_sunday_quiet"),
+            "compact_skips_sunday_quiet": compact_j.get("skips_sunday_quiet"),
+            "adapt_sunday_quiet": compact_j.get("adapt_sunday_quiet"),
+            "compact_adapt_sunday_quiet": compact_j.get("adapt_sunday_quiet"),
+            "teller_sunday_quiet": compact_j.get("teller_sunday_quiet"),
+            "compact_teller_sunday_quiet": compact_j.get("teller_sunday_quiet"),
+            "quiet_sunday_quiet": compact_j.get("quiet_sunday_quiet"),
+            "compact_quiet_sunday_quiet": compact_j.get("quiet_sunday_quiet"),
+            "doc_age_sunday_quiet": compact_j.get("doc_age_sunday_quiet"),
+            "compact_doc_age_sunday_quiet": compact_j.get("doc_age_sunday_quiet"),
+            "ritual_sunday_quiet": compact_j.get("ritual_sunday_quiet"),
+            "compact_ritual_sunday_quiet": compact_j.get("ritual_sunday_quiet"),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "

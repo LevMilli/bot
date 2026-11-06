@@ -1188,9 +1188,71 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault EIA/calendar sunday | EIA + calendar hints |
 | Vault pager/books sunday | pager + books hints |
 
+### Living upgrade — digests/fills sunday twins (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Compact digests+fills sunday | living_compact_card twins |
+| Export/status digests+fills sunday | board export + status text/json |
+| Ritual Discord hill/swarm/fills | discord lines |
+| Ritual observe fills sunday | observe plain + --json |
+
+### Living upgrade — green/bleed/CLV sunday twins (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Compact green+bleed sunday | living_compact_card twins |
+| Export/status green+bleed/CLV | board export + status flatten |
+| Ritual Discord green/bleed/CLV/calib | discord lines |
+| Compact CLV+timer+calib sunday | living_compact_card twins |
+
+### Living upgrade — queue/GateA/AI/tip sunday twins (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Compact queue+GateA+AI sunday | living_compact_card twins |
+| Export/status queue/GateA/AI | board export + status flatten |
+| Ritual Discord queue/GateA/AI/tip | discord lines |
+| Compact tip/blackout/injury sunday | living_compact_card twins |
+
+### Living upgrade — empty/EIA/pager/pulse/dual sunday twins (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Compact empty+near-miss sunday | living_compact_card twins |
+| Compact EIA+calendar+pager+books | living_compact_card twins |
+| Compact pulse+dual sunday | living_compact_card twins |
+| Export/status/ritual empty…dual | export + status + Discord/observe |
+
+### Living upgrade — skip-reg/clerks sunday twins (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Compact skip-reg+hard-stop sunday | living_compact_card twins |
+| Compact distance+quant+report+bee | living_compact_card twins |
+| Compact clerk twins (nm/hs/bleed/skip-twin/CLV/t-digest) | living_compact_card twins |
+| Vault+ritual+status skip-reg/clerks sunday | App vault + Discord/observe + status |
+
+### Living upgrade — meta vault sunday quiet pass (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Vault skips/budgets/adapt/tip-force sunday | App vault ops rows |
+| Vault compact/doc/quiet/ritual/teller sunday | App vault living rows |
+| Compact skips/teller/doc/quiet/ritual twins | living_compact_card + export |
+| Ritual/status meta sunday lines | Discord/observe + status |
+
+### Living upgrade — vault sunday leftovers (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Vault skip-taxonomy + sunday packet | App vault rows |
+| Vault quiet age / quiet·ritual / drafts | App vault rows |
+| Vault stopbleed + fill tax sunday | App vault rows |
+
 ### Next
 
-_(empty — living sunday quiet plan tickets cleared; fee floors locked; paper-only; Discord never auto-posts)_
+_(empty — living sunday quiet vault leftovers cleared; fee floors locked; paper-only; Discord never auto-posts)_
 
 ## Hard rules unchanged
 

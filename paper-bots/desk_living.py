@@ -921,6 +921,237 @@ def living_compact_card(
             if isinstance(src.get("dual_control_gaps"), dict)
             else f"gaps observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "digests_sunday_quiet": (
+            f"{(src.get('digest_inventory') or {}).get('label') or 'digests observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("digest_inventory"), dict)
+            else f"digests observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "fills_sunday_quiet": (
+            (
+                f"eligible today {(src.get('completions') or {}).get('eligible_completions_today')}"
+                if isinstance(src.get("completions"), dict)
+                and (src.get("completions") or {}).get("eligible_completions_today")
+                is not None
+                else "eligible fills n/a"
+            )
+            + f" · sunday quiet {quiet_age_part} (observe · never invents PnL)"
+        ),
+        "green_sunday_quiet": (
+            f"{green.get('label') or ('green=' + str(green.get('green_n')))} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if green
+            else f"green-day n/a · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "bleed_sunday_quiet": (
+            f"{bleed.get('label') or ('bleed=' + str(bleed.get('ratio')))} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if bleed
+            else f"bleed n/a · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "clv_sunday_quiet": (
+            f"{(src.get('clv') or src.get('clv_closer') or {}).get('label') or 'CLV observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("clv"), dict) or isinstance(src.get("clv_closer"), dict)
+            else f"CLV observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "timer_sunday_quiet": (
+            f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "calib_sunday_quiet": (
+            f"{(src.get('calib_nag') or {}).get('label') or 'calib observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+            if isinstance(src.get("calib_nag"), dict)
+            else f"calib observe · sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+        ),
+        "queue_sunday_quiet": (
+            f"{(src.get('firm_queue') or {}).get('label') or 'queue observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never promotes)"
+            if isinstance(src.get("firm_queue"), dict)
+            else f"queue observe · sunday quiet {quiet_age_part} (observe · never promotes)"
+        ),
+        "gate_a_sunday_quiet": (
+            f"{(src.get('helper_gate_a') or {}).get('label') or 'Gate A observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("helper_gate_a"), dict)
+            else f"Gate A observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "ai_sunday_quiet": (
+            f"{(src.get('living_ai') or {}).get('label') or 'AI observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+            if isinstance(src.get("living_ai"), dict)
+            else f"AI observe · sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+        ),
+        "tip_sunday_quiet": (
+            f"{(src.get('tip_radar') or {}).get('label') or 'tip feed observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("tip_radar"), dict)
+            else f"tip feed observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "blackout_sunday_quiet": (
+            f"{(src.get('eia_blackout') or {}).get('label') or 'blackout observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("eia_blackout"), dict)
+            else f"blackout observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "injury_sunday_quiet": (
+            f"{(src.get('injury_wire') or {}).get('label') or 'injury observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("injury_wire"), dict)
+            else f"injury observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+
+        "empty_sunday_quiet": (
+            f"{(src.get('empty_card') or {}).get('label') or 'empty CARD observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("empty_card"), dict)
+            else f"empty CARD observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "near_miss_sunday_quiet": (
+            f"{(src.get('near_miss') or {}).get('label') or 'near-miss observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never promotes)"
+            if isinstance(src.get("near_miss"), dict)
+            else f"near-miss observe · sunday quiet {quiet_age_part} (observe · never promotes)"
+        ),
+        "eia_sunday_quiet": (
+            f"{(src.get('eia_scout') or {}).get('label') or 'EIA observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("eia_scout"), dict)
+            else f"EIA observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "calendar_sunday_quiet": (
+            f"{(src.get('calendar_scanner') or {}).get('label') or 'calendar observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("calendar_scanner"), dict)
+            else f"calendar observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "pager_sunday_quiet": (
+            f"{(src.get('feature_quiet_pager') or {}).get('label') or 'pager observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-pages)"
+            if isinstance(src.get("feature_quiet_pager"), dict)
+            else f"pager observe · sunday quiet {quiet_age_part} (observe · never auto-pages)"
+        ),
+        "books_sunday_quiet": (
+            f"{(src.get('bookkeeper') or {}).get('label') or 'books observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never invents PnL)"
+            if isinstance(src.get("bookkeeper"), dict)
+            else f"books observe · sunday quiet {quiet_age_part} (observe · never invents PnL)"
+        ),
+        "pulse_sunday_quiet": (
+            f"{(src.get('clerk_pulse') or {}).get('label') or 'pulse observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("clerk_pulse"), dict)
+            else f"pulse observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "dual_sunday_quiet": (
+            f"{(src.get('dual_control') or {}).get('label') or 'dual observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("dual_control"), dict)
+            else f"dual observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "skip_reg_sunday_quiet": (
+            f"{(src.get('skip_regret') or {}).get('label') or 'skip-regret observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("skip_regret"), dict)
+            else f"skip-regret observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "hard_stop_sunday_quiet": (
+            f"{(src.get('hard_stop') or {}).get('label') or 'hard-stop observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never promotes)"
+            if isinstance(src.get("hard_stop"), dict)
+            else f"hard-stop observe · sunday quiet {quiet_age_part} (observe · never promotes)"
+        ),
+        "distance_sunday_quiet": (
+            f"{(src.get('distance_clerk') or {}).get('label') or 'distance observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("distance_clerk"), dict)
+            else f"distance observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "quant_sunday_quiet": (
+            f"{(src.get('quant_clerk') or {}).get('label') or 'quant observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("quant_clerk"), dict)
+            else f"quant observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "report_sunday_quiet": (
+            f"{(src.get('reporter') or {}).get('label') or 'report observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-posts)"
+            if isinstance(src.get("reporter"), dict)
+            else f"report observe · sunday quiet {quiet_age_part} (observe · never auto-posts)"
+        ),
+        "empty_bee_sunday_quiet": (
+            f"{(src.get('empty_card_bee') or {}).get('label') or 'empty bee observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("empty_card_bee"), dict)
+            else f"empty bee observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "nm_clerk_sunday_quiet": (
+            f"{(src.get('near_miss_clerk') or {}).get('label') or 'nm clerk observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never promotes)"
+            if isinstance(src.get("near_miss_clerk"), dict)
+            else f"nm clerk observe · sunday quiet {quiet_age_part} (observe · never promotes)"
+        ),
+        "hs_clerk_sunday_quiet": (
+            f"{(src.get('hard_stop_clerk') or {}).get('label') or 'hs clerk observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never promotes)"
+            if isinstance(src.get("hard_stop_clerk"), dict)
+            else f"hs clerk observe · sunday quiet {quiet_age_part} (observe · never promotes)"
+        ),
+        "bleed_clerk_sunday_quiet": (
+            f"{(src.get('bleed_clerk') or {}).get('label') or 'bleed clerk observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("bleed_clerk"), dict)
+            else f"bleed clerk observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "skip_twin_sunday_quiet": (
+            f"{(src.get('skip_twin_clerk') or {}).get('label') or 'skip-twin observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("skip_twin_clerk"), dict)
+            else f"skip-twin observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "clv_closer_sunday_quiet": (
+            f"{(src.get('clv_closer') or {}).get('label') or 'CLV closer observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("clv_closer"), dict)
+            else f"CLV closer observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "tdigest_sunday_quiet": (
+            f"{(src.get('timer_digest') or {}).get('label') or 't-digest observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("timer_digest"), dict)
+            else f"t-digest observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "skips_sunday_quiet": (
+            f"{(src.get('skip_taxonomy') or {}).get('label') or 'skips observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("skip_taxonomy"), dict)
+            else f"skips observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "teller_sunday_quiet": (
+            f"{(src.get('teller_living') or {}).get('label') or 'teller observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("teller_living"), dict)
+            else f"teller observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "doc_age_sunday_quiet": (
+            f"{(src.get('doctor_age') or {}).get('label') or 'doctor age observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("doctor_age"), dict)
+            else f"doctor age observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "quiet_sunday_quiet": (
+            f"{(src.get('feature_quiet') or {}).get('label') or 'feature quiet observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("feature_quiet"), dict)
+            else f"feature quiet observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "ritual_sunday_quiet": (
+            f"{(src.get('ritual_observe') or {}).get('label') or 'ritual observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-posts)"
+            if isinstance(src.get("ritual_observe"), dict)
+            else f"ritual observe · sunday quiet {quiet_age_part} (observe · never auto-posts)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2226,6 +2457,206 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{gaps.get('label') or 'gaps observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    inv = board.get("digest_inventory") if isinstance(board.get("digest_inventory"), dict) else {}
+    slim["digests_sunday_quiet"] = (
+        f"{inv.get('label') or 'digests observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    comp = board.get("completions") if isinstance(board.get("completions"), dict) else {}
+    fills_bit = (
+        f"eligible today {comp.get('eligible_completions_today')}"
+        if comp.get("eligible_completions_today") is not None
+        else "eligible fills n/a"
+    )
+    slim["fills_sunday_quiet"] = (
+        f"{fills_bit} · sunday quiet {slim['sunday_quiet_age_label']} "
+        "(observe · never invents PnL)"
+    )
+    green = board.get("green_day") if isinstance(board.get("green_day"), dict) else {}
+    slim["green_sunday_quiet"] = (
+        f"{green.get('label') or (('green=' + str(green.get('green_n'))) if green else 'green-day n/a')} "
+        f"· sunday quiet {slim['sunday_quiet_age_label']} (observe)"
+    )
+    bleed = board.get("bleed") if isinstance(board.get("bleed"), dict) else {}
+    slim["bleed_sunday_quiet"] = (
+        f"{bleed.get('label') or (('bleed=' + str(bleed.get('ratio'))) if bleed else 'bleed n/a')} "
+        f"· sunday quiet {slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    clv = (
+        board.get("clv")
+        if isinstance(board.get("clv"), dict)
+        else board.get("clv_closer") if isinstance(board.get("clv_closer"), dict) else {}
+    )
+    slim["clv_sunday_quiet"] = (
+        f"{clv.get('label') or 'CLV observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    timer = board.get("timer_heartbeat") if isinstance(board.get("timer_heartbeat"), dict) else {}
+    slim["timer_sunday_quiet"] = (
+        f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'} "
+        f"· sunday quiet {slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    calib = board.get("calib_nag") if isinstance(board.get("calib_nag"), dict) else {}
+    slim["calib_sunday_quiet"] = (
+        f"{calib.get('label') or 'calib observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-writes Φ)"
+    )
+    queue = board.get("firm_queue") if isinstance(board.get("firm_queue"), dict) else {}
+    slim["queue_sunday_quiet"] = (
+        f"{queue.get('label') or 'queue observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never promotes)"
+    )
+    gate_a = board.get("helper_gate_a") if isinstance(board.get("helper_gate_a"), dict) else {}
+    slim["gate_a_sunday_quiet"] = (
+        f"{gate_a.get('label') or 'Gate A observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    ai = board.get("living_ai") if isinstance(board.get("living_ai"), dict) else {}
+    slim["ai_sunday_quiet"] = (
+        f"{ai.get('label') or 'AI observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-writes Φ)"
+    )
+    tip = board.get("tip_radar") if isinstance(board.get("tip_radar"), dict) else {}
+    slim["tip_sunday_quiet"] = (
+        f"{tip.get('label') or 'tip feed observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    blackout = board.get("eia_blackout") if isinstance(board.get("eia_blackout"), dict) else {}
+    slim["blackout_sunday_quiet"] = (
+        f"{blackout.get('label') or 'blackout observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    injury = board.get("injury_wire") if isinstance(board.get("injury_wire"), dict) else {}
+    slim["injury_sunday_quiet"] = (
+        f"{injury.get('label') or 'injury observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+
+    empty = board.get("empty_card") if isinstance(board.get("empty_card"), dict) else {}
+    slim["empty_sunday_quiet"] = (
+        f"{empty.get('label') or 'empty CARD observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    near = board.get("near_miss") if isinstance(board.get("near_miss"), dict) else {}
+    slim["near_miss_sunday_quiet"] = (
+        f"{near.get('label') or 'near-miss observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never promotes)"
+    )
+    eia = board.get("eia_scout") if isinstance(board.get("eia_scout"), dict) else {}
+    slim["eia_sunday_quiet"] = (
+        f"{eia.get('label') or 'EIA observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    cal = board.get("calendar_scanner") if isinstance(board.get("calendar_scanner"), dict) else {}
+    slim["calendar_sunday_quiet"] = (
+        f"{cal.get('label') or 'calendar observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    pager = board.get("feature_quiet_pager") if isinstance(board.get("feature_quiet_pager"), dict) else {}
+    slim["pager_sunday_quiet"] = (
+        f"{pager.get('label') or 'pager observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-pages)"
+    )
+    books = board.get("bookkeeper") if isinstance(board.get("bookkeeper"), dict) else {}
+    slim["books_sunday_quiet"] = (
+        f"{books.get('label') or 'books observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never invents PnL)"
+    )
+    pulse = board.get("clerk_pulse") if isinstance(board.get("clerk_pulse"), dict) else {}
+    slim["pulse_sunday_quiet"] = (
+        f"{pulse.get('label') or 'pulse observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    dual = board.get("dual_control") if isinstance(board.get("dual_control"), dict) else {}
+    slim["dual_sunday_quiet"] = (
+        f"{dual.get('label') or 'dual observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    skip_regret = board.get("skip_regret") if isinstance(board.get("skip_regret"), dict) else {}
+    slim["skip_reg_sunday_quiet"] = (
+        f"{skip_regret.get('label') or 'skip-regret observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    hard_stop = board.get("hard_stop") if isinstance(board.get("hard_stop"), dict) else {}
+    slim["hard_stop_sunday_quiet"] = (
+        f"{hard_stop.get('label') or 'hard-stop observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never promotes)"
+    )
+    distance_clerk = board.get("distance_clerk") if isinstance(board.get("distance_clerk"), dict) else {}
+    slim["distance_sunday_quiet"] = (
+        f"{distance_clerk.get('label') or 'distance observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    quant_clerk = board.get("quant_clerk") if isinstance(board.get("quant_clerk"), dict) else {}
+    slim["quant_sunday_quiet"] = (
+        f"{quant_clerk.get('label') or 'quant observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    reporter = board.get("reporter") if isinstance(board.get("reporter"), dict) else {}
+    slim["report_sunday_quiet"] = (
+        f"{reporter.get('label') or 'report observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-posts)"
+    )
+    empty_card_bee = board.get("empty_card_bee") if isinstance(board.get("empty_card_bee"), dict) else {}
+    slim["empty_bee_sunday_quiet"] = (
+        f"{empty_card_bee.get('label') or 'empty bee observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    near_miss_clerk = board.get("near_miss_clerk") if isinstance(board.get("near_miss_clerk"), dict) else {}
+    slim["nm_clerk_sunday_quiet"] = (
+        f"{near_miss_clerk.get('label') or 'nm clerk observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never promotes)"
+    )
+    hard_stop_clerk = board.get("hard_stop_clerk") if isinstance(board.get("hard_stop_clerk"), dict) else {}
+    slim["hs_clerk_sunday_quiet"] = (
+        f"{hard_stop_clerk.get('label') or 'hs clerk observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never promotes)"
+    )
+    bleed_clerk = board.get("bleed_clerk") if isinstance(board.get("bleed_clerk"), dict) else {}
+    slim["bleed_clerk_sunday_quiet"] = (
+        f"{bleed_clerk.get('label') or 'bleed clerk observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    skip_twin_clerk = board.get("skip_twin_clerk") if isinstance(board.get("skip_twin_clerk"), dict) else {}
+    slim["skip_twin_sunday_quiet"] = (
+        f"{skip_twin_clerk.get('label') or 'skip-twin observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    clv_closer = board.get("clv_closer") if isinstance(board.get("clv_closer"), dict) else {}
+    slim["clv_closer_sunday_quiet"] = (
+        f"{clv_closer.get('label') or 'CLV closer observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    timer_digest = board.get("timer_digest") if isinstance(board.get("timer_digest"), dict) else {}
+    slim["tdigest_sunday_quiet"] = (
+        f"{timer_digest.get('label') or 't-digest observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    skip_taxonomy = board.get("skip_taxonomy") if isinstance(board.get("skip_taxonomy"), dict) else {}
+    slim["skips_sunday_quiet"] = (
+        f"{skip_taxonomy.get('label') or 'skips observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    teller_living = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
+    slim["teller_sunday_quiet"] = (
+        f"{teller_living.get('label') or 'teller observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    doctor_age = board.get("doctor_age") if isinstance(board.get("doctor_age"), dict) else {}
+    slim["doc_age_sunday_quiet"] = (
+        f"{doctor_age.get('label') or 'doctor age observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    feature_quiet = board.get("feature_quiet") if isinstance(board.get("feature_quiet"), dict) else {}
+    slim["quiet_sunday_quiet"] = (
+        f"{feature_quiet.get('label') or 'feature quiet observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    ritual_observe = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
+    slim["ritual_sunday_quiet"] = (
+        f"{ritual_observe.get('label') or 'ritual observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-posts)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2262,6 +2693,120 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_gaps_sunday_quiet"] = (
             compact.get("gaps_sunday_quiet") or slim.get("gaps_sunday_quiet")
+        )
+        slim["compact_digests_sunday_quiet"] = (
+            compact.get("digests_sunday_quiet") or slim.get("digests_sunday_quiet")
+        )
+        slim["compact_fills_sunday_quiet"] = (
+            compact.get("fills_sunday_quiet") or slim.get("fills_sunday_quiet")
+        )
+        slim["compact_green_sunday_quiet"] = (
+            compact.get("green_sunday_quiet") or slim.get("green_sunday_quiet")
+        )
+        slim["compact_bleed_sunday_quiet"] = (
+            compact.get("bleed_sunday_quiet") or slim.get("bleed_sunday_quiet")
+        )
+        slim["compact_clv_sunday_quiet"] = (
+            compact.get("clv_sunday_quiet") or slim.get("clv_sunday_quiet")
+        )
+        slim["compact_timer_sunday_quiet"] = (
+            compact.get("timer_sunday_quiet") or slim.get("timer_sunday_quiet")
+        )
+        slim["compact_calib_sunday_quiet"] = (
+            compact.get("calib_sunday_quiet") or slim.get("calib_sunday_quiet")
+        )
+        slim["compact_queue_sunday_quiet"] = (
+            compact.get("queue_sunday_quiet") or slim.get("queue_sunday_quiet")
+        )
+        slim["compact_gate_a_sunday_quiet"] = (
+            compact.get("gate_a_sunday_quiet") or slim.get("gate_a_sunday_quiet")
+        )
+        slim["compact_ai_sunday_quiet"] = (
+            compact.get("ai_sunday_quiet") or slim.get("ai_sunday_quiet")
+        )
+        slim["compact_tip_sunday_quiet"] = (
+            compact.get("tip_sunday_quiet") or slim.get("tip_sunday_quiet")
+        )
+        slim["compact_blackout_sunday_quiet"] = (
+            compact.get("blackout_sunday_quiet") or slim.get("blackout_sunday_quiet")
+        )
+        slim["compact_injury_sunday_quiet"] = (
+            compact.get("injury_sunday_quiet") or slim.get("injury_sunday_quiet")
+        )
+        slim["compact_empty_sunday_quiet"] = (
+            compact.get("empty_sunday_quiet") or slim.get("empty_sunday_quiet")
+        )
+        slim["compact_near_miss_sunday_quiet"] = (
+            compact.get("near_miss_sunday_quiet") or slim.get("near_miss_sunday_quiet")
+        )
+        slim["compact_eia_sunday_quiet"] = (
+            compact.get("eia_sunday_quiet") or slim.get("eia_sunday_quiet")
+        )
+        slim["compact_calendar_sunday_quiet"] = (
+            compact.get("calendar_sunday_quiet") or slim.get("calendar_sunday_quiet")
+        )
+        slim["compact_pager_sunday_quiet"] = (
+            compact.get("pager_sunday_quiet") or slim.get("pager_sunday_quiet")
+        )
+        slim["compact_books_sunday_quiet"] = (
+            compact.get("books_sunday_quiet") or slim.get("books_sunday_quiet")
+        )
+        slim["compact_pulse_sunday_quiet"] = (
+            compact.get("pulse_sunday_quiet") or slim.get("pulse_sunday_quiet")
+        )
+        slim["compact_dual_sunday_quiet"] = (
+            compact.get("dual_sunday_quiet") or slim.get("dual_sunday_quiet")
+        )
+        slim["compact_skip_reg_sunday_quiet"] = (
+            compact.get("skip_reg_sunday_quiet") or slim.get("skip_reg_sunday_quiet")
+        )
+        slim["compact_hard_stop_sunday_quiet"] = (
+            compact.get("hard_stop_sunday_quiet") or slim.get("hard_stop_sunday_quiet")
+        )
+        slim["compact_distance_sunday_quiet"] = (
+            compact.get("distance_sunday_quiet") or slim.get("distance_sunday_quiet")
+        )
+        slim["compact_quant_sunday_quiet"] = (
+            compact.get("quant_sunday_quiet") or slim.get("quant_sunday_quiet")
+        )
+        slim["compact_report_sunday_quiet"] = (
+            compact.get("report_sunday_quiet") or slim.get("report_sunday_quiet")
+        )
+        slim["compact_empty_bee_sunday_quiet"] = (
+            compact.get("empty_bee_sunday_quiet") or slim.get("empty_bee_sunday_quiet")
+        )
+        slim["compact_nm_clerk_sunday_quiet"] = (
+            compact.get("nm_clerk_sunday_quiet") or slim.get("nm_clerk_sunday_quiet")
+        )
+        slim["compact_hs_clerk_sunday_quiet"] = (
+            compact.get("hs_clerk_sunday_quiet") or slim.get("hs_clerk_sunday_quiet")
+        )
+        slim["compact_bleed_clerk_sunday_quiet"] = (
+            compact.get("bleed_clerk_sunday_quiet") or slim.get("bleed_clerk_sunday_quiet")
+        )
+        slim["compact_skip_twin_sunday_quiet"] = (
+            compact.get("skip_twin_sunday_quiet") or slim.get("skip_twin_sunday_quiet")
+        )
+        slim["compact_clv_closer_sunday_quiet"] = (
+            compact.get("clv_closer_sunday_quiet") or slim.get("clv_closer_sunday_quiet")
+        )
+        slim["compact_tdigest_sunday_quiet"] = (
+            compact.get("tdigest_sunday_quiet") or slim.get("tdigest_sunday_quiet")
+        )
+        slim["compact_skips_sunday_quiet"] = (
+            compact.get("skips_sunday_quiet") or slim.get("skips_sunday_quiet")
+        )
+        slim["compact_teller_sunday_quiet"] = (
+            compact.get("teller_sunday_quiet") or slim.get("teller_sunday_quiet")
+        )
+        slim["compact_doc_age_sunday_quiet"] = (
+            compact.get("doc_age_sunday_quiet") or slim.get("doc_age_sunday_quiet")
+        )
+        slim["compact_quiet_sunday_quiet"] = (
+            compact.get("quiet_sunday_quiet") or slim.get("quiet_sunday_quiet")
+        )
+        slim["compact_ritual_sunday_quiet"] = (
+            compact.get("ritual_sunday_quiet") or slim.get("ritual_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
