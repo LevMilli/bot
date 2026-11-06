@@ -714,13 +714,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ruin drill chip vault | active practice |
 | Expand gate vault polish | soft_copy on blocked |
 
-### Next
+### Living upgrade — sunday packet / export json / vault scroll
 
 | Ticket | Where |
 | --- | --- |
 | Sunday packet vault row | packet present observe |
 | Living export CLI note | doctor_age in status json |
-| Vault board scroll polish | dense row readability |
+| Vault board scroll polish | dense row + sticky toolbar |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Staff status doctor_age text | text status line |
+| Living compact include quiet | compact parts quiet label |
+| Ritual exit note on vault | ritual_ok observe chip |
 
 ## Hard rules unchanged
 

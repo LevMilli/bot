@@ -2630,19 +2630,25 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         import desk_living
         bk = desk_living.bookkeeper_chip(root)
         rp = desk_living.reporter_chip(root)
+        sun = desk_living.sunday_packet_chip(root)
         bee = desk_living.empty_card_bee_chip(root)
         desk_row["bookkeeper"] = bk
         desk_row["reporter"] = rp
+        desk_row["sunday_packet"] = sun
         desk_row["empty_card_bee"] = bee
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["bookkeeper"] = desk_row["master"].get("bookkeeper") or bk
             desk_row["master"]["reporter"] = desk_row["master"].get("reporter") or rp
+            desk_row["master"]["sunday_packet"] = (
+                desk_row["master"].get("sunday_packet") or sun
+            )
             desk_row["master"]["empty_card_bee"] = (
                 desk_row["master"].get("empty_card_bee") or bee
             )
     except Exception as exc:  # noqa: BLE001
         desk_row["bookkeeper"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["reporter"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["sunday_packet"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["empty_card_bee"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         import desk_living

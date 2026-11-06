@@ -1054,6 +1054,41 @@ def reporter_chip(root: str | None = None) -> dict:
     }
 
 
+def sunday_packet_chip(root: str | None = None) -> dict:
+    """Observe-only Sunday living packet presence chip (never auto-publishes)."""
+    packet: dict = {}
+    present = False
+    try:
+        from helpers import sunday_packet
+        path = sunday_packet.packet_path(root)
+        present = os.path.isfile(path)
+        if present:
+            with open(path, encoding="utf-8") as handle:
+                packet = json.load(handle)
+            if not isinstance(packet, dict):
+                packet = {}
+    except Exception:
+        packet = {}
+        present = False
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_publish": False,
+        "present": present,
+        "chicago_today": packet.get("chicago_today"),
+        "scorecard_present": bool(packet.get("scorecard_present")),
+        "ritual": packet.get("ritual") if isinstance(packet.get("ritual"), dict) else None,
+        "label": (
+            f"sunday packet={'yes' if present else 'no'} "
+            f"scorecard={bool(packet.get('scorecard_present'))} "
+            f"auto_publish=False"
+        ),
+        "note": packet.get("note") or (
+            "Staff Sunday living packet — draft/discord only; never auto-posts."
+        ),
+    }
+
+
 def empty_card_bee_chip(root: str | None = None) -> dict:
     """Empty CARD 3s latency bee digest chip."""
     digest: dict = {}
@@ -1747,6 +1782,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "quant_clerk": quant_clerk_chip(root),
         "bookkeeper": bookkeeper_chip(root),
         "reporter": reporter_chip(root),
+        "sunday_packet": sunday_packet_chip(root),
         "empty_card_bee": empty_card_bee_chip(root),
         "near_miss_clerk": near_miss_clerk_chip(root),
         "hard_stop_clerk": hard_stop_clerk_chip(root),
@@ -1899,6 +1935,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
         "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
         "betting_expand_gate", "doctor_age", "fee_floors_assert",
+        "sunday_packet", "reporter",
     )
     slim = {k: board.get(k) for k in keep if k in board}
     slim["paper_only"] = True

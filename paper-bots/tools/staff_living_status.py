@@ -211,6 +211,9 @@ def main() -> int:
             "fee_floors_assert": board.get("fee_floors_assert"),
             "teller_living": board.get("teller_living"),
             "timer_heartbeat": board.get("timer_heartbeat"),
+            "doctor_age": board.get("doctor_age"),
+            "sunday_packet": board.get("sunday_packet"),
+            "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),
             "chip_catalog": sorted(
                 k for k, v in board.items()

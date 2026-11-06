@@ -412,6 +412,17 @@ export type Desk = {
     note?: string
     error?: string
   }
+  sunday_packet?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    present?: boolean
+    auto_publish?: boolean
+    chicago_today?: string
+    scorecard_present?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
   empty_card_bee?: {
     paper_only?: boolean
     fee_floors_locked?: boolean
