@@ -746,13 +746,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Staff ritual --observe flag | print ritual_observe only |
 | Priority family ritual unit | assert ritual dedupe |
 
-### Next
+### Living upgrade — doctor ritual check / status ritual_ok / vault hint
 
 | Ticket | Where |
 | --- | --- |
 | Living doctor include ritual | doctor checks ritual_observe |
 | Status json ritual_ok top-level | flatten ritual_ok |
 | City vault ritual sticky note | short make living-ritual hint |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Doctor soft_copy ritual line | failed ritual in discord |
+| Living export ritual_ok | export top-level |
+| Staff status ritual_ok flag | text ritual_ok= |
 
 ## Hard rules unchanged
 

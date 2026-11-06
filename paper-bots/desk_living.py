@@ -2226,12 +2226,21 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     quiet = feature_store_quiet_alert(root)
     timer = timer_heartbeat_chip(root)
     gaps = dual_control_gaps_page(root)
+    ritual = (
+        health.get("ritual_observe")
+        if isinstance(health.get("ritual_observe"), dict)
+        else ritual_observe_chip(root)
+    )
+    # Ritual nag: weekly doctor marker freshness (floors/expand already checked).
+    # When record=True this run refreshes the marker — don't fail on pre-write staleness.
+    ritual_fresh_ok = bool(ritual.get("doctor_fresh")) or bool(record)
     ok = bool(
         floors.get("all_ok")
         and health.get("ok")
         and not expand.get("blocked")
         and not quiet.get("quiet")
         and timer.get("alive") is not False
+        and ritual_fresh_ok
     )
     checks = [
         {"id": "floors", "ok": bool(floors.get("all_ok")), "label": floors.get("label")},
@@ -2240,6 +2249,11 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         {"id": "feature_quiet", "ok": not bool(quiet.get("quiet")), "label": quiet.get("alert") or "feature quiet ok"},
         {"id": "timer", "ok": timer.get("alive") is not False, "label": timer.get("label")},
         {"id": "dual_gaps", "ok": not bool(gaps.get("page")), "label": gaps.get("label")},
+        {
+            "id": "ritual_observe",
+            "ok": ritual_fresh_ok,
+            "label": ritual.get("label") or "ritual observe",
+        },
     ]
     failed = [c for c in checks if not c.get("ok")]
     doc = {
@@ -2250,6 +2264,9 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         "failed_n": len(failed),
         "failed": failed,
         "checks": checks,
+        "ritual_observe": ritual,
+        "ritual_ok": ritual.get("ritual_ok"),
+        "ritual_exit_ok": ritual.get("exit_ok"),
         "chip_catalog": health.get("chip_catalog") or [],
         "chips_n": health.get("chips_n"),
         "chips_soft_max": CHIP_CATALOG_SOFT_MAX,

@@ -219,6 +219,16 @@ def main() -> int:
             "timer_heartbeat": board.get("timer_heartbeat"),
             "doctor_age": board.get("doctor_age"),
             "ritual_observe": board.get("ritual_observe"),
+            "ritual_ok": (
+                (board.get("ritual_observe") or {}).get("ritual_ok")
+                if isinstance(board.get("ritual_observe"), dict)
+                else None
+            ),
+            "ritual_exit_ok": (
+                (board.get("ritual_observe") or {}).get("exit_ok")
+                if isinstance(board.get("ritual_observe"), dict)
+                else None
+            ),
             "sunday_packet": board.get("sunday_packet"),
             "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),
