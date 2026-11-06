@@ -470,6 +470,16 @@ def run():
     s = load_state()
     if not existed:
         save_state(s)
+    # Living upgrade: CLI/standalone honors desk entry_gate (exits still run).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_living
+        blocked = desk_living.honor_desk_entry_gate(DESK_ROOT)
+        if blocked:
+            print(f"Desk entry_gate (CLI honor): {blocked[:160]}")
+    except Exception:
+        pass
     # Sync public Kalshi trade tape for sports + desk series (read-only).
     try:
         if DESK_ROOT not in sys.path:
@@ -839,6 +849,38 @@ def run():
                     p["scale_out_at"] = ts
                     p["scale_out_fair"] = round(float(fair), 4)
                     reason = f"scale-out +{SCALE_OUT_FAIR_MOVE*100:.0f}¢ fair (50%)"
+                    try:
+                        if DESK_ROOT not in sys.path:
+                            sys.path.insert(0, DESK_ROOT)
+                        import desk_roi_plan
+                        import desk_living
+                        desk_roi_plan.record_fee_ledger(
+                            DESK_ROOT,
+                            bot="sports-gap",
+                            ticker=str(p.get("ticker") or ""),
+                            side=str(p.get("side") or ""),
+                            price=bid,
+                            contracts=clip,
+                            fee=fee(bid) if bid else 0.0,
+                            pnl=pnl,
+                            fill_id=str(p.get("fill_id") or ""),
+                            kind="scale_out",
+                            note=reason[:120],
+                        )
+                        desk_living.record_completion(
+                            DESK_ROOT,
+                            bot="sports-gap",
+                            ticker=str(p.get("ticker") or ""),
+                            side=str(p.get("side") or ""),
+                            pnl=pnl,
+                            contracts=clip,
+                            fill_id=str(p.get("fill_id") or ""),
+                            kind="scale_out",
+                            eligible=True,
+                            note=reason[:120],
+                        )
+                    except Exception:
+                        pass
                     lines.append(
                         f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | "
                         f"**PAPER SELL** {clip} @ bid {bid:.2f} ({reason}), P&L ${pnl:+.2f}; "
@@ -890,6 +932,32 @@ def run():
                         kind="sell",
                         note=str(exit_reason or "")[:120],
                     )
+                    try:
+                        import desk_living
+                        import teller_memory
+                        desk_living.record_completion(
+                            DESK_ROOT,
+                            bot="sports-gap",
+                            ticker=str(p.get("ticker") or ""),
+                            side=str(p.get("side") or ""),
+                            pnl=pnl,
+                            contracts=p.get("contracts"),
+                            fill_id=str(p.get("fill_id") or ""),
+                            kind="sell",
+                            eligible=True,
+                            note=str(exit_reason or "")[:120],
+                        )
+                        teller_memory.remember(
+                            DESK_ROOT,
+                            kind="wins" if float(pnl) > 0 else "mistakes",
+                            text=(
+                                f"sports-gap {p.get('ticker')} {exit_reason} "
+                                f"pnl {float(pnl):+.2f}"
+                            )[:200],
+                            bot_id="sports-gap",
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 if desk is not None:

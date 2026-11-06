@@ -332,6 +332,38 @@ def step_settle(args, state, day):
                     })
                 except Exception:
                     pass
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_roi_plan
+                    import desk_living
+                    desk_roi_plan.record_fee_ledger(
+                        DESK_ROOT,
+                        bot="kalshi-sized",
+                        ticker=str(pos.get("ticker") or ""),
+                        side=str(pos.get("side") or ""),
+                        price=bid,
+                        contracts=pos.get("contracts"),
+                        fee=pos.get("fee") or 0.0,
+                        pnl=pnl,
+                        fill_id=str(pos.get("fill_id") or ""),
+                        kind="model_flip",
+                        note="model-flip bid under 50c",
+                    )
+                    desk_living.record_completion(
+                        DESK_ROOT,
+                        bot="kalshi-sized",
+                        ticker=str(pos.get("ticker") or ""),
+                        side=str(pos.get("side") or ""),
+                        pnl=pnl,
+                        contracts=pos.get("contracts"),
+                        fill_id=str(pos.get("fill_id") or ""),
+                        kind="model_flip",
+                        eligible=False,
+                        note="model-flip bid under 50c",
+                    )
+                except Exception:
+                    pass
                 logger.learn(
                     f"MODEL-FLIP SELL: {pos['ticker']} {pos['side']} bid {bid:.2f} pnl {pnl:+.2f}",
                     "model-flip",
@@ -363,6 +395,39 @@ def step_settle(args, state, day):
                 "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
                 "fill_id": pos.get("fill_id") or "",
             })
+        except Exception:
+            pass
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan
+            import desk_living
+            pnl = pos.get("pnl")
+            desk_roi_plan.record_fee_ledger(
+                DESK_ROOT,
+                bot="kalshi-sized",
+                ticker=str(pos.get("ticker") or ""),
+                side=str(pos.get("side") or ""),
+                price=pos.get("ask"),
+                contracts=pos.get("contracts"),
+                fee=pos.get("fee") or 0.0,
+                pnl=pnl,
+                fill_id=str(pos.get("fill_id") or ""),
+                kind="settle",
+                note="INX sized settle",
+            )
+            desk_living.record_completion(
+                DESK_ROOT,
+                bot="kalshi-sized",
+                ticker=str(pos.get("ticker") or ""),
+                side=str(pos.get("side") or ""),
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                fill_id=str(pos.get("fill_id") or ""),
+                kind="settle",
+                eligible=False,
+                note="INX sized settle",
+            )
         except Exception:
             pass
         logger.ledger_settle(pos, state["bankroll"])

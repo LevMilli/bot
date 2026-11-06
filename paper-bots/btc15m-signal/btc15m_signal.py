@@ -201,6 +201,29 @@ def settle_account(state):
                         fill_id=str(pos.get("fill_id") or ""),
                         note="settled",
                     )
+                try:
+                    import desk_living
+                    import teller_memory
+                    desk_living.record_completion(
+                        DESK_ROOT,
+                        bot="btc15m",
+                        ticker=str(pos.get("ticker") or ""),
+                        side=str(pos.get("side") or ""),
+                        pnl=pnl,
+                        contracts=pos.get("contracts"),
+                        fill_id=str(pos.get("fill_id") or ""),
+                        kind="settle",
+                        eligible=True,
+                        note="settled",
+                    )
+                    teller_memory.remember(
+                        DESK_ROOT,
+                        kind="wins" if float(pnl) > 0 else "mistakes",
+                        text=f"btc15m settle {pos.get('ticker')} pnl {float(pnl):+.2f}"[:200],
+                        bot_id="btc15m",
+                    )
+                except Exception:
+                    pass
             except Exception:
                 pass
     state["open"] = still
@@ -259,6 +282,29 @@ def paper_sell(state, pos, bid, fee, reason):
                 kind="sell",
                 note=str(reason or "")[:120],
             )
+            try:
+                import desk_living
+                import teller_memory
+                desk_living.record_completion(
+                    DESK_ROOT,
+                    bot="btc15m",
+                    ticker=str(pos.get("ticker") or ""),
+                    side=str(pos.get("side") or ""),
+                    pnl=pnl,
+                    contracts=pos.get("contracts"),
+                    fill_id=str(pos.get("fill_id") or ""),
+                    kind="sell",
+                    eligible=True,
+                    note=str(reason or "")[:120],
+                )
+                teller_memory.remember(
+                    DESK_ROOT,
+                    kind="wins" if float(pnl) > 0 else "mistakes",
+                    text=f"btc15m {reason} {pos.get('ticker')} pnl {float(pnl):+.2f}"[:200],
+                    bot_id="btc15m",
+                )
+            except Exception:
+                pass
             helper = str(pos.get("helper_source") or "").strip()
             if helper:
                 desk_roi_plan.record_helper_fill(
@@ -994,8 +1040,11 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
     # Soft: unknown candle trend does not block (only adverse toward-target does).
     if toward:
         reasons.append("last 5 candles moving toward target")
-    # Soft: calendar never loaded → do not block; known high-impact still blocks.
-    if news:
+    # Living upgrade P0: calendar never loaded → FAIL-CLOSED (block buys).
+    # Known high-impact hits still block. Matches desk copy "unavailable = skip BUY".
+    if news is None:
+        reasons.append("USD news calendar unavailable (fail-closed)")
+    elif news:
         reasons.append("USD high-impact news near this block")
 
     out.update({
@@ -1012,7 +1061,8 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         "toward": toward,
         "news": news,
         "calendar_loaded": news is not None,
-        "news_soft_unavailable": news is None,
+        "news_fail_closed": news is None,
+        "news_soft_unavailable": False,
         "candle_soft_unknown": toward is None,
         "cushion": cushion,
         "z": z,
@@ -1026,6 +1076,17 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
 def main():
     t0 = time.perf_counter()
     now = dt.datetime.now(dt.timezone.utc)
+    # Living upgrade: CLI/standalone honors desk entry_gate (exits still run).
+    if not IS_SHADOW:
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_living
+            blocked = desk_living.honor_desk_entry_gate(DESK_ROOT)
+            if blocked:
+                print(f"Desk entry_gate (CLI honor): {blocked[:160]}")
+        except Exception:
+            pass
     account = load_account()
     if not os.path.exists(ACCOUNT):
         save_account(account)

@@ -268,11 +268,25 @@ Interactive: Positive ROI Master Plan canvas.
 | Runtime | BTC `evaluate_window` applies relax when staff-armed |
 | Masters board | `roi_plan.near_miss_promote` |
 
+### Living Trading Upgrade (shipped slice)
+
+| Ticket | Where |
+| --- | --- |
+| BTC news fail-closed | `btc15m_signal` — calendar `None` blocks buys |
+| CLI entry_gate honor | `desk_living.honor_desk_entry_gate` on sports/BTC/commodity/meme |
+| Meme Chicago day | `memecoin-paper/bot.today_local` → America/Chicago |
+| Fee ledger gaps | sports scale-out + INX twins + meme sells |
+| Feature store + Completions KPI | `desk_living` → Masters `living_upgrade` |
+| Insight helpers (observe-only) | `helpers/{tip_radar,skip_historian,timer_heartbeat,empty_card_bee}` |
+| Teller memory on closes | sports / BTC / INX / meme settles & sells |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
+| Wire feature rows on every evaluate | sports/BTC/commodity hot path |
+| More insight swarm | CLV closer, injury wire, EIA week scout |
 
 ## Hard rules unchanged
 

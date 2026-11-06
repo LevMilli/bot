@@ -365,6 +365,12 @@ def master_summary(
             profit_lock = desk_roi_plan.profit_lock_status(root)
         except Exception:
             profit_lock = None
+        living = None
+        try:
+            import desk_living
+            living = desk_living.living_upgrade_board(root)
+        except Exception:
+            living = None
         plan = {
             "bleed": bleed,
             "capital_misplaced": misplaced,
@@ -379,6 +385,7 @@ def master_summary(
             "hillclimb_kill": hillclimb,
             "profit_lock": profit_lock,
             "baseline": baseline,
+            "living_upgrade": living,
             "fee_floors_locked": True,
         }
         try:

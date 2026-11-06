@@ -8,9 +8,12 @@ we HOLD and log it -- we never invent a price.
 """
 import csv, json, os, sys, time, uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 import config as C
+
+CT = ZoneInfo("America/Chicago")
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 P_LOG, P_POS, P_TRADES = (os.path.join(BASE, f) for f in (C.LOG, C.POSITIONS, C.TRADES))
@@ -28,7 +31,8 @@ def now_iso():
 
 
 def today_local():
-    return datetime.now().astimezone().date().isoformat()
+    """Chicago calendar day for trades_today / daily halt (living upgrade P0)."""
+    return datetime.now(CT).date().isoformat()
 
 
 # ------------------------------------------------------------------ HTTP
@@ -165,6 +169,47 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
                fee_usd=round(fee, 4), impact_pct=round(imp * 100, 3), pnl_usd=round(pnl, 4),
                liquidity_usd=liq))
     print(f"  PAPER SELL {pos['symbol']}: {reason} -> ${proceeds:.2f} (pnl ${pnl:+.2f})")
+    try:
+        desk_root = os.path.dirname(BASE)
+        if desk_root not in sys.path:
+            sys.path.insert(0, desk_root)
+        import desk_roi_plan
+        import desk_living
+        import teller_memory
+        desk_roi_plan.record_fee_ledger(
+            desk_root,
+            bot="memecoin",
+            ticker=str(pos.get("mint") or pos.get("symbol") or ""),
+            side="SELL",
+            price=price,
+            contracts=1.0,
+            fee=fee,
+            pnl=pnl,
+            fill_id=f"{pos.get('mint')}|{pos.get('entry_iso')}",
+            kind="sell" if full else "partial_sell",
+            note=str(reason or "")[:120],
+        )
+        if full:
+            desk_living.record_completion(
+                desk_root,
+                bot="memecoin",
+                ticker=str(pos.get("mint") or pos.get("symbol") or ""),
+                side="SELL",
+                pnl=pnl,
+                contracts=1.0,
+                fill_id=f"{pos.get('mint')}|{pos.get('entry_iso')}",
+                kind="sell",
+                eligible=False,
+                note=str(reason or "")[:120],
+            )
+            teller_memory.remember(
+                desk_root,
+                kind="wins" if float(pnl) > 0 else "mistakes",
+                text=f"memecoin {pos.get('symbol')} {reason} pnl {float(pnl):+.2f}"[:200],
+                bot_id="memecoin",
+            )
+    except Exception:
+        pass
     if full:
         try:
             desk = _desk()
@@ -601,6 +646,16 @@ def maybe_reload_broke_cash(st) -> bool:
 def main():
     if not C.PAPER:
         sys.exit("PAPER is False. This desk is paper-only and has no wallet. Refusing to run.")
+    desk_root = os.path.dirname(BASE)
+    try:
+        if desk_root not in sys.path:
+            sys.path.insert(0, desk_root)
+        import desk_living
+        blocked = desk_living.honor_desk_entry_gate(desk_root)
+        if blocked:
+            print(f"Desk entry_gate (CLI honor): {blocked[:160]}")
+    except Exception:
+        pass
     from collections import Counter
     stats = Counter()
     st = load_state()
