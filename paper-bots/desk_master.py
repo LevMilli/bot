@@ -368,7 +368,7 @@ def master_summary(
         living = None
         try:
             import desk_living
-            living = desk_living.living_upgrade_board(root)
+            living = desk_living.living_upgrade_board(root, bots=bots)
         except Exception:
             living = None
         plan = {
@@ -547,6 +547,24 @@ def master_summary(
                 )
         except Exception:
             plan["sports_calibration"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_cc = desk_roi_plan.latest_commodity_calibration(root)
+            if root and bots and (
+                not isinstance(latest_cc, dict)
+                or str(latest_cc.get("label") or "") != today
+            ):
+                plan["commodity_calibration"] = desk_roi_plan.capture_commodity_calibration(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["commodity_calibration"] = (
+                    latest_cc or desk_roi_plan.commodity_calibration_report(bots)
+                )
+        except Exception:
+            plan["commodity_calibration"] = None
         try:
             status_fq = desk_roi_plan.firm_queue_status(root)
             offers_n = int((status_fq or {}).get("offers_n") or 0)

@@ -266,10 +266,67 @@ def completions_summary(root: str | None = None, *, day: str | None = None) -> d
     }
 
 
-def living_upgrade_board(root: str | None = None) -> dict:
+def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
+    """Masters AI health: adapt snapshot + calib raise_phi tickets across fee-clear."""
+    adapt = {}
+    try:
+        import desk_adapt
+        adapt = desk_adapt.adapt_summary(root) or {}
+    except Exception:
+        adapt = {}
+    boards = {}
+    raise_phi = []
+    try:
+        import desk_roi_plan
+        for name, latest_fn, report_fn in (
+            ("btc", desk_roi_plan.latest_btc_calibration, desk_roi_plan.btc_calibration_report),
+            ("sports", desk_roi_plan.latest_sports_calibration, desk_roi_plan.sports_calibration_report),
+            ("commodity", desk_roi_plan.latest_commodity_calibration, desk_roi_plan.commodity_calibration_report),
+        ):
+            card = None
+            try:
+                card = latest_fn(root)
+            except Exception:
+                card = None
+            if not isinstance(card, dict):
+                try:
+                    card = report_fn(bots)
+                except Exception:
+                    card = {}
+            boards[name] = {
+                "action": (card or {}).get("action"),
+                "miscalibrated": bool((card or {}).get("miscalibrated")),
+                "hi_n": (card or {}).get("hi_n"),
+                "hi_hit_rate": (card or {}).get("hi_hit_rate"),
+            }
+            if str((card or {}).get("action") or "") == "raise_phi":
+                raise_phi.append(name)
+    except Exception:
+        boards = {}
+        raise_phi = []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "grok_buys": False,
+        "adapt_version": adapt.get("version"),
+        "adapt_bots_n": len(adapt.get("by_bot") or {}),
+        "adapt_recent_vol_n": len(adapt.get("recent_vol") or []),
+        "calib_boards": boards,
+        "raise_phi_tickets": raise_phi,
+        "raise_phi_n": len(raise_phi),
+        "auto_write_phi": False,
+        "note": (
+            "Living AI health — Wilson adapt + calib raise_Φ tickets. "
+            "Staff dual-control only; never silent Φ write; never softer floors."
+        ),
+    }
+
+
+def living_upgrade_board(root: str | None = None, bots: list | None = None) -> dict:
     """Masters card: data + completions health for the living upgrade."""
     feat = feature_store_coverage(root)
     comp = completions_summary(root)
+    ai = living_ai_health(root, bots=bots)
     helpers = {}
     for name in (
         "tip_radar_digest.json",
@@ -295,6 +352,7 @@ def living_upgrade_board(root: str | None = None) -> dict:
         "paper_only": True,
         "feature_store": feat,
         "completions": comp,
+        "living_ai": ai,
         "insight_helper_digests": helpers,
         "insight_helpers_present": sum(1 for v in helpers.values() if v),
         "chicago_today": chicago_today_iso(),

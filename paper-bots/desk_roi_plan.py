@@ -43,6 +43,7 @@ OPP_COST_NAME = "desk_opp_cost.json"
 IDEA_REVIEW_NAME = "desk_idea_review.json"
 BTC_CALIB_NAME = "desk_btc_calibration.json"
 SPORTS_CALIB_NAME = "desk_sports_calibration.json"
+COMMODITY_CALIB_NAME = "desk_commodity_calibration.json"
 FIRM_QUEUE_NAME = "desk_firm_queue.json"
 EMPTY_CARD_NAME = "desk_empty_card.json"
 NEAR_MISS_PROMOTE_NAME = "desk_near_miss_promote.json"
@@ -201,6 +202,12 @@ SPORTS_CALIB_MIN_N = 20
 SPORTS_CALIB_HI_LABEL = 0.80
 SPORTS_CALIB_HI_HIT_FLOOR = 0.70
 SPORTS_CALIB_BUCKETS = BTC_CALIB_BUCKETS
+
+# Commodity calibration — fair/prob buckets vs hit (NatGas/WTI/etc.; observe-only).
+COMMODITY_CALIB_MIN_N = 20
+COMMODITY_CALIB_HI_LABEL = 0.80
+COMMODITY_CALIB_HI_HIT_FLOOR = 0.70
+COMMODITY_CALIB_BUCKETS = BTC_CALIB_BUCKETS
 
 # Phase 9: dual-control live checklist — paper stub; never enables live orders.
 LIVE_ORDERS_ENABLED = False  # hard lock — stub cannot arm create-order
@@ -975,6 +982,119 @@ def capture_sports_calibration(
 
 def latest_sports_calibration(root: str | None = None) -> dict | None:
     store = _load(_path(SPORTS_CALIB_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+# ---- Commodity calibration report (living upgrade — parallel to BTC) -------
+
+def _commodity_history_rows(bots: list | None) -> list:
+    rows = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        if str(bot.get("id") or "") not in ("commodity-15m", "commodity"):
+            continue
+        for h in bot.get("history") or []:
+            if isinstance(h, dict):
+                rows.append(h)
+    return rows
+
+
+def commodity_calibration_report(
+    bots: list | None = None,
+    *,
+    min_n: int = COMMODITY_CALIB_MIN_N,
+) -> dict:
+    """Bucket commodity fair/prob vs hit. Flag high-p miscalibration.
+
+    Observe-only — never softens 0.05 floor; never auto-writes params.
+    """
+    rows = _commodity_history_rows(bots)
+    buckets = []
+    hi_hits = 0
+    hi_n = 0
+    for lo, hi in COMMODITY_CALIB_BUCKETS:
+        local = []
+        for h in rows:
+            p = _finite(
+                h.get("fair_at_entry")
+                if h.get("fair_at_entry") is not None
+                else h.get("prob") or h.get("confidence") or h.get("model_p")
+            )
+            pnl = _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd"))
+            if p is None or pnl is None:
+                continue
+            if not (lo <= float(p) < hi):
+                continue
+            hit = 1.0 if pnl > 0 else 0.0
+            local.append(hit)
+            if lo + 1e-12 >= COMMODITY_CALIB_HI_LABEL:
+                hi_n += 1
+                hi_hits += int(hit)
+        n = len(local)
+        rate = round(sum(local) / n, 4) if n else None
+        buckets.append({
+            "lo": lo,
+            "hi": hi,
+            "label_mid": round((lo + min(hi, 1.0)) / 2, 3),
+            "n": n,
+            "hit_rate": rate,
+            "gap": None if rate is None else round(rate - ((lo + min(hi, 1.0)) / 2), 4),
+        })
+    hi_rate = round(hi_hits / hi_n, 4) if hi_n else None
+    miscal = bool(
+        hi_n >= int(min_n)
+        and hi_rate is not None
+        and hi_rate + 1e-12 < COMMODITY_CALIB_HI_HIT_FLOOR
+    )
+    action = "raise_phi" if miscal else ("observe" if hi_n < int(min_n) else "keep")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bot": "commodity-15m",
+        "n": sum(b["n"] for b in buckets),
+        "hi_label": COMMODITY_CALIB_HI_LABEL,
+        "hi_n": hi_n,
+        "hi_hit_rate": hi_rate,
+        "hi_hit_floor": COMMODITY_CALIB_HI_HIT_FLOOR,
+        "miscalibrated": miscal,
+        "action": action,
+        "buckets": buckets,
+        "auto_promote": False,
+        "note": (
+            "Commodity calibration: high-fair (≥80%) bucket must hit ≥70% once n≥20. "
+            "Miscalibration → fix model — never soften 0.05 or size up on fake confidence."
+            if miscal
+            else "Commodity calibration board (parallel to BTC/sports). Floors locked; no auto param write."
+        ),
+    }
+
+
+def capture_commodity_calibration(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+) -> dict:
+    """Persist today's commodity calibration card for Masters / Sunday review."""
+    day = label or _chicago_day()
+    report = commodity_calibration_report(bots)
+    card = {**report, "label": day, "captured_at": _now()}
+    path = _path(COMMODITY_CALIB_NAME, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = [c for c in cards if str(c.get("label") or "") != day]
+    cards.append(card)
+    store["cards"] = cards[-60:]
+    store["latest"] = card
+    store["last_at"] = _now()
+    _save(path, store)
+    return card
+
+
+def latest_commodity_calibration(root: str | None = None) -> dict | None:
+    store = _load(_path(COMMODITY_CALIB_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
 
