@@ -874,13 +874,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual discord floors_ok | flags in draft header |
 | Vault ritual draft tint | exit_ok false color |
 
-### Next
+### Living upgrade — export quiet_doctor / status floors_ok / doctor draft badge
 
 | Ticket | Where |
 | --- | --- |
 | Export quiet_doctor | living_board_export field |
 | Status text floors_ok | ritual flags line |
 | Vault doctor draft label | stale badge text |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Compact export quiet bit | quiet in quiet_doctor age |
+| Ritual CLI floors in text | full ritual plain flags |
+| City ritual draft badge | exit_ok badge text |
 
 ## Hard rules unchanged
 

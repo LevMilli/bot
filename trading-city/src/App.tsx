@@ -1068,16 +1068,35 @@ export default function App() {
                     }}
                   >
                     {(() => {
+                      const fresh =
+                        snap?.desk?.doctor_fresh ??
+                        (snap?.desk?.master as { doctor_fresh?: boolean | null } | undefined)
+                          ?.doctor_fresh ??
+                        snap?.desk?.living_compact?.doctor_fresh ??
+                        (snap?.desk?.doctor_age?.stale === true
+                          ? false
+                          : snap?.desk?.doctor_age?.stale === false
+                            ? true
+                            : null)
+                      const badge =
+                        fresh === false
+                          ? ' · STALE'
+                          : fresh === true
+                            ? ' · fresh'
+                            : ''
                       const copy =
                         snap?.desk?.doctor_soft_copy ||
                         (snap?.desk?.master as {
                           doctor_soft_copy?: string
                         } | undefined)?.doctor_soft_copy
                       if (!copy) {
-                        return 'make living-doctor · staff paste only · never auto-posts'
+                        return (
+                          'make living-doctor · staff paste only · never auto-posts' + badge
+                        )
                       }
                       const one = String(copy).split('\n').filter(Boolean).slice(0, 2).join(' · ')
-                      return one.length > 160 ? `${one.slice(0, 157)}…` : one
+                      const clipped = one.length > 160 ? `${one.slice(0, 157)}…` : one
+                      return clipped + badge
                     })()}
                   </span>
                 </div>
