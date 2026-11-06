@@ -63,6 +63,11 @@ def _text(board: dict) -> str:
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
         (
+            f"compact_doctor: {compact.get('doctor_label') or 'doctor=n/a'} · "
+            f"{compact.get('ritual_label') or 'ritual=n/a'} · "
+            f"doctor_fresh={compact.get('doctor_fresh')}"
+        ),
+        (
             f"swarm: {swarm.get('insight_n')}:{swarm.get('betting_n')} "
             f"pass={swarm.get('pass')}"
         ),

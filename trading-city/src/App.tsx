@@ -972,6 +972,65 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">ritual</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const r =
+                          snap?.desk?.ritual_observe ||
+                          (snap?.desk?.master as {
+                            ritual_observe?: { ritual_ok?: boolean; exit_ok?: boolean }
+                          } | undefined)?.ritual_observe
+                        if (!r) return undefined
+                        if (r.ritual_ok) return '#6fbf73'
+                        if (r.exit_ok === false) return '#c45c26'
+                        return '#d4a017'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const r =
+                        snap?.desk?.ritual_observe ||
+                        (snap?.desk?.master as {
+                          ritual_observe?: {
+                            label?: string
+                            ritual_ok?: boolean
+                            exit_ok?: boolean
+                            auto_publish?: boolean
+                          }
+                        } | undefined)?.ritual_observe
+                      if (!r) return 'ritual observe pending'
+                      return (
+                        (r.label ||
+                          `ritual_ok=${Boolean(r.ritual_ok)} exit_ok=${Boolean(r.exit_ok)}`) +
+                        ' · auto_publish=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">ritual draft</span>
+                  <span className="vault-ritual-draft">
+                    {(() => {
+                      const copy =
+                        snap?.desk?.ritual_soft_copy ||
+                        snap?.desk?.ritual_discord ||
+                        (snap?.desk?.master as {
+                          ritual_soft_copy?: string
+                          ritual_discord?: string
+                        } | undefined)?.ritual_soft_copy ||
+                        (snap?.desk?.master as {
+                          ritual_discord?: string
+                        } | undefined)?.ritual_discord
+                      if (!copy) {
+                        return 'make living-ritual-discord · staff paste only · never auto-posts'
+                      }
+                      const one = String(copy).split('\n').filter(Boolean).slice(0, 2).join(' · ')
+                      return one.length > 160 ? `${one.slice(0, 157)}…` : one
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">AI</span>
                   <span
                     style={{
@@ -1951,65 +2010,6 @@ export default function App() {
                           ?.living_doctor
                       if (!d) return 'living doctor pending'
                       return d.label || (d.ok ? 'doctor OK' : 'doctor FAIL')
-                    })()}
-                  </span>
-                </div>
-                <div className="vault-board-row">
-                  <span className="vb-label">ritual</span>
-                  <span
-                    style={{
-                      color: (() => {
-                        const r =
-                          snap?.desk?.ritual_observe ||
-                          (snap?.desk?.master as {
-                            ritual_observe?: { ritual_ok?: boolean; exit_ok?: boolean }
-                          } | undefined)?.ritual_observe
-                        if (!r) return undefined
-                        if (r.ritual_ok) return '#6fbf73'
-                        if (r.exit_ok === false) return '#c45c26'
-                        return '#d4a017'
-                      })(),
-                    }}
-                  >
-                    {(() => {
-                      const r =
-                        snap?.desk?.ritual_observe ||
-                        (snap?.desk?.master as {
-                          ritual_observe?: {
-                            label?: string
-                            ritual_ok?: boolean
-                            exit_ok?: boolean
-                            auto_publish?: boolean
-                          }
-                        } | undefined)?.ritual_observe
-                      if (!r) return 'ritual observe pending'
-                      return (
-                        (r.label ||
-                          `ritual_ok=${Boolean(r.ritual_ok)} exit_ok=${Boolean(r.exit_ok)}`) +
-                        ' · auto_publish=False'
-                      )
-                    })()}
-                  </span>
-                </div>
-                <div className="vault-board-row">
-                  <span className="vb-label">ritual draft</span>
-                  <span className="vault-ritual-draft">
-                    {(() => {
-                      const copy =
-                        snap?.desk?.ritual_soft_copy ||
-                        snap?.desk?.ritual_discord ||
-                        (snap?.desk?.master as {
-                          ritual_soft_copy?: string
-                          ritual_discord?: string
-                        } | undefined)?.ritual_soft_copy ||
-                        (snap?.desk?.master as {
-                          ritual_discord?: string
-                        } | undefined)?.ritual_discord
-                      if (!copy) {
-                        return 'make living-ritual-discord · staff paste only · never auto-posts'
-                      }
-                      const one = String(copy).split('\n').filter(Boolean).slice(0, 2).join(' · ')
-                      return one.length > 160 ? `${one.slice(0, 157)}…` : one
                     })()}
                   </span>
                 </div>

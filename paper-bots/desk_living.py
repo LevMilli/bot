@@ -2073,6 +2073,14 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
             f"{ritual.get('label') or 'ritual observe'}\n"
             f"_staff paste only · never auto-posts · never enables live_"
         )
+        slim["doctor_soft_copy"] = (
+            f"**Living doctor age** (paper · floors locked · live=False)\n"
+            f"doctor={'fresh' if slim.get('doctor_fresh') else 'stale' if slim.get('doctor_fresh') is False else 'n/a'} "
+            f"doctor_fresh={slim.get('doctor_fresh')}\n"
+            f"{doctor_age.get('label') or 'doctor age'}\n"
+            f"ritual draft: make living-ritual-discord\n"
+            f"_staff paste only · never auto-posts · never enables live_"
+        )
     slim["note"] = "Staff export — never invent fills; never soften floors; never enable live."
     return slim
 
