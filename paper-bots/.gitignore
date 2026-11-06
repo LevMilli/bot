@@ -72,6 +72,10 @@ helpers/calib_nag_digest.json
 helpers/hard_stop_clerk_digest.json
 helpers/near_miss_clerk_digest.json
 helpers/bleed_clerk_digest.json
+helpers/distance_clerk_digest.json
+helpers/bookkeeper_clerk_digest.json
+helpers/reporter_clerk_digest.json
+helpers/quant_clerk_digest.json
 btc15m-signal/paper_parlays.json
 commodity-15m-paper/paper_account.json
 *.tmp
