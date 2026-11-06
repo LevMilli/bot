@@ -914,6 +914,93 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">CLV</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.clv ||
+                          (snap?.desk?.master as { clv?: { pass?: boolean } } | undefined)?.clv
+                        if (!c || c.pass == null) return undefined
+                        return c.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c =
+                        snap?.desk?.clv ||
+                        (snap?.desk?.master as {
+                          clv?: { label?: string; pass?: boolean; complete?: number; n?: number }
+                        } | undefined)?.clv
+                      if (!c) return 'CLV pending'
+                      return (
+                        c.label ||
+                        `CLV complete=${c.complete ?? '—'}/${c.n ?? '—'} ${
+                          c.pass === false ? 'gaps' : 'ok'
+                        }`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">calib</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.calib_nag ||
+                          (snap?.desk?.master as { calib_nag?: { tickets_n?: number } } | undefined)
+                            ?.calib_nag
+                        if (!c) return undefined
+                        return Number(c.tickets_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c =
+                        snap?.desk?.calib_nag ||
+                        (snap?.desk?.master as {
+                          calib_nag?: { label?: string; tickets_n?: number; auto_write_phi?: boolean }
+                        } | undefined)?.calib_nag
+                      if (!c) return 'calib nag pending'
+                      return (
+                        c.label ||
+                        `calib raise_Φ=${c.tickets_n ?? 0} · auto_write=${c.auto_write_phi === true}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">timer</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const t =
+                          snap?.desk?.timer_heartbeat ||
+                          (snap?.desk?.master as {
+                            timer_heartbeat?: { alive?: boolean }
+                          } | undefined)?.timer_heartbeat
+                        if (!t || t.alive == null) return undefined
+                        return t.alive === false ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const t =
+                        snap?.desk?.timer_heartbeat ||
+                        (snap?.desk?.master as {
+                          timer_heartbeat?: { label?: string; alive?: boolean; age_sec?: number }
+                        } | undefined)?.timer_heartbeat
+                      if (!t) return 'timer heartbeat pending'
+                      return (
+                        t.label ||
+                        `timer ${t.alive === false ? 'DEAD' : 'alive'}` +
+                          (t.age_sec != null ? ` age=${t.age_sec}s` : '')
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">teller</span>
                   <span>
                     {snap?.desk?.living_memory_line ||

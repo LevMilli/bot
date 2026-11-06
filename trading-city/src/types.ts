@@ -312,6 +312,35 @@ export type Desk = {
     note?: string
     error?: string
   }
+  clv?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    complete?: number
+    rate?: number | null
+    pass?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  calib_nag?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    tickets_n?: number
+    auto_write_phi?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  timer_heartbeat?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    alive?: boolean
+    age_sec?: number | null
+    label?: string
+    note?: string
+    error?: string
+  }
   teller_living?: {
     paper_only?: boolean
     fee_floors_locked?: boolean
