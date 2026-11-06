@@ -479,6 +479,57 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def teller_living_chip(
+    root: str | None = None,
+    bots: list | None = None,
+    *,
+    remember: bool = False,
+) -> dict:
+    """One teller memory_line from swarm + completions (paper observe)."""
+    swarm = insight_swarm_ratio(root)
+    comp = completions_chip(root)
+    floors_ok = True
+    try:
+        import desk_profit
+        floors = desk_profit.venue_floors_locked() or {}
+        floors_ok = bool(floors.get("all_ok"))
+    except Exception:
+        floors_ok = True
+    swarm_bit = (
+        f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+        f"{'ok' if swarm.get('pass') else 'thin'}"
+    )
+    fill_bit = (
+        f"eligible fills today {comp.get('eligible_completions_today')}"
+        if comp.get("eligible_completions_today") is not None
+        else "eligible fills n/a"
+    )
+    line = f"{swarm_bit} · {fill_bit} · floors={'locked' if floors_ok else 'CHECK'}"
+    if remember:
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="facts",
+                text=line[:200],
+                bot_id="desk",
+                source="living_teller_chip",
+            )
+        except Exception:
+            pass
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "swarm_pass": swarm.get("pass"),
+        "eligible_completions_today": comp.get("eligible_completions_today"),
+        "floors_ok": floors_ok,
+        "memory_line": line,
+        "label": line,
+        "note": "Teller living chip — grounded on swarm + Completions; never invents PnL.",
+    }
+
+
 def completions_chip(root: str | None = None) -> dict:
     """Eligible completions today — teller / Masters one-liner."""
     summary = completions_summary(root) or {}
@@ -1674,6 +1725,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "dual_control_chip": dual_control_chip(root),
         "ruin_drill_chip": ruin_drill_chip(root),
         "completions_chip": completions_chip(root),
+        "teller_living": teller_living_chip(root, bots=bots),
+        "fee_floors_assert": fee_floors_assert(root),
         "dual_control_gaps": dual_control_gaps_page(root),
         "hillclimb_chip": hillclimb_chip(root),
         "digest_inventory": digest_inventory(root),
@@ -1934,6 +1987,32 @@ def digest_inventory(root: str | None = None) -> dict:
     }
 
 
+def fee_floors_assert(root: str | None = None, cfg: dict | None = None) -> dict:
+    """Staff assert: runtime venue edges at/above locked floors."""
+    floors: dict = {}
+    try:
+        import desk_profit
+        # Prefer explicit cfg; avoid heavy snapshot loads during board builds/tests.
+        floors = desk_profit.venue_floors_locked(cfg if isinstance(cfg, dict) else None) or {}
+    except Exception as exc:  # noqa: BLE001
+        floors = {"paper_only": True, "locked": True, "all_ok": False, "error": type(exc).__name__}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "all_ok": bool(floors.get("all_ok")),
+        "venues": floors.get("venues") if isinstance(floors.get("venues"), dict) else {},
+        "label": (
+            "fee floors OK (0.06/0.05/0.02)"
+            if floors.get("all_ok")
+            else "fee floors CHECK — live edge below locked floor"
+        ),
+        "note": floors.get("note") or (
+            "Venue min_edge floors are locked — selective volume never softens them."
+        ),
+    }
+
+
 def living_self_check(root: str | None = None) -> dict:
     """Staff health probe for living spine (never places / never softens)."""
     board = living_upgrade_board(root)
@@ -1941,10 +2020,12 @@ def living_self_check(root: str | None = None) -> dict:
     quiet = board.get("feature_quiet") if isinstance(board.get("feature_quiet"), dict) else {}
     timer = board.get("timer_heartbeat") if isinstance(board.get("timer_heartbeat"), dict) else {}
     floors = bool(board.get("fee_floors_locked"))
+    floors_assert = fee_floors_assert(root)
     ok = bool(
         floors
         and board.get("live_orders_enabled") is False
         and board.get("grok_buys") is False
+        and floors_assert.get("all_ok")
     )
     return {
         "paper_only": True,
@@ -1955,6 +2036,7 @@ def living_self_check(root: str | None = None) -> dict:
         "swarm_ratio": swarm.get("ratio"),
         "feature_quiet": bool(quiet.get("quiet")),
         "timer_alive": timer.get("alive"),
+        "floors_assert": floors_assert,
         "chips_n": sum(
             1
             for k, v in board.items()

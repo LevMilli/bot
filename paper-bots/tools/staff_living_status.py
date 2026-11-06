@@ -15,6 +15,8 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py export
   python3 tools/staff_living_status.py seed
   python3 tools/staff_living_status.py pulse
+  python3 tools/staff_living_status.py floors
+  python3 tools/staff_living_status.py teller
 """
 from __future__ import annotations
 
@@ -44,6 +46,8 @@ def _text(board: dict) -> str:
     ruin = board.get("ruin_drill_chip") if isinstance(board.get("ruin_drill_chip"), dict) else {}
     inv = board.get("digest_inventory") if isinstance(board.get("digest_inventory"), dict) else {}
     hill = board.get("hillclimb_chip") if isinstance(board.get("hillclimb_chip"), dict) else {}
+    floors = board.get("fee_floors_assert") if isinstance(board.get("fee_floors_assert"), dict) else {}
+    teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     lines = [
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
@@ -59,6 +63,8 @@ def _text(board: dict) -> str:
         f"ruin: {ruin.get('label') or '—'}",
         f"hillclimb: {hill.get('label') or '—'}",
         f"digests: {inv.get('label') or '—'}",
+        f"floors: {floors.get('label') or '—'}",
+        f"teller: {teller.get('memory_line') or '—'}",
         f"chicago_today: {board.get('chicago_today')}",
     ]
     return "\n".join(lines)
@@ -73,6 +79,7 @@ def main() -> int:
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
+            "floors", "teller",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -139,6 +146,15 @@ def main() -> int:
             "note": "Forced clerk pulse refresh — observe digests only.",
         }, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "floors":
+        print(json.dumps(desk_living.fee_floors_assert(root), indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "teller":
+        print(json.dumps(
+            desk_living.teller_living_chip(root, remember=False),
+            indent=2, sort_keys=True, default=str,
+        ))
+        return 0
     if args.action == "json":
         print(json.dumps({
             "paper_only": True,
@@ -154,6 +170,8 @@ def main() -> int:
             "digest_inventory": board.get("digest_inventory"),
             "ruin_drill_chip": board.get("ruin_drill_chip"),
             "ruin_drill_page": board.get("ruin_drill_page"),
+            "fee_floors_assert": board.get("fee_floors_assert"),
+            "teller_living": board.get("teller_living"),
             "timer_heartbeat": board.get("timer_heartbeat"),
             "chicago_today": board.get("chicago_today"),
         }, indent=2, sort_keys=True, default=str))

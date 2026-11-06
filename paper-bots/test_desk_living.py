@@ -189,6 +189,17 @@ class DeskLivingTests(unittest.TestCase):
                 "LIVING_UPGRADE.md",
             )
             self.assertTrue(os.path.isfile(map_path))
+            teller = desk_living.teller_living_chip(tmp, remember=False)
+            self.assertIn("swarm", teller.get("memory_line") or "")
+            self.assertTrue(teller["fee_floors_locked"])
+            floors = desk_living.fee_floors_assert(tmp)
+            self.assertTrue(floors.get("all_ok"))
+            self.assertIn("teller_living", board2)
+            self.assertIn("fee_floors_assert", board2)
+            with open(map_path, encoding="utf-8") as handle:
+                body = handle.read()
+            self.assertIn("auto_publish", body)
+            self.assertIn("staff_sunday_packet", body)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

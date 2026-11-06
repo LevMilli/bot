@@ -818,6 +818,16 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "teller_living": (
+            (living or {}).get("teller_living")
+            if isinstance(living, dict)
+            else None
+        ),
+        "fee_floors_assert": (
+            (living or {}).get("fee_floors_assert")
+            if isinstance(living, dict)
+            else None
+        ),
         "feature_quiet": feature_quiet,
         "feature_quiet_pager": (
             (living or {}).get("feature_quiet_pager")
