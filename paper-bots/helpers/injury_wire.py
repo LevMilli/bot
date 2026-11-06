@@ -13,11 +13,17 @@ from datetime import datetime, timezone
 from helpers import HELPER_ONLY, PAPER_ONLY, assert_helper_only
 
 DIGEST_NAME = "injury_wire_digest.json"
+INBOX_NAME = "injury_wire_inbox.json"
 DESK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def digest_path(root: str | None = None) -> str:
     return os.path.join(root or DESK_ROOT, "helpers", DIGEST_NAME)
+
+
+def inbox_path(root: str | None = None) -> str:
+    """Staff drop file — list of {league,text} or plain strings."""
+    return os.path.join(root or DESK_ROOT, "helpers", INBOX_NAME)
 
 
 def build_digest(headlines: list | None = None, *, now: datetime | None = None) -> dict:
@@ -59,18 +65,62 @@ def write_digest(root: str | None = None, headlines: list | None = None) -> dict
     return digest
 
 
+def load_inbox(root: str | None = None) -> list:
+    """Read staff inbox headlines (observe-only ingest)."""
+    path = inbox_path(root)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        rows = data.get("headlines") or data.get("items") or []
+        return list(rows) if isinstance(rows, list) else []
+    return []
+
+
+def staff_ingest(root: str | None = None, headlines: list | None = None, *, replace: bool = False) -> dict:
+    """Staff path: write inbox and refresh digest. Never places fills."""
+    assert_helper_only("injury_wire")
+    assert PAPER_ONLY and HELPER_ONLY
+    path = inbox_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existing = [] if replace else load_inbox(root)
+    merged = list(existing)
+    for h in headlines or []:
+        merged.append(h)
+    payload = {
+        "paper_only": True,
+        "may_place_alone": False,
+        "floors_locked": True,
+        "headlines": merged[-80:],
+        "note": "Staff injury/news inbox — observe only.",
+    }
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp, path)
+    return write_digest_from_desk(root)
+
+
 def write_digest_from_desk(root: str | None = None) -> dict:
-    """Preserve last headlines if present; else empty observe digest."""
-    path = digest_path(root)
-    headlines = []
-    if os.path.isfile(path):
-        try:
-            with open(path, encoding="utf-8") as handle:
-                prev = json.load(handle)
-            if isinstance(prev, dict):
-                headlines = list(prev.get("headlines") or [])
-        except (OSError, json.JSONDecodeError, TypeError):
-            headlines = []
+    """Prefer staff inbox headlines; else preserve last digest."""
+    headlines = load_inbox(root)
+    if not headlines:
+        path = digest_path(root)
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    prev = json.load(handle)
+                if isinstance(prev, dict):
+                    headlines = list(prev.get("headlines") or [])
+            except (OSError, json.JSONDecodeError, TypeError):
+                headlines = []
     return write_digest(root, headlines=headlines)
 
 

@@ -38,6 +38,13 @@ class DeskLivingTests(unittest.TestCase):
             cov = desk_living.feature_store_coverage(tmp)
             self.assertEqual(cov["n"], 1)
             self.assertEqual(cov["skips"], 1)
+            self.assertTrue(cov.get("last_at"))
+            quiet = desk_living.feature_store_quiet_alert(tmp)
+            self.assertIn("quiet", quiet)
+            self.assertTrue(quiet["fee_floors_locked"])
+            board = desk_living.living_upgrade_board(tmp)
+            self.assertIn("feature_quiet", board)
+            self.assertIn("hillclimb_lever", board)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
@@ -216,6 +223,31 @@ class InsightHelpers(unittest.TestCase):
             # Due marker: second call within cadence returns None
             again = clerk_pulse.run_if_due(tmp)
             self.assertIsNone(again)
+
+    def test_injury_staff_ingest_and_swarm_lights(self):
+        from helpers import injury_wire
+        import desk_master
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "helpers"), exist_ok=True)
+            # Seed enough digests so swarm presence is measurable
+            from helpers import tip_radar, skip_historian, timer_heartbeat
+            tip_radar.write_digest(tmp, games=[{"league": "NBA", "ticker": "X", "tip_in_min": 3}])
+            skip_historian.write_digest(tmp, ["EDGE"])
+            timer_heartbeat.write_digest(tmp, alive=True, detail="ok")
+            dig = injury_wire.staff_ingest(tmp, headlines=[
+                {"league": "NFL", "text": "WR questionable"},
+            ])
+            self.assertEqual(dig["n"], 1)
+            self.assertTrue(os.path.isfile(injury_wire.inbox_path(tmp)))
+            swarm = desk_living.insight_swarm_ratio(tmp)
+            self.assertIn("ratio", swarm)
+            summary = desk_master.master_summary(tmp, bots=[], cfg={"max_open_risk": 100})
+            self.assertIn("swarm_lights", summary)
+            self.assertIn("insight swarm ≥3:1", " ".join(summary.get("priority") or []))
+            self.assertIn("living_ai", summary)
+            self.assertTrue(
+                any("eligible completions today" in str(p) for p in (summary.get("priority") or []))
+            )
 
     def test_tip_radar_from_quote_cache(self):
         from helpers import tip_radar

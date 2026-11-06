@@ -68,6 +68,7 @@ helpers/timer_heartbeat_digest.json
 helpers/empty_card_bee_digest.json
 helpers/clv_closer_digest.json
 helpers/injury_wire_digest.json
+helpers/injury_wire_inbox.json
 helpers/eia_scout_digest.json
 helpers/calib_nag_digest.json
 helpers/hard_stop_clerk_digest.json

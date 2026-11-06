@@ -2411,6 +2411,69 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     desk_row["sports_tip"] = tip
     if isinstance(desk_row.get("master"), dict):
         desk_row["master"]["sports_tip"] = tip
+    # Living upgrade city lights — insight≥3:1 swarm ratio for tellers / Masters HUD.
+    try:
+        living = None
+        if isinstance(desk_row.get("master"), dict):
+            plan = (desk_row["master"].get("roi_plan") or {})
+            living = plan.get("living_upgrade") if isinstance(plan, dict) else None
+        swarm = (living or {}).get("insight_swarm") if isinstance(living, dict) else None
+        if not isinstance(swarm, dict):
+            import desk_living
+            swarm = desk_living.insight_swarm_ratio(root)
+        lights = {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "pass": bool(swarm.get("pass")),
+            "ratio": swarm.get("ratio"),
+            "insight_n": swarm.get("insight_n"),
+            "betting_n": swarm.get("betting_n"),
+            "min_ratio": swarm.get("min_ratio"),
+            "color": "green" if swarm.get("pass") else "amber",
+            "label": (
+                f"Insight swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+                f"(≥{swarm.get('min_ratio')}:1)"
+            ),
+            "note": swarm.get("note") or "",
+        }
+        desk_row["swarm_lights"] = lights
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["swarm_lights"] = lights
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="facts",
+                text=f"swarm lights {lights['color']}: {lights['label']}"[:200],
+                bot_id="desk",
+            )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["swarm_lights"] = {"paper_only": True, "error": type(exc).__name__}
+    # Completions KPI line for tellers / vault board.
+    try:
+        import desk_living
+        comp = desk_living.completions_summary(root)
+        desk_row["completions"] = comp
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["completions"] = desk_row["master"].get("completions") or comp
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="facts",
+                text=(
+                    f"eligible completions today "
+                    f"{comp.get('eligible_completions_today') or 0} "
+                    f"(pnl {float(comp.get('eligible_pnl_today') or 0):+.2f})"
+                )[:200],
+                bot_id="desk",
+            )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["completions"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001

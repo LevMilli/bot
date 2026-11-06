@@ -298,6 +298,7 @@ def master_summary(
     retirement = None
     hillclimb = None
     profit_lock = None
+    living = None
     try:
         import desk_roi_plan
         bleed = desk_roi_plan.firm_bleed_ratio(bots)
@@ -585,6 +586,41 @@ def master_summary(
             plan["near_miss_promote"] = None
     except Exception:
         plan = None
+    priority = [
+        "revert last lever if hillclimb kill trips",
+        "profit-lock 0.5× after weekly target",
+        "daily R settle-only after tower budget",
+        "memecoin retirement clock before any volume talk",
+        "Master graduation = 2 Chicago weeks all M1–M7",
+        "sports hard-stop shadow → promote after n≥30",
+        "feed idle BTC/commodity risk when gates clear",
+        "insight swarm ≥3:1 before betting expand",
+    ]
+    living_ai = (living or {}).get("living_ai") if isinstance(living, dict) else None
+    completions = (living or {}).get("completions") if isinstance(living, dict) else None
+    if isinstance(living_ai, dict):
+        tickets = living_ai.get("raise_phi_tickets") or []
+        if tickets:
+            priority.insert(
+                0,
+                "staff raise_Φ tickets: " + ",".join(str(t) for t in tickets[:6]),
+            )
+        else:
+            priority.append("living AI calib observe (no raise_Φ tickets)")
+    if isinstance(completions, dict):
+        priority.append(
+            f"eligible completions today {completions.get('eligible_completions_today') or 0}"
+        )
+    feature_quiet = (living or {}).get("feature_quiet") if isinstance(living, dict) else None
+    if isinstance(feature_quiet, dict) and feature_quiet.get("quiet") and feature_quiet.get("alert"):
+        priority.insert(0, str(feature_quiet.get("alert"))[:120])
+    hillclimb_lever = (living or {}).get("hillclimb_lever") if isinstance(living, dict) else None
+    if isinstance(hillclimb_lever, dict):
+        active = hillclimb_lever.get("active") if isinstance(hillclimb_lever.get("active"), dict) else None
+        if active:
+            priority.append(f"hillclimb lever active: {active.get('name') or active.get('lever')}")
+        else:
+            priority.append("hillclimb: no staff lever this Chicago week (observe)")
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -603,15 +639,16 @@ def master_summary(
         "towers_m1_pass": m1_ready,
         "towers": rows,
         "stopbleed": stopbleed,
-        "priority": [
-            "revert last lever if hillclimb kill trips",
-            "profit-lock 0.5× after weekly target",
-            "daily R settle-only after tower budget",
-            "memecoin retirement clock before any volume talk",
-            "Master graduation = 2 Chicago weeks all M1–M7",
-            "sports hard-stop shadow → promote after n≥30",
-            "feed idle BTC/commodity risk when gates clear",
-        ],
+        "priority": priority,
+        "swarm_lights": (
+            (living or {}).get("insight_swarm")
+            if isinstance(living, dict)
+            else None
+        ),
+        "living_ai": living_ai,
+        "completions": completions,
+        "feature_quiet": feature_quiet,
+        "hillclimb_lever": hillclimb_lever,
         "note": (
             "Trading Masters — dual scoreboard for volume vs taxed EV. "
             "No profit guarantee. Fee floors unchanged."
