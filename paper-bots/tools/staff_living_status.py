@@ -181,6 +181,13 @@ def _text(board: dict) -> str:
             + " (observe)"
         ),
         (
+            "masters_sunday_part: "
+            + str(
+                compact.get("masters_sunday_label")
+                or f"masters_sunday={compact.get('quiet_age') or 'n/a'}"
+            )
+        ),
+        (
             f"teller_quiet_nag={bool(teller.get('quiet_nag'))} "
             + str(teller.get("quiet_age_label") or "quiet_age=n/a")
         ),
@@ -458,6 +465,22 @@ def main() -> int:
             or compact_j.get("quiet_age"),
             "compact_sunday_quiet_age_label": compact_j.get("sunday_quiet_age_label")
             or compact_j.get("quiet_age_label"),
+            "compact_masters_sunday_label": compact_j.get("masters_sunday_label")
+            or (
+                f"masters_sunday={compact_j.get('quiet_age')}"
+                if compact_j.get("quiet_age")
+                else "masters_sunday=n/a"
+            ),
+            "compact_masters_sunday_quiet": compact_j.get("masters_sunday_quiet")
+            or (
+                "sunday quiet "
+                + str(
+                    compact_j.get("quiet_age_label")
+                    or compact_j.get("sunday_quiet_age_label")
+                    or "quiet_age=n/a"
+                )
+                + " (observe)"
+            ),
             "sunday_quiet_tip": (
                 "Sunday quiet tip: "
                 + str(

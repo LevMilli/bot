@@ -290,6 +290,8 @@ export type Desk = {
     quiet_age_label?: string
     sunday_quiet_age?: string
     sunday_quiet_age_label?: string
+    masters_sunday_label?: string
+    masters_sunday_quiet?: string
     quiet_label?: string
     note?: string
     error?: string

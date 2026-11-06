@@ -61,6 +61,7 @@ def format_discord(payload: dict) -> str:
         f"`python3 tools/staff_sunday_packet.py discord` "
         f"(staff paste · never auto-posts)"
     )
+    lines.append(f"• Masters sunday: sunday quiet {tip_age} (observe · never pages)")
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -121,6 +122,9 @@ def main() -> int:
                 "cross-check python3 tools/staff_sunday_packet.py discord "
                 "(staff paste · never auto-posts)"
             )
+            flat["masters_sunday_quiet"] = (
+                f"sunday quiet {flat['sunday_quiet_age_label']} (observe)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -153,6 +157,7 @@ def main() -> int:
                 "cross-check python3 tools/staff_sunday_packet.py discord "
                 "(staff paste · never auto-posts)"
             )
+            print(f"masters sunday: sunday quiet {sunday_label} (observe)")
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"

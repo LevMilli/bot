@@ -296,6 +296,12 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("compact_sunday_quiet_age_label", export2)
             self.assertIn("sunday_quiet_tip", export2)
             self.assertIn("Sunday quiet tip", export2.get("sunday_quiet_tip") or "")
+            self.assertIn("compact_masters_sunday_label", export2)
+            self.assertTrue(
+                str(export2.get("compact_masters_sunday_label") or "").startswith(
+                    "masters_sunday="
+                )
+            )
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))
@@ -359,6 +365,12 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("teller_quiet_nag=", status_txt)
             self.assertIn("sunday_quiet_age_label", compact)
             self.assertIn("sunday_quiet_age", compact)
+            self.assertIn("masters_sunday_label", compact)
+            self.assertTrue(
+                any(str(p).startswith("masters_sunday=") for p in (compact.get("parts") or []))
+            )
+            self.assertIn("masters sunday:", status_txt)
+            self.assertIn("masters_sunday_part:", status_txt)
             from tools import staff_living_ritual as _ritual_mod
             # Status --json twin of ritual quiet_line (same observe wording).
             quiet_line_expect = _ritual_mod.quiet_line({
@@ -368,8 +380,12 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("Feature quiet", quiet_line_expect)
             parts = [str(p) for p in (compact.get("parts") or [])]
             quiet_i = next(i for i, p in enumerate(parts) if "quiet" in p.lower())
+            quiet_age_i = next(i for i, p in enumerate(parts) if p.startswith("quiet_age="))
+            masters_i = next(i for i, p in enumerate(parts) if p.startswith("masters_sunday="))
             ritual_i = next(i for i, p in enumerate(parts) if p.startswith("ritual="))
             doctor_i = next(i for i, p in enumerate(parts) if p.startswith("doctor="))
+            self.assertLess(quiet_age_i, masters_i)
+            self.assertLess(masters_i, ritual_i)
             expand_i = next(i for i, p in enumerate(parts) if p.startswith("expand="))
             self.assertLess(quiet_i, ritual_i)
             self.assertLess(ritual_i, doctor_i)
@@ -719,6 +735,7 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("age=n/a", text4)
             self.assertIn("Sunday quiet tip", text4)
             self.assertIn("quiet_age=n/a", text4)
+            self.assertIn("Masters sunday", text4)
             text5 = staff_living_ritual.format_discord({
                 "ok": True,
                 "ritual_ok": True,
