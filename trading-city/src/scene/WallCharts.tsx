@@ -205,7 +205,6 @@ export function WallStockChart({
         <boxGeometry args={[2.75, 0.035, 0.03]} />
         <meshBasicMaterial color="#2de2e6" toneMapped={false} />
       </mesh>
-      <pointLight position={[0, 0, 0.4]} intensity={0.35} color="#2de2e6" distance={3} />
     </group>
   )
 }

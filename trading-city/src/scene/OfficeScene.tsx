@@ -575,7 +575,7 @@ export function OfficeInterior({ bot, bots, desk, onOpenScreens, embedded = fals
       <Credenza />
       <WindowWall />
       {/* City vista only — border plaza screens stay on the outdoor plaza, not here. */}
-      <StreetCity bots={bots && bots.length ? bots : [bot]} desk={desk} />
+      <StreetCity bots={bots && bots.length ? bots : [bot]} desk={desk} lite={embedded} />
       <Desk />
       <DeskKit />
       <OfficeChair />
