@@ -1677,6 +1677,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "dual_control_gaps": dual_control_gaps_page(root),
         "hillclimb_chip": hillclimb_chip(root),
         "digest_inventory": digest_inventory(root),
+        "ruin_drill_page": ruin_drill_page(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -1688,6 +1689,127 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
     }
     board["compact"] = living_compact_card(root, bots=bots, board=board)
     return board
+
+
+def ruin_drill_page(root: str | None = None) -> dict:
+    """Staff markdown when ruin drill not practiced this Chicago month."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.ruin_drill_status(root) or {}
+    except Exception:
+        status = {}
+    practiced = bool(status.get("practiced_this_month"))
+    active = bool(status.get("active"))
+    page = bool(active or not practiced)
+    lines = [
+        "**RUIN DRILL** (paper vault practice — never enables live)",
+        f"active={active} level={status.get('level')} "
+        f"practiced_this_month={practiced} "
+        f"last={status.get('last_practice_at')}",
+        "",
+        "Levels:",
+        "- soft — block new entries; exits/settles still run",
+        "- hard — soft + pause every paper bot",
+        "- nuclear — hard + recommend flatten / cancel-on-pause habit",
+        "",
+        "Staff: `python3 tools/staff_ruin_drill.py set soft` then clear when done.",
+        "",
+        "_floors locked · LIVE_ORDERS_ENABLED=False · staff ack only_",
+    ]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_page": False,
+        "page": page,
+        "practiced_this_month": practiced,
+        "active": active,
+        "level": status.get("level"),
+        "copy": "\n".join(lines),
+        "label": (
+            f"ruin page active={active} practiced_month={practiced}"
+        ),
+        "note": status.get("note") or (
+            "Practice soft/hard this Chicago month for dual-control."
+        ),
+    }
+
+
+def seed_missing_digests(root: str | None = None, *, bots: list | None = None) -> dict:
+    """Staff seed empty observe digests for missing insight helpers (never places)."""
+    inv_before = digest_inventory(root)
+    seeded: list[str] = []
+    errors: list[dict] = []
+    for key in inv_before.get("missing") or []:
+        try:
+            if key == "sunday_living_packet":
+                from helpers import sunday_packet
+                sunday_packet.write_packet(root)
+                seeded.append(key)
+                continue
+            if key == "calendar":
+                from helpers import calendar_scanner
+                calendar_scanner.scan(root)
+                seeded.append(key)
+                continue
+            if key == "clerk_pulse":
+                from helpers import clerk_pulse
+                clerk_pulse.refresh_clerks(root, bots=bots)
+                seeded.append(key)
+                continue
+            if key == "timer_heartbeat":
+                from helpers import timer_heartbeat
+                timer_heartbeat.probe_from_snapshot(root)
+                seeded.append(key)
+                continue
+            mod = __import__(f"helpers.{key}", fromlist=["*"])
+            if hasattr(mod, "write_digest_from_desk"):
+                mod.write_digest_from_desk(root)
+                seeded.append(key)
+            elif hasattr(mod, "write_digest"):
+                mod.write_digest(root)
+                seeded.append(key)
+            else:
+                errors.append({"helper": key, "error": "no_write"})
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"helper": key, "error": type(exc).__name__})
+    inv_after = digest_inventory(root)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "seeded": seeded,
+        "seeded_n": len(seeded),
+        "errors": errors,
+        "before": {
+            "present_n": inv_before.get("present_n"),
+            "missing": inv_before.get("missing"),
+        },
+        "after": {
+            "present_n": inv_after.get("present_n"),
+            "missing": inv_after.get("missing"),
+            "pass": inv_after.get("pass"),
+            "ratio": inv_after.get("ratio"),
+        },
+        "note": "Seeded empty observe digests only — never places; floors locked.",
+    }
+
+
+def living_board_export(root: str | None = None, bots: list | None = None) -> dict:
+    """Compact JSON export of living board for staff paste / archive."""
+    board = living_upgrade_board(root, bots=bots)
+    keep = (
+        "chicago_today", "fee_floors_locked", "live_orders_enabled", "compact",
+        "insight_swarm", "digest_inventory", "feature_quiet", "feature_quiet_pager",
+        "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
+        "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
+    )
+    slim = {k: board.get(k) for k in keep if k in board}
+    slim["paper_only"] = True
+    slim["export"] = "living_board_v1"
+    slim["note"] = "Staff export — never invent fills; never soften floors; never enable live."
+    return slim
 
 
 def dual_control_gaps_page(root: str | None = None) -> dict:

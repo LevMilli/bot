@@ -841,6 +841,11 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "ruin_drill_page": (
+            (living or {}).get("ruin_drill_page")
+            if isinstance(living, dict)
+            else None
+        ),
         "dual_control": dual_control,
         "ruin_drill": ruin_drill,
         "skip_taxonomy": (

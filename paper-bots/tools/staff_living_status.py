@@ -11,6 +11,9 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py gaps
   python3 tools/staff_living_status.py inventory
   python3 tools/staff_living_status.py hillclimb
+  python3 tools/staff_living_status.py ruin
+  python3 tools/staff_living_status.py export
+  python3 tools/staff_living_status.py seed
 """
 from __future__ import annotations
 
@@ -68,7 +71,7 @@ def main() -> int:
         default="text",
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
-            "gaps", "inventory", "hillclimb",
+            "gaps", "inventory", "hillclimb", "ruin", "export", "seed",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -100,6 +103,21 @@ def main() -> int:
             hill = desk_living.hillclimb_chip(root)
         print(json.dumps(hill, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "ruin":
+        ruin = board.get("ruin_drill_page")
+        if not isinstance(ruin, dict):
+            ruin = desk_living.ruin_drill_page(root)
+        if ruin.get("copy"):
+            print(ruin["copy"])
+        else:
+            print(json.dumps(ruin, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "export":
+        print(json.dumps(desk_living.living_board_export(root), indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "seed":
+        print(json.dumps(desk_living.seed_missing_digests(root), indent=2, sort_keys=True, default=str))
+        return 0
     if args.action == "json":
         print(json.dumps({
             "paper_only": True,
@@ -114,6 +132,7 @@ def main() -> int:
             "hillclimb_chip": board.get("hillclimb_chip"),
             "digest_inventory": board.get("digest_inventory"),
             "ruin_drill_chip": board.get("ruin_drill_chip"),
+            "ruin_drill_page": board.get("ruin_drill_page"),
             "timer_heartbeat": board.get("timer_heartbeat"),
             "chicago_today": board.get("chicago_today"),
         }, indent=2, sort_keys=True, default=str))
