@@ -446,13 +446,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Distance clerk chip | `desk_living.distance_clerk_chip` |
 | Quant clerk chip | `desk_living.quant_clerk_chip` |
 
+### Living upgrade — bookkeeper / reporter / empty-bee chips
+
+| Ticket | Where |
+| --- | --- |
+| Bookkeeper chip | `desk_living.bookkeeper_chip` |
+| Reporter chip | `desk_living.reporter_chip` |
+| Empty-card bee chip | `desk_living.empty_card_bee_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Bookkeeper chip | completions + fee-ledger completeness |
-| Reporter chip | weekly scorecard mirror |
-| Empty-card bee chip | 3s latency bee digest |
+| Near-miss clerk chip | labeled near-miss digest |
+| Hard-stop clerk chip | shadow exits digest |
+| Bleed clerk chip | firm bleed digest |
 
 ## Hard rules unchanged
 
