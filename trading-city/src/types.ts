@@ -191,6 +191,29 @@ export type Desk = {
     window_min?: number
     note?: string
   }
+  tip_radar?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    t5?: number
+    t15?: number
+    t180?: number
+    label?: string
+    note?: string
+    error?: string
+  }
+  clerk_pulse?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    age_sec?: number | null
+    cadence_sec?: number | null
+    stale?: boolean
+    soft_warn?: boolean
+    refreshed_n?: number
+    label?: string
+    note?: string
+    error?: string
+  }
   /** Living upgrade insight≥3:1 city light (paper observe). */
   swarm_lights?: {
     paper_only?: boolean

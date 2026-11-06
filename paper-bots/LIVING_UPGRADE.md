@@ -39,6 +39,7 @@ python3 tools/staff_living_status.py expand       # exit 2 if swarm < 3:1
 python3 tools/staff_living_status.py teller
 
 python3 tools/staff_sunday_packet.py draft|discord|checklist
+# Discord draft cross-links weekly ritual (make living-ritual-discord)
 python3 tools/staff_injury_ingest.py show|add|clear
 python3 tools/staff_calib_tickets.py
 python3 tools/staff_hillclimb_pick.py status|list|pick|clear
