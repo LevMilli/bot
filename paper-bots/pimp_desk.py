@@ -2707,6 +2707,26 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["eia_blackout"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["living_compact"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        pulse = desk_living.clerk_pulse_chip(root)
+        dcc = desk_living.dual_control_chip(root)
+        rdc = desk_living.ruin_drill_chip(root)
+        desk_row["clerk_pulse"] = pulse
+        desk_row["dual_control_chip"] = dcc
+        desk_row["ruin_drill_chip"] = rdc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["clerk_pulse"] = desk_row["master"].get("clerk_pulse") or pulse
+            desk_row["master"]["dual_control_chip"] = (
+                desk_row["master"].get("dual_control_chip") or dcc
+            )
+            desk_row["master"]["ruin_drill_chip"] = (
+                desk_row["master"].get("ruin_drill_chip") or rdc
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["clerk_pulse"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["dual_control_chip"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["ruin_drill_chip"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

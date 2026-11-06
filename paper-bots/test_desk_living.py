@@ -129,6 +129,11 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("compact", board2)
             self.assertTrue(board2["eia_blackout"]["fee_floors_locked"])
             self.assertIn("swarm", board2["compact"].get("label") or "")
+            self.assertIn("clerk_pulse", board2)
+            self.assertIn("dual_control_chip", board2)
+            self.assertIn("ruin_drill_chip", board2)
+            self.assertFalse(board2["dual_control_chip"].get("live_orders_enabled"))
+            self.assertTrue(board2["ruin_drill_chip"]["fee_floors_locked"])
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
