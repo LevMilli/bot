@@ -2060,11 +2060,33 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     if slim.get("doctor_fresh") is None and doctor_age:
         slim["doctor_fresh"] = not bool(doctor_age.get("stale"))
     compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+    quiet = board.get("feature_quiet") if isinstance(board.get("feature_quiet"), dict) else {}
     if compact:
         slim["compact_ritual_ok"] = compact.get("ritual_ok")
         slim["compact_ritual_label"] = compact.get("ritual_label")
         slim["compact_doctor_fresh"] = compact.get("doctor_fresh")
         slim["compact_doctor_label"] = compact.get("doctor_label")
+    slim["quiet_doctor"] = (
+        "quiet="
+        + ("yes" if quiet.get("quiet") else "no")
+        + (
+            f" age={quiet.get('age_hours')}h"
+            if quiet.get("age_hours") is not None
+            else ""
+        )
+        + " · "
+        + str(
+            (compact or {}).get("doctor_label")
+            or (
+                "doctor=fresh"
+                if slim.get("doctor_fresh")
+                else "doctor=stale"
+                if slim.get("doctor_fresh") is False
+                else "doctor=n/a"
+            )
+        )
+        + f" · doctor_fresh={slim.get('doctor_fresh')}"
+    )
     if ritual:
         slim["ritual_soft_copy"] = (
             f"**Masters ritual** (paper · floors locked · live=False)\n"

@@ -118,7 +118,10 @@ def _text(board: dict) -> str:
             "doctor draft: make living-doctor · paste living-ritual-discord "
             "(never auto-posts)"
         ),
-        f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')}",
+        (
+            f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')} "
+            f"floors_ok={ritual.get('floors_ok')} expand_ok={ritual.get('expand_ok')}"
+        ),
         f"ritual: {ritual.get('label') or '—'}",
         f"sunday: {sunday.get('label') or '—'}",
         f"chicago_today: {board.get('chicago_today')}",
