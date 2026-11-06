@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Html, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
-import { DoubleSide, MathUtils, type Group, type Mesh, type PointLight } from 'three'
+import { CanvasTexture, DoubleSide, MathUtils, type Group, type Mesh, type PointLight } from 'three'
 import type { BotRow, Desk } from '../types'
 import { BEAM_COLORS, beamColorFor, workersOnShift } from '../data/format'
 import { botPose } from '../data/botPose'
@@ -470,6 +470,26 @@ function Column({ x, z }: { x: number; z: number }) {
 function TrustSeal({ workers }: { workers: number }) {
   const core = useRef<Mesh>(null)
   const spin = useRef<Mesh>(null)
+  // Canvas plaque — stays on the seal (no Html billboard stuck to the player).
+  const plaque = useMemo(() => {
+    const c = document.createElement('canvas')
+    c.width = 512
+    c.height = 160
+    const ctx = c.getContext('2d')!
+    ctx.clearRect(0, 0, 512, 160)
+    ctx.fillStyle = '#f9c80e'
+    ctx.font = 'bold 42px Orbitron, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('APEX-CITY TRUST', 256, 58)
+    ctx.fillStyle = '#9aa3c7'
+    ctx.font = '28px Share Tech Mono, monospace'
+    ctx.fillText(`${workers} TELLERS ON DUTY`, 256, 112)
+    const tex = new CanvasTexture(c)
+    tex.needsUpdate = true
+    return tex
+  }, [workers])
+  useEffect(() => () => plaque.dispose(), [plaque])
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
     if (core.current) {
@@ -480,7 +500,7 @@ function TrustSeal({ workers }: { workers: number }) {
   })
   // Portal apron — center of the T stem, clear of side queue mouths.
   return (
-    <group position={[0, 0.02, 4.35]} scale={0.68}>
+    <group position={[0, 0.02, 3.55]} scale={0.68}>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[1.45, 1.62, 64]} />
         <meshBasicMaterial color="#f9c80e" toneMapped={false} />
@@ -514,23 +534,10 @@ function TrustSeal({ workers }: { workers: number }) {
         <octahedronGeometry args={[0.12, 0]} />
         <meshBasicMaterial color="#fff4b8" toneMapped={false} />
       </mesh>
-      <Html position={[0, 0.72, 0]} center distanceFactor={9} style={{ pointerEvents: 'none' }}>
-        <div
-          style={{
-            fontFamily: 'Orbitron, sans-serif',
-            fontSize: '11px',
-            color: '#f9c80e',
-            letterSpacing: '0.14em',
-            textAlign: 'center',
-            textShadow: '0 0 14px rgba(249,200,14,0.5)',
-          }}
-        >
-          APEX-CITY TRUST
-          <div style={{ color: '#9aa3c7', marginTop: 3, fontSize: '10px', letterSpacing: '0.08em' }}>
-            {workers} TELLERS ON DUTY
-          </div>
-        </div>
-      </Html>
+      <mesh position={[0, 0.78, 0]}>
+        <planeGeometry args={[2.2, 0.7]} />
+        <meshBasicMaterial map={plaque} transparent toneMapped={false} depthWrite={false} />
+      </mesh>
     </group>
   )
 }
