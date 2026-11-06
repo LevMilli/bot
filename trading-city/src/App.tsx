@@ -2128,6 +2128,28 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">teller·sunday</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const t = snap?.desk?.teller_living
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const label =
+                        t?.quiet_age_label ||
+                        s?.quiet_age_label ||
+                        (s?.quiet_age
+                          ? `quiet_age=${s.quiet_age}`
+                          : t?.quiet_age
+                            ? `quiet_age=${t.quiet_age}`
+                            : 'quiet_age=n/a')
+                      return (
+                        `${label} · teller ↔ sunday quiet · ` +
+                        'staff_sunday_packet.py discord (paste only · never auto-posts)'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">floors</span>
                   <span
                     style={{

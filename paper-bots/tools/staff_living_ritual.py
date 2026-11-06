@@ -53,14 +53,14 @@ def format_discord(payload: dict) -> str:
         "",
     ]
     lines.append(quiet_line(payload))
+    # Always emit Sunday quiet tip (age=n/a ok) — staff observe only.
     sunday_label = payload.get("sunday_quiet_age_label") or payload.get("quiet_age_label")
-    if sunday_label or payload.get("quiet_age"):
-        tip_age = sunday_label or f"quiet_age={payload.get('quiet_age') or 'n/a'}"
-        lines.append(
-            f"• Sunday quiet tip: {tip_age} · cross-check "
-            f"`python3 tools/staff_sunday_packet.py discord` "
-            f"(staff paste · never auto-posts)"
-        )
+    tip_age = sunday_label or f"quiet_age={payload.get('quiet_age') or 'n/a'}"
+    lines.append(
+        f"• Sunday quiet tip: {tip_age} · cross-check "
+        f"`python3 tools/staff_sunday_packet.py discord` "
+        f"(staff paste · never auto-posts)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -223,6 +223,11 @@ def main() -> int:
         ),
     }
     payload["quiet_line"] = quiet_line(payload)
+    payload["sunday_quiet_tip"] = (
+        f"Sunday quiet tip: {sunday_quiet_age_label} · "
+        "cross-check python3 tools/staff_sunday_packet.py discord "
+        "(staff paste · never auto-posts)"
+    )
     if args.discord:
         print(format_discord(payload))
     elif args.json:
@@ -234,6 +239,7 @@ def main() -> int:
             f"(exit_ok={payload['exit_ok']})"
         )
         print(payload["quiet_line"])
+        print(payload["sunday_quiet_tip"])
         for name, row in steps:
             label = row.get("label") or row.get("copy") or name
             if name in ("gaps", "ruin") and row.get("copy"):
