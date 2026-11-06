@@ -2066,13 +2066,15 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         slim["compact_ritual_label"] = compact.get("ritual_label")
         slim["compact_doctor_fresh"] = compact.get("doctor_fresh")
         slim["compact_doctor_label"] = compact.get("doctor_label")
+    quiet_age = quiet.get("age_hours")
+    slim["quiet_age_h"] = quiet_age
     slim["quiet_doctor"] = (
         "quiet="
         + ("yes" if quiet.get("quiet") else "no")
         + (
-            f" age={quiet.get('age_hours')}h"
-            if quiet.get("age_hours") is not None
-            else ""
+            f" age={quiet_age}h"
+            if quiet_age is not None
+            else " age=n/a"
         )
         + " · "
         + str(
