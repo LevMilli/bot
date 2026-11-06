@@ -1224,14 +1224,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Compact pulse+dual sunday | living_compact_card twins |
 | Export/status/ritual empty…dual | export + status + Discord/observe |
 
-### Next
+### Living upgrade — skip-reg/clerks sunday twins (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Compact skip-reg+hard-stop sunday | living_compact_card twins |
-| Compact distance+quant sunday | living_compact_card twins |
-| Compact clerk twins (nm/hs/bleed/skip-twin) | living_compact_card twins |
-| Ritual Discord skip-reg/clerks + vault gaps | discord + vault sunday for remaining |
+| Compact distance+quant+report+bee | living_compact_card twins |
+| Compact clerk twins (nm/hs/bleed/skip-twin/CLV/t-digest) | living_compact_card twins |
+| Vault+ritual+status skip-reg/clerks sunday | App vault + Discord/observe + status |
+
+### Next
+
+_(empty — living sunday quiet clerk twin backfill cleared; fee floors locked; paper-only; Discord never auto-posts)_
 
 ## Hard rules unchanged
 

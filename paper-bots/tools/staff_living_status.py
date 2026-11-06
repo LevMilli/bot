@@ -441,6 +441,198 @@ def _text(board: dict) -> str:
             )
             + " (observe · never softens floors)"
         ),
+        (
+            "skip-reg sunday: "
+            + str(
+                (board.get("skip_regret") or {}).get("label")
+                if isinstance(board.get("skip_regret"), dict)
+                and (board.get("skip_regret") or {}).get("label")
+                else "skip-regret observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "hard-stop sunday: "
+            + str(
+                (board.get("hard_stop") or {}).get("label")
+                if isinstance(board.get("hard_stop"), dict)
+                and (board.get("hard_stop") or {}).get("label")
+                else "hard-stop observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "distance sunday: "
+            + str(
+                (board.get("distance_clerk") or {}).get("label")
+                if isinstance(board.get("distance_clerk"), dict)
+                and (board.get("distance_clerk") or {}).get("label")
+                else "distance observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "quant sunday: "
+            + str(
+                (board.get("quant_clerk") or {}).get("label")
+                if isinstance(board.get("quant_clerk"), dict)
+                and (board.get("quant_clerk") or {}).get("label")
+                else "quant observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "report sunday: "
+            + str(
+                (board.get("reporter") or {}).get("label")
+                if isinstance(board.get("reporter"), dict)
+                and (board.get("reporter") or {}).get("label")
+                else "report observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never auto-posts)"
+        ),
+        (
+            "empty-bee sunday: "
+            + str(
+                (board.get("empty_card_bee") or {}).get("label")
+                if isinstance(board.get("empty_card_bee"), dict)
+                and (board.get("empty_card_bee") or {}).get("label")
+                else "empty bee observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "nm-clerk sunday: "
+            + str(
+                (board.get("near_miss_clerk") or {}).get("label")
+                if isinstance(board.get("near_miss_clerk"), dict)
+                and (board.get("near_miss_clerk") or {}).get("label")
+                else "nm clerk observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "hs-clerk sunday: "
+            + str(
+                (board.get("hard_stop_clerk") or {}).get("label")
+                if isinstance(board.get("hard_stop_clerk"), dict)
+                and (board.get("hard_stop_clerk") or {}).get("label")
+                else "hs clerk observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never promotes)"
+        ),
+        (
+            "bleed-clerk sunday: "
+            + str(
+                (board.get("bleed_clerk") or {}).get("label")
+                if isinstance(board.get("bleed_clerk"), dict)
+                and (board.get("bleed_clerk") or {}).get("label")
+                else "bleed clerk observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
+        (
+            "skip-twin sunday: "
+            + str(
+                (board.get("skip_twin_clerk") or {}).get("label")
+                if isinstance(board.get("skip_twin_clerk"), dict)
+                and (board.get("skip_twin_clerk") or {}).get("label")
+                else "skip-twin observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "CLV-closer sunday: "
+            + str(
+                (board.get("clv_closer") or {}).get("label")
+                if isinstance(board.get("clv_closer"), dict)
+                and (board.get("clv_closer") or {}).get("label")
+                else "CLV closer observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
+        (
+            "t-digest sunday: "
+            + str(
+                (board.get("timer_digest") or {}).get("label")
+                if isinstance(board.get("timer_digest"), dict)
+                and (board.get("timer_digest") or {}).get("label")
+                else "t-digest observe"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe)"
+        ),
         f"floors: {floors.get('label') or '—'}",
         f"teller: {teller.get('memory_line') or '—'}",
         (
@@ -956,6 +1148,30 @@ def main() -> int:
             "compact_books_sunday_quiet": compact_j.get("books_sunday_quiet"),
             "compact_pulse_sunday_quiet": compact_j.get("pulse_sunday_quiet"),
             "compact_dual_sunday_quiet": compact_j.get("dual_sunday_quiet"),
+            "skip_reg_sunday_quiet": compact_j.get("skip_reg_sunday_quiet"),
+            "compact_skip_reg_sunday_quiet": compact_j.get("skip_reg_sunday_quiet"),
+            "hard_stop_sunday_quiet": compact_j.get("hard_stop_sunday_quiet"),
+            "compact_hard_stop_sunday_quiet": compact_j.get("hard_stop_sunday_quiet"),
+            "distance_sunday_quiet": compact_j.get("distance_sunday_quiet"),
+            "compact_distance_sunday_quiet": compact_j.get("distance_sunday_quiet"),
+            "quant_sunday_quiet": compact_j.get("quant_sunday_quiet"),
+            "compact_quant_sunday_quiet": compact_j.get("quant_sunday_quiet"),
+            "report_sunday_quiet": compact_j.get("report_sunday_quiet"),
+            "compact_report_sunday_quiet": compact_j.get("report_sunday_quiet"),
+            "empty_bee_sunday_quiet": compact_j.get("empty_bee_sunday_quiet"),
+            "compact_empty_bee_sunday_quiet": compact_j.get("empty_bee_sunday_quiet"),
+            "nm_clerk_sunday_quiet": compact_j.get("nm_clerk_sunday_quiet"),
+            "compact_nm_clerk_sunday_quiet": compact_j.get("nm_clerk_sunday_quiet"),
+            "hs_clerk_sunday_quiet": compact_j.get("hs_clerk_sunday_quiet"),
+            "compact_hs_clerk_sunday_quiet": compact_j.get("hs_clerk_sunday_quiet"),
+            "bleed_clerk_sunday_quiet": compact_j.get("bleed_clerk_sunday_quiet"),
+            "compact_bleed_clerk_sunday_quiet": compact_j.get("bleed_clerk_sunday_quiet"),
+            "skip_twin_sunday_quiet": compact_j.get("skip_twin_sunday_quiet"),
+            "compact_skip_twin_sunday_quiet": compact_j.get("skip_twin_sunday_quiet"),
+            "clv_closer_sunday_quiet": compact_j.get("clv_closer_sunday_quiet"),
+            "compact_clv_closer_sunday_quiet": compact_j.get("clv_closer_sunday_quiet"),
+            "tdigest_sunday_quiet": compact_j.get("tdigest_sunday_quiet"),
+            "compact_tdigest_sunday_quiet": compact_j.get("tdigest_sunday_quiet"),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "

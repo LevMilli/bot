@@ -741,9 +741,15 @@ export default function App() {
                           }
                         } | undefined)?.skip_regret
                       if (!s) return 'skip-regret pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (s.label || `skip-regret green_twin=${Boolean(s.green_twin)}`) +
-                        ' · floors locked'
+                        ' · floors locked' +
+                        ` · sunday quiet ${sundayBit} (observe · never softens floors)`
                       )
                     })()}
                   </span>
@@ -775,10 +781,16 @@ export default function App() {
                           }
                         } | undefined)?.hard_stop
                       if (!h) return 'hard-stop pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (h.label ||
                           `hard-stop ready=${Boolean(h.promote_ready)}`) +
-                        ' · auto_promote=False · live=False'
+                        ' · auto_promote=False · live=False' +
+                        ` · sunday quiet ${sundayBit} (observe · never promotes)`
                       )
                     })()}
                   </span>
@@ -1489,7 +1501,14 @@ export default function App() {
                           distance_clerk?: { label?: string; empty_card_pass?: boolean }
                         } | undefined)?.distance_clerk
                       if (!d) return 'distance clerk pending'
-                      return d.label || `distance empty_ok=${d.empty_card_pass ?? '—'}`
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        d.label || `distance empty_ok=${d.empty_card_pass ?? '—'}`
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -1520,9 +1539,15 @@ export default function App() {
                           }
                         } | undefined)?.quant_clerk
                       if (!q) return 'quant clerk pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (q.label || `quant fit_pass=${q.fit_pass ?? '—'} rate=${q.fit_rate ?? '—'}`) +
-                        ' · auto_write=False'
+                        ' · auto_write=False' +
+                        ` · sunday quiet ${sundayBit} (observe)`
                       )
                     })()}
                   </span>
@@ -1570,9 +1595,15 @@ export default function App() {
                           reporter?: { label?: string; present?: boolean; auto_publish?: boolean }
                         } | undefined)?.reporter
                       if (!r) return 'reporter pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (r.label || `reporter scorecard=${r.present ? 'yes' : 'no'}`) +
-                        ' · auto_publish=False'
+                        ' · auto_publish=False' +
+                        ` · sunday quiet ${sundayBit} (observe · never auto-posts)`
                       )
                     })()}
                   </span>
@@ -1712,7 +1743,14 @@ export default function App() {
                           empty_card_bee?: { label?: string; breaches?: number; n?: number }
                         } | undefined)?.empty_card_bee
                       if (!e) return 'empty bee pending'
-                      return e.label || `empty bee n=${e.n ?? 0} breaches=${e.breaches ?? 0}`
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        e.label || `empty bee n=${e.n ?? 0} breaches=${e.breaches ?? 0}`
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -1742,9 +1780,15 @@ export default function App() {
                           }
                         } | undefined)?.near_miss_clerk
                       if (!n) return 'near-miss clerk pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (n.label || `near-miss clerk ready=${Boolean(n.promote_ready)}`) +
-                        ' · auto_promote=False'
+                        ' · auto_promote=False' +
+                        ` · sunday quiet ${sundayBit} (observe · never promotes)`
                       )
                     })()}
                   </span>
@@ -1776,9 +1820,15 @@ export default function App() {
                           }
                         } | undefined)?.hard_stop_clerk
                       if (!h) return 'hard-stop clerk pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (h.label || `hard-stop clerk ready=${Boolean(h.promote_ready)}`) +
-                        ' · auto_promote=False · live=False'
+                        ' · auto_promote=False · live=False' +
+                        ` · sunday quiet ${sundayBit} (observe · never promotes)`
                       )
                     })()}
                   </span>
@@ -1809,9 +1859,15 @@ export default function App() {
                           }
                         } | undefined)?.bleed_clerk
                       if (!b) return 'bleed clerk pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
-                        b.label ||
-                        `bleed clerk ratio=${b.bleed_ratio ?? '—'} pass=${b.bleed_pass ?? '—'}`
+                        (b.label ||
+                          `bleed clerk ratio=${b.bleed_ratio ?? '—'} pass=${b.bleed_pass ?? '—'}`) +
+                        ` · sunday quiet ${sundayBit} (observe · never softens floors)`
                       )
                     })()}
                   </span>
@@ -1842,9 +1898,15 @@ export default function App() {
                           }
                         } | undefined)?.skip_twin_clerk
                       if (!s) return 'skip-twin clerk pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (s.label || `skip-twin ready=${Boolean(s.promote_ready)}`) +
-                        ' · auto_promote=False'
+                        ' · auto_promote=False' +
+                        ` · sunday quiet ${sundayBit} (observe)`
                       )
                     })()}
                   </span>
@@ -1870,12 +1932,17 @@ export default function App() {
                           clv_closer?: { label?: string; pass?: boolean; complete?: number; n?: number }
                         } | undefined)?.clv_closer
                       if (!c) return 'CLV closer pending'
-                      return (
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
                         c.label ||
                         `CLV closer n=${c.n ?? '—'} complete=${c.complete ?? '—'} ${
                           c.pass === false ? 'gaps' : 'ok'
                         }`
-                      )
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -1902,7 +1969,15 @@ export default function App() {
                           timer_digest?: { label?: string; alive?: boolean; status?: string }
                         } | undefined)?.timer_digest
                       if (!t) return 'timer digest pending'
-                      return t.label || `timer digest ${t.status || (t.alive === false ? 'dead' : 'alive')}`
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        t.label ||
+                        `timer digest ${t.status || (t.alive === false ? 'dead' : 'alive')}`
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
