@@ -97,6 +97,17 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "quiet_age_label: "
+            + str(
+                compact.get("quiet_age_label")
+                or (
+                    f"quiet_age={quiet.get('age_hours')}h"
+                    if quiet.get("age_hours") is not None
+                    else f"quiet_age={compact.get('quiet_age') or 'n/a'}"
+                )
+            )
+        ),
+        (
             f"swarm: {swarm.get('insight_n')}:{swarm.get('betting_n')} "
             f"pass={swarm.get('pass')}"
         ),
@@ -310,6 +321,15 @@ def main() -> int:
             "compact_quiet_age_h": compact_j.get("quiet_age_h")
             if compact_j.get("quiet_age_h") is not None
             else (board.get("feature_quiet") or {}).get("age_hours"),
+            "compact_quiet_age_label": compact_j.get("quiet_age_label") or (
+                f"quiet_age={compact_j.get('quiet_age')}"
+                if compact_j.get("quiet_age")
+                else (
+                    f"quiet_age={(board.get('feature_quiet') or {}).get('age_hours')}h"
+                    if (board.get("feature_quiet") or {}).get("age_hours") is not None
+                    else "quiet_age=n/a"
+                )
+            ),
             "quiet_age_h": (board.get("feature_quiet") or {}).get("age_hours"),
             "quiet_age": (
                 f"{(board.get('feature_quiet') or {}).get('age_hours')}h"
