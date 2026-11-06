@@ -297,12 +297,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Near-miss clerk | `helpers/near_miss_clerk` — soft z\|p promote readiness |
 | Bleed clerk | `helpers/bleed_clerk` — firm bleed + misplaced capital |
 
+### Living upgrade — ops insight clerks
+
+| Ticket | Where |
+| --- | --- |
+| Distance clerk | `helpers/distance_clerk` — empty CARD + firm queue |
+| Bookkeeper clerk | `helpers/bookkeeper_clerk` — Completions + fee ledger |
+| Reporter clerk | `helpers/reporter_clerk` — weekly scorecard mirror |
+| Quant clerk | `helpers/quant_clerk` — M3 fit + M4 latency (walk-forward) |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| More insight swarm | next distance / bookkeeper / reporter / quant clerks |
+| Commodity calib board | parallel to BTC/sports |
+| Living AI health card | adapt_wins + calib raise_phi on Masters |
 
 ## Hard rules unchanged
 

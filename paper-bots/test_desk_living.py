@@ -100,6 +100,7 @@ class InsightHelpers(unittest.TestCase):
         from helpers import tip_radar, skip_historian, timer_heartbeat, empty_card_bee
         from helpers import clv_closer, injury_wire, eia_scout
         from helpers import calib_nag, hard_stop_clerk, near_miss_clerk, bleed_clerk
+        from helpers import distance_clerk, bookkeeper_clerk, reporter_clerk, quant_clerk
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "helpers"), exist_ok=True)
             d = tip_radar.write_digest(tmp, games=[
@@ -147,12 +148,31 @@ class InsightHelpers(unittest.TestCase):
             bl = bleed_clerk.write_digest(tmp, bleed={"ratio": 0.1, "pass": True},
                                          misplaced={"misplaced_usd": 0, "rows": []})
             self.assertEqual(bl["helper"], "bleed_clerk")
+            dist = distance_clerk.write_digest(
+                tmp, empty_card={"pass": True, "last_sec": 1.1}, firm_queue={"offers_n": 2},
+            )
+            self.assertEqual(dist["firm_offers_n"], 2)
+            bk = bookkeeper_clerk.write_digest(
+                tmp, completions={"eligible_completions_today": 1, "completions_today": 2},
+            )
+            self.assertEqual(bk["eligible_completions_today"], 1)
+            rp = reporter_clerk.write_digest(tmp, scorecard={"label": "2026-W45", "m1": -1.0})
+            self.assertTrue(rp["present"])
+            self.assertFalse(rp["auto_publish"])
+            qt = quant_clerk.write_digest(
+                tmp, fit={"rate": 0.5, "n_fit": 12, "pass": True}, latency={"p50": 0.9, "pass": True},
+            )
+            self.assertFalse(qt["auto_write"])
             board = desk_living.living_upgrade_board(tmp)
             self.assertTrue(board["insight_helper_digests"].get("eia_scout"))
             self.assertTrue(board["insight_helper_digests"].get("calib_nag"))
             self.assertTrue(board["insight_helper_digests"].get("hard_stop_clerk"))
             self.assertTrue(board["insight_helper_digests"].get("near_miss_clerk"))
             self.assertTrue(board["insight_helper_digests"].get("bleed_clerk"))
+            self.assertTrue(board["insight_helper_digests"].get("distance_clerk"))
+            self.assertTrue(board["insight_helper_digests"].get("bookkeeper_clerk"))
+            self.assertTrue(board["insight_helper_digests"].get("reporter_clerk"))
+            self.assertTrue(board["insight_helper_digests"].get("quant_clerk"))
 
     def test_record_eval_features(self):
         with tempfile.TemporaryDirectory() as tmp:
