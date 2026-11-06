@@ -1217,6 +1217,106 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">nm clerk</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const n =
+                          snap?.desk?.near_miss_clerk ||
+                          (snap?.desk?.master as {
+                            near_miss_clerk?: { promote_ready?: boolean }
+                          } | undefined)?.near_miss_clerk
+                        if (!n) return undefined
+                        return n.promote_ready ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const n =
+                        snap?.desk?.near_miss_clerk ||
+                        (snap?.desk?.master as {
+                          near_miss_clerk?: {
+                            label?: string
+                            promote_ready?: boolean
+                            auto_promote?: boolean
+                          }
+                        } | undefined)?.near_miss_clerk
+                      if (!n) return 'near-miss clerk pending'
+                      return (
+                        (n.label || `near-miss clerk ready=${Boolean(n.promote_ready)}`) +
+                        ' · auto_promote=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">hs clerk</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const h =
+                          snap?.desk?.hard_stop_clerk ||
+                          (snap?.desk?.master as {
+                            hard_stop_clerk?: { promote_ready?: boolean }
+                          } | undefined)?.hard_stop_clerk
+                        if (!h) return undefined
+                        return h.promote_ready ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const h =
+                        snap?.desk?.hard_stop_clerk ||
+                        (snap?.desk?.master as {
+                          hard_stop_clerk?: {
+                            label?: string
+                            promote_ready?: boolean
+                            auto_promote?: boolean
+                            live?: boolean
+                          }
+                        } | undefined)?.hard_stop_clerk
+                      if (!h) return 'hard-stop clerk pending'
+                      return (
+                        (h.label || `hard-stop clerk ready=${Boolean(h.promote_ready)}`) +
+                        ' · auto_promote=False · live=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">bleed clk</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const b =
+                          snap?.desk?.bleed_clerk ||
+                          (snap?.desk?.master as {
+                            bleed_clerk?: { bleed_pass?: boolean }
+                          } | undefined)?.bleed_clerk
+                        if (!b || b.bleed_pass == null) return undefined
+                        return b.bleed_pass === false ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const b =
+                        snap?.desk?.bleed_clerk ||
+                        (snap?.desk?.master as {
+                          bleed_clerk?: {
+                            label?: string
+                            bleed_pass?: boolean
+                            bleed_ratio?: number | null
+                          }
+                        } | undefined)?.bleed_clerk
+                      if (!b) return 'bleed clerk pending'
+                      return (
+                        b.label ||
+                        `bleed clerk ratio=${b.bleed_ratio ?? '—'} pass=${b.bleed_pass ?? '—'}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">digests</span>
                   <span
                     style={{

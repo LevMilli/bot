@@ -690,13 +690,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Reporter vault tint | auto_publish False assert |
 | Empty-card bee vault | breaches amber |
 
-### Next
+### Living upgrade — near-miss / hard-stop / bleed clerk vault
 
 | Ticket | Where |
 | --- | --- |
 | Near-miss clerk vault | twin promote_ready |
 | Hard-stop clerk vault | clerk promote_ready |
 | Bleed clerk vault tint | clerk bleed hot |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Skip-twin clerk vault | promote_ready twin |
+| CLV closer vault row | closer digest |
+| Timer digest vault tint | digest dead |
 
 ## Hard rules unchanged
 
