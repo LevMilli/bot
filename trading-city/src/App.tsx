@@ -553,7 +553,7 @@ export default function App() {
               <div className="vault-board" aria-label="Desk vault board">
                 <div className="vault-board-toolbar">
                   <span className="vault-ritual-hint">
-                    ritual: make living-ritual / --discord · observe: make living-ritual-observe · paste draft from ritual draft row (never auto-posts)
+                    ritual: make living-ritual / --discord · observe: make living-ritual-observe · doctor: make living-doctor · paste from ritual/doctor draft rows (never auto-posts)
                   </span>
                   <button
                     type="button"

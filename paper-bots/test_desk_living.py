@@ -260,6 +260,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("compact_doctor_label", export2)
             self.assertIn("doctor_soft_copy", export2)
             self.assertIn("doctor=", export2.get("doctor_soft_copy") or "")
+            self.assertEqual(
+                export2.get("doctor_age_soft_copy"),
+                export2.get("doctor_soft_copy"),
+            )
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))

@@ -2081,6 +2081,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
             f"ritual draft: make living-ritual-discord\n"
             f"_staff paste only · never auto-posts · never enables live_"
         )
+        slim["doctor_age_soft_copy"] = slim["doctor_soft_copy"]  # alias
     slim["note"] = "Staff export — never invent fills; never soften floors; never enable live."
     return slim
 
