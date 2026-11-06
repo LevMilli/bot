@@ -898,13 +898,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual observe floors line | observe plain floors_ok |
 | Vault draft badge CSS | EXIT/SOFT class |
 
-### Next
+### Living upgrade — doctor draft STALE CSS / quiet_age always / observe doctor_fresh
 
 | Ticket | Where |
 | --- | --- |
 | Doctor draft badge CSS | STALE class twin |
 | Status json quiet_age always | mirror text n/a |
 | Ritual CLI doctor_fresh observe | observe end flag |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Compact HUD quiet_age chip | city compact age |
+| Ritual discord quiet hint | optional quiet line |
+| Staff status quiet_age field | text quiet_age= |
 
 ## Hard rules unchanged
 

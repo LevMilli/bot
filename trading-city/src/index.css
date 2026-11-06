@@ -923,6 +923,10 @@ a {
   color: #d4a017;
 }
 
+.vault-ritual-draft.is-stale {
+  color: #c45c26;
+}
+
 .vault-draft-badge {
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -936,7 +940,12 @@ a {
   color: #d4a017;
 }
 
-.vault-draft-badge.is-ok {
+.vault-draft-badge.is-stale {
+  color: #c45c26;
+}
+
+.vault-draft-badge.is-ok,
+.vault-draft-badge.is-fresh {
   color: #6fbf73;
 }
 
