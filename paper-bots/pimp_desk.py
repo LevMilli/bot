@@ -2541,6 +2541,22 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["empty_card"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["near_miss"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        th = desk_living.timer_heartbeat_chip(root)
+        ga = desk_living.helper_gate_a_board(root)
+        desk_row["timer_heartbeat"] = th
+        desk_row["helper_gate_a"] = ga
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["timer_heartbeat"] = (
+                desk_row["master"].get("timer_heartbeat") or th
+            )
+            desk_row["master"]["helper_gate_a"] = (
+                desk_row["master"].get("helper_gate_a") or ga
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["timer_heartbeat"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["helper_gate_a"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

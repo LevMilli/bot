@@ -76,6 +76,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("near_miss", board2)
             self.assertFalse(board2["near_miss"].get("auto_promote"))
             self.assertTrue(board2["empty_card"]["fee_floors_locked"])
+            self.assertIn("timer_heartbeat", board2)
+            self.assertIn("helper_gate_a", board2)
+            self.assertFalse(board2["helper_gate_a"].get("auto_promote"))
+            self.assertFalse(board2["helper_gate_a"].get("places_orders"))
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

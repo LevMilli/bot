@@ -445,6 +445,58 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def timer_heartbeat_chip(root: str | None = None) -> dict:
+    """Alive/dead paper timer chip for desk snapshot."""
+    status = {}
+    try:
+        import pimp_desk
+        status = pimp_desk.timer_health(root) or {}
+    except Exception:
+        status = {}
+    alive = bool(status.get("alive"))
+    age = status.get("age")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "alive": alive,
+        "age_sec": age,
+        "weekday_alert": bool(status.get("weekday_alert")),
+        "alert": status.get("alert") or "",
+        "label": (
+            f"timer {'alive' if alive else 'DEAD'}"
+            + (f" age={age}s" if age is not None else "")
+        ),
+        "note": status.get("detail") or "Discord paper_timer heartbeat.",
+    }
+
+
+def helper_gate_a_board(root: str | None = None) -> dict:
+    """Attributed helper fills Gate A readiness (observe-only until staff)."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.helper_promote_status(root) or {}
+    except Exception:
+        status = {}
+    helpers = status.get("helpers") if isinstance(status.get("helpers"), list) else []
+    ready_n = sum(1 for h in helpers if isinstance(h, dict) and h.get("promote_ready"))
+    armed_n = sum(1 for h in helpers if isinstance(h, dict) and h.get("armed"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "places_orders": False,
+        "helpers_n": len(helpers),
+        "ready_n": ready_n,
+        "armed_n": armed_n,
+        "helpers": helpers[:12],
+        "label": f"helper Gate A ready={ready_n}/{len(helpers)} armed={armed_n}",
+        "note": status.get("note") or (
+            "Helpers never place alone until Gate A + staff promote."
+        ),
+    }
+
+
 def empty_card_chip(root: str | None = None) -> dict:
     """Empty-market CARD latency chip (3s bar) for HUD."""
     status = {}
@@ -677,6 +729,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "firm_queue": firm_queue_chip(root),
         "empty_card": empty_card_chip(root),
         "near_miss": near_miss_chip(root),
+        "timer_heartbeat": timer_heartbeat_chip(root),
+        "helper_gate_a": helper_gate_a_board(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
