@@ -1532,6 +1532,43 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">sunday quiet</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const s =
+                          snap?.desk?.sunday_packet ||
+                          (snap?.desk?.master as {
+                            sunday_packet?: { quiet_age?: string; quiet_age_label?: string }
+                          } | undefined)?.sunday_packet
+                        const age = s?.quiet_age
+                        if (typeof age === 'string' && age.endsWith('h')) {
+                          const n = Number(age.slice(0, -1))
+                          if (Number.isFinite(n) && n >= 6) return '#d4a017'
+                        }
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const s =
+                        snap?.desk?.sunday_packet ||
+                        (snap?.desk?.master as {
+                          sunday_packet?: {
+                            quiet_age?: string
+                            quiet_age_label?: string
+                          }
+                        } | undefined)?.sunday_packet
+                      if (!s) return 'sunday quiet pending'
+                      return (
+                        (s.quiet_age_label ||
+                          (s.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')) +
+                        ' · sunday observe · never softens floors'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">empty bee</span>
                   <span
                     style={{

@@ -428,6 +428,8 @@ export type Desk = {
     chicago_today?: string
     scorecard_present?: boolean
     ritual_ok?: boolean | null
+    quiet_age?: string
+    quiet_age_label?: string
     ritual?: {
       ritual_ok?: boolean | null
       exit_ok?: boolean | null

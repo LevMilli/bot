@@ -128,6 +128,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("reporter", board2)
             self.assertIn("sunday_packet", board2)
             self.assertFalse(board2["sunday_packet"].get("auto_publish"))
+            self.assertIn("quiet_age_label", board2["sunday_packet"])
+            self.assertTrue(
+                str(board2["sunday_packet"].get("quiet_age_label") or "").startswith("quiet_age=")
+            )
             self.assertIn("empty_card_bee", board2)
             self.assertFalse(board2["reporter"].get("auto_publish"))
             self.assertTrue(board2["bookkeeper"]["fee_floors_locked"])
@@ -334,6 +338,8 @@ class DeskLivingTests(unittest.TestCase):
             status_txt = staff_living_status._text(board2)
             self.assertIn("quiet_age_label:", status_txt)
             self.assertIn("quiet_age=", status_txt)
+            self.assertIn("quiet_line:", status_txt)
+            self.assertIn("Feature quiet", status_txt)
             from tools import staff_living_ritual as _ritual_mod
             # Status --json twin of ritual quiet_line (same observe wording).
             quiet_line_expect = _ritual_mod.quiet_line({

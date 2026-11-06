@@ -1186,6 +1186,17 @@ def sunday_packet_chip(root: str | None = None) -> dict:
     except Exception:
         packet = {}
         present = False
+    quiet_age_label = packet.get("quiet_age_label")
+    quiet_age = packet.get("quiet_age")
+    if not quiet_age_label or not quiet_age:
+        try:
+            quiet = feature_store_quiet_alert(root)
+            age_h = quiet.get("age_hours") if isinstance(quiet, dict) else None
+            quiet_age = quiet_age or (f"{age_h}h" if age_h is not None else "n/a")
+            quiet_age_label = quiet_age_label or f"quiet_age={quiet_age}"
+        except Exception:
+            quiet_age = quiet_age or "n/a"
+            quiet_age_label = quiet_age_label or "quiet_age=n/a"
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -1195,10 +1206,13 @@ def sunday_packet_chip(root: str | None = None) -> dict:
         "scorecard_present": bool(packet.get("scorecard_present")),
         "ritual": packet.get("ritual") if isinstance(packet.get("ritual"), dict) else None,
         "ritual_ok": packet.get("ritual_ok"),
+        "quiet_age": quiet_age,
+        "quiet_age_label": quiet_age_label,
         "label": (
             f"sunday packet={'yes' if present else 'no'} "
             f"scorecard={bool(packet.get('scorecard_present'))} "
             f"ritual_ok={packet.get('ritual_ok')} "
+            f"{quiet_age_label} "
             f"auto_publish=False"
         ),
         "note": packet.get("note") or (
