@@ -265,6 +265,14 @@ class DeskLivingTests(unittest.TestCase):
             self.assertFalse(ruin_page.get("auto_publish"))
             compact = desk_living.living_compact_card(tmp)
             self.assertIn("swarm", compact.get("label") or "")
+            self.assertIn("quiet_label", compact)
+            self.assertTrue(any("quiet" in str(p).lower() for p in (compact.get("parts") or [])))
+            ritual = desk_living.ritual_observe_chip(tmp)
+            self.assertIn("ritual_ok", ritual)
+            self.assertIn("exit_ok", ritual)
+            self.assertFalse(ritual.get("auto_publish"))
+            self.assertTrue(ritual["fee_floors_locked"])
+            self.assertIn("ritual_observe", board2)
             # Fresh empty root → blocked until seed fills digests.
             with tempfile.TemporaryDirectory() as empty:
                 thin = desk_living.betting_expand_gate(empty)

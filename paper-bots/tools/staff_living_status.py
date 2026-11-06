@@ -50,6 +50,8 @@ def _text(board: dict) -> str:
     floors = board.get("fee_floors_assert") if isinstance(board.get("fee_floors_assert"), dict) else {}
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     expand = board.get("betting_expand_gate") if isinstance(board.get("betting_expand_gate"), dict) else {}
+    doctor_age = board.get("doctor_age") if isinstance(board.get("doctor_age"), dict) else {}
+    ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
     lines = [
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
@@ -70,6 +72,8 @@ def _text(board: dict) -> str:
         (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
+        f"doctor_age: {doctor_age.get('label') or '—'}",
+        f"ritual: {ritual.get('label') or '—'}",
         f"chicago_today: {board.get('chicago_today')}",
     ]
     return "\n".join(lines)
@@ -212,6 +216,7 @@ def main() -> int:
             "teller_living": board.get("teller_living"),
             "timer_heartbeat": board.get("timer_heartbeat"),
             "doctor_age": board.get("doctor_age"),
+            "ritual_observe": board.get("ritual_observe"),
             "sunday_packet": board.get("sunday_packet"),
             "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),

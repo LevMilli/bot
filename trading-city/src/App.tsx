@@ -1902,6 +1902,43 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">ritual</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const r =
+                          snap?.desk?.ritual_observe ||
+                          (snap?.desk?.master as {
+                            ritual_observe?: { ritual_ok?: boolean; exit_ok?: boolean }
+                          } | undefined)?.ritual_observe
+                        if (!r) return undefined
+                        if (r.ritual_ok) return '#6fbf73'
+                        if (r.exit_ok === false) return '#c45c26'
+                        return '#d4a017'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const r =
+                        snap?.desk?.ritual_observe ||
+                        (snap?.desk?.master as {
+                          ritual_observe?: {
+                            label?: string
+                            ritual_ok?: boolean
+                            exit_ok?: boolean
+                            auto_publish?: boolean
+                          }
+                        } | undefined)?.ritual_observe
+                      if (!r) return 'ritual observe pending'
+                      return (
+                        (r.label ||
+                          `ritual_ok=${Boolean(r.ritual_ok)} exit_ok=${Boolean(r.exit_ok)}`) +
+                        ' · auto_publish=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">bleed</span>
                   <span>
                     {(() => {
