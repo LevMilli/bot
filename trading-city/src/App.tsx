@@ -566,19 +566,37 @@ export default function App() {
                 <div className="vault-board-row">
                   <span className="vb-label">skips</span>
                   <span>
-                    {(snap?.desk?.more?.skip_leaderboard?.top || [])
-                      .slice(0, 5)
-                      .map((s) => `${s.code}×${s.n}`)
-                      .join(' · ') || 'quiet'}
+                    {(() => {
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        (snap?.desk?.more?.skip_leaderboard?.top || [])
+                          .slice(0, 5)
+                          .map((s) => `${s.code}×${s.n}`)
+                          .join(' · ') || 'quiet'
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
+                    })()}
                   </span>
                 </div>
                 <div className="vault-board-row">
                   <span className="vb-label">budgets</span>
                   <span>
-                    {Object.entries(snap?.desk?.more?.tower_budgets || {})
-                      .slice(0, 6)
-                      .map(([id, n]) => `${id}:$${Number(n).toFixed(0)}`)
-                      .join(' · ') || '—'}
+                    {(() => {
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        Object.entries(snap?.desk?.more?.tower_budgets || {})
+                          .slice(0, 6)
+                          .map(([id, n]) => `${id}:$${Number(n).toFixed(0)}`)
+                          .join(' · ') || '—'
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
                   </span>
                 </div>
                 <div className="vault-board-row">
@@ -592,10 +610,16 @@ export default function App() {
                         s += Number(row?.safe || 0)
                         b += Number(row?.big || 0)
                       }
-                      return `safe×${s} · big×${b}`
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      let base = `safe×${s} · big×${b}`
+                      if (snap?.desk?.gate_a?.any_ready) base += ' · Gate A ready'
+                      if (snap?.desk?.gate_b?.any_ready) base += ' · Gate B ready'
+                      return `${base} · sunday quiet ${sundayBit} (observe · never auto-writes Φ)`
                     })()}
-                    {snap?.desk?.gate_a?.any_ready ? ' · Gate A ready' : ''}
-                    {snap?.desk?.gate_b?.any_ready ? ' · Gate B ready' : ''}
                   </span>
                 </div>
                 <div className="vault-board-row">
@@ -605,10 +629,18 @@ export default function App() {
                       color: snap?.desk?.sports_tip?.active ? '#d4a017' : undefined,
                     }}
                   >
-                    {snap?.desk?.sports_tip?.active
-                      ? `tip-force T−${snap.desk.sports_tip.band} · ${snap.desk.sports_tip.force_sec || 45}s` +
-                        (snap.desk.sports_tip.sample ? ` · ${snap.desk.sports_tip.sample}` : '')
-                      : 'tip-force off · sports normal cadence'}
+                    {(() => {
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base = snap?.desk?.sports_tip?.active
+                        ? `tip-force T−${snap.desk.sports_tip.band} · ${snap.desk.sports_tip.force_sec || 45}s` +
+                          (snap.desk.sports_tip.sample ? ` · ${snap.desk.sports_tip.sample}` : '')
+                        : 'tip-force off · sports normal cadence'
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
+                    })()}
                   </span>
                 </div>
                 <div className="vault-board-row">
@@ -1029,6 +1061,14 @@ export default function App() {
                       ) {
                         base = `${base} · ${c.masters_sunday_label}`
                       }
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      if (!String(base).includes('sunday quiet')) {
+                        base = `${base} · sunday quiet ${sundayBit} (observe)`
+                      }
                       return base
                     })()}
                   </span>
@@ -1054,7 +1094,14 @@ export default function App() {
                           doctor_age?: { label?: string; stale?: boolean }
                         } | undefined)?.doctor_age
                       if (!a) return 'doctor age pending'
-                      return a.label || (a.stale ? 'doctor stale' : 'doctor age ok')
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        a.label || (a.stale ? 'doctor stale' : 'doctor age ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>
@@ -1148,10 +1195,16 @@ export default function App() {
                           }
                         } | undefined)?.ritual_observe
                       if (!r) return 'ritual observe pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (r.label ||
                           `ritual_ok=${Boolean(r.ritual_ok)} exit_ok=${Boolean(r.exit_ok)}`) +
-                        ' · auto_publish=False'
+                        ' · auto_publish=False' +
+                        ` · sunday quiet ${sundayBit} (observe · never auto-posts)`
                       )
                     })()}
                   </span>
@@ -1341,7 +1394,14 @@ export default function App() {
                           feature_quiet?: { label?: string; quiet?: boolean; alert?: string }
                         } | undefined)?.feature_quiet
                       if (!q) return 'feature quiet pending'
-                      return q.label || q.alert || (q.quiet ? 'feature QUIET' : 'feature quiet ok')
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        q.label || q.alert || (q.quiet ? 'feature QUIET' : 'feature quiet ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>
@@ -2344,7 +2404,13 @@ export default function App() {
                       const bits: string[] = []
                       if (t?.ritual_nag || t?.ritual_ok === false) bits.push('ritual_nag')
                       if (t?.quiet_nag) bits.push(t.quiet_age_label || 'quiet_nag')
-                      return bits.length ? `${line} · ${bits.join(' · ')}` : line
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const withBits = bits.length ? `${line} · ${bits.join(' · ')}` : line
+                      return `${withBits} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>

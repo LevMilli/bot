@@ -1233,9 +1233,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Compact clerk twins (nm/hs/bleed/skip-twin/CLV/t-digest) | living_compact_card twins |
 | Vault+ritual+status skip-reg/clerks sunday | App vault + Discord/observe + status |
 
+### Living upgrade — meta vault sunday quiet pass (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Vault skips/budgets/adapt/tip-force sunday | App vault ops rows |
+| Vault compact/doc/quiet/ritual/teller sunday | App vault living rows |
+| Compact skips/teller/doc/quiet/ritual twins | living_compact_card + export |
+| Ritual/status meta sunday lines | Discord/observe + status |
+
 ### Next
 
-_(empty — living sunday quiet clerk twin backfill cleared; fee floors locked; paper-only; Discord never auto-posts)_
+_(empty — living sunday quiet meta vault pass cleared; fee floors locked; paper-only; Discord never auto-posts)_
 
 ## Hard rules unchanged
 
