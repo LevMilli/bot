@@ -494,13 +494,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Staff living status | `tools/staff_living_status.py` |
 | Feature quiet pager | `desk_living.feature_quiet_pager` |
 
+### Living upgrade — injury ingest CLI + completions chip
+
+| Ticket | Where |
+| --- | --- |
+| Injury ingest CLI | `tools/staff_injury_ingest.py` |
+| Completions chip | `desk_living.completions_chip` + teller fact |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Living board snapshot test | assert priority ≤16 under full chips |
-| Staff injury ingest CLI | tools/staff_injury_ingest.py |
-| Completions today chip | teller one-liner |
+| Staff calib ticket CLI | tools/staff_calib_tickets.py |
+| Living board self_check | desk_living CLI health |
+| Swarm vault pulse color | city vault green/amber from pass |
 
 ## Hard rules unchanged
 

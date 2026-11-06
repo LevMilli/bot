@@ -2727,6 +2727,27 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["dual_control_chip"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["ruin_drill_chip"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        cc = desk_living.completions_chip(root)
+        desk_row["completions_chip"] = cc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["completions_chip"] = (
+                desk_row["master"].get("completions_chip") or cc
+            )
+        try:
+            import teller_memory
+            if int(cc.get("eligible_completions_today") or 0) > 0:
+                teller_memory.remember(
+                    root,
+                    kind="facts",
+                    text=str(cc.get("label") or "completions")[:200],
+                    bot_id="desk",
+                )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["completions_chip"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

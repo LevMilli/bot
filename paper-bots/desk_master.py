@@ -804,6 +804,11 @@ def master_summary(
         ),
         "living_ai": living_ai,
         "completions": completions,
+        "completions_chip": (
+            (living or {}).get("completions_chip")
+            if isinstance(living, dict)
+            else None
+        ),
         "feature_quiet": feature_quiet,
         "feature_quiet_pager": (
             (living or {}).get("feature_quiet_pager")

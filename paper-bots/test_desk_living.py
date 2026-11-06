@@ -150,6 +150,13 @@ class DeskLivingTests(unittest.TestCase):
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("timer")), 1)
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("bleed")), 1)
             self.assertEqual(sum(1 for t in trimmed if t.lower().startswith("dual")), 1)
+            self.assertIn("completions_chip", board2)
+            self.assertTrue(board2["completions_chip"]["fee_floors_locked"])
+            from helpers import injury_wire
+            dig = injury_wire.staff_ingest(
+                tmp, headlines=[{"league": "NBA", "text": "star out"}], replace=True,
+            )
+            self.assertEqual(dig.get("n"), 1)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
