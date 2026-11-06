@@ -478,13 +478,21 @@ Interactive: Positive ROI Master Plan canvas.
 | EIA blackout chip | `desk_living.eia_blackout_chip` |
 | Compact living card | `desk_living.living_compact_card` |
 
+### Living upgrade — pulse / dual-control / ruin chips
+
+| Ticket | Where |
+| --- | --- |
+| Clerk pulse chip | `desk_living.clerk_pulse_chip` |
+| Dual-control chip | `desk_living.dual_control_chip` |
+| Ruin drill chip | `desk_living.ruin_drill_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Clerk pulse health chip | last pulse age on HUD |
-| Dual-control signed chip | signed_n/items_n rail |
-| Ruin drill month chip | practiced_this_month alert |
+| Living Masters priority trim | dedupe noisy rail lines |
+| Staff living status CLI | tools/staff_living_status.py |
+| Feature quiet weekday page | pager copy for ≥6h silence |
 
 ## Hard rules unchanged
 

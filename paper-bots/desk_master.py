@@ -732,6 +732,17 @@ def master_summary(
     compact = (living or {}).get("compact") if isinstance(living, dict) else None
     if isinstance(compact, dict) and compact.get("label"):
         priority.append(str(compact.get("label"))[:160])
+    pulse = (living or {}).get("clerk_pulse") if isinstance(living, dict) else None
+    if isinstance(pulse, dict) and pulse.get("stale"):
+        priority.insert(0, str(pulse.get("label") or "clerk pulse STALE")[:120])
+    dual_chip = (living or {}).get("dual_control_chip") if isinstance(living, dict) else None
+    if isinstance(dual_chip, dict):
+        priority.append(str(dual_chip.get("label") or "dual-control")[:120])
+    ruin_chip = (living or {}).get("ruin_drill_chip") if isinstance(living, dict) else None
+    if isinstance(ruin_chip, dict) and (
+        ruin_chip.get("active") or not ruin_chip.get("practiced_this_month")
+    ):
+        priority.append(str(ruin_chip.get("label") or "ruin drill")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -909,6 +920,21 @@ def master_summary(
         ),
         "compact": (
             (living or {}).get("compact")
+            if isinstance(living, dict)
+            else None
+        ),
+        "clerk_pulse": (
+            (living or {}).get("clerk_pulse")
+            if isinstance(living, dict)
+            else None
+        ),
+        "dual_control_chip": (
+            (living or {}).get("dual_control_chip")
+            if isinstance(living, dict)
+            else None
+        ),
+        "ruin_drill_chip": (
+            (living or {}).get("ruin_drill_chip")
             if isinstance(living, dict)
             else None
         ),

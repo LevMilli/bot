@@ -445,6 +445,105 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def clerk_pulse_chip(root: str | None = None) -> dict:
+    """Last clerk-pulse age / digest health chip."""
+    digest: dict = {}
+    age_sec = None
+    try:
+        from helpers import clerk_pulse
+        path = clerk_pulse.digest_path(root)
+        marker = os.path.join(
+            os.path.dirname(path),
+            getattr(clerk_pulse, "RUN_MARKER", "clerk_pulse_at.txt"),
+        )
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if os.path.isfile(marker):
+            age_sec = int(max(0.0, time.time() - os.path.getmtime(marker)))
+        if not isinstance(digest, dict):
+            digest = {}
+    except Exception:
+        digest = {}
+    cadence = None
+    try:
+        from helpers import clerk_pulse as _cp
+        cadence = getattr(_cp, "CADENCE_SEC", 300)
+    except Exception:
+        cadence = 300
+    stale = age_sec is not None and cadence is not None and age_sec > int(cadence) * 2
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "age_sec": age_sec,
+        "cadence_sec": cadence,
+        "stale": stale,
+        "refreshed_n": digest.get("refreshed_n") or digest.get("n"),
+        "at": digest.get("at"),
+        "label": (
+            f"clerk pulse age={age_sec}s "
+            + ("STALE" if stale else "ok" if age_sec is not None else "n/a")
+        ),
+        "note": digest.get("note") or "5m insight clerk pulse — observe-only digests.",
+    }
+
+
+def dual_control_chip(root: str | None = None) -> dict:
+    """Dual-control signed checklist chip (paper arm only)."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.dual_control_status(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_promote": False,
+        "signed_n": status.get("signed_n"),
+        "items_n": status.get("items_n"),
+        "checklist_complete": bool(status.get("checklist_complete")),
+        "two_staff": bool(status.get("two_staff")),
+        "arm_ready_paper": bool(status.get("arm_ready_paper")),
+        "label": (
+            f"dual-control signed={status.get('signed_n')}/{status.get('items_n')} "
+            f"two_staff={bool(status.get('two_staff'))} "
+            f"arm_ready_paper={bool(status.get('arm_ready_paper'))}"
+        ),
+        "note": status.get("note") or (
+            "Both staff + full checklist before any future live path."
+        ),
+    }
+
+
+def ruin_drill_chip(root: str | None = None) -> dict:
+    """Ruin drill monthly practice chip."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.ruin_drill_status(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "active": bool(status.get("active")),
+        "level": status.get("level"),
+        "practiced_this_month": bool(status.get("practiced_this_month")),
+        "last_practice_at": status.get("last_practice_at"),
+        "label": (
+            f"ruin drill active={bool(status.get('active'))} "
+            f"level={status.get('level')} "
+            f"practiced_month={bool(status.get('practiced_this_month'))}"
+        ),
+        "note": status.get("note") or (
+            "Practice soft/hard this Chicago month for dual-control."
+        ),
+    }
+
+
 def calendar_scanner_chip(root: str | None = None) -> dict:
     """Upcoming high-impact calendar events chip."""
     digest: dict = {}
@@ -1517,6 +1616,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "timer_digest": timer_digest_chip(root),
         "calendar_scanner": calendar_scanner_chip(root),
         "eia_blackout": eia_blackout_chip(root),
+        "clerk_pulse": clerk_pulse_chip(root),
+        "dual_control_chip": dual_control_chip(root),
+        "ruin_drill_chip": ruin_drill_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
