@@ -347,6 +347,15 @@ def feature_store_quiet_alert(
             if quiet
             else ""
         ),
+        "label": (
+            f"feature quiet age={age_h}h QUIET"
+            if quiet
+            else (
+                f"feature quiet age={age_h}h ok"
+                if age_h is not None
+                else "feature quiet n/a"
+            )
+        ),
         "note": "Observe-only coverage alert. Never softens venue floors.",
     }
 
@@ -462,6 +471,7 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     except Exception:
         boards = {}
         raise_phi = []
+    n = len(raise_phi)
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -471,8 +481,13 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
         "adapt_recent_vol_n": len(adapt.get("recent_vol") or []),
         "calib_boards": boards,
         "raise_phi_tickets": raise_phi,
-        "raise_phi_n": len(raise_phi),
+        "raise_phi_n": n,
         "auto_write_phi": False,
+        "label": (
+            f"living AI raise_Φ={n}"
+            + (f" ({','.join(raise_phi)})" if raise_phi else " clear")
+            + " · auto_write=False"
+        ),
         "note": (
             "Living AI health — Wilson adapt + calib raise_Φ tickets. "
             "Staff dual-control only; never silent Φ write; never softer floors."
@@ -1916,17 +1931,20 @@ def dual_control_gaps_page(root: str | None = None) -> dict:
         lines.append("- all checklist items signed (still paper-only; live lock stays False)")
     lines.append("")
     lines.append("_floors locked · LIVE_ORDERS_ENABLED=False · staff ack only_")
+    copy = "\n".join(lines)
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "live_orders_enabled": False,
         "auto_page": False,
+        "auto_publish": False,
         "page": page,
         "gaps_n": len(gaps),
         "gaps": gaps,
         "signed_n": status.get("signed_n"),
         "items_n": status.get("items_n"),
-        "copy": "\n".join(lines),
+        "copy": copy,
+        "discord": copy,  # same markdown — staff paste only
         "label": (
             f"dual-control gaps={len(gaps)} signed={status.get('signed_n')}/{status.get('items_n')}"
         ),

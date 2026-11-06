@@ -9,6 +9,7 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py priority
   python3 tools/staff_living_status.py selfcheck
   python3 tools/staff_living_status.py gaps
+  python3 tools/staff_living_status.py gaps --discord
   python3 tools/staff_living_status.py inventory
   python3 tools/staff_living_status.py hillclimb
   python3 tools/staff_living_status.py ruin
@@ -83,6 +84,11 @@ def main() -> int:
         ),
     )
     parser.add_argument("--root", default=ROOT)
+    parser.add_argument(
+        "--discord",
+        action="store_true",
+        help="Paste-ready Discord markdown (gaps/ruin); never auto-posts.",
+    )
     args = parser.parse_args()
     root = args.root
     board = _board(root)
@@ -94,7 +100,10 @@ def main() -> int:
         gaps = board.get("dual_control_gaps")
         if not isinstance(gaps, dict):
             gaps = desk_living.dual_control_gaps_page(root)
-        if gaps.get("copy"):
+        if args.discord:
+            body = gaps.get("discord") or gaps.get("copy") or ""
+            print(body if body else json.dumps(gaps, indent=2, sort_keys=True, default=str))
+        elif gaps.get("copy"):
             print(gaps["copy"])
         else:
             print(json.dumps(gaps, indent=2, sort_keys=True, default=str))

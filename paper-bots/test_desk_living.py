@@ -230,7 +230,15 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("board_size", board2)
             gaps = desk_living.dual_control_gaps_page(tmp)
             self.assertIn("copy", gaps)
+            self.assertEqual(gaps.get("discord"), gaps.get("copy"))
             self.assertFalse(gaps.get("live_orders_enabled"))
+            self.assertFalse(gaps.get("auto_publish"))
+            ai = desk_living.living_ai_health(tmp)
+            self.assertIn("label", ai)
+            self.assertFalse(ai.get("auto_write_phi"))
+            self.assertTrue(ai["fee_floors_locked"])
+            quiet = desk_living.feature_store_quiet_alert(tmp)
+            self.assertIn("label", quiet)
             self.assertTrue(os.path.isfile(os.path.join(
                 os.path.dirname(os.path.abspath(desk_living.__file__)),
                 "tools", "staff_living_ritual.py",

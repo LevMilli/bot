@@ -202,6 +202,26 @@ export type Desk = {
     note?: string
     error?: string
   }
+  living_ai?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    raise_phi_n?: number
+    raise_phi_tickets?: string[]
+    auto_write_phi?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  feature_quiet?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    quiet?: boolean
+    age_hours?: number | null
+    label?: string
+    alert?: string
+    note?: string
+    error?: string
+  }
   clerk_pulse?: {
     paper_only?: boolean
     fee_floors_locked?: boolean

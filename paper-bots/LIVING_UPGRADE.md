@@ -27,6 +27,7 @@ make living-test
 python3 tools/staff_living_status.py              # compact text
 python3 tools/staff_living_status.py selfcheck
 python3 tools/staff_living_status.py gaps         # dual-control unsigned
+python3 tools/staff_living_status.py gaps --discord  # paste-ready gaps (never auto-posts)
 python3 tools/staff_living_status.py ruin         # monthly practice page
 python3 tools/staff_living_status.py inventory
 python3 tools/staff_living_status.py seed         # empty observe digests
