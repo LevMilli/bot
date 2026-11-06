@@ -250,6 +250,32 @@ export type Desk = {
     note?: string
     error?: string
   }
+  eia_scout?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    next_eta_hours?: number | null
+    label?: string
+    note?: string
+    error?: string
+  }
+  calendar_scanner?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    n?: number
+    label?: string
+    note?: string
+    error?: string
+  }
+  eia_blackout?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    blocked?: boolean
+    window_min?: number
+    label?: string
+    note?: string
+    error?: string
+  }
   living_compact?: {
     paper_only?: boolean
     fee_floors_locked?: boolean

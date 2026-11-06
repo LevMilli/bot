@@ -658,13 +658,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Hard-stop vault tint | sports promote_ready |
 | Injury wire vault row | inbox headlines observe |
 
-### Next
+### Living upgrade — EIA scout / calendar / blackout vault
 
 | Ticket | Where |
 | --- | --- |
 | EIA scout vault row | next inventory ETA |
 | Calendar vault tint | events n>0 amber |
 | EIA blackout vault | ACTIVE red |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Firm queue vault row | queue depth observe |
+| Helper Gate A vault | promote_ready helpers |
+| Feature quiet pager vault | pager copy soft |
 
 ## Hard rules unchanged
 
