@@ -113,6 +113,10 @@ def write_digest(root: str | None = None, events: list | None = None) -> dict:
     return digest
 
 
+def write_digest_from_desk(root: str | None = None) -> dict:
+    return write_digest(root)
+
+
 if __name__ == "__main__":
     demo = [
         {

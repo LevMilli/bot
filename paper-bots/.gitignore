@@ -78,6 +78,8 @@ helpers/bookkeeper_clerk_digest.json
 helpers/reporter_clerk_digest.json
 helpers/quant_clerk_digest.json
 helpers/skip_twin_clerk_digest.json
+helpers/clerk_pulse_digest.json
+helpers/clerk_pulse_at.txt
 btc15m-signal/paper_parlays.json
 commodity-15m-paper/paper_account.json
 *.tmp

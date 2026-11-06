@@ -67,6 +67,21 @@ def write_digest(root: str | None = None, games: list | None = None) -> dict:
     return digest
 
 
+def write_digest_from_desk(root: str | None = None) -> dict:
+    """Refresh marker with last games if any; empty board is still a valid pulse."""
+    path = digest_path(root)
+    games = []
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                prev = json.load(handle)
+            if isinstance(prev, dict):
+                games = list(prev.get("games") or [])
+        except (OSError, json.JSONDecodeError, TypeError):
+            games = []
+    return write_digest(root, games=games)
+
+
 if __name__ == "__main__":
     out = write_digest(games=[
         {"league": "NBA", "ticker": "DEMO", "tip_in_min": 12},

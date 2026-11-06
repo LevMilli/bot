@@ -2798,6 +2798,12 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
         calendar_scanner.run_if_due(root, now)
     except Exception:
         pass
+    # Living upgrade — refresh insight clerk digests on a 5m cadence (observe-only).
+    try:
+        from helpers import clerk_pulse
+        clerk_pulse.run_if_due(root, now)
+    except Exception:
+        pass
     touch_heartbeat(root, now)
     # Broke towers only: once per Chicago day in the early window, reload ammo + reset P&L.
     # Winners and towers with open paper stay untouched.

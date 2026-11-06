@@ -321,13 +321,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Insight≥3:1 audit | `desk_living.insight_swarm_ratio` on living board |
 | Skip-twin clerk | `helpers/skip_twin_clerk` — near-miss would_pnl twin digest |
 
+### Living upgrade — clerk pulse + skip-twin feature join
+
+| Ticket | Where |
+| --- | --- |
+| Clerk pulse timer | `helpers/clerk_pulse.run_if_due` from `pimp_desk.run_scheduled` |
+| Skip-twin → feature store | `desk_living.record_skip_twin_features` via `label_near_miss_outcome` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Feature-store skip-twin join | join labeled twins into feature rows |
-| Timer cadence for clerk digests | schedule write_digest_from_desk for swarm |
+| Tip radar live game feed | wire tip windows into tip_radar digests |
+| City lights for swarm ratio | Masters / tellers show insight≥3:1 |
 
 ## Hard rules unchanged
 

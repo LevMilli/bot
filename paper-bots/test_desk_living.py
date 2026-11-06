@@ -198,6 +198,24 @@ class InsightHelpers(unittest.TestCase):
             self.assertEqual(cov["n"], 1)
             self.assertEqual(cov["skips"], 1)
 
+    def test_skip_twin_and_clerk_pulse(self):
+        from helpers import clerk_pulse
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "helpers"), exist_ok=True)
+            out = desk_living.record_skip_twin_features(
+                tmp, bot="btc15m", ticker="T1", would_pnl=0.12, soft="z",
+            )
+            self.assertTrue(out["recorded"])
+            self.assertEqual(out["row"]["action"], "skip_twin")
+            digest = clerk_pulse.run_if_due(tmp)
+            self.assertIsNotNone(digest)
+            self.assertGreaterEqual(digest["refreshed_n"], 1)
+            self.assertFalse(digest["may_place_alone"])
+            self.assertTrue(os.path.isfile(os.path.join(tmp, "helpers", "clerk_pulse_digest.json")))
+            # Due marker: second call within cadence returns None
+            again = clerk_pulse.run_if_due(tmp)
+            self.assertIsNone(again)
+
 
 class MemeChicagoDay(unittest.TestCase):
     def test_today_local_is_chicago(self):

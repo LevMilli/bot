@@ -59,5 +59,20 @@ def write_digest(root: str | None = None, headlines: list | None = None) -> dict
     return digest
 
 
+def write_digest_from_desk(root: str | None = None) -> dict:
+    """Preserve last headlines if present; else empty observe digest."""
+    path = digest_path(root)
+    headlines = []
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                prev = json.load(handle)
+            if isinstance(prev, dict):
+                headlines = list(prev.get("headlines") or [])
+        except (OSError, json.JSONDecodeError, TypeError):
+            headlines = []
+    return write_digest(root, headlines=headlines)
+
+
 if __name__ == "__main__":
     print(write_digest(headlines=[{"league": "NBA", "text": "Demo: starter questionable (paper digest)"}]))
