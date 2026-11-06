@@ -1010,7 +1010,22 @@ export default function App() {
                 </div>
                 <div className="vault-board-row">
                   <span className="vb-label">ritual draft</span>
-                  <span className="vault-ritual-draft">
+                  <span
+                    className="vault-ritual-draft"
+                    style={{
+                      color: (() => {
+                        const r =
+                          snap?.desk?.ritual_observe ||
+                          (snap?.desk?.master as {
+                            ritual_observe?: { exit_ok?: boolean; ritual_ok?: boolean }
+                          } | undefined)?.ritual_observe
+                        if (!r) return undefined
+                        if (r.exit_ok === false) return '#c45c26'
+                        if (r.ritual_ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
                     {(() => {
                       const copy =
                         snap?.desk?.ritual_soft_copy ||

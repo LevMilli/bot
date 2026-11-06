@@ -291,6 +291,22 @@ def main() -> int:
             "compact_ritual_label": compact_j.get("ritual_label"),
             "compact_doctor_fresh": compact_j.get("doctor_fresh"),
             "compact_doctor_label": compact_j.get("doctor_label"),
+            "quiet_doctor": (
+                "quiet="
+                + ("yes" if (board.get("feature_quiet") or {}).get("quiet") else "no")
+                + " · "
+                + str(
+                    compact_j.get("doctor_label")
+                    or (
+                        "doctor=fresh"
+                        if doctor_fresh_j
+                        else "doctor=stale"
+                        if doctor_fresh_j is False
+                        else "doctor=n/a"
+                    )
+                )
+                + f" · doctor_fresh={doctor_fresh_j}"
+            ),
             "insight_swarm": board.get("insight_swarm"),
             "feature_quiet": board.get("feature_quiet"),
             "feature_quiet_pager": board.get("feature_quiet_pager"),

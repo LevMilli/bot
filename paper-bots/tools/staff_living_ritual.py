@@ -31,6 +31,8 @@ def format_discord(payload: dict) -> str:
         "",
         f"ritual_ok={payload.get('ritual_ok', payload.get('ok'))} "
         f"exit_ok={payload.get('exit_ok')} "
+        f"floors_ok={payload.get('floors_ok')} "
+        f"expand_ok={payload.get('expand_ok')} "
         f"doctor_ok={payload.get('doctor_ok')} "
         f"doctor_fresh={payload.get('doctor_fresh')}",
         "",
