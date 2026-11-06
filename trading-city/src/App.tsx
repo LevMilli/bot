@@ -661,6 +661,59 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">AI</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const ai =
+                          snap?.desk?.living_ai ||
+                          (snap?.desk?.master as { living_ai?: { raise_phi_n?: number } } | undefined)
+                            ?.living_ai
+                        if (!ai) return undefined
+                        return Number(ai.raise_phi_n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const ai =
+                        snap?.desk?.living_ai ||
+                        (snap?.desk?.master as {
+                          living_ai?: { label?: string; raise_phi_n?: number }
+                        } | undefined)?.living_ai
+                      if (!ai) return 'living AI pending'
+                      return (
+                        ai.label ||
+                        `raise_Φ=${ai.raise_phi_n ?? 0} · auto_write=False`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">quiet</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const q =
+                          snap?.desk?.feature_quiet ||
+                          (snap?.desk?.master as { feature_quiet?: { quiet?: boolean } } | undefined)
+                            ?.feature_quiet
+                        if (!q) return undefined
+                        return q.quiet ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const q =
+                        snap?.desk?.feature_quiet ||
+                        (snap?.desk?.master as {
+                          feature_quiet?: { label?: string; quiet?: boolean; alert?: string }
+                        } | undefined)?.feature_quiet
+                      if (!q) return 'feature quiet pending'
+                      return q.label || q.alert || (q.quiet ? 'feature QUIET' : 'feature quiet ok')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">swarm</span>
                   <span
                     style={{

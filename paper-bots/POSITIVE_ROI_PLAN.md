@@ -594,13 +594,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Living tip-feed vault row | tip radar on city vault |
 | Clerk pulse age soft warn | soft WARN before STALE hard insert |
 
-### Next
+### Living upgrade — AI vault + quiet tint + gaps Discord
 
 | Ticket | Where |
 | --- | --- |
 | Living AI vault row | raise_Φ ticket count on vault |
 | Feature quiet vault tint | quiet amber on vault |
-| Dual gaps Discord shortcut | status gaps --discord |
+| Dual gaps Discord shortcut | `staff_living_status.py gaps --discord` |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Ruin Discord shortcut | `status ruin --discord` |
+| Living compact vault row | one-line compact on vault |
+| Expand gate soft copy | blocked reason in status text |
 
 ## Hard rules unchanged
 

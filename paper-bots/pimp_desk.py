@@ -2759,6 +2759,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         # Snapshot path observes doctor without rewriting the weekly marker.
         desk_row["living_doctor"] = desk_living.living_doctor(root, record=False)
         desk_row["doctor_age"] = desk_living.doctor_age_chip(root)
+        desk_row["living_ai"] = desk_living.living_ai_health(root, bots=bots)
+        desk_row["feature_quiet"] = desk_living.feature_store_quiet_alert(root)
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["teller_living"] = (
                 desk_row["master"].get("teller_living") or tl
@@ -2774,6 +2776,12 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             desk_row["master"]["living_doctor"] = (
                 desk_row["master"].get("living_doctor")
                 or desk_row["living_doctor"]
+            )
+            desk_row["master"]["living_ai"] = (
+                desk_row["master"].get("living_ai") or desk_row["living_ai"]
+            )
+            desk_row["master"]["feature_quiet"] = (
+                desk_row["master"].get("feature_quiet") or desk_row["feature_quiet"]
             )
         # Prefer living line on desk teller when present.
         for bot in bots or []:
