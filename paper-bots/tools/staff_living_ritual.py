@@ -116,6 +116,12 @@ def main() -> int:
             )
             print(f"quiet_age={quiet_age}")
             print(
+                quiet_line({
+                    "feature_quiet": quiet if isinstance(quiet, dict) else {},
+                    "quiet_age": quiet_age,
+                })
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
