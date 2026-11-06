@@ -887,6 +887,10 @@ def living_compact_card(
         "masters_sunday_label": masters_sunday_part,
         "masters_sunday_quiet": f"sunday quiet {quiet_age_part} (observe)",
         "expand_label": expand_part,
+        "expand_sunday_quiet": (
+            f"{expand_part} · sunday quiet {quiet_age_part} "
+            "(observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2160,6 +2164,18 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{expand_bit} · sunday quiet {slim['sunday_quiet_age_label']} "
         "(observe · never softens floors)"
     )
+    floors = board.get("fee_floors_assert") if isinstance(board.get("fee_floors_assert"), dict) else {}
+    floors_bit = (
+        "floors=ok"
+        if floors.get("all_ok")
+        else "floors=soft"
+        if floors.get("all_ok") is False
+        else "floors=n/a"
+    )
+    slim["floors_sunday_quiet"] = (
+        f"{floors_bit} · sunday quiet {slim['sunday_quiet_age_label']} "
+        "(observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2175,6 +2191,10 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         slim["compact_masters_sunday_quiet"] = (
             compact.get("masters_sunday_quiet")
             or slim["masters_sunday_quiet"]
+        )
+        slim["compact_expand_sunday_quiet"] = (
+            compact.get("expand_sunday_quiet")
+            or slim.get("expand_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -2210,6 +2230,8 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
             f"doctor={'fresh' if slim.get('doctor_fresh') else 'stale' if slim.get('doctor_fresh') is False else 'n/a'} "
             f"doctor_fresh={slim.get('doctor_fresh')}\n"
             f"{doctor_age.get('label') or 'doctor age'}\n"
+            f"sunday quiet {slim.get('sunday_quiet_age_label') or 'quiet_age=n/a'} "
+            f"(observe · never softens floors)\n"
             f"ritual draft: make living-ritual-discord\n"
             f"_staff paste only · never auto-posts · never enables live_"
         )
@@ -2503,16 +2525,23 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         f"doctor={'fresh' if ritual.get('doctor_fresh') else 'stale' if ritual.get('doctor_fresh') is False else 'n/a'} "
         f"doctor_fresh={ritual.get('doctor_fresh')}"
     )
+    quiet = feature_store_quiet_alert(root)
+    quiet_age_h = quiet.get("age_hours") if isinstance(quiet, dict) else None
+    quiet_age_label = (
+        f"quiet_age={quiet_age_h}h" if quiet_age_h is not None else "quiet_age=n/a"
+    )
     soft_copy = (
         f"**Living doctor** (paper · floors locked · live=False)\n"
         f"{doc['label']} · failed=[{failed_ids}]\n"
         f"{ritual_line}\n"
         f"{doctor_line}\n"
+        f"sunday quiet {quiet_age_label} (observe · never softens floors)\n"
         f"ritual draft: make living-ritual-discord (staff paste · never auto-posts)\n"
         f"_never places · never softens floors · never enables live_"
     )
     doc["soft_copy"] = soft_copy
     doc["discord"] = soft_copy
+    doc["sunday_quiet_age_label"] = quiet_age_label
     doc["ritual_draft_cmd"] = "make living-ritual-discord"
     if record:
         try:
