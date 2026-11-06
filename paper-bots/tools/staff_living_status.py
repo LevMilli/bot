@@ -68,6 +68,27 @@ def _text(board: dict) -> str:
             f"doctor_fresh={compact.get('doctor_fresh')}"
         ),
         (
+            "quiet+doctor: quiet="
+            + ("yes" if quiet.get("quiet") else "no")
+            + (
+                f" age={quiet.get('age_hours')}h"
+                if quiet.get("age_hours") is not None
+                else ""
+            )
+            + " · "
+            + str(
+                compact.get("doctor_label")
+                or (
+                    "doctor=fresh"
+                    if doctor_fresh
+                    else "doctor=stale"
+                    if doctor_fresh is False
+                    else "doctor=n/a"
+                )
+            )
+            + f" · doctor_fresh={doctor_fresh}"
+        ),
+        (
             f"swarm: {swarm.get('insight_n')}:{swarm.get('betting_n')} "
             f"pass={swarm.get('pass')}"
         ),
