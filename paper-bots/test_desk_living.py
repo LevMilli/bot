@@ -98,6 +98,7 @@ class BtcNewsFailClosed(unittest.TestCase):
 class InsightHelpers(unittest.TestCase):
     def test_tip_radar_and_skip_historian(self):
         from helpers import tip_radar, skip_historian, timer_heartbeat, empty_card_bee
+        from helpers import clv_closer, injury_wire
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "helpers"), exist_ok=True)
             d = tip_radar.write_digest(tmp, games=[
@@ -113,6 +114,25 @@ class InsightHelpers(unittest.TestCase):
                 {"bot": "btc15m", "series": "KXBTC15M", "sec": 4.0},
             ])
             self.assertEqual(e["breaches"], 1)
+            c = clv_closer.build_digest({"n": 3, "complete": 2, "pass": False})
+            self.assertEqual(c["helper"], "clv_closer")
+            self.assertFalse(c["may_place_alone"])
+            iw = injury_wire.write_digest(tmp, headlines=[{"league": "NFL", "text": "QB out"}])
+            self.assertEqual(iw["n"], 1)
+
+    def test_record_eval_features(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_living.record_eval_features(
+                tmp,
+                bot="btc15m",
+                action="skip",
+                series="KXBTC15M",
+                ev={"side": "YES", "ask": 0.8, "edge": 0.03, "p": 0.88, "z": 0.7},
+                reasons=["z thin"],
+            )
+            cov = desk_living.feature_store_coverage(tmp)
+            self.assertEqual(cov["n"], 1)
+            self.assertEqual(cov["skips"], 1)
 
 
 class MemeChicagoDay(unittest.TestCase):

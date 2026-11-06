@@ -114,6 +114,46 @@ def record_decision_features(
     return {"recorded": True, "row": row}
 
 
+def record_eval_features(
+    root: str | None = None,
+    *,
+    bot: str,
+    action: str,
+    ev: dict | None = None,
+    ticker: str = "",
+    series: str = "",
+    reasons: list | None = None,
+    note: str = "",
+) -> dict:
+    """Convenience: map an evaluate/candidate dict into a feature-store row."""
+    ev = ev if isinstance(ev, dict) else {}
+    codes = []
+    for r in reasons or ev.get("reasons") or []:
+        codes.append(str(r)[:40])
+    return record_decision_features(
+        root,
+        bot=bot,
+        action=action,
+        series=series or str(ev.get("series") or "")[:40],
+        side=str(ev.get("side") or "")[:20],
+        ask=ev.get("ask"),
+        bid=ev.get("bid"),
+        fee=ev.get("fee"),
+        model_p=ev.get("p") if ev.get("p") is not None else ev.get("model_p") or ev.get("confidence"),
+        z=ev.get("z"),
+        edge=ev.get("edge") if ev.get("edge") is not None else ev.get("gap"),
+        depth=ev.get("depth"),
+        skip_codes=codes,
+        fill_id=str(ev.get("fill_id") or ticker or ev.get("ticker") or "")[:80],
+        note=note or "; ".join(codes)[:160],
+        extra={
+            "ticker": str(ticker or ev.get("ticker") or "")[:80],
+            "lane": str(ev.get("lane") or "")[:20],
+            "minutes_left": _f(ev.get("min_left") if ev.get("min_left") is not None else ev.get("minutes_left")),
+        },
+    )
+
+
 def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_ROWS_READ) -> dict:
     path = feature_store_path(root)
     n = 0
@@ -230,10 +270,24 @@ def living_upgrade_board(root: str | None = None) -> dict:
     """Masters card: data + completions health for the living upgrade."""
     feat = feature_store_coverage(root)
     comp = completions_summary(root)
+    helpers = {}
+    for name in (
+        "tip_radar_digest.json",
+        "skip_historian_digest.json",
+        "timer_heartbeat_digest.json",
+        "empty_card_bee_digest.json",
+        "clv_closer_digest.json",
+        "injury_wire_digest.json",
+        "calendar_digest.json",
+    ):
+        path = os.path.join(_root(root), "helpers", name)
+        helpers[name.replace("_digest.json", "").replace(".json", "")] = os.path.isfile(path)
     return {
         "paper_only": True,
         "feature_store": feat,
         "completions": comp,
+        "insight_helper_digests": helpers,
+        "insight_helpers_present": sum(1 for v in helpers.values() if v),
         "chicago_today": chicago_today_iso(),
         "fee_floors_locked": True,
         "insight_first": True,

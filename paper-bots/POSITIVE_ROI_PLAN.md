@@ -285,8 +285,8 @@ Interactive: Positive ROI Master Plan canvas.
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Wire feature rows on every evaluate | sports/BTC/commodity hot path |
-| More insight swarm | CLV closer, injury wire, EIA week scout |
+| Wire feature rows on every evaluate | **shipped** sports buy/skip + BTC skip/buy/block + commodity evaluate |
+| More insight swarm | **shipped** CLV closer + injury wire; next EIA week scout |
 
 ## Hard rules unchanged
 

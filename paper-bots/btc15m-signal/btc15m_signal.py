@@ -1482,6 +1482,18 @@ def main():
                         )
                     except Exception:
                         pass
+                    try:
+                        import desk_living
+                        desk_living.record_eval_features(
+                            DESK_ROOT, bot="btc15m", action="skip",
+                            series=str(ev.get("series") or "KXBTC15M"),
+                            ticker=str(ev.get("ticker") or ""),
+                            ev=ev,
+                            reasons=list(reasons or [regime]),
+                            note="; ".join(reasons or [regime])[:160],
+                        )
+                    except Exception:
+                        pass
                     # Phase 1 shadow near-miss: log only (does not eat desk open-risk).
                     try:
                         import desk_more
@@ -1562,10 +1574,18 @@ def main():
             if not IS_SHADOW:
                 try:
                     import desk_roi_plan
+                    import desk_living
                     desk_roi_plan.record_fit(
                         DESK_ROOT, bot="btc15m", outcome="buy",
                         ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
                         edge=ev.get("edge"),
+                    )
+                    desk_living.record_eval_features(
+                        DESK_ROOT, bot="btc15m", action="buy",
+                        series=str(ev.get("series") or "KXBTC15M"),
+                        ticker=str(ev.get("ticker") or ""),
+                        ev=ev,
+                        note="btc paper buy",
                     )
                 except Exception:
                     pass
@@ -1595,10 +1615,19 @@ def main():
             if not IS_SHADOW:
                 try:
                     import desk_roi_plan
+                    import desk_living
                     desk_roi_plan.record_fit(
                         DESK_ROOT, bot="btc15m", outcome="block",
                         ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
                         edge=ev.get("edge"), note=str(last_sentence)[:160],
+                    )
+                    desk_living.record_eval_features(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        series=str(ev.get("series") or "KXBTC15M"),
+                        ticker=str(ev.get("ticker") or ""),
+                        ev=ev,
+                        reasons=list(ev.get("reasons") or []) + [str(last_sentence)[:80]],
+                        note=str(last_sentence)[:160],
                     )
                 except Exception:
                     pass
