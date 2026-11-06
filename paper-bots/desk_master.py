@@ -298,6 +298,7 @@ def master_summary(
     retirement = None
     hillclimb = None
     profit_lock = None
+    living = None
     try:
         import desk_roi_plan
         bleed = desk_roi_plan.firm_bleed_ratio(bots)
@@ -368,7 +369,7 @@ def master_summary(
         living = None
         try:
             import desk_living
-            living = desk_living.living_upgrade_board(root)
+            living = desk_living.living_upgrade_board(root, bots=bots)
         except Exception:
             living = None
         plan = {
@@ -530,6 +531,42 @@ def master_summary(
         except Exception:
             plan["btc_calibration"] = None
         try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_sc = desk_roi_plan.latest_sports_calibration(root)
+            if root and bots and (
+                not isinstance(latest_sc, dict)
+                or str(latest_sc.get("label") or "") != today
+            ):
+                plan["sports_calibration"] = desk_roi_plan.capture_sports_calibration(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["sports_calibration"] = (
+                    latest_sc or desk_roi_plan.sports_calibration_report(bots)
+                )
+        except Exception:
+            plan["sports_calibration"] = None
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_cc = desk_roi_plan.latest_commodity_calibration(root)
+            if root and bots and (
+                not isinstance(latest_cc, dict)
+                or str(latest_cc.get("label") or "") != today
+            ):
+                plan["commodity_calibration"] = desk_roi_plan.capture_commodity_calibration(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["commodity_calibration"] = (
+                    latest_cc or desk_roi_plan.commodity_calibration_report(bots)
+                )
+        except Exception:
+            plan["commodity_calibration"] = None
+        try:
             status_fq = desk_roi_plan.firm_queue_status(root)
             offers_n = int((status_fq or {}).get("offers_n") or 0)
             latest_fq = (status_fq or {}).get("latest")
@@ -549,6 +586,134 @@ def master_summary(
             plan["near_miss_promote"] = None
     except Exception:
         plan = None
+    priority = [
+        "revert last lever if hillclimb kill trips",
+        "profit-lock 0.5× after weekly target",
+        "daily R settle-only after tower budget",
+        "memecoin retirement clock before any volume talk",
+        "Master graduation = 2 Chicago weeks all M1–M7",
+        "sports hard-stop shadow → promote after n≥30",
+        "feed idle BTC/commodity risk when gates clear",
+        "insight swarm ≥3:1 before betting expand",
+    ]
+    living_ai = (living or {}).get("living_ai") if isinstance(living, dict) else None
+    completions = (living or {}).get("completions") if isinstance(living, dict) else None
+    if isinstance(living_ai, dict):
+        tickets = living_ai.get("raise_phi_tickets") or []
+        if tickets:
+            priority.insert(
+                0,
+                "staff raise_Φ tickets: " + ",".join(str(t) for t in tickets[:6]),
+            )
+        else:
+            priority.append("living AI calib observe (no raise_Φ tickets)")
+    if isinstance(completions, dict):
+        priority.append(
+            f"eligible completions today {completions.get('eligible_completions_today') or 0}"
+        )
+    feature_quiet = (living or {}).get("feature_quiet") if isinstance(living, dict) else None
+    if isinstance(feature_quiet, dict) and feature_quiet.get("quiet") and feature_quiet.get("alert"):
+        priority.insert(0, str(feature_quiet.get("alert"))[:120])
+    hillclimb_lever = (living or {}).get("hillclimb_lever") if isinstance(living, dict) else None
+    if isinstance(hillclimb_lever, dict):
+        active = hillclimb_lever.get("active") if isinstance(hillclimb_lever.get("active"), dict) else None
+        if active:
+            priority.append(f"hillclimb lever active: {active.get('name') or active.get('lever')}")
+        else:
+            priority.append("hillclimb: no staff lever this Chicago week (observe)")
+    dual_control = (living or {}).get("dual_control") if isinstance(living, dict) else None
+    if isinstance(dual_control, dict):
+        priority.append(
+            f"dual-control paper {dual_control.get('signed_n') or 0}/"
+            f"{dual_control.get('items_n') or 0} signed; "
+            f"live_orders={bool(dual_control.get('live_orders_enabled'))}"
+        )
+    ruin_drill = (living or {}).get("ruin_drill") if isinstance(living, dict) else None
+    if isinstance(ruin_drill, dict):
+        if ruin_drill.get("active"):
+            priority.insert(0, f"ruin drill ACTIVE level={ruin_drill.get('level')}")
+        elif not ruin_drill.get("practiced_this_month"):
+            priority.append("ruin drill: practice soft/hard this Chicago month")
+    green_day = (living or {}).get("green_day") if isinstance(living, dict) else None
+    if isinstance(green_day, dict):
+        sg = green_day.get("sports_green_boost") or {}
+        priority.append(
+            f"fee-clear green {green_day.get('green_n') or 0}/"
+            f"{len(green_day.get('towers') or [])}; "
+            f"sports_green_boost={sg.get('green_boost') or 0}"
+        )
+    firm_queue = (living or {}).get("firm_queue") if isinstance(living, dict) else None
+    if isinstance(firm_queue, dict) and firm_queue.get("offers_n") is not None:
+        priority.append(str(firm_queue.get("label") or "firm queue")[:120])
+    empty_card = (living or {}).get("empty_card") if isinstance(living, dict) else None
+    if isinstance(empty_card, dict) and empty_card.get("pass") is False:
+        priority.insert(0, str(empty_card.get("label") or "empty CARD slow")[:120])
+    near_miss = (living or {}).get("near_miss") if isinstance(living, dict) else None
+    if isinstance(near_miss, dict) and near_miss.get("promote_ready"):
+        priority.append("near-miss promote_ready — staff arm z|p only")
+    timer_hb = (living or {}).get("timer_heartbeat") if isinstance(living, dict) else None
+    if isinstance(timer_hb, dict) and not timer_hb.get("alive"):
+        priority.insert(0, str(timer_hb.get("label") or "timer DEAD")[:120])
+    gate_a = (living or {}).get("helper_gate_a") if isinstance(living, dict) else None
+    if isinstance(gate_a, dict) and int(gate_a.get("ready_n") or 0) > 0:
+        priority.append(str(gate_a.get("label") or "helper Gate A")[:120])
+    skip_regret = (living or {}).get("skip_regret") if isinstance(living, dict) else None
+    if isinstance(skip_regret, dict) and skip_regret.get("green_twin"):
+        priority.append("skip-regret green_twin — staff soft gate review only")
+    hard_stop = (living or {}).get("hard_stop") if isinstance(living, dict) else None
+    if isinstance(hard_stop, dict) and hard_stop.get("promote_ready"):
+        priority.append("sports hard-stop promote_ready — staff arm only")
+    bleed = (living or {}).get("bleed") if isinstance(living, dict) else None
+    if isinstance(bleed, dict) and bleed.get("pass") is False:
+        priority.insert(0, str(bleed.get("label") or "bleed hot")[:120])
+    clv = (living or {}).get("clv") if isinstance(living, dict) else None
+    if isinstance(clv, dict) and clv.get("pass") is False:
+        priority.append(str(clv.get("label") or "CLV gaps")[:120])
+    tip = (living or {}).get("tip_radar") if isinstance(living, dict) else None
+    if isinstance(tip, dict) and int(tip.get("t5") or 0) > 0:
+        priority.append(str(tip.get("label") or "tip T-5")[:120])
+    calib = (living or {}).get("calib_nag") if isinstance(living, dict) else None
+    if isinstance(calib, dict) and int(calib.get("tickets_n") or 0) > 0:
+        priority.insert(0, str(calib.get("label") or "raise_phi tickets")[:120])
+    injury = (living or {}).get("injury_wire") if isinstance(living, dict) else None
+    if isinstance(injury, dict) and (
+        int(injury.get("n") or 0) > 0 or int(injury.get("inbox_n") or 0) > 0
+    ):
+        priority.append(str(injury.get("label") or "injury wire")[:120])
+    eia = (living or {}).get("eia_scout") if isinstance(living, dict) else None
+    if isinstance(eia, dict) and eia.get("next_eta_hours") is not None:
+        try:
+            if float(eia.get("next_eta_hours")) <= 24:
+                priority.append(str(eia.get("label") or "EIA soon")[:120])
+        except (TypeError, ValueError):
+            pass
+    distance = (living or {}).get("distance_clerk") if isinstance(living, dict) else None
+    if isinstance(distance, dict) and distance.get("empty_card_pass") is False:
+        priority.insert(0, str(distance.get("label") or "distance empty slow")[:120])
+    quant = (living or {}).get("quant_clerk") if isinstance(living, dict) else None
+    if isinstance(quant, dict) and quant.get("fit_pass") is False:
+        priority.append(str(quant.get("label") or "quant fit weak")[:120])
+    skip_hist = (living or {}).get("skip_historian") if isinstance(living, dict) else None
+    if isinstance(skip_hist, dict) and int(skip_hist.get("n_events") or 0) > 0:
+        priority.append(str(skip_hist.get("label") or "skip historian")[:120])
+    bee = (living or {}).get("empty_card_bee") if isinstance(living, dict) else None
+    if isinstance(bee, dict) and int(bee.get("breaches") or 0) > 0:
+        priority.insert(0, str(bee.get("label") or "empty CARD breaches")[:120])
+    book = (living or {}).get("bookkeeper") if isinstance(living, dict) else None
+    if isinstance(book, dict) and book.get("fee_ledger_complete") is False:
+        priority.append(str(book.get("label") or "fee ledger gaps")[:120])
+    reporter = (living or {}).get("reporter") if isinstance(living, dict) else None
+    if isinstance(reporter, dict) and reporter.get("present"):
+        priority.append(str(reporter.get("label") or "scorecard present")[:120])
+    nm_clerk = (living or {}).get("near_miss_clerk") if isinstance(living, dict) else None
+    if isinstance(nm_clerk, dict) and nm_clerk.get("promote_ready"):
+        priority.append("near-miss clerk promote_ready — staff z|p only")
+    hs_clerk = (living or {}).get("hard_stop_clerk") if isinstance(living, dict) else None
+    if isinstance(hs_clerk, dict) and hs_clerk.get("promote_ready"):
+        priority.append("hard-stop clerk promote_ready — staff arm only")
+    bleed_clerk = (living or {}).get("bleed_clerk") if isinstance(living, dict) else None
+    if isinstance(bleed_clerk, dict) and bleed_clerk.get("bleed_pass") is False:
+        priority.insert(0, str(bleed_clerk.get("label") or "bleed clerk hot")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -567,15 +732,139 @@ def master_summary(
         "towers_m1_pass": m1_ready,
         "towers": rows,
         "stopbleed": stopbleed,
-        "priority": [
-            "revert last lever if hillclimb kill trips",
-            "profit-lock 0.5× after weekly target",
-            "daily R settle-only after tower budget",
-            "memecoin retirement clock before any volume talk",
-            "Master graduation = 2 Chicago weeks all M1–M7",
-            "sports hard-stop shadow → promote after n≥30",
-            "feed idle BTC/commodity risk when gates clear",
-        ],
+        "priority": priority,
+        "swarm_lights": (
+            (living or {}).get("insight_swarm")
+            if isinstance(living, dict)
+            else None
+        ),
+        "living_ai": living_ai,
+        "completions": completions,
+        "feature_quiet": feature_quiet,
+        "hillclimb_lever": hillclimb_lever,
+        "dual_control": dual_control,
+        "ruin_drill": ruin_drill,
+        "skip_taxonomy": (
+            (living or {}).get("skip_taxonomy")
+            if isinstance(living, dict)
+            else None
+        ),
+        "green_day": (
+            (living or {}).get("green_day")
+            if isinstance(living, dict)
+            else None
+        ),
+        "firm_queue": (
+            (living or {}).get("firm_queue")
+            if isinstance(living, dict)
+            else None
+        ),
+        "empty_card": (
+            (living or {}).get("empty_card")
+            if isinstance(living, dict)
+            else None
+        ),
+        "near_miss": (
+            (living or {}).get("near_miss")
+            if isinstance(living, dict)
+            else None
+        ),
+        "timer_heartbeat": (
+            (living or {}).get("timer_heartbeat")
+            if isinstance(living, dict)
+            else None
+        ),
+        "helper_gate_a": (
+            (living or {}).get("helper_gate_a")
+            if isinstance(living, dict)
+            else None
+        ),
+        "skip_regret": (
+            (living or {}).get("skip_regret")
+            if isinstance(living, dict)
+            else None
+        ),
+        "hard_stop": (
+            (living or {}).get("hard_stop")
+            if isinstance(living, dict)
+            else None
+        ),
+        "bleed": (
+            (living or {}).get("bleed")
+            if isinstance(living, dict)
+            else None
+        ),
+        "clv": (
+            (living or {}).get("clv")
+            if isinstance(living, dict)
+            else None
+        ),
+        "tip_radar": (
+            (living or {}).get("tip_radar")
+            if isinstance(living, dict)
+            else None
+        ),
+        "calib_nag": (
+            (living or {}).get("calib_nag")
+            if isinstance(living, dict)
+            else None
+        ),
+        "injury_wire": (
+            (living or {}).get("injury_wire")
+            if isinstance(living, dict)
+            else None
+        ),
+        "eia_scout": (
+            (living or {}).get("eia_scout")
+            if isinstance(living, dict)
+            else None
+        ),
+        "skip_historian": (
+            (living or {}).get("skip_historian")
+            if isinstance(living, dict)
+            else None
+        ),
+        "distance_clerk": (
+            (living or {}).get("distance_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "quant_clerk": (
+            (living or {}).get("quant_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "bookkeeper": (
+            (living or {}).get("bookkeeper")
+            if isinstance(living, dict)
+            else None
+        ),
+        "reporter": (
+            (living or {}).get("reporter")
+            if isinstance(living, dict)
+            else None
+        ),
+        "empty_card_bee": (
+            (living or {}).get("empty_card_bee")
+            if isinstance(living, dict)
+            else None
+        ),
+        "near_miss_clerk": (
+            (living or {}).get("near_miss_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "hard_stop_clerk": (
+            (living or {}).get("hard_stop_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "bleed_clerk": (
+            (living or {}).get("bleed_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "live_orders_enabled": False,
         "note": (
             "Trading Masters — dual scoreboard for volume vs taxed EV. "
             "No profit guarantee. Fee floors unchanged."

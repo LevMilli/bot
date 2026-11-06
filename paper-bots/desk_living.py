@@ -19,6 +19,36 @@ COMPLETIONS_NAME = "desk_completions.json"
 MAX_FEATURE_ROWS_READ = 5000
 MAX_COMPLETION_ROWS = 2000
 FEE_CLEAR = frozenset({"sports-gap", "btc15m", "commodity-15m"})
+BETTING_TOWERS = (
+    "sports-gap",
+    "btc15m",
+    "commodity-15m",
+    "memecoin",
+    "kalshi-sp",
+    "kalshi-sized",
+)
+INSIGHT_HELPER_DIGESTS = (
+    "tip_radar_digest.json",
+    "skip_historian_digest.json",
+    "timer_heartbeat_digest.json",
+    "empty_card_bee_digest.json",
+    "clv_closer_digest.json",
+    "injury_wire_digest.json",
+    "eia_scout_digest.json",
+    "calib_nag_digest.json",
+    "hard_stop_clerk_digest.json",
+    "near_miss_clerk_digest.json",
+    "bleed_clerk_digest.json",
+    "distance_clerk_digest.json",
+    "bookkeeper_clerk_digest.json",
+    "reporter_clerk_digest.json",
+    "quant_clerk_digest.json",
+    "skip_twin_clerk_digest.json",
+    "sunday_living_packet.json",
+    "clerk_pulse_digest.json",
+    "calendar_digest.json",
+)
+INSIGHT_BETTING_MIN_RATIO = 3.0
 
 
 def _root(root: str | None = None) -> str:
@@ -114,11 +144,94 @@ def record_decision_features(
     return {"recorded": True, "row": row}
 
 
+def record_skip_twin_features(
+    root: str | None = None,
+    *,
+    bot: str,
+    ticker: str,
+    would_pnl,
+    soft: str | list | None = None,
+    note: str = "",
+    extra: dict | None = None,
+) -> dict:
+    """Join a labeled near-miss / skip-twin outcome into the feature store.
+
+    Observe-only learn row — does not arm soft gates or soften floors.
+    """
+    pnl = _f(would_pnl)
+    soft_key = (
+        ",".join(str(x) for x in soft)
+        if isinstance(soft, (list, tuple))
+        else str(soft or "")
+    )[:40]
+    payload = {
+        "twin": True,
+        "would_pnl": pnl,
+        "soft": soft_key,
+        "ticker": str(ticker or "")[:80],
+    }
+    if isinstance(extra, dict):
+        payload.update({str(k)[:40]: v for k, v in list(extra.items())[:8]})
+    return record_decision_features(
+        root,
+        bot=bot or "unknown",
+        action="skip_twin",
+        fill_id=str(ticker or "")[:80],
+        skip_codes=["SKIP_TWIN", soft_key] if soft_key else ["SKIP_TWIN"],
+        note=str(note or f"skip twin would_pnl={pnl}")[:160],
+        extra=payload,
+    )
+
+
+def record_eval_features(
+    root: str | None = None,
+    *,
+    bot: str,
+    action: str,
+    ev: dict | None = None,
+    ticker: str = "",
+    series: str = "",
+    reasons: list | None = None,
+    note: str = "",
+) -> dict:
+    """Convenience: map an evaluate/candidate dict into a feature-store row."""
+    ev = ev if isinstance(ev, dict) else {}
+    codes = []
+    for r in reasons or ev.get("reasons") or []:
+        codes.append(str(r)[:40])
+    return record_decision_features(
+        root,
+        bot=bot,
+        action=action,
+        series=series or str(ev.get("series") or "")[:40],
+        side=str(ev.get("side") or "")[:20],
+        ask=ev.get("ask"),
+        bid=ev.get("bid"),
+        fee=ev.get("fee"),
+        model_p=ev.get("p") if ev.get("p") is not None else ev.get("model_p") or ev.get("confidence"),
+        z=ev.get("z"),
+        edge=ev.get("edge") if ev.get("edge") is not None else ev.get("gap"),
+        depth=ev.get("depth"),
+        skip_codes=codes,
+        fill_id=str(ev.get("fill_id") or ticker or ev.get("ticker") or "")[:80],
+        note=note or "; ".join(codes)[:160],
+        extra={
+            "ticker": str(ticker or ev.get("ticker") or "")[:80],
+            "lane": str(ev.get("lane") or "")[:20],
+            "minutes_left": _f(ev.get("min_left") if ev.get("min_left") is not None else ev.get("minutes_left")),
+        },
+    )
+
+
+FEATURE_QUIET_HOURS = 6.0
+
+
 def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_ROWS_READ) -> dict:
     path = feature_store_path(root)
     n = 0
     buys = 0
     skips = 0
+    last_at = None
     if os.path.isfile(path):
         try:
             with open(path, encoding="utf-8") as handle:
@@ -140,6 +253,9 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
                         buys += 1
                     else:
                         skips += 1
+                    stamp = row.get("at")
+                    if stamp:
+                        last_at = str(stamp)
         except OSError:
             pass
     return {
@@ -147,9 +263,56 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
         "n": n,
         "buys": buys,
         "skips": skips,
+        "last_at": last_at,
         "path": os.path.basename(path),
         "fee_floors_locked": True,
         "note": "Decision feature store for living AI learning. Floors locked.",
+    }
+
+
+def feature_store_quiet_alert(
+    root: str | None = None,
+    *,
+    now: datetime | None = None,
+    quiet_hours: float = FEATURE_QUIET_HOURS,
+) -> dict:
+    """Weekday alert when feature store has been quiet too long (learn data starved)."""
+    now = now or datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    now = now.astimezone(CT)
+    cov = feature_store_coverage(root)
+    last_at = cov.get("last_at")
+    age_h = None
+    if last_at:
+        try:
+            stamp = datetime.fromisoformat(str(last_at).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=CT)
+            age_h = round((now - stamp.astimezone(CT)).total_seconds() / 3600.0, 2)
+        except ValueError:
+            age_h = None
+    weekday = now.weekday() < 5  # Mon–Fri Chicago
+    quiet = bool(
+        weekday
+        and (age_h is None or age_h + 1e-12 >= float(quiet_hours))
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "weekday": weekday,
+        "quiet": quiet,
+        "age_hours": age_h,
+        "quiet_hours": float(quiet_hours),
+        "n": cov.get("n"),
+        "last_at": last_at,
+        "alert": (
+            f"WEEKDAY ALERT: feature store quiet ≥{quiet_hours:.0f}h — "
+            "learn loop starved (floors still locked)."
+            if quiet
+            else ""
+        ),
+        "note": "Observe-only coverage alert. Never softens venue floors.",
     }
 
 
@@ -226,18 +389,921 @@ def completions_summary(root: str | None = None, *, day: str | None = None) -> d
     }
 
 
-def living_upgrade_board(root: str | None = None) -> dict:
+def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
+    """Masters AI health: adapt snapshot + calib raise_phi tickets across fee-clear."""
+    adapt = {}
+    try:
+        import desk_adapt
+        adapt = desk_adapt.adapt_summary(root) or {}
+    except Exception:
+        adapt = {}
+    boards = {}
+    raise_phi = []
+    try:
+        import desk_roi_plan
+        for name, latest_fn, report_fn in (
+            ("btc", desk_roi_plan.latest_btc_calibration, desk_roi_plan.btc_calibration_report),
+            ("sports", desk_roi_plan.latest_sports_calibration, desk_roi_plan.sports_calibration_report),
+            ("commodity", desk_roi_plan.latest_commodity_calibration, desk_roi_plan.commodity_calibration_report),
+        ):
+            card = None
+            try:
+                card = latest_fn(root)
+            except Exception:
+                card = None
+            if not isinstance(card, dict):
+                try:
+                    card = report_fn(bots)
+                except Exception:
+                    card = {}
+            boards[name] = {
+                "action": (card or {}).get("action"),
+                "miscalibrated": bool((card or {}).get("miscalibrated")),
+                "hi_n": (card or {}).get("hi_n"),
+                "hi_hit_rate": (card or {}).get("hi_hit_rate"),
+            }
+            if str((card or {}).get("action") or "") == "raise_phi":
+                raise_phi.append(name)
+    except Exception:
+        boards = {}
+        raise_phi = []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "grok_buys": False,
+        "adapt_version": adapt.get("version"),
+        "adapt_bots_n": len(adapt.get("by_bot") or {}),
+        "adapt_recent_vol_n": len(adapt.get("recent_vol") or []),
+        "calib_boards": boards,
+        "raise_phi_tickets": raise_phi,
+        "raise_phi_n": len(raise_phi),
+        "auto_write_phi": False,
+        "note": (
+            "Living AI health — Wilson adapt + calib raise_Φ tickets. "
+            "Staff dual-control only; never silent Φ write; never softer floors."
+        ),
+    }
+
+
+def near_miss_clerk_chip(root: str | None = None) -> dict:
+    """Near-miss clerk digest chip (z|p soft allowlist observe)."""
+    digest: dict = {}
+    try:
+        from helpers import near_miss_clerk
+        path = near_miss_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = near_miss_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "n": digest.get("n"),
+        "labeled_n": digest.get("labeled_n"),
+        "shadow_ev": digest.get("shadow_ev"),
+        "promote_ready": bool(digest.get("promote_ready")),
+        "decision": digest.get("decision") or "",
+        "label": (
+            f"near-miss clerk n={digest.get('n')} labeled={digest.get('labeled_n')} "
+            f"ev={digest.get('shadow_ev')} ready={bool(digest.get('promote_ready'))}"
+        ),
+        "note": digest.get("note") or (
+            "Soft allowlist z|p only — never edge, never softer fee floors."
+        ),
+    }
+
+
+def hard_stop_clerk_chip(root: str | None = None) -> dict:
+    """Sports hard-stop clerk digest chip (shadow until staff)."""
+    digest: dict = {}
+    try:
+        from helpers import hard_stop_clerk
+        path = hard_stop_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = hard_stop_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "n": digest.get("n"),
+        "n_with_pnl": digest.get("n_with_pnl"),
+        "shadow_expectancy": digest.get("shadow_expectancy"),
+        "promote_ready": bool(digest.get("promote_ready")),
+        "live": bool(digest.get("live")),
+        "staff_approved": bool(digest.get("staff_approved")),
+        "decision": digest.get("decision") or "",
+        "label": (
+            f"hard-stop clerk n={digest.get('n_with_pnl')} "
+            f"ev={digest.get('shadow_expectancy')} "
+            f"ready={bool(digest.get('promote_ready'))} live={bool(digest.get('live'))}"
+        ),
+        "note": digest.get("note") or (
+            "Live sells stay staff-gated; code default SPORTS_HARD_STOP_LIVE=False."
+        ),
+    }
+
+
+def bleed_clerk_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """Bleed clerk digest chip (ratio + misplaced capital)."""
+    digest: dict = {}
+    try:
+        from helpers import bleed_clerk
+        path = bleed_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("bleed_ratio") is None:
+            digest = bleed_clerk.write_digest_from_desk(root, bots=bots)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bleed_ratio": digest.get("bleed_ratio"),
+        "bleed_pass": digest.get("bleed_pass"),
+        "misplaced_usd": digest.get("misplaced_usd"),
+        "share_of_cap": digest.get("share_of_cap"),
+        "label": (
+            f"bleed clerk ratio={digest.get('bleed_ratio')} "
+            f"pass={digest.get('bleed_pass')} "
+            f"misplaced={digest.get('misplaced_usd')}"
+        ),
+        "note": digest.get("note") or (
+            "Recycle open risk on red towers toward fee-clear — floors locked."
+        ),
+    }
+
+
+def bookkeeper_chip(root: str | None = None) -> dict:
+    """Completions + fee-ledger completeness chip."""
+    digest: dict = {}
+    try:
+        from helpers import bookkeeper_clerk
+        path = bookkeeper_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("eligible_completions_today") is None:
+            digest = bookkeeper_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "eligible_completions_today": digest.get("eligible_completions_today"),
+        "eligible_pnl_today": digest.get("eligible_pnl_today"),
+        "fee_ledger_n": digest.get("fee_ledger_n"),
+        "fee_ledger_complete": digest.get("fee_ledger_complete"),
+        "label": (
+            f"bookkeeper fills={digest.get('eligible_completions_today')} "
+            f"fee_ledger={digest.get('fee_ledger_n')} "
+            f"complete={digest.get('fee_ledger_complete')}"
+        ),
+        "note": digest.get("note") or (
+            "Taxed Completions + fee ledger — never invent fills or soften floors."
+        ),
+    }
+
+
+def reporter_chip(root: str | None = None) -> dict:
+    """Weekly scorecard / Sunday packet mirror chip."""
+    digest: dict = {}
+    try:
+        from helpers import reporter_clerk
+        path = reporter_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("present") is None:
+            digest = reporter_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_publish": False,
+        "present": bool(digest.get("present")),
+        "label_week": digest.get("label"),
+        "m1": digest.get("m1"),
+        "keys": digest.get("keys") if isinstance(digest.get("keys"), list) else [],
+        "label": (
+            f"reporter scorecard={'yes' if digest.get('present') else 'no'} "
+            f"week={digest.get('label')} m1={digest.get('m1')}"
+        ),
+        "note": digest.get("note") or (
+            "Sunday packet mirror — staff publishes; never paints PnL."
+        ),
+    }
+
+
+def empty_card_bee_chip(root: str | None = None) -> dict:
+    """Empty CARD 3s latency bee digest chip."""
+    digest: dict = {}
+    try:
+        from helpers import empty_card_bee
+        path = empty_card_bee.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = empty_card_bee.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bar_sec": digest.get("bar_sec") or 3.0,
+        "n": digest.get("n"),
+        "breaches": digest.get("breaches"),
+        "label": (
+            f"empty bee n={digest.get('n')} breaches={digest.get('breaches')} "
+            f"bar={digest.get('bar_sec') or 3.0}s"
+        ),
+        "note": digest.get("note") or "Empty CARD bee — speed without softer floors.",
+    }
+
+
+def skip_historian_chip(root: str | None = None) -> dict:
+    """Top skip-code frequencies chip (BUDGET≠EDGE)."""
+    digest: dict = {}
+    try:
+        from helpers import skip_historian
+        path = skip_historian.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n_events") is None:
+            digest = skip_historian.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    top = digest.get("top") if isinstance(digest.get("top"), list) else []
+    head = top[0] if top and isinstance(top[0], dict) else {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n_events": digest.get("n_events"),
+        "top": top[:8],
+        "label": (
+            f"skip historian n={digest.get('n_events')} "
+            f"top={head.get('code')}×{head.get('n')}"
+            if head.get("code") is not None
+            else f"skip historian n={digest.get('n_events')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only skip historian. BUDGET≠EDGE — never soften floors."
+        ),
+    }
+
+
+def distance_clerk_chip(root: str | None = None) -> dict:
+    """Empty CARD latency + firm queue distance chip."""
+    digest: dict = {}
+    try:
+        from helpers import distance_clerk
+        path = distance_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("firm_offers_n") is None:
+            digest = distance_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "empty_card_pass": digest.get("empty_card_pass"),
+        "empty_card_last_sec": digest.get("empty_card_last_sec"),
+        "firm_offers_n": digest.get("firm_offers_n"),
+        "firm_deferred_n": digest.get("firm_deferred_n"),
+        "remaining_risk": digest.get("remaining_risk"),
+        "label": (
+            f"distance empty_ok={digest.get('empty_card_pass')} "
+            f"offers={digest.get('firm_offers_n')} "
+            f"def={digest.get('firm_deferred_n')} "
+            f"risk_left={digest.get('remaining_risk')}"
+        ),
+        "note": digest.get("note") or (
+            "Empty CARD + firm queue distance — recycle risk; floors locked."
+        ),
+    }
+
+
+def quant_clerk_chip(root: str | None = None) -> dict:
+    """M3 fit→buy / M4 latency walk-forward chip."""
+    digest: dict = {}
+    try:
+        from helpers import quant_clerk
+        path = quant_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or (
+            digest.get("fit_rate") is None and digest.get("latency_p50") is None
+        ):
+            digest = quant_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_write": False,
+        "fit_rate": digest.get("fit_rate"),
+        "fit_n": digest.get("fit_n"),
+        "fit_pass": digest.get("fit_pass"),
+        "latency_p50": digest.get("latency_p50"),
+        "latency_pass": digest.get("latency_pass"),
+        "towers": digest.get("towers") if isinstance(digest.get("towers"), list) else [],
+        "label": (
+            f"quant fit={digest.get('fit_rate')} "
+            f"lat_p50={digest.get('latency_p50')} "
+            f"fit_ok={digest.get('fit_pass')}"
+        ),
+        "note": digest.get("note") or (
+            "Walk-forward quant clerk — never LLM buys, never softer floors."
+        ),
+    }
+
+
+def injury_wire_chip(root: str | None = None) -> dict:
+    """Injury/news wire + staff inbox chip."""
+    digest: dict = {}
+    inbox_n = 0
+    try:
+        from helpers import injury_wire
+        path = injury_wire.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict):
+            digest = {}
+        if digest.get("n") is None:
+            digest = injury_wire.write_digest_from_desk(root)
+        inbox = injury_wire.load_inbox(root) or {}
+        rows = inbox.get("rows") if isinstance(inbox, dict) else None
+        if isinstance(rows, list):
+            inbox_n = len(rows)
+        elif isinstance(inbox, list):
+            inbox_n = len(inbox)
+    except Exception:
+        digest = {}
+    headlines = digest.get("headlines") if isinstance(digest.get("headlines"), list) else []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n") if digest.get("n") is not None else len(headlines),
+        "inbox_n": inbox_n,
+        "headlines": headlines[:6],
+        "label": (
+            f"injury wire n={digest.get('n') or len(headlines)} inbox={inbox_n}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only injury/news wire. Never buys; never waives sports floor."
+        ),
+    }
+
+
+def eia_scout_chip(root: str | None = None) -> dict:
+    """7-day crude/natgas inventory calendar chip."""
+    digest: dict = {}
+    try:
+        from helpers import eia_scout
+        path = eia_scout.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = eia_scout.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    events = digest.get("events") if isinstance(digest.get("events"), list) else []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n") if digest.get("n") is not None else len(events),
+        "next_eta_hours": digest.get("next_eta_hours"),
+        "scout_days": digest.get("scout_days"),
+        "events": events[:6],
+        "label": (
+            f"EIA scout n={digest.get('n') or len(events)} "
+            f"next={digest.get('next_eta_hours')}h"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only EIA week scout — never softens commodity 0.05."
+        ),
+    }
+
+
+def tip_radar_chip(root: str | None = None) -> dict:
+    """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
+    digest = {}
+    try:
+        from helpers import tip_radar
+        path = tip_radar.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or not digest.get("n"):
+            games = tip_radar.games_from_quote_cache(root)
+            digest = tip_radar.build_digest(games)
+    except Exception:
+        digest = {}
+    games = digest.get("games") if isinstance(digest.get("games"), list) else []
+    t5 = sum(1 for g in games if isinstance(g, dict) and g.get("priority") == "T-5")
+    t15 = sum(1 for g in games if isinstance(g, dict) and g.get("priority") == "T-15")
+    t180 = sum(1 for g in games if isinstance(g, dict) and g.get("priority") == "T-180")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n") if digest.get("n") is not None else len(games),
+        "t5": t5,
+        "t15": t15,
+        "t180": t180,
+        "nearest": games[0] if games else None,
+        "label": f"tip radar n={digest.get('n') or len(games)} T-5={t5} T-15={t15} T-180={t180}",
+        "note": digest.get("note") or "Observe-only tip radar. Never waives sports 0.06.",
+    }
+
+
+def calib_nag_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """raise_phi calibration ticket count chip (staff dual-control only)."""
+    digest = {}
+    try:
+        from helpers import calib_nag
+        path = calib_nag.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("tickets_n") is None:
+            digest = calib_nag.write_digest_from_desk(root, bots=bots)
+    except Exception:
+        digest = {}
+    tickets = digest.get("tickets") if isinstance(digest.get("tickets"), list) else []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_write_phi": False,
+        "tickets_n": digest.get("tickets_n") if digest.get("tickets_n") is not None else len(tickets),
+        "tickets": tickets[:6],
+        "boards": digest.get("boards") if isinstance(digest.get("boards"), list) else [],
+        "label": f"calib raise_phi tickets={digest.get('tickets_n') or len(tickets)}",
+        "note": digest.get("note") or (
+            "raise_phi is a staff ticket — never silent Φ write, never softer floors."
+        ),
+    }
+
+
+def bleed_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """Firm bleed ratio + misplaced capital chip."""
+    bleed = {}
+    misplaced = {}
+    try:
+        import desk_roi_plan
+        bleed = desk_roi_plan.firm_bleed_ratio(bots) or {}
+        misplaced = desk_roi_plan.capital_misplaced(bots) or {}
+    except Exception:
+        bleed, misplaced = {}, {}
+    ratio = bleed.get("ratio")
+    ok = bleed.get("pass")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "ratio": ratio,
+        "red_usd": bleed.get("red_usd"),
+        "green_usd": bleed.get("green_usd"),
+        "target_lt": bleed.get("target_lt") or 0.5,
+        "pass": ok,
+        "misplaced_usd": misplaced.get("misplaced_usd") or misplaced.get("misplaced"),
+        "label": (
+            f"bleed ratio={ratio} "
+            + ("ok" if ok else "hot" if ok is False else "n/a")
+            + f" misplaced={misplaced.get('misplaced_usd') or misplaced.get('misplaced')}"
+        ),
+        "note": bleed.get("note") or "Bleed uses Chicago today PnL; quiet $0 ignored.",
+    }
+
+
+def clv_chip(root: str | None = None) -> dict:
+    """Sports CLV completeness / beat-close evidence chip."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.clv_completeness(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": status.get("n"),
+        "complete": status.get("complete"),
+        "rate": status.get("rate"),
+        "settled_rate": status.get("settled_rate"),
+        "pass": status.get("pass"),
+        "label": (
+            f"CLV complete={status.get('complete')}/{status.get('n')} "
+            f"rate={status.get('rate')} "
+            + ("ok" if status.get("pass") else "gaps" if status.get("pass") is False else "n/a")
+        ),
+        "note": status.get("note") or (
+            "Every sports settle should log entry fair + clv — never softens 0.06."
+        ),
+    }
+
+
+def skip_regret_chip(root: str | None = None) -> dict:
+    """Labeled skip-regret twin chip — never auto-loosens floors."""
+    card = {}
+    try:
+        import desk_roi_plan
+        card = desk_roi_plan.latest_skip_regret_weekly(root) or {}
+        if not card:
+            # Observe-only summary without writing a weekly card.
+            try:
+                import desk_top25
+                summary = desk_top25.skip_regret_summary(root) or {}
+            except Exception:
+                summary = {}
+            card = {
+                "n": summary.get("n"),
+                "labeled_n": summary.get("labeled_n"),
+                "avg_would_pnl": summary.get("avg_would_pnl"),
+                "green_twin": bool(summary.get("green_twin")),
+                "decision": "reject",
+                "auto_promote": False,
+                "loosen_soft_gates": False,
+                "fee_floors_locked": True,
+            }
+    except Exception:
+        card = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": card.get("n"),
+        "labeled_n": card.get("labeled_n"),
+        "avg_would_pnl": card.get("avg_would_pnl"),
+        "green_twin": bool(card.get("green_twin")),
+        "decision": card.get("decision") or "reject",
+        "auto_promote": False,
+        "loosen_soft_gates": False,
+        "label": (
+            f"skip-regret labeled={card.get('labeled_n')} "
+            f"avg={card.get('avg_would_pnl')} "
+            f"{card.get('decision') or 'reject'}"
+        ),
+        "note": card.get("note") or (
+            "Skip-regret twin: staff-only soft gate review; fee floors locked."
+        ),
+    }
+
+
+def hard_stop_chip(root: str | None = None) -> dict:
+    """Sports hard-stop shadow exits readiness chip."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.sports_hard_stop_shadow_summary(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": status.get("n"),
+        "n_with_pnl": status.get("n_with_pnl"),
+        "shadow_expectancy": status.get("shadow_expectancy"),
+        "promote_ready": bool(status.get("promote_ready")),
+        "live": bool(status.get("live")),
+        "auto_promote": False,
+        "decision": status.get("decision") or "reject",
+        "label": (
+            f"hard-stop n={status.get('n_with_pnl')} "
+            f"ev={status.get('shadow_expectancy')} "
+            f"ready={bool(status.get('promote_ready'))} "
+            f"live={bool(status.get('live'))}"
+        ),
+        "note": status.get("note") or (
+            "Shadow-only until staff promote; code default live stays False."
+        ),
+    }
+
+
+def timer_heartbeat_chip(root: str | None = None) -> dict:
+    """Alive/dead paper timer chip for desk snapshot."""
+    status = {}
+    try:
+        import pimp_desk
+        status = pimp_desk.timer_health(root) or {}
+    except Exception:
+        status = {}
+    alive = bool(status.get("alive"))
+    age = status.get("age")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "alive": alive,
+        "age_sec": age,
+        "weekday_alert": bool(status.get("weekday_alert")),
+        "alert": status.get("alert") or "",
+        "label": (
+            f"timer {'alive' if alive else 'DEAD'}"
+            + (f" age={age}s" if age is not None else "")
+        ),
+        "note": status.get("detail") or "Discord paper_timer heartbeat.",
+    }
+
+
+def helper_gate_a_board(root: str | None = None) -> dict:
+    """Attributed helper fills Gate A readiness (observe-only until staff)."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.helper_promote_status(root) or {}
+    except Exception:
+        status = {}
+    helpers = status.get("helpers") if isinstance(status.get("helpers"), list) else []
+    ready_n = sum(1 for h in helpers if isinstance(h, dict) and h.get("promote_ready"))
+    armed_n = sum(1 for h in helpers if isinstance(h, dict) and h.get("armed"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "places_orders": False,
+        "helpers_n": len(helpers),
+        "ready_n": ready_n,
+        "armed_n": armed_n,
+        "helpers": helpers[:12],
+        "label": f"helper Gate A ready={ready_n}/{len(helpers)} armed={armed_n}",
+        "note": status.get("note") or (
+            "Helpers never place alone until Gate A + staff promote."
+        ),
+    }
+
+
+def empty_card_chip(root: str | None = None) -> dict:
+    """Empty-market CARD latency chip (3s bar) for HUD."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.empty_card_status(root) or {}
+    except Exception:
+        status = {}
+    p50 = status.get("p50_s") or status.get("p50") or status.get("last_sec")
+    ok = status.get("pass")
+    if ok is None and p50 is not None:
+        try:
+            ok = float(p50) <= 3.0
+        except (TypeError, ValueError):
+            ok = None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": status.get("n"),
+        "p50_s": p50,
+        "max_s": status.get("max_s"),
+        "pass": ok,
+        "bar_sec": status.get("bar_sec") or 3.0,
+        "label": (
+            f"empty CARD p50={p50}s "
+            + ("ok" if ok else "slow" if ok is False else "n/a")
+        ),
+        "note": status.get("note") or "Empty CARD <3s bar — speed without softer floors.",
+    }
+
+
+def near_miss_chip(root: str | None = None) -> dict:
+    """Near-miss soft z|p promote readiness chip (observe-only)."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.near_miss_promote_status(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": status.get("n"),
+        "labeled_n": status.get("labeled_n"),
+        "shadow_ev": status.get("shadow_ev"),
+        "promote_ready": bool(status.get("promote_ready")),
+        "soft_live": status.get("soft_live"),
+        "decision": status.get("decision"),
+        "auto_promote": False,
+        "label": (
+            f"near-miss n={status.get('n')} labeled={status.get('labeled_n')} "
+            f"ev={status.get('shadow_ev')} ready={bool(status.get('promote_ready'))}"
+        ),
+        "note": status.get("note") or (
+            "Soft allowlist z|p only — never edge / fee floors."
+        ),
+    }
+
+
+def firm_queue_chip(root: str | None = None) -> dict:
+    """Compact firm-queue HUD: offers / accepted / deferred / remaining risk."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.firm_queue_status(root) or {}
+    except Exception:
+        status = {}
+    offers_n = status.get("offers_n")
+    accepted_n = status.get("accepted_n")
+    deferred_n = status.get("deferred_n")
+    remaining = status.get("remaining_risk")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "offers_n": offers_n,
+        "accepted_n": accepted_n,
+        "deferred_n": deferred_n,
+        "remaining_risk": remaining,
+        "ttl_sec": status.get("ttl_sec"),
+        "label": (
+            f"firm queue offers={offers_n} acc={accepted_n} def={deferred_n} "
+            f"risk_left={remaining}"
+        ),
+        "note": status.get("note") or (
+            "Firm queue ranks fee-clear fits — deferred so best edge spends desk risk first."
+        ),
+    }
+
+
+def green_day_board(root: str | None = None, bots: list | None = None) -> dict:
+    """Fee-clear green-day / selective +1 readiness for HUD (floors locked)."""
+    fee_clear = []
+    green_n = 0
+    red_n = 0
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if bot_id not in FEE_CLEAR:
+            continue
+        today = _f(bot.get("today"))
+        row = {
+            "bot": bot_id,
+            "today": today,
+            "green": today is not None and today >= 0,
+            "selective_eligible": today is not None and today >= 0,
+        }
+        fee_clear.append(row)
+        if today is None:
+            continue
+        if today >= 0:
+            green_n += 1
+        else:
+            red_n += 1
+    boost = {}
+    try:
+        import desk_roi_plan
+        boost = desk_roi_plan.sports_green_boost_status(root, bots=bots) or {}
+    except Exception:
+        boost = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "fee_clear_towers": sorted(FEE_CLEAR),
+        "towers": fee_clear,
+        "green_n": green_n,
+        "red_n": red_n,
+        "all_fee_clear_green": bool(fee_clear) and red_n == 0 and green_n == len(fee_clear),
+        "sports_green_boost": {
+            "ready": bool(boost.get("ready")),
+            "green_boost": int(boost.get("green_boost") or 0),
+            "auto_promote": False,
+        },
+        "note": (
+            "Selective +1 only on fee-clear green days; sports green_boost stays 0 "
+            "until CLV+M1 gate ready. Never softens venue floors."
+        ),
+    }
+
+
+def skip_taxonomy_chip(root: str | None = None) -> dict:
+    """Top stable skip codes for teller rail / city chip (observe-only)."""
+    board = {}
+    try:
+        import desk_more
+        board = desk_more.skip_leaderboard(root) or {}
+    except Exception:
+        board = {}
+    top = list(board.get("stable_top") or board.get("top") or [])[:5]
+    head = top[0] if top and isinstance(top[0], dict) else {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "day": board.get("day"),
+        "top": top,
+        "top_code": head.get("code"),
+        "top_n": head.get("n"),
+        "weekend_share": board.get("weekend_share"),
+        "label": (
+            f"top skip {head.get('code')} ×{head.get('n')}"
+            if head.get("code")
+            else "skip taxonomy quiet"
+        ),
+        "note": board.get("note") or "Observe-only skip taxonomy chip.",
+    }
+
+
+def insight_swarm_ratio(root: str | None = None) -> dict:
+    """Insight:betting headcount audit — living hire order requires ≥3:1 until M1≥0."""
+    helpers = {}
+    for name in INSIGHT_HELPER_DIGESTS:
+        path = os.path.join(_root(root), "helpers", name)
+        key = name.replace("_digest.json", "").replace(".json", "")
+        helpers[key] = os.path.isfile(path)
+    insight_n = sum(1 for v in helpers.values() if v)
+    betting_n = len(BETTING_TOWERS)
+    ratio = round(insight_n / betting_n, 4) if betting_n else None
+    ok = bool(ratio is not None and ratio + 1e-12 >= INSIGHT_BETTING_MIN_RATIO)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "insight_n": insight_n,
+        "betting_n": betting_n,
+        "ratio": ratio,
+        "min_ratio": INSIGHT_BETTING_MIN_RATIO,
+        "pass": ok,
+        "insight_helpers": helpers,
+        "betting_towers": list(BETTING_TOWERS),
+        "note": (
+            "Insight swarm ≥3:1 vs betting towers until firm M1 ≥ 0. "
+            "Hire observe-only clerks first — never meme/INX spam."
+            if not ok
+            else "Insight:betting headcount meets ≥3:1 living hire order. Floors locked."
+        ),
+    }
+
+
+def living_upgrade_board(root: str | None = None, bots: list | None = None) -> dict:
     """Masters card: data + completions health for the living upgrade."""
     feat = feature_store_coverage(root)
+    quiet = feature_store_quiet_alert(root)
     comp = completions_summary(root)
+    ai = living_ai_health(root, bots=bots)
+    swarm = insight_swarm_ratio(root)
+    helpers = swarm.get("insight_helpers") or {}
+    hillclimb = None
+    dual = None
+    ruin = None
+    try:
+        import desk_roi_plan
+        hillclimb = desk_roi_plan.hillclimb_lever_status(root)
+        dual = desk_roi_plan.dual_control_status(root)
+        ruin = desk_roi_plan.ruin_drill_status(root)
+    except Exception:
+        hillclimb = None
+        dual = None
+        ruin = None
     return {
         "paper_only": True,
         "feature_store": feat,
+        "feature_quiet": quiet,
         "completions": comp,
+        "living_ai": ai,
+        "insight_swarm": swarm,
+        "hillclimb_lever": hillclimb,
+        "dual_control": dual,
+        "ruin_drill": ruin,
+        "skip_taxonomy": skip_taxonomy_chip(root),
+        "green_day": green_day_board(root, bots=bots),
+        "firm_queue": firm_queue_chip(root),
+        "empty_card": empty_card_chip(root),
+        "near_miss": near_miss_chip(root),
+        "timer_heartbeat": timer_heartbeat_chip(root),
+        "helper_gate_a": helper_gate_a_board(root),
+        "skip_regret": skip_regret_chip(root),
+        "hard_stop": hard_stop_chip(root),
+        "bleed": bleed_chip(root, bots=bots),
+        "clv": clv_chip(root),
+        "tip_radar": tip_radar_chip(root),
+        "calib_nag": calib_nag_chip(root, bots=bots),
+        "injury_wire": injury_wire_chip(root),
+        "eia_scout": eia_scout_chip(root),
+        "skip_historian": skip_historian_chip(root),
+        "distance_clerk": distance_clerk_chip(root),
+        "quant_clerk": quant_clerk_chip(root),
+        "bookkeeper": bookkeeper_chip(root),
+        "reporter": reporter_chip(root),
+        "empty_card_bee": empty_card_bee_chip(root),
+        "near_miss_clerk": near_miss_clerk_chip(root),
+        "hard_stop_clerk": hard_stop_clerk_chip(root),
+        "bleed_clerk": bleed_clerk_chip(root, bots=bots),
+        "insight_helper_digests": helpers,
+        "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
         "fee_floors_locked": True,
         "insight_first": True,
         "grok_buys": False,
+        "live_orders_enabled": False,
         "note": "Living Trading Upgrade board — more eligible completions + learn data.",
     }
 
