@@ -687,6 +687,15 @@ def master_summary(
                 priority.append(str(eia.get("label") or "EIA soon")[:120])
         except (TypeError, ValueError):
             pass
+    distance = (living or {}).get("distance_clerk") if isinstance(living, dict) else None
+    if isinstance(distance, dict) and distance.get("empty_card_pass") is False:
+        priority.insert(0, str(distance.get("label") or "distance empty slow")[:120])
+    quant = (living or {}).get("quant_clerk") if isinstance(living, dict) else None
+    if isinstance(quant, dict) and quant.get("fit_pass") is False:
+        priority.append(str(quant.get("label") or "quant fit weak")[:120])
+    skip_hist = (living or {}).get("skip_historian") if isinstance(living, dict) else None
+    if isinstance(skip_hist, dict) and int(skip_hist.get("n_events") or 0) > 0:
+        priority.append(str(skip_hist.get("label") or "skip historian")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -789,6 +798,21 @@ def master_summary(
         ),
         "eia_scout": (
             (living or {}).get("eia_scout")
+            if isinstance(living, dict)
+            else None
+        ),
+        "skip_historian": (
+            (living or {}).get("skip_historian")
+            if isinstance(living, dict)
+            else None
+        ),
+        "distance_clerk": (
+            (living or {}).get("distance_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "quant_clerk": (
+            (living or {}).get("quant_clerk")
             if isinstance(living, dict)
             else None
         ),
