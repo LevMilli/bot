@@ -664,6 +664,14 @@ def master_summary(
     feature_quiet = (living or {}).get("feature_quiet") if isinstance(living, dict) else None
     if isinstance(feature_quiet, dict) and feature_quiet.get("quiet") and feature_quiet.get("alert"):
         priority.insert(0, str(feature_quiet.get("alert"))[:120])
+    elif isinstance(feature_quiet, dict):
+        try:
+            age_h = float(feature_quiet.get("age_hours"))
+        except (TypeError, ValueError):
+            age_h = None
+        if age_h is not None and age_h >= 6:
+            # Soft rail — pager/alert already fronts when present (family-deduped).
+            priority.append(f"feature quiet age={age_h}h — learn loop soft warn")
     feature_pager = (living or {}).get("feature_quiet_pager") if isinstance(living, dict) else None
     if isinstance(feature_pager, dict) and feature_pager.get("page"):
         priority.insert(0, str(feature_pager.get("label") or "feature quiet PAGE")[:120])

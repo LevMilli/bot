@@ -91,6 +91,9 @@ def main() -> int:
             flat["quiet_age"] = f"{age_h}h" if age_h is not None else "n/a"
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
+            quiet = desk_living.feature_store_quiet_alert(root)
+            age_h = quiet.get("age_hours") if isinstance(quiet, dict) else None
+            quiet_age = f"{age_h}h" if age_h is not None else "n/a"
             print(chip.get("label") or "ritual observe")
             print(
                 f"floors_ok={chip.get('floors_ok')} expand_ok={chip.get('expand_ok')} "
@@ -101,6 +104,7 @@ def main() -> int:
                 f"floors_ok={chip.get('floors_ok')} expand_ok={chip.get('expand_ok')} "
                 f"doctor_fresh={chip.get('doctor_fresh')}"
             )
+            print(f"quiet_age={quiet_age}")
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
