@@ -479,6 +479,57 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def teller_living_chip(
+    root: str | None = None,
+    bots: list | None = None,
+    *,
+    remember: bool = False,
+) -> dict:
+    """One teller memory_line from swarm + completions (paper observe)."""
+    swarm = insight_swarm_ratio(root)
+    comp = completions_chip(root)
+    floors_ok = True
+    try:
+        import desk_profit
+        floors = desk_profit.venue_floors_locked() or {}
+        floors_ok = bool(floors.get("all_ok"))
+    except Exception:
+        floors_ok = True
+    swarm_bit = (
+        f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+        f"{'ok' if swarm.get('pass') else 'thin'}"
+    )
+    fill_bit = (
+        f"eligible fills today {comp.get('eligible_completions_today')}"
+        if comp.get("eligible_completions_today") is not None
+        else "eligible fills n/a"
+    )
+    line = f"{swarm_bit} · {fill_bit} · floors={'locked' if floors_ok else 'CHECK'}"
+    if remember:
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="facts",
+                text=line[:200],
+                bot_id="desk",
+                source="living_teller_chip",
+            )
+        except Exception:
+            pass
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "swarm_pass": swarm.get("pass"),
+        "eligible_completions_today": comp.get("eligible_completions_today"),
+        "floors_ok": floors_ok,
+        "memory_line": line,
+        "label": line,
+        "note": "Teller living chip — grounded on swarm + Completions; never invents PnL.",
+    }
+
+
 def completions_chip(root: str | None = None) -> dict:
     """Eligible completions today — teller / Masters one-liner."""
     summary = completions_summary(root) or {}
@@ -1674,6 +1725,13 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "dual_control_chip": dual_control_chip(root),
         "ruin_drill_chip": ruin_drill_chip(root),
         "completions_chip": completions_chip(root),
+        "teller_living": teller_living_chip(root, bots=bots),
+        "fee_floors_assert": fee_floors_assert(root),
+        "dual_control_gaps": dual_control_gaps_page(root),
+        "hillclimb_chip": hillclimb_chip(root),
+        "digest_inventory": digest_inventory(root),
+        "ruin_drill_page": ruin_drill_page(root),
+        "betting_expand_gate": betting_expand_gate(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -1687,6 +1745,309 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
     return board
 
 
+def ruin_drill_page(root: str | None = None) -> dict:
+    """Staff markdown when ruin drill not practiced this Chicago month."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.ruin_drill_status(root) or {}
+    except Exception:
+        status = {}
+    practiced = bool(status.get("practiced_this_month"))
+    active = bool(status.get("active"))
+    page = bool(active or not practiced)
+    lines = [
+        "**RUIN DRILL** (paper vault practice — never enables live)",
+        f"active={active} level={status.get('level')} "
+        f"practiced_this_month={practiced} "
+        f"last={status.get('last_practice_at')}",
+        "",
+        "Levels:",
+        "- soft — block new entries; exits/settles still run",
+        "- hard — soft + pause every paper bot",
+        "- nuclear — hard + recommend flatten / cancel-on-pause habit",
+        "",
+        "Staff: `python3 tools/staff_ruin_drill.py set soft` then clear when done.",
+        "",
+        "_floors locked · LIVE_ORDERS_ENABLED=False · staff ack only_",
+    ]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_page": False,
+        "page": page,
+        "practiced_this_month": practiced,
+        "active": active,
+        "level": status.get("level"),
+        "copy": "\n".join(lines),
+        "label": (
+            f"ruin page active={active} practiced_month={practiced}"
+        ),
+        "note": status.get("note") or (
+            "Practice soft/hard this Chicago month for dual-control."
+        ),
+    }
+
+
+def seed_missing_digests(root: str | None = None, *, bots: list | None = None) -> dict:
+    """Staff seed empty observe digests for missing insight helpers (never places)."""
+    inv_before = digest_inventory(root)
+    seeded: list[str] = []
+    errors: list[dict] = []
+    for key in inv_before.get("missing") or []:
+        try:
+            if key == "sunday_living_packet":
+                from helpers import sunday_packet
+                sunday_packet.write_packet(root)
+                seeded.append(key)
+                continue
+            if key == "calendar":
+                from helpers import calendar_scanner
+                calendar_scanner.scan(root)
+                seeded.append(key)
+                continue
+            if key == "clerk_pulse":
+                from helpers import clerk_pulse
+                clerk_pulse.refresh_clerks(root, bots=bots)
+                seeded.append(key)
+                continue
+            if key == "timer_heartbeat":
+                from helpers import timer_heartbeat
+                timer_heartbeat.probe_from_snapshot(root)
+                seeded.append(key)
+                continue
+            mod = __import__(f"helpers.{key}", fromlist=["*"])
+            if hasattr(mod, "write_digest_from_desk"):
+                mod.write_digest_from_desk(root)
+                seeded.append(key)
+            elif hasattr(mod, "write_digest"):
+                mod.write_digest(root)
+                seeded.append(key)
+            else:
+                errors.append({"helper": key, "error": "no_write"})
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"helper": key, "error": type(exc).__name__})
+    inv_after = digest_inventory(root)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "seeded": seeded,
+        "seeded_n": len(seeded),
+        "errors": errors,
+        "before": {
+            "present_n": inv_before.get("present_n"),
+            "missing": inv_before.get("missing"),
+        },
+        "after": {
+            "present_n": inv_after.get("present_n"),
+            "missing": inv_after.get("missing"),
+            "pass": inv_after.get("pass"),
+            "ratio": inv_after.get("ratio"),
+        },
+        "note": "Seeded empty observe digests only — never places; floors locked.",
+    }
+
+
+def living_board_export(root: str | None = None, bots: list | None = None) -> dict:
+    """Compact JSON export of living board for staff paste / archive."""
+    board = living_upgrade_board(root, bots=bots)
+    keep = (
+        "chicago_today", "fee_floors_locked", "live_orders_enabled", "compact",
+        "insight_swarm", "digest_inventory", "feature_quiet", "feature_quiet_pager",
+        "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
+        "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
+    )
+    slim = {k: board.get(k) for k in keep if k in board}
+    slim["paper_only"] = True
+    slim["export"] = "living_board_v1"
+    slim["note"] = "Staff export — never invent fills; never soften floors; never enable live."
+    return slim
+
+
+def dual_control_gaps_page(root: str | None = None) -> dict:
+    """Staff checklist gaps copy for unsigned dual-control items (never auto-pages)."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.dual_control_status(root) or {}
+    except Exception:
+        status = {}
+    items = status.get("items") if isinstance(status.get("items"), list) else []
+    gaps = [
+        {
+            "id": str(it.get("id") or ""),
+            "label": str(it.get("label") or "")[:120],
+        }
+        for it in items
+        if isinstance(it, dict) and not it.get("signed")
+    ]
+    page = bool(gaps) and not bool(status.get("arm_ready_paper"))
+    lines = [
+        "**DUAL-CONTROL GAPS** (paper checklist — never enables live)",
+        f"signed={status.get('signed_n')}/{status.get('items_n')} "
+        f"two_staff={bool(status.get('two_staff'))} "
+        f"arm_ready_paper={bool(status.get('arm_ready_paper'))}",
+        "",
+    ]
+    for g in gaps:
+        lines.append(f"- [ ] `{g.get('id')}` — {g.get('label')}")
+    if not gaps:
+        lines.append("- all checklist items signed (still paper-only; live lock stays False)")
+    lines.append("")
+    lines.append("_floors locked · LIVE_ORDERS_ENABLED=False · staff ack only_")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_page": False,
+        "page": page,
+        "gaps_n": len(gaps),
+        "gaps": gaps,
+        "signed_n": status.get("signed_n"),
+        "items_n": status.get("items_n"),
+        "copy": "\n".join(lines),
+        "label": (
+            f"dual-control gaps={len(gaps)} signed={status.get('signed_n')}/{status.get('items_n')}"
+        ),
+        "note": status.get("note") or (
+            "Unsigned dual-control items — staff signs via tools/staff_dual_control.py."
+        ),
+    }
+
+
+def hillclimb_chip(root: str | None = None) -> dict:
+    """Hillclimb lever status chip — active lever only when staff-set."""
+    status: dict = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.hillclimb_lever_status(root) or {}
+    except Exception:
+        status = {}
+    active = status.get("active") if isinstance(status.get("active"), dict) else None
+    name = None
+    if active:
+        name = active.get("name") or active.get("lever") or active.get("id")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "auto_revert": bool(status.get("auto_revert")),
+        "week": status.get("week"),
+        "active": active,
+        "active_name": name,
+        "active_this_week": bool(status.get("active_this_week") or active),
+        "kill": status.get("kill"),
+        "label": (
+            f"hillclimb lever={name} week={status.get('week')}"
+            if name
+            else f"hillclimb none week={status.get('week')}"
+        ),
+        "note": status.get("note") or (
+            "One allowlisted lever per Chicago week — floors locked."
+        ),
+    }
+
+
+def digest_inventory(root: str | None = None) -> dict:
+    """Count insight helper digests present vs expected (≥3:1 hire order)."""
+    present = []
+    missing = []
+    base = os.path.join(_root(root), "helpers")
+    for name in INSIGHT_HELPER_DIGESTS:
+        path = os.path.join(base, name)
+        key = name.replace("_digest.json", "").replace(".json", "")
+        if os.path.isfile(path):
+            present.append(key)
+        else:
+            missing.append(key)
+    expected_n = len(INSIGHT_HELPER_DIGESTS)
+    present_n = len(present)
+    betting_n = len(BETTING_TOWERS)
+    ratio = round(present_n / betting_n, 4) if betting_n else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "expected_n": expected_n,
+        "present_n": present_n,
+        "missing_n": len(missing),
+        "present": present,
+        "missing": missing,
+        "betting_n": betting_n,
+        "ratio": ratio,
+        "min_ratio": INSIGHT_BETTING_MIN_RATIO,
+        "pass": bool(ratio is not None and ratio + 1e-12 >= INSIGHT_BETTING_MIN_RATIO),
+        "label": (
+            f"digest inventory {present_n}/{expected_n} "
+            f"missing={len(missing)} ratio={ratio}"
+        ),
+        "note": (
+            "Insight digests present vs expected. Hire observe clerks first — floors locked."
+        ),
+    }
+
+
+def betting_expand_gate(root: str | None = None) -> dict:
+    """Insight-first hire blocker: refuse betting expand while swarm < 3:1."""
+    swarm = insight_swarm_ratio(root)
+    inv = digest_inventory(root)
+    ok = bool(swarm.get("pass")) and bool(inv.get("pass") or swarm.get("pass"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "allow_betting_expand": ok,
+        "blocked": not ok,
+        "swarm_pass": swarm.get("pass"),
+        "swarm_ratio": swarm.get("ratio"),
+        "min_ratio": swarm.get("min_ratio") or INSIGHT_BETTING_MIN_RATIO,
+        "digest_pass": inv.get("pass"),
+        "reason": (
+            "insight swarm meets ≥3:1 — betting expand still staff/paper only"
+            if ok
+            else (
+                f"BLOCK betting expand: insight swarm "
+                f"{swarm.get('insight_n')}:{swarm.get('betting_n')} "
+                f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1). "
+                "Hire observe clerks / seed digests first."
+            )
+        ),
+        "label": (
+            "betting expand allowed (paper)"
+            if ok
+            else "betting expand BLOCKED — insight swarm thin"
+        ),
+        "note": "Insight-first living hire order. Never softens venue floors.",
+    }
+
+
+def fee_floors_assert(root: str | None = None, cfg: dict | None = None) -> dict:
+    """Staff assert: runtime venue edges at/above locked floors."""
+    floors: dict = {}
+    try:
+        import desk_profit
+        # Prefer explicit cfg; avoid heavy snapshot loads during board builds/tests.
+        floors = desk_profit.venue_floors_locked(cfg if isinstance(cfg, dict) else None) or {}
+    except Exception as exc:  # noqa: BLE001
+        floors = {"paper_only": True, "locked": True, "all_ok": False, "error": type(exc).__name__}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "all_ok": bool(floors.get("all_ok")),
+        "venues": floors.get("venues") if isinstance(floors.get("venues"), dict) else {},
+        "label": (
+            "fee floors OK (0.06/0.05/0.02)"
+            if floors.get("all_ok")
+            else "fee floors CHECK — live edge below locked floor"
+        ),
+        "note": floors.get("note") or (
+            "Venue min_edge floors are locked — selective volume never softens them."
+        ),
+    }
+
+
 def living_self_check(root: str | None = None) -> dict:
     """Staff health probe for living spine (never places / never softens)."""
     board = living_upgrade_board(root)
@@ -1694,10 +2055,12 @@ def living_self_check(root: str | None = None) -> dict:
     quiet = board.get("feature_quiet") if isinstance(board.get("feature_quiet"), dict) else {}
     timer = board.get("timer_heartbeat") if isinstance(board.get("timer_heartbeat"), dict) else {}
     floors = bool(board.get("fee_floors_locked"))
+    floors_assert = fee_floors_assert(root)
     ok = bool(
         floors
         and board.get("live_orders_enabled") is False
         and board.get("grok_buys") is False
+        and floors_assert.get("all_ok")
     )
     return {
         "paper_only": True,
@@ -1708,9 +2071,14 @@ def living_self_check(root: str | None = None) -> dict:
         "swarm_ratio": swarm.get("ratio"),
         "feature_quiet": bool(quiet.get("quiet")),
         "timer_alive": timer.get("alive"),
+        "floors_assert": floors_assert,
         "chips_n": sum(
             1
             for k, v in board.items()
+            if isinstance(v, dict) and v.get("fee_floors_locked") is True
+        ),
+        "chip_catalog": sorted(
+            k for k, v in board.items()
             if isinstance(v, dict) and v.get("fee_floors_locked") is True
         ),
         "chicago_today": board.get("chicago_today"),

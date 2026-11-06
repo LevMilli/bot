@@ -509,13 +509,59 @@ Interactive: Positive ROI Master Plan canvas.
 | Living self_check | `desk_living.living_self_check` |
 | Swarm vault color | city vault green/amber from pass |
 
+### Living upgrade — dual gaps / hillclimb / digest inventory
+
+| Ticket | Where |
+| --- | --- |
+| Dual-control gaps page | `desk_living.dual_control_gaps_page` + CLI `gaps` |
+| Hillclimb chip | `desk_living.hillclimb_chip` + CLI `hillclimb` |
+| Digest inventory | `desk_living.digest_inventory` + CLI `inventory` |
+
+### Living upgrade — ruin page / export / digest seed
+
+| Ticket | Where |
+| --- | --- |
+| Ruin drill page | `desk_living.ruin_drill_page` + CLI `ruin` |
+| Living board export | `desk_living.living_board_export` + CLI `export` |
+| Digest seed | `desk_living.seed_missing_digests` + CLI `seed` |
+
+### Living upgrade — staff map + pulse CLI
+
+| Ticket | Where |
+| --- | --- |
+| Staff map | `paper-bots/LIVING_UPGRADE.md` |
+| Pulse force refresh | `staff_living_status.py pulse` |
+
+### Living upgrade — teller chip + floors assert + Sunday note
+
+| Ticket | Where |
+| --- | --- |
+| Teller living chip | `desk_living.teller_living_chip` |
+| Fee floors assert | `desk_living.fee_floors_assert` + CLI `floors` |
+| Sunday draft note | `LIVING_UPGRADE.md` (no auto publish) |
+
+### Living upgrade — vault teller/floors + chip catalog
+
+| Ticket | Where |
+| --- | --- |
+| City vault teller/floors | trading-city vault board rows |
+| Floors CLI exit 2 | `staff_living_status.py floors` |
+| Chip catalog | `living_self_check.chip_catalog` |
+
+### Living upgrade — smoke Makefile + betting expand gate
+
+| Ticket | Where |
+| --- | --- |
+| Smoke Makefile | `paper-bots/Makefile` living-* targets |
+| Betting expand gate | `desk_living.betting_expand_gate` + CLI `expand` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Dual-control incomplete page | staff checklist gaps copy |
-| Hillclimb staff status line | tools/staff_hillclimb_pick status on living |
-| Living digest inventory | count helpers present vs expected |
+| Expand gate on city vault | vault row when blocked |
+| Living snapshot unit | desk keys teller_living/swarm_lights |
+| Staff dual-control gaps exit | CLI gaps exit 2 when page |
 
 ## Hard rules unchanged
 
