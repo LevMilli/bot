@@ -2411,6 +2411,321 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     desk_row["sports_tip"] = tip
     if isinstance(desk_row.get("master"), dict):
         desk_row["master"]["sports_tip"] = tip
+    # Living upgrade city lights — insight≥3:1 swarm ratio for tellers / Masters HUD.
+    try:
+        living = None
+        if isinstance(desk_row.get("master"), dict):
+            plan = (desk_row["master"].get("roi_plan") or {})
+            living = plan.get("living_upgrade") if isinstance(plan, dict) else None
+        swarm = (living or {}).get("insight_swarm") if isinstance(living, dict) else None
+        if not isinstance(swarm, dict):
+            import desk_living
+            swarm = desk_living.insight_swarm_ratio(root)
+        lights = {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "pass": bool(swarm.get("pass")),
+            "ratio": swarm.get("ratio"),
+            "insight_n": swarm.get("insight_n"),
+            "betting_n": swarm.get("betting_n"),
+            "min_ratio": swarm.get("min_ratio"),
+            "color": "green" if swarm.get("pass") else "amber",
+            "label": (
+                f"Insight swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+                f"(≥{swarm.get('min_ratio')}:1)"
+            ),
+            "note": swarm.get("note") or "",
+        }
+        desk_row["swarm_lights"] = lights
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["swarm_lights"] = lights
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="facts",
+                text=f"swarm lights {lights['color']}: {lights['label']}"[:200],
+                bot_id="desk",
+            )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["swarm_lights"] = {"paper_only": True, "error": type(exc).__name__}
+    # Completions KPI line for tellers / vault board.
+    try:
+        import desk_living
+        comp = desk_living.completions_summary(root)
+        desk_row["completions"] = comp
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["completions"] = desk_row["master"].get("completions") or comp
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="facts",
+                text=(
+                    f"eligible completions today "
+                    f"{comp.get('eligible_completions_today') or 0} "
+                    f"(pnl {float(comp.get('eligible_pnl_today') or 0):+.2f})"
+                )[:200],
+                bot_id="desk",
+            )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["completions"] = {"paper_only": True, "error": type(exc).__name__}
+    # Dual-control paper checklist HUD — live orders stay hard-disabled.
+    try:
+        import desk_roi_plan
+        dc = desk_roi_plan.dual_control_status(root)
+        desk_row["dual_control"] = dc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["dual_control"] = desk_row["master"].get("dual_control") or dc
+            desk_row["master"]["live_orders_enabled"] = False
+    except Exception as exc:  # noqa: BLE001
+        desk_row["dual_control"] = {"paper_only": True, "live_orders_enabled": False, "error": type(exc).__name__}
+    try:
+        import desk_roi_plan
+        ruin = desk_roi_plan.ruin_drill_status(root)
+        desk_row["ruin_drill"] = ruin
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["ruin_drill"] = desk_row["master"].get("ruin_drill") or ruin
+    except Exception as exc:  # noqa: BLE001
+        desk_row["ruin_drill"] = {"paper_only": True, "error": type(exc).__name__}
+    # Skip taxonomy chip for teller rail / city HUD.
+    try:
+        import desk_living
+        chip = desk_living.skip_taxonomy_chip(root)
+        desk_row["skip_taxonomy"] = chip
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_taxonomy"] = chip
+        try:
+            import teller_memory
+            if chip.get("top_code"):
+                teller_memory.remember(
+                    root,
+                    kind="facts",
+                    text=f"desk {chip.get('label')}"[:200],
+                    bot_id="desk",
+                )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_taxonomy"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        gd = desk_living.green_day_board(root, bots=public)
+        desk_row["green_day"] = gd
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["green_day"] = desk_row["master"].get("green_day") or gd
+    except Exception as exc:  # noqa: BLE001
+        desk_row["green_day"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        fq = desk_living.firm_queue_chip(root)
+        desk_row["firm_queue"] = fq
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["firm_queue"] = desk_row["master"].get("firm_queue") or fq
+    except Exception as exc:  # noqa: BLE001
+        desk_row["firm_queue"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        ec = desk_living.empty_card_chip(root)
+        nm = desk_living.near_miss_chip(root)
+        desk_row["empty_card"] = ec
+        desk_row["near_miss"] = nm
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["empty_card"] = desk_row["master"].get("empty_card") or ec
+            desk_row["master"]["near_miss"] = desk_row["master"].get("near_miss") or nm
+    except Exception as exc:  # noqa: BLE001
+        desk_row["empty_card"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["near_miss"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        th = desk_living.timer_heartbeat_chip(root)
+        ga = desk_living.helper_gate_a_board(root)
+        desk_row["timer_heartbeat"] = th
+        desk_row["helper_gate_a"] = ga
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["timer_heartbeat"] = (
+                desk_row["master"].get("timer_heartbeat") or th
+            )
+            desk_row["master"]["helper_gate_a"] = (
+                desk_row["master"].get("helper_gate_a") or ga
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["timer_heartbeat"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["helper_gate_a"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        sr = desk_living.skip_regret_chip(root)
+        hs = desk_living.hard_stop_chip(root)
+        desk_row["skip_regret"] = sr
+        desk_row["hard_stop"] = hs
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_regret"] = desk_row["master"].get("skip_regret") or sr
+            desk_row["master"]["hard_stop"] = desk_row["master"].get("hard_stop") or hs
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_regret"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["hard_stop"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        bl = desk_living.bleed_chip(root, bots=bots)
+        cv = desk_living.clv_chip(root)
+        desk_row["bleed"] = bl
+        desk_row["clv"] = cv
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["bleed"] = desk_row["master"].get("bleed") or bl
+            desk_row["master"]["clv"] = desk_row["master"].get("clv") or cv
+    except Exception as exc:  # noqa: BLE001
+        desk_row["bleed"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["clv"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        tr = desk_living.tip_radar_chip(root)
+        cn = desk_living.calib_nag_chip(root, bots=bots)
+        desk_row["tip_radar"] = tr
+        desk_row["calib_nag"] = cn
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["tip_radar"] = desk_row["master"].get("tip_radar") or tr
+            desk_row["master"]["calib_nag"] = desk_row["master"].get("calib_nag") or cn
+    except Exception as exc:  # noqa: BLE001
+        desk_row["tip_radar"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["calib_nag"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        iw = desk_living.injury_wire_chip(root)
+        es = desk_living.eia_scout_chip(root)
+        desk_row["injury_wire"] = iw
+        desk_row["eia_scout"] = es
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["injury_wire"] = desk_row["master"].get("injury_wire") or iw
+            desk_row["master"]["eia_scout"] = desk_row["master"].get("eia_scout") or es
+    except Exception as exc:  # noqa: BLE001
+        desk_row["injury_wire"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["eia_scout"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        sh = desk_living.skip_historian_chip(root)
+        dc = desk_living.distance_clerk_chip(root)
+        qc = desk_living.quant_clerk_chip(root)
+        desk_row["skip_historian"] = sh
+        desk_row["distance_clerk"] = dc
+        desk_row["quant_clerk"] = qc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_historian"] = (
+                desk_row["master"].get("skip_historian") or sh
+            )
+            desk_row["master"]["distance_clerk"] = (
+                desk_row["master"].get("distance_clerk") or dc
+            )
+            desk_row["master"]["quant_clerk"] = (
+                desk_row["master"].get("quant_clerk") or qc
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_historian"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["distance_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["quant_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        bk = desk_living.bookkeeper_chip(root)
+        rp = desk_living.reporter_chip(root)
+        bee = desk_living.empty_card_bee_chip(root)
+        desk_row["bookkeeper"] = bk
+        desk_row["reporter"] = rp
+        desk_row["empty_card_bee"] = bee
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["bookkeeper"] = desk_row["master"].get("bookkeeper") or bk
+            desk_row["master"]["reporter"] = desk_row["master"].get("reporter") or rp
+            desk_row["master"]["empty_card_bee"] = (
+                desk_row["master"].get("empty_card_bee") or bee
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["bookkeeper"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["reporter"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["empty_card_bee"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        nmc = desk_living.near_miss_clerk_chip(root)
+        hsc = desk_living.hard_stop_clerk_chip(root)
+        blc = desk_living.bleed_clerk_chip(root, bots=bots)
+        desk_row["near_miss_clerk"] = nmc
+        desk_row["hard_stop_clerk"] = hsc
+        desk_row["bleed_clerk"] = blc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["near_miss_clerk"] = (
+                desk_row["master"].get("near_miss_clerk") or nmc
+            )
+            desk_row["master"]["hard_stop_clerk"] = (
+                desk_row["master"].get("hard_stop_clerk") or hsc
+            )
+            desk_row["master"]["bleed_clerk"] = desk_row["master"].get("bleed_clerk") or blc
+    except Exception as exc:  # noqa: BLE001
+        desk_row["near_miss_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["hard_stop_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["bleed_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        stc = desk_living.skip_twin_clerk_chip(root)
+        clc = desk_living.clv_closer_chip(root)
+        tdc = desk_living.timer_digest_chip(root)
+        desk_row["skip_twin_clerk"] = stc
+        desk_row["clv_closer"] = clc
+        desk_row["timer_digest"] = tdc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_twin_clerk"] = (
+                desk_row["master"].get("skip_twin_clerk") or stc
+            )
+            desk_row["master"]["clv_closer"] = desk_row["master"].get("clv_closer") or clc
+            desk_row["master"]["timer_digest"] = desk_row["master"].get("timer_digest") or tdc
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_twin_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["clv_closer"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["timer_digest"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        cal = desk_living.calendar_scanner_chip(root)
+        ebo = desk_living.eia_blackout_chip(root)
+        living_board = None
+        if isinstance(desk_row.get("master"), dict):
+            plan = (desk_row["master"].get("roi_plan") or {})
+            living_board = plan.get("living_upgrade") if isinstance(plan, dict) else None
+        compact = desk_living.living_compact_card(root, bots=bots, board=living_board)
+        desk_row["calendar_scanner"] = cal
+        desk_row["eia_blackout"] = ebo
+        desk_row["living_compact"] = compact
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["calendar_scanner"] = (
+                desk_row["master"].get("calendar_scanner") or cal
+            )
+            desk_row["master"]["eia_blackout"] = (
+                desk_row["master"].get("eia_blackout") or ebo
+            )
+            desk_row["master"]["compact"] = desk_row["master"].get("compact") or compact
+    except Exception as exc:  # noqa: BLE001
+        desk_row["calendar_scanner"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["eia_blackout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["living_compact"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
+        pulse = desk_living.clerk_pulse_chip(root)
+        dcc = desk_living.dual_control_chip(root)
+        rdc = desk_living.ruin_drill_chip(root)
+        desk_row["clerk_pulse"] = pulse
+        desk_row["dual_control_chip"] = dcc
+        desk_row["ruin_drill_chip"] = rdc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["clerk_pulse"] = desk_row["master"].get("clerk_pulse") or pulse
+            desk_row["master"]["dual_control_chip"] = (
+                desk_row["master"].get("dual_control_chip") or dcc
+            )
+            desk_row["master"]["ruin_drill_chip"] = (
+                desk_row["master"].get("ruin_drill_chip") or rdc
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["clerk_pulse"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["dual_control_chip"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["ruin_drill_chip"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
@@ -2796,6 +3111,12 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
     try:
         from helpers import calendar_scanner
         calendar_scanner.run_if_due(root, now)
+    except Exception:
+        pass
+    # Living upgrade — refresh insight clerk digests on a 5m cadence (observe-only).
+    try:
+        from helpers import clerk_pulse
+        clerk_pulse.run_if_due(root, now)
     except Exception:
         pass
     touch_heartbeat(root, now)

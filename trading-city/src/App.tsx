@@ -605,6 +605,37 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">swarm</span>
+                  <span>
+                    {(() => {
+                      const sw =
+                        snap?.desk?.swarm_lights || snap?.desk?.master?.swarm_lights
+                      if (!sw || sw.error) return 'insight swarm pending'
+                      const mark = sw.pass ? '●' : '◐'
+                      return (
+                        `${mark} ${sw.label || `insight ${sw.insight_n}:${sw.betting_n}`}` +
+                        (sw.color ? ` · ${sw.color}` : '')
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">fills</span>
+                  <span>
+                    {(() => {
+                      const c =
+                        snap?.desk?.completions || snap?.desk?.master?.completions
+                      if (!c || c.error) return 'completions pending'
+                      const n = c.eligible_completions_today
+                      const pnl = c.eligible_pnl_today
+                      return (
+                        `eligible today ${n ?? '—'}` +
+                        (pnl != null ? ` · pnl ${Number(pnl).toFixed(2)}` : '')
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">bleed</span>
                   <span>
                     {(() => {

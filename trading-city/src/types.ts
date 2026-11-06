@@ -191,6 +191,28 @@ export type Desk = {
     window_min?: number
     note?: string
   }
+  /** Living upgrade insight≥3:1 city light (paper observe). */
+  swarm_lights?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    pass?: boolean
+    ratio?: number | null
+    insight_n?: number
+    betting_n?: number
+    min_ratio?: number
+    color?: string
+    label?: string
+    note?: string
+    error?: string
+  }
+  completions?: {
+    paper_only?: boolean
+    eligible_completions_today?: number
+    eligible_pnl_today?: number | null
+    n?: number
+    note?: string
+    error?: string
+  }
   master?: {
     paper_only?: boolean
     version?: number
@@ -205,6 +227,8 @@ export type Desk = {
       note?: string
     }
     sports_tip?: Desk['sports_tip']
+    swarm_lights?: Desk['swarm_lights']
+    completions?: Desk['completions']
     towers?: unknown[]
     note?: string
   }
