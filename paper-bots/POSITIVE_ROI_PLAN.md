@@ -403,13 +403,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Timer heartbeat chip | `desk_living.timer_heartbeat_chip` |
 | Helper Gate A board | `desk_living.helper_gate_a_board` |
 
+### Living upgrade — skip-regret + hard-stop chips
+
+| Ticket | Where |
+| --- | --- |
+| Skip-regret chip | `desk_living.skip_regret_chip` |
+| Hard-stop chip | `desk_living.hard_stop_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Skip regret board chip | labeled regret EV on Masters |
-| Hard-stop shadow chip | sports shadow exits readiness |
+| Bleed ratio chip | firm bleed / red-tower capital |
+| CLV closer chip | sports beat-close rate |
 
 ## Hard rules unchanged
 

@@ -657,6 +657,12 @@ def master_summary(
     gate_a = (living or {}).get("helper_gate_a") if isinstance(living, dict) else None
     if isinstance(gate_a, dict) and int(gate_a.get("ready_n") or 0) > 0:
         priority.append(str(gate_a.get("label") or "helper Gate A")[:120])
+    skip_regret = (living or {}).get("skip_regret") if isinstance(living, dict) else None
+    if isinstance(skip_regret, dict) and skip_regret.get("green_twin"):
+        priority.append("skip-regret green_twin — staff soft gate review only")
+    hard_stop = (living or {}).get("hard_stop") if isinstance(living, dict) else None
+    if isinstance(hard_stop, dict) and hard_stop.get("promote_ready"):
+        priority.append("sports hard-stop promote_ready — staff arm only")
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -719,6 +725,16 @@ def master_summary(
         ),
         "helper_gate_a": (
             (living or {}).get("helper_gate_a")
+            if isinstance(living, dict)
+            else None
+        ),
+        "skip_regret": (
+            (living or {}).get("skip_regret")
+            if isinstance(living, dict)
+            else None
+        ),
+        "hard_stop": (
+            (living or {}).get("hard_stop")
             if isinstance(living, dict)
             else None
         ),

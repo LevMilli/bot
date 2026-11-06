@@ -445,6 +445,82 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def skip_regret_chip(root: str | None = None) -> dict:
+    """Labeled skip-regret twin chip — never auto-loosens floors."""
+    card = {}
+    try:
+        import desk_roi_plan
+        card = desk_roi_plan.latest_skip_regret_weekly(root) or {}
+        if not card:
+            # Observe-only summary without writing a weekly card.
+            try:
+                import desk_top25
+                summary = desk_top25.skip_regret_summary(root) or {}
+            except Exception:
+                summary = {}
+            card = {
+                "n": summary.get("n"),
+                "labeled_n": summary.get("labeled_n"),
+                "avg_would_pnl": summary.get("avg_would_pnl"),
+                "green_twin": bool(summary.get("green_twin")),
+                "decision": "reject",
+                "auto_promote": False,
+                "loosen_soft_gates": False,
+                "fee_floors_locked": True,
+            }
+    except Exception:
+        card = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": card.get("n"),
+        "labeled_n": card.get("labeled_n"),
+        "avg_would_pnl": card.get("avg_would_pnl"),
+        "green_twin": bool(card.get("green_twin")),
+        "decision": card.get("decision") or "reject",
+        "auto_promote": False,
+        "loosen_soft_gates": False,
+        "label": (
+            f"skip-regret labeled={card.get('labeled_n')} "
+            f"avg={card.get('avg_would_pnl')} "
+            f"{card.get('decision') or 'reject'}"
+        ),
+        "note": card.get("note") or (
+            "Skip-regret twin: staff-only soft gate review; fee floors locked."
+        ),
+    }
+
+
+def hard_stop_chip(root: str | None = None) -> dict:
+    """Sports hard-stop shadow exits readiness chip."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.sports_hard_stop_shadow_summary(root) or {}
+    except Exception:
+        status = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": status.get("n"),
+        "n_with_pnl": status.get("n_with_pnl"),
+        "shadow_expectancy": status.get("shadow_expectancy"),
+        "promote_ready": bool(status.get("promote_ready")),
+        "live": bool(status.get("live")),
+        "auto_promote": False,
+        "decision": status.get("decision") or "reject",
+        "label": (
+            f"hard-stop n={status.get('n_with_pnl')} "
+            f"ev={status.get('shadow_expectancy')} "
+            f"ready={bool(status.get('promote_ready'))} "
+            f"live={bool(status.get('live'))}"
+        ),
+        "note": status.get("note") or (
+            "Shadow-only until staff promote; code default live stays False."
+        ),
+    }
+
+
 def timer_heartbeat_chip(root: str | None = None) -> dict:
     """Alive/dead paper timer chip for desk snapshot."""
     status = {}
@@ -731,6 +807,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "near_miss": near_miss_chip(root),
         "timer_heartbeat": timer_heartbeat_chip(root),
         "helper_gate_a": helper_gate_a_board(root),
+        "skip_regret": skip_regret_chip(root),
+        "hard_stop": hard_stop_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
