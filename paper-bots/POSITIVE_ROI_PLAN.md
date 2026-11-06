@@ -563,13 +563,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Living keys unit | master teller/swarm/expand keys |
 | Gaps CLI exit 2 | `staff_living_status.py gaps` |
 
+### Living upgrade — doctor + size guard + expand teller fact
+
+| Ticket | Where |
+| --- | --- |
+| Living doctor | `desk_living.living_doctor` + CLI/make |
+| Board size guard | `living_board_size_guard` soft max 64 |
+| Expand teller fact | remember mistake when blocked |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Expand gate teller fact | remember when blocked |
-| Living board size guard | warn if chips_n balloons |
-| Staff living doctor | one-shot floors+expand+selfcheck |
+| Doctor on city vault | vault row doctor OK/FAIL |
+| Living chip prune pass | drop duplicate clerk/roi pairs |
+| Staff weekly ritual script | gaps+ruin+floors+expand+doctor |
 
 ## Hard rules unchanged
 

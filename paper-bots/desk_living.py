@@ -1742,6 +1742,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "note": "Living Trading Upgrade board — more eligible completions + learn data.",
     }
     board["compact"] = living_compact_card(root, bots=bots, board=board)
+    board["board_size"] = living_board_size_guard(chips_n=_count_living_chips(board))
     return board
 
 
@@ -1988,11 +1989,121 @@ def digest_inventory(root: str | None = None) -> dict:
     }
 
 
-def betting_expand_gate(root: str | None = None) -> dict:
+CHIP_CATALOG_SOFT_MAX = 64
+_BOARD_SIZE_SKIP = frozenset({
+    "board_size", "compact", "insight_helper_digests", "feature_store",
+    "feature_quiet", "completions", "living_ai", "insight_swarm",
+    "hillclimb_lever", "dual_control", "ruin_drill",
+})
+
+
+def _count_living_chips(board: dict | None) -> int:
+    return sum(
+        1
+        for k, v in (board or {}).items()
+        if (
+            k not in _BOARD_SIZE_SKIP
+            and isinstance(v, dict)
+            and v.get("fee_floors_locked") is True
+        )
+    )
+
+
+def living_board_size_guard(*, chips_n: int | None = None) -> dict:
+    """Warn when living chip count balloons (rail noise risk)."""
+    n = int(chips_n or 0)
+    over = n > CHIP_CATALOG_SOFT_MAX
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "chips_n": n,
+        "soft_max": CHIP_CATALOG_SOFT_MAX,
+        "over": over,
+        "label": (
+            f"chip catalog {n}/{CHIP_CATALOG_SOFT_MAX}"
+            + (" OVER" if over else " ok")
+        ),
+        "note": "Prefer finalize_living_priority over unbounded chip growth.",
+    }
+
+
+def living_doctor(root: str | None = None) -> dict:
+    """One-shot staff doctor: floors + expand + selfcheck + quiet/timer."""
+    floors = fee_floors_assert(root)
+    expand = betting_expand_gate(root)
+    health = living_self_check(root)
+    quiet = feature_store_quiet_alert(root)
+    timer = timer_heartbeat_chip(root)
+    gaps = dual_control_gaps_page(root)
+    ok = bool(
+        floors.get("all_ok")
+        and health.get("ok")
+        and not expand.get("blocked")
+        and not quiet.get("quiet")
+        and timer.get("alive") is not False
+    )
+    checks = [
+        {"id": "floors", "ok": bool(floors.get("all_ok")), "label": floors.get("label")},
+        {"id": "expand", "ok": not bool(expand.get("blocked")), "label": expand.get("label")},
+        {"id": "selfcheck", "ok": bool(health.get("ok")), "label": "living selfcheck"},
+        {"id": "feature_quiet", "ok": not bool(quiet.get("quiet")), "label": quiet.get("alert") or "feature quiet ok"},
+        {"id": "timer", "ok": timer.get("alive") is not False, "label": timer.get("label")},
+        {"id": "dual_gaps", "ok": not bool(gaps.get("page")), "label": gaps.get("label")},
+    ]
+    failed = [c for c in checks if not c.get("ok")]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "ok": ok and not failed,
+        "failed_n": len(failed),
+        "failed": failed,
+        "checks": checks,
+        "chip_catalog": health.get("chip_catalog") or [],
+        "chips_n": health.get("chips_n"),
+        "chips_soft_max": CHIP_CATALOG_SOFT_MAX,
+        "chips_over": bool(int(health.get("chips_n") or 0) > CHIP_CATALOG_SOFT_MAX),
+        "label": (
+            "living doctor OK"
+            if ok and not failed
+            else f"living doctor FAIL n={len(failed)}"
+        ),
+        "note": "Staff one-shot doctor — never places; never softens floors; never enables live.",
+    }
+
+
+def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> dict:
     """Insight-first hire blocker: refuse betting expand while swarm < 3:1."""
     swarm = insight_swarm_ratio(root)
     inv = digest_inventory(root)
     ok = bool(swarm.get("pass")) and bool(inv.get("pass") or swarm.get("pass"))
+    reason = (
+        "insight swarm meets ≥3:1 — betting expand still staff/paper only"
+        if ok
+        else (
+            f"BLOCK betting expand: insight swarm "
+            f"{swarm.get('insight_n')}:{swarm.get('betting_n')} "
+            f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1). "
+            "Hire observe clerks / seed digests first."
+        )
+    )
+    label = (
+        "betting expand allowed (paper)"
+        if ok
+        else "betting expand BLOCKED — insight swarm thin"
+    )
+    if remember and not ok:
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="mistakes",
+                text=str(label)[:200],
+                bot_id="desk",
+                source="betting_expand_gate",
+            )
+        except Exception:
+            pass
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -2003,21 +2114,8 @@ def betting_expand_gate(root: str | None = None) -> dict:
         "swarm_ratio": swarm.get("ratio"),
         "min_ratio": swarm.get("min_ratio") or INSIGHT_BETTING_MIN_RATIO,
         "digest_pass": inv.get("pass"),
-        "reason": (
-            "insight swarm meets ≥3:1 — betting expand still staff/paper only"
-            if ok
-            else (
-                f"BLOCK betting expand: insight swarm "
-                f"{swarm.get('insight_n')}:{swarm.get('betting_n')} "
-                f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1). "
-                "Hire observe clerks / seed digests first."
-            )
-        ),
-        "label": (
-            "betting expand allowed (paper)"
-            if ok
-            else "betting expand BLOCKED — insight swarm thin"
-        ),
+        "reason": reason,
+        "label": label,
         "note": "Insight-first living hire order. Never softens venue floors.",
     }
 
@@ -2072,15 +2170,16 @@ def living_self_check(root: str | None = None) -> dict:
         "feature_quiet": bool(quiet.get("quiet")),
         "timer_alive": timer.get("alive"),
         "floors_assert": floors_assert,
-        "chips_n": sum(
-            1
-            for k, v in board.items()
-            if isinstance(v, dict) and v.get("fee_floors_locked") is True
-        ),
+        "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()
-            if isinstance(v, dict) and v.get("fee_floors_locked") is True
+            if (
+                k not in _BOARD_SIZE_SKIP
+                and isinstance(v, dict)
+                and v.get("fee_floors_locked") is True
+            )
         ),
+        "board_size": living_board_size_guard(chips_n=_count_living_chips(board)),
         "chicago_today": board.get("chicago_today"),
         "note": "Living self_check — observe-only. Floors must stay locked.",
     }
