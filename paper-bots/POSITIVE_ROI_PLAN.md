@@ -954,13 +954,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Masters quiet_age_label rail | priority soft label |
 | Vault quiet+ritual cluster tip | tip under quiet age |
 
-### Next
+### Living upgrade — export quiet_line / observe text / sunday label
 
 | Ticket | Where |
 | --- | --- |
 | Export quiet_line field | living_board_export |
 | Ritual observe quiet_line text | observe plain |
 | Sunday packet quiet_age_label | soft sunday line |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Status text quiet_line twin | print quiet_line |
+| Vault sunday quiet_age chip | city sunday row |
+| Compact export quiet_age_label | export flatten |
 
 ## Hard rules unchanged
 

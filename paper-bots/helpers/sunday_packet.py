@@ -39,6 +39,7 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
     ai = living.get("living_ai") if isinstance(living.get("living_ai"), dict) else {}
     comp = living.get("completions") if isinstance(living.get("completions"), dict) else {}
     quiet = living.get("feature_quiet") if isinstance(living.get("feature_quiet"), dict) else {}
+    compact = living.get("compact") if isinstance(living.get("compact"), dict) else {}
     dual = living.get("dual_control") if isinstance(living.get("dual_control"), dict) else {}
     ruin = living.get("ruin_drill") if isinstance(living.get("ruin_drill"), dict) else {}
     doctor_age = living.get("doctor_age") if isinstance(living.get("doctor_age"), dict) else {}
@@ -47,6 +48,12 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
         if isinstance(living.get("ritual_observe"), dict)
         else {}
     )
+    quiet_age_h = quiet.get("age_hours")
+    quiet_age = (
+        compact.get("quiet_age")
+        or (f"{quiet_age_h}h" if quiet_age_h is not None else "n/a")
+    )
+    quiet_age_label = compact.get("quiet_age_label") or f"quiet_age={quiet_age}"
     return {
         "helper": "sunday_packet",
         "at": now.isoformat(),
@@ -78,7 +85,12 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
         "feature_quiet": {
             "quiet": quiet.get("quiet"),
             "alert": quiet.get("alert") or "",
+            "age_hours": quiet_age_h,
+            "quiet_age": quiet_age,
+            "quiet_age_label": quiet_age_label,
         },
+        "quiet_age": quiet_age,
+        "quiet_age_label": quiet_age_label,
         "dual_control": {
             "signed_n": dual.get("signed_n"),
             "items_n": dual.get("items_n"),
@@ -157,6 +169,10 @@ def format_discord(packet: dict | None = None) -> str:
             f"active={ruin.get('active')}"
         ),
         f"• Feature quiet: {quiet.get('alert') or ('quiet' if quiet.get('quiet') else 'ok')}",
+        (
+            f"• {p.get('quiet_age_label') or quiet.get('quiet_age_label') or 'quiet_age=n/a'} "
+            f"(staff observe — never softens floors)"
+        ),
         f"• Doctor age: {doctor_age.get('label') or '—'}",
         (
             f"• Weekly ritual draft: `{ritual.get('make') or 'make living-ritual-discord'}` "
