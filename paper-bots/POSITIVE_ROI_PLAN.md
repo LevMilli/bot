@@ -1132,13 +1132,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual discord gaps sunday | discord line |
 | Compact/export hill+swarm+gaps | sunday twins |
 
-### Next
+### Living upgrade — digests/fills/gaps observe (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Vault digests sunday quiet | digests row hint |
 | Vault fills sunday quiet | fills row hint |
-| Ritual observe gaps sunday | observe tip |
+| Ritual observe gaps sunday | observe plain + --json |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault green sunday quiet | green row hint |
+| Vault bleed sunday quiet | bleed row hint |
+| Ritual discord digests sunday | discord line |
 
 ## Hard rules unchanged
 
