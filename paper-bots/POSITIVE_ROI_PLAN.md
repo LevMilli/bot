@@ -642,13 +642,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Calib nag vault tint | raise_Φ tickets amber |
 | Timer dead vault tint | timer heartbeat DEAD |
 
-### Next
+### Living upgrade — tip labels + empty/near-miss vault
 
 | Ticket | Where |
 | --- | --- |
 | Tip-force vs tip-feed polish | clarify tip labels on vault |
-| Empty-card vault tint | empty CARD breaches |
+| Empty-card vault tint | empty CARD slow amber |
 | Near-miss promote vault | promote_ready observe only |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Skip-regret vault row | green_twin soft review |
+| Hard-stop vault tint | sports promote_ready |
+| Injury wire vault row | inbox headlines observe |
 
 ## Hard rules unchanged
 

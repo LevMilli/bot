@@ -596,12 +596,16 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
-                  <span className="vb-label">tip</span>
-                  <span>
+                  <span className="vb-label">tip force</span>
+                  <span
+                    style={{
+                      color: snap?.desk?.sports_tip?.active ? '#d4a017' : undefined,
+                    }}
+                  >
                     {snap?.desk?.sports_tip?.active
-                      ? `T−${snap.desk.sports_tip.band} force ${snap.desk.sports_tip.force_sec || 45}s` +
+                      ? `tip-force T−${snap.desk.sports_tip.band} · ${snap.desk.sports_tip.force_sec || 45}s` +
                         (snap.desk.sports_tip.sample ? ` · ${snap.desk.sports_tip.sample}` : '')
-                      : 'no tip-force · sports on normal cadence'}
+                      : 'tip-force off · sports normal cadence'}
                   </span>
                 </div>
                 <div className="vault-board-row">
@@ -628,6 +632,65 @@ export default function App() {
                       return (
                         tr.label ||
                         `tip radar n=${tr.n ?? '—'} T-5=${tr.t5 ?? 0} T-15=${tr.t15 ?? 0}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">empty</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const e =
+                          snap?.desk?.empty_card ||
+                          (snap?.desk?.master as { empty_card?: { pass?: boolean } } | undefined)
+                            ?.empty_card
+                        if (!e || e.pass == null) return undefined
+                        return e.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const e =
+                        snap?.desk?.empty_card ||
+                        (snap?.desk?.master as {
+                          empty_card?: { label?: string; pass?: boolean; p50_s?: number }
+                        } | undefined)?.empty_card
+                      if (!e) return 'empty CARD pending'
+                      return e.label || `empty CARD p50=${e.p50_s ?? '—'}s`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">near-miss</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const n =
+                          snap?.desk?.near_miss ||
+                          (snap?.desk?.master as {
+                            near_miss?: { promote_ready?: boolean }
+                          } | undefined)?.near_miss
+                        if (!n) return undefined
+                        return n.promote_ready ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const n =
+                        snap?.desk?.near_miss ||
+                        (snap?.desk?.master as {
+                          near_miss?: {
+                            label?: string
+                            promote_ready?: boolean
+                            auto_promote?: boolean
+                          }
+                        } | undefined)?.near_miss
+                      if (!n) return 'near-miss pending'
+                      return (
+                        (n.label ||
+                          `near-miss ready=${Boolean(n.promote_ready)}`) +
+                        ' · auto_promote=False'
                       )
                     })()}
                   </span>
