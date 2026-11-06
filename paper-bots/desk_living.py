@@ -860,6 +860,7 @@ def living_compact_card(
         doctor_part = "doctor=stale"
     else:
         doctor_part = "doctor=n/a"
+    masters_sunday_part = f"masters_sunday={quiet_age}"
     parts = [
         f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')}",
         f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'}",
@@ -867,6 +868,7 @@ def living_compact_card(
         f"bleed={bleed.get('ratio')}",
         quiet_part,
         quiet_age_part,
+        masters_sunday_part,
         ritual_part,
         doctor_part,
         expand_part,
@@ -882,6 +884,8 @@ def living_compact_card(
         "quiet_age_h": quiet_age_h,
         "sunday_quiet_age": quiet_age,
         "sunday_quiet_age_label": quiet_age_part,
+        "masters_sunday_label": masters_sunday_part,
+        "masters_sunday_quiet": f"sunday quiet {quiet_age_part} (observe)",
         "expand_label": expand_part,
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
@@ -2151,6 +2155,14 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         slim["compact_sunday_quiet_age_label"] = (
             compact.get("sunday_quiet_age_label")
             or slim["sunday_quiet_age_label"]
+        )
+        slim["compact_masters_sunday_label"] = (
+            compact.get("masters_sunday_label")
+            or f"masters_sunday={slim['quiet_age']}"
+        )
+        slim["compact_masters_sunday_quiet"] = (
+            compact.get("masters_sunday_quiet")
+            or slim["masters_sunday_quiet"]
         )
     slim["quiet_doctor"] = (
         "quiet="

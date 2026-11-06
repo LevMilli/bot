@@ -948,18 +948,26 @@ export default function App() {
                             doctor_label?: string
                             quiet_age?: string
                             quiet_age_h?: number | null
+                            masters_sunday_label?: string
                             parts?: string[]
                           }
                         } | undefined)?.compact
                       if (!c) return 'living compact pending'
-                      // Prefer full label (quiet → ritual → doctor → expand).
-                      const base = c.label || 'living compact'
+                      // Prefer full label (quiet → masters_sunday → ritual → doctor → expand).
+                      let base = c.label || 'living compact'
                       const age =
                         c.quiet_age ||
                         (c.quiet_age_h != null ? `${c.quiet_age_h}h` : null)
-                      return age && !String(base).includes('quiet_age=')
-                        ? `${base} · quiet_age=${age}`
-                        : base
+                      if (age && !String(base).includes('quiet_age=')) {
+                        base = `${base} · quiet_age=${age}`
+                      }
+                      if (
+                        c.masters_sunday_label &&
+                        !String(base).includes('masters_sunday=')
+                      ) {
+                        base = `${base} · ${c.masters_sunday_label}`
+                      }
+                      return base
                     })()}
                   </span>
                 </div>
@@ -2272,10 +2280,15 @@ export default function App() {
                           }
                         } | undefined)?.betting_expand_gate
                       if (!g) return 'expand gate pending'
-                      if (g.blocked) {
-                        return g.soft_copy || g.reason || g.label || 'betting expand BLOCKED'
-                      }
-                      return g.label || 'expand ok (paper)'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = g.blocked
+                        ? g.soft_copy || g.reason || g.label || 'betting expand BLOCKED'
+                        : g.label || 'expand ok (paper)'
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>
