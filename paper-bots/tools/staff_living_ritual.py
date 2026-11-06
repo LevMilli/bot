@@ -74,6 +74,18 @@ def format_discord(payload: dict) -> str:
         f"• Expand sunday: {expand_bit} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    floors_ok = payload.get("floors_ok")
+    floors_bit = (
+        "floors=ok"
+        if floors_ok
+        else "floors=soft"
+        if floors_ok is False
+        else "floors=n/a"
+    )
+    lines.append(
+        f"• Floors sunday: {floors_bit} · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -215,6 +227,10 @@ def main() -> int:
                 "(observe · never softens floors)"
             )
             print(
+                f"ruin sunday: ruin observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -291,6 +307,11 @@ def main() -> int:
     )
     payload["expand_sunday_quiet"] = (
         f"{'expand=ok' if expand_ok else 'expand=blocked' if expand_ok is False else 'expand=n/a'} "
+        f"· sunday quiet {sunday_quiet_age_label} "
+        "(observe · never softens floors)"
+    )
+    payload["floors_sunday_quiet"] = (
+        f"{'floors=ok' if floors_ok else 'floors=soft' if floors_ok is False else 'floors=n/a'} "
         f"· sunday quiet {sunday_quiet_age_label} "
         "(observe · never softens floors)"
     )

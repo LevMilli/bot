@@ -891,6 +891,11 @@ def living_compact_card(
             f"{expand_part} · sunday quiet {quiet_age_part} "
             "(observe · never softens floors)"
         ),
+        "floors_sunday_quiet": (
+            f"{('floors=ok' if (isinstance(src.get('fee_floors_assert'), dict) and src['fee_floors_assert'].get('all_ok') is True) else 'floors=soft' if (isinstance(src.get('fee_floors_assert'), dict) and src['fee_floors_assert'].get('all_ok') is False) else 'floors=n/a')} "
+            f"· sunday quiet {quiet_age_part} "
+            "(observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2195,6 +2200,10 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         slim["compact_expand_sunday_quiet"] = (
             compact.get("expand_sunday_quiet")
             or slim.get("expand_sunday_quiet")
+        )
+        slim["compact_floors_sunday_quiet"] = (
+            compact.get("floors_sunday_quiet")
+            or slim.get("floors_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
