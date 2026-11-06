@@ -341,13 +341,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Swarm city lights | `desk_row.swarm_lights` + Masters `swarm_lights` |
 | Injury staff inbox | `helpers/injury_wire_inbox.json` via `staff_ingest` |
 
+### Living upgrade — AI / completions HUD
+
+| Ticket | Where |
+| --- | --- |
+| raise_Φ on Masters priority | `master_summary.priority` from `living_ai` |
+| Completions on desk/tellers | `desk_row.completions` + teller_memory fact |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Masters HUD copy for living_ai | surface raise_Φ tickets in priority |
-| Completions KPI on tellers | memory line for eligible fills today |
+| Hillclimb allowlist card | observe-only proposed levers board |
+| Feature coverage alert | warn when feature-store quiet ≥6h weekday |
 
 ## Hard rules unchanged
 

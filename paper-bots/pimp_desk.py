@@ -2451,6 +2451,29 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             pass
     except Exception as exc:  # noqa: BLE001
         desk_row["swarm_lights"] = {"paper_only": True, "error": type(exc).__name__}
+    # Completions KPI line for tellers / vault board.
+    try:
+        import desk_living
+        comp = desk_living.completions_summary(root)
+        desk_row["completions"] = comp
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["completions"] = desk_row["master"].get("completions") or comp
+        try:
+            import teller_memory
+            teller_memory.remember(
+                root,
+                kind="facts",
+                text=(
+                    f"eligible completions today "
+                    f"{comp.get('eligible_completions_today') or 0} "
+                    f"(pnl {float(comp.get('eligible_pnl_today') or 0):+.2f})"
+                )[:200],
+                bot_id="desk",
+            )
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        desk_row["completions"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
