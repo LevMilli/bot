@@ -279,6 +279,10 @@ def living_upgrade_board(root: str | None = None) -> dict:
         "clv_closer_digest.json",
         "injury_wire_digest.json",
         "eia_scout_digest.json",
+        "calib_nag_digest.json",
+        "hard_stop_clerk_digest.json",
+        "near_miss_clerk_digest.json",
+        "bleed_clerk_digest.json",
         "calendar_digest.json",
     ):
         path = os.path.join(_root(root), "helpers", name)
