@@ -52,6 +52,7 @@ def _text(board: dict) -> str:
     expand = board.get("betting_expand_gate") if isinstance(board.get("betting_expand_gate"), dict) else {}
     doctor_age = board.get("doctor_age") if isinstance(board.get("doctor_age"), dict) else {}
     ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
+    sunday = board.get("sunday_packet") if isinstance(board.get("sunday_packet"), dict) else {}
     lines = [
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
@@ -74,6 +75,7 @@ def _text(board: dict) -> str:
         ),
         f"doctor_age: {doctor_age.get('label') or '—'}",
         f"ritual: {ritual.get('label') or '—'}",
+        f"sunday: {sunday.get('label') or '—'}",
         f"chicago_today: {board.get('chicago_today')}",
     ]
     return "\n".join(lines)

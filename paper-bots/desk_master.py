@@ -28,6 +28,7 @@ _PRIORITY_FAMILY_PREFIXES = (
     ("feature", ("feature quiet", "weekday alert: feature")),
     ("expand", ("betting expand",)),
     ("doctor", ("doctor", "living doctor")),
+    ("ritual", ("ritual", "ritual_ok")),
     ("tip", ("tip radar", "tip T")),
     ("pulse", ("clerk pulse",)),
 )
@@ -764,6 +765,11 @@ def master_summary(
     doctor_age = (living or {}).get("doctor_age") if isinstance(living, dict) else None
     if isinstance(doctor_age, dict) and doctor_age.get("stale"):
         priority.append(str(doctor_age.get("label") or "doctor stale")[:120])
+    ritual = (living or {}).get("ritual_observe") if isinstance(living, dict) else None
+    if isinstance(ritual, dict) and (
+        ritual.get("ritual_ok") is False or ritual.get("exit_ok") is False
+    ):
+        priority.append(str(ritual.get("label") or "ritual not ready")[:120])
     eia_bo = (living or {}).get("eia_blackout") if isinstance(living, dict) else None
     if isinstance(eia_bo, dict) and eia_bo.get("blocked"):
         priority.insert(0, str(eia_bo.get("label") or "EIA blackout ACTIVE")[:120])
@@ -868,6 +874,11 @@ def master_summary(
         ),
         "doctor_age": (
             (living or {}).get("doctor_age")
+            if isinstance(living, dict)
+            else None
+        ),
+        "ritual_observe": (
+            (living or {}).get("ritual_observe")
             if isinstance(living, dict)
             else None
         ),

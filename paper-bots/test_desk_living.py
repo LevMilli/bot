@@ -267,12 +267,21 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("swarm", compact.get("label") or "")
             self.assertIn("quiet_label", compact)
             self.assertTrue(any("quiet" in str(p).lower() for p in (compact.get("parts") or [])))
+            self.assertIn("expand_label", compact)
+            self.assertTrue(any(str(p).startswith("expand=") for p in (compact.get("parts") or [])))
             ritual = desk_living.ritual_observe_chip(tmp)
             self.assertIn("ritual_ok", ritual)
             self.assertIn("exit_ok", ritual)
             self.assertFalse(ritual.get("auto_publish"))
             self.assertTrue(ritual["fee_floors_locked"])
             self.assertIn("ritual_observe", board2)
+            import desk_master
+            prio = desk_master.finalize_living_priority([
+                ritual.get("label") or "ritual_ok=False exit_ok=False",
+                "ritual not ready — staff review",
+                "noise 1",
+            ])
+            self.assertEqual(sum(1 for t in prio if t.lower().startswith("ritual")), 1)
             # Fresh empty root → blocked until seed fills digests.
             with tempfile.TemporaryDirectory() as empty:
                 thin = desk_living.betting_expand_gate(empty)

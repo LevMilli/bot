@@ -730,13 +730,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Living compact include quiet | compact parts quiet label |
 | Ritual exit note on vault | ritual_ok observe chip |
 
-### Next
+### Living upgrade — ritual priority / sunday text / compact expand
 
 | Ticket | Where |
 | --- | --- |
 | Ritual observe Masters priority | stale ritual rail insert |
 | Living status sunday text | sunday packet line |
 | Compact include expand | expand blocked in compact |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Living selfcheck ritual_observe | include in selfcheck payload |
+| Staff ritual --observe flag | print ritual_observe only |
+| Priority family ritual unit | assert ritual dedupe |
 
 ## Hard rules unchanged
 

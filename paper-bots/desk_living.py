@@ -763,18 +763,25 @@ def living_compact_card(
         green = green_day_board(root, bots=bots)
         bleed = bleed_chip(root, bots=bots)
         quiet = feature_store_quiet_alert(root)
+        expand = betting_expand_gate(root)
         src = {
             "insight_swarm": swarm,
             "timer_heartbeat": timer,
             "green_day": green,
             "bleed": bleed,
             "feature_quiet": quiet,
+            "betting_expand_gate": expand,
         }
     swarm = src.get("insight_swarm") if isinstance(src.get("insight_swarm"), dict) else {}
     timer = src.get("timer_heartbeat") if isinstance(src.get("timer_heartbeat"), dict) else {}
     green = src.get("green_day") if isinstance(src.get("green_day"), dict) else {}
     bleed = src.get("bleed") if isinstance(src.get("bleed"), dict) else {}
     quiet = src.get("feature_quiet") if isinstance(src.get("feature_quiet"), dict) else {}
+    expand = (
+        src.get("betting_expand_gate")
+        if isinstance(src.get("betting_expand_gate"), dict)
+        else {}
+    )
     quiet_part = (
         str(quiet.get("label") or "").strip()
         or (
@@ -782,12 +789,20 @@ def living_compact_card(
             + (f" age={quiet.get('age_hours')}h" if quiet.get("age_hours") is not None else "")
         )
     )
+    expand_part = (
+        "expand=blocked"
+        if expand.get("blocked")
+        else "expand=ok"
+        if expand.get("allow_betting_expand") or expand.get("blocked") is False
+        else "expand=n/a"
+    )
     parts = [
         f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')}",
         f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'}",
         f"green={green.get('green_n')}",
         f"bleed={bleed.get('ratio')}",
         quiet_part,
+        expand_part,
     ]
     return {
         "paper_only": True,
@@ -795,6 +810,7 @@ def living_compact_card(
         "live_orders_enabled": False,
         "parts": parts,
         "quiet_label": quiet_part,
+        "expand_label": expand_part,
         "label": " · ".join(str(p) for p in parts),
         "note": "Compact living card — floors locked; paper only.",
     }
