@@ -38,6 +38,13 @@ class DeskLivingTests(unittest.TestCase):
             cov = desk_living.feature_store_coverage(tmp)
             self.assertEqual(cov["n"], 1)
             self.assertEqual(cov["skips"], 1)
+            self.assertTrue(cov.get("last_at"))
+            quiet = desk_living.feature_store_quiet_alert(tmp)
+            self.assertIn("quiet", quiet)
+            self.assertTrue(quiet["fee_floors_locked"])
+            board = desk_living.living_upgrade_board(tmp)
+            self.assertIn("feature_quiet", board)
+            self.assertIn("hillclimb_lever", board)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

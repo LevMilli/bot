@@ -222,11 +222,15 @@ def record_eval_features(
     )
 
 
+FEATURE_QUIET_HOURS = 6.0
+
+
 def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_ROWS_READ) -> dict:
     path = feature_store_path(root)
     n = 0
     buys = 0
     skips = 0
+    last_at = None
     if os.path.isfile(path):
         try:
             with open(path, encoding="utf-8") as handle:
@@ -248,6 +252,9 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
                         buys += 1
                     else:
                         skips += 1
+                    stamp = row.get("at")
+                    if stamp:
+                        last_at = str(stamp)
         except OSError:
             pass
     return {
@@ -255,9 +262,56 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
         "n": n,
         "buys": buys,
         "skips": skips,
+        "last_at": last_at,
         "path": os.path.basename(path),
         "fee_floors_locked": True,
         "note": "Decision feature store for living AI learning. Floors locked.",
+    }
+
+
+def feature_store_quiet_alert(
+    root: str | None = None,
+    *,
+    now: datetime | None = None,
+    quiet_hours: float = FEATURE_QUIET_HOURS,
+) -> dict:
+    """Weekday alert when feature store has been quiet too long (learn data starved)."""
+    now = now or datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    now = now.astimezone(CT)
+    cov = feature_store_coverage(root)
+    last_at = cov.get("last_at")
+    age_h = None
+    if last_at:
+        try:
+            stamp = datetime.fromisoformat(str(last_at).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=CT)
+            age_h = round((now - stamp.astimezone(CT)).total_seconds() / 3600.0, 2)
+        except ValueError:
+            age_h = None
+    weekday = now.weekday() < 5  # Mon–Fri Chicago
+    quiet = bool(
+        weekday
+        and (age_h is None or age_h + 1e-12 >= float(quiet_hours))
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "weekday": weekday,
+        "quiet": quiet,
+        "age_hours": age_h,
+        "quiet_hours": float(quiet_hours),
+        "n": cov.get("n"),
+        "last_at": last_at,
+        "alert": (
+            f"WEEKDAY ALERT: feature store quiet ≥{quiet_hours:.0f}h — "
+            "learn loop starved (floors still locked)."
+            if quiet
+            else ""
+        ),
+        "note": "Observe-only coverage alert. Never softens venue floors.",
     }
 
 
@@ -423,16 +477,25 @@ def insight_swarm_ratio(root: str | None = None) -> dict:
 def living_upgrade_board(root: str | None = None, bots: list | None = None) -> dict:
     """Masters card: data + completions health for the living upgrade."""
     feat = feature_store_coverage(root)
+    quiet = feature_store_quiet_alert(root)
     comp = completions_summary(root)
     ai = living_ai_health(root, bots=bots)
     swarm = insight_swarm_ratio(root)
     helpers = swarm.get("insight_helpers") or {}
+    hillclimb = None
+    try:
+        import desk_roi_plan
+        hillclimb = desk_roi_plan.hillclimb_lever_status(root)
+    except Exception:
+        hillclimb = None
     return {
         "paper_only": True,
         "feature_store": feat,
+        "feature_quiet": quiet,
         "completions": comp,
         "living_ai": ai,
         "insight_swarm": swarm,
+        "hillclimb_lever": hillclimb,
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),

@@ -348,13 +348,20 @@ Interactive: Positive ROI Master Plan canvas.
 | raise_Φ on Masters priority | `master_summary.priority` from `living_ai` |
 | Completions on desk/tellers | `desk_row.completions` + teller_memory fact |
 
+### Living upgrade — feature quiet alert + hillclimb card
+
+| Ticket | Where |
+| --- | --- |
+| Feature quiet alert | `desk_living.feature_store_quiet_alert` (≥6h weekday) |
+| Hillclimb lever card | living board + Masters `hillclimb_lever` status |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Hillclimb allowlist card | observe-only proposed levers board |
-| Feature coverage alert | warn when feature-store quiet ≥6h weekday |
+| Staff hillclimb pick UX | document `staff_pick_hillclimb_lever` path |
+| City 3D light for swarm | optional BorderScreens / teller chip |
+| Dual-control paper checklist HUD | Gate A/B stub visibility |
 
 ## Hard rules unchanged
 
