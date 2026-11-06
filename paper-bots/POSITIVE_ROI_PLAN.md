@@ -674,13 +674,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Helper Gate A vault | promote_ready helpers |
 | Feature quiet pager vault | pager copy soft |
 
-### Next
+### Living upgrade — skip taxonomy / distance / quant vault
 
 | Ticket | Where |
 | --- | --- |
 | Skip taxonomy vault | top skip codes observe |
 | Distance empty vault | empty_card_pass fail |
 | Quant fit vault tint | fit_pass fail amber |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Bookkeeper vault row | fee ledger gaps |
+| Reporter vault tint | auto_publish False assert |
+| Empty-card bee vault | breaches amber |
 
 ## Hard rules unchanged
 

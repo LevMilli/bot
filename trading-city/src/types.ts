@@ -366,6 +366,34 @@ export type Desk = {
     note?: string
     error?: string
   }
+  skip_taxonomy?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    top_code?: string
+    top_n?: number
+    label?: string
+    note?: string
+    error?: string
+  }
+  distance_clerk?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    empty_card_pass?: boolean
+    firm_offers_n?: number
+    label?: string
+    note?: string
+    error?: string
+  }
+  quant_clerk?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    fit_pass?: boolean
+    fit_rate?: number | null
+    auto_write?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
   clerk_pulse?: {
     paper_only?: boolean
     fee_floors_locked?: boolean

@@ -1074,6 +1074,80 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">skips</span>
+                  <span>
+                    {(() => {
+                      const s =
+                        snap?.desk?.skip_taxonomy ||
+                        (snap?.desk?.master as {
+                          skip_taxonomy?: { label?: string; top_code?: string; top_n?: number }
+                        } | undefined)?.skip_taxonomy
+                      if (!s) return 'skip taxonomy pending'
+                      return s.label || (s.top_code ? `top skip ${s.top_code} ×${s.top_n ?? 0}` : 'skip taxonomy quiet')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">distance</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const d =
+                          snap?.desk?.distance_clerk ||
+                          (snap?.desk?.master as {
+                            distance_clerk?: { empty_card_pass?: boolean }
+                          } | undefined)?.distance_clerk
+                        if (!d || d.empty_card_pass == null) return undefined
+                        return d.empty_card_pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const d =
+                        snap?.desk?.distance_clerk ||
+                        (snap?.desk?.master as {
+                          distance_clerk?: { label?: string; empty_card_pass?: boolean }
+                        } | undefined)?.distance_clerk
+                      if (!d) return 'distance clerk pending'
+                      return d.label || `distance empty_ok=${d.empty_card_pass ?? '—'}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">quant</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const q =
+                          snap?.desk?.quant_clerk ||
+                          (snap?.desk?.master as {
+                            quant_clerk?: { fit_pass?: boolean }
+                          } | undefined)?.quant_clerk
+                        if (!q || q.fit_pass == null) return undefined
+                        return q.fit_pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const q =
+                        snap?.desk?.quant_clerk ||
+                        (snap?.desk?.master as {
+                          quant_clerk?: {
+                            label?: string
+                            fit_pass?: boolean
+                            fit_rate?: number | null
+                            auto_write?: boolean
+                          }
+                        } | undefined)?.quant_clerk
+                      if (!q) return 'quant clerk pending'
+                      return (
+                        (q.label || `quant fit_pass=${q.fit_pass ?? '—'} rate=${q.fit_rate ?? '—'}`) +
+                        ' · auto_write=False'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">digests</span>
                   <span
                     style={{
