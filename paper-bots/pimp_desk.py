@@ -2683,6 +2683,30 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["clv_closer"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["timer_digest"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        cal = desk_living.calendar_scanner_chip(root)
+        ebo = desk_living.eia_blackout_chip(root)
+        living_board = None
+        if isinstance(desk_row.get("master"), dict):
+            plan = (desk_row["master"].get("roi_plan") or {})
+            living_board = plan.get("living_upgrade") if isinstance(plan, dict) else None
+        compact = desk_living.living_compact_card(root, bots=bots, board=living_board)
+        desk_row["calendar_scanner"] = cal
+        desk_row["eia_blackout"] = ebo
+        desk_row["living_compact"] = compact
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["calendar_scanner"] = (
+                desk_row["master"].get("calendar_scanner") or cal
+            )
+            desk_row["master"]["eia_blackout"] = (
+                desk_row["master"].get("eia_blackout") or ebo
+            )
+            desk_row["master"]["compact"] = desk_row["master"].get("compact") or compact
+    except Exception as exc:  # noqa: BLE001
+        desk_row["calendar_scanner"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["eia_blackout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["living_compact"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}
