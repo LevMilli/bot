@@ -850,13 +850,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Compact doctor_fresh export json | status --json compact flats |
 | Ritual CLI doctor_soft note | observe tip line |
 
-### Next
+### Living upgrade — vault doctor hint / doctor_age soft alias / desk verify
 
 | Ticket | Where |
 | --- | --- |
 | Vault hint doctor draft | toolbar paste path |
 | Doctor age soft in status json | alias doctor_soft_copy |
 | Masters doctor_soft on desk | desk_row already wired verify |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Compact quiet+doctor status | one-liner staff HUD |
+| Ritual discord doctor_fresh | format_discord line |
+| City doctor draft tint | stale color on draft row |
 
 ## Hard rules unchanged
 

@@ -224,31 +224,52 @@ def main() -> int:
             print(json.dumps(doc, indent=2, sort_keys=True, default=str))
         return 0 if doc.get("ok") else 2
     if args.action == "json":
+        compact_j = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        ritual_j = (
+            board.get("ritual_observe")
+            if isinstance(board.get("ritual_observe"), dict)
+            else {}
+        )
+        doctor_age_j = (
+            board.get("doctor_age") if isinstance(board.get("doctor_age"), dict) else {}
+        )
+        doctor_fresh_j = ritual_j.get("doctor_fresh")
+        if doctor_fresh_j is None and doctor_age_j:
+            doctor_fresh_j = not bool(doctor_age_j.get("stale"))
+        ritual_soft_j = (
+            (
+                f"**Masters ritual** (paper · floors locked · live=False)\n"
+                f"ritual_ok={ritual_j.get('ritual_ok')} "
+                f"exit_ok={ritual_j.get('exit_ok')} "
+                f"doctor_fresh={ritual_j.get('doctor_fresh')}\n"
+                f"{ritual_j.get('label') or 'ritual observe'}\n"
+                f"_staff paste only · never auto-posts · never enables live_"
+            )
+            if ritual_j
+            else None
+        )
+        doctor_soft_j = (
+            (
+                f"**Living doctor age** (paper · floors locked · live=False)\n"
+                f"doctor="
+                f"{'fresh' if doctor_fresh_j else 'stale' if doctor_fresh_j is False else 'n/a'} "
+                f"doctor_fresh={doctor_fresh_j}\n"
+                f"{doctor_age_j.get('label') or 'doctor age'}\n"
+                f"ritual draft: make living-ritual-discord\n"
+                f"_staff paste only · never auto-posts · never enables live_"
+            )
+            if ritual_j or doctor_age_j
+            else None
+        )
         print(json.dumps({
             "paper_only": True,
             "fee_floors_locked": True,
             "live_orders_enabled": False,
             "compact": board.get("compact"),
-            "compact_ritual_ok": (
-                (board.get("compact") or {}).get("ritual_ok")
-                if isinstance(board.get("compact"), dict)
-                else None
-            ),
-            "compact_ritual_label": (
-                (board.get("compact") or {}).get("ritual_label")
-                if isinstance(board.get("compact"), dict)
-                else None
-            ),
-            "compact_doctor_fresh": (
-                (board.get("compact") or {}).get("doctor_fresh")
-                if isinstance(board.get("compact"), dict)
-                else None
-            ),
-            "compact_doctor_label": (
-                (board.get("compact") or {}).get("doctor_label")
-                if isinstance(board.get("compact"), dict)
-                else None
-            ),
+            "compact_ritual_ok": compact_j.get("ritual_ok"),
+            "compact_ritual_label": compact_j.get("ritual_label"),
+            "compact_doctor_fresh": compact_j.get("doctor_fresh"),
+            "compact_doctor_label": compact_j.get("doctor_label"),
             "insight_swarm": board.get("insight_swarm"),
             "feature_quiet": board.get("feature_quiet"),
             "feature_quiet_pager": board.get("feature_quiet_pager"),
@@ -262,53 +283,13 @@ def main() -> int:
             "teller_living": board.get("teller_living"),
             "timer_heartbeat": board.get("timer_heartbeat"),
             "doctor_age": board.get("doctor_age"),
-            "doctor_fresh": (
-                (board.get("ritual_observe") or {}).get("doctor_fresh")
-                if isinstance(board.get("ritual_observe"), dict)
-                and (board.get("ritual_observe") or {}).get("doctor_fresh") is not None
-                else (
-                    not bool((board.get("doctor_age") or {}).get("stale"))
-                    if isinstance(board.get("doctor_age"), dict)
-                    else None
-                )
-            ),
+            "doctor_fresh": doctor_fresh_j,
             "ritual_observe": board.get("ritual_observe"),
-            "ritual_ok": (
-                (board.get("ritual_observe") or {}).get("ritual_ok")
-                if isinstance(board.get("ritual_observe"), dict)
-                else None
-            ),
-            "ritual_exit_ok": (
-                (board.get("ritual_observe") or {}).get("exit_ok")
-                if isinstance(board.get("ritual_observe"), dict)
-                else None
-            ),
-            "ritual_soft_copy": (
-                (
-                    f"**Masters ritual** (paper · floors locked · live=False)\n"
-                    f"ritual_ok={(board.get('ritual_observe') or {}).get('ritual_ok')} "
-                    f"exit_ok={(board.get('ritual_observe') or {}).get('exit_ok')} "
-                    f"doctor_fresh={(board.get('ritual_observe') or {}).get('doctor_fresh')}\n"
-                    f"{(board.get('ritual_observe') or {}).get('label') or 'ritual observe'}\n"
-                    f"_staff paste only · never auto-posts · never enables live_"
-                )
-                if isinstance(board.get("ritual_observe"), dict)
-                else None
-            ),
-            "doctor_soft_copy": (
-                (
-                    f"**Living doctor age** (paper · floors locked · live=False)\n"
-                    f"doctor="
-                    f"{'fresh' if (board.get('ritual_observe') or {}).get('doctor_fresh') else 'stale' if (board.get('ritual_observe') or {}).get('doctor_fresh') is False else 'n/a'} "
-                    f"doctor_fresh={(board.get('ritual_observe') or {}).get('doctor_fresh')}\n"
-                    f"{(board.get('doctor_age') or {}).get('label') or 'doctor age'}\n"
-                    f"ritual draft: make living-ritual-discord\n"
-                    f"_staff paste only · never auto-posts · never enables live_"
-                )
-                if isinstance(board.get("ritual_observe"), dict)
-                or isinstance(board.get("doctor_age"), dict)
-                else None
-            ),
+            "ritual_ok": ritual_j.get("ritual_ok") if ritual_j else None,
+            "ritual_exit_ok": ritual_j.get("exit_ok") if ritual_j else None,
+            "ritual_soft_copy": ritual_soft_j,
+            "doctor_soft_copy": doctor_soft_j,
+            "doctor_age_soft_copy": doctor_soft_j,  # alias
             "sunday_packet": board.get("sunday_packet"),
             "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),

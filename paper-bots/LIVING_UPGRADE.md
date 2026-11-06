@@ -64,7 +64,8 @@ python3 tools/staff_living_ritual.py --observe --json  # flatten ritual_ok / exi
 ```
 
 Doctor age marker: `desk_living_doctor.json` (gitignored). Snapshot observes without rewriting; CLI/ritual records.  
-`make living-ritual-observe` never writes the doctor marker — use full `make living-ritual` weekly.
+`make living-ritual-observe` never writes the doctor marker — use full `make living-ritual` weekly.  
+Desk/Masters expose `doctor_soft_copy` (alias `doctor_age_soft_copy`) for staff paste — never auto-posts.
 
 ## Hire order
 
