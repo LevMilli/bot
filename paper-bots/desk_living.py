@@ -896,6 +896,13 @@ def living_compact_card(
             f"· sunday quiet {quiet_age_part} "
             "(observe · never softens floors)"
         ),
+        "ruin_sunday_quiet": (
+            f"{(src.get('ruin_drill_chip') or {}).get('label') or 'ruin observe'} "
+            f"· sunday quiet {quiet_age_part} "
+            "(observe · never softens floors)"
+            if isinstance(src.get("ruin_drill_chip"), dict)
+            else f"ruin observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2181,6 +2188,11 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{floors_bit} · sunday quiet {slim['sunday_quiet_age_label']} "
         "(observe · never softens floors)"
     )
+    ruin_chip = board.get("ruin_drill_chip") if isinstance(board.get("ruin_drill_chip"), dict) else {}
+    slim["ruin_sunday_quiet"] = (
+        f"{ruin_chip.get('label') or 'ruin observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2204,6 +2216,10 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         slim["compact_floors_sunday_quiet"] = (
             compact.get("floors_sunday_quiet")
             or slim.get("floors_sunday_quiet")
+        )
+        slim["compact_ruin_sunday_quiet"] = (
+            compact.get("ruin_sunday_quiet")
+            or slim.get("ruin_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="

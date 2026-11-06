@@ -1114,13 +1114,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual observe ruin sunday | observe tip |
 | Status text ruin sunday | print line |
 
-### Next
+### Living upgrade — ruin sunday discord/export/compact (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Ritual discord ruin sunday | discord line |
 | Export ruin_sunday_quiet | living_board_export |
-| Compact ruin sunday twin | compact field |
+| Compact ruin sunday twin | compact.ruin_sunday_quiet |
+| Status flatten ruin sunday | status --json |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault hill sunday quiet | hill row hint |
+| Vault swarm sunday quiet | swarm row hint |
+| Ritual discord gaps sunday | discord line |
 
 ## Hard rules unchanged
 
