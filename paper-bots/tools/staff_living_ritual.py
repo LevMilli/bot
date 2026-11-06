@@ -5,6 +5,7 @@ Staff weekly living ritual — gaps, ruin, floors, expand, doctor (never publish
 Usage (from paper-bots/):
   python3 tools/staff_living_ritual.py
   python3 tools/staff_living_ritual.py --json
+  python3 tools/staff_living_ritual.py --discord
 """
 from __future__ import annotations
 
@@ -21,10 +22,32 @@ if ROOT not in sys.path:
 import desk_living
 
 
+def format_discord(payload: dict) -> str:
+    steps = payload.get("steps") if isinstance(payload.get("steps"), dict) else {}
+    lines = [
+        "**Living weekly ritual** (draft — staff paste only)",
+        f"_paper only · floors locked · live={bool(payload.get('live_orders_enabled'))} · auto_publish=False_",
+        "",
+        f"ritual_ok={payload.get('ok')}",
+        "",
+    ]
+    for name in ("gaps", "ruin", "floors", "expand", "doctor"):
+        row = steps.get(name) if isinstance(steps.get(name), dict) else {}
+        if name in ("gaps", "ruin") and row.get("copy"):
+            lines.append(row["copy"])
+            lines.append("")
+        else:
+            lines.append(f"• **{name}**: {row.get('label') or '—'}")
+    lines.append("")
+    lines.append(str(payload.get("note") or "Never invent fills; never soften floors; never enable live."))
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Staff weekly living ritual.")
     parser.add_argument("--root", default=ROOT)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--discord", action="store_true")
     args = parser.parse_args()
     root = args.root
 
@@ -33,7 +56,7 @@ def main() -> int:
         ("ruin", desk_living.ruin_drill_page(root)),
         ("floors", desk_living.fee_floors_assert(root)),
         ("expand", desk_living.betting_expand_gate(root)),
-        ("doctor", desk_living.living_doctor(root)),
+        ("doctor", desk_living.living_doctor(root, record=True)),
     ]
     payload = {
         "paper_only": True,
@@ -51,7 +74,9 @@ def main() -> int:
             "Never invent fills; never soften floors; never enable live."
         ),
     }
-    if args.json:
+    if args.discord:
+        print(format_discord(payload))
+    elif args.json:
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
     else:
         print("Living weekly ritual (paper only · floors locked · live=False)")

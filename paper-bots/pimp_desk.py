@@ -2756,7 +2756,9 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["betting_expand_gate"] = desk_living.betting_expand_gate(
             root, remember=True,
         )
-        desk_row["living_doctor"] = desk_living.living_doctor(root)
+        # Snapshot path observes doctor without rewriting the weekly marker.
+        desk_row["living_doctor"] = desk_living.living_doctor(root, record=False)
+        desk_row["doctor_age"] = desk_living.doctor_age_chip(root)
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["teller_living"] = (
                 desk_row["master"].get("teller_living") or tl
