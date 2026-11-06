@@ -651,6 +651,12 @@ def master_summary(
     near_miss = (living or {}).get("near_miss") if isinstance(living, dict) else None
     if isinstance(near_miss, dict) and near_miss.get("promote_ready"):
         priority.append("near-miss promote_ready — staff arm z|p only")
+    timer_hb = (living or {}).get("timer_heartbeat") if isinstance(living, dict) else None
+    if isinstance(timer_hb, dict) and not timer_hb.get("alive"):
+        priority.insert(0, str(timer_hb.get("label") or "timer DEAD")[:120])
+    gate_a = (living or {}).get("helper_gate_a") if isinstance(living, dict) else None
+    if isinstance(gate_a, dict) and int(gate_a.get("ready_n") or 0) > 0:
+        priority.append(str(gate_a.get("label") or "helper Gate A")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -703,6 +709,16 @@ def master_summary(
         ),
         "near_miss": (
             (living or {}).get("near_miss")
+            if isinstance(living, dict)
+            else None
+        ),
+        "timer_heartbeat": (
+            (living or {}).get("timer_heartbeat")
+            if isinstance(living, dict)
+            else None
+        ),
+        "helper_gate_a": (
+            (living or {}).get("helper_gate_a")
             if isinstance(living, dict)
             else None
         ),

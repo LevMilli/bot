@@ -396,13 +396,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Empty CARD chip | `desk_living.empty_card_chip` |
 | Near-miss chip | `desk_living.near_miss_chip` |
 
+### Living upgrade — timer heartbeat + helper Gate A
+
+| Ticket | Where |
+| --- | --- |
+| Timer heartbeat chip | `desk_living.timer_heartbeat_chip` |
+| Helper Gate A board | `desk_living.helper_gate_a_board` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Timer heartbeat chip | alive/dead on desk snapshot |
-| Helper Gate A board | attributed helper fills readiness |
+| Skip regret board chip | labeled regret EV on Masters |
+| Hard-stop shadow chip | sports shadow exits readiness |
 
 ## Hard rules unchanged
 
