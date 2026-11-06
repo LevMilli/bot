@@ -2665,6 +2665,24 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["hard_stop_clerk"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["bleed_clerk"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        stc = desk_living.skip_twin_clerk_chip(root)
+        clc = desk_living.clv_closer_chip(root)
+        tdc = desk_living.timer_digest_chip(root)
+        desk_row["skip_twin_clerk"] = stc
+        desk_row["clv_closer"] = clc
+        desk_row["timer_digest"] = tdc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_twin_clerk"] = (
+                desk_row["master"].get("skip_twin_clerk") or stc
+            )
+            desk_row["master"]["clv_closer"] = desk_row["master"].get("clv_closer") or clc
+            desk_row["master"]["timer_digest"] = desk_row["master"].get("timer_digest") or tdc
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_twin_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["clv_closer"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["timer_digest"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

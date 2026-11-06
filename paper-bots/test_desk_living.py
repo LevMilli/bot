@@ -119,6 +119,11 @@ class DeskLivingTests(unittest.TestCase):
             self.assertFalse(board2["near_miss_clerk"].get("auto_promote"))
             self.assertFalse(board2["hard_stop_clerk"].get("auto_promote"))
             self.assertTrue(board2["bleed_clerk"]["fee_floors_locked"])
+            self.assertIn("skip_twin_clerk", board2)
+            self.assertIn("clv_closer", board2)
+            self.assertIn("timer_digest", board2)
+            self.assertFalse(board2["skip_twin_clerk"].get("auto_promote"))
+            self.assertTrue(board2["clv_closer"]["fee_floors_locked"])
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
