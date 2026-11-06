@@ -328,6 +328,13 @@ class DeskLivingTests(unittest.TestCase):
             status_txt = staff_living_status._text(board2)
             self.assertIn("quiet_age_label:", status_txt)
             self.assertIn("quiet_age=", status_txt)
+            from tools import staff_living_ritual as _ritual_mod
+            # Status --json twin of ritual quiet_line (same observe wording).
+            quiet_line_expect = _ritual_mod.quiet_line({
+                "feature_quiet": board2.get("feature_quiet") or {},
+                "quiet_age": compact.get("quiet_age") or "n/a",
+            })
+            self.assertIn("Feature quiet", quiet_line_expect)
             parts = [str(p) for p in (compact.get("parts") or [])]
             quiet_i = next(i for i, p in enumerate(parts) if "quiet" in p.lower())
             ritual_i = next(i for i, p in enumerate(parts) if p.startswith("ritual="))
