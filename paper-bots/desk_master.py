@@ -611,6 +611,16 @@ def master_summary(
         priority.append(
             f"eligible completions today {completions.get('eligible_completions_today') or 0}"
         )
+    feature_quiet = (living or {}).get("feature_quiet") if isinstance(living, dict) else None
+    if isinstance(feature_quiet, dict) and feature_quiet.get("quiet") and feature_quiet.get("alert"):
+        priority.insert(0, str(feature_quiet.get("alert"))[:120])
+    hillclimb_lever = (living or {}).get("hillclimb_lever") if isinstance(living, dict) else None
+    if isinstance(hillclimb_lever, dict):
+        active = hillclimb_lever.get("active") if isinstance(hillclimb_lever.get("active"), dict) else None
+        if active:
+            priority.append(f"hillclimb lever active: {active.get('name') or active.get('lever')}")
+        else:
+            priority.append("hillclimb: no staff lever this Chicago week (observe)")
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -637,6 +647,8 @@ def master_summary(
         ),
         "living_ai": living_ai,
         "completions": completions,
+        "feature_quiet": feature_quiet,
+        "hillclimb_lever": hillclimb_lever,
         "note": (
             "Trading Masters — dual scoreboard for volume vs taxed EV. "
             "No profit guarantee. Fee floors unchanged."
