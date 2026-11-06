@@ -421,6 +421,13 @@ export type Desk = {
     auto_publish?: boolean
     chicago_today?: string
     scorecard_present?: boolean
+    ritual_ok?: boolean | null
+    ritual?: {
+      ritual_ok?: boolean | null
+      exit_ok?: boolean | null
+      make?: string
+      auto_publish?: boolean
+    }
     label?: string
     note?: string
     error?: string

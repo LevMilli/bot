@@ -2038,6 +2038,10 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["export"] = "living_board_v1"
     slim["ritual_ok"] = ritual.get("ritual_ok")
     slim["ritual_exit_ok"] = ritual.get("exit_ok")
+    compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+    if compact:
+        slim["compact_ritual_ok"] = compact.get("ritual_ok")
+        slim["compact_ritual_label"] = compact.get("ritual_label")
     if ritual:
         slim["ritual_soft_copy"] = (
             f"**Masters ritual** (paper · floors locked · live=False)\n"

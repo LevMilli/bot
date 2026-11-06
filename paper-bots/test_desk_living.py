@@ -251,6 +251,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("ritual_exit_ok", export2)
             self.assertIn("ritual_soft_copy", export2)
             self.assertIn("ritual_ok=", export2.get("ritual_soft_copy") or "")
+            self.assertIn("compact_ritual_ok", export2)
+            self.assertIn("compact_ritual_label", export2)
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))
