@@ -35,6 +35,7 @@ CLERK_MODULES = (
     "helpers.reporter_clerk",
     "helpers.quant_clerk",
     "helpers.skip_twin_clerk",
+    "helpers.sunday_packet",
 )
 
 

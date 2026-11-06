@@ -44,6 +44,7 @@ INSIGHT_HELPER_DIGESTS = (
     "reporter_clerk_digest.json",
     "quant_clerk_digest.json",
     "skip_twin_clerk_digest.json",
+    "sunday_living_packet.json",
     "clerk_pulse_digest.json",
     "calendar_digest.json",
 )
@@ -444,6 +445,33 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def skip_taxonomy_chip(root: str | None = None) -> dict:
+    """Top stable skip codes for teller rail / city chip (observe-only)."""
+    board = {}
+    try:
+        import desk_more
+        board = desk_more.skip_leaderboard(root) or {}
+    except Exception:
+        board = {}
+    top = list(board.get("stable_top") or board.get("top") or [])[:5]
+    head = top[0] if top and isinstance(top[0], dict) else {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "day": board.get("day"),
+        "top": top,
+        "top_code": head.get("code"),
+        "top_n": head.get("n"),
+        "weekend_share": board.get("weekend_share"),
+        "label": (
+            f"top skip {head.get('code')} ×{head.get('n')}"
+            if head.get("code")
+            else "skip taxonomy quiet"
+        ),
+        "note": board.get("note") or "Observe-only skip taxonomy chip.",
+    }
+
+
 def insight_swarm_ratio(root: str | None = None) -> dict:
     """Insight:betting headcount audit — living hire order requires ≥3:1 until M1≥0."""
     helpers = {}
@@ -504,6 +532,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "hillclimb_lever": hillclimb,
         "dual_control": dual,
         "ruin_drill": ruin,
+        "skip_taxonomy": skip_taxonomy_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),

@@ -664,6 +664,11 @@ def master_summary(
         "hillclimb_lever": hillclimb_lever,
         "dual_control": dual_control,
         "ruin_drill": ruin_drill,
+        "skip_taxonomy": (
+            (living or {}).get("skip_taxonomy")
+            if isinstance(living, dict)
+            else None
+        ),
         "live_orders_enabled": False,
         "note": (
             "Trading Masters — dual scoreboard for volume vs taxed EV. "

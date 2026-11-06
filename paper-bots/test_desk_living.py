@@ -50,6 +50,13 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue((board.get("dual_control") or {}).get("fee_floors_locked", True))
             self.assertIn("ruin_drill", board)
             self.assertIn("practiced_this_month", board.get("ruin_drill") or {})
+            self.assertIn("skip_taxonomy", board)
+            from helpers import sunday_packet
+            packet = sunday_packet.write_packet(tmp)
+            self.assertFalse(packet["auto_publish"])
+            self.assertFalse(packet["live_orders_enabled"])
+            self.assertTrue(os.path.isfile(sunday_packet.packet_path(tmp)))
+            self.assertIn("staff_checklist", packet)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
