@@ -157,6 +157,10 @@ class DeskLivingTests(unittest.TestCase):
                 tmp, headlines=[{"league": "NBA", "text": "star out"}], replace=True,
             )
             self.assertEqual(dig.get("n"), 1)
+            health = desk_living.living_self_check(tmp)
+            self.assertTrue(health["ok"])
+            self.assertTrue(health["fee_floors_locked"])
+            self.assertFalse(health["live_orders_enabled"])
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

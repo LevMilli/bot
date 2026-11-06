@@ -606,7 +606,18 @@ export default function App() {
                 </div>
                 <div className="vault-board-row">
                   <span className="vb-label">swarm</span>
-                  <span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const sw =
+                          snap?.desk?.swarm_lights || snap?.desk?.master?.swarm_lights
+                        if (!sw || sw.error) return undefined
+                        if (sw.pass || sw.color === 'green') return '#6fbf73'
+                        if (sw.color === 'amber' || sw.pass === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
                     {(() => {
                       const sw =
                         snap?.desk?.swarm_lights || snap?.desk?.master?.swarm_lights

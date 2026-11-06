@@ -501,13 +501,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Injury ingest CLI | `tools/staff_injury_ingest.py` |
 | Completions chip | `desk_living.completions_chip` + teller fact |
 
+### Living upgrade — calib tickets CLI + self_check + vault color
+
+| Ticket | Where |
+| --- | --- |
+| Calib tickets CLI | `tools/staff_calib_tickets.py` |
+| Living self_check | `desk_living.living_self_check` |
+| Swarm vault color | city vault green/amber from pass |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Staff calib ticket CLI | tools/staff_calib_tickets.py |
-| Living board self_check | desk_living CLI health |
-| Swarm vault pulse color | city vault green/amber from pass |
+| Dual-control incomplete page | staff checklist gaps copy |
+| Hillclimb staff status line | tools/staff_hillclimb_pick status on living |
+| Living digest inventory | count helpers present vs expected |
 
 ## Hard rules unchanged
 
