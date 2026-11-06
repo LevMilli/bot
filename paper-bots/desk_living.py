@@ -775,20 +775,63 @@ def living_compact_card(
     green = src.get("green_day") if isinstance(src.get("green_day"), dict) else {}
     bleed = src.get("bleed") if isinstance(src.get("bleed"), dict) else {}
     quiet = src.get("feature_quiet") if isinstance(src.get("feature_quiet"), dict) else {}
+    quiet_part = (
+        str(quiet.get("label") or "").strip()
+        or (
+            f"quiet={'yes' if quiet.get('quiet') else 'no'}"
+            + (f" age={quiet.get('age_hours')}h" if quiet.get("age_hours") is not None else "")
+        )
+    )
     parts = [
         f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')}",
         f"timer={'alive' if timer.get('alive') else 'DEAD' if timer.get('alive') is False else 'n/a'}",
         f"green={green.get('green_n')}",
         f"bleed={bleed.get('ratio')}",
-        f"quiet={'yes' if quiet.get('quiet') else 'no'}",
+        quiet_part,
     ]
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "live_orders_enabled": False,
         "parts": parts,
+        "quiet_label": quiet_part,
         "label": " · ".join(str(p) for p in parts),
         "note": "Compact living card — floors locked; paper only.",
+    }
+
+
+def ritual_observe_chip(root: str | None = None) -> dict:
+    """Observe-only weekly ritual readiness (never records doctor / never auto-posts)."""
+    floors = fee_floors_assert(root)
+    expand = betting_expand_gate(root)
+    age = doctor_age_chip(root)
+    floors_ok = bool(floors.get("all_ok"))
+    expand_ok = not bool(expand.get("blocked"))
+    doctor_fresh = not bool(age.get("stale"))
+    # Exit-code twin: ritual CLI fails on soft floors or blocked expand.
+    exit_ok = floors_ok and expand_ok
+    ritual_ok = exit_ok and doctor_fresh and age.get("ok_last") is not False
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "auto_publish": False,
+        "floors_ok": floors_ok,
+        "expand_ok": expand_ok,
+        "doctor_fresh": doctor_fresh,
+        "doctor_ok_last": age.get("ok_last"),
+        "exit_ok": exit_ok,
+        "ritual_ok": ritual_ok,
+        "label": (
+            f"ritual_ok={ritual_ok} exit_ok={exit_ok} "
+            f"floors={'ok' if floors_ok else 'soft'} "
+            f"expand={'ok' if expand_ok else 'blocked'} "
+            f"doctor={'fresh' if doctor_fresh else 'stale'}"
+        ),
+        "note": (
+            "Observe-only ritual readiness — run make living-ritual / --discord to record. "
+            "Never invent fills; never soften floors; never enable live."
+        ),
     }
 
 
@@ -1804,6 +1847,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "ruin_drill_page": ruin_drill_page(root),
         "betting_expand_gate": betting_expand_gate(root),
         "doctor_age": doctor_age_chip(root),
+        "ritual_observe": ritual_observe_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -1935,7 +1979,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
         "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
         "betting_expand_gate", "doctor_age", "fee_floors_assert",
-        "sunday_packet", "reporter",
+        "sunday_packet", "reporter", "ritual_observe",
     )
     slim = {k: board.get(k) for k in keep if k in board}
     slim["paper_only"] = True

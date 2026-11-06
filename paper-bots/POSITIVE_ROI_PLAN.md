@@ -722,13 +722,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Living export CLI note | doctor_age in status json |
 | Vault board scroll polish | dense row + sticky toolbar |
 
-### Next
+### Living upgrade — doctor_age text / compact quiet / ritual observe
 
 | Ticket | Where |
 | --- | --- |
 | Staff status doctor_age text | text status line |
 | Living compact include quiet | compact parts quiet label |
 | Ritual exit note on vault | ritual_ok observe chip |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Ritual observe Masters priority | stale ritual rail insert |
+| Living status sunday text | sunday packet line |
+| Compact include expand | expand blocked in compact |
 
 ## Hard rules unchanged
 

@@ -645,6 +645,19 @@ export type Desk = {
     label?: string
     note?: string
   }
+  ritual_observe?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    ritual_ok?: boolean
+    exit_ok?: boolean
+    floors_ok?: boolean
+    expand_ok?: boolean
+    doctor_fresh?: boolean
+    auto_publish?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
   master?: {
     paper_only?: boolean
     version?: number
