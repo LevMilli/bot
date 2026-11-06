@@ -532,13 +532,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Staff map | `paper-bots/LIVING_UPGRADE.md` |
 | Pulse force refresh | `staff_living_status.py pulse` |
 
+### Living upgrade — teller chip + floors assert + Sunday note
+
+| Ticket | Where |
+| --- | --- |
+| Teller living chip | `desk_living.teller_living_chip` |
+| Fee floors assert | `desk_living.fee_floors_assert` + CLI `floors` |
+| Sunday draft note | `LIVING_UPGRADE.md` (no auto publish) |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Living city teller chip | memory_line from completions/swarm |
-| Fee floors assert CLI | staff_living_status floors |
-| Weekly packet auto-draft cron note | Sunday checklist only |
+| City vault teller line | show living_memory_line on vault |
+| Staff floors fail-exit | CLI exit 2 when all_ok false |
+| Living chip catalog | list chip keys in selfcheck |
 
 ## Hard rules unchanged
 

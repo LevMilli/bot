@@ -40,6 +40,19 @@ python3 tools/staff_ruin_drill.py status|set|clear
 Insight swarm ≥ **3:1** vs betting towers before betting expand.  
 Seed missing digests with `staff_living_status.py seed` — observe only.
 
+## Sunday packet (staff only — no auto cron publish)
+
+Draft checklist / Discord copy when staff is ready — never auto-posts:
+
+```bash
+python3 tools/staff_sunday_packet.py draft
+python3 tools/staff_sunday_packet.py discord
+python3 tools/staff_sunday_packet.py checklist
+```
+
+Optional operator note: run `draft` once Chicago Sunday evening before staff review.  
+Do **not** wire a cron that posts Discord; `auto_publish` stays False forever.
+
 ## Hard rules
 
 - Starve: n≥4, factor 0.15

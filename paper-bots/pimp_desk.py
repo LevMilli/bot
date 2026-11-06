@@ -2749,6 +2749,21 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["completions_chip"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         import desk_living
+        tl = desk_living.teller_living_chip(root, bots=bots, remember=True)
+        desk_row["teller_living"] = tl
+        desk_row["living_memory_line"] = tl.get("memory_line")
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["teller_living"] = (
+                desk_row["master"].get("teller_living") or tl
+            )
+        # Prefer living line on desk teller when present.
+        for bot in bots or []:
+            if isinstance(bot, dict) and str(bot.get("id") or "") == "desk":
+                bot["memory_line"] = tl.get("memory_line") or bot.get("memory_line")
+    except Exception as exc:  # noqa: BLE001
+        desk_row["teller_living"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
+        import desk_living
         gaps = desk_living.dual_control_gaps_page(root)
         hc = desk_living.hillclimb_chip(root)
         inv = desk_living.digest_inventory(root)
