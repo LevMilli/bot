@@ -642,6 +642,9 @@ def master_summary(
             f"{len(green_day.get('towers') or [])}; "
             f"sports_green_boost={sg.get('green_boost') or 0}"
         )
+    firm_queue = (living or {}).get("firm_queue") if isinstance(living, dict) else None
+    if isinstance(firm_queue, dict) and firm_queue.get("offers_n") is not None:
+        priority.append(str(firm_queue.get("label") or "firm queue")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -679,6 +682,11 @@ def master_summary(
         ),
         "green_day": (
             (living or {}).get("green_day")
+            if isinstance(living, dict)
+            else None
+        ),
+        "firm_queue": (
+            (living or {}).get("firm_queue")
             if isinstance(living, dict)
             else None
         ),

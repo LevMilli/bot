@@ -445,6 +445,36 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def firm_queue_chip(root: str | None = None) -> dict:
+    """Compact firm-queue HUD: offers / accepted / deferred / remaining risk."""
+    status = {}
+    try:
+        import desk_roi_plan
+        status = desk_roi_plan.firm_queue_status(root) or {}
+    except Exception:
+        status = {}
+    offers_n = status.get("offers_n")
+    accepted_n = status.get("accepted_n")
+    deferred_n = status.get("deferred_n")
+    remaining = status.get("remaining_risk")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "offers_n": offers_n,
+        "accepted_n": accepted_n,
+        "deferred_n": deferred_n,
+        "remaining_risk": remaining,
+        "ttl_sec": status.get("ttl_sec"),
+        "label": (
+            f"firm queue offers={offers_n} acc={accepted_n} def={deferred_n} "
+            f"risk_left={remaining}"
+        ),
+        "note": status.get("note") or (
+            "Firm queue ranks fee-clear fits — deferred so best edge spends desk risk first."
+        ),
+    }
+
+
 def green_day_board(root: str | None = None, bots: list | None = None) -> dict:
     """Fee-clear green-day / selective +1 readiness for HUD (floors locked)."""
     fee_clear = []
@@ -585,6 +615,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "ruin_drill": ruin,
         "skip_taxonomy": skip_taxonomy_chip(root),
         "green_day": green_day_board(root, bots=bots),
+        "firm_queue": firm_queue_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),

@@ -67,6 +67,11 @@ class DeskLivingTests(unittest.TestCase):
             self.assertEqual(len(gd["towers"]), 2)
             self.assertTrue(gd["fee_floors_locked"])
             self.assertEqual(gd["sports_green_boost"]["green_boost"], 0)
+            fq = desk_living.firm_queue_chip(tmp)
+            self.assertTrue(fq["fee_floors_locked"])
+            self.assertIn("label", fq)
+            board2 = desk_living.living_upgrade_board(tmp)
+            self.assertIn("firm_queue", board2)
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
