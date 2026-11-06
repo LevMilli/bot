@@ -89,6 +89,14 @@ def _text(board: dict) -> str:
             + f" · doctor_fresh={doctor_fresh}"
         ),
         (
+            f"quiet_age="
+            + (
+                f"{quiet.get('age_hours')}h"
+                if quiet.get("age_hours") is not None
+                else str(compact.get("quiet_age") or "n/a")
+            )
+        ),
+        (
             f"swarm: {swarm.get('insight_n')}:{swarm.get('betting_n')} "
             f"pass={swarm.get('pass')}"
         ),

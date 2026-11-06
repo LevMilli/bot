@@ -809,13 +809,17 @@ def living_compact_card(
         if isinstance(src.get("doctor_age"), dict)
         else {}
     )
+    quiet_age_h = quiet.get("age_hours")
+    quiet_age = f"{quiet_age_h}h" if quiet_age_h is not None else "n/a"
     quiet_part = (
         str(quiet.get("label") or "").strip()
         or (
             f"quiet={'yes' if quiet.get('quiet') else 'no'}"
-            + (f" age={quiet.get('age_hours')}h" if quiet.get("age_hours") is not None else "")
+            + f" age={quiet_age}"
         )
     )
+    if quiet.get("label") and "age=" not in str(quiet.get("label") or "").lower():
+        quiet_part = f"{quiet_part} · quiet_age={quiet_age}"
     expand_part = (
         "expand=blocked"
         if expand.get("blocked")
@@ -856,6 +860,8 @@ def living_compact_card(
         "live_orders_enabled": False,
         "parts": parts,
         "quiet_label": quiet_part,
+        "quiet_age": quiet_age,
+        "quiet_age_h": quiet_age_h,
         "expand_label": expand_part,
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
