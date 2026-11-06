@@ -449,9 +449,9 @@ def skip_leaderboard(root: str | None = None, *, day: str | None = None, top: in
 
 
 # E1 #116 — while memecoin is red, starve its share and feed BTC/commodity.
-# ROI rescue: fire at −$8 so overnight −$10 boards starve meme before −$20.
+# ROI rescue: fire at −$5 so −$7.57 boards starve meme before another ticket.
 MEME_RED_SHARE = 0.03
-MEME_RED_LOCK_USD = 8.0
+MEME_RED_LOCK_USD = 5.0
 # Starve losers → feed fee-clear sports/BTC/commodity (never lower venue min_edge).
 FEE_CLEAR_TOWERS = ("sports-gap", "btc15m", "commodity-15m")
 INX_DRAWDOWN_CASH = 460.0
@@ -497,6 +497,7 @@ def effective_tower_shares(
     red_lock_usd: float | None = None,
     today_by_bot: dict | None = None,
     cash_by_bot: dict | None = None,
+    realized_by_bot: dict | None = None,
 ) -> dict[str, float]:
     """Tower budget shares: starve losers, feed fee-clear sports/BTC/commodity."""
     cfg = cfg or {}
@@ -504,6 +505,7 @@ def effective_tower_shares(
     shares = {str(k): float(v) for k, v in dict(shares or DEFAULT_TOWER_BUDGET_SHARE).items()}
     today_map = {str(k): _finite(v) for k, v in dict(today_by_bot or {}).items()}
     cash_map = {str(k): _finite(v) for k, v in dict(cash_by_bot or {}).items()}
+    realized_map = {str(k): _finite(v) for k, v in dict(realized_by_bot or {}).items()}
     lock = float(MEME_RED_LOCK_USD if red_lock_usd is None else red_lock_usd)
     meme = meme_today
     if meme is None:
@@ -522,7 +524,15 @@ def effective_tower_shares(
             cut_total += _cut_share(shares, inx_id, float(INX_LOSER_SHARE))
             exclude.add(inx_id)
     sports_today = today_map.get("sports-gap")
-    sports_red = sports_today is not None and sports_today <= float(SPORTS_RED_TODAY)
+    sports_realized = realized_map.get("sports-gap")
+    sports_red_pnl = None
+    if sports_today is not None and sports_realized is not None:
+        sports_red_pnl = min(sports_today, sports_realized)
+    elif sports_today is not None:
+        sports_red_pnl = sports_today
+    elif sports_realized is not None:
+        sports_red_pnl = sports_realized
+    sports_red = sports_red_pnl is not None and sports_red_pnl <= float(SPORTS_RED_TODAY)
     if sports_red:
         cut_total += _cut_share(shares, "sports-gap", float(SPORTS_RED_SHARE))
         exclude.add("sports-gap")
@@ -569,6 +579,7 @@ def tower_budgets(
     red_lock_usd: float | None = None,
     today_by_bot: dict | None = None,
     cash_by_bot: dict | None = None,
+    realized_by_bot: dict | None = None,
 ) -> dict[str, float]:
     """Dollar caps per tower from desk max_open_risk × share (loser-starve aware)."""
     cfg = cfg or {}
@@ -579,6 +590,7 @@ def tower_budgets(
         red_lock_usd=red_lock_usd,
         today_by_bot=today_by_bot,
         cash_by_bot=cash_by_bot,
+        realized_by_bot=realized_by_bot,
     )
     out = {}
     for bot_id, share in shares.items():
@@ -940,6 +952,7 @@ def more_summary(root: str | None = None, *, bots: list | None = None, cfg: dict
     meme_today = None
     today_by_bot: dict[str, float] = {}
     cash_by_bot: dict[str, float] = {}
+    realized_by_bot: dict[str, float] = {}
     for bot in bots or []:
         if not isinstance(bot, dict):
             continue
@@ -948,14 +961,18 @@ def more_summary(root: str | None = None, *, bots: list | None = None, cfg: dict
             continue
         t = _finite(bot.get("today"))
         c = _finite(bot.get("cash"))
+        r = _finite(bot.get("realized"))
         if t is not None:
             today_by_bot[bot_id] = t
         if c is not None:
             cash_by_bot[bot_id] = c
+        if r is not None:
+            realized_by_bot[bot_id] = r
         if bot_id == "memecoin":
             meme_today = t
     shares = effective_tower_shares(
-        cfg, meme_today=meme_today, today_by_bot=today_by_bot, cash_by_bot=cash_by_bot,
+        cfg, meme_today=meme_today, today_by_bot=today_by_bot,
+        cash_by_bot=cash_by_bot, realized_by_bot=realized_by_bot,
     )
     red = meme_today is not None and meme_today <= -float(MEME_RED_LOCK_USD)
     return {
@@ -963,7 +980,8 @@ def more_summary(root: str | None = None, *, bots: list | None = None, cfg: dict
         "version": 1,
         "skip_leaderboard": skip_leaderboard(root),
         "tower_budgets": tower_budgets(
-            cfg, meme_today=meme_today, today_by_bot=today_by_bot, cash_by_bot=cash_by_bot,
+            cfg, meme_today=meme_today, today_by_bot=today_by_bot,
+            cash_by_bot=cash_by_bot, realized_by_bot=realized_by_bot,
         ),
         "tower_shares": shares,
         "meme_red_day": red,

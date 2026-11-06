@@ -12,7 +12,7 @@ MAX_OPEN_RED = 1            # red-day: one open max (ROI rescue — was 2)
 MAX_ENTRIES_PER_DAY = 8     # fewer attempts while stop-bleed week runs
 # Desk daily stop stays $150; meme locks new entries earlier to protect the tower.
 DAILY_LOSS_HALT_USD = 150
-RED_DAY_ENTRY_LOCK_USD = 8  # today ≤ −$8 → entries off (was −$20; overnight still bought at −$10)
+RED_DAY_ENTRY_LOCK_USD = 5  # today ≤ −$5 → entries off (was −$8; −$7.57 board still bought)
 COOLDOWN_HOURS = 12         # half-day cooldown so the tower can re-enter winners faster
 # Speed lane only when Chicago-day realized PnL is non-negative (accurate still allowed).
 SPEED_ONLY_IF_TODAY_NONNEG = True

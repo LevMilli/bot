@@ -216,133 +216,31 @@ def step_scan(args, state, day):
         except Exception:
             pass
         return
-    edge_proxy = 0.0
+    # Same structural pause as kalshi-sp: residual payout is not independent edge.
+    fee_one = paper_sim.taker_fee(1, pick["ask"])
     try:
-        desk = _desk()
-        cfg = desk.load_settings(DESK_ROOT)
-        venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
-        fee_one = paper_sim.taker_fee(1, pick["ask"])
-        edge_proxy = max(0.0, (1.0 - float(pick["ask"]) - float(fee_one)))
-        if venue_edge > 0 and edge_proxy + 1e-12 < venue_edge:
-            reason = f"venue kalshi_inx edge {edge_proxy:.3f} < {venue_edge:.3f}"
-            print(alerts.format_skip_note(day, reason))
-            try:
-                import desk_living
-                desk_living.record_eval_features(
-                    DESK_ROOT, bot="kalshi-sized", action="skip",
-                    series=CFG.get("series") or "KXINXU",
-                    ticker=str(pick.get("ticker") or ""),
-                    ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": edge_proxy,
-                        "fee": fee_one, "confidence": pick.get("ask")},
-                    reasons=[reason], note=reason[:160],
-                )
-            except Exception:
-                pass
-            return
-        # Twin +1¢: sized must clear venue floor + 0.01 vs residual edge.
-        try:
-            import desk_inx
-            twin_block = desk_inx.twin_edge_blocks(
-                sized_edge=edge_proxy, venue_edge=venue_edge, extra=0.01,
-            )
-            if twin_block:
-                print(alerts.format_skip_note(day, twin_block))
-                if not args.dry_run:
-                    logger.learn(f"{day}: no trade - {twin_block}", "skip")
-                try:
-                    import desk_living
-                    desk_living.record_eval_features(
-                        DESK_ROOT, bot="kalshi-sized", action="skip",
-                        series=CFG.get("series") or "KXINXU",
-                        ticker=str(pick.get("ticker") or ""),
-                        ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": edge_proxy},
-                        reasons=[twin_block], note=str(twin_block)[:160],
-                    )
-                except Exception:
-                    pass
-                return
-        except Exception:
-            pass
-        blocked = desk.correlation_blocks(DESK_ROOT, "kalshi-sized", pick["side"], edge_proxy)
-        if blocked:
-            print(blocked)
-            try:
-                import desk_living
-                desk_living.record_eval_features(
-                    DESK_ROOT, bot="kalshi-sized", action="skip",
-                    series=CFG.get("series") or "KXINXU",
-                    ticker=str(pick.get("ticker") or ""),
-                    ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": edge_proxy},
-                    reasons=[blocked], note=str(blocked)[:160],
-                )
-            except Exception:
-                pass
-            return
-        gate = desk.entry_gate(DESK_ROOT)
-        if gate:
-            print(gate)
-            return
-        open_risk = _desk_open_risk(desk)
-        dollars = desk.stake_dollars_for(
-            "kalshi-sized",
-            pick["ask"],
-            edge=edge_proxy,
-            cfg=cfg,
-            open_risk_used=open_risk,
-            ask=pick["ask"],
-            root=DESK_ROOT,
-        )
-        n = desk.contracts_for_stake(pick["ask"], dollars)
-        while n >= 1 and n * pick["ask"] + paper_sim.taker_fee(n, pick["ask"]) > float(state["bankroll"]) + 1e-9:
-            n -= 1
-    except Exception as exc:
-        print(f"Desk sizing unavailable ({exc}); falling back to local max stake.")
-        n = risk_manager.stake_contracts(pick["ask"], bankroll=state["bankroll"])
-    if n < 1:
-        print(alerts.format_skip_note(day, "not enough paper bankroll / stake for 1 contract after fee"))
-        if not args.dry_run:
-            logger.learn(f"{day}: no trade - bankroll/stake too small after fee", "skip")
-        return
-    fee = paper_sim.taker_fee(n, pick["ask"])
-    preview = {
-        "ticker": pick["ticker"],
-        "side": pick["side"],
-        "ask": pick["ask"],
-        "contracts": n,
-        "cost": round(n * pick["ask"], 2),
-        "fee": fee,
-    }
-    if args.dry_run:
-        print(alerts.format_trade_note(preview, state["bankroll"] - preview["cost"] - fee, dry_run=True))
-        return
-    pos = paper_sim.open_position(state, day, ev, pick, n, now.isoformat(timespec="seconds"))
-    pos["why"] = (
-        f"Sized paper buy. Ask in {CFG['band_min_ask']*100:.0f}-"
-        f"{CFG['band_max_ask']*100:.0f}c band; desk Kelly-lite sized {n} contracts."
-    )
-    try:
-        import desk_profit
-        pos["risk_factor"] = desk_profit.risk_factor_for("kalshi-sized", pick["side"])
-        pos["gap_at_entry"] = round(edge_proxy, 4)
-        pos["fair_at_entry"] = round(float(pick["ask"]), 4)
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_inx
+        reason = desk_inx.refuse_residual_as_edge()
     except Exception:
-        pass
+        reason = "no independent fair — residual payout is not edge"
+    print(alerts.format_skip_note(day, reason))
     try:
         import desk_living
-        fee_one = paper_sim.taker_fee(1, pick["ask"])
         desk_living.record_eval_features(
-            DESK_ROOT, bot="kalshi-sized", action="buy",
+            DESK_ROOT, bot="kalshi-sized", action="skip",
             series=CFG.get("series") or "KXINXU",
             ticker=str(pick.get("ticker") or ""),
-            ev={"side": pick.get("side"), "ask": pick.get("ask"), "fee": fee_one,
-                "edge": edge_proxy, "confidence": pick.get("ask")},
-            note="paper buy kalshi-sized",
+            ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": 0.0,
+                "fee": fee_one, "confidence": pick.get("ask")},
+            reasons=[reason], note=reason[:160],
         )
     except Exception:
         pass
-    paper_sim.save_state(state)
-    logger.ledger_open(pos, state["bankroll"])
-    print(alerts.format_trade_note(pos, state["bankroll"]))
+    if not args.dry_run:
+        logger.learn(f"{day}: no trade - {reason}", "skip")
+    return
 
 
 def step_settle(args, state, day):
@@ -366,13 +264,15 @@ def step_settle(args, state, day):
                 pass
             if flip_on and bid is not None and bid < CFG["invalidation_log_below"] and not args.dry_run:
                 contracts = float(pos.get("contracts") or 0)
-                proceeds = round(contracts * float(bid), 4)
+                sell_fee = float(paper_sim.taker_fee(contracts, bid))
+                proceeds = round(contracts * float(bid) - sell_fee, 4)
                 pnl = round(proceeds - float(pos.get("cost") or 0) - float(pos.get("fee") or 0), 4)
                 state["bankroll"] = round(float(state["bankroll"]) + proceeds, 4)
                 pos.update({
                     "status": "sold",
                     "exit": "model-flip bid under 50c",
                     "exit_price": bid,
+                    "exit_fee": sell_fee,
                     "payout": proceeds,
                     "pnl": pnl,
                     "settled_at": dt.datetime.now().isoformat(timespec="seconds"),
@@ -403,7 +303,7 @@ def step_settle(args, state, day):
                         side=str(pos.get("side") or ""),
                         price=bid,
                         contracts=pos.get("contracts"),
-                        fee=pos.get("fee") or 0.0,
+                        fee=sell_fee,
                         pnl=pnl,
                         fill_id=str(pos.get("fill_id") or ""),
                         kind="model_flip",

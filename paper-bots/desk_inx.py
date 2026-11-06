@@ -49,11 +49,20 @@ def taker_fee_one(ask: float, rate: float = 0.07) -> float:
 
 
 def residual_edge(ask, *, rate: float = 0.07) -> float | None:
-    """Band-book residual edge proxy: 1 − ask − fee (no model p)."""
+    """Band-book residual payout proxy: 1 − ask − fee (no model p).
+
+    Not independent edge — always clears venue floors in the 80–92¢ band.
+    Callers must not treat this as venue/model clearance (see refuse_residual_as_edge).
+    """
     a = _finite(ask)
     if a is None or not (0.0 < a < 1.0):
         return None
     return round(max(0.0, 1.0 - a - taker_fee_one(a, rate)), 4)
+
+
+def refuse_residual_as_edge() -> str:
+    """Hard skip reason: residual payout is not fee-aware model edge."""
+    return "no independent fair — residual payout (1−ask−fee) is not edge"
 
 
 def dual_side_pick(candidates: list, *, band_lo: float, band_hi: float) -> dict | None:
@@ -234,6 +243,7 @@ def self_check() -> None:
     from datetime import date as d
 
     assert residual_edge(0.85) is not None
+    assert "not edge" in refuse_residual_as_edge().lower()
     cands = [
         {"ticker": "A", "ask": 0.90, "side": "yes"},
         {"ticker": "B", "ask": 0.82, "side": "yes"},

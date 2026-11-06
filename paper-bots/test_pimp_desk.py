@@ -278,10 +278,11 @@ class PimpDeskTests(unittest.TestCase):
         self.assertEqual(meme["every_sec"], 180)
         brief = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "brief")
         scans = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run"]
-        settle = next(s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle")
+        settles = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle"]
         self.assertEqual(brief["at_ct"], "08:00")
         self.assertEqual([s["at_ct"] for s in scans], ["12:05", "13:05", "14:20"])
-        self.assertEqual(settle["at_ct"], "16:00")
+        self.assertEqual([s["at_ct"] for s in settles], ["13:00", "16:00"])
+        self.assertEqual(settles[0]["until_ct"], "15:55")
         self.assertEqual(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["argv"], ("bot.py", "brief", "--dry-run"))
         self.assertFalse(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["entry"])
         self.assertTrue(pimp_desk.ACTIONS["kalshi-sp"]["run"]["entry"])
@@ -1352,6 +1353,17 @@ class PimpDeskTests(unittest.TestCase):
         self.assertTrue(pimp_desk.tower_doing_good(armed))
         self.assertFalse(pimp_desk.tower_needs_midnight_reload(armed))
         self.assertTrue(pimp_desk.tower_doing_good(open_book))  # open → leave alone
+        # Sticky INX / sports losers do not get fresh midnight ammo.
+        sticky_sp = {
+            "id": "kalshi-sp", "present": True, "open_count": 0,
+            "cash": 444.37, "today": 0.0, "realized": -55.63, "history": [],
+        }
+        sticky_sports = {
+            "id": "sports-gap", "present": True, "open_count": 0,
+            "cash": 83.38, "today": 0.0, "realized": -16.62, "history": [],
+        }
+        self.assertFalse(pimp_desk.tower_needs_midnight_reload(sticky_sp))
+        self.assertFalse(pimp_desk.tower_needs_midnight_reload(sticky_sports))
         with tempfile.TemporaryDirectory() as tmp:
             _tree(tmp, QUIET)
             # Broke memecoin account on disk.

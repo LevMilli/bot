@@ -230,6 +230,8 @@ AUTO = (
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:05", "until_ct": "12:25"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "13:05", "until_ct": "13:25"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "14:20", "until_ct": "14:40"},
+    # Model-flip / settle polls before 15:00 CT binary settle (mirror sized).
+    {"id": "kalshi-sp", "action": "settle", "at_ct": "13:00", "until_ct": "15:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
     {"id": "kalshi-sized", "action": "run", "at_ct": "12:05", "until_ct": "14:55"},
     # Model-flip / settle polls — offset from the scan window so one bot never double-locks.
@@ -3706,6 +3708,9 @@ def tower_needs_midnight_reload(bot: dict) -> bool:
     realized = _num(bot.get("realized"))
     if realized is None:
         realized = 0.0
+    # Do not mint fresh ammo for structural INX / sticky sports losers.
+    if bot_id in ("kalshi-sp", "kalshi-sized", "sports-gap") and realized < -1e-9:
+        return False
     if cash + 1e-9 < min_ammo:
         return True
     # Underwater after a losing day/book — even if cash was topped up mid-day.

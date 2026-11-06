@@ -512,6 +512,14 @@ def run():
                 today_pnl += float(pos.get("pnl") or 0)
             except (TypeError, ValueError):
                 pass
+    # Sticky book PnL — red rescue must not forget overnight realized losses.
+    realized_book = 0.0
+    for pos in s.get("closed") or []:
+        try:
+            realized_book += float(pos.get("pnl") or 0)
+        except (TypeError, ValueError):
+            pass
+    red_pnl = min(float(today_pnl), float(realized_book))
     entries_off = ""
     stop = float(cfg.get("daily_loss_stop") or 150)
     if today_pnl <= -stop:
@@ -725,7 +733,7 @@ def run():
                     side=str(p.get("side") or ""),
                     price=p.get("entry_price"),
                     contracts=p.get("contracts"),
-                    fee=0.0,
+                    fee=float(p.get("fee") or p.get("entry_fee") or 0.0),
                     pnl=pnl,
                     fill_id=str(p.get("fill_id") or ""),
                     kind="settle",
@@ -1073,16 +1081,16 @@ def run():
         boost = int(desk_roi_plan.sports_green_boost(DESK_ROOT))
         max_buys_eff = int(
             desk_more.selective_max_buys(
-                "sports-gap", base=MAX_BUYS_PER_CHECK, today=today_pnl, green_boost=boost,
+                "sports-gap", base=MAX_BUYS_PER_CHECK, today=red_pnl, green_boost=boost,
             )
         )
         if boost:
             print(f"Sports green_boost={boost} (CLV+M1 gate ready; fee floors locked)")
     except Exception:
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
-    if today_pnl < 0:
+    if red_pnl < 0:
         max_buys_eff = min(max_buys_eff, 2)
-    if today_pnl <= -10:
+    if red_pnl <= -10:
         max_buys_eff = min(max_buys_eff, 1)
     # Adverse cool-off after fast mark-downs (ROI plan Phase 4).
     try:
@@ -1099,7 +1107,7 @@ def run():
             lines.append(f"| {ts} | | | | | | | | {stale} |")
             summary_out.setdefault("skips", []).append(stale)
             max_buys_eff = 0
-        r_block = desk_roi_plan.daily_r_blocks("sports-gap", today_pnl)
+        r_block = desk_roi_plan.daily_r_blocks("sports-gap", red_pnl)
         if r_block:
             lines.append(f"| {ts} | | | | | | | | {r_block} |")
             summary_out.setdefault("skips", []).append(r_block)
@@ -1112,8 +1120,8 @@ def run():
         reason = None
         if buys_this_check >= max_buys_eff:
             reason = f"max buys this check ({max_buys_eff})"
-        elif today_pnl < 0 and str(c.get("lane") or "") == "speed":
-            reason = f"speed lane off on red sports day (today ${today_pnl:.2f})"
+        elif red_pnl < 0 and str(c.get("lane") or "") == "speed":
+            reason = f"speed lane off on red sports book (red ${red_pnl:.2f})"
         elif key in open_by_game:
             reason = "already holding this game"
         elif len(s["open"]) >= max_open:
