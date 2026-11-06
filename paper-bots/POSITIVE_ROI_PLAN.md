@@ -1097,13 +1097,30 @@ Interactive: Positive ROI Master Plan canvas.
 | Export floors_sunday_quiet | living_board_export |
 | Status text floors sunday | print line |
 
-### Next
+### Living upgrade — ruin/floors sunday batch
 
 | Ticket | Where |
 | --- | --- |
 | Vault ruin sunday quiet | ruin row hint |
 | Ritual discord floors sunday | discord line |
-| Compact floors sunday twin | compact field |
+| Compact floors sunday twin | compact.floors_sunday_quiet |
+| Status/export floors sunday twin | flatten compact |
+
+### Living upgrade — gaps/ruin sunday (this batch)
+
+| Ticket | Where |
+| --- | --- |
+| Vault gaps sunday quiet | gaps row hint |
+| Ritual observe ruin sunday | observe tip |
+| Status text ruin sunday | print line |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Ritual discord ruin sunday | discord line |
+| Export ruin_sunday_quiet | living_board_export |
+| Compact ruin sunday twin | compact field |
 
 ## Hard rules unchanged
 

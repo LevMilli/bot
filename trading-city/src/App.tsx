@@ -1928,7 +1928,14 @@ export default function App() {
                           dual_control_gaps?: { label?: string; page?: boolean; gaps_n?: number }
                         } | undefined)?.dual_control_gaps
                       if (!g) return 'dual gaps pending'
-                      return g.label || (g.page ? 'dual-control gaps' : 'dual gaps clear')
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        g.label || (g.page ? 'dual-control gaps' : 'dual gaps clear')
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -2258,10 +2265,15 @@ export default function App() {
                           }
                         } | undefined)?.ruin_drill_chip
                       if (!r) return 'ruin drill pending'
-                      return (
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
                         r.label ||
                         `ruin drill active=${Boolean(r.active)} practiced_month=${Boolean(r.practiced_this_month)}`
-                      )
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>

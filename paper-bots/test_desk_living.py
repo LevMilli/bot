@@ -310,6 +310,7 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("floors_sunday_quiet", export2)
             self.assertIn("sunday quiet", export2.get("floors_sunday_quiet") or "")
             self.assertIn("compact_expand_sunday_quiet", export2)
+            self.assertIn("compact_floors_sunday_quiet", export2)
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))
@@ -376,6 +377,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("masters_sunday_label", compact)
             self.assertIn("expand_sunday_quiet", compact)
             self.assertIn("sunday quiet", compact.get("expand_sunday_quiet") or "")
+            self.assertIn("floors_sunday_quiet", compact)
+            self.assertIn("sunday quiet", compact.get("floors_sunday_quiet") or "")
             self.assertTrue(
                 any(str(p).startswith("masters_sunday=") for p in (compact.get("parts") or []))
             )
@@ -383,6 +386,7 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("masters_sunday_part:", status_txt)
             self.assertIn("expand sunday:", status_txt)
             self.assertIn("floors sunday:", status_txt)
+            self.assertIn("ruin sunday:", status_txt)
             from tools import staff_living_ritual as _ritual_mod
             # Status --json twin of ritual quiet_line (same observe wording).
             quiet_line_expect = _ritual_mod.quiet_line({
@@ -749,6 +753,7 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("quiet_age=n/a", text4)
             self.assertIn("Masters sunday", text4)
             self.assertIn("Expand sunday", text4)
+            self.assertIn("Floors sunday", text4)
             text5 = staff_living_ritual.format_discord({
                 "ok": True,
                 "ritual_ok": True,

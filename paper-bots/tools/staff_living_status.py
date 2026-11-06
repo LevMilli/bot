@@ -129,6 +129,17 @@ def _text(board: dict) -> str:
         ),
         f"dual-control: {dual.get('label') or '—'}",
         f"ruin: {ruin.get('label') or '—'}",
+        (
+            "ruin sunday: "
+            + str(ruin.get("label") or "ruin observe")
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
         f"hillclimb: {hill.get('label') or '—'}",
         f"digests: {inv.get('label') or '—'}",
         f"floors: {floors.get('label') or '—'}",
@@ -519,6 +530,12 @@ def main() -> int:
             or (
                 str(compact_j.get("expand_label") or "expand=n/a")
                 + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe · never softens floors)"
+            ),
+            "compact_floors_sunday_quiet": compact_j.get("floors_sunday_quiet")
+            or (
+                "floors=n/a · sunday quiet "
                 + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
                 + " (observe · never softens floors)"
             ),
