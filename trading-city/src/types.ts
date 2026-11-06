@@ -246,6 +246,15 @@ export type Desk = {
     note?: string
     error?: string
   }
+  living_doctor?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    ok?: boolean
+    failed_n?: number
+    label?: string
+    note?: string
+    error?: string
+  }
   master?: {
     paper_only?: boolean
     version?: number
