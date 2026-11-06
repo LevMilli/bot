@@ -675,6 +675,18 @@ def master_summary(
     calib = (living or {}).get("calib_nag") if isinstance(living, dict) else None
     if isinstance(calib, dict) and int(calib.get("tickets_n") or 0) > 0:
         priority.insert(0, str(calib.get("label") or "raise_phi tickets")[:120])
+    injury = (living or {}).get("injury_wire") if isinstance(living, dict) else None
+    if isinstance(injury, dict) and (
+        int(injury.get("n") or 0) > 0 or int(injury.get("inbox_n") or 0) > 0
+    ):
+        priority.append(str(injury.get("label") or "injury wire")[:120])
+    eia = (living or {}).get("eia_scout") if isinstance(living, dict) else None
+    if isinstance(eia, dict) and eia.get("next_eta_hours") is not None:
+        try:
+            if float(eia.get("next_eta_hours")) <= 24:
+                priority.append(str(eia.get("label") or "EIA soon")[:120])
+        except (TypeError, ValueError):
+            pass
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -767,6 +779,16 @@ def master_summary(
         ),
         "calib_nag": (
             (living or {}).get("calib_nag")
+            if isinstance(living, dict)
+            else None
+        ),
+        "injury_wire": (
+            (living or {}).get("injury_wire")
+            if isinstance(living, dict)
+            else None
+        ),
+        "eia_scout": (
+            (living or {}).get("eia_scout")
             if isinstance(living, dict)
             else None
         ),
