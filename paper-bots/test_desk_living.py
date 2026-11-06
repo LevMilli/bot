@@ -196,6 +196,9 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue(floors.get("all_ok"))
             self.assertIn("teller_living", board2)
             self.assertIn("fee_floors_assert", board2)
+            health2 = desk_living.living_self_check(tmp)
+            self.assertIn("chip_catalog", health2)
+            self.assertGreaterEqual(len(health2.get("chip_catalog") or []), 5)
             with open(map_path, encoding="utf-8") as handle:
                 body = handle.read()
             self.assertIn("auto_publish", body)

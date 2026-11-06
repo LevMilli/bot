@@ -2752,9 +2752,14 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         tl = desk_living.teller_living_chip(root, bots=bots, remember=True)
         desk_row["teller_living"] = tl
         desk_row["living_memory_line"] = tl.get("memory_line")
+        desk_row["fee_floors_assert"] = desk_living.fee_floors_assert(root)
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["teller_living"] = (
                 desk_row["master"].get("teller_living") or tl
+            )
+            desk_row["master"]["fee_floors_assert"] = (
+                desk_row["master"].get("fee_floors_assert")
+                or desk_row["fee_floors_assert"]
             )
         # Prefer living line on desk teller when present.
         for bot in bots or []:

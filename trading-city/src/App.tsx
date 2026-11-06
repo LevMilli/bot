@@ -647,6 +647,39 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">teller</span>
+                  <span>
+                    {snap?.desk?.living_memory_line ||
+                      snap?.desk?.teller_living?.memory_line ||
+                      snap?.desk?.teller_memory?.recent?.[0]?.text ||
+                      'living teller pending'}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">floors</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const f =
+                          snap?.desk?.fee_floors_assert ||
+                          (snap?.desk?.master as { fee_floors_assert?: { all_ok?: boolean } } | undefined)
+                            ?.fee_floors_assert
+                        if (!f) return undefined
+                        return f.all_ok === false ? '#c45c26' : '#6fbf73'
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const f =
+                        snap?.desk?.fee_floors_assert ||
+                        (snap?.desk?.master as { fee_floors_assert?: { label?: string; all_ok?: boolean } } | undefined)
+                          ?.fee_floors_assert
+                      if (!f) return 'fee floors pending'
+                      return f.label || (f.all_ok ? 'floors locked ok' : 'floors CHECK')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">bleed</span>
                   <span>
                     {(() => {

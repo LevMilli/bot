@@ -540,13 +540,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Fee floors assert | `desk_living.fee_floors_assert` + CLI `floors` |
 | Sunday draft note | `LIVING_UPGRADE.md` (no auto publish) |
 
+### Living upgrade — vault teller/floors + chip catalog
+
+| Ticket | Where |
+| --- | --- |
+| City vault teller/floors | trading-city vault board rows |
+| Floors CLI exit 2 | `staff_living_status.py floors` |
+| Chip catalog | `living_self_check.chip_catalog` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| City vault teller line | show living_memory_line on vault |
-| Staff floors fail-exit | CLI exit 2 when all_ok false |
-| Living chip catalog | list chip keys in selfcheck |
+| Living smoke Makefile target | `make living-status` |
+| Desk snapshot living keys | assert teller_living in snapshot test |
+| Insight hire blocker | refuse betting expand when swarm fail |
 
 ## Hard rules unchanged
 

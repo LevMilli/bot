@@ -147,8 +147,9 @@ def main() -> int:
         }, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "floors":
-        print(json.dumps(desk_living.fee_floors_assert(root), indent=2, sort_keys=True, default=str))
-        return 0
+        payload = desk_living.fee_floors_assert(root)
+        print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        return 0 if payload.get("all_ok") else 2
     if args.action == "teller":
         print(json.dumps(
             desk_living.teller_living_chip(root, remember=False),
@@ -174,6 +175,10 @@ def main() -> int:
             "teller_living": board.get("teller_living"),
             "timer_heartbeat": board.get("timer_heartbeat"),
             "chicago_today": board.get("chicago_today"),
+            "chip_catalog": sorted(
+                k for k, v in board.items()
+                if isinstance(v, dict) and v.get("fee_floors_locked") is True
+            ),
         }, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "pager":
