@@ -786,13 +786,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Doctor soft_copy Masters link | cross-link ritual draft |
 | Vault compact ritual order | city compact HUD mirror |
 
-### Next
+### Living upgrade — vault paste tip / sunday ritual_ok / teller nag
 
 | Ticket | Where |
 | --- | --- |
 | Ritual draft copy button note | vault hint paste path |
 | Sunday packet ritual_ok | packet observe field |
 | Teller memory ritual nag | teller_living ritual line |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Status text ritual_nag | teller line in status |
+| Vault sunday ritual_ok | city sunday row tint |
+| Compact export ritual_ok | export compact.ritual_ok |
 
 ## Hard rules unchanged
 

@@ -520,7 +520,14 @@ def teller_living_chip(
         if comp.get("eligible_completions_today") is not None
         else "eligible fills n/a"
     )
-    line = f"{swarm_bit} · {fill_bit} · floors={'locked' if floors_ok else 'CHECK'}"
+    ritual = ritual_observe_chip(root)
+    ritual_nag = ""
+    if ritual.get("ritual_ok") is False:
+        ritual_nag = " · ritual nag (make living-ritual-discord)"
+    line = (
+        f"{swarm_bit} · {fill_bit} · floors={'locked' if floors_ok else 'CHECK'}"
+        f"{ritual_nag}"
+    )
     if remember:
         try:
             import teller_memory
@@ -531,6 +538,14 @@ def teller_living_chip(
                 bot_id="desk",
                 source="living_teller_chip",
             )
+            if ritual.get("ritual_ok") is False:
+                teller_memory.remember(
+                    root,
+                    kind="mistakes",
+                    text="ritual not ready — make living-ritual / --discord (paste only)",
+                    bot_id="desk",
+                    source="living_teller_ritual",
+                )
         except Exception:
             pass
     return {
@@ -540,6 +555,8 @@ def teller_living_chip(
         "swarm_pass": swarm.get("pass"),
         "eligible_completions_today": comp.get("eligible_completions_today"),
         "floors_ok": floors_ok,
+        "ritual_ok": ritual.get("ritual_ok"),
+        "ritual_nag": bool(ritual_nag),
         "memory_line": line,
         "label": line,
         "note": "Teller living chip — grounded on swarm + Completions; never invents PnL.",
@@ -1153,9 +1170,11 @@ def sunday_packet_chip(root: str | None = None) -> dict:
         "chicago_today": packet.get("chicago_today"),
         "scorecard_present": bool(packet.get("scorecard_present")),
         "ritual": packet.get("ritual") if isinstance(packet.get("ritual"), dict) else None,
+        "ritual_ok": packet.get("ritual_ok"),
         "label": (
             f"sunday packet={'yes' if present else 'no'} "
             f"scorecard={bool(packet.get('scorecard_present'))} "
+            f"ritual_ok={packet.get('ritual_ok')} "
             f"auto_publish=False"
         ),
         "note": packet.get("note") or (

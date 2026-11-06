@@ -42,6 +42,11 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
     dual = living.get("dual_control") if isinstance(living.get("dual_control"), dict) else {}
     ruin = living.get("ruin_drill") if isinstance(living.get("ruin_drill"), dict) else {}
     doctor_age = living.get("doctor_age") if isinstance(living.get("doctor_age"), dict) else {}
+    ritual_obs = (
+        living.get("ritual_observe")
+        if isinstance(living.get("ritual_observe"), dict)
+        else {}
+    )
     return {
         "helper": "sunday_packet",
         "at": now.isoformat(),
@@ -92,8 +97,14 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
         "ritual": {
             "cli": "python3 tools/staff_living_ritual.py --discord",
             "make": "make living-ritual-discord",
+            "observe": "make living-ritual-observe",
             "auto_publish": False,
+            "ritual_ok": ritual_obs.get("ritual_ok"),
+            "exit_ok": ritual_obs.get("exit_ok"),
+            "doctor_fresh": ritual_obs.get("doctor_fresh"),
+            "label": ritual_obs.get("label"),
         },
+        "ritual_ok": ritual_obs.get("ritual_ok"),
         "staff_checklist": [
             "Confirm venue floors still locked (0.06/0.05/0.02)",
             "Review raise_Φ tickets — staff dual-control only",
@@ -150,6 +161,10 @@ def format_discord(packet: dict | None = None) -> str:
         (
             f"• Weekly ritual draft: `{ritual.get('make') or 'make living-ritual-discord'}` "
             f"(paste only · auto_publish=False)"
+        ),
+        (
+            f"• Ritual observe: ritual_ok={ritual.get('ritual_ok')} "
+            f"exit_ok={ritual.get('exit_ok')} doctor_fresh={ritual.get('doctor_fresh')}"
         ),
         "",
         "**Staff checklist**",
