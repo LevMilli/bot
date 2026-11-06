@@ -4,40 +4,47 @@ import { CanvasTexture, Matrix4, Quaternion, Vector3, type Group, type MeshStand
 import type { BotPose } from '../data/botPose'
 import { mouseHand, typingHand } from './deskReach'
 
-/** Shared canvas decals — one texture per kind/mark, not per bot instance. */
+/**
+ * Purple industrial cyberpunk trader — silhouette matched to the user refs:
+ * blocky tactical helmet, twin rear blade antennae, exposed hydraulic neck,
+ * oversized graffiti pauldrons, circular torso rings, recessed purple LEDs.
+ *
+ * APEX-CITY format: same desk IK anchors as BotFigure. No per-bot pointLights
+ * (black-plaza crash). Plaza cars use `lite`. Markings via cached canvas decals.
+ */
+
 const TEX_CACHE = new Map<string, CanvasTexture>()
 
-/** Matte gunmetal armor — used-future black, not glossy. */
-const ARMOR = '#121218'
-const ARMOR_DARK = '#08080c'
-const ARMOR_EDGE = '#1c1c24'
-const METAL = '#2a2a32'
-const PURPLE = '#c44dff'
-const PURPLE_DIM = '#7a2fb8'
-const GRAFFITI = '#f2f2f0'
+/** Slightly lifted gunmetal so the figure reads against black chairs/desks. */
+const ARMOR = '#18181f'
+const ARMOR_DARK = '#0a0a0e'
+const ARMOR_EDGE = '#2a2a34'
+const METAL = '#3a3a46'
+const PURPLE = '#d060ff'
+const PURPLE_DIM = '#7a30b8'
+const GRAFFITI = '#f4f4f0'
 
-function armor(roughness = 0.58, metalness = 0.62) {
+function armor(roughness = 0.58, metalness = 0.65) {
   return {
     color: ARMOR,
     roughness,
     metalness,
-    emissive: '#0a0512',
-    emissiveIntensity: 0.08,
+    emissive: '#090510',
+    emissiveIntensity: 0.1,
   }
 }
 
-function neon(intensity = 1.4) {
+function neon(intensity = 1.55) {
   return {
     color: PURPLE,
     emissive: PURPLE,
     emissiveIntensity: intensity,
-    roughness: 0.25,
-    metalness: 0.2,
+    roughness: 0.22,
+    metalness: 0.18,
     toneMapped: false as const,
   }
 }
 
-/** Recessed rectangular LED strip. */
 function LedStrip({
   position,
   rotation,
@@ -50,60 +57,43 @@ function LedStrip({
   return (
     <mesh position={position} rotation={rotation}>
       <boxGeometry args={size} />
-      <meshStandardMaterial {...neon(1.55)} />
+      <meshStandardMaterial {...neon(1.65)} />
     </mesh>
   )
 }
 
-/** Small rivet / bolt head. */
-function Bolt({ position }: { position: [number, number, number] }) {
+/** Recessed LED channel — dark trough + glowing strip (matches photo recesses). */
+function LedChannel({
+  position,
+  rotation,
+  length = 0.16,
+  width = 0.028,
+}: {
+  position: [number, number, number]
+  rotation?: [number, number, number]
+  length?: number
+  width?: number
+}) {
+  return (
+    <group position={position} rotation={rotation}>
+      <mesh>
+        <boxGeometry args={[width + 0.01, length + 0.01, 0.016]} />
+        <meshStandardMaterial color={ARMOR_DARK} metalness={0.4} roughness={0.7} />
+      </mesh>
+      <mesh position={[0, 0, 0.006]}>
+        <boxGeometry args={[width * 0.55, length * 0.88, 0.01]} />
+        <meshStandardMaterial {...neon(1.7)} />
+      </mesh>
+    </group>
+  )
+}
+
+function Bolt({ position, r = 0.008 }: { position: [number, number, number]; r?: number }) {
   return (
     <mesh position={position}>
-      <cylinderGeometry args={[0.008, 0.008, 0.01, 8]} />
-      <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.3} />
+      <cylinderGeometry args={[r, r, 0.01, 8]} />
+      <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.28} />
     </mesh>
-  )
-}
-
-/** Three-point crown (faction mark) as real geometry. */
-function CrownMark({ scale = 1 }: { scale?: number }) {
-  return (
-    <group scale={scale}>
-      <mesh position={[0, 0.01, 0]}>
-        <boxGeometry args={[0.07, 0.02, 0.012]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 0.035, 0]}>
-        <boxGeometry args={[0.018, 0.04, 0.012]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
-      </mesh>
-      <mesh position={[-0.028, 0.028, 0]} rotation={[0, 0, 0.35]}>
-        <boxGeometry args={[0.016, 0.036, 0.012]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
-      </mesh>
-      <mesh position={[0.028, 0.028, 0]} rotation={[0, 0, -0.35]}>
-        <boxGeometry args={[0.016, 0.036, 0.012]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
-      </mesh>
-    </group>
-  )
-}
-
-/** Kill/trade tally: four bars + diagonal. */
-function TallyMark() {
-  return (
-    <group>
-      {([-0.03, -0.01, 0.01, 0.03] as const).map((x) => (
-        <mesh key={x} position={[x, 0, 0]}>
-          <boxGeometry args={[0.008, 0.06, 0.006]} />
-          <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
-        </mesh>
-      ))}
-      <mesh position={[0, 0, 0.002]} rotation={[0, 0, -0.7]}>
-        <boxGeometry args={[0.008, 0.072, 0.006]} />
-        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
-      </mesh>
-    </group>
   )
 }
 
@@ -111,8 +101,112 @@ function LedDot({ position, r = 0.012 }: { position: [number, number, number]; r
   return (
     <mesh position={position}>
       <sphereGeometry args={[r, 10, 10]} />
-      <meshStandardMaterial {...neon(1.8)} />
+      <meshStandardMaterial {...neon(1.9)} />
     </mesh>
+  )
+}
+
+function Cable({
+  position,
+  rotation,
+  length = 0.08,
+  r = 0.007,
+}: {
+  position: [number, number, number]
+  rotation?: [number, number, number]
+  length?: number
+  r?: number
+}) {
+  return (
+    <mesh position={position} rotation={rotation}>
+      <cylinderGeometry args={[r, r, length, 6]} />
+      <meshStandardMaterial color="#050508" roughness={0.92} metalness={0.12} />
+    </mesh>
+  )
+}
+
+function Hydraulic({
+  position,
+  rotation,
+  length = 0.09,
+}: {
+  position: [number, number, number]
+  rotation?: [number, number, number]
+  length?: number
+}) {
+  return (
+    <group position={position} rotation={rotation}>
+      <mesh>
+        <cylinderGeometry args={[0.01, 0.01, length, 8]} />
+        <meshStandardMaterial color={METAL} metalness={0.92} roughness={0.2} />
+      </mesh>
+      <mesh position={[0, length * 0.18, 0]}>
+        <cylinderGeometry args={[0.017, 0.017, length * 0.32, 8]} />
+        <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.32} />
+      </mesh>
+      {[-0.018, 0, 0.018].map((y) => (
+        <mesh key={y} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.015, 0.003, 4, 10]} />
+          <meshStandardMaterial color="#50505a" metalness={0.85} roughness={0.28} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/** Three-point crown — matches shoulder graffiti icon. */
+function CrownMark({ scale = 1 }: { scale?: number }) {
+  return (
+    <group scale={scale}>
+      <mesh position={[0, 0.008, 0]}>
+        <boxGeometry args={[0.08, 0.018, 0.01]} />
+        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0.038, 0]}>
+        <boxGeometry args={[0.02, 0.045, 0.01]} />
+        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+      </mesh>
+      <mesh position={[-0.032, 0.03, 0]} rotation={[0, 0, 0.4]}>
+        <boxGeometry args={[0.018, 0.04, 0.01]} />
+        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+      </mesh>
+      <mesh position={[0.032, 0.03, 0]} rotation={[0, 0, -0.4]}>
+        <boxGeometry args={[0.018, 0.04, 0.01]} />
+        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+      </mesh>
+    </group>
+  )
+}
+
+function TallyMark() {
+  return (
+    <group>
+      {([-0.032, -0.012, 0.008, 0.028] as const).map((x) => (
+        <mesh key={x} position={[x, 0, 0]}>
+          <boxGeometry args={[0.009, 0.065, 0.006]} />
+          <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+        </mesh>
+      ))}
+      <mesh position={[0, 0, 0.002]} rotation={[0, 0, -0.72]}>
+        <boxGeometry args={[0.009, 0.078, 0.006]} />
+        <meshBasicMaterial color={GRAFFITI} toneMapped={false} />
+      </mesh>
+    </group>
+  )
+}
+
+function ScratchMarks({ position, rotation }: { position: [number, number, number]; rotation?: [number, number, number] }) {
+  return (
+    <group position={position} rotation={rotation}>
+      <mesh position={[0, 0.02, 0]} rotation={[0, 0, 0.35]}>
+        <boxGeometry args={[0.1, 0.003, 0.002]} />
+        <meshBasicMaterial color="#3c3c46" toneMapped={false} />
+      </mesh>
+      <mesh position={[0.015, -0.012, 0]} rotation={[0, 0, -0.2]}>
+        <boxGeometry args={[0.07, 0.002, 0.002]} />
+        <meshBasicMaterial color="#2a2a32" toneMapped={false} />
+      </mesh>
+    </group>
   )
 }
 
@@ -122,8 +216,8 @@ function graffitiTexture(kind: 'pauldron' | 'unit', mark: string) {
   if (hit) return hit
 
   const c = document.createElement('canvas')
-  c.width = kind === 'pauldron' ? 256 : 128
-  c.height = kind === 'pauldron' ? 256 : 128
+  c.width = kind === 'pauldron' ? 384 : 160
+  c.height = kind === 'pauldron' ? 384 : 160
   const ctx = c.getContext('2d')!
   ctx.clearRect(0, 0, c.width, c.height)
   ctx.fillStyle = GRAFFITI
@@ -131,37 +225,44 @@ function graffitiTexture(kind: 'pauldron' | 'unit', mark: string) {
   ctx.textBaseline = 'middle'
 
   if (kind === 'pauldron') {
+    // Crown outline
+    ctx.lineWidth = 8
+    ctx.strokeStyle = GRAFFITI
     ctx.beginPath()
-    ctx.moveTo(128, 48)
-    ctx.lineTo(98, 88)
-    ctx.lineTo(108, 88)
-    ctx.lineTo(108, 108)
-    ctx.lineTo(148, 108)
-    ctx.lineTo(148, 88)
-    ctx.lineTo(158, 88)
+    ctx.moveTo(192, 58)
+    ctx.lineTo(148, 118)
+    ctx.lineTo(162, 118)
+    ctx.lineTo(162, 148)
+    ctx.lineTo(222, 148)
+    ctx.lineTo(222, 118)
+    ctx.lineTo(236, 118)
     ctx.closePath()
     ctx.fill()
     ctx.beginPath()
-    ctx.moveTo(98, 88)
-    ctx.lineTo(78, 58)
-    ctx.lineTo(92, 88)
+    ctx.moveTo(148, 118)
+    ctx.lineTo(118, 72)
+    ctx.lineTo(140, 118)
     ctx.fill()
     ctx.beginPath()
-    ctx.moveTo(158, 88)
-    ctx.lineTo(178, 58)
-    ctx.lineTo(164, 88)
+    ctx.moveTo(236, 118)
+    ctx.lineTo(266, 72)
+    ctx.lineTo(244, 118)
     ctx.fill()
-    ctx.font = 'bold 36px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('PIMPS', 128, 155)
-    ctx.font = 'bold 34px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('ONLY', 128, 195)
-    ctx.fillRect(95, 210, 4, 18)
-    ctx.fillRect(118, 208, 3, 22)
-    ctx.fillRect(145, 212, 4, 14)
-    ctx.fillRect(162, 210, 3, 16)
+    // Dripping PIMPS ONLY
+    ctx.font = 'bold 58px Impact, Haettenschweiler, Arial Black, sans-serif'
+    ctx.fillText('PIMPS', 192, 220)
+    ctx.font = 'bold 54px Impact, Haettenschweiler, Arial Black, sans-serif'
+    ctx.fillText('ONLY', 192, 280)
+    // Drips
+    ;[
+      [140, 300, 6, 28],
+      [175, 298, 5, 36],
+      [210, 302, 6, 22],
+      [245, 300, 5, 30],
+    ].forEach(([x, y, w, h]) => ctx.fillRect(x, y, w, h))
   } else {
-    ctx.font = 'bold 72px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText(mark.slice(0, 2), 64, 68)
+    ctx.font = 'bold 96px Impact, Haettenschweiler, Arial Black, sans-serif'
+    ctx.fillText(mark.slice(0, 2), 80, 84)
   }
 
   const tex = new CanvasTexture(c)
@@ -170,7 +271,6 @@ function graffitiTexture(kind: 'pauldron' | 'unit', mark: string) {
   return tex
 }
 
-/** Mechanical multi-finger hand for desk work. */
 function MechGrip({ work = false, gripRef }: { work?: boolean; gripRef?: RefObject<Group | null> }) {
   const own = useRef<Group>(null)
   const ref = gripRef ?? own
@@ -183,15 +283,30 @@ function MechGrip({ work = false, gripRef }: { work?: boolean; gripRef?: RefObje
   return (
     <group ref={ref}>
       <mesh>
-        <boxGeometry args={[0.07, 0.05, 0.055]} />
-        <meshStandardMaterial {...armor(0.5, 0.7)} />
+        <boxGeometry args={[0.082, 0.055, 0.065]} />
+        <meshStandardMaterial {...armor(0.48, 0.72)} />
       </mesh>
-      <LedStrip position={[0, 0, 0.03]} size={[0.05, 0.01, 0.008]} />
+      <mesh position={[0, 0.03, 0.012]}>
+        <boxGeometry args={[0.076, 0.02, 0.052]} />
+        <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.38} />
+      </mesh>
+      <LedChannel position={[0, 0, 0.035]} length={0.05} width={0.04} rotation={[Math.PI / 2, 0, 0]} />
       {([-1, 0, 1] as const).map((side) => (
-        <mesh key={side} position={[side * 0.022, 0.055, 0.01]} rotation={[0.15, 0, side * 0.12]}>
-          <boxGeometry args={[0.018, 0.09, 0.022]} />
-          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.45} />
-        </mesh>
+        <group key={side} position={[side * 0.026, 0.042, 0.01]} rotation={[0.14, 0, side * 0.14]}>
+          <mesh position={[0, 0.032, 0]}>
+            <boxGeometry args={[0.018, 0.055, 0.022]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.72} roughness={0.42} />
+          </mesh>
+          <mesh position={[0, 0.062, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.011, 0.003, 4, 10]} />
+            <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.28} />
+          </mesh>
+          <mesh position={[0, 0.092, 0.006]} rotation={[0.28, 0, 0]}>
+            <boxGeometry args={[0.015, 0.048, 0.02]} />
+            <meshStandardMaterial {...armor(0.5, 0.68)} />
+          </mesh>
+          <LedDot position={[0, 0.118, 0.014]} r={0.006} />
+        </group>
       ))}
     </group>
   )
@@ -227,6 +342,7 @@ function aimY(dir: Vector3, hint: Vector3, out: Quaternion) {
   return out.setFromRotationMatrix(_basis)
 }
 
+/** Chunky photo-matched arm: circular joints, recessed LED channels, tallies. */
 function IndustrialArm({
   side,
   pose,
@@ -333,62 +449,107 @@ function IndustrialArm({
   return (
     <group
       ref={ref}
-      position={[side * 0.34, 0.78, 0]}
+      position={[side * 0.36, 0.78, 0.02]}
       rotation={[trading ? -2.2 : -0.85, 0, trading ? -side * 0.1 : -side * 0.55]}
     >
-      {/* Shoulder ball + ring */}
-      <mesh position={[0, 0, 0]}>
-        <sphereGeometry args={[0.07, 16, 14]} />
-        <meshStandardMaterial color={ARMOR_DARK} metalness={0.75} roughness={0.4} />
+      {/* Heavy circular shoulder joint */}
+      <mesh>
+        <sphereGeometry args={[0.078, 16, 14]} />
+        <meshStandardMaterial color={ARMOR_DARK} metalness={0.78} roughness={0.38} emissive={PURPLE_DIM} emissiveIntensity={0.22} />
       </mesh>
-      <mesh position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.078, 0.012, 8, 24]} />
-        <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.28} />
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.088, 0.014, 8, 24]} />
+        <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.25} />
       </mesh>
-      <LedDot position={[0, 0.02, 0.075]} r={0.01} />
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.102, 0.006, 6, 20]} />
+        <meshStandardMaterial color={ARMOR_EDGE} metalness={0.82} roughness={0.3} />
+      </mesh>
+      <LedDot position={[0, 0.025, 0.085]} r={0.011} />
+      <LedDot position={[side * 0.055, 0, 0.06]} r={0.008} />
 
-      {/* Upper arm plating */}
-      <mesh position={[0, 0.17, 0]}>
-        <boxGeometry args={[0.1, 0.32, 0.1]} />
-        <meshStandardMaterial {...armor(0.55, 0.68)} />
+      {/* Upper arm — interlocking plates + recessed LED */}
+      <mesh position={[0, 0.175, 0]}>
+        <boxGeometry args={[0.125, 0.34, 0.125]} />
+        <meshStandardMaterial {...armor(0.52, 0.7)} />
       </mesh>
-      <mesh position={[0, 0.17, 0]}>
-        <boxGeometry args={[0.085, 0.3, 0.085]} />
-        <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.65} />
+      <mesh position={[0, 0.175, 0]}>
+        <boxGeometry args={[0.1, 0.3, 0.1]} />
+        <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.62} />
       </mesh>
-      <LedStrip position={[side * 0.052, 0.17, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.2, 0.014, 0.01]} />
-      <Bolt position={[side * 0.045, 0.08, 0.04]} />
-      <Bolt position={[side * 0.045, 0.22, 0.04]} />
+      <mesh position={[side * 0.05, 0.175, 0.03]}>
+        <boxGeometry args={[0.045, 0.28, 0.09]} />
+        <meshStandardMaterial color={ARMOR_EDGE} metalness={0.74} roughness={0.38} />
+      </mesh>
+      <LedChannel
+        position={[side * 0.068, 0.175, 0]}
+        rotation={[0, side * (Math.PI / 2), 0]}
+        length={0.24}
+        width={0.03}
+      />
+      <Cable position={[-side * 0.055, 0.17, -0.025]} rotation={[0.12, 0, side * 0.25]} length={0.24} />
+      <Hydraulic position={[-side * 0.04, 0.12, -0.03]} rotation={[0.25, 0, 0]} length={0.08} />
+      <Bolt position={[side * 0.06, 0.08, 0.05]} />
+      <Bolt position={[side * 0.06, 0.16, 0.05]} />
+      <Bolt position={[side * 0.06, 0.24, 0.05]} />
+      <ScratchMarks position={[side * 0.068, 0.12, 0.02]} rotation={[0, side * (Math.PI / 2), 0]} />
+      {/* Upper-arm tallies (ref shows on arm plating) */}
+      <group position={[side * 0.068, 0.22, 0.02]} rotation={[0, side * (Math.PI / 2), 0]} scale={0.85}>
+        <TallyMark />
+      </group>
 
-      {/* Elbow joint */}
+      {/* Elbow — heavy ring stack */}
       <mesh position={[0, 0.34, 0]}>
-        <sphereGeometry args={[0.055, 14, 12]} />
-        <meshStandardMaterial color={ARMOR_DARK} metalness={0.8} roughness={0.35} />
+        <sphereGeometry args={[0.062, 14, 12]} />
+        <meshStandardMaterial color={ARMOR_DARK} metalness={0.82} roughness={0.32} />
       </mesh>
       <mesh position={[0, 0.34, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.062, 0.01, 8, 22]} />
-        <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.25} />
+        <torusGeometry args={[0.07, 0.012, 8, 22]} />
+        <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.22} />
       </mesh>
-      <LedDot position={[0, 0.34, 0.065]} r={0.009} />
+      <mesh position={[0, 0.34, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.082, 0.006, 6, 18]} />
+        <meshStandardMaterial {...neon(1.0)} />
+      </mesh>
+      <LedDot position={[0, 0.34, 0.075]} r={0.01} />
 
       <group ref={fore} position={[0, 0.34, 0]} rotation={[trading ? -0.05 : -0.5, 0, 0]}>
-        <mesh position={[0, 0.15, 0]}>
-          <boxGeometry args={[0.09, 0.3, 0.09]} />
-          <meshStandardMaterial {...armor(0.52, 0.7)} />
+        <mesh position={[0, 0.155, 0]}>
+          <boxGeometry args={[0.11, 0.32, 0.11]} />
+          <meshStandardMaterial {...armor(0.5, 0.72)} />
         </mesh>
-        {/* Exposed mechanical guts on inner face */}
-        <mesh position={[-side * 0.04, 0.15, 0]}>
-          <boxGeometry args={[0.02, 0.22, 0.05]} />
-          <meshStandardMaterial color="#050508" metalness={0.4} roughness={0.7} emissive={PURPLE_DIM} emissiveIntensity={0.35} />
+        <mesh position={[side * 0.045, 0.12, 0.025]}>
+          <boxGeometry args={[0.04, 0.13, 0.08]} />
+          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.74} roughness={0.36} />
         </mesh>
-        <LedStrip position={[side * 0.048, 0.15, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.22, 0.014, 0.01]} />
-        {/* Tally marks on outer forearm — raised white bars */}
-        <group position={[side * 0.052, 0.14, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
+        <mesh position={[side * 0.045, 0.22, 0.025]}>
+          <boxGeometry args={[0.038, 0.11, 0.075]} />
+          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.74} roughness={0.36} />
+        </mesh>
+        <mesh position={[-side * 0.048, 0.155, 0]}>
+          <boxGeometry args={[0.025, 0.26, 0.06]} />
+          <meshStandardMaterial color="#040406" metalness={0.4} roughness={0.7} emissive={PURPLE_DIM} emissiveIntensity={0.42} />
+        </mesh>
+        <LedChannel
+          position={[side * 0.06, 0.155, 0]}
+          rotation={[0, side * (Math.PI / 2), 0]}
+          length={0.22}
+          width={0.028}
+        />
+        <LedChannel position={[0, 0.155, 0.058]} length={0.18} width={0.024} />
+        <Cable position={[-side * 0.055, 0.155, 0.02]} length={0.2} r={0.005} />
+        <group position={[side * 0.062, 0.14, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
           <TallyMark />
         </group>
+        <ScratchMarks position={[side * 0.058, 0.08, 0.03]} rotation={[0, side * (Math.PI / 2), 0]} />
+        {/* Neon wrist cuff */}
         <mesh position={[0, 0.32, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.048, 0.008, 8, 18]} />
-          <meshStandardMaterial {...neon(1.2)} />
+          <torusGeometry args={[0.055, 0.011, 8, 18]} />
+          <meshStandardMaterial {...neon(1.35)} />
+        </mesh>
+        <mesh position={[0, 0.3, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.052, 0.007, 6, 16]} />
+          <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.26} />
         </mesh>
         <group position={[0, 0.34, 0]}>
           <MechGrip work={work} gripRef={grip} />
@@ -403,29 +564,41 @@ function SeatedLegs() {
     <>
       {([-1, 1] as const).map((side) => (
         <group key={side}>
-          <mesh position={[side * 0.14, 0.22, 0.02]} rotation={[-Math.PI / 2, 0, side * 0.04]}>
-            <boxGeometry args={[0.11, 0.28, 0.12]} />
+          <mesh position={[side * 0.15, 0.22, 0.02]} rotation={[-Math.PI / 2, 0, side * 0.04]}>
+            <boxGeometry args={[0.13, 0.32, 0.14]} />
+            <meshStandardMaterial {...armor(0.58, 0.58)} />
+          </mesh>
+          <mesh position={[side * 0.15, 0.22, 0.07]} rotation={[-Math.PI / 2, 0, side * 0.04]}>
+            <boxGeometry args={[0.1, 0.24, 0.045]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.72} roughness={0.4} />
+          </mesh>
+          <LedChannel position={[side * 0.15, 0.22, 0.1]} length={0.1} width={0.05} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh position={[side * 0.15, 0.08, -0.08]} rotation={[0, 0, Math.PI / 2]}>
+            <torusGeometry args={[0.05, 0.009, 6, 14]} />
+            <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.26} />
+          </mesh>
+          <LedDot position={[side * 0.15, 0.08, -0.025]} r={0.009} />
+          <mesh position={[side * 0.15, -0.05, -0.14]} rotation={[0.15, 0, 0]}>
+            <boxGeometry args={[0.115, 0.44, 0.115]} />
             <meshStandardMaterial {...armor(0.6, 0.55)} />
           </mesh>
-          <LedStrip position={[side * 0.14, 0.22, 0.08]} size={[0.06, 0.012, 0.008]} />
-          <mesh position={[side * 0.14, -0.05, -0.14]} rotation={[0.15, 0, 0]}>
-            <boxGeometry args={[0.1, 0.42, 0.1]} />
-            <meshStandardMaterial {...armor(0.62, 0.55)} />
+          <LedChannel
+            position={[side * 0.21, -0.05, -0.14]}
+            rotation={[0, side * (Math.PI / 2), 0]}
+            length={0.22}
+            width={0.026}
+          />
+          <mesh position={[side * 0.15, -0.28, -0.02]} rotation={[0.2, 0, 0]}>
+            <boxGeometry args={[0.13, 0.08, 0.22]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.62} roughness={0.52} />
           </mesh>
-          <mesh position={[side * 0.14, -0.28, -0.02]} rotation={[0.2, 0, 0]}>
-            <boxGeometry args={[0.11, 0.07, 0.18]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.6} roughness={0.55} />
-          </mesh>
+          <LedStrip position={[side * 0.15, -0.25, 0.09]} size={[0.09, 0.012, 0.009]} />
         </group>
       ))}
     </>
   )
 }
 
-/**
- * Purple industrial cyberpunk trader bot — mimics the user reference photos.
- * Gated behind botRemodelGate; keep classic BotFigure until approved.
- */
 export function IndustrialBotFigure({
   pose = 'waiting',
   seated = true,
@@ -438,9 +611,7 @@ export function IndustrialBotFigure({
   seated?: boolean
   deskWork?: boolean
   seed?: number
-  /** Alphanumeric unit ID painted on helmet (refs use "22"). */
   unitMark?: string
-  /** Low-poly silhouette for distant plaza car riders — no lights / heavy decals. */
   lite?: boolean
 }) {
   const body = useRef<Group>(null)
@@ -513,260 +684,341 @@ export function IndustrialBotFigure({
       head.current.rotation.z = tilt
     }
     if (stripPulse.current) {
-      stripPulse.current.emissiveIntensity = 1.35 + Math.sin(t * 2.6) * 0.35
+      stripPulse.current.emissiveIntensity = 1.4 + Math.sin(t * 2.6) * 0.4
     }
   })
 
-  // Plaza car riders: black+purple silhouette only — no point lights / Text / heavy plates.
+  // Plaza car LOD — black+purple silhouette only.
   if (lite) {
     return (
       <group ref={body} position={anchor}>
         <mesh position={[0, 0.55, 0]}>
-          <boxGeometry args={[0.36, 0.5, 0.26]} />
+          <boxGeometry args={[0.4, 0.52, 0.28]} />
           <meshStandardMaterial {...armor(0.55, 0.65)} />
         </mesh>
-        <mesh position={[0, 0.55, 0.14]}>
-          <boxGeometry args={[0.2, 0.02, 0.01]} />
-          <meshStandardMaterial {...neon(1.2)} />
+        <mesh position={[0, 0.55, 0.15]}>
+          <boxGeometry args={[0.22, 0.02, 0.01]} />
+          <meshStandardMaterial {...neon(1.3)} />
         </mesh>
         <group ref={head} position={[0, 1.0, 0.02]}>
           <mesh position={[0, 0.14, 0]}>
-            <boxGeometry args={[0.28, 0.26, 0.3]} />
+            <boxGeometry args={[0.3, 0.28, 0.32]} />
             <meshStandardMaterial {...armor(0.5, 0.7)} />
           </mesh>
-          <LedDot position={[-0.05, 0.14, 0.16]} r={0.016} />
-          <LedDot position={[0.05, 0.14, 0.16]} r={0.016} />
-          <mesh position={[-0.07, 0.36, -0.08]} rotation={[0.3, 0, -0.15]}>
-            <boxGeometry args={[0.02, 0.28, 0.035]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.35} />
+          <LedDot position={[-0.055, 0.14, 0.17]} r={0.018} />
+          <LedDot position={[0.055, 0.14, 0.17]} r={0.018} />
+          <mesh position={[-0.075, 0.38, -0.08]} rotation={[0.35, 0, -0.18]}>
+            <boxGeometry args={[0.022, 0.32, 0.04]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.72} roughness={0.34} />
           </mesh>
-          <mesh position={[0.07, 0.36, -0.08]} rotation={[0.3, 0, 0.15]}>
-            <boxGeometry args={[0.02, 0.28, 0.035]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.35} />
+          <mesh position={[0.075, 0.38, -0.08]} rotation={[0.35, 0, 0.18]}>
+            <boxGeometry args={[0.022, 0.32, 0.04]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.72} roughness={0.34} />
           </mesh>
         </group>
         {([-1, 1] as const).map((side) => (
-          <mesh key={side} position={[side * 0.28, 0.7, 0]} rotation={[0.2, 0, side * 0.4]}>
-            <boxGeometry args={[0.12, 0.4, 0.1]} />
+          <mesh key={side} position={[side * 0.3, 0.72, 0]} rotation={[0.15, 0, side * 0.45]}>
+            <boxGeometry args={[0.14, 0.42, 0.12]} />
             <meshStandardMaterial {...armor(0.55, 0.6)} />
           </mesh>
         ))}
-        {seated || deskWork ? (
-          <SeatedLegs />
-        ) : (
-          <group ref={legs}>
-            {([-1, 1] as const).map((side) => (
-              <mesh key={side} position={[side * 0.12, -0.12, 0.02]}>
-                <boxGeometry args={[0.09, 0.32, 0.09]} />
-                <meshStandardMaterial {...armor(0.6, 0.55)} />
-              </mesh>
-            ))}
-          </group>
-        )}
+        {seated || deskWork ? <SeatedLegs /> : null}
       </group>
     )
   }
 
+  // Suite interiors are scaled ~0.62 — nudge desk bots up so armor/antennae still read.
+  const suiteBoost = deskWork ? 1.14 : 1
+
   return (
-    <group ref={body} position={anchor}>
+    <group ref={body} position={anchor} scale={suiteBoost}>
       <group ref={torso}>
-        {/* Hip block */}
+        {/* Pelvis */}
         <mesh position={[0, deskWork ? 0.3 : 0.14, deskWork ? 0.04 : 0]}>
-          <boxGeometry args={[0.28, 0.16, 0.22]} />
-          <meshStandardMaterial {...armor(0.6, 0.58)} />
+          <boxGeometry args={[0.32, 0.18, 0.26]} />
+          <meshStandardMaterial {...armor(0.58, 0.6)} />
+        </mesh>
+        <mesh position={[0, deskWork ? 0.36 : 0.2, deskWork ? 0.04 : 0]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.15, 0.014, 6, 22]} />
+          <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.26} />
         </mesh>
 
-        {/* Torso core — wider heavy chest cage */}
-        <mesh position={[0, 0.55, 0.02]}>
-          <boxGeometry args={[0.44, 0.54, 0.32]} />
-          <meshStandardMaterial {...armor(0.55, 0.65)} />
+        {/* Thick torso cage — photo: wide powerful frame */}
+        <mesh position={[0, 0.56, 0.02]}>
+          <boxGeometry args={[0.48, 0.56, 0.34]} />
+          <meshStandardMaterial {...armor(0.52, 0.68)} />
         </mesh>
-        {/* Side armor plates */}
-        {([-1, 1] as const).map((side) => (
-          <mesh key={side} position={[side * 0.24, 0.55, 0.02]}>
-            <boxGeometry args={[0.06, 0.4, 0.26]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.4} />
-          </mesh>
-        ))}
-        {/* Inner chassis glow */}
-        <mesh position={[0, 0.55, 0]}>
-          <boxGeometry args={[0.34, 0.46, 0.22]} />
-          <meshStandardMaterial color={ARMOR_DARK} metalness={0.45} roughness={0.7} emissive={PURPLE_DIM} emissiveIntensity={0.28} />
+        <mesh position={[0, 0.56, 0]}>
+          <boxGeometry args={[0.36, 0.48, 0.24]} />
+          <meshStandardMaterial color={ARMOR_DARK} metalness={0.45} roughness={0.68} emissive={PURPLE_DIM} emissiveIntensity={0.32} />
         </mesh>
-        {/* Mechanical spine */}
-        <mesh position={[0, 0.55, -0.12]}>
-          <boxGeometry args={[0.06, 0.48, 0.05]} />
-          <meshStandardMaterial color={METAL} metalness={0.8} roughness={0.35} />
+        {/* Front plate stack */}
+        <mesh position={[0, 0.7, 0.16]}>
+          <boxGeometry args={[0.36, 0.18, 0.06]} />
+          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.36} />
         </mesh>
-        {[0.38, 0.48, 0.58, 0.68].map((y) => (
-          <mesh key={y} position={[0, y, -0.14]} rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.045, 0.008, 6, 16]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.3} />
-          </mesh>
-        ))}
-        <LedStrip position={[0, 0.55, -0.155]} rotation={[Math.PI / 2, 0, 0]} size={[0.04, 0.36, 0.01]} />
-
-        {/* Chest LED strips */}
-        <LedStrip position={[-0.14, 0.62, 0.15]} size={[0.08, 0.014, 0.01]} />
-        <LedStrip position={[0.14, 0.62, 0.15]} size={[0.08, 0.014, 0.01]} />
-        <mesh position={[0, 0.48, 0.15]}>
-          <boxGeometry args={[0.2, 0.014, 0.01]} />
-          <meshStandardMaterial ref={stripPulse} {...neon(1.4)} />
+        <mesh position={[0, 0.52, 0.17]}>
+          <boxGeometry args={[0.3, 0.16, 0.05]} />
+          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.36} />
+        </mesh>
+        <mesh position={[0, 0.38, 0.15]}>
+          <boxGeometry args={[0.24, 0.1, 0.045]} />
+          <meshStandardMaterial {...armor(0.5, 0.7)} />
         </mesh>
 
-        {/* Shoulder ring frame */}
-        <mesh position={[0, 0.82, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <torusGeometry args={[0.2, 0.018, 8, 28]} />
+        {/* Circular structural rings (ref: shoulder/chest rings) */}
+        <mesh position={[0, 0.72, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.22, 0.02, 8, 28]} />
+          <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.24} />
+        </mesh>
+        <mesh position={[0, 0.72, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.255, 0.009, 6, 24]} />
+          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.82} roughness={0.3} />
+        </mesh>
+        <mesh position={[0, 0.5, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.2, 0.012, 6, 24]} />
           <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.28} />
         </mesh>
+        <LedDot position={[0.22, 0.72, 0]} r={0.009} />
+        <LedDot position={[-0.22, 0.72, 0]} r={0.009} />
 
-        {/* Heavy angular pauldrons — graffiti canvas */}
+        {/* Mechanical spine (OTS hero detail) */}
+        <mesh position={[0, 0.56, -0.14]}>
+          <boxGeometry args={[0.07, 0.52, 0.06]} />
+          <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.32} />
+        </mesh>
+        {[0.36, 0.44, 0.52, 0.6, 0.68, 0.76].map((y) => (
+          <mesh key={y} position={[0, y, -0.16]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.052, 0.009, 6, 16]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.3} />
+          </mesh>
+        ))}
+        <LedChannel position={[0, 0.56, -0.18]} length={0.42} width={0.035} rotation={[Math.PI / 2, 0, 0]} />
+        <Cable position={[-0.055, 0.56, -0.17]} rotation={[0.04, 0, 0.12]} length={0.4} />
+        <Cable position={[0.055, 0.56, -0.17]} rotation={[0.04, 0, -0.12]} length={0.4} />
+
+        {/* Side armor + underglow gaps */}
         {([-1, 1] as const).map((side) => (
-          <group key={side} position={[side * 0.32, 0.88, 0.04]}>
-            <mesh rotation={[0.12, side * 0.2, side * 0.42]}>
-              <boxGeometry args={[0.26, 0.16, 0.3]} />
-              <meshStandardMaterial {...armor(0.48, 0.72)} />
+          <group key={side}>
+            <mesh position={[side * 0.26, 0.56, 0.02]}>
+              <boxGeometry args={[0.07, 0.46, 0.3]} />
+              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.72} roughness={0.38} />
             </mesh>
-            {/* Raised rim */}
-            <mesh position={[0, 0.06, 0]} rotation={[0.12, side * 0.2, side * 0.42]}>
-              <boxGeometry args={[0.28, 0.03, 0.32]} />
-              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.35} />
+            <mesh position={[side * 0.3, 0.56, 0.02]}>
+              <boxGeometry args={[0.022, 0.4, 0.22]} />
+              <meshStandardMaterial color={ARMOR_DARK} metalness={0.4} roughness={0.65} emissive={PURPLE_DIM} emissiveIntensity={0.28} />
             </mesh>
-            <LedStrip position={[side * 0.02, 0.0, 0.12]} size={[0.14, 0.014, 0.01]} />
-            <LedStrip position={[side * 0.02, -0.04, 0.12]} size={[0.1, 0.01, 0.008]} />
-            <Bolt position={[side * 0.08, 0.05, 0.1]} />
-            <Bolt position={[side * 0.08, -0.03, 0.1]} />
-            <Bolt position={[side * 0.08, 0.05, -0.06]} />
-            {/* Crown + PIMPS ONLY — canvas decal (no troika Text / CDN fonts). */}
-            <mesh position={[side * 0.135, 0.02, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
-              <planeGeometry args={[0.2, 0.2]} />
+            <LedChannel
+              position={[side * 0.305, 0.62, 0.08]}
+              rotation={[0, side * (Math.PI / 2), 0]}
+              length={0.14}
+              width={0.028}
+            />
+            <ScratchMarks position={[side * 0.305, 0.48, 0.1]} rotation={[0, side * (Math.PI / 2), 0]} />
+            <Bolt position={[side * 0.295, 0.72, 0.12]} />
+            <Bolt position={[side * 0.295, 0.56, 0.12]} />
+            <Bolt position={[side * 0.295, 0.4, 0.12]} />
+          </group>
+        ))}
+
+        {/* Chest LED lattice */}
+        <LedChannel position={[-0.14, 0.68, 0.195]} length={0.1} width={0.05} rotation={[Math.PI / 2, 0, 0]} />
+        <LedChannel position={[0.14, 0.68, 0.195]} length={0.1} width={0.05} rotation={[Math.PI / 2, 0, 0]} />
+        <mesh position={[0, 0.48, 0.195]}>
+          <boxGeometry args={[0.24, 0.016, 0.012]} />
+          <meshStandardMaterial ref={stripPulse} {...neon(1.5)} />
+        </mesh>
+        <LedDot position={[0, 0.62, 0.195]} r={0.011} />
+
+        {/* Oversized graffiti pauldrons — photo hero surface */}
+        {([-1, 1] as const).map((side) => (
+          <group key={side} position={[side * 0.42, 0.92, 0.05]}>
+            {/* Flat angular pauldron plate */}
+            <mesh rotation={[0.1, side * 0.18, side * 0.5]}>
+              <boxGeometry args={[0.36, 0.2, 0.42]} />
+              <meshStandardMaterial {...armor(0.45, 0.75)} />
+            </mesh>
+            <mesh position={[0, 0.08, 0]} rotation={[0.1, side * 0.18, side * 0.48]}>
+              <boxGeometry args={[0.34, 0.04, 0.4]} />
+              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.32} />
+            </mesh>
+            <mesh position={[0, -0.02, 0.05]} rotation={[0.1, side * 0.18, side * 0.48]}>
+              <boxGeometry args={[0.24, 0.07, 0.24]} />
+              <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.55} emissive={PURPLE_DIM} emissiveIntensity={0.2} />
+            </mesh>
+            <LedChannel position={[side * 0.02, 0.02, 0.16]} length={0.18} width={0.04} rotation={[Math.PI / 2, 0, 0]} />
+            <LedChannel position={[side * 0.02, -0.04, 0.16]} length={0.12} width={0.032} rotation={[Math.PI / 2, 0, 0]} />
+            <Bolt position={[side * 0.1, 0.07, 0.14]} />
+            <Bolt position={[side * 0.1, -0.02, 0.14]} />
+            <Bolt position={[side * 0.1, 0.07, -0.06]} />
+            <Bolt position={[side * 0.1, -0.02, -0.06]} />
+            <ScratchMarks position={[side * 0.14, 0.02, 0.1]} rotation={[0, side * (Math.PI / 2), 0]} />
+            {/* Crown + PIMPS ONLY facing outward */}
+            <mesh position={[side * 0.165, 0.02, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
+              <planeGeometry args={[0.26, 0.26]} />
               <meshBasicMaterial map={maps!.pauldron} transparent toneMapped={false} depthWrite={false} />
             </mesh>
-            <group position={[side * 0.138, 0.07, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
-              <CrownMark scale={0.9} />
+            <group position={[side * 0.168, 0.09, 0.02]} rotation={[0, side * (Math.PI / 2), 0]}>
+              <CrownMark scale={1.15} />
             </group>
           </group>
         ))}
 
-        {/* Collar LEDs */}
-        <LedDot position={[-0.1, 0.92, 0.08]} r={0.01} />
-        <LedDot position={[0.1, 0.92, 0.08]} r={0.01} />
+        {/* Collar */}
+        <mesh position={[0, 0.92, 0.06]}>
+          <boxGeometry args={[0.3, 0.055, 0.18]} />
+          <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.34} />
+        </mesh>
+        <LedDot position={[-0.1, 0.94, 0.12]} r={0.01} />
+        <LedDot position={[0.1, 0.94, 0.12]} r={0.01} />
+        <LedDot position={[0, 0.95, 0.14]} r={0.008} />
 
-        {/* ── Head / helmet ── */}
-        <group ref={head} position={[0, 1.02, 0.02]}>
-          {/* Neck stack: pistons + cables + glow */}
-          <mesh position={[0, -0.06, 0]}>
-            <cylinderGeometry args={[0.045, 0.055, 0.1, 12]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.4} emissive={PURPLE_DIM} emissiveIntensity={0.45} />
+        {/* ── Tactical helmet (photo: blocky + twin rear blades) ── */}
+        <group ref={head} position={[0, 1.04, 0.02]}>
+          {/* Exposed hydraulic neck */}
+          <mesh position={[0, -0.07, 0]}>
+            <cylinderGeometry args={[0.055, 0.065, 0.12, 12]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.72} roughness={0.4} emissive={PURPLE_DIM} emissiveIntensity={0.55} />
           </mesh>
-          {([-1, 1] as const).map((side) => (
-            <mesh key={side} position={[side * 0.035, -0.05, 0.02]}>
-              <cylinderGeometry args={[0.01, 0.01, 0.09, 6]} />
-              <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.25} />
-            </mesh>
-          ))}
-          <mesh position={[0, -0.05, -0.03]}>
-            <cylinderGeometry args={[0.012, 0.012, 0.08, 6]} />
-            <meshStandardMaterial color="#1a1020" metalness={0.4} roughness={0.6} emissive={PURPLE} emissiveIntensity={0.5} />
+          <mesh position={[0, -0.07, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.062, 0.01, 6, 16]} />
+            <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.24} />
           </mesh>
-          {/* Cable bundles */}
-          <mesh position={[-0.04, -0.04, -0.02]} rotation={[0.2, 0, 0.3]}>
-            <cylinderGeometry args={[0.008, 0.008, 0.07, 6]} />
-            <meshStandardMaterial color="#0a0a0e" roughness={0.85} />
+          <Hydraulic position={[-0.038, -0.055, 0.025]} length={0.1} />
+          <Hydraulic position={[0.038, -0.055, 0.025]} length={0.1} />
+          <Hydraulic position={[0, -0.055, -0.04]} rotation={[0.2, 0, 0]} length={0.095} />
+          <mesh position={[0, -0.055, -0.045]}>
+            <cylinderGeometry args={[0.015, 0.015, 0.09, 6]} />
+            <meshStandardMaterial color="#1a1020" metalness={0.4} roughness={0.55} emissive={PURPLE} emissiveIntensity={0.6} />
           </mesh>
-          <mesh position={[0.04, -0.04, -0.02]} rotation={[0.2, 0, -0.3]}>
-            <cylinderGeometry args={[0.008, 0.008, 0.07, 6]} />
-            <meshStandardMaterial color="#0a0a0e" roughness={0.85} />
-          </mesh>
+          <Cable position={[-0.05, -0.045, -0.02]} rotation={[0.3, 0, 0.4]} length={0.09} />
+          <Cable position={[0.05, -0.045, -0.02]} rotation={[0.3, 0, -0.4]} length={0.09} />
+          <Cable position={[-0.025, -0.045, 0.045]} rotation={[0.15, 0.25, 0]} length={0.08} r={0.005} />
+          <Cable position={[0.025, -0.045, 0.045]} rotation={[0.15, -0.25, 0]} length={0.08} r={0.005} />
 
-          {/* Helmet main shell — blocky tactical */}
-          <mesh position={[0, 0.15, 0.02]}>
-            <boxGeometry args={[0.36, 0.3, 0.38]} />
-            <meshStandardMaterial {...armor(0.48, 0.72)} />
+          {/* Helmet shell */}
+          <mesh position={[0, 0.16, 0.02]}>
+            <boxGeometry args={[0.4, 0.32, 0.42]} />
+            <meshStandardMaterial {...armor(0.45, 0.74)} />
           </mesh>
-          {/* Segment seams */}
-          <mesh position={[0, 0.15, 0.02]}>
-            <boxGeometry args={[0.01, 0.28, 0.39]} />
+          <mesh position={[0, 0.16, 0.02]}>
+            <boxGeometry args={[0.014, 0.3, 0.43]} />
             <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.55} />
           </mesh>
-          {/* Crown plate */}
-          <mesh position={[0, 0.3, 0.02]}>
-            <boxGeometry args={[0.32, 0.07, 0.34]} />
-            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.4} />
+          <mesh position={[0, 0.16, 0.02]}>
+            <boxGeometry args={[0.41, 0.012, 0.43]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.5} roughness={0.55} />
           </mesh>
-          {/* Visor slope */}
-          <mesh position={[0, 0.13, 0.18]} rotation={[-0.4, 0, 0]}>
-            <boxGeometry args={[0.32, 0.17, 0.07]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.65} roughness={0.35} />
-          </mesh>
-
-          {/* Front eye dots — three-dot face from hero ref */}
-          <LedDot position={[-0.06, 0.15, 0.22]} r={0.02} />
-          <LedDot position={[0.06, 0.15, 0.22]} r={0.02} />
-          <LedDot position={[0, 0.1, 0.225]} r={0.014} />
-
-          {/* Side four-dot sensor bay (both sides) */}
+          {/* Cheek plates */}
           {([-1, 1] as const).map((side) => (
-            <group key={side} position={[side * 0.165, 0.14, 0.02]}>
+            <mesh key={side} position={[side * 0.205, 0.1, 0.04]}>
+              <boxGeometry args={[0.055, 0.2, 0.3]} />
+              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.72} roughness={0.38} />
+            </mesh>
+          ))}
+          {/* Crown plate */}
+          <mesh position={[0, 0.33, 0.02]}>
+            <boxGeometry args={[0.36, 0.08, 0.38]} />
+            <meshStandardMaterial color={ARMOR_EDGE} metalness={0.74} roughness={0.36} />
+          </mesh>
+          <Bolt position={[-0.13, 0.36, 0.14]} />
+          <Bolt position={[0.13, 0.36, 0.14]} />
+          <Bolt position={[-0.13, 0.36, -0.1]} />
+          <Bolt position={[0.13, 0.36, -0.1]} />
+          <Bolt position={[0, 0.36, 0.18]} />
+          {/* Brow + visor */}
+          <mesh position={[0, 0.23, 0.21]}>
+            <boxGeometry args={[0.32, 0.045, 0.055]} />
+            <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.28} />
+          </mesh>
+          <mesh position={[0, 0.13, 0.2]} rotation={[-0.42, 0, 0]}>
+            <boxGeometry args={[0.36, 0.18, 0.075]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.68} roughness={0.34} />
+          </mesh>
+          <ScratchMarks position={[0.1, 0.18, 0.22]} />
+
+          {/* Face sensor bay — horizontal slit + small purple points (photo: not giant orbs) */}
+          <mesh position={[0, 0.145, 0.235]}>
+            <boxGeometry args={[0.26, 0.048, 0.022]} />
+            <meshStandardMaterial color="#030306" metalness={0.45} roughness={0.55} />
+          </mesh>
+          <mesh position={[0, 0.145, 0.246]}>
+            <boxGeometry args={[0.22, 0.022, 0.01]} />
+            <meshStandardMaterial {...neon(1.35)} />
+          </mesh>
+          {([-0.08, -0.04, 0.04, 0.08] as const).map((x) => (
+            <LedDot key={x} position={[x, 0.145, 0.255]} r={0.009} />
+          ))}
+          <LedDot position={[0, 0.1, 0.252]} r={0.01} />
+
+          {/* Side four-dot sensor arrays */}
+          {([-1, 1] as const).map((side) => (
+            <group key={side} position={[side * 0.21, 0.145, 0.02]}>
               <mesh>
-                <boxGeometry args={[0.02, 0.06, 0.14]} />
-                <meshStandardMaterial color="#050508" metalness={0.5} roughness={0.5} />
+                <boxGeometry args={[0.028, 0.075, 0.17]} />
+                <meshStandardMaterial color="#030306" metalness={0.5} roughness={0.5} />
               </mesh>
-              {([-0.045, -0.015, 0.015, 0.045] as const).map((z) => (
-                <LedDot key={z} position={[side * 0.012, 0, z]} r={0.011} />
+              {([-0.055, -0.018, 0.018, 0.055] as const).map((z) => (
+                <LedDot key={z} position={[side * 0.016, 0, z]} r={0.013} />
               ))}
             </group>
           ))}
 
-          {/* Chin / jaw purple strip */}
-          <LedStrip position={[0, 0.02, 0.14]} size={[0.14, 0.02, 0.012]} />
-          <mesh position={[0, 0.02, 0.12]}>
-            <boxGeometry args={[0.18, 0.04, 0.08]} />
-            <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.4} emissive={PURPLE_DIM} emissiveIntensity={0.3} />
+          {/* Jaw underglow */}
+          <LedChannel position={[0, 0.015, 0.16]} length={0.16} width={0.05} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh position={[0, 0.015, 0.13]}>
+            <boxGeometry args={[0.22, 0.05, 0.1]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.4} emissive={PURPLE_DIM} emissiveIntensity={0.4} />
           </mesh>
+          <Hydraulic position={[-0.065, -0.005, 0.09]} rotation={[1.15, 0, 0]} length={0.055} />
+          <Hydraulic position={[0.065, -0.005, 0.09]} rotation={[1.15, 0, 0]} length={0.055} />
 
-          {/* Twin long blade antennae from rear-top (ref signature) */}
+          {/* Twin long rear blade antennae — photo signature (tall enough to read at suite scale) */}
           {([-1, 1] as const).map((side) => (
-            <group key={side} position={[side * 0.09, 0.28, -0.12]} rotation={[0.42, 0, side * 0.22]}>
-              <mesh position={[0, 0.2, 0]}>
-                <boxGeometry args={[0.028, 0.42, 0.05]} />
-                <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.32} />
+            <group key={side} position={[side * 0.1, 0.32, -0.16]} rotation={[0.55, 0, side * 0.22]}>
+              <mesh position={[0, 0.28, 0]}>
+                <boxGeometry args={[0.036, 0.58, 0.068]} />
+                <meshStandardMaterial color={ARMOR_EDGE} metalness={0.8} roughness={0.3} />
               </mesh>
-              {/* Industrial cut-outs */}
-              {[0.08, 0.18, 0.28].map((y) => (
-                <mesh key={y} position={[0, y, 0.008]}>
-                  <boxGeometry args={[0.032, 0.05, 0.022]} />
+              {[0.08, 0.18, 0.28, 0.38, 0.48].map((y) => (
+                <mesh key={y} position={[0, y, 0.014]}>
+                  <boxGeometry args={[0.04, 0.055, 0.03]} />
                   <meshStandardMaterial color={ARMOR_DARK} />
                 </mesh>
               ))}
               <mesh position={[0, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.03, 0.03, 0.02, 10]} />
-                <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.28} />
+                <cylinderGeometry args={[0.04, 0.04, 0.028, 10]} />
+                <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.24} />
               </mesh>
-              <Bolt position={[0, 0.02, 0.025]} />
-              <LedDot position={[0, 0.42, 0]} r={0.01} />
+              <Bolt position={[0, 0.02, 0.035]} />
+              <LedDot position={[0, 0.58, 0]} r={0.014} />
+              <LedChannel position={[0, 0.28, 0.036]} length={0.36} width={0.02} />
             </group>
           ))}
 
-          {/* Unit mark — canvas planes only (CSP-safe; no per-bot lights). */}
-          <mesh position={[0.17, 0.05, 0.1]} rotation={[0, Math.PI / 2, 0]}>
-            <planeGeometry args={[0.1, 0.1]} />
+          {/* Unit "22" — cheeks + rear skull */}
+          <mesh position={[0.215, 0.05, 0.1]} rotation={[0, Math.PI / 2, 0]}>
+            <planeGeometry args={[0.12, 0.12]} />
             <meshBasicMaterial map={maps!.unit} transparent toneMapped={false} depthWrite={false} />
           </mesh>
-          <mesh position={[-0.17, 0.05, 0.1]} rotation={[0, -Math.PI / 2, 0]}>
-            <planeGeometry args={[0.1, 0.1]} />
+          <mesh position={[-0.215, 0.05, 0.1]} rotation={[0, -Math.PI / 2, 0]}>
+            <planeGeometry args={[0.12, 0.12]} />
             <meshBasicMaterial map={maps!.unit} transparent toneMapped={false} depthWrite={false} />
           </mesh>
-          <mesh position={[0, 0.14, -0.18]} rotation={[0, Math.PI, 0]}>
-            <planeGeometry args={[0.14, 0.14]} />
-            <meshBasicMaterial map={maps!.unit} transparent opacity={0.45} toneMapped={false} depthWrite={false} />
+          <mesh position={[0, 0.15, -0.2]}>
+            <boxGeometry args={[0.18, 0.18, 0.025]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.6} roughness={0.45} />
           </mesh>
-
-          {/* Helmet bolts */}
-          <Bolt position={[-0.12, 0.26, 0.1]} />
-          <Bolt position={[0.12, 0.26, 0.1]} />
-          <Bolt position={[-0.12, 0.26, -0.08]} />
-          <Bolt position={[0.12, 0.26, -0.08]} />
+          <mesh position={[0, 0.15, -0.215]} rotation={[0, Math.PI, 0]}>
+            <planeGeometry args={[0.15, 0.15]} />
+            <meshBasicMaterial map={maps!.unit} transparent opacity={0.55} toneMapped={false} depthWrite={false} />
+          </mesh>
+          <Bolt position={[-0.15, 0.28, 0.14]} />
+          <Bolt position={[0.15, 0.28, 0.14]} />
+          <Bolt position={[-0.15, 0.28, -0.1]} />
+          <Bolt position={[0.15, 0.28, -0.1]} />
+          <Bolt position={[-0.15, 0.08, 0.16]} />
+          <Bolt position={[0.15, 0.08, 0.16]} />
         </group>
 
         <IndustrialArm side={-1} pose={pose} work={deskWork} />
@@ -776,30 +1028,39 @@ export function IndustrialBotFigure({
       {deskWork ? (
         <SeatedLegs />
       ) : seated ? (
-        ([-0.1, 0.1] as const).map((x) => (
+        ([-0.12, 0.12] as const).map((x) => (
           <mesh key={x} position={[x, 0.02, 0.04]} rotation={[0.55, 0, x > 0 ? -0.05 : 0.05]}>
-            <boxGeometry args={[0.09, 0.28, 0.09]} />
-            <meshStandardMaterial {...armor(0.6, 0.55)} />
+            <boxGeometry args={[0.1, 0.3, 0.1]} />
+            <meshStandardMaterial {...armor(0.58, 0.55)} />
           </mesh>
         ))
       ) : (
         <group ref={legs}>
           {([-1, 1] as const).map((side) => (
-            <group key={side} position={[side * 0.12, 0, 0]}>
+            <group key={side} position={[side * 0.13, 0, 0]}>
               <mesh position={[0, -0.12, 0.02]} rotation={[0.12, 0, side * 0.04]}>
-                <boxGeometry args={[0.09, 0.32, 0.09]} />
-                <meshStandardMaterial {...armor(0.6, 0.55)} />
+                <boxGeometry args={[0.11, 0.36, 0.11]} />
+                <meshStandardMaterial {...armor(0.58, 0.55)} />
               </mesh>
-              <LedStrip position={[side * 0.05, -0.1, 0]} rotation={[0, 0, Math.PI / 2]} size={[0.14, 0.01, 0.008]} />
-              <mesh position={[0, -0.34, 0.06]} rotation={[0.35, 0, 0]}>
-                <boxGeometry args={[0.1, 0.06, 0.16]} />
-                <meshStandardMaterial color={ARMOR_DARK} roughness={0.55} metalness={0.45} />
+              <LedChannel
+                position={[side * 0.06, -0.1, 0]}
+                rotation={[0, side * (Math.PI / 2), 0]}
+                length={0.18}
+                width={0.024}
+              />
+              <mesh position={[0, -0.3, 0.04]} rotation={[0, 0, Math.PI / 2]}>
+                <torusGeometry args={[0.045, 0.008, 6, 12]} />
+                <meshStandardMaterial color={METAL} metalness={0.88} roughness={0.26} />
               </mesh>
+              <mesh position={[0, -0.36, 0.07]} rotation={[0.35, 0, 0]}>
+                <boxGeometry args={[0.12, 0.07, 0.2]} />
+                <meshStandardMaterial color={ARMOR_DARK} roughness={0.55} metalness={0.48} />
+              </mesh>
+              <LedStrip position={[0, -0.34, 0.14]} size={[0.08, 0.012, 0.009]} />
             </group>
           ))}
         </group>
       )}
-
     </group>
   )
 }
