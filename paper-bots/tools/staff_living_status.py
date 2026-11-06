@@ -73,7 +73,7 @@ def _text(board: dict) -> str:
             + (
                 f" age={quiet.get('age_hours')}h"
                 if quiet.get("age_hours") is not None
-                else ""
+                else " age=n/a"
             )
             + " · "
             + str(

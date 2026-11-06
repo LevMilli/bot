@@ -1011,20 +1011,16 @@ export default function App() {
                 <div className="vault-board-row">
                   <span className="vb-label">ritual draft</span>
                   <span
-                    className="vault-ritual-draft"
-                    style={{
-                      color: (() => {
-                        const r =
-                          snap?.desk?.ritual_observe ||
-                          (snap?.desk?.master as {
-                            ritual_observe?: { exit_ok?: boolean; ritual_ok?: boolean }
-                          } | undefined)?.ritual_observe
-                        if (!r) return undefined
-                        if (r.exit_ok === false) return '#c45c26'
-                        if (r.ritual_ok === false) return '#d4a017'
-                        return undefined
-                      })(),
-                    }}
+                    className={(() => {
+                      const r =
+                        snap?.desk?.ritual_observe ||
+                        (snap?.desk?.master as {
+                          ritual_observe?: { exit_ok?: boolean; ritual_ok?: boolean }
+                        } | undefined)?.ritual_observe
+                      if (r?.exit_ok === false) return 'vault-ritual-draft is-exit'
+                      if (r?.ritual_ok === false) return 'vault-ritual-draft is-soft'
+                      return 'vault-ritual-draft'
+                    })()}
                   >
                     {(() => {
                       const r =
@@ -1032,13 +1028,21 @@ export default function App() {
                         (snap?.desk?.master as {
                           ritual_observe?: { exit_ok?: boolean; ritual_ok?: boolean }
                         } | undefined)?.ritual_observe
-                      const badge =
+                      const badgeKind =
                         r?.exit_ok === false
-                          ? ' · EXIT'
+                          ? 'exit'
                           : r?.ritual_ok === false
-                            ? ' · SOFT'
+                            ? 'soft'
                             : r?.ritual_ok === true
-                              ? ' · ok'
+                              ? 'ok'
+                              : ''
+                      const badgeText =
+                        badgeKind === 'exit'
+                          ? 'EXIT'
+                          : badgeKind === 'soft'
+                            ? 'SOFT'
+                            : badgeKind === 'ok'
+                              ? 'ok'
                               : ''
                       const copy =
                         snap?.desk?.ritual_soft_copy ||
@@ -1050,15 +1054,27 @@ export default function App() {
                         (snap?.desk?.master as {
                           ritual_discord?: string
                         } | undefined)?.ritual_discord
-                      if (!copy) {
-                        return (
-                          'make living-ritual-discord · staff paste only · never auto-posts' +
-                          badge
-                        )
-                      }
-                      const one = String(copy).split('\n').filter(Boolean).slice(0, 2).join(' · ')
-                      const clipped = one.length > 160 ? `${one.slice(0, 157)}…` : one
-                      return clipped + badge
+                      const body = !copy
+                        ? 'make living-ritual-discord · staff paste only · never auto-posts'
+                        : (() => {
+                            const one = String(copy)
+                              .split('\n')
+                              .filter(Boolean)
+                              .slice(0, 2)
+                              .join(' · ')
+                            return one.length > 160 ? `${one.slice(0, 157)}…` : one
+                          })()
+                      return (
+                        <>
+                          {body}
+                          {badgeText ? (
+                            <span className={`vault-draft-badge is-${badgeKind}`}>
+                              {' · '}
+                              {badgeText}
+                            </span>
+                          ) : null}
+                        </>
+                      )
                     })()}
                   </span>
                 </div>
