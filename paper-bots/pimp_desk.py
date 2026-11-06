@@ -2605,6 +2605,28 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["injury_wire"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["eia_scout"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        sh = desk_living.skip_historian_chip(root)
+        dc = desk_living.distance_clerk_chip(root)
+        qc = desk_living.quant_clerk_chip(root)
+        desk_row["skip_historian"] = sh
+        desk_row["distance_clerk"] = dc
+        desk_row["quant_clerk"] = qc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["skip_historian"] = (
+                desk_row["master"].get("skip_historian") or sh
+            )
+            desk_row["master"]["distance_clerk"] = (
+                desk_row["master"].get("distance_clerk") or dc
+            )
+            desk_row["master"]["quant_clerk"] = (
+                desk_row["master"].get("quant_clerk") or qc
+            )
+    except Exception as exc:  # noqa: BLE001
+        desk_row["skip_historian"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["distance_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["quant_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

@@ -445,6 +445,107 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def skip_historian_chip(root: str | None = None) -> dict:
+    """Top skip-code frequencies chip (BUDGET≠EDGE)."""
+    digest: dict = {}
+    try:
+        from helpers import skip_historian
+        path = skip_historian.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n_events") is None:
+            digest = skip_historian.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    top = digest.get("top") if isinstance(digest.get("top"), list) else []
+    head = top[0] if top and isinstance(top[0], dict) else {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n_events": digest.get("n_events"),
+        "top": top[:8],
+        "label": (
+            f"skip historian n={digest.get('n_events')} "
+            f"top={head.get('code')}×{head.get('n')}"
+            if head.get("code") is not None
+            else f"skip historian n={digest.get('n_events')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only skip historian. BUDGET≠EDGE — never soften floors."
+        ),
+    }
+
+
+def distance_clerk_chip(root: str | None = None) -> dict:
+    """Empty CARD latency + firm queue distance chip."""
+    digest: dict = {}
+    try:
+        from helpers import distance_clerk
+        path = distance_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("firm_offers_n") is None:
+            digest = distance_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "empty_card_pass": digest.get("empty_card_pass"),
+        "empty_card_last_sec": digest.get("empty_card_last_sec"),
+        "firm_offers_n": digest.get("firm_offers_n"),
+        "firm_deferred_n": digest.get("firm_deferred_n"),
+        "remaining_risk": digest.get("remaining_risk"),
+        "label": (
+            f"distance empty_ok={digest.get('empty_card_pass')} "
+            f"offers={digest.get('firm_offers_n')} "
+            f"def={digest.get('firm_deferred_n')} "
+            f"risk_left={digest.get('remaining_risk')}"
+        ),
+        "note": digest.get("note") or (
+            "Empty CARD + firm queue distance — recycle risk; floors locked."
+        ),
+    }
+
+
+def quant_clerk_chip(root: str | None = None) -> dict:
+    """M3 fit→buy / M4 latency walk-forward chip."""
+    digest: dict = {}
+    try:
+        from helpers import quant_clerk
+        path = quant_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or (
+            digest.get("fit_rate") is None and digest.get("latency_p50") is None
+        ):
+            digest = quant_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_write": False,
+        "fit_rate": digest.get("fit_rate"),
+        "fit_n": digest.get("fit_n"),
+        "fit_pass": digest.get("fit_pass"),
+        "latency_p50": digest.get("latency_p50"),
+        "latency_pass": digest.get("latency_pass"),
+        "towers": digest.get("towers") if isinstance(digest.get("towers"), list) else [],
+        "label": (
+            f"quant fit={digest.get('fit_rate')} "
+            f"lat_p50={digest.get('latency_p50')} "
+            f"fit_ok={digest.get('fit_pass')}"
+        ),
+        "note": digest.get("note") or (
+            "Walk-forward quant clerk — never LLM buys, never softer floors."
+        ),
+    }
+
+
 def injury_wire_chip(root: str | None = None) -> dict:
     """Injury/news wire + staff inbox chip."""
     digest: dict = {}
@@ -1000,6 +1101,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "calib_nag": calib_nag_chip(root, bots=bots),
         "injury_wire": injury_wire_chip(root),
         "eia_scout": eia_scout_chip(root),
+        "skip_historian": skip_historian_chip(root),
+        "distance_clerk": distance_clerk_chip(root),
+        "quant_clerk": quant_clerk_chip(root),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
