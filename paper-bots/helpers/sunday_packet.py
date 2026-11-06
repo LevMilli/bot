@@ -98,6 +98,49 @@ def build_packet(root: str | None = None, *, now: datetime | None = None) -> dic
     }
 
 
+def format_discord(packet: dict | None = None) -> str:
+    """Staff-facing Discord/markdown copy — never auto-posts."""
+    p = packet if isinstance(packet, dict) else {}
+    swarm = p.get("insight_swarm") if isinstance(p.get("insight_swarm"), dict) else {}
+    ai = p.get("living_ai") if isinstance(p.get("living_ai"), dict) else {}
+    comp = p.get("completions") if isinstance(p.get("completions"), dict) else {}
+    dual = p.get("dual_control") if isinstance(p.get("dual_control"), dict) else {}
+    ruin = p.get("ruin_drill") if isinstance(p.get("ruin_drill"), dict) else {}
+    quiet = p.get("feature_quiet") if isinstance(p.get("feature_quiet"), dict) else {}
+    lines = [
+        "**Sunday living packet** (draft — staff publishes)",
+        f"_paper only · floors locked · live={bool(p.get('live_orders_enabled'))}_",
+        "",
+        f"• Chicago day: `{p.get('chicago_today')}`",
+        f"• Scorecard: `{p.get('scorecard_label') or '—'}` present={bool(p.get('scorecard_present'))}",
+        (
+            f"• Insight swarm: {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+            f"ratio={swarm.get('ratio')} pass={swarm.get('pass')}"
+        ),
+        (
+            f"• Completions today: n={comp.get('eligible_completions_today')} "
+            f"pnl={comp.get('eligible_pnl_today')}"
+        ),
+        f"• raise_Φ tickets: {ai.get('raise_phi_n')} (auto_write_phi=False)",
+        (
+            f"• Dual-control signed: {dual.get('signed_n')}/{dual.get('items_n')} "
+            f"arm_ready_paper={dual.get('arm_ready_paper')}"
+        ),
+        (
+            f"• Ruin drill practiced_this_month={ruin.get('practiced_this_month')} "
+            f"active={ruin.get('active')}"
+        ),
+        f"• Feature quiet: {quiet.get('alert') or ('quiet' if quiet.get('quiet') else 'ok')}",
+        "",
+        "**Staff checklist**",
+    ]
+    for item in p.get("staff_checklist") or []:
+        lines.append(f"- [ ] {item}")
+    lines.append("")
+    lines.append(str(p.get("note") or "Never invent fills; never soften floors; never enable live."))
+    return "\n".join(lines)
+
+
 def write_packet(root: str | None = None) -> dict:
     packet = build_packet(root)
     path = packet_path(root)
