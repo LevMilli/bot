@@ -22,6 +22,7 @@ make living-selfcheck
 make living-doctor
 make living-ritual
 make living-ritual-discord
+make living-ritual-observe
 make living-floors-discord
 make living-doctor-discord
 make living-gaps-discord

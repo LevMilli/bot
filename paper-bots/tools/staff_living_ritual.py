@@ -6,6 +6,7 @@ Usage (from paper-bots/):
   python3 tools/staff_living_ritual.py
   python3 tools/staff_living_ritual.py --json
   python3 tools/staff_living_ritual.py --discord
+  python3 tools/staff_living_ritual.py --observe
 """
 from __future__ import annotations
 
@@ -48,8 +49,22 @@ def main() -> int:
     parser.add_argument("--root", default=ROOT)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--discord", action="store_true")
+    parser.add_argument(
+        "--observe",
+        action="store_true",
+        help="Print ritual_observe chip only (never records doctor).",
+    )
     args = parser.parse_args()
     root = args.root
+
+    if args.observe:
+        chip = desk_living.ritual_observe_chip(root)
+        if args.json:
+            print(json.dumps(chip, indent=2, sort_keys=True, default=str))
+        else:
+            print(chip.get("label") or "ritual observe")
+            print(chip.get("note") or "")
+        return 0 if chip.get("exit_ok") else 2
 
     steps = [
         ("gaps", desk_living.dual_control_gaps_page(root)),

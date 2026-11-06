@@ -738,13 +738,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Living status sunday text | sunday packet line |
 | Compact include expand | expand blocked in compact |
 
-### Next
+### Living upgrade — ritual observe CLI / selfcheck
 
 | Ticket | Where |
 | --- | --- |
 | Living selfcheck ritual_observe | include in selfcheck payload |
 | Staff ritual --observe flag | print ritual_observe only |
 | Priority family ritual unit | assert ritual dedupe |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Living doctor include ritual | doctor checks ritual_observe |
+| Status json ritual_ok top-level | flatten ritual_ok |
+| City vault ritual sticky note | short make living-ritual hint |
 
 ## Hard rules unchanged
 

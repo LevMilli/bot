@@ -2382,6 +2382,7 @@ def living_self_check(root: str | None = None) -> dict:
         and board.get("grok_buys") is False
         and floors_assert.get("all_ok")
     )
+    ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
     return {
         "paper_only": True,
         "fee_floors_locked": floors,
@@ -2392,6 +2393,9 @@ def living_self_check(root: str | None = None) -> dict:
         "feature_quiet": bool(quiet.get("quiet")),
         "timer_alive": timer.get("alive"),
         "floors_assert": floors_assert,
+        "ritual_observe": ritual,
+        "ritual_ok": ritual.get("ritual_ok"),
+        "ritual_exit_ok": ritual.get("exit_ok"),
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()
