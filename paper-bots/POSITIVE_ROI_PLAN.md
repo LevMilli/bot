@@ -586,13 +586,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual Discord copy | `staff_living_ritual.py --discord` + make |
 | Desk doctor age chip | `doctor_age_chip` + vault/Masters stale rail |
 
+### Living upgrade — sunday ritual + tip feed + pulse warn
+
+| Ticket | Where |
+| --- | --- |
+| Sunday ritual cross-link | sunday packet Discord + checklist |
+| Living tip-feed vault row | tip radar on city vault |
+| Clerk pulse age soft warn | soft WARN before STALE hard insert |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Sunday ritual cross-link | mention ritual in sunday packet Discord |
-| Living tip-feed vault row | tip radar on city vault |
-| Clerk pulse age soft warn | pulse stale before hard insert |
+| Living AI vault row | raise_Φ ticket count on vault |
+| Feature quiet vault tint | quiet amber on vault |
+| Dual gaps Discord shortcut | status gaps --discord |
 
 ## Hard rules unchanged
 

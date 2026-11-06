@@ -577,17 +577,32 @@ def clerk_pulse_chip(root: str | None = None) -> dict:
     except Exception:
         cadence = 300
     stale = age_sec is not None and cadence is not None and age_sec > int(cadence) * 2
+    soft_warn = (
+        age_sec is not None
+        and cadence is not None
+        and not stale
+        and age_sec > int(cadence)
+    )
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "age_sec": age_sec,
         "cadence_sec": cadence,
         "stale": stale,
+        "soft_warn": soft_warn,
         "refreshed_n": digest.get("refreshed_n") or digest.get("n"),
         "at": digest.get("at"),
         "label": (
             f"clerk pulse age={age_sec}s "
-            + ("STALE" if stale else "ok" if age_sec is not None else "n/a")
+            + (
+                "STALE"
+                if stale
+                else "WARN"
+                if soft_warn
+                else "ok"
+                if age_sec is not None
+                else "n/a"
+            )
         ),
         "note": digest.get("note") or "5m insight clerk pulse — observe-only digests.",
     }

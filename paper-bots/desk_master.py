@@ -28,6 +28,8 @@ _PRIORITY_FAMILY_PREFIXES = (
     ("feature", ("feature quiet", "weekday alert: feature")),
     ("expand", ("betting expand",)),
     ("doctor", ("doctor", "living doctor")),
+    ("tip", ("tip radar", "tip T")),
+    ("pulse", ("clerk pulse",)),
 )
 
 # Bars from docs/trading-masters-per-bot-plan.md (Chicago weeks).
@@ -771,6 +773,9 @@ def master_summary(
     pulse = (living or {}).get("clerk_pulse") if isinstance(living, dict) else None
     if isinstance(pulse, dict) and pulse.get("stale"):
         priority.insert(0, str(pulse.get("label") or "clerk pulse STALE")[:120])
+    elif isinstance(pulse, dict) and pulse.get("soft_warn"):
+        # Soft warn (past cadence, before 2×) — append, do not front the rail.
+        priority.append(str(pulse.get("label") or "clerk pulse WARN")[:120])
     ruin_chip = (living or {}).get("ruin_drill_chip") if isinstance(living, dict) else None
     if isinstance(ruin_chip, dict) and ruin_chip.get("active"):
         priority.insert(0, str(ruin_chip.get("label") or "ruin drill ACTIVE")[:120])

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -103,6 +104,11 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("Sunday living packet", md)
             self.assertIn("floors locked", md)
             self.assertIn("Staff checklist", md)
+            self.assertIn("living ritual", " ".join(packet.get("staff_checklist") or []).lower())
+            self.assertIn("ritual", packet)
+            self.assertIn("Doctor age", md)
+            self.assertIn("Weekly ritual", md)
+            self.assertIn("living-ritual-discord", md)
             self.assertIn("skip_historian", board2)
             self.assertIn("distance_clerk", board2)
             self.assertIn("quant_clerk", board2)
@@ -424,6 +430,25 @@ class InsightHelpers(unittest.TestCase):
             # Due marker: second call within cadence returns None
             again = clerk_pulse.run_if_due(tmp)
             self.assertIsNone(again)
+            chip = desk_living.clerk_pulse_chip(tmp)
+            self.assertFalse(chip.get("stale"))
+            self.assertFalse(chip.get("soft_warn"))
+            # Soft warn: past cadence, before 2×.
+            marker = os.path.join(tmp, "helpers", getattr(clerk_pulse, "RUN_MARKER", "clerk_pulse_at.txt"))
+            cadence = int(getattr(clerk_pulse, "CADENCE_SEC", 300))
+            past = time.time() - (cadence + 30)
+            os.utime(marker, (past, past))
+            warn = desk_living.clerk_pulse_chip(tmp)
+            self.assertTrue(warn.get("soft_warn"))
+            self.assertFalse(warn.get("stale"))
+            self.assertIn("WARN", warn.get("label") or "")
+            # Hard stale at >2× cadence.
+            older = time.time() - (cadence * 2 + 30)
+            os.utime(marker, (older, older))
+            stale = desk_living.clerk_pulse_chip(tmp)
+            self.assertTrue(stale.get("stale"))
+            self.assertFalse(stale.get("soft_warn"))
+            self.assertIn("STALE", stale.get("label") or "")
 
     def test_injury_staff_ingest_and_swarm_lights(self):
         from helpers import injury_wire

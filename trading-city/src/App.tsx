@@ -605,6 +605,62 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">tip feed</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const tr =
+                          snap?.desk?.tip_radar ||
+                          (snap?.desk?.master as { tip_radar?: { t5?: number } } | undefined)
+                            ?.tip_radar
+                        if (!tr) return undefined
+                        return Number(tr.t5 || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const tr =
+                        snap?.desk?.tip_radar ||
+                        (snap?.desk?.master as {
+                          tip_radar?: { label?: string; t5?: number; t15?: number; n?: number }
+                        } | undefined)?.tip_radar
+                      if (!tr) return 'tip radar pending'
+                      return (
+                        tr.label ||
+                        `tip radar n=${tr.n ?? '—'} T-5=${tr.t5 ?? 0} T-15=${tr.t15 ?? 0}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">pulse</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const p =
+                          snap?.desk?.clerk_pulse ||
+                          (snap?.desk?.master as {
+                            clerk_pulse?: { stale?: boolean; soft_warn?: boolean }
+                          } | undefined)?.clerk_pulse
+                        if (!p) return undefined
+                        if (p.stale) return '#c45c26'
+                        if (p.soft_warn) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const p =
+                        snap?.desk?.clerk_pulse ||
+                        (snap?.desk?.master as {
+                          clerk_pulse?: { label?: string; stale?: boolean; soft_warn?: boolean }
+                        } | undefined)?.clerk_pulse
+                      if (!p) return 'clerk pulse pending'
+                      return p.label || (p.stale ? 'pulse STALE' : p.soft_warn ? 'pulse WARN' : 'pulse ok')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">swarm</span>
                   <span
                     style={{
