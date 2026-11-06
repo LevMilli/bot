@@ -16,6 +16,11 @@ Paper only. Venue floors stay locked (sports `0.06` / BTC+commodity `0.05` / INX
 ## Staff CLIs (from `paper-bots/`)
 
 ```bash
+make living-status
+make living-floors
+make living-selfcheck
+make living-test
+
 python3 tools/staff_living_status.py              # compact text
 python3 tools/staff_living_status.py selfcheck
 python3 tools/staff_living_status.py gaps         # dual-control unsigned
@@ -26,6 +31,9 @@ python3 tools/staff_living_status.py export
 python3 tools/staff_living_status.py pulse        # force clerk pulse refresh
 python3 tools/staff_living_status.py pager        # feature-quiet copy
 python3 tools/staff_living_status.py hillclimb
+python3 tools/staff_living_status.py floors       # exit 2 if soft
+python3 tools/staff_living_status.py expand       # exit 2 if swarm < 3:1
+python3 tools/staff_living_status.py teller
 
 python3 tools/staff_sunday_packet.py draft|discord|checklist
 python3 tools/staff_injury_ingest.py show|add|clear
@@ -38,6 +46,7 @@ python3 tools/staff_ruin_drill.py status|set|clear
 ## Hire order
 
 Insight swarm ≥ **3:1** vs betting towers before betting expand.  
+`staff_living_status.py expand` exits 2 while blocked.  
 Seed missing digests with `staff_living_status.py seed` — observe only.
 
 ## Sunday packet (staff only — no auto cron publish)

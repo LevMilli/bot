@@ -859,6 +859,11 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "betting_expand_gate": (
+            (living or {}).get("betting_expand_gate")
+            if isinstance(living, dict)
+            else None
+        ),
         "dual_control": dual_control,
         "ruin_drill": ruin_drill,
         "skip_taxonomy": (
