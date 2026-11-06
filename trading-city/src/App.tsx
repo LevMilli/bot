@@ -832,7 +832,18 @@ export default function App() {
                 </div>
                 <div className="vault-board-row">
                   <span className="vb-label">fills</span>
-                  <span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.completions || snap?.desk?.master?.completions
+                        if (!c || c.error) return undefined
+                        const n = Number(c.eligible_completions_today ?? 0)
+                        // Observe thin: no eligible completions yet today.
+                        return n === 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
                     {(() => {
                       const c =
                         snap?.desk?.completions || snap?.desk?.master?.completions
@@ -843,6 +854,62 @@ export default function App() {
                         `eligible today ${n ?? '—'}` +
                         (pnl != null ? ` · pnl ${Number(pnl).toFixed(2)}` : '')
                       )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">green</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const g =
+                          snap?.desk?.green_day ||
+                          (snap?.desk?.master as {
+                            green_day?: { red_n?: number; all_fee_clear_green?: boolean }
+                          } | undefined)?.green_day
+                        if (!g) return undefined
+                        if (g.all_fee_clear_green) return '#6fbf73'
+                        if (Number(g.red_n || 0) > 0) return '#c45c26'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const g =
+                        snap?.desk?.green_day ||
+                        (snap?.desk?.master as {
+                          green_day?: { label?: string; green_n?: number; red_n?: number }
+                        } | undefined)?.green_day
+                      if (!g) return 'green-day pending'
+                      return (
+                        g.label ||
+                        `green=${g.green_n ?? '—'} red=${g.red_n ?? '—'}`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">bleed</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const b =
+                          snap?.desk?.bleed ||
+                          (snap?.desk?.master as { bleed?: { pass?: boolean } } | undefined)
+                            ?.bleed
+                        if (!b || b.pass == null) return undefined
+                        return b.pass === false ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const b =
+                        snap?.desk?.bleed ||
+                        (snap?.desk?.master as {
+                          bleed?: { label?: string; pass?: boolean; ratio?: number | null }
+                        } | undefined)?.bleed
+                      if (!b) return 'bleed pending'
+                      return b.label || `bleed ratio=${b.ratio ?? '—'} ${b.pass === false ? 'hot' : 'ok'}`
                     })()}
                   </span>
                 </div>

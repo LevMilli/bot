@@ -293,6 +293,25 @@ export type Desk = {
     note?: string
     error?: string
   }
+  green_day?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    green_n?: number
+    red_n?: number
+    all_fee_clear_green?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
+  bleed?: {
+    paper_only?: boolean
+    fee_floors_locked?: boolean
+    ratio?: number | null
+    pass?: boolean
+    label?: string
+    note?: string
+    error?: string
+  }
   teller_living?: {
     paper_only?: boolean
     fee_floors_locked?: boolean
