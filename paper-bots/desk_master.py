@@ -645,6 +645,12 @@ def master_summary(
     firm_queue = (living or {}).get("firm_queue") if isinstance(living, dict) else None
     if isinstance(firm_queue, dict) and firm_queue.get("offers_n") is not None:
         priority.append(str(firm_queue.get("label") or "firm queue")[:120])
+    empty_card = (living or {}).get("empty_card") if isinstance(living, dict) else None
+    if isinstance(empty_card, dict) and empty_card.get("pass") is False:
+        priority.insert(0, str(empty_card.get("label") or "empty CARD slow")[:120])
+    near_miss = (living or {}).get("near_miss") if isinstance(living, dict) else None
+    if isinstance(near_miss, dict) and near_miss.get("promote_ready"):
+        priority.append("near-miss promote_ready — staff arm z|p only")
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -687,6 +693,16 @@ def master_summary(
         ),
         "firm_queue": (
             (living or {}).get("firm_queue")
+            if isinstance(living, dict)
+            else None
+        ),
+        "empty_card": (
+            (living or {}).get("empty_card")
+            if isinstance(living, dict)
+            else None
+        ),
+        "near_miss": (
+            (living or {}).get("near_miss")
             if isinstance(living, dict)
             else None
         ),

@@ -389,13 +389,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Firm queue HUD | `desk_living.firm_queue_chip` on desk/Masters |
 | Sunday packet CLI | `tools/staff_sunday_packet.py` |
 
+### Living upgrade — empty CARD + near-miss chips
+
+| Ticket | Where |
+| --- | --- |
+| Empty CARD chip | `desk_living.empty_card_chip` |
+| Near-miss chip | `desk_living.near_miss_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Empty-CARD latency chip | last empty book sec on HUD |
-| Near-miss promote chip | n/labeled/shadow EV on Masters |
+| Timer heartbeat chip | alive/dead on desk snapshot |
+| Helper Gate A board | attributed helper fills readiness |
 
 ## Hard rules unchanged
 
