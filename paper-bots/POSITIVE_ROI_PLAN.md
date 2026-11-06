@@ -454,13 +454,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Reporter chip | `desk_living.reporter_chip` |
 | Empty-card bee chip | `desk_living.empty_card_bee_chip` |
 
+### Living upgrade — near-miss / hard-stop / bleed clerk chips
+
+| Ticket | Where |
+| --- | --- |
+| Near-miss clerk chip | `desk_living.near_miss_clerk_chip` |
+| Hard-stop clerk chip | `desk_living.hard_stop_clerk_chip` |
+| Bleed clerk chip | `desk_living.bleed_clerk_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Near-miss clerk chip | labeled near-miss digest |
-| Hard-stop clerk chip | shadow exits digest |
-| Bleed clerk chip | firm bleed digest |
+| Skip-twin clerk chip | labeled twin feature join |
+| CLV closer clerk chip | digest beat-close completeness |
+| Timer heartbeat digest chip | helper digest alive/dead |
 
 ## Hard rules unchanged
 
