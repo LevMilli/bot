@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { PerspectiveCamera } from '@react-three/drei'
 import { DoubleSide, type Group } from 'three'
@@ -74,25 +74,52 @@ function hallWallSegments(side: 'left' | 'right'): { x: number; w: number }[] {
   return segs
 }
 
+/** One useFrame spins every registered fan — avoids N per-fan subscriptions. */
+type FanSpin = { blades: Group; speed: number }
+const FAN_SPINS: FanSpin[] = []
+
+function FanSpinDriver() {
+  useFrame((_, dt) => {
+    const step = Math.min(0.05, dt)
+    for (let i = 0; i < FAN_SPINS.length; i++) {
+      const f = FAN_SPINS[i]
+      f.blades.rotation.y += step * f.speed * 1.35
+    }
+  })
+  return null
+}
+
 function CeilingFan({ position, speed = 1 }: { position: [number, number, number]; speed?: number }) {
   const blades = useRef<Group>(null)
-  useFrame((_, dt) => {
-    if (blades.current) blades.current.rotation.y += dt * speed * 1.35
-  })
+  useEffect(() => {
+    const g = blades.current
+    if (!g) return
+    const entry: FanSpin = { blades: g, speed }
+    FAN_SPINS.push(entry)
+    return () => {
+      const i = FAN_SPINS.indexOf(entry)
+      if (i >= 0) FAN_SPINS.splice(i, 1)
+    }
+  }, [speed])
   return (
     <group position={position}>
       <mesh position={[0, 0.08, 0]}>
-        <cylinderGeometry args={[0.06, 0.08, 0.1, 12]} />
+        <cylinderGeometry args={[0.06, 0.08, 0.1, 10]} />
         <meshStandardMaterial color={METAL} metalness={0.7} roughness={0.28} />
       </mesh>
       <mesh position={[0, -0.12, 0]}>
-        <cylinderGeometry args={[0.018, 0.018, 0.28, 8]} />
+        <cylinderGeometry args={[0.018, 0.018, 0.28, 6]} />
         <meshStandardMaterial color="#8a93a5" metalness={0.65} roughness={0.3} />
       </mesh>
       <group ref={blades} position={[0, -0.28, 0]}>
         <mesh>
-          <cylinderGeometry args={[0.1, 0.12, 0.06, 16]} />
+          <cylinderGeometry args={[0.1, 0.12, 0.06, 12]} />
           <meshStandardMaterial color="#1c222e" metalness={0.45} roughness={0.4} />
+        </mesh>
+        {/* Emissive hub reads as warm fill without a real pointLight per fan. */}
+        <mesh position={[0, -0.04, 0]}>
+          <sphereGeometry args={[0.05, 8, 8]} />
+          <meshStandardMaterial color="#ffe8c8" emissive="#ffe8c8" emissiveIntensity={0.55} />
         </mesh>
         {([0, 1, 2, 3] as const).map((i) => (
           <group key={i} rotation={[0, (i * Math.PI) / 2, 0]}>
@@ -103,7 +130,6 @@ function CeilingFan({ position, speed = 1 }: { position: [number, number, number
           </group>
         ))}
       </group>
-      <pointLight position={[0, -0.45, 0]} intensity={0.12} color="#ffe8c8" distance={4.5} />
     </group>
   )
 }
@@ -125,9 +151,13 @@ function WallSconce({
       </mesh>
       <mesh position={[0, -0.02, 0.1]} rotation={[0.35, 0, 0]}>
         <boxGeometry args={[0.18, 0.06, 0.14]} />
-        <meshStandardMaterial color="#f4e2a8" emissive={color} emissiveIntensity={0.55} roughness={0.35} />
+        <meshStandardMaterial color="#f4e2a8" emissive={color} emissiveIntensity={0.85} roughness={0.35} />
       </mesh>
-      <pointLight position={[0, -0.15, 0.25]} intensity={0.22} color={color} distance={3.2} />
+      {/* Glow via emissive only — dozens of sconce pointLights were the FPS killer. */}
+      <mesh position={[0, -0.12, 0.18]}>
+        <sphereGeometry args={[0.04, 6, 6]} />
+        <meshBasicMaterial color={color} transparent opacity={0.55} toneMapped={false} />
+      </mesh>
     </group>
   )
 }
@@ -151,19 +181,19 @@ function PottedPlant({ position, scale = 1 }: { position: [number, number, numbe
   return (
     <group position={position} scale={scale}>
       <mesh position={[0, 0.16, 0]}>
-        <cylinderGeometry args={[0.16, 0.13, 0.32, 12]} />
+        <cylinderGeometry args={[0.16, 0.13, 0.32, 8]} />
         <meshStandardMaterial color="#2a3344" roughness={0.55} metalness={0.2} />
       </mesh>
       <mesh position={[0, 0.42, 0]}>
-        <sphereGeometry args={[0.22, 12, 12]} />
+        <sphereGeometry args={[0.22, 8, 8]} />
         <meshStandardMaterial color="#1d6b45" roughness={0.7} />
       </mesh>
       <mesh position={[0.12, 0.55, 0.05]}>
-        <sphereGeometry args={[0.14, 10, 10]} />
+        <sphereGeometry args={[0.14, 7, 7]} />
         <meshStandardMaterial color="#2a8f5a" roughness={0.65} />
       </mesh>
       <mesh position={[-0.1, 0.52, -0.08]}>
-        <sphereGeometry args={[0.12, 10, 10]} />
+        <sphereGeometry args={[0.12, 7, 7]} />
         <meshStandardMaterial color="#248a52" roughness={0.68} />
       </mesh>
     </group>
@@ -435,8 +465,11 @@ function HallCosmetics() {
             <boxGeometry args={[1.75, 0.02, 0.5]} />
             <meshStandardMaterial color="#8aa0b8" metalness={0.55} roughness={0.3} />
           </mesh>
-          <pointLight position={[x, WALL_H - 0.4, 0]} intensity={0.42} color="#dff6ff" distance={7.5} />
         </group>
+      ))}
+      {/* Sparse real fills — visual glow stays on emissive troffers/sconces. */}
+      {[6, 14, 22, 29].map((x) => (
+        <pointLight key={`fill-${x}`} position={[x, WALL_H - 0.55, 0]} intensity={0.55} color="#dff6ff" distance={11} />
       ))}
       {fanXs.map((x, i) => (
         <CeilingFan key={`fan-${x}`} position={[x, WALL_H - 0.12, 0]} speed={0.85 + (i % 3) * 0.12} />
@@ -496,7 +529,10 @@ function HallCosmetics() {
             <sphereGeometry args={[0.1, 12, 12]} />
             <meshStandardMaterial color="#f4e2a8" emissive="#f9c80e" emissiveIntensity={0.65} />
           </mesh>
-          <pointLight position={[0, 1.5, 0]} intensity={0.28} color={i === 0 ? '#b967ff' : '#2de2e6'} distance={4.5} />
+          <mesh position={[0, 1.35, 0]}>
+            <sphereGeometry args={[0.08, 8, 8]} />
+            <meshBasicMaterial color={i === 0 ? '#b967ff' : '#2de2e6'} transparent opacity={0.7} toneMapped={false} />
+          </mesh>
           <FramedArt position={[0, 2.15, WING_HALL.zMin + 0.22]} color="#2de2e6" wide />
         </group>
       ))}
@@ -681,9 +717,8 @@ function SuiteShell({ room, color, live }: { room: WingRoom; color: string; live
           </mesh>
           <mesh position={[0.95, 0.95, 0.1]}>
             <coneGeometry args={[0.08, 0.1, 12, 1, true]} />
-            <meshStandardMaterial color="#f4e2a8" emissive="#f9c80e" emissiveIntensity={0.5} side={DoubleSide} />
+            <meshStandardMaterial color="#f4e2a8" emissive="#f9c80e" emissiveIntensity={0.75} side={DoubleSide} />
           </mesh>
-          <pointLight position={[0.7, 1.15, 0.1]} intensity={0.25} color="#ffe2a0" distance={2.8} />
         </group>
       )}
 
@@ -710,11 +745,16 @@ function SuiteShell({ room, color, live }: { room: WingRoom; color: string; live
       <WallSconce position={[-ROOM_HALF_W + 0.12, 2.15, -1.2]} rotationY={Math.PI / 2} color={color} />
       <WallSconce position={[ROOM_HALF_W - 0.12, 2.15, -1.2]} rotationY={-Math.PI / 2} color={color} />
       <mesh position={[-ROOM_HALF_W + 0.7, 0.18, ROOM_HALF_D - 0.7]}>
-        <cylinderGeometry args={[0.12, 0.1, 0.35, 12]} />
+        <cylinderGeometry args={[0.12, 0.1, 0.35, 10]} />
         <meshStandardMaterial color="#12151c" metalness={0.3} roughness={0.5} />
       </mesh>
-      <pointLight position={[0, 2.55, 0]} intensity={live ? 0.5 : 0.28} color={color} distance={7} />
-      <pointLight position={[0, 2.2, -ROOM_HALF_D + 0.8]} intensity={0.2} color="#9ecbff" distance={5} />
+      {/* Only the live suite pays for real point lights — idle rooms stay emissive-lit. */}
+      {live && (
+        <>
+          <pointLight position={[0, 2.55, 0]} intensity={0.55} color={color} distance={8} />
+          <pointLight position={[0, 2.2, -ROOM_HALF_D + 0.8]} intensity={0.28} color="#9ecbff" distance={5.5} />
+        </>
+      )}
     </group>
   )
 }
@@ -740,12 +780,13 @@ export function OfficeHallScene({
       <color attach="background" args={['#12082a']} />
       <fog attach="fog" args={['#14082e', 38, 92]} />
       <PerspectiveCamera makeDefault fov={58} near={0.06} far={140} position={[10, 1.9, 0]} />
-      <ambientLight intensity={0.72} color="#d4c8ff" />
-      <directionalLight position={[12, 16, 6]} intensity={0.55} color="#f2e8ff" />
-      <hemisphereLight args={['#c8dcff', '#1a1030', 0.42]} />
-      <pointLight position={[10, 2.5, 0]} intensity={0.48} color="#7ef9ff" distance={20} />
-      <pointLight position={[22, 2.3, 0]} intensity={0.32} color="#b967ff" distance={14} />
+      <ambientLight intensity={0.82} color="#d4c8ff" />
+      <directionalLight position={[12, 16, 6]} intensity={0.48} color="#f2e8ff" />
+      <hemisphereLight args={['#c8dcff', '#1a1030', 0.5]} />
+      <pointLight position={[10, 2.5, 0]} intensity={0.4} color="#7ef9ff" distance={18} />
+      <pointLight position={[22, 2.3, 0]} intensity={0.28} color="#b967ff" distance={14} />
 
+      <FanSpinDriver />
       <HallCosmetics />
 
       {rooms.map((room, i) => {
@@ -787,7 +828,7 @@ export function OfficeHallScene({
         onHintChange={onWalkHint}
       />
 
-      <NeonBloom strength={0.2} />
+      <NeonBloom strength={0.18} lite />
     </>
   )
 }

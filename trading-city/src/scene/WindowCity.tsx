@@ -14,13 +14,22 @@ import { Vault } from './Vault'
  * Border plaza screens stay on the outdoor CityScene — not behind the glass —
  * so the office stays clear of those vertical tower bars.
  */
-export function StreetCity({ bots, desk }: { bots: BotRow[]; desk?: Desk }) {
+export function StreetCity({
+  bots,
+  desk,
+  /** Fewer stars when embedded in the wing (FPS). */
+  lite = false,
+}: {
+  bots: BotRow[]
+  desk?: Desk
+  lite?: boolean
+}) {
   const { slots, fillers } = useMemo(() => layoutCity(bots), [bots])
 
   return (
     <group position={[3.2, 0, -16]}>
       <PurpleHorizon />
-      <Starfield count={320} />
+      <Starfield count={lite ? 140 : 320} />
       {/* No park pads here — one of them crosses the glass and lands on the office floor. */}
       <GridFloor parks={false} />
       {/* No BorderScreens behind office glass — keeps the suite clear of tower bars. */}
