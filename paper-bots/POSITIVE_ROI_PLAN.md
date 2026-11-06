@@ -634,13 +634,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Green-day vault strip | green_n / red_n observe |
 | Bleed hot vault tint | bleed fail red |
 
-### Next
+### Living upgrade — CLV / calib / timer vault
 
 | Ticket | Where |
 | --- | --- |
 | CLV vault row | sports CLV completeness |
 | Calib nag vault tint | raise_Φ tickets amber |
 | Timer dead vault tint | timer heartbeat DEAD |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Tip-force vs tip-feed polish | clarify tip labels on vault |
+| Empty-card vault tint | empty CARD breaches |
+| Near-miss promote vault | promote_ready observe only |
 
 ## Hard rules unchanged
 
