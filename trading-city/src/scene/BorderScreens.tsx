@@ -100,7 +100,47 @@ function rowsOf(bot: BotRow): TradeOrHistory[] {
 function signature(bot: BotRow) {
   const rows = rowsOf(bot)
   const tail = rows.length ? Number(rows[rows.length - 1].pnl || 0) : 0
-  return `${bot.id}|${bot.today}|${bot.realized}|${rows.length}|${tail}|${bot.name}|${bot.open_count}|${bot.expectancy_hit_rate}`
+  const pos = bot.positions?.[0]
+  return [
+    bot.id,
+    bot.today,
+    bot.realized,
+    rows.length,
+    tail,
+    bot.name,
+    bot.open_count,
+    bot.expectancy_hit_rate,
+    bot.expectancy,
+    bot.cash,
+    bot.avg_win,
+    bot.avg_loss,
+    bot.positions?.length,
+    pos?.what || pos?.title || pos?.team,
+  ].join('|')
+}
+
+function emaSeries(values: number[], period = 8): number[] {
+  if (!values.length) return []
+  const k = 2 / (period + 1)
+  const out: number[] = []
+  let prev = values[0]
+  for (const value of values) {
+    prev = value * k + prev * (1 - k)
+    out.push(prev)
+  }
+  return out
+}
+
+function recordOf(rows: TradeOrHistory[]) {
+  let wins = 0
+  let losses = 0
+  for (const row of rows) {
+    if (row.pnl == null) continue
+    const pnl = Number(row.pnl)
+    if (pnl > 0.005) wins += 1
+    else if (pnl < -0.005) losses += 1
+  }
+  return { wins, losses }
 }
 
 function ink(
@@ -137,12 +177,13 @@ function diamond(ctx: CanvasRenderingContext2D, x: number, y: number, r: number,
  * `time` breathes the tip and walks a scan across the plot.
  */
 function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
-  const W = canvas.width
-  const H = canvas.height
+  const W = 1800
+  const H = 600
   const ctx = canvas.getContext('2d')!
+  ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0)
   const seed = hashId(bot.id || bot.name || 'wall')
   const beam = beamColorFor(bot.id)
-  const tapeTop = H - 78
+  const tapeTop = H - 112
 
   ctx.clearRect(0, 0, W, H)
   const sky = ctx.createLinearGradient(0, 0, W * 0.12, H)
@@ -153,6 +194,11 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   ctx.fillRect(0, 0, W, H)
   ctx.fillStyle = beam
   ctx.fillRect(0, 0, 12, H)
+  ctx.fillStyle = 'rgba(255,255,255,0.045)'
+  for (let y = 0; y < H; y += 7) ctx.fillRect(0, y, W, 1)
+  const sheen = (time * 48) % (H + 40)
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'
+  ctx.fillRect(0, sheen - 20, W, 22)
 
   const ground = tapeTop - 4
   let bx = 0
@@ -192,7 +238,7 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   const span = max - min || 1
   const plotL = 36
   const plotR = W - 168
-  const plotT = 158
+  const plotT = 186
   const plotB = tapeTop - 16
   const yOf = (v: number) => plotB - ((v - min) / span) * (plotB - plotT)
   const xy = points.map((v, i) => ({
@@ -214,6 +260,11 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
     ctx.lineTo(plotR, y)
     ctx.stroke()
   }
+  ctx.restore()
+  ctx.save()
+  ctx.strokeStyle = 'rgba(255,255,255,0.42)'
+  ctx.lineWidth = 2
+  ctx.strokeRect(plotL, plotT, plotR - plotL, plotB - plotT)
   ctx.restore()
 
   if (zeroIn) {
@@ -258,6 +309,9 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   }
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
+  ctx.strokeStyle = `${beam}33`
+  ctx.lineWidth = 56
+  trace(0, xy.length - 1)
   ctx.strokeStyle = `${beam}88`
   ctx.lineWidth = 30
   trace(0, xy.length - 1)
@@ -269,6 +323,34 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   ctx.strokeStyle = '#fff6ff'
   ctx.lineWidth = 3
   trace(0, xy.length - 1)
+
+  const ema = emaSeries(points, 8)
+  ctx.save()
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.setLineDash([12, 8])
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ema.forEach((v, i) => {
+    const x = xy[i].x
+    const y = yOf(v)
+    if (i === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  })
+  ctx.stroke()
+  ctx.restore()
+  const emaTip = ema[ema.length - 1]
+  ctx.font = '700 22px sans-serif'
+  ink(ctx, 'EMA', xy[xy.length - 1].x - 54, yOf(emaTip) - 12, '#ffffff', 4)
+
+  for (let i = 0; i < xy.length; i += 2) {
+    const p = xy[i]
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2)
+    ctx.fillStyle = xy[i].v >= (xy[i - 1]?.v ?? p.v) ? '#ffffff' : DOWN
+    ctx.fill()
+  }
 
   let hiI = 0
   let loI = 0
@@ -344,59 +426,107 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   const figure = money(ret, true)
   ink(ctx, figure, W - 36 - ctx.measureText(figure).width, 72, retColor, 8)
 
-  ctx.font = '600 28px sans-serif'
-  const chips: { text: string; color: string }[] = [
+  ctx.font = '600 26px sans-serif'
+  const rows = rowsOf(bot)
+  const record = recordOf(rows)
+  const last = [...rows].reverse().find((row) => row.pnl != null)
+  const row1: { text: string; color: string }[] = [
     { text: `OPEN ${bot.open_count ?? 0}`, color: '#ffffff' },
   ]
-  if (series.quoted) {
-    chips.push({ text: `HIGH ${money(max, true)}`, color: UP })
-    chips.push({ text: `LOW ${money(min, true)}`, color: DOWN })
+  if (record.wins + record.losses > 0) {
+    row1.push({ text: `${record.wins}W`, color: UP })
+    row1.push({ text: `${record.losses}L`, color: DOWN })
   }
-  const last = [...rowsOf(bot)].reverse().find((row) => row.pnl != null)
-  if (last) {
-    const what = String(last.what || last.title || last.team || last.ticker || 'last').slice(0, 22)
-    chips.push({ text: `${what} ${money(last.pnl, true)}`, color: tone(Number(last.pnl || 0)) })
-  }
+  if (bot.cash != null) row1.push({ text: `CASH ${money(bot.cash)}`, color: '#ffffff' })
   if (bot.expectancy_hit_rate != null && (bot.expectancy_n ?? 0) > 0) {
-    chips.push({
-      text: `HIT ${Math.round(bot.expectancy_hit_rate * 100)}%`,
-      color: '#ffffff',
-    })
+    row1.push({ text: `HIT ${Math.round(bot.expectancy_hit_rate * 100)}%`, color: '#ffffff' })
   }
-  let cx = 32
-  for (const chip of chips) {
-    if (cx > plotR - 40) break
-    ink(ctx, chip.text, cx, 124, chip.color, 5)
-    cx += ctx.measureText(chip.text).width + 28
+  if (bot.expectancy != null && (bot.expectancy_n ?? 0) > 0) {
+    row1.push({ text: `EXP ${money(bot.expectancy, true)}`, color: tone(bot.expectancy) })
   }
+  const row2: { text: string; color: string }[] = []
+  if (series.quoted) {
+    row2.push({ text: `HIGH ${money(max, true)}`, color: UP })
+    row2.push({ text: `LOW ${money(min, true)}`, color: DOWN })
+    row2.push({ text: `PATH ${money(points[points.length - 1] - points[0], true)}`, color: tone(points[points.length - 1] - points[0]) })
+  }
+  if (bot.avg_win != null) row2.push({ text: `AVG W ${money(bot.avg_win, true)}`, color: UP })
+  if (bot.avg_loss != null) row2.push({ text: `AVG L ${money(bot.avg_loss, true)}`, color: DOWN })
+  const pos = bot.positions?.[0]
+  if (pos) {
+    const side = pos.side ? String(pos.side).toUpperCase() : 'IN'
+    const what = String(pos.what || pos.title || pos.team || pos.ticker || 'position').slice(0, 18)
+    row2.push({ text: `${side} ${what}`, color: beam })
+  }
+  if (last) {
+    const what = String(last.what || last.title || last.team || last.ticker || 'last').slice(0, 20)
+    row2.push({ text: `${what} ${money(last.pnl, true)}`, color: tone(Number(last.pnl || 0)) })
+  }
+  const paintRow = (items: { text: string; color: string }[], y: number) => {
+    let x = 32
+    for (const chip of items) {
+      const w = ctx.measureText(chip.text).width
+      if (x + w > W - 36) break
+      ink(ctx, chip.text, x, y, chip.color, 5)
+      x += w + 26
+    }
+  }
+  paintRow(row1, 114)
+  paintRow(row2, 150)
 
-  ctx.fillStyle = 'rgba(4, 2, 18, 0.38)'
+  ctx.fillStyle = 'rgba(4, 2, 18, 0.45)'
   ctx.fillRect(0, tapeTop, W, H - tapeTop)
   ctx.fillStyle = beam
   ctx.fillRect(0, tapeTop, W, 4)
-  const prints = rowsOf(bot).slice(-18)
+  const prints = rows.slice(-16)
+  const recent = [...rows].reverse().filter((row) => row.pnl != null).slice(0, 2)
+  const textX = W * 0.58
   ctx.font = '700 22px sans-serif'
-  ink(ctx, 'PRINTS', 24, tapeTop + 48, 'rgba(255,255,255,0.85)', 4)
+  ink(ctx, 'PRINTS', 24, tapeTop + 32, 'rgba(255,255,255,0.85)', 4)
   if (prints.length) {
     const absMax = Math.max(...prints.map((row) => Math.abs(Number(row.pnl || 0))), 1)
-    const slot = (W - 180) / prints.length
+    const slot = (textX - 170) / prints.length
     prints.forEach((row, i) => {
       const pnl = Number(row.pnl || 0)
-      const bh = Math.max(8, (Math.abs(pnl) / absMax) * 48)
-      const x = 150 + i * slot
+      const bh = Math.max(8, (Math.abs(pnl) / absMax) * 64)
+      const x = 140 + i * slot
       ctx.fillStyle = tone(pnl)
-      ctx.fillRect(x, tapeTop + 62 - bh, Math.max(8, slot - 8), bh)
+      ctx.fillRect(x, tapeTop + 96 - bh, Math.max(8, slot - 8), bh)
     })
   } else {
-    ctx.font = '600 22px sans-serif'
-    ink(ctx, 'no closed prints yet', 150, tapeTop + 48, 'rgba(255,255,255,0.7)', 4)
+    ctx.font = '600 24px sans-serif'
+    ink(ctx, 'no closed prints yet', 140, tapeTop + 72, 'rgba(255,255,255,0.75)', 4)
+  }
+  ctx.font = '700 26px sans-serif'
+  recent.forEach((row, i) => {
+    const what = String(row.what || row.title || row.team || row.ticker || 'trade').slice(0, 26)
+    ink(ctx, `${what}  ${money(row.pnl, true)}`, textX, tapeTop + 42 + i * 34, tone(Number(row.pnl || 0)), 4)
+  })
+
+  const tag = figure
+  ctx.font = '700 36px monospace'
+  const step = series.quoted ? money(lastStep, true) : ''
+  const tagW = Math.max(ctx.measureText(tag).width, step ? ctx.measureText(step).width : 0) + 32
+  let tagX = tip.x + 22
+  if (tagX + tagW > plotR - 4) tagX = tip.x - tagW - 18
+  const tagH = step ? 78 : 48
+  let tagY = tip.y - tagH - 12
+  tagY = Math.min(Math.max(tagY, plotT + 4), plotB - tagH - 4)
+  ctx.fillStyle = 'rgba(4, 2, 18, 0.62)'
+  ctx.fillRect(tagX, tagY, tagW, tagH)
+  ctx.fillStyle = retColor
+  ctx.fillRect(tagX, tagY, 6, tagH)
+  ink(ctx, tag, tagX + 16, tagY + 34, retColor, 5)
+  if (step) {
+    ctx.font = '700 24px monospace'
+    ink(ctx, step, tagX + 16, tagY + 64, tone(lastStep), 4)
   }
 
   ctx.save()
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)'
-  ctx.lineWidth = 3
-  const arm = 28
-  const m = 10
+  ctx.strokeStyle = beam
+  ctx.lineWidth = 5
+  const arm = 42
+  const m = 12
   const corners: [number, number, number, number][] = [
     [m, m, 1, 1],
     [W - m, m, -1, 1],
@@ -419,8 +549,8 @@ function TradeWall({ bot, edge }: { bot: BotRow; edge: Edge }) {
   const state = useRef({ acc: 0, sig: '', time: 0 })
   const map = useMemo(() => {
     const canvas = document.createElement('canvas')
-    canvas.width = 1800
-    canvas.height = 600
+    canvas.width = 2400
+    canvas.height = 800
     const tex = new THREE.CanvasTexture(canvas)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.anisotropy = 8
