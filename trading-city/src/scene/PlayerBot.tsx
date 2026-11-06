@@ -13,8 +13,16 @@ import {
   stepGroundedWalk,
   type GroundedState,
 } from '../data/groundedWalk'
+import { PlayerHeroFigure, type PlayerHeroMotion } from './PlayerHeroFigure'
 
 const INTERACT_R = 2.95
+/** Farther over-shoulder so the taller industrial hero reads cleanly. */
+const HERO_CAM_BACK = 3.45
+const HERO_CAM_UP = 2.2
+const HERO_CAM_SIDE = 0.48
+const HERO_EYE = 1.85
+/** Spawn clear of the TrustSeal Html at z≈4.35. */
+const SPAWN_Z = 6.1
 
 export type PlayerBotProps = {
   active: boolean
@@ -31,8 +39,8 @@ export type PlayerBotProps = {
 }
 
 /**
- * Vault third-person player — thin wrapper over shared groundedWalk physics
- * (same locomotion the office / wing walker should use).
+ * Vault third-person player — shared groundedWalk physics + hero industrial mesh.
+ * Tellers stay on CityBotFigure; this is the guest VIP body only.
  */
 export function PlayerBot({
   active,
@@ -47,15 +55,23 @@ export function PlayerBot({
 }: PlayerBotProps) {
   const { camera, gl } = useThree()
   const body = useRef<Group>(null)
-  const leftFoot = useRef<Group>(null)
-  const rightFoot = useRef<Group>(null)
-  const state = useRef<GroundedState>(createGroundedState(0, Math.min(zFront - 2.8, 5), Math.PI))
+  const state = useRef<GroundedState>(createGroundedState(0, Math.min(zFront - 2.4, SPAWN_Z), Math.PI))
+  const motion = useRef<PlayerHeroMotion>({
+    step: 0,
+    bobAmp: 0,
+    groundSpeed: 0,
+    grounded: true,
+    jumping: false,
+    sprinting: false,
+    turn: 0,
+  })
   const keys = useRef<Record<string, boolean>>({})
   const nearest = useRef<{ id: string; index: number } | null>(null)
   const nearIdx = useRef<number | null>(null)
   const locked = useRef(false)
   const dragging = useRef(false)
   const hintRef = useRef('')
+  const landPunch = useRef(0)
   const bounds = useMemo(
     () => vaultFloorBounds(hallHalfW, zBack, zFront, GROUNDED.capsuleR),
     [hallHalfW, zBack, zFront],
@@ -80,10 +96,16 @@ export function PlayerBot({
       onHintChange?.('')
       return
     }
-    resetGroundedState(state.current, 0, Math.min(zFront - 2.8, 5), Math.PI)
+    resetGroundedState(state.current, 0, Math.min(zFront - 2.4, SPAWN_Z), Math.PI)
+    // Seed a wider hero camera behind the spawn.
+    const s = state.current
+    const backX = Math.sin(s.yaw) * -HERO_CAM_BACK + Math.cos(s.yaw) * HERO_CAM_SIDE
+    const backZ = Math.cos(s.yaw) * -HERO_CAM_BACK - Math.sin(s.yaw) * HERO_CAM_SIDE
+    s.camPos.set(s.pos.x + backX, HERO_CAM_UP, s.pos.z + backZ)
     nearIdx.current = null
+    landPunch.current = 0
     onNearChange?.(null)
-    camera.position.copy(state.current.camPos)
+    camera.position.copy(s.camPos)
   }, [active, zFront, onHintChange, onNearChange, camera])
 
   useEffect(() => {
@@ -154,35 +176,58 @@ export function PlayerBot({
 
   useFrame((_, rawDt) => {
     if (!active) return
+    const dt = Math.min(0.033, rawDt)
     const s = state.current
+    const wasAir = !s.grounded
+    const k = keys.current
     const pose = stepGroundedWalk(s, {
       dt: rawDt,
-      keys: keys.current,
+      keys: k,
       obstacles,
       clampXZ,
       camClamp,
     })
 
+    // Override follow cam for the taller hero silhouette.
+    const backX = Math.sin(s.yaw) * -HERO_CAM_BACK + Math.cos(s.yaw) * HERO_CAM_SIDE
+    const backZ = Math.cos(s.yaw) * -HERO_CAM_BACK - Math.sin(s.yaw) * HERO_CAM_SIDE
+    let wantCamX = s.pos.x + backX
+    const wantCamY = s.pos.y + HERO_CAM_UP + pose.bob + s.pitch * 0.55
+    let wantCamZ = s.pos.z + backZ
+    wantCamX = MathUtils.clamp(wantCamX, camClamp.minX, camClamp.maxX)
+    wantCamZ = MathUtils.clamp(wantCamZ, camClamp.minZ, camClamp.maxZ)
+    s.camPos.x = MathUtils.damp(s.camPos.x, wantCamX, GROUNDED.camLerp, dt)
+    s.camPos.y = MathUtils.damp(s.camPos.y, wantCamY, GROUNDED.camLerp, dt)
+    s.camPos.z = MathUtils.damp(s.camPos.z, wantCamZ, GROUNDED.camLerp, dt)
+
+    if (wasAir && s.grounded) landPunch.current = 1
+    landPunch.current = MathUtils.damp(landPunch.current, 0, 8, dt)
+
+    motion.current.step = pose.step
+    motion.current.bobAmp = pose.bobAmp
+    motion.current.groundSpeed = pose.groundSpeed
+    motion.current.grounded = s.grounded
+    motion.current.jumping = !s.grounded
+    motion.current.sprinting = Boolean(k.shift) && pose.groundSpeed > 1.2
+    motion.current.turn = pose.turn
+
     if (body.current) {
-      body.current.position.set(s.pos.x, s.pos.y + Math.abs(pose.bob) * 0.18, s.pos.z)
+      const punch = landPunch.current * 0.06
+      body.current.position.set(
+        s.pos.x,
+        s.pos.y + Math.abs(pose.bob) * 0.2 - punch,
+        s.pos.z,
+      )
       body.current.rotation.y = s.yaw
-      body.current.rotation.z = MathUtils.damp(body.current.rotation.z, pose.lean, 10, Math.min(0.033, rawDt))
-      body.current.rotation.x = MathUtils.damp(body.current.rotation.x, pose.pitchLean, 8, Math.min(0.033, rawDt))
-    }
-    if (leftFoot.current) {
-      leftFoot.current.position.set(-0.12, 0.06 + pose.leftLift, 0.06 + pose.step * 0.12)
-      leftFoot.current.rotation.x = pose.step * 0.35
-    }
-    if (rightFoot.current) {
-      rightFoot.current.position.set(0.12, 0.06 + pose.rightLift, 0.06 - pose.step * 0.12)
-      rightFoot.current.rotation.x = -pose.step * 0.35
+      body.current.rotation.z = MathUtils.damp(body.current.rotation.z, pose.lean, 10, dt)
+      body.current.rotation.x = MathUtils.damp(body.current.rotation.x, pose.pitchLean, 8, dt)
     }
 
     camera.position.copy(s.camPos)
     camera.lookAt(
-      s.pos.x + Math.sin(s.yaw) * 4.2,
-      s.pos.y + GROUNDED.eyeH + s.pitch * 2.2,
-      s.pos.z + Math.cos(s.yaw) * 4.2,
+      s.pos.x + Math.sin(s.yaw) * 4.4,
+      s.pos.y + HERO_EYE + s.pitch * 2.2,
+      s.pos.z + Math.cos(s.yaw) * 4.4,
     )
 
     let best: { id: string; index: number; d: number } | null = null
@@ -207,37 +252,8 @@ export function PlayerBot({
   if (!active) return null
 
   return (
-    <group ref={body} position={[0, 0, Math.min(zFront - 2.8, 5)]}>
-      <mesh position={[0, GROUNDED.bodyH * 0.42, 0]} castShadow>
-        <capsuleGeometry args={[GROUNDED.capsuleR * 0.75, GROUNDED.bodyH * 0.5, 5, 10]} />
-        <meshStandardMaterial
-          color="#5ad4e8"
-          roughness={0.4}
-          metalness={0.35}
-          emissive="#1a8098"
-          emissiveIntensity={0.25}
-        />
-      </mesh>
-      <mesh position={[0, GROUNDED.bodyH * 0.92, 0]} castShadow>
-        <sphereGeometry args={[0.2, 12, 12]} />
-        <meshStandardMaterial color="#e8fdff" roughness={0.25} metalness={0.45} />
-      </mesh>
-      <mesh position={[0, GROUNDED.bodyH * 0.95, 0.16]}>
-        <boxGeometry args={[0.14, 0.04, 0.04]} />
-        <meshStandardMaterial color="#061018" metalness={0.7} roughness={0.2} />
-      </mesh>
-      <group ref={leftFoot} position={[-0.12, 0.06, 0.06]}>
-        <mesh>
-          <boxGeometry args={[0.1, 0.08, 0.18]} />
-          <meshStandardMaterial color="#0a1820" roughness={0.6} metalness={0.3} />
-        </mesh>
-      </group>
-      <group ref={rightFoot} position={[0.12, 0.06, 0.06]}>
-        <mesh>
-          <boxGeometry args={[0.1, 0.08, 0.18]} />
-          <meshStandardMaterial color="#0a1820" roughness={0.6} metalness={0.3} />
-        </mesh>
-      </group>
+    <group ref={body} position={[0, 0, Math.min(zFront - 2.4, SPAWN_Z)]}>
+      <PlayerHeroFigure motion={motion} />
     </group>
   )
 }
