@@ -4,6 +4,7 @@ import { MathUtils, type Group } from 'three'
 import { vaultFloorBounds, type FloorObstacle } from '../data/bankWalk'
 import {
   GROUNDED,
+  HERO_TUNE,
   aabbClamp,
   applyLookDelta,
   createGroundedState,
@@ -16,12 +17,12 @@ import {
 import { PlayerHeroFigure, type PlayerHeroMotion } from './PlayerHeroFigure'
 
 const INTERACT_R = 2.95
-/** Farther over-shoulder so the taller industrial hero reads cleanly. */
-const HERO_CAM_BACK = 3.45
-const HERO_CAM_UP = 2.2
-const HERO_CAM_SIDE = 0.48
-const HERO_EYE = 1.85
-/** Spawn clear of the TrustSeal Html at z≈4.35. */
+/** Base over-shoulder — stretches out further when sprinting. */
+const HERO_CAM_BACK = 3.35
+const HERO_CAM_BACK_SPRINT = 3.95
+const HERO_CAM_UP = 2.25
+const HERO_CAM_SIDE = 0.52
+const HERO_EYE = 1.9
 const SPAWN_Z = 6.1
 
 export type PlayerBotProps = {
@@ -30,17 +31,15 @@ export type PlayerBotProps = {
   zBack: number
   zFront: number
   obstacles?: FloorObstacle[]
-  /** World positions of teller rope mouths (interact points). */
   tellerMouths: { x: number; z: number; id: string | null; index: number }[]
   onInteract: (id: string, index: number) => void
   onHintChange?: (hint: string) => void
-  /** Fires when the nearest interactable teller changes. */
   onNearChange?: (index: number | null) => void
 }
 
 /**
- * Vault third-person player — shared groundedWalk physics + hero industrial mesh.
- * Tellers stay on CityBotFigure; this is the guest VIP body only.
+ * Vault third-person guest hero — HERO_TUNE locomotion + PlayerHeroFigure v2.
+ * Tellers stay on CityBotFigure.
  */
 export function PlayerBot({
   active,
@@ -64,6 +63,7 @@ export function PlayerBot({
     jumping: false,
     sprinting: false,
     turn: 0,
+    velY: 0,
   })
   const keys = useRef<Record<string, boolean>>({})
   const nearest = useRef<{ id: string; index: number } | null>(null)
@@ -72,6 +72,7 @@ export function PlayerBot({
   const dragging = useRef(false)
   const hintRef = useRef('')
   const landPunch = useRef(0)
+  const camBack = useRef(HERO_CAM_BACK)
   const bounds = useMemo(
     () => vaultFloorBounds(hallHalfW, zBack, zFront, GROUNDED.capsuleR),
     [hallHalfW, zBack, zFront],
@@ -97,11 +98,11 @@ export function PlayerBot({
       return
     }
     resetGroundedState(state.current, 0, Math.min(zFront - 2.4, SPAWN_Z), Math.PI)
-    // Seed a wider hero camera behind the spawn.
     const s = state.current
     const backX = Math.sin(s.yaw) * -HERO_CAM_BACK + Math.cos(s.yaw) * HERO_CAM_SIDE
     const backZ = Math.cos(s.yaw) * -HERO_CAM_BACK - Math.sin(s.yaw) * HERO_CAM_SIDE
     s.camPos.set(s.pos.x + backX, HERO_CAM_UP, s.pos.z + backZ)
+    camBack.current = HERO_CAM_BACK
     nearIdx.current = null
     landPunch.current = 0
     onNearChange?.(null)
@@ -135,7 +136,7 @@ export function PlayerBot({
         const n = nearest.current
         if (n?.id) onInteract(n.id, n.index)
       }
-      if (k === ' ' || k === 'spacebar') queueJump(state.current)
+      if (k === ' ' || k === 'spacebar') queueJump(state.current, HERO_TUNE.jumpBuffer ?? GROUNDED.jumpBuffer)
     }
     const onKeyUp = (e: KeyboardEvent) => {
       keys.current[e.key.toLowerCase()] = false
@@ -180,54 +181,62 @@ export function PlayerBot({
     const s = state.current
     const wasAir = !s.grounded
     const k = keys.current
+    const jumpHeld = Boolean(k[' '] || k.spacebar)
     const pose = stepGroundedWalk(s, {
       dt: rawDt,
       keys: k,
       obstacles,
       clampXZ,
       camClamp,
+      tune: HERO_TUNE,
+      jumpHeld,
     })
 
-    // Override follow cam for the taller hero silhouette.
-    const backX = Math.sin(s.yaw) * -HERO_CAM_BACK + Math.cos(s.yaw) * HERO_CAM_SIDE
-    const backZ = Math.cos(s.yaw) * -HERO_CAM_BACK - Math.sin(s.yaw) * HERO_CAM_SIDE
+    const sprinting = Boolean(k.shift) && pose.groundSpeed > 1.4
+    const wantBack = sprinting ? HERO_CAM_BACK_SPRINT : HERO_CAM_BACK
+    camBack.current = MathUtils.damp(camBack.current, wantBack, 6, dt)
+
+    const backX = Math.sin(s.yaw) * -camBack.current + Math.cos(s.yaw) * HERO_CAM_SIDE
+    const backZ = Math.cos(s.yaw) * -camBack.current - Math.sin(s.yaw) * HERO_CAM_SIDE
     let wantCamX = s.pos.x + backX
-    const wantCamY = s.pos.y + HERO_CAM_UP + pose.bob + s.pitch * 0.55
+    const wantCamY = s.pos.y + HERO_CAM_UP + pose.bob * 1.15 + s.pitch * 0.55 + (sprinting ? 0.08 : 0)
     let wantCamZ = s.pos.z + backZ
     wantCamX = MathUtils.clamp(wantCamX, camClamp.minX, camClamp.maxX)
     wantCamZ = MathUtils.clamp(wantCamZ, camClamp.minZ, camClamp.maxZ)
-    s.camPos.x = MathUtils.damp(s.camPos.x, wantCamX, GROUNDED.camLerp, dt)
-    s.camPos.y = MathUtils.damp(s.camPos.y, wantCamY, GROUNDED.camLerp, dt)
-    s.camPos.z = MathUtils.damp(s.camPos.z, wantCamZ, GROUNDED.camLerp, dt)
+    // Snappier cam lag when turning so the hero stays framed.
+    const camLag = pose.turn !== 0 ? GROUNDED.camLerp + 3 : GROUNDED.camLerp
+    s.camPos.x = MathUtils.damp(s.camPos.x, wantCamX, camLag, dt)
+    s.camPos.y = MathUtils.damp(s.camPos.y, wantCamY, camLag, dt)
+    s.camPos.z = MathUtils.damp(s.camPos.z, wantCamZ, camLag, dt)
 
-    if (wasAir && s.grounded) landPunch.current = 1
-    landPunch.current = MathUtils.damp(landPunch.current, 0, 8, dt)
+    if (wasAir && s.grounded) {
+      // Harder land punch from fall speed.
+      landPunch.current = Math.min(1.4, 0.55 + Math.abs(pose.velY) * 0.08)
+    }
+    landPunch.current = MathUtils.damp(landPunch.current, 0, 7, dt)
 
     motion.current.step = pose.step
     motion.current.bobAmp = pose.bobAmp
     motion.current.groundSpeed = pose.groundSpeed
     motion.current.grounded = s.grounded
     motion.current.jumping = !s.grounded
-    motion.current.sprinting = Boolean(k.shift) && pose.groundSpeed > 1.2
+    motion.current.sprinting = sprinting
     motion.current.turn = pose.turn
+    motion.current.velY = pose.velY
 
     if (body.current) {
-      const punch = landPunch.current * 0.06
-      body.current.position.set(
-        s.pos.x,
-        s.pos.y + Math.abs(pose.bob) * 0.2 - punch,
-        s.pos.z,
-      )
+      const punch = landPunch.current * 0.09
+      body.current.position.set(s.pos.x, s.pos.y + Math.abs(pose.bob) * 0.24 - punch, s.pos.z)
       body.current.rotation.y = s.yaw
-      body.current.rotation.z = MathUtils.damp(body.current.rotation.z, pose.lean, 10, dt)
-      body.current.rotation.x = MathUtils.damp(body.current.rotation.x, pose.pitchLean, 8, dt)
+      body.current.rotation.z = MathUtils.damp(body.current.rotation.z, pose.lean * 1.15, 12, dt)
+      body.current.rotation.x = MathUtils.damp(body.current.rotation.x, pose.pitchLean, 10, dt)
     }
 
     camera.position.copy(s.camPos)
     camera.lookAt(
-      s.pos.x + Math.sin(s.yaw) * 4.4,
-      s.pos.y + HERO_EYE + s.pitch * 2.2,
-      s.pos.z + Math.cos(s.yaw) * 4.4,
+      s.pos.x + Math.sin(s.yaw) * 4.6,
+      s.pos.y + HERO_EYE + s.pitch * 2.3,
+      s.pos.z + Math.cos(s.yaw) * 4.6,
     )
 
     let best: { id: string; index: number; d: number } | null = null
