@@ -223,7 +223,11 @@ class DeskLivingTests(unittest.TestCase):
             teller = desk_living.teller_living_chip(tmp, remember=False)
             self.assertIn("swarm", teller.get("memory_line") or "")
             self.assertIn("ritual_ok", teller)
+            self.assertIn("quiet_age_label", teller)
+            self.assertTrue(str(teller.get("quiet_age_label") or "").startswith("quiet_age="))
             self.assertTrue(teller["fee_floors_locked"])
+            if teller.get("quiet_nag"):
+                self.assertIn("quiet_age=", teller.get("memory_line") or "")
             if teller.get("ritual_ok") is False:
                 self.assertIn("ritual nag", teller.get("memory_line") or "")
                 self.assertTrue(teller.get("ritual_nag"))
@@ -698,6 +702,23 @@ class InsightHelpers(unittest.TestCase):
             })
             self.assertIn("Feature quiet", text4)
             self.assertIn("age=n/a", text4)
+            text5 = staff_living_ritual.format_discord({
+                "ok": True,
+                "ritual_ok": True,
+                "exit_ok": True,
+                "floors_ok": True,
+                "expand_ok": True,
+                "doctor_ok": True,
+                "doctor_fresh": True,
+                "quiet_age": "4h",
+                "sunday_quiet_age_label": "quiet_age=4h",
+                "live_orders_enabled": False,
+                "steps": steps,
+                "note": "Never invent fills.",
+            })
+            self.assertIn("Sunday quiet tip", text5)
+            self.assertIn("quiet_age=4h", text5)
+            self.assertIn("staff_sunday_packet.py discord", text5)
             line = staff_living_ritual.quiet_line({
                 "feature_quiet": {},
                 "quiet_age": "n/a",

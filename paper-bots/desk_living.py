@@ -524,9 +524,22 @@ def teller_living_chip(
     ritual_nag = ""
     if ritual.get("ritual_ok") is False:
         ritual_nag = " · ritual nag (make living-ritual-discord)"
+    quiet = feature_store_quiet_alert(root)
+    quiet_age_h = quiet.get("age_hours") if isinstance(quiet, dict) else None
+    quiet_age = f"{quiet_age_h}h" if quiet_age_h is not None else "n/a"
+    quiet_age_label = f"quiet_age={quiet_age}"
+    quiet_nag = ""
+    try:
+        age_f = float(quiet_age_h) if quiet_age_h is not None else None
+    except (TypeError, ValueError):
+        age_f = None
+    if (isinstance(quiet, dict) and quiet.get("quiet")) or (
+        age_f is not None and age_f >= 6
+    ):
+        quiet_nag = f" · {quiet_age_label} soft nag (learn loop observe)"
     line = (
         f"{swarm_bit} · {fill_bit} · floors={'locked' if floors_ok else 'CHECK'}"
-        f"{ritual_nag}"
+        f"{ritual_nag}{quiet_nag}"
     )
     if remember:
         try:
@@ -557,6 +570,10 @@ def teller_living_chip(
         "floors_ok": floors_ok,
         "ritual_ok": ritual.get("ritual_ok"),
         "ritual_nag": bool(ritual_nag),
+        "quiet_age": quiet_age,
+        "quiet_age_h": quiet_age_h,
+        "quiet_age_label": quiet_age_label,
+        "quiet_nag": bool(quiet_nag),
         "memory_line": line,
         "label": line,
         "note": "Teller living chip — grounded on swarm + Completions; never invents PnL.",

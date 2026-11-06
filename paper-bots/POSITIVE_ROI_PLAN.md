@@ -970,13 +970,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault sunday quiet_age chip | city sunday quiet row |
 | Compact export quiet_age_label | export flatten (landed) |
 
-### Next
+### Living upgrade — status sunday quiet / teller nag / ritual tip
 
 | Ticket | Where |
 | --- | --- |
 | Status json sunday quiet_age | flatten sunday quiet |
 | Teller quiet_age_label nag | teller living line |
 | Ritual discord sunday quiet tip | optional tip line |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault teller quiet nag tint | city teller row |
+| Export sunday_quiet_age_label | living_board_export |
+| Masters sunday quiet soft rail | priority observe |
 
 ## Hard rules unchanged
 

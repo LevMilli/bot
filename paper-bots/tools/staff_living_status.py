@@ -405,6 +405,14 @@ def main() -> int:
             "doctor_soft_copy": doctor_soft_j,
             "doctor_age_soft_copy": doctor_soft_j,  # alias
             "sunday_packet": board.get("sunday_packet"),
+            "sunday_quiet_age": (board.get("sunday_packet") or {}).get("quiet_age")
+            if isinstance(board.get("sunday_packet"), dict)
+            else None,
+            "sunday_quiet_age_label": (
+                (board.get("sunday_packet") or {}).get("quiet_age_label")
+                if isinstance(board.get("sunday_packet"), dict)
+                else None
+            ),
             "betting_expand_gate": board.get("betting_expand_gate"),
             "chicago_today": board.get("chicago_today"),
             "chip_catalog": sorted(
