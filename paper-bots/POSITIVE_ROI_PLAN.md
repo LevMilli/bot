@@ -1242,9 +1242,17 @@ Interactive: Positive ROI Master Plan canvas.
 | Compact skips/teller/doc/quiet/ritual twins | living_compact_card + export |
 | Ritual/status meta sunday lines | Discord/observe + status |
 
+### Living upgrade — vault sunday leftovers (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Vault skip-taxonomy + sunday packet | App vault rows |
+| Vault quiet age / quiet·ritual / drafts | App vault rows |
+| Vault stopbleed + fill tax sunday | App vault rows |
+
 ### Next
 
-_(empty — living sunday quiet meta vault pass cleared; fee floors locked; paper-only; Discord never auto-posts)_
+_(empty — living sunday quiet vault leftovers cleared; fee floors locked; paper-only; Discord never auto-posts)_
 
 ## Hard rules unchanged
 
