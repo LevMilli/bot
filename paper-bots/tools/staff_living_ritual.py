@@ -23,6 +23,21 @@ if ROOT not in sys.path:
 import desk_living
 
 
+def quiet_line(payload: dict) -> str:
+    """Always-on feature quiet observe line for Discord / --json."""
+    quiet = payload.get("feature_quiet") if isinstance(payload.get("feature_quiet"), dict) else {}
+    age = quiet.get("age_hours") if quiet else None
+    age_s = (
+        f"{age}h"
+        if age is not None
+        else str(payload.get("quiet_age") or "n/a")
+    )
+    return (
+        f"• Feature quiet: quiet={quiet.get('quiet') if quiet else None} age={age_s} "
+        f"(staff observe — never softens floors)"
+    )
+
+
 def format_discord(payload: dict) -> str:
     steps = payload.get("steps") if isinstance(payload.get("steps"), dict) else {}
     lines = [
@@ -37,17 +52,7 @@ def format_discord(payload: dict) -> str:
         f"doctor_fresh={payload.get('doctor_fresh')}",
         "",
     ]
-    quiet = payload.get("feature_quiet") if isinstance(payload.get("feature_quiet"), dict) else {}
-    age = quiet.get("age_hours") if quiet else None
-    age_s = (
-        f"{age}h"
-        if age is not None
-        else str(payload.get("quiet_age") or "n/a")
-    )
-    lines.append(
-        f"• Feature quiet: quiet={quiet.get('quiet') if quiet else None} age={age_s} "
-        f"(staff observe — never softens floors)"
-    )
+    lines.append(quiet_line(payload))
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -85,9 +90,15 @@ def main() -> int:
             flat["floors_ok"] = chip.get("floors_ok")
             flat["expand_ok"] = chip.get("expand_ok")
             flat["doctor_fresh"] = chip.get("doctor_fresh")
-            flat["feature_quiet"] = quiet if isinstance(quiet, dict) else {}
+            fq = quiet if isinstance(quiet, dict) else {}
+            flat["feature_quiet"] = {
+                "quiet": fq.get("quiet"),
+                "age_hours": fq.get("age_hours"),
+                "alert": fq.get("alert"),
+            }
             flat["quiet_age_h"] = age_h
             flat["quiet_age"] = f"{age_h}h" if age_h is not None else "n/a"
+            flat["quiet_line"] = quiet_line(flat)
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -133,8 +144,14 @@ def main() -> int:
         age = doctor_row.get("doctor_age")
         if doctor_fresh is None and isinstance(age, dict):
             doctor_fresh = not bool(age.get("stale"))
-    feature_quiet = desk_living.feature_store_quiet_alert(root)
-    quiet_age_h = feature_quiet.get("age_hours") if isinstance(feature_quiet, dict) else None
+    feature_quiet_raw = desk_living.feature_store_quiet_alert(root)
+    fq = feature_quiet_raw if isinstance(feature_quiet_raw, dict) else {}
+    feature_quiet = {
+        "quiet": fq.get("quiet"),
+        "age_hours": fq.get("age_hours"),
+        "alert": fq.get("alert"),
+    }
+    quiet_age_h = feature_quiet.get("age_hours")
     payload = {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -148,7 +165,7 @@ def main() -> int:
         "expand_ok": expand_ok,
         "doctor_ok": doctor_ok,
         "doctor_fresh": doctor_fresh,
-        "feature_quiet": feature_quiet if isinstance(feature_quiet, dict) else {},
+        "feature_quiet": feature_quiet,
         "quiet_age": f"{quiet_age_h}h" if quiet_age_h is not None else "n/a",
         "quiet_age_h": quiet_age_h,
         "note": (
@@ -156,6 +173,7 @@ def main() -> int:
             "Never invent fills; never soften floors; never enable live."
         ),
     }
+    payload["quiet_line"] = quiet_line(payload)
     if args.discord:
         print(format_discord(payload))
     elif args.json:
@@ -166,6 +184,7 @@ def main() -> int:
             f"floors_ok={payload['floors_ok']} expand_ok={payload['expand_ok']} "
             f"(exit_ok={payload['exit_ok']})"
         )
+        print(payload["quiet_line"])
         for name, row in steps:
             label = row.get("label") or row.get("copy") or name
             if name in ("gaps", "ruin") and row.get("copy"):

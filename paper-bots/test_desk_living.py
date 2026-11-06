@@ -324,6 +324,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue(
                 any(str(p).startswith("quiet_age=") for p in (compact.get("parts") or []))
             )
+            from tools import staff_living_status
+            status_txt = staff_living_status._text(board2)
+            self.assertIn("quiet_age_label:", status_txt)
+            self.assertIn("quiet_age=", status_txt)
             parts = [str(p) for p in (compact.get("parts") or [])]
             quiet_i = next(i for i, p in enumerate(parts) if "quiet" in p.lower())
             ritual_i = next(i for i, p in enumerate(parts) if p.startswith("ritual="))
@@ -675,6 +679,12 @@ class InsightHelpers(unittest.TestCase):
             })
             self.assertIn("Feature quiet", text4)
             self.assertIn("age=n/a", text4)
+            line = staff_living_ritual.quiet_line({
+                "feature_quiet": {},
+                "quiet_age": "n/a",
+            })
+            self.assertIn("Feature quiet", line)
+            self.assertIn("age=n/a", line)
             # --json flatten fields on observe chip path
             obs = desk_living.ritual_observe_chip(tmp)
             self.assertIn("ritual_ok", obs)
