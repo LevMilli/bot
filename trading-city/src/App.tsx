@@ -2177,7 +2177,13 @@ export default function App() {
                         (snap?.desk?.master as { fee_floors_assert?: { label?: string; all_ok?: boolean } } | undefined)
                           ?.fee_floors_assert
                       if (!f) return 'fee floors pending'
-                      return f.label || (f.all_ok ? 'floors locked ok' : 'floors CHECK')
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = f.label || (f.all_ok ? 'floors locked ok' : 'floors CHECK')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>
@@ -2210,10 +2216,15 @@ export default function App() {
                           }
                         } | undefined)?.dual_control_chip
                       if (!d) return 'dual-control pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (d.label ||
                           `dual-control signed=${d.signed_n ?? '—'}/${d.items_n ?? '—'}`) +
-                        ' · live=False'
+                        ` · live=False · sunday quiet ${sundayBit} (observe)`
                       )
                     })()}
                   </span>

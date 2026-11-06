@@ -157,6 +157,23 @@ def _text(board: dict) -> str:
             )
             + " (observe · never softens floors)"
         ),
+        (
+            "floors sunday: "
+            + (
+                "floors=ok"
+                if floors.get("all_ok")
+                else "floors=soft"
+                if floors.get("all_ok") is False
+                else "floors=n/a"
+            )
+            + " · sunday quiet "
+            + str(
+                sunday.get("quiet_age_label")
+                or compact.get("quiet_age_label")
+                or "quiet_age=n/a"
+            )
+            + " (observe · never softens floors)"
+        ),
         f"doctor_age: {doctor_age.get('label') or '—'}",
         (
             f"doctor_fresh={doctor_fresh} "
@@ -497,6 +514,13 @@ def main() -> int:
                     or "quiet_age=n/a"
                 )
                 + " (observe)"
+            ),
+            "compact_expand_sunday_quiet": compact_j.get("expand_sunday_quiet")
+            or (
+                str(compact_j.get("expand_label") or "expand=n/a")
+                + " · sunday quiet "
+                + str(compact_j.get("quiet_age_label") or "quiet_age=n/a")
+                + " (observe · never softens floors)"
             ),
             "sunday_quiet_tip": (
                 "Sunday quiet tip: "

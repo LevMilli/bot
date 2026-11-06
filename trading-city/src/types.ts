@@ -292,6 +292,7 @@ export type Desk = {
     sunday_quiet_age_label?: string
     masters_sunday_label?: string
     masters_sunday_quiet?: string
+    expand_sunday_quiet?: string
     quiet_label?: string
     note?: string
     error?: string

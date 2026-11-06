@@ -148,6 +148,17 @@ def main() -> int:
                 f"{expand_bit} · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never softens floors)"
             )
+            floors_bit = (
+                "floors=ok"
+                if chip.get("floors_ok")
+                else "floors=soft"
+                if chip.get("floors_ok") is False
+                else "floors=n/a"
+            )
+            flat["floors_sunday_quiet"] = (
+                f"{floors_bit} · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -190,6 +201,17 @@ def main() -> int:
             )
             print(
                 f"expand sunday: {expand_bit} · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            floors_bit = (
+                "floors=ok"
+                if chip.get("floors_ok")
+                else "floors=soft"
+                if chip.get("floors_ok") is False
+                else "floors=n/a"
+            )
+            print(
+                f"floors sunday: {floors_bit} · sunday quiet {sunday_label} "
                 "(observe · never softens floors)"
             )
             print(

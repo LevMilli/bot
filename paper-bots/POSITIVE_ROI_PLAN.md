@@ -1074,13 +1074,36 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual discord expand sunday | discord line |
 | Status text expand sunday | print line |
 
-### Next
+### Living upgrade — floors/compact/doctor sunday batch
 
 | Ticket | Where |
 | --- | --- |
 | Vault floors sunday quiet | floors row hint |
-| Compact expand sunday twin | compact field |
-| Doctor soft_copy sunday bit | soft_copy tip |
+| Compact expand sunday twin | compact.expand_sunday_quiet |
+| Doctor soft_copy sunday bit | soft_copy + export tip |
+
+### Living upgrade — compact expand / dual / floors observe (this batch)
+
+| Ticket | Where |
+| --- | --- |
+| Status json compact expand sunday | flatten |
+| Vault dual sunday quiet | dual row hint |
+| Ritual observe floors sunday | observe plain + --json |
+
+### Living upgrade — floors sunday export/text (this batch)
+
+| Ticket | Where |
+| --- | --- |
+| Export floors_sunday_quiet | living_board_export |
+| Status text floors sunday | print line |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault ruin sunday quiet | ruin row hint |
+| Ritual discord floors sunday | discord line |
+| Compact floors sunday twin | compact field |
 
 ## Hard rules unchanged
 

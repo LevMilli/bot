@@ -255,6 +255,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("ritual_ok=", doc.get("soft_copy") or "")
             self.assertIn("doctor=", doc.get("soft_copy") or "")
             self.assertIn("doctor_fresh=", doc.get("soft_copy") or "")
+            self.assertIn("sunday quiet", doc.get("soft_copy") or "")
+            self.assertIn("quiet_age=", doc.get("soft_copy") or "")
             self.assertIn("living-ritual-discord", doc.get("soft_copy") or "")
             self.assertEqual(doc.get("ritual_draft_cmd"), "make living-ritual-discord")
             self.assertTrue(any(c.get("id") == "ritual_observe" for c in (doc.get("checks") or [])))
@@ -272,6 +274,7 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("compact_doctor_label", export2)
             self.assertIn("doctor_soft_copy", export2)
             self.assertIn("doctor=", export2.get("doctor_soft_copy") or "")
+            self.assertIn("sunday quiet", export2.get("doctor_soft_copy") or "")
             self.assertEqual(
                 export2.get("doctor_age_soft_copy"),
                 export2.get("doctor_soft_copy"),
@@ -304,6 +307,9 @@ class DeskLivingTests(unittest.TestCase):
             )
             self.assertIn("expand_sunday_quiet", export2)
             self.assertIn("sunday quiet", export2.get("expand_sunday_quiet") or "")
+            self.assertIn("floors_sunday_quiet", export2)
+            self.assertIn("sunday quiet", export2.get("floors_sunday_quiet") or "")
+            self.assertIn("compact_expand_sunday_quiet", export2)
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))
@@ -368,12 +374,15 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("sunday_quiet_age_label", compact)
             self.assertIn("sunday_quiet_age", compact)
             self.assertIn("masters_sunday_label", compact)
+            self.assertIn("expand_sunday_quiet", compact)
+            self.assertIn("sunday quiet", compact.get("expand_sunday_quiet") or "")
             self.assertTrue(
                 any(str(p).startswith("masters_sunday=") for p in (compact.get("parts") or []))
             )
             self.assertIn("masters sunday:", status_txt)
             self.assertIn("masters_sunday_part:", status_txt)
             self.assertIn("expand sunday:", status_txt)
+            self.assertIn("floors sunday:", status_txt)
             from tools import staff_living_ritual as _ritual_mod
             # Status --json twin of ritual quiet_line (same observe wording).
             quiet_line_expect = _ritual_mod.quiet_line({
