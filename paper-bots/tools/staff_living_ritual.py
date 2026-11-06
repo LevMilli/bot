@@ -253,6 +253,30 @@ def format_discord(payload: dict) -> str:
         f"• T-digest sunday: t-digest observe · sunday quiet {tip_age} "
         f"(observe)"
     )
+    lines.append(
+        f"• Skips sunday: skips observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Adapt sunday: adapt observe · sunday quiet {tip_age} "
+        f"(observe · never auto-writes Φ)"
+    )
+    lines.append(
+        f"• Teller sunday: teller observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Quiet sunday: feature quiet observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Doc-age sunday: doctor age observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Ritual sunday: ritual observe · sunday quiet {tip_age} "
+        f"(observe · never auto-posts)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -466,6 +490,30 @@ def main() -> int:
                 f"t-digest observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe)"
             )
+            flat["skips_sunday_quiet"] = (
+                f"skips observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["adapt_sunday_quiet"] = (
+                f"adapt observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-writes Φ)"
+            )
+            flat["teller_sunday_quiet"] = (
+                f"teller observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["quiet_sunday_quiet"] = (
+                f"feature quiet observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["doc_age_sunday_quiet"] = (
+                f"doctor age observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["ritual_sunday_quiet"] = (
+                f"ritual observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-posts)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -652,6 +700,30 @@ def main() -> int:
             print(
                 f"t-digest sunday: t-digest observe · sunday quiet {sunday_label} "
                 "(observe)"
+            )
+            print(
+                f"skips sunday: skips observe · sunday quiet {sunday_label} "
+                "(observe)"
+            )
+            print(
+                f"adapt sunday: adapt observe · sunday quiet {sunday_label} "
+                "(observe · never auto-writes Φ)"
+            )
+            print(
+                f"teller sunday: teller observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"quiet sunday: feature quiet observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"doc-age sunday: doctor age observe · sunday quiet {sunday_label} "
+                "(observe · never softens floors)"
+            )
+            print(
+                f"ritual sunday: ritual observe · sunday quiet {sunday_label} "
+                "(observe · never auto-posts)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
