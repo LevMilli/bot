@@ -1152,10 +1152,16 @@ export default function App() {
                             : 'n/a')
                       const quietBit =
                         fq?.quiet === true ? 'quiet=yes' : fq?.quiet === false ? 'quiet=no' : 'quiet=?'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (c?.quiet_age_label || `quiet_age=${age}`) +
                         ` · ${quietBit}` +
-                        (fq?.alert ? ` · ${fq.alert}` : '')
+                        (fq?.alert ? ` · ${fq.alert}` : '') +
+                        ` · sunday quiet ${sundayBit} (observe · never softens floors)`
                       )
                     })()}
                   </span>
@@ -1163,7 +1169,7 @@ export default function App() {
                 <div className="vault-board-row">
                   <span className="vb-label">quiet·ritual</span>
                   <span className="vault-ritual-hint">
-                    quiet age ↔ ritual observe · make living-ritual-observe / living-ritual-discord (staff paste · never auto-posts)
+                    quiet age ↔ ritual observe · sunday quiet · make living-ritual-observe / living-ritual-discord (staff paste · never auto-posts)
                   </span>
                 </div>
                 <div className="vault-board-row">
@@ -1255,6 +1261,11 @@ export default function App() {
                         (snap?.desk?.master as {
                           ritual_discord?: string
                         } | undefined)?.ritual_discord
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       const body = !copy
                         ? 'make living-ritual-discord · staff paste only · never auto-posts'
                         : (() => {
@@ -1267,7 +1278,7 @@ export default function App() {
                           })()
                       return (
                         <>
-                          {body}
+                          {`${body} · sunday quiet ${sundayBit} (observe · never auto-posts)`}
                           {badgeText ? (
                             <span className={`vault-draft-badge is-${badgeKind}`}>
                               {' · '}
@@ -1317,6 +1328,11 @@ export default function App() {
                         (snap?.desk?.master as {
                           doctor_soft_copy?: string
                         } | undefined)?.doctor_soft_copy
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       const body = !copy
                         ? 'make living-doctor · staff paste only · never auto-posts'
                         : (() => {
@@ -1329,7 +1345,7 @@ export default function App() {
                           })()
                       return (
                         <>
-                          {body}
+                          {`${body} · sunday quiet ${sundayBit} (observe · never softens floors)`}
                           {badgeText ? (
                             <span className={`vault-draft-badge is-${badgeKind}`}>
                               {' · '}
@@ -1535,7 +1551,17 @@ export default function App() {
                           skip_taxonomy?: { label?: string; top_code?: string; top_n?: number }
                         } | undefined)?.skip_taxonomy
                       if (!s) return 'skip taxonomy pending'
-                      return s.label || (s.top_code ? `top skip ${s.top_code} ×${s.top_n ?? 0}` : 'skip taxonomy quiet')
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        s.label ||
+                        (s.top_code
+                          ? `top skip ${s.top_code} ×${s.top_n ?? 0}`
+                          : 'skip taxonomy quiet')
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -1697,13 +1723,19 @@ export default function App() {
                             present?: boolean
                             ritual_ok?: boolean | null
                             auto_publish?: boolean
+                            quiet_age?: string
+                            quiet_age_label?: string
                           }
                         } | undefined)?.sunday_packet
                       if (!s) return 'sunday packet pending'
+                      const sunBit =
+                        s.quiet_age_label ||
+                        (s.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       return (
                         (s.label || `sunday packet=${s.present ? 'yes' : 'no'}`) +
                         (s.ritual_ok == null ? '' : ` · ritual_ok=${Boolean(s.ritual_ok)}`) +
-                        ' · auto_publish=False'
+                        ' · auto_publish=False' +
+                        ` · sunday quiet ${sunBit} (observe · never auto-posts)`
                       )
                     })()}
                   </span>
@@ -2623,10 +2655,16 @@ export default function App() {
                     {(() => {
                       const sb = snap?.desk?.master?.stopbleed
                       if (!sb) return 'memecoin measure pending'
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       return (
                         `stop×${sb.stop_exits ?? 0} · flip×${sb.model_flip_exits ?? 0}` +
                         (sb.red_day_locked ? ' · RED LOCK' : '') +
-                        (sb.expand_volume ? ' · volume ok' : ' · no volume expand')
+                        (sb.expand_volume ? ' · volume ok' : ' · no volume expand') +
+                        ` · sunday quiet ${sundayBit} (observe · never softens floors)`
                       )
                     })()}
                   </span>
@@ -2634,8 +2672,21 @@ export default function App() {
                 <div className="vault-board-row tax-edu">
                   <span className="vb-label">fill tax</span>
                   <span>
-                    +{(((snap?.desk?.ops?.fill_tax ?? snap?.desk?.gate_a?.fill_tax) ?? 0.01) * 100).toFixed(0)}¢
-                    adverse on boards — untaxed paper wins are not live-ready
+                    {(() => {
+                      const sun =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        sun?.quiet_age_label ||
+                        (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
+                      const cents = (
+                        ((snap?.desk?.ops?.fill_tax ?? snap?.desk?.gate_a?.fill_tax) ?? 0.01) *
+                        100
+                      ).toFixed(0)
+                      return (
+                        `+${cents}¢ adverse on boards — untaxed paper wins are not live-ready` +
+                        ` · sunday quiet ${sundayBit} (observe · never softens floors)`
+                      )
+                    })()}
                   </span>
                 </div>
               </div>
