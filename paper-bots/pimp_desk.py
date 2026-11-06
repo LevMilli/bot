@@ -2485,6 +2485,14 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     except Exception as exc:  # noqa: BLE001
         desk_row["dual_control"] = {"paper_only": True, "live_orders_enabled": False, "error": type(exc).__name__}
     try:
+        import desk_roi_plan
+        ruin = desk_roi_plan.ruin_drill_status(root)
+        desk_row["ruin_drill"] = ruin
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["ruin_drill"] = desk_row["master"].get("ruin_drill") or ruin
+    except Exception as exc:  # noqa: BLE001
+        desk_row["ruin_drill"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

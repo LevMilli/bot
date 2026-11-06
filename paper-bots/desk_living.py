@@ -484,13 +484,16 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
     helpers = swarm.get("insight_helpers") or {}
     hillclimb = None
     dual = None
+    ruin = None
     try:
         import desk_roi_plan
         hillclimb = desk_roi_plan.hillclimb_lever_status(root)
         dual = desk_roi_plan.dual_control_status(root)
+        ruin = desk_roi_plan.ruin_drill_status(root)
     except Exception:
         hillclimb = None
         dual = None
+        ruin = None
     return {
         "paper_only": True,
         "feature_store": feat,
@@ -500,6 +503,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "insight_swarm": swarm,
         "hillclimb_lever": hillclimb,
         "dual_control": dual,
+        "ruin_drill": ruin,
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),

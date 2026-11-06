@@ -48,6 +48,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("dual_control", board)
             self.assertFalse(board.get("live_orders_enabled"))
             self.assertTrue((board.get("dual_control") or {}).get("fee_floors_locked", True))
+            self.assertIn("ruin_drill", board)
+            self.assertIn("practiced_this_month", board.get("ruin_drill") or {})
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",
