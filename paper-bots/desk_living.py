@@ -2160,6 +2160,14 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         ),
         "note": "Staff one-shot doctor — never places; never softens floors; never enables live.",
     }
+    failed_ids = ",".join(str(c.get("id") or "") for c in failed) or "none"
+    soft_copy = (
+        f"**Living doctor** (paper · floors locked · live=False)\n"
+        f"{doc['label']} · failed=[{failed_ids}]\n"
+        f"_never places · never softens floors · never enables live_"
+    )
+    doc["soft_copy"] = soft_copy
+    doc["discord"] = soft_copy
     if record:
         try:
             marker = record_doctor_run(root, doc)
@@ -2233,17 +2241,26 @@ def fee_floors_assert(root: str | None = None, cfg: dict | None = None) -> dict:
         floors = desk_profit.venue_floors_locked(cfg if isinstance(cfg, dict) else None) or {}
     except Exception as exc:  # noqa: BLE001
         floors = {"paper_only": True, "locked": True, "all_ok": False, "error": type(exc).__name__}
+    all_ok = bool(floors.get("all_ok"))
+    label = (
+        "fee floors OK (0.06/0.05/0.02)"
+        if all_ok
+        else "fee floors CHECK — live edge below locked floor"
+    )
+    soft_copy = (
+        f"**Fee floors assert** (locked · never soften)\n"
+        f"{label}\n"
+        f"_sports 0.06 · BTC/commodity 0.05 · INX/DEX 0.02 · live=False_"
+    )
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "live_orders_enabled": False,
-        "all_ok": bool(floors.get("all_ok")),
+        "all_ok": all_ok,
         "venues": floors.get("venues") if isinstance(floors.get("venues"), dict) else {},
-        "label": (
-            "fee floors OK (0.06/0.05/0.02)"
-            if floors.get("all_ok")
-            else "fee floors CHECK — live edge below locked floor"
-        ),
+        "label": label,
+        "soft_copy": soft_copy,
+        "discord": soft_copy,
         "note": floors.get("note") or (
             "Venue min_edge floors are locked — selective volume never softens them."
         ),

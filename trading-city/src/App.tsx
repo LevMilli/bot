@@ -727,6 +727,32 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">digests</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const inv =
+                          snap?.desk?.digest_inventory ||
+                          (snap?.desk?.master as {
+                            digest_inventory?: { pass?: boolean }
+                          } | undefined)?.digest_inventory
+                        if (!inv) return undefined
+                        return inv.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const inv =
+                        snap?.desk?.digest_inventory ||
+                        (snap?.desk?.master as {
+                          digest_inventory?: { label?: string; pass?: boolean }
+                        } | undefined)?.digest_inventory
+                      if (!inv) return 'digest inventory pending'
+                      return inv.label || (inv.pass === false ? 'digests thin' : 'digests ok')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">swarm</span>
                   <span
                     style={{

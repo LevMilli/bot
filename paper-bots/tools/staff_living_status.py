@@ -91,7 +91,7 @@ def main() -> int:
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -164,7 +164,10 @@ def main() -> int:
         return 0
     if args.action == "floors":
         payload = desk_living.fee_floors_assert(root)
-        print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        if args.discord:
+            print(payload.get("discord") or payload.get("soft_copy") or payload.get("label") or "—")
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0 if payload.get("all_ok") else 2
     if args.action == "teller":
         print(json.dumps(
@@ -185,7 +188,10 @@ def main() -> int:
         return 0 if gate.get("allow_betting_expand") else 2
     if args.action == "doctor":
         doc = desk_living.living_doctor(root)
-        print(json.dumps(doc, indent=2, sort_keys=True, default=str))
+        if args.discord:
+            print(doc.get("discord") or doc.get("soft_copy") or doc.get("label") or "—")
+        else:
+            print(json.dumps(doc, indent=2, sort_keys=True, default=str))
         return 0 if doc.get("ok") else 2
     if args.action == "json":
         print(json.dumps({
