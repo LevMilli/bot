@@ -792,6 +792,91 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">EIA</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const e =
+                          snap?.desk?.eia_scout ||
+                          (snap?.desk?.master as {
+                            eia_scout?: { next_eta_hours?: number | null }
+                          } | undefined)?.eia_scout
+                        if (!e || e.next_eta_hours == null) return undefined
+                        return Number(e.next_eta_hours) <= 24 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const e =
+                        snap?.desk?.eia_scout ||
+                        (snap?.desk?.master as {
+                          eia_scout?: {
+                            label?: string
+                            n?: number
+                            next_eta_hours?: number | null
+                          }
+                        } | undefined)?.eia_scout
+                      if (!e) return 'EIA scout pending'
+                      return (
+                        e.label ||
+                        `EIA scout n=${e.n ?? 0} next=${e.next_eta_hours ?? '—'}h`
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">calendar</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c =
+                          snap?.desk?.calendar_scanner ||
+                          (snap?.desk?.master as {
+                            calendar_scanner?: { n?: number }
+                          } | undefined)?.calendar_scanner
+                        if (!c) return undefined
+                        return Number(c.n || 0) > 0 ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c =
+                        snap?.desk?.calendar_scanner ||
+                        (snap?.desk?.master as {
+                          calendar_scanner?: { label?: string; n?: number }
+                        } | undefined)?.calendar_scanner
+                      if (!c) return 'calendar pending'
+                      return c.label || `calendar events n=${c.n ?? 0}`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">blackout</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const b =
+                          snap?.desk?.eia_blackout ||
+                          (snap?.desk?.master as {
+                            eia_blackout?: { blocked?: boolean }
+                          } | undefined)?.eia_blackout
+                        if (!b) return undefined
+                        return b.blocked ? '#c45c26' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const b =
+                        snap?.desk?.eia_blackout ||
+                        (snap?.desk?.master as {
+                          eia_blackout?: { label?: string; blocked?: boolean }
+                        } | undefined)?.eia_blackout
+                      if (!b) return 'EIA blackout pending'
+                      return b.label || (b.blocked ? 'EIA blackout ACTIVE' : 'EIA blackout clear')
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">pulse</span>
                   <span
                     style={{
