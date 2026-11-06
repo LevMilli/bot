@@ -313,6 +313,9 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("compact_floors_sunday_quiet", export2)
             self.assertIn("ruin_sunday_quiet", export2)
             self.assertIn("compact_ruin_sunday_quiet", export2)
+            self.assertIn("swarm_sunday_quiet", export2)
+            self.assertIn("hill_sunday_quiet", export2)
+            self.assertIn("gaps_sunday_quiet", export2)
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))
@@ -383,6 +386,9 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("sunday quiet", compact.get("floors_sunday_quiet") or "")
             self.assertIn("ruin_sunday_quiet", compact)
             self.assertIn("sunday quiet", compact.get("ruin_sunday_quiet") or "")
+            self.assertIn("swarm_sunday_quiet", compact)
+            self.assertIn("hill_sunday_quiet", compact)
+            self.assertIn("gaps_sunday_quiet", compact)
             self.assertTrue(
                 any(str(p).startswith("masters_sunday=") for p in (compact.get("parts") or []))
             )
@@ -759,6 +765,7 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("Expand sunday", text4)
             self.assertIn("Floors sunday", text4)
             self.assertIn("Ruin sunday", text4)
+            self.assertIn("Gaps sunday", text4)
             text5 = staff_living_ritual.format_discord({
                 "ok": True,
                 "ritual_ok": True,

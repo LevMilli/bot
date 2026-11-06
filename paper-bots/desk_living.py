@@ -903,6 +903,24 @@ def living_compact_card(
             if isinstance(src.get("ruin_drill_chip"), dict)
             else f"ruin observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "swarm_sunday_quiet": (
+            f"swarm {(src.get('insight_swarm') or {}).get('insight_n')}:{(src.get('insight_swarm') or {}).get('betting_n')} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("insight_swarm"), dict)
+            else f"swarm n/a · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "hill_sunday_quiet": (
+            f"{(src.get('hillclimb_chip') or {}).get('label') or 'hillclimb none'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("hillclimb_chip"), dict)
+            else f"hillclimb none · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "gaps_sunday_quiet": (
+            f"{(src.get('dual_control_gaps') or {}).get('label') or 'gaps observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("dual_control_gaps"), dict)
+            else f"gaps observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2193,6 +2211,21 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{ruin_chip.get('label') or 'ruin observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    swarm = board.get("insight_swarm") if isinstance(board.get("insight_swarm"), dict) else {}
+    slim["swarm_sunday_quiet"] = (
+        f"swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    hill = board.get("hillclimb_chip") if isinstance(board.get("hillclimb_chip"), dict) else {}
+    slim["hill_sunday_quiet"] = (
+        f"{hill.get('label') or 'hillclimb none'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    gaps = board.get("dual_control_gaps") if isinstance(board.get("dual_control_gaps"), dict) else {}
+    slim["gaps_sunday_quiet"] = (
+        f"{gaps.get('label') or 'gaps observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2220,6 +2253,15 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         slim["compact_ruin_sunday_quiet"] = (
             compact.get("ruin_sunday_quiet")
             or slim.get("ruin_sunday_quiet")
+        )
+        slim["compact_swarm_sunday_quiet"] = (
+            compact.get("swarm_sunday_quiet") or slim.get("swarm_sunday_quiet")
+        )
+        slim["compact_hill_sunday_quiet"] = (
+            compact.get("hill_sunday_quiet") or slim.get("hill_sunday_quiet")
+        )
+        slim["compact_gaps_sunday_quiet"] = (
+            compact.get("gaps_sunday_quiet") or slim.get("gaps_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
