@@ -53,6 +53,14 @@ def format_discord(payload: dict) -> str:
         "",
     ]
     lines.append(quiet_line(payload))
+    sunday_label = payload.get("sunday_quiet_age_label") or payload.get("quiet_age_label")
+    if sunday_label or payload.get("quiet_age"):
+        tip_age = sunday_label or f"quiet_age={payload.get('quiet_age') or 'n/a'}"
+        lines.append(
+            f"• Sunday quiet tip: {tip_age} · cross-check "
+            f"`python3 tools/staff_sunday_packet.py discord` "
+            f"(staff paste · never auto-posts)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -158,6 +166,14 @@ def main() -> int:
         "alert": fq.get("alert"),
     }
     quiet_age_h = feature_quiet.get("age_hours")
+    sunday = desk_living.sunday_packet_chip(root)
+    sunday_quiet_age_label = None
+    if isinstance(sunday, dict) and sunday.get("quiet_age_label"):
+        sunday_quiet_age_label = str(sunday.get("quiet_age_label"))
+    if not sunday_quiet_age_label:
+        sunday_quiet_age_label = (
+            f"quiet_age={quiet_age_h}h" if quiet_age_h is not None else "quiet_age=n/a"
+        )
     payload = {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -174,6 +190,9 @@ def main() -> int:
         "feature_quiet": feature_quiet,
         "quiet_age": f"{quiet_age_h}h" if quiet_age_h is not None else "n/a",
         "quiet_age_h": quiet_age_h,
+        "quiet_age_label": f"quiet_age={quiet_age_h}h" if quiet_age_h is not None else "quiet_age=n/a",
+        "sunday_quiet_age": sunday.get("quiet_age") if isinstance(sunday, dict) else None,
+        "sunday_quiet_age_label": sunday_quiet_age_label,
         "note": (
             "Weekly ritual draft — staff reviews gaps/ruin/floors/expand/doctor. "
             "Never invent fills; never soften floors; never enable live."
