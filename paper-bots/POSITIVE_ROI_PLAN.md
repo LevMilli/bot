@@ -555,13 +555,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Smoke Makefile | `paper-bots/Makefile` living-* targets |
 | Betting expand gate | `desk_living.betting_expand_gate` + CLI `expand` |
 
+### Living upgrade — vault expand + gaps exit + living keys test
+
+| Ticket | Where |
+| --- | --- |
+| Expand on city vault | trading-city vault `expand` row |
+| Living keys unit | master teller/swarm/expand keys |
+| Gaps CLI exit 2 | `staff_living_status.py gaps` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Expand gate on city vault | vault row when blocked |
-| Living snapshot unit | desk keys teller_living/swarm_lights |
-| Staff dual-control gaps exit | CLI gaps exit 2 when page |
+| Expand gate teller fact | remember when blocked |
+| Living board size guard | warn if chips_n balloons |
+| Staff living doctor | one-shot floors+expand+selfcheck |
 
 ## Hard rules unchanged
 

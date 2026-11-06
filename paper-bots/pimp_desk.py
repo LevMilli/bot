@@ -2753,6 +2753,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["teller_living"] = tl
         desk_row["living_memory_line"] = tl.get("memory_line")
         desk_row["fee_floors_assert"] = desk_living.fee_floors_assert(root)
+        desk_row["betting_expand_gate"] = desk_living.betting_expand_gate(root)
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["teller_living"] = (
                 desk_row["master"].get("teller_living") or tl
@@ -2761,12 +2762,17 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
                 desk_row["master"].get("fee_floors_assert")
                 or desk_row["fee_floors_assert"]
             )
+            desk_row["master"]["betting_expand_gate"] = (
+                desk_row["master"].get("betting_expand_gate")
+                or desk_row["betting_expand_gate"]
+            )
         # Prefer living line on desk teller when present.
         for bot in bots or []:
             if isinstance(bot, dict) and str(bot.get("id") or "") == "desk":
                 bot["memory_line"] = tl.get("memory_line") or bot.get("memory_line")
     except Exception as exc:  # noqa: BLE001
         desk_row["teller_living"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["betting_expand_gate"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         import desk_living
         gaps = desk_living.dual_control_gaps_page(root)

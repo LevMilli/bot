@@ -417,6 +417,12 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("insight swarm ≥3:1", " ".join(summary.get("priority") or []))
             self.assertIn("living_ai", summary)
             self.assertLessEqual(len(summary.get("priority") or []), desk_master.PRIORITY_MAX)
+            # Living desk keys expected on Masters / living board path.
+            living = desk_living.living_upgrade_board(tmp)
+            for key in ("teller_living", "fee_floors_assert", "betting_expand_gate", "insight_swarm"):
+                self.assertIn(key, living)
+            self.assertIn("betting_expand_gate", summary)
+            self.assertIn("teller_living", summary)
             # Completions line only when today > 0 (trimmed noise otherwise).
             comps = (summary.get("completions") or {}).get("eligible_completions_today") or 0
             if int(comps) > 0:

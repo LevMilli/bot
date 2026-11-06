@@ -98,7 +98,7 @@ def main() -> int:
             print(gaps["copy"])
         else:
             print(json.dumps(gaps, indent=2, sort_keys=True, default=str))
-        return 0
+        return 2 if gaps.get("page") else 0
     if args.action == "inventory":
         inv = board.get("digest_inventory")
         if not isinstance(inv, dict):
