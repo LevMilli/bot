@@ -195,6 +195,61 @@ function diamond(ctx: CanvasRenderingContext2D, x: number, y: number, r: number,
   ctx.fill()
 }
 
+/** Downtown row from the reference wall: packed setbacks, a regular window grid, no antennas. */
+const SKYLINE: { w: number; h: number; step: number }[] = [
+  { w: 78, h: 0.46, step: 0.16 },
+  { w: 52, h: 0.72, step: 0.24 },
+  { w: 104, h: 0.34, step: 0.1 },
+  { w: 46, h: 0.96, step: 0.3 },
+  { w: 70, h: 0.54, step: 0.18 },
+  { w: 38, h: 0.8, step: 0.28 },
+  { w: 118, h: 0.3, step: 0.08 },
+  { w: 56, h: 0.68, step: 0.22 },
+  { w: 42, h: 0.88, step: 0.26 },
+  { w: 90, h: 0.4, step: 0.12 },
+  { w: 34, h: 0.62, step: 0.2 },
+  { w: 64, h: 0.5, step: 0.16 },
+]
+
+function paintWindows(
+  ctx: CanvasRenderingContext2D,
+  seed: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  ctx.fillStyle = 'rgba(236, 244, 255, 0.94)'
+  for (let wy = y + 8; wy < y + h - 7; wy += 13) {
+    for (let wx = x + 7; wx < x + w - 7; wx += 11) {
+      if (rand(seed + wx * 3 + wy) > 0.2) ctx.fillRect(wx, wy, 3, 5)
+    }
+  }
+}
+
+function paintSkyline(ctx: CanvasRenderingContext2D, seed: number, ground: number, top: number) {
+  const avail = ground - top
+  let bx = 0
+  const start = seed % SKYLINE.length
+  for (let i = 0; i < 14 && bx < 760; i++) {
+    const spec = SKYLINE[(start + i) % SKYLINE.length]
+    const bw = spec.w * (0.9 + rand(seed + i * 5) * 0.2)
+    const bh = avail * spec.h * (0.92 + rand(seed + i * 9) * 0.12)
+    const x = bx
+    const y = ground - bh
+    const inset = bw * spec.step
+    const shoulder = y + bh * 0.42
+    ctx.fillStyle = '#05030e'
+    ctx.fillRect(x, shoulder, bw, ground - shoulder)
+    ctx.fillRect(x + inset, y, Math.max(10, bw - inset * 2), shoulder - y + 1)
+    ctx.fillStyle = '#14102a'
+    ctx.fillRect(x + bw - 2, y, 2, bh)
+    paintWindows(ctx, seed + i * 17, x, shoulder, bw, ground - shoulder)
+    paintWindows(ctx, seed + i * 29, x + inset, y, Math.max(10, bw - inset * 2), shoulder - y)
+    bx += bw + 3
+  }
+}
+
 /**
  * Glass chart: the photo's blue field, vertical dashes, left skyline, and a
  * glowing line, plus a scale, high/low, and the tower's own color.
@@ -225,25 +280,7 @@ function paintWall(canvas: HTMLCanvasElement, bot: BotRow, time: number) {
   ctx.fillRect(0, sheen - 20, W, 22)
 
   const ground = tapeTop - 4
-  let bx = 0
-  let bi = 0
-  while (bx < W * 0.34) {
-    const bw = 46 + rand(seed + bi * 5) * 78
-    const bh = (ground - 150) * (0.28 + rand(seed + bi * 9 + 2) * 0.72)
-    ctx.fillStyle = 'rgba(5, 3, 14, 0.9)'
-    ctx.fillRect(bx, ground - bh, bw - 5, bh)
-    const roof = ground - bh
-    ctx.fillStyle = 'rgba(236, 242, 255, 0.75)'
-    ctx.fillRect(bx + bw * 0.45, roof - 18 - rand(seed + bi) * 28, 3, 18 + rand(seed + bi) * 28)
-    ctx.fillStyle = 'rgba(236, 242, 255, 0.9)'
-    for (let wy = ground - bh + 16; wy < ground - 14; wy += 20) {
-      for (let wx = bx + 10; wx < bx + bw - 16; wx += 16) {
-        if (rand(seed + wx * 3 + wy + bi) > 0.4) ctx.fillRect(wx, wy, 4, 6)
-      }
-    }
-    bx += bw
-    bi += 1
-  }
+  paintSkyline(ctx, seed, ground, 168)
 
   ctx.save()
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)'
