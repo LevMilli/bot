@@ -89,6 +89,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("clv", board2)
             self.assertTrue(board2["bleed"]["fee_floors_locked"])
             self.assertTrue(board2["clv"]["fee_floors_locked"])
+            self.assertIn("tip_radar", board2)
+            self.assertIn("calib_nag", board2)
+            self.assertFalse(board2["calib_nag"].get("auto_write_phi"))
+            self.assertTrue(board2["tip_radar"]["fee_floors_locked"])
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

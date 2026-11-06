@@ -445,6 +445,65 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def tip_radar_chip(root: str | None = None) -> dict:
+    """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
+    digest = {}
+    try:
+        from helpers import tip_radar
+        path = tip_radar.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or not digest.get("n"):
+            games = tip_radar.games_from_quote_cache(root)
+            digest = tip_radar.build_digest(games)
+    except Exception:
+        digest = {}
+    games = digest.get("games") if isinstance(digest.get("games"), list) else []
+    t5 = sum(1 for g in games if isinstance(g, dict) and g.get("priority") == "T-5")
+    t15 = sum(1 for g in games if isinstance(g, dict) and g.get("priority") == "T-15")
+    t180 = sum(1 for g in games if isinstance(g, dict) and g.get("priority") == "T-180")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": digest.get("n") if digest.get("n") is not None else len(games),
+        "t5": t5,
+        "t15": t15,
+        "t180": t180,
+        "nearest": games[0] if games else None,
+        "label": f"tip radar n={digest.get('n') or len(games)} T-5={t5} T-15={t15} T-180={t180}",
+        "note": digest.get("note") or "Observe-only tip radar. Never waives sports 0.06.",
+    }
+
+
+def calib_nag_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """raise_phi calibration ticket count chip (staff dual-control only)."""
+    digest = {}
+    try:
+        from helpers import calib_nag
+        path = calib_nag.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("tickets_n") is None:
+            digest = calib_nag.write_digest_from_desk(root, bots=bots)
+    except Exception:
+        digest = {}
+    tickets = digest.get("tickets") if isinstance(digest.get("tickets"), list) else []
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_write_phi": False,
+        "tickets_n": digest.get("tickets_n") if digest.get("tickets_n") is not None else len(tickets),
+        "tickets": tickets[:6],
+        "boards": digest.get("boards") if isinstance(digest.get("boards"), list) else [],
+        "label": f"calib raise_phi tickets={digest.get('tickets_n') or len(tickets)}",
+        "note": digest.get("note") or (
+            "raise_phi is a staff ticket — never silent Φ write, never softer floors."
+        ),
+    }
+
+
 def bleed_chip(root: str | None = None, bots: list | None = None) -> dict:
     """Firm bleed ratio + misplaced capital chip."""
     bleed = {}
@@ -868,6 +927,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "hard_stop": hard_stop_chip(root),
         "bleed": bleed_chip(root, bots=bots),
         "clv": clv_chip(root),
+        "tip_radar": tip_radar_chip(root),
+        "calib_nag": calib_nag_chip(root, bots=bots),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
