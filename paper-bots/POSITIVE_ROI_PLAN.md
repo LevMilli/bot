@@ -438,13 +438,21 @@ Interactive: Positive ROI Master Plan canvas.
 | City vault swarm/fills | `trading-city` Desk types + vault board |
 | Sunday Discord copy | `sunday_packet.format_discord` + CLI |
 
+### Living upgrade — skip / distance / quant chips
+
+| Ticket | Where |
+| --- | --- |
+| Skip historian chip | `desk_living.skip_historian_chip` |
+| Distance clerk chip | `desk_living.distance_clerk_chip` |
+| Quant clerk chip | `desk_living.quant_clerk_chip` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Skip historian chip | top skip codes on HUD |
-| Distance clerk chip | empty latency + firm queue distance |
-| Quant clerk chip | M3 fit→buy / M4 latency |
+| Bookkeeper chip | completions + fee-ledger completeness |
+| Reporter chip | weekly scorecard mirror |
+| Empty-card bee chip | 3s latency bee digest |
 
 ## Hard rules unchanged
 
