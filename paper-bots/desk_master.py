@@ -662,6 +662,10 @@ def master_summary(
             f"eligible completions today {completions.get('eligible_completions_today') or 0}"
         )
     feature_quiet = (living or {}).get("feature_quiet") if isinstance(living, dict) else None
+    living_compact = (living or {}).get("compact") if isinstance(living, dict) else None
+    quiet_age_label = None
+    if isinstance(living_compact, dict) and living_compact.get("quiet_age_label"):
+        quiet_age_label = str(living_compact.get("quiet_age_label"))[:80]
     if isinstance(feature_quiet, dict) and feature_quiet.get("quiet") and feature_quiet.get("alert"):
         priority.insert(0, str(feature_quiet.get("alert"))[:120])
     elif isinstance(feature_quiet, dict):
@@ -671,7 +675,14 @@ def master_summary(
             age_h = None
         if age_h is not None and age_h >= 6:
             # Soft rail — pager/alert already fronts when present (family-deduped).
-            priority.append(f"feature quiet age={age_h}h — learn loop soft warn")
+            # Prefer compact quiet_age_label when living board supplied it.
+            if quiet_age_label:
+                priority.append(f"{quiet_age_label} — learn loop soft warn")
+            else:
+                priority.append(f"feature quiet age={age_h}h — learn loop soft warn")
+        elif quiet_age_label and age_h is not None:
+            # Soft observe label when age known but under the warn threshold.
+            priority.append(f"{quiet_age_label} (observe)")
     feature_pager = (living or {}).get("feature_quiet_pager") if isinstance(living, dict) else None
     if isinstance(feature_pager, dict) and feature_pager.get("page"):
         priority.insert(0, str(feature_pager.get("label") or "feature quiet PAGE")[:120])

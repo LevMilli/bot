@@ -336,6 +336,21 @@ def main() -> int:
                 if (board.get("feature_quiet") or {}).get("age_hours") is not None
                 else "n/a"
             ),
+            "quiet_line": (
+                "• Feature quiet: quiet="
+                + str((board.get("feature_quiet") or {}).get("quiet"))
+                + " age="
+                + (
+                    f"{(board.get('feature_quiet') or {}).get('age_hours')}h"
+                    if (board.get("feature_quiet") or {}).get("age_hours") is not None
+                    else (
+                        str(compact_j.get("quiet_age") or "n/a")
+                        if compact_j.get("quiet_age")
+                        else "n/a"
+                    )
+                )
+                + " (staff observe — never softens floors)"
+            ),
             "quiet_doctor": (
                 "quiet="
                 + ("yes" if (board.get("feature_quiet") or {}).get("quiet") else "no")

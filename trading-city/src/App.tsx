@@ -1044,6 +1044,12 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">quiet·ritual</span>
+                  <span className="vault-ritual-hint">
+                    quiet age ↔ ritual observe · make living-ritual-observe / living-ritual-discord (staff paste · never auto-posts)
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{

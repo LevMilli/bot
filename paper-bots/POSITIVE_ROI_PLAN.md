@@ -946,13 +946,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual json always quiet line | --json feature_quiet + quiet_line |
 | Vault quiet_age near ritual | quiet age before ritual |
 
-### Next
+### Living upgrade — status quiet_line / Masters label rail / vault tip
 
 | Ticket | Where |
 | --- | --- |
 | Status json quiet_line twin | flatten quiet_line |
 | Masters quiet_age_label rail | priority soft label |
 | Vault quiet+ritual cluster tip | tip under quiet age |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Export quiet_line field | living_board_export |
+| Ritual observe quiet_line text | observe plain |
+| Sunday packet quiet_age_label | soft sunday line |
 
 ## Hard rules unchanged
 
