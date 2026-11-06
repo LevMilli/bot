@@ -288,13 +288,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Sports calibration board | `sports_calibration_report` / Masters `sports_calibration` |
 | Feature rows on loser towers | meme + INX (sp/sized) skip/buy → living feature store |
 
+### Living upgrade — Tier-2 insight clerks
+
+| Ticket | Where |
+| --- | --- |
+| Calib nag | `helpers/calib_nag` — BTC+sports raise_Φ tickets (no silent write) |
+| Hard-stop clerk | `helpers/hard_stop_clerk` — sports shadow promote readiness |
+| Near-miss clerk | `helpers/near_miss_clerk` — soft z\|p promote readiness |
+| Bleed clerk | `helpers/bleed_clerk` — firm bleed + misplaced capital |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe / staff hillclimb | Chicago weeks; one allowlist lever when ready |
-| Wire feature rows on every evaluate | **shipped** fee-clear + meme/INX |
-| More insight swarm | **shipped** CLV/injury/EIA scout; next calib/hard-stop clerks |
+| More insight swarm | next distance / bookkeeper / reporter / quant clerks |
 
 ## Hard rules unchanged
 
