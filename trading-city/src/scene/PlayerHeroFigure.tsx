@@ -3,8 +3,8 @@ import { useFrame } from '@react-three/fiber'
 import { CanvasTexture, MathUtils, type Group, type Mesh, type MeshStandardMaterial } from 'three'
 
 /**
- * Vault guest hero v2 — industrial DNA with denser plating, thrusters,
- * HUD visor scan, cape flutter, and locomotion-driven limbs.
+ * Vault guest hero v3 — denser plating, orbit ring, energy field,
+ * backpack winglets, HUD visor scan, cape flutter, locomotion limbs.
  */
 
 const ARMOR = '#14141c'
@@ -120,7 +120,7 @@ function CrownMark({ scale = 1 }: { scale?: number }) {
 const TEX_CACHE = new Map<string, CanvasTexture>()
 
 function guestTexture(kind: 'pauldron' | 'unit' | 'pack' | 'chest') {
-  const key = `guest-v2:${kind}`
+  const key = `guest-v3:${kind}`
   const hit = TEX_CACHE.get(key)
   if (hit) return hit
   const c = document.createElement('canvas')
@@ -131,35 +131,47 @@ function guestTexture(kind: 'pauldron' | 'unit' | 'pack' | 'chest') {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   if (kind === 'pauldron') {
+    ctx.strokeStyle = ACCENT
+    ctx.lineWidth = 6
+    ctx.strokeRect(18, 18, 220, 220)
     ctx.fillStyle = GRAFFITI
-    ctx.font = 'bold 36px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('APEX', 128, 64)
-    ctx.font = 'bold 32px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('TRUST', 128, 104)
-    ctx.fillStyle = GOLD
+    ctx.font = 'bold 38px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('APEX', 128, 58)
     ctx.font = 'bold 34px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('GUEST', 128, 155)
+    ctx.fillText('TRUST', 128, 98)
+    ctx.fillStyle = GOLD
+    ctx.font = 'bold 40px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('VIP', 128, 148)
     ctx.fillStyle = ACCENT
-    ctx.fillRect(64, 185, 128, 10)
+    ctx.fillRect(48, 178, 160, 12)
+    ctx.fillStyle = GOLD
+    ctx.fillRect(72, 198, 112, 6)
     ctx.fillStyle = GRAFFITI
-    ;[88, 118, 148].forEach((x, i) => ctx.fillRect(x, 208, 4, 16 + i * 2))
+    ;[78, 108, 138, 168].forEach((x, i) => ctx.fillRect(x, 214, 5, 14 + i * 2))
   } else if (kind === 'pack') {
     ctx.fillStyle = ACCENT
-    ctx.font = 'bold 40px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('VAULT', 64, 44)
+    ctx.font = 'bold 36px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('VAULT', 64, 36)
     ctx.fillStyle = GOLD
-    ctx.font = 'bold 48px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('01', 64, 96)
-  } else if (kind === 'chest') {
+    ctx.font = 'bold 52px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('01', 64, 88)
     ctx.fillStyle = ACCENT
-    ctx.font = 'bold 48px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('GUEST', 128, 100)
+    ctx.fillRect(24, 108, 80, 6)
+  } else if (kind === 'chest') {
+    ctx.strokeStyle = GOLD
+    ctx.lineWidth = 5
+    ctx.strokeRect(28, 40, 200, 176)
+    ctx.fillStyle = ACCENT
+    ctx.font = 'bold 44px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('GUEST', 128, 95)
     ctx.fillStyle = GOLD
-    ctx.font = 'bold 56px Impact, Haettenschweiler, sans-serif'
-    ctx.fillText('01', 128, 170)
+    ctx.font = 'bold 64px Impact, Haettenschweiler, sans-serif'
+    ctx.fillText('01', 128, 168)
+    ctx.fillStyle = ACCENT
+    ctx.fillRect(64, 200, 128, 8)
   } else {
     ctx.fillStyle = GOLD
-    ctx.font = 'bold 68px Impact, Haettenschweiler, sans-serif'
+    ctx.font = 'bold 72px Impact, Haettenschweiler, sans-serif'
     ctx.fillText('01', 64, 68)
   }
   const tex = new CanvasTexture(c)
@@ -368,6 +380,8 @@ export function PlayerHeroFigure({
   const holo = useRef<Group>(null)
   const thrusterL = useRef<MeshStandardMaterial>(null)
   const thrusterR = useRef<MeshStandardMaterial>(null)
+  const orbit = useRef<Group>(null)
+  const field = useRef<Mesh>(null)
   const maps = useMemo(
     () => ({
       pauldron: guestTexture('pauldron'),
@@ -409,13 +423,13 @@ export function PlayerHeroFigure({
 
     if (chestPulse.current) {
       chestPulse.current.emissiveIntensity =
-        1.6 + Math.sin(t * 3.2) * 0.45 + (m.sprinting ? 0.55 : 0) + (m.jumping ? 0.35 : 0)
+        1.85 + Math.sin(t * 3.2) * 0.5 + (m.sprinting ? 0.65 : 0) + (m.jumping ? 0.4 : 0)
     }
     if (packGlow.current) {
       packGlow.current.emissiveIntensity =
-        (m.sprinting ? 2.6 : m.jumping ? 2.1 : 1.2) + Math.sin(t * 5) * 0.35
+        (m.sprinting ? 2.9 : m.jumping ? 2.3 : 1.35) + Math.sin(t * 5) * 0.4
     }
-    const thrust = (m.sprinting || m.jumping ? 3.2 : 0.2) + Math.sin(t * 14) * 0.4
+    const thrust = (m.sprinting || m.jumping ? 3.5 : 0.25) + Math.sin(t * 14) * 0.45
     if (thrusterL.current) thrusterL.current.emissiveIntensity = thrust
     if (thrusterR.current) thrusterR.current.emissiveIntensity = thrust
     if (visorScan.current) {
@@ -425,33 +439,72 @@ export function PlayerHeroFigure({
       holo.current.rotation.y = t * 1.4
       holo.current.position.y = 0.62 + Math.sin(t * 2.1) * 0.02
     }
+    if (orbit.current) {
+      orbit.current.rotation.y = t * 1.15
+      orbit.current.rotation.z = Math.sin(t * 0.7) * 0.18
+    }
+    if (field.current) {
+      const mat = field.current.material as { opacity?: number }
+      if (mat.opacity != null) {
+        mat.opacity = 0.18 + Math.sin(t * 2.2) * 0.08 + (m.sprinting ? 0.12 : 0)
+      }
+      const s = 1 + Math.sin(t * 1.8) * 0.06 + (m.jumping ? 0.12 : 0)
+      field.current.scale.set(s, 1, s)
+    }
   })
 
   return (
     <group ref={root} position={[0, 0.64, 0]} scale={1} frustumCulled={false}>
-      <pointLight position={[0, 1.25, 0.6]} intensity={0.7} color="#9ef8ff" distance={4.2} />
-      <pointLight position={[0, 0.95, -0.55]} intensity={0.45} color="#ffd24a" distance={3.2} />
-      <pointLight position={[0, 0.4, -0.35]} intensity={0.35} color="#5af0ff" distance={2.4} />
+      <pointLight position={[0, 1.25, 0.6]} intensity={0.85} color="#9ef8ff" distance={4.6} />
+      <pointLight position={[0, 0.95, -0.55]} intensity={0.55} color="#ffd24a" distance={3.4} />
+      <pointLight position={[0, 0.4, -0.35]} intensity={0.42} color="#5af0ff" distance={2.6} />
+
+      {/* Ground energy field */}
+      <mesh ref={field} position={[0, -0.62, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.28, 0.52, 40]} />
+        <meshBasicMaterial color={ACCENT} transparent opacity={0.22} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, -0.615, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.18, 0.24, 32]} />
+        <meshBasicMaterial color={GOLD} transparent opacity={0.35} depthWrite={false} toneMapped={false} />
+      </mesh>
 
       <group ref={torso}>
+        {/* Orbit halo around torso */}
+        <group ref={orbit} position={[0, 0.58, 0]}>
+          <mesh rotation={[Math.PI / 2.4, 0.2, 0]}>
+            <torusGeometry args={[0.48, 0.012, 8, 48]} />
+            <meshStandardMaterial {...neon(ACCENT, 1.6)} />
+          </mesh>
+          {([0, 1, 2] as const).map((i) => {
+            const a = (i / 3) * Math.PI * 2
+            return (
+              <mesh key={i} position={[Math.cos(a) * 0.48, Math.sin(a) * 0.12, Math.sin(a) * 0.48]}>
+                <sphereGeometry args={[0.028, 10, 10]} />
+                <meshStandardMaterial {...neon(i === 1 ? GOLD : ACCENT, 2.2)} />
+              </mesh>
+            )
+          })}
+        </group>
+
         {/* Hip cage + skirt plates */}
         <mesh position={[0, 0.16, 0]}>
-          <boxGeometry args={[0.34, 0.2, 0.26]} />
+          <boxGeometry args={[0.36, 0.22, 0.28]} />
           <meshStandardMaterial {...armor(0.55, 0.65)} />
         </mesh>
-        <LedStrip position={[0, 0.16, 0.14]} size={[0.2, 0.016, 0.012]} color={GOLD} />
+        <LedStrip position={[0, 0.16, 0.15]} size={[0.22, 0.018, 0.012]} color={GOLD} />
         {([-1, 1] as const).map((side) => (
-          <mesh key={side} position={[side * 0.18, 0.12, 0.02]} rotation={[0.15, 0, side * 0.2]}>
-            <boxGeometry args={[0.1, 0.18, 0.04]} />
+          <mesh key={side} position={[side * 0.19, 0.12, 0.02]} rotation={[0.15, 0, side * 0.2]}>
+            <boxGeometry args={[0.11, 0.2, 0.045]} />
             <meshStandardMaterial color={ARMOR_EDGE} metalness={0.7} roughness={0.4} />
           </mesh>
         ))}
         <mesh position={[0, 0.26, 0]}>
-          <boxGeometry args={[0.38, 0.055, 0.3]} />
+          <boxGeometry args={[0.4, 0.055, 0.32]} />
           <meshStandardMaterial color={ARMOR_EDGE} metalness={0.8} roughness={0.3} />
         </mesh>
         {([-0.14, 0, 0.14] as const).map((x) => (
-          <mesh key={x} position={[x, 0.26, 0.155]}>
+          <mesh key={x} position={[x, 0.26, 0.165]}>
             <boxGeometry args={[0.055, 0.045, 0.035]} />
             <meshStandardMaterial color={ARMOR_DARK} metalness={0.65} roughness={0.42} />
           </mesh>
@@ -459,23 +512,30 @@ export function PlayerHeroFigure({
 
         {/* Heavy chest with bevel plates */}
         <mesh position={[0, 0.6, 0.02]}>
-          <boxGeometry args={[0.5, 0.62, 0.36]} />
+          <boxGeometry args={[0.52, 0.64, 0.38]} />
           <meshStandardMaterial {...armor(0.46, 0.74)} />
         </mesh>
         {([-1, 1] as const).map((side) => (
-          <mesh key={side} position={[side * 0.28, 0.6, 0.02]}>
-            <boxGeometry args={[0.08, 0.5, 0.3]} />
+          <mesh key={side} position={[side * 0.29, 0.6, 0.02]}>
+            <boxGeometry args={[0.09, 0.52, 0.32]} />
             <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.34} />
           </mesh>
         ))}
+        {/* Angular chest fins */}
+        {([-1, 1] as const).map((side) => (
+          <mesh key={`fin-${side}`} position={[side * 0.34, 0.72, 0.08]} rotation={[0.1, 0, side * 0.55]}>
+            <boxGeometry args={[0.06, 0.28, 0.14]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.35} />
+          </mesh>
+        ))}
         <mesh position={[0, 0.6, 0]}>
-          <boxGeometry args={[0.38, 0.52, 0.26]} />
+          <boxGeometry args={[0.4, 0.54, 0.28]} />
           <meshStandardMaterial
             color={ARMOR_DARK}
             metalness={0.48}
             roughness={0.62}
             emissive={ACCENT_DIM}
-            emissiveIntensity={0.4}
+            emissiveIntensity={0.48}
           />
         </mesh>
         {/* Spine */}
@@ -567,38 +627,58 @@ export function PlayerHeroFigure({
           </group>
         ))}
 
-        {/* Backpack + thrusters */}
+        {/* Backpack + thrusters + winglets */}
         <group position={[0, 0.6, -0.3]}>
           <mesh>
-            <boxGeometry args={[0.34, 0.46, 0.18]} />
+            <boxGeometry args={[0.36, 0.48, 0.2]} />
             <meshStandardMaterial {...armor(0.48, 0.74)} />
           </mesh>
           <mesh position={[0, 0, -0.03]}>
-            <boxGeometry args={[0.26, 0.36, 0.14]} />
+            <boxGeometry args={[0.28, 0.38, 0.15]} />
             <meshStandardMaterial color={ARMOR_DARK} metalness={0.55} roughness={0.55} />
           </mesh>
-          <mesh position={[0, -0.04, -0.12]}>
-            <cylinderGeometry args={[0.07, 0.09, 0.1, 12]} />
-            <meshStandardMaterial ref={packGlow} {...neon(ACCENT, 1.6)} />
+          <mesh position={[0, -0.04, -0.13]}>
+            <cylinderGeometry args={[0.075, 0.095, 0.11, 12]} />
+            <meshStandardMaterial ref={packGlow} {...neon(ACCENT, 1.8)} />
           </mesh>
           {/* Dual exhaust */}
           {([-1, 1] as const).map((side) => (
-            <group key={side} position={[side * 0.1, -0.18, -0.08]}>
+            <group key={side} position={[side * 0.11, -0.2, -0.08]}>
               <mesh>
-                <cylinderGeometry args={[0.035, 0.045, 0.1, 10]} />
+                <cylinderGeometry args={[0.038, 0.048, 0.11, 10]} />
                 <meshStandardMaterial color={ARMOR_EDGE} metalness={0.75} roughness={0.35} />
               </mesh>
-              <mesh position={[0, -0.07, 0]}>
-                <cylinderGeometry args={[0.028, 0.032, 0.04, 10]} />
+              <mesh position={[0, -0.08, 0]}>
+                <cylinderGeometry args={[0.03, 0.034, 0.045, 10]} />
                 <meshStandardMaterial ref={side < 0 ? thrusterL : thrusterR} {...neon(ACCENT, 0.4)} />
               </mesh>
             </group>
           ))}
-          <mesh position={[0, 0.14, -0.1]}>
-            <planeGeometry args={[0.18, 0.18]} />
+          {/* Sweeping pack winglets */}
+          {([-1, 1] as const).map((side) => (
+            <mesh
+              key={`wing-${side}`}
+              position={[side * 0.22, 0.08, -0.02]}
+              rotation={[0.15, side * -0.35, side * 0.55]}
+            >
+              <boxGeometry args={[0.22, 0.06, 0.14]} />
+              <meshStandardMaterial color={ARMOR_EDGE} metalness={0.8} roughness={0.28} />
+            </mesh>
+          ))}
+          {([-1, 1] as const).map((side) => (
+            <LedStrip
+              key={`wing-led-${side}`}
+              position={[side * 0.26, 0.1, 0]}
+              rotation={[0.15, side * -0.35, side * 0.55]}
+              size={[0.16, 0.014, 0.01]}
+              color={GOLD}
+            />
+          ))}
+          <mesh position={[0, 0.14, -0.11]}>
+            <planeGeometry args={[0.2, 0.2]} />
             <meshBasicMaterial map={maps.pack} transparent toneMapped={false} depthWrite={false} />
           </mesh>
-          <LedStrip position={[0, 0.2, -0.1]} size={[0.16, 0.014, 0.012]} color={GOLD} />
+          <LedStrip position={[0, 0.22, -0.11]} size={[0.18, 0.016, 0.012]} color={GOLD} />
         </group>
 
         {/* Cape panels */}
@@ -651,6 +731,19 @@ export function PlayerHeroFigure({
             <boxGeometry args={[0.38, 0.09, 0.4]} />
             <meshStandardMaterial color={ARMOR_EDGE} metalness={0.78} roughness={0.32} />
           </mesh>
+          {/* Crest ridge + crown gem */}
+          <mesh position={[0, 0.42, 0.02]} rotation={[0.1, 0, 0]}>
+            <boxGeometry args={[0.08, 0.1, 0.28]} />
+            <meshStandardMaterial color={ARMOR_DARK} metalness={0.7} roughness={0.35} />
+          </mesh>
+          <mesh position={[0, 0.48, 0.06]}>
+            <octahedronGeometry args={[0.04, 0]} />
+            <meshStandardMaterial {...neon(GOLD, 2.4)} />
+          </mesh>
+          <mesh position={[0, 0.38, 0.22]}>
+            <boxGeometry args={[0.2, 0.02, 0.03]} />
+            <meshStandardMaterial {...neon(ACCENT, 1.8)} />
+          </mesh>
 
           {/* Visor + scan bar */}
           <mesh position={[0, 0.16, 0.21]} rotation={[-0.32, 0, 0]}>
@@ -659,7 +752,7 @@ export function PlayerHeroFigure({
           </mesh>
           <mesh position={[0, 0.16, 0.25]} rotation={[-0.32, 0, 0]}>
             <boxGeometry args={[0.3, 0.06, 0.025]} />
-            <meshStandardMaterial {...neon(ACCENT, 2.2)} />
+            <meshStandardMaterial {...neon(ACCENT, 2.5)} />
           </mesh>
           <mesh ref={visorScan} position={[0, 0.16, 0.265]} rotation={[-0.32, 0, 0]}>
             <boxGeometry args={[0.04, 0.05, 0.02]} />

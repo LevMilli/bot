@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Html, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
-import { CanvasTexture, DoubleSide, MathUtils, type Group, type Mesh, type PointLight } from 'three'
+import { CanvasTexture, DoubleSide, MathUtils, type Group, type Mesh, type MeshStandardMaterial, type PointLight } from 'three'
 import type { BotRow, Desk } from '../types'
 import { BEAM_COLORS, beamColorFor, workersOnShift } from '../data/format'
 import { botPose } from '../data/botPose'
@@ -34,6 +34,8 @@ const TRIM = '#7ec8d8'
 const BRASS = '#c9a227'
 const INK = '#050812'
 const FLOOR = '#0e061c'
+const CYAN = '#2de2e6'
+const GREEN = '#39ff14'
 
 /**
  * Dual banks + clear center aisle to the vault.
@@ -123,6 +125,7 @@ function TellerPod({
   const lamp = useRef<Mesh>(null)
   const halo = useRef<Mesh>(null)
   const screen = useRef<Mesh>(null)
+  const screenB = useRef<Mesh>(null)
   const pad = useRef<Mesh>(null)
   const botRoot = useRef<Group>(null)
   const walk = useRef({ z: 0, x: 0 })
@@ -148,6 +151,12 @@ function TellerPod({
       const mat = screen.current.material as { opacity?: number }
       if (mat.opacity != null) {
         mat.opacity = 0.45 + Math.sin(t * 5.5 + index * 1.7) * 0.12 + (near ? 0.12 : 0)
+      }
+    }
+    if (screenB.current && !offline) {
+      const mat = screenB.current.material as { opacity?: number }
+      if (mat.opacity != null) {
+        mat.opacity = 0.4 + Math.sin(t * 4.2 + index * 2.1) * 0.1 + (near ? 0.1 : 0)
       }
     }
     if (pad.current && !offline) {
@@ -183,8 +192,17 @@ function TellerPod({
     <group>
       {/* Raised platform under the whole station */}
       <mesh position={[0, 0.04, -0.55]} receiveShadow>
-        <boxGeometry args={[podW + 0.22, 0.08, 1.35]} />
+        <boxGeometry args={[podW + 0.28, 0.08, 1.4]} />
         <meshStandardMaterial color="#14101c" roughness={0.75} metalness={0.15} />
+      </mesh>
+      <mesh position={[0, 0.09, -0.55]}>
+        <boxGeometry args={[podW + 0.2, 0.02, 1.32]} />
+        <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.28} />
+      </mesh>
+      {/* Soft underglow */}
+      <mesh position={[0, 0.02, -0.4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[podW + 0.1, 1.1]} />
+        <meshBasicMaterial color={color} transparent opacity={0.1} depthWrite={false} toneMapped={false} />
       </mesh>
       {/* Compact cabinet — wall side only; front face ≈ −0.22 */}
       <mesh position={[0, 0.5, -0.62]} castShadow>
@@ -210,32 +228,64 @@ function TellerPod({
           <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
         </mesh>
       ))}
+      {/* Front ticker fascia */}
+      <mesh position={[0, 0.42, -0.33]}>
+        <boxGeometry args={[podW - 0.4, 0.05, 0.02]} />
+        <meshStandardMaterial color={CYAN} emissive={CYAN} emissiveIntensity={0.45} toneMapped={false} />
+      </mesh>
       {/* Counter top — lip ≈ +0.05, clear of ropes at 1.4+ */}
       <mesh position={[0, 0.92, -0.42]} castShadow>
         <boxGeometry args={[podW + 0.1, 0.06, 0.78]} />
         <meshStandardMaterial color="#d8d0c0" roughness={0.28} metalness={0.22} />
       </mesh>
+      {/* Glass transaction strip */}
+      <mesh position={[0, 0.96, -0.28]}>
+        <boxGeometry args={[podW * 0.7, 0.018, 0.35]} />
+        <meshPhysicalMaterial
+          color="#7ef9ff"
+          metalness={0.05}
+          roughness={0.08}
+          transmission={0.5}
+          transparent
+          opacity={0.4}
+          thickness={0.15}
+        />
+      </mesh>
       <mesh position={[0, 0.96, -0.05]}>
         <boxGeometry args={[podW * 0.55, 0.025, 0.03]} />
         <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={focused ? 0.3 : 0.14} />
       </mesh>
-      {/* Transaction pad */}
+      {/* Transaction pad + keyboard */}
       <mesh ref={pad} position={[0.15, 0.96, -0.2]} rotation={[-Math.PI / 2, 0, 0.08]}>
         <planeGeometry args={[0.28, 0.2]} />
         <meshStandardMaterial color="#f4f0e4" roughness={0.9} emissive={color} emissiveIntensity={near ? 0.18 : 0.05} />
       </mesh>
+      <mesh position={[-0.22, 0.955, -0.18]}>
+        <boxGeometry args={[0.32, 0.02, 0.16]} />
+        <meshStandardMaterial color="#121018" metalness={0.45} roughness={0.4} />
+      </mesh>
+      <mesh position={[-0.22, 0.97, -0.18]}>
+        <boxGeometry args={[0.28, 0.008, 0.12]} />
+        <meshStandardMaterial color={CYAN} emissive={CYAN} emissiveIntensity={0.22} toneMapped={false} />
+      </mesh>
       {([-podW / 2 - 0.02, podW / 2 + 0.02] as const).map((sx) => (
-        <mesh key={sx} position={[sx, 0.55, -0.58]}>
-          <boxGeometry args={[0.022, 0.7, 0.42]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.28} toneMapped={false} />
-        </mesh>
+        <group key={sx}>
+          <mesh position={[sx, 0.55, -0.58]}>
+            <boxGeometry args={[0.022, 0.7, 0.42]} />
+            <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.28} toneMapped={false} />
+          </mesh>
+          <mesh position={[sx, 0.92, -0.58]}>
+            <boxGeometry args={[0.04, 0.04, 0.45]} />
+            <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
+          </mesh>
+        </group>
       ))}
 
       {([-0.7, 0.7] as const).map((sx) => (
         <group key={sx}>
           <mesh position={[sx, 1.35, -0.55]}>
             <boxGeometry args={[0.024, 0.7, 0.35]} />
-            <meshStandardMaterial color="#7ef9ff" transparent opacity={0.07} metalness={0.3} roughness={0.15} depthWrite={false} />
+            <meshStandardMaterial color="#7ef9ff" transparent opacity={0.1} metalness={0.3} roughness={0.15} depthWrite={false} />
           </mesh>
           <mesh position={[sx, 1.72, -0.55]}>
             <boxGeometry args={[0.032, 0.032, 0.38]} />
@@ -244,6 +294,7 @@ function TellerPod({
         </group>
       ))}
 
+      {/* Dual terminals */}
       <mesh position={[-0.28, 1.05, -0.22]} rotation={[-0.32, 0.08, 0]}>
         <boxGeometry args={[0.34, 0.22, 0.028]} />
         <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} emissive={color} emissiveIntensity={0.12} />
@@ -251,6 +302,14 @@ function TellerPod({
       <mesh ref={screen} position={[-0.28, 1.05, -0.2]} rotation={[-0.32, 0.08, 0]}>
         <planeGeometry args={[0.28, 0.16]} />
         <meshBasicMaterial color={offline ? '#2a1830' : color} transparent opacity={0.55} toneMapped={false} />
+      </mesh>
+      <mesh position={[0.22, 1.0, -0.28]} rotation={[-0.28, -0.12, 0]}>
+        <boxGeometry args={[0.26, 0.16, 0.024]} />
+        <meshStandardMaterial color={INK} metalness={0.45} roughness={0.32} emissive={GREEN} emissiveIntensity={0.08} />
+      </mesh>
+      <mesh ref={screenB} position={[0.22, 1.0, -0.26]} rotation={[-0.28, -0.12, 0]}>
+        <planeGeometry args={[0.2, 0.11]} />
+        <meshBasicMaterial color={offline ? '#1a2020' : GREEN} transparent opacity={0.45} toneMapped={false} />
       </mesh>
       <mesh position={[0.36, 0.97, -0.32]}>
         <cylinderGeometry args={[0.026, 0.034, 0.06, 10]} />
@@ -270,6 +329,7 @@ function TellerPod({
           roughness={0.4}
         />
       </mesh>
+      <pointLight position={[0.2, 1.15, -0.1]} intensity={0.28} color="#fff4d0" distance={2.4} />
 
       {/* Nameplate on a post above the cabinet — not floating into the bot */}
       <mesh position={[0, 1.25, -0.78]}>
@@ -373,71 +433,137 @@ function ProfitBoard({ desk }: { desk?: Desk }) {
   )
 }
 
-/** Hero circular vault door — the visual anchor the old lobby never had. */
+/** Hero circular vault door — layered steel, rotating rings, chamber glow. */
 function HeroVaultDoor() {
   const dial = useRef<Group>(null)
+  const outerSpin = useRef<Group>(null)
   const ring = useRef<Mesh>(null)
+  const status = useRef<MeshStandardMaterial>(null)
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime()
-    if (dial.current) dial.current.rotation.z = t * 0.28
+    if (dial.current) dial.current.rotation.z = t * 0.32
+    if (outerSpin.current) outerSpin.current.rotation.z = -t * 0.12
     if (ring.current) {
       const mat = ring.current.material as { opacity?: number }
-      if (mat.opacity != null) mat.opacity = 0.28 + Math.sin(t * 1.5) * 0.1
+      if (mat.opacity != null) mat.opacity = 0.32 + Math.sin(t * 1.6) * 0.14
     }
+    if (status.current) status.current.emissiveIntensity = 0.7 + Math.sin(t * 2.4) * 0.35
   })
-  const bolts = Array.from({ length: 14 }, (_, i) => {
-    const a = (i / 14) * Math.PI * 2
-    return [Math.cos(a) * 1.05, Math.sin(a) * 1.05] as const
+  const bolts = Array.from({ length: 18 }, (_, i) => {
+    const a = (i / 18) * Math.PI * 2
+    return [Math.cos(a) * 1.18, Math.sin(a) * 1.18] as const
   })
-  // End of the center aisle, behind + below NET DESK — cyan ring clear of board faces.
   return (
-    <group position={[0, 1.2, Z_BACK + 0.95]} scale={0.88}>
-      <mesh position={[0, 0, -0.06]}>
-        <cylinderGeometry args={[1.45, 1.45, 0.18, 48]} />
-        <meshStandardMaterial color="#0a0614" metalness={0.6} roughness={0.32} />
+    <group position={[0, 1.35, Z_BACK + 0.72]}>
+      {/* Recessed vault alcove frame */}
+      <mesh position={[0, 0.05, -0.35]}>
+        <boxGeometry args={[4.4, 3.6, 0.5]} />
+        <meshStandardMaterial color="#0c0814" metalness={0.45} roughness={0.55} />
       </mesh>
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[1.28, 1.28, 0.2, 48]} />
-        <meshStandardMaterial color="#2a2438" metalness={0.75} roughness={0.24} />
+      <mesh position={[0, 0.05, -0.08]}>
+        <boxGeometry args={[3.9, 3.2, 0.18]} />
+        <meshStandardMaterial color="#16101f" metalness={0.55} roughness={0.4} />
       </mesh>
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.06]}>
-        <cylinderGeometry args={[1.05, 1.05, 0.16, 48]} />
-        <meshStandardMaterial color="#14101c" metalness={0.7} roughness={0.28} />
+      {/* Brass arch trim */}
+      <mesh position={[0, 1.55, 0.05]}>
+        <boxGeometry args={[3.95, 0.08, 0.12]} />
+        <meshStandardMaterial color={BRASS} metalness={0.88} roughness={0.2} />
       </mesh>
-      {Array.from({ length: 8 }).map((_, i) => {
-        const a = (i / 8) * Math.PI
-        return (
-          <mesh key={i} position={[0, 0, 0.14]} rotation={[0, 0, a]}>
-            <boxGeometry args={[2.05, 0.055, 0.04]} />
-            <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
-          </mesh>
-        )
-      })}
-      {bolts.map(([bx, by], i) => (
-        <mesh key={i} position={[bx, by, 0.18]}>
-          <cylinderGeometry args={[0.055, 0.055, 0.05, 8]} />
-          <meshStandardMaterial color="#8a7a40" metalness={0.8} roughness={0.28} />
+      <mesh position={[0, -1.5, 0.05]}>
+        <boxGeometry args={[3.95, 0.1, 0.14]} />
+        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
+      </mesh>
+      {([-1, 1] as const).map((side) => (
+        <mesh key={side} position={[side * 1.95, 0.05, 0.05]}>
+          <boxGeometry args={[0.1, 3.15, 0.12]} />
+          <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
         </mesh>
       ))}
-      <group ref={dial} position={[0, 0, 0.22]}>
+      {/* Inner chamber glow */}
+      <mesh position={[0, 0.05, -0.55]}>
+        <circleGeometry args={[1.15, 48]} />
+        <meshBasicMaterial color="#3a1860" toneMapped={false} />
+      </mesh>
+      <pointLight position={[0, 0.2, -0.2]} intensity={0.85} color="#ffd080" distance={6} />
+      <pointLight position={[0, 0.1, 0.5]} intensity={0.45} color="#7ef9ff" distance={5} />
+
+      <group scale={1.05}>
+        <mesh position={[0, 0, -0.08]}>
+          <cylinderGeometry args={[1.55, 1.55, 0.22, 56]} />
+          <meshStandardMaterial color="#080510" metalness={0.65} roughness={0.3} />
+        </mesh>
         <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.32, 0.05, 12, 28]} />
-          <meshStandardMaterial color={BRASS} metalness={0.9} roughness={0.18} emissive={BRASS} emissiveIntensity={0.35} />
+          <cylinderGeometry args={[1.38, 1.38, 0.24, 56]} />
+          <meshStandardMaterial color="#2a2438" metalness={0.8} roughness={0.22} />
         </mesh>
-        <mesh>
-          <boxGeometry args={[0.5, 0.045, 0.045]} />
-          <meshBasicMaterial color="#f9c80e" toneMapped={false} />
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.08]}>
+          <cylinderGeometry args={[1.12, 1.12, 0.2, 56]} />
+          <meshStandardMaterial color="#121018" metalness={0.75} roughness={0.26} />
         </mesh>
-        <mesh rotation={[0, 0, Math.PI / 2]}>
-          <boxGeometry args={[0.28, 0.035, 0.035]} />
-          <meshBasicMaterial color="#39ff14" toneMapped={false} />
+        {/* Spoke plate */}
+        {Array.from({ length: 10 }).map((_, i) => {
+          const a = (i / 10) * Math.PI
+          return (
+            <mesh key={i} position={[0, 0, 0.16]} rotation={[0, 0, a]}>
+              <boxGeometry args={[2.15, 0.06, 0.045]} />
+              <meshStandardMaterial color={BRASS} metalness={0.9} roughness={0.18} />
+            </mesh>
+          )
+        })}
+        {bolts.map(([bx, by], i) => (
+          <mesh key={i} position={[bx, by, 0.2]}>
+            <cylinderGeometry args={[0.05, 0.05, 0.06, 8]} />
+            <meshStandardMaterial color="#9a8a48" metalness={0.85} roughness={0.25} />
+          </mesh>
+        ))}
+        {/* Slow outer gear ring */}
+        <group ref={outerSpin} position={[0, 0, 0.12]}>
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[1.42, 0.035, 10, 64]} />
+            <meshStandardMaterial color={BRASS} metalness={0.9} roughness={0.2} emissive={BRASS} emissiveIntensity={0.2} />
+          </mesh>
+          {Array.from({ length: 24 }).map((_, i) => {
+            const a = (i / 24) * Math.PI * 2
+            return (
+              <mesh key={i} position={[Math.cos(a) * 1.42, Math.sin(a) * 1.42, 0]} rotation={[0, 0, a]}>
+                <boxGeometry args={[0.08, 0.045, 0.04]} />
+                <meshStandardMaterial color="#8a7a40" metalness={0.8} roughness={0.28} />
+              </mesh>
+            )
+          })}
+        </group>
+        <group ref={dial} position={[0, 0, 0.26]}>
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.36, 0.055, 12, 32]} />
+            <meshStandardMaterial color={BRASS} metalness={0.92} roughness={0.16} emissive={BRASS} emissiveIntensity={0.45} />
+          </mesh>
+          <mesh>
+            <boxGeometry args={[0.58, 0.05, 0.05]} />
+            <meshBasicMaterial color="#f9c80e" toneMapped={false} />
+          </mesh>
+          <mesh rotation={[0, 0, Math.PI / 2]}>
+            <boxGeometry args={[0.34, 0.04, 0.04]} />
+            <meshBasicMaterial color="#39ff14" toneMapped={false} />
+          </mesh>
+          <mesh position={[0, 0, 0.04]}>
+            <sphereGeometry args={[0.08, 14, 14]} />
+            <meshStandardMaterial color="#1a1420" metalness={0.7} roughness={0.3} emissive="#2de2e6" emissiveIntensity={0.5} />
+          </mesh>
+        </group>
+        <mesh ref={ring} position={[0, 0, 0.1]}>
+          <ringGeometry args={[1.22, 1.4, 56]} />
+          <meshBasicMaterial color="#2de2e6" transparent opacity={0.3} depthWrite={false} toneMapped={false} />
         </mesh>
       </group>
-      <mesh ref={ring} position={[0, 0, 0.1]}>
-        <ringGeometry args={[1.15, 1.28, 48]} />
-        <meshBasicMaterial color="#2de2e6" transparent opacity={0.26} depthWrite={false} toneMapped={false} />
+      {/* SECURE status plaque */}
+      <mesh position={[0, -1.85, 0.12]}>
+        <boxGeometry args={[1.4, 0.28, 0.06]} />
+        <meshStandardMaterial color={INK} metalness={0.5} roughness={0.35} />
       </mesh>
-      <pointLight position={[0, 0, 0.6]} intensity={0.55} color="#fff0b0" distance={5} />
+      <mesh position={[0, -1.85, 0.16]}>
+        <boxGeometry args={[1.2, 0.14, 0.02]} />
+        <meshStandardMaterial ref={status} color="#39ff14" emissive="#39ff14" emissiveIntensity={0.8} toneMapped={false} />
+      </mesh>
     </group>
   )
 }
@@ -758,6 +884,19 @@ function BankEnclosure() {
           <meshBasicMaterial color="#f9c80e" transparent opacity={0.22} toneMapped={false} />
         </mesh>
       ))}
+      {/* Vault approach floor seal */}
+      <mesh position={[0, 0.032, zBack + 2.4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[1.05, 1.35, 48]} />
+        <meshBasicMaterial color="#f9c80e" transparent opacity={0.28} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0.033, zBack + 2.4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.55, 0.7, 40]} />
+        <meshBasicMaterial color={CYAN} transparent opacity={0.32} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0.034, zBack + 2.4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.35, 32]} />
+        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.25} />
+      </mesh>
 
       {/* Back wall + wainscot (vault end) */}
       <mesh position={[0, ceilY / 2, zBack - wallT / 2]}>
@@ -821,11 +960,45 @@ function BankEnclosure() {
           ))}
           {/* Framed wall panels between sconces */}
           {[-3.5, 0.2, 3.2].map((z) => (
-            <mesh key={`panel-${z}`} position={[side * (halfW - 0.12), 2.5, z]}>
-              <boxGeometry args={[0.05, 1.4, 1.6]} />
-              <meshStandardMaterial color="#221838" roughness={0.65} metalness={0.2} />
-            </mesh>
+            <group key={`panel-${z}`} position={[side * (halfW - 0.12), 2.5, z]}>
+              <mesh>
+                <boxGeometry args={[0.05, 1.4, 1.6]} />
+                <meshStandardMaterial color="#221838" roughness={0.65} metalness={0.2} />
+              </mesh>
+              <mesh position={[side * -0.03, 0, 0]}>
+                <boxGeometry args={[0.02, 1.5, 1.7]} />
+                <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.28} />
+              </mesh>
+              <mesh position={[side * -0.04, 0.45, 0]}>
+                <boxGeometry args={[0.015, 0.04, 1.2]} />
+                <meshBasicMaterial color={CYAN} toneMapped={false} />
+              </mesh>
+            </group>
           ))}
+          {/* ATM / kiosk along side walls near portal */}
+          <group position={[side * (halfW - 0.85), 0, zFront - 4.2]}>
+            <mesh position={[0, 0.95, 0]} castShadow>
+              <boxGeometry args={[0.55, 1.7, 0.4]} />
+              <meshStandardMaterial color="#16101c" metalness={0.55} roughness={0.38} />
+            </mesh>
+            <mesh position={[side * -0.22, 1.25, 0]} rotation={[0, side * -0.05, 0]}>
+              <boxGeometry args={[0.04, 0.45, 0.32]} />
+              <meshStandardMaterial color={INK} metalness={0.5} roughness={0.3} />
+            </mesh>
+            <mesh position={[side * -0.25, 1.25, 0]}>
+              <planeGeometry args={[0.38, 0.28]} />
+              <meshBasicMaterial color={CYAN} toneMapped={false} />
+            </mesh>
+            <mesh position={[side * -0.22, 0.7, 0]}>
+              <boxGeometry args={[0.03, 0.12, 0.22]} />
+              <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
+            </mesh>
+            <mesh position={[0, 1.85, 0]}>
+              <boxGeometry args={[0.5, 0.04, 0.36]} />
+              <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
+            </mesh>
+            <pointLight position={[side * -0.4, 1.2, 0]} intensity={0.35} color="#7ef9ff" distance={3} />
+          </group>
         </group>
       ))}
 
@@ -911,6 +1084,46 @@ function BankEnclosure() {
           <mesh position={[0, 0.98, 0.1]}>
             <boxGeometry args={[0.35, 0.02, 0.25]} />
             <meshStandardMaterial color="#f4f0e4" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 0.96, -0.15]}>
+            <boxGeometry args={[0.9, 0.02, 0.04]} />
+            <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Safe-deposit box wall flanking the vault door */}
+      {([-1, 1] as const).map((side) => (
+        <group key={`boxes-${side}`} position={[side * 3.35, 1.55, zBack + 0.35]}>
+          <mesh>
+            <boxGeometry args={[1.8, 2.4, 0.28]} />
+            <meshStandardMaterial color="#16101c" metalness={0.55} roughness={0.4} />
+          </mesh>
+          {Array.from({ length: 4 }).map((_, row) =>
+            Array.from({ length: 3 }).map((_, col) => (
+              <mesh
+                key={`${row}-${col}`}
+                position={[(col - 1) * 0.5, 0.85 - row * 0.52, 0.16]}
+              >
+                <boxGeometry args={[0.42, 0.4, 0.04]} />
+                <meshStandardMaterial color="#2a2438" metalness={0.65} roughness={0.32} />
+              </mesh>
+            )),
+          )}
+          {Array.from({ length: 4 }).map((_, row) =>
+            Array.from({ length: 3 }).map((_, col) => (
+              <mesh
+                key={`knob-${row}-${col}`}
+                position={[(col - 1) * 0.5 + 0.12, 0.85 - row * 0.52, 0.2]}
+              >
+                <cylinderGeometry args={[0.025, 0.025, 0.03, 8]} />
+                <meshStandardMaterial color={BRASS} metalness={0.9} roughness={0.2} />
+              </mesh>
+            )),
+          )}
+          <mesh position={[0, 1.28, 0.16]}>
+            <boxGeometry args={[1.7, 0.04, 0.05]} />
+            <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
           </mesh>
         </group>
       ))}

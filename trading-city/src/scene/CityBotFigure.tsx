@@ -31,6 +31,8 @@ export function CityBotFigure({
         unitMark={unitMark}
         /** Tiny plaza car riders — silhouette only to keep WebGL light. */
         lite={context === 'city'}
+        /** Bank window staff get trust-hall cyan/brass teller kit. */
+        variant={context === 'bank' ? 'teller' : 'default'}
       />
     )
   }
