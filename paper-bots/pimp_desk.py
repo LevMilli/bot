@@ -2645,6 +2645,26 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["reporter"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["empty_card_bee"] = {"paper_only": True, "error": type(exc).__name__}
     try:
+        import desk_living
+        nmc = desk_living.near_miss_clerk_chip(root)
+        hsc = desk_living.hard_stop_clerk_chip(root)
+        blc = desk_living.bleed_clerk_chip(root, bots=bots)
+        desk_row["near_miss_clerk"] = nmc
+        desk_row["hard_stop_clerk"] = hsc
+        desk_row["bleed_clerk"] = blc
+        if isinstance(desk_row.get("master"), dict):
+            desk_row["master"]["near_miss_clerk"] = (
+                desk_row["master"].get("near_miss_clerk") or nmc
+            )
+            desk_row["master"]["hard_stop_clerk"] = (
+                desk_row["master"].get("hard_stop_clerk") or hsc
+            )
+            desk_row["master"]["bleed_clerk"] = desk_row["master"].get("bleed_clerk") or blc
+    except Exception as exc:  # noqa: BLE001
+        desk_row["near_miss_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["hard_stop_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["bleed_clerk"] = {"paper_only": True, "error": type(exc).__name__}
+    try:
         desk_row["venue_floors"] = desk_profit.venue_floors_locked(cfg)
     except Exception as exc:  # noqa: BLE001
         desk_row["venue_floors"] = {"paper_only": True, "error": type(exc).__name__}

@@ -705,6 +705,15 @@ def master_summary(
     reporter = (living or {}).get("reporter") if isinstance(living, dict) else None
     if isinstance(reporter, dict) and reporter.get("present"):
         priority.append(str(reporter.get("label") or "scorecard present")[:120])
+    nm_clerk = (living or {}).get("near_miss_clerk") if isinstance(living, dict) else None
+    if isinstance(nm_clerk, dict) and nm_clerk.get("promote_ready"):
+        priority.append("near-miss clerk promote_ready — staff z|p only")
+    hs_clerk = (living or {}).get("hard_stop_clerk") if isinstance(living, dict) else None
+    if isinstance(hs_clerk, dict) and hs_clerk.get("promote_ready"):
+        priority.append("hard-stop clerk promote_ready — staff arm only")
+    bleed_clerk = (living or {}).get("bleed_clerk") if isinstance(living, dict) else None
+    if isinstance(bleed_clerk, dict) and bleed_clerk.get("bleed_pass") is False:
+        priority.insert(0, str(bleed_clerk.get("label") or "bleed clerk hot")[:120])
     return {
         "paper_only": True,
         "version": MASTER_VERSION,
@@ -837,6 +846,21 @@ def master_summary(
         ),
         "empty_card_bee": (
             (living or {}).get("empty_card_bee")
+            if isinstance(living, dict)
+            else None
+        ),
+        "near_miss_clerk": (
+            (living or {}).get("near_miss_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "hard_stop_clerk": (
+            (living or {}).get("hard_stop_clerk")
+            if isinstance(living, dict)
+            else None
+        ),
+        "bleed_clerk": (
+            (living or {}).get("bleed_clerk")
             if isinstance(living, dict)
             else None
         ),

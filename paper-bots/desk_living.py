@@ -445,6 +445,104 @@ def living_ai_health(root: str | None = None, bots: list | None = None) -> dict:
     }
 
 
+def near_miss_clerk_chip(root: str | None = None) -> dict:
+    """Near-miss clerk digest chip (z|p soft allowlist observe)."""
+    digest: dict = {}
+    try:
+        from helpers import near_miss_clerk
+        path = near_miss_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = near_miss_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "n": digest.get("n"),
+        "labeled_n": digest.get("labeled_n"),
+        "shadow_ev": digest.get("shadow_ev"),
+        "promote_ready": bool(digest.get("promote_ready")),
+        "decision": digest.get("decision") or "",
+        "label": (
+            f"near-miss clerk n={digest.get('n')} labeled={digest.get('labeled_n')} "
+            f"ev={digest.get('shadow_ev')} ready={bool(digest.get('promote_ready'))}"
+        ),
+        "note": digest.get("note") or (
+            "Soft allowlist z|p only — never edge, never softer fee floors."
+        ),
+    }
+
+
+def hard_stop_clerk_chip(root: str | None = None) -> dict:
+    """Sports hard-stop clerk digest chip (shadow until staff)."""
+    digest: dict = {}
+    try:
+        from helpers import hard_stop_clerk
+        path = hard_stop_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = hard_stop_clerk.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "n": digest.get("n"),
+        "n_with_pnl": digest.get("n_with_pnl"),
+        "shadow_expectancy": digest.get("shadow_expectancy"),
+        "promote_ready": bool(digest.get("promote_ready")),
+        "live": bool(digest.get("live")),
+        "staff_approved": bool(digest.get("staff_approved")),
+        "decision": digest.get("decision") or "",
+        "label": (
+            f"hard-stop clerk n={digest.get('n_with_pnl')} "
+            f"ev={digest.get('shadow_expectancy')} "
+            f"ready={bool(digest.get('promote_ready'))} live={bool(digest.get('live'))}"
+        ),
+        "note": digest.get("note") or (
+            "Live sells stay staff-gated; code default SPORTS_HARD_STOP_LIVE=False."
+        ),
+    }
+
+
+def bleed_clerk_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """Bleed clerk digest chip (ratio + misplaced capital)."""
+    digest: dict = {}
+    try:
+        from helpers import bleed_clerk
+        path = bleed_clerk.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("bleed_ratio") is None:
+            digest = bleed_clerk.write_digest_from_desk(root, bots=bots)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "bleed_ratio": digest.get("bleed_ratio"),
+        "bleed_pass": digest.get("bleed_pass"),
+        "misplaced_usd": digest.get("misplaced_usd"),
+        "share_of_cap": digest.get("share_of_cap"),
+        "label": (
+            f"bleed clerk ratio={digest.get('bleed_ratio')} "
+            f"pass={digest.get('bleed_pass')} "
+            f"misplaced={digest.get('misplaced_usd')}"
+        ),
+        "note": digest.get("note") or (
+            "Recycle open risk on red towers toward fee-clear — floors locked."
+        ),
+    }
+
+
 def bookkeeper_chip(root: str | None = None) -> dict:
     """Completions + fee-ledger completeness chip."""
     digest: dict = {}
@@ -1196,6 +1294,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "bookkeeper": bookkeeper_chip(root),
         "reporter": reporter_chip(root),
         "empty_card_bee": empty_card_bee_chip(root),
+        "near_miss_clerk": near_miss_clerk_chip(root),
+        "hard_stop_clerk": hard_stop_clerk_chip(root),
+        "bleed_clerk": bleed_clerk_chip(root, bots=bots),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
