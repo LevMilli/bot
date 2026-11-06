@@ -762,13 +762,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Living export ritual_ok | export top-level |
 | Staff status ritual_ok flag | text ritual_ok= |
 
-### Next
+### Living upgrade — compact ritual / Masters soft_copy / ritual CLI json
 
 | Ticket | Where |
 | --- | --- |
 | Compact card ritual_ok | compact parts ritual= |
 | Masters ritual soft_copy | priority discord ritual |
 | Ritual CLI --json ritual_ok | flatten exit fields |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault ritual_soft_copy row | city Masters ritual draft |
+| Compact quiet+ritual order | HUD part order tweak |
+| Ritual observe Makefile note | LIVING_UPGRADE tip |
 
 ## Hard rules unchanged
 

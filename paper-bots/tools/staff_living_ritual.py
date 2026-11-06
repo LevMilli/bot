@@ -60,7 +60,13 @@ def main() -> int:
     if args.observe:
         chip = desk_living.ritual_observe_chip(root)
         if args.json:
-            print(json.dumps(chip, indent=2, sort_keys=True, default=str))
+            flat = dict(chip)
+            flat["ritual_ok"] = chip.get("ritual_ok")
+            flat["exit_ok"] = chip.get("exit_ok")
+            flat["floors_ok"] = chip.get("floors_ok")
+            flat["expand_ok"] = chip.get("expand_ok")
+            flat["doctor_fresh"] = chip.get("doctor_fresh")
+            print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             print(chip.get("label") or "ritual observe")
             print(chip.get("note") or "")
@@ -73,17 +79,23 @@ def main() -> int:
         ("expand", desk_living.betting_expand_gate(root)),
         ("doctor", desk_living.living_doctor(root, record=True)),
     ]
+    floors_ok = bool(steps[2][1].get("all_ok"))
+    expand_ok = not bool(steps[3][1].get("blocked"))
+    doctor_ok = bool(steps[4][1].get("ok"))
+    exit_ok = floors_ok and expand_ok
+    ritual_ok = exit_ok and doctor_ok
     payload = {
         "paper_only": True,
         "fee_floors_locked": True,
         "live_orders_enabled": False,
         "auto_publish": False,
         "steps": {name: row for name, row in steps},
-        "ok": bool(
-            steps[2][1].get("all_ok")
-            and not steps[3][1].get("blocked")
-            and steps[4][1].get("ok")
-        ),
+        "ok": ritual_ok,
+        "ritual_ok": ritual_ok,
+        "exit_ok": exit_ok,
+        "floors_ok": floors_ok,
+        "expand_ok": expand_ok,
+        "doctor_ok": doctor_ok,
         "note": (
             "Weekly ritual draft — staff reviews gaps/ruin/floors/expand/doctor. "
             "Never invent fills; never soften floors; never enable live."

@@ -770,6 +770,15 @@ def master_summary(
         ritual.get("ritual_ok") is False or ritual.get("exit_ok") is False
     ):
         priority.append(str(ritual.get("label") or "ritual not ready")[:120])
+    ritual_soft_copy = None
+    if isinstance(ritual, dict):
+        ritual_soft_copy = (
+            f"**Masters ritual** (paper · floors locked · live=False)\n"
+            f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')} "
+            f"doctor_fresh={ritual.get('doctor_fresh')}\n"
+            f"{ritual.get('label') or 'ritual observe'}\n"
+            f"_staff paste only · never auto-posts · never enables live_"
+        )
     eia_bo = (living or {}).get("eia_blackout") if isinstance(living, dict) else None
     if isinstance(eia_bo, dict) and eia_bo.get("blocked"):
         priority.insert(0, str(eia_bo.get("label") or "EIA blackout ACTIVE")[:120])
@@ -882,6 +891,8 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "ritual_soft_copy": ritual_soft_copy,
+        "ritual_discord": ritual_soft_copy,
         "dual_control": dual_control,
         "ruin_drill": ruin_drill,
         "skip_taxonomy": (

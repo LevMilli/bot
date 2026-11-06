@@ -272,12 +272,14 @@ class DeskLivingTests(unittest.TestCase):
             ruin_page = desk_living.ruin_drill_page(tmp)
             self.assertEqual(ruin_page.get("discord"), ruin_page.get("copy"))
             self.assertFalse(ruin_page.get("auto_publish"))
-            compact = desk_living.living_compact_card(tmp)
+            compact = desk_living.living_compact_card(tmp, board=board2)
             self.assertIn("swarm", compact.get("label") or "")
             self.assertIn("quiet_label", compact)
             self.assertTrue(any("quiet" in str(p).lower() for p in (compact.get("parts") or [])))
             self.assertIn("expand_label", compact)
             self.assertTrue(any(str(p).startswith("expand=") for p in (compact.get("parts") or [])))
+            self.assertTrue(any(str(p).startswith("ritual=") for p in (compact.get("parts") or [])))
+            self.assertIn("ritual_label", compact)
             ritual = desk_living.ritual_observe_chip(tmp)
             self.assertIn("ritual_ok", ritual)
             self.assertIn("exit_ok", ritual)
@@ -291,6 +293,14 @@ class DeskLivingTests(unittest.TestCase):
                 "noise 1",
             ])
             self.assertEqual(sum(1 for t in prio if t.lower().startswith("ritual")), 1)
+            masters = desk_master.master_summary(
+                tmp,
+                bots=[{"id": "btc15m", "open_risk": 0, "history": [], "gate_a": {}}],
+                cfg={"max_open_risk": 100, "tower_risk_budgets": {"btc15m": 0.1}},
+            )
+            self.assertIn("ritual_soft_copy", masters)
+            self.assertIn("ritual_ok=", masters.get("ritual_soft_copy") or "")
+            self.assertEqual(masters.get("ritual_discord"), masters.get("ritual_soft_copy"))
             # Fresh empty root → blocked until seed fills digests.
             with tempfile.TemporaryDirectory() as empty:
                 thin = desk_living.betting_expand_gate(empty)
@@ -555,6 +565,12 @@ class InsightHelpers(unittest.TestCase):
             self.assertIn("Living weekly ritual", text)
             self.assertIn("DUAL-CONTROL GAPS", text)
             self.assertIn("floors", text)
+            # --json flatten fields on observe chip path
+            obs = desk_living.ritual_observe_chip(tmp)
+            self.assertIn("ritual_ok", obs)
+            self.assertIn("exit_ok", obs)
+            self.assertIn("floors_ok", obs)
+            self.assertIn("expand_ok", obs)
             age = desk_living.doctor_age_chip(tmp)
             self.assertTrue(age.get("stale"))
             desk_living.record_doctor_run(tmp, {"ok": True, "label": "living doctor OK", "failed_n": 0})
