@@ -52,7 +52,13 @@ def _text(board: dict) -> str:
     expand = board.get("betting_expand_gate") if isinstance(board.get("betting_expand_gate"), dict) else {}
     doctor_age = board.get("doctor_age") if isinstance(board.get("doctor_age"), dict) else {}
     ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
+    compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
     sunday = board.get("sunday_packet") if isinstance(board.get("sunday_packet"), dict) else {}
+    doctor_fresh = ritual.get("doctor_fresh")
+    if doctor_fresh is None and compact.get("doctor_fresh") is not None:
+        doctor_fresh = compact.get("doctor_fresh")
+    if doctor_fresh is None and doctor_age:
+        doctor_fresh = not bool(doctor_age.get("stale"))
     lines = [
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
@@ -78,6 +84,10 @@ def _text(board: dict) -> str:
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         f"doctor_age: {doctor_age.get('label') or '—'}",
+        (
+            f"doctor_fresh={doctor_fresh} "
+            f"{compact.get('doctor_label') or ('doctor=fresh' if doctor_fresh else 'doctor=stale' if doctor_fresh is False else 'doctor=n/a')}"
+        ),
         f"ritual_ok={ritual.get('ritual_ok')} exit_ok={ritual.get('exit_ok')}",
         f"ritual: {ritual.get('label') or '—'}",
         f"sunday: {sunday.get('label') or '—'}",
