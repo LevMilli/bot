@@ -882,13 +882,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Status text floors_ok | ritual flags line |
 | Vault doctor draft label | stale badge text |
 
-### Next
+### Living upgrade — quiet_doctor age / ritual CLI floors / ritual draft badge
 
 | Ticket | Where |
 | --- | --- |
 | Compact export quiet bit | quiet in quiet_doctor age |
 | Ritual CLI floors in text | full ritual plain flags |
 | City ritual draft badge | exit_ok badge text |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Status text quiet age | quiet+doctor age= |
+| Ritual observe floors line | observe plain floors_ok |
+| Vault draft badge CSS | EXIT/SOFT class |
 
 ## Hard rules unchanged
 

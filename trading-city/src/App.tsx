@@ -1027,6 +1027,19 @@ export default function App() {
                     }}
                   >
                     {(() => {
+                      const r =
+                        snap?.desk?.ritual_observe ||
+                        (snap?.desk?.master as {
+                          ritual_observe?: { exit_ok?: boolean; ritual_ok?: boolean }
+                        } | undefined)?.ritual_observe
+                      const badge =
+                        r?.exit_ok === false
+                          ? ' · EXIT'
+                          : r?.ritual_ok === false
+                            ? ' · SOFT'
+                            : r?.ritual_ok === true
+                              ? ' · ok'
+                              : ''
                       const copy =
                         snap?.desk?.ritual_soft_copy ||
                         snap?.desk?.ritual_discord ||
@@ -1038,10 +1051,14 @@ export default function App() {
                           ritual_discord?: string
                         } | undefined)?.ritual_discord
                       if (!copy) {
-                        return 'make living-ritual-discord · staff paste only · never auto-posts'
+                        return (
+                          'make living-ritual-discord · staff paste only · never auto-posts' +
+                          badge
+                        )
                       }
                       const one = String(copy).split('\n').filter(Boolean).slice(0, 2).join(' · ')
-                      return one.length > 160 ? `${one.slice(0, 157)}…` : one
+                      const clipped = one.length > 160 ? `${one.slice(0, 157)}…` : one
+                      return clipped + badge
                     })()}
                   </span>
                 </div>

@@ -131,6 +131,10 @@ def main() -> int:
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
     else:
         print("Living weekly ritual (paper only · floors locked · live=False)")
+        print(
+            f"floors_ok={payload['floors_ok']} expand_ok={payload['expand_ok']} "
+            f"(exit_ok={payload['exit_ok']})"
+        )
         for name, row in steps:
             label = row.get("label") or row.get("copy") or name
             if name in ("gaps", "ruin") and row.get("copy"):
@@ -140,7 +144,7 @@ def main() -> int:
         print(
             f"\nritual_ok={payload['ritual_ok']} exit_ok={payload['exit_ok']} "
             f"floors_ok={payload['floors_ok']} expand_ok={payload['expand_ok']} "
-            f"doctor_ok={payload['doctor_ok']}"
+            f"doctor_ok={payload['doctor_ok']} doctor_fresh={payload.get('doctor_fresh')}"
         )
         print(payload["note"])
     # Fail if floors soft or expand blocked (doctor may still fail on quiet/gaps).

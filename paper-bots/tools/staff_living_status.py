@@ -294,9 +294,15 @@ def main() -> int:
             "compact_ritual_label": compact_j.get("ritual_label"),
             "compact_doctor_fresh": compact_j.get("doctor_fresh"),
             "compact_doctor_label": compact_j.get("doctor_label"),
+            "quiet_age_h": (board.get("feature_quiet") or {}).get("age_hours"),
             "quiet_doctor": (
                 "quiet="
                 + ("yes" if (board.get("feature_quiet") or {}).get("quiet") else "no")
+                + (
+                    f" age={(board.get('feature_quiet') or {}).get('age_hours')}h"
+                    if (board.get("feature_quiet") or {}).get("age_hours") is not None
+                    else " age=n/a"
+                )
                 + " · "
                 + str(
                     compact_j.get("doctor_label")
