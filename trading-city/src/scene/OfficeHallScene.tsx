@@ -4,7 +4,14 @@ import { DoubleSide } from 'three'
 import type { BotRow, Desk } from '../types'
 import { beamColorFor } from '../data/format'
 import { activeWingRooms, type WingRoom } from '../data/officeWingLayout'
-import { ROOM_HALF_D, ROOM_HALF_W, WING_HALL, type WingSpawnMode } from '../data/wingWalk'
+import {
+  DOOR_HALF,
+  ROOM_HALF_D,
+  ROOM_HALF_W,
+  SUITE_CONTENT_SCALE,
+  WING_HALL,
+  type WingSpawnMode,
+} from '../data/wingWalk'
 import { NeonBloom } from './Effects'
 import { OfficeInterior } from './OfficeScene'
 import { WingWalker } from './WingWalker'
@@ -25,13 +32,47 @@ type Props = {
 }
 
 const WALL_H = WING_HALL.wallH
-const SUITE_SCALE = 0.62
-const DOOR_W = 2.1
+const DOOR_W = DOOR_HALF * 2
+
+/** Build solid hall wall segments along ±Z, leaving gaps at suite doorways. */
+function hallWallSegments(side: 'left' | 'right'): { x: number; w: number }[] {
+  const zEdge = side === 'left' ? WING_HALL.zMin : WING_HALL.zMax
+  const doors = activeWingRooms()
+    .filter((r) => {
+      if (r.side === 'end') return false
+      // Door sits on the hall face nearest this room.
+      const doorZ = r.position[2] + Math.cos(r.yaw) * ROOM_HALF_D
+      return Math.abs(doorZ - zEdge) < 0.35
+    })
+    .map((r) => r.position[0])
+    .sort((a, b) => a - b)
+
+  const gap = DOOR_W + 0.15
+  const xStart = WING_HALL.xMin
+  const xEnd = WING_HALL.xMax
+  const segs: { x: number; w: number }[] = []
+  let cursor = xStart
+  for (const dx of doors) {
+    const gapLo = dx - gap / 2
+    const gapHi = dx + gap / 2
+    if (gapLo > cursor + 0.08) {
+      segs.push({ x: (cursor + gapLo) / 2, w: gapLo - cursor })
+    }
+    cursor = Math.max(cursor, gapHi)
+  }
+  if (xEnd > cursor + 0.08) {
+    segs.push({ x: (cursor + xEnd) / 2, w: xEnd - cursor })
+  }
+  return segs
+}
 
 function HallCosmetics() {
   const x0 = (WING_HALL.xMin + WING_HALL.xMax) / 2
   const len = WING_HALL.xMax - WING_HALL.xMin
   const width = WING_HALL.zMax - WING_HALL.zMin
+  const leftSegs = hallWallSegments('left')
+  const rightSegs = hallWallSegments('right')
+  const rooms = activeWingRooms()
   return (
     <group>
       {/* Continuous hall slab — bright enough to survive bloom/vignette */}
@@ -59,6 +100,40 @@ function HallCosmetics() {
           <meshStandardMaterial color="#7ec8d8" metalness={0.35} roughness={0.4} />
         </mesh>
       ))}
+      {/* Enclosed hall side walls — gaps only at suite doors so the camera stays inside the model */}
+      {leftSegs.map((seg) => (
+        <mesh key={`hl-${seg.x}`} position={[seg.x, WALL_H / 2, WING_HALL.zMin]}>
+          <boxGeometry args={[seg.w, WALL_H, 0.14]} />
+          <meshStandardMaterial color="#1a1430" roughness={0.88} metalness={0.08} />
+        </mesh>
+      ))}
+      {rightSegs.map((seg) => (
+        <mesh key={`hr-${seg.x}`} position={[seg.x, WALL_H / 2, WING_HALL.zMax]}>
+          <boxGeometry args={[seg.w, WALL_H, 0.14]} />
+          <meshStandardMaterial color="#1a1430" roughness={0.88} metalness={0.08} />
+        </mesh>
+      ))}
+      {/* Door threshold bridges — continuous floor from hall into each suite */}
+      {rooms
+        .filter((r) => r.side !== 'end')
+        .map((r) => {
+          const doorZ = r.position[2] + Math.cos(r.yaw) * (ROOM_HALF_D - 0.05)
+          return (
+            <mesh
+              key={`th-${r.id}`}
+              position={[r.position[0], 0.015, (doorZ + (doorZ > 0 ? WING_HALL.zMax : WING_HALL.zMin)) / 2]}
+              rotation={[-Math.PI / 2, 0, 0]}
+            >
+              <planeGeometry args={[DOOR_W + 0.35, Math.abs(doorZ) - width / 2 + 0.35]} />
+              <meshStandardMaterial color="#322850" roughness={0.6} metalness={0.12} side={DoubleSide} />
+            </mesh>
+          )
+        })}
+      {/* Boss threshold at hall +X end */}
+      <mesh position={[WING_HALL.xMax + 0.35, 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1.1, DOOR_W + 0.4]} />
+        <meshStandardMaterial color="#322850" roughness={0.6} metalness={0.12} side={DoubleSide} />
+      </mesh>
       {/* Ceiling + troffers */}
       <mesh position={[x0, WALL_H, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <planeGeometry args={[len + 0.4, width + 0.2]} />
@@ -73,10 +148,10 @@ function HallCosmetics() {
           <pointLight position={[x, WALL_H - 0.35, 0]} intensity={0.35} color="#dff6ff" distance={7} />
         </group>
       ))}
-      {/* Entry arch */}
+      {/* Entry arch — solid end wall so the wing reads enclosed */}
       <group position={[WING_HALL.xMin + 0.2, 0, 0]}>
         <mesh position={[0, WALL_H / 2, 0]}>
-          <boxGeometry args={[0.18, WALL_H, width + 0.35]} />
+          <boxGeometry args={[0.22, WALL_H, width + 0.45]} />
           <meshStandardMaterial color="#1a2130" metalness={0.4} roughness={0.4} />
         </mesh>
         <mesh position={[0.2, 2.55, 0]}>
@@ -268,13 +343,25 @@ export function OfficeHallScene({
         return <SuiteShell key={room.id} room={room} color={color} live={live} />
       })}
 
-      {/* LOD: full OfficeInterior only for the suite you're in; others stay shells. */}
+      {/* LOD: trading desk for the live suite — embedded (no sealed back wall) so the
+          SuiteShell doorway walks straight into the hall with the rest of the floor. */}
       {rooms.map((room) => {
         if (room.botId !== bot.id) return null
         const row = bots.find((b) => b.id === room.botId) || bot
         return (
-          <group key={`live-${room.id}`} position={room.position} rotation={[0, room.yaw, 0]} scale={SUITE_SCALE}>
-            <OfficeInterior bot={row} bots={bots} desk={desk} onOpenScreens={onOpenScreens} />
+          <group
+            key={`live-${room.id}`}
+            position={room.position}
+            rotation={[0, room.yaw, 0]}
+            scale={SUITE_CONTENT_SCALE}
+          >
+            <OfficeInterior
+              bot={row}
+              bots={bots}
+              desk={desk}
+              onOpenScreens={onOpenScreens}
+              embedded
+            />
           </group>
         )
       })}
