@@ -355,13 +355,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Feature quiet alert | `desk_living.feature_store_quiet_alert` (≥6h weekday) |
 | Hillclimb lever card | living board + Masters `hillclimb_lever` status |
 
+### Living upgrade — dual-control HUD + hillclimb CLI
+
+| Ticket | Where |
+| --- | --- |
+| Dual-control on Masters/desk | `dual_control_status` on living + desk_row |
+| Hillclimb staff CLI | `tools/staff_hillclimb_pick.py` + `staff_clear_hillclimb_lever` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Staff hillclimb pick UX | document `staff_pick_hillclimb_lever` path |
 | City 3D light for swarm | optional BorderScreens / teller chip |
-| Dual-control paper checklist HUD | Gate A/B stub visibility |
+| Dual-control staff sign CLI | mirror hillclimb pick UX |
+| Ruin-drill reminder on HUD | monthly soft/hard practice flag |
 
 ## Hard rules unchanged
 

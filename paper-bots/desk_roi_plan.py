@@ -4331,6 +4331,41 @@ def staff_pick_hillclimb_lever(
     }
 
 
+def staff_clear_hillclimb_lever(
+    root: str | None,
+    *,
+    who: str = "",
+    note: str = "",
+) -> dict:
+    """Demote/clear the active hillclimb lever (paper hygiene). No param write."""
+    path = _path(HILLCLIMB_LEVER_NAME, root)
+    store = _load(path, {"paper_only": True, "active": None, "history": []})
+    active = store.get("active") if isinstance(store.get("active"), dict) else None
+    hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    if active:
+        hist.append({
+            **active,
+            "demoted_at": _now(),
+            "demote_reason": str(note or "staff clear")[:120],
+            "demoted_by": str(who or "")[:80],
+        })
+    store["active"] = None
+    store["history"] = hist[-52:]
+    store["last_at"] = _now()
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    _save(path, store)
+    return {
+        "ok": True,
+        "cleared": bool(active),
+        "was": active,
+        "status": hillclimb_lever_status(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+    }
+
+
 def dual_control_status(root: str | None = None) -> dict:
     """Paper dual-control checklist. Live orders stay hard-disabled."""
     store = _load(

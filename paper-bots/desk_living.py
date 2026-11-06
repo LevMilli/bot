@@ -483,11 +483,14 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
     swarm = insight_swarm_ratio(root)
     helpers = swarm.get("insight_helpers") or {}
     hillclimb = None
+    dual = None
     try:
         import desk_roi_plan
         hillclimb = desk_roi_plan.hillclimb_lever_status(root)
+        dual = desk_roi_plan.dual_control_status(root)
     except Exception:
         hillclimb = None
+        dual = None
     return {
         "paper_only": True,
         "feature_store": feat,
@@ -496,12 +499,14 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "living_ai": ai,
         "insight_swarm": swarm,
         "hillclimb_lever": hillclimb,
+        "dual_control": dual,
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
         "fee_floors_locked": True,
         "insight_first": True,
         "grok_buys": False,
+        "live_orders_enabled": False,
         "note": "Living Trading Upgrade board — more eligible completions + learn data.",
     }
 
