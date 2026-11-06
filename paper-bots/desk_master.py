@@ -786,6 +786,9 @@ def master_summary(
     digest_inv = (living or {}).get("digest_inventory") if isinstance(living, dict) else None
     if isinstance(digest_inv, dict) and digest_inv.get("pass") is False:
         priority.append(str(digest_inv.get("label") or "digest inventory thin")[:120])
+    expand = (living or {}).get("betting_expand_gate") if isinstance(living, dict) else None
+    if isinstance(expand, dict) and expand.get("blocked"):
+        priority.insert(0, str(expand.get("label") or "betting expand BLOCKED")[:120])
     priority = finalize_living_priority(priority)
     return {
         "paper_only": True,
@@ -853,6 +856,11 @@ def master_summary(
         ),
         "ruin_drill_page": (
             (living or {}).get("ruin_drill_page")
+            if isinstance(living, dict)
+            else None
+        ),
+        "betting_expand_gate": (
+            (living or {}).get("betting_expand_gate")
             if isinstance(living, dict)
             else None
         ),

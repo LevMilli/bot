@@ -548,13 +548,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Floors CLI exit 2 | `staff_living_status.py floors` |
 | Chip catalog | `living_self_check.chip_catalog` |
 
+### Living upgrade — smoke Makefile + betting expand gate
+
+| Ticket | Where |
+| --- | --- |
+| Smoke Makefile | `paper-bots/Makefile` living-* targets |
+| Betting expand gate | `desk_living.betting_expand_gate` + CLI `expand` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Living smoke Makefile target | `make living-status` |
-| Desk snapshot living keys | assert teller_living in snapshot test |
-| Insight hire blocker | refuse betting expand when swarm fail |
+| Expand gate on city vault | vault row when blocked |
+| Living snapshot unit | desk keys teller_living/swarm_lights |
+| Staff dual-control gaps exit | CLI gaps exit 2 when page |
 
 ## Hard rules unchanged
 

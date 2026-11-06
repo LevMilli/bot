@@ -79,7 +79,7 @@ def main() -> int:
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
-            "floors", "teller",
+            "floors", "teller", "expand",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -156,6 +156,10 @@ def main() -> int:
             indent=2, sort_keys=True, default=str,
         ))
         return 0
+    if args.action == "expand":
+        gate = desk_living.betting_expand_gate(root)
+        print(json.dumps(gate, indent=2, sort_keys=True, default=str))
+        return 0 if gate.get("allow_betting_expand") else 2
     if args.action == "json":
         print(json.dumps({
             "paper_only": True,
