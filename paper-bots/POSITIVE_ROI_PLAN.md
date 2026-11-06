@@ -962,13 +962,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual observe quiet_line text | observe plain |
 | Sunday packet quiet_age_label | soft sunday line |
 
-### Next
+### Living upgrade — status quiet_line / vault sunday quiet / export label
 
 | Ticket | Where |
 | --- | --- |
 | Status text quiet_line twin | print quiet_line |
-| Vault sunday quiet_age chip | city sunday row |
-| Compact export quiet_age_label | export flatten |
+| Vault sunday quiet_age chip | city sunday quiet row |
+| Compact export quiet_age_label | export flatten (landed) |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Status json sunday quiet_age | flatten sunday quiet |
+| Teller quiet_age_label nag | teller living line |
+| Ritual discord sunday quiet tip | optional tip line |
 
 ## Hard rules unchanged
 

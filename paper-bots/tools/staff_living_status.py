@@ -108,6 +108,18 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "quiet_line: "
+            + "• Feature quiet: quiet="
+            + str(quiet.get("quiet"))
+            + " age="
+            + (
+                f"{quiet.get('age_hours')}h"
+                if quiet.get("age_hours") is not None
+                else str(compact.get("quiet_age") or "n/a")
+            )
+            + " (staff observe — never softens floors)"
+        ),
+        (
             f"swarm: {swarm.get('insight_n')}:{swarm.get('betting_n')} "
             f"pass={swarm.get('pass')}"
         ),
