@@ -1156,13 +1156,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault timer sunday quiet | timer row hint |
 | Ritual observe digests sunday | observe plain + --json |
 
-### Next
+### Living upgrade — calib/pulse/timer sunday (auto-roll)
 
 | Ticket | Where |
 | --- | --- |
 | Vault calib sunday quiet | calib row hint |
 | Vault pulse sunday quiet | pulse row hint |
 | Ritual discord timer sunday | discord line |
+
+### Next
+
+| Ticket | Where |
+| --- | --- |
+| Vault queue sunday quiet | queue row hint |
+| Vault Gate A sunday quiet | Gate A row hint |
+| Vault AI sunday quiet | AI row hint |
 
 ## Hard rules unchanged
 

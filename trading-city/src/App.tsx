@@ -903,7 +903,15 @@ export default function App() {
                           clerk_pulse?: { label?: string; stale?: boolean; soft_warn?: boolean }
                         } | undefined)?.clerk_pulse
                       if (!p) return 'clerk pulse pending'
-                      return p.label || (p.stale ? 'pulse STALE' : p.soft_warn ? 'pulse WARN' : 'pulse ok')
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        p.label ||
+                        (p.stale ? 'pulse STALE' : p.soft_warn ? 'pulse WARN' : 'pulse ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
                     })()}
                   </span>
                 </div>
@@ -2115,10 +2123,15 @@ export default function App() {
                           calib_nag?: { label?: string; tickets_n?: number; auto_write_phi?: boolean }
                         } | undefined)?.calib_nag
                       if (!c) return 'calib nag pending'
-                      return (
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
                         c.label ||
                         `calib raise_Φ=${c.tickets_n ?? 0} · auto_write=${c.auto_write_phi === true}`
-                      )
+                      return `${base} · sunday quiet ${sundayBit} (observe · never auto-writes Φ)`
                     })()}
                   </span>
                 </div>
