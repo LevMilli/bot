@@ -184,6 +184,11 @@ class DeskLivingTests(unittest.TestCase):
             self.assertEqual(export.get("export"), "living_board_v1")
             self.assertTrue(export.get("fee_floors_locked"))
             self.assertIn("ruin_drill_page", board2)
+            map_path = os.path.join(
+                os.path.dirname(os.path.abspath(desk_living.__file__)),
+                "LIVING_UPGRADE.md",
+            )
+            self.assertTrue(os.path.isfile(map_path))
             desk_living.record_completion(
                 tmp,
                 bot="btc15m",

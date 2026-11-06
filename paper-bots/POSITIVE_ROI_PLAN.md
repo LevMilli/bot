@@ -525,13 +525,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Living board export | `desk_living.living_board_export` + CLI `export` |
 | Digest seed | `desk_living.seed_missing_digests` + CLI `seed` |
 
+### Living upgrade — staff map + pulse CLI
+
+| Ticket | Where |
+| --- | --- |
+| Staff map | `paper-bots/LIVING_UPGRADE.md` |
+| Pulse force refresh | `staff_living_status.py pulse` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Living upgrade README slice | paper-bots/LIVING_UPGRADE.md staff map |
-| Clerk pulse force refresh CLI | staff_living_status pulse |
-| Masters priority unit file | test_finalize_living_priority |
+| Living city teller chip | memory_line from completions/swarm |
+| Fee floors assert CLI | staff_living_status floors |
+| Weekly packet auto-draft cron note | Sunday checklist only |
 
 ## Hard rules unchanged
 
