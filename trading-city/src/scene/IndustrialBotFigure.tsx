@@ -937,16 +937,19 @@ export function IndustrialBotFigure({
           </mesh>
           <ScratchMarks position={[0.1, 0.18, 0.22]} />
 
-          {/* Face sensor bay — horizontal recessed strip with purple dots */}
+          {/* Face sensor bay — horizontal slit + small purple points (photo: not giant orbs) */}
           <mesh position={[0, 0.145, 0.235]}>
-            <boxGeometry args={[0.22, 0.055, 0.02]} />
+            <boxGeometry args={[0.26, 0.048, 0.022]} />
             <meshStandardMaterial color="#030306" metalness={0.45} roughness={0.55} />
           </mesh>
-          <LedDot position={[-0.07, 0.145, 0.25]} r={0.02} />
-          <LedDot position={[0.07, 0.145, 0.25]} r={0.02} />
-          <LedDot position={[0, 0.1, 0.252]} r={0.014} />
-          <LedDot position={[-0.035, 0.145, 0.25]} r={0.012} />
-          <LedDot position={[0.035, 0.145, 0.25]} r={0.012} />
+          <mesh position={[0, 0.145, 0.246]}>
+            <boxGeometry args={[0.22, 0.022, 0.01]} />
+            <meshStandardMaterial {...neon(1.35)} />
+          </mesh>
+          {([-0.08, -0.04, 0.04, 0.08] as const).map((x) => (
+            <LedDot key={x} position={[x, 0.145, 0.255]} r={0.009} />
+          ))}
+          <LedDot position={[0, 0.1, 0.252]} r={0.01} />
 
           {/* Side four-dot sensor arrays */}
           {([-1, 1] as const).map((side) => (
