@@ -286,6 +286,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("compact_quiet_age_label", export2)
             self.assertIn("quiet_line", export2)
             self.assertIn("Feature quiet", export2.get("quiet_line") or "")
+            self.assertIn("sunday_quiet_age_label", export2)
+            self.assertTrue(
+                str(export2.get("sunday_quiet_age_label") or "").startswith("quiet_age=")
+            )
             age = desk_living.doctor_age_chip(tmp)
             self.assertFalse(age.get("stale"))
             self.assertIsNotNone(age.get("age_sec"))

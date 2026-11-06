@@ -2127,6 +2127,13 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         + str(slim["quiet_age"])
         + " (staff observe — never softens floors)"
     )
+    sunday = board.get("sunday_packet") if isinstance(board.get("sunday_packet"), dict) else {}
+    slim["sunday_quiet_age"] = sunday.get("quiet_age") or slim["quiet_age"]
+    slim["sunday_quiet_age_label"] = (
+        sunday.get("quiet_age_label")
+        or slim.get("compact_quiet_age_label")
+        or f"quiet_age={slim['quiet_age']}"
+    )
     slim["quiet_doctor"] = (
         "quiet="
         + ("yes" if quiet.get("quiet") else "no")
