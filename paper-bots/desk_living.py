@@ -1270,6 +1270,10 @@ def living_compact_card(
             f"{living_hud_summary(src).get('label') or 'hud observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "money_path_sunday_quiet": (
+            f"{living_money_path_tip(src).get('label') or 'money-path observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never invents PnL)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2534,6 +2538,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     hud = living_hud_summary(board)
     slim["hud"] = hud
     slim["hud_label"] = hud.get("label")
+    money = living_money_path_tip(board)
+    slim["money_path"] = money
+    slim["money_path_label"] = money.get("label")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -2938,6 +2945,22 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{hud_export.get('label') or 'hud observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    money_export = living_money_path_tip(board)
+    slim["money_path_sunday_quiet"] = (
+        f"{money_export.get('label') or 'money-path observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never invents PnL)"
+    )
+    # Lightweight selfcheck flags after ritual_live_ok is known.
+    slim["selfcheck_ok"] = bool(
+        slim.get("fee_floors_locked")
+        and slim.get("live_orders_enabled") is False
+        and (slim.get("l7_observe") or {}).get("ok")
+        and slim.get("ritual_live_ok")
+    )
+    slim["selfcheck_label"] = (
+        f"selfcheck ok={slim['selfcheck_ok']} floors_locked={slim.get('fee_floors_locked')} "
+        f"l7={(slim.get('l7_observe') or {}).get('ok')} live=False"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -3137,6 +3160,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_hud_sunday_quiet"] = (
             compact.get("hud_sunday_quiet") or slim.get("hud_sunday_quiet")
+        )
+        slim["compact_money_path_sunday_quiet"] = (
+            compact.get("money_path_sunday_quiet") or slim.get("money_path_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4231,6 +4257,37 @@ def living_priority_snapshot(board: dict | None = None, root: str | None = None)
             else "priority empty"
         ),
         "note": "Living priority snapshot — observe-only; never softens floors.",
+    }
+
+
+def living_money_path_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Observe tip for fee ledger / fills / floors (not a board chip; never invents PnL)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    books = src.get("bookkeeper") if isinstance(src.get("bookkeeper"), dict) else {}
+    floors = src.get("fee_floors_assert") if isinstance(src.get("fee_floors_assert"), dict) else {}
+    fills = src.get("completions") if isinstance(src.get("completions"), dict) else {}
+    floors_ok = floors.get("all_ok")
+    ledger_ok = books.get("fee_ledger_complete")
+    label = (
+        f"money-path fills={fills.get('eligible_completions_today') if fills else books.get('eligible_completions_today')} "
+        f"fee_ledger={books.get('fee_ledger_n')} complete={ledger_ok} "
+        f"floors={'ok' if floors_ok is True else 'soft' if floors_ok is False else 'n/a'} "
+        "(observe · never invents PnL · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "eligible_completions_today": (
+            fills.get("eligible_completions_today")
+            if fills.get("eligible_completions_today") is not None
+            else books.get("eligible_completions_today")
+        ),
+        "fee_ledger_n": books.get("fee_ledger_n"),
+        "fee_ledger_complete": ledger_ok,
+        "floors_ok": floors_ok,
+        "label": label,
+        "note": "Money-path observe tip — staff only; never invents fills or softens floors.",
     }
 
 

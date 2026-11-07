@@ -1462,15 +1462,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Observe/Discord HUD sunday | ritual observe / format_discord |
 | Selfcheck/export hud fields | living_self_check / export |
 
+### Living upgrade — help/selfcheck/money-path batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Makefile `living-help` / `living-money` | Makefile |
+| README living Makefile index | README.md |
+| Status CLI `help` / `money` (+ discord) | staff_living_status |
+| `living_money_path_tip` + `money_path_sunday_quiet` | desk_living / compact / export |
+| Export `selfcheck_ok` / `selfcheck_label` | living_board_export |
+| Vault selfcheck + money-path rows | App vault |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| README living Makefile index | docs-only staff pointer |
-| `living-help` Makefile target | list smoke cmds |
-| Vault selfcheck row from export.ok | if snap carries selfcheck |
-| Money-path observe tips (fee/ledger) | only if existing digests already expose labels |
-| Trading-city dist sync after vault-only | already rebuilt with HUD |
+| *(cleared — prior backlog shipped in help/selfcheck/money-path batch)* | — |
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
 
@@ -1478,7 +1485,7 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — HUD surfaces shipped; soft-max surfaces exhausted; backlog parked above)* | — |
+| *(empty — help/selfcheck/money-path shipped; soft-max 52/64)* | — |
 
 ## Hard rules unchanged
 

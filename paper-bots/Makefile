@@ -1,5 +1,15 @@
 # Living Trading Upgrade — staff smoke (paper only; floors locked; never auto-post).
-.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord
+.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money
+
+living-help:
+	@echo "Living Trading Upgrade — paper only · floors locked · Discord never auto-posts"
+	@echo "  make living-status / living-selfcheck / living-export / living-test"
+	@echo "  make living-hud / living-hud-discord / living-priority / living-priority-discord"
+	@echo "  make living-ritual-live / living-ritual-live-discord / living-ritual-observe"
+	@echo "  make living-ritual / living-ritual-discord / living-doctor / living-doctor-discord"
+	@echo "  make living-floors / living-floors-discord / living-teller / living-money"
+	@echo "  make living-l7 / living-sunday / living-gaps-discord / living-ruin-discord"
+	@echo "Staff map: LIVING_UPGRADE.md · plan: POSITIVE_ROI_PLAN.md"
 
 living-status:
 	python3 tools/staff_living_status.py
@@ -80,3 +90,6 @@ living-hud:
 
 living-hud-discord:
 	python3 tools/staff_living_status.py hud --discord
+
+living-money:
+	python3 tools/staff_living_status.py money
