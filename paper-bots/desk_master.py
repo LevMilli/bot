@@ -565,6 +565,22 @@ def master_summary(
         except Exception:
             plan["exit_plans"] = None
         try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            latest_bw = desk_roi_plan.latest_bleed_week(root)
+            if root and bots and (
+                not isinstance(latest_bw, dict)
+                or str(latest_bw.get("label") or "") != today
+            ):
+                plan["bleed_week"] = desk_roi_plan.capture_bleed_week(
+                    root, bots=bots, label=today,
+                )
+            else:
+                plan["bleed_week"] = latest_bw or desk_roi_plan.firm_bleed_ratio(bots)
+        except Exception:
+            plan["bleed_week"] = None
+        try:
             plan["idea_review"] = desk_roi_plan.idea_review_status(root)
         except Exception:
             plan["idea_review"] = None

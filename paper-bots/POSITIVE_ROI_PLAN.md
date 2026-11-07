@@ -1639,6 +1639,14 @@ Interactive: Positive ROI Master Plan canvas.
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64). Soft-max still binds.
 
+### Positive ROI — Chicago bleed-week observe
+
+| Ticket | Where |
+| --- | --- |
+| `capture_bleed_week` / `latest_bleed_week` | `desk_roi_plan` (not a board chip) |
+| Masters `roi_plan.bleed_week` | `desk_master.master_summary` |
+| Target \|red\|/\|green\| &lt; 0.5 + misplaced $ | observe only; never softens floors |
+
 ### Next
 
 | Ticket | Where |
@@ -1646,7 +1654,6 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 | Sports hard-stop staff promote when shadow n≥30 EV≥0 | `staff_set_sports_hard_stop_live` (observe until ready) |
 | Sports green_boost arm after 2w M1≥0 + CLV≥52% | `sports_green_boost_status` |
 | INX band promote after research week leader n≥20 | `staff_promote_inx_band` |
-| Observe Chicago bleed ratio &lt;0.5 | `firm_bleed_ratio` / Capital OS |
 
 ## Hard rules unchanged
 
