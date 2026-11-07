@@ -2109,6 +2109,120 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">digest fresh</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const d = (
+                          snap?.desk as
+                            | { digest_freshness?: { pass?: boolean } }
+                            | undefined
+                        )?.digest_freshness
+                        if (!d) return undefined
+                        return d.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const d = (
+                        snap?.desk as
+                          | {
+                              digest_freshness?: {
+                                label?: string
+                                pass?: boolean
+                              }
+                            }
+                          | undefined
+                      )?.digest_freshness
+                      if (!d) return 'digest freshness pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = d.label || (d.pass === false ? 'digest fresh STALE' : 'digest fresh ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">journals</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const j = (
+                          snap?.desk as
+                            | { journal_coverage?: { pass?: boolean } }
+                            | undefined
+                        )?.journal_coverage
+                        if (!j) return undefined
+                        return j.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const j = (
+                        snap?.desk as
+                          | {
+                              journal_coverage?: {
+                                label?: string
+                                pass?: boolean
+                              }
+                            }
+                          | undefined
+                      )?.journal_coverage
+                      if (!j) return 'journal coverage pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        j.label || (j.pass === false ? 'journals thin/stale' : 'journals ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">monday</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const m = (
+                          snap?.desk as
+                            | {
+                                monday_pulse?: {
+                                  pass?: boolean
+                                  timer_alive?: boolean
+                                }
+                              }
+                            | undefined
+                        )?.monday_pulse
+                        if (!m) return undefined
+                        if (m.timer_alive === false) return '#c45c26'
+                        return m.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const m = (
+                        snap?.desk as
+                          | { monday_pulse?: { label?: string; pass?: boolean } }
+                          | undefined
+                      )?.monday_pulse
+                      if (!m) return 'monday pulse pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        m.label || (m.pass === false ? 'monday pulse thin' : 'monday pulse ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">swarm</span>
                   <span
                     style={{

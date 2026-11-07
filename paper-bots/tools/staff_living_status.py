@@ -143,6 +143,30 @@ def _text(board: dict) -> str:
         f"hillclimb: {hill.get('label') or '—'}",
         f"digests: {inv.get('label') or '—'}",
         (
+            "digest fresh: "
+            + str(
+                (board.get("digest_freshness") or {}).get("label")
+                if isinstance(board.get("digest_freshness"), dict)
+                else "digest fresh observe"
+            )
+        ),
+        (
+            "journals: "
+            + str(
+                (board.get("journal_coverage") or {}).get("label")
+                if isinstance(board.get("journal_coverage"), dict)
+                else "journals observe"
+            )
+        ),
+        (
+            "monday pulse: "
+            + str(
+                (board.get("monday_pulse") or {}).get("label")
+                if isinstance(board.get("monday_pulse"), dict)
+                else "monday pulse observe"
+            )
+        ),
+        (
             "digests sunday: "
             + str(inv.get("label") or "digests observe")
             + " · sunday quiet "
@@ -1280,6 +1304,15 @@ def main() -> int:
             "compact_doc_age_sunday_quiet": compact_j.get("doc_age_sunday_quiet"),
             "ritual_sunday_quiet": compact_j.get("ritual_sunday_quiet"),
             "compact_ritual_sunday_quiet": compact_j.get("ritual_sunday_quiet"),
+            "digest_freshness": board.get("digest_freshness"),
+            "journal_coverage": board.get("journal_coverage"),
+            "monday_pulse": board.get("monday_pulse"),
+            "digest_fresh_sunday_quiet": compact_j.get("digest_fresh_sunday_quiet"),
+            "journal_sunday_quiet": compact_j.get("journal_sunday_quiet"),
+            "monday_sunday_quiet": compact_j.get("monday_sunday_quiet"),
+            "compact_digest_fresh_sunday_quiet": compact_j.get("digest_fresh_sunday_quiet"),
+            "compact_journal_sunday_quiet": compact_j.get("journal_sunday_quiet"),
+            "compact_monday_sunday_quiet": compact_j.get("monday_sunday_quiet"),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "

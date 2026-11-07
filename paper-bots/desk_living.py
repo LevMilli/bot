@@ -1152,6 +1152,24 @@ def living_compact_card(
             if isinstance(src.get("ritual_observe"), dict)
             else f"ritual observe · sunday quiet {quiet_age_part} (observe · never auto-posts)"
         ),
+        "digest_fresh_sunday_quiet": (
+            f"{(src.get('digest_freshness') or {}).get('label') or 'digest fresh observe'} "
+            f"· sunday quiet {quiet_age_part} (observe)"
+            if isinstance(src.get("digest_freshness"), dict)
+            else f"digest fresh observe · sunday quiet {quiet_age_part} (observe)"
+        ),
+        "journal_sunday_quiet": (
+            f"{(src.get('journal_coverage') or {}).get('label') or 'journals observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("journal_coverage"), dict)
+            else f"journals observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "monday_sunday_quiet": (
+            f"{(src.get('monday_pulse') or {}).get('label') or 'monday pulse observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("monday_pulse"), dict)
+            else f"monday pulse observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2221,6 +2239,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "dual_control_gaps": dual_control_gaps_page(root),
         "hillclimb_chip": hillclimb_chip(root),
         "digest_inventory": digest_inventory(root),
+        "digest_freshness": digest_freshness_chip(root),
+        "journal_coverage": journal_coverage_chip(root),
+        "monday_pulse": monday_pulse_chip(root, bots=bots),
         "ruin_drill_page": ruin_drill_page(root),
         "betting_expand_gate": betting_expand_gate(root),
         "doctor_age": doctor_age_chip(root),
@@ -2352,7 +2373,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     board = living_upgrade_board(root, bots=bots)
     keep = (
         "chicago_today", "fee_floors_locked", "live_orders_enabled", "compact",
-        "insight_swarm", "digest_inventory", "feature_quiet", "feature_quiet_pager",
+        "insight_swarm", "digest_inventory", "digest_freshness", "journal_coverage", "monday_pulse", "feature_quiet", "feature_quiet_pager",
         "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
         "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
         "betting_expand_gate", "doctor_age", "fee_floors_assert",
@@ -2657,6 +2678,21 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{ritual_observe.get('label') or 'ritual observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never auto-posts)"
     )
+    dig_fresh = board.get("digest_freshness") if isinstance(board.get("digest_freshness"), dict) else {}
+    slim["digest_fresh_sunday_quiet"] = (
+        f"{dig_fresh.get('label') or 'digest fresh observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe)"
+    )
+    journ = board.get("journal_coverage") if isinstance(board.get("journal_coverage"), dict) else {}
+    slim["journal_sunday_quiet"] = (
+        f"{journ.get('label') or 'journals observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    monday = board.get("monday_pulse") if isinstance(board.get("monday_pulse"), dict) else {}
+    slim["monday_sunday_quiet"] = (
+        f"{monday.get('label') or 'monday pulse observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2807,6 +2843,15 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_ritual_sunday_quiet"] = (
             compact.get("ritual_sunday_quiet") or slim.get("ritual_sunday_quiet")
+        )
+        slim["compact_digest_fresh_sunday_quiet"] = (
+            compact.get("digest_fresh_sunday_quiet") or slim.get("digest_fresh_sunday_quiet")
+        )
+        slim["compact_journal_sunday_quiet"] = (
+            compact.get("journal_sunday_quiet") or slim.get("journal_sunday_quiet")
+        )
+        slim["compact_monday_sunday_quiet"] = (
+            compact.get("monday_sunday_quiet") or slim.get("monday_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -2974,6 +3019,183 @@ def digest_inventory(root: str | None = None) -> dict:
         "note": (
             "Insight digests present vs expected. Hire observe clerks first — floors locked."
         ),
+    }
+
+
+DIGEST_FRESH_HOURS = 24.0
+JOURNAL_FRESH_HOURS = 48.0
+
+
+def digest_freshness_chip(
+    root: str | None = None,
+    *,
+    now: datetime | None = None,
+    fresh_hours: float = DIGEST_FRESH_HOURS,
+) -> dict:
+    """Observe max age of insight helper digests (L7 Monday freshness)."""
+    now = now or datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    now = now.astimezone(CT)
+    base = os.path.join(_root(root), "helpers")
+    ages: list[float] = []
+    stale_names: list[str] = []
+    missing: list[str] = []
+    for name in INSIGHT_HELPER_DIGESTS:
+        dig_path = os.path.join(base, name)
+        key = name.replace("_digest.json", "").replace(".json", "")
+        if not os.path.isfile(dig_path):
+            missing.append(key)
+            continue
+        try:
+            mtime = os.path.getmtime(dig_path)
+            age_h = round((now.timestamp() - mtime) / 3600.0, 2)
+            ages.append(age_h)
+            if age_h > float(fresh_hours):
+                stale_names.append(key)
+        except OSError:
+            missing.append(key)
+    max_age = max(ages) if ages else None
+    ok = (
+        not missing
+        and not stale_names
+        and max_age is not None
+        and max_age <= float(fresh_hours)
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "fresh_hours": float(fresh_hours),
+        "max_age_h": max_age,
+        "stale_n": len(stale_names),
+        "missing_n": len(missing),
+        "stale": stale_names[:12],
+        "missing": missing[:12],
+        "pass": ok,
+        "label": (
+            f"digest fresh max={max_age}h "
+            + (
+                "ok"
+                if ok
+                else f"STALE stale={len(stale_names)} missing={len(missing)}"
+            )
+        ),
+        "note": (
+            "L7 digest freshness observe — never invents digests; never softens floors."
+        ),
+    }
+
+
+def journal_coverage_chip(
+    root: str | None = None,
+    *,
+    now: datetime | None = None,
+    fresh_hours: float = JOURNAL_FRESH_HOURS,
+) -> dict:
+    """Observe fit + latency journal coverage / freshness (L7 daily journal alert)."""
+    now = now or datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    now = now.astimezone(CT)
+    fit_n = 0
+    lat_n = 0
+    fit_last = None
+    lat_last = None
+    try:
+        import desk_roi_plan
+        fit = desk_roi_plan.load_fit(root) or {}
+        lat = desk_roi_plan.load_latency(root) or {}
+        fit_rows = [r for r in (fit.get("rows") or []) if isinstance(r, dict)]
+        lat_rows = [r for r in (lat.get("rows") or []) if isinstance(r, dict)]
+        fit_n = len(fit_rows)
+        lat_n = len(lat_rows)
+        fit_last = fit.get("last_at") or (fit_rows[-1].get("at") if fit_rows else None)
+        lat_last = lat.get("last_at") or (lat_rows[-1].get("at") if lat_rows else None)
+    except Exception:
+        pass
+
+    def _age(stamp):
+        if not stamp:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=CT)
+            return round((now - dt.astimezone(CT)).total_seconds() / 3600.0, 2)
+        except ValueError:
+            return None
+
+    fit_age = _age(fit_last)
+    lat_age = _age(lat_last)
+    ages = [a for a in (fit_age, lat_age) if a is not None]
+    max_age = max(ages) if ages else None
+    covered = fit_n > 0 and lat_n > 0
+    fresh = max_age is not None and max_age <= float(fresh_hours)
+    ok = covered and fresh
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "fit_n": fit_n,
+        "latency_n": lat_n,
+        "fit_age_h": fit_age,
+        "latency_age_h": lat_age,
+        "max_age_h": max_age,
+        "fresh_hours": float(fresh_hours),
+        "pass": ok,
+        "label": (
+            f"journals fit={fit_n} lat={lat_n} "
+            + (
+                f"max_age={max_age}h ok"
+                if ok
+                else (
+                    f"max_age={max_age}h THIN"
+                    if not covered
+                    else f"max_age={max_age}h STALE"
+                )
+            )
+        ),
+        "note": (
+            "L7 journal coverage observe (fit+latency) — never softens floors; never invents fills."
+        ),
+    }
+
+
+def monday_pulse_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """Monday staff pulse: timer alive + digest freshness (L7 continuous learning)."""
+    del bots  # reserved for board parity
+    timer = timer_heartbeat_chip(root)
+    dig = digest_freshness_chip(root)
+    journals = journal_coverage_chip(root)
+    timer_ok = timer.get("alive") is True
+    dig_ok = dig.get("pass") is True
+    ok = timer_ok and dig_ok
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "timer_alive": timer.get("alive"),
+        "digest_pass": dig_ok,
+        "journal_pass": journals.get("pass"),
+        "pass": ok,
+        "label": (
+            "monday pulse "
+            + (
+                "ok"
+                if ok
+                else (
+                    "TIMER_DEAD"
+                    if timer.get("alive") is False
+                    else "DIGEST_STALE"
+                    if not dig_ok
+                    else "thin"
+                )
+            )
+        ),
+        "note": (
+            "L7 Monday pulse (timer + digest freshness) — observe only; never softens floors."
+        ),
+        "timer": timer.get("label"),
+        "digest_fresh": dig.get("label"),
+        "journals": journals.get("label"),
     }
 
 

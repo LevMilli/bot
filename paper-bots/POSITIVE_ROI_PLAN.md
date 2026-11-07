@@ -1250,9 +1250,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault quiet age / quiet·ritual / drafts | App vault rows |
 | Vault stopbleed + fill tax sunday | App vault rows |
 
+### Living upgrade — L7 digest/journal/monday observe (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Digest freshness chip | `desk_living.digest_freshness_chip` |
+| Journal coverage chip | fit+latency age/coverage observe |
+| Monday pulse chip | timer alive + digest freshness |
+| Vault/status/ritual/export surfaces | App + staff CLIs + compact twins |
+
 ### Next
 
-_(empty — living sunday quiet vault leftovers cleared; fee floors locked; paper-only; Discord never auto-posts)_
+| Ticket | Where |
+| --- | --- |
+| Toxic fill detector chip | L7 daily toxic fill observe |
+| Weekly adapt A/B summary chip | L7 weekly adapt observe |
+| Staff SLA raise_Φ age surface | L7 SLA observe (never auto-writes Φ) |
 
 ## Hard rules unchanged
 

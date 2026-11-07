@@ -607,6 +607,32 @@ class DeskLivingTests(unittest.TestCase):
         parsed, err = desk_profit.parse_venue_min_edge({"kalshi_btc15m": 0.01})
         self.assertIsNotNone(err)
 
+    def test_l7_digest_journal_monday_chips(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            dig = desk_living.digest_freshness_chip(tmp)
+            self.assertTrue(dig.get("fee_floors_locked"))
+            self.assertIn("label", dig)
+            self.assertIn("pass", dig)
+            journ = desk_living.journal_coverage_chip(tmp)
+            self.assertTrue(journ.get("fee_floors_locked"))
+            self.assertIn("fit_n", journ)
+            self.assertIn("latency_n", journ)
+            monday = desk_living.monday_pulse_chip(tmp)
+            self.assertTrue(monday.get("fee_floors_locked"))
+            self.assertIn("timer_alive", monday)
+            board = desk_living.living_upgrade_board(tmp)
+            self.assertIn("digest_freshness", board)
+            self.assertIn("journal_coverage", board)
+            self.assertIn("monday_pulse", board)
+            compact = desk_living.living_compact_card(tmp, board=board)
+            self.assertIn("digest_fresh_sunday_quiet", compact)
+            self.assertIn("journal_sunday_quiet", compact)
+            self.assertIn("monday_sunday_quiet", compact)
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("digest_fresh_sunday_quiet", export)
+            self.assertIn("journal_sunday_quiet", export)
+            self.assertIn("monday_sunday_quiet", export)
 
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
@@ -621,6 +647,8 @@ class BtcNewsFailClosed(unittest.TestCase):
             "# Soft: calendar never loaded → do not block; known high-impact still blocks.",
             text,
         )
+
+
 
 
 class InsightHelpers(unittest.TestCase):
