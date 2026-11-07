@@ -1564,6 +1564,24 @@ def main():
                     pass
             print()
             continue
+        # E1 #136/#137 — red-day sticky opens exit-first before speculative buys.
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_more
+            sticky_block = desk_more.sticky_entry_blocks(
+                "btc15m",
+                today=today_pnl,
+                bots=[{"id": "btc15m", "positions": list((account or {}).get("open") or [])}],
+            )
+        except Exception:
+            sticky_block = ""
+        if sticky_block:
+            print(f"  SIGNAL: SKIP -> {sticky_block}")
+            skips += 1
+            last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
+            print()
+            continue
         tp = min(round(ev["ask"] + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
         print(
             f"  SIGNAL: BUY {ev['side']} on {ev['ticker']} at <= {ev['ask']:.2f} "

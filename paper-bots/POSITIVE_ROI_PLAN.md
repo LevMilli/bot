@@ -1712,6 +1712,14 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | #119 INX stake shrink both bots | `test_e1_exits_stake_mint.InxStakeContractsShrink` |
 | #120 meme learning_skip mint key | `test_e1_exits_stake_mint.MemeLearningSkipMintKey` |
 
+### Sticky-open SLA entry block (E1 #136/#137)
+
+| Ticket | Where |
+| --- | --- |
+| Sticky detect + exit_priority | `desk_more.sticky_positions` / `sticky_sla_status` |
+| Red-day speculative entry block | `sticky_entry_blocks` on sports / BTC / commodity |
+| Masters | `roi_plan.sticky_sla` |
+
 ### Next
 
 | Ticket | Where |
