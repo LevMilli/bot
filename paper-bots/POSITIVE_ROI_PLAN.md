@@ -1557,11 +1557,21 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual observe/Discord tip lines | staff_living_ritual |
 | Vault tip rows | App vault |
 
+### Living upgrade — export/doctor tip batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_export_tip` + `export_tip_sunday_quiet` | desk_living / compact / export |
+| `living_doctor_tip` + `doctor_tip_sunday_quiet` | desk_living / compact / export |
+| Status CLI `export-tip` / `doctor-tip` | staff_living_status |
+| Makefile `living-export-tip` / `living-doctor-tip` | Makefile |
+| Ritual + vault tip rows | ritual / App |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| *(cleared — swarm/expand/quiet/timer shipped; soft-max 52/64)* | — |
+| *(exhausted useful soft-max invent — pause until chip headroom or staff asks)* | Prefer not to invent thin aliases |
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
 
@@ -1569,7 +1579,7 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — swarm/expand/quiet/timer shipped; soft-max 52/64)* | — |
+| *(empty — useful soft-max invent exhausted at 52/64)* | — |
 
 ## Hard rules unchanged
 

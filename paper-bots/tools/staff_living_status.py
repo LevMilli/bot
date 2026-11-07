@@ -158,6 +158,16 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_timer_tip")
         else {}
     )
+    export_tip = (
+        desk_living.living_export_tip(board)
+        if hasattr(desk_living, "living_export_tip")
+        else {}
+    )
+    doctor_tip = (
+        desk_living.living_doctor_tip(board)
+        if hasattr(desk_living, "living_doctor_tip")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -1266,6 +1276,34 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "export-tip: "
+            + str(export_tip.get("label") or "export observe")
+        ),
+        (
+            "export-tip sunday: "
+            + str(
+                compact.get("export_tip_sunday_quiet")
+                or (
+                    str(export_tip.get("label") or "export observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
+            "doctor-tip: "
+            + str(doctor_tip.get("label") or "doctor-tip observe")
+        ),
+        (
+            "doctor-tip sunday: "
+            + str(
+                compact.get("doctor_tip_sunday_quiet")
+                or (
+                    str(doctor_tip.get("label") or "doctor-tip observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never records doctor)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1369,7 +1407,7 @@ def main() -> int:
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
-            "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip",
+            "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -1515,6 +1553,8 @@ def main() -> int:
         expand_tip_j = desk_living.living_expand_tip(board)
         quiet_tip_j = desk_living.living_quiet_tip(board)
         timer_tip_j = desk_living.living_timer_tip(board)
+        export_tip_j = desk_living.living_export_tip(board)
+        doctor_tip_j = desk_living.living_doctor_tip(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1972,6 +2012,15 @@ def main() -> int:
             "timer_tip_label": timer_tip_j.get("label"),
             "timer_tip_sunday_quiet": compact_j.get("timer_tip_sunday_quiet"),
             "compact_timer_tip_sunday_quiet": compact_j.get("timer_tip_sunday_quiet"),
+            "export_tip": export_tip_j,
+            "export_tip_label": export_tip_j.get("label"),
+            "export_tip_sunday_quiet": compact_j.get("export_tip_sunday_quiet"),
+            "compact_export_tip_sunday_quiet": compact_j.get("export_tip_sunday_quiet"),
+            "doctor_tip": doctor_tip_j,
+            "doctor_tip_label": doctor_tip_j.get("label"),
+            "doctor_tip_fresh": doctor_tip_j.get("doctor_fresh"),
+            "doctor_tip_sunday_quiet": compact_j.get("doctor_tip_sunday_quiet"),
+            "compact_doctor_tip_sunday_quiet": compact_j.get("doctor_tip_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -2512,6 +2561,51 @@ def main() -> int:
             out["timer_tip_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if tip.get("alive") is not False or tip.get("weekday_alert") is False else 2
+
+
+    if args.action == "export-tip":
+        tip = desk_living.living_export_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("export_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'export observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Export tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"v={tip.get('export')} twins_n={tip.get('twins_n')} smoke_ok={tip.get('smoke_ok')}\n"
+                "cmds: make living-export · living-export-tip\n"
+                "_observe only · never softens floors · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["export_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+
+    if args.action == "doctor-tip":
+        tip = desk_living.living_doctor_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("doctor_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'doctor-tip observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never records doctor)"
+        )
+        if args.discord:
+            print(
+                "**Doctor tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"fresh={tip.get('doctor_fresh')} stale={tip.get('stale')}\n"
+                "cmds: make living-doctor-tip · living-doctor (records)\n"
+                "_never records on this tip · never softens floors · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["doctor_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

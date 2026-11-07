@@ -517,6 +517,24 @@ def format_discord(payload: dict) -> str:
             f"• Timer-tip sunday: {timer_tip_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    export_tip_twin = payload.get("export_tip_sunday_quiet")
+    if export_tip_twin:
+        lines.append(f"• Export-tip sunday: {export_tip_twin}")
+    else:
+        export_tip_lab = payload.get("export_tip_label") or "export observe"
+        lines.append(
+            f"• Export-tip sunday: {export_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    doctor_tip_twin = payload.get("doctor_tip_sunday_quiet")
+    if doctor_tip_twin:
+        lines.append(f"• Doctor-tip sunday: {doctor_tip_twin}")
+    else:
+        doctor_tip_lab = payload.get("doctor_tip_label") or "doctor-tip observe"
+        lines.append(
+            f"• Doctor-tip sunday: {doctor_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never records doctor)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1244,6 +1262,26 @@ def main() -> int:
                 )
             )
             print(
+                "export-tip sunday: "
+                + str(
+                    compact_obs.get("export_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_export_tip(board_obs).get('label') or 'export observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "doctor-tip sunday: "
+                + str(
+                    compact_obs.get("doctor_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_doctor_tip(board_obs).get('label') or 'doctor-tip observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never records doctor)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1484,6 +1522,20 @@ def main() -> int:
     payload["timer_tip_sunday_quiet"] = compact.get("timer_tip_sunday_quiet") or (
         f"{timer_tip.get('label') or 'timer observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    export_tip = desk_living.living_export_tip(board)
+    payload["export_tip"] = export_tip
+    payload["export_tip_label"] = export_tip.get("label")
+    payload["export_tip_sunday_quiet"] = compact.get("export_tip_sunday_quiet") or (
+        f"{export_tip.get('label') or 'export observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    doctor_tip = desk_living.living_doctor_tip(board)
+    payload["doctor_tip"] = doctor_tip
+    payload["doctor_tip_label"] = doctor_tip.get("label")
+    payload["doctor_tip_sunday_quiet"] = compact.get("doctor_tip_sunday_quiet") or (
+        f"{doctor_tip.get('label') or 'doctor-tip observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never records doctor)"
     )
     if args.discord:
         print(format_discord(payload))
