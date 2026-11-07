@@ -1677,6 +1677,127 @@ export default function App() {
                     })()}
                   </span>
                 </div>
+
+                <div className="vault-board-row">
+                  <span className="vb-label">swarm tip</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | { swarm_pass?: boolean; swarm_tip?: { pass?: boolean } }
+                          | undefined
+                        const ok = desk?.swarm_pass ?? desk?.swarm_tip?.pass
+                        if (ok === true) return '#6fbf73'
+                        if (ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            swarm_tip_sunday_quiet?: string
+                            compact_swarm_tip_sunday_quiet?: string
+                            swarm_tip_label?: string
+                            swarm_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.swarm_tip_sunday_quiet ||
+                        desk?.compact_swarm_tip_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.swarm_tip_label ||
+                        desk?.swarm_tip?.label ||
+                        'swarm observe'
+                      return `${label} · make living-swarm`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">expand tip</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            expand_tip_sunday_quiet?: string
+                            compact_expand_tip_sunday_quiet?: string
+                            expand_tip_label?: string
+                            expand_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.expand_tip_sunday_quiet ||
+                        desk?.compact_expand_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.expand_tip_label ||
+                          desk?.expand_tip?.label ||
+                          'expand observe') + ' · make living-expand-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">quiet tip</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            quiet_tip_sunday_quiet?: string
+                            compact_quiet_tip_sunday_quiet?: string
+                            quiet_tip_label?: string
+                            quiet_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.quiet_tip_sunday_quiet ||
+                        desk?.compact_quiet_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.quiet_tip_label ||
+                          desk?.quiet_tip?.label ||
+                          'quiet observe') + ' · make living-quiet-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">timer tip</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | { timer_alive?: boolean; timer_tip?: { alive?: boolean } }
+                          | undefined
+                        const ok = desk?.timer_alive ?? desk?.timer_tip?.alive
+                        if (ok === true) return '#6fbf73'
+                        if (ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            timer_tip_sunday_quiet?: string
+                            compact_timer_tip_sunday_quiet?: string
+                            timer_tip_label?: string
+                            timer_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.timer_tip_sunday_quiet ||
+                        desk?.compact_timer_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.timer_tip_label ||
+                          desk?.timer_tip?.label ||
+                          'timer observe') + ' · make living-timer-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
                 <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span

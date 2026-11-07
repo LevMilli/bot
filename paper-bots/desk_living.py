@@ -1314,6 +1314,22 @@ def living_compact_card(
             f"{living_hard_rules_tip(src).get('label') or 'hard-rules observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "swarm_tip_sunday_quiet": (
+            f"{living_swarm_tip(src).get('label') or 'swarm observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "expand_tip_sunday_quiet": (
+            f"{living_expand_tip(src).get('label') or 'expand observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "quiet_tip_sunday_quiet": (
+            f"{living_quiet_tip(src).get('label') or 'quiet observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "timer_tip_sunday_quiet": (
+            f"{living_timer_tip(src).get('label') or 'timer observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2480,6 +2496,27 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{hard_rules.get('label') or 'hard-rules observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+
+        swarm_tip = living_swarm_tip(board)
+        compact["swarm_tip_sunday_quiet"] = (
+            f"{swarm_tip.get('label') or 'swarm observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        expand_tip = living_expand_tip(board)
+        compact["expand_tip_sunday_quiet"] = (
+            f"{expand_tip.get('label') or 'expand observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        quiet_tip = living_quiet_tip(board)
+        compact["quiet_tip_sunday_quiet"] = (
+            f"{quiet_tip.get('label') or 'quiet observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        timer_tip = living_timer_tip(board)
+        compact["timer_tip_sunday_quiet"] = (
+            f"{timer_tip.get('label') or 'timer observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2667,6 +2704,22 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     hard_rules = living_hard_rules_tip(board)
     slim["hard_rules"] = hard_rules
     slim["hard_rules_label"] = hard_rules.get("label")
+
+    swarm_tip = living_swarm_tip(board)
+    slim["swarm_tip"] = swarm_tip
+    slim["swarm_tip_label"] = swarm_tip.get("label")
+    slim["swarm_pass"] = swarm_tip.get("pass")
+    expand_tip = living_expand_tip(board)
+    slim["expand_tip"] = expand_tip
+    slim["expand_tip_label"] = expand_tip.get("label")
+    slim["expand_blocked"] = expand_tip.get("blocked")
+    quiet_tip = living_quiet_tip(board)
+    slim["quiet_tip"] = quiet_tip
+    slim["quiet_tip_label"] = quiet_tip.get("label")
+    timer_tip = living_timer_tip(board)
+    slim["timer_tip"] = timer_tip
+    slim["timer_tip_label"] = timer_tip.get("label")
+    slim["timer_alive"] = timer_tip.get("alive")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3126,6 +3179,27 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{hard_rules_export.get('label') or 'hard-rules observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+
+    swarm_tip_export = living_swarm_tip(board)
+    slim["swarm_tip_sunday_quiet"] = (
+        f"{swarm_tip_export.get('label') or 'swarm observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    expand_tip_export = living_expand_tip(board)
+    slim["expand_tip_sunday_quiet"] = (
+        f"{expand_tip_export.get('label') or 'expand observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    quiet_tip_export = living_quiet_tip(board)
+    slim["quiet_tip_sunday_quiet"] = (
+        f"{quiet_tip_export.get('label') or 'quiet observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    timer_tip_export = living_timer_tip(board)
+    slim["timer_tip_sunday_quiet"] = (
+        f"{timer_tip_export.get('label') or 'timer observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3369,6 +3443,19 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_hard_rules_sunday_quiet"] = (
             compact.get("hard_rules_sunday_quiet") or slim.get("hard_rules_sunday_quiet")
+        )
+
+        slim["compact_swarm_tip_sunday_quiet"] = (
+            compact.get("swarm_tip_sunday_quiet") or slim.get("swarm_tip_sunday_quiet")
+        )
+        slim["compact_expand_tip_sunday_quiet"] = (
+            compact.get("expand_tip_sunday_quiet") or slim.get("expand_tip_sunday_quiet")
+        )
+        slim["compact_quiet_tip_sunday_quiet"] = (
+            compact.get("quiet_tip_sunday_quiet") or slim.get("quiet_tip_sunday_quiet")
+        )
+        slim["compact_timer_tip_sunday_quiet"] = (
+            compact.get("timer_tip_sunday_quiet") or slim.get("timer_tip_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4629,6 +4716,10 @@ _DISCORD_PASTE_TARGETS = (
     "chicago",
     "starve",
     "hard-rules",
+    "swarm",
+    "expand-tip",
+    "quiet-tip",
+    "timer-tip",
     "gaps",
     "ruin",
     "expand",
@@ -4812,6 +4903,105 @@ def living_hard_rules_tip(board: dict | None = None, root: str | None = None) ->
         "rules": rules,
         "label": label,
         "note": "Hard rules tip — observe-only staff reminder; never rewrites policy.",
+    }
+
+
+
+
+def living_swarm_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Insight swarm ratio tip (hire-order observe; not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    swarm = src.get("insight_swarm") if isinstance(src.get("insight_swarm"), dict) else {}
+    ratio = swarm.get("ratio")
+    min_ratio = swarm.get("min_ratio", 3.0)
+    passed = swarm.get("pass")
+    label = (
+        f"swarm insight={swarm.get('insight_n')} betting={swarm.get('betting_n')} "
+        f"ratio={ratio} min={min_ratio} pass={passed} "
+        "(observe · hire ≥3:1 · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "insight_n": swarm.get("insight_n"),
+        "betting_n": swarm.get("betting_n"),
+        "ratio": ratio,
+        "min_ratio": min_ratio,
+        "pass": passed,
+        "label": label,
+        "note": "Swarm tip — observe-only hire-order ratio; not a board chip.",
+    }
+
+
+def living_expand_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Betting expand gate tip (paper/staff only; not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    gate = src.get("betting_expand_gate") if isinstance(src.get("betting_expand_gate"), dict) else {}
+    blocked = gate.get("blocked")
+    allow = gate.get("allow_betting_expand")
+    label = (
+        f"expand allow={allow} blocked={blocked} ratio={gate.get('swarm_ratio')} "
+        f"live={gate.get('live_orders_enabled')} "
+        "(observe · paper expand only · never softens floors · never enables live)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "allow_betting_expand": allow,
+        "blocked": blocked,
+        "swarm_ratio": gate.get("swarm_ratio"),
+        "live_orders_enabled": gate.get("live_orders_enabled"),
+        "label": label,
+        "soft_copy": gate.get("soft_copy"),
+        "note": "Expand tip — observe-only; never enables live or softens floors.",
+    }
+
+
+def living_quiet_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Feature-store quiet age tip (not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    quiet = src.get("feature_quiet") if isinstance(src.get("feature_quiet"), dict) else {}
+    label = (
+        f"quiet={bool(quiet.get('quiet'))} age={quiet.get('age_hours')}h "
+        f"threshold={quiet.get('quiet_hours')}h weekday={quiet.get('weekday')} "
+        "(observe · learn-loop · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "quiet": bool(quiet.get("quiet")),
+        "age_hours": quiet.get("age_hours"),
+        "quiet_hours": quiet.get("quiet_hours"),
+        "weekday": quiet.get("weekday"),
+        "label": label,
+        "alert": quiet.get("alert"),
+        "note": "Quiet tip — observe-only feature-store age; not a board chip.",
+    }
+
+
+def living_timer_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Paper timer heartbeat tip (not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    timer = src.get("timer_heartbeat") if isinstance(src.get("timer_heartbeat"), dict) else {}
+    alive = timer.get("alive")
+    label = (
+        f"timer alive={alive} age_sec={timer.get('age_sec')} "
+        f"weekday_alert={timer.get('weekday_alert')} "
+        "(observe · paper timer · never softens floors · never enables live)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "alive": alive,
+        "age_sec": timer.get("age_sec"),
+        "weekday_alert": timer.get("weekday_alert"),
+        "label": label,
+        "alert": timer.get("alert"),
+        "note": "Timer tip — observe-only heartbeat; not a board chip.",
     }
 
 

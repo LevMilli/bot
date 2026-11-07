@@ -97,6 +97,10 @@ make living-venues           # sports 0.06 / BTC+commodity 0.05 / INX+DEX 0.02
 make living-chicago          # Chicago CT calendar day
 make living-starve           # starve n≥4 factor 0.15
 make living-hard-rules       # meme red / INX halt / kill reminder
+make living-swarm            # insight/betting hire ratio
+make living-expand-tip       # betting expand gate tip
+make living-quiet-tip        # feature-store quiet age
+make living-timer-tip        # paper timer heartbeat
 make living-export
 make living-test
 ```

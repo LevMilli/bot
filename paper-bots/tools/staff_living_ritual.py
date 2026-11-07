@@ -481,6 +481,42 @@ def format_discord(payload: dict) -> str:
             f"• Hard-rules sunday: {hard_rules_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    swarm_tip_twin = payload.get("swarm_tip_sunday_quiet")
+    if swarm_tip_twin:
+        lines.append(f"• Swarm-tip sunday: {swarm_tip_twin}")
+    else:
+        swarm_tip_lab = payload.get("swarm_tip_label") or "swarm observe"
+        lines.append(
+            f"• Swarm-tip sunday: {swarm_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    expand_tip_twin = payload.get("expand_tip_sunday_quiet")
+    if expand_tip_twin:
+        lines.append(f"• Expand-tip sunday: {expand_tip_twin}")
+    else:
+        expand_tip_lab = payload.get("expand_tip_label") or "expand observe"
+        lines.append(
+            f"• Expand-tip sunday: {expand_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    quiet_tip_twin = payload.get("quiet_tip_sunday_quiet")
+    if quiet_tip_twin:
+        lines.append(f"• Quiet-tip sunday: {quiet_tip_twin}")
+    else:
+        quiet_tip_lab = payload.get("quiet_tip_label") or "quiet observe"
+        lines.append(
+            f"• Quiet-tip sunday: {quiet_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    timer_tip_twin = payload.get("timer_tip_sunday_quiet")
+    if timer_tip_twin:
+        lines.append(f"• Timer-tip sunday: {timer_tip_twin}")
+    else:
+        timer_tip_lab = payload.get("timer_tip_label") or "timer observe"
+        lines.append(
+            f"• Timer-tip sunday: {timer_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1166,6 +1202,47 @@ def main() -> int:
                     )
                 )
             )
+
+            print(
+                "swarm-tip sunday: "
+                + str(
+                    compact_obs.get("swarm_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_swarm_tip(board_obs).get('label') or 'swarm observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "expand-tip sunday: "
+                + str(
+                    compact_obs.get("expand_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_expand_tip(board_obs).get('label') or 'expand observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "quiet-tip sunday: "
+                + str(
+                    compact_obs.get("quiet_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_quiet_tip(board_obs).get('label') or 'quiet observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "timer-tip sunday: "
+                + str(
+                    compact_obs.get("timer_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_timer_tip(board_obs).get('label') or 'timer observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
@@ -1377,6 +1454,35 @@ def main() -> int:
     payload["hard_rules_label"] = hard_rules.get("label")
     payload["hard_rules_sunday_quiet"] = compact.get("hard_rules_sunday_quiet") or (
         f"{hard_rules.get('label') or 'hard-rules observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+
+    swarm_tip = desk_living.living_swarm_tip(board)
+    payload["swarm_tip"] = swarm_tip
+    payload["swarm_tip_label"] = swarm_tip.get("label")
+    payload["swarm_tip_sunday_quiet"] = compact.get("swarm_tip_sunday_quiet") or (
+        f"{swarm_tip.get('label') or 'swarm observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    expand_tip = desk_living.living_expand_tip(board)
+    payload["expand_tip"] = expand_tip
+    payload["expand_tip_label"] = expand_tip.get("label")
+    payload["expand_tip_sunday_quiet"] = compact.get("expand_tip_sunday_quiet") or (
+        f"{expand_tip.get('label') or 'expand observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    quiet_tip = desk_living.living_quiet_tip(board)
+    payload["quiet_tip"] = quiet_tip
+    payload["quiet_tip_label"] = quiet_tip.get("label")
+    payload["quiet_tip_sunday_quiet"] = compact.get("quiet_tip_sunday_quiet") or (
+        f"{quiet_tip.get('label') or 'quiet observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    timer_tip = desk_living.living_timer_tip(board)
+    payload["timer_tip"] = timer_tip
+    payload["timer_tip_label"] = timer_tip.get("label")
+    payload["timer_tip_sunday_quiet"] = compact.get("timer_tip_sunday_quiet") or (
+        f"{timer_tip.get('label') or 'timer observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:
