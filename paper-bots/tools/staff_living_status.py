@@ -1112,6 +1112,10 @@ def main() -> int:
         return 0 if doc.get("ok") else 2
     if args.action == "json":
         compact_j = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        live_j = desk_living.ritual_live_labels(board)
+        live_n_j = sum(
+            1 for k, v in live_j.items() if str(k).endswith("_label") and v
+        )
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1477,6 +1481,24 @@ def main() -> int:
             "compact_l7_observe_sunday_quiet": compact_j.get("l7_observe_sunday_quiet"),
             "sunday_twin_coverage": desk_living.sunday_twin_coverage(board),
             "sunday_twin_coverage_label": desk_living.sunday_twin_coverage(board).get("label"),
+            "ritual_live_labels": live_j,
+            "ritual_live_n": live_n_j,
+            "ritual_live_timer": live_j.get("timer_label"),
+            "timer_sunday_quiet": (
+                compact_j.get("timer_sunday_quiet")
+                or (
+                    str(live_j.get("timer_label") or "timer observe")
+                    + " · sunday quiet "
+                    + str(
+                        (board.get("sunday_packet") or {}).get("quiet_age_label")
+                        if isinstance(board.get("sunday_packet"), dict)
+                        and (board.get("sunday_packet") or {}).get("quiet_age_label")
+                        else compact_j.get("quiet_age_label")
+                        or "quiet_age=n/a"
+                    )
+                    + " (observe · never softens floors)"
+                )
+            ),
             "feature_store": board.get("feature_store"),
             "skip_historian": board.get("skip_historian"),
             "feature_store_sunday_quiet": compact_j.get("feature_store_sunday_quiet"),

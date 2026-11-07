@@ -1371,11 +1371,19 @@ Interactive: Positive ROI Master Plan canvas.
 | Status text timer/ritual live/twins sunday | staff_living_status |
 | Selfcheck `ritual_live_*` | living_self_check |
 
+### Living upgrade — doctor/vault timer live (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Doctor soft_copy ritual live + timer sunday | `living_doctor` |
+| Status JSON `ritual_live_*` + timer sunday | staff_living_status json |
+| Vault timer prefers live/twin labels | App vault row |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — timer/status ritual live shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — doctor/vault timer live shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 
