@@ -1435,6 +1435,37 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">paste</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            paste_sunday_quiet?: string
+                            compact_paste_sunday_quiet?: string
+                            paste_label?: string
+                            paste?: { label?: string; targets_n?: number }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.paste_sunday_quiet || desk?.compact_paste_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.paste_label ||
+                        desk?.paste?.label ||
+                        'paste observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(staff paste only · never auto-posts) · make living-paste'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{

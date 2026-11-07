@@ -418,6 +418,15 @@ def format_discord(payload: dict) -> str:
             f"• Smoke sunday: {smoke_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    paste_twin = payload.get("paste_sunday_quiet")
+    if paste_twin:
+        lines.append(f"• Paste sunday: {paste_twin}")
+    else:
+        paste_lab = payload.get("paste_label") or "paste observe"
+        lines.append(
+            f"• Paste sunday: {paste_lab} · sunday quiet {tip_age} "
+            f"(observe · never auto-posts)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1034,6 +1043,16 @@ def main() -> int:
                 )
             )
             print(
+                "paste sunday: "
+                + str(
+                    compact_obs.get("paste_sunday_quiet")
+                    or (
+                        f"{desk_living.living_discord_paste_tip(board_obs).get('label') or 'paste observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never auto-posts)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1192,6 +1211,14 @@ def main() -> int:
     payload["smoke_sunday_quiet"] = compact.get("smoke_sunday_quiet") or (
         f"{smoke.get('label') or 'smoke observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    paste = desk_living.living_discord_paste_tip(board)
+    payload["paste"] = paste
+    payload["paste_label"] = paste.get("label")
+    payload["paste_n"] = paste.get("targets_n")
+    payload["paste_sunday_quiet"] = compact.get("paste_sunday_quiet") or (
+        f"{paste.get('label') or 'paste observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never auto-posts)"
     )
     if args.discord:
         print(format_discord(payload))
