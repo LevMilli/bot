@@ -87,6 +87,8 @@ make living-ritual-live / living-ritual-observe
 make living-ritual-discord   # paste draft only — never auto-posts
 make living-doctor / living-doctor-discord
 make living-money            # fee ledger / fills observe tip
+make living-rules            # paper / floors / Discord paste-only tip
+make living-surfaces         # sunday twins + soft-max headroom
 make living-export
 make living-test
 ```

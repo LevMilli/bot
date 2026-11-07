@@ -382,6 +382,33 @@ def format_discord(payload: dict) -> str:
             f"• HUD sunday: {hud_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    money_twin = payload.get("money_path_sunday_quiet")
+    if money_twin:
+        lines.append(f"• Money-path sunday: {money_twin}")
+    else:
+        money_lab = payload.get("money_path_label") or "money-path observe"
+        lines.append(
+            f"• Money-path sunday: {money_lab} · sunday quiet {tip_age} "
+            f"(observe · never invents PnL)"
+        )
+    rails_twin = payload.get("guardrails_sunday_quiet")
+    if rails_twin:
+        lines.append(f"• Guardrails sunday: {rails_twin}")
+    else:
+        rails_lab = payload.get("guardrails_label") or "guardrails observe"
+        lines.append(
+            f"• Guardrails sunday: {rails_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    surfaces_twin = payload.get("surfaces_sunday_quiet")
+    if surfaces_twin:
+        lines.append(f"• Surfaces sunday: {surfaces_twin}")
+    else:
+        surfaces_lab = payload.get("surfaces_label") or "surfaces observe"
+        lines.append(
+            f"• Surfaces sunday: {surfaces_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -958,6 +985,36 @@ def main() -> int:
                 )
             )
             print(
+                "money-path sunday: "
+                + str(
+                    compact_obs.get("money_path_sunday_quiet")
+                    or (
+                        f"{desk_living.living_money_path_tip(board_obs).get('label') or 'money-path observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never invents PnL)"
+                    )
+                )
+            )
+            print(
+                "guardrails sunday: "
+                + str(
+                    compact_obs.get("guardrails_sunday_quiet")
+                    or (
+                        f"{desk_living.living_guardrails_tip(board_obs).get('label') or 'guardrails observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "surfaces sunday: "
+                + str(
+                    compact_obs.get("surfaces_sunday_quiet")
+                    or (
+                        f"{desk_living.living_surface_index(board_obs).get('label') or 'surfaces observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1086,6 +1143,27 @@ def main() -> int:
     payload["hud_label"] = hud.get("label")
     payload["hud_sunday_quiet"] = compact.get("hud_sunday_quiet") or (
         f"{hud.get('label') or 'hud observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    money = desk_living.living_money_path_tip(board)
+    payload["money_path"] = money
+    payload["money_path_label"] = money.get("label")
+    payload["money_path_sunday_quiet"] = compact.get("money_path_sunday_quiet") or (
+        f"{money.get('label') or 'money-path observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never invents PnL)"
+    )
+    rails = desk_living.living_guardrails_tip(board)
+    payload["guardrails"] = rails
+    payload["guardrails_label"] = rails.get("label")
+    payload["guardrails_sunday_quiet"] = compact.get("guardrails_sunday_quiet") or (
+        f"{rails.get('label') or 'guardrails observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    surfaces = desk_living.living_surface_index(board)
+    payload["surfaces"] = surfaces
+    payload["surfaces_label"] = surfaces.get("label")
+    payload["surfaces_sunday_quiet"] = compact.get("surfaces_sunday_quiet") or (
+        f"{surfaces.get('label') or 'surfaces observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:

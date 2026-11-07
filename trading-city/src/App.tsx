@@ -1327,6 +1327,70 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">guardrails</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            guardrails_sunday_quiet?: string
+                            compact_guardrails_sunday_quiet?: string
+                            guardrails_label?: string
+                            guardrails?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.guardrails_sunday_quiet ||
+                        desk?.compact_guardrails_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.guardrails_label ||
+                        desk?.guardrails?.label ||
+                        'guardrails observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(observe · never softens floors) · make living-rules'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">surfaces</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            surfaces_sunday_quiet?: string
+                            compact_surfaces_sunday_quiet?: string
+                            surfaces_label?: string
+                            surfaces?: { label?: string; headroom?: number }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.surfaces_sunday_quiet ||
+                        desk?.compact_surfaces_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.surfaces_label ||
+                        desk?.surfaces?.label ||
+                        'surfaces observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(soft-max · no new chips) · make living-surfaces'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{
