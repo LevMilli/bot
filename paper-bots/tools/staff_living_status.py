@@ -1726,6 +1726,7 @@ def main() -> int:
             "exit-quality", "promote-distance", "hillclimb-lever", "firm-health",
             "bleed-week", "daily-r", "opp-cost", "profit-lock", "ops-observe",
             "incubation", "ruin-drill", "cold-harvest", "graduation", "btc-calib",
+            "eth-calib",
             "guardrails", "adverse-cool", "anti-revenge", "empty-card", "stale-world",
             "review-observe", "idea-review", "quarterly", "corr-matrix",
             "calib-clv", "clv-status", "green-or-gone", "sticky-sla", "selective",
@@ -3789,6 +3790,19 @@ def main() -> int:
         except Exception:
             bots = []
         out = desk_roi_plan.btc_calibration_report(bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not out.get("miscalibrated") else 2
+    if args.action == "eth-calib":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.eth_calibration_report(bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if not out.get("miscalibrated") else 2
     if args.action == "guardrails":

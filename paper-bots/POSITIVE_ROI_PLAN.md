@@ -1900,6 +1900,16 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Meme exit histogram | `meme_exit_histogram` |
 | Wired | `exit_quality_observe.exit_regret` · Masters `roi_plan.exit_regret` |
 
+### ETH calib slice (Phase 4)
+
+| Ticket | Where |
+| --- | --- |
+| KXETH15M separate from KXBTC15M | `eth_calibration_report` |
+| Capture / latest | `capture_eth_calibration` · `latest_eth_calibration` |
+| CLI | `make living-eth-calib` |
+| Masters / calib-clv | `roi_plan.eth_calibration` · `calib_clv_observe.eth_calibration` |
+| Never writes Φ | `auto_write_phi=False` |
+
 ### Next
 
 | Ticket | Where |

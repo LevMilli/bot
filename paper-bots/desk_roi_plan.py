@@ -48,6 +48,7 @@ CAPITAL_OS_NAME = "desk_capital_os.json"
 OPP_COST_NAME = "desk_opp_cost.json"
 IDEA_REVIEW_NAME = "desk_idea_review.json"
 BTC_CALIB_NAME = "desk_btc_calibration.json"
+ETH_CALIB_NAME = "desk_eth_calibration.json"
 SPORTS_CALIB_NAME = "desk_sports_calibration.json"
 COMMODITY_CALIB_NAME = "desk_commodity_calibration.json"
 RAISE_PHI_DECISIONS = "desk_raise_phi_decisions.json"
@@ -857,31 +858,47 @@ def latest_capital_os(root: str | None = None) -> dict | None:
     return latest if isinstance(latest, dict) else None
 
 
-# ---- BTC calibration report (Phase 4) --------------------------------------
+# ---- BTC / ETH calibration report (Phase 4) --------------------------------
 
-def _btc_history_rows(bots: list | None) -> list:
+def _btc_history_rows(bots: list | None, *, series: str | None = None) -> list:
+    """Closed/history rows from btc15m. Optional series filter (KXBTC15M / KXETH15M)."""
+    want = str(series or "").strip().upper()
     rows = []
     for bot in bots or []:
         if not isinstance(bot, dict):
             continue
         if str(bot.get("id") or "") not in ("btc15m", "btc"):
             continue
-        for h in bot.get("history") or []:
-            if isinstance(h, dict):
+        for src in (bot.get("history") or [], bot.get("closed") or []):
+            for h in src:
+                if not isinstance(h, dict):
+                    continue
+                if want:
+                    s = str(h.get("series") or "").upper()
+                    ticker = str(h.get("ticker") or "").upper()
+                    if want == "KXETH15M":
+                        if "ETH" not in s and not ticker.startswith("KXETH"):
+                            continue
+                    elif want == "KXBTC15M":
+                        if "ETH" in s or ticker.startswith("KXETH"):
+                            continue
+                        if s and "BTC" not in s and not ticker.startswith("KXBTC"):
+                            # Keep unlabeled legacy BTC rows when series missing.
+                            if s:
+                                continue
                 rows.append(h)
     return rows
 
 
-def btc_calibration_report(
+def _crypto15_calibration_report(
     bots: list | None = None,
     *,
+    series: str,
+    bot_label: str,
     min_n: int = BTC_CALIB_MIN_N,
 ) -> dict:
-    """Bucket BTC model-p vs realized hit rate. Flag high-p miscalibration.
-
-    Plan: if labeled ~80% wins ~55%, raise Φ — never size on miscalibration.
-    """
-    rows = _btc_history_rows(bots)
+    """Shared BTC/ETH calib buckets. Never auto-writes Φ."""
+    rows = _btc_history_rows(bots, series=series)
     buckets = []
     hi_hits = 0
     hi_n = 0
@@ -916,10 +933,12 @@ def btc_calibration_report(
         and hi_rate + 1e-12 < BTC_CALIB_HI_HIT_FLOOR
     )
     action = "raise_phi" if miscal else ("observe" if hi_n < int(min_n) else "keep")
+    name = "ETH" if "ETH" in series.upper() else "BTC"
     return {
         "paper_only": True,
         "fee_floors_locked": True,
-        "bot": "btc15m",
+        "bot": bot_label,
+        "series": series,
         "n": sum(b["n"] for b in buckets),
         "hi_label": BTC_CALIB_HI_LABEL,
         "hi_n": hi_n,
@@ -929,13 +948,40 @@ def btc_calibration_report(
         "action": action,
         "buckets": buckets,
         "auto_promote": False,
+        "auto_write_phi": False,
         "note": (
-            "BTC calibration: high-p (≥80%) bucket must hit ≥70% once n≥20. "
+            f"{name} calibration: high-p (≥80%) bucket must hit ≥70% once n≥20. "
             "Miscalibration → raise Φ / fix model — never size up on fake confidence."
             if miscal
-            else "BTC calibration board. Fee floors locked; no auto param write."
+            else f"{name} ({series}) calibration board. Fee floors locked; no auto param write."
         ),
     }
+
+
+def btc_calibration_report(
+    bots: list | None = None,
+    *,
+    min_n: int = BTC_CALIB_MIN_N,
+) -> dict:
+    """Bucket BTC model-p vs realized hit rate. Flag high-p miscalibration.
+
+    Plan: if labeled ~80% wins ~55%, raise Φ — never size on miscalibration.
+    Uses KXBTC15M slice when series tags exist; unlabeled legacy rows stay in.
+    """
+    return _crypto15_calibration_report(
+        bots, series="KXBTC15M", bot_label="btc15m", min_n=min_n,
+    )
+
+
+def eth_calibration_report(
+    bots: list | None = None,
+    *,
+    min_n: int = BTC_CALIB_MIN_N,
+) -> dict:
+    """KXETH15M calib slice — separate from BTC (Phase 4). Never writes Φ."""
+    return _crypto15_calibration_report(
+        bots, series="KXETH15M", bot_label="btc15m", min_n=min_n,
+    )
 
 
 def capture_btc_calibration(
@@ -962,6 +1008,34 @@ def capture_btc_calibration(
 
 def latest_btc_calibration(root: str | None = None) -> dict | None:
     store = _load(_path(BTC_CALIB_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
+
+
+def capture_eth_calibration(
+    root: str | None,
+    *,
+    bots: list | None = None,
+    label: str | None = None,
+) -> dict:
+    """Persist today's ETH (KXETH15M) calibration card — never writes Φ."""
+    day = label or _chicago_day()
+    report = eth_calibration_report(bots)
+    card = {**report, "label": day, "captured_at": _now()}
+    path = _path(ETH_CALIB_NAME, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = [c for c in cards if str(c.get("label") or "") != day]
+    cards.append(card)
+    store["cards"] = cards[-60:]
+    store["latest"] = card
+    store["last_at"] = _now()
+    _save(path, store)
+    return card
+
+
+def latest_eth_calibration(root: str | None = None) -> dict | None:
+    store = _load(_path(ETH_CALIB_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
 
@@ -4137,6 +4211,7 @@ def calib_clv_observe(
 ) -> dict:
     """Phase 4 calib + CLV + sticky/green-or-gone flow observe (never writes Φ)."""
     btc = btc_calibration_report(bots)
+    eth = eth_calibration_report(bots)
     sports = sports_calibration_report(bots)
     commodity = commodity_calibration_report(bots)
     phi = raise_phi_decision_log(root)
@@ -4151,7 +4226,9 @@ def calib_clv_observe(
     gog = green_or_gone_status(bots)
     selective = selective_throughput_observe(root, bots=bots)
     alerts = []
-    for name, card in (("btc", btc), ("sports", sports), ("commodity", commodity)):
+    for name, card in (
+        ("btc", btc), ("eth", eth), ("sports", sports), ("commodity", commodity),
+    ):
         if card.get("miscalibrated") or card.get("action") == "raise_phi":
             alerts.append(f"{name}_raise_phi")
     clv_n = int(clv.get("n") or 0)
@@ -4176,9 +4253,17 @@ def calib_clv_observe(
         "alerts": alerts,
         "btc_calibration": {
             "n": btc.get("n"),
+            "series": btc.get("series"),
             "miscalibrated": bool(btc.get("miscalibrated")),
             "action": btc.get("action"),
             "hi_hit_rate": btc.get("hi_hit_rate"),
+        },
+        "eth_calibration": {
+            "n": eth.get("n"),
+            "series": eth.get("series"),
+            "miscalibrated": bool(eth.get("miscalibrated")),
+            "action": eth.get("action"),
+            "hi_hit_rate": eth.get("hi_hit_rate"),
         },
         "sports_calibration": {
             "n": sports.get("n"),
