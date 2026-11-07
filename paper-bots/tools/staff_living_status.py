@@ -1731,6 +1731,7 @@ def main() -> int:
             "review-observe", "idea-review", "quarterly", "corr-matrix",
             "calib-clv", "clv-status", "clv-leagues", "green-or-gone", "sticky-sla",
             "selective",
+            "eligible-funnel", "insight-ratio", "edge08-compare", "cadence-health",
             "raise-phi-log", "sports-calib", "commodity-calib",
             "baseline-fee", "baseline-capture", "fee-ledger",
             "commodity-tstop-status", "commodity-tstop-promote",
@@ -3954,6 +3955,58 @@ def main() -> int:
         out = desk_roi_plan.selective_throughput_observe(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("m1_holds") else 2
+    if args.action == "eligible-funnel":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.weekly_eligible_fill_report(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "insight-ratio":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.insight_betting_ratio_board(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "edge08-compare":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.edge08_vs_main_expectancy_board(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "cadence-health":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.fee_clear_cadence_health_board(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("all_ok") else 2
     if args.action == "raise-phi-log":
         out = desk_roi_plan.raise_phi_decision_log(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))

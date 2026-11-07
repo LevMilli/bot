@@ -78,7 +78,16 @@ from desk_roi_e4 import (  # noqa: F401
     throughput_vs_m1_board,
 )
 
-
+# E5–E7 densify boards (new module — does not rewrite #354/#355/#356 surfaces).
+from desk_roi_e5e7 import (  # noqa: F401
+    edge08_vs_main_expectancy_board,
+    fee_clear_cadence_health_board,
+    insight_betting_ratio_board,
+    near_miss_edge_relax_forever_zero,
+    selective_never_expands_meme_inx,
+    skip_regret_never_edge_floor,
+    weekly_eligible_fill_report,
+)
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
 MAX_HARD_STOP_ROWS = 2000
@@ -3360,7 +3369,7 @@ def latest_skip_regret_weekly(root: str | None = None) -> dict | None:
     return latest if isinstance(latest, dict) else None
 
 
-SKIP_REGRET_SOFT_ALLOW = frozenset({"z", "p", "cushion", "depth", "latency"})
+SKIP_REGRET_SOFT_ALLOW = frozenset({"z", "p", "cushion", "depth", "latency", "news"})
 SKIP_REGRET_FEE_GATES = frozenset({"edge", "fee", "min_edge", "venue_edge", "floor"})
 MAX_SKIP_REGRET_DECISIONS = 200
 
@@ -3409,8 +3418,8 @@ def skip_regret_candidates(root: str | None = None) -> dict:
         "green_twin": bool(weekly.get("green_twin") or summary.get("green_twin")),
         "labeled_n": int(summary.get("labeled_n") or 0),
         "note": (
-            "Skip-regret candidates filtered to non-fee soft gates only. "
-            "Fee/edge floors never appear as loosen targets."
+            "Skip-regret candidates filtered to Z/P/DEPTH/NEWS timing only. "
+            "Fee/edge floors never appear as loosen targets (step 452 lock)."
         ),
     }
 
@@ -8835,11 +8844,16 @@ def plan_summary(
         "distance_to_zero": distance_to_zero_board(root, bots=bots),
         "firm_heat": firm_heat_map(root, bots=bots),
         "sticky_sla": sticky,
+        "weekly_eligible_fill": weekly_eligible_fill_report(root, bots=bots),
+        "insight_betting_ratio": insight_betting_ratio_board(root, bots=bots),
+        "edge08_vs_main": edge08_vs_main_expectancy_board(root, bots=bots),
+        "fee_clear_cadence": fee_clear_cadence_health_board(root, bots=bots),
         "fee_floors_locked": True,
         "next_tickets": [
             "staff hillclimb pick (TC-151 process)",
             "dual-control / LIVE_ORDERS (deferred)",
             "force-armed evidence catch-up (deferred)",
+            "E8–E9 staff/LIVE deferred (bulk E3–E7 engineerable shipped)",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }

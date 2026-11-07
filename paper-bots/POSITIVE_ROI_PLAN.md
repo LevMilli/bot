@@ -1932,6 +1932,22 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | INX twins / meme | `learning_skip(..., side, hour_ct)` + record `side` |
 | Fallback | classic market × bucket when fine sample thin |
 
+### Bulk E3–E7 engineerable (Nov 7)
+
+| Ticket | Where |
+| --- | --- |
+| **Marker** | Bulk E3–E7 engineerable shipped Nov7; **E8–E9 staff/LIVE deferred** |
+| Weekly eligible-fill funnel CLI | `weekly_eligible_fill_report` · `make living-eligible-funnel` |
+| Insight:betting ≥3:1 board | `insight_betting_ratio_board` · Masters `roi_plan.insight_betting_ratio` |
+| Edge08 vs main expectancy | `edge08_vs_main_expectancy_board` · `make living-edge08-compare` |
+| Fee-clear cadence health (508–510) | `fee_clear_cadence_health_board` · `make living-cadence-health` |
+| Lock tests 451/452/456 | `test_bulk_e5e7_locks.py` · edge_relax=0 · skip-regret never EDGE · selective never meme/INX |
+| M4 staff drills + speed runbook | `DESK_ROI_SYSTEM.md` §9 |
+| Soft-max tip invent | **EXHAUSTED** — no tip wrappers/chips in this bulk |
+| Floors | Locked (paper-only) |
+
+Sibling open PRs (do not duplicate): #354 e3e4 selective/funnel/schema · #355 autopsy/latency/grad · #356 prefetch/empty-card.
+
 ### Next
 
 | Ticket | Where |
@@ -1939,6 +1955,7 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Staff pick hillclimb lever this Chicago week | TC-151 (process — external) |
 | Dual-control / LIVE_ORDERS (deferred) | staff gate |
 | Force-armed evidence catch-up (deferred) | hard-stop / near-miss / INX n bars |
+| E8–E9 staff/LIVE path | deferred — paper green + staff first |
 
 ### INX research no-force path
 
