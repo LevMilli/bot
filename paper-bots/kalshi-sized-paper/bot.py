@@ -199,7 +199,11 @@ def step_scan(args, state, day):
         pass
     try:
         desk = _desk()
-        skip = desk.learning_skip(desk.load_learning(DESK_ROOT), "S&P-sized", desk.prob_bucket(pick["ask"]))
+        hour_ct = dt.datetime.now(CT).hour
+        skip = desk.learning_skip(
+            desk.load_learning(DESK_ROOT), "S&P-sized", desk.prob_bucket(pick["ask"]),
+            side=pick.get("side"), hour_ct=hour_ct,
+        )
     except Exception:
         skip = ""
     if skip:
@@ -288,6 +292,7 @@ def step_settle(args, state, day):
                         "prob": pos.get("ask"),
                         "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
                         "fill_id": pos.get("fill_id") or "",
+                        "side": pos.get("side") or "",
                     })
                 except Exception:
                     pass
@@ -353,6 +358,7 @@ def step_settle(args, state, day):
                 "prob": pos.get("ask"),
                 "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
                 "fill_id": pos.get("fill_id") or "",
+                "side": pos.get("side") or "",
             })
         except Exception:
             pass

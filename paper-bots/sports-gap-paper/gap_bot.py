@@ -702,6 +702,7 @@ def run():
                     "bucket": desk.prob_bucket(p.get("fair_at_entry")),
                     "stake": p.get("risk") if p.get("risk") is not None else p.get("cost"),
                     "fill_id": p.get("fill_id") or "",
+                    "side": p.get("side") or "",
                     "at": ts,
                 })
             # Closing-line value: entry fair vs settle binary (1 win / 0 loss) as close proxy.
@@ -1010,6 +1011,7 @@ def run():
                         "bucket": desk.prob_bucket(p.get("fair_at_entry")),
                         "stake": p.get("risk") if p.get("risk") is not None else p.get("cost"),
                         "fill_id": p.get("fill_id") or "",
+                        "side": p.get("side") or "",
                         "at": ts,
                     })
                 try:

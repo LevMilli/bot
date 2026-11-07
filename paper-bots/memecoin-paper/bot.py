@@ -219,6 +219,7 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
                 "prob": pos.get("confidence"),
                 "stake": pos.get("cost_usd"),
                 "fill_id": f"{pos.get('mint')}|{pos.get('entry_iso')}",
+                "side": pos.get("lane") or pos.get("side") or "long",
             })
         except Exception:
             pass
@@ -538,6 +539,8 @@ def scan(st, stats):
                             desk.load_learning(os.path.dirname(BASE)),
                             mint or row.get("symbol") or "",
                             desk.prob_bucket(conf),
+                            side=str(lane or "long"),
+                            hour_ct=datetime.now(CT).hour,
                         ) or None
                 except Exception:
                     gate_reason = None
