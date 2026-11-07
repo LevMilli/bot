@@ -1391,6 +1391,50 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">smoke</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | { smoke_ok?: boolean; smoke?: { ok?: boolean } }
+                          | undefined
+                        const ok = desk?.smoke_ok ?? desk?.smoke?.ok
+                        if (ok === true) return '#6fbf73'
+                        if (ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            smoke_sunday_quiet?: string
+                            compact_smoke_sunday_quiet?: string
+                            smoke_label?: string
+                            smoke?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.smoke_sunday_quiet ||
+                        desk?.compact_smoke_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.smoke_label ||
+                        desk?.smoke?.label ||
+                        'smoke observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(observe · never softens floors) · make living-smoke'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{

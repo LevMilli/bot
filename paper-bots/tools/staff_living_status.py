@@ -97,6 +97,11 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_surface_index")
         else {}
     )
+    smoke = (
+        desk_living.living_staff_smoke(board)
+        if hasattr(desk_living, "living_staff_smoke")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -1036,6 +1041,20 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "smoke: "
+            + str(smoke.get("label") or "smoke observe")
+        ),
+        (
+            "smoke sunday: "
+            + str(
+                compact.get("smoke_sunday_quiet")
+                or (
+                    str(smoke.get("label") or "smoke observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1138,14 +1157,14 @@ def main() -> int:
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
-            "help", "money", "rules", "surfaces",
+            "help", "money", "rules", "surfaces", "smoke",
         ),
     )
     parser.add_argument("--root", default=ROOT)
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money/rules/surfaces); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money/rules/surfaces/smoke); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -1210,6 +1229,9 @@ def main() -> int:
         prio = desk_living.living_priority_snapshot(root=root)
         live = desk_living.ritual_live_labels(root=root)
         live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
+        rails = desk_living.living_guardrails_tip(root=root)
+        surfaces = desk_living.living_surface_index(root=root)
+        smoke = desk_living.living_staff_smoke(root=root)
         print(json.dumps({
             "paper_only": True,
             "fee_floors_locked": True,
@@ -1220,6 +1242,10 @@ def main() -> int:
             "priority_label": prio.get("label"),
             "ritual_live_n": live_n,
             "ritual_live_ok": live_n >= 40,
+            "guardrails_label": rails.get("label"),
+            "surfaces_label": surfaces.get("label"),
+            "smoke_ok": smoke.get("ok"),
+            "smoke_label": smoke.get("label"),
             "note": "Forced clerk pulse refresh — observe digests only.",
         }, indent=2, sort_keys=True, default=str))
         return 0
@@ -1265,6 +1291,7 @@ def main() -> int:
         money_j = desk_living.living_money_path_tip(board)
         rails_j = desk_living.living_guardrails_tip(board)
         surfaces_j = desk_living.living_surface_index(board)
+        smoke_j = desk_living.living_staff_smoke(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1668,6 +1695,11 @@ def main() -> int:
             "surfaces_label": surfaces_j.get("label"),
             "surfaces_sunday_quiet": compact_j.get("surfaces_sunday_quiet"),
             "compact_surfaces_sunday_quiet": compact_j.get("surfaces_sunday_quiet"),
+            "smoke": smoke_j,
+            "smoke_label": smoke_j.get("label"),
+            "smoke_ok": smoke_j.get("ok"),
+            "smoke_sunday_quiet": compact_j.get("smoke_sunday_quiet"),
+            "compact_smoke_sunday_quiet": compact_j.get("smoke_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -1868,10 +1900,10 @@ def main() -> int:
     if args.action == "help":
         print(
             "Living status actions (paper · floors locked · Discord never auto-posts):\n"
-            "  text json selfcheck export hud priority ritual-live money rules surfaces\n"
+            "  text json selfcheck export hud priority ritual-live money rules surfaces smoke\n"
             "  floors teller expand doctor l7 sunday pulse gaps inventory\n"
             "  hillclimb ruin seed pager\n"
-            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/rules/surfaces/priority\n"
+            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/rules/surfaces/smoke/priority\n"
             "Makefile: make living-help"
         )
         return 0
@@ -1942,6 +1974,29 @@ def main() -> int:
             out["surfaces_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if not tip.get("over") else 2
+
+    if args.action == "smoke":
+        tip = desk_living.living_staff_smoke(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("smoke_sunday_quiet") or (
+            f"{tip.get('label') or 'smoke observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Staff smoke** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"ok={tip.get('ok')} floors_ok={tip.get('floors_ok')} "
+                f"headroom={tip.get('headroom')} chips={tip.get('chips_n')}/{tip.get('soft_max')}\n"
+                "cmds: make living-smoke · living-rules · living-surfaces\n"
+                "_never softens floors · never auto-posts · never enables live_"
+            )
+        else:
+            out = dict(tip)
+            out["smoke_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if tip.get("ok") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

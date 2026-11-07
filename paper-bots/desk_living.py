@@ -1282,6 +1282,10 @@ def living_compact_card(
             f"{living_surface_index(src).get('label') or 'surfaces observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "smoke_sunday_quiet": (
+            f"{living_staff_smoke(src).get('label') or 'smoke observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2408,6 +2412,11 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{surfaces.get('label') or 'surfaces observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+        smoke = living_staff_smoke(board)
+        compact["smoke_sunday_quiet"] = (
+            f"{smoke.get('label') or 'smoke observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2565,6 +2574,10 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     surfaces = living_surface_index(board)
     slim["surfaces"] = surfaces
     slim["surfaces_label"] = surfaces.get("label")
+    smoke = living_staff_smoke(board)
+    slim["smoke"] = smoke
+    slim["smoke_label"] = smoke.get("label")
+    slim["smoke_ok"] = smoke.get("ok")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -2984,6 +2997,11 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{surfaces_export.get('label') or 'surfaces observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    smoke_export = living_staff_smoke(board)
+    slim["smoke_sunday_quiet"] = (
+        f"{smoke_export.get('label') or 'smoke observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3203,6 +3221,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_surfaces_sunday_quiet"] = (
             compact.get("surfaces_sunday_quiet") or slim.get("surfaces_sunday_quiet")
+        )
+        slim["compact_smoke_sunday_quiet"] = (
+            compact.get("smoke_sunday_quiet") or slim.get("smoke_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -3968,8 +3989,12 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         f"{timer_sunday_line}\n"
         f"teller ritual live n={live_n}\n"
         f"{str(health.get('priority_label') or living_priority_snapshot(root=root).get('label') or 'priority observe')}\n"
+        f"{str(health.get('guardrails_label') or living_guardrails_tip(root=root).get('label') or 'guardrails observe')}\n"
+        f"{str(health.get('surfaces_label') or living_surface_index(root=root).get('label') or 'surfaces observe')}\n"
+        f"{str(health.get('smoke_label') or living_staff_smoke(root=root).get('label') or 'smoke observe')}\n"
         f"sunday quiet {quiet_age_label} (observe · never softens floors)\n"
         f"ritual draft: make living-ritual-discord · audit: make living-ritual-live "
+        f"· smoke: make living-smoke "
         f"(staff paste · never auto-posts)\n"
         f"_never places · never softens floors · never enables live_"
     )
@@ -4406,6 +4431,40 @@ def living_surface_index(board: dict | None = None, root: str | None = None) -> 
     }
 
 
+def living_staff_smoke(board: dict | None = None, root: str | None = None) -> dict:
+    """One-shot staff smoke of floors + guardrails + surfaces (not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    floors = src.get("fee_floors_assert") if isinstance(src.get("fee_floors_assert"), dict) else {}
+    rails = living_guardrails_tip(src)
+    surfaces = living_surface_index(src)
+    floors_ok = floors.get("all_ok") is not False
+    live_off = src.get("live_orders_enabled") is False
+    paper = src.get("paper_only") is not False
+    locked = src.get("fee_floors_locked") is not False
+    not_over = not bool(surfaces.get("over"))
+    ok = bool(floors_ok and live_off and paper and locked and not_over)
+    label = (
+        f"smoke ok={ok} floors={'ok' if floors.get('all_ok') is True else 'soft' if floors.get('all_ok') is False else 'n/a'} "
+        f"live={src.get('live_orders_enabled')} headroom={surfaces.get('headroom')} "
+        f"(observe · make living-smoke · never softens floors · never auto-posts)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "ok": ok,
+        "floors_ok": floors.get("all_ok"),
+        "live_orders_enabled": src.get("live_orders_enabled"),
+        "headroom": surfaces.get("headroom"),
+        "chips_n": surfaces.get("chips_n"),
+        "soft_max": surfaces.get("soft_max"),
+        "guardrails_label": rails.get("label"),
+        "surfaces_label": surfaces.get("label"),
+        "label": label,
+        "note": "Staff smoke aggregate — observe-only; never places or softens floors.",
+    }
+
+
 def living_hud_summary(board: dict | None = None, root: str | None = None) -> dict:
     """One-line staff HUD of living surfaces (not a board chip)."""
     src = board if isinstance(board, dict) else living_upgrade_board(root)
@@ -4506,11 +4565,14 @@ def living_self_check(root: str | None = None) -> dict:
     )
     prio = living_priority_snapshot(board)
     hud = living_hud_summary(board)
+    rails = living_guardrails_tip(board)
+    surfaces = living_surface_index(board)
+    smoke = living_staff_smoke(board)
     return {
         "paper_only": True,
         "fee_floors_locked": floors,
         "live_orders_enabled": False,
-        "ok": ok and l7_ok,
+        "ok": ok and l7_ok and bool(smoke.get("ok")),
         "swarm_pass": swarm.get("pass"),
         "swarm_ratio": swarm.get("ratio"),
         "feature_quiet": bool(quiet.get("quiet")),
@@ -4549,6 +4611,13 @@ def living_self_check(root: str | None = None) -> dict:
         "priority_label": str(prio.get("label") or "priority observe"),
         "hud": hud,
         "hud_label": str(hud.get("label") or "hud observe"),
+        "guardrails": rails,
+        "guardrails_label": str(rails.get("label") or "guardrails observe"),
+        "surfaces": surfaces,
+        "surfaces_label": str(surfaces.get("label") or "surfaces observe"),
+        "smoke": smoke,
+        "smoke_ok": bool(smoke.get("ok")),
+        "smoke_label": str(smoke.get("label") or "smoke observe"),
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()
