@@ -1848,6 +1848,15 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Money pulse / Masters | `calib_clv` on pulse + `roi_plan.calib_clv` |
 | Never auto-writes Φ | `auto_write_phi=False` |
 
+### Baseline + fee-ledger observe (Phase 0)
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `baseline_fee_observe` · `make living-baseline-fee` |
+| Capture W0 | `make living-baseline-capture` |
+| Fee ledger completeness | `make living-fee-ledger` |
+| Money pulse / Masters | `baseline_fee` on pulse + `roi_plan.baseline_fee` |
+
 ### Next
 
 | Ticket | Where |

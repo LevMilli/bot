@@ -177,6 +177,25 @@ class MoneyPulseSurfaces(unittest.TestCase):
             self.assertIn("green_or_gone", out["alerts"])
             self.assertIn("calib_clv=", out["label"])
 
+    def test_baseline_fee_observe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            thin = desk_roi_plan.baseline_fee_observe(tmp, bots=[])
+            self.assertTrue(thin["observe_only"])
+            self.assertIn("baseline_missing", thin["alerts"])
+            self.assertFalse(thin["baseline"]["has_baseline"])
+            captured = desk_roi_plan.baseline_fee_observe(
+                tmp,
+                bots=[{"id": "btc15m", "today": 0, "cash": 100, "open_risk": 0}],
+                cfg={"max_open_risk": 100},
+                capture=True,
+                label="W0",
+            )
+            self.assertTrue(captured["baseline"]["has_baseline"])
+            self.assertEqual(captured["baseline"]["latest_label"], "W0")
+            self.assertNotIn("baseline_missing", captured["alerts"])
+            self.assertIn("fee_ledger", captured)
+            self.assertIn("baseline_fee=", captured["label"])
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()
