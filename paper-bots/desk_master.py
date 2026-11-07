@@ -440,6 +440,7 @@ def master_summary(
             "sports_hard_stop_shadow": desk_roi_plan.sports_hard_stop_shadow_summary(root),
             "commodity_time_stop": desk_roi_plan.commodity_time_stop_shadow_summary(root),
             "sports_time_final": desk_roi_plan.sports_time_final_shadow_summary(root),
+            "exit_regret": desk_roi_plan.exit_regret_observe(root, bots=bots),
             "inx_band_promote": desk_roi_plan.inx_band_promote_status(root),
             "correlation": None,
             "weekly_scorecard": weekly,

@@ -1890,6 +1890,16 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | BTC TP not print-only | root `README.md` |
 | Pin test | `test_doc_truth.py` (floors 0.06/0.05/0.02; AUTO 180/60/90/180) |
 
+### Exit-regret KPIs (Phase 3 E2 densify)
+
+| Ticket | Where |
+| --- | --- |
+| Sports settle losers with prior shadow | `exit_regret_observe.sports_shadow_share` |
+| BTC settle vs TP giveback (¢) | `btc_tp_giveback_avg` |
+| INX flip save vs wipe | `inx_flip_save_usd` |
+| Meme exit histogram | `meme_exit_histogram` |
+| Wired | `exit_quality_observe.exit_regret` · Masters `roi_plan.exit_regret` |
+
 ### Next
 
 | Ticket | Where |
@@ -1941,7 +1951,7 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 
 - Venue floors: sports 0.06 / BTC+commodity 0.05 / INX+DEX 0.02
 - Starve: n≥4, factor 0.15
-- Meme red lock −$8; INX halt $460
+- Meme red lock −$5; INX halt $460
 - Kill: M3↑ with M1↓ for 2 Chicago weeks → revert lever
 
 ## Tests

@@ -4619,6 +4619,99 @@ def promote_distance_observe(
     }
 
 
+def exit_regret_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """E2 KPIs: settle losers that had a shadow exit chance; BTC TP giveback; INX flip save.
+
+    Observe only — does not arm live sells or soften floors.
+    """
+    sports_settle_losers = 0
+    sports_with_shadow = 0
+    btc_settle_n = 0
+    btc_givebacks: list[float] = []
+    inx_flip_n = 0
+    inx_flip_save_sum = 0.0
+    meme_kinds: dict[str, int] = {}
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bid = str(bot.get("id") or "")
+        closed = list(bot.get("closed") or bot.get("history") or [])
+        for pos in closed:
+            if not isinstance(pos, dict):
+                continue
+            pnl = _finite(pos.get("pnl") if pos.get("pnl") is not None else pos.get("pnl_usd"))
+            kind = _exit_kind(
+                pos.get("exit") or pos.get("exit_reason") or pos.get("reason")
+                or pos.get("close_reason") or pos.get("status")
+            )
+            if bid == "sports-gap" and kind == "settle" and pnl is not None and pnl < 0:
+                sports_settle_losers += 1
+                if pos.get("hard_stop_shadowed") or pos.get("time_final_shadowed"):
+                    sports_with_shadow += 1
+            if bid == "btc15m" and kind == "settle":
+                btc_settle_n += 1
+                tp = _finite(pos.get("take_profit"))
+                exit_px = _finite(
+                    pos.get("exit_price") if pos.get("exit_price") is not None
+                    else pos.get("settle_price")
+                )
+                # Binary settle pays 0 or 1 — use payout/contracts when price missing.
+                if exit_px is None:
+                    contracts = _finite(pos.get("contracts")) or 0.0
+                    payout = _finite(pos.get("payout"))
+                    if contracts > 0 and payout is not None:
+                        exit_px = round(float(payout) / float(contracts), 4)
+                if tp is not None and exit_px is not None and exit_px + 1e-12 < tp:
+                    btc_givebacks.append(round(float(tp) - float(exit_px), 4))
+            if bid in ("kalshi-sp", "kalshi-sized") and kind == "model_flip":
+                inx_flip_n += 1
+                cost = _finite(pos.get("cost"))
+                if pnl is not None and cost is not None:
+                    # Counterfactual full wipe ≈ −cost; save = pnl − (−cost).
+                    inx_flip_save_sum = round(inx_flip_save_sum + float(pnl) + float(cost), 4)
+            if bid == "memecoin":
+                meme_kinds[kind] = int(meme_kinds.get(kind) or 0) + 1
+    shadow_share = (
+        round(sports_with_shadow / sports_settle_losers, 4)
+        if sports_settle_losers else None
+    )
+    avg_giveback = (
+        round(sum(btc_givebacks) / len(btc_givebacks), 4) if btc_givebacks else None
+    )
+    meme_hist = [
+        {"key": k, "n": n} for k, n in sorted(meme_kinds.items(), key=lambda kv: -kv[1])
+    ]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "board_chip": False,
+        "sports_settle_losers": sports_settle_losers,
+        "sports_settle_losers_with_shadow": sports_with_shadow,
+        "sports_shadow_share": shadow_share,
+        "btc_settle_n": btc_settle_n,
+        "btc_tp_giveback_n": len(btc_givebacks),
+        "btc_tp_giveback_avg": avg_giveback,
+        "inx_flip_n": inx_flip_n,
+        "inx_flip_save_usd": inx_flip_save_sum if inx_flip_n else None,
+        "meme_exit_histogram": meme_hist[:12],
+        "label": (
+            f"exit_regret sports_losers_shadow="
+            f"{sports_with_shadow}/{sports_settle_losers} "
+            f"btc_giveback_avg={avg_giveback} inx_flip_save={inx_flip_save_sum if inx_flip_n else None}"
+        ),
+        "note": (
+            "E2 exit-regret KPIs — share of sports settle losers that already "
+            "logged hard-stop/time-final shadow; BTC settle vs TP giveback (¢); "
+            "INX model-flip save vs wipe; meme exit histogram. Floors locked."
+        ),
+    }
+
+
 def exit_quality_observe(
     root: str | None = None,
     *,
@@ -4628,6 +4721,7 @@ def exit_quality_observe(
     coverage = exit_plan_coverage(root, bots=bots)
     sports = sports_exit_quality_board(bots)
     fee_clear = fee_clear_exit_quality_board(bots)
+    regret = exit_regret_observe(root, bots=bots)
     hard = sports_hard_stop_shadow_summary(root)
     tstop = commodity_time_stop_shadow_summary(root)
     tfinal = sports_time_final_shadow_summary(root)
@@ -4642,6 +4736,7 @@ def exit_quality_observe(
         "exit_plan_coverage": coverage,
         "sports_exits": sports,
         "fee_clear_exits": fee_clear,
+        "exit_regret": regret,
         "hard_stop_shadow": {
             "n": hard.get("n"),
             "n_with_pnl": hard.get("n_with_pnl"),
@@ -4687,11 +4782,14 @@ def exit_quality_observe(
             f"{coverage.get('n_open')} sports_n={sports.get('n')} "
             f"btc_comm_n={fee_clear.get('n')} "
             f"hs_shadow={hard.get('n_with_pnl')} "
-            f"tstop={tstop.get('n_with_pnl')} selective_m1={selective.get('m1_holds')}"
+            f"tstop={tstop.get('n_with_pnl')} "
+            f"regret_shadow={regret.get('sports_settle_losers_with_shadow')}/"
+            f"{regret.get('sports_settle_losers')} "
+            f"selective_m1={selective.get('m1_holds')}"
         ),
         "note": (
             "E2 exit-quality observe / selective throughput after M1 "
-            "(+ commodity time-stop shadow). "
+            "(+ commodity time-stop / sports time-final / exit-regret KPIs). "
             "Never softens floors; never arms LIVE_ORDERS; no tip invent."
         ),
     }
