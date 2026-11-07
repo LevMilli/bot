@@ -98,8 +98,10 @@ class InxBandPromote(unittest.TestCase):
             self.assertEqual(rep["leader"], "70_80")
             self.assertEqual(rep["history_n"], 30)
             self.assertFalse(rep["auto_promote"])
+            self.assertFalse(rep.get("evidence_thin"))
             status = desk_roi_plan.inx_band_promote_status(tmp)
             self.assertTrue(status["promote_ready"])
+            self.assertFalse(status.get("evidence_thin"))
             armed = desk_roi_plan.staff_promote_inx_leader(tmp, note="no-force leader")
             self.assertTrue(armed["ok"])
             self.assertEqual(desk_roi_plan.inx_live_band(tmp)["id"], "70_80")
@@ -108,6 +110,26 @@ class InxBandPromote(unittest.TestCase):
                 thin = desk_roi_plan.staff_promote_inx_leader(tmp2)
                 self.assertFalse(thin["ok"])
                 self.assertFalse(thin.get("force", False))
+
+    def test_evidence_thin_keeps_80_90(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Leader sample below n≥20 → keep live 80–90.
+            hist = (
+                [{"ask": 0.75, "pnl": 2.0, "contracts": 1} for _ in range(8)]
+                + [{"ask": 0.85, "pnl": -0.5, "contracts": 1} for _ in range(3)]
+            )
+            rep = desk_roi_plan.run_inx_band_research(tmp, history=hist)
+            self.assertTrue(rep["evidence_thin"])
+            self.assertEqual(rep["keep_live_band"], "80_90")
+            self.assertGreater(rep["n_to_promote"], 0)
+            self.assertEqual(desk_roi_plan.inx_live_band(tmp)["id"], "80_90")
+            status = desk_roi_plan.inx_band_promote_status(tmp)
+            self.assertTrue(status["evidence_thin"])
+            self.assertFalse(status["promote_ready"])
+            self.assertEqual(status["keep_live_band"], "80_90")
+            self.assertIn("THIN", status.get("label") or "")
+            denied = desk_roi_plan.staff_promote_inx_leader(tmp)
+            self.assertFalse(denied["ok"])
 
 
 if __name__ == "__main__":

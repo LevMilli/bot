@@ -1720,11 +1720,20 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Red-day speculative entry block | `sticky_entry_blocks` on sports / BTC / commodity |
 | Masters | `roi_plan.sticky_sla` |
 
+### INX research evidence thin (keep 80–90)
+
+| Ticket | Where |
+| --- | --- |
+| Evidence-thin board | `inx_band_promote_status.evidence_thin` / `keep_live_band` / `n_to_promote` |
+| Research report flags | `run_inx_band_research.evidence_thin` |
+| CLI | `make living-inx-research` / `living-inx-status` |
+| Rule | Keep live **80–90** until leader n≥20 beats live EV — no force on money-path CLI |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| INX research evidence thin — keep 80–90 until leader n≥20 beats live | `make living-inx-research` / `living-inx-status` |
+| Near-miss soft-p second arm after z holds M1 | `staff_promote_near_miss_soft("p")` gated |
 
 ### INX research no-force path
 

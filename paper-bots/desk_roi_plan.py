@@ -3229,18 +3229,30 @@ def run_inx_band_research(
         key=lambda x: (x.get("expectancy_taxed") is not None, x.get("expectancy_taxed") or -999),
         reverse=True,
     )
+    leader_id = ranked[0]["id"] if ranked else None
+    leader_n = int((ranked[0].get("n") if ranked else 0) or 0)
+    evidence_thin = (not ranked) or leader_n < int(INX_BAND_PROMOTE_MIN_N)
     report = {
         "paper_only": True,
         "live_band": live.get("id") or INX_LIVE_BAND_DEFAULT,
         "live_changed": bool(live.get("live_changed")),
         "staff_approved": bool(live.get("staff_approved")),
         "bands": bands,
-        "leader": ranked[0]["id"] if ranked else None,
+        "leader": leader_id,
+        "leader_n": leader_n,
         "history_n": len(hist),
+        "evidence_thin": evidence_thin,
+        "keep_live_band": INX_LIVE_BAND_DEFAULT if evidence_thin else (
+            live.get("id") or INX_LIVE_BAND_DEFAULT
+        ),
+        "promote_min_n": INX_BAND_PROMOTE_MIN_N,
+        "n_to_promote": max(0, int(INX_BAND_PROMOTE_MIN_N) - leader_n),
         "fee_floors_locked": True,
         "auto_promote": False,
+        "observe_only": True,
         "note": (
             "Research harness only — does not change kalshi-sp/sized ask band. "
+            "Evidence thin → keep 80–90 until leader n≥20 beats live. "
             "Promote only via staff_promote_inx_band after artifact + Chicago week "
             "(no force on money-path CLI)."
         ),
@@ -3279,62 +3291,104 @@ def staff_promote_inx_leader(
 
 
 def inx_band_promote_status(root: str | None = None) -> dict:
-    """Ready when research leader beats live band with n≥20 — never auto-promote."""
+    """Ready when research leader beats live band with n≥20 — never auto-promote.
+
+    Evidence-thin path: keep live 80–90 until leader n≥20 beats live EV.
+    """
     store = _load(_path(INX_BAND_RESEARCH, root), {"paper_only": True, "latest": None})
     report = store.get("latest") if isinstance(store.get("latest"), dict) else None
     live = inx_live_band(root)
+    live_id = live.get("id") or INX_LIVE_BAND_DEFAULT
+    keep_band = INX_LIVE_BAND_DEFAULT
     if not report:
         return {
             "paper_only": True,
             "promote_ready": False,
             "decision": "reject",
+            "evidence_thin": True,
+            "keep_live_band": keep_band,
+            "n_to_promote": INX_BAND_PROMOTE_MIN_N,
             "reason": "no research artifact yet — run_inx_band_research first",
-            "live_band": live.get("id"),
+            "live_band": live_id,
             "leader": None,
+            "leader_n": 0,
             "auto_promote": False,
             "staff_approved": bool(live.get("staff_approved")),
             "fee_floors_locked": True,
+            "observe_only": True,
+            "label": (
+                f"INX evidence THIN — keep {keep_band} until leader n≥"
+                f"{INX_BAND_PROMOTE_MIN_N}"
+            ),
+            "note": (
+                "INX band promote requires research artifact + staff_promote_inx_band. "
+                "Never auto-changes config.json. Fee floors locked."
+            ),
         }
     bands = {b["id"]: b for b in (report.get("bands") or []) if isinstance(b, dict) and b.get("id")}
     leader_id = report.get("leader")
     leader = bands.get(leader_id) if leader_id else None
-    live_row = bands.get(live.get("id") or INX_LIVE_BAND_DEFAULT)
+    live_row = bands.get(live_id)
     ready = False
     reason = "leader missing or thin sample"
+    leader_n = int((leader or {}).get("n") or 0) if leader else 0
+    evidence_thin = True
     if isinstance(leader, dict):
-        n = int(leader.get("n") or 0)
+        n = leader_n
         exp = _finite(leader.get("expectancy_taxed"))
         live_exp = _finite((live_row or {}).get("expectancy_taxed")) if live_row else None
         if n < INX_BAND_PROMOTE_MIN_N:
-            reason = f"leader n={n} < {INX_BAND_PROMOTE_MIN_N}"
+            reason = f"leader n={n} < {INX_BAND_PROMOTE_MIN_N} — evidence thin, keep {keep_band}"
+            evidence_thin = True
         elif exp is None:
             reason = "leader expectancy missing"
-        elif leader_id == (live.get("id") or INX_LIVE_BAND_DEFAULT):
+            evidence_thin = True
+        elif leader_id == live_id:
             reason = "leader already equals live band — no promote needed"
+            evidence_thin = False
         elif live_exp is not None and exp + 1e-12 < live_exp:
-            reason = "leader EV below live band EV"
+            reason = "leader EV below live band EV — keep live band"
+            evidence_thin = False
         else:
             ready = True
+            evidence_thin = False
             reason = (
                 f"leader {leader_id} n={n} EV={exp} beats live "
-                f"{live.get('id')} — staff may promote"
+                f"{live_id} — staff may promote"
             )
+    n_to_promote = max(0, int(INX_BAND_PROMOTE_MIN_N) - int(leader_n))
     return {
         "paper_only": True,
         "promote_ready": ready,
         "decision": "review" if ready else "reject",
+        "evidence_thin": evidence_thin,
+        "keep_live_band": keep_band if (evidence_thin or not ready) else live_id,
+        "n_to_promote": n_to_promote if evidence_thin else 0,
         "reason": reason,
-        "live_band": live.get("id"),
+        "live_band": live_id,
         "leader": leader_id,
-        "leader_n": int((leader or {}).get("n") or 0) if leader else 0,
+        "leader_n": leader_n,
         "leader_ev": _finite((leader or {}).get("expectancy_taxed")) if leader else None,
         "promote_min_n": INX_BAND_PROMOTE_MIN_N,
+        "history_n": int(report.get("history_n") or 0),
         "auto_promote": False,
         "staff_approved": bool(live.get("staff_approved")),
         "effective": live,
         "fee_floors_locked": True,
+        "observe_only": True,
+        "label": (
+            f"INX evidence THIN keep={keep_band} leader_n={leader_n} "
+            f"need≥{INX_BAND_PROMOTE_MIN_N}"
+            if evidence_thin
+            else (
+                f"INX promote_ready leader={leader_id} n={leader_n}"
+                if ready
+                else f"INX reject — {reason[:80]}"
+            )
+        ),
         "note": (
             "INX band promote requires research artifact + staff_promote_inx_band. "
+            "Evidence thin → keep 80–90 until leader n≥20 beats live. "
             "Never auto-changes config.json. Fee floors locked."
         ),
     }
