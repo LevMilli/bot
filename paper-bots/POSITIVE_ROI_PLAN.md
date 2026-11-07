@@ -1687,6 +1687,16 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Feature-store coverage + quiet | `make living-feature-store` |
 | Combined pulse | `make living-money-pulse` |
 
+### Feature-store densify + completions/firm-queue observe (non-tip)
+
+| Ticket | Where |
+| --- | --- |
+| Dense schema v1 (null-coded keys) | `FEATURE_DENSE_KEYS` · `densify_feature_row` · `record_decision_features` |
+| Densify coverage board | `feature_store_coverage.densify_pct` / `densify_pass` (≥90%) |
+| Completions eligible by tower | `completions_summary.eligible_by_bot` |
+| Firm-queue observe samples | `firm_queue_status` deferred/accepted samples · `observe_only` |
+| Pulse includes densify | `make living-money-pulse` → `feature_densify` |
+
 ### Sports desk-wide open-risk (E1 #116)
 
 | Ticket | Where |

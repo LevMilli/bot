@@ -1636,7 +1636,7 @@ def rebuild_firm_queue(
 
 
 def firm_queue_status(root: str | None = None) -> dict:
-    """Masters board: latest firm rank pass + offer book size."""
+    """Masters board: latest firm rank pass + offer book size (observe-safe)."""
     store = _firm_queue_store(root)
     latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
     offers = store.get("offers") if isinstance(store.get("offers"), dict) else {}
@@ -1650,20 +1650,53 @@ def firm_queue_status(root: str | None = None) -> dict:
         if age is not None and age > FIRM_QUEUE_TTL_SEC:
             continue
         live_offers += 1
+    latest_age = _seconds_since_iso((latest or {}).get("at")) if latest else None
+    deferred = []
+    accepted = []
+    for row in (latest or {}).get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        tip = {
+            "bot": row.get("bot"),
+            "ticker": row.get("ticker"),
+            "rank": row.get("rank"),
+            "score": row.get("score"),
+            "status": row.get("status"),
+        }
+        if str(row.get("status") or "") == "deferred":
+            deferred.append(tip)
+        elif str(row.get("status") or "") == "accepted":
+            accepted.append(tip)
     return {
         "paper_only": True,
         "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
         "towers": sorted(FIRM_QUEUE_BOTS),
         "ttl_sec": FIRM_QUEUE_TTL_SEC,
         "offers_n": live_offers,
         "latest": latest,
+        "latest_age_sec": latest_age,
+        "stale": bool(
+            latest_age is not None and latest_age > FIRM_QUEUE_TTL_SEC
+        ),
         "accepted_n": None if not latest else latest.get("accepted_n"),
         "deferred_n": None if not latest else latest.get("deferred_n"),
         "remaining_risk": None if not latest else latest.get("remaining_risk"),
+        "accepted_sample": accepted[:8],
+        "deferred_sample": deferred[:8],
         "top": (latest or {}).get("rows") or [],
+        "label": (
+            f"firm-queue observe offers={live_offers} "
+            f"acc={None if not latest else latest.get('accepted_n')} "
+            f"def={None if not latest else latest.get('deferred_n')} "
+            f"risk_left={None if not latest else latest.get('remaining_risk')}"
+        ),
         "note": (
-            "Firm queue ranks fee-clear sports+btc+commodity by opportunity score; "
-            "deferred tickets skip so desk risk buys best edge first. Fee floors locked."
+            "Firm queue observe — ranks fee-clear sports+btc+commodity by score; "
+            "deferred tickets skip so desk risk buys best edge first. "
+            "Never softens floors; never arms LIVE_ORDERS."
         ),
     }
 

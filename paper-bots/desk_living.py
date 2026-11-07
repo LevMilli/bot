@@ -91,6 +91,76 @@ def feature_store_path(root: str | None = None) -> str:
     return os.path.join(_root(root), FEATURE_STORE_NAME)
 
 
+# Living L0/L1 densify schema — every fee-clear row carries these keys
+# (value or explicit null). Never softens floors; observe/learn only.
+FEATURE_DENSE_KEYS = (
+    "ask",
+    "bid",
+    "fee",
+    "model_p",
+    "z",
+    "edge",
+    "depth",
+    "spread",
+    "minutes_left",
+    "regime",
+    "lane",
+    "league",
+    "series",
+    "side",
+    "skip_stable",
+    "gate_a",
+    "starved",
+    "open_risk",
+    "stake_mult",
+    "fill_tax",
+    "clv",
+    "fit",
+    "latency_ms",
+    "helper_ids",
+    "news_flag",
+    "eia_flag",
+    "weekend_flag",
+    "corr_flag",
+    "cushion",
+    "vol_score",
+)
+FEATURE_DENSE_TARGET = 0.90  # L1 coverage bar for densified keys present
+
+
+def densify_feature_row(row: dict | None) -> dict:
+    """Ensure densify schema keys exist (null-coded when unknown)."""
+    out = dict(row or {})
+    for key in FEATURE_DENSE_KEYS:
+        if key not in out:
+            out[key] = None
+    out["schema"] = "feature_v1_dense"
+    out["paper_only"] = True
+    out["fee_floors_locked"] = True
+    return out
+
+
+def feature_row_densify_score(row: dict | None) -> dict:
+    """Fraction of densify keys that are explicitly present (incl. null)."""
+    row = row if isinstance(row, dict) else {}
+    present = 0
+    missing = []
+    for key in FEATURE_DENSE_KEYS:
+        if key in row:
+            present += 1
+        else:
+            missing.append(key)
+    n = len(FEATURE_DENSE_KEYS) or 1
+    pct = round(present / n, 4)
+    return {
+        "present": present,
+        "expected": n,
+        "pct": pct,
+        "pass": pct + 1e-12 >= FEATURE_DENSE_TARGET,
+        "missing": missing[:12],
+    }
+
+
 def record_decision_features(
     root: str | None = None,
     *,
@@ -110,7 +180,12 @@ def record_decision_features(
     note: str = "",
     extra: dict | None = None,
 ) -> dict:
-    """Append one decision feature row (buy or skip). Paper only."""
+    """Append one densified decision feature row (buy or skip). Paper only."""
+    ask_f = _f(ask)
+    bid_f = _f(bid)
+    spread = None
+    if ask_f is not None and bid_f is not None:
+        spread = round(ask_f - bid_f, 6)
     row = {
         "at": datetime.now(CT).isoformat(timespec="seconds"),
         "chicago_day": chicago_today_iso(),
@@ -118,13 +193,14 @@ def record_decision_features(
         "action": str(action or "skip")[:20],
         "series": str(series or "")[:40],
         "side": str(side or "")[:20],
-        "ask": _f(ask),
-        "bid": _f(bid),
+        "ask": ask_f,
+        "bid": bid_f,
         "fee": _f(fee),
         "model_p": _f(model_p),
         "z": _f(z),
         "edge": _f(edge),
         "depth": _f(depth),
+        "spread": spread,
         "skip_codes": [str(c)[:40] for c in (skip_codes or [])][:12],
         "fill_id": str(fill_id or "")[:80],
         "note": str(note or "")[:160],
@@ -132,10 +208,17 @@ def record_decision_features(
         "fee_floors_locked": True,
     }
     if isinstance(extra, dict):
-        for k, v in list(extra.items())[:12]:
-            if k in row:
+        for k, v in list(extra.items())[:24]:
+            key = str(k)[:40]
+            if key in ("at", "chicago_day", "bot", "action", "skip_codes", "fill_id", "note"):
                 continue
-            row[str(k)[:40]] = v if isinstance(v, (str, int, float, bool)) or v is None else str(v)[:80]
+            if key in row and row[key] is not None:
+                continue
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                row[key] = v if not isinstance(v, str) else v[:80]
+            else:
+                row[key] = str(v)[:80]
+    row = densify_feature_row(row)
     path = feature_store_path(root)
     try:
         with open(path, "a", encoding="utf-8") as handle:
@@ -195,11 +278,18 @@ def record_eval_features(
     reasons: list | None = None,
     note: str = "",
 ) -> dict:
-    """Convenience: map an evaluate/candidate dict into a feature-store row."""
+    """Convenience: map an evaluate/candidate dict into a densified feature row."""
     ev = ev if isinstance(ev, dict) else {}
     codes = []
     for r in reasons or ev.get("reasons") or []:
         codes.append(str(r)[:40])
+    helper_ids = ev.get("helper_ids")
+    if isinstance(helper_ids, (list, tuple)):
+        helper_ids = ",".join(str(x)[:24] for x in helper_ids[:8])
+    elif helper_ids is not None:
+        helper_ids = str(helper_ids)[:80]
+    else:
+        helper_ids = None
     return record_decision_features(
         root,
         bot=bot,
@@ -218,8 +308,28 @@ def record_eval_features(
         note=note or "; ".join(codes)[:160],
         extra={
             "ticker": str(ticker or ev.get("ticker") or "")[:80],
-            "lane": str(ev.get("lane") or "")[:20],
-            "minutes_left": _f(ev.get("min_left") if ev.get("min_left") is not None else ev.get("minutes_left")),
+            "lane": str(ev.get("lane") or "")[:20] or None,
+            "league": str(ev.get("league") or "")[:20] or None,
+            "regime": str(ev.get("regime") or "")[:40] or None,
+            "minutes_left": _f(
+                ev.get("min_left") if ev.get("min_left") is not None else ev.get("minutes_left")
+            ),
+            "skip_stable": ev.get("skip_stable") if "skip_stable" in ev else None,
+            "gate_a": ev.get("gate_a") if "gate_a" in ev else None,
+            "starved": ev.get("starved") if "starved" in ev else None,
+            "open_risk": _f(ev.get("open_risk")),
+            "stake_mult": _f(ev.get("stake_mult")),
+            "fill_tax": _f(ev.get("fill_tax") if ev.get("fill_tax") is not None else 0.01),
+            "clv": _f(ev.get("clv")),
+            "fit": ev.get("fit") if "fit" in ev else None,
+            "latency_ms": _f(ev.get("latency_ms")),
+            "helper_ids": helper_ids,
+            "news_flag": ev.get("news_flag") if "news_flag" in ev else None,
+            "eia_flag": ev.get("eia_flag") if "eia_flag" in ev else None,
+            "weekend_flag": ev.get("weekend_flag") if "weekend_flag" in ev else None,
+            "corr_flag": ev.get("corr_flag") if "corr_flag" in ev else None,
+            "cushion": _f(ev.get("cushion")),
+            "vol_score": _f(ev.get("vol_score")),
         },
     )
 
@@ -233,6 +343,9 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
     buys = 0
     skips = 0
     last_at = None
+    densify_sum = 0.0
+    densify_pass_n = 0
+    dense_schema_n = 0
     if os.path.isfile(path):
         try:
             with open(path, encoding="utf-8") as handle:
@@ -257,8 +370,15 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
                     stamp = row.get("at")
                     if stamp:
                         last_at = str(stamp)
+                    score = feature_row_densify_score(row)
+                    densify_sum += float(score["pct"])
+                    if score["pass"]:
+                        densify_pass_n += 1
+                    if str(row.get("schema") or "") == "feature_v1_dense":
+                        dense_schema_n += 1
         except OSError:
             pass
+    densify_pct = round(densify_sum / n, 4) if n else None
     return {
         "paper_only": True,
         "n": n,
@@ -267,7 +387,18 @@ def feature_store_coverage(root: str | None = None, *, limit: int = MAX_FEATURE_
         "last_at": last_at,
         "path": os.path.basename(path),
         "fee_floors_locked": True,
-        "note": "Decision feature store for living AI learning. Floors locked.",
+        "densify_keys_n": len(FEATURE_DENSE_KEYS),
+        "densify_pct": densify_pct,
+        "densify_pass_n": densify_pass_n,
+        "densify_target": FEATURE_DENSE_TARGET,
+        "densify_pass": (
+            densify_pct is not None and densify_pct + 1e-12 >= FEATURE_DENSE_TARGET
+        ),
+        "dense_schema_n": dense_schema_n,
+        "note": (
+            "Decision feature store densify (L0/L1 field audit). "
+            "Null-coded missing keys; floors locked."
+        ),
     }
 
 
@@ -417,15 +548,25 @@ def completions_summary(root: str | None = None, *, day: str | None = None) -> d
     by_day = store.get("by_day") if isinstance(store.get("by_day"), dict) else {}
     today_rows = [r for r in (by_day.get(day) or []) if isinstance(r, dict)]
     eligible = [r for r in today_rows if r.get("eligible")]
+    ineligible = [r for r in today_rows if not r.get("eligible")]
     pnl_sum = round(sum(float(_f(r.get("pnl")) or 0) for r in eligible), 4)
+    by_bot: dict[str, dict] = {}
+    for r in eligible:
+        bot = str(r.get("bot") or "unknown")[:40]
+        slot = by_bot.setdefault(bot, {"eligible_n": 0, "eligible_pnl": 0.0})
+        slot["eligible_n"] += 1
+        slot["eligible_pnl"] = round(slot["eligible_pnl"] + float(_f(r.get("pnl")) or 0), 4)
     return {
         "paper_only": True,
         "chicago_day": day,
         "completions_today": len(today_rows),
         "eligible_completions_today": len(eligible),
+        "ineligible_completions_today": len(ineligible),
         "eligible_pnl_today": pnl_sum,
+        "eligible_by_bot": by_bot,
         "fee_clear_towers": sorted(FEE_CLEAR),
         "fee_floors_locked": True,
+        "observe_only": True,
         "note": (
             "CompletedEligibleFills = fee-clear closes today. "
             "Optimize with M1 guardrail — never softer floors."
@@ -2260,7 +2401,7 @@ def near_miss_chip(root: str | None = None) -> dict:
 
 
 def firm_queue_chip(root: str | None = None) -> dict:
-    """Compact firm-queue HUD: offers / accepted / deferred / remaining risk."""
+    """Compact firm-queue HUD observe: offers / accepted / deferred / remaining risk."""
     status = {}
     try:
         import desk_roi_plan
@@ -2274,17 +2415,24 @@ def firm_queue_chip(root: str | None = None) -> dict:
     return {
         "paper_only": True,
         "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
         "offers_n": offers_n,
         "accepted_n": accepted_n,
         "deferred_n": deferred_n,
         "remaining_risk": remaining,
+        "latest_age_sec": status.get("latest_age_sec"),
+        "stale": status.get("stale"),
+        "deferred_sample": status.get("deferred_sample") or [],
+        "accepted_sample": status.get("accepted_sample") or [],
         "ttl_sec": status.get("ttl_sec"),
-        "label": (
+        "label": status.get("label") or (
             f"firm queue offers={offers_n} acc={accepted_n} def={deferred_n} "
             f"risk_left={remaining}"
         ),
         "note": status.get("note") or (
-            "Firm queue ranks fee-clear fits — deferred so best edge spends desk risk first."
+            "Firm queue observe — deferred so best edge spends desk risk first. "
+            "Never softens floors."
         ),
     }
 
