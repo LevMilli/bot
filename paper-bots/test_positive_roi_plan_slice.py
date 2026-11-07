@@ -263,5 +263,38 @@ class ExitPlanCoverage(unittest.TestCase):
             self.assertTrue((plan.get("exit_plans") or {}).get("fee_floors_locked"))
 
 
+class BleedWeekObserve(unittest.TestCase):
+    def test_capture_bleed_week_persists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bots = [
+                {"id": "btc15m", "today": 10.0, "open_risk": 0, "gate_a": {"ready": True}},
+                {"id": "memecoin", "today": -3.0, "open_risk": 5.0, "gate_a": {"ready": False}},
+            ]
+            card = desk_roi_plan.capture_bleed_week(tmp, bots=bots, label="2026-11-06")
+            self.assertEqual(card.get("label"), "2026-11-06")
+            self.assertEqual(card.get("target_lt"), 0.5)
+            self.assertFalse(card.get("board_chip"))
+            self.assertTrue(card.get("fee_floors_locked"))
+            self.assertAlmostEqual(float(card.get("ratio") or 0), 0.3, places=4)
+            self.assertTrue(card.get("pass"))
+            latest = desk_roi_plan.latest_bleed_week(tmp)
+            self.assertEqual((latest or {}).get("label"), "2026-11-06")
+
+    def test_master_summary_includes_bleed_week(self):
+        import desk_master
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = desk_master.master_summary(
+                tmp,
+                bots=[
+                    {"id": "btc15m", "today": 8.0, "open_risk": 0, "history": [], "gate_a": {}, "open": []},
+                    {"id": "sports-gap", "today": -1.0, "open_risk": 2.0, "history": [], "gate_a": {}, "open": []},
+                ],
+                cfg={"max_open_risk": 100},
+            )
+            plan = summary.get("roi_plan") or {}
+            self.assertIn("bleed_week", plan)
+            self.assertTrue((plan.get("bleed_week") or {}).get("fee_floors_locked"))
+
+
 if __name__ == "__main__":
     unittest.main()

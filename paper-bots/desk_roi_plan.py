@@ -46,6 +46,7 @@ SPORTS_CALIB_NAME = "desk_sports_calibration.json"
 COMMODITY_CALIB_NAME = "desk_commodity_calibration.json"
 FIRM_QUEUE_NAME = "desk_firm_queue.json"
 EMPTY_CARD_NAME = "desk_empty_card.json"
+BLEED_WEEK_NAME = "desk_bleed_week.json"
 NEAR_MISS_PROMOTE_NAME = "desk_near_miss_promote.json"
 
 MAX_FIT_ROWS = 4000
@@ -476,6 +477,59 @@ def firm_bleed_ratio(bots: list | None = None) -> dict:
         "note": "Bleed ratio uses Chicago today PnL. Quiet $0 towers ignored.",
     }
 
+
+
+
+def capture_bleed_week(
+    root: str | None,
+    bots: list | None = None,
+    *,
+    label: str | None = None,
+) -> dict:
+    """Persist Chicago-day firm bleed card (target ratio < 0.5). Observe only."""
+    day = label or _chicago_day()
+    bleed = firm_bleed_ratio(bots)
+    misplaced = capital_misplaced(bots)
+    board = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "label": day,
+        "captured_at": _now(),
+        "red_usd": bleed.get("red_usd"),
+        "green_usd": bleed.get("green_usd"),
+        "ratio": bleed.get("ratio"),
+        "target_lt": bleed.get("target_lt"),
+        "pass": bleed.get("pass"),
+        "by_tower": bleed.get("by_tower"),
+        "misplaced_usd": misplaced.get("misplaced_usd"),
+        "misplaced_share": misplaced.get("share_of_cap"),
+        "label_line": (
+            f"bleed week={day} ratio={bleed.get('ratio')} "
+            f"pass={bleed.get('pass')} misplaced=${misplaced.get('misplaced_usd')} "
+            "(observe · target <0.5 · never softens floors)"
+        ),
+        "note": (
+            "Chicago bleed observe — want |red|/|green| < 0.5. "
+            "Recycle misplaced open risk toward fee-clear; never soften floors."
+        ),
+    }
+    path = _path(BLEED_WEEK_NAME, root)
+    store = _load(path, {"paper_only": True, "cards": [], "latest": None})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = [c for c in cards if str(c.get("label") or "") != day]
+    cards.append(board)
+    store["cards"] = cards[-60:]
+    store["latest"] = board
+    store["paper_only"] = True
+    _save(path, store)
+    return board
+
+
+def latest_bleed_week(root: str | None = None) -> dict | None:
+    store = _load(_path(BLEED_WEEK_NAME, root), {"paper_only": True, "latest": None})
+    latest = store.get("latest")
+    return latest if isinstance(latest, dict) else None
 
 def capital_misplaced(bots: list | None = None, cfg: dict | None = None) -> dict:
     """
