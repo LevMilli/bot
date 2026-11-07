@@ -1910,6 +1910,16 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Masters / calib-clv | `roi_plan.eth_calibration` · `calib_clv_observe.eth_calibration` |
 | Never writes Φ | `auto_write_phi=False` |
 
+### Per-league CLV board (Phase 4)
+
+| Ticket | Where |
+| --- | --- |
+| NFL / NCAAF / NBA / WNBA / MLB / NHL | `desk_more.clv_by_league` |
+| Beat-close bar | ≥52% once n≥10 |
+| CLI | `make living-clv-leagues` |
+| Masters / calib-clv | `roi_plan.clv_leagues` · `calib_clv_observe.clv_leagues` |
+| Floors | Never softens venue edge; NFL fair floor stays stricter |
+
 ### Next
 
 | Ticket | Where |

@@ -453,6 +453,11 @@ def master_summary(
             "fee_floors_locked": True,
         }
         try:
+            import desk_more
+            plan["clv_leagues"] = desk_more.clv_by_league(root)
+        except Exception:
+            plan["clv_leagues"] = None
+        try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
