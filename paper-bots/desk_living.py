@@ -2464,6 +2464,13 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["ritual_live_labels"] = ritual_live_labels(board)
     slim["sunday_twin_coverage"] = sunday_twin_coverage(board)
     slim["l7_observe"] = l7_observe_summary(board)
+    compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+    slim["sunday_twins"] = {
+        k: compact_src.get(k)
+        for k in sorted(compact_src)
+        if str(k).endswith("_sunday_quiet")
+    }
+    slim["sunday_twins_n"] = len(slim["sunday_twins"])
     slim["ritual_ok"] = ritual.get("ritual_ok")
     slim["ritual_exit_ok"] = ritual.get("exit_ok")
     slim["doctor_fresh"] = ritual.get("doctor_fresh")

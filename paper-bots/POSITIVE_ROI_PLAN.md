@@ -1345,6 +1345,14 @@ Interactive: Positive ROI Master Plan canvas.
 | Status text/json sunday twins | staff_living_status |
 | Vault sunday twins row | App vault (from export flat) |
 
+### Living upgrade — status sunday twins flatten (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Status JSON auto-flatten `*_sunday_quiet` | staff_living_status json |
+| Status text swarm/hill/gaps sunday | _text lines |
+| Export `sunday_twins` map | living_board_export |
+
 ### Next
 
 | Ticket | Where |

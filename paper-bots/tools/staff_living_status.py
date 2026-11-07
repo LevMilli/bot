@@ -252,6 +252,30 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "swarm sunday: "
+            + str(
+                (board.get("compact") or {}).get("swarm_sunday_quiet")
+                if isinstance(board.get("compact"), dict)
+                else "swarm observe · sunday quiet"
+            )
+        ),
+        (
+            "hill sunday: "
+            + str(
+                (board.get("compact") or {}).get("hill_sunday_quiet")
+                if isinstance(board.get("compact"), dict)
+                else "hillclimb observe · sunday quiet"
+            )
+        ),
+        (
+            "gaps sunday: "
+            + str(
+                (board.get("compact") or {}).get("gaps_sunday_quiet")
+                if isinstance(board.get("compact"), dict)
+                else "gaps observe · sunday quiet"
+            )
+        ),
+        (
             "digests sunday: "
             + str(inv.get("label") or "digests observe")
             + " · sunday quiet "
@@ -1093,7 +1117,7 @@ def main() -> int:
             if ritual_j or doctor_age_j
             else None
         )
-        print(json.dumps({
+        out = {
             "paper_only": True,
             "fee_floors_locked": True,
             "live_orders_enabled": False,
@@ -1480,7 +1504,19 @@ def main() -> int:
                 k for k, v in board.items()
                 if isinstance(v, dict) and v.get("fee_floors_locked") is True
             ),
-        }, indent=2, sort_keys=True, default=str))
+        }
+        # Flatten every compact *_sunday_quiet twin so new twins never go missing.
+        for key, val in compact_j.items():
+            if not str(key).endswith("_sunday_quiet"):
+                continue
+            out.setdefault(key, val)
+            out.setdefault(f"compact_{key}", val)
+        out["sunday_twins_flat_n"] = sum(
+            1
+            for k in out
+            if str(k).endswith("_sunday_quiet") and not str(k).startswith("compact_")
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "pager":
         pager = board.get("feature_quiet_pager")
