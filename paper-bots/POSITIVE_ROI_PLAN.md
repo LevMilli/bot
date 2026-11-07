@@ -1821,6 +1821,15 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Dual-control | observe-only status inside `ops_observe` (LIVE_ORDERS still deferred) |
 | Money pulse / Masters | `ops` on pulse + `roi_plan.ops` |
 
+### Guardrails observe (empty CARD / stale / adverse / anti-revenge)
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `guardrails_observe` · `make living-guardrails` |
+| Adverse / anti-revenge status | `adverse_cool_status` / `anti_revenge_status` |
+| Split CLIs | `living-adverse-cool` / `living-anti-revenge` / `living-empty-card` / `living-stale-world` |
+| Money pulse / Masters | `guardrails` on pulse + `roi_plan.guardrails` |
+
 ### Next
 
 | Ticket | Where |
