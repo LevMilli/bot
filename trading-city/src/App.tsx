@@ -1175,6 +1175,29 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">ritual·live</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            ritual_live_sunday_quiet?: string
+                            ritual_live_n?: number
+                            compact_ritual_live_sunday_quiet?: string
+                          }
+                        | undefined
+                      const twin =
+                        desk?.ritual_live_sunday_quiet ||
+                        desk?.compact_ritual_live_sunday_quiet
+                      if (twin) return `${twin} · make living-ritual-live (paste only · never auto-posts)`
+                      const n = desk?.ritual_live_n
+                      return (
+                        `ritual live${n != null ? ` n=${n}` : ''} · sunday quiet · ` +
+                        'make living-ritual-live / living-ritual-discord (staff paste · never auto-posts)'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{
@@ -2948,10 +2971,20 @@ export default function App() {
                   <span
                     style={{
                       color: (() => {
-                        const t = snap?.desk?.teller_living
+                        const t = snap?.desk?.teller_living as
+                          | {
+                              ritual_nag?: boolean
+                              ritual_ok?: boolean
+                              quiet_nag?: boolean
+                              quiet_age_h?: number
+                              quiet_age?: string
+                              ritual_live_ok?: boolean
+                            }
+                          | undefined
                         if (!t) return undefined
                         if (t.ritual_nag || t.ritual_ok === false) return '#d4a017'
                         if (t.quiet_nag) return '#d4a017'
+                        if (t.ritual_live_ok === false) return '#d4a017'
                         const ageH =
                           t.quiet_age_h ??
                           (typeof t.quiet_age === 'string' && t.quiet_age.endsWith('h')
@@ -2968,10 +3001,20 @@ export default function App() {
                         snap?.desk?.teller_living?.memory_line ||
                         snap?.desk?.teller_memory?.recent?.[0]?.text ||
                         'living teller pending'
-                      const t = snap?.desk?.teller_living
+                      const t = snap?.desk?.teller_living as
+                        | {
+                            ritual_nag?: boolean
+                            ritual_ok?: boolean
+                            quiet_nag?: boolean
+                            quiet_age_label?: string
+                            ritual_live_n?: number
+                            ritual_live_ok?: boolean
+                          }
+                        | undefined
                       const bits: string[] = []
                       if (t?.ritual_nag || t?.ritual_ok === false) bits.push('ritual_nag')
                       if (t?.quiet_nag) bits.push(t.quiet_age_label || 'quiet_nag')
+                      if (t?.ritual_live_n != null) bits.push(`ritual_live_n=${t.ritual_live_n}`)
                       const sun =
                         snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
                       const sundayBit =
@@ -2979,6 +3022,37 @@ export default function App() {
                         (sun?.quiet_age ? `quiet_age=${sun.quiet_age}` : 'quiet_age=n/a')
                       const withBits = bits.length ? `${line} · ${bits.join(' · ')}` : line
                       return `${withBits} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">teller·live</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            teller_ritual_live_sunday_quiet?: string
+                            compact_teller_ritual_live_sunday_quiet?: string
+                            teller_living?: {
+                              ritual_live_n?: number
+                              ritual_live_ok?: boolean
+                            }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.teller_ritual_live_sunday_quiet ||
+                        desk?.compact_teller_ritual_live_sunday_quiet
+                      if (twin) return twin
+                      const n = desk?.teller_living?.ritual_live_n
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `teller ritual live n=${n ?? '?'} · sunday quiet ${sundayBit} ` +
+                        '(observe · never softens floors)'
+                      )
                     })()}
                   </span>
                 </div>

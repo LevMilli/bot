@@ -799,16 +799,23 @@ class DeskLivingTests(unittest.TestCase):
             compact = desk_living.living_compact_card(tmp, board=board)
             self.assertIn("ritual_live_sunday_quiet", compact)
             self.assertIn("ritual live n=", compact.get("ritual_live_sunday_quiet") or "")
+            self.assertIn("teller_ritual_live_sunday_quiet", compact)
+            self.assertIn("teller ritual live n=", compact.get("teller_ritual_live_sunday_quiet") or "")
             export = desk_living.living_board_export(tmp)
             self.assertIn("ritual_live_sunday_quiet", export)
             self.assertIn("ritual_live_sunday_quiet", export.get("sunday_twins") or {})
-            self.assertIn(
-                "ritual_live_sunday_quiet",
-                export.get("compact_ritual_live_sunday_quiet")
-                and {"ritual_live_sunday_quiet"}
-                or {"ritual_live_sunday_quiet"},
-            )
+            self.assertIn("teller_ritual_live_sunday_quiet", export.get("sunday_twins") or {})
+            self.assertTrue(export.get("ritual_live_ok"))
+            self.assertGreaterEqual(int(export.get("ritual_live_n") or 0), 40)
             self.assertTrue(str(export.get("compact_ritual_live_sunday_quiet") or export.get("ritual_live_sunday_quiet") or "").startswith("ritual live"))
+            from tools import staff_living_status
+            live = desk_living.ritual_live_labels(board)
+            self.assertGreaterEqual(
+                sum(1 for k, v in live.items() if str(k).endswith("_label") and v),
+                40,
+            )
+            txt = staff_living_status._text(board)
+            self.assertIn("teller ritual live sunday:", txt)
             payload = {
                 "paper_only": True,
                 "live_orders_enabled": False,
