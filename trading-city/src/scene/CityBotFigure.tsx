@@ -13,6 +13,8 @@ export function CityBotFigure({
   deskWork = false,
   seed = 0,
   unitMark,
+  /** Force low-poly silhouette (far tellers / background patrons). */
+  lite,
 }: {
   context: Context
   pose?: BotPose
@@ -20,6 +22,7 @@ export function CityBotFigure({
   deskWork?: boolean
   seed?: number
   unitMark?: string
+  lite?: boolean
 }) {
   if (shouldUseIndustrialBot(context)) {
     return (
@@ -29,8 +32,8 @@ export function CityBotFigure({
         deskWork={deskWork}
         seed={seed}
         unitMark={unitMark}
-        /** Tiny plaza car riders — silhouette only to keep WebGL light. */
-        lite={context === 'city'}
+        /** Plaza cars always lite; callers can also request lite for distant bank extras. */
+        lite={lite ?? context === 'city'}
         /** Bank window staff get trust-hall cyan/brass teller kit. */
         variant={context === 'bank' ? 'teller' : 'default'}
       />

@@ -455,17 +455,16 @@ export function PlayerHeroFigure({
 
   return (
     <group ref={root} position={[0, 0.64, 0]} scale={1} frustumCulled={false}>
-      <pointLight position={[0, 1.25, 0.6]} intensity={0.85} color="#9ef8ff" distance={4.6} />
-      <pointLight position={[0, 0.95, -0.55]} intensity={0.55} color="#ffd24a" distance={3.4} />
-      <pointLight position={[0, 0.4, -0.35]} intensity={0.42} color="#5af0ff" distance={2.6} />
+      {/* One fill light — pack/chest LEDs carry the accent glow without 3× light cost. */}
+      <pointLight position={[0, 1.15, 0.35]} intensity={0.7} color="#b8f4ff" distance={4.2} />
 
       {/* Ground energy field */}
       <mesh ref={field} position={[0, -0.62, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.28, 0.52, 40]} />
+        <ringGeometry args={[0.28, 0.52, 28]} />
         <meshBasicMaterial color={ACCENT} transparent opacity={0.22} depthWrite={false} toneMapped={false} />
       </mesh>
       <mesh position={[0, -0.615, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.18, 0.24, 32]} />
+        <ringGeometry args={[0.18, 0.24, 24]} />
         <meshBasicMaterial color={GOLD} transparent opacity={0.35} depthWrite={false} toneMapped={false} />
       </mesh>
 
@@ -473,8 +472,8 @@ export function PlayerHeroFigure({
         {/* Orbit halo around torso */}
         <group ref={orbit} position={[0, 0.58, 0]}>
           <mesh rotation={[Math.PI / 2.4, 0.2, 0]}>
-            <torusGeometry args={[0.48, 0.012, 8, 48]} />
-            <meshStandardMaterial {...neon(ACCENT, 1.6)} />
+            <torusGeometry args={[0.48, 0.012, 6, 32]} />
+            <meshBasicMaterial color={ACCENT} toneMapped={false} />
           </mesh>
           {([0, 1, 2] as const).map((i) => {
             const a = (i / 3) * Math.PI * 2
