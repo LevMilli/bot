@@ -3898,6 +3898,111 @@ def l7_observe_summary(board: dict | None = None, root: str | None = None) -> di
 
 
 
+
+def ritual_live_labels(board: dict | None = None, root: str | None = None) -> dict:
+    """Surface-only live labels for ritual Discord sunday lines (not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+
+    def _lab(key: str, fallback: str) -> str:
+        row = src.get(key)
+        if isinstance(row, dict) and row.get("label"):
+            return str(row.get("label"))
+        return fallback
+
+    completions = src.get("completions") if isinstance(src.get("completions"), dict) else {}
+    fills_lab = (
+        f"eligible today {completions.get('eligible_completions_today')}"
+        if completions.get("eligible_completions_today") is not None
+        else _lab("completions_chip", "fills observe")
+    )
+    quiet = src.get("feature_quiet") if isinstance(src.get("feature_quiet"), dict) else {}
+    quiet_lab = (
+        quiet.get("alert")
+        or (
+            f"feature quiet={'yes' if quiet.get('quiet') else 'no'}"
+            if quiet
+            else None
+        )
+        or "feature quiet observe"
+    )
+    feat_store = src.get("feature_store") if isinstance(src.get("feature_store"), dict) else {}
+    fstore_lab = (
+        f"feature store n={feat_store.get('n')} "
+        f"buys={feat_store.get('buys')} skips={feat_store.get('skips')}"
+        if feat_store
+        else "feature store observe"
+    )
+    l7 = l7_observe_summary(src)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "digests_label": _lab("digest_inventory", "digests observe"),
+        "fills_label": fills_lab,
+        "hill_label": _lab("hillclimb_chip", "hillclimb none"),
+        "swarm_label": (
+            (
+                f"swarm {src['insight_swarm'].get('insight_n')}:"
+                f"{src['insight_swarm'].get('betting_n')} "
+                f"ratio={src['insight_swarm'].get('ratio')}"
+                + (" ok" if src['insight_swarm'].get('pass') else " THIN")
+            )
+            if isinstance(src.get("insight_swarm"), dict)
+            and src["insight_swarm"].get("insight_n") is not None
+            else _lab("insight_swarm", "swarm observe")
+        ),
+        "green_label": _lab("green_day", "green-day observe"),
+        "bleed_label": _lab("bleed", "bleed observe"),
+        "clv_label": _lab("clv", "CLV observe"),
+        "calib_label": _lab("calib_nag", "calib observe"),
+        "queue_label": _lab("firm_queue", "queue observe"),
+        "gate_a_label": _lab("helper_gate_a", "Gate A observe"),
+        "ai_label": _lab("living_ai", "AI observe"),
+        "tip_label": _lab("tip_radar", "tip feed observe"),
+        "blackout_label": _lab("eia_blackout", "blackout observe"),
+        "injury_label": _lab("injury_wire", "injury observe"),
+        "empty_label": _lab("empty_card", "empty CARD observe"),
+        "near_miss_label": _lab("near_miss", "near-miss observe"),
+        "eia_label": _lab("eia_scout", "EIA observe"),
+        "calendar_label": _lab("calendar_scanner", "calendar observe"),
+        "pager_label": _lab("feature_quiet_pager", "pager observe"),
+        "books_label": _lab("bookkeeper", "books observe"),
+        "pulse_label": _lab("clerk_pulse", "pulse observe"),
+        "dual_label": _lab("dual_control_chip", "dual observe"),
+        "skip_reg_label": _lab("skip_regret", "skip-regret observe"),
+        "hard_stop_label": _lab("hard_stop", "hard-stop observe"),
+        "distance_label": _lab("distance_clerk", "distance observe"),
+        "quant_label": _lab("quant_clerk", "quant observe"),
+        "report_label": _lab("reporter", "report observe"),
+        "empty_bee_label": _lab("empty_card_bee", "empty bee observe"),
+        "nm_clerk_label": _lab("near_miss_clerk", "nm clerk observe"),
+        "hs_clerk_label": _lab("hard_stop_clerk", "hs clerk observe"),
+        "bleed_clerk_label": _lab("bleed_clerk", "bleed clerk observe"),
+        "skip_twin_label": _lab("skip_twin_clerk", "skip-twin observe"),
+        "clv_closer_label": _lab("clv_closer", "CLV closer observe"),
+        "tdigest_label": _lab("timer_digest", "t-digest observe"),
+        "skips_label": _lab("skip_taxonomy", "skips observe"),
+        "adapt_label": _lab("living_ai", "adapt observe"),
+        "teller_label": _lab("teller_living", "teller observe"),
+        "quiet_label": str(quiet_lab),
+        "doc_age_label": _lab("doctor_age", "doctor age observe"),
+        "ritual_label": _lab("ritual_observe", "ritual observe"),
+        "digest_fresh_label": _lab("digest_freshness", "digest fresh observe"),
+        "journals_label": _lab("journal_coverage", "journals observe"),
+        "monday_label": _lab("monday_pulse", "monday pulse observe"),
+        "toxic_fills_label": _lab("toxic_fills", "toxic fills observe"),
+        "adapt_ab_label": _lab("adapt_ab", "adapt A/B observe"),
+        "raise_phi_sla_label": _lab("raise_phi_sla", "raise_Φ SLA observe"),
+        "feature_coverage_label": _lab("feature_coverage", "feature coverage observe"),
+        "chip_catalog_label": _lab("chip_catalog", "chip catalog observe"),
+        "phase2_pulse_label": _lab("phase2_pulse", "phase2 pulse observe"),
+        "l7_observe_label": str(l7.get("label") or "L7 observe pulse"),
+        "feature_store_label": fstore_lab,
+        "skip_historian_label": _lab("skip_historian", "skip historian observe"),
+        "note": "Ritual Discord live labels — staff paste only; never auto-posts.",
+    }
+
+
 def sunday_twin_coverage(board: dict | None = None, root: str | None = None) -> dict:
     """Count compact sunday quiet twins vs fee-locked board fields (surface audit)."""
     src = board if isinstance(board, dict) else living_upgrade_board(root)

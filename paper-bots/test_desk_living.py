@@ -765,6 +765,36 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("skip_historian_sunday_quiet", export)
             self.assertFalse((board.get("board_size") or {}).get("over"))
 
+    def test_ritual_live_labels(self):
+        import tempfile
+        from tools.staff_living_ritual import format_discord
+        with tempfile.TemporaryDirectory() as tmp:
+            board = desk_living.living_upgrade_board(tmp)
+            live = desk_living.ritual_live_labels(board)
+            self.assertTrue(live.get("fee_floors_locked"))
+            self.assertFalse(live.get("board_chip"))
+            self.assertIn("swarm_label", live)
+            self.assertIn("toxic_fills_label", live)
+            payload = {
+                "paper_only": True,
+                "live_orders_enabled": False,
+                "ritual_ok": True,
+                "exit_ok": True,
+                "floors_ok": True,
+                "expand_ok": True,
+                "doctor_ok": True,
+                "doctor_fresh": True,
+                "sunday_quiet_age_label": "quiet_age=n/a",
+                "timer_alive": True,
+                "steps": {},
+            }
+            payload.update({k: v for k, v in live.items() if str(k).endswith("_label")})
+            draft = format_discord(payload)
+            self.assertIn(str(live.get("swarm_label")), draft)
+            self.assertIn(str(live.get("toxic_fills_label")), draft)
+            self.assertNotIn("l7_observe", board)
+            self.assertFalse((board.get("board_size") or {}).get("over"))
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util
