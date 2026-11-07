@@ -463,6 +463,24 @@ def format_discord(payload: dict) -> str:
             f"• Chicago sunday: {chicago_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    starve_twin = payload.get("starve_sunday_quiet")
+    if starve_twin:
+        lines.append(f"• Starve sunday: {starve_twin}")
+    else:
+        starve_lab = payload.get("starve_label") or "starve observe"
+        lines.append(
+            f"• Starve sunday: {starve_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    hard_rules_twin = payload.get("hard_rules_sunday_quiet")
+    if hard_rules_twin:
+        lines.append(f"• Hard-rules sunday: {hard_rules_twin}")
+    else:
+        hard_rules_lab = payload.get("hard_rules_label") or "hard-rules observe"
+        lines.append(
+            f"• Hard-rules sunday: {hard_rules_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1129,6 +1147,26 @@ def main() -> int:
                 )
             )
             print(
+                "starve sunday: "
+                + str(
+                    compact_obs.get("starve_sunday_quiet")
+                    or (
+                        f"{desk_living.living_starve_tip(board_obs).get('label') or 'starve observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "hard-rules sunday: "
+                + str(
+                    compact_obs.get("hard_rules_sunday_quiet")
+                    or (
+                        f"{desk_living.living_hard_rules_tip(board_obs).get('label') or 'hard-rules observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1325,6 +1363,20 @@ def main() -> int:
     payload["chicago_label"] = chicago.get("label")
     payload["chicago_sunday_quiet"] = compact.get("chicago_sunday_quiet") or (
         f"{chicago.get('label') or 'chicago observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    starve = desk_living.living_starve_tip(board)
+    payload["starve"] = starve
+    payload["starve_label"] = starve.get("label")
+    payload["starve_sunday_quiet"] = compact.get("starve_sunday_quiet") or (
+        f"{starve.get('label') or 'starve observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    hard_rules = desk_living.living_hard_rules_tip(board)
+    payload["hard_rules"] = hard_rules
+    payload["hard_rules_label"] = hard_rules.get("label")
+    payload["hard_rules_sunday_quiet"] = compact.get("hard_rules_sunday_quiet") or (
+        f"{hard_rules.get('label') or 'hard-rules observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:

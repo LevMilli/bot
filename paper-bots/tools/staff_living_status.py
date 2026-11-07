@@ -127,6 +127,16 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_chicago_tip")
         else {}
     )
+    starve = (
+        desk_living.living_starve_tip(board)
+        if hasattr(desk_living, "living_starve_tip")
+        else {}
+    )
+    hard_rules = (
+        desk_living.living_hard_rules_tip(board)
+        if hasattr(desk_living, "living_hard_rules_tip")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -1150,6 +1160,34 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "starve: "
+            + str(starve.get("label") or "starve observe")
+        ),
+        (
+            "starve sunday: "
+            + str(
+                compact.get("starve_sunday_quiet")
+                or (
+                    str(starve.get("label") or "starve observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
+            "hard-rules: "
+            + str(hard_rules.get("label") or "hard-rules observe")
+        ),
+        (
+            "hard-rules sunday: "
+            + str(
+                compact.get("hard_rules_sunday_quiet")
+                or (
+                    str(hard_rules.get("label") or "hard-rules observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1253,14 +1291,14 @@ def main() -> int:
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
-            "venues", "chicago",
+            "venues", "chicago", "starve", "hard-rules",
         ),
     )
     parser.add_argument("--root", default=ROOT)
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money/rules/surfaces/smoke/paste/paper/makefile/venues/chicago); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money/rules/surfaces/smoke/paste/paper/makefile/venues/chicago/starve/hard-rules); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -1393,6 +1431,8 @@ def main() -> int:
         makefile_j = desk_living.living_makefile_index(board)
         venues_j = desk_living.living_venues_tip(board)
         chicago_j = desk_living.living_chicago_tip(board)
+        starve_j = desk_living.living_starve_tip(board)
+        hard_rules_j = desk_living.living_hard_rules_tip(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1825,6 +1865,14 @@ def main() -> int:
             "chicago_label": chicago_j.get("label"),
             "chicago_sunday_quiet": compact_j.get("chicago_sunday_quiet"),
             "compact_chicago_sunday_quiet": compact_j.get("chicago_sunday_quiet"),
+            "starve": starve_j,
+            "starve_label": starve_j.get("label"),
+            "starve_sunday_quiet": compact_j.get("starve_sunday_quiet"),
+            "compact_starve_sunday_quiet": compact_j.get("starve_sunday_quiet"),
+            "hard_rules": hard_rules_j,
+            "hard_rules_label": hard_rules_j.get("label"),
+            "hard_rules_sunday_quiet": compact_j.get("hard_rules_sunday_quiet"),
+            "compact_hard_rules_sunday_quiet": compact_j.get("hard_rules_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -2025,10 +2073,10 @@ def main() -> int:
     if args.action == "help":
         print(
             "Living status actions (paper · floors locked · Discord never auto-posts):\n"
-            "  text json selfcheck export hud priority ritual-live money rules surfaces smoke paste paper makefile venues chicago\n"
+            "  text json selfcheck export hud priority ritual-live money rules surfaces smoke paste paper makefile venues chicago starve hard-rules\n"
             "  floors teller expand doctor l7 sunday pulse gaps inventory\n"
             "  hillclimb ruin seed pager\n"
-            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/rules/surfaces/smoke/paste/paper/makefile/venues/chicago/priority\n"
+            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/rules/surfaces/smoke/paste/paper/makefile/venues/chicago/starve/hard-rules/priority\n"
             "Makefile: make living-help"
         )
         return 0
@@ -2233,6 +2281,51 @@ def main() -> int:
             out["chicago_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if tip.get("chicago_today") else 2
+
+    if args.action == "starve":
+        tip = desk_living.living_starve_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("starve_sunday_quiet") or (
+            f"{tip.get('label') or 'starve observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Starve rule** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"n_min={tip.get('n_min')} factor={tip.get('factor')}\n"
+                "_observe only · never rewrites starve · never softens floors_"
+            )
+        else:
+            out = dict(tip)
+            out["starve_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+
+    if args.action == "hard-rules":
+        tip = desk_living.living_hard_rules_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("hard_rules_sunday_quiet") or (
+            f"{tip.get('label') or 'hard-rules observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            rules = tip.get("rules") or {}
+            print(
+                "**Hard rules** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"meme_red_lock={rules.get('meme_red_lock_usd')} inx_halt={rules.get('inx_halt_usd')}\n"
+                f"kill={rules.get('kill')}\n"
+                f"venues={rules.get('venues')}\n"
+                "_observe only · never rewrites policy · never softens floors_"
+            )
+        else:
+            out = dict(tip)
+            out["hard_rules_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

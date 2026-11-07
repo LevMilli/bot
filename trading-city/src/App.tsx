@@ -1617,6 +1617,67 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">starve</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            starve_sunday_quiet?: string
+                            compact_starve_sunday_quiet?: string
+                            starve_label?: string
+                            starve?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.starve_sunday_quiet || desk?.compact_starve_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.starve_label || desk?.starve?.label || 'starve observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(observe) · make living-starve'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">hard-rules</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            hard_rules_sunday_quiet?: string
+                            compact_hard_rules_sunday_quiet?: string
+                            hard_rules_label?: string
+                            hard_rules?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.hard_rules_sunday_quiet ||
+                        desk?.compact_hard_rules_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.hard_rules_label ||
+                        desk?.hard_rules?.label ||
+                        'hard-rules observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(observe) · make living-hard-rules'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{
