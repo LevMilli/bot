@@ -2537,6 +2537,40 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">ritual live</span>
+                  <span>
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            ritual_live_labels?: {
+                              digests_label?: string
+                              fills_label?: string
+                              timer_label?: string
+                            }
+                            ritual_live_n?: number
+                          }
+                        | undefined
+                      const live = desk?.ritual_live_labels
+                      const n =
+                        desk?.ritual_live_n ??
+                        (live
+                          ? Object.keys(live).filter((k) => k.endsWith('_label')).length
+                          : undefined)
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      if (!live && n == null)
+                        return `ritual live observe · sunday quiet ${sundayBit} (observe · never softens floors)`
+                      const dig = live?.digests_label || 'digests observe'
+                      const fills = live?.fills_label || 'fills observe'
+                      const timer = live?.timer_label || 'timer observe'
+                      return `ritual live n=${n ?? '?'} · ${dig} · ${fills} · ${timer} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">feat store</span>
                   <span>
                     {(() => {
