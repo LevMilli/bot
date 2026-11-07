@@ -680,6 +680,11 @@ export function IndustrialBotFigure({
   const phase = seed * 1.37
 
   useFrame(({ clock }) => {
+    // Standing bank tellers / hall bots: half-rate idle (~30fps) — still smooth bob, less CPU.
+    if (!deskWork && !lite) {
+      const frame = (clock.getElapsedTime() * 60) | 0
+      if (frame % 2 !== (Math.abs(Math.floor(seed * 10)) % 2)) return
+    }
     const t = clock.getElapsedTime() + phase
     if (body.current) {
       let bob = Math.sin(t * 1.35) * 0.014

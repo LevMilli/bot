@@ -131,13 +131,19 @@ function TellerPod({
   const walk = useRef({ z: 0, x: 0 })
 
   useEffect(() => () => plate.dispose(), [plate])
+  const tick = useRef(0)
   useFrame(({ clock }, dt) => {
     const t = clock.getElapsedTime()
-    if (lamp.current) {
+    const hot = focused || near || away || recalling
+    // Far idle pods update every other frame — keeps lean/walk responsive when hot.
+    tick.current += 1
+    if (!hot && tick.current % 2 === 1) return
+
+    if (lamp.current && (hot || tick.current % 4 === 0)) {
       const mat = lamp.current.material as { emissiveIntensity?: number }
       if (mat.emissiveIntensity != null) {
         mat.emissiveIntensity =
-          offline ? 0.2 : (focused || near ? 0.95 : 0.55) + Math.sin(t * 2.4 + index) * 0.18
+          offline ? 0.2 : (focused || near ? 1.05 : 0.75) + Math.sin(t * 2.4 + index) * 0.12
       }
     }
     if (halo.current) {
@@ -147,19 +153,19 @@ function TellerPod({
       const mat = halo.current.material as { opacity?: number }
       if (mat.opacity != null) mat.opacity = near || focused ? 0.9 : 0.55
     }
-    if (screen.current && !offline) {
+    if (hot && screen.current && !offline) {
       const mat = screen.current.material as { opacity?: number }
       if (mat.opacity != null) {
         mat.opacity = 0.45 + Math.sin(t * 5.5 + index * 1.7) * 0.12 + (near ? 0.12 : 0)
       }
     }
-    if (screenB.current && !offline) {
+    if (hot && screenB.current && !offline) {
       const mat = screenB.current.material as { opacity?: number }
       if (mat.opacity != null) {
         mat.opacity = 0.4 + Math.sin(t * 4.2 + index * 2.1) * 0.1 + (near ? 0.1 : 0)
       }
     }
-    if (pad.current && !offline) {
+    if (hot && pad.current && !offline) {
       pad.current.position.y = 0.96 + Math.sin(t * 3.4 + index) * 0.004
     }
     // Step sideways behind the counter when away — never through the desk.
@@ -191,7 +197,7 @@ function TellerPod({
   return (
     <group>
       {/* Raised platform under the whole station */}
-      <mesh position={[0, 0.04, -0.55]} receiveShadow>
+      <mesh position={[0, 0.04, -0.55]}>
         <boxGeometry args={[podW + 0.28, 0.08, 1.4]} />
         <meshStandardMaterial color="#14101c" roughness={0.75} metalness={0.15} />
       </mesh>
@@ -205,7 +211,7 @@ function TellerPod({
         <meshBasicMaterial color={color} transparent opacity={0.1} depthWrite={false} toneMapped={false} />
       </mesh>
       {/* Compact cabinet — wall side only; front face ≈ −0.22 */}
-      <mesh position={[0, 0.5, -0.62]} castShadow>
+      <mesh position={[0, 0.5, -0.62]}>
         <boxGeometry args={[podW, 0.78, 0.55]} />
         <meshStandardMaterial
           color="#16121c"
@@ -234,22 +240,14 @@ function TellerPod({
         <meshStandardMaterial color={CYAN} emissive={CYAN} emissiveIntensity={0.45} toneMapped={false} />
       </mesh>
       {/* Counter top — lip ≈ +0.05, clear of ropes at 1.4+ */}
-      <mesh position={[0, 0.92, -0.42]} castShadow>
+      <mesh position={[0, 0.92, -0.42]}>
         <boxGeometry args={[podW + 0.1, 0.06, 0.78]} />
         <meshStandardMaterial color="#d8d0c0" roughness={0.28} metalness={0.22} />
       </mesh>
-      {/* Glass transaction strip */}
+      {/* Glass-look strip — emissive basic (transmission Physical was a frame killer ×12) */}
       <mesh position={[0, 0.96, -0.28]}>
         <boxGeometry args={[podW * 0.7, 0.018, 0.35]} />
-        <meshPhysicalMaterial
-          color="#7ef9ff"
-          metalness={0.05}
-          roughness={0.08}
-          transmission={0.5}
-          transparent
-          opacity={0.4}
-          thickness={0.15}
-        />
+        <meshBasicMaterial color="#7ef9ff" transparent opacity={0.28} depthWrite={false} toneMapped={false} />
       </mesh>
       <mesh position={[0, 0.96, -0.05]}>
         <boxGeometry args={[podW * 0.55, 0.025, 0.03]} />
@@ -324,12 +322,12 @@ function TellerPod({
         <meshStandardMaterial
           color="#1a1420"
           emissive={offline ? '#401820' : color}
-          emissiveIntensity={0.7}
+          emissiveIntensity={focused || near ? 1.15 : 0.85}
           side={DoubleSide}
           roughness={0.4}
         />
       </mesh>
-      <pointLight position={[0.2, 1.15, -0.1]} intensity={0.28} color="#fff4d0" distance={2.4} />
+      {/* Desk pool light removed — lamp + screen emissives keep the glow without ×12 pointLights. */}
 
       {/* Nameplate on a post above the cabinet — not floating into the bot */}
       <mesh position={[0, 1.25, -0.78]}>
@@ -449,8 +447,8 @@ function HeroVaultDoor() {
     }
     if (status.current) status.current.emissiveIntensity = 0.7 + Math.sin(t * 2.4) * 0.35
   })
-  const bolts = Array.from({ length: 18 }, (_, i) => {
-    const a = (i / 18) * Math.PI * 2
+  const bolts = Array.from({ length: 12 }, (_, i) => {
+    const a = (i / 12) * Math.PI * 2
     return [Math.cos(a) * 1.18, Math.sin(a) * 1.18] as const
   })
   return (
@@ -487,28 +485,28 @@ function HeroVaultDoor() {
       ))}
       {/* Inner chamber glow behind the wheel */}
       <mesh position={[0, 0.05, -0.28]}>
-        <circleGeometry args={[1.25, 48]} />
+        <circleGeometry args={[1.25, 32]} />
         <meshBasicMaterial color="#3a1860" toneMapped={false} />
       </mesh>
-      <pointLight position={[0, 0.2, -0.1]} intensity={1.0} color="#ffd080" distance={7} />
-      <pointLight position={[0, 0.1, 0.65]} intensity={0.55} color="#7ef9ff" distance={5.5} />
+      {/* Single warm vault light — cyan ring is emissive meshBasic */}
+      <pointLight position={[0, 0.15, 0.35]} intensity={0.85} color="#ffe0a8" distance={6.5} />
 
       <group scale={1.12}>
         <mesh position={[0, 0, -0.08]}>
-          <cylinderGeometry args={[1.55, 1.55, 0.22, 56]} />
+          <cylinderGeometry args={[1.55, 1.55, 0.22, 32]} />
           <meshStandardMaterial color="#080510" metalness={0.65} roughness={0.3} />
         </mesh>
         <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[1.38, 1.38, 0.24, 56]} />
+          <cylinderGeometry args={[1.38, 1.38, 0.24, 32]} />
           <meshStandardMaterial color="#2a2438" metalness={0.8} roughness={0.22} />
         </mesh>
         <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.08]}>
-          <cylinderGeometry args={[1.12, 1.12, 0.2, 56]} />
+          <cylinderGeometry args={[1.12, 1.12, 0.2, 32]} />
           <meshStandardMaterial color="#121018" metalness={0.75} roughness={0.26} />
         </mesh>
         {/* Spoke plate */}
-        {Array.from({ length: 10 }).map((_, i) => {
-          const a = (i / 10) * Math.PI
+        {Array.from({ length: 8 }).map((_, i) => {
+          const a = (i / 8) * Math.PI
           return (
             <mesh key={i} position={[0, 0, 0.16]} rotation={[0, 0, a]}>
               <boxGeometry args={[2.15, 0.06, 0.045]} />
@@ -518,18 +516,18 @@ function HeroVaultDoor() {
         })}
         {bolts.map(([bx, by], i) => (
           <mesh key={i} position={[bx, by, 0.2]}>
-            <cylinderGeometry args={[0.05, 0.05, 0.06, 8]} />
+            <cylinderGeometry args={[0.05, 0.05, 0.06, 6]} />
             <meshStandardMaterial color="#9a8a48" metalness={0.85} roughness={0.25} />
           </mesh>
         ))}
         {/* Slow outer gear ring */}
         <group ref={outerSpin} position={[0, 0, 0.12]}>
           <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[1.42, 0.035, 10, 64]} />
+            <torusGeometry args={[1.42, 0.035, 8, 40]} />
             <meshStandardMaterial color={BRASS} metalness={0.9} roughness={0.2} emissive={BRASS} emissiveIntensity={0.2} />
           </mesh>
-          {Array.from({ length: 24 }).map((_, i) => {
-            const a = (i / 24) * Math.PI * 2
+          {Array.from({ length: 16 }).map((_, i) => {
+            const a = (i / 16) * Math.PI * 2
             return (
               <mesh key={i} position={[Math.cos(a) * 1.42, Math.sin(a) * 1.42, 0]} rotation={[0, 0, a]}>
                 <boxGeometry args={[0.08, 0.045, 0.04]} />
@@ -540,7 +538,7 @@ function HeroVaultDoor() {
         </group>
         <group ref={dial} position={[0, 0, 0.26]}>
           <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.36, 0.055, 12, 32]} />
+            <torusGeometry args={[0.36, 0.055, 8, 24]} />
             <meshStandardMaterial color={BRASS} metalness={0.92} roughness={0.16} emissive={BRASS} emissiveIntensity={0.45} />
           </mesh>
           <mesh>
@@ -552,12 +550,12 @@ function HeroVaultDoor() {
             <meshBasicMaterial color="#39ff14" toneMapped={false} />
           </mesh>
           <mesh position={[0, 0, 0.04]}>
-            <sphereGeometry args={[0.08, 14, 14]} />
+            <sphereGeometry args={[0.08, 10, 10]} />
             <meshStandardMaterial color="#1a1420" metalness={0.7} roughness={0.3} emissive="#2de2e6" emissiveIntensity={0.5} />
           </mesh>
         </group>
         <mesh ref={ring} position={[0, 0, 0.1]}>
-          <ringGeometry args={[1.22, 1.4, 56]} />
+          <ringGeometry args={[1.22, 1.4, 40]} />
           <meshBasicMaterial color="#2de2e6" transparent opacity={0.3} depthWrite={false} toneMapped={false} />
         </mesh>
       </group>
@@ -953,15 +951,18 @@ function BankEnclosure() {
                 <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
               </mesh>
               <mesh position={[side * -0.08, 0, 0]}>
-                <sphereGeometry args={[0.07, 10, 10]} />
+                <sphereGeometry args={[0.07, 8, 8]} />
                 <meshBasicMaterial color={i % 2 === 0 ? '#7ef9ff' : '#f9c80e'} toneMapped={false} />
               </mesh>
-              <pointLight
-                position={[side * -0.35, 0, 0]}
-                intensity={0.55}
-                color={i % 2 === 0 ? '#7ef9ff' : '#ffe0a0'}
-                distance={5.5}
-              />
+              {/* Real lights only on every other sconce — bulbs still glow via meshBasic */}
+              {i % 2 === 0 && (
+                <pointLight
+                  position={[side * -0.35, 0, 0]}
+                  intensity={0.48}
+                  color={i % 2 === 0 ? '#7ef9ff' : '#ffe0a0'}
+                  distance={5.5}
+                />
+              )}
             </group>
           ))}
           {/* Framed wall panels between sconces */}
@@ -983,7 +984,7 @@ function BankEnclosure() {
           ))}
           {/* ATM / kiosk along side walls near portal */}
           <group position={[side * (halfW - 0.85), 0, zFront - 4.2]}>
-            <mesh position={[0, 0.95, 0]} castShadow>
+            <mesh position={[0, 0.95, 0]}>
               <boxGeometry args={[0.55, 1.7, 0.4]} />
               <meshStandardMaterial color="#16101c" metalness={0.55} roughness={0.38} />
             </mesh>
@@ -1003,7 +1004,6 @@ function BankEnclosure() {
               <boxGeometry args={[0.5, 0.04, 0.36]} />
               <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
             </mesh>
-            <pointLight position={[side * -0.4, 1.2, 0]} intensity={0.35} color="#7ef9ff" distance={3} />
           </group>
         </group>
       ))}
@@ -1461,7 +1461,7 @@ function LobbyPatrons() {
           position={[p.side, 0.05, p.z0]}
           scale={0.82}
         >
-          <CityBotFigure context="bank" pose="waiting" seated={false} seed={p.seed} />
+          <CityBotFigure context="bank" pose="waiting" seated={false} seed={p.seed} lite />
         </group>
       ))}
     </group>
@@ -1782,12 +1782,11 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
         onNearChange={setNearIndex}
       />
 
-      <ambientLight intensity={0.7} color="#d8ceff" />
-      <directionalLight position={[2.8, 6.5, 2.2]} intensity={0.7} color="#ffe9c8" castShadow={false} />
+      <ambientLight intensity={0.82} color="#d8ceff" />
+      <directionalLight position={[2.8, 6.5, 2.2]} intensity={0.78} color="#ffe9c8" castShadow={false} />
       <pointLight ref={aisleLight} position={[0, 3.2, 0]} intensity={1.15} color="#fff0b0" distance={20} />
-      <pointLight position={[0, 2.9, Z_BACK + 1.6]} intensity={0.65} color="#7ef9ff" distance={14} />
-      <pointLight position={[-HALL_W / 2 + 1.2, 2.6, 0]} intensity={0.45} color="#b967ff" distance={9} />
-      <pointLight position={[HALL_W / 2 - 1.2, 2.6, 0]} intensity={0.45} color="#b967ff" distance={9} />
+      <pointLight position={[0, 2.9, Z_BACK + 1.6]} intensity={0.7} color="#7ef9ff" distance={14} />
+      {/* Side fills bumped into ambient/directional so we drop 2 hall pointLights */}
 
       <BankEnclosure />
       {/* Service walls behind each teller bank — close the room behind the bots */}
@@ -1865,7 +1864,7 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
         )
       })}
 
-      <NeonBloom strength={0.08} />
+      <NeonBloom strength={0.1} lite />
     </>
   )
 }
