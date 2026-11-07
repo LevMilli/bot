@@ -4180,6 +4180,70 @@ def calib_clv_observe(
     }
 
 
+def baseline_fee_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+    capture: bool = False,
+    label: str | None = None,
+) -> dict:
+    """W0/baseline artifact + fee-ledger completeness observe (Phase 0 truth)."""
+    store = load_baseline(root)
+    latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    if capture and root is not None:
+        # Prefer explicit W0 if no baselines yet; else Chicago week tag.
+        if label:
+            tag = str(label)[:40]
+        elif not latest:
+            tag = "W0"
+        else:
+            tag = f"W-{_chicago_week_id()}"[:40]
+        latest = capture_baseline(root, bots=bots, cfg=cfg, label=tag)
+        store = load_baseline(root)
+    fees = fee_ledger_summary(root)
+    complete = fee_ledger_completeness(root, bots=bots)
+    alerts = []
+    if latest is None:
+        alerts.append("baseline_missing")
+    if not complete.get("pass") and int(complete.get("history_n") or 0) >= 5:
+        alerts.append("fee_ledger_thin")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "ok": len(alerts) == 0,
+        "alerts": alerts,
+        "baseline": {
+            "has_baseline": latest is not None,
+            "latest_label": (latest or {}).get("label"),
+            "captured_at": (latest or {}).get("captured_at"),
+            "baselines_n": len(store.get("baselines") or []),
+            "bleed_ratio": ((latest or {}).get("bleed") or {}).get("ratio"),
+            "misplaced_usd": ((latest or {}).get("capital_misplaced") or {}).get("misplaced_usd"),
+        },
+        "fee_ledger": {
+            "n": fees.get("n"),
+            "fee_sum": fees.get("fee_sum"),
+            "fill_tax_sum": fees.get("fill_tax_sum"),
+            "completeness": complete,
+        },
+        "label": (
+            f"baseline_fee={'ok' if not alerts else 'ALERT'} "
+            f"alerts={','.join(alerts) or 'none'} "
+            f"baseline={((latest or {}).get('label') if latest else 'none')} "
+            f"fee_n={fees.get('n')} complete={complete.get('rate')}"
+        ),
+        "note": (
+            "Baseline/fee observe — W0 artifact for week-over-week compare; "
+            "fee-ledger completeness target ≥80% once n≥5. Floors locked."
+        ),
+    }
+
+
 def ops_observe(
     root: str | None = None,
     *,
@@ -7048,6 +7112,7 @@ def plan_summary(
         "guardrails": guardrails_observe(root, bots=bots),
         "review": review_observe(root, bots=bots),
         "calib_clv": calib_clv_observe(root, bots=bots),
+        "baseline_fee": baseline_fee_observe(root, bots=bots, cfg=cfg),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,

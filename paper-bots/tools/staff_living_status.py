@@ -1730,6 +1730,7 @@ def main() -> int:
             "review-observe", "idea-review", "quarterly", "corr-matrix",
             "calib-clv", "clv-status", "green-or-gone", "sticky-sla", "selective",
             "raise-phi-log", "sports-calib", "commodity-calib",
+            "baseline-fee", "baseline-capture", "fee-ledger",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3603,6 +3604,7 @@ def main() -> int:
             "guardrails": desk_roi_plan.guardrails_observe(root),
             "review": desk_roi_plan.review_observe(root),
             "calib_clv": desk_roi_plan.calib_clv_observe(root),
+            "baseline_fee": desk_roi_plan.baseline_fee_observe(root),
             "green_boost": desk_roi_plan.sports_green_boost_status(root),
             "near_miss": desk_roi_plan.near_miss_promote_status(root),
             "hard_stop": desk_roi_plan.sports_hard_stop_shadow_summary(root),
@@ -3615,7 +3617,8 @@ def main() -> int:
                 "Money-path pulse — observe only (firm-queue / completions / "
                 "feature densify / exit-quality / selective after M1 / "
                 "promote-distance / firm-health / ops / guardrails / review / "
-                "calib-clv). Never softens floors. Never arms LIVE_ORDERS."
+                "calib-clv / baseline-fee). Never softens floors. "
+                "Never arms LIVE_ORDERS."
             ),
         }
         # Enrich exit/selective with live bots when snapshot available.
@@ -3646,6 +3649,9 @@ def main() -> int:
                 out["guardrails"] = desk_roi_plan.guardrails_observe(root, bots=bots)
                 out["review"] = desk_roi_plan.review_observe(root, bots=bots)
                 out["calib_clv"] = desk_roi_plan.calib_clv_observe(root, bots=bots)
+                out["baseline_fee"] = desk_roi_plan.baseline_fee_observe(
+                    root, bots=bots, cfg=cfg,
+                )
                 out["capital_os"] = desk_roi_plan.capital_os_status(
                     root, bots=bots, cfg=cfg,
                 )
@@ -3953,6 +3959,63 @@ def main() -> int:
         out = desk_roi_plan.commodity_calibration_report(bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if not out.get("miscalibrated") else 2
+    if args.action == "baseline-fee":
+        bots = []
+        cfg = None
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+            try:
+                cfg = pimp_desk.load_settings(root)
+            except Exception:
+                cfg = None
+        except Exception:
+            bots = []
+        out = desk_roi_plan.baseline_fee_observe(root, bots=bots, cfg=cfg)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "baseline-capture":
+        bots = []
+        cfg = None
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+            try:
+                cfg = pimp_desk.load_settings(root)
+            except Exception:
+                cfg = None
+        except Exception:
+            bots = []
+        out = desk_roi_plan.baseline_fee_observe(
+            root, bots=bots, cfg=cfg, capture=True, label="W0",
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("baseline", {}).get("has_baseline") else 2
+    if args.action == "fee-ledger":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "observe_only": True,
+            "summary": desk_roi_plan.fee_ledger_summary(root),
+            "completeness": desk_roi_plan.fee_ledger_completeness(root, bots=bots),
+        }
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out["completeness"].get("pass") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
