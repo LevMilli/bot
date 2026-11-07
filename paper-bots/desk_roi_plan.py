@@ -3133,6 +3133,155 @@ def label_near_miss_from_result(
     }
 
 
+def _sports_account_path(root: str | None = None) -> str:
+    return os.path.join(_root(root), "sports-gap-paper", "state.json")
+
+
+def _kalshi_yes_bid_from_market(market: dict | None):
+    """Parse yes bid dollars from a Kalshi market dict (0.0 is a real quote)."""
+    if not isinstance(market, dict):
+        return None
+    raw = market.get("yes_bid_dollars")
+    if raw in (None, ""):
+        raw = market.get("yes_bid")
+    if raw in (None, ""):
+        return None
+    try:
+        bid = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if bid > 1.5:
+        bid = bid / 100.0
+    if bid < 0:
+        return None
+    return bid
+
+
+def backfill_sports_exit_shadow_from_closed(
+    root: str | None = None,
+    *,
+    fetch_market=None,
+    limit: int = 80,
+) -> dict:
+    """Settle-retro densify: closed sports → hard-stop / time-final shadow rows.
+
+    Uses real Kalshi bids (bid=0 on finalized losers counts). Dedupes by ticker.
+    Observe only — never LIVE sells, never arms promotes.
+    """
+    path = _sports_account_path(root)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            state = json.load(handle)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {
+            "ok": True,
+            "recorded": 0,
+            "hard_stop": 0,
+            "time_final": 0,
+            "scanned": 0,
+            "note": "no sports state",
+        }
+    closed = [r for r in (state.get("closed") or []) if isinstance(r, dict)]
+    hs_path = _path(SPORTS_HARD_STOP_SHADOW, root)
+    tf_path = _path(SPORTS_TIME_FINAL_SHADOW, root)
+    hs_state = _load(hs_path, {"paper_only": True, "version": 1, "rows": [], "live": False})
+    tf_state = _load(tf_path, {"paper_only": True, "version": 1, "rows": [], "live": False})
+    hs_seen = {
+        str(r.get("ticker") or "")
+        for r in (hs_state.get("rows") or [])
+        if isinstance(r, dict) and r.get("ticker")
+    }
+    tf_seen = {
+        str(r.get("ticker") or "")
+        for r in (tf_state.get("rows") or [])
+        if isinstance(r, dict) and r.get("ticker")
+    }
+
+    def _default_fetch(ticker: str):
+        import urllib.request
+        url = (
+            "https://api.elections.kalshi.com/trade-api/v2/markets/"
+            + str(ticker)
+        )
+        try:
+            with urllib.request.urlopen(url, timeout=8) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+        market = payload.get("market") if isinstance(payload, dict) else None
+        if not isinstance(market, dict):
+            market = payload if isinstance(payload, dict) else None
+        return market if isinstance(market, dict) else None
+
+    getter = fetch_market or _default_fetch
+    hard_n = 0
+    tfinal_n = 0
+    scanned = 0
+    for row in closed[-int(limit) :]:
+        tick = str(row.get("ticker") or "").strip()
+        if not tick:
+            continue
+        need_hs = tick not in hs_seen
+        need_tf = tick not in tf_seen
+        if not need_hs and not need_tf:
+            continue
+        scanned += 1
+        try:
+            market = getter(tick)
+        except Exception:
+            market = None
+        bid = _kalshi_yes_bid_from_market(market)
+        if bid is None:
+            continue
+        entry = row.get("entry_price")
+        if need_hs:
+            rec = record_sports_hard_stop_shadow(
+                root,
+                ticker=tick,
+                side=str(row.get("side") or ""),
+                league=str(row.get("league") or ""),
+                entry_price=entry,
+                bid=bid,
+                contracts=row.get("contracts"),
+                cost=row.get("cost"),
+                note="catchup settle-retro hard-stop — no live sell",
+            )
+            if rec.get("recorded"):
+                hard_n += 1
+                hs_seen.add(tick)
+        if need_tf:
+            rec = record_sports_time_final_shadow(
+                root,
+                ticker=tick,
+                side=str(row.get("side") or ""),
+                league=str(row.get("league") or ""),
+                minutes_left=0.0,  # closed → treat as final
+                entry_price=entry,
+                bid=bid,
+                contracts=row.get("contracts"),
+                cost=row.get("cost"),
+                note="catchup settle-retro time-final — no live sell",
+            )
+            if rec.get("recorded"):
+                tfinal_n += 1
+                tf_seen.add(tick)
+    return {
+        "ok": True,
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live": False,
+        "scanned": scanned,
+        "hard_stop": hard_n,
+        "time_final": tfinal_n,
+        "recorded": hard_n + tfinal_n,
+        "note": (
+            "Sports exit-shadow catch-up from closed settles (bid=0 losers count). "
+            "Never LIVE; never arms."
+        ),
+    }
+
+
 def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     """Best-effort densify: near-miss label + helper backfill + CLV repair.
 
@@ -3142,6 +3291,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     labeled = {"ok": False, "labeled": 0, "labeled_n": 0}
     backfilled = {"ok": False, "recorded": 0}
     repaired = {"ok": False, "repaired": 0}
+    sports_exit = {"ok": False, "recorded": 0}
     errors: list[str] = []
     try:
         labeled = label_near_miss_catchup(root, fetch_result=fetch_result)
@@ -3158,6 +3308,11 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     except Exception as exc:  # noqa: BLE001
         errors.append(f"clv:{type(exc).__name__}")
         repaired = {"ok": False, "repaired": 0, "error": type(exc).__name__}
+    try:
+        sports_exit = backfill_sports_exit_shadow_from_closed(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"sports_exit:{type(exc).__name__}")
+        sports_exit = {"ok": False, "recorded": 0, "error": type(exc).__name__}
     status = near_miss_promote_status(root)
     # CLI catch-up writes marker so doctor / shadow_ops aren't false-stale.
     try:
@@ -3180,9 +3335,11 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "labeled": int(labeled.get("labeled") or 0),
         "backfilled": int(backfilled.get("recorded") or 0),
         "repaired": int(repaired.get("repaired") or 0),
+        "sports_exit_shadow": int(sports_exit.get("recorded") or 0),
         "near_miss_label": labeled,
         "helper_backfill": backfilled,
         "clv_repair": repaired,
+        "sports_exit": sports_exit,
         "errors": errors[:8],
         "note": (
             "Shadow catch-up — labels/backfills/repairs densify evidence only. "
@@ -6037,15 +6194,16 @@ def commodity_time_stop_hit(
     if cost_n is None and entry is not None:
         cost_n = round(float(entry) * contracts_n, 4)
     fee_approx = 0.0
+    # bid=0 is a real quote (finalized loser); only reject missing/negative.
     if bid_n is not None and bid_n > 0:
         fee_approx = math.ceil(round(0.07 * bid_n * (1.0 - bid_n) * 100, 6)) / 100
     mark_pnl = None
-    if bid_n is not None and cost_n is not None:
+    if bid_n is not None and cost_n is not None and bid_n >= 0:
         proceeds = round(contracts_n * max(0.0, bid_n - fee_approx), 4)
         mark_pnl = round(proceeds - cost_n, 4)
     near_close = left is not None and left + 1e-12 <= float(min_left) and left > -1e-9
     underwater = mark_pnl is not None and mark_pnl <= 1e-12
-    hit = bool(near_close and underwater and bid_n is not None and bid_n > 0)
+    hit = bool(near_close and underwater and bid_n is not None and bid_n >= 0)
     return {
         "hit": hit,
         "minutes_left": left,
@@ -6282,15 +6440,16 @@ def sports_time_final_hit(
     if cost_n is None and entry is not None:
         cost_n = round(float(entry) * contracts_n, 4)
     fee_approx = 0.0
+    # bid=0 is a real quote (finalized loser); only reject missing/negative.
     if bid_n is not None and bid_n > 0:
         fee_approx = math.ceil(round(0.07 * bid_n * (1.0 - bid_n) * 100, 6)) / 100
     mark_pnl = None
-    if bid_n is not None and cost_n is not None:
+    if bid_n is not None and cost_n is not None and bid_n >= 0:
         proceeds = round(contracts_n * max(0.0, bid_n - fee_approx), 4)
         mark_pnl = round(proceeds - cost_n, 4)
     near_final = left is not None and left + 1e-12 <= float(min_left) and left >= -1e-9
     underwater = mark_pnl is not None and mark_pnl <= 1e-12
-    hit = bool(near_final and underwater and bid_n is not None and bid_n > 0)
+    hit = bool(near_final and underwater and bid_n is not None and bid_n >= 0)
     return {
         "hit": hit,
         "minutes_left": left,
@@ -6475,7 +6634,9 @@ def sports_hard_stop_hit(
     entry = _finite(entry_price)
     b = _finite(bid)
     d = _finite(drop)
-    if entry is None or b is None or d is None or entry <= 0 or b <= 0:
+    # bid=0 is a real quote (finalized loser / wiped book) — strongest hard-stop.
+    # Only reject missing or negative bids; do not treat 0 as "no quote".
+    if entry is None or b is None or d is None or entry <= 0 or b < 0:
         return {"hit": False, "drop": d, "entry": entry, "bid": b, "threshold": None}
     threshold = round(entry - float(d), 4)
     hit = b <= threshold + 1e-12

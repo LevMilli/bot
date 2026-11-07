@@ -22,6 +22,25 @@ class SportsHardStopShadow(unittest.TestCase):
         miss = desk_roi_plan.sports_hard_stop_hit(0.80, 0.69, drop=0.12)
         self.assertFalse(miss["hit"])
 
+    def test_hit_allows_finalized_loser_bid_zero(self):
+        # Settle-retro densify: Kalshi finalized losers quote yes_bid=0.
+        # bid=0 must count (strongest adverse) — never treat as missing quote.
+        hit = desk_roi_plan.sports_hard_stop_hit(0.72, 0.0, drop=0.12)
+        self.assertTrue(hit["hit"])
+        self.assertEqual(hit["bid"], 0.0)
+        self.assertEqual(hit["threshold"], 0.60)
+        with tempfile.TemporaryDirectory() as tmp:
+            rec = desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KX-LOSER-0",
+                entry_price=0.72,
+                bid=0.0,
+                contracts=10,
+                cost=7.2,
+            )
+            self.assertTrue(rec["recorded"])
+            self.assertEqual(desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"], 1)
+
     def test_shadow_never_live_by_default(self):
         self.assertFalse(desk_roi_plan.SPORTS_HARD_STOP_LIVE)
         with tempfile.TemporaryDirectory() as tmp:

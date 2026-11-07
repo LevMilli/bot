@@ -282,6 +282,62 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertFalse(desk_roi_plan.SPORTS_HARD_STOP_LIVE)
             self.assertFalse(desk_roi_plan.SPORTS_TIME_FINAL_LIVE)
 
+    def test_catchup_backfill_closed_loser_bid_zero(self):
+        """Closed sports loser with Kalshi bid=0 densifies hard-stop + time-final."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            state = {
+                "cash": 100.0,
+                "open": [],
+                "closed": [
+                    {
+                        "ticker": "KX-CLOSED-LOSER",
+                        "side": "home",
+                        "league": "NCAAF",
+                        "entry_price": 0.72,
+                        "contracts": 27,
+                        "cost": 19.98,
+                        "pnl": -19.98,
+                    }
+                ],
+                "paper_only": True,
+            }
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+
+            def fake_market(ticker: str):
+                self.assertEqual(ticker, "KX-CLOSED-LOSER")
+                return {"ticker": ticker, "yes_bid_dollars": "0", "status": "finalized"}
+
+            out = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_market,
+            )
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["hard_stop"], 1)
+            self.assertEqual(out["time_final"], 1)
+            self.assertEqual(desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"], 1)
+            self.assertEqual(desk_roi_plan.sports_time_final_shadow_summary(tmp)["n"], 1)
+            # Idempotent — second pass records nothing.
+            again = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_market,
+            )
+            self.assertEqual(again["recorded"], 0)
+
+    def test_commodity_tstop_allows_bid_zero(self):
+        hit = desk_roi_plan.commodity_time_stop_hit(
+            close_time=None,
+            bid=0.0,
+            entry_price=0.55,
+            cost=5.5,
+            contracts=10,
+            min_left=3.0,
+            now=None,
+        )
+        # Without close_time, near_close is False — just assert bid=0 not rejected as invalid.
+        self.assertEqual(hit["bid"], 0.0)
+        self.assertTrue(hit["underwater"])
+
 
 if __name__ == "__main__":
     unittest.main()

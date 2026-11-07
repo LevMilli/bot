@@ -41,6 +41,31 @@ class SportsTimeFinal(unittest.TestCase):
         self.assertTrue(hit["underwater"])
         self.assertTrue(hit["shadow_only"])
 
+    def test_hit_allows_finalized_loser_bid_zero(self):
+        # Settle-retro: rem=0 + bid=0 underwater must record (not rejected as no-quote).
+        hit = desk_roi_plan.sports_time_final_hit(
+            0.0,
+            bid=0.0,
+            entry_price=0.72,
+            cost=19.98,
+            contracts=27,
+        )
+        self.assertTrue(hit["hit"])
+        self.assertTrue(hit["near_final"])
+        self.assertTrue(hit["underwater"])
+        self.assertEqual(hit["bid"], 0.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            rec = desk_roi_plan.record_sports_time_final_shadow(
+                tmp,
+                ticker="KX-TF-0",
+                minutes_left=0.0,
+                entry_price=0.72,
+                bid=0.0,
+                contracts=27,
+                cost=19.98,
+            )
+            self.assertTrue(rec["recorded"], rec)
+
     def test_no_hit_when_far_from_final(self):
         hit = desk_roi_plan.sports_time_final_hit(
             12.0,
