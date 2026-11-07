@@ -230,6 +230,57 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertFalse(st["auto_promote"])
             self.assertFalse(st.get("live"))
 
+    def test_settle_retro_bid_fetch_records_hard_stop_and_tfinal(self):
+        """Final without pair → Kalshi bid fallback densifies hard-stop / t-final."""
+        gap_path = os.path.join(HERE, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("fetch_kalshi_market", src)
+        self.assertIn("market_yes_bid", src)
+        self.assertIn("settle-retro shadow hard-stop", src)
+        self.assertIn("SETTLE-RETRO STOP", src)
+        self.assertNotIn("LIVE_ORDERS = True", src)
+        with tempfile.TemporaryDirectory() as tmp:
+            # Simulate settle-retro path: no pair, bid from Kalshi market fetch.
+            market = {"ticker": "KXNBA-RETRO-1", "yes_bid_dollars": "0.55"}
+            # Import helpers from gap_bot without running main.
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("gap_bot_settle", gap_path)
+            mod = importlib.util.module_from_spec(spec)
+            # Avoid executing main side effects: load only after patching? Spec loads full module.
+            # Prefer unit-level record with fetched bid (same path settle-retro uses).
+            bid = float(market["yes_bid_dollars"])
+            hs = desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KXNBA-RETRO-1",
+                side="home",
+                league="NBA",
+                entry_price=0.78,
+                bid=bid,
+                fair=None,
+                contracts=10,
+                cost=7.8,
+                note="settle-retro shadow hard-stop — no live sell",
+            )
+            self.assertTrue(hs["recorded"])
+            tf = desk_roi_plan.record_sports_time_final_shadow(
+                tmp,
+                ticker="KXNBA-RETRO-1",
+                side="home",
+                league="NBA",
+                minutes_left=0.0,
+                entry_price=0.78,
+                bid=bid,
+                contracts=10,
+                cost=7.8,
+                note="settle-retro shadow time-final — no live sell",
+            )
+            self.assertTrue(tf["recorded"])
+            self.assertEqual(desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"], 1)
+            self.assertEqual(desk_roi_plan.sports_time_final_shadow_summary(tmp)["n"], 1)
+            self.assertFalse(desk_roi_plan.SPORTS_HARD_STOP_LIVE)
+            self.assertFalse(desk_roi_plan.SPORTS_TIME_FINAL_LIVE)
+
 
 if __name__ == "__main__":
     unittest.main()

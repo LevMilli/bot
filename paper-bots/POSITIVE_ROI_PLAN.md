@@ -1994,6 +1994,19 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 | History settle → label bridge | `kalshi_history.record_settle` → `label_near_miss_from_result`; `ensure_history_file` creates `kalshi_crypto_history.json` |
 | Tests | `test_shadow_tick_catchup.py` · `test_shadow_timer_tick.py` |
 
+### Settle-retro densify (Nov 7) — unblock hard-stop / t-final / t-stop n after #368
+
+Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers. Never LIVE / force-arm / Discord auto-post.
+
+| Ticket | Where |
+| --- | --- |
+| Sports settle-retro Kalshi bid fallback | `gap_bot.fetch_kalshi_market` / `market_yes_bid` when next-day finals rebuild has no pair → hard-stop + t-final shadow record; mid-open densify when pair missing |
+| Money-pulse peers | `staff_living_status money-pulse` top-level `commodity_time_stop` + `sports_time_final` (mirror `hard_stop`) |
+| Doctor shadow-ops densify | `shadow_ops_alerts` += `catchup_stale` / `tick_stale` / `*_journal_missing` / `*_promote_thin` (observe; doctor does not hard-fail) |
+| Commodity in shadow tick | `pimp_desk.run_shadow_tick` smokes `commodity-15m` paper (`commodity_smoked`) alongside sports-gap |
+| Commodity settle-retro t-stop | `commodity-15m-paper/bot.py settle_account` → `record_commodity_time_stop_shadow` when last minutes missed (`now≈close`) |
+| Tests | `test_settle_retro_densify.py` · extends `test_shadow_evidence_densify` / `test_shadow_timer_tick` / `test_commodity_time_stop` |
+
 ### Next
 
 | Ticket | Where |

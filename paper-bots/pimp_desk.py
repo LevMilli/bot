@@ -3409,7 +3409,8 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
                 "error": tick_out.get("error") or "",
                 "summary": (
                     f"auto shadow-tick labeled_n={tick_out.get('labeled_n')} "
-                    f"sports={sum(1 for r in (tick_out.get('shadow_rows') or []) if r.get('bot') == 'sports-gap')}"
+                    f"sports={sum(1 for r in (tick_out.get('shadow_rows') or []) if r.get('bot') == 'sports-gap')} "
+                    f"commodity={sum(1 for r in (tick_out.get('shadow_rows') or []) if r.get('bot') == 'commodity-15m')}"
                 )[:180],
                 "live_orders_enabled": False,
                 "shadow_rows": tick_out.get("shadow_rows") or [],
@@ -3508,11 +3509,12 @@ def run_shadow_tick(
     *,
     run_bots: bool = True,
 ) -> dict:
-    """One-shot paper shadow smoke — densify edge08 + sports + heartbeat without LIVE.
+    """One-shot paper shadow smoke — densify edge08 + sports + commodity + heartbeat.
 
     Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), smokes sports-gap
-    paper (hard-stop / t-final / near-miss densify), touches heartbeat,
-    best-effort history settle. Never sets LIVE_ORDERS. Floors stay locked.
+    and commodity-15m paper (hard-stop / t-final / t-stop / near-miss densify),
+    touches heartbeat, best-effort history settle. Never sets LIVE_ORDERS.
+    Floors stay locked.
     """
     root = _root(root)
     if now is None:
@@ -3576,6 +3578,23 @@ def run_shadow_tick(
             "paper_only": True,
             "live_orders_enabled": False,
         })
+        # Commodity-15m paper smoke — densify time-stop without waiting for 90s slot.
+        # Main paper account; no DESK_SHADOW env; never LIVE.
+        try:
+            commodity = run_bot("commodity-15m", "run", root)
+        except Exception as exc:  # noqa: BLE001
+            commodity = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+        shadow_rows.append({
+            "bot": "commodity-15m",
+            "action": "shadow-smoke",
+            "shadow_id": None,
+            "ok": bool(commodity.get("ok")),
+            "blocked": bool(commodity.get("blocked")),
+            "error": commodity.get("error") or "",
+            "summary": commodity.get("summary") or "",
+            "paper_only": True,
+            "live_orders_enabled": False,
+        })
     catchup = {}
     try:
         import desk_roi_plan
@@ -3604,14 +3623,16 @@ def run_shadow_tick(
         "history_settle": history_settle,
         "shadow_rows": shadow_rows,
         "sports_smoked": any(r.get("bot") == "sports-gap" for r in shadow_rows),
+        "commodity_smoked": any(r.get("bot") == "commodity-15m" for r in shadow_rows),
         "catchup": catchup,
         "shadow_ops": ops,
         "labeled_n": catchup.get("labeled_n"),
         "backfilled": catchup.get("backfilled"),
         "repaired": catchup.get("repaired"),
         "note": (
-            "Shadow tick — paper DESK_SHADOW edge08 + sports-gap smoke + catch-up densify. "
-            "Never LIVE_ORDERS; never tip invent; Discord never auto-posts."
+            "Shadow tick — paper DESK_SHADOW edge08 + sports-gap + commodity-15m "
+            "smoke + catch-up densify. Never LIVE_ORDERS; never tip invent; "
+            "Discord never auto-posts."
         ),
     }
 

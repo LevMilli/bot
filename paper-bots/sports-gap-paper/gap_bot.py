@@ -429,6 +429,41 @@ def px(m, k):
     v = m.get(k)
     return float(v) if v not in (None, "") else None
 
+
+def market_yes_bid(m):
+    """Yes bid in dollars from a Kalshi market dict (dollars or cents)."""
+    if not isinstance(m, dict):
+        return None
+    bid = px(m, "yes_bid_dollars")
+    if bid is not None:
+        return bid
+    raw = m.get("yes_bid")
+    if raw in (None, ""):
+        return None
+    try:
+        bid = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if bid > 1.5:
+        bid = bid / 100.0
+    return bid
+
+
+def fetch_kalshi_market(ticker: str):
+    """Best-effort public market fetch for settle-retro / mid-open bid densify."""
+    tick = str(ticker or "").strip()
+    if not tick:
+        return None
+    try:
+        payload = get(f"{KALSHI}/markets/{tick}")
+    except Exception:
+        return None
+    market = payload.get("market") if isinstance(payload, dict) else None
+    if not isinstance(market, dict):
+        market = payload if isinstance(payload, dict) else None
+    return market if isinstance(market, dict) else None
+
+
 # ---------------- main ----------------
 def _desk():
     if DESK_ROOT not in sys.path:
@@ -864,7 +899,9 @@ def run():
                 )
             except Exception:
                 pass
-            # Settle retrospective shadow densify — bid from pair if present; no live sell.
+            # Settle retrospective shadow densify — bid from pair if present;
+            # next-day finals rebuild has no pair → Kalshi market bid fallback.
+            # Still NO live sell.
             try:
                 if DESK_ROOT not in sys.path:
                     sys.path.insert(0, DESK_ROOT)
@@ -873,7 +910,10 @@ def run():
                 m_settle = None
                 if isinstance(pair, dict):
                     m_settle = pair.get(p["side"])
-                bid_settle = px(m_settle, "yes_bid_dollars") if m_settle else None
+                bid_settle = market_yes_bid(m_settle) if m_settle else None
+                if bid_settle is None:
+                    m_settle = fetch_kalshi_market(p.get("ticker"))
+                    bid_settle = market_yes_bid(m_settle) if m_settle else None
                 fair_settle = None
                 if info.get("fair_home") is not None:
                     fair_settle = (
@@ -939,85 +979,93 @@ def run():
             continue
         # Mid-open exits: hard-stop + time-final densify when pair/bid exist
         # (fair_home optional). Gap-decay / flip / scale-out still need fair.
+        # When pair missing but ticker known, fetch Kalshi bid so shadow densifies.
         pair_info = info.get("pair") if info and isinstance(info, dict) else None
         m = None
         if isinstance(pair_info, dict):
             m = pair_info.get(p["side"])
+        bid = market_yes_bid(m) if m is not None else None
+        if info and bid is None:
+            fetched = fetch_kalshi_market(p.get("ticker"))
+            bid = market_yes_bid(fetched) if fetched else None
+            # Prefer pair market for ask/fair exits; use fetch only when pair absent.
+            if m is None and fetched is not None:
+                m = fetched
         if info and m is not None:
             fair_home = info.get("fair_home")
             fair = None
             if fair_home is not None:
                 fair = fair_home if p["side"] == "home" else 1 - fair_home
-            bid = px(m, "yes_bid_dollars")
             exit_reason = None
-            # Hard-stop shadow: log would-have stops; live sell stays off until promote.
-            try:
-                if DESK_ROOT not in sys.path:
-                    sys.path.insert(0, DESK_ROOT)
-                import desk_roi_plan
-                hs = desk_roi_plan.sports_hard_stop_hit(
-                    p.get("entry_price"), bid,
-                )
-                if hs.get("hit") and not p.get("hard_stop_shadowed"):
-                    desk_roi_plan.record_sports_hard_stop_shadow(
-                        DESK_ROOT,
-                        ticker=str(p.get("ticker") or ""),
-                        side=str(p.get("side") or ""),
-                        league=str(p.get("league") or ""),
-                        entry_price=p.get("entry_price"),
-                        bid=bid,
-                        fair=fair,
-                        contracts=p.get("contracts"),
-                        cost=p.get("cost"),
-                        note="shadow hard-stop — no live sell",
+            # Hard-stop / time-final shadow need a bid; live sell stays off until promote.
+            if bid is not None:
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_roi_plan
+                    hs = desk_roi_plan.sports_hard_stop_hit(
+                        p.get("entry_price"), bid,
                     )
-                    p["hard_stop_shadowed"] = True
-                    summary_out.setdefault("hard_stop_shadow", []).append(
-                        f"SHADOW STOP {p.get('ticker')} bid {bid}"
-                    )
-                    # Live hard-stop only after staff promote file (code default False).
-                    if desk_roi_plan.sports_hard_stop_is_live(DESK_ROOT):
-                        exit_reason = (
-                            f"hard-stop bid {float(bid):.2f} ≤ "
-                            f"{hs.get('threshold')}"
-                        )
-                # Time-to-final trim shadow: ≤N min left + underwater mark.
-                if exit_reason is None and not p.get("time_final_shadowed"):
-                    game = info.get("game") if isinstance(info, dict) else None
-                    status = (game or {}).get("status") if isinstance(game, dict) else None
-                    rem = desk_roi_plan.sports_minutes_remaining(
-                        status, league=str(p.get("league") or ""),
-                    )
-                    tf = desk_roi_plan.sports_time_final_hit(
-                        rem, bid,
-                        entry_price=p.get("entry_price"),
-                        cost=p.get("cost"),
-                        contracts=p.get("contracts"),
-                    )
-                    if tf.get("hit"):
-                        desk_roi_plan.record_sports_time_final_shadow(
+                    if hs.get("hit") and not p.get("hard_stop_shadowed"):
+                        desk_roi_plan.record_sports_hard_stop_shadow(
                             DESK_ROOT,
                             ticker=str(p.get("ticker") or ""),
                             side=str(p.get("side") or ""),
                             league=str(p.get("league") or ""),
-                            minutes_left=rem,
                             entry_price=p.get("entry_price"),
                             bid=bid,
+                            fair=fair,
                             contracts=p.get("contracts"),
                             cost=p.get("cost"),
-                            note="shadow time-final — no live sell",
+                            note="shadow hard-stop — no live sell",
                         )
-                        p["time_final_shadowed"] = True
-                        summary_out.setdefault("time_final_shadow", []).append(
-                            f"SHADOW TFINAL {p.get('ticker')} rem={rem}"
+                        p["hard_stop_shadowed"] = True
+                        summary_out.setdefault("hard_stop_shadow", []).append(
+                            f"SHADOW STOP {p.get('ticker')} bid {bid}"
                         )
-                        if desk_roi_plan.sports_time_final_is_live(DESK_ROOT):
+                        # Live hard-stop only after staff promote file (code default False).
+                        if desk_roi_plan.sports_hard_stop_is_live(DESK_ROOT):
                             exit_reason = (
-                                f"time-final ≤{tf.get('min_left_bar')}m "
-                                f"underwater mark {tf.get('mark_pnl')}"
+                                f"hard-stop bid {float(bid):.2f} ≤ "
+                                f"{hs.get('threshold')}"
                             )
-            except Exception:
-                pass
+                    # Time-to-final trim shadow: ≤N min left + underwater mark.
+                    if exit_reason is None and not p.get("time_final_shadowed"):
+                        game = info.get("game") if isinstance(info, dict) else None
+                        status = (game or {}).get("status") if isinstance(game, dict) else None
+                        rem = desk_roi_plan.sports_minutes_remaining(
+                            status, league=str(p.get("league") or ""),
+                        )
+                        tf = desk_roi_plan.sports_time_final_hit(
+                            rem, bid,
+                            entry_price=p.get("entry_price"),
+                            cost=p.get("cost"),
+                            contracts=p.get("contracts"),
+                        )
+                        if tf.get("hit"):
+                            desk_roi_plan.record_sports_time_final_shadow(
+                                DESK_ROOT,
+                                ticker=str(p.get("ticker") or ""),
+                                side=str(p.get("side") or ""),
+                                league=str(p.get("league") or ""),
+                                minutes_left=rem,
+                                entry_price=p.get("entry_price"),
+                                bid=bid,
+                                contracts=p.get("contracts"),
+                                cost=p.get("cost"),
+                                note="shadow time-final — no live sell",
+                            )
+                            p["time_final_shadowed"] = True
+                            summary_out.setdefault("time_final_shadow", []).append(
+                                f"SHADOW TFINAL {p.get('ticker')} rem={rem}"
+                            )
+                            if desk_roi_plan.sports_time_final_is_live(DESK_ROOT):
+                                exit_reason = (
+                                    f"time-final ≤{tf.get('min_left_bar')}m "
+                                    f"underwater mark {tf.get('mark_pnl')}"
+                                )
+                except Exception:
+                    pass
             # Fair-dependent exits (gap-decay / flip / scale-out) need fair_home.
             if fair is not None:
                 # Phase 2: gap-decay — tip edge that died mid-game frees risk.

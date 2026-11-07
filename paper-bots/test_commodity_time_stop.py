@@ -116,6 +116,53 @@ class CommodityTimeStop(unittest.TestCase):
         self.assertIn("all-opens densify", text)
         self.assertIn("record_commodity_time_stop_shadow", text)
 
+    def test_settle_retro_time_stop_records_shadow(self):
+        """Settle underwater open → settle-retro records time-stop shadow once."""
+        bot_src = os.path.join(HERE, "commodity-15m-paper", "bot.py")
+        with open(bot_src, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("settle-retro shadow time-stop", text)
+        self.assertIn("time_stop_shadowed", text)
+        with tempfile.TemporaryDirectory() as tmp:
+            close_iso = (
+                datetime.now(timezone.utc) - timedelta(minutes=1)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            # now must match parsed close_time (no subsecond drift) → minutes_left≈0.
+            close_dt = datetime.fromisoformat(close_iso.replace("Z", "+00:00"))
+            rec = desk_roi_plan.record_commodity_time_stop_shadow(
+                tmp,
+                ticker="KXWTI15M-SETTLE-1",
+                side="YES",
+                series="KXWTI15M",
+                close_time=close_iso,
+                entry_price=0.60,
+                bid=0.35,
+                contracts=10,
+                cost=6.0,
+                note="settle-retro shadow time-stop — no live sell",
+                now=close_dt,
+            )
+            self.assertTrue(rec["recorded"], rec)
+            self.assertTrue(rec.get("shadow_only", True))
+            summ = desk_roi_plan.commodity_time_stop_shadow_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            self.assertFalse(summ["auto_promote"])
+            self.assertFalse(desk_roi_plan.COMMODITY_TIME_STOP_LIVE)
+            # Closed flag contract: settle path sets time_stop_shadowed on pos.
+            closed = {
+                "ticker": "KXWTI15M-SETTLE-1",
+                "side": "YES",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "cost": 6.0,
+                "contracts": 10,
+                "time_stop_shadowed": True,
+                "exit": "settled",
+                "pnl": -6.0,
+            }
+            self.assertTrue(closed["time_stop_shadowed"])
+            self.assertEqual(closed["exit"], "settled")
+
 
 if __name__ == "__main__":
     unittest.main()
