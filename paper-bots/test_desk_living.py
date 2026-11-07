@@ -837,8 +837,12 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn(str(live.get("toxic_fills_label")), draft)
             self.assertIn("Ritual live sunday:", draft)
             self.assertIn("Sunday twins sunday:", draft)
+            self.assertIn("Teller ritual live sunday:", draft)
             if live.get("timer_label"):
                 self.assertIn(str(live.get("timer_label")), draft)
+            doc = desk_living.living_doctor(tmp, record=False)
+            self.assertIn("teller ritual live n=", doc.get("soft_copy") or "")
+            self.assertIn("living-ritual-live", doc.get("soft_copy") or "")
             self.assertNotIn("l7_observe", board)
             self.assertFalse((board.get("board_size") or {}).get("over"))
 

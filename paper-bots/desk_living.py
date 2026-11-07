@@ -3857,8 +3857,10 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         f"{sunday_cov_line}\n"
         f"{ritual_live_line}\n"
         f"{timer_sunday_line}\n"
+        f"teller ritual live n={live_n}\n"
         f"sunday quiet {quiet_age_label} (observe · never softens floors)\n"
-        f"ritual draft: make living-ritual-discord (staff paste · never auto-posts)\n"
+        f"ritual draft: make living-ritual-discord · audit: make living-ritual-live "
+        f"(staff paste · never auto-posts)\n"
         f"_never places · never softens floors · never enables live_"
     )
     doc["soft_copy"] = soft_copy
