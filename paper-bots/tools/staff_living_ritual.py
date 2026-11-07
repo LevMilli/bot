@@ -607,6 +607,42 @@ def format_discord(payload: dict) -> str:
             f"• Skip-regret-tip sunday: {skip_regret_tip_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    eia_tip_twin = payload.get("eia_tip_sunday_quiet")
+    if eia_tip_twin:
+        lines.append(f"• EIA-tip sunday: {eia_tip_twin}")
+    else:
+        eia_tip_lab = payload.get("eia_tip_label") or "eia observe"
+        lines.append(
+            f"• EIA-tip sunday: {eia_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    injury_tip_twin = payload.get("injury_tip_sunday_quiet")
+    if injury_tip_twin:
+        lines.append(f"• Injury-tip sunday: {injury_tip_twin}")
+    else:
+        injury_tip_lab = payload.get("injury_tip_label") or "injury observe"
+        lines.append(
+            f"• Injury-tip sunday: {injury_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    completions_tip_twin = payload.get("completions_tip_sunday_quiet")
+    if completions_tip_twin:
+        lines.append(f"• Completions-tip sunday: {completions_tip_twin}")
+    else:
+        completions_tip_lab = payload.get("completions_tip_label") or "completions observe"
+        lines.append(
+            f"• Completions-tip sunday: {completions_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    toxic_tip_twin = payload.get("toxic_tip_sunday_quiet")
+    if toxic_tip_twin:
+        lines.append(f"• Toxic-tip sunday: {toxic_tip_twin}")
+    else:
+        toxic_tip_lab = payload.get("toxic_tip_label") or "toxic observe"
+        lines.append(
+            f"• Toxic-tip sunday: {toxic_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1434,6 +1470,46 @@ def main() -> int:
                 )
             )
             print(
+                "eia-tip sunday: "
+                + str(
+                    compact_obs.get("eia_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_eia_tip(board_obs).get('label') or 'eia observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "injury-tip sunday: "
+                + str(
+                    compact_obs.get("injury_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_injury_tip(board_obs).get('label') or 'injury observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "completions-tip sunday: "
+                + str(
+                    compact_obs.get("completions_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_completions_tip(board_obs).get('label') or 'completions observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "toxic-tip sunday: "
+                + str(
+                    compact_obs.get("toxic_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_toxic_tip(board_obs).get('label') or 'toxic observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1743,6 +1819,34 @@ def main() -> int:
     payload["skip_regret_tip_label"] = skip_regret_tip.get("label")
     payload["skip_regret_tip_sunday_quiet"] = compact.get("skip_regret_tip_sunday_quiet") or (
         f"{skip_regret_tip.get('label') or 'skip-regret observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    eia_tip = desk_living.living_eia_tip(board)
+    payload["eia_tip"] = eia_tip
+    payload["eia_tip_label"] = eia_tip.get("label")
+    payload["eia_tip_sunday_quiet"] = compact.get("eia_tip_sunday_quiet") or (
+        f"{eia_tip.get('label') or 'eia observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    injury_tip = desk_living.living_injury_tip(board)
+    payload["injury_tip"] = injury_tip
+    payload["injury_tip_label"] = injury_tip.get("label")
+    payload["injury_tip_sunday_quiet"] = compact.get("injury_tip_sunday_quiet") or (
+        f"{injury_tip.get('label') or 'injury observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    completions_tip = desk_living.living_completions_tip(board)
+    payload["completions_tip"] = completions_tip
+    payload["completions_tip_label"] = completions_tip.get("label")
+    payload["completions_tip_sunday_quiet"] = compact.get("completions_tip_sunday_quiet") or (
+        f"{completions_tip.get('label') or 'completions observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    toxic_tip = desk_living.living_toxic_tip(board)
+    payload["toxic_tip"] = toxic_tip
+    payload["toxic_tip_label"] = toxic_tip.get("label")
+    payload["toxic_tip_sunday_quiet"] = compact.get("toxic_tip_sunday_quiet") or (
+        f"{toxic_tip.get('label') or 'toxic observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:

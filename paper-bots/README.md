@@ -111,6 +111,10 @@ make living-near-miss-tip    # near-miss promote tip (never auto)
 make living-helper-tip       # helper Gate A tip (never arms)
 make living-hard-stop-tip    # sports hard-stop shadow tip
 make living-skip-regret-tip  # skip-regret twin tip
+make living-eia-tip          # EIA blackout/scout tip
+make living-injury-tip       # injury wire tip (never buys)
+make living-completions-tip  # completions today tip
+make living-toxic-tip        # toxic/adverse fills tip
 make living-export
 make living-test
 ```
