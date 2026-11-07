@@ -139,11 +139,14 @@ def format_discord(payload: dict) -> str:
     )
     timer_alive = payload.get("timer_alive")
     timer_bit = (
-        "timer=alive"
-        if timer_alive
-        else "timer=DEAD"
-        if timer_alive is False
-        else "timer=n/a"
+        _pl("timer_label", "")
+        or (
+            "timer=alive"
+            if timer_alive
+            else "timer=DEAD"
+            if timer_alive is False
+            else "timer=n/a"
+        )
     )
     lines.append(
         f"• Timer sunday: {timer_bit} · sunday quiet {tip_age} "
@@ -329,6 +332,28 @@ def format_discord(payload: dict) -> str:
         f"• Skip-historian sunday: {_pl('skip_historian_label', 'skip historian observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    ritual_live_twin = payload.get("ritual_live_sunday_quiet")
+    if ritual_live_twin:
+        lines.append(f"• Ritual live sunday: {ritual_live_twin}")
+    else:
+        live_n = sum(
+            1
+            for k, v in payload.items()
+            if str(k).endswith("_label") and v and k not in ("label",)
+        )
+        lines.append(
+            f"• Ritual live sunday: ritual live n={live_n} · "
+            f"{_pl('digests_label', 'digests observe')} · "
+            f"{_pl('fills_label', 'fills observe')} · "
+            f"{_pl('timer_label', 'timer observe')} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    sunday_cov = payload.get("sunday_twin_coverage")
+    if isinstance(sunday_cov, dict) and sunday_cov.get("label"):
+        lines.append(
+            f"• Sunday twins sunday: {sunday_cov.get('label')} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -711,6 +736,16 @@ def main() -> int:
                 f"{flat['sunday_twin_label']} · sunday quiet {sq} "
                 "(observe · never softens floors)"
             )
+            live_n_flat = sum(
+                1 for k, v in live.items() if str(k).endswith("_label") and v
+            )
+            flat["ritual_live_sunday_quiet"] = (
+                f"ritual live n={live_n_flat} · "
+                f"{live.get('digests_label') or 'digests observe'} · "
+                f"{live.get('fills_label') or 'fills observe'} · "
+                f"{live.get('timer_label') or 'timer observe'} · sunday quiet {sq} "
+                "(observe · never softens floors)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -842,6 +877,16 @@ def main() -> int:
                 f"sunday twins: {sunday_cov.get('label') or 'sunday twins observe'} · "
                 f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
+            live_n_obs = sum(
+                1 for k, v in live.items() if str(k).endswith("_label") and v
+            )
+            print(
+                f"ritual live sunday: ritual live n={live_n_obs} · "
+                f"{live.get('digests_label') or 'digests observe'} · "
+                f"{live.get('fills_label') or 'fills observe'} · "
+                f"{live.get('timer_label') or 'timer observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
@@ -947,6 +992,11 @@ def main() -> int:
     payload["timer_alive"] = timer.get("alive")
     payload["sunday_twin_coverage"] = desk_living.sunday_twin_coverage(board)
     payload["ritual_live_labels"] = live
+    compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+    payload["ritual_live_sunday_quiet"] = (
+        compact.get("ritual_live_sunday_quiet")
+        or desk_living.living_compact_card(root, board=board).get("ritual_live_sunday_quiet")
+    )
     if args.discord:
         print(format_discord(payload))
     elif args.json:

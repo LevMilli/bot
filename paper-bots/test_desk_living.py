@@ -710,9 +710,12 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("L7 observe", doc.get("soft_copy") or "")
             self.assertIn("ritual live n=", doc.get("soft_copy") or "")
             self.assertIn("timer sunday:", doc.get("soft_copy") or "")
+            self.assertIn("ritual live", doc.get("ritual_live_sunday_quiet") or "")
             self.assertGreaterEqual(int(doc.get("ritual_live_n") or 0), 40)
             self.assertIn("timer", doc.get("ritual_live_timer") or "")
             self.assertTrue(doc.get("fee_floors_locked"))
+            health = desk_living.living_self_check(tmp)
+            self.assertIn("ritual live n=", health.get("ritual_live_sunday_quiet") or "")
 
     def test_l7_pulse_surfaces(self):
         import tempfile
@@ -817,9 +820,15 @@ class DeskLivingTests(unittest.TestCase):
                 "steps": {},
             }
             payload.update({k: v for k, v in live.items() if str(k).endswith("_label")})
+            payload["ritual_live_sunday_quiet"] = compact.get("ritual_live_sunday_quiet")
+            payload["sunday_twin_coverage"] = desk_living.sunday_twin_coverage(board)
             draft = format_discord(payload)
             self.assertIn(str(live.get("swarm_label")), draft)
             self.assertIn(str(live.get("toxic_fills_label")), draft)
+            self.assertIn("Ritual live sunday:", draft)
+            self.assertIn("Sunday twins sunday:", draft)
+            if live.get("timer_label"):
+                self.assertIn(str(live.get("timer_label")), draft)
             self.assertNotIn("l7_observe", board)
             self.assertFalse((board.get("board_size") or {}).get("over"))
 
@@ -862,6 +871,7 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("sunday twins:", txt)
             self.assertIn("timer sunday:", txt)
             self.assertIn("ritual live:", txt)
+            self.assertIn("ritual live sunday:", txt)
             self.assertIn("sunday twins sunday:", txt)
             self.assertFalse((board.get("board_size") or {}).get("over"))
 
@@ -880,6 +890,7 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("gaps sunday:", txt)
             self.assertIn("timer sunday:", txt)
             self.assertIn("ritual live:", txt)
+            self.assertIn("ritual live sunday:", txt)
             export = desk_living.living_board_export(tmp)
             self.assertIn("sunday_twins", export)
             self.assertGreaterEqual(int(export.get("sunday_twins_n") or 0), 50)

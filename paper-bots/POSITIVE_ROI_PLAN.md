@@ -1391,11 +1391,20 @@ Interactive: Positive ROI Master Plan canvas.
 | --- | --- |
 | Compact/export `ritual_live_sunday_quiet` | living_compact_card / export |
 
+### Living upgrade — ritual live status/discord (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Discord Ritual live + Sunday twins sunday | format_discord |
+| Discord Timer prefers `timer_label` | format_discord |
+| Observe/status ritual live sunday twin | ritual + status |
+| Selfcheck/doctor `ritual_live_sunday_quiet` | living_self_check / doctor |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — compact ritual live twin shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — ritual live status/discord shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 

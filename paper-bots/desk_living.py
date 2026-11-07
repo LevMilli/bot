@@ -3790,10 +3790,14 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         or timer.get("label")
         or "timer observe"
     )
-    ritual_live_line = (
-        f"ritual live n={live_n} · {timer_live} "
-        f"(observe · never softens floors)"
+    ritual_live_line = str(
+        health.get("ritual_live_sunday_quiet")
+        or (
+            f"ritual live n={live_n} · {timer_live} "
+            f"(observe · never softens floors)"
+        )
     )
+    doc["ritual_live_sunday_quiet"] = ritual_live_line
     timer_sunday_line = (
         f"timer sunday: {timer_live} · sunday quiet {quiet_age_label} "
         f"(observe · never softens floors)"
@@ -4156,6 +4160,19 @@ def living_self_check(root: str | None = None) -> dict:
         "ritual_live_n": int(live_n),
         "ritual_live_ok": live_n >= 40,
         "ritual_live_timer": str(live.get("timer_label") or "timer observe"),
+        "ritual_live_sunday_quiet": str(
+            (board.get("compact") or {}).get("ritual_live_sunday_quiet")
+            if isinstance(board.get("compact"), dict)
+            else ""
+        )
+        or (
+            f"ritual live n={live_n} · "
+            f"{live.get('digests_label') or 'digests observe'} · "
+            f"{live.get('fills_label') or 'fills observe'} · "
+            f"{live.get('timer_label') or 'timer observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else 'quiet_age=n/a'} "
+            f"(observe · never softens floors)"
+        ),
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()
