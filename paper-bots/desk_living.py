@@ -1206,6 +1206,10 @@ def living_compact_card(
             if isinstance(src.get("phase2_pulse"), dict)
             else f"phase2 pulse observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "l7_observe_sunday_quiet": (
+            f"{l7_observe_summary(src).get('label') or 'L7 observe pulse'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2770,6 +2774,13 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{p2.get('label') or 'phase2 pulse observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    l7s = l7_observe_summary(board)
+    slim["l7_observe_ok"] = bool(l7s.get("ok"))
+    slim["l7_observe_label"] = str(l7s.get("label") or "L7 observe pending")
+    slim["l7_observe_sunday_quiet"] = (
+        f"{slim['l7_observe_label']} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2947,6 +2958,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_phase2_pulse_sunday_quiet"] = (
             compact.get("phase2_pulse_sunday_quiet") or slim.get("phase2_pulse_sunday_quiet")
+        )
+        slim["compact_l7_observe_sunday_quiet"] = (
+            compact.get("l7_observe_sunday_quiet") or slim.get("l7_observe_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -3796,6 +3810,51 @@ def fee_floors_assert(root: str | None = None, cfg: dict | None = None) -> dict:
     }
 
 
+
+L7_OBSERVE_KEYS = (
+    "digest_freshness",
+    "journal_coverage",
+    "monday_pulse",
+    "toxic_fills",
+    "adapt_ab",
+    "raise_phi_sla",
+    "feature_coverage",
+    "chip_catalog",
+    "phase2_pulse",
+)
+
+
+def l7_observe_summary(board: dict | None = None, root: str | None = None) -> dict:
+    """Surface-only L7 pulse from an existing board (never a new board chip)."""
+    src = board if isinstance(board, dict) else None
+    if src is None:
+        src = living_upgrade_board(root)
+    present = [k for k in L7_OBSERVE_KEYS if isinstance(src.get(k), dict)]
+    missing = [k for k in L7_OBSERVE_KEYS if k not in present]
+    labels = []
+    for k in present:
+        row = src.get(k) if isinstance(src.get(k), dict) else {}
+        lab = row.get("label")
+        if lab:
+            labels.append(str(lab))
+    ok = not missing
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "ok": ok,
+        "present": present,
+        "missing": missing,
+        "label": (
+            "L7 observe "
+            + (" · ".join(labels[:3]) + ("…" if len(labels) > 3 else ""))
+            if labels
+            else "L7 observe pending"
+        ),
+        "note": "Surface-only L7 pulse — not a board chip; never softens floors.",
+    }
+
+
 def living_self_check(root: str | None = None) -> dict:
     """Staff health probe for living spine (never places / never softens)."""
     board = living_upgrade_board(root)
@@ -3811,26 +3870,8 @@ def living_self_check(root: str | None = None) -> dict:
         and floors_assert.get("all_ok")
     )
     ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
-    l7_keys = (
-        "digest_freshness",
-        "journal_coverage",
-        "monday_pulse",
-        "toxic_fills",
-        "adapt_ab",
-        "raise_phi_sla",
-        "feature_coverage",
-        "chip_catalog",
-        "phase2_pulse",
-    )
-    l7_present = [k for k in l7_keys if isinstance(board.get(k), dict)]
-    l7_missing = [k for k in l7_keys if k not in l7_present]
-    l7_labels = []
-    for k in l7_present:
-        row = board.get(k) if isinstance(board.get(k), dict) else {}
-        lab = row.get("label")
-        if lab:
-            l7_labels.append(str(lab))
-    l7_ok = not l7_missing
+    l7 = l7_observe_summary(board)
+    l7_ok = bool(l7.get("ok"))
     return {
         "paper_only": True,
         "fee_floors_locked": floors,
@@ -3845,14 +3886,9 @@ def living_self_check(root: str | None = None) -> dict:
         "ritual_ok": ritual.get("ritual_ok"),
         "ritual_exit_ok": ritual.get("exit_ok"),
         "l7_observe_ok": l7_ok,
-        "l7_observe_present": l7_present,
-        "l7_observe_missing": l7_missing,
-        "l7_observe_label": (
-            "L7 observe "
-            + (" · ".join(l7_labels[:3]) + ("…" if len(l7_labels) > 3 else ""))
-            if l7_labels
-            else "L7 observe pending"
-        ),
+        "l7_observe_present": list(l7.get("present") or []),
+        "l7_observe_missing": list(l7.get("missing") or []),
+        "l7_observe_label": str(l7.get("label") or "L7 observe pending"),
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()

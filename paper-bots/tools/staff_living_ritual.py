@@ -579,9 +579,13 @@ def main() -> int:
             flat["feature_coverage"] = desk_living.feature_coverage_chip(root)
             flat["chip_catalog"] = desk_living.chip_catalog_chip(root)
             flat["phase2_pulse"] = desk_living.phase2_pulse_chip(root)
-            _l7 = desk_living.living_self_check(root)
-            flat["l7_observe_ok"] = _l7.get("l7_observe_ok")
-            flat["l7_observe_label"] = _l7.get("l7_observe_label")
+            _l7 = desk_living.l7_observe_summary(root=root)
+            flat["l7_observe_ok"] = _l7.get("ok")
+            flat["l7_observe_label"] = _l7.get("label")
+            flat["l7_observe_sunday_quiet"] = (
+                f"{_l7.get('label') or 'L7 observe pulse'} · sunday quiet "
+                f"{flat['sunday_quiet_age_label']} (observe · never softens floors)"
+            )
             flat["toxic_sunday_quiet"] = (
                 f"toxic fills observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never softens floors)"
@@ -862,9 +866,9 @@ def main() -> int:
                 f"phase2-pulse sunday: {p2.get('label') or 'phase2 pulse observe'} · "
                 f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
-            _l7 = desk_living.living_self_check(root)
+            _l7 = desk_living.l7_observe_summary(root=root)
             print(
-                f"L7-pulse sunday: {_l7.get('l7_observe_label') or 'L7 observe pulse'} · "
+                f"L7-pulse sunday: {_l7.get('label') or 'L7 observe pulse'} · "
                 f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
             print(
