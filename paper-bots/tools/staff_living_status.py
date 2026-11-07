@@ -1724,7 +1724,7 @@ def main() -> int:
             "edge08-export", "green-boost-export",
             "helper-gate-a", "helper-arm", "helper-backfill",
             "clv-repair", "clv-completeness",
-            "shadow-catchup", "shadow-tick",
+            "shadow-catchup", "shadow-tick", "shadow-ops",
             "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse",
@@ -3600,6 +3600,11 @@ def main() -> int:
         out = pimp_desk.run_shadow_tick(root, run_bots=True)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
+    if args.action == "shadow-ops":
+        # Observe-only shadow ops alerts — never arms LIVE / force / tip invent.
+        out = desk_roi_plan.shadow_ops_alerts(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "clv-completeness":
         out = desk_roi_plan.clv_completeness(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
@@ -3725,6 +3730,9 @@ def main() -> int:
             "review": desk_roi_plan.review_observe(root),
             "calib_clv": desk_roi_plan.calib_clv_observe(root),
             "baseline_fee": desk_roi_plan.baseline_fee_observe(root),
+            "fee_ledger": desk_roi_plan.fee_ledger_summary(root),
+            "graduation": desk_roi_plan.graduation_board(root),
+            "observation_clock": desk_roi_plan.observation_week_clock(root),
             "green_boost": desk_roi_plan.sports_green_boost_status(root),
             "near_miss": desk_roi_plan.near_miss_promote_status(root),
             "hard_stop": desk_roi_plan.sports_hard_stop_shadow_summary(root),
@@ -3739,7 +3747,8 @@ def main() -> int:
                 "Money-path pulse — observe only (firm-queue / completions / "
                 "feature densify / exit-quality / selective after M1 / "
                 "promote-distance / firm-health / ops / dual-control-observe / "
-                "guardrails / review / calib-clv / baseline-fee / "
+                "guardrails / review / calib-clv / baseline-fee / fee_ledger / "
+                "graduation / observation-clock / "
                 "hard-stop / commodity time-stop / sports time-final / "
                 "shadow catch-up densify). "
                 "Never softens floors. Never arms LIVE_ORDERS."

@@ -954,8 +954,27 @@ def is_near_miss(
     text = " | ".join(str(r) for r in reasons).lower()
     hard = any(
         k in text
-        for k in ("news", "weekend", "correlation", "entry_gate", "daily loss", "depth 0")
+        for k in ("weekend", "correlation", "entry_gate", "daily loss", "depth 0")
     )
+    # "news" alone is hard — but fail-closed / unavailable calendar CDN misses
+    # must not wipe soft-band densify. Real FOMC/CPI/news-window blackouts stay hard.
+    if "news" in text and not hard:
+        calendar_fp = any(
+            s in text
+            for s in (
+                "fail-closed",
+                "calendar unavailable",
+                "unavailable (fail-closed)",
+                "did-not-load",
+                "calendar did not",
+            )
+        )
+        real_blackout = any(
+            s in text
+            for s in ("news window", "blackout", "fomc", "cpi", "nfp", "high-impact")
+        )
+        if real_blackout or not calendar_fp:
+            hard = True
     # Soft z|p in band is enough — ask-outside / regime / cushion companions
     # are common on 15m skips and must not wipe densify (hard gates still block).
     ok = (not hard) and len(soft) == 1

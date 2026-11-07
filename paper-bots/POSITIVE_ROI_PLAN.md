@@ -2007,6 +2007,23 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers. Ne
 | Commodity settle-retro t-stop | `commodity-15m-paper/bot.py settle_account` → `record_commodity_time_stop_shadow` when last minutes missed (`now≈close`) |
 | Tests | `test_settle_retro_densify.py` · extends `test_shadow_evidence_densify` / `test_shadow_timer_tick` / `test_commodity_time_stop` |
 
+### Rest we can densify (Nov 7) — evidence/ops after #369
+
+Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chips. Never LIVE / force-arm / Discord auto-post. No fabricated promote rows.
+
+| Ticket | Where |
+| --- | --- |
+| Near-miss hard-news FP carve-out | `desk_more.is_near_miss` — fail-closed / calendar-unavailable ≠ real FOMC/news-window blackout |
+| CLI tick/catchup markers | `run_shadow_tick` / `run_shadow_catchup` write `desk_shadow_*_at.txt` (doctor not false-stale) |
+| Fee ledger durability | `SETTLEMENT_FILES` += `desk_fee_ledger.json`; money-pulse `fee_ledger`; ops `fee_ledger_missing` |
+| Helper edge08 backfill | `backfill_helper_fills_from_btc_closed` also reads `shadow_edge08_account.json` |
+| Commodity + meme near-miss | soft z\|p `record_near_miss` + settle/sell `label_near_miss_from_result` |
+| INX settle smoke in tick | `run_shadow_tick` paper `kalshi-sp`/`kalshi-sized` **settle** only (`inx_*_smoked`) |
+| Pulse / ops / Make | money-pulse `graduation` + `observation_clock`; `near_miss_journal_thin`; `make living-shadow-ops` |
+| Tests | `test_rest_we_can.py` |
+
+**Still ops-only:** labeled_n→30 needs market fills over tick loops — code densifies record/label/durability/surfaces only.
+
 ### Next
 
 | Ticket | Where |
