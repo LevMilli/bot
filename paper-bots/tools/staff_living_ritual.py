@@ -289,40 +289,49 @@ def format_discord(payload: dict) -> str:
         f"• Monday sunday: monday pulse observe · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    toxic_lab = payload.get("toxic_fills_label") or "toxic fills observe"
+    adapt_lab = payload.get("adapt_ab_label") or "adapt A/B observe"
+    rps_lab = payload.get("raise_phi_sla_label") or "raise_Φ SLA observe"
+    feat_lab = payload.get("feature_coverage_label") or "feature coverage observe"
+    cat_lab = payload.get("chip_catalog_label") or "chip catalog observe"
+    p2_lab = payload.get("phase2_pulse_label") or "phase2 pulse observe"
+    l7_lab = payload.get("l7_observe_label") or "L7 observe pulse"
+    fstore_lab = payload.get("feature_store_label") or "feature store observe"
+    skip_lab = payload.get("skip_historian_label") or "skip historian observe"
     lines.append(
-        f"• Toxic sunday: toxic fills observe · sunday quiet {tip_age} "
+        f"• Toxic sunday: {toxic_lab} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Adapt-A/B sunday: adapt A/B observe · sunday quiet {tip_age} "
+        f"• Adapt-A/B sunday: {adapt_lab} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Raise-Φ-SLA sunday: raise_Φ SLA observe · sunday quiet {tip_age} "
+        f"• Raise-Φ-SLA sunday: {rps_lab} · sunday quiet {tip_age} "
         f"(observe · never auto-writes Φ)"
     )
     lines.append(
-        f"• Feature-coverage sunday: feature coverage observe · sunday quiet {tip_age} "
+        f"• Feature-coverage sunday: {feat_lab} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Chip-catalog sunday: chip catalog observe · sunday quiet {tip_age} "
+        f"• Chip-catalog sunday: {cat_lab} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Phase2-pulse sunday: phase2 pulse observe · sunday quiet {tip_age} "
+        f"• Phase2-pulse sunday: {p2_lab} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• L7-pulse sunday: L7 observe pulse · sunday quiet {tip_age} "
+        f"• L7-pulse sunday: {l7_lab} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Feature-store sunday: feature store observe · sunday quiet {tip_age} "
+        f"• Feature-store sunday: {fstore_lab} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Skip-historian sunday: skip historian observe · sunday quiet {tip_age} "
+        f"• Skip-historian sunday: {skip_lab} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append("")
@@ -1000,6 +1009,29 @@ def main() -> int:
         f"· sunday quiet {sunday_quiet_age_label} "
         "(observe · never softens floors)"
     )
+    # Live labels for L7 / feature-store / skip-historian discord lines (surface-only).
+    toxic = desk_living.toxic_fill_chip(root)
+    adapt_ab = desk_living.adapt_ab_chip(root)
+    rps = desk_living.raise_phi_sla_chip(root)
+    feat_cov = desk_living.feature_coverage_chip(root)
+    catalog = desk_living.chip_catalog_chip(root)
+    p2 = desk_living.phase2_pulse_chip(root)
+    l7 = desk_living.l7_observe_summary(root=root)
+    feat_store = desk_living.feature_store_coverage(root)
+    skip_hist = desk_living.skip_historian_chip(root)
+    payload["toxic_fills_label"] = toxic.get("label") or "toxic fills observe"
+    payload["adapt_ab_label"] = adapt_ab.get("label") or "adapt A/B observe"
+    payload["raise_phi_sla_label"] = rps.get("label") or "raise_Φ SLA observe"
+    payload["feature_coverage_label"] = feat_cov.get("label") or "feature coverage observe"
+    payload["chip_catalog_label"] = catalog.get("label") or "chip catalog observe"
+    payload["phase2_pulse_label"] = p2.get("label") or "phase2 pulse observe"
+    payload["l7_observe_label"] = l7.get("label") or "L7 observe pulse"
+    payload["feature_store_label"] = (
+        f"feature store n={feat_store.get('n')} "
+        f"buys={feat_store.get('buys')} skips={feat_store.get('skips')}"
+    )
+    payload["skip_historian_label"] = skip_hist.get("label") or "skip historian observe"
+    payload["sunday_twin_coverage"] = desk_living.sunday_twin_coverage(root=root)
     if args.discord:
         print(format_discord(payload))
     elif args.json:

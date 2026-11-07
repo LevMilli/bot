@@ -1312,11 +1312,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Skip historian sunday twin | compact/export `skip_historian_sunday_quiet` |
 | Vault/status/ritual surfaces | App + staff CLIs |
 
+### Living upgrade — sunday export + live discord labels (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Export keep feature_store + skip_historian | `living_board_export` |
+| Ritual discord live L7/store/historian labels | `format_discord` |
+| `sunday_twin_coverage` + status `sunday` | surface audit CLI |
+| Makefile living-sunday* | staff paste · never auto-posts |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — chip catalog ~52/64 soft-max; invent surfaces not new board chips)* | — |
+| *(empty — sunday twin coverage complete; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 

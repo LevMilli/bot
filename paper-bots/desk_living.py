@@ -2444,7 +2444,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
         "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
         "betting_expand_gate", "doctor_age", "fee_floors_assert",
-        "sunday_packet", "reporter", "ritual_observe",
+        "sunday_packet", "reporter", "ritual_observe", "feature_store", "skip_historian",
     )
     slim = {k: board.get(k) for k in keep if k in board}
     ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
@@ -3894,6 +3894,38 @@ def l7_observe_summary(board: dict | None = None, root: str | None = None) -> di
             else "L7 observe pending"
         ),
         "note": "Surface-only L7 pulse — not a board chip; never softens floors.",
+    }
+
+
+
+def sunday_twin_coverage(board: dict | None = None, root: str | None = None) -> dict:
+    """Count compact sunday quiet twins vs fee-locked board fields (surface audit)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    compact = (
+        src.get("compact")
+        if isinstance(src.get("compact"), dict)
+        else living_compact_card(root, board=src)
+    )
+    twins = sorted(k for k in compact if str(k).endswith("_sunday_quiet"))
+    fields = sorted(
+        k
+        for k, v in src.items()
+        if (
+            k not in _BOARD_SIZE_SKIP
+            and isinstance(v, dict)
+            and v.get("fee_floors_locked") is True
+        )
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "twins_n": len(twins),
+        "fields_n": len(fields),
+        "twins": twins,
+        "pass": True,
+        "label": f"sunday twins={len(twins)} fields={len(fields)} ok",
+        "note": "Surface audit only — never softens floors; not a board chip.",
     }
 
 

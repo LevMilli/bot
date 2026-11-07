@@ -1,5 +1,5 @@
 # Living Trading Upgrade — staff smoke (paper only; floors locked; never auto-post).
-.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-gaps-discord living-ruin-discord living-l7 living-l7-discord
+.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord
 
 living-status:
 	python3 tools/staff_living_status.py
@@ -46,3 +46,9 @@ living-l7:
 
 living-l7-discord:
 	python3 tools/staff_living_status.py l7 --discord
+
+living-sunday:
+	python3 tools/staff_living_status.py sunday
+
+living-sunday-discord:
+	python3 tools/staff_living_status.py sunday --discord
