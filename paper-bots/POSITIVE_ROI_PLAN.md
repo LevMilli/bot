@@ -1591,6 +1591,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Makefile living-near-miss-tip / helper-tip / hard-stop-tip / skip-regret-tip | Makefile |
 | Ritual + vault tip rows | ritual / App |
 
+### Living upgrade — eia/injury/completions/toxic tip batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_eia_tip` + `eia_tip_sunday_quiet` | desk_living / compact / export |
+| `living_injury_tip` + `injury_tip_sunday_quiet` | desk_living / compact / export |
+| `living_completions_tip` + `completions_tip_sunday_quiet` | desk_living / compact / export |
+| `living_toxic_tip` + `toxic_tip_sunday_quiet` | desk_living / compact / export |
+| Status CLI eia-tip / injury-tip / completions-tip / toxic-tip | staff_living_status |
+| Makefile living-eia-tip / injury-tip / completions-tip / toxic-tip | Makefile |
+| Ritual + vault tip rows | ritual / App |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |

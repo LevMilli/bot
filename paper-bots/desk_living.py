@@ -1370,6 +1370,22 @@ def living_compact_card(
             f"{living_skip_regret_tip(src).get('label') or 'skip-regret observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "eia_tip_sunday_quiet": (
+            f"{living_eia_tip(src).get('label') or 'eia observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "injury_tip_sunday_quiet": (
+            f"{living_injury_tip(src).get('label') or 'injury observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "completions_tip_sunday_quiet": (
+            f"{living_completions_tip(src).get('label') or 'completions observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "toxic_tip_sunday_quiet": (
+            f"{living_toxic_tip(src).get('label') or 'toxic observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2609,6 +2625,26 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{skip_regret_tip.get('label') or 'skip-regret observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+        eia_tip = living_eia_tip(board)
+        compact["eia_tip_sunday_quiet"] = (
+            f"{eia_tip.get('label') or 'eia observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        injury_tip = living_injury_tip(board)
+        compact["injury_tip_sunday_quiet"] = (
+            f"{injury_tip.get('label') or 'injury observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        completions_tip = living_completions_tip(board)
+        compact["completions_tip_sunday_quiet"] = (
+            f"{completions_tip.get('label') or 'completions observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        toxic_tip = living_toxic_tip(board)
+        compact["toxic_tip_sunday_quiet"] = (
+            f"{toxic_tip.get('label') or 'toxic observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2848,6 +2884,20 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     skip_regret_tip = living_skip_regret_tip(board)
     slim["skip_regret_tip"] = skip_regret_tip
     slim["skip_regret_tip_label"] = skip_regret_tip.get("label")
+    eia_tip = living_eia_tip(board)
+    slim["eia_tip"] = eia_tip
+    slim["eia_tip_label"] = eia_tip.get("label")
+    slim["eia_blocked"] = eia_tip.get("blocked")
+    injury_tip = living_injury_tip(board)
+    slim["injury_tip"] = injury_tip
+    slim["injury_tip_label"] = injury_tip.get("label")
+    completions_tip = living_completions_tip(board)
+    slim["completions_tip"] = completions_tip
+    slim["completions_tip_label"] = completions_tip.get("label")
+    toxic_tip = living_toxic_tip(board)
+    slim["toxic_tip"] = toxic_tip
+    slim["toxic_tip_label"] = toxic_tip.get("label")
+    slim["toxic_pass"] = toxic_tip.get("pass")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3380,6 +3430,26 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{skip_regret_export.get('label') or 'skip-regret observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    eia_export = living_eia_tip(board)
+    slim["eia_tip_sunday_quiet"] = (
+        f"{eia_export.get('label') or 'eia observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    injury_export = living_injury_tip(board)
+    slim["injury_tip_sunday_quiet"] = (
+        f"{injury_export.get('label') or 'injury observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    completions_export = living_completions_tip(board)
+    slim["completions_tip_sunday_quiet"] = (
+        f"{completions_export.get('label') or 'completions observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    toxic_export = living_toxic_tip(board)
+    slim["toxic_tip_sunday_quiet"] = (
+        f"{toxic_export.get('label') or 'toxic observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3668,6 +3738,18 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_skip_regret_tip_sunday_quiet"] = (
             compact.get("skip_regret_tip_sunday_quiet") or slim.get("skip_regret_tip_sunday_quiet")
+        )
+        slim["compact_eia_tip_sunday_quiet"] = (
+            compact.get("eia_tip_sunday_quiet") or slim.get("eia_tip_sunday_quiet")
+        )
+        slim["compact_injury_tip_sunday_quiet"] = (
+            compact.get("injury_tip_sunday_quiet") or slim.get("injury_tip_sunday_quiet")
+        )
+        slim["compact_completions_tip_sunday_quiet"] = (
+            compact.get("completions_tip_sunday_quiet") or slim.get("completions_tip_sunday_quiet")
+        )
+        slim["compact_toxic_tip_sunday_quiet"] = (
+            compact.get("toxic_tip_sunday_quiet") or slim.get("toxic_tip_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4942,6 +5024,10 @@ _DISCORD_PASTE_TARGETS = (
     "helper-tip",
     "hard-stop-tip",
     "skip-regret-tip",
+    "eia-tip",
+    "injury-tip",
+    "completions-tip",
+    "toxic-tip",
     "gaps",
     "ruin",
     "expand",
@@ -5478,6 +5564,94 @@ def living_skip_regret_tip(board: dict | None = None, root: str | None = None) -
         "green_twin": sr.get("green_twin"),
         "label": label,
         "note": "Skip-regret tip — observe-only; never loosens fee floors.",
+    }
+
+
+
+
+def living_eia_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """EIA blackout/scout tip — not a board chip; never softens 0.05."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    blackout = src.get("eia_blackout") if isinstance(src.get("eia_blackout"), dict) else {}
+    scout = src.get("eia_scout") if isinstance(src.get("eia_scout"), dict) else {}
+    label = (
+        f"eia blocked={blackout.get('blocked')} hits={blackout.get('hits_n')} "
+        f"window={blackout.get('window_min')}m scout_n={scout.get('n')} "
+        f"next={scout.get('next_eta_hours')}h "
+        "(observe · never softens commodity 0.05 · never enables live)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "blocked": blackout.get("blocked"),
+        "hits_n": blackout.get("hits_n"),
+        "window_min": blackout.get("window_min"),
+        "scout_n": scout.get("n"),
+        "next_eta_hours": scout.get("next_eta_hours"),
+        "label": label,
+        "note": "EIA tip — observe-only blackout/scout; never softens commodity floor.",
+    }
+
+
+def living_injury_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Injury/news wire tip — not a board chip; never buys."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    wire = src.get("injury_wire") if isinstance(src.get("injury_wire"), dict) else {}
+    label = (
+        f"injury wire n={wire.get('n')} inbox={wire.get('inbox_n')} "
+        "(observe · never buys · never waives sports floor · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "n": wire.get("n"),
+        "inbox_n": wire.get("inbox_n"),
+        "label": label,
+        "note": "Injury tip — observe-only wire; never buys or waives sports floor.",
+    }
+
+
+def living_completions_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Completions today tip — not a board chip; never softens floors."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    chip = src.get("completions_chip") if isinstance(src.get("completions_chip"), dict) else {}
+    label = (
+        f"completions eligible={chip.get('eligible_completions_today')} "
+        f"pnl={chip.get('eligible_pnl_today')} day={chip.get('chicago_day')} "
+        "(observe · M1 guardrail · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "eligible_completions_today": chip.get("eligible_completions_today"),
+        "eligible_pnl_today": chip.get("eligible_pnl_today"),
+        "chicago_day": chip.get("chicago_day"),
+        "label": label,
+        "note": "Completions tip — observe-only fee-clear closes today; not a board chip.",
+    }
+
+
+def living_toxic_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Toxic/adverse fills tip — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    tox = src.get("toxic_fills") if isinstance(src.get("toxic_fills"), dict) else {}
+    label = (
+        f"toxic active={tox.get('active_n')} tracked={tox.get('tracked_n')} "
+        f"pass={tox.get('pass')} "
+        "(observe · never invents fills · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "active_n": tox.get("active_n"),
+        "tracked_n": tox.get("tracked_n"),
+        "pass": tox.get("pass"),
+        "label": label,
+        "note": "Toxic tip — observe-only adverse cool; never invents fills.",
     }
 
 

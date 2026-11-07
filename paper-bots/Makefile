@@ -1,5 +1,5 @@
 # Living Trading Upgrade — staff smoke (paper only; floors locked; never auto-post).
-.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord living-paste living-paste-discord living-paper living-paper-discord living-makefile living-makefile-discord living-venues living-venues-discord living-chicago living-chicago-discord living-starve living-starve-discord living-hard-rules living-hard-rules-discord living-swarm living-swarm-discord living-expand-tip living-expand-tip-discord living-quiet-tip living-quiet-tip-discord living-timer-tip living-timer-tip-discord living-export-tip living-export-tip-discord living-doctor-tip living-doctor-tip-discord living-inventory-tip living-inventory-tip-discord living-dual-tip living-dual-tip-discord living-hillclimb-tip living-hillclimb-tip-discord living-ruin-tip living-ruin-tip-discord living-near-miss-tip living-near-miss-tip-discord living-helper-tip living-helper-tip-discord living-hard-stop-tip living-hard-stop-tip-discord living-skip-regret-tip living-skip-regret-tip-discord
+.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord living-paste living-paste-discord living-paper living-paper-discord living-makefile living-makefile-discord living-venues living-venues-discord living-chicago living-chicago-discord living-starve living-starve-discord living-hard-rules living-hard-rules-discord living-swarm living-swarm-discord living-expand-tip living-expand-tip-discord living-quiet-tip living-quiet-tip-discord living-timer-tip living-timer-tip-discord living-export-tip living-export-tip-discord living-doctor-tip living-doctor-tip-discord living-inventory-tip living-inventory-tip-discord living-dual-tip living-dual-tip-discord living-hillclimb-tip living-hillclimb-tip-discord living-ruin-tip living-ruin-tip-discord living-near-miss-tip living-near-miss-tip-discord living-helper-tip living-helper-tip-discord living-hard-stop-tip living-hard-stop-tip-discord living-skip-regret-tip living-skip-regret-tip-discord living-eia-tip living-eia-tip-discord living-injury-tip living-injury-tip-discord living-completions-tip living-completions-tip-discord living-toxic-tip living-toxic-tip-discord
 
 living-help:
 	@echo "Living Trading Upgrade — paper only · floors locked · Discord never auto-posts"
@@ -15,7 +15,8 @@ living-help:
 	@echo "  make living-swarm / living-expand-tip / living-quiet-tip / living-timer-tip"
 	@echo "  make living-export-tip / living-doctor-tip / living-inventory-tip / living-dual-tip"
 	@echo "  make living-hillclimb-tip / living-ruin-tip / living-near-miss-tip / living-helper-tip"
-	@echo "  make living-hard-stop-tip / living-skip-regret-tip"
+	@echo "  make living-hard-stop-tip / living-skip-regret-tip / living-eia-tip / living-injury-tip"
+	@echo "  make living-completions-tip / living-toxic-tip"
 	@echo "  make living-l7 / living-sunday / living-gaps-discord / living-ruin-discord"
 	@echo "Staff map: LIVING_UPGRADE.md · plan: POSITIVE_ROI_PLAN.md"
 
@@ -245,3 +246,27 @@ living-skip-regret-tip:
 
 living-skip-regret-tip-discord:
 	python3 tools/staff_living_status.py skip-regret-tip --discord
+
+living-eia-tip:
+	python3 tools/staff_living_status.py eia-tip
+
+living-eia-tip-discord:
+	python3 tools/staff_living_status.py eia-tip --discord
+
+living-injury-tip:
+	python3 tools/staff_living_status.py injury-tip
+
+living-injury-tip-discord:
+	python3 tools/staff_living_status.py injury-tip --discord
+
+living-completions-tip:
+	python3 tools/staff_living_status.py completions-tip
+
+living-completions-tip-discord:
+	python3 tools/staff_living_status.py completions-tip --discord
+
+living-toxic-tip:
+	python3 tools/staff_living_status.py toxic-tip
+
+living-toxic-tip-discord:
+	python3 tools/staff_living_status.py toxic-tip --discord
