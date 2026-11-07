@@ -956,8 +956,9 @@ def is_near_miss(
         k in text
         for k in ("news", "weekend", "correlation", "entry_gate", "daily loss", "depth 0")
     )
-    # Allow ask-outside / regime companions with soft z|p (≤3 reason tokens).
-    ok = (not hard) and len(soft) == 1 and (not reasons or len(reasons) <= 3)
+    # Soft z|p in band is enough — ask-outside / regime / cushion companions
+    # are common on 15m skips and must not wipe densify (hard gates still block).
+    ok = (not hard) and len(soft) == 1
     return {
         "near_miss": ok,
         "soft": soft,
