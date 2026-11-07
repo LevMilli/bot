@@ -1719,7 +1719,7 @@ def main() -> int:
             "edge08-status", "edge08-promote",
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
-            "firm-queue", "completions", "feature-store", "money-pulse",
+            "firm-queue", "completions", "feature-store", "money-pulse", "exit-quality",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3527,11 +3527,39 @@ def main() -> int:
             "inx_band": desk_roi_plan.inx_band_promote_status(root),
             "edge08": desk_roi_plan.btc_edge08_shadow_status(root),
             "helper_gate_a": desk_roi_plan.helper_promote_status(root),
+            "exit_quality": desk_roi_plan.exit_quality_observe(root, bots=None),
+            "selective_throughput": desk_roi_plan.selective_throughput_observe(root),
             "note": (
-                "Money-path pulse — observe only (firm-queue / completions eligible / "
-                "feature-store densify). Never softens floors. Never arms LIVE_ORDERS."
+                "Money-path pulse — observe only (firm-queue / completions / "
+                "feature densify / exit-quality / selective after M1). "
+                "Never softens floors. Never arms LIVE_ORDERS."
             ),
         }
+        # Enrich exit/selective with live bots when snapshot available.
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            bots = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(bots, list):
+                out["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
+                out["selective_throughput"] = desk_roi_plan.selective_throughput_observe(
+                    root, bots=bots,
+                )
+        except Exception:
+            pass
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "exit-quality":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.exit_quality_observe(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
 
