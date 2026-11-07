@@ -223,10 +223,13 @@ class DeskLivingTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(map_path))
             teller = desk_living.teller_living_chip(tmp, remember=False)
             self.assertIn("swarm", teller.get("memory_line") or "")
+            self.assertIn("ritual live n=", teller.get("memory_line") or "")
             self.assertIn("ritual_ok", teller)
             self.assertIn("quiet_age_label", teller)
             self.assertTrue(str(teller.get("quiet_age_label") or "").startswith("quiet_age="))
             self.assertTrue(teller["fee_floors_locked"])
+            self.assertGreaterEqual(int(teller.get("ritual_live_n") or 0), 40)
+            self.assertTrue(teller.get("ritual_live_ok"))
             if teller.get("quiet_nag"):
                 self.assertIn("quiet_age=", teller.get("memory_line") or "")
             if teller.get("ritual_ok") is False:

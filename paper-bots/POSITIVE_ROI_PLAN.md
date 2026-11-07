@@ -1400,11 +1400,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Observe/status ritual live sunday twin | ritual + status |
 | Selfcheck/doctor `ritual_live_sunday_quiet` | living_self_check / doctor |
 
+### Living upgrade — teller ritual live (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Teller memory_line `ritual live n=` | teller_living_chip |
+| Status teller ritual live line | staff_living_status |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — ritual live status/discord shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — teller ritual live shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 

@@ -500,6 +500,7 @@ def teller_living_chip(
     bots: list | None = None,
     *,
     remember: bool = False,
+    enrich_live: bool = True,
 ) -> dict:
     """One teller memory_line from swarm + completions (paper observe)."""
     swarm = insight_swarm_ratio(root)
@@ -537,9 +538,18 @@ def teller_living_chip(
         age_f is not None and age_f >= 6
     ):
         quiet_nag = f" · {quiet_age_label} soft nag (learn loop observe)"
+    live_n = None
+    live_ok = None
+    ritual_live_bit = ""
+    if enrich_live:
+        # Standalone path only — board build passes enrich_live=False then stamps later.
+        live = ritual_live_labels(root=root)
+        live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
+        live_ok = live_n >= 40
+        ritual_live_bit = f" · ritual live n={live_n}"
     line = (
         f"{swarm_bit} · {fill_bit} · floors={'locked' if floors_ok else 'CHECK'}"
-        f"{ritual_nag}{quiet_nag}"
+        f"{ritual_nag}{quiet_nag}{ritual_live_bit}"
     )
     if remember:
         try:
@@ -574,6 +584,8 @@ def teller_living_chip(
         "quiet_age_h": quiet_age_h,
         "quiet_age_label": quiet_age_label,
         "quiet_nag": bool(quiet_nag),
+        "ritual_live_n": live_n,
+        "ritual_live_ok": live_ok,
         "memory_line": line,
         "label": line,
         "note": "Teller living chip — grounded on swarm + Completions; never invents PnL.",
@@ -2304,7 +2316,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "dual_control_chip": dual_control_chip(root),
         "ruin_drill_chip": ruin_drill_chip(root),
         "completions_chip": completions_chip(root),
-        "teller_living": teller_living_chip(root, bots=bots),
+        "teller_living": teller_living_chip(root, bots=bots, enrich_live=False),
         "fee_floors_assert": fee_floors_assert(root),
         "dual_control_gaps": dual_control_gaps_page(root),
         "hillclimb_chip": hillclimb_chip(root),
@@ -2334,6 +2346,19 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
     chips_n = _count_living_chips(board)
     board["board_size"] = living_board_size_guard(chips_n=chips_n)
     board["chip_catalog"] = chip_catalog_chip(root, chips_n=chips_n)
+    # Surface-only: stamp ritual live n onto teller after board exists (no recursion).
+    teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else None
+    if teller is not None:
+        live = ritual_live_labels(board)
+        live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
+        teller["ritual_live_n"] = live_n
+        teller["ritual_live_ok"] = live_n >= 40
+        base = str(teller.get("memory_line") or teller.get("label") or "")
+        if "ritual live n=" not in base:
+            base = f"{base} · ritual live n={live_n}".strip(" ·")
+            teller["memory_line"] = base
+            teller["label"] = base
+        board["teller_living"] = teller
     return board
 
 

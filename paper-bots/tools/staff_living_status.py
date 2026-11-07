@@ -918,7 +918,17 @@ def _text(board: dict) -> str:
         f"teller: {teller.get('memory_line') or '—'}",
         (
             f"ritual_nag={bool(teller.get('ritual_nag'))} "
-            f"teller_ritual_ok={teller.get('ritual_ok')}"
+            f"teller_ritual_ok={teller.get('ritual_ok')} "
+            f"teller_ritual_live_n={teller.get('ritual_live_n')}"
+        ),
+        (
+            "teller ritual live: "
+            + (
+                f"n={teller.get('ritual_live_n')} ok={teller.get('ritual_live_ok')}"
+                if teller.get("ritual_live_n") is not None
+                else "ritual live observe"
+            )
+            + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
         ),
         (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
