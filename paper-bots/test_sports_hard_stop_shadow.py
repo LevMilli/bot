@@ -42,6 +42,9 @@ class SportsHardStopShadow(unittest.TestCase):
             self.assertFalse(summ["live"])
             self.assertFalse(summ["auto_promote"])
             self.assertEqual(summ["decision"], "reject")  # n < 30
+            self.assertTrue(summ["evidence_thin"])
+            self.assertGreater(summ["n_to_promote"], 0)
+            self.assertIn("THIN", summ.get("label") or "")
 
     def test_promote_stays_review_not_auto(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -62,6 +65,8 @@ class SportsHardStopShadow(unittest.TestCase):
             self.assertFalse(desk_roi_plan.SPORTS_HARD_STOP_LIVE)
             self.assertIn(summ["decision"], ("review", "reject"))
             self.assertTrue(summ["promote_ready"])
+            self.assertFalse(summ["evidence_thin"])
+            self.assertEqual(summ["n_to_promote"], 0)
             # Staff arm via file; code constant stays False.
             armed = desk_roi_plan.staff_set_sports_hard_stop_live(
                 tmp, True, note="n≥30 shadow EV ok",

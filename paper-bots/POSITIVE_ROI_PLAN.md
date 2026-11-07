@@ -1748,11 +1748,19 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Money pulse | `make living-money-pulse` includes exit_quality |
 | Masters | `roi_plan.exit_quality` + `selective_throughput` |
 
+### Hard-stop shadow evidence observe (n→30)
+
+| Ticket | Where |
+| --- | --- |
+| Evidence-thin board | `sports_hard_stop_shadow_summary.evidence_thin` / `n_to_promote` / `label` |
+| Observe CLI | `make living-hard-stop-status` |
+| No-force promote when ready | `make living-hard-stop-promote-ready` (force=False) |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Hard-stop shadow n→30 observe / no-force promote when ready | `sports_hard_stop_shadow_summary` |
+| BTC TP / model-flip exit-quality observe parity | `exit_quality` extend fee-clear |
 
 ### INX research no-force path
 
