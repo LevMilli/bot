@@ -42,7 +42,8 @@ class SportsTimeFinal(unittest.TestCase):
         self.assertTrue(hit["shadow_only"])
 
     def test_hit_allows_finalized_loser_bid_zero(self):
-        # Settle-retro: rem=0 + bid=0 underwater must record (not rejected as no-quote).
+        # Hit detection accepts bid=0, but settle wipe (rem≤0+bid=0) is not a trim
+        # quote — record skips so promote EV is not poisoned by full-hold losers.
         hit = desk_roi_plan.sports_time_final_hit(
             0.0,
             bid=0.0,
@@ -64,7 +65,19 @@ class SportsTimeFinal(unittest.TestCase):
                 contracts=27,
                 cost=19.98,
             )
-            self.assertTrue(rec["recorded"], rec)
+            self.assertFalse(rec["recorded"])
+            self.assertEqual(rec.get("skipped"), "settle_wipe_not_trim")
+            # Mid-game wipe with rem>0 still records.
+            mid = desk_roi_plan.record_sports_time_final_shadow(
+                tmp,
+                ticker="KX-TF-MID0",
+                minutes_left=2.0,
+                entry_price=0.72,
+                bid=0.0,
+                contracts=27,
+                cost=19.98,
+            )
+            self.assertTrue(mid["recorded"], mid)
 
     def test_no_hit_when_far_from_final(self):
         hit = desk_roi_plan.sports_time_final_hit(

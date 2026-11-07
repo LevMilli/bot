@@ -39,6 +39,11 @@ class SportsHardStopShadow(unittest.TestCase):
                 cost=7.2,
             )
             self.assertTrue(rec["recorded"])
+            row = rec["row"]
+            self.assertTrue(row["priced_at_threshold"])
+            self.assertEqual(row["exit_bid"], 0.60)
+            # Exit at threshold — not full wipe — so EV is stop-fill, not -cost.
+            self.assertGreater(row["shadow_pnl"], -7.2)
             self.assertEqual(desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"], 1)
 
     def test_shadow_never_live_by_default(self):

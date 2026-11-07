@@ -6486,6 +6486,12 @@ def record_sports_time_final_shadow(
     )
     if not gate.get("hit"):
         return {"recorded": False, **gate}
+    # Settlement wipe (rem≤0 + bid=0) is not a trim quote — skip so promote EV
+    # is not poisoned by full-hold losers. Mid-game bid=0 with rem>0 still logs.
+    bid_n = _finite(gate.get("bid"))
+    rem_n = _finite(gate.get("minutes_left"))
+    if bid_n is not None and bid_n <= 0 and (rem_n is None or rem_n <= 0):
+        return {"recorded": False, "skipped": "settle_wipe_not_trim", **gate}
     path = _path(SPORTS_TIME_FINAL_SHADOW, root)
     state = _load(path, {"paper_only": True, "version": 1, "rows": [], "live": False})
     row = {
@@ -6670,12 +6676,26 @@ def record_sports_hard_stop_shadow(
         return {"recorded": False, **gate}
     path = _path(SPORTS_HARD_STOP_SHADOW, root)
     state = _load(path, {"paper_only": True, "version": 1, "rows": [], "live": False})
-    # Shadow PnL if we sold at bid − approx fee (Kalshi-style ceil omitted; 1¢ tax).
+    # Shadow PnL if we sold at exit bid − approx fee.
+    # Wiped books (bid=0 settle-retro) price the exit at the stop threshold —
+    # that is the fill we would have taken when the stop first hit, not the
+    # final 0 (which would poison promote EV with full-hold losses).
     contracts_n = _finite(contracts) or 1.0
     cost_n = _finite(cost)
-    bid_n = _finite(bid) or 0.0
-    fee_approx = math.ceil(round(0.07 * bid_n * (1.0 - bid_n) * 100, 6)) / 100 if bid_n else 0.0
-    proceeds = round(contracts_n * max(0.0, bid_n - fee_approx), 2)
+    quote_bid = _finite(bid)
+    thr = _finite(gate.get("threshold"))
+    exit_bid = quote_bid
+    priced_at_threshold = False
+    if quote_bid is not None and quote_bid <= 0 and thr is not None and thr > 0:
+        exit_bid = thr
+        priced_at_threshold = True
+    exit_bid = float(exit_bid or 0.0)
+    fee_approx = (
+        math.ceil(round(0.07 * exit_bid * (1.0 - exit_bid) * 100, 6)) / 100
+        if exit_bid > 0
+        else 0.0
+    )
+    proceeds = round(contracts_n * max(0.0, exit_bid - fee_approx), 2)
     shadow_pnl = None if cost_n is None else round(proceeds - cost_n, 2)
     row = {
         "at": _now(),
@@ -6684,6 +6704,8 @@ def record_sports_hard_stop_shadow(
         "league": league,
         "entry_price": gate.get("entry"),
         "bid": gate.get("bid"),
+        "exit_bid": exit_bid,
+        "priced_at_threshold": priced_at_threshold,
         "threshold": gate.get("threshold"),
         "drop": gate.get("drop"),
         "fair": _finite(fair),

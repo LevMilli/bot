@@ -315,9 +315,12 @@ class ShadowEvidenceDensify(unittest.TestCase):
             )
             self.assertTrue(out["ok"])
             self.assertEqual(out["hard_stop"], 1)
-            self.assertEqual(out["time_final"], 1)
-            self.assertEqual(desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"], 1)
-            self.assertEqual(desk_roi_plan.sports_time_final_shadow_summary(tmp)["n"], 1)
+            # time-final skips settle wipe (bid=0 + rem=0) — not a trim quote.
+            self.assertEqual(out["time_final"], 0)
+            hs = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)
+            self.assertEqual(hs["n"], 1)
+            self.assertGreater(hs["shadow_expectancy"], -19.98)
+            self.assertEqual(desk_roi_plan.sports_time_final_shadow_summary(tmp)["n"], 0)
             # Idempotent — second pass records nothing.
             again = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
                 tmp, fetch_market=fake_market,
