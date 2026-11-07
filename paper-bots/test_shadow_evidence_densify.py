@@ -94,6 +94,7 @@ class ShadowEvidenceDensify(unittest.TestCase):
             "desk_commodity_time_stop_shadow.json",
             "desk_sports_time_final_shadow.json",
             "desk_helper_fills.json",
+            "desk_fee_ledger.json",
             "btc15m-signal/shadow_edge08_account.json",
         }
         present = set(pimp_desk.SETTLEMENT_FILES)

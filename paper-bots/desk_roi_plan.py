@@ -3159,6 +3159,15 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         errors.append(f"clv:{type(exc).__name__}")
         repaired = {"ok": False, "repaired": 0, "error": type(exc).__name__}
     status = near_miss_promote_status(root)
+    # CLI catch-up writes marker so doctor / shadow_ops aren't false-stale.
+    try:
+        root_s = _root(root)
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) + "\n"
+        marker = os.path.join(root_s, "desk_shadow_catchup_at.txt")
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write(stamp)
+    except OSError:
+        pass
     return {
         "ok": True,
         "paper_only": True,
@@ -3197,6 +3206,8 @@ def shadow_ops_alerts(root: str | None = None) -> dict:
         "hard_stop": {"present": False, "path": None, "thin": True},
         "commodity_tstop": {"present": False, "path": None, "thin": True},
         "sports_tfinal": {"present": False, "path": None, "thin": True},
+        "near_miss": {"present": False, "path": None, "thin": True, "labeled_n": 0},
+        "fee_ledger": {"present": False, "path": None},
     }
     shadow_enabled = True
     try:
@@ -3299,6 +3310,26 @@ def shadow_ops_alerts(root: str | None = None) -> dict:
                     alerts.append("sports_tfinal_promote_thin")
             except Exception:
                 pass
+            # Near-miss journal thin / labeled_n=0 (observe densify).
+            try:
+                nm = near_miss_promote_status(root)
+                labeled_n = int(nm.get("labeled_n") or 0)
+                total_n = int(nm.get("n") or 0)
+                journals["near_miss"]["present"] = True
+                journals["near_miss"]["labeled_n"] = labeled_n
+                journals["near_miss"]["pending_n"] = max(0, total_n - labeled_n)
+                journals["near_miss"]["thin"] = bool(labeled_n <= 0)
+                if journals["near_miss"]["thin"]:
+                    alerts.append("near_miss_journal_thin")
+            except Exception:
+                journals["near_miss"]["thin"] = True
+                alerts.append("near_miss_journal_thin")
+            # Fee ledger durability — SETTLEMENT_FILES copy; gitignore may still churn.
+            fee_path = _path(FEE_LEDGER_NAME, root)
+            journals["fee_ledger"]["path"] = fee_path
+            journals["fee_ledger"]["present"] = os.path.isfile(fee_path)
+            if shadow_enabled and not journals["fee_ledger"]["present"]:
+                alerts.append("fee_ledger_missing")
     except Exception as exc:  # noqa: BLE001
         alerts.append(f"probe_error:{type(exc).__name__}")
     return {
@@ -3316,8 +3347,8 @@ def shadow_ops_alerts(root: str | None = None) -> dict:
         "shadow_enabled": shadow_enabled,
         "note": (
             "Shadow ops observe — heartbeat / edge08 / catch-up age / "
-            "sports+commodity shadow journals / thin promote boards. "
-            "Never arms LIVE_ORDERS."
+            "sports+commodity shadow journals / near-miss thin / fee ledger / "
+            "thin promote boards. Never arms LIVE_ORDERS."
         ),
     }
 
@@ -7450,63 +7481,78 @@ def record_helper_fill(
 def backfill_helper_fills_from_btc_closed(root: str | None = None) -> dict:
     """Catch-up: attribute calendar_scanner (etc.) helper fills from btc closed[].
 
+    Also scans shadow_edge08_account.json closed rows (DESK_SHADOW densify path).
     Idempotent by fill_id. Observe densify for Gate A — never places alone.
     """
     base = _root(root)
-    acct_path = os.path.join(base, "btc15m-signal", "paper_account.json")
-    try:
-        with open(acct_path, encoding="utf-8") as handle:
-            acct = json.load(handle)
-    except Exception:
-        acct = {}
-    if not isinstance(acct, dict):
-        acct = {}
-    closed = [c for c in (acct.get("closed") or []) if isinstance(c, dict)]
+    acct_paths = [
+        (os.path.join(base, "btc15m-signal", "paper_account.json"), "btc-backfill"),
+        (
+            os.path.join(base, "btc15m-signal", "shadow_edge08_account.json"),
+            "edge08-backfill",
+        ),
+    ]
     recorded = 0
     skipped = 0
+    closed_n = 0
     samples: list[dict] = []
-    for pos in closed:
-        helper = str(pos.get("helper_source") or "").strip()
-        if not helper:
-            # Feature-store style tag from buy path.
-            if pos.get("calendar_loaded") is True:
-                helper = "calendar_scanner"
+    sources_seen: list[str] = []
+    for acct_path, id_prefix in acct_paths:
+        try:
+            with open(acct_path, encoding="utf-8") as handle:
+                acct = json.load(handle)
+        except Exception:
+            acct = {}
+        if not isinstance(acct, dict):
+            acct = {}
+        closed = [c for c in (acct.get("closed") or []) if isinstance(c, dict)]
+        if closed:
+            sources_seen.append(os.path.basename(acct_path))
+        closed_n += len(closed)
+        for pos in closed:
+            helper = str(pos.get("helper_source") or "").strip()
+            if not helper:
+                # Feature-store style tag from buy path.
+                if pos.get("calendar_loaded") is True:
+                    helper = "calendar_scanner"
+                else:
+                    skipped += 1
+                    continue
+            fill_id = str(pos.get("fill_id") or "")
+            if not fill_id:
+                # Stable synthetic id from ticker+closed so catch-up stays idempotent.
+                fill_id = (
+                    f"{id_prefix}:{pos.get('ticker') or ''}:"
+                    f"{pos.get('closed') or pos.get('at') or ''}"
+                )[:80]
+            out = record_helper_fill(
+                root,
+                helper=helper,
+                bot="btc15m",
+                ticker=str(pos.get("ticker") or ""),
+                pnl=pos.get("pnl"),
+                contracts=pos.get("contracts"),
+                fill_id=fill_id,
+                note=f"backfill from {os.path.basename(acct_path)}",
+            )
+            if out.get("recorded"):
+                recorded += 1
+                if len(samples) < 8:
+                    samples.append({
+                        "ticker": pos.get("ticker"),
+                        "helper": helper,
+                        "fill_id": fill_id,
+                        "source": os.path.basename(acct_path),
+                    })
             else:
                 skipped += 1
-                continue
-        fill_id = str(pos.get("fill_id") or "")
-        if not fill_id:
-            # Stable synthetic id from ticker+closed so catch-up stays idempotent.
-            fill_id = (
-                f"btc-backfill:{pos.get('ticker') or ''}:"
-                f"{pos.get('closed') or pos.get('at') or ''}"
-            )[:80]
-        out = record_helper_fill(
-            root,
-            helper=helper,
-            bot="btc15m",
-            ticker=str(pos.get("ticker") or ""),
-            pnl=pos.get("pnl"),
-            contracts=pos.get("contracts"),
-            fill_id=fill_id,
-            note="backfill from btc closed",
-        )
-        if out.get("recorded"):
-            recorded += 1
-            if len(samples) < 8:
-                samples.append({
-                    "ticker": pos.get("ticker"),
-                    "helper": helper,
-                    "fill_id": fill_id,
-                })
-        else:
-            skipped += 1
     gate = helper_gate_a(root, "calendar_scanner")
     return {
         "ok": True,
         "recorded": recorded,
         "skipped": skipped,
-        "closed_n": len(closed),
+        "closed_n": closed_n,
+        "sources": sources_seen,
         "samples": samples,
         "gate_a_calendar": gate,
         "paper_only": True,
@@ -7516,8 +7562,8 @@ def backfill_helper_fills_from_btc_closed(root: str | None = None) -> dict:
         "places_orders": False,
         "live": False,
         "note": (
-            "Helper fills backfill from btc15m closed with helper_source / "
-            "calendar_loaded. Gate A still needs staff arm; never LIVE."
+            "Helper fills backfill from btc15m paper + shadow_edge08 closed with "
+            "helper_source / calendar_loaded. Gate A still needs staff arm; never LIVE."
         ),
     }
 

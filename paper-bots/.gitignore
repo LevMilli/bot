@@ -52,6 +52,9 @@ desk_anti_revenge.json
 desk_incubation.json
 desk_ruin_drill.json
 desk_fee_ledger.json
+# Shadow tick/catchup markers — local churn; SETTLEMENT copy not needed (mtime only).
+desk_shadow_tick_at.txt
+desk_shadow_catchup_at.txt
 desk_helper_fills.json
 desk_helper_promote.json
 desk_cold_harvest.json

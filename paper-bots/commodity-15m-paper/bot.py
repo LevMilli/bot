@@ -502,6 +502,17 @@ def settle_account(state: dict) -> None:
                 kind="settle",
                 note="settled",
             )
+            # Near-miss would_pnl densify — label soft z|p skips for this ticker.
+            try:
+                desk_roi_plan.label_near_miss_from_result(
+                    DESK_ROOT,
+                    ticker=str(pos.get("ticker") or ""),
+                    result=str(result),
+                    bot="commodity-15m",
+                    note="commodity-15m settle label",
+                )
+            except Exception:
+                pass
             # Settle-retro time-stop densify — last minutes missed before close.
             # Evaluate with now≈close (minutes_left≈0). Still NO live sell.
             if not pos.get("time_stop_shadowed"):
@@ -1035,6 +1046,32 @@ def main() -> int:
             )
         except Exception:
             pass
+        # Soft z|p near-miss densify on skips (mirror sports/btc). Never LIVE.
+        if ev.get("reasons"):
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_more as _nm_com
+                nm = _nm_com.is_near_miss(
+                    reasons=list(ev.get("reasons") or []),
+                    z=ev.get("z"),
+                    p=ev.get("p"),
+                    edge=ev.get("edge"),
+                    min_edge=0.0,
+                )
+                if nm.get("near_miss"):
+                    _nm_com.record_near_miss(DESK_ROOT, {
+                        "bot": "commodity-15m",
+                        "ticker": ev.get("ticker") or m.get("ticker"),
+                        "side": ev.get("side"),
+                        "soft": nm.get("soft"),
+                        "z": ev.get("z"),
+                        "p": ev.get("p"),
+                        "edge": ev.get("edge"),
+                        "note": f"commodity {nm.get('note')}",
+                    })
+            except Exception:
+                pass
         if not ev.get("reasons"):
             candidates.append({
                 "bot": "commodity-15m",

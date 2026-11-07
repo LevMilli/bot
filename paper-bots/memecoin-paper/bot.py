@@ -202,6 +202,18 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
                 eligible=False,
                 note=str(reason or "")[:120],
             )
+            # Near-miss would_pnl densify when mint matches a soft skip.
+            try:
+                nm_result = "yes" if float(pnl) > 0 else "no"
+                desk_roi_plan.label_near_miss_from_result(
+                    desk_root,
+                    ticker=str(pos.get("mint") or pos.get("symbol") or ""),
+                    result=nm_result,
+                    bot="memecoin",
+                    note="memecoin sell label",
+                )
+            except Exception:
+                pass
             teller_memory.remember(
                 desk_root,
                 kind="wins" if float(pnl) > 0 else "mistakes",
@@ -478,7 +490,32 @@ def scan(st, stats):
         elif conf + 1e-12 >= C.MIN_CONFIDENCE_SPEED:
             lane = "speed"
         else:
-            record("SKIP", f"confidence {conf} < speed floor {C.MIN_CONFIDENCE_SPEED}")
+            skip_reason = f"confidence {conf} < speed floor {C.MIN_CONFIDENCE_SPEED}"
+            record("SKIP", skip_reason)
+            # Soft-p densify when conf sits in near-miss p band (rare under speed floor).
+            try:
+                desk_root = os.path.dirname(BASE)
+                if desk_root not in sys.path:
+                    sys.path.insert(0, desk_root)
+                import desk_more as _nm_meme
+                nm = _nm_meme.is_near_miss(
+                    reasons=[skip_reason],
+                    z=None,
+                    p=conf,
+                    edge=max(0.0, float(conf) - 0.5),
+                    min_edge=0.05,
+                )
+                if nm.get("near_miss"):
+                    _nm_meme.record_near_miss(desk_root, {
+                        "bot": "memecoin",
+                        "ticker": mint or row.get("symbol") or "",
+                        "side": "long",
+                        "soft": nm.get("soft"),
+                        "p": conf,
+                        "note": f"meme {nm.get('note')}",
+                    })
+            except Exception:
+                pass
             continue
         if (
             lane == "speed"
@@ -547,6 +584,31 @@ def scan(st, stats):
         row["risk_gates_ok"] = "PASS" if not gate_reason else "FAIL"
         if gate_reason:
             record("SKIP", gate_reason)
+            try:
+                desk_root = os.path.dirname(BASE)
+                if desk_root not in sys.path:
+                    sys.path.insert(0, desk_root)
+                import desk_more as _nm_meme
+                residual = max(0.0, float(conf) - 0.5)
+                nm = _nm_meme.is_near_miss(
+                    reasons=[gate_reason],
+                    z=None,
+                    p=conf,
+                    edge=residual,
+                    min_edge=0.05,
+                )
+                if nm.get("near_miss"):
+                    _nm_meme.record_near_miss(desk_root, {
+                        "bot": "memecoin",
+                        "ticker": mint or row.get("symbol") or "",
+                        "side": str(lane or "long"),
+                        "soft": nm.get("soft"),
+                        "p": conf,
+                        "edge": residual,
+                        "note": f"meme {nm.get('note')} · {gate_reason}"[:160],
+                    })
+            except Exception:
+                pass
             try:
                 desk_root = os.path.dirname(BASE)
                 if desk_root not in sys.path:

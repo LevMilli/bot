@@ -179,6 +179,7 @@ SETTLEMENT_FILES = (
     "desk_commodity_time_stop_shadow.json",
     "desk_sports_time_final_shadow.json",
     "desk_helper_fills.json",
+    "desk_fee_ledger.json",
     "btc15m-signal/shadow_edge08_account.json",
     "pimp-learning.json",
     "pimp-good.json",
@@ -3509,12 +3510,12 @@ def run_shadow_tick(
     *,
     run_bots: bool = True,
 ) -> dict:
-    """One-shot paper shadow smoke — densify edge08 + sports + commodity + heartbeat.
+    """One-shot paper shadow smoke — densify edge08 + sports + commodity + INX + heartbeat.
 
-    Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), smokes sports-gap
-    and commodity-15m paper (hard-stop / t-final / t-stop / near-miss densify),
+    Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), smokes sports-gap,
+    commodity-15m, and INX paper settles (hard-stop / t-final / t-stop / near-miss densify),
     touches heartbeat, best-effort history settle. Never sets LIVE_ORDERS.
-    Floors stay locked.
+    Floors stay locked. Writes tick+catchup markers so doctor isn't false-stale.
     """
     root = _root(root)
     if now is None:
@@ -3595,12 +3596,41 @@ def run_shadow_tick(
             "paper_only": True,
             "live_orders_enabled": False,
         })
+        # INX paper settle smoke — densify fee ledger + band history without noon scan.
+        # settle only (not mid-day scan invent); never LIVE.
+        for inx_bot in ("kalshi-sp", "kalshi-sized"):
+            try:
+                inx = run_bot(inx_bot, "settle", root)
+            except Exception as exc:  # noqa: BLE001
+                inx = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+            shadow_rows.append({
+                "bot": inx_bot,
+                "action": "settle-smoke",
+                "shadow_id": None,
+                "ok": bool(inx.get("ok")),
+                "blocked": bool(inx.get("blocked")),
+                "error": inx.get("error") or "",
+                "summary": inx.get("summary") or "",
+                "paper_only": True,
+                "live_orders_enabled": False,
+            })
     catchup = {}
     try:
         import desk_roi_plan
         catchup = desk_roi_plan.run_shadow_catchup(root)
     except Exception as exc:  # noqa: BLE001
         catchup = {"ok": False, "error": type(exc).__name__, "labeled_n": 0, "backfilled": 0, "repaired": 0}
+    # CLI tick path writes markers (same as run_scheduled) so doctor isn't false-stale.
+    try:
+        stamp = _iso(now) + "\n"
+        for name in ("desk_shadow_tick_at.txt", "desk_shadow_catchup_at.txt"):
+            try:
+                with open(_under(root, name), "w", encoding="utf-8") as handle:
+                    handle.write(stamp)
+            except OSError:
+                pass
+    except Exception:
+        pass
     ops = {}
     try:
         import desk_roi_plan
@@ -3624,6 +3654,8 @@ def run_shadow_tick(
         "shadow_rows": shadow_rows,
         "sports_smoked": any(r.get("bot") == "sports-gap" for r in shadow_rows),
         "commodity_smoked": any(r.get("bot") == "commodity-15m" for r in shadow_rows),
+        "inx_sp_smoked": any(r.get("bot") == "kalshi-sp" for r in shadow_rows),
+        "inx_sized_smoked": any(r.get("bot") == "kalshi-sized" for r in shadow_rows),
         "catchup": catchup,
         "shadow_ops": ops,
         "labeled_n": catchup.get("labeled_n"),
@@ -3631,7 +3663,7 @@ def run_shadow_tick(
         "repaired": catchup.get("repaired"),
         "note": (
             "Shadow tick — paper DESK_SHADOW edge08 + sports-gap + commodity-15m "
-            "smoke + catch-up densify. Never LIVE_ORDERS; never tip invent; "
+            "+ INX settle smoke + catch-up densify. Never LIVE_ORDERS; never tip invent; "
             "Discord never auto-posts."
         ),
     }
