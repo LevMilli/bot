@@ -728,6 +728,41 @@ def run():
                         _tip_funnel.record_tip_funnel(DESK_ROOT, league, "block_edge")
                 except Exception:
                     pass
+            # Soft z/p near-miss densify (mirror btc15m) — shadow only, no buy.
+            if reason and (
+                "gap <" in str(reason)
+                or "fair" in str(reason).lower()
+                or "speed floor" in str(reason).lower()
+            ):
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_more as _nm_more
+                    # Soft-p via fair; soft-edge via gap vs need (no sports z — p/edge only).
+                    nm = _nm_more.is_near_miss(
+                        reasons=[reason],
+                        z=None,
+                        p=fair,
+                        edge=gap,
+                        min_edge=float(need) if need is not None else 0.06,
+                    )
+                    if nm.get("near_miss"):
+                        _nm_more.record_near_miss(DESK_ROOT, {
+                            "bot": "sports-gap",
+                            "ticker": m.get("ticker"),
+                            "side": "YES",  # Kalshi yes contract on this team market
+                            "soft": nm.get("soft"),
+                            "p": fair,
+                            "edge": gap,
+                            "ask": ask,
+                            "note": f"sports {nm.get('note')} · {side}",
+                            "league": league,
+                        })
+                        summary_out.setdefault("near_miss", []).append(
+                            f"NEAR-MISS {m.get('ticker')} ({nm.get('note')})"
+                        )
+                except Exception:
+                    pass
             if reason:
                 lines.append(row + gtxt + f" | {reason} |"); continue
             if alarm is not None:
@@ -810,6 +845,22 @@ def run():
                     fill_id=str(p.get("fill_id") or ""),
                     kind="settle",
                     note="settled",
+                )
+            except Exception:
+                pass
+            # Near-miss would_pnl densify — label shadow skips for this ticker (observe).
+            # Kalshi yes-contract: our side won → result=yes, else no. No live sell.
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                nm_result = "yes" if winner == p.get("side") else "no"
+                desk_roi_plan.label_near_miss_from_result(
+                    DESK_ROOT,
+                    ticker=str(p.get("ticker") or ""),
+                    result=nm_result,
+                    bot="sports-gap",
+                    note="sports-gap settle label",
                 )
             except Exception:
                 pass
@@ -1483,6 +1534,34 @@ def run():
                     )
         if reason:
             lines.append(row + gtxt + f" | {reason} |")
+            # Soft near-miss on late buy-path skips (mirror early eval path).
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_more as _nm_buy
+                why = str(reason or "").lower()
+                if any(k in why for k in ("gap", "edge", "fair", "speed floor")):
+                    nm = _nm_buy.is_near_miss(
+                        reasons=[reason],
+                        z=None,
+                        p=fair,
+                        edge=gap,
+                        min_edge=float(c.get("need") or need_edge or 0.06),
+                    )
+                    if nm.get("near_miss"):
+                        _nm_buy.record_near_miss(DESK_ROOT, {
+                            "bot": "sports-gap",
+                            "ticker": m.get("ticker"),
+                            "side": "YES",
+                            "soft": nm.get("soft"),
+                            "p": fair,
+                            "edge": gap,
+                            "ask": ask,
+                            "note": f"sports buy-skip {nm.get('note')}",
+                            "league": c.get("league"),
+                        })
+            except Exception:
+                pass
             if desk_brain is not None:
                 try:
                     desk_brain.record_decision(

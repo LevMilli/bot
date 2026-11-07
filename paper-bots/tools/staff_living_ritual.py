@@ -706,6 +706,14 @@ def main() -> int:
     root = args.root
 
     if args.observe:
+        # Observe-safe densify when floors/expand look clean — never arms / LIVE.
+        try:
+            chip_pre = desk_living.ritual_observe_chip(root)
+            if chip_pre.get("exit_ok"):
+                import desk_roi_plan as _catch
+                _catch.run_shadow_catchup(root)
+        except Exception:
+            pass
         chip = desk_living.ritual_observe_chip(root)
         if args.json:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -1593,6 +1601,24 @@ def main() -> int:
             print(f"doctor_fresh={chip.get('doctor_fresh')}")
         return 0 if chip.get("exit_ok") else 2
 
+    # Shadow densify on ritual path — label/backfill/repair before boards.
+    # Best-effort; never arms soft gates; never LIVE; never tip invent.
+    shadow_catchup = {
+        "ok": False, "labeled_n": 0, "labeled": 0, "backfilled": 0, "repaired": 0,
+    }
+    try:
+        import desk_roi_plan as _catch
+        shadow_catchup = _catch.run_shadow_catchup(root)
+    except Exception as exc:  # noqa: BLE001
+        shadow_catchup = {
+            "ok": False,
+            "labeled_n": 0,
+            "labeled": 0,
+            "backfilled": 0,
+            "repaired": 0,
+            "error": type(exc).__name__,
+        }
+
     steps = [
         ("gaps", desk_living.dual_control_gaps_page(root)),
         ("ruin", desk_living.ruin_drill_page(root)),
@@ -1635,6 +1661,11 @@ def main() -> int:
         "fee_floors_locked": True,
         "live_orders_enabled": False,
         "auto_publish": False,
+        "auto_promote": False,
+        "shadow_catchup": shadow_catchup,
+        "labeled_n": shadow_catchup.get("labeled_n"),
+        "backfilled": shadow_catchup.get("backfilled"),
+        "repaired": shadow_catchup.get("repaired"),
         "steps": {name: row for name, row in steps},
         "ok": ritual_ok,
         "ritual_ok": ritual_ok,
@@ -1651,6 +1682,7 @@ def main() -> int:
         "sunday_quiet_age_label": sunday_quiet_age_label,
         "note": (
             "Weekly ritual draft — staff reviews gaps/ruin/floors/expand/doctor. "
+            "Shadow catch-up densifies labeled_n (observe). "
             "Never invent fills; never soften floors; never enable live."
         ),
     }

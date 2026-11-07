@@ -1977,6 +1977,20 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers. Ne
 | Helper Gate A + CLV repair | `backfill_helper_fills_from_btc_closed` · `repair_clv_completeness` · `make living-helper-backfill` / `living-clv-repair` |
 | Tests | `test_shadow_evidence_densify.py` |
 
+### Shadow tick + catch-up wire (Nov 7) — promote n toward 30 without LIVE/tip invent
+
+Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chips. Discord never auto-posts.
+
+| Ticket | Where |
+| --- | --- |
+| Auto catch-up on pulse + ritual | `run_shadow_catchup` → money-pulse / ritual / ritual-live · surfaces `labeled_n` / `backfilled` / `repaired` |
+| Dedicated catch-up Make | `make living-shadow-catchup` → `shadow-catchup` CLI |
+| Paper shadow smoke tick | `pimp_desk.run_shadow_tick` · `make living-shadow-tick` (DESK_SHADOW edge08 + heartbeat + history; never LIVE) |
+| Doctor / ops observe | `shadow_ops_alerts` — heartbeat missing / `shadow_edge08` absent (observe; doctor surfaces, does not hard-fail) |
+| Sports near-miss + settle→label | `gap_bot` soft p/edge skips → `record_near_miss`; settle → `label_near_miss_from_result` |
+| History settle → label bridge | `kalshi_history.record_settle` → `label_near_miss_from_result`; `ensure_history_file` creates `kalshi_crypto_history.json` |
+| Tests | `test_shadow_tick_catchup.py` |
+
 ### Next
 
 | Ticket | Where |

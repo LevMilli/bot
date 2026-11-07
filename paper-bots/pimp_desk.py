@@ -3425,6 +3425,100 @@ def run_due(root: str | None = None, now: dt.datetime | None = None) -> dict:
     return {"ok": True, "error": "", "rows": rows}
 
 
+def run_shadow_tick(
+    root: str | None = None,
+    now: dt.datetime | None = None,
+    *,
+    run_bots: bool = True,
+) -> dict:
+    """One-shot paper shadow smoke — densify edge08 + heartbeat without LIVE.
+
+    Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), touches heartbeat,
+    best-effort history settle. Never sets LIVE_ORDERS. Floors stay locked.
+    """
+    root = _root(root)
+    if now is None:
+        now = dt.datetime.now(dt.timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    keep_closed_settlements(root)
+    ensure_paper_accounts(root)
+    # Ensure edge08 shadow account materializes even if bot script is offline.
+    edge08_path = None
+    try:
+        edge08_path = shadow_account_path(root, "btc15m", "edge08")
+        if not os.path.isfile(edge08_path):
+            save_shadow_account(root, "btc15m", "edge08", load_shadow_account(root, "btc15m", "edge08"))
+    except Exception:
+        edge08_path = None
+    history_settle = {"settled": 0, "attempted": 0}
+    history_path = None
+    try:
+        import kalshi_history
+        history_path = kalshi_history.ensure_history_file(root)
+        history_settle = kalshi_history.settle_open_windows(root, limit=12)
+    except Exception as exc:  # noqa: BLE001
+        history_settle = {"settled": 0, "attempted": 0, "error": type(exc).__name__}
+    touch_heartbeat(root, now)
+    shadow_rows: list = []
+    if run_bots:
+        cfg = load_settings(root)
+        for prof in shadow_profiles(cfg):
+            if prof.get("bot") != "btc15m":
+                continue
+            # Force one pass — ignore cadence (smoke densify).
+            try:
+                result = run_bot("btc15m", "run", root, shadow_profile=prof)
+            except Exception as exc:  # noqa: BLE001
+                result = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+            shadow_rows.append({
+                "bot": "btc15m",
+                "action": "shadow",
+                "shadow_id": prof.get("id"),
+                "ok": bool(result.get("ok")),
+                "blocked": bool(result.get("blocked")),
+                "error": result.get("error") or "",
+                "summary": result.get("summary") or "",
+            })
+    catchup = {}
+    try:
+        import desk_roi_plan
+        catchup = desk_roi_plan.run_shadow_catchup(root)
+    except Exception as exc:  # noqa: BLE001
+        catchup = {"ok": False, "error": type(exc).__name__, "labeled_n": 0, "backfilled": 0, "repaired": 0}
+    ops = {}
+    try:
+        import desk_roi_plan
+        ops = desk_roi_plan.shadow_ops_alerts(root)
+    except Exception:
+        ops = {}
+    return {
+        "ok": True,
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "live": False,
+        "heartbeat_touched": True,
+        "shadow_edge08_path": edge08_path,
+        "shadow_edge08_present": bool(edge08_path and os.path.isfile(edge08_path)),
+        "history_path": history_path,
+        "history_present": bool(history_path and os.path.isfile(history_path)),
+        "history_settle": history_settle,
+        "shadow_rows": shadow_rows,
+        "catchup": catchup,
+        "shadow_ops": ops,
+        "labeled_n": catchup.get("labeled_n"),
+        "backfilled": catchup.get("backfilled"),
+        "repaired": catchup.get("repaired"),
+        "note": (
+            "Shadow tick — paper DESK_SHADOW edge08 + catch-up densify. "
+            "Never LIVE_ORDERS; never tip invent; Discord never auto-posts."
+        ),
+    }
+
+
 def _unlink(path: str) -> bool:
     """Delete a paper file. A settlement symlink and the volume file both go."""
     if os.path.islink(path):

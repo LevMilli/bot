@@ -3133,6 +3133,98 @@ def label_near_miss_from_result(
     }
 
 
+def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
+    """Best-effort densify: near-miss label + helper backfill + CLV repair.
+
+    Observe only — never arms soft gates, never LIVE_ORDERS, never tip invent.
+    Safe to call from money-pulse / ritual / make living-shadow-catchup.
+    """
+    labeled = {"ok": False, "labeled": 0, "labeled_n": 0}
+    backfilled = {"ok": False, "recorded": 0}
+    repaired = {"ok": False, "repaired": 0}
+    errors: list[str] = []
+    try:
+        labeled = label_near_miss_catchup(root, fetch_result=fetch_result)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"label:{type(exc).__name__}")
+        labeled = {"ok": False, "labeled": 0, "labeled_n": 0, "error": type(exc).__name__}
+    try:
+        backfilled = backfill_helper_fills_from_btc_closed(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"helper:{type(exc).__name__}")
+        backfilled = {"ok": False, "recorded": 0, "error": type(exc).__name__}
+    try:
+        repaired = repair_clv_completeness(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"clv:{type(exc).__name__}")
+        repaired = {"ok": False, "repaired": 0, "error": type(exc).__name__}
+    status = near_miss_promote_status(root)
+    return {
+        "ok": True,
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "live": False,
+        "live_orders_enabled": False,
+        "labeled_n": status.get("labeled_n"),
+        "labeled": int(labeled.get("labeled") or 0),
+        "backfilled": int(backfilled.get("recorded") or 0),
+        "repaired": int(repaired.get("repaired") or 0),
+        "near_miss_label": labeled,
+        "helper_backfill": backfilled,
+        "clv_repair": repaired,
+        "errors": errors[:8],
+        "note": (
+            "Shadow catch-up — labels/backfills/repairs densify evidence only. "
+            "Never arms; never LIVE; soft-max tip invent exhausted."
+        ),
+    }
+
+
+def shadow_ops_alerts(root: str | None = None) -> dict:
+    """Observe alerts: missing heartbeat or missing edge08 shadow account."""
+    alerts: list[str] = []
+    heartbeat = {"present": False, "alive": False, "age": None, "path": None}
+    edge08 = {"present": False, "path": None, "shadow_enabled": False}
+    try:
+        import pimp_desk
+        hb_path = pimp_desk.heartbeat_path(root)
+        heartbeat["path"] = hb_path
+        heartbeat["present"] = os.path.isfile(hb_path)
+        health = pimp_desk.timer_health(root)
+        heartbeat["alive"] = bool(health.get("alive"))
+        heartbeat["age"] = health.get("age")
+        if not heartbeat["present"]:
+            alerts.append("heartbeat_missing")
+        elif not heartbeat["alive"]:
+            alerts.append("heartbeat_stale")
+        cfg = pimp_desk.load_settings(root)
+        shadow = cfg.get("shadow") if isinstance(cfg.get("shadow"), dict) else {}
+        edge08["shadow_enabled"] = bool(shadow.get("enabled", True))
+        acct = pimp_desk.shadow_account_path(root, "btc15m", "edge08")
+        edge08["path"] = acct
+        edge08["present"] = os.path.isfile(acct)
+        if edge08["shadow_enabled"] and not edge08["present"]:
+            alerts.append("shadow_edge08_missing")
+    except Exception as exc:  # noqa: BLE001
+        alerts.append(f"probe_error:{type(exc).__name__}")
+    return {
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": len(alerts) == 0,
+        "alerts": alerts,
+        "heartbeat": heartbeat,
+        "shadow_edge08": edge08,
+        "note": (
+            "Shadow ops observe — heartbeat / edge08 account presence. "
+            "Never arms LIVE_ORDERS."
+        ),
+    }
+
+
 def label_near_miss_catchup(
     root: str | None = None,
     *,
@@ -5281,6 +5373,10 @@ def ops_observe(
         alerts.append("dual_control_live")  # unexpected under deferred policy
     if calib.get("miscalibrated"):
         alerts.append("btc_calib")
+    shadow_ops = shadow_ops_alerts(root)
+    for a in shadow_ops.get("alerts") or []:
+        if a and a not in alerts:
+            alerts.append(a)
     thin = incubating == 0 and ready_grad == 0 and int(cold.get("weeks_n") or 0) == 0
     return {
         "paper_only": True,
@@ -5292,6 +5388,7 @@ def ops_observe(
         "ok": len(alerts) == 0,
         "evidence_thin": thin,
         "alerts": alerts,
+        "shadow_ops": shadow_ops,
         "incubation": {
             "incubating_n": incubating,
             "ready_n": ready_grad,
