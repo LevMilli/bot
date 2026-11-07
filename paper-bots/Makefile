@@ -416,6 +416,9 @@ living-graduation:
 living-btc-calib:
 	python3 tools/staff_living_status.py btc-calib
 
+living-eth-calib:
+	python3 tools/staff_living_status.py eth-calib
+
 living-guardrails:
 	python3 tools/staff_living_status.py guardrails
 
