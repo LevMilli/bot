@@ -14,14 +14,14 @@ export function NeonBloom({
     <EffectComposer
       multisampling={0}
       enableNormalPass={false}
-      resolutionScale={lite ? 0.5 : 1}
+      resolutionScale={lite ? 0.35 : 1}
     >
       <Bloom
-        intensity={(lite ? 0.32 : 0.4) * strength}
-        luminanceThreshold={lite ? 0.55 : 0.45}
-        luminanceSmoothing={0.5}
+        intensity={(lite ? 0.28 : 0.4) * strength}
+        luminanceThreshold={lite ? 0.6 : 0.45}
+        luminanceSmoothing={0.55}
         mipmapBlur={!lite}
-        radius={lite ? 0.22 : 0.35}
+        radius={lite ? 0.18 : 0.35}
       />
       {!lite && (
         <Vignette offset={0.32} darkness={0.4} blendFunction={BlendFunction.NORMAL} />
