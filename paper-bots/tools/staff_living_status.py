@@ -1738,6 +1738,9 @@ def main() -> int:
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
             "sports-tfinal-promote-ready",
+            # Post-E3E7 money-path boards (#358) — observe CLIs; never tip invent.
+            "latency-stage", "tip-decision-ms", "exit-risk-ms", "fill-capacity",
+            "firm-tower-m1", "m5-idle-budget", "distance-stance",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -4007,6 +4010,113 @@ def main() -> int:
         out = desk_roi_plan.fee_clear_cadence_health_board(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("all_ok") else 2
+    if args.action == "latency-stage":
+        out = desk_roi_plan.latency_stage_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "tip-decision-ms":
+        out = desk_roi_plan.tip_to_decision_ms(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "exit-risk-ms":
+        out = desk_roi_plan.exit_to_risk_freed_ms(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "fill-capacity":
+        bots = []
+        cfg = None
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+            cfg = snap.get("cfg") if isinstance(snap, dict) else None
+        except Exception:
+            bots = []
+            cfg = None
+        out = desk_roi_plan.fill_capacity_observe(root, bots=bots, cfg=cfg)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "firm-tower-m1":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.firm_tower_m1_gap_alert(bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not out.get("alert") else 2
+    if args.action == "m5-idle-budget":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        fee_clear = ("sports", "btc15m", "commodity15m")
+        rows = []
+        for b in bots:
+            if not isinstance(b, dict):
+                continue
+            bid = str(b.get("id") or b.get("bot") or "")
+            if bid not in fee_clear and not any(x in bid for x in fee_clear):
+                # still annotate known fee-clear-ish ids
+                if bid not in ("sports-gap", "btc15m-signal", "commodity-15m"):
+                    continue
+            util = b.get("util")
+            if util is None:
+                util = b.get("utilization")
+            open_risk = float(b.get("open_risk") or b.get("open_risk_usd") or 0.0)
+            rows.append(
+                desk_roi_plan.m5_idle_vs_budget_annotation(
+                    bid or str(b.get("name") or "?"),
+                    util=util,
+                    open_risk=open_risk,
+                    root=root,
+                )
+            )
+        if not rows:
+            for bid in ("sports", "btc15m", "commodity15m"):
+                rows.append(
+                    desk_roi_plan.m5_idle_vs_budget_annotation(
+                        bid, util=None, open_risk=0.0, root=root
+                    )
+                )
+        out = {"fee_floors_locked": True, "rows": rows}
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "distance-stance":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        # Prefer distance_to_zero board stance when present; else stance helper.
+        try:
+            dist = desk_roi_plan.distance_to_zero_board(root, bots=bots)
+        except Exception:
+            dist = {}
+        if isinstance(dist, dict) and dist.get("stance"):
+            out = dist
+        else:
+            now_pnl = None
+            if isinstance(dist, dict):
+                now_pnl = dist.get("now_pnl") or dist.get("firm_taxed_m1")
+            out = desk_roi_plan.distance_to_zero_stance(now_pnl=now_pnl, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
     if args.action == "raise-phi-log":
         out = desk_roi_plan.raise_phi_decision_log(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
