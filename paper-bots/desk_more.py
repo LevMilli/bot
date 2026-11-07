@@ -935,29 +935,33 @@ def is_near_miss(
 ) -> dict:
     """
     True when exactly one soft gate missed in a narrow band (shadow study lane).
-    Never auto-buys live desk risk — caller must tag shadow_only.
+    Soft allowlist is z|p only — edge is never a near-miss promote candidate
+    (fee floors locked). Never auto-buys live desk risk — caller tags shadow_only.
     """
     reasons = list(reasons or [])
     z_n = _finite(z)
     p_n = _finite(p)
-    e_n = _finite(edge)
     soft = []
     if z_n is not None and NEAR_MISS_Z_BAND[0] <= z_n < NEAR_MISS_Z_BAND[1]:
         soft.append("z")
     if p_n is not None and NEAR_MISS_P_BAND[0] <= p_n < NEAR_MISS_P_BAND[1]:
         soft.append("p")
-    # Edge just under venue floor by ≤1¢ of edge
-    if e_n is not None and (min_edge - 0.01) <= e_n < min_edge:
-        soft.append("edge")
+    # Edge just-under is observed for notes only — never qualifies soft promote.
+    e_n = _finite(edge)
+    edge_just_under = bool(
+        e_n is not None and (min_edge - 0.01) <= e_n < min_edge
+    )
     text = " | ".join(str(r) for r in reasons).lower()
     hard = any(
         k in text
         for k in ("news", "weekend", "correlation", "entry_gate", "daily loss", "depth 0")
     )
-    ok = (not hard) and len(soft) == 1 and (not reasons or len(reasons) <= 2)
+    # Allow ask-outside / regime companions with soft z|p (≤3 reason tokens).
+    ok = (not hard) and len(soft) == 1 and (not reasons or len(reasons) <= 3)
     return {
         "near_miss": ok,
         "soft": soft,
+        "edge_just_under": edge_just_under,
         "stake": NEAR_MISS_STAKE if ok else 0.0,
         "shadow_only": True,
         "note": (
