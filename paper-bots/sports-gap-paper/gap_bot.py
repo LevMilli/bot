@@ -780,6 +780,41 @@ def run():
                             f"hard-stop bid {float(bid):.2f} ≤ "
                             f"{hs.get('threshold')}"
                         )
+                # Time-to-final trim shadow: ≤N min left + underwater mark.
+                if exit_reason is None and not p.get("time_final_shadowed"):
+                    game = info.get("game") if isinstance(info, dict) else None
+                    status = (game or {}).get("status") if isinstance(game, dict) else None
+                    rem = desk_roi_plan.sports_minutes_remaining(
+                        status, league=str(p.get("league") or ""),
+                    )
+                    tf = desk_roi_plan.sports_time_final_hit(
+                        rem, bid,
+                        entry_price=p.get("entry_price"),
+                        cost=p.get("cost"),
+                        contracts=p.get("contracts"),
+                    )
+                    if tf.get("hit"):
+                        desk_roi_plan.record_sports_time_final_shadow(
+                            DESK_ROOT,
+                            ticker=str(p.get("ticker") or ""),
+                            side=str(p.get("side") or ""),
+                            league=str(p.get("league") or ""),
+                            minutes_left=rem,
+                            entry_price=p.get("entry_price"),
+                            bid=bid,
+                            contracts=p.get("contracts"),
+                            cost=p.get("cost"),
+                            note="shadow time-final — no live sell",
+                        )
+                        p["time_final_shadowed"] = True
+                        summary_out.setdefault("time_final_shadow", []).append(
+                            f"SHADOW TFINAL {p.get('ticker')} rem={rem}"
+                        )
+                        if desk_roi_plan.sports_time_final_is_live(DESK_ROOT):
+                            exit_reason = (
+                                f"time-final ≤{tf.get('min_left_bar')}m "
+                                f"underwater mark {tf.get('mark_pnl')}"
+                            )
             except Exception:
                 pass
             # Phase 2: gap-decay — tip edge that died mid-game frees risk.
@@ -1311,8 +1346,9 @@ def run():
             exit_plan = _exit_plan_mod.default_exit_plan("sports-gap")
         except Exception:
             exit_plan = {
-                "kind": "gap_decay+scale_out+hard_stop_shadow+settle",
+                "kind": "gap_decay+scale_out+hard_stop_shadow+time_final_shadow+settle",
                 "hard_stop_shadow": True,
+                "time_final_shadow": True,
                 "settle_backstop": True,
                 "fee_floors_locked": True,
             }
