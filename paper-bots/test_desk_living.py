@@ -734,6 +734,22 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("l7 observe:", txt)
             self.assertTrue(board.get("fee_floors_locked") or True)
 
+    def test_feature_store_skip_historian_sunday(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            board = desk_living.living_upgrade_board(tmp)
+            self.assertIn("feature_store", board)
+            self.assertIn("skip_historian", board)
+            compact = desk_living.living_compact_card(tmp, board=board)
+            self.assertIn("feature_store_sunday_quiet", compact)
+            self.assertIn("skip_historian_sunday_quiet", compact)
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("feature_store_sunday_quiet", export)
+            self.assertIn("skip_historian_sunday_quiet", export)
+            # still no new board chip / catalog soft-max ok
+            self.assertFalse((board.get("board_size") or {}).get("over"))
+            self.assertNotIn("l7_observe", board)
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util

@@ -1304,6 +1304,14 @@ Interactive: Positive ROI Master Plan canvas.
 | Makefile living-l7 / living-l7-discord | wire to status CLI |
 | Priority inserts L7 miss | staff priority JSON |
 
+### Living upgrade — feature store + skip historian sunday (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Feature store sunday twin | compact/export `feature_store_sunday_quiet` |
+| Skip historian sunday twin | compact/export `skip_historian_sunday_quiet` |
+| Vault/status/ritual surfaces | App + staff CLIs |
+
 ### Next
 
 | Ticket | Where |

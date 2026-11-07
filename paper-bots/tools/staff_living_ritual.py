@@ -317,6 +317,14 @@ def format_discord(payload: dict) -> str:
         f"• L7-pulse sunday: L7 observe pulse · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    lines.append(
+        f"• Feature-store sunday: feature store observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Skip-historian sunday: skip historian observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -585,6 +593,19 @@ def main() -> int:
             flat["l7_observe_sunday_quiet"] = (
                 f"{_l7.get('label') or 'L7 observe pulse'} · sunday quiet "
                 f"{flat['sunday_quiet_age_label']} (observe · never softens floors)"
+            )
+            flat["feature_store"] = desk_living.feature_store_coverage(root)
+            flat["skip_historian"] = desk_living.skip_historian_chip(root)
+            flat["feature_store_sunday_quiet"] = (
+                f"feature store n={flat['feature_store'].get('n')} "
+                f"buys={flat['feature_store'].get('buys')} "
+                f"skips={flat['feature_store'].get('skips')} · sunday quiet "
+                f"{flat['sunday_quiet_age_label']} (observe · never softens floors)"
+            )
+            flat["skip_historian_sunday_quiet"] = (
+                f"{(flat['skip_historian'] or {}).get('label') or 'skip historian observe'} · "
+                f"sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
             )
             flat["toxic_sunday_quiet"] = (
                 f"toxic fills observe · sunday quiet {flat['sunday_quiet_age_label']} "
@@ -869,6 +890,17 @@ def main() -> int:
             _l7 = desk_living.l7_observe_summary(root=root)
             print(
                 f"L7-pulse sunday: {_l7.get('label') or 'L7 observe pulse'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            feat_store = desk_living.feature_store_coverage(root)
+            skip_hist = desk_living.skip_historian_chip(root)
+            print(
+                f"feature-store sunday: feature store n={feat_store.get('n')} "
+                f"buys={feat_store.get('buys')} skips={feat_store.get('skips')} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            print(
+                f"skip-historian sunday: {skip_hist.get('label') or 'skip historian observe'} · "
                 f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
             print(

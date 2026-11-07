@@ -2496,7 +2496,52 @@ export default function App() {
                     })()}
                   </span>
                 </div>
+                                <div className="vault-board-row">
+                  <span className="vb-label">feat store</span>
+                  <span>
+                    {(() => {
+                      const f = (
+                        snap?.desk as
+                          | {
+                              feature_store?: {
+                                n?: number
+                                buys?: number
+                                skips?: number
+                              }
+                            }
+                          | undefined
+                      )?.feature_store
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      if (!f)
+                        return `feature store observe · sunday quiet ${sundayBit} (observe · never softens floors)`
+                      return `feature store n=${f.n ?? 0} buys=${f.buys ?? 0} skips=${f.skips ?? 0} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">skip hist</span>
+                  <span>
+                    {(() => {
+                      const h = (
+                        snap?.desk as
+                          | { skip_historian?: { label?: string } }
+                          | undefined
+                      )?.skip_historian
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = h?.label || 'skip historian observe'
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+<div className="vault-board-row">
                   <span className="vb-label">swarm</span>
                   <span
                     style={{
