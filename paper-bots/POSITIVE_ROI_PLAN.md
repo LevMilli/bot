@@ -1543,11 +1543,25 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault starve + hard-rules rows | App vault |
 | README index | README.md |
 
+
+### Living upgrade — swarm/expand/quiet/timer tip batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_swarm_tip` + `swarm_tip_sunday_quiet` | desk_living / compact / export |
+| `living_expand_tip` + `expand_tip_sunday_quiet` | desk_living / compact / export |
+| `living_quiet_tip` + `quiet_tip_sunday_quiet` | desk_living / compact / export |
+| `living_timer_tip` + `timer_tip_sunday_quiet` | desk_living / compact / export |
+| Status CLI swarm/expand-tip/quiet-tip/timer-tip | staff_living_status |
+| Makefile living-swarm / expand-tip / quiet-tip / timer-tip | Makefile |
+| Ritual observe/Discord tip lines | staff_living_ritual |
+| Vault tip rows | App vault |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| *(cleared — starve/hard-rules shipped; soft-max 52/64)* | — |
+| *(cleared — swarm/expand/quiet/timer shipped; soft-max 52/64)* | — |
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
 
@@ -1555,7 +1569,7 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — starve/hard-rules shipped; soft-max 52/64)* | — |
+| *(empty — swarm/expand/quiet/timer shipped; soft-max 52/64)* | — |
 
 ## Hard rules unchanged
 
