@@ -1763,11 +1763,21 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Fee-clear exit kinds | `fee_clear_exit_quality_board` (TP / flip / settle) |
 | Combined observe | `exit_quality_observe.fee_clear_exits` |
 
+### Green_boost evidence-thin observe (no-force when ready)
+
+| Ticket | Where |
+| --- | --- |
+| Evidence-thin board | `sports_green_boost_status.evidence_thin` / `missing` / `label` |
+| Observe CLI | `make living-green-boost-status` |
+| No-force arm when ready | `make living-green-boost-arm-ready` (force=False) |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Observe Chicago weeks / staff hillclimb pick (process) | TC-151 |
+| Dual-control / LIVE_ORDERS (deferred) | staff gate |
+| Force-armed evidence catch-up (deferred) | hard-stop / near-miss / INX n bars |
 
 ### INX research no-force path
 

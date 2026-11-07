@@ -3043,11 +3043,22 @@ def sports_green_boost_status(
     staff_armed = bool(promote.get("staff_approved")) and bool(promote.get("live"))
     # Ready gate or explicit staff arm (force path when evidence thin).
     boost = 1 if (ready or staff_armed) else 0
+    missing = []
+    if not weeks_ok:
+        missing.append(f"weeks {len(sports_weeks)}/{SPORTS_GREEN_BOOST_WEEKS}")
+    if not hist_ok:
+        missing.append(f"sports_m1_n {sports_n}/{SPORTS_M1_MIN_N}")
+    if not clv_ok:
+        missing.append(f"clv {clv_n}/{SPORTS_CLV_MIN_N} rate={clv_rate}")
+    evidence_thin = not ready
     return {
         "paper_only": True,
         "fee_floors_locked": True,
+        "observe_only": True,
         "auto_promote": False,
         "ready": ready,
+        "evidence_thin": evidence_thin,
+        "missing": missing,
         "staff_approved": staff_armed,
         "staff_armed": staff_armed,
         "green_boost": boost,
@@ -3062,10 +3073,16 @@ def sports_green_boost_status(
         "weeks_required": SPORTS_GREEN_BOOST_WEEKS,
         "weeks_ok": weeks_ok,
         "week_labels": [str(c.get("label") or "") for c in sports_weeks],
+        "label": (
+            f"green_boost={'1' if boost else '0'} "
+            f"{'ready' if ready else 'THIN'} "
+            f"armed={staff_armed} missing={','.join(missing) or 'none'}"
+        ),
         "note": (
             "Sports selective +1 after 2 Chicago weeks sports M1≥0, "
             f"history n≥{SPORTS_M1_MIN_N}, and CLV beat-close ≥{SPORTS_CLV_BAR:.0%} "
-            f"(n≥{SPORTS_CLV_MIN_N}), or staff_set_sports_green_boost. Default boost=0."
+            f"(n≥{SPORTS_CLV_MIN_N}), or staff_set_sports_green_boost. Default boost=0. "
+            "Evidence catch-up deferred — no-force CLI only when ready."
         ),
     }
 
