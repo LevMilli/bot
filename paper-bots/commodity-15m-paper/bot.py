@@ -2,7 +2,8 @@
 """
 commodity-15m-paper/bot.py — PAPER tower for Kalshi metals/energy 15m markets.
 
-Series: Palladium, NatGas, Copper, Brent, WTI, Silver, Gold, Platinum.
+Series priority (#560): liquid first (gold, WTI), then mid liquidity
+(silver / brent / copper / platinum), thin last (palladium, natgas).
 Same desk adapt gates as BTC (vol-safe / Wilson ≥80% play-big). No live orders.
 """
 from __future__ import annotations
@@ -23,15 +24,17 @@ UA = {
     )
 }
 
+# #560 liquid-first SERIES order — evaluate/prefetch spends cycles on gold/WTI
+# before thin books (palladium/natgas). Never softens 0.05 floor.
 SERIES = (
-    "KXPALLADIUM15M",
-    "KXNATGAS15M",
-    "KXCOPPER15M",
-    "KXBRENT15M",
-    "KXWTI15M",
-    "KXSILVER15M",
-    "KXGOLD15M",
-    "KXPLATINUM15M",
+    "KXGOLD15M",       # liquid metal
+    "KXWTI15M",        # liquid energy
+    "KXSILVER15M",     # mid
+    "KXBRENT15M",      # mid energy
+    "KXCOPPER15M",     # mid metal
+    "KXPLATINUM15M",   # mid metal
+    "KXPALLADIUM15M",  # thin
+    "KXNATGAS15M",     # thin / high-σ — last
 )
 
 # Yahoo symbols for spot (fail-closed if missing).
@@ -809,7 +812,9 @@ def main() -> int:
         flip_delta = 0.06
         flip_on = True
 
+    t_spot = time.perf_counter()
     spots = spots_by_series()
+    spot_secs = time.perf_counter() - t_spot
     print(f"Spots ready: {len(spots)}/{len(SERIES)}  cash=${float(account.get('cash') or 0):.2f}")
     windows = []
     for series in SERIES:
@@ -834,6 +839,10 @@ def main() -> int:
                     note="no open commodity windows",
                 )
             desk_roi_plan.record_latency(
+                DESK_ROOT, bot="commodity-15m", seconds=spot_secs,
+                note="commodity spot (empty)", stage="spot",
+            )
+            desk_roi_plan.record_latency(
                 DESK_ROOT, bot="commodity-15m", seconds=elapsed,
                 note="empty card", stage="evaluate",
             )
@@ -849,7 +858,9 @@ def main() -> int:
         if ask0 is None:
             continue
         book_jobs.append((str(m["ticker"]), side0, float(ask0)))
+    t_book = time.perf_counter()
     books = prefetch_commodity_books(book_jobs)
+    book_secs = time.perf_counter() - t_book
     print(f"Prefetched {len(books)} commodity orderbook(s) in parallel")
     candidates = []
     buys = 0
@@ -1180,6 +1191,15 @@ def main() -> int:
     try:
         import desk_roi_plan
         elapsed = time.perf_counter() - t0
+        # #504 stage densify: spot / book walls (plus existing evaluate/exit/buy).
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=spot_secs,
+            note="commodity spot", stage="spot",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=book_secs,
+            note=f"commodity book n={len(book_jobs)}", stage="book",
+        )
         desk_roi_plan.record_latency(
             DESK_ROOT, bot="commodity-15m", seconds=elapsed,
             note="commodity evaluate", stage="evaluate",

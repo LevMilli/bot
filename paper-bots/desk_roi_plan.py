@@ -88,6 +88,17 @@ from desk_roi_e5e7 import (  # noqa: F401
     skip_regret_never_edge_floor,
     weekly_eligible_fill_report,
 )
+
+# Post #354–#357 money-path boards (latency stage / speed KPIs / M1 gap).
+from desk_roi_post_e3e7 import (  # noqa: F401
+    exit_to_risk_freed_ms,
+    fee_floors_locked_check,
+    fill_capacity_observe,
+    firm_tower_m1_gap_alert,
+    latency_stage_board,
+    m5_idle_vs_budget_annotation,
+    tip_to_decision_ms,
+)
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
 MAX_HARD_STOP_ROWS = 2000
@@ -2365,13 +2376,18 @@ def depth_adjusted_edge_board(
         if edge is None:
             continue
         depth = _finite(c.get("depth"))
-        adj = desk_more.depth_adjusted_edge(edge, depth, need=depth_need)
+        series = str(c.get("series") or "")[:40]
+        # #471–472: vol prior raises effective depth need (NatGas high); never softens floor.
+        row_need = desk_more.effective_depth_need(series or None, depth_need)
+        adj = desk_more.depth_adjusted_edge(edge, depth, need=row_need)
         scored.append({
             "bot": bot or "fee-clear",
             "ticker": str(c.get("ticker") or c.get("key") or "")[:60],
-            "series": str(c.get("series") or "")[:40],
+            "series": series,
             "edge": round(float(edge), 6),
             "depth": depth,
+            "depth_need": row_need,
+            "series_vol_prior": desk_more.series_vol_prior(series or None),
             "depth_adjusted_edge": adj,
             "idx": i,
         })
@@ -2397,6 +2413,7 @@ def depth_adjusted_edge_board(
         "live_orders_enabled": False,
         "board_chip": False,
         "need": depth_need,
+        "vol_prior_raises_need": True,
         "n": len(scored),
         "rank_changed_n": changed,
         "candidates": scored[:40],
@@ -2409,16 +2426,19 @@ def depth_adjusted_edge_board(
                 "ticker": r["ticker"],
                 "bot": r["bot"],
                 "depth_adjusted_edge": r["depth_adjusted_edge"],
+                "depth_need": r.get("depth_need"),
                 "rank": r["adj_rank"],
             }
             for r in top_adj
         ],
         "label": (
-            f"depth_edge n={len(scored)} changed={changed} need={depth_need:g}"
+            f"depth_edge n={len(scored)} changed={changed} need={depth_need:g} "
+            f"(vol-prior raises per-series need)"
         ),
         "note": (
             "Depth-adjusted edge ranking observe for fee-clear towers — "
-            "compares raw vs depth-adjusted order; does not re-rank live book."
+            "vol prior raises effective need on high-σ series (NatGas); "
+            "never softens floors; does not invent fills."
         ),
     }
 
@@ -2814,6 +2834,17 @@ def distance_to_zero_board(
             "pnl": now_pnl,
             "distance_to_zero": distance,
         })
+    # #733 stance tags: bleed_stop | fee_clear_earn | idle — never force buys.
+    try:
+        from desk_roi_post_e3e7 import distance_to_zero_stance
+        stance = distance_to_zero_stance(now_pnl=now_pnl, bots=bots)
+    except Exception:
+        stance = {
+            "recommended_stance": "idle",
+            "force_buys": False,
+            "fee_clear_today": None,
+            "loser_today": None,
+        }
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -2826,13 +2857,17 @@ def distance_to_zero_board(
         "at_zero": float(now_pnl) >= 0.0,
         "series": series,
         "series_n": len(series),
+        "recommended_stance": stance.get("recommended_stance"),
+        "stance": stance,
+        "force_buys": False,
         "label": (
             f"distance_to_zero={distance} now={now_pnl} "
-            f"w0={w0_pnl} delta_vs_w0={delta_vs_w0}"
+            f"w0={w0_pnl} delta_vs_w0={delta_vs_w0} "
+            f"stance={stance.get('recommended_stance')}"
         ),
         "note": (
-            "Distance-to-zero vs W0 (−$225 class). Climb firm taxed PnL to 0; "
-            "never invent fills. Floors locked."
+            "Distance-to-zero vs W0 (−$225 class). Stance tags: "
+            "bleed_stop | fee_clear_earn | idle — never force buys. Floors locked."
         ),
     }
 
@@ -8848,6 +8883,11 @@ def plan_summary(
         "insight_betting_ratio": insight_betting_ratio_board(root, bots=bots),
         "edge08_vs_main": edge08_vs_main_expectancy_board(root, bots=bots),
         "fee_clear_cadence": fee_clear_cadence_health_board(root, bots=bots),
+        "latency_stage": latency_stage_board(root),
+        "tip_to_decision_ms": tip_to_decision_ms(root),
+        "exit_to_risk_freed_ms": exit_to_risk_freed_ms(root),
+        "fill_capacity_observe": fill_capacity_observe(root, bots=bots, cfg=cfg),
+        "firm_tower_m1_gap": firm_tower_m1_gap_alert(bots),
         "fee_floors_locked": True,
         "next_tickets": [
             "staff hillclimb pick (TC-151 process)",

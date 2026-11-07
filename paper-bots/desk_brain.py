@@ -70,15 +70,23 @@ def save_journal(state: dict, root: str | None = None) -> None:
     os.replace(tmp, path)
 
 
-def opportunity_score(edge, confidence, depth=None, need: float = 10.0) -> float:
+def opportunity_score(
+    edge,
+    confidence,
+    depth=None,
+    need: float = 10.0,
+    series: str | None = None,
+) -> float:
     """Higher = spend risk first.
 
     Phase 1: depth-adjusted edge × confidence
     (`edge × min(1, depth/need) × p`). Missing depth keeps raw edge.
+    Vol prior (#471–472) raises effective need on high-σ series (NatGas).
     """
     try:
         import desk_more
-        return desk_more.opportunity_score_v2(edge, confidence, depth, need=need)
+        eff_need = desk_more.effective_depth_need(series, need)
+        return desk_more.opportunity_score_v2(edge, confidence, depth, need=eff_need)
     except Exception:
         pass
     try:
@@ -108,8 +116,17 @@ def rank_candidates(rows: Iterable[dict], *, edge_key: str = "edge",
         if not isinstance(row, dict):
             continue
         item = dict(row)
+        need = item.get("depth_need")
+        try:
+            need_f = float(need) if need is not None else 10.0
+        except (TypeError, ValueError):
+            need_f = 10.0
         item["_brain_score"] = opportunity_score(
-            item.get(edge_key), item.get(conf_key), item.get(depth_key),
+            item.get(edge_key),
+            item.get(conf_key),
+            item.get(depth_key),
+            need=need_f,
+            series=item.get("series"),
         )
         item["_brain_i"] = i
         scored.append(item)
