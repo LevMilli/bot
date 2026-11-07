@@ -1,0 +1,36 @@
+{
+  "auto_apply": false,
+  "fee_floors_locked": true,
+  "last_at": "2026-11-07T09:27:47Z",
+  "latest": {
+    "after": "",
+    "at": "2026-11-07T09:27:47Z",
+    "auto_apply": false,
+    "before": "",
+    "decision": "defer",
+    "fee_floors_locked": true,
+    "lever": "venue_min_edge_btc",
+    "live_orders_enabled": false,
+    "note": "THIN week \u2014 M1/M3 incomplete; defer TC-151 pick until evidence",
+    "paper_only": true,
+    "week": "2026-W45",
+    "who": ""
+  },
+  "paper_only": true,
+  "rows": [
+    {
+      "after": "",
+      "at": "2026-11-07T09:27:47Z",
+      "auto_apply": false,
+      "before": "",
+      "decision": "defer",
+      "fee_floors_locked": true,
+      "lever": "venue_min_edge_btc",
+      "live_orders_enabled": false,
+      "note": "THIN week \u2014 M1/M3 incomplete; defer TC-151 pick until evidence",
+      "paper_only": true,
+      "week": "2026-W45",
+      "who": ""
+    }
+  ]
+}
