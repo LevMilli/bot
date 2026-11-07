@@ -1429,11 +1429,23 @@ Interactive: Positive ROI Master Plan canvas.
 | Doctor soft_copy teller ritual live + audit cmd | living_doctor |
 | Status JSON teller/ritual live flats | staff_living_status json |
 
+### Living upgrade — export/HUD priority batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_priority_snapshot` surface helper | desk_living |
+| Compact/export `priority_sunday_quiet` | compact / export |
+| Export priority_lines + living_memory_line | living_board_export |
+| Status priority --discord + text/json flats | staff_living_status |
+| Makefile `living-priority-discord` | Makefile |
+| Vault priority row | App vault |
+| Selfcheck/doctor priority label | living_self_check / doctor |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — observe/priority ritual live batch shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — export/HUD priority batch shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 

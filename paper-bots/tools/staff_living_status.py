@@ -72,6 +72,11 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "sunday_twin_coverage")
         else {}
     )
+    prio = (
+        desk_living.living_priority_snapshot(board)
+        if hasattr(desk_living, "living_priority_snapshot")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -941,6 +946,20 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "priority: "
+            + str(prio.get("label") or "priority observe")
+        ),
+        (
+            "priority sunday: "
+            + str(
+                compact.get("priority_sunday_quiet")
+                or (
+                    str(prio.get("label") or "priority observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1157,6 +1176,7 @@ def main() -> int:
         live_n_j = sum(
             1 for k, v in live_j.items() if str(k).endswith("_label") and v
         )
+        prio_j = desk_living.living_priority_snapshot(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1539,6 +1559,16 @@ def main() -> int:
                 if isinstance(board.get("teller_living"), dict)
                 else None
             ),
+            "priority": prio_j,
+            "priority_label": prio_j.get("label"),
+            "priority_lines": list(prio_j.get("priority") or []),
+            "priority_sunday_quiet": compact_j.get("priority_sunday_quiet"),
+            "compact_priority_sunday_quiet": compact_j.get("priority_sunday_quiet"),
+            "living_memory_line": (
+                (board.get("teller_living") or {}).get("memory_line")
+                if isinstance(board.get("teller_living"), dict)
+                else None
+            ),
             "timer_sunday_quiet": (
                 compact_j.get("timer_sunday_quiet")
                 or (
@@ -1641,49 +1671,18 @@ def main() -> int:
             }, indent=2))
         return 0
     if args.action == "priority":
-        living = board
-        raw: list[str] = []
-        fq = living.get("feature_quiet") if isinstance(living.get("feature_quiet"), dict) else {}
-        if fq.get("quiet") and fq.get("alert"):
-            raw.insert(0, str(fq.get("alert"))[:120])
-        timer = living.get("timer_heartbeat") if isinstance(living.get("timer_heartbeat"), dict) else {}
-        if timer.get("alive") is False:
-            raw.insert(0, str(timer.get("label") or "timer DEAD")[:120])
-        swarm = living.get("insight_swarm") if isinstance(living.get("insight_swarm"), dict) else {}
-        if swarm.get("pass") is False:
-            raw.append(
-                f"insight swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
-                f"(need ≥{swarm.get('min_ratio')}:1)"
+        snap = desk_living.living_priority_snapshot(board)
+        if args.discord:
+            lines = snap.get("priority") or []
+            body = "\n".join(f"• {x}" for x in lines) or "• priority empty"
+            print(
+                "**Living priority** (paper · floors locked · live=False)\n"
+                f"{snap.get('label')}\n"
+                f"{body}\n"
+                "_staff paste · never auto-posts · never softens floors_"
             )
-        ruin = living.get("ruin_drill_chip") if isinstance(living.get("ruin_drill_chip"), dict) else {}
-        if ruin.get("active"):
-            raw.insert(0, str(ruin.get("label") or "ruin ACTIVE")[:120])
-        elif not ruin.get("practiced_this_month"):
-            raw.append("ruin drill: practice soft/hard this Chicago month")
-        l7 = desk_living.l7_observe_summary(living)
-        if not l7.get("ok"):
-            raw.insert(0, str(l7.get("label") or "L7 observe missing")[:120])
-        live = desk_living.ritual_live_labels(living)
-        live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
-        if live_n < 40:
-            raw.insert(0, f"ritual live thin n={live_n} (need ≥40 observe labels)")
-        teller = living.get("teller_living") if isinstance(living.get("teller_living"), dict) else {}
-        if teller.get("ritual_live_ok") is False:
-            raw.append(
-                f"teller ritual live thin n={teller.get('ritual_live_n')} (observe)"
-            )
-        raw.extend([
-            "insight swarm ≥3:1 before betting expand",
-            "revert last lever if hillclimb kill trips",
-            "fee floors locked 0.06/0.05/0.02",
-            "make living-ritual-live · staff paste only",
-        ])
-        print(json.dumps({
-            "paper_only": True,
-            "fee_floors_locked": True,
-            "priority": desk_master.finalize_living_priority(raw),
-            "max_n": desk_master.PRIORITY_MAX,
-        }, indent=2))
+        else:
+            print(json.dumps(snap, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "sunday":
         cov = desk_living.sunday_twin_coverage(board)

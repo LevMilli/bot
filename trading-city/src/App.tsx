@@ -1198,6 +1198,40 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">priority</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            priority_sunday_quiet?: string
+                            compact_priority_sunday_quiet?: string
+                            priority_label?: string
+                            priority_lines?: string[]
+                            priority?: { label?: string; priority?: string[] }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.priority_sunday_quiet ||
+                        desk?.compact_priority_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.priority_label ||
+                        desk?.priority?.label ||
+                        'priority observe'
+                      const top = (desk?.priority_lines || desk?.priority?.priority || [])[0]
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label}${top ? ` · ${top}` : ''} · sunday quiet ${sundayBit} ` +
+                        '(observe · never softens floors) · make living-priority'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{

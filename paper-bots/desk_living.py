@@ -1262,6 +1262,10 @@ def living_compact_card(
             else f"skip historian observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
         "ritual_live_sunday_quiet": ritual_live_sunday,
+        "priority_sunday_quiet": (
+            f"{living_priority_snapshot(src).get('label') or 'priority observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2509,6 +2513,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["ritual_live_labels"] = ritual_live_labels(board)
     slim["sunday_twin_coverage"] = sunday_twin_coverage(board)
     slim["l7_observe"] = l7_observe_summary(board)
+    prio = living_priority_snapshot(board)
+    slim["priority"] = prio
+    slim["priority_lines"] = list(prio.get("priority") or [])
+    slim["priority_label"] = prio.get("label")
+    teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
+    slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
     slim["sunday_twins"] = {
         k: compact_src.get(k)
@@ -2901,6 +2911,11 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     )
     slim["ritual_live_n"] = live_n_export
     slim["ritual_live_ok"] = live_n_export >= 40
+    prio_export = living_priority_snapshot(board)
+    slim["priority_sunday_quiet"] = (
+        f"{prio_export.get('label') or 'priority observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -3094,6 +3109,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         slim["compact_teller_ritual_live_sunday_quiet"] = (
             compact.get("teller_ritual_live_sunday_quiet")
             or slim.get("teller_ritual_live_sunday_quiet")
+        )
+        slim["compact_priority_sunday_quiet"] = (
+            compact.get("priority_sunday_quiet") or slim.get("priority_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -3858,6 +3876,7 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         f"{ritual_live_line}\n"
         f"{timer_sunday_line}\n"
         f"teller ritual live n={live_n}\n"
+        f"{str(health.get('priority_label') or living_priority_snapshot(root=root).get('label') or 'priority observe')}\n"
         f"sunday quiet {quiet_age_label} (observe · never softens floors)\n"
         f"ritual draft: make living-ritual-discord · audit: make living-ritual-live "
         f"(staff paste · never auto-posts)\n"
@@ -4127,6 +4146,69 @@ def ritual_live_labels(board: dict | None = None, root: str | None = None) -> di
     }
 
 
+def living_priority_snapshot(board: dict | None = None, root: str | None = None) -> dict:
+    """Surface-only staff priority lines (not a board chip; never softens floors)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    raw: list[str] = []
+    fq = src.get("feature_quiet") if isinstance(src.get("feature_quiet"), dict) else {}
+    if fq.get("quiet") and fq.get("alert"):
+        raw.insert(0, str(fq.get("alert"))[:120])
+    timer = src.get("timer_heartbeat") if isinstance(src.get("timer_heartbeat"), dict) else {}
+    if timer.get("alive") is False:
+        raw.insert(0, str(timer.get("label") or "timer DEAD")[:120])
+    swarm = src.get("insight_swarm") if isinstance(src.get("insight_swarm"), dict) else {}
+    if swarm.get("pass") is False:
+        raw.append(
+            f"insight swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+            f"(need ≥{swarm.get('min_ratio')}:1)"
+        )
+    ruin = src.get("ruin_drill_chip") if isinstance(src.get("ruin_drill_chip"), dict) else {}
+    if ruin.get("active"):
+        raw.insert(0, str(ruin.get("label") or "ruin ACTIVE")[:120])
+    elif not ruin.get("practiced_this_month"):
+        raw.append("ruin drill: practice soft/hard this Chicago month")
+    l7 = l7_observe_summary(src)
+    if not l7.get("ok"):
+        raw.insert(0, str(l7.get("label") or "L7 observe missing")[:120])
+    live = ritual_live_labels(src)
+    live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
+    if live_n < 40:
+        raw.insert(0, f"ritual live thin n={live_n} (need ≥40 observe labels)")
+    teller = src.get("teller_living") if isinstance(src.get("teller_living"), dict) else {}
+    if teller.get("ritual_live_ok") is False:
+        raw.append(
+            f"teller ritual live thin n={teller.get('ritual_live_n')} (observe)"
+        )
+    raw.extend([
+        "insight swarm ≥3:1 before betting expand",
+        "revert last lever if hillclimb kill trips",
+        "fee floors locked 0.06/0.05/0.02",
+        "make living-ritual-live · staff paste only",
+    ])
+    try:
+        import desk_master
+        priority = desk_master.finalize_living_priority(raw)
+        max_n = desk_master.PRIORITY_MAX
+    except Exception:
+        priority = raw[:5]
+        max_n = 5
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "priority": priority,
+        "raw_n": len(raw),
+        "max_n": max_n,
+        "ritual_live_n": live_n,
+        "label": (
+            f"priority n={len(priority)} · top={priority[0][:60]}"
+            if priority
+            else "priority empty"
+        ),
+        "note": "Living priority snapshot — observe-only; never softens floors.",
+    }
+
+
 def sunday_twin_coverage(board: dict | None = None, root: str | None = None) -> dict:
     """Count compact sunday quiet twins vs fee-locked board fields (surface audit)."""
     src = board if isinstance(board, dict) else living_upgrade_board(root)
@@ -4182,6 +4264,7 @@ def living_self_check(root: str | None = None) -> dict:
         for k, v in live.items()
         if str(k).endswith("_label") and isinstance(v, str) and v
     )
+    prio = living_priority_snapshot(board)
     return {
         "paper_only": True,
         "fee_floors_locked": floors,
@@ -4221,6 +4304,8 @@ def living_self_check(root: str | None = None) -> dict:
             f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else 'quiet_age=n/a'} "
             f"(observe · never softens floors)"
         ),
+        "priority": prio,
+        "priority_label": str(prio.get("label") or "priority observe"),
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()
