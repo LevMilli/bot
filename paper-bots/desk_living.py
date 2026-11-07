@@ -1298,6 +1298,14 @@ def living_compact_card(
             f"{living_makefile_index(src).get('label') or 'makefile observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "venues_sunday_quiet": (
+            f"{living_venues_tip(src).get('label') or 'venues observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "chicago_sunday_quiet": (
+            f"{living_chicago_tip(src).get('label') or 'chicago observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2444,6 +2452,16 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{makefile.get('label') or 'makefile observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+        venues = living_venues_tip(board)
+        compact["venues_sunday_quiet"] = (
+            f"{venues.get('label') or 'venues observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        chicago = living_chicago_tip(board)
+        compact["chicago_sunday_quiet"] = (
+            f"{chicago.get('label') or 'chicago observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2617,6 +2635,14 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["makefile"] = makefile
     slim["makefile_label"] = makefile.get("label")
     slim["makefile_n"] = makefile.get("targets_n")
+    venues = living_venues_tip(board)
+    slim["venues"] = venues
+    slim["venues_label"] = venues.get("label")
+    slim["venues_ok"] = venues.get("ok")
+    chicago = living_chicago_tip(board)
+    slim["chicago"] = chicago
+    slim["chicago_label"] = chicago.get("label")
+    slim["chicago_today"] = chicago.get("chicago_today") or slim.get("chicago_today")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3056,6 +3082,16 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{makefile_export.get('label') or 'makefile observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    venues_export = living_venues_tip(board)
+    slim["venues_sunday_quiet"] = (
+        f"{venues_export.get('label') or 'venues observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    chicago_export = living_chicago_tip(board)
+    slim["chicago_sunday_quiet"] = (
+        f"{chicago_export.get('label') or 'chicago observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3287,6 +3323,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_makefile_sunday_quiet"] = (
             compact.get("makefile_sunday_quiet") or slim.get("makefile_sunday_quiet")
+        )
+        slim["compact_venues_sunday_quiet"] = (
+            compact.get("venues_sunday_quiet") or slim.get("venues_sunday_quiet")
+        )
+        slim["compact_chicago_sunday_quiet"] = (
+            compact.get("chicago_sunday_quiet") or slim.get("chicago_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4543,6 +4585,8 @@ _DISCORD_PASTE_TARGETS = (
     "paste",
     "paper",
     "makefile",
+    "venues",
+    "chicago",
     "gaps",
     "ruin",
     "expand",
@@ -4636,6 +4680,52 @@ def living_makefile_index(board: dict | None = None, root: str | None = None) ->
         "path": str(make_path),
         "label": label,
         "note": "Makefile living-* index — observe-only staff map; not a board chip.",
+    }
+
+
+def living_venues_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Locked venue fee-floor table tip (not a board chip; never softens)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    floors = src.get("fee_floors_assert") if isinstance(src.get("fee_floors_assert"), dict) else {}
+    venues = {
+        "sports": 0.06,
+        "btc_commodity": 0.05,
+        "inx_dex": 0.02,
+    }
+    ok = floors.get("all_ok") is not False and src.get("fee_floors_locked") is not False
+    label = (
+        f"venues sports={venues['sports']} btc+commodity={venues['btc_commodity']} "
+        f"inx+dex={venues['inx_dex']} floors={'ok' if floors.get('all_ok') is True else 'soft' if floors.get('all_ok') is False else 'n/a'} "
+        f"locked={src.get('fee_floors_locked') is not False} "
+        "(observe · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "ok": bool(ok),
+        "venues": venues,
+        "floors_ok": floors.get("all_ok"),
+        "label": label,
+        "note": "Venue fee floors tip — locked observe table; never softens.",
+    }
+
+
+def living_chicago_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Chicago calendar day tip for staff packets (not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    day = src.get("chicago_today") or chicago_today_iso()
+    label = (
+        f"chicago today={day} "
+        "(observe · CT calendar · never softens floors · never enables live)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "chicago_today": day,
+        "label": label,
+        "note": "Chicago day tip — observe-only staff calendar; not a board chip.",
     }
 
 

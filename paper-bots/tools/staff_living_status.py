@@ -117,6 +117,16 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_makefile_index")
         else {}
     )
+    venues = (
+        desk_living.living_venues_tip(board)
+        if hasattr(desk_living, "living_venues_tip")
+        else {}
+    )
+    chicago = (
+        desk_living.living_chicago_tip(board)
+        if hasattr(desk_living, "living_chicago_tip")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -1112,6 +1122,34 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "venues: "
+            + str(venues.get("label") or "venues observe")
+        ),
+        (
+            "venues sunday: "
+            + str(
+                compact.get("venues_sunday_quiet")
+                or (
+                    str(venues.get("label") or "venues observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
+            "chicago: "
+            + str(chicago.get("label") or "chicago observe")
+        ),
+        (
+            "chicago sunday: "
+            + str(
+                compact.get("chicago_sunday_quiet")
+                or (
+                    str(chicago.get("label") or "chicago observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1215,13 +1253,14 @@ def main() -> int:
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
+            "venues", "chicago",
         ),
     )
     parser.add_argument("--root", default=ROOT)
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money/rules/surfaces/smoke/paste/paper/makefile); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money/rules/surfaces/smoke/paste/paper/makefile/venues/chicago); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -1352,6 +1391,8 @@ def main() -> int:
         paste_j = desk_living.living_discord_paste_tip(board)
         paper_live_j = desk_living.living_paper_live_tip(board)
         makefile_j = desk_living.living_makefile_index(board)
+        venues_j = desk_living.living_venues_tip(board)
+        chicago_j = desk_living.living_chicago_tip(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1775,6 +1816,15 @@ def main() -> int:
             "makefile_n": makefile_j.get("targets_n"),
             "makefile_sunday_quiet": compact_j.get("makefile_sunday_quiet"),
             "compact_makefile_sunday_quiet": compact_j.get("makefile_sunday_quiet"),
+            "venues": venues_j,
+            "venues_label": venues_j.get("label"),
+            "venues_ok": venues_j.get("ok"),
+            "venues_sunday_quiet": compact_j.get("venues_sunday_quiet"),
+            "compact_venues_sunday_quiet": compact_j.get("venues_sunday_quiet"),
+            "chicago": chicago_j,
+            "chicago_label": chicago_j.get("label"),
+            "chicago_sunday_quiet": compact_j.get("chicago_sunday_quiet"),
+            "compact_chicago_sunday_quiet": compact_j.get("chicago_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -1975,10 +2025,10 @@ def main() -> int:
     if args.action == "help":
         print(
             "Living status actions (paper · floors locked · Discord never auto-posts):\n"
-            "  text json selfcheck export hud priority ritual-live money rules surfaces smoke paste paper makefile\n"
+            "  text json selfcheck export hud priority ritual-live money rules surfaces smoke paste paper makefile venues chicago\n"
             "  floors teller expand doctor l7 sunday pulse gaps inventory\n"
             "  hillclimb ruin seed pager\n"
-            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/rules/surfaces/smoke/paste/paper/makefile/priority\n"
+            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/rules/surfaces/smoke/paste/paper/makefile/venues/chicago/priority\n"
             "Makefile: make living-help"
         )
         return 0
@@ -2139,6 +2189,50 @@ def main() -> int:
             out["makefile_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if int(tip.get("targets_n") or 0) > 0 else 2
+
+    if args.action == "venues":
+        tip = desk_living.living_venues_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("venues_sunday_quiet") or (
+            f"{tip.get('label') or 'venues observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            v = tip.get("venues") or {}
+            print(
+                "**Venue fee floors** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"sports={v.get('sports')} btc+commodity={v.get('btc_commodity')} "
+                f"inx+dex={v.get('inx_dex')} ok={tip.get('ok')}\n"
+                "_never softens floors · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["venues_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if tip.get("ok") else 2
+
+    if args.action == "chicago":
+        tip = desk_living.living_chicago_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("chicago_sunday_quiet") or (
+            f"{tip.get('label') or 'chicago observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Chicago day** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"chicago_today={tip.get('chicago_today')}\n"
+                "_observe only · never softens floors · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["chicago_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if tip.get("chicago_today") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
