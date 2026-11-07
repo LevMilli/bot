@@ -338,6 +338,18 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
             kind="sell",
             note=str(reason or "")[:120],
         )
+        desk_roi_plan.record_adverse_fill(
+            DESK_ROOT,
+            bot="commodity-15m",
+            ticker=str(pos.get("ticker") or ""),
+            entry_price=(
+                pos.get("entry") if pos.get("entry") is not None
+                else pos.get("price") if pos.get("price") is not None
+                else pos.get("ask")
+            ),
+            mark_price=bid,
+            note=str(reason or "")[:120],
+        )
         try:
             import desk_living
             import teller_memory
@@ -812,12 +824,18 @@ def main() -> int:
         print("CARD: Checked commodity 15m markets. No open windows.")
         try:
             import desk_roi_plan
-            desk_roi_plan.record_empty_card(
-                DESK_ROOT, bot="commodity-15m", seconds=elapsed, markets_n=0,
-                note="no open commodity windows",
-            )
+            for series in SERIES:
+                desk_roi_plan.record_empty_card(
+                    DESK_ROOT,
+                    bot="commodity-15m",
+                    seconds=elapsed,
+                    markets_n=0,
+                    series=series,
+                    note="no open commodity windows",
+                )
             desk_roi_plan.record_latency(
-                DESK_ROOT, bot="commodity-15m", seconds=elapsed, note="empty card",
+                DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+                note="empty card", stage="evaluate",
             )
         except Exception:
             pass
@@ -1024,11 +1042,29 @@ def main() -> int:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_more
-        max_buys_eff = int(
-            desk_more.selective_max_buys(
-                "commodity-15m", base=MAX_BUYS_PER_CHECK, today=today_pnl,
+        import desk_roi_plan
+        if today_pnl >= 0:
+            top = ranked[0] if ranked else {}
+            ev_top = (top.get("_ev") if isinstance(top, dict) else None) or top or {}
+            desk_roi_plan.record_selective_attempt(
+                DESK_ROOT,
+                "commodity-15m",
+                edge=ev_top.get("edge"),
+                z=ev_top.get("z"),
+                depth=ev_top.get("depth"),
+                today=today_pnl,
+                boosted=True,
+                note="selective +1 path considered",
             )
-        )
+        if desk_roi_plan.selective_kill_active(DESK_ROOT, "commodity-15m"):
+            max_buys_eff = int(MAX_BUYS_PER_CHECK)
+            print("Selective +1 KILLED (5 green-day EV worsen) — base max_buys only")
+        else:
+            max_buys_eff = int(
+                desk_more.selective_max_buys(
+                    "commodity-15m", base=MAX_BUYS_PER_CHECK, today=today_pnl,
+                )
+            )
     except Exception:
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
@@ -1050,6 +1086,18 @@ def main() -> int:
     for row in ranked:
         if buys >= max_buys_eff:
             print(f"  → skip: max buys this check ({max_buys_eff})")
+            ev_skip = (row.get("_ev") if isinstance(row, dict) else None) or row or {}
+            try:
+                import desk_roi_plan
+                desk_roi_plan.note_pending_high_edge(
+                    DESK_ROOT,
+                    bot="commodity-15m",
+                    ticker=str(ev_skip.get("ticker") or ""),
+                    edge=ev_skip.get("edge"),
+                    reason=f"max buys this check ({max_buys_eff})",
+                )
+            except Exception:
+                pass
             break
         ev = row.get("_ev") or row
         try:
@@ -1098,6 +1146,12 @@ def main() -> int:
                     ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
                     edge=ev.get("edge"),
                 )
+                desk_roi_plan.flush_opp_cost_on_buy(
+                    DESK_ROOT,
+                    bot="commodity-15m",
+                    ticker=str(ev.get("ticker") or ""),
+                    edge=ev.get("edge"),
+                )
             except Exception:
                 pass
         else:
@@ -1108,14 +1162,39 @@ def main() -> int:
                     ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
                     edge=ev.get("edge"), note=msg[:160],
                 )
+                why = str(msg or "").lower()
+                if any(
+                    k in why
+                    for k in ("budget", "open risk", "max open", "cash", "risk cap")
+                ):
+                    desk_roi_plan.note_pending_high_edge(
+                        DESK_ROOT,
+                        bot="commodity-15m",
+                        ticker=str(ev.get("ticker") or ""),
+                        edge=ev.get("edge"),
+                        reason=str(msg)[:120],
+                    )
             except Exception:
                 pass
     save_account(account)
     try:
         import desk_roi_plan
+        elapsed = time.perf_counter() - t0
         desk_roi_plan.record_latency(
-            DESK_ROOT, bot="commodity-15m", seconds=time.perf_counter() - t0,
-            note="commodity check",
+            DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+            note="commodity evaluate", stage="evaluate",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+            note=f"commodity buys={buys}", stage="buy",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+            note="commodity exit/manage", stage="exit",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+            note="commodity check", stage="loop",
         )
     except Exception:
         pass

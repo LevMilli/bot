@@ -82,7 +82,9 @@ class BookPrefetch(unittest.TestCase):
 
     def test_master_exposes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            desk_roi_plan.record_empty_card(tmp, bot="btc15m", seconds=0.8)
+            desk_roi_plan.record_empty_card(
+                tmp, bot="btc15m", seconds=0.8, series="KXBTC15M",
+            )
             summary = desk_master.master_summary(
                 tmp,
                 bots=[{"id": "btc15m", "open_risk": 0, "history": [], "gate_a": {}}],
@@ -90,6 +92,7 @@ class BookPrefetch(unittest.TestCase):
             )
             plan = summary.get("roi_plan") or {}
             self.assertIn("empty_card", plan)
+            self.assertIn("empty_card_series", plan)
             self.assertTrue(plan.get("fee_floors_locked"))
 
     def test_fee_floors_untouched(self):

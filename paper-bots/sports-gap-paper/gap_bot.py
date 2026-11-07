@@ -543,6 +543,49 @@ def run():
     buy_candidates = []
     max_open_risk = float(cfg.get("max_open_risk") if cfg.get("max_open_risk") is not None else 100)
 
+    # Pre-tip book warm T−15 / T−5 into quote_cache (never places orders / waives floors).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_more
+        tip_games = []
+        for league, (path, series, _src) in SPORTS.items():
+            try:
+                games = espn_games(path)
+            except Exception:
+                continue
+            for g in games:
+                if g.get("state") != "pre":
+                    continue
+                eta = tip_eta_minutes(g)
+                if eta is None or eta <= 0 or eta > 15:
+                    continue
+                tip_games.append({
+                    "league": league,
+                    "series": series,
+                    "tip_in_min": float(eta),
+                    "ticker": str(g.get("id") or ""),
+                })
+        if tip_games:
+            warm15 = desk_more.warm_tip_books(
+                DESK_ROOT, 15, games=tip_games, fetch=get,
+            )
+            print(
+                f"Pre-tip warm T−15: {warm15.get('warmed_n') or 0} series "
+                f"({warm15.get('games_n') or 0} tip-soon)"
+            )
+            tip5 = [g for g in tip_games if float(g.get("tip_in_min") or 99) <= 5]
+            if tip5:
+                warm5 = desk_more.warm_tip_books(
+                    DESK_ROOT, 5, games=tip5, fetch=get,
+                )
+                print(
+                    f"Pre-tip warm T−5: {warm5.get('warmed_n') or 0} series "
+                    f"({warm5.get('games_n') or 0} tip-soon)"
+                )
+    except Exception as exc:
+        print(f"Pre-tip warm skipped: {type(exc).__name__}")
+
     for league, (path, series, src) in SPORTS.items():
         if league_cached_idle(path):
             summary_out["leagues"][league] = "no live games"
@@ -1037,6 +1080,22 @@ def run():
         still.append(p)
     s["open"] = still
     open_by_game = {p["game_key"]: p for p in s["open"]}
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="sports-gap",
+            seconds=time.perf_counter() - t0,
+            note="sports-gap exits", stage="exit",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="sports-gap",
+            seconds=time.perf_counter() - t0,
+            note=f"sports-gap evaluate n={len(buy_candidates)}", stage="evaluate",
+        )
+    except Exception:
+        pass
 
     # ---- paper buys after exits, capped by desk open risk ----
     # Rank-then-buy: spend open-risk on highest fee-aware gaps first.
@@ -1252,6 +1311,14 @@ def run():
         else:
             n = int(stake // per) if per > 0 else 0
         cost = round(n * per, 2) if n >= 1 else 0.0
+        if reason is None and n >= 1 and (c.get("tip_window") or c.get("tip_alarm") is not None):
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan as _tip_sized
+                _tip_sized.record_tip_funnel(DESK_ROOT, str(c.get("league") or ""), "sized")
+            except Exception:
+                pass
         if reason is None and (n < 1 or cost > s["cash"] + 1e-9):
             reason = "not enough paper cash"
         if reason is None:
@@ -1421,8 +1488,24 @@ def run():
                 ticker=str(m.get("ticker") or ""),
                 edge=gap,
             )
+            if c.get("tip_window") or c.get("tip_alarm") is not None:
+                desk_roi_plan.record_tip_funnel(
+                    DESK_ROOT, str(c.get("league") or ""), "bought",
+                )
         except Exception:
             pass
+
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="sports-gap",
+            seconds=time.perf_counter() - t0,
+            note=f"sports-gap buys={buys_this_check}", stage="buy",
+        )
+    except Exception:
+        pass
 
     equity_open = sum(p["cost"] for p in s["open"])
     realized = round(sum(p["pnl"] for p in s["closed"]), 2)
@@ -1440,7 +1523,7 @@ def run():
         import desk_roi_plan
         desk_roi_plan.record_latency(
             DESK_ROOT, bot="sports-gap", seconds=time.perf_counter() - t0,
-            note="sports-gap check",
+            note="sports-gap check", stage="loop",
         )
     except Exception:
         pass

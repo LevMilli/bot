@@ -701,6 +701,14 @@ def master_summary(
         except Exception:
             plan["empty_card"] = None
         try:
+            plan["empty_card_series"] = desk_roi_plan.empty_card_series_board(root)
+        except Exception:
+            plan["empty_card_series"] = None
+        try:
+            plan["depth_adjusted_edge"] = desk_roi_plan.depth_adjusted_edge_board(root)
+        except Exception:
+            plan["depth_adjusted_edge"] = None
+        try:
             plan["near_miss_promote"] = desk_roi_plan.near_miss_promote_status(root)
         except Exception:
             plan["near_miss_promote"] = None
