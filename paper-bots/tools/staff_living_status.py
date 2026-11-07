@@ -1718,7 +1718,7 @@ def main() -> int:
             "green-boost-arm", "green-boost-status", "green-boost-arm-ready",
             "inx-band-promote", "staff-promote-batch",
             "near-miss-promote", "near-miss-soft-p", "hard-stop-export",
-            "edge08-status", "edge08-promote",
+            "edge08-status", "edge08-promote", "edge08-promote-ready",
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse", "exit-quality",
@@ -3497,14 +3497,21 @@ def main() -> int:
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
+    if args.action == "edge08-promote-ready":
+        # Explicit no-force path — evidence catch-up deferred.
+        out = desk_roi_plan.staff_promote_btc_edge08(
+            root, who="staff-cli", note="staff edge08 no-force ready CLI", force=False,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "helper-gate-a":
         out = desk_roi_plan.helper_promote_status(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
-        return 0
+        return 0 if not out.get("evidence_thin") else 2
     if args.action == "helper-arm":
         # Arm only when Gate A ready — no force on money-path CLI (helpers stay gated).
         out = desk_roi_plan.staff_set_helper_autonomy(
-            root, args.helper, True, note="staff helper-arm CLI",
+            root, args.helper, True, note="staff helper-arm CLI", force=False,
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2

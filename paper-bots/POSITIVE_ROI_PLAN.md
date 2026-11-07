@@ -1771,6 +1771,14 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Observe CLI | `make living-green-boost-status` |
 | No-force arm when ready | `make living-green-boost-arm-ready` (force=False) |
 
+### Edge08 + Helper Gate A evidence-thin observe
+
+| Ticket | Where |
+| --- | --- |
+| Edge08 distance board | `btc_edge08_shadow_status.evidence_thin` / `n_to_promote` / `label` |
+| No-force promote when ready | `make living-edge08-promote-ready` (force=False) |
+| Helper Gate A thin board | `helper_gate_a` / `helper_promote_status.evidence_thin` / `label` |
+
 ### Next
 
 | Ticket | Where |
