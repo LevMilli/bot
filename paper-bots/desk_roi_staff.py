@@ -543,6 +543,119 @@ def staff_batch_arm_promotes_ready(
     }
 
 
+def staff_disarm_thin_promotes(
+    root: str | None = None,
+    *,
+    note: str = "",
+    bots: list | None = None,
+) -> dict:
+    """Disarm staff promotes that are live/armed while evidence is still thin.
+
+    Safety rollback for prior force-arms with n≪30 / not promote_ready.
+    Never enables LIVE_ORDERS. Never softens floors. Never tip invent.
+    """
+    note_s = str(
+        note
+        or "disarm thin force-arms — need n≥30 EV≥0 before re-arm"
+    )[:200]
+    dist = plan.promote_distance_observe(root, bots=bots)
+    by_gate = {
+        str(r.get("gate")): r
+        for r in (dist.get("gates") or [])
+        if isinstance(r, dict)
+    }
+    cleared: list[dict] = []
+    kept: list[dict] = []
+    skipped: list[dict] = []
+
+    def _thin(gate: str) -> bool:
+        row = by_gate.get(gate) or {}
+        if row.get("evidence_thin") is True:
+            return True
+        if row.get("promote_ready") is False and row.get("armed"):
+            return True
+        return False
+
+    # hard_stop
+    if plan.sports_hard_stop_is_live(root):
+        if _thin("hard_stop") or not (
+            by_gate.get("hard_stop") or {}
+        ).get("promote_ready"):
+            res = plan.staff_set_sports_hard_stop_live(
+                root, False, note=note_s, force=False,
+            )
+            cleared.append({"gate": "hard_stop", "result": res})
+        else:
+            kept.append({"gate": "hard_stop", "reason": "promote_ready"})
+    else:
+        skipped.append({"gate": "hard_stop", "reason": "not_live"})
+
+    # green_boost
+    gb = plan.sports_green_boost_status(root, bots=bots)
+    if bool(gb.get("staff_approved")) or bool(gb.get("live")):
+        if _thin("green_boost") or not gb.get("ready"):
+            res = plan.staff_set_sports_green_boost(
+                root, False, note=note_s, force=False, bots=bots,
+            )
+            cleared.append({"gate": "green_boost", "result": res})
+        else:
+            kept.append({"gate": "green_boost", "reason": "ready"})
+    else:
+        skipped.append({"gate": "green_boost", "reason": "not_armed"})
+
+    # near_miss soft
+    nm = plan.near_miss_promote_status(root)
+    if bool(nm.get("staff_approved")) or bool(nm.get("live")):
+        if _thin("near_miss") or not nm.get("promote_ready"):
+            res = plan.staff_clear_near_miss_promote(root, note=note_s)
+            cleared.append({"gate": "near_miss", "result": res})
+        else:
+            kept.append({"gate": "near_miss", "reason": "promote_ready"})
+    else:
+        skipped.append({"gate": "near_miss", "reason": "not_armed"})
+
+    # inx band
+    inx = plan.inx_band_promote_status(root)
+    inx_armed = bool(inx.get("staff_approved")) or bool(inx.get("live"))
+    if inx_armed:
+        # INX band promote without research / ready → clear
+        ready_inx = bool((by_gate.get("inx_band") or {}).get("promote_ready"))
+        if _thin("inx_band") or not ready_inx:
+            res = plan.staff_clear_inx_band_promote(root, note=note_s)
+            cleared.append({"gate": "inx_band", "result": res})
+        else:
+            kept.append({"gate": "inx_band", "reason": "promote_ready"})
+    else:
+        skipped.append({"gate": "inx_band", "reason": "not_armed"})
+
+    # edge08 overlay promote is raise-only arm via pimp_desk — no thin disarm API here.
+    skipped.append({
+        "gate": "edge08",
+        "reason": "no_thin_disarm_api (raise-only overlay; staff clears via pimp)",
+    })
+
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "live_orders_enabled": bool(plan.LIVE_ORDERS_ENABLED),
+        "auto_promote": False,
+        "force_default": False,
+        "observe_only": False,
+        "safety_rollback": True,
+        "note": note_s,
+        "cleared": cleared,
+        "kept": kept,
+        "skipped": skipped,
+        "cleared_n": len(cleared),
+        "kept_n": len(kept),
+        "ok": True,
+        "label": (
+            f"disarm_thin cleared={len(cleared)} kept={len(kept)} "
+            f"skipped={len(skipped)}"
+        ),
+    }
+
+
 def export_near_miss_shadow_csv(
     root: str | None = None,
     *,

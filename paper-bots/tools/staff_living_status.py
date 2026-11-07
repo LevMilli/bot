@@ -1744,6 +1744,7 @@ def main() -> int:
             # Staff SLA pack — observe / no-force; never tip invent; LIVE off.
             "hillclimb-pack", "hillclimb-pick", "hillclimb-pick-log",
             "promote-ready-pack", "staff-promote-batch-ready",
+            "disarm-thin", "staff-disarm-thin",
             "dual-control-status", "dual-control-observe",
             "observation-clock", "staff-dashboard", "graduation-capture",
             "promote-sla",
@@ -4299,6 +4300,26 @@ def main() -> int:
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("armed_n", 0) > 0 else 2
+    if args.action in ("disarm-thin", "staff-disarm-thin"):
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.staff_disarm_thin_promotes(
+            root,
+            note="staff disarm thin force-arms — need n≥30 EV≥0 before re-arm",
+            bots=bots,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        # Exit 0 after safety rollback; still assert LIVE off.
+        assert out.get("live_orders_enabled") is False
+        assert out.get("fee_floors_locked") is True
+        return 0 if out.get("ok") else 2
     if args.action in ("dual-control-status", "dual-control-observe"):
         out = desk_roi_plan.dual_control_observe_board(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
