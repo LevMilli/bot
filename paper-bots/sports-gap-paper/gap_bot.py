@@ -1062,10 +1062,17 @@ def run():
             float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0)
             for p in s["open"]
         )
+        # E1 #116 — firm queue remaining uses desk-wide headroom, not sports-local only.
+        head = desk_roi_plan.desk_open_risk_headroom(
+            DESK_ROOT,
+            local_bot="sports-gap",
+            local_open_risk=local_open,
+            max_open_risk=max_open_risk,
+        )
         desk_roi_plan.rebuild_firm_queue(
             DESK_ROOT,
-            remaining_risk=max(0.0, float(max_open_risk) - float(local_open)),
-            note="sports-gap firm offer",
+            remaining_risk=float(head.get("remaining") or 0.0),
+            note="sports-gap firm offer (desk-wide risk)",
         )
     except Exception:
         pass
@@ -1126,7 +1133,25 @@ def run():
             reason = "already holding this game"
         elif len(s["open"]) >= max_open:
             reason = "max open positions"
-        open_risk = sum(float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0) for p in s["open"])
+        local_open_risk = sum(
+            float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0)
+            for p in s["open"]
+        )
+        # E1 #116 — desk-wide open risk (BTC+commodity+…) + sports local.
+        open_risk = local_open_risk
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan as _drp_risk
+            _head = _drp_risk.desk_open_risk_headroom(
+                DESK_ROOT,
+                local_bot="sports-gap",
+                local_open_risk=local_open_risk,
+                max_open_risk=max_open_risk,
+            )
+            open_risk = float(_head.get("used") or local_open_risk)
+        except Exception:
+            open_risk = local_open_risk
         if reason is None and desk is not None:
             try:
                 blocked = desk.correlation_blocks(DESK_ROOT, "sports-gap", c["side"], gap)
@@ -1173,8 +1198,26 @@ def run():
         cost = round(n * per, 2) if n >= 1 else 0.0
         if reason is None and (n < 1 or cost > s["cash"] + 1e-9):
             reason = "not enough paper cash"
-        if reason is None and open_risk + cost > max_open_risk + 1e-9:
-            reason = f"max open risk (${open_risk:.2f} + ${cost:.2f} > ${max_open_risk:.2f})"
+        if reason is None:
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                desk_block = desk_roi_plan.desk_open_risk_blocks(
+                    DESK_ROOT,
+                    local_bot="sports-gap",
+                    local_open_risk=local_open_risk,
+                    add_cost=cost,
+                    max_open_risk=max_open_risk,
+                )
+                if desk_block:
+                    reason = desk_block
+            except Exception:
+                if open_risk + cost > max_open_risk + 1e-9:
+                    reason = (
+                        f"max open risk (${open_risk:.2f} + ${cost:.2f} > "
+                        f"${max_open_risk:.2f})"
+                    )
         if reason:
             lines.append(row + gtxt + f" | {reason} |")
             if desk_brain is not None:
