@@ -1714,7 +1714,8 @@ def main() -> int:
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
             "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip", "near-miss-tip", "helper-tip", "hard-stop-tip", "skip-regret-tip", "eia-tip", "injury-tip", "completions-tip", "toxic-tip", "calib-tip", "clv-tip", "clerk-tip", "bookkeeper-tip",
-            "hard-stop-promote", "green-boost-arm", "inx-band-promote", "staff-promote-batch",
+            "hard-stop-promote", "hard-stop-status", "hard-stop-promote-ready",
+            "green-boost-arm", "inx-band-promote", "staff-promote-batch",
             "near-miss-promote", "near-miss-soft-p", "hard-stop-export",
             "edge08-status", "edge08-promote",
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
@@ -3359,6 +3360,17 @@ def main() -> int:
     if args.action == "hard-stop-promote":
         out = desk_roi_plan.staff_set_sports_hard_stop_live(
             root, True, note="staff hard-stop promote CLI", force=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hard-stop-status":
+        out = desk_roi_plan.sports_hard_stop_shadow_summary(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("promote_ready") else 2
+    if args.action == "hard-stop-promote-ready":
+        # No force — only when shadow n≥30 EV≥0. Evidence catch-up stays deferred.
+        out = desk_roi_plan.staff_set_sports_hard_stop_live(
+            root, True, note="staff hard-stop no-force promote-ready CLI", force=False,
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2

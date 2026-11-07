@@ -4006,23 +4006,35 @@ def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
         _path(SPORTS_HARD_STOP_PROMOTE, root),
         {"paper_only": True, "staff_approved": False, "live": False},
     )
+    evidence_thin = n < int(SPORTS_HARD_STOP_PROMOTE_N)
+    n_to_promote = max(0, int(SPORTS_HARD_STOP_PROMOTE_N) - n)
+    ready = decision == "review"
     return {
         "paper_only": True,
+        "observe_only": True,
         "n": len(rows),
         "n_with_pnl": n,
         "shadow_expectancy": exp,
         "promote_min_n": SPORTS_HARD_STOP_PROMOTE_N,
+        "n_to_promote": n_to_promote,
+        "evidence_thin": evidence_thin,
         "drop": SPORTS_HARD_STOP_DROP,
         "live": live,
         "code_default_live": bool(SPORTS_HARD_STOP_LIVE),
         "staff_approved": bool(promote.get("staff_approved")),
-        "promote_ready": decision == "review",
+        "promote_ready": ready,
         "auto_promote": False,
         "decision": decision,
         "fee_floors_locked": True,
+        "label": (
+            f"hard-stop shadow n={n}/{SPORTS_HARD_STOP_PROMOTE_N} "
+            f"{'THIN' if evidence_thin else ('ready' if ready else 'reject')} "
+            f"EV={exp} live={live}"
+        ),
         "note": (
             "Sports hard-stop stays shadow-only until staff_set_sports_hard_stop_live. "
-            f"Promote ready after n≥{SPORTS_HARD_STOP_PROMOTE_N} and shadow EV ≥ 0. "
+            f"Evidence thin until n≥{SPORTS_HARD_STOP_PROMOTE_N} and shadow EV ≥ 0. "
+            "No-force money-path CLI promotes only when promote_ready. "
             "Code default SPORTS_HARD_STOP_LIVE stays False."
         ),
     }
