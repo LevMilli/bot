@@ -185,57 +185,60 @@ def settle_account(state):
             )
         except Exception:
             pass
+        # Fee ledger + helper fill densify under DESK_SHADOW too (observe journals).
+        # Living / teller stay main-desk only.
+        try:
+            import desk_roi_plan
+            settle_note = "settled shadow" if IS_SHADOW else "settled"
+            desk_roi_plan.record_fee_ledger(
+                DESK_ROOT,
+                bot="btc15m",
+                ticker=str(pos.get("ticker") or ""),
+                side=str(pos.get("side") or ""),
+                price=pos.get("ask") or pos.get("entry_price"),
+                contracts=pos.get("contracts"),
+                fee=0.0,
+                pnl=pnl,
+                fill_id=str(pos.get("fill_id") or ""),
+                kind="settle",
+                note=settle_note,
+            )
+            helper = str(pos.get("helper_source") or "").strip()
+            if helper:
+                desk_roi_plan.record_helper_fill(
+                    DESK_ROOT,
+                    helper=helper,
+                    bot="btc15m",
+                    ticker=str(pos.get("ticker") or ""),
+                    pnl=pnl,
+                    contracts=pos.get("contracts"),
+                    fill_id=str(pos.get("fill_id") or ""),
+                    note=settle_note,
+                )
+        except Exception:
+            pass
         if not IS_SHADOW:
             try:
-                import desk_roi_plan
-                desk_roi_plan.record_fee_ledger(
+                import desk_living
+                import teller_memory
+                desk_living.record_completion(
                     DESK_ROOT,
                     bot="btc15m",
                     ticker=str(pos.get("ticker") or ""),
                     side=str(pos.get("side") or ""),
-                    price=pos.get("ask") or pos.get("entry_price"),
-                    contracts=pos.get("contracts"),
-                    fee=0.0,
                     pnl=pnl,
+                    contracts=pos.get("contracts"),
                     fill_id=str(pos.get("fill_id") or ""),
                     kind="settle",
+                    eligible=True,
                     note="settled",
                 )
-                helper = str(pos.get("helper_source") or "").strip()
-                if helper:
-                    desk_roi_plan.record_helper_fill(
-                        DESK_ROOT,
-                        helper=helper,
-                        bot="btc15m",
-                        ticker=str(pos.get("ticker") or ""),
-                        pnl=pnl,
-                        contracts=pos.get("contracts"),
-                        fill_id=str(pos.get("fill_id") or ""),
-                        note="settled",
-                    )
-                try:
-                    import desk_living
-                    import teller_memory
-                    desk_living.record_completion(
-                        DESK_ROOT,
-                        bot="btc15m",
-                        ticker=str(pos.get("ticker") or ""),
-                        side=str(pos.get("side") or ""),
-                        pnl=pnl,
-                        contracts=pos.get("contracts"),
-                        fill_id=str(pos.get("fill_id") or ""),
-                        kind="settle",
-                        eligible=True,
-                        note="settled",
-                    )
-                    teller_memory.remember(
-                        DESK_ROOT,
-                        kind="wins" if float(pnl) > 0 else "mistakes",
-                        text=f"btc15m settle {pos.get('ticker')} pnl {float(pnl):+.2f}"[:200],
-                        bot_id="btc15m",
-                    )
-                except Exception:
-                    pass
+                teller_memory.remember(
+                    DESK_ROOT,
+                    kind="wins" if float(pnl) > 0 else "mistakes",
+                    text=f"btc15m settle {pos.get('ticker')} pnl {float(pnl):+.2f}"[:200],
+                    bot_id="btc15m",
+                )
             except Exception:
                 pass
     state["open"] = still
@@ -257,6 +260,41 @@ def paper_sell(state, pos, bid, fee, reason):
         "pnl": pnl,
     })
     state.setdefault("closed", []).append(closed)
+    # Fee ledger + helper fill densify under DESK_SHADOW too (observe journals).
+    try:
+        import desk_roi_plan
+        sell_note = str(reason or "")[:120]
+        if IS_SHADOW and sell_note:
+            sell_note = f"shadow {sell_note}"[:120]
+        elif IS_SHADOW:
+            sell_note = "shadow sell"
+        desk_roi_plan.record_fee_ledger(
+            DESK_ROOT,
+            bot="btc15m",
+            ticker=str(pos.get("ticker") or ""),
+            side=str(pos.get("side") or ""),
+            price=bid,
+            contracts=pos.get("contracts"),
+            fee=fee,
+            pnl=pnl,
+            fill_id=str(pos.get("fill_id") or ""),
+            kind="sell",
+            note=sell_note,
+        )
+        helper = str(pos.get("helper_source") or "").strip()
+        if helper:
+            desk_roi_plan.record_helper_fill(
+                DESK_ROOT,
+                helper=helper,
+                bot="btc15m",
+                ticker=str(pos.get("ticker") or ""),
+                pnl=pnl,
+                contracts=pos.get("contracts"),
+                fill_id=str(pos.get("fill_id") or ""),
+                note=sell_note,
+            )
+    except Exception:
+        pass
     if not IS_SHADOW:
         try:
             desk = _desk()
@@ -280,19 +318,6 @@ def paper_sell(state, pos, bid, fee, reason):
                 pnl=pnl,
                 contracts=pos.get("contracts"),
                 note=str(reason or "")[:80],
-            )
-            desk_roi_plan.record_fee_ledger(
-                DESK_ROOT,
-                bot="btc15m",
-                ticker=str(pos.get("ticker") or ""),
-                side=str(pos.get("side") or ""),
-                price=bid,
-                contracts=pos.get("contracts"),
-                fee=fee,
-                pnl=pnl,
-                fill_id=str(pos.get("fill_id") or ""),
-                kind="sell",
-                note=str(reason or "")[:120],
             )
             desk_roi_plan.record_adverse_fill(
                 DESK_ROOT,
@@ -325,18 +350,6 @@ def paper_sell(state, pos, bid, fee, reason):
                 )
             except Exception:
                 pass
-            helper = str(pos.get("helper_source") or "").strip()
-            if helper:
-                desk_roi_plan.record_helper_fill(
-                    DESK_ROOT,
-                    helper=helper,
-                    bot="btc15m",
-                    ticker=str(pos.get("ticker") or ""),
-                    pnl=pnl,
-                    contracts=pos.get("contracts"),
-                    fill_id=str(pos.get("fill_id") or ""),
-                    note=str(reason or "")[:120],
-                )
         except Exception:
             pass
     return pnl
@@ -1183,22 +1196,22 @@ def main():
     except Exception as e:
         print(f"  DVOL failed: {e}")
 
-    if not IS_SHADOW:
+    # History settle + 15m sweep densify under DESK_SHADOW too (label bridge).
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import kalshi_history
         try:
-            if DESK_ROOT not in sys.path:
-                sys.path.insert(0, DESK_ROOT)
-            import kalshi_history
-            try:
-                settled = kalshi_history.settle_open_windows(DESK_ROOT, limit=30)
-                if settled.get("settled"):
-                    print(f"History settle harness: labeled {settled['settled']} window(s)")
-            except Exception as exc:
-                print(f"  history settle harness skipped: {type(exc).__name__}")
-            n15 = kalshi_history.snapshot_open_15m_series(DESK_ROOT)
-            if n15:
-                print(f"15m series history: recorded {n15} open markets (crypto/metals/energy)")
-        except Exception as e:
-            print(f"  15m history sweep failed: {e}")
+            settled = kalshi_history.settle_open_windows(DESK_ROOT, limit=30)
+            if settled.get("settled"):
+                print(f"History settle harness: labeled {settled['settled']} window(s)")
+        except Exception as exc:
+            print(f"  history settle harness skipped: {type(exc).__name__}")
+        n15 = kalshi_history.snapshot_open_15m_series(DESK_ROOT)
+        if n15:
+            print(f"15m series history: recorded {n15} open markets (crypto/metals/energy)")
+    except Exception as e:
+        print(f"  15m history sweep failed: {e}")
     if not IS_SHADOW and price is not None:
         n_ladder = snapshot_btcd_ladder(DESK_ROOT, price)
         if n_ladder:
@@ -1471,7 +1484,8 @@ def main():
                 parlay_min=PARLAY_MIN_MIN,
             )
         print(f"  regime: {regime}")
-        if kalshi_history is not None and not IS_SHADOW:
+        # History snapshot densify under DESK_SHADOW (settle→near-miss label bridge).
+        if kalshi_history is not None:
             try:
                 kalshi_history.record_snapshot(
                     DESK_ROOT,
@@ -1495,7 +1509,7 @@ def main():
             hold_reason = "volatile — holding for ≤5m parlay window"
             if hold_reason not in reasons:
                 reasons.append(hold_reason)
-            if kalshi_history is not None and not IS_SHADOW and ev.get("side"):
+            if kalshi_history is not None and ev.get("side"):
                 try:
                     kalshi_history.mark_hold(
                         DESK_ROOT, str(ev.get("ticker") or ""), str(ev.get("side")),
@@ -1686,7 +1700,7 @@ def main():
                     )
                 except Exception:
                     pass
-            if kalshi_history is not None and not IS_SHADOW:
+            if kalshi_history is not None:
                 try:
                     kalshi_history.clear_hold(DESK_ROOT, str(ev.get("ticker") or ""))
                 except Exception:
@@ -1811,7 +1825,7 @@ def main():
                 save_account(account)
                 for line in eth_flip_sold:
                     print(f"  MODEL-FLIP SELL: {line}")
-        if kalshi_history is not None and not IS_SHADOW:
+        if kalshi_history is not None:
             try:
                 kalshi_history.record_snapshot(
                     DESK_ROOT, series="KXETH15M", ticker=m["ticker"], spot=eth_price,
@@ -1865,7 +1879,7 @@ def main():
             if "Paper buy" in sentence and "No paper buy" not in sentence:
                 buys += 1
                 last_sentence = sentence
-                if kalshi_history is not None and not IS_SHADOW:
+                if kalshi_history is not None:
                     try:
                         kalshi_history.clear_hold(DESK_ROOT, str(m.get("ticker") or ""))
                     except Exception:
@@ -1968,7 +1982,7 @@ def main():
             else:
                 skips += 1
         elif regime == "volatile_hold":
-            if kalshi_history is not None and not IS_SHADOW:
+            if kalshi_history is not None:
                 try:
                     kalshi_history.mark_hold(
                         DESK_ROOT, m["ticker"], str(ev_early.get("side") or ""),
