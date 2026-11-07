@@ -1330,6 +1330,14 @@ def living_compact_card(
             f"{living_timer_tip(src).get('label') or 'timer observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "export_tip_sunday_quiet": (
+            f"{living_export_tip(src).get('label') or 'export observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "doctor_tip_sunday_quiet": (
+            f"{living_doctor_tip(src).get('label') or 'doctor-tip observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never records doctor)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2517,6 +2525,17 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{timer_tip.get('label') or 'timer observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+
+        export_tip = living_export_tip(board)
+        compact["export_tip_sunday_quiet"] = (
+            f"{export_tip.get('label') or 'export observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        doctor_tip = living_doctor_tip(board)
+        compact["doctor_tip_sunday_quiet"] = (
+            f"{doctor_tip.get('label') or 'doctor-tip observe'} · sunday quiet {quiet_bit} "
+            "(observe · never records doctor)"
+        )
         board["compact"] = compact
     return board
 
@@ -2720,6 +2739,14 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["timer_tip"] = timer_tip
     slim["timer_tip_label"] = timer_tip.get("label")
     slim["timer_alive"] = timer_tip.get("alive")
+
+    export_tip = living_export_tip(board)
+    slim["export_tip"] = export_tip
+    slim["export_tip_label"] = export_tip.get("label")
+    doctor_tip = living_doctor_tip(board)
+    slim["doctor_tip"] = doctor_tip
+    slim["doctor_tip_label"] = doctor_tip.get("label")
+    slim["doctor_tip_fresh"] = doctor_tip.get("doctor_fresh")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3200,6 +3227,17 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{timer_tip_export.get('label') or 'timer observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+
+    export_tip_export = living_export_tip(board)
+    slim["export_tip_sunday_quiet"] = (
+        f"{export_tip_export.get('label') or 'export observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    doctor_tip_export = living_doctor_tip(board)
+    slim["doctor_tip_sunday_quiet"] = (
+        f"{doctor_tip_export.get('label') or 'doctor-tip observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never records doctor)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3456,6 +3494,13 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_timer_tip_sunday_quiet"] = (
             compact.get("timer_tip_sunday_quiet") or slim.get("timer_tip_sunday_quiet")
+        )
+
+        slim["compact_export_tip_sunday_quiet"] = (
+            compact.get("export_tip_sunday_quiet") or slim.get("export_tip_sunday_quiet")
+        )
+        slim["compact_doctor_tip_sunday_quiet"] = (
+            compact.get("doctor_tip_sunday_quiet") or slim.get("doctor_tip_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4720,6 +4765,8 @@ _DISCORD_PASTE_TARGETS = (
     "expand-tip",
     "quiet-tip",
     "timer-tip",
+    "export-tip",
+    "doctor-tip",
     "gaps",
     "ruin",
     "expand",
@@ -5002,6 +5049,58 @@ def living_timer_tip(board: dict | None = None, root: str | None = None) -> dict
         "label": label,
         "alert": timer.get("alert"),
         "note": "Timer tip — observe-only heartbeat; not a board chip.",
+    }
+
+
+
+
+def living_export_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Staff export surface tip (version / twins / smoke) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    compact = src.get("compact") if isinstance(src.get("compact"), dict) else {}
+    twins_n = sum(1 for k in compact if str(k).endswith("_sunday_quiet")) if compact else None
+    smoke = living_staff_smoke(src)
+    paper = living_paper_live_tip(src)
+    label = (
+        f"export v=living_board_v1 twins={twins_n if twins_n is not None else '?'} "
+        f"smoke_ok={smoke.get('ok')} paper_live_ok={paper.get('ok')} "
+        "(observe · make living-export · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "export": "living_board_v1",
+        "twins_n": twins_n,
+        "smoke_ok": smoke.get("ok"),
+        "paper_live_ok": paper.get("ok"),
+        "label": label,
+        "note": "Export tip — observe-only archive pointer; not a board chip.",
+    }
+
+
+def living_doctor_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Doctor age/fresh tip without recording (not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    age = src.get("doctor_age") if isinstance(src.get("doctor_age"), dict) else {}
+    ritual = src.get("ritual_observe") if isinstance(src.get("ritual_observe"), dict) else {}
+    fresh = ritual.get("doctor_fresh")
+    if fresh is None and age:
+        fresh = not bool(age.get("stale"))
+    label = (
+        f"doctor-tip fresh={fresh} stale={age.get('stale')} "
+        f"label={age.get('label') or 'doctor age observe'} "
+        "(observe · never records doctor · never softens floors · never auto-posts)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "doctor_fresh": fresh,
+        "stale": age.get("stale"),
+        "doctor_label": age.get("label"),
+        "label": label,
+        "note": "Doctor tip — observe-only; never writes doctor marker.",
     }
 
 

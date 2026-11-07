@@ -1798,7 +1798,72 @@ export default function App() {
                     })()}
                   </span>
                 </div>
+                
                 <div className="vault-board-row">
+                  <span className="vb-label">export tip</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            export_tip_sunday_quiet?: string
+                            compact_export_tip_sunday_quiet?: string
+                            export_tip_label?: string
+                            export_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.export_tip_sunday_quiet ||
+                        desk?.compact_export_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.export_tip_label ||
+                          desk?.export_tip?.label ||
+                          'export observe') + ' · make living-export-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">doctor tip</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | {
+                              doctor_tip_fresh?: boolean
+                              doctor_tip?: { doctor_fresh?: boolean }
+                            }
+                          | undefined
+                        const ok =
+                          desk?.doctor_tip_fresh ?? desk?.doctor_tip?.doctor_fresh
+                        if (ok === true) return '#6fbf73'
+                        if (ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            doctor_tip_sunday_quiet?: string
+                            compact_doctor_tip_sunday_quiet?: string
+                            doctor_tip_label?: string
+                            doctor_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.doctor_tip_sunday_quiet ||
+                        desk?.compact_doctor_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.doctor_tip_label ||
+                          desk?.doctor_tip?.label ||
+                          'doctor-tip observe') + ' · make living-doctor-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
+<div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{

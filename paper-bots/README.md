@@ -101,6 +101,8 @@ make living-swarm            # insight/betting hire ratio
 make living-expand-tip       # betting expand gate tip
 make living-quiet-tip        # feature-store quiet age
 make living-timer-tip        # paper timer heartbeat
+make living-export-tip       # archive/export surface tip
+make living-doctor-tip       # doctor age tip (never records)
 make living-export
 make living-test
 ```
