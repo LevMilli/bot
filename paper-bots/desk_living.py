@@ -1290,6 +1290,14 @@ def living_compact_card(
             f"{living_discord_paste_tip(src).get('label') or 'paste observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never auto-posts)"
         ),
+        "paper_live_sunday_quiet": (
+            f"{living_paper_live_tip(src).get('label') or 'paper-live observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never enables live)"
+        ),
+        "makefile_sunday_quiet": (
+            f"{living_makefile_index(src).get('label') or 'makefile observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2426,6 +2434,16 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{paste.get('label') or 'paste observe'} · sunday quiet {quiet_bit} "
             "(observe · never auto-posts)"
         )
+        paper_live = living_paper_live_tip(board)
+        compact["paper_live_sunday_quiet"] = (
+            f"{paper_live.get('label') or 'paper-live observe'} · sunday quiet {quiet_bit} "
+            "(observe · never enables live)"
+        )
+        makefile = living_makefile_index(board)
+        compact["makefile_sunday_quiet"] = (
+            f"{makefile.get('label') or 'makefile observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2591,6 +2609,14 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["paste"] = paste
     slim["paste_label"] = paste.get("label")
     slim["paste_n"] = paste.get("targets_n")
+    paper_live = living_paper_live_tip(board)
+    slim["paper_live"] = paper_live
+    slim["paper_live_label"] = paper_live.get("label")
+    slim["paper_live_ok"] = paper_live.get("ok")
+    makefile = living_makefile_index(board)
+    slim["makefile"] = makefile
+    slim["makefile_label"] = makefile.get("label")
+    slim["makefile_n"] = makefile.get("targets_n")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3020,6 +3046,16 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{paste_export.get('label') or 'paste observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never auto-posts)"
     )
+    paper_live_export = living_paper_live_tip(board)
+    slim["paper_live_sunday_quiet"] = (
+        f"{paper_live_export.get('label') or 'paper-live observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never enables live)"
+    )
+    makefile_export = living_makefile_index(board)
+    slim["makefile_sunday_quiet"] = (
+        f"{makefile_export.get('label') or 'makefile observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3245,6 +3281,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_paste_sunday_quiet"] = (
             compact.get("paste_sunday_quiet") or slim.get("paste_sunday_quiet")
+        )
+        slim["compact_paper_live_sunday_quiet"] = (
+            compact.get("paper_live_sunday_quiet") or slim.get("paper_live_sunday_quiet")
+        )
+        slim["compact_makefile_sunday_quiet"] = (
+            compact.get("makefile_sunday_quiet") or slim.get("makefile_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4498,6 +4540,9 @@ _DISCORD_PASTE_TARGETS = (
     "rules",
     "surfaces",
     "smoke",
+    "paste",
+    "paper",
+    "makefile",
     "gaps",
     "ruin",
     "expand",
@@ -4531,6 +4576,66 @@ def living_discord_paste_tip(board: dict | None = None, root: str | None = None)
         ],
         "label": label,
         "note": "Discord paste index — drafts only; never auto-posts.",
+    }
+
+
+def living_paper_live_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Paper-only + live=False assert tip (not a board chip; never enables live)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    paper = src.get("paper_only") is not False
+    live = src.get("live_orders_enabled")
+    grok = src.get("grok_buys")
+    locked = src.get("fee_floors_locked") is not False
+    ok = bool(paper and live is False and grok is not True and locked)
+    label = (
+        f"paper-live ok={ok} paper={paper} live={live} grok_buys={grok} "
+        f"floors_locked={locked} "
+        "(observe · never enables live · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "ok": ok,
+        "live_orders_enabled": live,
+        "grok_buys": grok,
+        "floors_locked": locked,
+        "label": label,
+        "note": "Paper/live assert tip — observe-only; never enables live orders.",
+    }
+
+
+def living_makefile_index(board: dict | None = None, root: str | None = None) -> dict:
+    """Count Makefile living-* smoke targets (not a board chip)."""
+    _ = board  # observe-only; board unused except for API symmetry
+    import pathlib
+
+    make_path = pathlib.Path(__file__).resolve().parent / "Makefile"
+    targets: list[str] = []
+    try:
+        text = make_path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("living-") and ":" in line and not line.startswith(".PHONY"):
+                name = line.split(":", 1)[0].strip()
+                if name.startswith("living-"):
+                    targets.append(name)
+    except OSError:
+        targets = []
+    targets = sorted(set(targets))
+    label = (
+        f"makefile living_n={len(targets)} "
+        f"sample={','.join(targets[:5])}… "
+        "(observe · soft-max surfaces · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "targets": targets,
+        "targets_n": len(targets),
+        "path": str(make_path),
+        "label": label,
+        "note": "Makefile living-* index — observe-only staff map; not a board chip.",
     }
 
 

@@ -427,6 +427,24 @@ def format_discord(payload: dict) -> str:
             f"• Paste sunday: {paste_lab} · sunday quiet {tip_age} "
             f"(observe · never auto-posts)"
         )
+    paper_twin = payload.get("paper_live_sunday_quiet")
+    if paper_twin:
+        lines.append(f"• Paper-live sunday: {paper_twin}")
+    else:
+        paper_lab = payload.get("paper_live_label") or "paper-live observe"
+        lines.append(
+            f"• Paper-live sunday: {paper_lab} · sunday quiet {tip_age} "
+            f"(observe · never enables live)"
+        )
+    makefile_twin = payload.get("makefile_sunday_quiet")
+    if makefile_twin:
+        lines.append(f"• Makefile sunday: {makefile_twin}")
+    else:
+        makefile_lab = payload.get("makefile_label") or "makefile observe"
+        lines.append(
+            f"• Makefile sunday: {makefile_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1053,6 +1071,26 @@ def main() -> int:
                 )
             )
             print(
+                "paper-live sunday: "
+                + str(
+                    compact_obs.get("paper_live_sunday_quiet")
+                    or (
+                        f"{desk_living.living_paper_live_tip(board_obs).get('label') or 'paper-live observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never enables live)"
+                    )
+                )
+            )
+            print(
+                "makefile sunday: "
+                + str(
+                    compact_obs.get("makefile_sunday_quiet")
+                    or (
+                        f"{desk_living.living_makefile_index(board_obs).get('label') or 'makefile observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1219,6 +1257,22 @@ def main() -> int:
     payload["paste_sunday_quiet"] = compact.get("paste_sunday_quiet") or (
         f"{paste.get('label') or 'paste observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never auto-posts)"
+    )
+    paper_live = desk_living.living_paper_live_tip(board)
+    payload["paper_live"] = paper_live
+    payload["paper_live_label"] = paper_live.get("label")
+    payload["paper_live_ok"] = paper_live.get("ok")
+    payload["paper_live_sunday_quiet"] = compact.get("paper_live_sunday_quiet") or (
+        f"{paper_live.get('label') or 'paper-live observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never enables live)"
+    )
+    makefile = desk_living.living_makefile_index(board)
+    payload["makefile"] = makefile
+    payload["makefile_label"] = makefile.get("label")
+    payload["makefile_n"] = makefile.get("targets_n")
+    payload["makefile_sunday_quiet"] = compact.get("makefile_sunday_quiet") or (
+        f"{makefile.get('label') or 'makefile observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:
         print(format_discord(payload))

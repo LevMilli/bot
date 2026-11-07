@@ -1507,11 +1507,23 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault paste row | App vault |
 | README index | README.md |
 
+### Living upgrade — paper-live / makefile batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_paper_live_tip` + `paper_live_sunday_quiet` | desk_living / compact / export |
+| `living_makefile_index` + `makefile_sunday_quiet` | desk_living / compact / export |
+| Status CLI `paper` / `makefile` (+ discord) | staff_living_status |
+| Makefile `living-paper` / `living-makefile` | Makefile |
+| Ritual observe/Discord paper+makefile | staff_living_ritual |
+| Vault paper-live + makefile rows | App vault |
+| README index | README.md |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| *(cleared — Discord paste index shipped; soft-max 52/64 — pause new chips)* | — |
+| *(cleared — paper-live/makefile shipped; soft-max 52/64)* | — |
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
 
@@ -1519,7 +1531,7 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — Discord paste index shipped; soft-max 52/64)* | — |
+| *(empty — paper-live/makefile shipped; soft-max 52/64)* | — |
 
 ## Hard rules unchanged
 
