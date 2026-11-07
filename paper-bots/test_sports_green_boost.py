@@ -20,6 +20,10 @@ class SportsGreenBoost(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             st = desk_roi_plan.sports_green_boost_status(tmp, bots=[])
             self.assertFalse(st["ready"])
+            self.assertTrue(st["evidence_thin"])
+            self.assertTrue(st["observe_only"])
+            self.assertIn("THIN", st["label"])
+            self.assertTrue(st["missing"])
             self.assertEqual(st["green_boost"], 0)
             self.assertFalse(st["auto_promote"])
             self.assertEqual(desk_roi_plan.sports_green_boost(tmp), 0)
@@ -46,6 +50,9 @@ class SportsGreenBoost(unittest.TestCase):
             self.assertTrue(st["weeks_ok"])
             self.assertTrue(st["clv_ok"])
             self.assertTrue(st["ready"])
+            self.assertFalse(st["evidence_thin"])
+            self.assertEqual(st["missing"], [])
+            self.assertIn("ready", st["label"])
             self.assertEqual(st["green_boost"], 1)
 
     def test_green_or_gone_flags_red_open(self):
