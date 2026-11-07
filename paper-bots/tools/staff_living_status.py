@@ -1715,6 +1715,7 @@ def main() -> int:
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
             "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip", "near-miss-tip", "helper-tip", "hard-stop-tip", "skip-regret-tip", "eia-tip", "injury-tip", "completions-tip", "toxic-tip", "calib-tip", "clv-tip", "clerk-tip", "bookkeeper-tip",
             "hard-stop-promote", "green-boost-arm", "inx-band-promote", "staff-promote-batch",
+            "near-miss-promote", "hard-stop-export",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3366,6 +3367,19 @@ def main() -> int:
             inx_band_id=desk_roi_plan.INX_LIVE_BAND_DEFAULT,
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "near-miss-promote":
+        out = desk_roi_plan.staff_promote_near_miss_soft(
+            root, "z", note="staff near-miss soft-z arm CLI", force=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hard-stop-export":
+        out = desk_roi_plan.export_sports_hard_stop_shadow_csv(root)
+        # Keep response compact for staff paste — drop full csv body unless empty.
+        slim = {k: v for k, v in out.items() if k != "csv"}
+        slim["csv_preview"] = (out.get("csv") or "")[:400]
+        print(json.dumps(slim, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
 
     if args.action == "l7":

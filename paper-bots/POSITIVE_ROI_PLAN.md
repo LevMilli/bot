@@ -1661,6 +1661,14 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 0.02. Soft-max chip catalog still 52/64.
 
+### Near-miss soft-z staff arm + hard-stop CSV packet
+
+| Ticket | Where |
+| --- | --- |
+| Soft-z force arm (edge relax forever 0) | `staff_promote_near_miss_soft("z", force=True)` · `make living-near-miss-promote` |
+| Committed artifact | `desk_near_miss_promote.json` |
+| Hard-stop shadow CSV export | `export_sports_hard_stop_shadow_csv` · `make living-hard-stop-export` |
+
 ### Next
 
 | Ticket | Where |
@@ -1668,8 +1676,10 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | INX research week — promote non-default band only if leader n≥20 beats 80–90 | `run_inx_band_research` → `staff_promote_inx_band` (no force) |
 | Green_boost evidence catch-up — 2 Chicago weeks M1≥0 + CLV≥52% | `sports_green_boost_status.ready` (staff already armed) |
 | Hard-stop shadow n≥30 EV≥0 — drop force dependency | `sports_hard_stop_shadow_summary.promote_ready` |
-| Near-miss soft-gate staff promote (z/p only) when n≥30 | `staff_set_near_miss_live` |
+| Near-miss labeled n≥30 EV≥0 — drop force; optional soft-p second | `near_miss_promote_status` → `staff_promote_near_miss_soft("p")` |
 | Dual-control / LIVE_ORDERS stay off until separate staff gate | paper-only forever until staff |
+| BTC raise_Φ staff decision log (accept/defer) | calib tickets / staff apply path |
+| Shadow edge08 promote only at n≥30 EV≥0.5 | BTC shadow parallel account |
 
 ## Hard rules unchanged
 
