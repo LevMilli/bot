@@ -30,6 +30,14 @@ desk_roi_baseline.json
 desk_near_miss_weekly.json
 desk_inx_band_research.json
 desk_sports_hard_stop_shadow.json
+# Shadow tick / catch-up runtime (never commit; regenerate via make living-shadow-tick).
+btc15m-signal/shadow_edge08_account.json
+desk_promote_gate_sla.json
+desk_selective_attempts.json
+desk_selective_kill.json
+desk_near_miss_shadow.csv
+desk_btc_edge08_shadow.csv
+desk_sports_green_boost_evidence.csv
 # Staff promote artifacts (hard-stop / green_boost / INX band) are committed so
 # paper desks boot armed after an explicit staff batch — not gitignored.
 desk_adverse_cool.json
