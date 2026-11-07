@@ -3967,6 +3967,97 @@ def selective_throughput_observe(
     }
 
 
+def promote_distance_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """One board: distance-to-promote across money-path staff gates (observe only).
+
+    Never arms LIVE_ORDERS. Never force-promotes. Floors locked.
+    """
+    inx = inx_band_promote_status(root)
+    hard = sports_hard_stop_shadow_summary(root)
+    green = sports_green_boost_status(root, bots=bots)
+    near = near_miss_promote_status(root)
+    soft_p = near_miss_soft_p_status(root, bots=bots)
+    edge = btc_edge08_shadow_status(root)
+    helper = helper_promote_status(root)
+    rows = [
+        {
+            "gate": "inx_band",
+            "evidence_thin": bool(inx.get("evidence_thin")),
+            "promote_ready": bool(inx.get("promote_ready")),
+            "n_to_promote": inx.get("n_to_promote"),
+            "label": inx.get("label") or inx.get("reason"),
+        },
+        {
+            "gate": "hard_stop",
+            "evidence_thin": bool(hard.get("evidence_thin")),
+            "promote_ready": bool(hard.get("promote_ready")),
+            "n_to_promote": hard.get("n_to_promote"),
+            "label": hard.get("label"),
+        },
+        {
+            "gate": "green_boost",
+            "evidence_thin": bool(green.get("evidence_thin")),
+            "promote_ready": bool(green.get("ready")),
+            "n_to_promote": None,
+            "missing": green.get("missing"),
+            "label": green.get("label"),
+        },
+        {
+            "gate": "near_miss",
+            "evidence_thin": bool(near.get("evidence_thin")),
+            "promote_ready": bool(near.get("promote_ready")),
+            "n_to_promote": near.get("n_to_promote"),
+            "label": near.get("label"),
+        },
+        {
+            "gate": "near_miss_soft_p",
+            "evidence_thin": bool(soft_p.get("evidence_thin")),
+            "promote_ready": bool(soft_p.get("soft_p_ready")),
+            "n_to_promote": soft_p.get("n_to_promote"),
+            "label": soft_p.get("label"),
+        },
+        {
+            "gate": "edge08",
+            "evidence_thin": bool(edge.get("evidence_thin")),
+            "promote_ready": bool(edge.get("promote_ready")),
+            "n_to_promote": edge.get("n_to_promote"),
+            "label": edge.get("label"),
+        },
+        {
+            "gate": "helper_gate_a",
+            "evidence_thin": bool(helper.get("evidence_thin")),
+            "promote_ready": int(helper.get("ready_n") or 0) > 0 and not helper.get("evidence_thin"),
+            "n_to_promote": None,
+            "thin_n": helper.get("thin_n"),
+            "label": helper.get("label"),
+        },
+    ]
+    thin_n = sum(1 for r in rows if r.get("evidence_thin"))
+    ready_n = sum(1 for r in rows if r.get("promote_ready"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "gates": rows,
+        "thin_n": thin_n,
+        "ready_n": ready_n,
+        "evidence_thin": thin_n > 0,
+        "label": f"promote_distance thin={thin_n}/{len(rows)} ready={ready_n}",
+        "note": (
+            "Promote-distance observe across INX / hard-stop / green_boost / "
+            "near-miss / edge08 / helper Gate A. Evidence catch-up deferred; "
+            "no force; dual-control LIVE_ORDERS still off."
+        ),
+    }
+
+
 def exit_quality_observe(
     root: str | None = None,
     *,
@@ -6422,6 +6513,7 @@ def plan_summary(
         "near_miss_soft_p": near_miss_soft_p_status(root, bots=bots),
         "exit_quality": exit_quality_observe(root, bots=bots),
         "selective_throughput": selective_throughput_observe(root, bots=bots),
+        "promote_distance": promote_distance_observe(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,

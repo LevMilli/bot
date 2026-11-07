@@ -1722,7 +1722,8 @@ def main() -> int:
             "edge08-status", "edge08-promote", "edge08-promote-ready",
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
-            "firm-queue", "completions", "feature-store", "money-pulse", "exit-quality",
+            "firm-queue", "completions", "feature-store", "money-pulse",
+            "exit-quality", "promote-distance",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3590,10 +3591,14 @@ def main() -> int:
             "helper_gate_a": desk_roi_plan.helper_promote_status(root),
             "exit_quality": desk_roi_plan.exit_quality_observe(root, bots=None),
             "selective_throughput": desk_roi_plan.selective_throughput_observe(root),
+            "promote_distance": desk_roi_plan.promote_distance_observe(root),
+            "green_boost": desk_roi_plan.sports_green_boost_status(root),
+            "near_miss": desk_roi_plan.near_miss_promote_status(root),
+            "hard_stop": desk_roi_plan.sports_hard_stop_shadow_summary(root),
             "note": (
                 "Money-path pulse — observe only (firm-queue / completions / "
-                "feature densify / exit-quality / selective after M1). "
-                "Never softens floors. Never arms LIVE_ORDERS."
+                "feature densify / exit-quality / selective after M1 / "
+                "promote-distance). Never softens floors. Never arms LIVE_ORDERS."
             ),
         }
         # Enrich exit/selective with live bots when snapshot available.
@@ -3604,6 +3609,12 @@ def main() -> int:
             if isinstance(bots, list):
                 out["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
                 out["selective_throughput"] = desk_roi_plan.selective_throughput_observe(
+                    root, bots=bots,
+                )
+                out["promote_distance"] = desk_roi_plan.promote_distance_observe(
+                    root, bots=bots,
+                )
+                out["green_boost"] = desk_roi_plan.sports_green_boost_status(
                     root, bots=bots,
                 )
         except Exception:
@@ -3623,6 +3634,19 @@ def main() -> int:
         out = desk_roi_plan.exit_quality_observe(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "promote-distance":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.promote_distance_observe(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ready_n", 0) > 0 and not out.get("evidence_thin") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
