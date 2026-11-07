@@ -1717,7 +1717,8 @@ def main() -> int:
             "hard-stop-promote", "hard-stop-status", "hard-stop-promote-ready",
             "green-boost-arm", "green-boost-status", "green-boost-arm-ready",
             "inx-band-promote", "staff-promote-batch",
-            "near-miss-promote", "near-miss-soft-p", "hard-stop-export",
+            "near-miss-promote", "near-miss-status", "near-miss-promote-ready",
+            "near-miss-soft-p", "hard-stop-export",
             "edge08-status", "edge08-promote", "edge08-promote-ready",
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
@@ -3446,6 +3447,17 @@ def main() -> int:
     if args.action == "near-miss-promote":
         out = desk_roi_plan.staff_promote_near_miss_soft(
             root, "z", note="staff near-miss soft-z arm CLI", force=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "near-miss-status":
+        out = desk_roi_plan.near_miss_promote_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("promote_ready") else 2
+    if args.action == "near-miss-promote-ready":
+        # No force — evidence catch-up deferred; arm soft-z only when promote_ready.
+        out = desk_roi_plan.staff_promote_near_miss_soft(
+            root, "z", note="staff near-miss soft-z no-force ready CLI", force=False,
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2

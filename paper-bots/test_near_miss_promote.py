@@ -47,6 +47,9 @@ class NearMissPromote(unittest.TestCase):
             st = desk_roi_plan.near_miss_promote_status(tmp)
             self.assertEqual(st["decision"], "reject")
             self.assertFalse(st["promote_ready"])
+            self.assertTrue(st["evidence_thin"])
+            self.assertIn("THIN", st["label"])
+            self.assertGreater(st["n_to_promote"], 0)
             self.assertFalse(st["auto_promote"])
 
     def test_promote_ready_when_ev_ok(self):
@@ -55,6 +58,9 @@ class NearMissPromote(unittest.TestCase):
             st = desk_roi_plan.near_miss_promote_status(tmp)
             self.assertEqual(st["labeled_n"], 30)
             self.assertTrue(st["promote_ready"])
+            self.assertFalse(st["evidence_thin"])
+            self.assertEqual(st["n_to_promote"], 0)
+            self.assertIn("ready", st["label"])
             self.assertEqual(st["decision"], "review")
             self.assertGreaterEqual(st["shadow_ev"], 0.0)
             self.assertFalse(st["auto_promote"])
@@ -65,6 +71,9 @@ class NearMissPromote(unittest.TestCase):
             _seed_labeled(tmp, 30, would_pnl=-0.05)
             st = desk_roi_plan.near_miss_promote_status(tmp)
             self.assertFalse(st["promote_ready"])
+            self.assertTrue(st["evidence_thin"])
+            self.assertIn("THIN", st["label"])
+            self.assertEqual(st["n_to_promote"], 0)  # n bar met; EV still thin
             self.assertEqual(st["decision"], "reject")
 
     def test_staff_arm_z_only_when_ready(self):

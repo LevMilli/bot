@@ -1779,6 +1779,15 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | No-force promote when ready | `make living-edge08-promote-ready` (force=False) |
 | Helper Gate A thin board | `helper_gate_a` / `helper_promote_status.evidence_thin` / `label` |
 
+### Near-miss evidence-thin observe + no-force z
+
+| Ticket | Where |
+| --- | --- |
+| Distance board | `near_miss_promote_status.evidence_thin` / `n_to_promote` / `label` |
+| Soft-p thin label | `near_miss_soft_p_status.evidence_thin` |
+| Observe CLI | `make living-near-miss-status` |
+| No-force soft-z when ready | `make living-near-miss-promote-ready` (force=False) |
+
 ### Next
 
 | Ticket | Where |
