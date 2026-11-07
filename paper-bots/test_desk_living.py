@@ -816,6 +816,16 @@ class DeskLivingTests(unittest.TestCase):
             )
             txt = staff_living_status._text(board)
             self.assertIn("teller ritual live sunday:", txt)
+            self.assertIn("priority:", txt)
+            self.assertIn("priority sunday:", txt)
+            prio = desk_living.living_priority_snapshot(board)
+            self.assertTrue(prio.get("fee_floors_locked"))
+            self.assertFalse(prio.get("board_chip"))
+            self.assertIn("priority", prio.get("label") or "")
+            self.assertIn("priority_sunday_quiet", compact)
+            self.assertIn("priority_sunday_quiet", export.get("sunday_twins") or {})
+            self.assertIn("priority_lines", export)
+            self.assertTrue(export.get("living_memory_line") or True)
             payload = {
                 "paper_only": True,
                 "live_orders_enabled": False,
