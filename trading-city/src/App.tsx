@@ -1260,6 +1260,73 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">selfcheck</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | { selfcheck_ok?: boolean }
+                          | undefined
+                        if (desk?.selfcheck_ok === true) return '#6fbf73'
+                        if (desk?.selfcheck_ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            selfcheck_ok?: boolean
+                            selfcheck_label?: string
+                          }
+                        | undefined
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        desk?.selfcheck_label ||
+                        (desk?.selfcheck_ok != null
+                          ? `selfcheck ok=${desk.selfcheck_ok}`
+                          : 'selfcheck observe')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">money-path</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            money_path_sunday_quiet?: string
+                            compact_money_path_sunday_quiet?: string
+                            money_path_label?: string
+                            money_path?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.money_path_sunday_quiet ||
+                        desk?.compact_money_path_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.money_path_label ||
+                        desk?.money_path?.label ||
+                        'money-path observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(observe · never invents PnL) · make living-money'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{

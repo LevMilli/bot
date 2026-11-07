@@ -78,9 +78,16 @@ empty paper account: no trade history or saved state is included in this pack.
 Paper-only living spine — floors locked, never auto-publishes Discord.
 
 ```
+make living-help             # list smoke targets
 make living-status
-make living-ritual-discord   # paste draft only
-make living-doctor
+make living-selfcheck
+make living-hud / living-hud-discord
+make living-priority / living-priority-discord
+make living-ritual-live / living-ritual-observe
+make living-ritual-discord   # paste draft only — never auto-posts
+make living-doctor / living-doctor-discord
+make living-money            # fee ledger / fills observe tip
+make living-export
 make living-test
 ```
 

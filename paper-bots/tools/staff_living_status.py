@@ -82,6 +82,11 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_hud_summary")
         else {}
     )
+    money = (
+        desk_living.living_money_path_tip(board)
+        if hasattr(desk_living, "living_money_path_tip")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -979,6 +984,20 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "money-path: "
+            + str(money.get("label") or "money-path observe")
+        ),
+        (
+            "money-path sunday: "
+            + str(
+                compact.get("money_path_sunday_quiet")
+                or (
+                    str(money.get("label") or "money-path observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never invents PnL)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1081,13 +1100,14 @@ def main() -> int:
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
+            "help", "money",
         ),
     )
     parser.add_argument("--root", default=ROOT)
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -1204,6 +1224,7 @@ def main() -> int:
         )
         prio_j = desk_living.living_priority_snapshot(board)
         hud_j = desk_living.living_hud_summary(board)
+        money_j = desk_living.living_money_path_tip(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1595,6 +1616,10 @@ def main() -> int:
             "hud_label": hud_j.get("label"),
             "hud_sunday_quiet": compact_j.get("hud_sunday_quiet"),
             "compact_hud_sunday_quiet": compact_j.get("hud_sunday_quiet"),
+            "money_path": money_j,
+            "money_path_label": money_j.get("label"),
+            "money_path_sunday_quiet": compact_j.get("money_path_sunday_quiet"),
+            "compact_money_path_sunday_quiet": compact_j.get("money_path_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -1791,6 +1816,39 @@ def main() -> int:
             out["hud_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if hud.get("ritual_live_ok") and hud.get("l7_observe_ok") else 2
+
+    if args.action == "help":
+        print(
+            "Living status actions (paper · floors locked · Discord never auto-posts):\n"
+            "  text json selfcheck export hud priority ritual-live money\n"
+            "  floors teller expand doctor l7 sunday pulse gaps inventory\n"
+            "  hillclimb ruin seed pager\n"
+            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/priority\n"
+            "Makefile: make living-help"
+        )
+        return 0
+
+    if args.action == "money":
+        tip = desk_living.living_money_path_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("money_path_sunday_quiet") or (
+            f"{tip.get('label') or 'money-path observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never invents PnL)"
+        )
+        if args.discord:
+            print(
+                "**Money-path observe** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"fee_ledger_n={tip.get('fee_ledger_n')} complete={tip.get('fee_ledger_complete')} "
+                f"floors_ok={tip.get('floors_ok')}\n"
+                "_never invents PnL · never softens floors · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["money_path_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if tip.get("floors_ok") is not False else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
