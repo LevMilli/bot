@@ -83,6 +83,32 @@ class InxBandPromote(unittest.TestCase):
             self.assertTrue(live["staff_approved"])
             self.assertFalse(live["live_changed"])
 
+    def test_history_from_bots_and_no_force_leader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bots = [{
+                "id": "kalshi-sp",
+                "history": (
+                    [{"ask": 0.75, "pnl": 2.0, "contracts": 1} for _ in range(25)]
+                    + [{"ask": 0.85, "pnl": -1.0, "contracts": 1} for _ in range(5)]
+                ),
+            }]
+            hist = desk_roi_plan.inx_history_from_bots(bots)
+            self.assertEqual(len(hist), 30)
+            rep = desk_roi_plan.run_inx_band_research(tmp, bots=bots)
+            self.assertEqual(rep["leader"], "70_80")
+            self.assertEqual(rep["history_n"], 30)
+            self.assertFalse(rep["auto_promote"])
+            status = desk_roi_plan.inx_band_promote_status(tmp)
+            self.assertTrue(status["promote_ready"])
+            armed = desk_roi_plan.staff_promote_inx_leader(tmp, note="no-force leader")
+            self.assertTrue(armed["ok"])
+            self.assertEqual(desk_roi_plan.inx_live_band(tmp)["id"], "70_80")
+            # Empty research → leader promote fails (no force).
+            with tempfile.TemporaryDirectory() as tmp2:
+                thin = desk_roi_plan.staff_promote_inx_leader(tmp2)
+                self.assertFalse(thin["ok"])
+                self.assertFalse(thin.get("force", False))
+
 
 if __name__ == "__main__":
     unittest.main()

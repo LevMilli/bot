@@ -1716,7 +1716,7 @@ def main() -> int:
             "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip", "near-miss-tip", "helper-tip", "hard-stop-tip", "skip-regret-tip", "eia-tip", "injury-tip", "completions-tip", "toxic-tip", "calib-tip", "clv-tip", "clerk-tip", "bookkeeper-tip",
             "hard-stop-promote", "green-boost-arm", "inx-band-promote", "staff-promote-batch",
             "near-miss-promote", "hard-stop-export", "edge08-status", "edge08-promote",
-            "helper-gate-a", "helper-arm",
+            "helper-gate-a", "helper-arm", "inx-research", "inx-status",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3358,10 +3358,27 @@ def main() -> int:
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
+    if args.action == "inx-research":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.run_inx_band_research(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "inx-status":
+        out = desk_roi_plan.inx_band_promote_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("promote_ready") else 2
     if args.action == "inx-band-promote":
-        out = desk_roi_plan.staff_promote_inx_band(
-            root, desk_roi_plan.INX_LIVE_BAND_DEFAULT,
-            note="staff INX band lock CLI (80–90)", force=True,
+        # No-force: promote research leader only when promote_ready.
+        out = desk_roi_plan.staff_promote_inx_leader(
+            root, note="staff INX leader promote CLI (no force)",
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
