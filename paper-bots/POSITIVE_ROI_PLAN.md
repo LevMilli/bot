@@ -1964,6 +1964,19 @@ Paper only. Fee floors locked. Discord never auto-posts. Soft-max tip invent EXH
 
 **Still blocked:** `LIVE_ORDERS_ENABLED`; force-arm as default (`living-staff-promote-batch` remains labeled STAFF FORCE only); hillclimb auto-apply; tip invent; fee-floor soften.
 
+### Shadow evidence densify (Nov 7) — grow labeled n toward ≥30
+
+Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers. Never LIVE / force-arm / Discord auto-post.
+
+| Ticket | Where |
+| --- | --- |
+| Near-miss would_pnl settle + catch-up | `label_near_miss_from_result` / `label_near_miss_catchup` · btc15m `settle_account` · `make living-near-miss-label` |
+| Durable shadow journals | `pimp_desk.SETTLEMENT_FILES` += hard-stop / commodity t-stop / sports t-final / helper fills / `shadow_edge08_account.json` |
+| Sports hard-stop + t-final densify | `gap_bot` records when pair+bid present (fair_home optional) + settle-retro |
+| Export CLIs | `make living-near-miss-export` / `living-edge08-export` / `living-green-boost-export` (+ existing `living-hard-stop-export`) |
+| Helper Gate A + CLV repair | `backfill_helper_fills_from_btc_closed` · `repair_clv_completeness` · `make living-helper-backfill` / `living-clv-repair` |
+| Tests | `test_shadow_evidence_densify.py` |
+
 ### Next
 
 | Ticket | Where |

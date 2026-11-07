@@ -174,6 +174,12 @@ SETTLEMENT_FILES = (
     "desk_phase3_state.json",
     "desk_adapt_ab_ledger.json",
     "btc15m-signal/paper_parlays.json",
+    # Shadow evidence journals — keep promote n across image bounce.
+    "desk_sports_hard_stop_shadow.json",
+    "desk_commodity_time_stop_shadow.json",
+    "desk_sports_time_final_shadow.json",
+    "desk_helper_fills.json",
+    "btc15m-signal/shadow_edge08_account.json",
     "pimp-learning.json",
     "pimp-good.json",
 )

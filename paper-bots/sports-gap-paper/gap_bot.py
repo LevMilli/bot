@@ -813,12 +813,90 @@ def run():
                 )
             except Exception:
                 pass
+            # Settle retrospective shadow densify — bid from pair if present; no live sell.
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan
+                pair = info.get("pair") if isinstance(info, dict) else None
+                m_settle = None
+                if isinstance(pair, dict):
+                    m_settle = pair.get(p["side"])
+                bid_settle = px(m_settle, "yes_bid_dollars") if m_settle else None
+                fair_settle = None
+                if info.get("fair_home") is not None:
+                    fair_settle = (
+                        info["fair_home"] if p["side"] == "home"
+                        else 1 - info["fair_home"]
+                    )
+                if bid_settle is not None and not p.get("hard_stop_shadowed"):
+                    hs = desk_roi_plan.sports_hard_stop_hit(
+                        p.get("entry_price"), bid_settle,
+                    )
+                    if hs.get("hit"):
+                        desk_roi_plan.record_sports_hard_stop_shadow(
+                            DESK_ROOT,
+                            ticker=str(p.get("ticker") or ""),
+                            side=str(p.get("side") or ""),
+                            league=str(p.get("league") or ""),
+                            entry_price=p.get("entry_price"),
+                            bid=bid_settle,
+                            fair=fair_settle,
+                            contracts=p.get("contracts"),
+                            cost=p.get("cost"),
+                            note="settle-retro shadow hard-stop — no live sell",
+                        )
+                        p["hard_stop_shadowed"] = True
+                        summary_out.setdefault("hard_stop_shadow", []).append(
+                            f"SETTLE-RETRO STOP {p.get('ticker')} bid {bid_settle}"
+                        )
+                if bid_settle is not None and not p.get("time_final_shadowed"):
+                    game = info.get("game") if isinstance(info, dict) else None
+                    status = (game or {}).get("status") if isinstance(game, dict) else None
+                    rem = desk_roi_plan.sports_minutes_remaining(
+                        status, league=str(p.get("league") or ""),
+                    )
+                    if rem is None:
+                        rem = 0.0  # final → treat as 0 min left for retrospective
+                    tf = desk_roi_plan.sports_time_final_hit(
+                        rem, bid_settle,
+                        entry_price=p.get("entry_price"),
+                        cost=p.get("cost"),
+                        contracts=p.get("contracts"),
+                    )
+                    if tf.get("hit"):
+                        desk_roi_plan.record_sports_time_final_shadow(
+                            DESK_ROOT,
+                            ticker=str(p.get("ticker") or ""),
+                            side=str(p.get("side") or ""),
+                            league=str(p.get("league") or ""),
+                            minutes_left=rem,
+                            entry_price=p.get("entry_price"),
+                            bid=bid_settle,
+                            contracts=p.get("contracts"),
+                            cost=p.get("cost"),
+                            note="settle-retro shadow time-final — no live sell",
+                        )
+                        p["time_final_shadowed"] = True
+                        summary_out.setdefault("time_final_shadow", []).append(
+                            f"SETTLE-RETRO TFINAL {p.get('ticker')} rem={rem}"
+                        )
+            except Exception:
+                pass
             lines.append(f"| {ts} | {p['league']} | {p['game']} | FINAL {as_}-{hs} | | | | | **PAPER SETTLE** {p['team']}: {'WON' if payout else 'LOST'} payout ${payout:.2f}, P&L ${pnl:+.2f} |")
             summary_out["closes"].append(f"SETTLE {p['ticker']} pnl {pnl:+.2f}")
             continue
-        if info and info.get("fair_home") is not None:
-            m = info["pair"][p["side"]]
-            fair = info["fair_home"] if p["side"] == "home" else 1 - info["fair_home"]
+        # Mid-open exits: hard-stop + time-final densify when pair/bid exist
+        # (fair_home optional). Gap-decay / flip / scale-out still need fair.
+        pair_info = info.get("pair") if info and isinstance(info, dict) else None
+        m = None
+        if isinstance(pair_info, dict):
+            m = pair_info.get(p["side"])
+        if info and m is not None:
+            fair_home = info.get("fair_home")
+            fair = None
+            if fair_home is not None:
+                fair = fair_home if p["side"] == "home" else 1 - fair_home
             bid = px(m, "yes_bid_dollars")
             exit_reason = None
             # Hard-stop shadow: log would-have stops; live sell stays off until promote.
@@ -889,54 +967,57 @@ def run():
                             )
             except Exception:
                 pass
-            # Phase 2: gap-decay — tip edge that died mid-game frees risk.
-            try:
-                if DESK_ROOT not in sys.path:
-                    sys.path.insert(0, DESK_ROOT)
-                import desk_phase2
-                live_ask = px(m, "yes_ask_dollars")
-                if live_ask is not None:
-                    gap_now = float(fair) - float(live_ask) - fee(live_ask)
-                else:
-                    gap_now = float(fair) - float(p.get("entry_price") or 0)
-                mins = None
+            # Fair-dependent exits (gap-decay / flip / scale-out) need fair_home.
+            if fair is not None:
+                # Phase 2: gap-decay — tip edge that died mid-game frees risk.
                 try:
-                    # Use module-level datetime — a local import here shadows it for
-                    # the whole run() and crashed every check after tape sync
-                    # (UnboundLocalError on datetime.now(CT) for the day stamp).
-                    opened = str(p.get("opened") or "")
-                    if opened.endswith("Z"):
-                        opened = opened[:-1] + "+00:00"
-                    mins = (datetime.now(timezone.utc) - datetime.fromisoformat(opened)).total_seconds() / 60.0
-                except Exception:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_phase2
+                    live_ask = px(m, "yes_ask_dollars")
+                    if live_ask is not None:
+                        gap_now = float(fair) - float(live_ask) - fee(live_ask)
+                    else:
+                        gap_now = float(fair) - float(p.get("entry_price") or 0)
                     mins = None
-                decay = desk_phase2.sports_gap_decay_exit(
-                    gap_at_entry=p.get("gap_at_entry"),
-                    gap_now=gap_now,
-                    minutes_since_open=mins,
-                    live=True,
-                )
-                if decay.get("exit"):
-                    exit_reason = decay.get("reason") or "gap-decay"
-                    desk_phase2.remember_gap_decay(DESK_ROOT, {
-                        "ticker": p.get("ticker"), "league": p.get("league"), **decay,
-                    })
-            except Exception:
-                pass
-            if exit_reason is None and flip_on and desk is not None:
-                try:
-                    import desk_profit
-                    if desk_profit.model_flip_adverse(
-                        p["side"], p.get("fair_at_entry"), fair, flip_delta
-                    ):
-                        exit_reason = f"model-flip fair Δ≥{flip_delta:g}"
+                    try:
+                        # Use module-level datetime — a local import here shadows it for
+                        # the whole run() and crashed every check after tape sync
+                        # (UnboundLocalError on datetime.now(CT) for the day stamp).
+                        opened = str(p.get("opened") or "")
+                        if opened.endswith("Z"):
+                            opened = opened[:-1] + "+00:00"
+                        mins = (datetime.now(timezone.utc) - datetime.fromisoformat(opened)).total_seconds() / 60.0
+                    except Exception:
+                        mins = None
+                    decay = desk_phase2.sports_gap_decay_exit(
+                        gap_at_entry=p.get("gap_at_entry"),
+                        gap_now=gap_now,
+                        minutes_since_open=mins,
+                        live=True,
+                    )
+                    if decay.get("exit"):
+                        exit_reason = decay.get("reason") or "gap-decay"
+                        desk_phase2.remember_gap_decay(DESK_ROOT, {
+                            "ticker": p.get("ticker"), "league": p.get("league"), **decay,
+                        })
                 except Exception:
                     pass
-            if exit_reason is None and bid is not None and bid > 0 and bid - fee(bid) >= fair:
-                exit_reason = "gap closed - sold at bid"
+                if exit_reason is None and flip_on and desk is not None:
+                    try:
+                        import desk_profit
+                        if desk_profit.model_flip_adverse(
+                            p["side"], p.get("fair_at_entry"), fair, flip_delta
+                        ):
+                            exit_reason = f"model-flip fair Δ≥{flip_delta:g}"
+                    except Exception:
+                        pass
+                if exit_reason is None and bid is not None and bid > 0 and bid - fee(bid) >= fair:
+                    exit_reason = "gap closed - sold at bid"
             # Scale-out 50% when fair moved +8¢ since entry (keep runner; free risk).
             if (
-                exit_reason is None
+                fair is not None
+                and exit_reason is None
                 and bid is not None
                 and bid > 0
                 and not p.get("scaled_out")
@@ -1009,8 +1090,9 @@ def run():
                 proceeds = round(p["contracts"] * (bid - fee(bid)), 2)
                 pnl = round(proceeds - p["cost"], 2)
                 s["cash"] = round(s["cash"] + proceeds, 2)
+                fair_exit = round(fair, 4) if fair is not None else None
                 p.update({"closed": ts, "exit": exit_reason, "exit_price": bid, "payout": proceeds,
-                          "pnl": pnl, "fair_at_exit": round(fair, 4)})
+                          "pnl": pnl, "fair_at_exit": fair_exit})
                 s["closed"].append(p)
                 # Adverse cool-off when mark dropped hard vs entry ask.
                 try:
@@ -1102,7 +1184,8 @@ def run():
                     )
                 except Exception:
                     pass
-                lines.append(f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair:.1%} ({p['team']}) | | | | **PAPER SELL** {p['contracts']} @ bid {bid:.2f} ({exit_reason}), P&L ${pnl:+.2f} |")
+                fair_txt = f"{fair:.1%}" if fair is not None else "n/a"
+                lines.append(f"| {ts} | {p['league']} | {p['game']} | {info['score']} | {fair_txt} ({p['team']}) | | | | **PAPER SELL** {p['contracts']} @ bid {bid:.2f} ({exit_reason}), P&L ${pnl:+.2f} |")
                 summary_out["closes"].append(f"SELL {p['ticker']} pnl {pnl:+.2f}")
                 continue
         still.append(p)

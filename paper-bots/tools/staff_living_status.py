@@ -1718,9 +1718,13 @@ def main() -> int:
             "green-boost-arm", "green-boost-status", "green-boost-arm-ready",
             "inx-band-promote", "staff-promote-batch",
             "near-miss-promote", "near-miss-status", "near-miss-promote-ready",
-            "near-miss-soft-p", "hard-stop-export",
+            "near-miss-soft-p", "near-miss-label", "near-miss-export",
+            "hard-stop-export",
             "edge08-status", "edge08-promote", "edge08-promote-ready",
-            "helper-gate-a", "helper-arm", "inx-research", "inx-status",
+            "edge08-export", "green-boost-export",
+            "helper-gate-a", "helper-arm", "helper-backfill",
+            "clv-repair", "clv-completeness",
+            "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse",
             "exit-quality", "promote-distance", "hillclimb-lever", "firm-health",
@@ -3531,6 +3535,41 @@ def main() -> int:
         slim["csv_preview"] = (out.get("csv") or "")[:400]
         print(json.dumps(slim, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
+    if args.action == "near-miss-label":
+        # Observe catch-up — labels would_pnl only; never arms soft gates.
+        out = desk_roi_plan.label_near_miss_catchup(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "near-miss-export":
+        out = desk_roi_plan.export_near_miss_shadow_csv(root)
+        slim = {k: v for k, v in out.items() if k != "csv"}
+        slim["csv_preview"] = (out.get("csv") or "")[:400]
+        print(json.dumps(slim, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "edge08-export":
+        out = desk_roi_plan.export_edge08_shadow_csv(root)
+        slim = {k: v for k, v in out.items() if k != "csv"}
+        slim["csv_preview"] = (out.get("csv") or "")[:400]
+        print(json.dumps(slim, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "green-boost-export":
+        out = desk_roi_plan.export_green_boost_evidence(root)
+        slim = {k: v for k, v in out.items() if k != "csv"}
+        slim["csv_preview"] = (out.get("csv") or "")[:400]
+        print(json.dumps(slim, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "helper-backfill":
+        out = desk_roi_plan.backfill_helper_fills_from_btc_closed(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "clv-repair":
+        out = desk_roi_plan.repair_clv_completeness(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "clv-completeness":
+        out = desk_roi_plan.clv_completeness(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
     if args.action == "edge08-status":
         out = desk_roi_plan.btc_edge08_shadow_status(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
