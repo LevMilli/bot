@@ -1803,6 +1803,15 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Process board | `hillclimb_lever_status` — `process_only` / `needs_staff_pick` / `label` |
 | Observe CLI | `make living-hillclimb-lever` (never auto-picks) |
 
+### Firm-health observe (Phase 2/7 pulse)
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `firm_health_observe` · `make living-firm-health` |
+| Bleed / daily R / opp-cost / profit-lock CLIs | `living-bleed-week` / `living-daily-r` / `living-opp-cost` / `living-profit-lock` |
+| Money pulse | `make living-money-pulse` includes `firm_health` + capital OS |
+| Masters | `roi_plan.firm_health` |
+
 ### Next
 
 | Ticket | Where |
