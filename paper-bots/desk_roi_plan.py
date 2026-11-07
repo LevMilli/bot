@@ -4168,6 +4168,75 @@ def ops_observe(
     }
 
 
+def review_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Cadence observe: 90d idea review + quarterly rebaseline + corr matrix."""
+    ideas = idea_review_status(root)
+    quarterly = quarterly_rebaseline_status(root)
+    corr = {"fee_floors_locked": True, "note": "correlation_matrix unavailable"}
+    try:
+        import desk_profit
+        corr = desk_profit.correlation_matrix(bots or [])
+    except Exception as exc:
+        corr = {
+            "fee_floors_locked": True,
+            "error": str(exc)[:120],
+            "note": "correlation_matrix unavailable",
+        }
+    alerts = []
+    if int(ideas.get("stale_n") or 0) > 0:
+        alerts.append("idea_stale")
+    if not quarterly.get("has_quarterly"):
+        alerts.append("quarterly_missing")
+    heat = [
+        p for p in (corr.get("veto_pairs") or [])
+        if isinstance(p, dict) and p.get("heat")
+    ]
+    if heat:
+        alerts.append("corr_heat")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "ok": len(alerts) == 0,
+        "alerts": alerts,
+        "idea_review": {
+            "open_n": ideas.get("open_n"),
+            "stale_n": ideas.get("stale_n"),
+            "review_days": ideas.get("review_days"),
+            "stale": ideas.get("stale"),
+        },
+        "quarterly_rebaseline": {
+            "has_quarterly": quarterly.get("has_quarterly"),
+            "latest": quarterly.get("latest"),
+        },
+        "correlation": {
+            "open_n": corr.get("open_n"),
+            "btc_inx_veto": corr.get("btc_inx_veto"),
+            "meme_isolated": corr.get("meme_isolated"),
+            "series_haircuts": corr.get("series_haircuts"),
+            "heat_pairs": heat,
+            "veto_pairs": corr.get("veto_pairs"),
+        },
+        "label": (
+            f"review={'ok' if not alerts else 'ALERT'} "
+            f"alerts={','.join(alerts) or 'none'} "
+            f"ideas_open={ideas.get('open_n')} stale={ideas.get('stale_n')} "
+            f"quarterly={quarterly.get('has_quarterly')} heat={len(heat)}"
+        ),
+        "note": (
+            "Review observe — 90d idea cadence, quarterly W rebaseline habit, "
+            "BTC↔INX veto + WTI↔Brent haircut matrix. Floors locked."
+        ),
+    }
+
+
 def guardrails_observe(
     root: str | None = None,
     *,
@@ -6872,6 +6941,7 @@ def plan_summary(
         "firm_health": firm_health_observe(root, bots=bots, cfg=cfg),
         "ops": ops_observe(root, bots=bots),
         "guardrails": guardrails_observe(root, bots=bots),
+        "review": review_observe(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,

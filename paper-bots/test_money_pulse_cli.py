@@ -141,6 +141,18 @@ class MoneyPulseSurfaces(unittest.TestCase):
             self.assertEqual(out["anti_revenge"]["active_n"], 1)
             self.assertIn("guardrails=", out["label"])
 
+    def test_review_observe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = desk_roi_plan.review_observe(tmp, bots=[])
+            self.assertTrue(out["observe_only"])
+            self.assertTrue(out["fee_floors_locked"])
+            self.assertIn("idea_review", out)
+            self.assertIn("quarterly_rebaseline", out)
+            self.assertIn("correlation", out)
+            self.assertTrue(out["correlation"].get("btc_inx_veto"))
+            self.assertIn("quarterly_missing", out["alerts"])
+            self.assertIn("review=", out["label"])
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()
