@@ -4075,6 +4075,99 @@ def firm_health_observe(
     }
 
 
+def ops_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 6/7 ops observe: incubation / ruin / cold-harvest / graduation / BTC calib.
+
+    Dual-control status is included as observe-only (LIVE_ORDERS stay deferred).
+    """
+    incub = incubation_board(root)
+    ruin = ruin_drill_status(root)
+    cold = cold_harvest_status(root)
+    grad = graduation_board(root)
+    calib = btc_calibration_report(bots)
+    dual = dual_control_status(root)
+    incubating = int(incub.get("incubating_n") or 0)
+    ready_grad = int(incub.get("ready_n") or 0)
+    masters = int((grad.get("masters_n") if isinstance(grad, dict) else None) or 0)
+    ruin_active = bool(ruin.get("active"))
+    dual_live = bool(dual.get("live_orders_enabled") or dual.get("armed") or dual.get("live"))
+    alerts = []
+    if ruin_active:
+        alerts.append("ruin_drill_active")
+    if dual_live:
+        alerts.append("dual_control_live")  # unexpected under deferred policy
+    if calib.get("miscalibrated"):
+        alerts.append("btc_calib")
+    thin = incubating == 0 and ready_grad == 0 and int(cold.get("weeks_n") or 0) == 0
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "ok": len(alerts) == 0,
+        "evidence_thin": thin,
+        "alerts": alerts,
+        "incubation": {
+            "incubating_n": incubating,
+            "ready_n": ready_grad,
+            "graduated_n": incub.get("graduated_n"),
+            "min_n": incub.get("min_n"),
+        },
+        "ruin_drill": {
+            "active": ruin_active,
+            "level": ruin.get("level"),
+            "practiced_this_month": ruin.get("practiced_this_month"),
+        },
+        "cold_harvest": {
+            "cold_total": cold.get("cold_total"),
+            "weeks_n": cold.get("weeks_n"),
+            "latest": cold.get("latest"),
+        },
+        "graduation": {
+            "masters_n": masters,
+            "masters": grad.get("masters") if isinstance(grad, dict) else None,
+            "weeks_n": grad.get("weeks_n") if isinstance(grad, dict) else None,
+            "towers": grad.get("towers") if isinstance(grad, dict) else None,
+        },
+        "btc_calibration": {
+            "n": calib.get("n"),
+            "miscalibrated": bool(calib.get("miscalibrated")),
+            "action": calib.get("action"),
+            "hi_n": calib.get("hi_n"),
+            "hi_hit_rate": calib.get("hi_hit_rate"),
+            "hi_label": calib.get("hi_label"),
+            "note": calib.get("note"),
+        },
+        "dual_control": {
+            "observe_only": True,
+            "deferred": True,
+            "live_orders_enabled": False,
+            "status": {
+                k: dual.get(k)
+                for k in ("paper_only", "armed", "live", "live_orders_enabled", "checklist", "note")
+                if k in dual
+            },
+            "note": "LIVE_ORDERS dual-control deferred — observe status only.",
+        },
+        "label": (
+            f"ops={'ok' if not alerts else 'ALERT'} "
+            f"incub={incubating}/{ready_grad} masters={masters} "
+            f"ruin={ruin.get('level') or 'off'} cold_w={cold.get('weeks_n')} "
+            f"btc_n={calib.get('n')}"
+        ),
+        "note": (
+            "Ops observe — incubation / ruin drill / cold harvest / Master graduation / "
+            "BTC calibration. Dual-control LIVE_ORDERS remain deferred."
+        ),
+    }
+
+
 def promote_distance_observe(
     root: str | None = None,
     *,
@@ -6645,6 +6738,7 @@ def plan_summary(
         "selective_throughput": selective_throughput_observe(root, bots=bots),
         "promote_distance": promote_distance_observe(root, bots=bots),
         "firm_health": firm_health_observe(root, bots=bots, cfg=cfg),
+        "ops": ops_observe(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,

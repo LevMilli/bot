@@ -110,6 +110,20 @@ class MoneyPulseSurfaces(unittest.TestCase):
             self.assertIn("fee_ledger", out)
             self.assertIn("firm_health=", out["label"])
 
+    def test_ops_observe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = desk_roi_plan.ops_observe(tmp, bots=[])
+            self.assertTrue(out["observe_only"])
+            self.assertTrue(out["fee_floors_locked"])
+            self.assertFalse(out["live_orders_enabled"])
+            self.assertTrue(out["dual_control"]["deferred"])
+            self.assertIn("incubation", out)
+            self.assertIn("ruin_drill", out)
+            self.assertIn("cold_harvest", out)
+            self.assertIn("graduation", out)
+            self.assertIn("btc_calibration", out)
+            self.assertIn("ops=", out["label"])
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()
