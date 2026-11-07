@@ -466,6 +466,14 @@ def master_summary(
         except Exception:
             plan["skip_regret_weekly"] = None
         try:
+            plan["skip_regret_candidates"] = desk_roi_plan.skip_regret_candidates(root)
+        except Exception:
+            plan["skip_regret_candidates"] = None
+        try:
+            plan["skip_regret_decisions"] = desk_roi_plan.skip_regret_decision_log(root)
+        except Exception:
+            plan["skip_regret_decisions"] = None
+        try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")

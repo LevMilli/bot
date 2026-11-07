@@ -1717,6 +1717,7 @@ def main() -> int:
             "hard-stop-promote", "green-boost-arm", "inx-band-promote", "staff-promote-batch",
             "near-miss-promote", "hard-stop-export", "edge08-status", "edge08-promote",
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
+            "skip-regret", "skip-regret-accept", "skip-regret-defer",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -1725,6 +1726,13 @@ def main() -> int:
         default="calendar_scanner",
         help="Helper id for helper-arm (default calendar_scanner).",
     )
+    parser.add_argument(
+        "--soft",
+        default="",
+        help="Soft gate id for skip-regret accept/defer (never fee/edge).",
+    )
+    parser.add_argument("--who", default="", help="Staff id for decision logs.")
+    parser.add_argument("--note", default="", help="Short staff note for decision logs.")
     parser.add_argument(
         "--discord",
         action="store_true",
@@ -3422,6 +3430,28 @@ def main() -> int:
         # Arm only when Gate A ready — no force on money-path CLI (helpers stay gated).
         out = desk_roi_plan.staff_set_helper_autonomy(
             root, args.helper, True, note="staff helper-arm CLI",
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "skip-regret":
+        out = {
+            "weekly": desk_roi_plan.skip_regret_weekly_card(root),
+            "candidates": desk_roi_plan.skip_regret_candidates(root),
+            "decisions": desk_roi_plan.skip_regret_decision_log(root),
+            "fee_floors_locked": True,
+            "auto_promote": False,
+        }
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "skip-regret-accept":
+        out = desk_roi_plan.staff_log_skip_regret_decision(
+            root, decision="accept", soft=args.soft, who=args.who, note=args.note,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "skip-regret-defer":
+        out = desk_roi_plan.staff_log_skip_regret_decision(
+            root, decision="defer", soft=args.soft, who=args.who, note=args.note,
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2

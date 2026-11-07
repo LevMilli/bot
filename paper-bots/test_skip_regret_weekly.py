@@ -61,6 +61,49 @@ class MasterWire(unittest.TestCase):
             self.assertIsInstance(card, dict)
             self.assertTrue(card.get("fee_floors_locked"))
             self.assertFalse(card.get("auto_promote"))
+            self.assertIn("skip_regret_candidates", plan)
+            self.assertIn("skip_regret_decisions", plan)
+
+
+class SkipRegretStaffPath(unittest.TestCase):
+    def test_candidates_filter_fee_gates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(5):
+                desk_top25.record_skip_regret(
+                    tmp, bot="btc15m", ticker=f"Z{i}", soft_gate="z", would_pnl=0.4,
+                )
+                desk_top25.record_skip_regret(
+                    tmp, bot="btc15m", ticker=f"E{i}", soft_gate="edge", would_pnl=0.9,
+                )
+            cands = desk_roi_plan.skip_regret_candidates(tmp)
+            softs = {c["soft"] for c in cands["candidates"]}
+            self.assertIn("z", softs)
+            self.assertNotIn("edge", softs)
+            self.assertIn("edge", cands["rejected_fee_gates"])
+            self.assertTrue(cands["fee_floors_locked"])
+
+    def test_accept_requires_green_twin_fee_forbidden(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = desk_roi_plan.staff_log_skip_regret_decision(
+                tmp, decision="accept", soft="edge",
+            )
+            self.assertFalse(bad["ok"])
+            thin = desk_roi_plan.staff_log_skip_regret_decision(
+                tmp, decision="accept", soft="z",
+            )
+            self.assertFalse(thin["ok"])
+            for i in range(22):
+                desk_top25.record_skip_regret(
+                    tmp, bot="sports-gap", ticker=f"S{i}", soft_gate="z", would_pnl=0.5,
+                )
+            desk_roi_plan.skip_regret_weekly_card(tmp, label="2026-11-07")
+            ok = desk_roi_plan.staff_log_skip_regret_decision(
+                tmp, decision="accept", soft="z", who="ops", note="review",
+            )
+            self.assertTrue(ok["ok"])
+            self.assertFalse(ok["loosen_soft_gates"])
+            log = desk_roi_plan.skip_regret_decision_log(tmp)
+            self.assertEqual(log["accepts"], 1)
 
 
 if __name__ == "__main__":
