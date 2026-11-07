@@ -790,6 +790,19 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("toxic_fills_label", live)
             self.assertIn("timer_label", live)
             self.assertTrue(str(live.get("timer_label") or "").startswith("timer "))
+            compact = desk_living.living_compact_card(tmp, board=board)
+            self.assertIn("ritual_live_sunday_quiet", compact)
+            self.assertIn("ritual live n=", compact.get("ritual_live_sunday_quiet") or "")
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("ritual_live_sunday_quiet", export)
+            self.assertIn("ritual_live_sunday_quiet", export.get("sunday_twins") or {})
+            self.assertIn(
+                "ritual_live_sunday_quiet",
+                export.get("compact_ritual_live_sunday_quiet")
+                and {"ritual_live_sunday_quiet"}
+                or {"ritual_live_sunday_quiet"},
+            )
+            self.assertTrue(str(export.get("compact_ritual_live_sunday_quiet") or export.get("ritual_live_sunday_quiet") or "").startswith("ritual live"))
             payload = {
                 "paper_only": True,
                 "live_orders_enabled": False,
