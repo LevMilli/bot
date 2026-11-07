@@ -1857,6 +1857,18 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Fee ledger completeness | `make living-fee-ledger` |
 | Money pulse / Masters | `baseline_fee` on pulse + `roi_plan.baseline_fee` |
 
+### Commodity time-stop shadow (Phase 3 P0)
+
+| Ticket | Where |
+| --- | --- |
+| Hit rule | ≤3m to close + underwater mark PnL → `commodity_time_stop_hit` |
+| Shadow log | `record_commodity_time_stop_shadow` (code `COMMODITY_TIME_STOP_LIVE=False`) |
+| Promote board | `commodity_time_stop_shadow_summary` · `make living-commodity-tstop-status` |
+| No-force arm when ready | `make living-commodity-tstop-promote-ready` |
+| Runtime | `commodity-15m-paper/bot.py` shadows; live sell only if staff-armed |
+| Exit plan stamp | `model_flip+time_stop_shadow+settle` |
+| Masters / promote-distance | `roi_plan.commodity_time_stop` + gate on distance board |
+
 ### Next
 
 | Ticket | Where |

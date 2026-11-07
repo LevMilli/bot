@@ -871,6 +871,67 @@ def main() -> int:
                     )
                 except Exception:
                     pass
+        # Phase 3: time-stop shadow (≤3m to close + underwater mark). Live staff-gated.
+        try:
+            import desk_roi_plan
+            tick = str(m.get("ticker") or "")
+            for pos in list(account.get("open") or []):
+                if str(pos.get("ticker") or "") != tick:
+                    continue
+                if pos.get("time_stop_shadowed"):
+                    continue
+                bid_ts = ev.get("bid")
+                if bid_ts is None:
+                    continue
+                hit = desk_roi_plan.commodity_time_stop_hit(
+                    pos.get("close_time"),
+                    bid_ts,
+                    pos.get("entry") or pos.get("price") or pos.get("ask"),
+                    cost=pos.get("cost"),
+                    contracts=pos.get("contracts"),
+                )
+                if not hit.get("hit"):
+                    continue
+                desk_roi_plan.record_commodity_time_stop_shadow(
+                    DESK_ROOT,
+                    ticker=tick,
+                    side=str(pos.get("side") or ""),
+                    series=str(pos.get("series") or series or ""),
+                    close_time=str(pos.get("close_time") or ""),
+                    entry_price=pos.get("entry") or pos.get("price") or pos.get("ask"),
+                    bid=bid_ts,
+                    contracts=pos.get("contracts"),
+                    cost=pos.get("cost"),
+                    note="commodity time-stop shadow",
+                )
+                pos["time_stop_shadowed"] = True
+                print(
+                    f"  TIME-STOP SHADOW: {tick} left={hit.get('minutes_left')}m "
+                    f"mark_pnl={hit.get('mark_pnl')}"
+                )
+                if desk_roi_plan.commodity_time_stop_is_live(DESK_ROOT) and float(bid_ts) > 0:
+                    fee_ts = kalshi_fee(float(bid_ts))
+                    pnl_ts = paper_sell(
+                        account, pos, bid_ts, fee_ts,
+                        f"time-stop left={hit.get('minutes_left')}m mark≤0",
+                    )
+                    account["open"] = [
+                        p for p in (account.get("open") or []) if p is not pos
+                    ]
+                    save_account(account)
+                    print(f"  TIME-STOP SELL: {tick} pnl {pnl_ts:+.2f}")
+                    try:
+                        desk_roi_plan.record_anti_revenge(
+                            DESK_ROOT, bot="commodity-15m",
+                            ticker=tick, reason="time-stop",
+                            note=f"mark_pnl={hit.get('mark_pnl')}",
+                        )
+                    except Exception:
+                        pass
+                else:
+                    save_account(account)
+        except Exception:
+            pass
         try:
             import kalshi_history
             kalshi_history.record_snapshot(

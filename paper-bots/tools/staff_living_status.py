@@ -1731,6 +1731,8 @@ def main() -> int:
             "calib-clv", "clv-status", "green-or-gone", "sticky-sla", "selective",
             "raise-phi-log", "sports-calib", "commodity-calib",
             "baseline-fee", "baseline-capture", "fee-ledger",
+            "commodity-tstop-status", "commodity-tstop-promote",
+            "commodity-tstop-promote-ready",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -4016,6 +4018,22 @@ def main() -> int:
         }
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out["completeness"].get("pass") else 2
+    if args.action == "commodity-tstop-status":
+        out = desk_roi_plan.commodity_time_stop_shadow_summary(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("promote_ready") else 2
+    if args.action == "commodity-tstop-promote":
+        out = desk_roi_plan.staff_set_commodity_time_stop_live(
+            root, True, note="staff commodity time-stop arm CLI", force=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "commodity-tstop-promote-ready":
+        out = desk_roi_plan.staff_set_commodity_time_stop_live(
+            root, True, note="staff commodity time-stop no-force ready CLI", force=False,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
