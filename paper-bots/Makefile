@@ -1,9 +1,9 @@
 # Living Trading Upgrade — staff smoke (paper only; floors locked; never auto-post).
-.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord
+.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord
 
 living-help:
 	@echo "Living Trading Upgrade — paper only · floors locked · Discord never auto-posts"
-	@echo "  make living-status / living-selfcheck / living-export / living-test"
+	@echo "  make living-status / living-selfcheck / living-export / living-test / living-smoke"
 	@echo "  make living-hud / living-hud-discord / living-priority / living-priority-discord"
 	@echo "  make living-ritual-live / living-ritual-live-discord / living-ritual-observe"
 	@echo "  make living-ritual / living-ritual-discord / living-doctor / living-doctor-discord"
@@ -106,3 +106,9 @@ living-surfaces:
 
 living-surfaces-discord:
 	python3 tools/staff_living_status.py surfaces --discord
+
+living-smoke:
+	python3 tools/staff_living_status.py smoke
+
+living-smoke-discord:
+	python3 tools/staff_living_status.py smoke --discord

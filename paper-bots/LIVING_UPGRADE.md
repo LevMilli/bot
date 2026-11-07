@@ -16,9 +16,13 @@ Paper only. Venue floors stay locked (sports `0.06` / BTC+commodity `0.05` / INX
 ## Staff CLIs (from `paper-bots/`)
 
 ```bash
+make living-help
 make living-status
 make living-floors
 make living-selfcheck
+make living-smoke            # floors + guardrails + soft-max aggregate
+make living-rules / living-surfaces
+make living-money / living-hud / living-priority
 make living-doctor
 make living-ritual
 make living-ritual-discord

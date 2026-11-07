@@ -1485,11 +1485,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault guardrails + surfaces rows | App vault |
 | README living index | README.md |
 
+### Living upgrade — staff smoke batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_staff_smoke` + `smoke_sunday_quiet` | desk_living / compact / export |
+| Status CLI `smoke` (+ discord) | staff_living_status |
+| Makefile `living-smoke` | Makefile |
+| Doctor/pulse/ritual smoke flats | doctor soft_copy / pulse / ritual |
+| Vault smoke row | App vault |
+| LIVING_UPGRADE / README index | docs |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| *(cleared — guardrails/surfaces shipped)* | — |
+| *(cleared — staff smoke shipped)* | — |
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
 
@@ -1497,7 +1508,7 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — guardrails/surfaces shipped; soft-max 52/64)* | — |
+| *(empty — staff smoke shipped; soft-max 52/64)* | — |
 
 ## Hard rules unchanged
 

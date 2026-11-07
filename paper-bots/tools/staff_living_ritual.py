@@ -409,6 +409,15 @@ def format_discord(payload: dict) -> str:
             f"• Surfaces sunday: {surfaces_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    smoke_twin = payload.get("smoke_sunday_quiet")
+    if smoke_twin:
+        lines.append(f"• Smoke sunday: {smoke_twin}")
+    else:
+        smoke_lab = payload.get("smoke_label") or "smoke observe"
+        lines.append(
+            f"• Smoke sunday: {smoke_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1015,6 +1024,16 @@ def main() -> int:
                 )
             )
             print(
+                "smoke sunday: "
+                + str(
+                    compact_obs.get("smoke_sunday_quiet")
+                    or (
+                        f"{desk_living.living_staff_smoke(board_obs).get('label') or 'smoke observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1164,6 +1183,14 @@ def main() -> int:
     payload["surfaces_label"] = surfaces.get("label")
     payload["surfaces_sunday_quiet"] = compact.get("surfaces_sunday_quiet") or (
         f"{surfaces.get('label') or 'surfaces observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    smoke = desk_living.living_staff_smoke(board)
+    payload["smoke"] = smoke
+    payload["smoke_label"] = smoke.get("label")
+    payload["smoke_ok"] = smoke.get("ok")
+    payload["smoke_sunday_quiet"] = compact.get("smoke_sunday_quiet") or (
+        f"{smoke.get('label') or 'smoke observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:
