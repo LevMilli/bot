@@ -834,6 +834,26 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("sunday twins:", txt)
             self.assertFalse((board.get("board_size") or {}).get("over"))
 
+    def test_status_sunday_twins_flatten(self):
+        import tempfile
+        from tools import staff_living_status
+        with tempfile.TemporaryDirectory() as tmp:
+            board = desk_living.living_upgrade_board(tmp)
+            compact = board.get("compact") or {}
+            self.assertIn("swarm_sunday_quiet", compact)
+            self.assertIn("hill_sunday_quiet", compact)
+            self.assertIn("gaps_sunday_quiet", compact)
+            txt = staff_living_status._text(board)
+            self.assertIn("swarm sunday:", txt)
+            self.assertIn("hill sunday:", txt)
+            self.assertIn("gaps sunday:", txt)
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("sunday_twins", export)
+            self.assertGreaterEqual(int(export.get("sunday_twins_n") or 0), 50)
+            for key in ("swarm_sunday_quiet", "hill_sunday_quiet", "gaps_sunday_quiet"):
+                self.assertIn(key, export["sunday_twins"])
+            self.assertFalse((board.get("board_size") or {}).get("over"))
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util
