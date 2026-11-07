@@ -1188,6 +1188,24 @@ def living_compact_card(
             if isinstance(src.get("raise_phi_sla"), dict)
             else f"raise_Φ SLA observe · sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
         ),
+        "feature_coverage_sunday_quiet": (
+            f"{(src.get('feature_coverage') or {}).get('label') or 'feature coverage observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("feature_coverage"), dict)
+            else f"feature coverage observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "chip_catalog_sunday_quiet": (
+            f"{(src.get('chip_catalog') or src.get('board_size') or {}).get('label') or 'chip catalog observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("chip_catalog") or src.get("board_size"), dict)
+            else f"chip catalog observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "phase2_pulse_sunday_quiet": (
+            f"{(src.get('phase2_pulse') or {}).get('label') or 'phase2 pulse observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("phase2_pulse"), dict)
+            else f"phase2 pulse observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2263,6 +2281,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "toxic_fills": toxic_fill_chip(root),
         "adapt_ab": adapt_ab_chip(root),
         "raise_phi_sla": raise_phi_sla_chip(root, bots=bots),
+        "feature_coverage": feature_coverage_chip(root),
+        "phase2_pulse": phase2_pulse_chip(root),
         "ruin_drill_page": ruin_drill_page(root),
         "betting_expand_gate": betting_expand_gate(root),
         "doctor_age": doctor_age_chip(root),
@@ -2277,7 +2297,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "note": "Living Trading Upgrade board — more eligible completions + learn data.",
     }
     board["compact"] = living_compact_card(root, bots=bots, board=board)
-    board["board_size"] = living_board_size_guard(chips_n=_count_living_chips(board))
+    chips_n = _count_living_chips(board)
+    board["board_size"] = living_board_size_guard(chips_n=chips_n)
+    board["chip_catalog"] = chip_catalog_chip(root, chips_n=chips_n)
     return board
 
 
@@ -2394,7 +2416,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     board = living_upgrade_board(root, bots=bots)
     keep = (
         "chicago_today", "fee_floors_locked", "live_orders_enabled", "compact",
-        "insight_swarm", "digest_inventory", "digest_freshness", "journal_coverage", "monday_pulse", "toxic_fills", "adapt_ab", "raise_phi_sla", "feature_quiet", "feature_quiet_pager",
+        "insight_swarm", "digest_inventory", "digest_freshness", "journal_coverage", "monday_pulse", "toxic_fills", "adapt_ab", "raise_phi_sla", "feature_coverage", "chip_catalog", "phase2_pulse", "feature_quiet", "feature_quiet_pager",
         "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
         "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
         "betting_expand_gate", "doctor_age", "fee_floors_assert",
@@ -2729,6 +2751,25 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{rps.get('label') or 'raise_Φ SLA observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never auto-writes Φ)"
     )
+    feat_cov = board.get("feature_coverage") if isinstance(board.get("feature_coverage"), dict) else {}
+    slim["feature_coverage_sunday_quiet"] = (
+        f"{feat_cov.get('label') or 'feature coverage observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    catalog = (
+        board.get("chip_catalog")
+        if isinstance(board.get("chip_catalog"), dict)
+        else board.get("board_size") if isinstance(board.get("board_size"), dict) else {}
+    )
+    slim["chip_catalog_sunday_quiet"] = (
+        f"{catalog.get('label') or 'chip catalog observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    p2 = board.get("phase2_pulse") if isinstance(board.get("phase2_pulse"), dict) else {}
+    slim["phase2_pulse_sunday_quiet"] = (
+        f"{p2.get('label') or 'phase2 pulse observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2897,6 +2938,15 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_raise_phi_sla_sunday_quiet"] = (
             compact.get("raise_phi_sla_sunday_quiet") or slim.get("raise_phi_sla_sunday_quiet")
+        )
+        slim["compact_feature_coverage_sunday_quiet"] = (
+            compact.get("feature_coverage_sunday_quiet") or slim.get("feature_coverage_sunday_quiet")
+        )
+        slim["compact_chip_catalog_sunday_quiet"] = (
+            compact.get("chip_catalog_sunday_quiet") or slim.get("chip_catalog_sunday_quiet")
+        )
+        slim["compact_phase2_pulse_sunday_quiet"] = (
+            compact.get("phase2_pulse_sunday_quiet") or slim.get("phase2_pulse_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -3377,6 +3427,90 @@ def raise_phi_sla_chip(root: str | None = None, bots: list | None = None) -> dic
         "note": (
             "L7 staff SLA observe — decide raise_Φ within 7 Chicago days; "
             "never silent Φ write; never softer floors."
+        ),
+    }
+
+
+
+
+FEATURE_COVERAGE_MIN_N = 8
+
+
+def feature_coverage_chip(root: str | None = None) -> dict:
+    """L7 feature-store coverage observe (thin learning data)."""
+    cov = feature_store_coverage(root)
+    n = int(cov.get("n") or 0)
+    buys = int(cov.get("buys") or 0)
+    skips = int(cov.get("skips") or 0)
+    thin = n < FEATURE_COVERAGE_MIN_N
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n": n,
+        "buys": buys,
+        "skips": skips,
+        "last_at": cov.get("last_at"),
+        "min_n": FEATURE_COVERAGE_MIN_N,
+        "pass": not thin,
+        "label": (
+            f"feature coverage n={n} buys={buys} skips={skips}"
+            + (" THIN" if thin else " ok")
+        ),
+        "note": (
+            "L7 feature coverage observe — never invents fills; never softens floors."
+        ),
+    }
+
+
+def chip_catalog_chip(root: str | None = None, *, chips_n: int | None = None) -> dict:
+    """L7 chip-catalog soft-max observe (rail noise risk)."""
+    n = chips_n
+    if n is None:
+        try:
+            board = living_upgrade_board(root)
+            n = _count_living_chips(board)
+        except Exception:
+            n = 0
+    guard = living_board_size_guard(chips_n=n)
+    return {
+        **guard,
+        "pass": not bool(guard.get("over")),
+        "note": (
+            "L7 chip catalog observe — prefer finalize_living_priority; "
+            "never softens floors."
+        ),
+    }
+
+
+def phase2_pulse_chip(root: str | None = None) -> dict:
+    """L7 Phase 2 quality pulse (gap-decay + scale-out + hillclimb locks)."""
+    summary: dict = {}
+    try:
+        import desk_phase2
+        summary = desk_phase2.phase2_summary(root) or {}
+    except Exception:
+        summary = {}
+    if not isinstance(summary, dict):
+        summary = {}
+    gap_n = int(summary.get("gap_decay_exit_count") or 0)
+    scale_n = int(summary.get("scale_out_count") or 0)
+    locks = list(summary.get("hillclimb_locks") or [])
+    lock_n = len(locks)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "gap_decay_exit_count": gap_n,
+        "scale_out_count": scale_n,
+        "hillclimb_lock_n": lock_n,
+        "hillclimb_locks": locks[-2:],
+        "pass": True,
+        "label": (
+            f"phase2 pulse gap_decay={gap_n} scale_out={scale_n} "
+            f"hill_locks={lock_n}"
+        ),
+        "note": (
+            "L7 Phase 2 pulse observe — make more of each good trade; "
+            "fee floors untouched."
         ),
     }
 

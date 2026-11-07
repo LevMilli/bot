@@ -662,6 +662,33 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("adapt_ab_sunday_quiet", export)
             self.assertIn("raise_phi_sla_sunday_quiet", export)
 
+    def test_l7_feature_catalog_phase2_chips(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            feat = desk_living.feature_coverage_chip(tmp)
+            self.assertTrue(feat.get("fee_floors_locked"))
+            self.assertIn("n", feat)
+            self.assertIn("label", feat)
+            catalog = desk_living.chip_catalog_chip(tmp, chips_n=10)
+            self.assertTrue(catalog.get("fee_floors_locked"))
+            self.assertFalse(catalog.get("over"))
+            self.assertTrue(catalog.get("pass"))
+            p2 = desk_living.phase2_pulse_chip(tmp)
+            self.assertTrue(p2.get("fee_floors_locked"))
+            self.assertIn("gap_decay_exit_count", p2)
+            board = desk_living.living_upgrade_board(tmp)
+            self.assertIn("feature_coverage", board)
+            self.assertIn("chip_catalog", board)
+            self.assertIn("phase2_pulse", board)
+            compact = desk_living.living_compact_card(tmp, board=board)
+            self.assertIn("feature_coverage_sunday_quiet", compact)
+            self.assertIn("chip_catalog_sunday_quiet", compact)
+            self.assertIn("phase2_pulse_sunday_quiet", compact)
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("feature_coverage_sunday_quiet", export)
+            self.assertIn("chip_catalog_sunday_quiet", export)
+            self.assertIn("phase2_pulse_sunday_quiet", export)
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util

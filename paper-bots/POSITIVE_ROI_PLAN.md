@@ -1268,6 +1268,15 @@ Interactive: Positive ROI Master Plan canvas.
 | Staff SLA raise_Φ age surface | `desk_living.raise_phi_sla_chip` (never auto-writes Φ) |
 | Vault/status/ritual/export surfaces | App + staff CLIs + compact twins |
 
+### Living upgrade — L7 feature/catalog/phase2 observe (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Feature coverage chip | `desk_living.feature_coverage_chip` |
+| Chip catalog soft-max chip | `desk_living.chip_catalog_chip` |
+| Phase 2 pulse chip | `desk_living.phase2_pulse_chip` (gap-decay/scale-out) |
+| Vault/status/ritual/export surfaces | App + staff CLIs + compact twins |
+
 ### Next
 
 | Ticket | Where |

@@ -2345,6 +2345,106 @@ export default function App() {
                     })()}
                   </span>
                 </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">feature cov</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const f = (
+                          snap?.desk as
+                            | { feature_coverage?: { pass?: boolean } }
+                            | undefined
+                        )?.feature_coverage
+                        if (!f) return undefined
+                        return f.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const f = (
+                        snap?.desk as
+                          | {
+                              feature_coverage?: {
+                                label?: string
+                                pass?: boolean
+                              }
+                            }
+                          | undefined
+                      )?.feature_coverage
+                      if (!f) return 'feature coverage pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        f.label ||
+                        (f.pass === false ? 'feature coverage THIN' : 'feature coverage ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">chip catalog</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const c = (
+                          snap?.desk as
+                            | {
+                                chip_catalog?: { pass?: boolean; over?: boolean }
+                                board_size?: { over?: boolean }
+                              }
+                            | undefined
+                        )
+                        const row = c?.chip_catalog || c?.board_size
+                        if (!row) return undefined
+                        if (row.over) return '#c45c26'
+                        return (c?.chip_catalog?.pass === false) ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const c = (
+                        snap?.desk as
+                          | {
+                              chip_catalog?: { label?: string; pass?: boolean }
+                              board_size?: { label?: string }
+                            }
+                          | undefined
+                      )
+                      const row = c?.chip_catalog || c?.board_size
+                      if (!row) return 'chip catalog pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = row.label || 'chip catalog observe'
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">phase2</span>
+                  <span>
+                    {(() => {
+                      const p = (
+                        snap?.desk as
+                          | { phase2_pulse?: { label?: string } }
+                          | undefined
+                      )?.phase2_pulse
+                      if (!p) return 'phase2 pulse pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base = p.label || 'phase2 pulse observe'
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
 <div className="vault-board-row">
                   <span className="vb-label">swarm</span>
                   <span

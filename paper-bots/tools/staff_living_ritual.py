@@ -301,6 +301,18 @@ def format_discord(payload: dict) -> str:
         f"• Raise-Φ-SLA sunday: raise_Φ SLA observe · sunday quiet {tip_age} "
         f"(observe · never auto-writes Φ)"
     )
+    lines.append(
+        f"• Feature-coverage sunday: feature coverage observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Chip-catalog sunday: chip catalog observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Phase2-pulse sunday: phase2 pulse observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -560,6 +572,9 @@ def main() -> int:
             flat["toxic_fills"] = desk_living.toxic_fill_chip(root)
             flat["adapt_ab"] = desk_living.adapt_ab_chip(root)
             flat["raise_phi_sla"] = desk_living.raise_phi_sla_chip(root)
+            flat["feature_coverage"] = desk_living.feature_coverage_chip(root)
+            flat["chip_catalog"] = desk_living.chip_catalog_chip(root)
+            flat["phase2_pulse"] = desk_living.phase2_pulse_chip(root)
             flat["toxic_sunday_quiet"] = (
                 f"toxic fills observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never softens floors)"
@@ -571,6 +586,18 @@ def main() -> int:
             flat["raise_phi_sla_sunday_quiet"] = (
                 f"raise_Φ SLA observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never auto-writes Φ)"
+            )
+            flat["feature_coverage_sunday_quiet"] = (
+                f"feature coverage observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["chip_catalog_sunday_quiet"] = (
+                f"chip catalog observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["phase2_pulse_sunday_quiet"] = (
+                f"phase2 pulse observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
             )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
@@ -812,6 +839,21 @@ def main() -> int:
             print(
                 f"raise-Φ-SLA sunday: {rps.get('label') or 'raise_Φ SLA observe'} · "
                 f"sunday quiet {sunday_label} (observe · never auto-writes Φ)"
+            )
+            feat = desk_living.feature_coverage_chip(root)
+            catalog = desk_living.chip_catalog_chip(root)
+            p2 = desk_living.phase2_pulse_chip(root)
+            print(
+                f"feature-coverage sunday: {feat.get('label') or 'feature coverage observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            print(
+                f"chip-catalog sunday: {catalog.get('label') or 'chip catalog observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            print(
+                f"phase2-pulse sunday: {p2.get('label') or 'phase2 pulse observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
