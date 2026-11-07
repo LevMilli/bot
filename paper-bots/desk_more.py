@@ -974,17 +974,96 @@ def record_sports_clv(
     return row
 
 
+CLV_BEAT_BAR = 0.52
+CLV_LEAGUE_MIN_N = 10
+CLV_LEAGUE_ORDER = ("NFL", "NCAAF", "NBA", "WNBA", "MLB", "NHL")
+
+
+def clv_by_league(
+    root: str | None = None,
+    *,
+    min_n: int = CLV_LEAGUE_MIN_N,
+    beat_bar: float = CLV_BEAT_BAR,
+) -> dict:
+    """Phase 4 per-league CLV board — NFL/NCAAF/NBA/WNBA/MLB/NHL north star."""
+    state = load_clv(root)
+    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict) and r.get("clv") is not None]
+    by: dict[str, list] = {}
+    for r in rows:
+        lg = str(r.get("league") or "UNK").strip().upper() or "UNK"
+        by.setdefault(lg, []).append(r)
+    leagues = []
+    for lg in list(CLV_LEAGUE_ORDER) + sorted(k for k in by if k not in CLV_LEAGUE_ORDER):
+        local = by.get(lg) or []
+        if not local and lg not in CLV_LEAGUE_ORDER:
+            continue
+        n = len(local)
+        if n == 0 and lg in CLV_LEAGUE_ORDER:
+            leagues.append({
+                "league": lg,
+                "n": 0,
+                "avg_clv": None,
+                "beat_close_rate": None,
+                "beat_bar": float(beat_bar),
+                "min_n": int(min_n),
+                "thin": True,
+                "pass": False,
+            })
+            continue
+        if n == 0:
+            continue
+        avg = round(sum(float(r["clv"]) for r in local) / n, 4)
+        pos = sum(1 for r in local if float(r["clv"]) > 0)
+        rate = round(pos / n, 4)
+        thin = n < int(min_n)
+        ok = (not thin) and rate + 1e-12 >= float(beat_bar)
+        leagues.append({
+            "league": lg,
+            "n": n,
+            "avg_clv": avg,
+            "beat_close_rate": rate,
+            "beat_bar": float(beat_bar),
+            "min_n": int(min_n),
+            "thin": thin,
+            "pass": ok,
+        })
+    thin_n = sum(1 for L in leagues if L.get("thin"))
+    pass_n = sum(1 for L in leagues if L.get("pass"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "board_chip": False,
+        "beat_bar": float(beat_bar),
+        "min_n": int(min_n),
+        "leagues": leagues,
+        "thin_n": thin_n,
+        "pass_n": pass_n,
+        "label": f"clv_leagues pass={pass_n} thin={thin_n}/{len(leagues)}",
+        "note": (
+            f"Per-league CLV — beat-close ≥{beat_bar:.0%} once n≥{min_n}. "
+            "NFL packs stay stricter on fair floors; this board never softens venue edge."
+        ),
+    }
+
+
 def clv_summary(root: str | None = None) -> dict:
     state = load_clv(root)
     rows = [r for r in (state.get("rows") or []) if isinstance(r, dict) and r.get("clv") is not None]
     n = len(rows)
     avg = round(sum(float(r["clv"]) for r in rows) / n, 4) if n else None
     pos = sum(1 for r in rows if float(r["clv"]) > 0)
+    rate = round(pos / n, 4) if n else None
+    leagues = clv_by_league(root)
     return {
         "paper_only": True,
+        "fee_floors_locked": True,
         "n": n,
         "avg_clv": avg,
-        "beat_close_rate": round(pos / n, 4) if n else None,
+        "beat_close_rate": rate,
+        "beat_bar": CLV_BEAT_BAR,
+        "pass": n < 20 or (rate is not None and rate + 1e-12 >= CLV_BEAT_BAR),
+        "by_league": leagues,
         "recent": rows[-20:],
         "note": "CLV>0 means entry fair beat later fair/close (learning north star for sports).",
     }

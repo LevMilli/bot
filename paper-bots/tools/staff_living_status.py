@@ -1729,7 +1729,8 @@ def main() -> int:
             "eth-calib",
             "guardrails", "adverse-cool", "anti-revenge", "empty-card", "stale-world",
             "review-observe", "idea-review", "quarterly", "corr-matrix",
-            "calib-clv", "clv-status", "green-or-gone", "sticky-sla", "selective",
+            "calib-clv", "clv-status", "clv-leagues", "green-or-gone", "sticky-sla",
+            "selective",
             "raise-phi-log", "sports-calib", "commodity-calib",
             "baseline-fee", "baseline-capture", "fee-ledger",
             "commodity-tstop-status", "commodity-tstop-promote",
@@ -3907,6 +3908,12 @@ def main() -> int:
         out["label"] = f"clv n={n} beat={rate} bar=0.52"
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("pass") else 2
+    if args.action == "clv-leagues":
+        import desk_more
+        out = desk_more.clv_by_league(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        # Exit 0 only when at least one league passes the bar (n≥10 + ≥52%).
+        return 0 if int(out.get("pass_n") or 0) > 0 else 2
     if args.action == "green-or-gone":
         bots = []
         try:

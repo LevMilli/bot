@@ -4290,6 +4290,7 @@ def calib_clv_observe(
             "bar": 0.52,
             "pass": clv_n < 20 or (clv_rate is not None and clv_rate + 1e-12 >= 0.52),
         },
+        "clv_leagues": clv.get("by_league") or {},
         "sticky_sla": sticky,
         "green_or_gone": {
             "pass": gog.get("pass"),

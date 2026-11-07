@@ -452,6 +452,9 @@ living-calib-clv:
 living-clv-status:
 	python3 tools/staff_living_status.py clv-status
 
+living-clv-leagues:
+	python3 tools/staff_living_status.py clv-leagues
+
 living-green-or-gone:
 	python3 tools/staff_living_status.py green-or-gone
 
