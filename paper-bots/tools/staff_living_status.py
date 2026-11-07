@@ -1727,6 +1727,7 @@ def main() -> int:
             "bleed-week", "daily-r", "opp-cost", "profit-lock", "ops-observe",
             "incubation", "ruin-drill", "cold-harvest", "graduation", "btc-calib",
             "guardrails", "adverse-cool", "anti-revenge", "empty-card", "stale-world",
+            "review-observe", "idea-review", "quarterly", "corr-matrix",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3598,6 +3599,7 @@ def main() -> int:
             "firm_health": desk_roi_plan.firm_health_observe(root),
             "ops": desk_roi_plan.ops_observe(root),
             "guardrails": desk_roi_plan.guardrails_observe(root),
+            "review": desk_roi_plan.review_observe(root),
             "green_boost": desk_roi_plan.sports_green_boost_status(root),
             "near_miss": desk_roi_plan.near_miss_promote_status(root),
             "hard_stop": desk_roi_plan.sports_hard_stop_shadow_summary(root),
@@ -3609,7 +3611,7 @@ def main() -> int:
             "note": (
                 "Money-path pulse — observe only (firm-queue / completions / "
                 "feature densify / exit-quality / selective after M1 / "
-                "promote-distance / firm-health / ops / guardrails). "
+                "promote-distance / firm-health / ops / guardrails / review). "
                 "Never softens floors. Never arms LIVE_ORDERS."
             ),
         }
@@ -3639,6 +3641,7 @@ def main() -> int:
                 )
                 out["ops"] = desk_roi_plan.ops_observe(root, bots=bots)
                 out["guardrails"] = desk_roi_plan.guardrails_observe(root, bots=bots)
+                out["review"] = desk_roi_plan.review_observe(root, bots=bots)
                 out["capital_os"] = desk_roi_plan.capital_os_status(
                     root, bots=bots, cfg=cfg,
                 )
@@ -3812,6 +3815,44 @@ def main() -> int:
         out = desk_roi_plan.stale_world_status(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if not out.get("blocked") else 2
+    if args.action == "review-observe":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.review_observe(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "idea-review":
+        out = desk_roi_plan.idea_review_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if int(out.get("stale_n") or 0) == 0 else 2
+    if args.action == "quarterly":
+        out = desk_roi_plan.quarterly_rebaseline_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("has_quarterly") else 2
+    if args.action == "corr-matrix":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        try:
+            import desk_profit
+            out = desk_profit.correlation_matrix(bots)
+        except Exception as exc:
+            out = {"ok": False, "reason": str(exc), "fee_floors_locked": True}
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

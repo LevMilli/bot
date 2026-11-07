@@ -1830,6 +1830,14 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Split CLIs | `living-adverse-cool` / `living-anti-revenge` / `living-empty-card` / `living-stale-world` |
 | Money pulse / Masters | `guardrails` on pulse + `roi_plan.guardrails` |
 
+### Review observe (ideas / quarterly / corr)
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `review_observe` · `make living-review-observe` |
+| Split CLIs | `living-idea-review` / `living-quarterly` / `living-corr-matrix` |
+| Money pulse / Masters | `review` on pulse + `roi_plan.review` |
+
 ### Next
 
 | Ticket | Where |
