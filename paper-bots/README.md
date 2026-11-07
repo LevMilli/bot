@@ -107,6 +107,10 @@ make living-inventory-tip    # digest inventory tip
 make living-dual-tip         # dual-control tip (never arms live)
 make living-hillclimb-tip    # hillclimb lever tip
 make living-ruin-tip         # ruin drill tip
+make living-near-miss-tip    # near-miss promote tip (never auto)
+make living-helper-tip       # helper Gate A tip (never arms)
+make living-hard-stop-tip    # sports hard-stop shadow tip
+make living-skip-regret-tip  # skip-regret twin tip
 make living-export
 make living-test
 ```

@@ -188,6 +188,26 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_ruin_tip")
         else {}
     )
+    near_miss_tip = (
+        desk_living.living_near_miss_tip(board)
+        if hasattr(desk_living, "living_near_miss_tip")
+        else {}
+    )
+    helper_tip = (
+        desk_living.living_helper_tip(board)
+        if hasattr(desk_living, "living_helper_tip")
+        else {}
+    )
+    hard_stop_tip = (
+        desk_living.living_hard_stop_tip(board)
+        if hasattr(desk_living, "living_hard_stop_tip")
+        else {}
+    )
+    skip_regret_tip = (
+        desk_living.living_skip_regret_tip(board)
+        if hasattr(desk_living, "living_skip_regret_tip")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -1381,6 +1401,62 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "near-miss-tip: "
+            + str(near_miss_tip.get("label") or "near-miss observe")
+        ),
+        (
+            "near-miss-tip sunday: "
+            + str(
+                compact.get("near_miss_tip_sunday_quiet")
+                or (
+                    str(near_miss_tip.get("label") or "near-miss observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
+            "helper-tip: "
+            + str(helper_tip.get("label") or "helper observe")
+        ),
+        (
+            "helper-tip sunday: "
+            + str(
+                compact.get("helper_tip_sunday_quiet")
+                or (
+                    str(helper_tip.get("label") or "helper observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never arms)"
+                )
+            )
+        ),
+        (
+            "hard-stop-tip: "
+            + str(hard_stop_tip.get("label") or "hard-stop observe")
+        ),
+        (
+            "hard-stop-tip sunday: "
+            + str(
+                compact.get("hard_stop_tip_sunday_quiet")
+                or (
+                    str(hard_stop_tip.get("label") or "hard-stop observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never enables live)"
+                )
+            )
+        ),
+        (
+            "skip-regret-tip: "
+            + str(skip_regret_tip.get("label") or "skip-regret observe")
+        ),
+        (
+            "skip-regret-tip sunday: "
+            + str(
+                compact.get("skip_regret_tip_sunday_quiet")
+                or (
+                    str(skip_regret_tip.get("label") or "skip-regret observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1484,7 +1560,7 @@ def main() -> int:
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
-            "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip",
+            "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip", "near-miss-tip", "helper-tip", "hard-stop-tip", "skip-regret-tip",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -1636,6 +1712,10 @@ def main() -> int:
         dual_tip_j = desk_living.living_dual_tip(board)
         hillclimb_tip_j = desk_living.living_hillclimb_tip(board)
         ruin_tip_j = desk_living.living_ruin_tip(board)
+        near_miss_tip_j = desk_living.living_near_miss_tip(board)
+        helper_tip_j = desk_living.living_helper_tip(board)
+        hard_stop_tip_j = desk_living.living_hard_stop_tip(board)
+        skip_regret_tip_j = desk_living.living_skip_regret_tip(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -2118,6 +2198,23 @@ def main() -> int:
             "ruin_tip_label": ruin_tip_j.get("label"),
             "ruin_tip_sunday_quiet": compact_j.get("ruin_tip_sunday_quiet"),
             "compact_ruin_tip_sunday_quiet": compact_j.get("ruin_tip_sunday_quiet"),
+            "near_miss_tip": near_miss_tip_j,
+            "near_miss_tip_label": near_miss_tip_j.get("label"),
+            "near_miss_tip_sunday_quiet": compact_j.get("near_miss_tip_sunday_quiet"),
+            "compact_near_miss_tip_sunday_quiet": compact_j.get("near_miss_tip_sunday_quiet"),
+            "helper_tip": helper_tip_j,
+            "helper_tip_label": helper_tip_j.get("label"),
+            "helper_tip_sunday_quiet": compact_j.get("helper_tip_sunday_quiet"),
+            "compact_helper_tip_sunday_quiet": compact_j.get("helper_tip_sunday_quiet"),
+            "hard_stop_tip": hard_stop_tip_j,
+            "hard_stop_tip_label": hard_stop_tip_j.get("label"),
+            "hard_stop_tip_live": hard_stop_tip_j.get("live"),
+            "hard_stop_tip_sunday_quiet": compact_j.get("hard_stop_tip_sunday_quiet"),
+            "compact_hard_stop_tip_sunday_quiet": compact_j.get("hard_stop_tip_sunday_quiet"),
+            "skip_regret_tip": skip_regret_tip_j,
+            "skip_regret_tip_label": skip_regret_tip_j.get("label"),
+            "skip_regret_tip_sunday_quiet": compact_j.get("skip_regret_tip_sunday_quiet"),
+            "compact_skip_regret_tip_sunday_quiet": compact_j.get("skip_regret_tip_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -2786,6 +2883,91 @@ def main() -> int:
         else:
             out = dict(tip)
             out["ruin_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+
+
+    if args.action == "near-miss-tip":
+        tip = desk_living.living_near_miss_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("near_miss_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'near-miss observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Near-miss tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"n={tip.get('n')} labeled={tip.get('labeled_n')} ready={tip.get('promote_ready')} decision={tip.get('decision')}\n"
+                "_never auto-promotes · never softens floors · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["near_miss_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+
+    if args.action == "helper-tip":
+        tip = desk_living.living_helper_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("helper_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'helper observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never arms)"
+        )
+        if args.discord:
+            print(
+                "**Helper tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"ready={tip.get('ready_n')}/{tip.get('helpers_n')} armed={tip.get('armed_n')} places={tip.get('places_orders')}\n"
+                "_never arms · never places · never softens floors_"
+            )
+        else:
+            out = dict(tip)
+            out["helper_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+
+    if args.action == "hard-stop-tip":
+        tip = desk_living.living_hard_stop_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("hard_stop_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'hard-stop observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never enables live)"
+        )
+        if args.discord:
+            print(
+                "**Hard-stop tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"n={tip.get('n')} ready={tip.get('promote_ready')} live={tip.get('live')}\n"
+                "_shadow-only · never enables live · never softens floors_"
+            )
+        else:
+            out = dict(tip)
+            out["hard_stop_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if tip.get("live") is False else 2
+
+    if args.action == "skip-regret-tip":
+        tip = desk_living.living_skip_regret_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("skip_regret_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'skip-regret observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Skip-regret tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"labeled={tip.get('labeled_n')} decision={tip.get('decision')} loosen={tip.get('loosen_soft_gates')}\n"
+                "_never softens floors · never auto-loosens · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["skip_regret_tip_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
 

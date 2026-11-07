@@ -1579,6 +1579,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Makefile living-inventory-tip / dual-tip / hillclimb-tip / ruin-tip | Makefile |
 | Ritual + vault tip rows | ritual / App |
 
+### Living upgrade — near-miss/helper/hard-stop/skip-regret tip batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_near_miss_tip` + `near_miss_tip_sunday_quiet` | desk_living / compact / export |
+| `living_helper_tip` + `helper_tip_sunday_quiet` | desk_living / compact / export |
+| `living_hard_stop_tip` + `hard_stop_tip_sunday_quiet` | desk_living / compact / export |
+| `living_skip_regret_tip` + `skip_regret_tip_sunday_quiet` | desk_living / compact / export |
+| Status CLI near-miss-tip / helper-tip / hard-stop-tip / skip-regret-tip | staff_living_status |
+| Makefile living-near-miss-tip / helper-tip / hard-stop-tip / skip-regret-tip | Makefile |
+| Ritual + vault tip rows | ritual / App |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |

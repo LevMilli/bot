@@ -1992,6 +1992,133 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">near-miss tip</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | {
+                              near_miss_tip?: { promote_ready?: boolean }
+                            }
+                          | undefined
+                        const ready = desk?.near_miss_tip?.promote_ready
+                        if (ready === true) return '#d4a017'
+                        if (ready === false) return '#6fbf73'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            near_miss_tip_sunday_quiet?: string
+                            compact_near_miss_tip_sunday_quiet?: string
+                            near_miss_tip_label?: string
+                            near_miss_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.near_miss_tip_sunday_quiet ||
+                        desk?.compact_near_miss_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.near_miss_tip_label ||
+                          desk?.near_miss_tip?.label ||
+                          'near-miss observe') + ' · make living-near-miss-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">helper tip</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            helper_tip_sunday_quiet?: string
+                            compact_helper_tip_sunday_quiet?: string
+                            helper_tip_label?: string
+                            helper_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.helper_tip_sunday_quiet ||
+                        desk?.compact_helper_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.helper_tip_label ||
+                          desk?.helper_tip?.label ||
+                          'helper observe') + ' · make living-helper-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">hard-stop tip</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | {
+                              hard_stop_tip_live?: boolean
+                              hard_stop_tip?: { live?: boolean }
+                            }
+                          | undefined
+                        const live =
+                          desk?.hard_stop_tip_live ?? desk?.hard_stop_tip?.live
+                        if (live === false) return '#6fbf73'
+                        if (live === true) return '#c45c26'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            hard_stop_tip_sunday_quiet?: string
+                            compact_hard_stop_tip_sunday_quiet?: string
+                            hard_stop_tip_label?: string
+                            hard_stop_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.hard_stop_tip_sunday_quiet ||
+                        desk?.compact_hard_stop_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.hard_stop_tip_label ||
+                          desk?.hard_stop_tip?.label ||
+                          'hard-stop observe') + ' · make living-hard-stop-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">skip-regret tip</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            skip_regret_tip_sunday_quiet?: string
+                            compact_skip_regret_tip_sunday_quiet?: string
+                            skip_regret_tip_label?: string
+                            skip_regret_tip?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.skip_regret_tip_sunday_quiet ||
+                        desk?.compact_skip_regret_tip_sunday_quiet
+                      if (twin) return twin
+                      return (
+                        (desk?.skip_regret_tip_label ||
+                          desk?.skip_regret_tip?.label ||
+                          'skip-regret observe') +
+                        ' · make living-skip-regret-tip'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{
