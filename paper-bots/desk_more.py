@@ -758,9 +758,83 @@ def sticky_positions(
                     "opened": opened,
                     "risk": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
                     "note": "sticky — settle harness / exit audit",
+                    "exit_priority": True,
                 })
     out.sort(key=lambda r: -float(r.get("age_hours") or 0))
     return out
+
+
+def sticky_for_bot(
+    bots: Iterable[dict] | None,
+    bot: str,
+    *,
+    now_epoch: float | None = None,
+) -> list[dict]:
+    """Sticky opens for one tower (exit-priority queue)."""
+    bot_id = str(bot or "")
+    return [r for r in sticky_positions(bots or [], now_epoch=now_epoch) if r.get("bot") == bot_id]
+
+
+def sticky_entry_blocks(
+    bot: str,
+    *,
+    today: float | None = None,
+    bots: Iterable[dict] | None = None,
+    sticky_rows: list | None = None,
+    now_epoch: float | None = None,
+    red_only: bool = True,
+) -> str:
+    """E1 #136/#137 — block speculative entries while sticky opens need exits.
+
+    Default: only on red day (today < 0). Exits/settles still run. Floors locked.
+    """
+    bot_id = str(bot or "")
+    if not bot_id:
+        return ""
+    if red_only and (today is None or float(today) >= 0):
+        return ""
+    rows = sticky_rows
+    if rows is None:
+        rows = sticky_for_bot(bots, bot_id, now_epoch=now_epoch)
+    mine = [r for r in (rows or []) if isinstance(r, dict) and (
+        not r.get("bot") or str(r.get("bot")) == bot_id
+    )]
+    if not mine:
+        return ""
+    oldest = max(float(r.get("age_hours") or 0) for r in mine)
+    return (
+        f"sticky-open SLA: {len(mine)} open(s) past settle window "
+        f"(oldest {oldest:.1f}h) — exits first before new speculative buys"
+    )[:160]
+
+
+def sticky_sla_status(
+    bots: Iterable[dict] | None = None,
+    *,
+    now_epoch: float | None = None,
+) -> dict:
+    """Observe board: sticky counts + exit-priority flag (never softens floors)."""
+    rows = sticky_positions(bots or [], now_epoch=now_epoch)
+    by_bot: dict[str, int] = {}
+    for r in rows:
+        b = str(r.get("bot") or "unknown")
+        by_bot[b] = int(by_bot.get(b) or 0) + 1
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "sticky_count": len(rows),
+        "by_bot": by_bot,
+        "exit_priority": bool(rows),
+        "top": rows[:8],
+        "label": (
+            f"sticky SLA n={len(rows)} exit_priority={'yes' if rows else 'no'}"
+        ),
+        "note": (
+            "Sticky opens past settle expectation get exit priority; "
+            "red-day speculative entries block until clears. Floors locked."
+        ),
+    }
 
 
 def remember_sticky(root: str | None, rows: list[dict]) -> None:

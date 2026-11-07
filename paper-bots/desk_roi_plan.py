@@ -5872,6 +5872,17 @@ def plan_summary(
     bleed = firm_bleed_ratio(bots)
     misplaced = capital_misplaced(bots, cfg)
     baseline = load_baseline(root).get("latest")
+    sticky = None
+    try:
+        import desk_more
+        sticky = desk_more.sticky_sla_status(bots)
+    except Exception:
+        sticky = {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "sticky_count": 0,
+            "observe_only": True,
+        }
     return {
         "paper_only": True,
         "version": 2,
@@ -5910,6 +5921,7 @@ def plan_summary(
         "empty_card": empty_card_status(root),
         "near_miss_promote": near_miss_promote_status(root),
         "fit_firm": fit_buy_rate(root),
+        "sticky_sla": sticky,
         "fee_floors_locked": True,
         "next_tickets": [
             "observe Chicago weeks / staff hillclimb pick",

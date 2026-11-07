@@ -1177,6 +1177,25 @@ def run():
                         reason = firm_block
             except Exception:
                 pass
+        # E1 #136/#137 — red-day sticky opens get exit priority before new buys.
+        if reason is None:
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_more
+                sticky_bots = [{
+                    "id": "sports-gap",
+                    "positions": list(s.get("open") or []),
+                }]
+                sticky_block = desk_more.sticky_entry_blocks(
+                    "sports-gap",
+                    today=red_pnl,
+                    bots=sticky_bots,
+                )
+                if sticky_block:
+                    reason = sticky_block
+            except Exception:
+                pass
         spread = None
         try:
             if bid is not None and ask is not None:

@@ -1010,6 +1010,22 @@ def main() -> int:
             except Exception:
                 pass
             continue
+        # E1 #136/#137 — red-day sticky opens exit-first before speculative buys.
+        try:
+            import desk_more
+            sticky_block = desk_more.sticky_entry_blocks(
+                "commodity-15m",
+                today=today_pnl,
+                bots=[{
+                    "id": "commodity-15m",
+                    "positions": list((account or {}).get("open") or []),
+                }],
+            )
+        except Exception:
+            sticky_block = ""
+        if sticky_block:
+            print(f"  → skip: {sticky_block}")
+            continue
         msg = paper_buy(account, ev)
         print(f"  → {msg}")
         if msg.startswith("Paper buy"):
