@@ -689,6 +689,18 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("chip_catalog_sunday_quiet", export)
             self.assertIn("phase2_pulse_sunday_quiet", export)
 
+    def test_l7_selfcheck_doctor_pulse(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            health = desk_living.living_self_check(tmp)
+            self.assertTrue(health.get("l7_observe_ok"))
+            self.assertFalse(health.get("l7_observe_missing"))
+            self.assertIn("L7 observe", health.get("l7_observe_label") or "")
+            doc = desk_living.living_doctor(tmp, record=False)
+            self.assertTrue(doc.get("l7_observe_ok"))
+            self.assertIn("L7 observe", doc.get("soft_copy") or "")
+            self.assertTrue(doc.get("fee_floors_locked"))
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util

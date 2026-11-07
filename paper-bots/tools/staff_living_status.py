@@ -215,6 +215,27 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "l7 observe: "
+            + (
+                "L7 observe ok"
+                if all(
+                    isinstance(board.get(k), dict)
+                    for k in (
+                        "digest_freshness",
+                        "journal_coverage",
+                        "monday_pulse",
+                        "toxic_fills",
+                        "adapt_ab",
+                        "raise_phi_sla",
+                        "feature_coverage",
+                        "chip_catalog",
+                        "phase2_pulse",
+                    )
+                )
+                else "L7 observe missing chips"
+            )
+        ),
+        (
             "digests sunday: "
             + str(inv.get("label") or "digests observe")
             + " · sunday quiet "
@@ -1379,6 +1400,24 @@ def main() -> int:
             "compact_feature_coverage_sunday_quiet": compact_j.get("feature_coverage_sunday_quiet"),
             "compact_chip_catalog_sunday_quiet": compact_j.get("chip_catalog_sunday_quiet"),
             "compact_phase2_pulse_sunday_quiet": compact_j.get("phase2_pulse_sunday_quiet"),
+            "l7_observe": (
+                "L7 observe ok"
+                if all(
+                    isinstance(board.get(k), dict)
+                    for k in (
+                        "digest_freshness",
+                        "journal_coverage",
+                        "monday_pulse",
+                        "toxic_fills",
+                        "adapt_ab",
+                        "raise_phi_sla",
+                        "feature_coverage",
+                        "chip_catalog",
+                        "phase2_pulse",
+                    )
+                )
+                else "L7 observe missing chips"
+            ),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "
