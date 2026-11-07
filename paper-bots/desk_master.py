@@ -628,6 +628,30 @@ def master_summary(
         except Exception:
             plan["btc_edge08_shadow"] = None
         try:
+            plan["edge08_vs_main"] = desk_roi_plan.edge08_vs_main_expectancy_board(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["edge08_vs_main"] = None
+        try:
+            plan["insight_betting_ratio"] = desk_roi_plan.insight_betting_ratio_board(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["insight_betting_ratio"] = None
+        try:
+            plan["weekly_eligible_fill"] = desk_roi_plan.weekly_eligible_fill_report(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["weekly_eligible_fill"] = None
+        try:
+            plan["fee_clear_cadence"] = desk_roi_plan.fee_clear_cadence_health_board(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["fee_clear_cadence"] = None
+        try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")

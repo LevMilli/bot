@@ -134,3 +134,17 @@ There is **no** claim of live alpha. Paper results stay optimistic.
 | Live gates | `gates_hit` / `entry_gate` |
 | Staff + city | PIMP-TRADING cards, APEX-CITY monitors |
 | Follow-ups | Sports hard stop; BTC real TP or drop; sized Kalshi when present |
+
+---
+
+## 9. Speed runbook (M4) — staff drills
+
+Fee floors stay locked. Speed never waives edge. Cadence targets (AUTO): BTC **60s**, commodity **90s**, sports **180s** (tip windows denser without floor waive). Observe: `fee_clear_cadence_health_board` · `make living-cadence-health` · Masters `roi_plan.fee_clear_cadence`.
+
+**M4 bars:** sports p50 ≤45s (n≥5); BTC/commodity p50 ≤20s (n≥5).
+
+### Drill A — M4 red, M1 green
+Latency is the problem, not edge. Fix perf (cache hits, prefetch, stage timers). **Do not** loosen venue floors, soft-relax edge, or raise max_buys to “catch up.”
+
+### Drill B — M4 green, M1 red
+Not a speed problem. Do not densify cadence further. Kill last volume/selective lever; starve losers; keep meme/INX capped. Wait for fee-clear EV, not faster polls.
