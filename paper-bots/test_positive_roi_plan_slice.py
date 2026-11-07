@@ -215,6 +215,12 @@ class ExitPlanCoverage(unittest.TestCase):
         commodity = desk_roi_plan.default_exit_plan("commodity-15m")
         self.assertIn("model_flip", commodity)
         self.assertFalse(sports.get("board_chip", False))
+        inx = desk_roi_plan.default_exit_plan("kalshi-sp")
+        self.assertEqual(inx.get("kind"), "model_flip+settle")
+        sized = desk_roi_plan.default_exit_plan("kalshi-sized")
+        self.assertEqual(sized.get("ask_band"), "84-92")
+        meme = desk_roi_plan.default_exit_plan("memecoin")
+        self.assertEqual(meme.get("stop_pct"), -0.12)
 
     def test_coverage_pass_when_plans_present(self):
         bots = [

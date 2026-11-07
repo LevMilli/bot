@@ -20,6 +20,7 @@ bot can be run once per step (scan at 12:30, settle after 3 PM) and remember.
 import json
 import math
 import os
+import sys
 import datetime as dt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -79,6 +80,19 @@ def open_position(state, day, event_ticker, pick, contracts, entry_time_iso):
            "price_source": "https://api.elections.kalshi.com/trade-api/v2",
            "price_at": entry_time_iso,
            "fill_id": f"{pick.get('ticker')}|{entry_time_iso}"}
+    try:
+        desk_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if desk_root not in sys.path:
+            sys.path.insert(0, desk_root)
+        import desk_roi_plan as _xp
+        pos["exit_plan"] = _xp.default_exit_plan("kalshi-sp")
+    except Exception:
+        pos["exit_plan"] = {
+            "kind": "model_flip+settle",
+            "model_flip": True,
+            "settle_backstop": True,
+            "fee_floors_locked": True,
+        }
     state["bankroll"] = round(state["bankroll"] - cost - fee, 4)
     state["open"].append(pos)
     return pos

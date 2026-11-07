@@ -2773,6 +2773,34 @@ def default_exit_plan(bot: str) -> dict:
             "fee_floors_locked": True,
             "note": "Commodity exits: model-flip; settle is backstop; WTI↔Brent haircut on entry.",
         }
+    if b in ("kalshi-sp", "kalshi-sp500", "kalshi_sp", "inx-sp"):
+        return {
+            "kind": "model_flip+settle",
+            "model_flip": True,
+            "settle_backstop": True,
+            "ask_band": "80-90",
+            "fee_floors_locked": True,
+            "note": "INX S&P exits: model-flip when fair drifts; settle backstop; band staff-promote gated.",
+        }
+    if b in ("kalshi-sized", "kalshi_sized", "inx-sized"):
+        return {
+            "kind": "model_flip+settle",
+            "model_flip": True,
+            "settle_backstop": True,
+            "ask_band": "84-92",
+            "fee_floors_locked": True,
+            "note": "INX sized exits: model-flip when fair drifts; settle backstop; twin+1¢ edge locked.",
+        }
+    if b in ("memecoin", "meme"):
+        return {
+            "kind": "stop+model_flip+ladder+settle",
+            "stop_pct": -0.12,
+            "model_flip_mom": -0.06,
+            "ladder_take_profits": True,
+            "settle_backstop": True,
+            "fee_floors_locked": True,
+            "note": "Meme exits: −12% stop, −6% mom flip, ladder TPs; never expand volume.",
+        }
     return {
         "kind": "settle",
         "settle_backstop": True,
@@ -2802,13 +2830,15 @@ def exit_plan_coverage(
                     row = dict(p)
                     row.setdefault("bot", bid)
                     opens.append(row)
-    fee_clear = [p for p in opens if str(p.get("bot") or "") in FEE_CLEAR]
+    tracked_ids = set(FEE_CLEAR) | set(LOSER_IDS)
+    tracked = [p for p in opens if str(p.get("bot") or "") in tracked_ids]
+    fee_clear = [p for p in tracked if str(p.get("bot") or "") in FEE_CLEAR]
     with_plan = [
         p
-        for p in fee_clear
+        for p in tracked
         if isinstance(p.get("exit_plan"), dict) and p.get("exit_plan")
     ]
-    n = len(fee_clear)
+    n = len(tracked)
     covered = len(with_plan)
     rate = (covered / n) if n else None
     ok = n == 0 or (rate is not None and rate >= 1.0 - 1e-12)
@@ -2817,13 +2847,14 @@ def exit_plan_coverage(
         "fee_floors_locked": True,
         "board_chip": False,
         "n_open": n,
+        "n_fee_clear": len(fee_clear),
         "n_with_plan": covered,
         "coverage": rate,
         "pass": ok,
         "missing_bots": sorted(
             {
                 str(p.get("bot") or "")
-                for p in fee_clear
+                for p in tracked
                 if not (isinstance(p.get("exit_plan"), dict) and p.get("exit_plan"))
             }
         ),
@@ -2833,7 +2864,7 @@ def exit_plan_coverage(
             "(observe · Phase 3 · never softens floors)"
         ),
         "note": (
-            "Every fee-clear open should stamp exit_plan at buy. "
+            "Every desk open should stamp exit_plan at buy (fee-clear + loser towers). "
             "Missing plans are exit-quality debt — not a reason to soften floors."
         ),
     }
