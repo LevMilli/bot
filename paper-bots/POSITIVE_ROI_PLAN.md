@@ -1496,11 +1496,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault smoke row | App vault |
 | LIVING_UPGRADE / README index | docs |
 
+### Living upgrade — Discord paste index batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_discord_paste_tip` + `paste_sunday_quiet` | desk_living / compact / export |
+| Status CLI `paste` (+ discord) | staff_living_status |
+| Makefile `living-paste` | Makefile |
+| Ritual observe/Discord paste line | staff_living_ritual |
+| Vault paste row | App vault |
+| README index | README.md |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| *(cleared — staff smoke shipped)* | — |
+| *(cleared — Discord paste index shipped; soft-max 52/64 — pause new chips)* | — |
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
 
@@ -1508,7 +1519,7 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — staff smoke shipped; soft-max 52/64)* | — |
+| *(empty — Discord paste index shipped; soft-max 52/64)* | — |
 
 ## Hard rules unchanged
 

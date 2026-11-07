@@ -102,6 +102,11 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_staff_smoke")
         else {}
     )
+    paste = (
+        desk_living.living_discord_paste_tip(board)
+        if hasattr(desk_living, "living_discord_paste_tip")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -1055,6 +1060,20 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "paste: "
+            + str(paste.get("label") or "paste observe")
+        ),
+        (
+            "paste sunday: "
+            + str(
+                compact.get("paste_sunday_quiet")
+                or (
+                    str(paste.get("label") or "paste observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never auto-posts)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1157,14 +1176,14 @@ def main() -> int:
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
-            "help", "money", "rules", "surfaces", "smoke",
+            "help", "money", "rules", "surfaces", "smoke", "paste",
         ),
     )
     parser.add_argument("--root", default=ROOT)
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money/rules/surfaces/smoke); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud/money/rules/surfaces/smoke/paste); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -1292,6 +1311,7 @@ def main() -> int:
         rails_j = desk_living.living_guardrails_tip(board)
         surfaces_j = desk_living.living_surface_index(board)
         smoke_j = desk_living.living_staff_smoke(board)
+        paste_j = desk_living.living_discord_paste_tip(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1700,6 +1720,11 @@ def main() -> int:
             "smoke_ok": smoke_j.get("ok"),
             "smoke_sunday_quiet": compact_j.get("smoke_sunday_quiet"),
             "compact_smoke_sunday_quiet": compact_j.get("smoke_sunday_quiet"),
+            "paste": paste_j,
+            "paste_label": paste_j.get("label"),
+            "paste_n": paste_j.get("targets_n"),
+            "paste_sunday_quiet": compact_j.get("paste_sunday_quiet"),
+            "compact_paste_sunday_quiet": compact_j.get("paste_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -1900,10 +1925,10 @@ def main() -> int:
     if args.action == "help":
         print(
             "Living status actions (paper · floors locked · Discord never auto-posts):\n"
-            "  text json selfcheck export hud priority ritual-live money rules surfaces smoke\n"
+            "  text json selfcheck export hud priority ritual-live money rules surfaces smoke paste\n"
             "  floors teller expand doctor l7 sunday pulse gaps inventory\n"
             "  hillclimb ruin seed pager\n"
-            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/rules/surfaces/smoke/priority\n"
+            "Discord paste: --discord on floors/doctor/l7/sunday/ritual-live/hud/money/rules/surfaces/smoke/paste/priority\n"
             "Makefile: make living-help"
         )
         return 0
@@ -1997,6 +2022,29 @@ def main() -> int:
             out["smoke_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if tip.get("ok") else 2
+
+    if args.action == "paste":
+        tip = desk_living.living_discord_paste_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("paste_sunday_quiet") or (
+            f"{tip.get('label') or 'paste observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never auto-posts)"
+        )
+        if args.discord:
+            cmds = " · ".join(tip.get("cmds") or [])
+            print(
+                "**Discord paste index** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"targets_n={tip.get('targets_n')} auto_post={tip.get('auto_post')}\n"
+                f"cmds: {cmds}\n"
+                "_staff paste only · never auto-posts · never softens floors_"
+            )
+        else:
+            out = dict(tip)
+            out["paste_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if tip.get("auto_post") is False else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

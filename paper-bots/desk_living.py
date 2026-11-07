@@ -1286,6 +1286,10 @@ def living_compact_card(
             f"{living_staff_smoke(src).get('label') or 'smoke observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "paste_sunday_quiet": (
+            f"{living_discord_paste_tip(src).get('label') or 'paste observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-posts)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2417,6 +2421,11 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{smoke.get('label') or 'smoke observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+        paste = living_discord_paste_tip(board)
+        compact["paste_sunday_quiet"] = (
+            f"{paste.get('label') or 'paste observe'} · sunday quiet {quiet_bit} "
+            "(observe · never auto-posts)"
+        )
         board["compact"] = compact
     return board
 
@@ -2578,6 +2587,10 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["smoke"] = smoke
     slim["smoke_label"] = smoke.get("label")
     slim["smoke_ok"] = smoke.get("ok")
+    paste = living_discord_paste_tip(board)
+    slim["paste"] = paste
+    slim["paste_label"] = paste.get("label")
+    slim["paste_n"] = paste.get("targets_n")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3002,6 +3015,11 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{smoke_export.get('label') or 'smoke observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    paste_export = living_discord_paste_tip(board)
+    slim["paste_sunday_quiet"] = (
+        f"{paste_export.get('label') or 'paste observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-posts)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3224,6 +3242,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_smoke_sunday_quiet"] = (
             compact.get("smoke_sunday_quiet") or slim.get("smoke_sunday_quiet")
+        )
+        slim["compact_paste_sunday_quiet"] = (
+            compact.get("paste_sunday_quiet") or slim.get("paste_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4462,6 +4483,54 @@ def living_staff_smoke(board: dict | None = None, root: str | None = None) -> di
         "surfaces_label": surfaces.get("label"),
         "label": label,
         "note": "Staff smoke aggregate — observe-only; never places or softens floors.",
+    }
+
+
+_DISCORD_PASTE_TARGETS = (
+    "floors",
+    "doctor",
+    "l7",
+    "sunday",
+    "ritual-live",
+    "hud",
+    "priority",
+    "money",
+    "rules",
+    "surfaces",
+    "smoke",
+    "gaps",
+    "ruin",
+    "expand",
+)
+
+
+def living_discord_paste_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Index of paste-only Discord draft targets (never auto-posts; not a board chip)."""
+    _ = board if isinstance(board, dict) else (living_upgrade_board(root) if root else None)
+    targets = list(_DISCORD_PASTE_TARGETS)
+    label = (
+        f"paste n={len(targets)} auto_post=False "
+        f"targets={','.join(targets[:6])}… "
+        "(observe · staff paste only · never auto-posts · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "auto_post": False,
+        "targets": targets,
+        "targets_n": len(targets),
+        "cmds": [
+            "make living-floors-discord",
+            "make living-doctor-discord",
+            "make living-ritual-discord",
+            "make living-hud-discord",
+            "make living-smoke-discord",
+            "make living-rules-discord",
+            "make living-surfaces-discord",
+        ],
+        "label": label,
+        "note": "Discord paste index — drafts only; never auto-posts.",
     }
 
 
