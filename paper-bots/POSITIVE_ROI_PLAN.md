@@ -1812,6 +1812,15 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Money pulse | `make living-money-pulse` includes `firm_health` + capital OS |
 | Masters | `roi_plan.firm_health` |
 
+### Ops observe (incubation / ruin / cold / graduation / BTC calib)
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `ops_observe` · `make living-ops-observe` |
+| Split CLIs | `living-incubation` / `living-ruin-drill-status` / `living-cold-harvest` / `living-graduation` / `living-btc-calib` |
+| Dual-control | observe-only status inside `ops_observe` (LIVE_ORDERS still deferred) |
+| Money pulse / Masters | `ops` on pulse + `roi_plan.ops` |
+
 ### Next
 
 | Ticket | Where |
