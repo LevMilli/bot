@@ -1723,7 +1723,8 @@ def main() -> int:
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse",
-            "exit-quality", "promote-distance", "hillclimb-lever",
+            "exit-quality", "promote-distance", "hillclimb-lever", "firm-health",
+            "bleed-week", "daily-r", "opp-cost", "profit-lock",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3592,13 +3593,20 @@ def main() -> int:
             "exit_quality": desk_roi_plan.exit_quality_observe(root, bots=None),
             "selective_throughput": desk_roi_plan.selective_throughput_observe(root),
             "promote_distance": desk_roi_plan.promote_distance_observe(root),
+            "firm_health": desk_roi_plan.firm_health_observe(root),
             "green_boost": desk_roi_plan.sports_green_boost_status(root),
             "near_miss": desk_roi_plan.near_miss_promote_status(root),
             "hard_stop": desk_roi_plan.sports_hard_stop_shadow_summary(root),
+            "bleed_week": desk_roi_plan.latest_bleed_week(root),
+            "opp_cost": desk_roi_plan.opp_cost_summary(root),
+            "profit_lock": desk_roi_plan.profit_lock_status(root),
+            "daily_r": desk_roi_plan.latest_daily_r_board(root),
+            "capital_os": desk_roi_plan.capital_os_status(root),
             "note": (
                 "Money-path pulse — observe only (firm-queue / completions / "
                 "feature densify / exit-quality / selective after M1 / "
-                "promote-distance). Never softens floors. Never arms LIVE_ORDERS."
+                "promote-distance / firm-health). Never softens floors. "
+                "Never arms LIVE_ORDERS."
             ),
         }
         # Enrich exit/selective with live bots when snapshot available.
@@ -3606,6 +3614,11 @@ def main() -> int:
             import pimp_desk
             snap = pimp_desk.snapshot(root)
             bots = snap.get("bots") if isinstance(snap, dict) else None
+            cfg = None
+            try:
+                cfg = pimp_desk.load_settings(root)
+            except Exception:
+                cfg = None
             if isinstance(bots, list):
                 out["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
                 out["selective_throughput"] = desk_roi_plan.selective_throughput_observe(
@@ -3617,6 +3630,15 @@ def main() -> int:
                 out["green_boost"] = desk_roi_plan.sports_green_boost_status(
                     root, bots=bots,
                 )
+                out["firm_health"] = desk_roi_plan.firm_health_observe(
+                    root, bots=bots, cfg=cfg,
+                )
+                out["capital_os"] = desk_roi_plan.capital_os_status(
+                    root, bots=bots, cfg=cfg,
+                )
+                # Refresh bleed + daily R cards for Chicago-day observe.
+                out["bleed_week"] = desk_roi_plan.capture_bleed_week(root, bots=bots)
+                out["daily_r"] = desk_roi_plan.capture_daily_r_board(root, bots=bots)
         except Exception:
             pass
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
@@ -3652,6 +3674,58 @@ def main() -> int:
         out = desk_roi_plan.hillclimb_lever_status(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("active_this_week") and not out.get("kill") else 2
+    if args.action == "firm-health":
+        bots = []
+        cfg = None
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+            try:
+                cfg = pimp_desk.load_settings(root)
+            except Exception:
+                cfg = None
+        except Exception:
+            bots = []
+        out = desk_roi_plan.firm_health_observe(root, bots=bots, cfg=cfg)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "bleed-week":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.capture_bleed_week(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "daily-r":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.capture_daily_r_board(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "opp-cost":
+        out = desk_roi_plan.opp_cost_summary(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "profit-lock":
+        out = desk_roi_plan.profit_lock_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

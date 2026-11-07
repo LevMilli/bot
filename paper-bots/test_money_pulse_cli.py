@@ -92,6 +92,24 @@ class MoneyPulseSurfaces(unittest.TestCase):
                 self.assertIn(need, gates)
             self.assertIn("thin=", out["label"])
 
+    def test_firm_health_observe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bots = [
+                {"id": "sports-gap", "today": 2.0, "open_risk": 10.0, "gate_a": {"ready": True}},
+                {"id": "memecoin", "today": -1.0, "open_risk": 5.0, "gate_a": {"ready": False}},
+            ]
+            desk_roi_plan.capture_bleed_week(tmp, bots=bots)
+            out = desk_roi_plan.firm_health_observe(tmp, bots=bots, cfg={"max_open_risk": 100})
+            self.assertTrue(out["observe_only"])
+            self.assertTrue(out["fee_floors_locked"])
+            self.assertFalse(out["live_orders_enabled"])
+            self.assertIn("bleed", out)
+            self.assertIn("capital_os", out)
+            self.assertIn("profit_lock", out)
+            self.assertIn("opp_cost", out)
+            self.assertIn("fee_ledger", out)
+            self.assertIn("firm_health=", out["label"])
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()

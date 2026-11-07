@@ -3967,6 +3967,114 @@ def selective_throughput_observe(
     }
 
 
+def firm_health_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+) -> dict:
+    """Phase 2/7 firm-health pulse: bleed / capital OS / daily R / profit-lock / opp-cost / fees.
+
+    Observe only. Never softens floors. Never arms LIVE_ORDERS.
+    """
+    bleed_live = firm_bleed_ratio(bots)
+    misplaced = capital_misplaced(bots, cfg)
+    bleed_card = latest_bleed_week(root) or {}
+    capital = capital_os_status(root, bots=bots, cfg=cfg)
+    daily = latest_daily_r_board(root) or {}
+    if not daily and bots:
+        daily = capture_daily_r_board(root, bots=bots) if root else {
+            "towers": {},
+            "settle_only": [],
+            "note": "ephemeral daily R (no root)",
+        }
+    profit = profit_lock_status(root)
+    opp = opp_cost_summary(root)
+    fees = fee_ledger_completeness(root, bots=bots)
+    bleed_pass = bool(bleed_live.get("pass"))
+    capital_ok = bool(capital.get("ok"))
+    fee_rate = _finite(fees.get("rate"))
+    fee_ok = bool(fees.get("pass")) if int(fees.get("history_n") or 0) else True
+    alerts = []
+    if not bleed_pass:
+        alerts.append("bleed")
+    if not capital_ok:
+        alerts.extend(list(capital.get("alerts") or ["capital_os"]))
+    if profit.get("safe_mode"):
+        alerts.append("profit_lock_safe")
+    if not fee_ok:
+        alerts.append("fee_ledger")
+    settle_only = list(daily.get("settle_only") or [])
+    if settle_only:
+        alerts.append("daily_r_settle")
+    thin = (not bleed_card) or (
+        int(opp.get("n") or 0) == 0 and int(fees.get("history_n") or 0) == 0
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "ok": len(alerts) == 0,
+        "evidence_thin": thin,
+        "alerts": sorted(set(alerts)),
+        "bleed": {
+            "ratio": bleed_live.get("ratio"),
+            "pass": bleed_pass,
+            "red_usd": bleed_live.get("red_usd"),
+            "green_usd": bleed_live.get("green_usd"),
+            "misplaced_usd": misplaced.get("misplaced_usd"),
+            "card_label": bleed_card.get("label"),
+            "label_line": bleed_card.get("label_line"),
+        },
+        "capital_os": {
+            "ok": capital_ok,
+            "alerts": capital.get("alerts"),
+            "barbell_pass": (capital.get("barbell") or {}).get("pass"),
+            "midday_alert": (capital.get("midday_util") or {}).get("alert"),
+            "zero_buy_alert": (capital.get("zero_buy") or {}).get("alert"),
+        },
+        "daily_r": {
+            "label": daily.get("label"),
+            "settle_only": settle_only,
+            "r_usd": daily.get("r_usd"),
+        },
+        "profit_lock": {
+            "safe_mode": bool(profit.get("safe_mode")),
+            "size_mult": profit.get("size_mult"),
+            "week_pnl": profit.get("week_pnl"),
+            "target_usd": profit.get("target_usd"),
+        },
+        "opp_cost": {
+            "n": opp.get("n"),
+            "mean_wait_s": opp.get("mean_wait_s"),
+            "max_wait_s": opp.get("max_wait_s"),
+            "bar_sec": opp.get("bar_sec"),
+        },
+        "fee_ledger": {
+            "rate": fee_rate,
+            "pass": fee_ok,
+            "history_n": fees.get("history_n"),
+            "matched": fees.get("matched"),
+            "target_gte": fees.get("bar") or 0.80,
+        },
+        "label": (
+            f"firm_health={'ok' if not alerts else 'ALERT'} "
+            f"alerts={','.join(alerts) or 'none'} "
+            f"bleed={bleed_live.get('ratio')} "
+            f"misplaced=${misplaced.get('misplaced_usd')} "
+            f"opp_n={opp.get('n')} fee={fee_rate}"
+        ),
+        "note": (
+            "Firm-health observe (bleed <0.5, barbell, daily R settle-only, "
+            "profit-lock safe-mode, opp-cost clock, fee-ledger ≥80%). "
+            "Never softens floors; never arms LIVE_ORDERS."
+        ),
+    }
+
+
 def promote_distance_observe(
     root: str | None = None,
     *,
@@ -6536,11 +6644,14 @@ def plan_summary(
         "exit_quality": exit_quality_observe(root, bots=bots),
         "selective_throughput": selective_throughput_observe(root, bots=bots),
         "promote_distance": promote_distance_observe(root, bots=bots),
+        "firm_health": firm_health_observe(root, bots=bots, cfg=cfg),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,
         "next_tickets": [
-            "observe Chicago weeks / staff hillclimb pick",
+            "staff hillclimb pick (TC-151 process)",
+            "dual-control / LIVE_ORDERS (deferred)",
+            "force-armed evidence catch-up (deferred)",
         ],
         "note": "Positive-ROI plan instrumentation. No profit guarantee.",
     }
