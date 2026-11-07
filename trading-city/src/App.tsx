@@ -2496,7 +2496,36 @@ export default function App() {
                     })()}
                   </span>
                 </div>
-                                <div className="vault-board-row">
+                <div className="vault-board-row">
+                  <span className="vb-label">sunday twins</span>
+                  <span>
+                    {(() => {
+                      const cov = (
+                        snap?.desk as
+                          | {
+                              sunday_twin_coverage?: {
+                                label?: string
+                                twins_n?: number
+                                fields_n?: number
+                              }
+                            }
+                          | undefined
+                      )?.sunday_twin_coverage
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        cov?.label ||
+                        (cov?.twins_n != null
+                          ? `sunday twins=${cov.twins_n} fields=${cov.fields_n ?? '?'}`
+                          : 'sunday twins observe')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">feat store</span>
                   <span>
                     {(() => {

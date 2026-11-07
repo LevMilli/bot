@@ -3751,12 +3751,15 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         f"quiet_age={quiet_age_h}h" if quiet_age_h is not None else "quiet_age=n/a"
     )
     l7_line = str(health.get("l7_observe_label") or "L7 observe pending")
+    sunday_cov = sunday_twin_coverage(root=root)
+    sunday_cov_line = str(sunday_cov.get("label") or "sunday twins observe")
     soft_copy = (
         f"**Living doctor** (paper · floors locked · live=False)\n"
         f"{doc['label']} · failed=[{failed_ids}]\n"
         f"{ritual_line}\n"
         f"{doctor_line}\n"
         f"{l7_line}\n"
+        f"{sunday_cov_line}\n"
         f"sunday quiet {quiet_age_label} (observe · never softens floors)\n"
         f"ritual draft: make living-ritual-discord (staff paste · never auto-posts)\n"
         f"_never places · never softens floors · never enables live_"
@@ -3765,6 +3768,8 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     doc["discord"] = soft_copy
     doc["l7_observe_ok"] = health.get("l7_observe_ok")
     doc["l7_observe_label"] = l7_line
+    doc["sunday_twin_coverage"] = sunday_cov
+    doc["sunday_twin_coverage_label"] = sunday_cov_line
     doc["sunday_quiet_age_label"] = quiet_age_label
     doc["ritual_draft_cmd"] = "make living-ritual-discord"
     if record:
