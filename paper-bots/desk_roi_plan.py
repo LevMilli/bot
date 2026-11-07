@@ -2908,12 +2908,32 @@ def effective_inx_ask_band(root: str | None, cfg: dict | None = None) -> dict:
     }
 
 
-def run_inx_band_research(root: str | None, history: list | None = None) -> dict:
+def inx_history_from_bots(bots: list | None = None) -> list:
+    """Collect kalshi-sp / kalshi-sized settle rows for band research (ask+pnl)."""
+    rows = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        if str(bot.get("id") or "") not in ("kalshi-sp", "kalshi-sized", "kalshi-sp500"):
+            continue
+        for h in bot.get("history") or []:
+            if isinstance(h, dict):
+                rows.append(h)
+    return rows
+
+
+def run_inx_band_research(
+    root: str | None,
+    history: list | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
     """Score research bands; never writes live config. Live stays 80–90 until staff promote."""
+    hist = list(history) if history is not None else inx_history_from_bots(bots)
     live = inx_live_band(root)
     bands = []
     for b in INX_RESEARCH_BANDS:
-        scored = inx_band_research_score(history or [], lo=b["lo"], hi=b["hi"])
+        scored = inx_band_research_score(hist, lo=b["lo"], hi=b["hi"])
         bands.append({
             **b,
             **scored,
@@ -2932,10 +2952,13 @@ def run_inx_band_research(root: str | None, history: list | None = None) -> dict
         "staff_approved": bool(live.get("staff_approved")),
         "bands": bands,
         "leader": ranked[0]["id"] if ranked else None,
+        "history_n": len(hist),
         "fee_floors_locked": True,
+        "auto_promote": False,
         "note": (
             "Research harness only — does not change kalshi-sp/sized ask band. "
-            "Promote only via staff_promote_inx_band after artifact + Chicago week."
+            "Promote only via staff_promote_inx_band after artifact + Chicago week "
+            "(no force on money-path CLI)."
         ),
         "at": _now(),
     }
@@ -2946,6 +2969,29 @@ def run_inx_band_research(root: str | None, history: list | None = None) -> dict
     store["latest"] = report
     _save(path, store)
     return report
+
+
+def staff_promote_inx_leader(
+    root: str | None = None,
+    *,
+    note: str = "",
+) -> dict:
+    """No-force promote of research leader when promote_ready. Never softens floors."""
+    status = inx_band_promote_status(root)
+    leader = status.get("leader")
+    if not status.get("promote_ready") or not leader:
+        return {
+            "ok": False,
+            "reason": status.get("reason") or "not promote_ready",
+            "status": status,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "paper_only": True,
+            "force": False,
+        }
+    return staff_promote_inx_band(
+        root, str(leader), note=note or f"staff promote leader {leader}", force=False,
+    )
 
 
 def inx_band_promote_status(root: str | None = None) -> dict:

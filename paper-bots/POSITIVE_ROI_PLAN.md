@@ -1673,7 +1673,16 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 
 | Ticket | Where |
 | --- | --- |
-| INX research week — promote non-default band only if leader n≥20 beats 80–90 | `run_inx_band_research` → `staff_promote_inx_band` (no force) |
+| INX research evidence thin — keep 80–90 until leader n≥20 beats live | `make living-inx-research` / `living-inx-status` |
+
+### INX research no-force path
+
+| Ticket | Where |
+| --- | --- |
+| History from kalshi-sp/sized bots | `inx_history_from_bots` |
+| Research run | `run_inx_band_research` · `make living-inx-research` |
+| Promote-ready board | `inx_band_promote_status` · `make living-inx-status` |
+| Leader promote (no force) | `staff_promote_inx_leader` · `make living-inx-band-promote` |
 | Green_boost evidence catch-up — 2 Chicago weeks M1≥0 + CLV≥52% | `sports_green_boost_status.ready` (staff already armed) |
 | Hard-stop shadow n≥30 EV≥0 — drop force dependency | `sports_hard_stop_shadow_summary.promote_ready` |
 | Near-miss labeled n≥30 EV≥0 — drop force; optional soft-p second | `near_miss_promote_status` → `staff_promote_near_miss_soft("p")` |
