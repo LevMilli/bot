@@ -1362,11 +1362,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Selfcheck `sunday_twin_*` fields | `living_self_check` |
 | Vault sunday twins map n | App vault row |
 
+### Living upgrade — timer + status ritual live (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `timer_label` on ritual_live_labels | desk_living |
+| Ritual observe timer sunday row | staff_living_ritual |
+| Status text timer/ritual live/twins sunday | staff_living_status |
+| Selfcheck `ritual_live_*` | living_self_check |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — observe live/selfcheck twins shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — timer/status ritual live shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 
