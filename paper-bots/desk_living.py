@@ -1274,6 +1274,14 @@ def living_compact_card(
             f"{living_money_path_tip(src).get('label') or 'money-path observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never invents PnL)"
         ),
+        "guardrails_sunday_quiet": (
+            f"{living_guardrails_tip(src).get('label') or 'guardrails observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "surfaces_sunday_quiet": (
+            f"{living_surface_index(src).get('label') or 'surfaces observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2381,13 +2389,23 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             teller["memory_line"] = base
             teller["label"] = base
         board["teller_living"] = teller
-    # Refresh hud twin now that compact exists (accurate twins_n).
+    # Refresh hud / surfaces / guardrails twins now that compact + catalog exist.
     compact = board.get("compact") if isinstance(board.get("compact"), dict) else None
     if compact is not None:
-        hud = living_hud_summary(board)
         quiet_bit = compact.get("sunday_quiet_age_label") or compact.get("quiet_age_label") or "quiet_age=n/a"
+        hud = living_hud_summary(board)
         compact["hud_sunday_quiet"] = (
             f"{hud.get('label') or 'hud observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        rails = living_guardrails_tip(board)
+        compact["guardrails_sunday_quiet"] = (
+            f"{rails.get('label') or 'guardrails observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        surfaces = living_surface_index(board)
+        compact["surfaces_sunday_quiet"] = (
+            f"{surfaces.get('label') or 'surfaces observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
         board["compact"] = compact
@@ -2541,6 +2559,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     money = living_money_path_tip(board)
     slim["money_path"] = money
     slim["money_path_label"] = money.get("label")
+    rails = living_guardrails_tip(board)
+    slim["guardrails"] = rails
+    slim["guardrails_label"] = rails.get("label")
+    surfaces = living_surface_index(board)
+    slim["surfaces"] = surfaces
+    slim["surfaces_label"] = surfaces.get("label")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -2950,6 +2974,16 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{money_export.get('label') or 'money-path observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never invents PnL)"
     )
+    rails_export = living_guardrails_tip(board)
+    slim["guardrails_sunday_quiet"] = (
+        f"{rails_export.get('label') or 'guardrails observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    surfaces_export = living_surface_index(board)
+    slim["surfaces_sunday_quiet"] = (
+        f"{surfaces_export.get('label') or 'surfaces observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3163,6 +3197,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_money_path_sunday_quiet"] = (
             compact.get("money_path_sunday_quiet") or slim.get("money_path_sunday_quiet")
+        )
+        slim["compact_guardrails_sunday_quiet"] = (
+            compact.get("guardrails_sunday_quiet") or slim.get("guardrails_sunday_quiet")
+        )
+        slim["compact_surfaces_sunday_quiet"] = (
+            compact.get("surfaces_sunday_quiet") or slim.get("surfaces_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4288,6 +4328,81 @@ def living_money_path_tip(board: dict | None = None, root: str | None = None) ->
         "floors_ok": floors_ok,
         "label": label,
         "note": "Money-path observe tip — staff only; never invents fills or softens floors.",
+    }
+
+
+def living_guardrails_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Hard-rules observe tip (paper / floors / Discord) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    floors = src.get("fee_floors_assert") if isinstance(src.get("fee_floors_assert"), dict) else {}
+    floors_ok = floors.get("all_ok")
+    paper_only = src.get("paper_only") is not False
+    live = src.get("live_orders_enabled")
+    locked = src.get("fee_floors_locked") is not False
+    label = (
+        f"guardrails paper={paper_only} live={live} floors_locked={locked} "
+        f"floors={'ok' if floors_ok is True else 'soft' if floors_ok is False else 'n/a'} "
+        "discord=paste-only "
+        "(sports 0.06 / BTC+commodity 0.05 / INX+DEX 0.02 · never softens · never auto-posts)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "live_orders_enabled": live,
+        "floors_ok": floors_ok,
+        "floors_locked": locked,
+        "discord_auto_post": False,
+        "venue_floors": {
+            "sports": 0.06,
+            "btc_commodity": 0.05,
+            "inx_dex": 0.02,
+        },
+        "label": label,
+        "note": "Guardrails observe tip — staff only; never softens floors; Discord never auto-posts.",
+    }
+
+
+def living_surface_index(board: dict | None = None, root: str | None = None) -> dict:
+    """Soft-max surface index: sunday twins + catalog headroom (not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    # Avoid compact rebuild recursion when called while building living_compact_card.
+    compact = src.get("compact") if isinstance(src.get("compact"), dict) else None
+    if compact is not None:
+        twins_n = sum(1 for k in compact if str(k).endswith("_sunday_quiet"))
+        fields_n = None
+    else:
+        twins_n = None
+        fields_n = None
+    catalog = src.get("chip_catalog") if isinstance(src.get("chip_catalog"), dict) else {}
+    chips_n = catalog.get("chips_n")
+    if chips_n is None:
+        chips_n = len(
+            [
+                c
+                for c in (src.get("chips") or [])
+                if isinstance(c, dict) and c.get("board_chip") is not False
+            ]
+        )
+    soft_max = int(catalog.get("soft_max") or CHIP_CATALOG_SOFT_MAX)
+    headroom = max(0, soft_max - int(chips_n or 0))
+    twins_bit = twins_n if twins_n is not None else "?"
+    label = (
+        f"surfaces twins={twins_bit} chips={chips_n}/{soft_max} headroom={headroom} "
+        f"(observe · soft-max · no new chips · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "twins_n": twins_n,
+        "fields_n": fields_n,
+        "chips_n": chips_n,
+        "soft_max": soft_max,
+        "headroom": headroom,
+        "over": bool(int(chips_n or 0) > soft_max),
+        "label": label,
+        "note": "Surface index — observe-only soft-max audit; not a board chip.",
     }
 
 
