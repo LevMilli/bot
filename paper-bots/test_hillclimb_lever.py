@@ -63,6 +63,11 @@ class HillclimbLever(unittest.TestCase):
             st = desk_roi_plan.hillclimb_lever_status(tmp)
             self.assertIsNone(st["active"])
             self.assertFalse(st["auto_revert"])
+            self.assertTrue(st["process_only"])
+            self.assertEqual(st["ticket"], "TC-151")
+            self.assertTrue(st["needs_staff_pick"])
+            self.assertTrue(st["evidence_thin"])
+            self.assertIn("THIN", st["label"])
 
     def test_capture_week_reads_active_lever(self):
         with tempfile.TemporaryDirectory() as tmp:

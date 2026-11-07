@@ -1723,7 +1723,7 @@ def main() -> int:
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse",
-            "exit-quality", "promote-distance",
+            "exit-quality", "promote-distance", "hillclimb-lever",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3647,6 +3647,11 @@ def main() -> int:
         out = desk_roi_plan.promote_distance_observe(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ready_n", 0) > 0 and not out.get("evidence_thin") else 2
+    if args.action == "hillclimb-lever":
+        # TC-151 process observe — never auto-picks a lever.
+        out = desk_roi_plan.hillclimb_lever_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("active_this_week") and not out.get("kill") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

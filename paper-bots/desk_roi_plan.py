@@ -5769,20 +5769,42 @@ def hillclimb_lever_status(root: str | None = None) -> dict:
     kill = hillclimb_kill_status(root)
     week = _chicago_week_id()
     same_week = bool(active and str(active.get("week") or "") == week)
+    needs_staff_pick = not same_week
+    kill_flag = bool(kill.get("kill"))
+    # Process ticket TC-151: observe Chicago weeks / staff hillclimb pick.
+    # Agent cannot pick for staff — surface distance-to-action only.
     return {
         "paper_only": True,
         "fee_floors_locked": True,
+        "observe_only": True,
+        "process_only": True,  # TC-151 — staff must pick; no auto
+        "ticket": "TC-151",
         "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
         "active": active,
         "week": week,
         "active_this_week": same_week,
-        "kill": bool(kill.get("kill")),
+        "needs_staff_pick": needs_staff_pick,
+        "evidence_thin": needs_staff_pick or kill_flag,
+        "kill": kill_flag,
         "kill_action": (kill.get("status") or {}).get("action") if isinstance(kill.get("status"), dict) else kill.get("action"),
         "auto_promote": False,
         "auto_revert": False,
+        "label": (
+            f"hillclimb week={week} "
+            + (
+                f"active={active.get('lever')} KILL"
+                if kill_flag and active
+                else (
+                    f"active={active.get('lever')}"
+                    if same_week and active
+                    else "THIN — needs staff pick this Chicago week"
+                )
+            )
+        ),
         "note": (
-            "Staff picks one allowlisted lever per Chicago week. "
-            "Kill flag → demote before next idea. No auto param write; floors locked."
+            "TC-151 process: staff picks one allowlisted lever per Chicago week. "
+            "Kill flag → demote before next idea. No auto param write; floors locked. "
+            "Agent observe-only — never auto-picks."
         ),
     }
 
