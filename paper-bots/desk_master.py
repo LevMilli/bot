@@ -704,6 +704,32 @@ def master_summary(
             plan["near_miss_promote"] = desk_roi_plan.near_miss_promote_status(root)
         except Exception:
             plan["near_miss_promote"] = None
+        try:
+            plan["selective_kill"] = desk_roi_plan.selective_kill_status(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["selective_kill"] = None
+        try:
+            plan["tip_funnel"] = desk_roi_plan.tip_funnel_board(root)
+        except Exception:
+            plan["tip_funnel"] = None
+        try:
+            plan["gate_a_pilot"] = desk_roi_plan.gate_a_pilot_btc_calendar(root)
+        except Exception:
+            plan["gate_a_pilot"] = None
+        try:
+            plan["eligible_fill_funnel"] = desk_roi_plan.eligible_fill_funnel(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["eligible_fill_funnel"] = None
+        try:
+            plan["throughput_vs_m1"] = desk_roi_plan.throughput_vs_m1_board(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["throughput_vs_m1"] = None
     except Exception:
         plan = None
     priority = [

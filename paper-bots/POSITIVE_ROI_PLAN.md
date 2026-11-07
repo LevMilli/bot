@@ -1976,6 +1976,22 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Masters | `roi_plan.raise_phi_decisions` |
 | Never writes Φ | `auto_write_phi=False` forever |
 
+
+
+### E3–E4 selective kill / tip funnel / Gate A pilot / throughput
+
+| Ticket | Where |
+| --- | --- |
+| Selective +1 attempt journal | `record_selective_attempt` (edge/z/depth) |
+| 5-green-day kill | `selective_kill_status` / `selective_kill_active` → base max_buys only |
+| Tip-window funnel per league | `record_tip_funnel` / `tip_funnel_board` (NFL…NHL) |
+| Opp-cost on BTC + commodity | `note_pending_high_edge` / `flush_opp_cost_on_buy` mirrors sports |
+| Helper advice schema | `helpers.advice_schema.validate_helper_advice` |
+| Incubation idea-bank only | `incubation_blocks_auto` weather/econ/Polymarket refuse main AUTO |
+| Gate A pilot densify | `gate_a_pilot_btc_calendar` (observe · no staff arm) |
+| Eligible-fill + throughput vs M1 | `eligible_fill_funnel` / `throughput_vs_m1_board` |
+| Masters | `roi_plan.selective_kill` · `tip_funnel` · `gate_a_pilot` · `eligible_fill_funnel` · `throughput_vs_m1` |
+
 ## Hard rules unchanged
 
 - Venue floors: sports 0.06 / BTC+commodity 0.05 / INX+DEX 0.02

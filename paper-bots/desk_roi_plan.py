@@ -57,6 +57,28 @@ EMPTY_CARD_NAME = "desk_empty_card.json"
 BLEED_WEEK_NAME = "desk_bleed_week.json"
 NEAR_MISS_PROMOTE_NAME = "desk_near_miss_promote.json"
 
+# E3–E4 boards live in desk_roi_e4 (re-exported for desk_roi_plan.* API).
+from desk_roi_e4 import (  # noqa: F401
+    INCUBATION_IDEA_BANK_ONLY,
+    INCUBATION_IDEA_BANK_PREFIXES,
+    LOCKED_VENUE_FLOORS,
+    SELECTIVE_KILL_GREEN_DAYS,
+    TIP_FUNNEL_LEAGUES,
+    TIP_FUNNEL_STAGES,
+    eligible_fill_funnel,
+    gate_a_pilot_btc_calendar,
+    incubation_blocks_auto,
+    incubation_idea_bank_only,
+    note_selective_green_day,
+    record_selective_attempt,
+    record_tip_funnel,
+    selective_kill_active,
+    selective_kill_status,
+    tip_funnel_board,
+    throughput_vs_m1_board,
+)
+
+
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
 MAX_HARD_STOP_ROWS = 2000
@@ -68,6 +90,19 @@ ADVERSE_COOL_MINUTES = 20
 # Phase 6: Master only after 2 consecutive Chicago weeks of all M-codes.
 GRADUATION_WEEKS_REQUIRED = 2
 GRADUATION_CODES = ("M1", "M2", "M3", "M4", "M5", "M6", "M7")
+GRADUATION_DENIAL_CODES = (
+    "M1_fail",
+    "M2_fail",
+    "M3_fail",
+    "M4_fail",
+    "M5_fail",
+    "M6_fail",
+    "M7_fail",
+    "thin_n",
+    "fee_ledger",
+    "cli_bypass",
+    "news_fail_open",
+)
 
 # Phase 7: meme sleeve retirement clock (recommend pause; staff re-arms).
 MEME_RETIRE_WINDOW_DAYS = 20
@@ -432,6 +467,7 @@ def record_latency(
     bot: str,
     seconds: float,
     note: str = "",
+    stage: str | None = None,
 ) -> dict:
     sec = _finite(seconds)
     if sec is None or sec < 0:
@@ -443,6 +479,9 @@ def record_latency(
         "seconds": round(sec, 3),
         "note": str(note or "")[:120],
     }
+    stage_s = str(stage or "").strip()[:40]
+    if stage_s:
+        row["stage"] = stage_s
     rows = list(state.get("rows") or [])
     rows.append(row)
     state["rows"] = rows[-MAX_LAT_ROWS:]
@@ -452,6 +491,16 @@ def record_latency(
     state["last_at"] = row["at"]
     save_latency(state, root)
     return row
+
+
+def _latency_percentile(vals: list[float], p: float) -> float | None:
+    """Inclusive percentile on a sorted list. p in [0, 1]."""
+    if not vals:
+        return None
+    if len(vals) == 1:
+        return float(vals[0])
+    idx = int(round((len(vals) - 1) * max(0.0, min(1.0, float(p)))))
+    return float(vals[idx])
 
 
 def latency_p50(root: str | None = None, bot: str | None = None) -> dict:
@@ -470,7 +519,8 @@ def latency_p50(root: str | None = None, bot: str | None = None) -> dict:
         ]
     vals.sort()
     n = len(vals)
-    p50 = vals[n // 2] if n else None
+    p50 = _latency_percentile(vals, 0.50)
+    p95 = _latency_percentile(vals, 0.95)
     # Sports bar 45s; 15m towers 20s — caller passes bot for bar pick.
     bar = 45.0 if bot == "sports-gap" else 20.0
     return {
@@ -478,9 +528,82 @@ def latency_p50(root: str | None = None, bot: str | None = None) -> dict:
         "bot": bot,
         "n": n,
         "p50_s": round(p50, 3) if p50 is not None else None,
+        "p95_s": round(p95, 3) if p95 is not None else None,
         "bar_s": bar,
         "pass": p50 is not None and n >= 5 and p50 <= bar,
     }
+
+
+def m4_latency_board(root: str | None = None) -> dict:
+    """M4 board: sports ≤45s / 15m ≤20s with p50+p95 and Chicago-day breach alert."""
+    towers = [
+        ("sports-gap", 45.0),
+        ("btc15m", 20.0),
+        ("commodity-15m", 20.0),
+    ]
+    day = _chicago_day()
+    state = load_latency(root)
+    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict)]
+    by_bot: dict[str, dict] = {}
+    breaches = []
+    for bot, bar in towers:
+        bot_rows = [r for r in rows if str(r.get("bot") or "") == bot]
+        day_rows = [
+            r for r in bot_rows
+            if str(r.get("at") or "")[:10] == day or str(r.get("at") or "").startswith(day)
+        ]
+        sample = day_rows if day_rows else bot_rows
+        vals = sorted(
+            float(r["seconds"])
+            for r in sample
+            if _finite(r.get("seconds")) is not None
+        )
+        n = len(vals)
+        p50 = _latency_percentile(vals, 0.50)
+        p95 = _latency_percentile(vals, 0.95)
+        stages: dict[str, int] = {}
+        for r in bot_rows:
+            st = str(r.get("stage") or "").strip()
+            if st:
+                stages[st] = int(stages.get(st) or 0) + 1
+        ok = p50 is not None and n >= 5 and p50 <= bar
+        day_breach = bool(
+            day_rows
+            and any((_finite(r.get("seconds")) or 0) > bar for r in day_rows)
+        )
+        if day_breach or (n >= 5 and p50 is not None and p50 > bar):
+            breaches.append(bot)
+        by_bot[bot] = {
+            "bot": bot,
+            "n": n,
+            "day_n": len(day_rows),
+            "p50_s": round(p50, 3) if p50 is not None else None,
+            "p95_s": round(p95, 3) if p95 is not None else None,
+            "bar_s": bar,
+            "pass": ok,
+            "day_breach": day_breach,
+            "stages": stages,
+        }
+    alert = bool(breaches)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "chicago_day": day,
+        "towers": by_bot,
+        "breaches": breaches,
+        "alert": alert,
+        "ok": not alert,
+        "label": (
+            f"m4_latency={'ALERT' if alert else 'ok'} "
+            f"breaches={','.join(breaches) or 'none'} day={day}"
+        ),
+        "note": (
+            "M4 latency board — sports p50≤45s, BTC/commodity p50≤20s; "
+            "p95 surfaced; Chicago-day breach alert. Floors locked."
+        ),
+    }
+
 
 
 # ---- Firm bleed + capital misplaced ----------------------------------------
@@ -2404,6 +2527,156 @@ def load_baseline(root: str | None = None) -> dict:
     return _load(_path(BASELINE_NAME, root), {"paper_only": True, "baselines": [], "latest": None})
 
 
+def _firm_pnl_proxy(bots: list | None) -> float:
+    """Sum of today (preferred) else realized across bot rows."""
+    total = 0.0
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        today = _finite(bot.get("today"))
+        if today is not None:
+            total += today
+            continue
+        realized = _finite(bot.get("realized"))
+        if realized is not None:
+            total += realized
+    return round(total, 4)
+
+
+def distance_to_zero_board(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Distance-to-zero vs W0 baseline series (−$225 class firm PnL climb)."""
+    store = load_baseline(root)
+    baselines = [b for b in (store.get("baselines") or []) if isinstance(b, dict)]
+    latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    w0 = None
+    for b in baselines:
+        if str(b.get("label") or "") == "W0":
+            w0 = b
+            break
+    if w0 is None and baselines:
+        w0 = baselines[0]
+    if w0 is None:
+        w0 = latest
+
+    def _artifact_pnl(art: dict | None) -> float | None:
+        if not isinstance(art, dict):
+            return None
+        towers = art.get("towers") if isinstance(art.get("towers"), list) else []
+        if towers:
+            return round(
+                sum((_finite(t.get("today")) or 0.0) for t in towers if isinstance(t, dict)),
+                4,
+            )
+        return None
+
+    w0_pnl = _artifact_pnl(w0)
+    now_pnl = _firm_pnl_proxy(bots) if bots is not None else _artifact_pnl(latest)
+    if now_pnl is None:
+        now_pnl = 0.0
+    distance = round(max(0.0, -float(now_pnl)), 4)
+    delta_vs_w0 = None
+    if w0_pnl is not None:
+        delta_vs_w0 = round(float(now_pnl) - float(w0_pnl), 4)
+    series = []
+    for art in baselines[-24:]:
+        pnl = _artifact_pnl(art)
+        series.append({
+            "label": art.get("label"),
+            "captured_at": art.get("captured_at"),
+            "pnl": pnl,
+            "distance_to_zero": round(max(0.0, -(pnl or 0.0)), 4) if pnl is not None else None,
+        })
+    if bots is not None:
+        series.append({
+            "label": "live",
+            "captured_at": _now(),
+            "pnl": now_pnl,
+            "distance_to_zero": distance,
+        })
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "w0_label": (w0 or {}).get("label") if w0 else None,
+        "w0_pnl": w0_pnl,
+        "now_pnl": now_pnl,
+        "distance_to_zero": distance,
+        "delta_vs_w0": delta_vs_w0,
+        "at_zero": float(now_pnl) >= 0.0,
+        "series": series,
+        "series_n": len(series),
+        "label": (
+            f"distance_to_zero={distance} now={now_pnl} "
+            f"w0={w0_pnl} delta_vs_w0={delta_vs_w0}"
+        ),
+        "note": (
+            "Distance-to-zero vs W0 (−$225 class). Climb firm taxed PnL to 0; "
+            "never invent fills. Floors locked."
+        ),
+    }
+
+
+def firm_heat_map(
+    root: str | None = None,
+    bots: list | None = None,
+) -> dict:
+    """Open-risk heat by tower for Masters portfolio view."""
+    _ = root
+    towers = []
+    total = 0.0
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bid = str(bot.get("id") or "")
+        if not bid:
+            continue
+        risk = _finite(bot.get("open_risk"))
+        if risk is None:
+            risk = 0.0
+        risk = max(0.0, float(risk))
+        total += risk
+        today = _finite(bot.get("today"))
+        towers.append({
+            "bot": bid,
+            "open_risk": round(risk, 4),
+            "today": today,
+            "fee_clear": bid in FEE_CLEAR,
+        })
+    for t in towers:
+        share = (t["open_risk"] / total) if total > 1e-12 else 0.0
+        t["share"] = round(share, 4)
+        if t["open_risk"] <= 0:
+            t["heat"] = "cold"
+        elif t.get("today") is not None and float(t["today"]) < 0 and share >= 0.25:
+            t["heat"] = "hot"
+        elif share >= 0.40:
+            t["heat"] = "warm"
+        else:
+            t["heat"] = "ok"
+    towers.sort(key=lambda r: (-float(r.get("open_risk") or 0), str(r.get("bot") or "")))
+    hottest = towers[0]["bot"] if towers and float(towers[0].get("open_risk") or 0) > 0 else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "total_open_risk": round(total, 4),
+        "towers": towers,
+        "hottest": hottest,
+        "label": (
+            f"firm_heat total={round(total, 2)} hottest={hottest or 'none'} "
+            f"towers={len(towers)}"
+        ),
+        "note": (
+            "Firm open-risk heat map by tower — recycle hot loser risk into "
+            "fee-clear. Floors locked."
+        ),
+    }
+
+
 # ---- Near-miss weekly card + staff soft-gate promote -----------------------
 
 def _near_miss_rows(root: str | None) -> list[dict]:
@@ -3339,15 +3612,36 @@ def green_or_gone_status(bots: list | None = None) -> dict:
 
 # ---- Sports CLV completeness -----------------------------------------------
 
+def _clv_has_entry(row: dict) -> bool:
+    return row.get("fair_entry") is not None or row.get("entry_fair") is not None
+
+
+def _clv_has_close(row: dict) -> bool:
+    return row.get("fair_close") is not None or row.get("close_fair") is not None
+
+
+def _clv_is_settled_row(row: dict) -> bool:
+    """Settled when exit says settle OR any close/clv field is present."""
+    exit_r = str(row.get("exit") or row.get("exit_reason") or "").lower()
+    if "settled" in exit_r or exit_r.startswith("settle"):
+        return True
+    if row.get("clv") is not None or _clv_has_close(row):
+        return True
+    return False
+
+
 def clv_row_complete(row: dict | None) -> bool:
-    """True when a sports CLV journal row has the fields needed for M2/CLV learning."""
+    """True when a sports CLV journal row has the fields needed for M2/CLV learning.
+
+    Open/pre-settle rows need entry fair only. Settled rows fail-closed unless
+    fair_entry + close_fair (or aliases) + clv are all present.
+    """
     if not isinstance(row, dict):
         return False
-    if row.get("fair_entry") is None and row.get("entry_fair") is None:
+    if not _clv_has_entry(row):
         return False
-    if row.get("clv") is None and row.get("fair_close") is None and row.get("close_fair") is None:
-        # Allow open rows that only have entry fair (pre-settle); still "complete enough" for entry log.
-        return True
+    if _clv_is_settled_row(row):
+        return _clv_has_close(row) and row.get("clv") is not None
     return True
 
 
@@ -3360,14 +3654,21 @@ def clv_completeness(root: str | None = None) -> dict:
         rows = []
     ok = sum(1 for r in rows if clv_row_complete(r))
     n = len(rows)
-    settled = [
-        r for r in rows
-        if r.get("clv") is not None or r.get("fair_close") is not None or r.get("close_fair") is not None
-    ]
-    settled_ok = sum(
-        1 for r in settled
-        if (r.get("fair_entry") is not None or r.get("entry_fair") is not None) and r.get("clv") is not None
-    )
+    settled = [r for r in rows if _clv_is_settled_row(r)]
+    settled_ok = sum(1 for r in settled if clv_row_complete(r))
+    missing_close = [
+        {
+            "ticker": r.get("ticker"),
+            "exit": r.get("exit") or r.get("exit_reason"),
+            "has_entry": _clv_has_entry(r),
+            "has_close": _clv_has_close(r),
+            "has_clv": r.get("clv") is not None,
+        }
+        for r in settled
+        if not _clv_has_close(r)
+    ][:12]
+    alert = "settle_missing_close_fair" if missing_close else None
+    settled_pass = (not settled) or settled_ok == len(settled)
     return {
         "paper_only": True,
         "n": n,
@@ -3376,9 +3677,17 @@ def clv_completeness(root: str | None = None) -> dict:
         "settled_complete": settled_ok,
         "rate": round(ok / n, 4) if n else None,
         "settled_rate": round(settled_ok / len(settled), 4) if settled else None,
-        "pass": (n == 0) or (ok == n and (not settled or settled_ok == len(settled))),
-        "note": "Every sports settle should log entry fair + clv.",
+        "pass": (n == 0) or (ok == n and settled_pass),
+        "fail_closed": True,
+        "alert": alert,
+        "missing_close_fair_n": len(missing_close),
+        "missing_close_fair_sample": missing_close,
+        "note": (
+            "Every sports settle must log fair_entry + close_fair + clv. "
+            "Incomplete settled rows fail closed."
+        ),
     }
+
 
 
 # ---- INX band research harness (no live change) ----------------------------
@@ -5664,9 +5973,9 @@ def record_adverse_fill(
     if drop + 1e-12 < ADVERSE_MARK_DROP:
         return {"cooled": False, "drop": round(drop, 4)}
     path = _path(ADVERSE_COOL_NAME, root)
-    state = _load(path, {"paper_only": True, "bots": {}})
+    state = _load(path, {"paper_only": True, "bots": {}, "history": []})
     until = time.time() + ADVERSE_COOL_MINUTES * 60
-    state.setdefault("bots", {})[str(bot)] = {
+    event = {
         "until": until,
         "at": _now(),
         "ticker": ticker,
@@ -5674,7 +5983,12 @@ def record_adverse_fill(
         "mark": mark,
         "drop": round(drop, 4),
         "note": str(note or "")[:160],
+        "bot": str(bot),
     }
+    state.setdefault("bots", {})[str(bot)] = event
+    hist = list(state.get("history") or [])
+    hist.append({k: event[k] for k in ("at", "bot", "ticker", "entry", "mark", "drop", "note")})
+    state["history"] = hist[-500:]
     state["last_at"] = _now()
     _save(path, state)
     return {
@@ -5816,7 +6130,7 @@ def load_incubation(root: str | None = None) -> dict:
 
 
 def incubation_status(root: str | None, series: str | None) -> dict:
-    """Lane for one series: main | incubation | ready_to_graduate | graduated."""
+    """Lane for one series: main | incubation | ready_to_graduate | graduated | idea_bank."""
     key = _series_key(series)
     store = load_incubation(root)
     graduated = {str(s).upper() for s in (store.get("graduated") or [])}
@@ -5825,7 +6139,11 @@ def incubation_status(root: str | None, series: str | None) -> dict:
     n = int(row.get("n") or 0)
     pnls = [p for p in (row.get("pnls") or []) if _finite(p) is not None]
     exp = round(sum(pnls) / len(pnls), 4) if pnls else None
-    if key and key in graduated:
+    idea_bank = bool(row.get("idea_bank_only")) or incubation_idea_bank_only(key or series)
+    auto_block = incubation_blocks_auto(key or series)
+    if idea_bank:
+        lane = "idea_bank"
+    elif key and key in graduated:
         lane = "graduated"
     elif key and key in INCUBATION_MAIN_SERIES and not row:
         lane = "main"
@@ -5840,13 +6158,22 @@ def incubation_status(root: str | None, series: str | None) -> dict:
         "n": n,
         "min_n": INCUBATION_MIN_N,
         "expectancy_taxed": exp,
-        "promote_ready": lane == "ready_to_graduate",
+        "promote_ready": lane == "ready_to_graduate" and not idea_bank,
         "auto_promote": False,
-        "main_tape": key in INCUBATION_MAIN_SERIES or lane in ("main", "graduated"),
+        "idea_bank_only": idea_bank,
+        "blocks_auto": auto_block,
+        "main_tape": (
+            not idea_bank
+            and (key in INCUBATION_MAIN_SERIES or lane in ("main", "graduated"))
+        ),
         "fee_floors_locked": True,
         "note": (
-            f"Incubation: need n≥{INCUBATION_MIN_N} fee-aware settles before staff graduate. "
-            "Paper trades allowed; no auto-promote."
+            "Idea-bank only (weather/econ/Polymarket) — refuse main AUTO."
+            if idea_bank
+            else (
+                f"Incubation: need n≥{INCUBATION_MIN_N} fee-aware settles before staff graduate. "
+                "Paper trades allowed; no auto-promote."
+            )
         ),
     }
 
@@ -5897,20 +6224,38 @@ def record_incubation_settle(
 
 
 def enroll_incubation(root: str | None, series: str, *, note: str = "") -> dict:
-    """Force a series into incubation (even if it was on the main list)."""
+    """Force a series into incubation (even if it was on the main list).
+
+    Weather/econ/Polymarket stay idea-bank only — refuse main AUTO.
+    """
     key = _series_key(series)
     if not key:
         return {"ok": False, "reason": "no series"}
+    idea_bank = incubation_idea_bank_only(key) or incubation_idea_bank_only(series)
+    auto_block = incubation_blocks_auto(key)
     store = load_incubation(root)
     graduated = [s for s in (store.get("graduated") or []) if str(s).upper() != key]
     store["graduated"] = graduated
     series_map = store.setdefault("series", {})
     if key not in series_map:
-        series_map[key] = {"series": key, "n": 0, "pnls": [], "bots": {}, "enrolled_at": _now()}
+        series_map[key] = {
+            "series": key, "n": 0, "pnls": [], "bots": {}, "enrolled_at": _now(),
+        }
     series_map[key]["note"] = str(note or "")[:160]
+    series_map[key]["idea_bank_only"] = bool(idea_bank)
+    if idea_bank:
+        series_map[key]["main_auto"] = False
+        series_map[key]["blocks_auto"] = auto_block
     store["series"] = series_map
     _save(_path(INCUBATION_NAME, root), store)
-    return {"ok": True, **incubation_status(root, key)}
+    status = incubation_status(root, key)
+    return {
+        "ok": True,
+        **status,
+        "main_auto": False if idea_bank else status.get("main_tape"),
+        "refused_main_auto": bool(idea_bank),
+        "blocks_auto": auto_block,
+    }
 
 
 def staff_graduate_incubation(
@@ -5923,6 +6268,16 @@ def staff_graduate_incubation(
     """Staff promote series out of incubation after n≥50 (unless force)."""
     key = _series_key(series)
     status = incubation_status(root, key)
+    auto_block = incubation_blocks_auto(key)
+    if auto_block and not force:
+        return {
+            "ok": False,
+            "reason": auto_block,
+            "status": status,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "refused_main_auto": True,
+        }
     if not force and not status.get("promote_ready"):
         return {
             "ok": False,
@@ -5973,7 +6328,15 @@ def incubation_board(root: str | None = None) -> dict:
 
 def incubation_blocks_promote(root: str | None, series: str | None) -> str:
     """Non-empty when series must not leave paper incubation yet."""
+    auto = incubation_blocks_auto(series)
+    if auto:
+        return auto
     status = incubation_status(root, series)
+    if status.get("lane") == "idea_bank":
+        return (
+            f"incubation idea-bank only: {status.get('series')} "
+            "— refuse main AUTO (weather/econ/Polymarket)"
+        )
     if status.get("lane") in ("main", "graduated", "ready_to_graduate", "unknown"):
         # ready_to_graduate still needs staff — block auto-promote paths
         if status.get("lane") == "ready_to_graduate":
@@ -6690,6 +7053,291 @@ def adverse_cool_status(root: str | None = None) -> dict:
     }
 
 
+def adverse_selection_autopsy(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Count fills that immediately mark ≤ −5¢ vs entry (adverse selection study)."""
+    path = _path(ADVERSE_COOL_NAME, root)
+    state = _load(path, {"paper_only": True, "bots": {}, "history": []})
+    hist = [r for r in (state.get("history") or []) if isinstance(r, dict)]
+    for bot, row in (state.get("bots") or {}).items():
+        if not isinstance(row, dict):
+            continue
+        drop = _finite(row.get("drop"))
+        if drop is None or drop + 1e-12 < ADVERSE_MARK_DROP:
+            continue
+        hist.append({
+            "bot": str(bot),
+            "ticker": row.get("ticker"),
+            "drop": drop,
+            "entry": row.get("entry"),
+            "mark": row.get("mark"),
+            "at": row.get("at"),
+            "source": "cool_snapshot",
+        })
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        for h in bot.get("history") or []:
+            if not isinstance(h, dict):
+                continue
+            entry = _finite(
+                h.get("entry_price")
+                if h.get("entry_price") is not None
+                else h.get("ask") if h.get("ask") is not None else h.get("entry")
+            )
+            mark = _finite(
+                h.get("exit_price")
+                if h.get("exit_price") is not None
+                else h.get("mark_price") if h.get("mark_price") is not None else h.get("bid")
+            )
+            if entry is None or mark is None or entry <= 0:
+                continue
+            drop = entry - mark
+            if drop + 1e-12 < ADVERSE_MARK_DROP:
+                continue
+            hist.append({
+                "bot": bot_id,
+                "ticker": h.get("ticker") or h.get("what"),
+                "drop": round(drop, 4),
+                "entry": entry,
+                "mark": mark,
+                "at": h.get("closed") or h.get("at"),
+                "source": "history",
+            })
+    seen = set()
+    uniq = []
+    for r in hist:
+        key = (str(r.get("bot")), str(r.get("ticker")), r.get("drop"))
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(r)
+    by_bot: dict[str, int] = {}
+    for r in uniq:
+        b = str(r.get("bot") or "")
+        by_bot[b] = int(by_bot.get(b) or 0) + 1
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "drop_bar": ADVERSE_MARK_DROP,
+        "n": len(uniq),
+        "by_bot": by_bot,
+        "sample": uniq[:12],
+        "label": f"adverse_selection n={len(uniq)} bar={ADVERSE_MARK_DROP}",
+        "note": (
+            "Adverse-selection autopsy — fills marking ≤−5¢ vs entry. "
+            "Observe only; floors locked."
+        ),
+    }
+
+
+def _history_tag_hits(
+    bots: list | None,
+    *,
+    bot_ids: set[str] | frozenset | None = None,
+    tag_keys: tuple[str, ...] = (),
+    tag_values_truthy: tuple[str, ...] = (),
+    note_needles: tuple[str, ...] = (),
+) -> list[dict]:
+    """Scan bot history/journals for tagged fills (autopsy helpers)."""
+    hits = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if bot_ids is not None and bot_id not in bot_ids:
+            continue
+        for h in list(bot.get("history") or []) + list(bot.get("closed") or []):
+            if not isinstance(h, dict):
+                continue
+            tags = h.get("tags") if isinstance(h.get("tags"), (list, tuple, set)) else []
+            tag_set = {str(t).lower() for t in tags}
+            flagged = False
+            for k in tag_keys:
+                if h.get(k) is True or str(h.get(k) or "").lower() in ("1", "true", "yes"):
+                    flagged = True
+                    break
+            for k in tag_values_truthy:
+                if k.lower() in tag_set:
+                    flagged = True
+                    break
+            note = str(h.get("note") or h.get("exit") or h.get("reason") or "").lower()
+            if not flagged and note_needles and any(n in note for n in note_needles):
+                flagged = True
+            if not flagged and any(n in tag_set for n in note_needles):
+                flagged = True
+            if not flagged:
+                continue
+            hits.append({
+                "bot": bot_id,
+                "ticker": h.get("ticker") or h.get("what"),
+                "at": h.get("closed") or h.get("at") or h.get("when"),
+                "pnl": _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd")),
+                "tags": list(tags)[:8],
+            })
+    return hits
+
+
+def news_gap_autopsy(root: str | None = None, *, bots: list | None = None) -> dict:
+    """Should-be-zero: BTC fills inside ±30m USD-high news window after fail-closed."""
+    hits = _history_tag_hits(
+        bots,
+        bot_ids=frozenset({"btc15m"}),
+        tag_keys=("news_near", "in_news_window", "news_gap", "news_window"),
+        tag_values_truthy=("news_near", "news_gap", "in_news_window", "news_window"),
+        note_needles=("news window", "news_gap", "usd high-impact", "news near"),
+    )
+    journal = _load(
+        _path("desk_news_gap_autopsy.json", root),
+        {"paper_only": True, "rows": []},
+    )
+    for r in journal.get("rows") or []:
+        if isinstance(r, dict):
+            hits.append({
+                "bot": str(r.get("bot") or "btc15m"),
+                "ticker": r.get("ticker"),
+                "at": r.get("at"),
+                "pnl": _finite(r.get("pnl")),
+                "tags": ["journal"],
+            })
+    n = len(hits)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "should_be_zero": True,
+        "n": n,
+        "bad_n": n,
+        "pass": n == 0,
+        "sample": hits[:12],
+        "label": f"news_gap_autopsy n={n} (should be 0)",
+        "note": (
+            "News-gap loser autopsy — any BTC fill inside ±30m USD-high window "
+            "should be zero after fail-closed. Floors locked."
+        ),
+    }
+
+
+def eia_gap_autopsy(root: str | None = None, *, bots: list | None = None) -> dict:
+    """Should-be-zero: energy fills inside EIA inventory blackout."""
+    hits = _history_tag_hits(
+        bots,
+        bot_ids=frozenset({"commodity-15m"}),
+        tag_keys=("eia_blackout", "eia_gap", "in_eia_window"),
+        tag_values_truthy=("eia_blackout", "eia_gap", "in_eia_window"),
+        note_needles=("eia blackout", "eia_gap", "inventory blackout"),
+    )
+    journal = _load(
+        _path("desk_eia_gap_autopsy.json", root),
+        {"paper_only": True, "rows": []},
+    )
+    for r in journal.get("rows") or []:
+        if isinstance(r, dict):
+            hits.append({
+                "bot": str(r.get("bot") or "commodity-15m"),
+                "ticker": r.get("ticker"),
+                "at": r.get("at"),
+                "pnl": _finite(r.get("pnl")),
+                "tags": ["journal"],
+            })
+    n = len(hits)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "should_be_zero": True,
+        "n": n,
+        "bad_n": n,
+        "pass": n == 0,
+        "sample": hits[:12],
+        "label": f"eia_gap_autopsy n={n} (should be 0)",
+        "note": (
+            "EIA-gap loser autopsy — energy fills inside inventory blackout "
+            "should be zero. Floors locked."
+        ),
+    }
+
+
+def weekend_inx_autopsy(root: str | None = None, *, bots: list | None = None) -> dict:
+    """Should-be-zero: INX (sp/sized) fills on weekend."""
+    hits = _history_tag_hits(
+        bots,
+        bot_ids=frozenset({"kalshi-sp", "kalshi-sized"}),
+        tag_keys=("weekend", "weekend_fill", "is_weekend"),
+        tag_values_truthy=("weekend", "weekend_fill", "WEEKEND"),
+        note_needles=("weekend", "WEEKEND"),
+    )
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if bot_id not in ("kalshi-sp", "kalshi-sized"):
+            continue
+        for h in list(bot.get("history") or []) + list(bot.get("closed") or []):
+            if not isinstance(h, dict):
+                continue
+            raw = str(h.get("closed") or h.get("at") or h.get("when") or "")[:10]
+            if len(raw) < 10 or raw[4] != "-" or raw[7] != "-":
+                continue
+            try:
+                from datetime import datetime
+                day = datetime.strptime(raw[:10], "%Y-%m-%d")
+                if day.weekday() < 5:
+                    continue
+            except Exception:
+                continue
+            hits.append({
+                "bot": bot_id,
+                "ticker": h.get("ticker") or h.get("what"),
+                "at": raw,
+                "pnl": _finite(h.get("pnl") if h.get("pnl") is not None else h.get("pnl_usd")),
+                "tags": ["weekend_date"],
+            })
+    journal = _load(
+        _path("desk_weekend_inx_autopsy.json", root),
+        {"paper_only": True, "rows": []},
+    )
+    for r in journal.get("rows") or []:
+        if isinstance(r, dict):
+            hits.append({
+                "bot": str(r.get("bot") or "kalshi-sp"),
+                "ticker": r.get("ticker"),
+                "at": r.get("at"),
+                "pnl": _finite(r.get("pnl")),
+                "tags": ["journal"],
+            })
+    seen = set()
+    uniq = []
+    for r in hits:
+        key = (r.get("bot"), r.get("ticker"), r.get("at"))
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(r)
+    n = len(uniq)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "should_be_zero": True,
+        "n": n,
+        "bad_n": n,
+        "pass": n == 0,
+        "sample": uniq[:12],
+        "label": f"weekend_inx_autopsy n={n} (should be 0)",
+        "note": (
+            "Weekend INX fill autopsy — sp/sized weekend fills should be zero. "
+            "Floors locked."
+        ),
+    }
+
+
+
 def latest_weekly_scorecard(root: str | None = None) -> dict | None:
     path = _path(WEEKLY_SCORECARD, root)
     store = _load(path, {"paper_only": True, "cards": [], "latest": None})
@@ -6769,25 +7417,102 @@ def capture_graduation_week(
     return week
 
 
-def graduation_board(root: str | None = None, *, store: dict | None = None) -> dict:
-    """Consecutive all-pass weeks per tower → master / week_1 / not_ready."""
+def _graduation_denial_for_card(card: dict | None, *, n_settles: int | None = None) -> list[str]:
+    """Per-tower denial codes from latest M-pass card + thin sample."""
+    denials: list[str] = []
+    card = card if isinstance(card, dict) else {}
+    codes = card.get("codes") if isinstance(card.get("codes"), dict) else {}
+    for m in GRADUATION_CODES:
+        if codes and not codes.get(m):
+            denials.append(f"{m}_fail")
+    if n_settles is not None and int(n_settles) < 5:
+        denials.append("thin_n")
+    return denials
+
+
+def graduation_gate_flags(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Fail-closed Master badge gates: fee ledger ≥80%, no news fail-open, no CLI bypass."""
+    fees = fee_ledger_completeness(root, bots=bots)
+    fee_rate = _finite(fees.get("rate"))
+    hist_n = int(fees.get("history_n") or 0)
+    fee_fail = bool(
+        hist_n >= 5 and (fee_rate is None or fee_rate + 1e-12 < 0.80)
+    )
+    news = news_gap_autopsy(root, bots=bots)
+    news_fail = int(news.get("bad_n") or news.get("n") or 0) > 0
+    cli_bypass = bool(LIVE_ORDERS_ENABLED)
+    try:
+        dc = dual_control_status(root)
+        if bool(dc.get("live_orders_enabled")):
+            cli_bypass = True
+    except Exception:
+        pass
+    denials = []
+    if fee_fail:
+        denials.append("fee_ledger")
+    if news_fail:
+        denials.append("news_fail_open")
+    if cli_bypass:
+        denials.append("cli_bypass")
+    fail_closed = bool(denials)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "fee_ledger_rate": fee_rate,
+        "fee_ledger_fail": fee_fail,
+        "news_fail_open": news_fail,
+        "cli_bypass": cli_bypass,
+        "denial_codes": denials,
+        "master_badge_fail_closed": fail_closed,
+        "badge_allowed": not fail_closed,
+        "note": (
+            "Master badge fail-closed when fee ledger <80% (n≥5), "
+            "news fail-open fills present, or LIVE/CLI bypass armed."
+        ),
+    }
+
+
+def graduation_board(
+    root: str | None = None,
+    *,
+    store: dict | None = None,
+    bots: list | None = None,
+) -> dict:
+    """Consecutive all-pass weeks per tower → master / week_1 / not_ready.
+
+    Adds denial_codes enum + master_badge_fail_closed when fee_ledger <80%
+    or known fail-open gates (news / CLI bypass).
+    """
     if store is None:
         store = _load(_path(MASTER_GRAD, root), {"paper_only": True, "weeks": []})
     weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
     weeks = sorted(weeks, key=lambda w: str(w.get("label") or ""))
-    bots: set[str] = set()
+    bot_ids: set[str] = set()
     for w in weeks:
         towers = w.get("towers") if isinstance(w.get("towers"), dict) else {}
-        bots.update(str(b) for b in towers.keys())
+        bot_ids.update(str(b) for b in towers.keys())
+    gates = graduation_gate_flags(root, bots=bots)
+    gate_denials = list(gates.get("denial_codes") or [])
+    badge_fail = bool(gates.get("master_badge_fail_closed"))
     board = {}
-    for bot in sorted(bots):
+    firm_denials: list[str] = list(gate_denials)
+    for bot in sorted(bot_ids):
         streak = 0
+        last_card = None
         for w in reversed(weeks):
             towers = w.get("towers") if isinstance(w.get("towers"), dict) else {}
             card = towers.get(bot) if isinstance(towers.get(bot), dict) else None
             if card and card.get("all"):
                 streak += 1
+                if last_card is None:
+                    last_card = card
             else:
+                if last_card is None:
+                    last_card = card
                 break
         if streak >= GRADUATION_WEEKS_REQUIRED:
             status = "master"
@@ -6795,15 +7520,31 @@ def graduation_board(root: str | None = None, *, store: dict | None = None) -> d
             status = "week_1"
         else:
             status = "not_ready"
+        n_settles = None
+        for b in bots or []:
+            if isinstance(b, dict) and str(b.get("id") or "") == bot:
+                hist = [h for h in (b.get("history") or []) if isinstance(h, dict)]
+                n_settles = len(hist)
+                break
+        denials = _graduation_denial_for_card(last_card, n_settles=n_settles)
+        denials = list(dict.fromkeys(denials + gate_denials))
+        for d in denials:
+            if d not in firm_denials:
+                firm_denials.append(d)
+        graduated = status == "master"
+        badge_render = graduated and not badge_fail
         board[bot] = {
             "bot": bot,
             "consecutive_all_pass_weeks": streak,
             "weeks_required": GRADUATION_WEEKS_REQUIRED,
             "status": status,
-            "graduated": status == "master",
+            "graduated": graduated,
+            "badge_render": badge_render,
+            "denial_codes": denials,
             "auto_promote": False,
         }
     masters = sorted(b for b, r in board.items() if r.get("graduated"))
+    masters_badged = sorted(b for b, r in board.items() if r.get("badge_render"))
     return {
         "paper_only": True,
         "weeks_n": len(weeks),
@@ -6811,13 +7552,21 @@ def graduation_board(root: str | None = None, *, store: dict | None = None) -> d
         "towers": board,
         "masters": masters,
         "masters_n": len(masters),
+        "masters_badged": masters_badged,
+        "denial_codes": firm_denials,
+        "denial_code_enum": list(GRADUATION_DENIAL_CODES),
+        "master_badge_fail_closed": badge_fail,
+        "badge_allowed": not badge_fail,
+        "gates": gates,
         "auto_promote": False,
         "fee_floors_locked": True,
         "note": (
             "Phase 6 graduation board. Master = "
-            f"{GRADUATION_WEEKS_REQUIRED} consecutive all-pass weeks. No auto-promote."
+            f"{GRADUATION_WEEKS_REQUIRED} consecutive all-pass weeks. "
+            "Badge fail-closed on fee_ledger/news_fail_open/cli_bypass. No auto-promote."
         ),
     }
+
 
 
 # ---- Meme 20d retirement clock (Phase 7) -----------------------------------
@@ -7827,7 +8576,7 @@ def plan_summary(
         "commodity_time_stop": commodity_time_stop_shadow_summary(root),
         "sports_time_final": sports_time_final_shadow_summary(root),
         "weekly_scorecard": latest_weekly_scorecard(root),
-        "graduation": graduation_board(root),
+        "graduation": graduation_board(root, bots=bots),
         "hillclimb_kill": hillclimb_kill_status(root),
         "profit_lock": profit_lock_status(root),
         "skip_regret_weekly": latest_skip_regret_weekly(root),
@@ -7855,6 +8604,11 @@ def plan_summary(
         "near_miss_soft_p": near_miss_soft_p_status(root, bots=bots),
         "exit_quality": exit_quality_observe(root, bots=bots),
         "selective_throughput": selective_throughput_observe(root, bots=bots),
+        "selective_kill": selective_kill_status(root, bots=bots),
+        "tip_funnel": tip_funnel_board(root),
+        "gate_a_pilot": gate_a_pilot_btc_calendar(root),
+        "eligible_fill_funnel": eligible_fill_funnel(root, bots=bots),
+        "throughput_vs_m1": throughput_vs_m1_board(root, bots=bots),
         "promote_distance": promote_distance_observe(root, bots=bots),
         "firm_health": firm_health_observe(root, bots=bots, cfg=cfg),
         "ops": ops_observe(root, bots=bots),
@@ -7863,6 +8617,13 @@ def plan_summary(
         "calib_clv": calib_clv_observe(root, bots=bots),
         "baseline_fee": baseline_fee_observe(root, bots=bots, cfg=cfg),
         "fit_firm": fit_buy_rate(root),
+        "m4_latency": m4_latency_board(root),
+        "adverse_selection_autopsy": adverse_selection_autopsy(root, bots=bots),
+        "news_gap_autopsy": news_gap_autopsy(root, bots=bots),
+        "eia_gap_autopsy": eia_gap_autopsy(root, bots=bots),
+        "weekend_inx_autopsy": weekend_inx_autopsy(root, bots=bots),
+        "distance_to_zero": distance_to_zero_board(root, bots=bots),
+        "firm_heat": firm_heat_map(root, bots=bots),
         "sticky_sla": sticky,
         "fee_floors_locked": True,
         "next_tickets": [
