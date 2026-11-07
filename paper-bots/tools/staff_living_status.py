@@ -1716,9 +1716,15 @@ def main() -> int:
             "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip", "near-miss-tip", "helper-tip", "hard-stop-tip", "skip-regret-tip", "eia-tip", "injury-tip", "completions-tip", "toxic-tip", "calib-tip", "clv-tip", "clerk-tip", "bookkeeper-tip",
             "hard-stop-promote", "green-boost-arm", "inx-band-promote", "staff-promote-batch",
             "near-miss-promote", "hard-stop-export", "edge08-status", "edge08-promote",
+            "helper-gate-a", "helper-arm",
         ),
     )
     parser.add_argument("--root", default=ROOT)
+    parser.add_argument(
+        "--helper",
+        default="calendar_scanner",
+        help="Helper id for helper-arm (default calendar_scanner).",
+    )
     parser.add_argument(
         "--discord",
         action="store_true",
@@ -3388,6 +3394,17 @@ def main() -> int:
     if args.action == "edge08-promote":
         out = desk_roi_plan.staff_promote_btc_edge08(
             root, who="staff-cli", note="staff edge08 promote CLI",
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "helper-gate-a":
+        out = desk_roi_plan.helper_promote_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "helper-arm":
+        # Arm only when Gate A ready — no force on money-path CLI (helpers stay gated).
+        out = desk_roi_plan.staff_set_helper_autonomy(
+            root, args.helper, True, note="staff helper-arm CLI",
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
