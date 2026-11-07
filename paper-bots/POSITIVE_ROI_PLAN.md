@@ -1353,11 +1353,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Status text swarm/hill/gaps sunday | _text lines |
 | Export `sunday_twins` map | living_board_export |
 
+### Living upgrade — observe live + selfcheck twins (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Ritual `--observe` plain driven by `ritual_live_labels` | staff_living_ritual |
+| Ritual `--observe --json` live + sunday twin flats | staff_living_ritual |
+| Selfcheck `sunday_twin_*` fields | `living_self_check` |
+| Vault sunday twins map n | App vault row |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — sunday twin coverage complete; chip catalog 52/64 soft-max)* | — |
+| *(empty — observe live/selfcheck twins shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 

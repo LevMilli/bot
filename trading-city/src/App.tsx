@@ -2500,17 +2500,24 @@ export default function App() {
                   <span className="vb-label">sunday twins</span>
                   <span>
                     {(() => {
-                      const cov = (
-                        snap?.desk as
-                          | {
-                              sunday_twin_coverage?: {
-                                label?: string
-                                twins_n?: number
-                                fields_n?: number
-                              }
+                      const desk = snap?.desk as
+                        | {
+                            sunday_twin_coverage?: {
+                              label?: string
+                              twins_n?: number
+                              fields_n?: number
                             }
-                          | undefined
-                      )?.sunday_twin_coverage
+                            sunday_twins?: Record<string, string>
+                            sunday_twins_n?: number
+                          }
+                        | undefined
+                      const cov = desk?.sunday_twin_coverage
+                      const twinsN =
+                        desk?.sunday_twins_n ??
+                        (desk?.sunday_twins
+                          ? Object.keys(desk.sunday_twins).length
+                          : undefined) ??
+                        cov?.twins_n
                       const s =
                         snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
                       const sundayBit =
@@ -2518,10 +2525,14 @@ export default function App() {
                         (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       const base =
                         cov?.label ||
-                        (cov?.twins_n != null
-                          ? `sunday twins=${cov.twins_n} fields=${cov.fields_n ?? '?'}`
+                        (twinsN != null
+                          ? `sunday twins=${twinsN} fields=${cov?.fields_n ?? '?'}`
                           : 'sunday twins observe')
-                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                      const mapBit =
+                        twinsN != null && desk?.sunday_twins
+                          ? ` · map=${twinsN}`
+                          : ''
+                      return `${base}${mapBit} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>
                 </div>

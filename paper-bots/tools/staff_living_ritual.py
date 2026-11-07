@@ -635,6 +635,81 @@ def main() -> int:
                 f"phase2 pulse observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never softens floors)"
             )
+            live = desk_living.ritual_live_labels(root=root)
+            sunday_cov = desk_living.sunday_twin_coverage(root=root)
+            flat["ritual_live_labels"] = live
+            flat["sunday_twin_coverage"] = sunday_cov
+            flat["sunday_twin_ok"] = bool(sunday_cov.get("pass"))
+            flat["sunday_twin_n"] = int(sunday_cov.get("twins_n") or 0)
+            flat["sunday_twin_label"] = str(
+                sunday_cov.get("label") or "sunday twins observe"
+            )
+            # Prefer live chip labels on sunday quiet flats when present
+            _live_sunday = (
+                ("digests_sunday_quiet", "digests_label", "never softens floors"),
+                ("fills_sunday_quiet", "fills_label", "never invents PnL"),
+                ("swarm_sunday_quiet", "swarm_label", None),
+                ("hill_sunday_quiet", "hill_label", "never softens floors"),
+                ("green_sunday_quiet", "green_label", None),
+                ("bleed_sunday_quiet", "bleed_label", "never softens floors"),
+                ("clv_sunday_quiet", "clv_label", None),
+                ("calib_sunday_quiet", "calib_label", "never auto-writes Φ"),
+                ("queue_sunday_quiet", "queue_label", "never promotes"),
+                ("gate_a_sunday_quiet", "gate_a_label", "never softens floors"),
+                ("ai_sunday_quiet", "ai_label", "never auto-writes Φ"),
+                ("tip_sunday_quiet", "tip_label", None),
+                ("blackout_sunday_quiet", "blackout_label", "never softens floors"),
+                ("injury_sunday_quiet", "injury_label", None),
+                ("empty_sunday_quiet", "empty_label", None),
+                ("near_miss_sunday_quiet", "near_miss_label", "never promotes"),
+                ("eia_sunday_quiet", "eia_label", None),
+                ("calendar_sunday_quiet", "calendar_label", None),
+                ("pager_sunday_quiet", "pager_label", "never auto-pages"),
+                ("books_sunday_quiet", "books_label", "never invents PnL"),
+                ("pulse_sunday_quiet", "pulse_label", None),
+                ("dual_sunday_quiet", "dual_label", "never softens floors"),
+                ("skip_reg_sunday_quiet", "skip_reg_label", "never softens floors"),
+                ("hard_stop_sunday_quiet", "hard_stop_label", "never promotes"),
+                ("distance_sunday_quiet", "distance_label", None),
+                ("quant_sunday_quiet", "quant_label", None),
+                ("report_sunday_quiet", "report_label", "never auto-posts"),
+                ("empty_bee_sunday_quiet", "empty_bee_label", None),
+                ("nm_clerk_sunday_quiet", "nm_clerk_label", "never promotes"),
+                ("hs_clerk_sunday_quiet", "hs_clerk_label", "never promotes"),
+                ("bleed_clerk_sunday_quiet", "bleed_clerk_label", "never softens floors"),
+                ("skip_twin_sunday_quiet", "skip_twin_label", None),
+                ("clv_closer_sunday_quiet", "clv_closer_label", None),
+                ("tdigest_sunday_quiet", "tdigest_label", None),
+                ("skips_sunday_quiet", "skips_label", None),
+                ("adapt_sunday_quiet", "adapt_label", "never auto-writes Φ"),
+                ("teller_sunday_quiet", "teller_label", "never softens floors"),
+                ("quiet_sunday_quiet", "quiet_label", "never softens floors"),
+                ("doc_age_sunday_quiet", "doc_age_label", "never softens floors"),
+                ("ritual_sunday_quiet", "ritual_label", "never auto-posts"),
+                ("digest_fresh_sunday_quiet", "digest_fresh_label", None),
+                ("journal_sunday_quiet", "journals_label", "never softens floors"),
+                ("monday_sunday_quiet", "monday_label", "never softens floors"),
+                ("toxic_sunday_quiet", "toxic_fills_label", "never softens floors"),
+                ("adapt_ab_sunday_quiet", "adapt_ab_label", "never softens floors"),
+                ("raise_phi_sla_sunday_quiet", "raise_phi_sla_label", "never auto-writes Φ"),
+                ("feature_coverage_sunday_quiet", "feature_coverage_label", "never softens floors"),
+                ("chip_catalog_sunday_quiet", "chip_catalog_label", "never softens floors"),
+                ("phase2_pulse_sunday_quiet", "phase2_pulse_label", "never softens floors"),
+                ("l7_observe_sunday_quiet", "l7_observe_label", "never softens floors"),
+                ("feature_store_sunday_quiet", "feature_store_label", "never softens floors"),
+                ("skip_historian_sunday_quiet", "skip_historian_label", "never softens floors"),
+            )
+            sq = flat["sunday_quiet_age_label"]
+            for flat_key, live_key, note in _live_sunday:
+                lab = live.get(live_key)
+                if not lab:
+                    continue
+                suffix = f" (observe · {note})" if note else " (observe)"
+                flat[flat_key] = f"{lab} · sunday quiet {sq}{suffix}"
+            flat["sunday_twins_sunday_quiet"] = (
+                f"{flat['sunday_twin_label']} · sunday quiet {sq} "
+                "(observe · never softens floors)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -690,221 +765,79 @@ def main() -> int:
                 f"floors sunday: {floors_bit} · sunday quiet {sunday_label} "
                 "(observe · never softens floors)"
             )
-            print(
-                f"ruin sunday: ruin observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
+            live = desk_living.ritual_live_labels(root=root)
+            sunday_cov = desk_living.sunday_twin_coverage(root=root)
+            observe_rows = (
+                ("ruin sunday", "ruin_label", "ruin observe", "never softens floors"),
+                ("gaps sunday", "gaps_label", "gaps observe", "never softens floors"),
+                ("swarm sunday", "swarm_label", "swarm observe", None),
+                ("hill sunday", "hill_label", "hillclimb none", "never softens floors"),
+                ("digests sunday", "digests_label", "digests observe", "never softens floors"),
+                ("fills sunday", "fills_label", "fills observe", "never invents PnL"),
+                ("green sunday", "green_label", "green-day observe", None),
+                ("bleed sunday", "bleed_label", "bleed observe", "never softens floors"),
+                ("CLV sunday", "clv_label", "CLV observe", None),
+                ("calib sunday", "calib_label", "calib observe", "never auto-writes Φ"),
+                ("queue sunday", "queue_label", "queue observe", "never promotes"),
+                ("Gate A sunday", "gate_a_label", "Gate A observe", "never softens floors"),
+                ("AI sunday", "ai_label", "AI observe", "never auto-writes Φ"),
+                ("tip sunday", "tip_label", "tip feed observe", None),
+                ("blackout sunday", "blackout_label", "blackout observe", "never softens floors"),
+                ("injury sunday", "injury_label", "injury observe", None),
+                ("empty sunday", "empty_label", "empty CARD observe", None),
+                ("near-miss sunday", "near_miss_label", "near-miss observe", "never promotes"),
+                ("EIA sunday", "eia_label", "EIA observe", None),
+                ("calendar sunday", "calendar_label", "calendar observe", None),
+                ("pager sunday", "pager_label", "pager observe", "never auto-pages"),
+                ("books sunday", "books_label", "books observe", "never invents PnL"),
+                ("pulse sunday", "pulse_label", "pulse observe", None),
+                ("dual sunday", "dual_label", "dual observe", "never softens floors"),
+                ("skip-reg sunday", "skip_reg_label", "skip-regret observe", "never softens floors"),
+                ("hard-stop sunday", "hard_stop_label", "hard-stop observe", "never promotes"),
+                ("distance sunday", "distance_label", "distance observe", None),
+                ("quant sunday", "quant_label", "quant observe", None),
+                ("report sunday", "report_label", "report observe", "never auto-posts"),
+                ("empty-bee sunday", "empty_bee_label", "empty bee observe", None),
+                ("nm-clerk sunday", "nm_clerk_label", "nm clerk observe", "never promotes"),
+                ("hs-clerk sunday", "hs_clerk_label", "hs clerk observe", "never promotes"),
+                ("bleed-clerk sunday", "bleed_clerk_label", "bleed clerk observe", "never softens floors"),
+                ("skip-twin sunday", "skip_twin_label", "skip-twin observe", None),
+                ("CLV-closer sunday", "clv_closer_label", "CLV closer observe", None),
+                ("t-digest sunday", "tdigest_label", "t-digest observe", None),
+                ("skips sunday", "skips_label", "skips observe", None),
+                ("adapt sunday", "adapt_label", "adapt observe", "never auto-writes Φ"),
+                ("teller sunday", "teller_label", "teller observe", "never softens floors"),
+                ("quiet sunday", "quiet_label", "feature quiet observe", "never softens floors"),
+                ("doc-age sunday", "doc_age_label", "doctor age observe", "never softens floors"),
+                ("ritual sunday", "ritual_label", "ritual observe", "never auto-posts"),
+                ("digest-fresh sunday", "digest_fresh_label", "digest fresh observe", None),
+                ("journals sunday", "journals_label", "journals observe", "never softens floors"),
+                ("monday sunday", "monday_label", "monday pulse observe", "never softens floors"),
+                ("toxic sunday", "toxic_fills_label", "toxic fills observe", "never softens floors"),
+                ("adapt-A/B sunday", "adapt_ab_label", "adapt A/B observe", "never softens floors"),
+                ("raise-Φ-SLA sunday", "raise_phi_sla_label", "raise_Φ SLA observe", "never auto-writes Φ"),
+                ("feature-coverage sunday", "feature_coverage_label", "feature coverage observe", "never softens floors"),
+                ("chip-catalog sunday", "chip_catalog_label", "chip catalog observe", "never softens floors"),
+                ("phase2-pulse sunday", "phase2_pulse_label", "phase2 pulse observe", "never softens floors"),
+                ("L7-pulse sunday", "l7_observe_label", "L7 observe pulse", "never softens floors"),
+                ("feature-store sunday", "feature_store_label", "feature store observe", "never softens floors"),
+                ("skip-historian sunday", "skip_historian_label", "skip historian observe", "never softens floors"),
             )
+            # gaps/ruin labels may come from pages rather than ritual_live_labels
+            ruin_page = desk_living.ruin_drill_page(root)
+            gaps_page = desk_living.dual_control_gaps_page(root)
+            if isinstance(ruin_page, dict) and ruin_page.get("label"):
+                live["ruin_label"] = str(ruin_page.get("label"))
+            if isinstance(gaps_page, dict) and gaps_page.get("label"):
+                live["gaps_label"] = str(gaps_page.get("label"))
+            for title, key, fallback, note in observe_rows:
+                lab = live.get(key) or fallback
+                suffix = f" (observe · {note})" if note else " (observe)"
+                print(
+                    f"{title}: {lab} · sunday quiet {sunday_label}{suffix}"
+                )
             print(
-                f"gaps sunday: gaps observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"digests sunday: digests observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"fills sunday: fills observe · sunday quiet {sunday_label} "
-                "(observe · never invents PnL)"
-            )
-            print(
-                f"green sunday: green-day observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"bleed sunday: bleed observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"CLV sunday: CLV observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"queue sunday: queue observe · sunday quiet {sunday_label} "
-                "(observe · never promotes)"
-            )
-            print(
-                f"Gate A sunday: Gate A observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"AI sunday: AI observe · sunday quiet {sunday_label} "
-                "(observe · never auto-writes Φ)"
-            )
-            print(
-                f"tip sunday: tip feed observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"blackout sunday: blackout observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"injury sunday: injury observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"empty sunday: empty CARD observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"near-miss sunday: near-miss observe · sunday quiet {sunday_label} "
-                "(observe · never promotes)"
-            )
-            print(
-                f"EIA sunday: EIA observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"calendar sunday: calendar observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"pager sunday: pager observe · sunday quiet {sunday_label} "
-                "(observe · never auto-pages)"
-            )
-            print(
-                f"books sunday: books observe · sunday quiet {sunday_label} "
-                "(observe · never invents PnL)"
-            )
-            print(
-                f"pulse sunday: pulse observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"dual sunday: dual observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"skip-reg sunday: skip-regret observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"hard-stop sunday: hard-stop observe · sunday quiet {sunday_label} "
-                "(observe · never promotes)"
-            )
-            print(
-                f"distance sunday: distance observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"quant sunday: quant observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"report sunday: report observe · sunday quiet {sunday_label} "
-                "(observe · never auto-posts)"
-            )
-            print(
-                f"empty-bee sunday: empty bee observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"nm-clerk sunday: nm clerk observe · sunday quiet {sunday_label} "
-                "(observe · never promotes)"
-            )
-            print(
-                f"hs-clerk sunday: hs clerk observe · sunday quiet {sunday_label} "
-                "(observe · never promotes)"
-            )
-            print(
-                f"bleed-clerk sunday: bleed clerk observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"skip-twin sunday: skip-twin observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"CLV-closer sunday: CLV closer observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"t-digest sunday: t-digest observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"skips sunday: skips observe · sunday quiet {sunday_label} "
-                "(observe)"
-            )
-            print(
-                f"adapt sunday: adapt observe · sunday quiet {sunday_label} "
-                "(observe · never auto-writes Φ)"
-            )
-            print(
-                f"teller sunday: teller observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"quiet sunday: feature quiet observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"doc-age sunday: doctor age observe · sunday quiet {sunday_label} "
-                "(observe · never softens floors)"
-            )
-            print(
-                f"ritual sunday: ritual observe · sunday quiet {sunday_label} "
-                "(observe · never auto-posts)"
-            )
-            dig = desk_living.digest_freshness_chip(root)
-            journ = desk_living.journal_coverage_chip(root)
-            monday = desk_living.monday_pulse_chip(root)
-            print(
-                f"digest-fresh sunday: {dig.get('label') or 'digest fresh observe'} · "
-                f"sunday quiet {sunday_label} (observe)"
-            )
-            print(
-                f"journals sunday: {journ.get('label') or 'journals observe'} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            print(
-                f"monday sunday: {monday.get('label') or 'monday pulse observe'} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            toxic = desk_living.toxic_fill_chip(root)
-            adapt_ab = desk_living.adapt_ab_chip(root)
-            rps = desk_living.raise_phi_sla_chip(root)
-            print(
-                f"toxic sunday: {toxic.get('label') or 'toxic fills observe'} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            print(
-                f"adapt-A/B sunday: {adapt_ab.get('label') or 'adapt A/B observe'} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            print(
-                f"raise-Φ-SLA sunday: {rps.get('label') or 'raise_Φ SLA observe'} · "
-                f"sunday quiet {sunday_label} (observe · never auto-writes Φ)"
-            )
-            feat = desk_living.feature_coverage_chip(root)
-            catalog = desk_living.chip_catalog_chip(root)
-            p2 = desk_living.phase2_pulse_chip(root)
-            print(
-                f"feature-coverage sunday: {feat.get('label') or 'feature coverage observe'} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            print(
-                f"chip-catalog sunday: {catalog.get('label') or 'chip catalog observe'} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            print(
-                f"phase2-pulse sunday: {p2.get('label') or 'phase2 pulse observe'} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            _l7 = desk_living.l7_observe_summary(root=root)
-            print(
-                f"L7-pulse sunday: {_l7.get('label') or 'L7 observe pulse'} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            feat_store = desk_living.feature_store_coverage(root)
-            skip_hist = desk_living.skip_historian_chip(root)
-            print(
-                f"feature-store sunday: feature store n={feat_store.get('n')} "
-                f"buys={feat_store.get('buys')} skips={feat_store.get('skips')} · "
-                f"sunday quiet {sunday_label} (observe · never softens floors)"
-            )
-            print(
-                f"skip-historian sunday: {skip_hist.get('label') or 'skip historian observe'} · "
+                f"sunday twins: {sunday_cov.get('label') or 'sunday twins observe'} · "
                 f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
             print(

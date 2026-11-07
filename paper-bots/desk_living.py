@@ -4077,6 +4077,7 @@ def living_self_check(root: str | None = None) -> dict:
     ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
     l7 = l7_observe_summary(board)
     l7_ok = bool(l7.get("ok"))
+    sunday_cov = sunday_twin_coverage(board)
     return {
         "paper_only": True,
         "fee_floors_locked": floors,
@@ -4094,6 +4095,11 @@ def living_self_check(root: str | None = None) -> dict:
         "l7_observe_present": list(l7.get("present") or []),
         "l7_observe_missing": list(l7.get("missing") or []),
         "l7_observe_label": str(l7.get("label") or "L7 observe pending"),
+        "sunday_twin_ok": bool(sunday_cov.get("pass")),
+        "sunday_twin_n": int(sunday_cov.get("twins_n") or 0),
+        "sunday_twin_fields_n": int(sunday_cov.get("fields_n") or 0),
+        "sunday_twin_label": str(sunday_cov.get("label") or "sunday twins observe"),
+        "sunday_twin_coverage": sunday_cov,
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()
