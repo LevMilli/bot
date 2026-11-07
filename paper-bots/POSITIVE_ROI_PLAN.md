@@ -1519,11 +1519,23 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault paper-live + makefile rows | App vault |
 | README index | README.md |
 
+### Living upgrade — venues / chicago batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_venues_tip` + `venues_sunday_quiet` | desk_living / compact / export |
+| `living_chicago_tip` + `chicago_sunday_quiet` | desk_living / compact / export |
+| Status CLI `venues` / `chicago` (+ discord) | staff_living_status |
+| Makefile `living-venues` / `living-chicago` | Makefile |
+| Ritual observe/Discord venues+chicago | staff_living_ritual |
+| Vault venues + chicago rows | App vault |
+| README index | README.md |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| *(cleared — paper-live/makefile shipped; soft-max 52/64)* | — |
+| *(cleared — venues/chicago shipped; soft-max 52/64)* | — |
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
 
@@ -1531,7 +1543,7 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — paper-live/makefile shipped; soft-max 52/64)* | — |
+| *(empty — venues/chicago shipped; soft-max 52/64)* | — |
 
 ## Hard rules unchanged
 

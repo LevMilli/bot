@@ -445,6 +445,24 @@ def format_discord(payload: dict) -> str:
             f"• Makefile sunday: {makefile_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    venues_twin = payload.get("venues_sunday_quiet")
+    if venues_twin:
+        lines.append(f"• Venues sunday: {venues_twin}")
+    else:
+        venues_lab = payload.get("venues_label") or "venues observe"
+        lines.append(
+            f"• Venues sunday: {venues_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    chicago_twin = payload.get("chicago_sunday_quiet")
+    if chicago_twin:
+        lines.append(f"• Chicago sunday: {chicago_twin}")
+    else:
+        chicago_lab = payload.get("chicago_label") or "chicago observe"
+        lines.append(
+            f"• Chicago sunday: {chicago_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1091,6 +1109,26 @@ def main() -> int:
                 )
             )
             print(
+                "venues sunday: "
+                + str(
+                    compact_obs.get("venues_sunday_quiet")
+                    or (
+                        f"{desk_living.living_venues_tip(board_obs).get('label') or 'venues observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "chicago sunday: "
+                + str(
+                    compact_obs.get("chicago_sunday_quiet")
+                    or (
+                        f"{desk_living.living_chicago_tip(board_obs).get('label') or 'chicago observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1272,6 +1310,21 @@ def main() -> int:
     payload["makefile_n"] = makefile.get("targets_n")
     payload["makefile_sunday_quiet"] = compact.get("makefile_sunday_quiet") or (
         f"{makefile.get('label') or 'makefile observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    venues = desk_living.living_venues_tip(board)
+    payload["venues"] = venues
+    payload["venues_label"] = venues.get("label")
+    payload["venues_ok"] = venues.get("ok")
+    payload["venues_sunday_quiet"] = compact.get("venues_sunday_quiet") or (
+        f"{venues.get('label') or 'venues observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    chicago = desk_living.living_chicago_tip(board)
+    payload["chicago"] = chicago
+    payload["chicago_label"] = chicago.get("label")
+    payload["chicago_sunday_quiet"] = compact.get("chicago_sunday_quiet") or (
+        f"{chicago.get('label') or 'chicago observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:

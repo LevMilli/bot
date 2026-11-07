@@ -93,6 +93,8 @@ make living-smoke            # floors + guardrails + soft-max aggregate
 make living-paste            # Discord paste-only target index
 make living-paper            # paper_only + live=False assert
 make living-makefile         # living-* Makefile target index
+make living-venues           # sports 0.06 / BTC+commodity 0.05 / INX+DEX 0.02
+make living-chicago          # Chicago CT calendar day
 make living-export
 make living-test
 ```

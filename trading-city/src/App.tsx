@@ -1542,6 +1542,81 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">venues</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | { venues_ok?: boolean; venues?: { ok?: boolean } }
+                          | undefined
+                        const ok = desk?.venues_ok ?? desk?.venues?.ok
+                        if (ok === true) return '#6fbf73'
+                        if (ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            venues_sunday_quiet?: string
+                            compact_venues_sunday_quiet?: string
+                            venues_label?: string
+                            venues?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.venues_sunday_quiet || desk?.compact_venues_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.venues_label || desk?.venues?.label || 'venues observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(never softens) · make living-venues'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">chicago</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            chicago_sunday_quiet?: string
+                            compact_chicago_sunday_quiet?: string
+                            chicago_label?: string
+                            chicago?: { label?: string; chicago_today?: string }
+                            chicago_today?: string
+                          }
+                        | undefined
+                      const twin =
+                        desk?.chicago_sunday_quiet || desk?.compact_chicago_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.chicago_label ||
+                        desk?.chicago?.label ||
+                        (desk?.chicago_today
+                          ? `chicago today=${desk.chicago_today}`
+                          : 'chicago observe')
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(CT) · make living-chicago'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{
