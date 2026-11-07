@@ -88,6 +88,15 @@ class HelperGateA(unittest.TestCase):
         self.assertTrue(floors["locked"])
         self.assertTrue(floors["all_ok"])
 
+    def test_force_arm_for_tests_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = desk_roi_plan.staff_set_helper_autonomy(
+                tmp, "calendar_scanner", True, force=True, note="test force",
+            )
+            self.assertTrue(out["ok"])
+            # Force arms autonomy flag, but may_place_alone still needs Gate A ready.
+            self.assertFalse(desk_roi_plan.helper_may_place_alone(tmp, "calendar_scanner"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1678,7 +1678,14 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Hard-stop shadow n≥30 EV≥0 — drop force dependency | `sports_hard_stop_shadow_summary.promote_ready` |
 | Near-miss labeled n≥30 EV≥0 — drop force; optional soft-p second | `near_miss_promote_status` → `staff_promote_near_miss_soft("p")` |
 | Dual-control / LIVE_ORDERS stay off until separate staff gate | paper-only forever until staff |
-| Helper Gate A staff arm after ready | `staff_set_helper_autonomy` |
+
+### Helper Gate A staff arm CLI
+
+| Ticket | Where |
+| --- | --- |
+| Gate A board | `helper_promote_status` · `make living-helper-gate-a` |
+| Staff arm (ready only; no force on CLI) | `staff_set_helper_autonomy` · `make living-helper-arm` |
+| Default | `may_place_alone=False` until Gate A + staff |
 
 ### BTC edge08 shadow promote (raise-only)
 
