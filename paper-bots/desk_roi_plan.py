@@ -100,6 +100,23 @@ from desk_roi_post_e3e7 import (  # noqa: F401
     m5_idle_vs_budget_annotation,
     tip_to_decision_ms,
 )
+
+# Staff SLA unblock pack (observe / no-force) — never LIVE, never tip invent.
+from desk_roi_staff import (  # noqa: F401
+    dual_control_observe_board,
+    export_edge08_shadow_csv,
+    export_green_boost_evidence,
+    export_near_miss_shadow_csv,
+    hillclimb_lever_journal,
+    hillclimb_pick_evidence_pack,
+    observation_week_clock,
+    promote_gate_sla,
+    staff_batch_arm_promotes_ready,
+    staff_dashboard,
+    staff_hillclimb_pick_journal,
+    staff_log_hillclimb_pick,
+    staff_promote_ready_pack,
+)
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
 MAX_HARD_STOP_ROWS = 2000
@@ -5015,18 +5032,33 @@ def ops_observe(
             "observe_only": True,
             "deferred": True,
             "live_orders_enabled": False,
+            "signed_n": dual.get("signed_n"),
+            "items_n": dual.get("items_n"),
+            "two_staff": dual.get("two_staff"),
+            "arm_ready_paper": dual.get("arm_ready_paper"),
+            "checklist_complete": dual.get("checklist_complete"),
             "status": {
                 k: dual.get(k)
-                for k in ("paper_only", "armed", "live", "live_orders_enabled", "checklist", "note")
+                for k in (
+                    "paper_only",
+                    "signed_n",
+                    "items_n",
+                    "two_staff",
+                    "arm_ready_paper",
+                    "checklist_complete",
+                    "live_orders_enabled",
+                    "note",
+                )
                 if k in dual
             },
-            "note": "LIVE_ORDERS dual-control deferred — observe status only.",
+            "note": "LIVE_ORDERS dual-control deferred — densified observe keys.",
         },
         "label": (
             f"ops={'ok' if not alerts else 'ALERT'} "
             f"incub={incubating}/{ready_grad} masters={masters} "
             f"ruin={ruin.get('level') or 'off'} cold_w={cold.get('weeks_n')} "
-            f"btc_n={calib.get('n')}"
+            f"btc_n={calib.get('n')} "
+            f"dual={dual.get('signed_n')}/{dual.get('items_n')}"
         ),
         "note": (
             "Ops observe — incubation / ruin drill / cold harvest / Master graduation / "

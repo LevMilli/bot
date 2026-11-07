@@ -1,5 +1,5 @@
 # Living Trading Upgrade — staff smoke (paper only; floors locked; never auto-post).
-.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord living-paste living-paste-discord living-paper living-paper-discord living-makefile living-makefile-discord living-venues living-venues-discord living-chicago living-chicago-discord living-starve living-starve-discord living-hard-rules living-hard-rules-discord living-swarm living-swarm-discord living-expand-tip living-expand-tip-discord living-quiet-tip living-quiet-tip-discord living-timer-tip living-timer-tip-discord living-export-tip living-export-tip-discord living-doctor-tip living-doctor-tip-discord living-inventory-tip living-inventory-tip-discord living-dual-tip living-dual-tip-discord living-hillclimb-tip living-hillclimb-tip-discord living-ruin-tip living-ruin-tip-discord living-near-miss-tip living-near-miss-tip-discord living-helper-tip living-helper-tip-discord living-hard-stop-tip living-hard-stop-tip-discord living-skip-regret-tip living-skip-regret-tip-discord living-eia-tip living-eia-tip-discord living-injury-tip living-injury-tip-discord living-completions-tip living-completions-tip-discord living-toxic-tip living-toxic-tip-discord living-calib-tip living-calib-tip-discord living-clv-tip living-clv-tip-discord living-clerk-tip living-clerk-tip-discord living-bookkeeper-tip living-bookkeeper-tip-discord living-hard-stop-promote living-hard-stop-status living-hard-stop-promote-ready living-green-boost-arm living-green-boost-status living-green-boost-arm-ready living-inx-band-promote living-staff-promote-batch living-near-miss-promote living-near-miss-status living-near-miss-promote-ready living-near-miss-soft-p living-hard-stop-export living-edge08-status living-edge08-promote living-edge08-promote-ready living-helper-gate-a living-helper-arm living-inx-research living-inx-status living-skip-regret living-firm-queue living-completions living-feature-store living-money-pulse living-exit-quality living-promote-distance living-hillclimb-lever living-firm-health living-bleed-week living-daily-r living-opp-cost living-profit-lock living-ops-observe living-incubation living-ruin-drill-status living-cold-harvest living-graduation living-btc-calib living-guardrails living-adverse-cool living-anti-revenge living-empty-card living-stale-world living-review-observe living-idea-review living-quarterly living-corr-matrix living-calib-clv living-clv-status living-green-or-gone living-sticky-sla living-selective living-eligible-funnel living-insight-ratio living-edge08-compare living-cadence-health living-raise-phi-log living-sports-calib living-commodity-calib living-baseline-fee living-baseline-capture living-fee-ledger living-commodity-tstop-status living-commodity-tstop-promote living-commodity-tstop-promote-ready living-latency-stage living-tip-decision-ms living-exit-risk-ms living-fill-capacity living-firm-tower-m1 living-m5-idle-budget living-distance-stance
+.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord living-paste living-paste-discord living-paper living-paper-discord living-makefile living-makefile-discord living-venues living-venues-discord living-chicago living-chicago-discord living-starve living-starve-discord living-hard-rules living-hard-rules-discord living-swarm living-swarm-discord living-expand-tip living-expand-tip-discord living-quiet-tip living-quiet-tip-discord living-timer-tip living-timer-tip-discord living-export-tip living-export-tip-discord living-doctor-tip living-doctor-tip-discord living-inventory-tip living-inventory-tip-discord living-dual-tip living-dual-tip-discord living-hillclimb-tip living-hillclimb-tip-discord living-ruin-tip living-ruin-tip-discord living-near-miss-tip living-near-miss-tip-discord living-helper-tip living-helper-tip-discord living-hard-stop-tip living-hard-stop-tip-discord living-skip-regret-tip living-skip-regret-tip-discord living-eia-tip living-eia-tip-discord living-injury-tip living-injury-tip-discord living-completions-tip living-completions-tip-discord living-toxic-tip living-toxic-tip-discord living-calib-tip living-calib-tip-discord living-clv-tip living-clv-tip-discord living-clerk-tip living-clerk-tip-discord living-bookkeeper-tip living-bookkeeper-tip-discord living-hard-stop-promote living-hard-stop-status living-hard-stop-promote-ready living-green-boost-arm living-green-boost-status living-green-boost-arm-ready living-inx-band-promote living-staff-promote-batch living-near-miss-promote living-near-miss-status living-near-miss-promote-ready living-near-miss-soft-p living-hard-stop-export living-edge08-status living-edge08-promote living-edge08-promote-ready living-helper-gate-a living-helper-arm living-inx-research living-inx-status living-skip-regret living-firm-queue living-completions living-feature-store living-money-pulse living-exit-quality living-promote-distance living-hillclimb-lever living-firm-health living-bleed-week living-daily-r living-opp-cost living-profit-lock living-ops-observe living-incubation living-ruin-drill-status living-cold-harvest living-graduation living-btc-calib living-guardrails living-adverse-cool living-anti-revenge living-empty-card living-stale-world living-review-observe living-idea-review living-quarterly living-corr-matrix living-calib-clv living-clv-status living-green-or-gone living-sticky-sla living-selective living-eligible-funnel living-insight-ratio living-edge08-compare living-cadence-health living-raise-phi-log living-sports-calib living-commodity-calib living-baseline-fee living-baseline-capture living-fee-ledger living-commodity-tstop-status living-commodity-tstop-promote living-commodity-tstop-promote-ready living-latency-stage living-tip-decision-ms living-exit-risk-ms living-fill-capacity living-firm-tower-m1 living-m5-idle-budget living-distance-stance living-hillclimb-pick living-hillclimb-pick-ready living-hillclimb-pick-list living-hillclimb-pick-status living-hillclimb-clear living-staff-promote-ready-pack living-promote-ready-pack living-staff-promote-batch-ready living-dual-control-status living-dual-control living-dual-gaps living-staff-dashboard living-observation-clock living-graduation-capture living-promote-sla
 
 living-help:
 	@echo "Living Trading Upgrade — paper only · floors locked · Discord never auto-posts"
@@ -20,6 +20,9 @@ living-help:
 	@echo "  make living-clerk-tip / living-bookkeeper-tip"
 	@echo "  make living-hard-stop-promote / living-green-boost-arm / living-inx-band-promote"
 	@echo "  make living-staff-promote-batch / living-near-miss-promote / living-hard-stop-export"
+	@echo "  make living-staff-promote-ready-pack / living-staff-promote-batch-ready (prefer over force)"
+	@echo "  make living-hillclimb-pick / living-staff-dashboard / living-observation-clock"
+	@echo "  make living-dual-control-status / living-graduation-capture"
 	@echo "  make living-l7 / living-sunday / living-gaps-discord / living-ruin-discord"
 	@echo "Staff map: LIVING_UPGRADE.md · plan: POSITIVE_ROI_PLAN.md"
 
@@ -327,6 +330,7 @@ living-inx-band-promote:
 	python3 tools/staff_living_status.py inx-band-promote
 
 living-staff-promote-batch:
+	@echo "STAFF FORCE OVERRIDE — prefer make living-staff-promote-batch-ready"
 	python3 tools/staff_living_status.py staff-promote-batch
 
 living-near-miss-promote:
@@ -533,3 +537,47 @@ living-m5-idle-budget:
 
 living-distance-stance:
 	python3 tools/staff_living_status.py distance-stance
+
+# Staff SLA pack — observe / no-force; never LIVE; never tip invent; floors locked.
+living-hillclimb-pick-list:
+	python3 tools/staff_hillclimb_pick.py list
+
+living-hillclimb-pick-status:
+	python3 tools/staff_hillclimb_pick.py status
+
+living-hillclimb-pick-ready:
+	python3 tools/staff_hillclimb_pick.py pack
+
+living-hillclimb-pick:
+	@if [ -n "$(HILLCLIMB_LEVER)" ]; then \
+	  python3 tools/staff_hillclimb_pick.py pick "$(HILLCLIMB_LEVER)" --note "$(NOTE)"; \
+	else \
+	  python3 tools/staff_living_status.py hillclimb-pick; \
+	fi
+
+living-hillclimb-clear:
+	python3 tools/staff_hillclimb_pick.py clear --who "$(WHO)" --note "$(NOTE)"
+
+living-staff-promote-ready-pack living-promote-ready-pack:
+	python3 tools/staff_living_status.py promote-ready-pack
+
+living-staff-promote-batch-ready:
+	python3 tools/staff_living_status.py staff-promote-batch-ready
+
+living-dual-control-status living-dual-control:
+	python3 tools/staff_living_status.py dual-control-status
+
+living-dual-gaps:
+	python3 tools/staff_living_status.py gaps
+
+living-staff-dashboard:
+	python3 tools/staff_living_status.py staff-dashboard
+
+living-observation-clock:
+	python3 tools/staff_living_status.py observation-clock
+
+living-graduation-capture:
+	python3 tools/staff_living_status.py graduation-capture
+
+living-promote-sla:
+	python3 tools/staff_living_status.py promote-sla
