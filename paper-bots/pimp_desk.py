@@ -3359,6 +3359,83 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
             "error": result.get("error") or "",
             "summary": result.get("summary") or "",
         })
+    # Auto shadow densify — catch-up (~10m) and forced tick (~15m / ops alert).
+    # Best-effort; never arms LIVE / force / tip invent; Discord never auto-posts.
+    try:
+        import desk_roi_plan
+        catchup_marker = _under(root, "desk_shadow_catchup_at.txt")
+        tick_marker = _under(root, "desk_shadow_tick_at.txt")
+        catchup_due = True
+        tick_due = True
+        if os.path.isfile(catchup_marker):
+            try:
+                catchup_due = (now.timestamp() - os.path.getmtime(catchup_marker)) >= 600
+            except OSError:
+                catchup_due = True
+        if os.path.isfile(tick_marker):
+            try:
+                tick_due = (now.timestamp() - os.path.getmtime(tick_marker)) >= 900
+            except OSError:
+                tick_due = True
+        force_tick = False
+        try:
+            ops = desk_roi_plan.shadow_ops_alerts(root)
+            alerts = ops.get("alerts") or []
+            force_tick = any(
+                a in ("shadow_edge08_missing", "heartbeat_missing", "heartbeat_stale")
+                for a in alerts
+            )
+        except Exception:
+            force_tick = False
+        if tick_due or force_tick:
+            # Includes catch-up + sports-gap smoke; paper-only.
+            tick_out = run_shadow_tick(root, now, run_bots=True)
+            try:
+                with open(tick_marker, "w", encoding="utf-8") as handle:
+                    handle.write(_iso(now) + "\n")
+            except OSError:
+                pass
+            try:
+                with open(catchup_marker, "w", encoding="utf-8") as handle:
+                    handle.write(_iso(now) + "\n")
+            except OSError:
+                pass
+            results.append({
+                "bot": "shadow-tick",
+                "action": "auto",
+                "ok": bool(tick_out.get("ok")),
+                "blocked": False,
+                "entries_blocked": False,
+                "error": tick_out.get("error") or "",
+                "summary": (
+                    f"auto shadow-tick labeled_n={tick_out.get('labeled_n')} "
+                    f"sports={sum(1 for r in (tick_out.get('shadow_rows') or []) if r.get('bot') == 'sports-gap')}"
+                )[:180],
+                "live_orders_enabled": False,
+                "shadow_rows": tick_out.get("shadow_rows") or [],
+            })
+        elif catchup_due:
+            catchup = desk_roi_plan.run_shadow_catchup(root)
+            try:
+                with open(catchup_marker, "w", encoding="utf-8") as handle:
+                    handle.write(_iso(now) + "\n")
+            except OSError:
+                pass
+            results.append({
+                "bot": "shadow-catchup",
+                "action": "auto",
+                "ok": bool(catchup.get("ok")),
+                "blocked": False,
+                "entries_blocked": False,
+                "error": catchup.get("error") or "",
+                "summary": (
+                    f"auto catch-up labeled_n={catchup.get('labeled_n')} "
+                    f"backfilled={catchup.get('backfilled')} repaired={catchup.get('repaired')}"
+                )[:180],
+                "live_orders_enabled": False,
+            })
+    except Exception:
+        pass
     if results:
         _atomic_write(auto_path(root), json.dumps(saved, indent=2) + "\n")
     # Phase 0/1 recycle: remember sticky opens so staff/ops can free risk.
@@ -3431,9 +3508,10 @@ def run_shadow_tick(
     *,
     run_bots: bool = True,
 ) -> dict:
-    """One-shot paper shadow smoke — densify edge08 + heartbeat without LIVE.
+    """One-shot paper shadow smoke — densify edge08 + sports + heartbeat without LIVE.
 
-    Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), touches heartbeat,
+    Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), smokes sports-gap
+    paper (hard-stop / t-final / near-miss densify), touches heartbeat,
     best-effort history settle. Never sets LIVE_ORDERS. Floors stay locked.
     """
     root = _root(root)
@@ -3480,6 +3558,24 @@ def run_shadow_tick(
                 "error": result.get("error") or "",
                 "summary": result.get("summary") or "",
             })
+        # Sports-gap paper smoke — densify hard-stop / t-final / near-miss without
+        # waiting for the 180s due-slot. Main paper account; no DESK_SHADOW env;
+        # never LIVE.
+        try:
+            sports = run_bot("sports-gap", "run", root)
+        except Exception as exc:  # noqa: BLE001
+            sports = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+        shadow_rows.append({
+            "bot": "sports-gap",
+            "action": "shadow-smoke",
+            "shadow_id": None,
+            "ok": bool(sports.get("ok")),
+            "blocked": bool(sports.get("blocked")),
+            "error": sports.get("error") or "",
+            "summary": sports.get("summary") or "",
+            "paper_only": True,
+            "live_orders_enabled": False,
+        })
     catchup = {}
     try:
         import desk_roi_plan
@@ -3507,13 +3603,14 @@ def run_shadow_tick(
         "history_present": bool(history_path and os.path.isfile(history_path)),
         "history_settle": history_settle,
         "shadow_rows": shadow_rows,
+        "sports_smoked": any(r.get("bot") == "sports-gap" for r in shadow_rows),
         "catchup": catchup,
         "shadow_ops": ops,
         "labeled_n": catchup.get("labeled_n"),
         "backfilled": catchup.get("backfilled"),
         "repaired": catchup.get("repaired"),
         "note": (
-            "Shadow tick — paper DESK_SHADOW edge08 + catch-up densify. "
+            "Shadow tick — paper DESK_SHADOW edge08 + sports-gap smoke + catch-up densify. "
             "Never LIVE_ORDERS; never tip invent; Discord never auto-posts."
         ),
     }

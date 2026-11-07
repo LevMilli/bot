@@ -109,6 +109,13 @@ class CommodityTimeStop(unittest.TestCase):
         self.assertTrue(floors["locked"])
         self.assertAlmostEqual(floors["venues"]["kalshi_commodity15m"]["floor"], 0.05)
 
+    def test_bot_all_opens_densify_path(self):
+        bot_src = os.path.join(HERE, "commodity-15m-paper", "bot.py")
+        with open(bot_src, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("all-opens densify", text)
+        self.assertIn("record_commodity_time_stop_shadow", text)
+
 
 if __name__ == "__main__":
     unittest.main()

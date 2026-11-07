@@ -1005,6 +1005,99 @@ def main() -> int:
                 "_ev": ev,
             })
 
+    # Densify time-stop shadow across ALL opens (not only current-window ticker).
+    # Reuses window bids when present; best-effort market fetch otherwise.
+    try:
+        import desk_roi_plan
+        bid_by_ticker: dict[str, dict] = {}
+        for series_w, _spot_w, m_w in windows:
+            tick_w = str(m_w.get("ticker") or "")
+            if not tick_w:
+                continue
+            bid_by_ticker[tick_w] = {
+                "YES": m_w.get("yes_bid"),
+                "NO": m_w.get("no_bid"),
+                "series": series_w,
+            }
+        changed_ts = False
+        for pos in list(account.get("open") or []):
+            if not isinstance(pos, dict) or pos.get("time_stop_shadowed"):
+                continue
+            tick = str(pos.get("ticker") or "")
+            if not tick:
+                continue
+            side = str(pos.get("side") or "YES").upper()
+            info = bid_by_ticker.get(tick) or {}
+            bid_ts = info.get(side)
+            if bid_ts is None:
+                try:
+                    payload = get_json(f"{KALSHI}/markets/{tick}", timeout=12)
+                    market = payload.get("market") if isinstance(payload, dict) else None
+                    if not isinstance(market, dict):
+                        market = payload if isinstance(payload, dict) else {}
+                    raw = (
+                        market.get("yes_bid_dollars") if side == "YES"
+                        else market.get("no_bid_dollars")
+                    )
+                    if raw in (None, ""):
+                        raw = market.get("yes_bid") if side == "YES" else market.get("no_bid")
+                    bid_ts = float(raw) if raw not in (None, "") else None
+                    if bid_ts is not None and bid_ts > 1.5:
+                        bid_ts = bid_ts / 100.0
+                except Exception:
+                    continue
+            if bid_ts is None:
+                continue
+            hit = desk_roi_plan.commodity_time_stop_hit(
+                pos.get("close_time"),
+                bid_ts,
+                pos.get("entry") or pos.get("price") or pos.get("ask"),
+                cost=pos.get("cost"),
+                contracts=pos.get("contracts"),
+            )
+            if not hit.get("hit"):
+                continue
+            desk_roi_plan.record_commodity_time_stop_shadow(
+                DESK_ROOT,
+                ticker=tick,
+                side=side,
+                series=str(pos.get("series") or info.get("series") or ""),
+                close_time=str(pos.get("close_time") or ""),
+                entry_price=pos.get("entry") or pos.get("price") or pos.get("ask"),
+                bid=bid_ts,
+                contracts=pos.get("contracts"),
+                cost=pos.get("cost"),
+                note="commodity time-stop shadow (all-opens densify)",
+            )
+            pos["time_stop_shadowed"] = True
+            changed_ts = True
+            print(
+                f"  TIME-STOP SHADOW (all-opens): {tick} left={hit.get('minutes_left')}m "
+                f"mark_pnl={hit.get('mark_pnl')}"
+            )
+            if desk_roi_plan.commodity_time_stop_is_live(DESK_ROOT) and float(bid_ts) > 0:
+                fee_ts = kalshi_fee(float(bid_ts))
+                pnl_ts = paper_sell(
+                    account, pos, bid_ts, fee_ts,
+                    f"time-stop left={hit.get('minutes_left')}m mark≤0",
+                )
+                account["open"] = [
+                    p for p in (account.get("open") or []) if p is not pos
+                ]
+                print(f"  TIME-STOP SELL: {tick} pnl {pnl_ts:+.2f}")
+                try:
+                    desk_roi_plan.record_anti_revenge(
+                        DESK_ROOT, bot="commodity-15m",
+                        ticker=tick, reason="time-stop",
+                        note=f"mark_pnl={hit.get('mark_pnl')}",
+                    )
+                except Exception:
+                    pass
+        if changed_ts:
+            save_account(account)
+    except Exception:
+        pass
+
     # Global rank soft pass — fill best commodity edges first under local loop.
     try:
         import desk_brain
