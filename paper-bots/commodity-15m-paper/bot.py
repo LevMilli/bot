@@ -740,6 +740,16 @@ def paper_buy(state: dict, ev: dict) -> str:
         "history_ci_low": perf.get("hit_ci_low"),
         "fill_tax": 0.01,
     })
+    try:
+        import desk_roi_plan as _xp
+        state["open"][-1]["exit_plan"] = _xp.default_exit_plan("commodity-15m")
+    except Exception:
+        state["open"][-1]["exit_plan"] = {
+            "kind": "model_flip+settle",
+            "model_flip": True,
+            "settle_backstop": True,
+            "fee_floors_locked": True,
+        }
     save_account(state)
     return f"Paper buy {ev['side']} {ticker} x{contracts} @ {ask:.2f}."
 

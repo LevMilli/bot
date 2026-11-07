@@ -204,5 +204,58 @@ class NearMissWeekly(unittest.TestCase):
             self.assertTrue(card["fee_floors_locked"])
 
 
+class ExitPlanCoverage(unittest.TestCase):
+    def test_default_exit_plans_fee_clear(self):
+        sports = desk_roi_plan.default_exit_plan("sports-gap")
+        self.assertIn("hard_stop_shadow", sports)
+        self.assertTrue(sports.get("fee_floors_locked"))
+        self.assertFalse(sports.get("hard_stop_live"))
+        btc = desk_roi_plan.default_exit_plan("btc15m")
+        self.assertEqual(btc.get("kind"), "take_profit+model_flip+settle")
+        commodity = desk_roi_plan.default_exit_plan("commodity-15m")
+        self.assertIn("model_flip", commodity)
+        self.assertFalse(sports.get("board_chip", False))
+
+    def test_coverage_pass_when_plans_present(self):
+        bots = [
+            {
+                "id": "sports-gap",
+                "open": [{"ticker": "A", "exit_plan": desk_roi_plan.default_exit_plan("sports-gap")}],
+            },
+            {
+                "id": "btc15m",
+                "open": [{"ticker": "B", "exit_plan": desk_roi_plan.default_exit_plan("btc15m")}],
+            },
+            {
+                "id": "commodity-15m",
+                "open": [{"ticker": "C", "exit_plan": desk_roi_plan.default_exit_plan("commodity-15m")}],
+            },
+        ]
+        cov = desk_roi_plan.exit_plan_coverage(bots=bots)
+        self.assertTrue(cov.get("pass"))
+        self.assertEqual(cov.get("n_open"), 3)
+        self.assertEqual(cov.get("n_with_plan"), 3)
+        self.assertFalse(cov.get("board_chip"))
+        self.assertTrue(cov.get("fee_floors_locked"))
+
+    def test_coverage_fails_without_plan(self):
+        bots = [{"id": "sports-gap", "open": [{"ticker": "A"}]}]
+        cov = desk_roi_plan.exit_plan_coverage(bots=bots)
+        self.assertFalse(cov.get("pass"))
+        self.assertIn("sports-gap", cov.get("missing_bots") or [])
+
+    def test_master_summary_includes_exit_plans(self):
+        import desk_master
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = desk_master.master_summary(
+                tmp,
+                bots=[{"id": "btc15m", "open_risk": 0, "history": [], "gate_a": {}, "open": []}],
+                cfg={"max_open_risk": 100},
+            )
+            plan = summary.get("roi_plan") or {}
+            self.assertIn("exit_plans", plan)
+            self.assertTrue((plan.get("exit_plans") or {}).get("fee_floors_locked"))
+
+
 if __name__ == "__main__":
     unittest.main()

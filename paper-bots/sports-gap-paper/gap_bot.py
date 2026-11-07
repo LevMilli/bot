@@ -1242,6 +1242,18 @@ def run():
             risk_factor = desk_profit.risk_factor_for("sports-gap", c["side"])
         except Exception:
             risk_factor = ""
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan as _exit_plan_mod
+            exit_plan = _exit_plan_mod.default_exit_plan("sports-gap")
+        except Exception:
+            exit_plan = {
+                "kind": "gap_decay+scale_out+hard_stop_shadow+settle",
+                "hard_stop_shadow": True,
+                "settle_backstop": True,
+                "fee_floors_locked": True,
+            }
         pos = {"game_key": key, "league": c["league"], "game": c["name"], "ticker": m["ticker"], "team": m.get("yes_sub_title"),
                "side": c["side"], "contracts": n, "entry_price": ask, "bid": bid, "ask": ask, "entry_fee": fee(ask),
                "fee": fee(ask), "cost": cost, "risk": cost, "reward": reward, "risk_reward": ratio,
@@ -1251,7 +1263,8 @@ def run():
                "opened": ts, "score_at_entry": c["score"], "espn_id": c["g"]["id"], "espn_path": c["path"],
                "price_source": f"{KALSHI}/markets?series_ticker={c['series']}",
                "price_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "fill_id": f"{m['ticker']}|{ts}"}
+               "fill_id": f"{m['ticker']}|{ts}",
+               "exit_plan": exit_plan}
         s["open"].append(pos)
         open_by_game[key] = pos
         buys_this_check += 1
