@@ -1983,6 +1983,17 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 - Meme red lock −$5; INX halt $460
 - Kill: M3↑ with M1↓ for 2 Chicago weeks → revert lever
 
+### Bulk autopsy / CLV / latency / graduation (money-path)
+
+| Ticket | Where |
+| --- | --- |
+| CLV settle fail-closed | `clv_row_complete` / `clv_completeness` alert `settle_missing_close_fair` |
+| Latency stages + p95 | `record_latency(stage=)` / `latency_p50` p95 / `m4_latency_board` |
+| Adverse-selection autopsy | `adverse_selection_autopsy` + BTC/commodity `record_adverse_fill` |
+| News/EIA/weekend autopsy | `news_gap_autopsy` / `eia_gap_autopsy` / `weekend_inx_autopsy` |
+| Graduation denial + badge | `GRADUATION_DENIAL_CODES` / `graduation_gate_flags` / `master_badge_fail_closed` |
+| Distance-to-zero + heat | `distance_to_zero_board` / `firm_heat_map` → Masters `roi_plan` + living |
+
 ## Tests
 
 ```bash

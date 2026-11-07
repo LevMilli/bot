@@ -282,6 +282,14 @@ def paper_sell(state, pos, bid, fee, reason):
                 kind="sell",
                 note=str(reason or "")[:120],
             )
+            desk_roi_plan.record_adverse_fill(
+                DESK_ROOT,
+                bot="btc15m",
+                ticker=str(pos.get("ticker") or ""),
+                entry_price=pos.get("ask") if pos.get("ask") is not None else pos.get("entry_price"),
+                mark_price=bid,
+                note=str(reason or "")[:120],
+            )
             try:
                 import desk_living
                 import teller_memory
@@ -1987,7 +1995,19 @@ def main():
             import desk_roi_plan
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="btc15m", seconds=elapsed,
-                note="btc15m check",
+                note="btc15m evaluate", stage="evaluate",
+            )
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="btc15m", seconds=elapsed,
+                note=f"btc15m buys={buys}", stage="buy",
+            )
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="btc15m", seconds=elapsed,
+                note="btc15m exit/manage", stage="exit",
+            )
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="btc15m", seconds=elapsed,
+                note="btc15m check", stage="loop",
             )
             if not markets and not eth_markets:
                 desk_roi_plan.record_empty_card(

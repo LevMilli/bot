@@ -395,7 +395,7 @@ def master_summary(
         try:
             if root and rows:
                 desk_roi_plan.capture_graduation_week(root, rows)
-            graduation = desk_roi_plan.graduation_board(root)
+            graduation = desk_roi_plan.graduation_board(root, bots=bots)
         except Exception:
             graduation = None
         try:
@@ -450,6 +450,15 @@ def master_summary(
             "profit_lock": profit_lock,
             "baseline": baseline,
             "living_upgrade": living,
+            "m4_latency": desk_roi_plan.m4_latency_board(root),
+            "adverse_selection_autopsy": desk_roi_plan.adverse_selection_autopsy(
+                root, bots=bots,
+            ),
+            "news_gap_autopsy": desk_roi_plan.news_gap_autopsy(root, bots=bots),
+            "eia_gap_autopsy": desk_roi_plan.eia_gap_autopsy(root, bots=bots),
+            "weekend_inx_autopsy": desk_roi_plan.weekend_inx_autopsy(root, bots=bots),
+            "distance_to_zero": desk_roi_plan.distance_to_zero_board(root, bots=bots),
+            "firm_heat": desk_roi_plan.firm_heat_map(root, bots=bots),
             "fee_floors_locked": True,
         }
         try:

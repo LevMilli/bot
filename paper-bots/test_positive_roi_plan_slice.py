@@ -95,6 +95,17 @@ class ClvCompleteness(unittest.TestCase):
         self.assertFalse(desk_roi_plan.clv_row_complete({"clv": 0.02}))
         self.assertTrue(desk_roi_plan.clv_row_complete({"fair_entry": 0.8}))
 
+    def test_settled_missing_close_fair_fails_closed(self):
+        self.assertFalse(desk_roi_plan.clv_row_complete({
+            "fair_entry": 0.82, "exit": "settled",
+        }))
+        self.assertFalse(desk_roi_plan.clv_row_complete({
+            "fair_entry": 0.82, "clv": 0.04,
+        }))
+        self.assertTrue(desk_roi_plan.clv_row_complete({
+            "fair_entry": 0.82, "close_fair": 0.78, "clv": 0.04, "exit": "settled",
+        }))
+
 
 class InxBandResearch(unittest.TestCase):
     def test_research_does_not_change_live(self):

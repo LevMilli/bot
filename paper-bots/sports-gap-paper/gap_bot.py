@@ -1037,6 +1037,22 @@ def run():
         still.append(p)
     s["open"] = still
     open_by_game = {p["game_key"]: p for p in s["open"]}
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="sports-gap",
+            seconds=time.perf_counter() - t0,
+            note="sports-gap exits", stage="exit",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="sports-gap",
+            seconds=time.perf_counter() - t0,
+            note=f"sports-gap evaluate n={len(buy_candidates)}", stage="evaluate",
+        )
+    except Exception:
+        pass
 
     # ---- paper buys after exits, capped by desk open risk ----
     # Rank-then-buy: spend open-risk on highest fee-aware gaps first.
@@ -1424,6 +1440,18 @@ def run():
         except Exception:
             pass
 
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="sports-gap",
+            seconds=time.perf_counter() - t0,
+            note=f"sports-gap buys={buys_this_check}", stage="buy",
+        )
+    except Exception:
+        pass
+
     equity_open = sum(p["cost"] for p in s["open"])
     realized = round(sum(p["pnl"] for p in s["closed"]), 2)
     lines.append("")
@@ -1440,7 +1468,7 @@ def run():
         import desk_roi_plan
         desk_roi_plan.record_latency(
             DESK_ROOT, bot="sports-gap", seconds=time.perf_counter() - t0,
-            note="sports-gap check",
+            note="sports-gap check", stage="loop",
         )
     except Exception:
         pass
