@@ -2410,16 +2410,20 @@ def near_miss_promote_status(root: str | None = None) -> dict:
         soft = str(promote.get("soft") or "").strip().lower()
         if soft in NEAR_MISS_SOFT_ALLOW:
             soft_live = soft
+    labeled_n = len(labeled)
+    n_to = max(0, int(NEAR_MISS_PROMOTE_N) - labeled_n)
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "observe_only": True,
         "n": n,
-        "labeled_n": len(labeled),
+        "labeled_n": labeled_n,
+        "n_to_promote": n_to,
         "shadow_ev": shadow_ev,
         "baseline_ev": baseline,
         "promote_min_n": NEAR_MISS_PROMOTE_N,
         "promote_ready": ready,
+        "evidence_thin": not ready,
         "decision": decision,
         "auto_promote": False,
         "code_default_live": bool(NEAR_MISS_LIVE),
@@ -2432,11 +2436,17 @@ def near_miss_promote_status(root: str | None = None) -> dict:
         "p_relax": NEAR_MISS_P_RELAX if soft_live == "p" else 0.0,
         "by_soft": by_soft,
         "by_bot": by_bot,
+        "label": (
+            f"near_miss={'ready' if ready else 'THIN'} "
+            f"labeled={labeled_n}/{NEAR_MISS_PROMOTE_N} "
+            f"ev={shadow_ev} n_to={n_to} soft_live={soft_live or 'none'}"
+        ),
         "note": (
             "Near-miss shadow: staff may arm soft-z first after "
             f"n≥{NEAR_MISS_PROMOTE_N} labeled with shadow EV ≥ {baseline}. "
             "Soft-p is second arm only after z holds M1. "
-            "Never auto-promote; never lower fee/edge floors."
+            "Never auto-promote; never lower fee/edge floors. "
+            "Evidence catch-up deferred — no-force promote CLI only."
         ),
     }
 
@@ -2525,18 +2535,20 @@ def near_miss_soft_p_status(
         "observe_only": True,
         "auto_promote": False,
         "soft_p_ready": ready,
+        "evidence_thin": not ready,
         "promote_ready": bool(base.get("promote_ready")),
         "z_armed": z_armed,
         "soft_live": soft,
         "m1_holds": bool(m1.get("holds")),
         "m1": m1,
         "labeled_n": base.get("labeled_n"),
+        "n_to_promote": base.get("n_to_promote"),
         "shadow_ev": base.get("shadow_ev"),
         "reason": reason,
         "label": (
             f"soft-p ready"
             if ready
-            else f"soft-p deferred — {reason[:72]}"
+            else f"soft-p THIN — {reason[:72]}"
         ),
         "note": (
             "Soft-p is the second near-miss arm after soft-z holds M1. "
