@@ -701,6 +701,24 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("L7 observe", doc.get("soft_copy") or "")
             self.assertTrue(doc.get("fee_floors_locked"))
 
+    def test_l7_pulse_surfaces(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            board = desk_living.living_upgrade_board(tmp)
+            # surface helper must not add a board chip
+            self.assertNotIn("l7_observe", board)
+            summary = desk_living.l7_observe_summary(board)
+            self.assertTrue(summary.get("fee_floors_locked"))
+            self.assertFalse(summary.get("board_chip"))
+            self.assertTrue(summary.get("ok"))
+            compact = desk_living.living_compact_card(tmp, board=board)
+            self.assertIn("l7_observe_sunday_quiet", compact)
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("l7_observe_sunday_quiet", export)
+            self.assertTrue(export.get("l7_observe_ok"))
+            # chip catalog unchanged by surface helper
+            self.assertFalse((board.get("board_size") or {}).get("over"))
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util

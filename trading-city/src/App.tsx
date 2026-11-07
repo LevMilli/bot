@@ -2445,7 +2445,58 @@ export default function App() {
                     })()}
                   </span>
                 </div>
-<div className="vault-board-row">
+                <div className="vault-board-row">
+                  <span className="vb-label">l7 pulse</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const exportL7 = (
+                          snap?.desk as
+                            | { l7_observe_ok?: boolean; l7_observe_label?: string }
+                            | undefined
+                        )
+                        if (exportL7?.l7_observe_ok === false) return '#d4a017'
+                        const keys = [
+                          'digest_freshness',
+                          'journal_coverage',
+                          'monday_pulse',
+                          'toxic_fills',
+                          'adapt_ab',
+                          'raise_phi_sla',
+                          'feature_coverage',
+                          'chip_catalog',
+                          'phase2_pulse',
+                        ] as const
+                        const desk = snap?.desk as Record<string, unknown> | undefined
+                        if (!desk) return undefined
+                        const missing = keys.some((k) => {
+                          const v = desk[k]
+                          return !v || typeof v !== 'object'
+                        })
+                        return missing ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const exportL7 = (
+                        snap?.desk as
+                          | { l7_observe_label?: string; l7_observe_sunday_quiet?: string }
+                          | undefined
+                      )
+                      if (exportL7?.l7_observe_sunday_quiet)
+                        return exportL7.l7_observe_sunday_quiet
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        exportL7?.l7_observe_label || 'L7 observe pulse'
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">swarm</span>
                   <span
                     style={{

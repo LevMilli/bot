@@ -1286,6 +1286,15 @@ Interactive: Positive ROI Master Plan canvas.
 | Makefile `living-l7` | observe exit 2 on missing L7 chips |
 | Ritual/status L7 pulse | Discord/observe + status text |
 
+### Living upgrade — L7 pulse surfaces (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `l7_observe_summary` helper | surface-only (not a board chip) |
+| Compact/export L7 sunday twin | `l7_observe_sunday_quiet` |
+| Vault l7 pulse row | App vault |
+| `make living-l7-discord` | staff paste draft · never auto-posts |
+
 ### Next
 
 | Ticket | Where |
