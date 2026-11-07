@@ -1524,9 +1524,21 @@ def main() -> int:
             "sunday_twin_coverage_label": desk_living.sunday_twin_coverage(board).get("label"),
             "ritual_live_labels": live_j,
             "ritual_live_n": live_n_j,
+            "ritual_live_ok": live_n_j >= 40,
             "ritual_live_timer": live_j.get("timer_label"),
             "ritual_live_sunday_quiet": compact_j.get("ritual_live_sunday_quiet"),
             "compact_ritual_live_sunday_quiet": compact_j.get("ritual_live_sunday_quiet"),
+            "teller_ritual_live_sunday_quiet": compact_j.get(
+                "teller_ritual_live_sunday_quiet"
+            ),
+            "compact_teller_ritual_live_sunday_quiet": compact_j.get(
+                "teller_ritual_live_sunday_quiet"
+            ),
+            "teller_ritual_live_n": (
+                (board.get("teller_living") or {}).get("ritual_live_n")
+                if isinstance(board.get("teller_living"), dict)
+                else None
+            ),
             "timer_sunday_quiet": (
                 compact_j.get("timer_sunday_quiet")
                 or (
@@ -1651,10 +1663,20 @@ def main() -> int:
         l7 = desk_living.l7_observe_summary(living)
         if not l7.get("ok"):
             raw.insert(0, str(l7.get("label") or "L7 observe missing")[:120])
+        live = desk_living.ritual_live_labels(living)
+        live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
+        if live_n < 40:
+            raw.insert(0, f"ritual live thin n={live_n} (need ≥40 observe labels)")
+        teller = living.get("teller_living") if isinstance(living.get("teller_living"), dict) else {}
+        if teller.get("ritual_live_ok") is False:
+            raw.append(
+                f"teller ritual live thin n={teller.get('ritual_live_n')} (observe)"
+            )
         raw.extend([
             "insight swarm ≥3:1 before betting expand",
             "revert last lever if hillclimb kill trips",
             "fee floors locked 0.06/0.05/0.02",
+            "make living-ritual-live · staff paste only",
         ])
         print(json.dumps({
             "paper_only": True,

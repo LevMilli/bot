@@ -354,6 +354,16 @@ def format_discord(payload: dict) -> str:
             f"• Sunday twins sunday: {sunday_cov.get('label')} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    teller_twin = payload.get("teller_ritual_live_sunday_quiet")
+    if teller_twin:
+        lines.append(f"• Teller ritual live sunday: {teller_twin}")
+    else:
+        teller_n = payload.get("teller_ritual_live_n")
+        lines.append(
+            f"• Teller ritual live sunday: teller ritual live n="
+            f"{teller_n if teller_n is not None else 'n/a'} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -887,6 +897,28 @@ def main() -> int:
                 f"{live.get('timer_label') or 'timer observe'} · "
                 f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
+            board_obs = desk_living.living_upgrade_board(root)
+            teller_obs = (
+                board_obs.get("teller_living")
+                if isinstance(board_obs.get("teller_living"), dict)
+                else {}
+            )
+            compact_obs = (
+                board_obs.get("compact")
+                if isinstance(board_obs.get("compact"), dict)
+                else {}
+            )
+            print(
+                "teller ritual live sunday: "
+                + str(
+                    compact_obs.get("teller_ritual_live_sunday_quiet")
+                    or (
+                        f"teller ritual live n="
+                        f"{teller_obs.get('ritual_live_n') if teller_obs.get('ritual_live_n') is not None else live_n_obs} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
@@ -996,6 +1028,12 @@ def main() -> int:
     payload["ritual_live_sunday_quiet"] = (
         compact.get("ritual_live_sunday_quiet")
         or desk_living.living_compact_card(root, board=board).get("ritual_live_sunday_quiet")
+    )
+    teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
+    payload["teller_ritual_live_n"] = teller.get("ritual_live_n")
+    payload["teller_ritual_live_ok"] = teller.get("ritual_live_ok")
+    payload["teller_ritual_live_sunday_quiet"] = compact.get(
+        "teller_ritual_live_sunday_quiet"
     )
     if args.discord:
         print(format_discord(payload))

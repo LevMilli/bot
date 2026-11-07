@@ -1418,11 +1418,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault ritual·live + teller·live rows | App vault |
 | Status teller ritual live sunday twin line | staff_living_status _text |
 
+### Living upgrade — observe/priority ritual live batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Priority flags thin ritual live + teller | staff_living_status priority |
+| Makefile `living-priority` | Makefile |
+| Observe teller ritual live sunday line | staff_living_ritual --observe |
+| Discord Teller ritual live sunday | format_discord |
+| Doctor soft_copy teller ritual live + audit cmd | living_doctor |
+| Status JSON teller/ritual live flats | staff_living_status json |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — ritual live batch shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — observe/priority ritual live batch shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 
