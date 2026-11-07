@@ -3760,6 +3760,20 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     l7_line = str(health.get("l7_observe_label") or "L7 observe pending")
     sunday_cov = sunday_twin_coverage(root=root)
     sunday_cov_line = str(sunday_cov.get("label") or "sunday twins observe")
+    live_n = int(health.get("ritual_live_n") or 0)
+    timer_live = str(
+        health.get("ritual_live_timer")
+        or timer.get("label")
+        or "timer observe"
+    )
+    ritual_live_line = (
+        f"ritual live n={live_n} · {timer_live} "
+        f"(observe · never softens floors)"
+    )
+    timer_sunday_line = (
+        f"timer sunday: {timer_live} · sunday quiet {quiet_age_label} "
+        f"(observe · never softens floors)"
+    )
     soft_copy = (
         f"**Living doctor** (paper · floors locked · live=False)\n"
         f"{doc['label']} · failed=[{failed_ids}]\n"
@@ -3767,6 +3781,8 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         f"{doctor_line}\n"
         f"{l7_line}\n"
         f"{sunday_cov_line}\n"
+        f"{ritual_live_line}\n"
+        f"{timer_sunday_line}\n"
         f"sunday quiet {quiet_age_label} (observe · never softens floors)\n"
         f"ritual draft: make living-ritual-discord (staff paste · never auto-posts)\n"
         f"_never places · never softens floors · never enables live_"
@@ -3778,6 +3794,11 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     doc["sunday_twin_coverage"] = sunday_cov
     doc["sunday_twin_coverage_label"] = sunday_cov_line
     doc["sunday_quiet_age_label"] = quiet_age_label
+    doc["ritual_live_ok"] = health.get("ritual_live_ok")
+    doc["ritual_live_n"] = live_n
+    doc["ritual_live_timer"] = timer_live
+    doc["ritual_live_line"] = ritual_live_line
+    doc["timer_sunday_line"] = timer_sunday_line
     doc["ritual_draft_cmd"] = "make living-ritual-discord"
     if record:
         try:

@@ -2863,21 +2863,42 @@ export default function App() {
                     }}
                   >
                     {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            timer_heartbeat?: {
+                              label?: string
+                              alive?: boolean
+                              age_sec?: number
+                            }
+                            ritual_live_labels?: { timer_label?: string }
+                            timer_sunday_quiet?: string
+                          }
+                        | undefined
                       const t =
-                        snap?.desk?.timer_heartbeat ||
+                        desk?.timer_heartbeat ||
                         (snap?.desk?.master as {
-                          timer_heartbeat?: { label?: string; alive?: boolean; age_sec?: number }
+                          timer_heartbeat?: {
+                            label?: string
+                            alive?: boolean
+                            age_sec?: number
+                          }
                         } | undefined)?.timer_heartbeat
-                      if (!t) return 'timer heartbeat pending'
+                      const liveTimer = desk?.ritual_live_labels?.timer_label
+                      const twin = desk?.timer_sunday_quiet
+                      if (twin && twin.includes('sunday quiet')) return twin
                       const s =
                         snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
                       const sundayBit =
                         s?.quiet_age_label ||
                         (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
                       const base =
-                        t.label ||
-                        `timer ${t.alive === false ? 'DEAD' : 'alive'}` +
-                          (t.age_sec != null ? ` age=${t.age_sec}s` : '')
+                        liveTimer ||
+                        t?.label ||
+                        (t
+                          ? `timer ${t.alive === false ? 'DEAD' : 'alive'}` +
+                            (t.age_sec != null ? ` age=${t.age_sec}s` : '')
+                          : null)
+                      if (!base) return 'timer heartbeat pending'
                       return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
                     })()}
                   </span>

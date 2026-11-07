@@ -708,6 +708,10 @@ class DeskLivingTests(unittest.TestCase):
             doc = desk_living.living_doctor(tmp, record=False)
             self.assertTrue(doc.get("l7_observe_ok"))
             self.assertIn("L7 observe", doc.get("soft_copy") or "")
+            self.assertIn("ritual live n=", doc.get("soft_copy") or "")
+            self.assertIn("timer sunday:", doc.get("soft_copy") or "")
+            self.assertGreaterEqual(int(doc.get("ritual_live_n") or 0), 40)
+            self.assertIn("timer", doc.get("ritual_live_timer") or "")
             self.assertTrue(doc.get("fee_floors_locked"))
 
     def test_l7_pulse_surfaces(self):
