@@ -277,6 +277,18 @@ def format_discord(payload: dict) -> str:
         f"• Ritual sunday: ritual observe · sunday quiet {tip_age} "
         f"(observe · never auto-posts)"
     )
+    lines.append(
+        f"• Digest-fresh sunday: digest fresh observe · sunday quiet {tip_age} "
+        f"(observe)"
+    )
+    lines.append(
+        f"• Journals sunday: journals observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Monday sunday: monday pulse observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -514,6 +526,25 @@ def main() -> int:
                 f"ritual observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never auto-posts)"
             )
+            flat["digest_fresh_sunday_quiet"] = (
+                f"digest fresh observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe)"
+            )
+            flat["journal_sunday_quiet"] = (
+                f"journals observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["monday_sunday_quiet"] = (
+                f"monday pulse observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            # L7 observe flats (non-sunday)
+            dig = desk_living.digest_freshness_chip(root)
+            journ = desk_living.journal_coverage_chip(root)
+            monday = desk_living.monday_pulse_chip(root)
+            flat["digest_freshness"] = dig
+            flat["journal_coverage"] = journ
+            flat["monday_pulse"] = monday
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -724,6 +755,21 @@ def main() -> int:
             print(
                 f"ritual sunday: ritual observe · sunday quiet {sunday_label} "
                 "(observe · never auto-posts)"
+            )
+            dig = desk_living.digest_freshness_chip(root)
+            journ = desk_living.journal_coverage_chip(root)
+            monday = desk_living.monday_pulse_chip(root)
+            print(
+                f"digest-fresh sunday: {dig.get('label') or 'digest fresh observe'} · "
+                f"sunday quiet {sunday_label} (observe)"
+            )
+            print(
+                f"journals sunday: {journ.get('label') or 'journals observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            print(
+                f"monday sunday: {monday.get('label') or 'monday pulse observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
