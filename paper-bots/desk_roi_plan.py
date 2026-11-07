@@ -3722,6 +3722,195 @@ def exit_plan_coverage(
     }
 
 
+def _exit_kind(text: str | None) -> str:
+    t = str(text or "").lower()
+    if "scale" in t:
+        return "scale_out"
+    if "gap" in t and "decay" in t:
+        return "gap_decay"
+    if "gap closed" in t or "gap-close" in t:
+        return "gap_close"
+    if "model-flip" in t or "model_flip" in t or "flip" in t:
+        return "model_flip"
+    if "hard-stop" in t or "hard_stop" in t:
+        return "hard_stop"
+    if "settled" in t or "settle" in t:
+        return "settle"
+    if "take-profit" in t or "take_profit" in t or "tp" == t:
+        return "take_profit"
+    if not t:
+        return "unknown"
+    return "other"
+
+
+def sports_exit_quality_board(
+    bots: list | None = None,
+    *,
+    min_n: int = 5,
+) -> dict:
+    """E2 observe: sports exit kind hit rates from closed history (paper only)."""
+    by_kind: dict[str, dict] = {}
+    by_league: dict[str, dict] = {}
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        if str(bot.get("id") or "") != "sports-gap":
+            continue
+        closed = list(bot.get("closed") or bot.get("history") or [])
+        for pos in closed:
+            if not isinstance(pos, dict):
+                continue
+            pnl = _finite(pos.get("pnl") if pos.get("pnl") is not None else pos.get("pnl_usd"))
+            if pnl is None:
+                continue
+            kind = _exit_kind(pos.get("exit") or pos.get("exit_reason") or pos.get("reason"))
+            league = str(pos.get("league") or "UNK")[:12]
+            for bucket, key in ((by_kind, kind), (by_league, league)):
+                slot = bucket.setdefault(key, {"n": 0, "hits": 0, "pnl_sum": 0.0})
+                slot["n"] += 1
+                slot["pnl_sum"] = round(slot["pnl_sum"] + float(pnl), 4)
+                if pnl > 0:
+                    slot["hits"] += 1
+    def _finish(raw: dict) -> list:
+        out = []
+        for k, v in raw.items():
+            n = int(v.get("n") or 0)
+            hits = int(v.get("hits") or 0)
+            out.append({
+                "key": k,
+                "n": n,
+                "hits": hits,
+                "hit_rate": round(hits / n, 4) if n else None,
+                "expectancy": round(float(v.get("pnl_sum") or 0) / n, 4) if n else None,
+                "thin": n < int(min_n),
+            })
+        out.sort(key=lambda r: -int(r.get("n") or 0))
+        return out
+    kinds = _finish(by_kind)
+    leagues = _finish(by_league)
+    total_n = sum(int(k.get("n") or 0) for k in kinds)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "board_chip": False,
+        "n": total_n,
+        "min_n": int(min_n),
+        "by_kind": kinds,
+        "by_league": leagues[:12],
+        "label": f"sports exit-quality n={total_n} kinds={len(kinds)} (observe)",
+        "note": (
+            "E2 exit-quality observe — gap-close / flip / scale-out / settle hit rates. "
+            "Never softens floors; never arms LIVE_ORDERS."
+        ),
+    }
+
+
+def selective_throughput_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """E2/E4 observe: selective +1 only when M1 holds on fee-clear greens."""
+    m1 = firm_taxed_m1(bots)
+    firm_exp = _finite(m1.get("expectancy_taxed"))
+    firm_n = int(m1.get("n") or 0)
+    m1_holds = firm_n >= 10 and firm_exp is not None and firm_exp + 1e-12 >= 0.0
+    boost = sports_green_boost_status(root, bots=bots)
+    towers = []
+    try:
+        import desk_more
+        for bot in bots or []:
+            if not isinstance(bot, dict):
+                continue
+            bid = str(bot.get("id") or "")
+            if bid not in FEE_CLEAR:
+                continue
+            today = _finite(bot.get("today"))
+            base = 3
+            green_boost = int(boost.get("green_boost") or 0) if bid == "sports-gap" else 1
+            max_buys = desk_more.selective_max_buys(
+                bid, base=base, today=today, green_boost=green_boost,
+            )
+            towers.append({
+                "bot": bid,
+                "today": today,
+                "green": today is not None and today >= 0,
+                "selective_max_buys": max_buys,
+                "boosted": max_buys > base,
+            })
+    except Exception:
+        towers = []
+    boosted_n = sum(1 for t in towers if t.get("boosted"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "board_chip": False,
+        "m1_holds": m1_holds,
+        "m1": firm_exp,
+        "m1_n": firm_n,
+        "sports_green_boost": boost.get("green_boost"),
+        "sports_green_ready": bool(boost.get("ready") or boost.get("staff_armed")),
+        "towers": towers,
+        "boosted_n": boosted_n,
+        "after_m1": m1_holds,
+        "label": (
+            f"selective throughput after_m1={m1_holds} boosted={boosted_n} "
+            "(observe · never softens floors)"
+        ),
+        "note": (
+            "Selective +1 only on fee-clear greens when today≥0; "
+            "throughput talk only after firm M1 holds. Floors locked."
+        ),
+    }
+
+
+def exit_quality_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Combined E2 exit-quality + hard-stop shadow + selective observe board."""
+    coverage = exit_plan_coverage(root, bots=bots)
+    sports = sports_exit_quality_board(bots)
+    hard = sports_hard_stop_shadow_summary(root)
+    selective = selective_throughput_observe(root, bots=bots)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "exit_plan_coverage": coverage,
+        "sports_exits": sports,
+        "hard_stop_shadow": {
+            "n": hard.get("n"),
+            "n_with_pnl": hard.get("n_with_pnl"),
+            "shadow_expectancy": hard.get("shadow_expectancy"),
+            "promote_min_n": hard.get("promote_min_n"),
+            "promote_ready": hard.get("promote_ready"),
+            "n_to_promote": max(
+                0,
+                int(hard.get("promote_min_n") or 30) - int(hard.get("n_with_pnl") or 0),
+            ),
+            "live": hard.get("live"),
+            "decision": hard.get("decision"),
+        },
+        "selective_throughput": selective,
+        "label": (
+            f"E2 exit-quality cover={coverage.get('n_with_plan')}/"
+            f"{coverage.get('n_open')} sports_n={sports.get('n')} "
+            f"hs_shadow={hard.get('n_with_pnl')} selective_m1={selective.get('m1_holds')}"
+        ),
+        "note": (
+            "E2 exit-quality observe / selective throughput after M1. "
+            "Never softens floors; never arms LIVE_ORDERS; no tip invent."
+        ),
+    }
+
+
 # ---- Sports hard-stop shadow -----------------------------------------------
 
 def sports_hard_stop_hit(
@@ -6092,6 +6281,8 @@ def plan_summary(
         "empty_card": empty_card_status(root),
         "near_miss_promote": near_miss_promote_status(root),
         "near_miss_soft_p": near_miss_soft_p_status(root, bots=bots),
+        "exit_quality": exit_quality_observe(root, bots=bots),
+        "selective_throughput": selective_throughput_observe(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,

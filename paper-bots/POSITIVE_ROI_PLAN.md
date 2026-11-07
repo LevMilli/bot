@@ -1738,11 +1738,21 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Staff arm (no force) | `staff_promote_near_miss_soft("p")` · `make living-near-miss-soft-p` |
 | Masters | `roi_plan.near_miss_soft_p` |
 
+### E2 exit-quality observe / selective after M1
+
+| Ticket | Where |
+| --- | --- |
+| Sports exit kind hit rates | `sports_exit_quality_board` |
+| Combined observe | `exit_quality_observe` · `make living-exit-quality` |
+| Selective throughput after M1 | `selective_throughput_observe` |
+| Money pulse | `make living-money-pulse` includes exit_quality |
+| Masters | `roi_plan.exit_quality` + `selective_throughput` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| E2 exit-quality observe / selective throughput after M1 | `exit_quality_observe` / selective board |
+| Hard-stop shadow n→30 observe / no-force promote when ready | `sports_hard_stop_shadow_summary` |
 
 ### INX research no-force path
 
