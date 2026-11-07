@@ -4676,6 +4676,17 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     quiet = feature_store_quiet_alert(root)
     timer = timer_heartbeat_chip(root)
     gaps = dual_control_gaps_page(root)
+    shadow_ops = {"ok": True, "alerts": [], "label": "shadow ops ok"}
+    try:
+        import desk_roi_plan
+        shadow_ops = desk_roi_plan.shadow_ops_alerts(root)
+        shadow_ops["label"] = (
+            "shadow ops ok"
+            if shadow_ops.get("ok")
+            else f"shadow ops ALERT {','.join(shadow_ops.get('alerts') or [])}"
+        )
+    except Exception:
+        shadow_ops = {"ok": True, "alerts": [], "label": "shadow ops n/a"}
     ritual = (
         health.get("ritual_observe")
         if isinstance(health.get("ritual_observe"), dict)
@@ -4684,6 +4695,8 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     # Ritual nag: weekly doctor marker freshness (floors/expand already checked).
     # When record=True this run refreshes the marker — don't fail on pre-write staleness.
     ritual_fresh_ok = bool(ritual.get("doctor_fresh")) or bool(record)
+    # Shadow ops alerts are observe-only — surface in checks but do not fail doctor
+    # (evidence densify; staff runs make living-shadow-tick).
     ok = bool(
         floors.get("all_ok")
         and health.get("ok")
@@ -4704,16 +4717,26 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
             "ok": ritual_fresh_ok,
             "label": ritual.get("label") or "ritual observe",
         },
+        {
+            "id": "shadow_ops",
+            "ok": bool(shadow_ops.get("ok")),
+            "observe_only": True,
+            "label": shadow_ops.get("label") or "shadow ops observe",
+        },
     ]
     failed = [c for c in checks if not c.get("ok")]
+    # Hard fails exclude observe-only shadow_ops (alert surfaces; does not fail doctor).
+    hard_failed = [c for c in failed if not c.get("observe_only")]
     doc = {
         "paper_only": True,
         "fee_floors_locked": True,
         "live_orders_enabled": False,
-        "ok": ok and not failed,
-        "failed_n": len(failed),
-        "failed": failed,
+        "ok": ok and not hard_failed,
+        "failed_n": len(hard_failed),
+        "failed": hard_failed,
         "checks": checks,
+        "shadow_ops": shadow_ops,
+        "shadow_ops_alerts": list(shadow_ops.get("alerts") or []),
         "ritual_observe": ritual,
         "ritual_ok": ritual.get("ritual_ok"),
         "ritual_exit_ok": ritual.get("exit_ok"),
@@ -4723,8 +4746,8 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
         "chips_over": bool(int(health.get("chips_n") or 0) > CHIP_CATALOG_SOFT_MAX),
         "label": (
             "living doctor OK"
-            if ok and not failed
-            else f"living doctor FAIL n={len(failed)}"
+            if ok and not hard_failed
+            else f"living doctor FAIL n={len(hard_failed)}"
         ),
         "note": "Staff one-shot doctor — never places; never softens floors; never enables live.",
     }

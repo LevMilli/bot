@@ -76,6 +76,7 @@ def load_history(root: str | None = None) -> dict:
 
 
 def save_history(state: dict, root: str | None = None) -> None:
+    """Persist history — creates kalshi_crypto_history.json when snapshots exist."""
     path = history_path(root)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     snaps = list(state.get("snapshots") or [])
@@ -93,6 +94,14 @@ def save_history(state: dict, root: str | None = None) -> None:
         json.dump(state, handle, indent=2)
         handle.write("\n")
     os.replace(tmp, path)
+
+
+def ensure_history_file(root: str | None = None) -> str:
+    """Create empty kalshi_crypto_history.json if missing (snapshot path readiness)."""
+    path = history_path(root)
+    if not os.path.isfile(path):
+        save_history(_empty(), root)
+    return path
 
 
 def record_snapshot(
@@ -260,7 +269,11 @@ def record_settle(
     target: float | None = None,
     note: str = "",
 ) -> dict:
-    """Append one authoritative Kalshi yes/no label for adapt / history learning."""
+    """Append one authoritative Kalshi yes/no label for adapt / history learning.
+
+    Also bridges to near-miss would_pnl labeling (observe densify) when result
+    is yes/no. Never places orders; never arms soft gates.
+    """
     state = load_history(root)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     res = str(result or "").strip().lower()
@@ -288,6 +301,19 @@ def record_settle(
         settles = settles[-2000:]
     state["settles"] = settles
     save_history(state, root)
+    # Near-miss densify bridge — label pending shadow skips for this ticker.
+    if res in ("yes", "no") and ticker:
+        try:
+            import desk_roi_plan
+            labeled = desk_roi_plan.label_near_miss_from_result(
+                root,
+                ticker=str(ticker),
+                result=res,
+                note=note or "history settle label",
+            )
+            row["near_miss_labeled"] = int(labeled.get("labeled") or 0)
+        except Exception:
+            row["near_miss_labeled"] = 0
     return row
 
 

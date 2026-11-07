@@ -1724,6 +1724,7 @@ def main() -> int:
             "edge08-export", "green-boost-export",
             "helper-gate-a", "helper-arm", "helper-backfill",
             "clv-repair", "clv-completeness",
+            "shadow-catchup", "shadow-tick",
             "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse",
@@ -2595,6 +2596,23 @@ def main() -> int:
         return 0 if cov.get("pass") else 2
 
     if args.action == "ritual-live":
+        # Densify when floors look clean — observe-safe catch-up only.
+        shadow_catchup = {
+            "ok": False, "labeled_n": 0, "labeled": 0, "backfilled": 0, "repaired": 0,
+        }
+        try:
+            floors = desk_living.fee_floors_assert(root)
+            if floors.get("all_ok"):
+                shadow_catchup = desk_roi_plan.run_shadow_catchup(root)
+        except Exception as exc:  # noqa: BLE001
+            shadow_catchup = {
+                "ok": False,
+                "labeled_n": 0,
+                "labeled": 0,
+                "backfilled": 0,
+                "repaired": 0,
+                "error": type(exc).__name__,
+            }
         live = desk_living.ritual_live_labels(board)
         live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
         compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -2611,6 +2629,12 @@ def main() -> int:
             "paper_only": True,
             "fee_floors_locked": True,
             "board_chip": False,
+            "auto_promote": False,
+            "live_orders_enabled": False,
+            "shadow_catchup": shadow_catchup,
+            "labeled_n": shadow_catchup.get("labeled_n"),
+            "backfilled": shadow_catchup.get("backfilled"),
+            "repaired": shadow_catchup.get("repaired"),
             "ritual_live_n": live_n,
             "ritual_live_ok": live_n >= 40,
             "ritual_live_timer": live.get("timer_label"),
@@ -3566,6 +3590,16 @@ def main() -> int:
         out = desk_roi_plan.repair_clv_completeness(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
+    if args.action == "shadow-catchup":
+        # Observe densify trio — never arms soft gates / LIVE / tip invent.
+        out = desk_roi_plan.run_shadow_catchup(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "shadow-tick":
+        import pimp_desk
+        out = pimp_desk.run_shadow_tick(root, run_bots=True)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "clv-completeness":
         out = desk_roi_plan.clv_completeness(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
@@ -3637,6 +3671,23 @@ def main() -> int:
         ))
         return 0
     if args.action == "money-pulse":
+        # Side-effect densify (observe-safe): label / helper backfill / CLV repair.
+        # Never arms soft gates; never LIVE; never tip invent.
+        try:
+            shadow_catchup = desk_roi_plan.run_shadow_catchup(root)
+        except Exception as exc:  # noqa: BLE001
+            shadow_catchup = {
+                "ok": False,
+                "labeled_n": 0,
+                "labeled": 0,
+                "backfilled": 0,
+                "repaired": 0,
+                "error": type(exc).__name__,
+            }
+        try:
+            shadow_ops = desk_roi_plan.shadow_ops_alerts(root)
+        except Exception:
+            shadow_ops = {"ok": False, "alerts": ["probe_failed"]}
         feat = desk_living.feature_store_coverage(root)
         out = {
             "paper_only": True,
@@ -3644,6 +3695,11 @@ def main() -> int:
             "auto_promote": False,
             "live_orders_enabled": False,
             "observe_only": True,
+            "shadow_catchup": shadow_catchup,
+            "labeled_n": shadow_catchup.get("labeled_n"),
+            "backfilled": shadow_catchup.get("backfilled"),
+            "repaired": shadow_catchup.get("repaired"),
+            "shadow_ops": shadow_ops,
             "firm_queue": desk_roi_plan.firm_queue_status(root),
             "completions": desk_living.completions_summary(root),
             "feature_store": feat,
@@ -3681,7 +3737,8 @@ def main() -> int:
                 "Money-path pulse — observe only (firm-queue / completions / "
                 "feature densify / exit-quality / selective after M1 / "
                 "promote-distance / firm-health / ops / dual-control-observe / "
-                "guardrails / review / calib-clv / baseline-fee). "
+                "guardrails / review / calib-clv / baseline-fee / "
+                "shadow catch-up densify). "
                 "Never softens floors. Never arms LIVE_ORDERS."
             ),
         }
