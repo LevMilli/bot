@@ -1337,6 +1337,14 @@ Interactive: Positive ROI Master Plan canvas.
 | Export surface audits | ritual_live_labels / sunday_twin_coverage / l7_observe |
 | Makefile `living-export` | staff_living_status export |
 
+### Living upgrade — sunday twin doctor/status/vault (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Doctor soft_copy sunday twins line | `living_doctor` |
+| Status text/json sunday twins | staff_living_status |
+| Vault sunday twins row | App vault (from export flat) |
+
 ### Next
 
 | Ticket | Where |

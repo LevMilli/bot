@@ -226,6 +226,14 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "sunday twins: "
+            + str(
+                (desk_living.sunday_twin_coverage(board).get("label")
+                 if hasattr(desk_living, "sunday_twin_coverage")
+                 else "sunday twins observe")
+            )
+        ),
+        (
             "feature store: "
             + (
                 f"n={(board.get('feature_store') or {}).get('n')} "
@@ -1412,6 +1420,8 @@ def main() -> int:
             "l7_observe_label": desk_living.l7_observe_summary(board).get("label"),
             "l7_observe_sunday_quiet": compact_j.get("l7_observe_sunday_quiet"),
             "compact_l7_observe_sunday_quiet": compact_j.get("l7_observe_sunday_quiet"),
+            "sunday_twin_coverage": desk_living.sunday_twin_coverage(board),
+            "sunday_twin_coverage_label": desk_living.sunday_twin_coverage(board).get("label"),
             "feature_store": board.get("feature_store"),
             "skip_historian": board.get("skip_historian"),
             "feature_store_sunday_quiet": compact_j.get("feature_store_sunday_quiet"),
