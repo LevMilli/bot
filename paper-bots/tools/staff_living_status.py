@@ -1130,12 +1130,19 @@ def main() -> int:
             pass
         digest = clerk_pulse.refresh_clerks(root)
         chip = desk_living.clerk_pulse_chip(root)
+        prio = desk_living.living_priority_snapshot(root=root)
+        live = desk_living.ritual_live_labels(root=root)
+        live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
         print(json.dumps({
             "paper_only": True,
             "fee_floors_locked": True,
             "may_place_alone": False,
             "refreshed_n": (digest or {}).get("refreshed_n") if isinstance(digest, dict) else None,
             "chip": chip,
+            "priority": prio,
+            "priority_label": prio.get("label"),
+            "ritual_live_n": live_n,
+            "ritual_live_ok": live_n >= 40,
             "note": "Forced clerk pulse refresh — observe digests only.",
         }, indent=2, sort_keys=True, default=str))
         return 0

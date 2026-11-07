@@ -1441,11 +1441,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault priority row | App vault |
 | Selfcheck/doctor priority label | living_self_check / doctor |
 
+### Living upgrade — priority observe/pulse batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Ritual observe priority sunday line | staff_living_ritual --observe |
+| Discord Priority sunday | format_discord |
+| Ritual payload priority snapshot | staff_living_ritual |
+| Pulse JSON priority + ritual_live_n | staff_living_status pulse |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — export/HUD priority batch shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — priority observe/pulse shipped; chip catalog 52/64 soft-max; useful surfaces covered)* | — |
 
 ## Hard rules unchanged
 
