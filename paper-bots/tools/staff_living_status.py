@@ -1715,7 +1715,7 @@ def main() -> int:
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
             "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip", "near-miss-tip", "helper-tip", "hard-stop-tip", "skip-regret-tip", "eia-tip", "injury-tip", "completions-tip", "toxic-tip", "calib-tip", "clv-tip", "clerk-tip", "bookkeeper-tip",
             "hard-stop-promote", "green-boost-arm", "inx-band-promote", "staff-promote-batch",
-            "near-miss-promote", "hard-stop-export",
+            "near-miss-promote", "hard-stop-export", "edge08-status", "edge08-promote",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3380,6 +3380,16 @@ def main() -> int:
         slim = {k: v for k, v in out.items() if k != "csv"}
         slim["csv_preview"] = (out.get("csv") or "")[:400]
         print(json.dumps(slim, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "edge08-status":
+        out = desk_roi_plan.btc_edge08_shadow_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("promote_ready") else 2
+    if args.action == "edge08-promote":
+        out = desk_roi_plan.staff_promote_btc_edge08(
+            root, who="staff-cli", note="staff edge08 promote CLI",
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
 
     if args.action == "l7":

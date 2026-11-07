@@ -1678,8 +1678,16 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Hard-stop shadow n≥30 EV≥0 — drop force dependency | `sports_hard_stop_shadow_summary.promote_ready` |
 | Near-miss labeled n≥30 EV≥0 — drop force; optional soft-p second | `near_miss_promote_status` → `staff_promote_near_miss_soft("p")` |
 | Dual-control / LIVE_ORDERS stay off until separate staff gate | paper-only forever until staff |
-| Shadow edge08 promote only at n≥30 EV≥0.5 | `pimp_desk.promote_shadow` (btc15m/edge08) |
 | Helper Gate A staff arm after ready | `staff_set_helper_autonomy` |
+
+### BTC edge08 shadow promote (raise-only)
+
+| Ticket | Where |
+| --- | --- |
+| Promote-ready board | `btc_edge08_shadow_status` (n≥30 EV≥0.5) |
+| Staff promote | `staff_promote_btc_edge08` · `make living-edge08-promote` |
+| Runtime | `pimp_desk.promote_shadow` writes venue_edge **0.08** (above 0.05 floor) |
+| Masters | `roi_plan.btc_edge08_shadow` |
 
 ### BTC raise_Φ staff decision log
 
