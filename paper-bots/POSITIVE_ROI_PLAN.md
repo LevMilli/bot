@@ -1623,6 +1623,14 @@ Interactive: Positive ROI Master Plan canvas.
 | Sports / commodity / BTC stamp `exit_plan` at buy | `gap_bot` / commodity bot / `btc15m_signal` |
 | Masters `roi_plan.exit_plans` | `desk_master.master_summary` |
 
+### Positive ROI — exit_plan stamp on INX + meme opens
+
+| Ticket | Where |
+| --- | --- |
+| INX S&P / sized `exit_plan` at open | `kalshi-*-paper/paper_sim.open_position` |
+| Memecoin `exit_plan` (stop/flip/ladder) | `memecoin-paper/bot.py` |
+| Coverage tracks fee-clear + loser towers | `exit_plan_coverage` |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |

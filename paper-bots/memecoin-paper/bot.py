@@ -591,6 +591,21 @@ def scan(st, stats):
                    why=f"Paper buy ({lane} lane). Confidence {conf}. Ticket ${ticket:.2f}.",
                    peak_price=price, ladder_done=[],
                    confidence=conf, lane=lane, url=p.get("url"))
+        try:
+            desk_root = os.path.dirname(BASE)
+            if desk_root not in sys.path:
+                sys.path.insert(0, desk_root)
+            import desk_roi_plan as _xp
+            pos["exit_plan"] = _xp.default_exit_plan("memecoin")
+        except Exception:
+            pos["exit_plan"] = {
+                "kind": "stop+model_flip+ladder+settle",
+                "stop_pct": -0.12,
+                "model_flip_mom": -0.06,
+                "ladder_take_profits": True,
+                "settle_backstop": True,
+                "fee_floors_locked": True,
+            }
         st["open"].append(pos)
         open_mints.add(mint)
         entries_today += 1
