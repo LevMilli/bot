@@ -1255,9 +1255,30 @@ def main():
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_more
-        max_buys_eff = int(
-            desk_more.selective_max_buys("btc15m", base=MAX_BUYS_PER_CHECK, today=today_pnl)
-        )
+        import desk_roi_plan
+        if today_pnl >= 0:
+            top = next((ev for ev in ranked if not ev.get("reasons")), None) or (
+                ranked[0] if ranked else {}
+            )
+            desk_roi_plan.record_selective_attempt(
+                DESK_ROOT,
+                "btc15m",
+                edge=(top or {}).get("edge"),
+                z=(top or {}).get("z"),
+                depth=(top or {}).get("depth"),
+                today=today_pnl,
+                boosted=True,
+                note="selective +1 path considered",
+            )
+        if desk_roi_plan.selective_kill_active(DESK_ROOT, "btc15m"):
+            max_buys_eff = int(MAX_BUYS_PER_CHECK)
+            print("Selective +1 KILLED (5 green-day EV worsen) — base max_buys only")
+        else:
+            max_buys_eff = int(
+                desk_more.selective_max_buys(
+                    "btc15m", base=MAX_BUYS_PER_CHECK, today=today_pnl,
+                )
+            )
     except Exception:
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
@@ -1307,6 +1328,18 @@ def main():
         if buys >= max_buys_eff:
             skips += 1
             print(f"--- {ev.get('ticker')}  skip: max buys this check ({max_buys_eff})")
+            if not IS_SHADOW:
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.note_pending_high_edge(
+                        DESK_ROOT,
+                        bot="btc15m",
+                        ticker=str(ev.get("ticker") or ""),
+                        edge=ev.get("edge"),
+                        reason=f"max buys this check ({max_buys_eff})",
+                    )
+                except Exception:
+                    pass
             continue
         m = ev.get("market") or {"ticker": ev.get("ticker"), "target": 0, "close_time": ev.get("close_time"),
                                  "yes_bid": None, "yes_ask": None, "no_bid": None, "no_ask": None}
@@ -1615,6 +1648,12 @@ def main():
                         ev=ev,
                         note="btc paper buy",
                     )
+                    desk_roi_plan.flush_opp_cost_on_buy(
+                        DESK_ROOT,
+                        bot="btc15m",
+                        ticker=str(ev.get("ticker") or ""),
+                        edge=ev.get("edge"),
+                    )
                 except Exception:
                     pass
             if kalshi_history is not None and not IS_SHADOW:
@@ -1657,6 +1696,18 @@ def main():
                         reasons=list(ev.get("reasons") or []) + [str(last_sentence)[:80]],
                         note=str(last_sentence)[:160],
                     )
+                    why = str(last_sentence or "").lower()
+                    if any(
+                        k in why
+                        for k in ("budget", "open risk", "max open", "cash", "risk cap")
+                    ):
+                        desk_roi_plan.note_pending_high_edge(
+                            DESK_ROOT,
+                            bot="btc15m",
+                            ticker=str(ev.get("ticker") or ""),
+                            edge=ev.get("edge"),
+                            reason=str(last_sentence)[:120],
+                        )
                 except Exception:
                     pass
         print()

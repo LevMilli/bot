@@ -657,9 +657,30 @@ def run():
                 if skip:
                     reason = skip
                     summary_out["skips"].append(skip)
+            alarm = tip_alarm_band(g) if g.get("state") == "pre" else None
+            tip_window = alarm is not None or (
+                g.get("state") == "pre" and tip_within_minutes(g)
+            )
+            if tip_window:
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_roi_plan as _tip_funnel
+                    _tip_funnel.record_tip_funnel(DESK_ROOT, league, "games_seen")
+                    if reason is None:
+                        _tip_funnel.record_tip_funnel(DESK_ROOT, league, "fee_clear")
+                    elif reason and (
+                        "gap <" in str(reason)
+                        or "fair" in str(reason).lower()
+                        or "edge" in str(reason).lower()
+                        or "spread" in str(reason).lower()
+                        or "price too" in str(reason).lower()
+                    ):
+                        _tip_funnel.record_tip_funnel(DESK_ROOT, league, "block_edge")
+                except Exception:
+                    pass
             if reason:
                 lines.append(row + gtxt + f" | {reason} |"); continue
-            alarm = tip_alarm_band(g) if g.get("state") == "pre" else None
             if alarm is not None:
                 print(f"  TIP-ALARM T−{alarm}: {league} {name} (fee-aware priority, edge still required)")
             buy_candidates.append({
@@ -667,6 +688,7 @@ def run():
                 "bid": bid, "ask": ask, "gap": gap, "score": score, "path": path, "g": g,
                 "series": series, "row": row, "gtxt": gtxt, "lane": lane, "need": need,
                 "tip_alarm": alarm,
+                "tip_window": tip_window,
             })
 
     # ---- exits / settlement (before new paper buys) ----
@@ -1117,18 +1139,36 @@ def run():
     buys_this_check = 0
     # Selective volume when green; ROI rescue caps when red — fee floors unchanged.
     # green_boost stays 0 until sports_green_boost_status ready (2w M1≥0 + CLV bar).
+    # E4: kill selective +1 if taxed EV worsens over 5 green Chicago days.
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_more
         import desk_roi_plan
         boost = int(desk_roi_plan.sports_green_boost(DESK_ROOT))
-        max_buys_eff = int(
-            desk_more.selective_max_buys(
-                "sports-gap", base=MAX_BUYS_PER_CHECK, today=red_pnl, green_boost=boost,
+        if red_pnl is not None and float(red_pnl) >= 0:
+            top = buy_candidates[0] if buy_candidates else {}
+            desk_roi_plan.record_selective_attempt(
+                DESK_ROOT,
+                "sports-gap",
+                edge=(top or {}).get("gap"),
+                z=None,
+                depth=None,
+                league=(top or {}).get("league"),
+                today=red_pnl,
+                boosted=bool(boost),
+                note="selective +1 path considered",
             )
-        )
-        if boost:
+        if desk_roi_plan.selective_kill_active(DESK_ROOT, "sports-gap"):
+            max_buys_eff = int(MAX_BUYS_PER_CHECK)
+            print("Selective +1 KILLED (5 green-day EV worsen) — base max_buys only")
+        else:
+            max_buys_eff = int(
+                desk_more.selective_max_buys(
+                    "sports-gap", base=MAX_BUYS_PER_CHECK, today=red_pnl, green_boost=boost,
+                )
+            )
+        if boost and max_buys_eff > MAX_BUYS_PER_CHECK:
             print(f"Sports green_boost={boost} (CLV+M1 gate ready; fee floors locked)")
     except Exception:
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
@@ -1252,6 +1292,14 @@ def run():
         else:
             n = int(stake // per) if per > 0 else 0
         cost = round(n * per, 2) if n >= 1 else 0.0
+        if reason is None and n >= 1 and (c.get("tip_window") or c.get("tip_alarm") is not None):
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import desk_roi_plan as _tip_sized
+                _tip_sized.record_tip_funnel(DESK_ROOT, str(c.get("league") or ""), "sized")
+            except Exception:
+                pass
         if reason is None and (n < 1 or cost > s["cash"] + 1e-9):
             reason = "not enough paper cash"
         if reason is None:
@@ -1324,6 +1372,15 @@ def run():
                         edge=gap,
                         reason=str(reason)[:120],
                     )
+                if c.get("tip_window") or c.get("tip_alarm") is not None:
+                    if any(k in why for k in ("max buys", "max open risk", "budget", "open risk", "cash")):
+                        desk_roi_plan.record_tip_funnel(
+                            DESK_ROOT, str(c.get("league") or ""), "block_budget",
+                        )
+                    elif any(k in why for k in ("gap", "edge", "fair", "spread", "price")):
+                        desk_roi_plan.record_tip_funnel(
+                            DESK_ROOT, str(c.get("league") or ""), "block_edge",
+                        )
             except Exception:
                 pass
             continue
@@ -1421,6 +1478,10 @@ def run():
                 ticker=str(m.get("ticker") or ""),
                 edge=gap,
             )
+            if c.get("tip_window") or c.get("tip_alarm") is not None:
+                desk_roi_plan.record_tip_funnel(
+                    DESK_ROOT, str(c.get("league") or ""), "bought",
+                )
         except Exception:
             pass
 

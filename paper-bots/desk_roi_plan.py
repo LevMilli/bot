@@ -57,6 +57,28 @@ EMPTY_CARD_NAME = "desk_empty_card.json"
 BLEED_WEEK_NAME = "desk_bleed_week.json"
 NEAR_MISS_PROMOTE_NAME = "desk_near_miss_promote.json"
 
+# E3–E4 boards live in desk_roi_e4 (re-exported for desk_roi_plan.* API).
+from desk_roi_e4 import (  # noqa: F401
+    INCUBATION_IDEA_BANK_ONLY,
+    INCUBATION_IDEA_BANK_PREFIXES,
+    LOCKED_VENUE_FLOORS,
+    SELECTIVE_KILL_GREEN_DAYS,
+    TIP_FUNNEL_LEAGUES,
+    TIP_FUNNEL_STAGES,
+    eligible_fill_funnel,
+    gate_a_pilot_btc_calendar,
+    incubation_blocks_auto,
+    incubation_idea_bank_only,
+    note_selective_green_day,
+    record_selective_attempt,
+    record_tip_funnel,
+    selective_kill_active,
+    selective_kill_status,
+    tip_funnel_board,
+    throughput_vs_m1_board,
+)
+
+
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
 MAX_HARD_STOP_ROWS = 2000
@@ -5816,7 +5838,7 @@ def load_incubation(root: str | None = None) -> dict:
 
 
 def incubation_status(root: str | None, series: str | None) -> dict:
-    """Lane for one series: main | incubation | ready_to_graduate | graduated."""
+    """Lane for one series: main | incubation | ready_to_graduate | graduated | idea_bank."""
     key = _series_key(series)
     store = load_incubation(root)
     graduated = {str(s).upper() for s in (store.get("graduated") or [])}
@@ -5825,7 +5847,11 @@ def incubation_status(root: str | None, series: str | None) -> dict:
     n = int(row.get("n") or 0)
     pnls = [p for p in (row.get("pnls") or []) if _finite(p) is not None]
     exp = round(sum(pnls) / len(pnls), 4) if pnls else None
-    if key and key in graduated:
+    idea_bank = bool(row.get("idea_bank_only")) or incubation_idea_bank_only(key or series)
+    auto_block = incubation_blocks_auto(key or series)
+    if idea_bank:
+        lane = "idea_bank"
+    elif key and key in graduated:
         lane = "graduated"
     elif key and key in INCUBATION_MAIN_SERIES and not row:
         lane = "main"
@@ -5840,13 +5866,22 @@ def incubation_status(root: str | None, series: str | None) -> dict:
         "n": n,
         "min_n": INCUBATION_MIN_N,
         "expectancy_taxed": exp,
-        "promote_ready": lane == "ready_to_graduate",
+        "promote_ready": lane == "ready_to_graduate" and not idea_bank,
         "auto_promote": False,
-        "main_tape": key in INCUBATION_MAIN_SERIES or lane in ("main", "graduated"),
+        "idea_bank_only": idea_bank,
+        "blocks_auto": auto_block,
+        "main_tape": (
+            not idea_bank
+            and (key in INCUBATION_MAIN_SERIES or lane in ("main", "graduated"))
+        ),
         "fee_floors_locked": True,
         "note": (
-            f"Incubation: need n≥{INCUBATION_MIN_N} fee-aware settles before staff graduate. "
-            "Paper trades allowed; no auto-promote."
+            "Idea-bank only (weather/econ/Polymarket) — refuse main AUTO."
+            if idea_bank
+            else (
+                f"Incubation: need n≥{INCUBATION_MIN_N} fee-aware settles before staff graduate. "
+                "Paper trades allowed; no auto-promote."
+            )
         ),
     }
 
@@ -5897,20 +5932,38 @@ def record_incubation_settle(
 
 
 def enroll_incubation(root: str | None, series: str, *, note: str = "") -> dict:
-    """Force a series into incubation (even if it was on the main list)."""
+    """Force a series into incubation (even if it was on the main list).
+
+    Weather/econ/Polymarket stay idea-bank only — refuse main AUTO.
+    """
     key = _series_key(series)
     if not key:
         return {"ok": False, "reason": "no series"}
+    idea_bank = incubation_idea_bank_only(key) or incubation_idea_bank_only(series)
+    auto_block = incubation_blocks_auto(key)
     store = load_incubation(root)
     graduated = [s for s in (store.get("graduated") or []) if str(s).upper() != key]
     store["graduated"] = graduated
     series_map = store.setdefault("series", {})
     if key not in series_map:
-        series_map[key] = {"series": key, "n": 0, "pnls": [], "bots": {}, "enrolled_at": _now()}
+        series_map[key] = {
+            "series": key, "n": 0, "pnls": [], "bots": {}, "enrolled_at": _now(),
+        }
     series_map[key]["note"] = str(note or "")[:160]
+    series_map[key]["idea_bank_only"] = bool(idea_bank)
+    if idea_bank:
+        series_map[key]["main_auto"] = False
+        series_map[key]["blocks_auto"] = auto_block
     store["series"] = series_map
     _save(_path(INCUBATION_NAME, root), store)
-    return {"ok": True, **incubation_status(root, key)}
+    status = incubation_status(root, key)
+    return {
+        "ok": True,
+        **status,
+        "main_auto": False if idea_bank else status.get("main_tape"),
+        "refused_main_auto": bool(idea_bank),
+        "blocks_auto": auto_block,
+    }
 
 
 def staff_graduate_incubation(
@@ -5923,6 +5976,16 @@ def staff_graduate_incubation(
     """Staff promote series out of incubation after n≥50 (unless force)."""
     key = _series_key(series)
     status = incubation_status(root, key)
+    auto_block = incubation_blocks_auto(key)
+    if auto_block and not force:
+        return {
+            "ok": False,
+            "reason": auto_block,
+            "status": status,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "refused_main_auto": True,
+        }
     if not force and not status.get("promote_ready"):
         return {
             "ok": False,
@@ -5973,7 +6036,15 @@ def incubation_board(root: str | None = None) -> dict:
 
 def incubation_blocks_promote(root: str | None, series: str | None) -> str:
     """Non-empty when series must not leave paper incubation yet."""
+    auto = incubation_blocks_auto(series)
+    if auto:
+        return auto
     status = incubation_status(root, series)
+    if status.get("lane") == "idea_bank":
+        return (
+            f"incubation idea-bank only: {status.get('series')} "
+            "— refuse main AUTO (weather/econ/Polymarket)"
+        )
     if status.get("lane") in ("main", "graduated", "ready_to_graduate", "unknown"):
         # ready_to_graduate still needs staff — block auto-promote paths
         if status.get("lane") == "ready_to_graduate":
@@ -7855,6 +7926,11 @@ def plan_summary(
         "near_miss_soft_p": near_miss_soft_p_status(root, bots=bots),
         "exit_quality": exit_quality_observe(root, bots=bots),
         "selective_throughput": selective_throughput_observe(root, bots=bots),
+        "selective_kill": selective_kill_status(root, bots=bots),
+        "tip_funnel": tip_funnel_board(root),
+        "gate_a_pilot": gate_a_pilot_btc_calendar(root),
+        "eligible_fill_funnel": eligible_fill_funnel(root, bots=bots),
+        "throughput_vs_m1": throughput_vs_m1_board(root, bots=bots),
         "promote_distance": promote_distance_observe(root, bots=bots),
         "firm_health": firm_health_observe(root, bots=bots, cfg=cfg),
         "ops": ops_observe(root, bots=bots),
