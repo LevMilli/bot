@@ -206,6 +206,32 @@ MAX_FIRM_OFFERS = 200
 # Empty-market CARD bar — fee-clear towers should exit idle loops fast.
 EMPTY_CARD_BAR_SEC = 3.0
 MAX_EMPTY_CARD_ROWS = 500
+# 15m series observe boards (plan 422–441): empty rate + median time-to-book.
+EMPTY_CARD_SERIES_15M = (
+    "KXBTC15M",
+    "KXETH15M",
+    "KXGOLD15M",
+    "KXSILVER15M",
+    "KXPLATINUM15M",
+    "KXPALLADIUM15M",
+    "KXCOPPER15M",
+    "KXWTI15M",
+    "KXBRENT15M",
+    "KXNATGAS15M",
+)
+_BOT_DEFAULT_SERIES = {
+    "btc15m": ("KXBTC15M", "KXETH15M"),
+    "commodity-15m": (
+        "KXGOLD15M",
+        "KXSILVER15M",
+        "KXPLATINUM15M",
+        "KXPALLADIUM15M",
+        "KXCOPPER15M",
+        "KXWTI15M",
+        "KXBRENT15M",
+        "KXNATGAS15M",
+    ),
+}
 
 # Phase 5: near-miss soft-gate promote (never fee / edge floors).
 NEAR_MISS_PROMOTE_N = 30
@@ -2133,6 +2159,7 @@ def record_empty_card(
     seconds,
     markets_n: int = 0,
     note: str = "",
+    series: str = "",
 ) -> dict:
     """Log an idle/empty-market CARD loop for the <3s bar."""
     sec = _finite(seconds)
@@ -2141,9 +2168,11 @@ def record_empty_card(
     bot_id = str(bot or "").strip()
     if not bot_id:
         return {"recorded": False, "reason": "missing bot"}
+    series_id = str(series or "").strip().upper()[:40]
     row = {
         "at": _now(),
         "bot": bot_id[:40],
+        "series": series_id,
         "seconds": round(float(sec), 3),
         "markets_n": int(markets_n or 0),
         "bar_sec": EMPTY_CARD_BAR_SEC,
@@ -2184,6 +2213,8 @@ def empty_card_status(root: str | None = None, *, bot: str | None = None) -> dic
         b = str(r.get("bot") or "")
         by_bot[b] = int(by_bot.get(b) or 0) + 1
     ok = p50 is None or p50 + 1e-12 <= EMPTY_CARD_BAR_SEC
+    series_board = empty_card_series_board(root) if root is not None else None
+    series_alerts = list((series_board or {}).get("alerts") or [])
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -2191,17 +2222,194 @@ def empty_card_status(root: str | None = None, *, bot: str | None = None) -> dic
         "p50_s": p50,
         "max_s": round(max(secs), 3) if secs else None,
         "bar_sec": EMPTY_CARD_BAR_SEC,
-        "pass": ok,
+        "pass": ok and not series_alerts,
         "by_bot": by_bot,
         "recent": rows[-8:],
+        "series_alerts": series_alerts,
         "note": (
             f"Empty-market CARD bar {EMPTY_CARD_BAR_SEC:.0f}s — "
             "prefetch books; idle loops should exit fast."
-            if ok
+            if ok and not series_alerts
             else (
                 f"Empty-market CARD p50 {p50}s > {EMPTY_CARD_BAR_SEC:.0f}s bar — "
                 "speed up idle path / prefetch."
+                if not ok
+                else (
+                    "Empty CARD series alert densify: "
+                    + ",".join(series_alerts[:6])
+                )
             )
+        ),
+    }
+
+
+def empty_card_series_board(root: str | None = None) -> dict:
+    """Per-series empty CARD rate + median time-to-book (plan 422–441, 511–512).
+
+    Covers KXBTC15M / KXETH15M and commodity 15m series. Alert when empty
+    resolve exceeds 3s and data is present. Observe only; floors locked.
+    """
+    store = _load(_path(EMPTY_CARD_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    buckets: dict[str, list[float]] = {s: [] for s in EMPTY_CARD_SERIES_15M}
+    for r in rows:
+        sec = _finite(r.get("seconds"))
+        if sec is None:
+            continue
+        series = str(r.get("series") or "").strip().upper()
+        tagged = False
+        if series in buckets:
+            buckets[series].append(float(sec))
+            tagged = True
+        if tagged:
+            continue
+        for s in _BOT_DEFAULT_SERIES.get(str(r.get("bot") or ""), ()):
+            if s in buckets:
+                buckets[s].append(float(sec))
+    series_rows = []
+    alerts: list[str] = []
+    for series in EMPTY_CARD_SERIES_15M:
+        secs = sorted(buckets.get(series) or [])
+        n = len(secs)
+        p50 = round(secs[(n - 1) // 2], 3) if n else None
+        max_s = round(max(secs), 3) if n else None
+        fail_n = sum(1 for s in secs if s + 1e-12 > EMPTY_CARD_BAR_SEC)
+        empty_rate = round(fail_n / n, 4) if n else None
+        ok = p50 is None or p50 + 1e-12 <= EMPTY_CARD_BAR_SEC
+        if n and not ok:
+            alerts.append(series)
+        series_rows.append({
+            "series": series,
+            "n": n,
+            "empty_rate": empty_rate,
+            "median_time_to_book_s": p50,
+            "max_s": max_s,
+            "bar_sec": EMPTY_CARD_BAR_SEC,
+            "pass": ok,
+            "alert": bool(n and not ok),
+        })
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "bar_sec": EMPTY_CARD_BAR_SEC,
+        "series": series_rows,
+        "alerts": alerts,
+        "ok": len(alerts) == 0,
+        "label": (
+            f"empty_card_series={'ok' if not alerts else 'ALERT'} "
+            f"alerts={','.join(alerts) or 'none'} "
+            f"tracked={len(EMPTY_CARD_SERIES_15M)}"
+        ),
+        "note": (
+            "15m empty-CARD densify — rate + median time-to-book per series; "
+            f"alert when empty resolve >{EMPTY_CARD_BAR_SEC:.0f}s (data present). "
+            "Floors locked."
+        ),
+    }
+
+
+def depth_adjusted_edge_board(
+    root: str | None = None,
+    *,
+    candidates: list | None = None,
+    need: float | None = None,
+) -> dict:
+    """Observe: raw edge rank vs depth-adjusted rank for fee-clear towers.
+
+    Plan 423+ densify. Never changes live ranking or floors.
+    """
+    import desk_more
+
+    depth_need = float(need) if need is not None else float(desk_more.DEFAULT_DEPTH_NEED)
+    rows_in: list[dict] = []
+    if candidates:
+        rows_in = [c for c in candidates if isinstance(c, dict)]
+    else:
+        try:
+            fq = firm_queue_status(root) if root is not None else {}
+            offers = list((fq or {}).get("top") or [])
+            if not offers:
+                latest = (fq or {}).get("latest") if isinstance(fq, dict) else None
+                if isinstance(latest, dict):
+                    offers = list(latest.get("rows") or [])
+            if not offers:
+                store = _firm_queue_store(root) if root is not None else {}
+                book = store.get("offers") if isinstance(store.get("offers"), dict) else {}
+                offers = [v for v in book.values() if isinstance(v, dict)]
+            rows_in = [o for o in offers if isinstance(o, dict)]
+        except Exception:
+            rows_in = []
+    scored: list[dict] = []
+    for i, c in enumerate(rows_in):
+        bot = str(c.get("bot") or "")
+        if bot and bot not in FEE_CLEAR and bot not in FIRM_QUEUE_BOTS:
+            continue
+        edge = _finite(
+            c.get("edge")
+            if c.get("edge") is not None
+            else (c.get("gap") if c.get("gap") is not None else c.get("score"))
+        )
+        if edge is None:
+            continue
+        depth = _finite(c.get("depth"))
+        adj = desk_more.depth_adjusted_edge(edge, depth, need=depth_need)
+        scored.append({
+            "bot": bot or "fee-clear",
+            "ticker": str(c.get("ticker") or c.get("key") or "")[:60],
+            "series": str(c.get("series") or "")[:40],
+            "edge": round(float(edge), 6),
+            "depth": depth,
+            "depth_adjusted_edge": adj,
+            "idx": i,
+        })
+    raw_order = sorted(range(len(scored)), key=lambda i: (-scored[i]["edge"], i))
+    adj_order = sorted(
+        range(len(scored)),
+        key=lambda i: (-scored[i]["depth_adjusted_edge"], i),
+    )
+    for rank, i in enumerate(raw_order, start=1):
+        scored[i]["raw_rank"] = rank
+    for rank, i in enumerate(adj_order, start=1):
+        scored[i]["adj_rank"] = rank
+    for row in scored:
+        row["rank_delta"] = int(row["raw_rank"]) - int(row["adj_rank"])
+    changed = sum(1 for r in scored if r.get("raw_rank") != r.get("adj_rank"))
+    top_raw = [scored[i] for i in raw_order[:8]]
+    top_adj = [scored[i] for i in adj_order[:8]]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "need": depth_need,
+        "n": len(scored),
+        "rank_changed_n": changed,
+        "candidates": scored[:40],
+        "top_raw": [
+            {"ticker": r["ticker"], "bot": r["bot"], "edge": r["edge"], "rank": r["raw_rank"]}
+            for r in top_raw
+        ],
+        "top_depth_adjusted": [
+            {
+                "ticker": r["ticker"],
+                "bot": r["bot"],
+                "depth_adjusted_edge": r["depth_adjusted_edge"],
+                "rank": r["adj_rank"],
+            }
+            for r in top_adj
+        ],
+        "label": (
+            f"depth_edge n={len(scored)} changed={changed} need={depth_need:g}"
+        ),
+        "note": (
+            "Depth-adjusted edge ranking observe for fee-clear towers — "
+            "compares raw vs depth-adjusted order; does not re-rank live book."
         ),
     }
 
@@ -8600,6 +8808,8 @@ def plan_summary(
         "btc_calibration": btc_calibration_report(bots),
         "firm_queue": firm_queue_status(root),
         "empty_card": empty_card_status(root),
+        "empty_card_series": empty_card_series_board(root),
+        "depth_adjusted_edge": depth_adjusted_edge_board(root),
         "near_miss_promote": near_miss_promote_status(root),
         "near_miss_soft_p": near_miss_soft_p_status(root, bots=bots),
         "exit_quality": exit_quality_observe(root, bots=bots),

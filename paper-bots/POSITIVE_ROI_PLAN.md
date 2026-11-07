@@ -258,6 +258,9 @@ Interactive: Positive ROI Master Plan canvas.
 | Empty CARD log | `record_empty_card` / `empty_card_status` (bar 3s) |
 | Runtime | commodity empty fast-exit; BTC logs empty CARD latency |
 | Masters board | `roi_plan.empty_card` |
+| Sports pre-tip warm T−15/T−5 | `desk_more.warm_tip_books` → gap_bot tip alarm path (447–448, 513–514) |
+| Empty CARD series densify | `empty_card_series_board` — KXBTC/ETH + commodity 15m rate + median + >3s alert (422–441, 511–512) |
+| Depth-adjusted edge observe | `depth_adjusted_edge_board` raw vs depth rank (423+) |
 
 ### Near-miss soft-gate staff promote
 

@@ -2061,10 +2061,15 @@ def main():
                 note="btc15m check", stage="loop",
             )
             if not markets and not eth_markets:
-                desk_roi_plan.record_empty_card(
-                    DESK_ROOT, bot="btc15m", seconds=elapsed, markets_n=0,
-                    note="no open BTC/ETH 15m windows",
-                )
+                for series in ("KXBTC15M", "KXETH15M"):
+                    desk_roi_plan.record_empty_card(
+                        DESK_ROOT,
+                        bot="btc15m",
+                        seconds=elapsed,
+                        markets_n=0,
+                        series=series,
+                        note="no open BTC/ETH 15m windows",
+                    )
         except Exception:
             pass
     print(

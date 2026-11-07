@@ -105,6 +105,18 @@ DEFAULT_TOWER_BUDGET_SHARE = {
 # Depth need for depth-adjusted edge (contracts at/below ask).
 DEFAULT_DEPTH_NEED = 10.0
 
+# Sports pre-tip book warm windows (T−15 / T−5). Priority only — never waives floors.
+TIP_WARM_WINDOWS_MIN = (15, 5)
+KALSHI_PUBLIC = "https://api.elections.kalshi.com/trade-api/v2"
+SPORTS_SERIES_BY_LEAGUE = {
+    "NFL": "KXNFLGAME",
+    "NCAAF": "KXNCAAFGAME",
+    "NBA": "KXNBAGAME",
+    "WNBA": "KXWNBAGAME",
+    "MLB": "KXMLBGAME",
+    "NHL": "KXNHLGAME",
+}
+
 # Near-miss shadow: tiny stake, never counts toward desk open-risk.
 NEAR_MISS_STAKE = 2.0
 NEAR_MISS_Z_BAND = (0.55, 0.65)
@@ -386,6 +398,147 @@ def prefetch_map(jobs: Iterable, worker, *, max_workers: int = 8) -> tuple[dict,
             else:
                 ok[job] = value
     return ok, errors
+
+
+def sports_quote_cache_path(root: str | None = None) -> str:
+    base = root or os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "sports-gap-paper", "quote_cache.json")
+
+
+def _sports_quote_cache_load(root: str | None = None) -> dict:
+    path = sports_quote_cache_path(root)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def _sports_quote_cache_put(root: str | None, url: str, body: Any) -> None:
+    """Write one URL body into sports-gap quote_cache (warm path)."""
+    path = sports_quote_cache_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = _sports_quote_cache_load(root)
+    data[str(url)] = {"at": time.time(), "body": body}
+    if len(data) > 80:
+        newest = sorted(
+            data.items(),
+            key=lambda item: float((item[1] or {}).get("at") or 0),
+        )[-80:]
+        data = dict(newest)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    os.replace(tmp, path)
+
+
+def _default_kalshi_fetch(url: str):
+    import urllib.request
+
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0 (paper warm_tip_books)"}
+    )
+    with urllib.request.urlopen(req, timeout=20) as response:
+        return json.load(response)
+
+
+def series_markets_url(series: str) -> str:
+    tick = str(series or "").strip()
+    return (
+        f"{KALSHI_PUBLIC}/markets?series_ticker={tick}&status=open&limit=1000"
+    )
+
+
+def warm_tip_books(
+    root: str | None,
+    minutes_to_tip: float | int = 15,
+    *,
+    games: list | None = None,
+    fetch=None,
+    series_by_league: dict | None = None,
+    put_cache=None,
+) -> dict:
+    """Prefetch Kalshi books for tip-soon games into sports quote_cache.
+
+    Covers T−15 / T−5 warm windows (plan 447–448, 513–514). Never places
+    orders and never waives venue floors — observe/warm only.
+    """
+    horizon = float(minutes_to_tip) if minutes_to_tip is not None else 15.0
+    if horizon <= 0:
+        horizon = 15.0
+    league_map = dict(series_by_league or SPORTS_SERIES_BY_LEAGUE)
+    fetcher = fetch or _default_kalshi_fetch
+    writer = put_cache or (
+        lambda url, body: _sports_quote_cache_put(root, url, body)
+    )
+    soon: list[dict] = []
+    for g in games or []:
+        if not isinstance(g, dict):
+            continue
+        tip = _finite(g.get("tip_in_min"))
+        if tip is None:
+            tip = _finite(g.get("eta_min"))
+        if tip is None or tip <= 0 or tip > horizon + 1e-9:
+            continue
+        soon.append(g)
+    series_keys: dict[str, str] = {}
+    for g in soon:
+        league = str(g.get("league") or "").strip().upper()
+        series = str(g.get("series") or "").strip() or league_map.get(league, "")
+        if not series:
+            continue
+        series_keys[series] = league or series
+    warmed: list[dict] = []
+    errors: dict[str, str] = {}
+    for series, league in sorted(series_keys.items()):
+        url = series_markets_url(series)
+        try:
+            body = fetcher(url)
+            writer(url, body)
+            warmed.append({
+                "series": series,
+                "league": league,
+                "url": url,
+                "markets_n": len((body or {}).get("markets") or [])
+                if isinstance(body, dict)
+                else 0,
+            })
+        except Exception as exc:  # noqa: BLE001
+            errors[series] = str(exc)[:160]
+    ticker_warmed = 0
+    for g in soon:
+        tick = str(g.get("kalshi_ticker") or g.get("market_ticker") or "").strip()
+        if not tick or tick.startswith("http") or len(tick) < 6:
+            continue
+        if not tick.upper().startswith("KX"):
+            continue
+        url = f"{KALSHI_PUBLIC}/markets/{tick}/orderbook"
+        try:
+            body = fetcher(url)
+            writer(url, body)
+            ticker_warmed += 1
+        except Exception as exc:  # noqa: BLE001
+            errors[tick] = str(exc)[:160]
+    band = 5 if horizon <= 5 + 1e-9 else (15 if horizon <= 15 + 1e-9 else int(horizon))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "orders_placed": False,
+        "minutes_to_tip": horizon,
+        "tip_band": band,
+        "games_n": len(soon),
+        "warmed_n": len(warmed),
+        "ticker_warmed_n": ticker_warmed,
+        "warmed": warmed,
+        "errors": errors,
+        "windows": list(TIP_WARM_WINDOWS_MIN),
+        "note": (
+            f"Pre-tip warm T−{band}: prefetched {len(warmed)} series book(s) "
+            "into quote_cache. Never waives sports 0.06 floor."
+        ),
+    }
 
 
 def record_skip_codes(
@@ -1171,6 +1324,38 @@ def self_check() -> None:
     assert opportunity_score_v2(0.10, 0.8, 5, need=10) < opportunity_score_v2(0.10, 0.8, 20, need=10)
     ok_map, err_map = prefetch_map([1, 2], lambda j: j + 1)
     assert ok_map == {1: 2, 2: 3} and err_map == {}
+    warm_calls: list[str] = []
+
+    def _fake_fetch(url: str):
+        warm_calls.append(url)
+        return {"markets": [{"ticker": "KXTEST"}]}
+
+    warm = warm_tip_books(
+        None,
+        15,
+        games=[
+            {"league": "NBA", "series": "KXNBAGAME", "tip_in_min": 12},
+            {"league": "NFL", "series": "KXNFLGAME", "tip_in_min": 4},
+            {"league": "NHL", "series": "KXNHLGAME", "tip_in_min": 60},
+        ],
+        fetch=_fake_fetch,
+        put_cache=lambda _u, _b: None,
+    )
+    assert warm["orders_placed"] is False
+    assert warm["fee_floors_locked"] is True
+    assert warm["warmed_n"] == 2  # 60m tip excluded from T−15
+    assert len(warm_calls) == 2
+    warm5 = warm_tip_books(
+        None,
+        5,
+        games=[
+            {"league": "NBA", "series": "KXNBAGAME", "tip_in_min": 12},
+            {"league": "NFL", "series": "KXNFLGAME", "tip_in_min": 4},
+        ],
+        fetch=_fake_fetch,
+        put_cache=lambda _u, _b: None,
+    )
+    assert warm5["warmed_n"] == 1 and warm5["tip_band"] == 5
     budgets = tower_budgets({"max_open_risk": 100})
     assert abs(sum(budgets.values()) - 100) < 0.05
     block = tower_budget_blocks("memecoin", 4.0, 3.0, {"max_open_risk": 100})

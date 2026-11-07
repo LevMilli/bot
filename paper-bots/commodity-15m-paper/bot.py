@@ -824,10 +824,15 @@ def main() -> int:
         print("CARD: Checked commodity 15m markets. No open windows.")
         try:
             import desk_roi_plan
-            desk_roi_plan.record_empty_card(
-                DESK_ROOT, bot="commodity-15m", seconds=elapsed, markets_n=0,
-                note="no open commodity windows",
-            )
+            for series in SERIES:
+                desk_roi_plan.record_empty_card(
+                    DESK_ROOT,
+                    bot="commodity-15m",
+                    seconds=elapsed,
+                    markets_n=0,
+                    series=series,
+                    note="no open commodity windows",
+                )
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="commodity-15m", seconds=elapsed,
                 note="empty card", stage="evaluate",
