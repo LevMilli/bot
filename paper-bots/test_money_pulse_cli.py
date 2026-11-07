@@ -124,6 +124,23 @@ class MoneyPulseSurfaces(unittest.TestCase):
             self.assertIn("btc_calibration", out)
             self.assertIn("ops=", out["label"])
 
+    def test_guardrails_observe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.record_adverse_fill(
+                tmp, bot="btc15m", ticker="KX", entry_price=0.60, mark_price=0.50,
+            )
+            desk_roi_plan.record_anti_revenge(
+                tmp, bot="sports-gap", ticker="GAME1", reason="stop",
+            )
+            out = desk_roi_plan.guardrails_observe(tmp, bots=[{"id": "btc15m"}])
+            self.assertTrue(out["observe_only"])
+            self.assertTrue(out["fee_floors_locked"])
+            self.assertIn("adverse_cool", out["alerts"])
+            self.assertIn("anti_revenge", out["alerts"])
+            self.assertEqual(out["adverse_cool"]["active_n"], 1)
+            self.assertEqual(out["anti_revenge"]["active_n"], 1)
+            self.assertIn("guardrails=", out["label"])
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()

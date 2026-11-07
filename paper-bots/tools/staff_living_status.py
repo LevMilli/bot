@@ -1726,6 +1726,7 @@ def main() -> int:
             "exit-quality", "promote-distance", "hillclimb-lever", "firm-health",
             "bleed-week", "daily-r", "opp-cost", "profit-lock", "ops-observe",
             "incubation", "ruin-drill", "cold-harvest", "graduation", "btc-calib",
+            "guardrails", "adverse-cool", "anti-revenge", "empty-card", "stale-world",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3596,6 +3597,7 @@ def main() -> int:
             "promote_distance": desk_roi_plan.promote_distance_observe(root),
             "firm_health": desk_roi_plan.firm_health_observe(root),
             "ops": desk_roi_plan.ops_observe(root),
+            "guardrails": desk_roi_plan.guardrails_observe(root),
             "green_boost": desk_roi_plan.sports_green_boost_status(root),
             "near_miss": desk_roi_plan.near_miss_promote_status(root),
             "hard_stop": desk_roi_plan.sports_hard_stop_shadow_summary(root),
@@ -3607,8 +3609,8 @@ def main() -> int:
             "note": (
                 "Money-path pulse — observe only (firm-queue / completions / "
                 "feature densify / exit-quality / selective after M1 / "
-                "promote-distance / firm-health / ops). Never softens floors. "
-                "Never arms LIVE_ORDERS."
+                "promote-distance / firm-health / ops / guardrails). "
+                "Never softens floors. Never arms LIVE_ORDERS."
             ),
         }
         # Enrich exit/selective with live bots when snapshot available.
@@ -3636,6 +3638,7 @@ def main() -> int:
                     root, bots=bots, cfg=cfg,
                 )
                 out["ops"] = desk_roi_plan.ops_observe(root, bots=bots)
+                out["guardrails"] = desk_roi_plan.guardrails_observe(root, bots=bots)
                 out["capital_os"] = desk_roi_plan.capital_os_status(
                     root, bots=bots, cfg=cfg,
                 )
@@ -3771,6 +3774,44 @@ def main() -> int:
         out = desk_roi_plan.btc_calibration_report(bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if not out.get("miscalibrated") else 2
+    if args.action == "guardrails":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.guardrails_observe(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "adverse-cool":
+        out = desk_roi_plan.adverse_cool_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("active_n", 0) == 0 else 2
+    if args.action == "anti-revenge":
+        out = desk_roi_plan.anti_revenge_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("active_n", 0) == 0 else 2
+    if args.action == "empty-card":
+        out = desk_roi_plan.empty_card_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "stale-world":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.stale_world_status(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not out.get("blocked") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

@@ -4168,6 +4168,61 @@ def ops_observe(
     }
 
 
+def guardrails_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Entry guardrails observe: empty CARD / stale-world / adverse / anti-revenge."""
+    empty = empty_card_status(root)
+    stale = stale_world_status(root, bots=bots)
+    adverse = adverse_cool_status(root)
+    revenge = anti_revenge_status(root)
+    alerts = []
+    if not empty.get("pass"):
+        alerts.append("empty_card")
+    if stale.get("blocked"):
+        alerts.append("stale_world")
+    if int(adverse.get("active_n") or 0) > 0:
+        alerts.append("adverse_cool")
+    if int(revenge.get("active_n") or 0) > 0:
+        alerts.append("anti_revenge")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "ok": len(alerts) == 0,
+        "alerts": alerts,
+        "empty_card": {
+            "n": empty.get("n"),
+            "p50_s": empty.get("p50_s"),
+            "bar_sec": empty.get("bar_sec"),
+            "pass": empty.get("pass"),
+        },
+        "stale_world": {
+            "blocked": stale.get("blocked"),
+            "clock_skew_max_s": stale.get("clock_skew_max_s"),
+            "rows": stale.get("rows"),
+        },
+        "adverse_cool": adverse,
+        "anti_revenge": revenge,
+        "label": (
+            f"guardrails={'ok' if not alerts else 'ALERT'} "
+            f"alerts={','.join(alerts) or 'none'} "
+            f"empty_p50={empty.get('p50_s')} "
+            f"stale={len(stale.get('blocked') or [])} "
+            f"adverse={adverse.get('active_n')} revenge={revenge.get('active_n')}"
+        ),
+        "note": (
+            "Guardrails observe — empty CARD <3s, stale-world/clock-skew, "
+            "adverse cool-off, anti-revenge same-market block. Floors locked."
+        ),
+    }
+
+
 def promote_distance_observe(
     root: str | None = None,
     *,
@@ -4701,6 +4756,43 @@ def record_anti_revenge(
         "until": until,
         "minutes": int(minutes),
         "reason": str(reason or "stop")[:80],
+    }
+
+
+def anti_revenge_status(root: str | None = None) -> dict:
+    """Observe board: same-market anti-revenge cools currently active."""
+    path = _path(ANTI_REVENGE_NAME, root)
+    state = _load(path, {"paper_only": True, "markets": {}})
+    now = time.time()
+    active = []
+    for key, row in (state.get("markets") or {}).items():
+        if not isinstance(row, dict):
+            continue
+        until = _finite(row.get("until"))
+        if until is None or until <= now:
+            continue
+        active.append({
+            "key": str(key),
+            "bot": row.get("bot"),
+            "ticker": row.get("ticker"),
+            "reason": row.get("reason"),
+            "left_min": int(max(1, (until - now) / 60.0)),
+            "until": until,
+            "at": row.get("at"),
+        })
+    active.sort(key=lambda r: (str(r.get("bot") or ""), str(r.get("ticker") or "")))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "minutes": ANTI_REVENGE_MINUTES,
+        "active_n": len(active),
+        "active": active[:40],
+        "label": f"anti_revenge active={len(active)} window={ANTI_REVENGE_MINUTES}m",
+        "note": (
+            f"Anti-revenge blocks same-market re-entry for {ANTI_REVENGE_MINUTES}m "
+            "after stop/flip. Floors locked."
+        ),
     }
 
 
@@ -5571,6 +5663,46 @@ def adverse_cool_blocks(root: str | None, bot: str) -> str:
         f"adverse cool-off: {bot} paused ~{left}m after "
         f"{row.get('drop')} drop on {row.get('ticker') or 'fill'}"
     )
+
+
+def adverse_cool_status(root: str | None = None) -> dict:
+    """Observe board: which towers are in adverse cool-off right now."""
+    path = _path(ADVERSE_COOL_NAME, root)
+    state = _load(path, {"paper_only": True, "bots": {}})
+    now = time.time()
+    active = []
+    for bot, row in (state.get("bots") or {}).items():
+        if not isinstance(row, dict):
+            continue
+        until = _finite(row.get("until"))
+        if until is None or until <= now:
+            continue
+        active.append({
+            "bot": str(bot),
+            "ticker": row.get("ticker"),
+            "drop": row.get("drop"),
+            "left_min": int(max(1, (until - now) / 60.0)),
+            "until": until,
+            "at": row.get("at"),
+        })
+    active.sort(key=lambda r: str(r.get("bot") or ""))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "drop_bar": ADVERSE_MARK_DROP,
+        "minutes": ADVERSE_COOL_MINUTES,
+        "active_n": len(active),
+        "active": active,
+        "label": (
+            f"adverse_cool active={len(active)} "
+            f"bar={ADVERSE_MARK_DROP} window={ADVERSE_COOL_MINUTES}m"
+        ),
+        "note": (
+            f"Adverse cool-off after ≥{ADVERSE_MARK_DROP} mark drop — "
+            f"{ADVERSE_COOL_MINUTES}m pause. Floors locked."
+        ),
+    }
 
 
 def latest_weekly_scorecard(root: str | None = None) -> dict | None:
@@ -6739,6 +6871,7 @@ def plan_summary(
         "promote_distance": promote_distance_observe(root, bots=bots),
         "firm_health": firm_health_observe(root, bots=bots, cfg=cfg),
         "ops": ops_observe(root, bots=bots),
+        "guardrails": guardrails_observe(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,
