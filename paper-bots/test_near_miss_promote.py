@@ -113,6 +113,18 @@ class NearMissPromote(unittest.TestCase):
         self.assertTrue(floors["locked"])
         self.assertTrue(floors["all_ok"])
 
+    def test_staff_force_arm_z_before_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            armed = desk_roi_plan.staff_promote_near_miss_soft(
+                tmp, "z", note="staff gate lifted money-path", force=True,
+            )
+            self.assertTrue(armed["ok"])
+            self.assertEqual(desk_roi_plan.near_miss_soft_live(tmp), "z")
+            relax = desk_roi_plan.effective_near_miss_relax(tmp)
+            self.assertAlmostEqual(relax["z_relax"], desk_roi_plan.NEAR_MISS_Z_RELAX)
+            self.assertEqual(relax["edge_relax"], 0.0)
+            self.assertFalse(desk_roi_plan.NEAR_MISS_LIVE)
+
 
 if __name__ == "__main__":
     unittest.main()

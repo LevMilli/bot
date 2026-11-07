@@ -1,0 +1,17 @@
+{
+  "at": "2026-11-07T07:12:27Z",
+  "auto_promote": false,
+  "code_default_live": false,
+  "decision": "reject",
+  "edge_relax": 0.0,
+  "fee_floors_locked": true,
+  "live": true,
+  "note": "staff near-miss soft-z arm CLI",
+  "p_relax": 0.0,
+  "paper_only": true,
+  "shadow_ev": null,
+  "shadow_n": 0,
+  "soft": "z",
+  "staff_approved": true,
+  "z_relax": 0.05
+}

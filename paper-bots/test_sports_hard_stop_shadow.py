@@ -162,5 +162,26 @@ class FeeFloorsStillLocked(unittest.TestCase):
         self.assertIn("cannot lower", err or "")
 
 
+class HardStopShadowCsvExport(unittest.TestCase):
+    def test_export_csv_packet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(3):
+                desk_roi_plan.record_sports_hard_stop_shadow(
+                    tmp,
+                    ticker=f"T{i}",
+                    entry_price=0.80,
+                    bid=0.60,
+                    contracts=10,
+                    cost=5.0,
+                )
+            out = desk_roi_plan.export_sports_hard_stop_shadow_csv(tmp)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["n"], 3)
+            self.assertTrue(out["fee_floors_locked"])
+            self.assertFalse(out["auto_promote"])
+            self.assertIn("shadow_pnl", out["csv"])
+            self.assertTrue(out["path"] and out["path"].endswith(".csv"))
+
+
 if __name__ == "__main__":
     unittest.main()

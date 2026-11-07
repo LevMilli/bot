@@ -56,7 +56,7 @@ desk_sports_calibration.json
 desk_commodity_calibration.json
 desk_firm_queue.json
 desk_empty_card.json
-desk_near_miss_promote.json
+# desk_near_miss_promote.json committed after staff soft-z arm (money-path)
 desk_completions.json
 desk_living_doctor.json
 desk_feature_store.jsonl

@@ -3102,6 +3102,70 @@ def sports_hard_stop_shadow_summary(root: str | None = None) -> dict:
     }
 
 
+def export_sports_hard_stop_shadow_csv(
+    root: str | None = None,
+    *,
+    path: str | None = None,
+) -> dict:
+    """Staff promote packet: CSV export of sports hard-stop shadow rows.
+
+    Paper only. Never sells. Never softens floors. make-money plan step 291.
+    """
+    import csv
+    import io
+
+    shadow_path = _path(SPORTS_HARD_STOP_SHADOW, root)
+    state = _load(shadow_path, {"paper_only": True, "rows": []})
+    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict)]
+    summary = sports_hard_stop_shadow_summary(root)
+    fields = (
+        "at", "ticker", "side", "league", "entry_price", "bid", "threshold",
+        "drop", "fair", "contracts", "cost", "shadow_pnl", "shadow_only",
+        "live_sell", "note",
+    )
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({k: row.get(k) for k in fields})
+    text = buf.getvalue()
+    out_path = path or _path("desk_sports_hard_stop_shadow.csv", root)
+    try:
+        with open(out_path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        wrote = True
+    except OSError as exc:
+        wrote = False
+        out_path = None
+        return {
+            "ok": False,
+            "wrote": False,
+            "path": None,
+            "n": len(rows),
+            "csv": text,
+            "summary": summary,
+            "reason": f"write failed: {exc}",
+            "paper_only": True,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    return {
+        "ok": True,
+        "wrote": wrote,
+        "path": out_path,
+        "n": len(rows),
+        "csv": text,
+        "summary": summary,
+        "paper_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "note": (
+            "Hard-stop shadow CSV for staff promote packet. "
+            "Does not arm live sells; use staff_set_sports_hard_stop_live."
+        ),
+    }
+
+
 def sports_hard_stop_is_live(root: str | None = None) -> bool:
     """Live sells only when code flag OR explicit staff promote file says so."""
     if SPORTS_HARD_STOP_LIVE:
