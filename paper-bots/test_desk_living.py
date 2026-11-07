@@ -795,6 +795,32 @@ class DeskLivingTests(unittest.TestCase):
             self.assertNotIn("l7_observe", board)
             self.assertFalse((board.get("board_size") or {}).get("over"))
 
+    def test_export_keep_clerks_surfaces(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            board = desk_living.living_upgrade_board(tmp)
+            export = desk_living.living_board_export(tmp)
+            for key in (
+                "living_ai", "skip_taxonomy", "helper_gate_a", "skip_regret",
+                "tip_radar", "calib_nag", "injury_wire", "eia_scout",
+                "distance_clerk", "quant_clerk", "bookkeeper", "empty_card_bee",
+                "near_miss_clerk", "hard_stop_clerk", "skip_twin_clerk",
+                "timer_digest", "calendar_scanner", "eia_blackout", "clerk_pulse",
+                "dual_control_chip", "teller_living", "clv_closer", "bleed_clerk",
+                "completions", "near_miss", "hard_stop", "empty_card",
+                "hillclimb_lever", "dual_control", "ruin_drill", "ruin_drill_page",
+            ):
+                self.assertIn(key, export)
+            self.assertIn("ritual_live_labels", export)
+            self.assertIn("sunday_twin_coverage", export)
+            self.assertIn("l7_observe", export)
+            self.assertFalse(export["ritual_live_labels"].get("board_chip"))
+            self.assertFalse(export["sunday_twin_coverage"].get("board_chip"))
+            self.assertFalse(export["l7_observe"].get("board_chip"))
+            # still no new board chip
+            self.assertNotIn("l7_observe", board)
+            self.assertFalse((board.get("board_size") or {}).get("over"))
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util
