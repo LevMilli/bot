@@ -62,6 +62,24 @@ def _text(board: dict) -> str:
         doctor_fresh = compact.get("doctor_fresh")
     if doctor_fresh is None and doctor_age:
         doctor_fresh = not bool(doctor_age.get("stale"))
+    live = (
+        desk_living.ritual_live_labels(board)
+        if hasattr(desk_living, "ritual_live_labels")
+        else {}
+    )
+    sunday_cov = (
+        desk_living.sunday_twin_coverage(board)
+        if hasattr(desk_living, "sunday_twin_coverage")
+        else {}
+    )
+    sunday_bit = str(
+        sunday.get("quiet_age_label")
+        or compact.get("quiet_age_label")
+        or "quiet_age=n/a"
+    )
+    live_n = sum(
+        1 for k, v in live.items() if str(k).endswith("_label") and v
+    )
     lines = [
         "Living upgrade status (paper only · floors locked · live=False)",
         f"compact: {compact.get('label') or '—'}",
@@ -227,11 +245,24 @@ def _text(board: dict) -> str:
         ),
         (
             "sunday twins: "
-            + str(
-                (desk_living.sunday_twin_coverage(board).get("label")
-                 if hasattr(desk_living, "sunday_twin_coverage")
-                 else "sunday twins observe")
-            )
+            + str(sunday_cov.get("label") or "sunday twins observe")
+        ),
+        (
+            "timer sunday: "
+            + str(live.get("timer_label") or "timer observe")
+            + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+        ),
+        (
+            f"ritual live: n={live_n} · "
+            + str(live.get("digests_label") or "digests observe")
+            + " · "
+            + str(live.get("fills_label") or "fills observe")
+            + " (observe · never softens floors)"
+        ),
+        (
+            "sunday twins sunday: "
+            + str(sunday_cov.get("label") or "sunday twins observe")
+            + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
         ),
         (
             "feature store: "

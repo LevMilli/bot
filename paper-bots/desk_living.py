@@ -3980,6 +3980,7 @@ def ritual_live_labels(board: dict | None = None, root: str | None = None) -> di
         "green_label": _lab("green_day", "green-day observe"),
         "bleed_label": _lab("bleed", "bleed observe"),
         "clv_label": _lab("clv", "CLV observe"),
+        "timer_label": _lab("timer_heartbeat", "timer observe"),
         "calib_label": _lab("calib_nag", "calib observe"),
         "queue_label": _lab("firm_queue", "queue observe"),
         "gate_a_label": _lab("helper_gate_a", "Gate A observe"),
@@ -4078,6 +4079,12 @@ def living_self_check(root: str | None = None) -> dict:
     l7 = l7_observe_summary(board)
     l7_ok = bool(l7.get("ok"))
     sunday_cov = sunday_twin_coverage(board)
+    live = ritual_live_labels(board)
+    live_n = sum(
+        1
+        for k, v in live.items()
+        if str(k).endswith("_label") and isinstance(v, str) and v
+    )
     return {
         "paper_only": True,
         "fee_floors_locked": floors,
@@ -4100,6 +4107,10 @@ def living_self_check(root: str | None = None) -> dict:
         "sunday_twin_fields_n": int(sunday_cov.get("fields_n") or 0),
         "sunday_twin_label": str(sunday_cov.get("label") or "sunday twins observe"),
         "sunday_twin_coverage": sunday_cov,
+        "ritual_live_labels": live,
+        "ritual_live_n": int(live_n),
+        "ritual_live_ok": live_n >= 40,
+        "ritual_live_timer": str(live.get("timer_label") or "timer observe"),
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()

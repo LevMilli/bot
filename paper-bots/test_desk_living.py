@@ -701,6 +701,10 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("sunday twins", health.get("sunday_twin_label") or "")
             self.assertIn("sunday_twin_coverage", health)
             self.assertFalse((health.get("sunday_twin_coverage") or {}).get("board_chip"))
+            self.assertTrue(health.get("ritual_live_ok"))
+            self.assertGreaterEqual(int(health.get("ritual_live_n") or 0), 40)
+            self.assertIn("timer", health.get("ritual_live_timer") or "")
+            self.assertIn("ritual_live_labels", health)
             doc = desk_living.living_doctor(tmp, record=False)
             self.assertTrue(doc.get("l7_observe_ok"))
             self.assertIn("L7 observe", doc.get("soft_copy") or "")
@@ -780,6 +784,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertFalse(live.get("board_chip"))
             self.assertIn("swarm_label", live)
             self.assertIn("toxic_fills_label", live)
+            self.assertIn("timer_label", live)
+            self.assertTrue(str(live.get("timer_label") or "").startswith("timer "))
             payload = {
                 "paper_only": True,
                 "live_orders_enabled": False,
@@ -837,6 +843,9 @@ class DeskLivingTests(unittest.TestCase):
             board = desk_living.living_upgrade_board(tmp)
             txt = staff_living_status._text(board)
             self.assertIn("sunday twins:", txt)
+            self.assertIn("timer sunday:", txt)
+            self.assertIn("ritual live:", txt)
+            self.assertIn("sunday twins sunday:", txt)
             self.assertFalse((board.get("board_size") or {}).get("over"))
 
     def test_status_sunday_twins_flatten(self):
@@ -852,6 +861,8 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("swarm sunday:", txt)
             self.assertIn("hill sunday:", txt)
             self.assertIn("gaps sunday:", txt)
+            self.assertIn("timer sunday:", txt)
+            self.assertIn("ritual live:", txt)
             export = desk_living.living_board_export(tmp)
             self.assertIn("sunday_twins", export)
             self.assertGreaterEqual(int(export.get("sunday_twins_n") or 0), 50)
