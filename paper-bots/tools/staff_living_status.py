@@ -191,6 +191,30 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "feature coverage: "
+            + str(
+                (board.get("feature_coverage") or {}).get("label")
+                if isinstance(board.get("feature_coverage"), dict)
+                else "feature coverage observe"
+            )
+        ),
+        (
+            "chip catalog: "
+            + str(
+                (board.get("chip_catalog") or board.get("board_size") or {}).get("label")
+                if isinstance(board.get("chip_catalog") or board.get("board_size"), dict)
+                else "chip catalog observe"
+            )
+        ),
+        (
+            "phase2 pulse: "
+            + str(
+                (board.get("phase2_pulse") or {}).get("label")
+                if isinstance(board.get("phase2_pulse"), dict)
+                else "phase2 pulse observe"
+            )
+        ),
+        (
             "digests sunday: "
             + str(inv.get("label") or "digests observe")
             + " · sunday quiet "
@@ -1346,6 +1370,15 @@ def main() -> int:
             "compact_toxic_sunday_quiet": compact_j.get("toxic_sunday_quiet"),
             "compact_adapt_ab_sunday_quiet": compact_j.get("adapt_ab_sunday_quiet"),
             "compact_raise_phi_sla_sunday_quiet": compact_j.get("raise_phi_sla_sunday_quiet"),
+            "feature_coverage": board.get("feature_coverage"),
+            "chip_catalog": board.get("chip_catalog") or board.get("board_size"),
+            "phase2_pulse": board.get("phase2_pulse"),
+            "feature_coverage_sunday_quiet": compact_j.get("feature_coverage_sunday_quiet"),
+            "chip_catalog_sunday_quiet": compact_j.get("chip_catalog_sunday_quiet"),
+            "phase2_pulse_sunday_quiet": compact_j.get("phase2_pulse_sunday_quiet"),
+            "compact_feature_coverage_sunday_quiet": compact_j.get("feature_coverage_sunday_quiet"),
+            "compact_chip_catalog_sunday_quiet": compact_j.get("chip_catalog_sunday_quiet"),
+            "compact_phase2_pulse_sunday_quiet": compact_j.get("phase2_pulse_sunday_quiet"),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "
