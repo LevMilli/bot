@@ -3743,6 +3743,23 @@ def _exit_kind(text: str | None) -> str:
     return "other"
 
 
+def _finish_exit_stats(raw: dict, *, min_n: int) -> list:
+    out = []
+    for k, v in raw.items():
+        n = int(v.get("n") or 0)
+        hits = int(v.get("hits") or 0)
+        out.append({
+            "key": k,
+            "n": n,
+            "hits": hits,
+            "hit_rate": round(hits / n, 4) if n else None,
+            "expectancy": round(float(v.get("pnl_sum") or 0) / n, 4) if n else None,
+            "thin": n < int(min_n),
+        })
+    out.sort(key=lambda r: -int(r.get("n") or 0))
+    return out
+
+
 def sports_exit_quality_board(
     bots: list | None = None,
     *,
@@ -3771,23 +3788,8 @@ def sports_exit_quality_board(
                 slot["pnl_sum"] = round(slot["pnl_sum"] + float(pnl), 4)
                 if pnl > 0:
                     slot["hits"] += 1
-    def _finish(raw: dict) -> list:
-        out = []
-        for k, v in raw.items():
-            n = int(v.get("n") or 0)
-            hits = int(v.get("hits") or 0)
-            out.append({
-                "key": k,
-                "n": n,
-                "hits": hits,
-                "hit_rate": round(hits / n, 4) if n else None,
-                "expectancy": round(float(v.get("pnl_sum") or 0) / n, 4) if n else None,
-                "thin": n < int(min_n),
-            })
-        out.sort(key=lambda r: -int(r.get("n") or 0))
-        return out
-    kinds = _finish(by_kind)
-    leagues = _finish(by_league)
+    kinds = _finish_exit_stats(by_kind, min_n=min_n)
+    leagues = _finish_exit_stats(by_league, min_n=min_n)
     total_n = sum(int(k.get("n") or 0) for k in kinds)
     return {
         "paper_only": True,
@@ -3801,6 +3803,57 @@ def sports_exit_quality_board(
         "label": f"sports exit-quality n={total_n} kinds={len(kinds)} (observe)",
         "note": (
             "E2 exit-quality observe — gap-close / flip / scale-out / settle hit rates. "
+            "Never softens floors; never arms LIVE_ORDERS."
+        ),
+    }
+
+
+def fee_clear_exit_quality_board(
+    bots: list | None = None,
+    *,
+    min_n: int = 5,
+) -> dict:
+    """E2 observe: BTC + commodity exit kind hit rates (TP / flip / settle)."""
+    by_bot: dict[str, dict] = {}
+    by_kind: dict[str, dict] = {}
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bid = str(bot.get("id") or "")
+        if bid not in ("btc15m", "commodity-15m"):
+            continue
+        closed = list(bot.get("closed") or bot.get("history") or [])
+        for pos in closed:
+            if not isinstance(pos, dict):
+                continue
+            pnl = _finite(pos.get("pnl") if pos.get("pnl") is not None else pos.get("pnl_usd"))
+            if pnl is None:
+                continue
+            kind = _exit_kind(
+                pos.get("exit") or pos.get("exit_reason") or pos.get("reason")
+                or pos.get("close_reason")
+            )
+            for bucket, key in ((by_bot, bid), (by_kind, kind)):
+                slot = bucket.setdefault(key, {"n": 0, "hits": 0, "pnl_sum": 0.0})
+                slot["n"] += 1
+                slot["pnl_sum"] = round(slot["pnl_sum"] + float(pnl), 4)
+                if pnl > 0:
+                    slot["hits"] += 1
+    bots_out = _finish_exit_stats(by_bot, min_n=min_n)
+    kinds = _finish_exit_stats(by_kind, min_n=min_n)
+    total_n = sum(int(k.get("n") or 0) for k in kinds)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "board_chip": False,
+        "n": total_n,
+        "min_n": int(min_n),
+        "by_bot": bots_out,
+        "by_kind": kinds,
+        "label": f"btc+commodity exit-quality n={total_n} kinds={len(kinds)} (observe)",
+        "note": (
+            "E2 fee-clear exit observe — take-profit / model-flip / settle. "
             "Never softens floors; never arms LIVE_ORDERS."
         ),
     }
@@ -3874,6 +3927,7 @@ def exit_quality_observe(
     """Combined E2 exit-quality + hard-stop shadow + selective observe board."""
     coverage = exit_plan_coverage(root, bots=bots)
     sports = sports_exit_quality_board(bots)
+    fee_clear = fee_clear_exit_quality_board(bots)
     hard = sports_hard_stop_shadow_summary(root)
     selective = selective_throughput_observe(root, bots=bots)
     return {
@@ -3885,23 +3939,27 @@ def exit_quality_observe(
         "board_chip": False,
         "exit_plan_coverage": coverage,
         "sports_exits": sports,
+        "fee_clear_exits": fee_clear,
         "hard_stop_shadow": {
             "n": hard.get("n"),
             "n_with_pnl": hard.get("n_with_pnl"),
             "shadow_expectancy": hard.get("shadow_expectancy"),
             "promote_min_n": hard.get("promote_min_n"),
             "promote_ready": hard.get("promote_ready"),
+            "evidence_thin": hard.get("evidence_thin"),
             "n_to_promote": max(
                 0,
                 int(hard.get("promote_min_n") or 30) - int(hard.get("n_with_pnl") or 0),
             ),
             "live": hard.get("live"),
             "decision": hard.get("decision"),
+            "label": hard.get("label"),
         },
         "selective_throughput": selective,
         "label": (
             f"E2 exit-quality cover={coverage.get('n_with_plan')}/"
             f"{coverage.get('n_open')} sports_n={sports.get('n')} "
+            f"btc_comm_n={fee_clear.get('n')} "
             f"hs_shadow={hard.get('n_with_pnl')} selective_m1={selective.get('m1_holds')}"
         ),
         "note": (
