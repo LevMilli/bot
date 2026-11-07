@@ -1756,11 +1756,18 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Observe CLI | `make living-hard-stop-status` |
 | No-force promote when ready | `make living-hard-stop-promote-ready` (force=False) |
 
+### BTC + commodity exit-quality observe parity
+
+| Ticket | Where |
+| --- | --- |
+| Fee-clear exit kinds | `fee_clear_exit_quality_board` (TP / flip / settle) |
+| Combined observe | `exit_quality_observe.fee_clear_exits` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| BTC TP / model-flip exit-quality observe parity | `exit_quality` extend fee-clear |
+| Observe Chicago weeks / staff hillclimb pick (process) | TC-151 |
 
 ### INX research no-force path
 

@@ -35,6 +35,33 @@ class ExitQualityObserve(unittest.TestCase):
         self.assertIn("settle", keys)
         self.assertIn("gap_decay", keys)
 
+    def test_btc_commodity_exit_kinds(self):
+        bots = [
+            {
+                "id": "btc15m",
+                "closed": [
+                    {"exit": "take-profit bid", "pnl": 1.2},
+                    {"exit": "model-flip", "pnl": -0.4},
+                    {"exit": "settled", "pnl": 0.3},
+                ],
+            },
+            {
+                "id": "commodity-15m",
+                "closed": [
+                    {"exit_reason": "model-flip fair", "pnl": 0.8},
+                    {"reason": "settled", "pnl": -0.1},
+                ],
+            },
+        ]
+        board = desk_roi_plan.fee_clear_exit_quality_board(bots, min_n=1)
+        self.assertEqual(board["n"], 5)
+        keys = {r["key"] for r in board["by_kind"]}
+        self.assertIn("take_profit", keys)
+        self.assertIn("model_flip", keys)
+        self.assertIn("settle", keys)
+        bot_ids = {r["key"] for r in board["by_bot"]}
+        self.assertEqual(bot_ids, {"btc15m", "commodity-15m"})
+
     def test_selective_after_m1(self):
         bots = [
             {
