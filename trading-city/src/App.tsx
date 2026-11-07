@@ -2548,8 +2548,14 @@ export default function App() {
                               timer_label?: string
                             }
                             ritual_live_n?: number
+                            ritual_live_sunday_quiet?: string
+                            compact_ritual_live_sunday_quiet?: string
                           }
                         | undefined
+                      const twin =
+                        desk?.ritual_live_sunday_quiet ||
+                        desk?.compact_ritual_live_sunday_quiet
+                      if (twin && twin.includes('sunday quiet')) return twin
                       const live = desk?.ritual_live_labels
                       const n =
                         desk?.ritual_live_n ??

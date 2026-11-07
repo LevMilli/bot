@@ -873,6 +873,15 @@ def living_compact_card(
         doctor_part,
         expand_part,
     ]
+    _live = ritual_live_labels(src)
+    _live_n = sum(1 for k, v in _live.items() if str(k).endswith("_label") and v)
+    ritual_live_sunday = (
+        f"ritual live n={_live_n} · "
+        f"{_live.get('digests_label') or 'digests observe'} · "
+        f"{_live.get('fills_label') or 'fills observe'} · "
+        f"{_live.get('timer_label') or 'timer observe'} "
+        f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+    )
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -1230,6 +1239,7 @@ def living_compact_card(
             if isinstance(src.get("skip_historian"), dict)
             else f"skip historian observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "ritual_live_sunday_quiet": ritual_live_sunday,
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2838,6 +2848,17 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{skip_hist.get('label') or 'skip historian observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    live_export = ritual_live_labels(board)
+    live_n_export = sum(
+        1 for k, v in live_export.items() if str(k).endswith("_label") and v
+    )
+    slim["ritual_live_sunday_quiet"] = (
+        f"ritual live n={live_n_export} · "
+        f"{live_export.get('digests_label') or 'digests observe'} · "
+        f"{live_export.get('fills_label') or 'fills observe'} · "
+        f"{live_export.get('timer_label') or 'timer observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -3024,6 +3045,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_skip_historian_sunday_quiet"] = (
             compact.get("skip_historian_sunday_quiet") or slim.get("skip_historian_sunday_quiet")
+        )
+        slim["compact_ritual_live_sunday_quiet"] = (
+            compact.get("ritual_live_sunday_quiet") or slim.get("ritual_live_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="

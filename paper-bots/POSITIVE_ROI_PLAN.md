@@ -1385,11 +1385,17 @@ Interactive: Positive ROI Master Plan canvas.
 | --- | --- |
 | Vault ritual live n/digests/fills/timer | App vault row |
 
+### Living upgrade — compact ritual live sunday twin (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Compact/export `ritual_live_sunday_quiet` | living_compact_card / export |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — vault ritual live row shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — compact ritual live twin shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 
