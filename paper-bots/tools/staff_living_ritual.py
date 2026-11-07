@@ -364,6 +364,15 @@ def format_discord(payload: dict) -> str:
             f"{teller_n if teller_n is not None else 'n/a'} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    prio_twin = payload.get("priority_sunday_quiet")
+    if prio_twin:
+        lines.append(f"• Priority sunday: {prio_twin}")
+    else:
+        prio_lab = payload.get("priority_label") or "priority observe"
+        lines.append(
+            f"• Priority sunday: {prio_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -920,6 +929,16 @@ def main() -> int:
                 )
             )
             print(
+                "priority sunday: "
+                + str(
+                    compact_obs.get("priority_sunday_quiet")
+                    or (
+                        f"{desk_living.living_priority_snapshot(board_obs).get('label') or 'priority observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1034,6 +1053,14 @@ def main() -> int:
     payload["teller_ritual_live_ok"] = teller.get("ritual_live_ok")
     payload["teller_ritual_live_sunday_quiet"] = compact.get(
         "teller_ritual_live_sunday_quiet"
+    )
+    prio = desk_living.living_priority_snapshot(board)
+    payload["priority"] = prio
+    payload["priority_label"] = prio.get("label")
+    payload["priority_lines"] = list(prio.get("priority") or [])
+    payload["priority_sunday_quiet"] = compact.get("priority_sunday_quiet") or (
+        f"{prio.get('label') or 'priority observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:
         print(format_discord(payload))
