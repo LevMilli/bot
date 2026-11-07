@@ -103,6 +103,10 @@ make living-quiet-tip        # feature-store quiet age
 make living-timer-tip        # paper timer heartbeat
 make living-export-tip       # archive/export surface tip
 make living-doctor-tip       # doctor age tip (never records)
+make living-inventory-tip    # digest inventory tip
+make living-dual-tip         # dual-control tip (never arms live)
+make living-hillclimb-tip    # hillclimb lever tip
+make living-ruin-tip         # ruin drill tip
 make living-export
 make living-test
 ```

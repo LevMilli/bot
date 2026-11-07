@@ -1567,6 +1567,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Makefile `living-export-tip` / `living-doctor-tip` | Makefile |
 | Ritual + vault tip rows | ritual / App |
 
+### Living upgrade — inventory/dual/hillclimb/ruin tip batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_inventory_tip` + `inventory_sunday_quiet` | desk_living / compact / export |
+| `living_dual_tip` + `dual_tip_sunday_quiet` | desk_living / compact / export |
+| `living_hillclimb_tip` + `hillclimb_tip_sunday_quiet` | desk_living / compact / export |
+| `living_ruin_tip` + `ruin_tip_sunday_quiet` | desk_living / compact / export |
+| Status CLI `inventory-tip` / `dual-tip` / `hillclimb-tip` / `ruin-tip` | staff_living_status |
+| Makefile living-inventory-tip / dual-tip / hillclimb-tip / ruin-tip | Makefile |
+| Ritual + vault tip rows | ritual / App |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |

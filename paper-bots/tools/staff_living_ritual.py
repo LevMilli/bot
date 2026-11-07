@@ -535,6 +535,42 @@ def format_discord(payload: dict) -> str:
             f"• Doctor-tip sunday: {doctor_tip_lab} · sunday quiet {tip_age} "
             f"(observe · never records doctor)"
         )
+    inventory_tip_twin = payload.get("inventory_sunday_quiet") or payload.get("inventory_tip_sunday_quiet")
+    if inventory_tip_twin:
+        lines.append(f"• Inventory-tip sunday: {inventory_tip_twin}")
+    else:
+        inventory_tip_lab = payload.get("inventory_tip_label") or "inventory observe"
+        lines.append(
+            f"• Inventory-tip sunday: {inventory_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    dual_tip_twin = payload.get("dual_tip_sunday_quiet")
+    if dual_tip_twin:
+        lines.append(f"• Dual-tip sunday: {dual_tip_twin}")
+    else:
+        dual_tip_lab = payload.get("dual_tip_label") or "dual observe"
+        lines.append(
+            f"• Dual-tip sunday: {dual_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never enables live)"
+        )
+    hillclimb_tip_twin = payload.get("hillclimb_tip_sunday_quiet")
+    if hillclimb_tip_twin:
+        lines.append(f"• Hillclimb-tip sunday: {hillclimb_tip_twin}")
+    else:
+        hillclimb_tip_lab = payload.get("hillclimb_tip_label") or "hillclimb observe"
+        lines.append(
+            f"• Hillclimb-tip sunday: {hillclimb_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    ruin_tip_twin = payload.get("ruin_tip_sunday_quiet")
+    if ruin_tip_twin:
+        lines.append(f"• Ruin-tip sunday: {ruin_tip_twin}")
+    else:
+        ruin_tip_lab = payload.get("ruin_tip_label") or "ruin observe"
+        lines.append(
+            f"• Ruin-tip sunday: {ruin_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1282,6 +1318,46 @@ def main() -> int:
                 )
             )
             print(
+                "inventory-tip sunday: "
+                + str(
+                    compact_obs.get("inventory_sunday_quiet")
+                    or (
+                        f"{desk_living.living_inventory_tip(board_obs).get('label') or 'inventory observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "dual-tip sunday: "
+                + str(
+                    compact_obs.get("dual_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_dual_tip(board_obs).get('label') or 'dual observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never enables live)"
+                    )
+                )
+            )
+            print(
+                "hillclimb-tip sunday: "
+                + str(
+                    compact_obs.get("hillclimb_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_hillclimb_tip(board_obs).get('label') or 'hillclimb observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "ruin-tip sunday: "
+                + str(
+                    compact_obs.get("ruin_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_ruin_tip(board_obs).get('label') or 'ruin observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1536,6 +1612,34 @@ def main() -> int:
     payload["doctor_tip_sunday_quiet"] = compact.get("doctor_tip_sunday_quiet") or (
         f"{doctor_tip.get('label') or 'doctor-tip observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never records doctor)"
+    )
+    inventory_tip = desk_living.living_inventory_tip(board)
+    payload["inventory_tip"] = inventory_tip
+    payload["inventory_tip_label"] = inventory_tip.get("label")
+    payload["inventory_sunday_quiet"] = compact.get("inventory_sunday_quiet") or (
+        f"{inventory_tip.get('label') or 'inventory observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    dual_tip = desk_living.living_dual_tip(board)
+    payload["dual_tip"] = dual_tip
+    payload["dual_tip_label"] = dual_tip.get("label")
+    payload["dual_tip_sunday_quiet"] = compact.get("dual_tip_sunday_quiet") or (
+        f"{dual_tip.get('label') or 'dual observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never enables live)"
+    )
+    hillclimb_tip = desk_living.living_hillclimb_tip(board)
+    payload["hillclimb_tip"] = hillclimb_tip
+    payload["hillclimb_tip_label"] = hillclimb_tip.get("label")
+    payload["hillclimb_tip_sunday_quiet"] = compact.get("hillclimb_tip_sunday_quiet") or (
+        f"{hillclimb_tip.get('label') or 'hillclimb observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    ruin_tip = desk_living.living_ruin_tip(board)
+    payload["ruin_tip"] = ruin_tip
+    payload["ruin_tip_label"] = ruin_tip.get("label")
+    payload["ruin_tip_sunday_quiet"] = compact.get("ruin_tip_sunday_quiet") or (
+        f"{ruin_tip.get('label') or 'ruin observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:
         print(format_discord(payload))
