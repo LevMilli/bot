@@ -1603,6 +1603,18 @@ Interactive: Positive ROI Master Plan canvas.
 | Makefile living-eia-tip / injury-tip / completions-tip / toxic-tip | Makefile |
 | Ritual + vault tip rows | ritual / App |
 
+### Living upgrade — calib/clv/clerk/bookkeeper tip batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_calib_tip` + `calib_tip_sunday_quiet` | desk_living / compact / export |
+| `living_clv_tip` + `clv_tip_sunday_quiet` | desk_living / compact / export |
+| `living_clerk_tip` + `clerk_tip_sunday_quiet` | desk_living / compact / export |
+| `living_bookkeeper_tip` + `bookkeeper_tip_sunday_quiet` | desk_living / compact / export |
+| Status CLI calib-tip / clv-tip / clerk-tip / bookkeeper-tip | staff_living_status |
+| Makefile living-calib-tip / clv-tip / clerk-tip / bookkeeper-tip | Makefile |
+| Ritual + vault tip rows | ritual / App |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |

@@ -1386,6 +1386,22 @@ def living_compact_card(
             f"{living_toxic_tip(src).get('label') or 'toxic observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "calib_tip_sunday_quiet": (
+            f"{living_calib_tip(src).get('label') or 'calib observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "clv_tip_sunday_quiet": (
+            f"{living_clv_tip(src).get('label') or 'clv observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "clerk_tip_sunday_quiet": (
+            f"{living_clerk_tip(src).get('label') or 'clerk observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "bookkeeper_tip_sunday_quiet": (
+            f"{living_bookkeeper_tip(src).get('label') or 'bookkeeper observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2645,6 +2661,26 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{toxic_tip.get('label') or 'toxic observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+        calib_tip = living_calib_tip(board)
+        compact["calib_tip_sunday_quiet"] = (
+            f"{calib_tip.get('label') or 'calib observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        clv_tip = living_clv_tip(board)
+        compact["clv_tip_sunday_quiet"] = (
+            f"{clv_tip.get('label') or 'clv observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        clerk_tip = living_clerk_tip(board)
+        compact["clerk_tip_sunday_quiet"] = (
+            f"{clerk_tip.get('label') or 'clerk observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        bookkeeper_tip = living_bookkeeper_tip(board)
+        compact["bookkeeper_tip_sunday_quiet"] = (
+            f"{bookkeeper_tip.get('label') or 'bookkeeper observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2898,6 +2934,19 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["toxic_tip"] = toxic_tip
     slim["toxic_tip_label"] = toxic_tip.get("label")
     slim["toxic_pass"] = toxic_tip.get("pass")
+    calib_tip = living_calib_tip(board)
+    slim["calib_tip"] = calib_tip
+    slim["calib_tip_label"] = calib_tip.get("label")
+    clv_tip = living_clv_tip(board)
+    slim["clv_tip"] = clv_tip
+    slim["clv_tip_label"] = clv_tip.get("label")
+    slim["clv_pass"] = clv_tip.get("pass")
+    clerk_tip = living_clerk_tip(board)
+    slim["clerk_tip"] = clerk_tip
+    slim["clerk_tip_label"] = clerk_tip.get("label")
+    bookkeeper_tip = living_bookkeeper_tip(board)
+    slim["bookkeeper_tip"] = bookkeeper_tip
+    slim["bookkeeper_tip_label"] = bookkeeper_tip.get("label")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3450,6 +3499,26 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{toxic_export.get('label') or 'toxic observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    calib_export = living_calib_tip(board)
+    slim["calib_tip_sunday_quiet"] = (
+        f"{calib_export.get('label') or 'calib observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    clv_export = living_clv_tip(board)
+    slim["clv_tip_sunday_quiet"] = (
+        f"{clv_export.get('label') or 'clv observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    clerk_export = living_clerk_tip(board)
+    slim["clerk_tip_sunday_quiet"] = (
+        f"{clerk_export.get('label') or 'clerk observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    bookkeeper_export = living_bookkeeper_tip(board)
+    slim["bookkeeper_tip_sunday_quiet"] = (
+        f"{bookkeeper_export.get('label') or 'bookkeeper observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3750,6 +3819,18 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_toxic_tip_sunday_quiet"] = (
             compact.get("toxic_tip_sunday_quiet") or slim.get("toxic_tip_sunday_quiet")
+        )
+        slim["compact_calib_tip_sunday_quiet"] = (
+            compact.get("calib_tip_sunday_quiet") or slim.get("calib_tip_sunday_quiet")
+        )
+        slim["compact_clv_tip_sunday_quiet"] = (
+            compact.get("clv_tip_sunday_quiet") or slim.get("clv_tip_sunday_quiet")
+        )
+        slim["compact_clerk_tip_sunday_quiet"] = (
+            compact.get("clerk_tip_sunday_quiet") or slim.get("clerk_tip_sunday_quiet")
+        )
+        slim["compact_bookkeeper_tip_sunday_quiet"] = (
+            compact.get("bookkeeper_tip_sunday_quiet") or slim.get("bookkeeper_tip_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -5028,6 +5109,10 @@ _DISCORD_PASTE_TARGETS = (
     "injury-tip",
     "completions-tip",
     "toxic-tip",
+    "calib-tip",
+    "clv-tip",
+    "clerk-tip",
+    "bookkeeper-tip",
     "gaps",
     "ruin",
     "expand",
@@ -5652,6 +5737,103 @@ def living_toxic_tip(board: dict | None = None, root: str | None = None) -> dict
         "pass": tox.get("pass"),
         "label": label,
         "note": "Toxic tip — observe-only adverse cool; never invents fills.",
+    }
+
+
+
+
+def living_calib_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Calib raise_phi nag/SLA tip — not a board chip; never silent Φ write."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    nag = src.get("calib_nag") if isinstance(src.get("calib_nag"), dict) else {}
+    sla = src.get("raise_phi_sla") if isinstance(src.get("raise_phi_sla"), dict) else {}
+    label = (
+        f"calib tickets={nag.get('tickets_n')} sla_n={sla.get('raise_phi_n')} "
+        f"overdue={sla.get('overdue')} auto_write={nag.get('auto_write_phi')} "
+        "(observe · never silent Φ write · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "tickets_n": nag.get("tickets_n"),
+        "raise_phi_n": sla.get("raise_phi_n"),
+        "overdue": sla.get("overdue"),
+        "auto_write_phi": nag.get("auto_write_phi"),
+        "pass": sla.get("pass"),
+        "label": label,
+        "note": "Calib tip — observe-only raise_phi tickets/SLA; never silent Φ write.",
+    }
+
+
+def living_clv_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """CLV completeness tip — not a board chip; never softens sports 0.06."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    clv = src.get("clv") if isinstance(src.get("clv"), dict) else {}
+    closer = src.get("clv_closer") if isinstance(src.get("clv_closer"), dict) else {}
+    label = (
+        f"clv complete={clv.get('complete')}/{clv.get('n')} rate={clv.get('rate')} "
+        f"closer={closer.get('complete')}/{closer.get('n')} pass={clv.get('pass')} "
+        "(observe · never softens sports 0.06 · never enables live)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "n": clv.get("n"),
+        "complete": clv.get("complete"),
+        "rate": clv.get("rate"),
+        "closer_n": closer.get("n"),
+        "closer_complete": closer.get("complete"),
+        "pass": clv.get("pass"),
+        "label": label,
+        "note": "CLV tip — observe-only settle completeness; never softens sports floor.",
+    }
+
+
+def living_clerk_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Clerk pulse tip — not a board chip; never softens floors."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    pulse = src.get("clerk_pulse") if isinstance(src.get("clerk_pulse"), dict) else {}
+    label = (
+        f"clerk pulse age={pulse.get('age_sec')}s stale={pulse.get('stale')} "
+        f"refreshed={pulse.get('refreshed_n')} cadence={pulse.get('cadence_sec')}s "
+        "(observe · refreshes digests · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "age_sec": pulse.get("age_sec"),
+        "stale": pulse.get("stale"),
+        "refreshed_n": pulse.get("refreshed_n"),
+        "cadence_sec": pulse.get("cadence_sec"),
+        "soft_warn": pulse.get("soft_warn"),
+        "label": label,
+        "note": "Clerk tip — observe-only pulse; never softens floors.",
+    }
+
+
+def living_bookkeeper_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Bookkeeper fee-ledger tip — not a board chip; never invents fills."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    book = src.get("bookkeeper") if isinstance(src.get("bookkeeper"), dict) else {}
+    label = (
+        f"bookkeeper fills={book.get('eligible_completions_today')} "
+        f"pnl={book.get('eligible_pnl_today')} ledger={book.get('fee_ledger_n')} "
+        f"complete={book.get('fee_ledger_complete')} "
+        "(observe · never invents fills · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "eligible_completions_today": book.get("eligible_completions_today"),
+        "eligible_pnl_today": book.get("eligible_pnl_today"),
+        "fee_ledger_n": book.get("fee_ledger_n"),
+        "fee_ledger_complete": book.get("fee_ledger_complete"),
+        "label": label,
+        "note": "Bookkeeper tip — observe-only taxed completions + fee ledger; not a board chip.",
     }
 
 

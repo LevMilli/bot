@@ -643,6 +643,42 @@ def format_discord(payload: dict) -> str:
             f"• Toxic-tip sunday: {toxic_tip_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    calib_tip_twin = payload.get("calib_tip_sunday_quiet")
+    if calib_tip_twin:
+        lines.append(f"• Calib-tip sunday: {calib_tip_twin}")
+    else:
+        calib_tip_lab = payload.get("calib_tip_label") or "calib observe"
+        lines.append(
+            f"• Calib-tip sunday: {calib_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    clv_tip_twin = payload.get("clv_tip_sunday_quiet")
+    if clv_tip_twin:
+        lines.append(f"• CLV-tip sunday: {clv_tip_twin}")
+    else:
+        clv_tip_lab = payload.get("clv_tip_label") or "clv observe"
+        lines.append(
+            f"• CLV-tip sunday: {clv_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    clerk_tip_twin = payload.get("clerk_tip_sunday_quiet")
+    if clerk_tip_twin:
+        lines.append(f"• Clerk-tip sunday: {clerk_tip_twin}")
+    else:
+        clerk_tip_lab = payload.get("clerk_tip_label") or "clerk observe"
+        lines.append(
+            f"• Clerk-tip sunday: {clerk_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
+    bookkeeper_tip_twin = payload.get("bookkeeper_tip_sunday_quiet")
+    if bookkeeper_tip_twin:
+        lines.append(f"• Bookkeeper-tip sunday: {bookkeeper_tip_twin}")
+    else:
+        bookkeeper_tip_lab = payload.get("bookkeeper_tip_label") or "bookkeeper observe"
+        lines.append(
+            f"• Bookkeeper-tip sunday: {bookkeeper_tip_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -1510,6 +1546,46 @@ def main() -> int:
                 )
             )
             print(
+                "calib-tip sunday: "
+                + str(
+                    compact_obs.get("calib_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_calib_tip(board_obs).get('label') or 'calib observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "clv-tip sunday: "
+                + str(
+                    compact_obs.get("clv_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_clv_tip(board_obs).get('label') or 'clv observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "clerk-tip sunday: "
+                + str(
+                    compact_obs.get("clerk_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_clerk_tip(board_obs).get('label') or 'clerk observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
+                "bookkeeper-tip sunday: "
+                + str(
+                    compact_obs.get("bookkeeper_tip_sunday_quiet")
+                    or (
+                        f"{desk_living.living_bookkeeper_tip(board_obs).get('label') or 'bookkeeper observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1847,6 +1923,34 @@ def main() -> int:
     payload["toxic_tip_label"] = toxic_tip.get("label")
     payload["toxic_tip_sunday_quiet"] = compact.get("toxic_tip_sunday_quiet") or (
         f"{toxic_tip.get('label') or 'toxic observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    calib_tip = desk_living.living_calib_tip(board)
+    payload["calib_tip"] = calib_tip
+    payload["calib_tip_label"] = calib_tip.get("label")
+    payload["calib_tip_sunday_quiet"] = compact.get("calib_tip_sunday_quiet") or (
+        f"{calib_tip.get('label') or 'calib observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    clv_tip = desk_living.living_clv_tip(board)
+    payload["clv_tip"] = clv_tip
+    payload["clv_tip_label"] = clv_tip.get("label")
+    payload["clv_tip_sunday_quiet"] = compact.get("clv_tip_sunday_quiet") or (
+        f"{clv_tip.get('label') or 'clv observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    clerk_tip = desk_living.living_clerk_tip(board)
+    payload["clerk_tip"] = clerk_tip
+    payload["clerk_tip_label"] = clerk_tip.get("label")
+    payload["clerk_tip_sunday_quiet"] = compact.get("clerk_tip_sunday_quiet") or (
+        f"{clerk_tip.get('label') or 'clerk observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    bookkeeper_tip = desk_living.living_bookkeeper_tip(board)
+    payload["bookkeeper_tip"] = bookkeeper_tip
+    payload["bookkeeper_tip_label"] = bookkeeper_tip.get("label")
+    payload["bookkeeper_tip_sunday_quiet"] = compact.get("bookkeeper_tip_sunday_quiet") or (
+        f"{bookkeeper_tip.get('label') or 'bookkeeper observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:

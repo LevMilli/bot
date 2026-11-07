@@ -115,6 +115,10 @@ make living-eia-tip          # EIA blackout/scout tip
 make living-injury-tip       # injury wire tip (never buys)
 make living-completions-tip  # completions today tip
 make living-toxic-tip        # toxic/adverse fills tip
+make living-calib-tip        # calib raise_phi nag/SLA tip
+make living-clv-tip          # CLV completeness tip
+make living-clerk-tip        # clerk pulse tip
+make living-bookkeeper-tip   # bookkeeper fee-ledger tip
 make living-export
 make living-test
 ```
