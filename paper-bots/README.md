@@ -19,7 +19,7 @@ pretend ("paper") account in local files.
 | `kalshi-sp500-paper/` | Kalshi S&P 500 daily paper bot: once a day buys (on paper) the safest 80–90¢ contract on the 3 PM CT close, skips big-news days, plus a full backtester | Kalshi public API |
 | `sports-gap-paper/` | Live sports "gap" paper bot: compares ESPN's live win probability with Kalshi game prices, paper-buys big gaps | ESPN scoreboard, Kalshi public API |
 | `memecoin-paper/` | Solana meme-coin paper bot: strict rug-pull filter, paper buys at real prices, stop/ladder/trailing exits | DexScreener, RugCheck |
-| `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **paper** bot. Prints BUY or SKIP, and paper-fills into `paper_account.json` when the checklist clears (TP print-only) | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
+| `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **paper** bot. Prints BUY or SKIP, paper-fills into `paper_account.json` when the checklist clears; **real TP + model-flip + settle** | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
 | `TEAM_ROLES.md` | How the "desk" of helper bots was organized, and the safety rules | — |
 | `DESK_ROI_SYSTEM.md` | Desk-wide ROI rules every present bot must follow (paper only) | — |
 | `BUY_SELL_FAILSAFE_INVENTORY.md` | Per-bot buy / sell / failsafe thresholds + entry_gate map | — |
@@ -71,7 +71,8 @@ empty paper account: no trade history or saved state is included in this pack.
 - **BUY only if all are true:** ≥10 min left; p ≥ ask + fee + 0.05; cushion ≥ $40; z ≥ 0.5 (0.6 if only
   Coinbase worked); ask 65–85¢; spread ≤ 3¢; ≥5 contracts offered at the ask; last 5 one-minute candles not
   moving toward the target; no USD high-impact news within 30 min of the block. Otherwise **SKIP** + reason.
-- Suggested take-profit if you were filled: fill + 15¢, capped at 99¢ (print-only — not executed).
+- Take-profit: fill + 15¢, capped at 99¢ — **executed** via `manage_take_profits` → `paper_sell`. Model-flip flatten + settle remain.
+- Venue floor `kalshi_btc15m` **0.05** locked (sports 0.06 / commodity 0.05 / INX+DEX 0.02).
 - On the PIMP desk, BTC `run` is an **entry** action: desk daily loss / max open / open risk gate it like the other towers. See `DESK_ROI_SYSTEM.md`.
 
 ## Living Trading Upgrade (staff pulse)

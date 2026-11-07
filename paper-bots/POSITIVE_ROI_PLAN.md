@@ -1882,6 +1882,14 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Exit plan stamp | `…+time_final_shadow+settle` |
 | Masters / promote-distance | `roi_plan.sports_time_final` + gate on distance board |
 
+### Doc-truth inventory / README (Phase 0 honesty)
+
+| Ticket | Where |
+| --- | --- |
+| Floors / cadence / exits match code | `BUY_SELL_FAILSAFE_INVENTORY.md` |
+| BTC TP not print-only | root `README.md` |
+| Pin test | `test_doc_truth.py` (floors 0.06/0.05/0.02; AUTO 180/60/90/180) |
+
 ### Next
 
 | Ticket | Where |
