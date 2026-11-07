@@ -1920,6 +1920,15 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Masters / calib-clv | `roi_plan.clv_leagues` · `calib_clv_observe.clv_leagues` |
 | Floors | Never softens venue edge; NFL fair floor stays stricter |
 
+### Learning skip v2 wire (Phase 4)
+
+| Ticket | Where |
+| --- | --- |
+| Fine key | market × side × hour_ct × bucket (n≥8, hit &lt;40%) |
+| Sports / BTC | already passed side+hour; **record** now stamps `side` |
+| INX twins / meme | `learning_skip(..., side, hour_ct)` + record `side` |
+| Fallback | classic market × bucket when fine sample thin |
+
 ### Next
 
 | Ticket | Where |
