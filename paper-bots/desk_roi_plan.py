@@ -101,22 +101,33 @@ from desk_roi_post_e3e7 import (  # noqa: F401
     tip_to_decision_ms,
 )
 
-# Staff SLA unblock pack (observe / no-force) — never LIVE, never tip invent.
-from desk_roi_staff import (  # noqa: F401
-    dual_control_observe_board,
-    export_edge08_shadow_csv,
-    export_green_boost_evidence,
-    export_near_miss_shadow_csv,
-    hillclimb_lever_journal,
-    hillclimb_pick_evidence_pack,
-    observation_week_clock,
-    promote_gate_sla,
-    staff_batch_arm_promotes_ready,
-    staff_dashboard,
-    staff_hillclimb_pick_journal,
-    staff_log_hillclimb_pick,
-    staff_promote_ready_pack,
-)
+# Staff SLA unblock pack — lazy re-export (avoids circular import with desk_roi_staff).
+_STAFF_SLA_EXPORTS = frozenset({
+    "dual_control_observe_board",
+    "export_edge08_shadow_csv",
+    "export_green_boost_evidence",
+    "export_near_miss_shadow_csv",
+    "hillclimb_lever_journal",
+    "hillclimb_pick_evidence_pack",
+    "observation_week_clock",
+    "promote_gate_sla",
+    "staff_batch_arm_promotes_ready",
+    "staff_dashboard",
+    "staff_disarm_thin_promotes",
+    "staff_hillclimb_pick_journal",
+    "staff_log_hillclimb_pick",
+    "staff_promote_ready_pack",
+})
+
+
+def __getattr__(name: str):
+    if name in _STAFF_SLA_EXPORTS:
+        import desk_roi_staff as _staff
+
+        return getattr(_staff, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 MAX_FIT_ROWS = 4000
 MAX_LAT_ROWS = 4000
 MAX_HARD_STOP_ROWS = 2000
