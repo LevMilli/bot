@@ -1948,13 +1948,29 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 
 Sibling open PRs (do not duplicate): #354 e3e4 selective/funnel/schema · #355 autopsy/latency/grad · #356 prefetch/empty-card.
 
+### Staff SLA pack (observe / no-force)
+
+Paper only. Fee floors locked. Discord never auto-posts. Soft-max tip invent EXHAUSTED — no tip wrappers.
+
+| Ticket | Where |
+| --- | --- |
+| Hillclimb pick evidence (TC-151) | `hillclimb_pick_evidence_pack` · `staff_hillclimb_pick_journal` · `make living-hillclimb-pick` |
+| Promote-ready pack + no-force batch | `staff_promote_ready_pack` · `staff_batch_arm_promotes_ready` · `make living-staff-promote-ready-pack` / `living-staff-promote-batch-ready` |
+| Dual-control observe board | `dual_control_observe_board` · `make living-dual-control-status` (LIVE stays False) |
+| Observation week + staff dashboard | `observation_week_clock` · `staff_dashboard` · `make living-observation-clock` / `living-staff-dashboard` |
+| Promote SLA ages | `promote_gate_sla` (ready-but-unarmed vs thin; never auto-arm) |
+| CSV evidence packets | `export_near_miss_shadow_csv` / `export_edge08_shadow_csv` / `export_green_boost_evidence` |
+| Tests | `test_staff_sla_pack.py` |
+
+**Still blocked:** `LIVE_ORDERS_ENABLED`; force-arm as default (`living-staff-promote-batch` remains labeled STAFF FORCE only); hillclimb auto-apply; tip invent; fee-floor soften.
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Staff pick hillclimb lever this Chicago week | TC-151 (process — external) |
-| Dual-control / LIVE_ORDERS (deferred) | staff gate |
-| Force-armed evidence catch-up (deferred) | hard-stop / near-miss / INX n bars |
+| Staff pick hillclimb lever this Chicago week | TC-151 process — use evidence pack + `make living-hillclimb-pick HILLCLIMB_LEVER=…` |
+| Dual-control / LIVE_ORDERS (deferred) | observe scaffolding shipped; live arm still staff-gated off |
+| Force-armed evidence catch-up (deferred) | hard-stop / near-miss / INX n bars — prefer `*-promote-ready` |
 | E8–E9 staff/LIVE path | deferred — paper green + staff first |
 
 ### INX research no-force path

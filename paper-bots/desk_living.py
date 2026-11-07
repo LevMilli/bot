@@ -4096,7 +4096,11 @@ def dual_control_gaps_page(root: str | None = None) -> dict:
 
 
 def hillclimb_chip(root: str | None = None) -> dict:
-    """Hillclimb lever status chip — active lever only when staff-set."""
+    """Hillclimb lever status chip — active lever only when staff-set.
+
+    Surfaces needs_staff_pick / THIN like hillclimb_lever_status.label.
+    Never tip-invents; never auto-picks.
+    """
     status: dict = {}
     try:
         import desk_roi_plan
@@ -4107,21 +4111,32 @@ def hillclimb_chip(root: str | None = None) -> dict:
     name = None
     if active:
         name = active.get("name") or active.get("lever") or active.get("id")
+    needs = bool(status.get("needs_staff_pick"))
+    kill_flag = bool(status.get("kill"))
+    same_week = bool(status.get("active_this_week"))
+    if kill_flag and name:
+        label = f"hillclimb lever={name} week={status.get('week')} KILL"
+    elif same_week and name and not needs:
+        label = f"hillclimb lever={name} week={status.get('week')}"
+    else:
+        label = (
+            f"hillclimb THIN — needs_staff_pick week={status.get('week')}"
+        )
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "auto_promote": False,
+        "auto_pick": False,
+        "auto_apply": False,
         "auto_revert": bool(status.get("auto_revert")),
         "week": status.get("week"),
         "active": active,
         "active_name": name,
-        "active_this_week": bool(status.get("active_this_week") or active),
+        "active_this_week": same_week,
+        "needs_staff_pick": needs,
+        "evidence_thin": bool(status.get("evidence_thin") or needs or kill_flag),
         "kill": status.get("kill"),
-        "label": (
-            f"hillclimb lever={name} week={status.get('week')}"
-            if name
-            else f"hillclimb none week={status.get('week')}"
-        ),
+        "label": label,
         "note": status.get("note") or (
             "One allowlisted lever per Chicago week — floors locked."
         ),

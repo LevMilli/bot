@@ -1741,6 +1741,12 @@ def main() -> int:
             # Post-E3E7 money-path boards (#358) — observe CLIs; never tip invent.
             "latency-stage", "tip-decision-ms", "exit-risk-ms", "fill-capacity",
             "firm-tower-m1", "m5-idle-budget", "distance-stance",
+            # Staff SLA pack — observe / no-force; never tip invent; LIVE off.
+            "hillclimb-pack", "hillclimb-pick", "hillclimb-pick-log",
+            "promote-ready-pack", "staff-promote-batch-ready",
+            "dual-control-status", "dual-control-observe",
+            "observation-clock", "staff-dashboard", "graduation-capture",
+            "promote-sla",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3454,11 +3460,18 @@ def main() -> int:
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
     if args.action == "staff-promote-batch":
+        # STAFF FORCE OVERRIDE — prefer staff-promote-batch-ready (no-force).
         out = desk_roi_plan.staff_batch_arm_promotes(
             root,
             force=True,
-            note="staff gate lifted batch — hard-stop + green_boost + INX 80-90",
+            note="STAFF FORCE OVERRIDE — prefer staff-promote-batch-ready",
             inx_band_id=desk_roi_plan.INX_LIVE_BAND_DEFAULT,
+        )
+        out["staff_force_override"] = True
+        out["prefer"] = "staff-promote-batch-ready"
+        out["note"] = (
+            "STAFF FORCE OVERRIDE — prefer staff-promote-batch-ready "
+            "(no-force; arms only promote_ready gates)."
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
@@ -3611,6 +3624,7 @@ def main() -> int:
             "promote_distance": desk_roi_plan.promote_distance_observe(root),
             "firm_health": desk_roi_plan.firm_health_observe(root),
             "ops": desk_roi_plan.ops_observe(root),
+            "dual_control_observe": desk_roi_plan.dual_control_observe_board(root),
             "guardrails": desk_roi_plan.guardrails_observe(root),
             "review": desk_roi_plan.review_observe(root),
             "calib_clv": desk_roi_plan.calib_clv_observe(root),
@@ -3626,9 +3640,9 @@ def main() -> int:
             "note": (
                 "Money-path pulse — observe only (firm-queue / completions / "
                 "feature densify / exit-quality / selective after M1 / "
-                "promote-distance / firm-health / ops / guardrails / review / "
-                "calib-clv / baseline-fee). Never softens floors. "
-                "Never arms LIVE_ORDERS."
+                "promote-distance / firm-health / ops / dual-control-observe / "
+                "guardrails / review / calib-clv / baseline-fee). "
+                "Never softens floors. Never arms LIVE_ORDERS."
             ),
         }
         # Enrich exit/selective with live bots when snapshot available.
@@ -4236,6 +4250,137 @@ def main() -> int:
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
+
+    # ---- Staff SLA pack (observe / no-force; never tip invent; LIVE off) ----
+    if args.action == "hillclimb-pack":
+        out = desk_roi_plan.hillclimb_pick_evidence_pack(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not (out.get("needs_staff_pick") or out.get("kill")) else 2
+    if args.action == "hillclimb-pick":
+        # Observe pack only here — actual pick goes through staff_hillclimb_pick.py
+        out = desk_roi_plan.hillclimb_pick_evidence_pack(root)
+        out["auto_pick"] = False
+        out["auto_apply"] = False
+        out["cli"] = out.get("cli") or {}
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not (out.get("needs_staff_pick") or out.get("kill")) else 2
+    if args.action == "hillclimb-pick-log":
+        out = desk_roi_plan.staff_hillclimb_pick_journal(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "promote-ready-pack":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.staff_promote_ready_pack(root, bots=bots)
+        if args.discord:
+            print(out.get("discord_draft") or json.dumps(out, indent=2, sort_keys=True, default=str))
+        else:
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if int(out.get("ready_n") or 0) > 0 else 2
+    if args.action == "staff-promote-batch-ready":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.staff_batch_arm_promotes_ready(
+            root, force=False, note="staff no-force promote-ready batch", bots=bots,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("armed_n", 0) > 0 else 2
+    if args.action in ("dual-control-status", "dual-control-observe"):
+        out = desk_roi_plan.dual_control_observe_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        # Never treat arm_ready_paper as live unlock; exit 0 on observe.
+        assert out.get("live_orders_enabled") is False
+        assert out.get("LIVE_ORDERS_ENABLED") is False
+        return 0
+    if args.action == "observation-clock":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.observation_week_clock(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "staff-dashboard":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.staff_dashboard(root, bots=bots)
+        if args.discord:
+            # Draft only — never auto-posts.
+            draft = (
+                f"**Staff SLA dashboard** (paper · floors locked · LIVE=False)\n"
+                f"{out.get('label')}\n"
+                f"_draft only — Discord never auto-posts · never tip invent_"
+            )
+            print(draft)
+        else:
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "graduation-capture":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        # capture_graduation_week expects tower rows; fall back to empty list.
+        rows = []
+        try:
+            import desk_master
+            summary = desk_master.master_summary(root, bots=bots) if bots else {}
+            towers = (summary or {}).get("towers") if isinstance(summary, dict) else None
+            if isinstance(towers, list):
+                rows = [t for t in towers if isinstance(t, dict)]
+            elif isinstance(towers, dict):
+                rows = [v for v in towers.values() if isinstance(v, dict)]
+        except Exception:
+            rows = []
+        out = desk_roi_plan.capture_graduation_week(root, rows)
+        out["fee_floors_locked"] = True
+        out["live_orders_enabled"] = False
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "promote-sla":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.promote_gate_sla(root, bots=bots, refresh=True)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
