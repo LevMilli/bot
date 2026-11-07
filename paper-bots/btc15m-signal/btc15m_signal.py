@@ -1561,36 +1561,42 @@ def main():
                         )
                     except Exception:
                         pass
-                    # Phase 1 shadow near-miss: log only (does not eat desk open-risk).
-                    try:
-                        import desk_more
-                        z_val = None
-                        if ev.get("cushion") is not None and ev.get("sigma"):
-                            try:
-                                z_val = float(ev["cushion"]) / float(ev["sigma"])
-                            except (TypeError, ValueError, ZeroDivisionError):
-                                z_val = None
-                        nm = desk_more.is_near_miss(
-                            reasons=reasons or [regime],
-                            z=z_val,
-                            p=ev.get("p") or ev.get("confidence"),
-                            edge=ev.get("edge"),
-                            min_edge=float(edge_buf),
-                        )
-                        if nm.get("near_miss"):
-                            desk_more.record_near_miss(DESK_ROOT, {
-                                "bot": "btc15m",
-                                "ticker": ev.get("ticker"),
-                                "side": ev.get("side"),
-                                "soft": nm.get("soft"),
-                                "z": z_val,
-                                "p": ev.get("p"),
-                                "edge": ev.get("edge"),
-                                "note": nm.get("note"),
-                            })
-                            print(f"  NEAR-MISS shadow logged ({nm.get('note')})")
-                    except Exception:
-                        pass
+                # Near-miss shadow densify: also under DESK_SHADOW / living-shadow-tick
+                # (brain/living stay non-shadow). Soft z|p only — never edge promote.
+                try:
+                    import desk_more
+                    z_val = None
+                    if ev.get("cushion") is not None and ev.get("sigma"):
+                        try:
+                            z_val = float(ev["cushion"]) / float(ev["sigma"])
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            z_val = None
+                    nm = desk_more.is_near_miss(
+                        reasons=reasons or [regime],
+                        z=z_val,
+                        p=ev.get("p") or ev.get("confidence"),
+                        edge=ev.get("edge"),
+                        min_edge=float(edge_buf),
+                    )
+                    soft = [
+                        s for s in (nm.get("soft") or [])
+                        if s in ("z", "p")
+                    ]
+                    if nm.get("near_miss") and len(soft) == 1:
+                        desk_more.record_near_miss(DESK_ROOT, {
+                            "bot": "btc15m",
+                            "ticker": ev.get("ticker"),
+                            "side": ev.get("side"),
+                            "soft": soft,
+                            "z": z_val,
+                            "p": ev.get("p"),
+                            "edge": ev.get("edge"),
+                            "note": nm.get("note"),
+                            "is_shadow": bool(IS_SHADOW),
+                        })
+                        print(f"  NEAR-MISS shadow logged ({nm.get('note')})")
+                except Exception:
+                    pass
                 print()
                 continue
 
@@ -1913,31 +1919,37 @@ def main():
                     )
                 except Exception:
                     pass
-                try:
-                    import desk_more
-                    z_val = ev_early.get("z")
-                    nm = desk_more.is_near_miss(
-                        reasons=reasons,
-                        z=z_val,
-                        p=ev_early.get("p"),
-                        edge=ev_early.get("edge"),
-                        min_edge=float(edge_buf),
-                    )
-                    if nm.get("near_miss"):
-                        desk_more.record_near_miss(DESK_ROOT, {
-                            "bot": "btc15m",
-                            "ticker": m.get("ticker"),
-                            "side": ev_early.get("side"),
-                            "soft": nm.get("soft"),
-                            "z": z_val,
-                            "p": ev_early.get("p"),
-                            "edge": ev_early.get("edge"),
-                            "note": f"ETH {nm.get('note')}",
-                            "series": "KXETH15M",
-                        })
-                        print(f"  ETH NEAR-MISS shadow logged ({nm.get('note')})")
-                except Exception:
-                    pass
+            # Near-miss densify under DESK_SHADOW too (soft z|p only).
+            try:
+                import desk_more
+                z_val = ev_early.get("z")
+                nm = desk_more.is_near_miss(
+                    reasons=reasons,
+                    z=z_val,
+                    p=ev_early.get("p"),
+                    edge=ev_early.get("edge"),
+                    min_edge=float(edge_buf),
+                )
+                soft = [
+                    s for s in (nm.get("soft") or [])
+                    if s in ("z", "p")
+                ]
+                if nm.get("near_miss") and len(soft) == 1:
+                    desk_more.record_near_miss(DESK_ROOT, {
+                        "bot": "btc15m",
+                        "ticker": m.get("ticker"),
+                        "side": ev_early.get("side"),
+                        "soft": soft,
+                        "z": z_val,
+                        "p": ev_early.get("p"),
+                        "edge": ev_early.get("edge"),
+                        "note": f"ETH {nm.get('note')}",
+                        "series": "KXETH15M",
+                        "is_shadow": bool(IS_SHADOW),
+                    })
+                    print(f"  ETH NEAR-MISS shadow logged ({nm.get('note')})")
+            except Exception:
+                pass
         elif regime == "parlay_window":
             late = evaluate_window(
                 m, eth_price, eth_closes, dvol, False, edge_buf,
