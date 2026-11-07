@@ -173,6 +173,18 @@ def settle_account(state):
             })
         except Exception:
             pass
+        # Near-miss would_pnl densify — label shadow skips for this ticker (observe).
+        try:
+            import desk_roi_plan
+            desk_roi_plan.label_near_miss_from_result(
+                DESK_ROOT,
+                ticker=str(pos.get("ticker") or ""),
+                result=str(result),
+                bot="btc15m",
+                note="btc15m settle label",
+            )
+        except Exception:
+            pass
         if not IS_SHADOW:
             try:
                 import desk_roi_plan

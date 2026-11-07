@@ -2969,13 +2969,48 @@ def _near_miss_rows(root: str | None) -> list[dict]:
         return []
 
 
+def near_miss_would_pnl(
+    *,
+    side: str | None,
+    result: str | None,
+    stake=None,
+    entry_price=None,
+) -> float | None:
+    """Stake-sized would-have PnL for a near-miss once Kalshi result is yes/no.
+
+    Assumes a paper buy of ``stake`` dollars at ``entry_price`` (default 0.50).
+    Won → payout − cost; lost → −cost. Observe/label only — never places.
+    """
+    res = str(result or "").strip().lower()
+    sd = str(side or "").strip().upper()
+    if res not in ("yes", "no") or sd not in ("YES", "NO"):
+        return None
+    try:
+        import desk_more
+        default_stake = float(desk_more.NEAR_MISS_STAKE)
+    except Exception:
+        default_stake = 2.0
+    stake_n = _finite(stake)
+    if stake_n is None or stake_n <= 0:
+        stake_n = default_stake
+    entry = _finite(entry_price)
+    if entry is None or entry <= 0 or entry >= 1:
+        entry = 0.5
+    contracts = float(stake_n) / float(entry)
+    won = (res == "yes" and sd == "YES") or (res == "no" and sd == "NO")
+    payout = contracts * (1.0 if won else 0.0)
+    return round(payout - float(stake_n), 4)
+
+
 def label_near_miss_outcome(
     root: str | None,
     *,
     ticker: str,
     would_pnl,
     bot: str | None = None,
+    side: str | None = None,
     note: str = "",
+    only_unlabeled: bool = False,
 ) -> dict:
     """Attach settle / would-have PnL to shadow near-miss rows (staff or settle hook)."""
     tick = str(ticker or "").strip()
@@ -2990,15 +3025,22 @@ def label_near_miss_outcome(
         return {"labeled": 0, "reason": "no near_miss store"}
     n = 0
     bot_id = str(bot or "").strip()
+    side_id = str(side or "").strip().upper()
     out_rows = []
     for row in rows:
         if not isinstance(row, dict):
             out_rows.append(row)
             continue
         item = dict(row)
-        if str(item.get("ticker") or "") == tick and (
+        match = str(item.get("ticker") or "") == tick and (
             not bot_id or str(item.get("bot") or "") == bot_id
-        ):
+        )
+        if side_id:
+            match = match and str(item.get("side") or "").strip().upper() == side_id
+        if match:
+            if only_unlabeled and _finite(item.get("would_pnl")) is not None:
+                out_rows.append(item)
+                continue
             item["would_pnl"] = round(float(pnl), 4)
             item["labeled_at"] = _now()
             if note:
@@ -3032,6 +3074,153 @@ def label_near_miss_outcome(
         except Exception:
             pass
     return {"labeled": n, "ticker": tick, "would_pnl": round(float(pnl), 4)}
+
+
+def label_near_miss_from_result(
+    root: str | None,
+    *,
+    ticker: str,
+    result: str,
+    bot: str | None = None,
+    note: str = "",
+) -> dict:
+    """Label unlabeled near-miss rows for ticker using Kalshi yes/no result."""
+    tick = str(ticker or "").strip()
+    res = str(result or "").strip().lower()
+    if not tick or res not in ("yes", "no"):
+        return {"labeled": 0, "reason": "need ticker + yes/no result"}
+    rows = [
+        r for r in _near_miss_rows(root)
+        if str(r.get("ticker") or "") == tick
+        and (not bot or str(r.get("bot") or "") == str(bot))
+        and _finite(r.get("would_pnl")) is None
+    ]
+    if not rows:
+        return {"labeled": 0, "ticker": tick, "reason": "no unlabeled near-miss"}
+    labeled = 0
+    done: set[tuple] = set()
+    for row in rows:
+        side = str(row.get("side") or "YES").strip().upper() or "YES"
+        bot_id = str(row.get("bot") or "")
+        key = (tick, side, bot_id)
+        if key in done:
+            continue
+        done.add(key)
+        pnl = near_miss_would_pnl(
+            side=side,
+            result=res,
+            stake=row.get("stake"),
+            entry_price=row.get("ask") or row.get("entry_price"),
+        )
+        if pnl is None:
+            continue
+        out = label_near_miss_outcome(
+            root,
+            ticker=tick,
+            would_pnl=pnl,
+            bot=bot_id or None,
+            side=side,
+            note=note or f"settle result={res}",
+            only_unlabeled=True,
+        )
+        labeled += int(out.get("labeled") or 0)
+    return {
+        "labeled": labeled,
+        "ticker": tick,
+        "result": res,
+        "paper_only": True,
+        "auto_promote": False,
+    }
+
+
+def label_near_miss_catchup(
+    root: str | None = None,
+    *,
+    fetch_result=None,
+    limit: int = 200,
+) -> dict:
+    """Observe catch-up: label pending near-miss rows from closed market results.
+
+    ``fetch_result(ticker)`` should return 'yes'/'no'/None. Default hits Kalshi
+    public market endpoint. Never arms soft gates. Never LIVE.
+    """
+    rows = _near_miss_rows(root)
+    pending = [
+        r for r in rows
+        if _finite(r.get("would_pnl")) is None and str(r.get("ticker") or "").strip()
+    ]
+    # Unique tickers, preserve order.
+    seen: set[str] = set()
+    tickers: list[str] = []
+    for r in pending:
+        tick = str(r.get("ticker") or "").strip()
+        if tick in seen:
+            continue
+        seen.add(tick)
+        tickers.append(tick)
+        if len(tickers) >= int(limit):
+            break
+
+    def _default_fetch(ticker: str):
+        import json
+        import urllib.request
+        url = (
+            "https://api.elections.kalshi.com/trade-api/v2/markets/"
+            + str(ticker)
+        )
+        try:
+            with urllib.request.urlopen(url, timeout=8) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+        market = payload.get("market") if isinstance(payload, dict) else None
+        if not isinstance(market, dict):
+            market = payload if isinstance(payload, dict) else {}
+        result = str((market or {}).get("result") or "").strip().lower()
+        return result if result in ("yes", "no") else None
+
+    getter = fetch_result or _default_fetch
+    labeled = 0
+    scanned = 0
+    unresolved = 0
+    samples: list[dict] = []
+    for tick in tickers:
+        scanned += 1
+        try:
+            result = getter(tick)
+        except Exception:
+            result = None
+        if result not in ("yes", "no"):
+            unresolved += 1
+            continue
+        out = label_near_miss_from_result(
+            root, ticker=tick, result=result, note="catchup-label",
+        )
+        n = int(out.get("labeled") or 0)
+        labeled += n
+        if n and len(samples) < 8:
+            samples.append({"ticker": tick, "result": result, "labeled": n})
+    status = near_miss_promote_status(root)
+    return {
+        "ok": True,
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "live": False,
+        "pending_n": len(pending),
+        "scanned": scanned,
+        "labeled": labeled,
+        "unresolved": unresolved,
+        "labeled_n": status.get("labeled_n"),
+        "n": status.get("n"),
+        "promote_ready": status.get("promote_ready"),
+        "samples": samples,
+        "note": (
+            "Near-miss catch-up labels would_pnl from settled markets. "
+            "Never auto-promotes; soft-max tip invent exhausted."
+        ),
+    }
 
 
 def near_miss_promote_status(root: str | None = None) -> dict:
@@ -3967,6 +4156,101 @@ def clv_completeness(root: str | None = None) -> dict:
             "Every sports settle must log fair_entry + close_fair + clv. "
             "Incomplete settled rows fail closed."
         ),
+    }
+
+
+def repair_clv_completeness(root: str | None = None) -> dict:
+    """Observe repair: fill close_fair + clv on settled rows that already have entry.
+
+    Fail-closed when fair_entry is missing. Never arms green_boost. Never LIVE.
+    Uses pnl sign as settle binary proxy when close is absent (win→1.0 / loss→0.0).
+    """
+    try:
+        import desk_more
+        state = desk_more.load_clv(root)
+        rows = list(state.get("rows") or [])
+    except Exception:
+        return {
+            "ok": False,
+            "repaired": 0,
+            "skipped": 0,
+            "reason": "no clv store",
+            "paper_only": True,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    repaired = 0
+    skipped = 0
+    out: list = []
+    for row in rows:
+        if not isinstance(row, dict):
+            out.append(row)
+            continue
+        item = dict(row)
+        if not _clv_is_settled_row(item):
+            out.append(item)
+            continue
+        if clv_row_complete(item):
+            out.append(item)
+            continue
+        if not _clv_has_entry(item):
+            skipped += 1
+            out.append(item)
+            continue
+        # Fill close from pnl binary when missing.
+        if not _clv_has_close(item):
+            pnl = _finite(item.get("pnl"))
+            if pnl is None:
+                skipped += 1
+                out.append(item)
+                continue
+            close = 1.0 if pnl > 0 else 0.0
+            item["fair_close"] = close
+            item["close_fair"] = close
+        fe = _finite(item.get("fair_entry"))
+        if fe is None:
+            fe = _finite(item.get("entry_fair"))
+        fc = _finite(item.get("fair_close"))
+        if fc is None:
+            fc = _finite(item.get("close_fair"))
+        if fe is None or fc is None:
+            skipped += 1
+            out.append(item)
+            continue
+        if item.get("clv") is None:
+            item["clv"] = round(float(fe) - float(fc), 4)
+        item["repaired_at"] = _now()
+        item["repair_note"] = "clv-completeness catch-up"
+        repaired += 1
+        out.append(item)
+    if repaired:
+        try:
+            import desk_more
+            state["rows"] = out
+            state["last_at"] = _now()
+            desk_more.save_clv(state, root)
+        except Exception:
+            return {
+                "ok": False,
+                "repaired": 0,
+                "skipped": skipped,
+                "reason": "save failed",
+                "paper_only": True,
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
+    board = clv_completeness(root)
+    return {
+        "ok": True,
+        "repaired": repaired,
+        "skipped": skipped,
+        "completeness": board,
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "live": False,
+        "note": "CLV completeness repair — observe only; never arms green_boost.",
     }
 
 
@@ -6924,6 +7208,19 @@ def record_helper_fill(
     helper_id = str(helper or "").strip()
     if not helper_id:
         return {"recorded": False, "reason": "helper required"}
+    path = _path(HELPER_FILLS_NAME, root)
+    store = _load(path, {"paper_only": True, "rows": [], "by_helper": {}})
+    rows = list(store.get("rows") or [])
+    fid = str(fill_id or "")[:80]
+    if fid:
+        for existing in rows:
+            if isinstance(existing, dict) and str(existing.get("fill_id") or "") == fid:
+                return {
+                    "recorded": False,
+                    "reason": "fill_id already present",
+                    "row": existing,
+                    "idempotent": True,
+                }
     n = _finite(contracts) or 1.0
     pnl_n = _finite(pnl)
     tax_n = float(fill_tax) * max(1.0, n)
@@ -6937,16 +7234,13 @@ def record_helper_fill(
         "contracts": n,
         "fill_tax": round(tax_n, 4),
         "pnl_taxed": taxed,
-        "fill_id": str(fill_id or "")[:80],
+        "fill_id": fid,
         "note": str(note or "")[:160],
         "paper_only": True,
         "helper_only": True,
         "places_orders": False,
         "fee_floors_locked": True,
     }
-    path = _path(HELPER_FILLS_NAME, root)
-    store = _load(path, {"paper_only": True, "rows": [], "by_helper": {}})
-    rows = list(store.get("rows") or [])
     rows.append(row)
     store["rows"] = rows[-MAX_HELPER_FILL_ROWS:]
     by = store.get("by_helper") if isinstance(store.get("by_helper"), dict) else {}
@@ -6957,6 +7251,81 @@ def record_helper_fill(
     store["last_at"] = row["at"]
     _save(path, store)
     return {"recorded": True, "row": row}
+
+
+def backfill_helper_fills_from_btc_closed(root: str | None = None) -> dict:
+    """Catch-up: attribute calendar_scanner (etc.) helper fills from btc closed[].
+
+    Idempotent by fill_id. Observe densify for Gate A — never places alone.
+    """
+    base = _root(root)
+    acct_path = os.path.join(base, "btc15m-signal", "paper_account.json")
+    try:
+        with open(acct_path, encoding="utf-8") as handle:
+            acct = json.load(handle)
+    except Exception:
+        acct = {}
+    if not isinstance(acct, dict):
+        acct = {}
+    closed = [c for c in (acct.get("closed") or []) if isinstance(c, dict)]
+    recorded = 0
+    skipped = 0
+    samples: list[dict] = []
+    for pos in closed:
+        helper = str(pos.get("helper_source") or "").strip()
+        if not helper:
+            # Feature-store style tag from buy path.
+            if pos.get("calendar_loaded") is True:
+                helper = "calendar_scanner"
+            else:
+                skipped += 1
+                continue
+        fill_id = str(pos.get("fill_id") or "")
+        if not fill_id:
+            # Stable synthetic id from ticker+closed so catch-up stays idempotent.
+            fill_id = (
+                f"btc-backfill:{pos.get('ticker') or ''}:"
+                f"{pos.get('closed') or pos.get('at') or ''}"
+            )[:80]
+        out = record_helper_fill(
+            root,
+            helper=helper,
+            bot="btc15m",
+            ticker=str(pos.get("ticker") or ""),
+            pnl=pos.get("pnl"),
+            contracts=pos.get("contracts"),
+            fill_id=fill_id,
+            note="backfill from btc closed",
+        )
+        if out.get("recorded"):
+            recorded += 1
+            if len(samples) < 8:
+                samples.append({
+                    "ticker": pos.get("ticker"),
+                    "helper": helper,
+                    "fill_id": fill_id,
+                })
+        else:
+            skipped += 1
+    gate = helper_gate_a(root, "calendar_scanner")
+    return {
+        "ok": True,
+        "recorded": recorded,
+        "skipped": skipped,
+        "closed_n": len(closed),
+        "samples": samples,
+        "gate_a_calendar": gate,
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "places_orders": False,
+        "live": False,
+        "note": (
+            "Helper fills backfill from btc15m closed with helper_source / "
+            "calendar_loaded. Gate A still needs staff arm; never LIVE."
+        ),
+    }
 
 
 def helper_gate_a(
