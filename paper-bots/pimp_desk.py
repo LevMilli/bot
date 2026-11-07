@@ -2139,8 +2139,19 @@ def shadow_profiles(cfg: dict | None = None) -> list:
     return rows
 
 
-def promote_shadow(root: str | None, bot_id: str, variant_id: str, who: str = "") -> tuple:
-    """Copy winning shadow venue_edge into pimp-bot-params.json overlay. Paper only."""
+def promote_shadow(
+    root: str | None,
+    bot_id: str,
+    variant_id: str,
+    who: str = "",
+    *,
+    force: bool = False,
+) -> tuple:
+    """Copy winning shadow venue_edge into pimp-bot-params.json overlay. Paper only.
+
+    Requires promote_ready (n/EV bars) unless force=True. Never softens venue
+    floors (BTC/commodity 0.05 / sports 0.06 / INX+DEX 0.02).
+    """
     root = _root(root)
     cfg = load_settings(root)
     prof = None
@@ -2152,19 +2163,27 @@ def promote_shadow(root: str | None, bot_id: str, variant_id: str, who: str = ""
         return None, "Unknown shadow profile."
     state = load_shadow_account(root, bot_id, variant_id)
     exp = desk_profit.bot_expectancy(state.get("closed") or [], window_days=int(cfg.get("expectancy_window_days") or 20))
-    if not desk_profit.shadow_promote_ready(exp, prof.get("promote_after")):
+    if not force and not desk_profit.shadow_promote_ready(exp, prof.get("promote_after")):
         return None, (
             f"Shadow {variant_id} not ready "
             f"(n={exp.get('n')}, EV={exp.get('expectancy')})."
         )
+    params = dict(prof.get("params") or {})
+    venue_edge = desk_profit._num(params.get("venue_edge"))
+    # Raise-only vs locked floors — refuse any soften.
+    floors = desk_profit.venue_floors_locked().get("venues") or {}
+    btc_floor = float(((floors.get("kalshi_btc15m") or {}).get("floor")) or 0.05)
+    if venue_edge is not None and venue_edge + 1e-12 < btc_floor and bot_id == "btc15m":
+        return None, f"cannot soften BTC venue_edge below floor {btc_floor}"
     path = _under(root, "pimp-bot-params.json")
     overlay = _read_json(path) or {}
     if not isinstance(overlay, dict):
         overlay = {}
     bot_overlay = dict(overlay.get(bot_id) or {})
-    bot_overlay.update(dict(prof.get("params") or {}))
+    bot_overlay.update(params)
     bot_overlay["promoted_from_shadow"] = variant_id
     bot_overlay["promoted_at"] = central_text()
+    bot_overlay["force_promoted"] = bool(force)
     overlay[bot_id] = bot_overlay
     _write_json(path, overlay)
     audit(root, who or "unknown", f"Promoted shadow {bot_id}/{variant_id}", None, bot_overlay)

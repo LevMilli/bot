@@ -599,6 +599,10 @@ def master_summary(
         except Exception:
             plan["raise_phi_decisions"] = None
         try:
+            plan["btc_edge08_shadow"] = desk_roi_plan.btc_edge08_shadow_status(root)
+        except Exception:
+            plan["btc_edge08_shadow"] = None
+        try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")

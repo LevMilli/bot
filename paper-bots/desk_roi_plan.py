@@ -1031,6 +1031,139 @@ def raise_phi_decision_log(root: str | None = None) -> dict:
     }
 
 
+# ---- BTC edge08 shadow promote (raise-only venue_edge 0.08) -----------------
+
+BTC_EDGE08_BOT = "btc15m"
+BTC_EDGE08_VARIANT = "edge08"
+
+
+def btc_edge08_shadow_status(root: str | None = None) -> dict:
+    """Promote-ready board for btc15m/edge08 shadow (n≥30 EV≥0.5). Never auto."""
+    try:
+        import pimp_desk
+        cfg = pimp_desk.load_settings(root)
+        rows = pimp_desk.shadow_snapshot_rows(root or _root(root), cfg)
+    except Exception as exc:
+        return {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "auto_promote": False,
+            "promote_ready": False,
+            "bot": BTC_EDGE08_BOT,
+            "variant_id": BTC_EDGE08_VARIANT,
+            "reason": f"shadow status unavailable: {exc}",
+        }
+    edge = next(
+        (
+            r for r in (rows or [])
+            if isinstance(r, dict)
+            and r.get("bot") == BTC_EDGE08_BOT
+            and r.get("variant_id") == BTC_EDGE08_VARIANT
+        ),
+        None,
+    )
+    if not edge:
+        return {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "auto_promote": False,
+            "promote_ready": False,
+            "bot": BTC_EDGE08_BOT,
+            "variant_id": BTC_EDGE08_VARIANT,
+            "n": 0,
+            "expectancy": None,
+            "promote_min_n": 30,
+            "promote_min_ev": 0.5,
+            "venue_edge": 0.08,
+            "reason": "no edge08 shadow account yet",
+            "note": (
+                "BTC edge08 shadow raises venue_edge to 0.08 (above 0.05 floor). "
+                "Staff promote only at n≥30 EV≥0.5."
+            ),
+        }
+    ready = bool(edge.get("promote_ready"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "promote_ready": ready,
+        "bot": BTC_EDGE08_BOT,
+        "variant_id": BTC_EDGE08_VARIANT,
+        "n": int(edge.get("n") or 0),
+        "expectancy": edge.get("expectancy"),
+        "cash": edge.get("cash"),
+        "params": edge.get("params") or {"venue_edge": 0.08},
+        "venue_edge": float((edge.get("params") or {}).get("venue_edge") or 0.08),
+        "promote_min_n": 30,
+        "promote_min_ev": 0.5,
+        "decision": "review" if ready else "reject",
+        "reason": (
+            "promote_ready — staff may arm edge08"
+            if ready
+            else "need n≥30 and EV≥0.5 on edge08 shadow"
+        ),
+        "note": (
+            "Raise-only shadow: venue_edge 0.08 never softens 0.05 floor. "
+            "auto_promote=False."
+        ),
+    }
+
+
+def staff_promote_btc_edge08(
+    root: str | None = None,
+    *,
+    who: str = "",
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff promote btc15m/edge08 shadow into params overlay (raise-only)."""
+    status = btc_edge08_shadow_status(root)
+    if not force and not status.get("promote_ready"):
+        return {
+            "ok": False,
+            "reason": status.get("reason") or "not promote_ready",
+            "status": status,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "paper_only": True,
+        }
+    try:
+        import pimp_desk
+        overlay, err = pimp_desk.promote_shadow(
+            root, BTC_EDGE08_BOT, BTC_EDGE08_VARIANT, who=who or "staff", force=force,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"promote failed: {exc}",
+            "status": status,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "paper_only": True,
+        }
+    if err:
+        return {
+            "ok": False,
+            "reason": err,
+            "status": status,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "paper_only": True,
+        }
+    return {
+        "ok": True,
+        "reason": "armed edge08",
+        "note": str(note or "")[:200],
+        "overlay": (overlay or {}).get(BTC_EDGE08_BOT) if isinstance(overlay, dict) else overlay,
+        "status": btc_edge08_shadow_status(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "paper_only": True,
+        "venue_edge": 0.08,
+        "floors_ok": True,
+    }
+
+
 # ---- Sports calibration report (living upgrade — parallel to BTC) ----------
 
 def _sports_history_rows(bots: list | None) -> list:
