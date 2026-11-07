@@ -1354,6 +1354,22 @@ def living_compact_card(
             f"{living_ruin_tip(src).get('label') or 'ruin observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "near_miss_tip_sunday_quiet": (
+            f"{living_near_miss_tip(src).get('label') or 'near-miss observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "helper_tip_sunday_quiet": (
+            f"{living_helper_tip(src).get('label') or 'helper observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never arms)"
+        ),
+        "hard_stop_tip_sunday_quiet": (
+            f"{living_hard_stop_tip(src).get('label') or 'hard-stop observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never enables live)"
+        ),
+        "skip_regret_tip_sunday_quiet": (
+            f"{living_skip_regret_tip(src).get('label') or 'skip-regret observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2573,6 +2589,26 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{ruin_tip.get('label') or 'ruin observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+        near_miss_tip = living_near_miss_tip(board)
+        compact["near_miss_tip_sunday_quiet"] = (
+            f"{near_miss_tip.get('label') or 'near-miss observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        helper_tip = living_helper_tip(board)
+        compact["helper_tip_sunday_quiet"] = (
+            f"{helper_tip.get('label') or 'helper observe'} · sunday quiet {quiet_bit} "
+            "(observe · never arms)"
+        )
+        hard_stop_tip = living_hard_stop_tip(board)
+        compact["hard_stop_tip_sunday_quiet"] = (
+            f"{hard_stop_tip.get('label') or 'hard-stop observe'} · sunday quiet {quiet_bit} "
+            "(observe · never enables live)"
+        )
+        skip_regret_tip = living_skip_regret_tip(board)
+        compact["skip_regret_tip_sunday_quiet"] = (
+            f"{skip_regret_tip.get('label') or 'skip-regret observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2798,6 +2834,20 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     ruin_tip = living_ruin_tip(board)
     slim["ruin_tip"] = ruin_tip
     slim["ruin_tip_label"] = ruin_tip.get("label")
+    near_miss_tip = living_near_miss_tip(board)
+    slim["near_miss_tip"] = near_miss_tip
+    slim["near_miss_tip_label"] = near_miss_tip.get("label")
+    slim["near_miss_promote_ready"] = near_miss_tip.get("promote_ready")
+    helper_tip = living_helper_tip(board)
+    slim["helper_tip"] = helper_tip
+    slim["helper_tip_label"] = helper_tip.get("label")
+    hard_stop_tip = living_hard_stop_tip(board)
+    slim["hard_stop_tip"] = hard_stop_tip
+    slim["hard_stop_tip_label"] = hard_stop_tip.get("label")
+    slim["hard_stop_live"] = hard_stop_tip.get("live")
+    skip_regret_tip = living_skip_regret_tip(board)
+    slim["skip_regret_tip"] = skip_regret_tip
+    slim["skip_regret_tip_label"] = skip_regret_tip.get("label")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3310,6 +3360,26 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{ruin_export.get('label') or 'ruin observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    near_miss_export = living_near_miss_tip(board)
+    slim["near_miss_tip_sunday_quiet"] = (
+        f"{near_miss_export.get('label') or 'near-miss observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    helper_export = living_helper_tip(board)
+    slim["helper_tip_sunday_quiet"] = (
+        f"{helper_export.get('label') or 'helper observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never arms)"
+    )
+    hard_stop_export = living_hard_stop_tip(board)
+    slim["hard_stop_tip_sunday_quiet"] = (
+        f"{hard_stop_export.get('label') or 'hard-stop observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never enables live)"
+    )
+    skip_regret_export = living_skip_regret_tip(board)
+    slim["skip_regret_tip_sunday_quiet"] = (
+        f"{skip_regret_export.get('label') or 'skip-regret observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3586,6 +3656,18 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_ruin_tip_sunday_quiet"] = (
             compact.get("ruin_tip_sunday_quiet") or slim.get("ruin_tip_sunday_quiet")
+        )
+        slim["compact_near_miss_tip_sunday_quiet"] = (
+            compact.get("near_miss_tip_sunday_quiet") or slim.get("near_miss_tip_sunday_quiet")
+        )
+        slim["compact_helper_tip_sunday_quiet"] = (
+            compact.get("helper_tip_sunday_quiet") or slim.get("helper_tip_sunday_quiet")
+        )
+        slim["compact_hard_stop_tip_sunday_quiet"] = (
+            compact.get("hard_stop_tip_sunday_quiet") or slim.get("hard_stop_tip_sunday_quiet")
+        )
+        slim["compact_skip_regret_tip_sunday_quiet"] = (
+            compact.get("skip_regret_tip_sunday_quiet") or slim.get("skip_regret_tip_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4856,6 +4938,10 @@ _DISCORD_PASTE_TARGETS = (
     "dual-tip",
     "hillclimb-tip",
     "ruin-tip",
+    "near-miss-tip",
+    "helper-tip",
+    "hard-stop-tip",
+    "skip-regret-tip",
     "gaps",
     "ruin",
     "expand",
@@ -5292,6 +5378,106 @@ def living_ruin_tip(board: dict | None = None, root: str | None = None) -> dict:
         "practiced_this_month": ruin.get("practiced_this_month"),
         "label": label,
         "note": "Ruin tip — observe-only practice status; not a board chip.",
+    }
+
+
+
+
+def living_near_miss_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Near-miss promote tip (never auto-promotes) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    nm = src.get("near_miss") if isinstance(src.get("near_miss"), dict) else {}
+    label = (
+        f"near-miss n={nm.get('n')} labeled={nm.get('labeled_n')} "
+        f"ev={nm.get('shadow_ev')} ready={nm.get('promote_ready')} "
+        f"decision={nm.get('decision')} auto_promote={nm.get('auto_promote')} "
+        "(observe · never auto-promotes · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "n": nm.get("n"),
+        "labeled_n": nm.get("labeled_n"),
+        "shadow_ev": nm.get("shadow_ev"),
+        "promote_ready": nm.get("promote_ready"),
+        "decision": nm.get("decision"),
+        "auto_promote": nm.get("auto_promote"),
+        "label": label,
+        "note": "Near-miss tip — observe-only; staff arms soft gate; never auto-promotes.",
+    }
+
+
+def living_helper_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Helper Gate A tip (never arms autonomy) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    gate = src.get("helper_gate_a") if isinstance(src.get("helper_gate_a"), dict) else {}
+    label = (
+        f"helper Gate A ready={gate.get('ready_n')}/{gate.get('helpers_n')} "
+        f"armed={gate.get('armed_n')} auto_promote={gate.get('auto_promote')} "
+        "(observe · never arms · never places · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "ready_n": gate.get("ready_n"),
+        "helpers_n": gate.get("helpers_n"),
+        "armed_n": gate.get("armed_n"),
+        "auto_promote": gate.get("auto_promote"),
+        "places_orders": gate.get("places_orders"),
+        "label": label,
+        "note": "Helper tip — observe-only Gate A; staff arm required; never places.",
+    }
+
+
+def living_hard_stop_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Sports hard-stop tip (shadow until staff live) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    hs = src.get("hard_stop") if isinstance(src.get("hard_stop"), dict) else {}
+    label = (
+        f"hard-stop n={hs.get('n')} ev={hs.get('shadow_expectancy')} "
+        f"ready={hs.get('promote_ready')} live={hs.get('live')} "
+        f"auto_promote={hs.get('auto_promote')} "
+        "(observe · shadow-only · never enables live · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "n": hs.get("n"),
+        "shadow_expectancy": hs.get("shadow_expectancy"),
+        "promote_ready": hs.get("promote_ready"),
+        "live": hs.get("live"),
+        "auto_promote": hs.get("auto_promote"),
+        "decision": hs.get("decision"),
+        "label": label,
+        "note": "Hard-stop tip — observe-only shadow; staff_set_sports_hard_stop_live gated.",
+    }
+
+
+def living_skip_regret_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Skip-regret twin tip (never loosens fee floors) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    sr = src.get("skip_regret") if isinstance(src.get("skip_regret"), dict) else {}
+    label = (
+        f"skip-regret labeled={sr.get('labeled_n')} avg={sr.get('avg_would_pnl')} "
+        f"decision={sr.get('decision')} loosen={sr.get('loosen_soft_gates')} "
+        f"auto_promote={sr.get('auto_promote')} "
+        "(observe · never softens floors · never auto-loosens)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "labeled_n": sr.get("labeled_n"),
+        "avg_would_pnl": sr.get("avg_would_pnl"),
+        "decision": sr.get("decision"),
+        "loosen_soft_gates": sr.get("loosen_soft_gates"),
+        "auto_promote": sr.get("auto_promote"),
+        "green_twin": sr.get("green_twin"),
+        "label": label,
+        "note": "Skip-regret tip — observe-only; never loosens fee floors.",
     }
 
 
