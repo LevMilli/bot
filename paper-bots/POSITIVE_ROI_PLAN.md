@@ -1321,6 +1321,14 @@ Interactive: Positive ROI Master Plan canvas.
 | `sunday_twin_coverage` + status `sunday` | surface audit CLI |
 | Makefile living-sunday* | staff paste · never auto-posts |
 
+### Living upgrade — ritual Discord live labels (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `ritual_live_labels` helper | surface-only label map from board |
+| Ritual Discord sunday lines | live chip labels with static fallbacks |
+| Coverage test | draft contains live swarm/toxic labels |
+
 ### Next
 
 | Ticket | Where |

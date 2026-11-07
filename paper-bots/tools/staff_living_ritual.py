@@ -105,32 +105,36 @@ def format_discord(payload: dict) -> str:
         f"• Gaps sunday: {gaps_label} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    def _pl(key: str, fallback: str) -> str:
+        val = payload.get(key)
+        return str(val) if val else fallback
+
     lines.append(
-        f"• Digests sunday: digests observe · sunday quiet {tip_age} "
+        f"• Digests sunday: {_pl('digests_label', 'digests observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Fills sunday: fills observe · sunday quiet {tip_age} "
+        f"• Fills sunday: {_pl('fills_label', 'fills observe')} · sunday quiet {tip_age} "
         f"(observe · never invents PnL)"
     )
     lines.append(
-        f"• Hill sunday: hillclimb none · sunday quiet {tip_age} "
+        f"• Hill sunday: {_pl('hill_label', 'hillclimb none')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Swarm sunday: swarm observe · sunday quiet {tip_age} "
+        f"• Swarm sunday: {_pl('swarm_label', 'swarm observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Green sunday: green-day observe · sunday quiet {tip_age} "
+        f"• Green sunday: {_pl('green_label', 'green-day observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Bleed sunday: bleed observe · sunday quiet {tip_age} "
+        f"• Bleed sunday: {_pl('bleed_label', 'bleed observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• CLV sunday: CLV observe · sunday quiet {tip_age} "
+        f"• CLV sunday: {_pl('clv_label', 'CLV observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     timer_alive = payload.get("timer_alive")
@@ -146,192 +150,183 @@ def format_discord(payload: dict) -> str:
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Calib sunday: calib observe · sunday quiet {tip_age} "
+        f"• Calib sunday: {_pl('calib_label', 'calib observe')} · sunday quiet {tip_age} "
         f"(observe · never auto-writes Φ)"
     )
     lines.append(
-        f"• Queue sunday: queue observe · sunday quiet {tip_age} "
+        f"• Queue sunday: {_pl('queue_label', 'queue observe')} · sunday quiet {tip_age} "
         f"(observe · never promotes)"
     )
     lines.append(
-        f"• Gate A sunday: Gate A observe · sunday quiet {tip_age} "
+        f"• Gate A sunday: {_pl('gate_a_label', 'Gate A observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• AI sunday: AI observe · sunday quiet {tip_age} "
+        f"• AI sunday: {_pl('ai_label', 'AI observe')} · sunday quiet {tip_age} "
         f"(observe · never auto-writes Φ)"
     )
     lines.append(
-        f"• Tip sunday: tip feed observe · sunday quiet {tip_age} "
+        f"• Tip sunday: {_pl('tip_label', 'tip feed observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Blackout sunday: blackout observe · sunday quiet {tip_age} "
+        f"• Blackout sunday: {_pl('blackout_label', 'blackout observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Injury sunday: injury observe · sunday quiet {tip_age} "
+        f"• Injury sunday: {_pl('injury_label', 'injury observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Empty sunday: empty CARD observe · sunday quiet {tip_age} "
+        f"• Empty sunday: {_pl('empty_label', 'empty CARD observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Near-miss sunday: near-miss observe · sunday quiet {tip_age} "
+        f"• Near-miss sunday: {_pl('near_miss_label', 'near-miss observe')} · sunday quiet {tip_age} "
         f"(observe · never promotes)"
     )
     lines.append(
-        f"• EIA sunday: EIA observe · sunday quiet {tip_age} "
+        f"• EIA sunday: {_pl('eia_label', 'EIA observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Calendar sunday: calendar observe · sunday quiet {tip_age} "
+        f"• Calendar sunday: {_pl('calendar_label', 'calendar observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Pager sunday: pager observe · sunday quiet {tip_age} "
+        f"• Pager sunday: {_pl('pager_label', 'pager observe')} · sunday quiet {tip_age} "
         f"(observe · never auto-pages)"
     )
     lines.append(
-        f"• Books sunday: books observe · sunday quiet {tip_age} "
+        f"• Books sunday: {_pl('books_label', 'books observe')} · sunday quiet {tip_age} "
         f"(observe · never invents PnL)"
     )
     lines.append(
-        f"• Pulse sunday: pulse observe · sunday quiet {tip_age} "
+        f"• Pulse sunday: {_pl('pulse_label', 'pulse observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Dual sunday: dual observe · sunday quiet {tip_age} "
+        f"• Dual sunday: {_pl('dual_label', 'dual observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Skip-reg sunday: skip-regret observe · sunday quiet {tip_age} "
+        f"• Skip-reg sunday: {_pl('skip_reg_label', 'skip-regret observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Hard-stop sunday: hard-stop observe · sunday quiet {tip_age} "
+        f"• Hard-stop sunday: {_pl('hard_stop_label', 'hard-stop observe')} · sunday quiet {tip_age} "
         f"(observe · never promotes)"
     )
     lines.append(
-        f"• Distance sunday: distance observe · sunday quiet {tip_age} "
+        f"• Distance sunday: {_pl('distance_label', 'distance observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Quant sunday: quant observe · sunday quiet {tip_age} "
+        f"• Quant sunday: {_pl('quant_label', 'quant observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Report sunday: report observe · sunday quiet {tip_age} "
+        f"• Report sunday: {_pl('report_label', 'report observe')} · sunday quiet {tip_age} "
         f"(observe · never auto-posts)"
     )
     lines.append(
-        f"• Empty-bee sunday: empty bee observe · sunday quiet {tip_age} "
+        f"• Empty-bee sunday: {_pl('empty_bee_label', 'empty bee observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• NM-clerk sunday: nm clerk observe · sunday quiet {tip_age} "
+        f"• NM-clerk sunday: {_pl('nm_clerk_label', 'nm clerk observe')} · sunday quiet {tip_age} "
         f"(observe · never promotes)"
     )
     lines.append(
-        f"• HS-clerk sunday: hs clerk observe · sunday quiet {tip_age} "
+        f"• HS-clerk sunday: {_pl('hs_clerk_label', 'hs clerk observe')} · sunday quiet {tip_age} "
         f"(observe · never promotes)"
     )
     lines.append(
-        f"• Bleed-clerk sunday: bleed clerk observe · sunday quiet {tip_age} "
+        f"• Bleed-clerk sunday: {_pl('bleed_clerk_label', 'bleed clerk observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Skip-twin sunday: skip-twin observe · sunday quiet {tip_age} "
+        f"• Skip-twin sunday: {_pl('skip_twin_label', 'skip-twin observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• CLV-closer sunday: CLV closer observe · sunday quiet {tip_age} "
+        f"• CLV-closer sunday: {_pl('clv_closer_label', 'CLV closer observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• T-digest sunday: t-digest observe · sunday quiet {tip_age} "
+        f"• T-digest sunday: {_pl('tdigest_label', 't-digest observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Skips sunday: skips observe · sunday quiet {tip_age} "
+        f"• Skips sunday: {_pl('skips_label', 'skips observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Adapt sunday: adapt observe · sunday quiet {tip_age} "
+        f"• Adapt sunday: {_pl('adapt_label', 'adapt observe')} · sunday quiet {tip_age} "
         f"(observe · never auto-writes Φ)"
     )
     lines.append(
-        f"• Teller sunday: teller observe · sunday quiet {tip_age} "
+        f"• Teller sunday: {_pl('teller_label', 'teller observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Quiet sunday: feature quiet observe · sunday quiet {tip_age} "
+        f"• Quiet sunday: {_pl('quiet_label', 'feature quiet observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Doc-age sunday: doctor age observe · sunday quiet {tip_age} "
+        f"• Doc-age sunday: {_pl('doc_age_label', 'doctor age observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Ritual sunday: ritual observe · sunday quiet {tip_age} "
+        f"• Ritual sunday: {_pl('ritual_label', 'ritual observe')} · sunday quiet {tip_age} "
         f"(observe · never auto-posts)"
     )
     lines.append(
-        f"• Digest-fresh sunday: digest fresh observe · sunday quiet {tip_age} "
+        f"• Digest-fresh sunday: {_pl('digest_fresh_label', 'digest fresh observe')} · sunday quiet {tip_age} "
         f"(observe)"
     )
     lines.append(
-        f"• Journals sunday: journals observe · sunday quiet {tip_age} "
+        f"• Journals sunday: {_pl('journals_label', 'journals observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Monday sunday: monday pulse observe · sunday quiet {tip_age} "
-        f"(observe · never softens floors)"
-    )
-    toxic_lab = payload.get("toxic_fills_label") or "toxic fills observe"
-    adapt_lab = payload.get("adapt_ab_label") or "adapt A/B observe"
-    rps_lab = payload.get("raise_phi_sla_label") or "raise_Φ SLA observe"
-    feat_lab = payload.get("feature_coverage_label") or "feature coverage observe"
-    cat_lab = payload.get("chip_catalog_label") or "chip catalog observe"
-    p2_lab = payload.get("phase2_pulse_label") or "phase2 pulse observe"
-    l7_lab = payload.get("l7_observe_label") or "L7 observe pulse"
-    fstore_lab = payload.get("feature_store_label") or "feature store observe"
-    skip_lab = payload.get("skip_historian_label") or "skip historian observe"
-    lines.append(
-        f"• Toxic sunday: {toxic_lab} · sunday quiet {tip_age} "
+        f"• Monday sunday: {_pl('monday_label', 'monday pulse observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Adapt-A/B sunday: {adapt_lab} · sunday quiet {tip_age} "
+        f"• Toxic sunday: {_pl('toxic_fills_label', 'toxic fills observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Raise-Φ-SLA sunday: {rps_lab} · sunday quiet {tip_age} "
+        f"• Adapt-A/B sunday: {_pl('adapt_ab_label', 'adapt A/B observe')} · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Raise-Φ-SLA sunday: {_pl('raise_phi_sla_label', 'raise_Φ SLA observe')} · sunday quiet {tip_age} "
         f"(observe · never auto-writes Φ)"
     )
     lines.append(
-        f"• Feature-coverage sunday: {feat_lab} · sunday quiet {tip_age} "
+        f"• Feature-coverage sunday: {_pl('feature_coverage_label', 'feature coverage observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Chip-catalog sunday: {cat_lab} · sunday quiet {tip_age} "
+        f"• Chip-catalog sunday: {_pl('chip_catalog_label', 'chip catalog observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Phase2-pulse sunday: {p2_lab} · sunday quiet {tip_age} "
+        f"• Phase2-pulse sunday: {_pl('phase2_pulse_label', 'phase2 pulse observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• L7-pulse sunday: {l7_lab} · sunday quiet {tip_age} "
+        f"• L7-pulse sunday: {_pl('l7_observe_label', 'L7 observe pulse')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Feature-store sunday: {fstore_lab} · sunday quiet {tip_age} "
+        f"• Feature-store sunday: {_pl('feature_store_label', 'feature store observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append(
-        f"• Skip-historian sunday: {skip_lab} · sunday quiet {tip_age} "
+        f"• Skip-historian sunday: {_pl('skip_historian_label', 'skip historian observe')} · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
     lines.append("")
@@ -1009,29 +1004,14 @@ def main() -> int:
         f"· sunday quiet {sunday_quiet_age_label} "
         "(observe · never softens floors)"
     )
-    # Live labels for L7 / feature-store / skip-historian discord lines (surface-only).
-    toxic = desk_living.toxic_fill_chip(root)
-    adapt_ab = desk_living.adapt_ab_chip(root)
-    rps = desk_living.raise_phi_sla_chip(root)
-    feat_cov = desk_living.feature_coverage_chip(root)
-    catalog = desk_living.chip_catalog_chip(root)
-    p2 = desk_living.phase2_pulse_chip(root)
-    l7 = desk_living.l7_observe_summary(root=root)
-    feat_store = desk_living.feature_store_coverage(root)
-    skip_hist = desk_living.skip_historian_chip(root)
-    payload["toxic_fills_label"] = toxic.get("label") or "toxic fills observe"
-    payload["adapt_ab_label"] = adapt_ab.get("label") or "adapt A/B observe"
-    payload["raise_phi_sla_label"] = rps.get("label") or "raise_Φ SLA observe"
-    payload["feature_coverage_label"] = feat_cov.get("label") or "feature coverage observe"
-    payload["chip_catalog_label"] = catalog.get("label") or "chip catalog observe"
-    payload["phase2_pulse_label"] = p2.get("label") or "phase2 pulse observe"
-    payload["l7_observe_label"] = l7.get("label") or "L7 observe pulse"
-    payload["feature_store_label"] = (
-        f"feature store n={feat_store.get('n')} "
-        f"buys={feat_store.get('buys')} skips={feat_store.get('skips')}"
-    )
-    payload["skip_historian_label"] = skip_hist.get("label") or "skip historian observe"
-    payload["sunday_twin_coverage"] = desk_living.sunday_twin_coverage(root=root)
+    # Live labels for ritual Discord sunday lines (surface-only; not board chips).
+    board = desk_living.living_upgrade_board(root)
+    live = desk_living.ritual_live_labels(board)
+    payload.update({k: v for k, v in live.items() if str(k).endswith("_label")})
+    timer = board.get("timer_heartbeat") if isinstance(board.get("timer_heartbeat"), dict) else {}
+    payload["timer_alive"] = timer.get("alive")
+    payload["sunday_twin_coverage"] = desk_living.sunday_twin_coverage(board)
+    payload["ritual_live_labels"] = live
     if args.discord:
         print(format_discord(payload))
     elif args.json:
