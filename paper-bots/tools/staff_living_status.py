@@ -3473,21 +3473,31 @@ def main() -> int:
         ))
         return 0
     if args.action == "money-pulse":
+        feat = desk_living.feature_store_coverage(root)
         out = {
             "paper_only": True,
             "fee_floors_locked": True,
             "auto_promote": False,
+            "live_orders_enabled": False,
+            "observe_only": True,
             "firm_queue": desk_roi_plan.firm_queue_status(root),
             "completions": desk_living.completions_summary(root),
-            "feature_store": desk_living.feature_store_coverage(root),
+            "feature_store": feat,
+            "feature_densify": {
+                "densify_pct": feat.get("densify_pct"),
+                "densify_pass": feat.get("densify_pass"),
+                "densify_target": feat.get("densify_target"),
+                "dense_schema_n": feat.get("dense_schema_n"),
+                "densify_keys_n": feat.get("densify_keys_n"),
+            },
             "feature_quiet": desk_living.feature_store_quiet_alert(root),
             "empty_card": desk_roi_plan.empty_card_status(root),
             "inx_band": desk_roi_plan.inx_band_promote_status(root),
             "edge08": desk_roi_plan.btc_edge08_shadow_status(root),
             "helper_gate_a": desk_roi_plan.helper_promote_status(root),
             "note": (
-                "Money-path pulse — observe only. Never softens floors. "
-                "Never arms LIVE_ORDERS."
+                "Money-path pulse — observe only (firm-queue / completions eligible / "
+                "feature-store densify). Never softens floors. Never arms LIVE_ORDERS."
             ),
         }
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
