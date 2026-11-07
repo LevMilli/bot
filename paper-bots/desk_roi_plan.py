@@ -91,6 +91,7 @@ from desk_roi_e5e7 import (  # noqa: F401
 
 # Post #354–#357 money-path boards (latency stage / speed KPIs / M1 gap).
 from desk_roi_post_e3e7 import (  # noqa: F401
+    distance_to_zero_stance,
     exit_to_risk_freed_ms,
     fee_floors_locked_check,
     fill_capacity_observe,
