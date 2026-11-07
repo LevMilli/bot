@@ -75,6 +75,28 @@ class SportsGreenBoost(unittest.TestCase):
         self.assertTrue(floors["locked"])
         self.assertTrue(floors["all_ok"])
 
+    def test_staff_cannot_arm_before_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            denied = desk_roi_plan.staff_set_sports_green_boost(tmp, True)
+            self.assertFalse(denied["ok"])
+            self.assertEqual(desk_roi_plan.sports_green_boost(tmp), 0)
+
+    def test_staff_force_arm_without_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            armed = desk_roi_plan.staff_set_sports_green_boost(
+                tmp, True, note="staff gate lifted", force=True,
+            )
+            self.assertTrue(armed["ok"])
+            self.assertEqual(armed["green_boost"], 1)
+            st = desk_roi_plan.sports_green_boost_status(tmp)
+            self.assertFalse(st["ready"])
+            self.assertTrue(st["staff_armed"])
+            self.assertEqual(st["green_boost"], 1)
+            self.assertEqual(desk_roi_plan.sports_green_boost(tmp), 1)
+            disarmed = desk_roi_plan.staff_set_sports_green_boost(tmp, False)
+            self.assertTrue(disarmed["ok"])
+            self.assertEqual(desk_roi_plan.sports_green_boost(tmp), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

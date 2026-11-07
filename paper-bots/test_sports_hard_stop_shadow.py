@@ -82,6 +82,46 @@ class SportsHardStopShadow(unittest.TestCase):
             self.assertFalse(denied["ok"])
             self.assertFalse(desk_roi_plan.sports_hard_stop_is_live(tmp))
 
+    def test_staff_force_arm_before_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp, ticker="T0", entry_price=0.80, bid=0.60, contracts=10, cost=5.0,
+            )
+            armed = desk_roi_plan.staff_set_sports_hard_stop_live(
+                tmp, True, note="staff gate lifted", force=True,
+            )
+            self.assertTrue(armed["ok"])
+            self.assertTrue(desk_roi_plan.sports_hard_stop_is_live(tmp))
+            self.assertFalse(desk_roi_plan.SPORTS_HARD_STOP_LIVE)
+
+
+class StaffBatchArmPromotes(unittest.TestCase):
+    def test_batch_force_arms_all_three(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = desk_roi_plan.staff_batch_arm_promotes(
+                tmp,
+                force=True,
+                note="staff gate lifted batch",
+                inx_band_id="80_90",
+            )
+            self.assertTrue(out["ok"])
+            self.assertFalse(out["auto_promote"])
+            self.assertTrue(out["fee_floors_locked"])
+            self.assertFalse(out["live_orders_enabled"])
+            self.assertTrue(desk_roi_plan.sports_hard_stop_is_live(tmp))
+            self.assertEqual(desk_roi_plan.sports_green_boost(tmp), 1)
+            live = desk_roi_plan.inx_live_band(tmp)
+            self.assertEqual(live["id"], "80_90")
+            self.assertTrue(live["staff_approved"])
+            self.assertFalse(live["live_changed"])
+
+    def test_batch_denied_without_force_when_thin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = desk_roi_plan.staff_batch_arm_promotes(tmp, force=False)
+            self.assertFalse(out["ok"])
+            self.assertFalse(desk_roi_plan.sports_hard_stop_is_live(tmp))
+            self.assertEqual(desk_roi_plan.sports_green_boost(tmp), 0)
+
 
 class SportsLatencyFit(unittest.TestCase):
     def test_sports_m4_bar_is_45s(self):

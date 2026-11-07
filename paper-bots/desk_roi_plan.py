@@ -22,6 +22,7 @@ INX_BAND_RESEARCH = "desk_inx_band_research.json"
 INX_BAND_PROMOTE = "desk_inx_band_promote.json"
 SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
 SPORTS_HARD_STOP_PROMOTE = "desk_sports_hard_stop_promote.json"
+SPORTS_GREEN_BOOST_PROMOTE = "desk_sports_green_boost_promote.json"
 ADVERSE_COOL_NAME = "desk_adverse_cool.json"
 WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 MASTER_GRAD = "desk_master_grad.json"
@@ -2398,12 +2399,20 @@ def sports_green_boost_status(
         and clv_rate + 1e-12 >= SPORTS_CLV_BAR
     )
     ready = bool(weeks_ok and hist_ok and clv_ok)
-    boost = 1 if ready else 0
+    promote = _load(
+        _path(SPORTS_GREEN_BOOST_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    staff_armed = bool(promote.get("staff_approved")) and bool(promote.get("live"))
+    # Ready gate or explicit staff arm (force path when evidence thin).
+    boost = 1 if (ready or staff_armed) else 0
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "auto_promote": False,
         "ready": ready,
+        "staff_approved": staff_armed,
+        "staff_armed": staff_armed,
         "green_boost": boost,
         "sports_m1": sports_exp,
         "sports_m1_n": sports_n,
@@ -2417,19 +2426,71 @@ def sports_green_boost_status(
         "weeks_ok": weeks_ok,
         "week_labels": [str(c.get("label") or "") for c in sports_weeks],
         "note": (
-            "Sports selective +1 only after 2 Chicago weeks sports M1≥0, "
+            "Sports selective +1 after 2 Chicago weeks sports M1≥0, "
             f"history n≥{SPORTS_M1_MIN_N}, and CLV beat-close ≥{SPORTS_CLV_BAR:.0%} "
-            f"(n≥{SPORTS_CLV_MIN_N}). Default boost=0."
+            f"(n≥{SPORTS_CLV_MIN_N}), or staff_set_sports_green_boost. Default boost=0."
         ),
     }
 
 
 def sports_green_boost(root: str | None = None, bots: list | None = None) -> int:
-    """Runtime boost for selective_max_buys — 0 until gate ready."""
+    """Runtime boost for selective_max_buys — 0 until gate ready or staff arm."""
     try:
         return int(sports_green_boost_status(root, bots=bots).get("green_boost") or 0)
     except Exception:
         return 0
+
+
+def staff_set_sports_green_boost(
+    root: str | None,
+    enabled: bool,
+    *,
+    note: str = "",
+    force: bool = False,
+    bots: list | None = None,
+) -> dict:
+    """Staff gate to arm/disarm sports selective +1 boost.
+
+    Enabling requires readiness (2w M1≥0 + CLV≥52%) unless force=True.
+    Never auto-called. Does not soften fee floors.
+    """
+    status = sports_green_boost_status(root, bots=bots)
+    if enabled and not force and not status.get("ready"):
+        return {
+            "ok": False,
+            "live": False,
+            "staff_approved": False,
+            "green_boost": int(status.get("green_boost") or 0),
+            "reason": (
+                "not ready (need 2 Chicago weeks sports M1≥0, "
+                f"hist n≥{SPORTS_M1_MIN_N}, CLV≥{SPORTS_CLV_BAR:.0%})"
+            ),
+            "status": status,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    row = {
+        "paper_only": True,
+        "staff_approved": bool(enabled),
+        "live": bool(enabled),
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "ready_at_arm": bool(status.get("ready")),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+    _save(_path(SPORTS_GREEN_BOOST_PROMOTE, root), row)
+    after = sports_green_boost_status(root, bots=bots)
+    return {
+        "ok": True,
+        "live": bool(enabled),
+        "staff_approved": bool(enabled),
+        "green_boost": int(after.get("green_boost") or 0),
+        "reason": "armed" if enabled else "disarmed",
+        "status": after,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
 
 
 # ---- Green-or-gone Masters flags (Phase 7) ---------------------------------
@@ -3100,6 +3161,46 @@ def staff_set_sports_hard_stop_live(
         "summary": sports_hard_stop_shadow_summary(root),
         "auto_promote": False,
         "fee_floors_locked": True,
+    }
+
+
+def staff_batch_arm_promotes(
+    root: str | None = None,
+    *,
+    force: bool = False,
+    note: str = "",
+    inx_band_id: str = INX_LIVE_BAND_DEFAULT,
+    bots: list | None = None,
+) -> dict:
+    """Staff batch: hard-stop live + green_boost + INX band promote.
+
+    Never auto-called. force=True only when staff explicitly lifts evidence gates.
+    Locks fee floors; LIVE_ORDERS stay off (paper sells / paper boost only).
+    """
+    note_s = str(note or "staff batch promote")[:200]
+    hard_stop = staff_set_sports_hard_stop_live(
+        root, True, note=note_s, force=force,
+    )
+    green = staff_set_sports_green_boost(
+        root, True, note=note_s, force=force, bots=bots,
+    )
+    inx = staff_promote_inx_band(
+        root, inx_band_id, note=note_s, force=force,
+    )
+    ok = bool(hard_stop.get("ok") and green.get("ok") and inx.get("ok"))
+    return {
+        "paper_only": True,
+        "ok": ok,
+        "hard_stop": hard_stop,
+        "green_boost": green,
+        "inx_band": inx,
+        "inx_band_id": str(inx_band_id),
+        "force": bool(force),
+        "note": note_s,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "live_orders_enabled": False,
+        "code_default_hard_stop_live": bool(SPORTS_HARD_STOP_LIVE),
     }
 
 
