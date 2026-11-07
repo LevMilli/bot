@@ -1704,6 +1704,14 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Headroom helper | `desk_open_risk_headroom` / `desk_open_risk_blocks` |
 | Sports buy + firm-queue remaining | `sports-gap-paper/gap_bot.py` uses desk-wide used/remaining |
 
+### E1 #118–#120 regression guards
+
+| Ticket | Where |
+| --- | --- |
+| #118 exits-before-entries | `test_e1_exits_stake_mint.SportsExitsBeforeEntries` |
+| #119 INX stake shrink both bots | `test_e1_exits_stake_mint.InxStakeContractsShrink` |
+| #120 meme learning_skip mint key | `test_e1_exits_stake_mint.MemeLearningSkipMintKey` |
+
 ### Next
 
 | Ticket | Where |
