@@ -2222,7 +2222,130 @@ export default function App() {
                     })()}
                   </span>
                 </div>
+                                <div className="vault-board-row">
+                  <span className="vb-label">toxic fills</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const t = (
+                          snap?.desk as
+                            | { toxic_fills?: { pass?: boolean } }
+                            | undefined
+                        )?.toxic_fills
+                        if (!t) return undefined
+                        return t.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const t = (
+                        snap?.desk as
+                          | {
+                              toxic_fills?: {
+                                label?: string
+                                pass?: boolean
+                              }
+                            }
+                          | undefined
+                      )?.toxic_fills
+                      if (!t) return 'toxic fills pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        t.label ||
+                        (t.pass === false ? 'toxic fills COOLING' : 'toxic fills ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">adapt A/B</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const a = (
+                          snap?.desk as
+                            | { adapt_ab?: { pass?: boolean } }
+                            | undefined
+                        )?.adapt_ab
+                        if (!a) return undefined
+                        return a.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const a = (
+                        snap?.desk as
+                          | {
+                              adapt_ab?: {
+                                label?: string
+                                pass?: boolean
+                              }
+                            }
+                          | undefined
+                      )?.adapt_ab
+                      if (!a) return 'adapt A/B pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        a.label ||
+                        (a.pass === false ? 'adapt A/B under flat' : 'adapt A/B ok')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never softens floors)`
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">raise_Φ SLA</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const r = (
+                          snap?.desk as
+                            | {
+                                raise_phi_sla?: {
+                                  pass?: boolean
+                                  overdue?: boolean
+                                }
+                              }
+                            | undefined
+                        )?.raise_phi_sla
+                        if (!r) return undefined
+                        if (r.overdue) return '#c45c26'
+                        return r.pass === false ? '#d4a017' : undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const r = (
+                        snap?.desk as
+                          | {
+                              raise_phi_sla?: {
+                                label?: string
+                                pass?: boolean
+                              }
+                            }
+                          | undefined
+                      )?.raise_phi_sla
+                      if (!r) return 'raise_Φ SLA pending'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      const base =
+                        r.label ||
+                        (r.pass === false ? 'raise_Φ SLA overdue' : 'raise_Φ SLA clear')
+                      return `${base} · sunday quiet ${sundayBit} (observe · never auto-writes Φ)`
+                    })()}
+                  </span>
+                </div>
+<div className="vault-board-row">
                   <span className="vb-label">swarm</span>
                   <span
                     style={{

@@ -634,6 +634,34 @@ class DeskLivingTests(unittest.TestCase):
             self.assertIn("journal_sunday_quiet", export)
             self.assertIn("monday_sunday_quiet", export)
 
+    def test_l7_toxic_adapt_sla_chips(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            toxic = desk_living.toxic_fill_chip(tmp)
+            self.assertTrue(toxic.get("fee_floors_locked"))
+            self.assertIn("active_n", toxic)
+            self.assertIn("label", toxic)
+            adapt = desk_living.adapt_ab_chip(tmp)
+            self.assertTrue(adapt.get("fee_floors_locked"))
+            self.assertIn("n_settled", adapt)
+            self.assertIn("adapt_wins", adapt)
+            rps = desk_living.raise_phi_sla_chip(tmp)
+            self.assertTrue(rps.get("fee_floors_locked"))
+            self.assertFalse(rps.get("auto_write_phi"))
+            self.assertIn("raise_phi_n", rps)
+            board = desk_living.living_upgrade_board(tmp)
+            self.assertIn("toxic_fills", board)
+            self.assertIn("adapt_ab", board)
+            self.assertIn("raise_phi_sla", board)
+            compact = desk_living.living_compact_card(tmp, board=board)
+            self.assertIn("toxic_sunday_quiet", compact)
+            self.assertIn("adapt_ab_sunday_quiet", compact)
+            self.assertIn("raise_phi_sla_sunday_quiet", compact)
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("toxic_sunday_quiet", export)
+            self.assertIn("adapt_ab_sunday_quiet", export)
+            self.assertIn("raise_phi_sla_sunday_quiet", export)
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util
