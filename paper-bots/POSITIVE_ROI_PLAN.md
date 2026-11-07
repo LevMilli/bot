@@ -1678,8 +1678,17 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Hard-stop shadow n≥30 EV≥0 — drop force dependency | `sports_hard_stop_shadow_summary.promote_ready` |
 | Near-miss labeled n≥30 EV≥0 — drop force; optional soft-p second | `near_miss_promote_status` → `staff_promote_near_miss_soft("p")` |
 | Dual-control / LIVE_ORDERS stay off until separate staff gate | paper-only forever until staff |
-| BTC raise_Φ staff decision log (accept/defer) | calib tickets / staff apply path |
-| Shadow edge08 promote only at n≥30 EV≥0.5 | BTC shadow parallel account |
+| Shadow edge08 promote only at n≥30 EV≥0.5 | `pimp_desk.promote_shadow` (btc15m/edge08) |
+| Helper Gate A staff arm after ready | `staff_set_helper_autonomy` |
+
+### BTC raise_Φ staff decision log
+
+| Ticket | Where |
+| --- | --- |
+| Accept/defer log + before/after hit rates | `staff_log_raise_phi_decision` / `raise_phi_decision_log` |
+| CLI | `tools/staff_calib_tickets.py accept\|defer\|decisions` |
+| Masters | `roi_plan.raise_phi_decisions` |
+| Never writes Φ | `auto_write_phi=False` forever |
 
 ## Hard rules unchanged
 
