@@ -1796,11 +1796,18 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Money pulse | `make living-money-pulse` includes `promote_distance` |
 | Masters | `roi_plan.promote_distance` |
 
+### TC-151 hillclimb lever process observe
+
+| Ticket | Where |
+| --- | --- |
+| Process board | `hillclimb_lever_status` — `process_only` / `needs_staff_pick` / `label` |
+| Observe CLI | `make living-hillclimb-lever` (never auto-picks) |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Observe Chicago weeks / staff hillclimb pick (process) | TC-151 |
+| Staff pick hillclimb lever this Chicago week | TC-151 (process — external) |
 | Dual-control / LIVE_ORDERS (deferred) | staff gate |
 | Force-armed evidence catch-up (deferred) | hard-stop / near-miss / INX n bars |
 
