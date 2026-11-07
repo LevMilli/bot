@@ -42,7 +42,7 @@ living-test:
 	python3 -m unittest test_desk_living -q
 
 living-l7:
-	python3 -c "import desk_living; h=desk_living.living_self_check(); print(h.get('l7_observe_label')); print('ok' if h.get('l7_observe_ok') else 'missing='+str(h.get('l7_observe_missing'))); raise SystemExit(0 if h.get('l7_observe_ok') else 2)"
+	python3 tools/staff_living_status.py l7
 
 living-l7-discord:
-	python3 -c "import desk_living; d=desk_living.living_doctor(record=False); print(d.get('soft_copy') or d.get('l7_observe_label') or 'L7 observe'); print('(staff paste · never auto-posts)')"
+	python3 tools/staff_living_status.py l7 --discord
