@@ -168,6 +168,26 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_doctor_tip")
         else {}
     )
+    inventory_tip = (
+        desk_living.living_inventory_tip(board)
+        if hasattr(desk_living, "living_inventory_tip")
+        else {}
+    )
+    dual_tip = (
+        desk_living.living_dual_tip(board)
+        if hasattr(desk_living, "living_dual_tip")
+        else {}
+    )
+    hillclimb_tip = (
+        desk_living.living_hillclimb_tip(board)
+        if hasattr(desk_living, "living_hillclimb_tip")
+        else {}
+    )
+    ruin_tip = (
+        desk_living.living_ruin_tip(board)
+        if hasattr(desk_living, "living_ruin_tip")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -1303,6 +1323,63 @@ def _text(board: dict) -> str:
                 )
             )
         ),
+
+        (
+            "inventory-tip: "
+            + str(inventory_tip.get("label") or "inventory observe")
+        ),
+        (
+            "inventory-tip sunday: "
+            + str(
+                compact.get("inventory_sunday_quiet")
+                or (
+                    str(inventory_tip.get("label") or "inventory observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
+            "dual-tip: "
+            + str(dual_tip.get("label") or "dual observe")
+        ),
+        (
+            "dual-tip sunday: "
+            + str(
+                compact.get("dual_tip_sunday_quiet")
+                or (
+                    str(dual_tip.get("label") or "dual observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never enables live)"
+                )
+            )
+        ),
+        (
+            "hillclimb-tip: "
+            + str(hillclimb_tip.get("label") or "hillclimb observe")
+        ),
+        (
+            "hillclimb-tip sunday: "
+            + str(
+                compact.get("hillclimb_tip_sunday_quiet")
+                or (
+                    str(hillclimb_tip.get("label") or "hillclimb observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
+            "ruin-tip: "
+            + str(ruin_tip.get("label") or "ruin observe")
+        ),
+        (
+            "ruin-tip sunday: "
+            + str(
+                compact.get("ruin_tip_sunday_quiet")
+                or (
+                    str(ruin_tip.get("label") or "ruin observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
         (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
@@ -1407,7 +1484,7 @@ def main() -> int:
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
-            "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip",
+            "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -1555,6 +1632,10 @@ def main() -> int:
         timer_tip_j = desk_living.living_timer_tip(board)
         export_tip_j = desk_living.living_export_tip(board)
         doctor_tip_j = desk_living.living_doctor_tip(board)
+        inventory_tip_j = desk_living.living_inventory_tip(board)
+        dual_tip_j = desk_living.living_dual_tip(board)
+        hillclimb_tip_j = desk_living.living_hillclimb_tip(board)
+        ruin_tip_j = desk_living.living_ruin_tip(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -2021,6 +2102,22 @@ def main() -> int:
             "doctor_tip_fresh": doctor_tip_j.get("doctor_fresh"),
             "doctor_tip_sunday_quiet": compact_j.get("doctor_tip_sunday_quiet"),
             "compact_doctor_tip_sunday_quiet": compact_j.get("doctor_tip_sunday_quiet"),
+            "inventory_tip": inventory_tip_j,
+            "inventory_tip_label": inventory_tip_j.get("label"),
+            "inventory_sunday_quiet": compact_j.get("inventory_sunday_quiet"),
+            "compact_inventory_sunday_quiet": compact_j.get("inventory_sunday_quiet"),
+            "dual_tip": dual_tip_j,
+            "dual_tip_label": dual_tip_j.get("label"),
+            "dual_tip_sunday_quiet": compact_j.get("dual_tip_sunday_quiet"),
+            "compact_dual_tip_sunday_quiet": compact_j.get("dual_tip_sunday_quiet"),
+            "hillclimb_tip": hillclimb_tip_j,
+            "hillclimb_tip_label": hillclimb_tip_j.get("label"),
+            "hillclimb_tip_sunday_quiet": compact_j.get("hillclimb_tip_sunday_quiet"),
+            "compact_hillclimb_tip_sunday_quiet": compact_j.get("hillclimb_tip_sunday_quiet"),
+            "ruin_tip": ruin_tip_j,
+            "ruin_tip_label": ruin_tip_j.get("label"),
+            "ruin_tip_sunday_quiet": compact_j.get("ruin_tip_sunday_quiet"),
+            "compact_ruin_tip_sunday_quiet": compact_j.get("ruin_tip_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -2604,6 +2701,91 @@ def main() -> int:
         else:
             out = dict(tip)
             out["doctor_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+
+
+    if args.action == "inventory-tip":
+        tip = desk_living.living_inventory_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("inventory_sunday_quiet") or (
+            f"{tip.get('label') or 'inventory observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Inventory tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"present={tip.get('present_n')}/{tip.get('expected_n')} missing={tip.get('missing_n')} pass={tip.get('pass')}\n"
+                "_hire clerks first · never softens floors · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["inventory_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if tip.get("pass") else 2
+
+    if args.action == "dual-tip":
+        tip = desk_living.living_dual_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("dual_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'dual observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never enables live)"
+        )
+        if args.discord:
+            print(
+                "**Dual tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"signed={tip.get('signed_n')}/{tip.get('items_n')} two_staff={tip.get('two_staff')} arm_ready_paper={tip.get('arm_ready_paper')}\n"
+                "_never promotes · never enables live · never softens floors_"
+            )
+        else:
+            out = dict(tip)
+            out["dual_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if tip.get("live_orders_enabled") is False else 2
+
+    if args.action == "hillclimb-tip":
+        tip = desk_living.living_hillclimb_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("hillclimb_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'hillclimb observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Hillclimb tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"week={tip.get('week')} active={tip.get('active')} kill={tip.get('kill')}\n"
+                "_one lever/week · never auto-writes · never softens floors_"
+            )
+        else:
+            out = dict(tip)
+            out["hillclimb_tip_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+
+    if args.action == "ruin-tip":
+        tip = desk_living.living_ruin_tip(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("ruin_tip_sunday_quiet") or (
+            f"{tip.get('label') or 'ruin observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Ruin tip** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"active={tip.get('active')} level={tip.get('level')} practiced_month={tip.get('practiced_this_month')}\n"
+                "_observe only · never softens floors · never auto-posts_"
+            )
+        else:
+            out = dict(tip)
+            out["ruin_tip_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
 

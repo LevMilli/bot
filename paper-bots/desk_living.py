@@ -1338,6 +1338,22 @@ def living_compact_card(
             f"{living_doctor_tip(src).get('label') or 'doctor-tip observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never records doctor)"
         ),
+        "inventory_sunday_quiet": (
+            f"{living_inventory_tip(src).get('label') or 'inventory observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "dual_tip_sunday_quiet": (
+            f"{living_dual_tip(src).get('label') or 'dual observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never enables live)"
+        ),
+        "hillclimb_tip_sunday_quiet": (
+            f"{living_hillclimb_tip(src).get('label') or 'hillclimb observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "ruin_tip_sunday_quiet": (
+            f"{living_ruin_tip(src).get('label') or 'ruin observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2536,6 +2552,27 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{doctor_tip.get('label') or 'doctor-tip observe'} · sunday quiet {quiet_bit} "
             "(observe · never records doctor)"
         )
+
+        inventory_tip = living_inventory_tip(board)
+        compact["inventory_sunday_quiet"] = (
+            f"{inventory_tip.get('label') or 'inventory observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        dual_tip = living_dual_tip(board)
+        compact["dual_tip_sunday_quiet"] = (
+            f"{dual_tip.get('label') or 'dual observe'} · sunday quiet {quiet_bit} "
+            "(observe · never enables live)"
+        )
+        hillclimb_tip = living_hillclimb_tip(board)
+        compact["hillclimb_tip_sunday_quiet"] = (
+            f"{hillclimb_tip.get('label') or 'hillclimb observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        ruin_tip = living_ruin_tip(board)
+        compact["ruin_tip_sunday_quiet"] = (
+            f"{ruin_tip.get('label') or 'ruin observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2747,6 +2784,20 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["doctor_tip"] = doctor_tip
     slim["doctor_tip_label"] = doctor_tip.get("label")
     slim["doctor_tip_fresh"] = doctor_tip.get("doctor_fresh")
+
+    inventory_tip = living_inventory_tip(board)
+    slim["inventory_tip"] = inventory_tip
+    slim["inventory_tip_label"] = inventory_tip.get("label")
+    slim["inventory_pass"] = inventory_tip.get("pass")
+    dual_tip = living_dual_tip(board)
+    slim["dual_tip"] = dual_tip
+    slim["dual_tip_label"] = dual_tip.get("label")
+    hillclimb_tip = living_hillclimb_tip(board)
+    slim["hillclimb_tip"] = hillclimb_tip
+    slim["hillclimb_tip_label"] = hillclimb_tip.get("label")
+    ruin_tip = living_ruin_tip(board)
+    slim["ruin_tip"] = ruin_tip
+    slim["ruin_tip_label"] = ruin_tip.get("label")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3238,6 +3289,27 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{doctor_tip_export.get('label') or 'doctor-tip observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never records doctor)"
     )
+
+    inventory_export = living_inventory_tip(board)
+    slim["inventory_sunday_quiet"] = (
+        f"{inventory_export.get('label') or 'inventory observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    dual_export = living_dual_tip(board)
+    slim["dual_tip_sunday_quiet"] = (
+        f"{dual_export.get('label') or 'dual observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never enables live)"
+    )
+    hill_export = living_hillclimb_tip(board)
+    slim["hillclimb_tip_sunday_quiet"] = (
+        f"{hill_export.get('label') or 'hillclimb observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    ruin_export = living_ruin_tip(board)
+    slim["ruin_tip_sunday_quiet"] = (
+        f"{ruin_export.get('label') or 'ruin observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3501,6 +3573,19 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_doctor_tip_sunday_quiet"] = (
             compact.get("doctor_tip_sunday_quiet") or slim.get("doctor_tip_sunday_quiet")
+        )
+
+        slim["compact_inventory_sunday_quiet"] = (
+            compact.get("inventory_sunday_quiet") or slim.get("inventory_sunday_quiet")
+        )
+        slim["compact_dual_tip_sunday_quiet"] = (
+            compact.get("dual_tip_sunday_quiet") or slim.get("dual_tip_sunday_quiet")
+        )
+        slim["compact_hillclimb_tip_sunday_quiet"] = (
+            compact.get("hillclimb_tip_sunday_quiet") or slim.get("hillclimb_tip_sunday_quiet")
+        )
+        slim["compact_ruin_tip_sunday_quiet"] = (
+            compact.get("ruin_tip_sunday_quiet") or slim.get("ruin_tip_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4767,6 +4852,10 @@ _DISCORD_PASTE_TARGETS = (
     "timer-tip",
     "export-tip",
     "doctor-tip",
+    "inventory-tip",
+    "dual-tip",
+    "hillclimb-tip",
+    "ruin-tip",
     "gaps",
     "ruin",
     "expand",
@@ -5101,6 +5190,108 @@ def living_doctor_tip(board: dict | None = None, root: str | None = None) -> dic
         "doctor_label": age.get("label"),
         "label": label,
         "note": "Doctor tip — observe-only; never writes doctor marker.",
+    }
+
+
+
+
+def living_inventory_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Digest inventory tip (insight digests present vs expected) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    inv = src.get("digest_inventory") if isinstance(src.get("digest_inventory"), dict) else {}
+    label = (
+        f"inventory present={inv.get('present_n')}/{inv.get('expected_n')} "
+        f"missing={inv.get('missing_n')} ratio={inv.get('ratio')} pass={inv.get('pass')} "
+        "(observe · hire clerks first · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "present_n": inv.get("present_n"),
+        "expected_n": inv.get("expected_n"),
+        "missing_n": inv.get("missing_n"),
+        "ratio": inv.get("ratio"),
+        "pass": inv.get("pass"),
+        "missing": list(inv.get("missing") or [])[:8],
+        "label": label,
+        "note": "Inventory tip — observe-only digest coverage; not a board chip.",
+    }
+
+
+def living_dual_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Dual-control checklist tip (never arms live) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    dual = src.get("dual_control_chip") if isinstance(src.get("dual_control_chip"), dict) else {}
+    label = (
+        f"dual signed={dual.get('signed_n')}/{dual.get('items_n')} "
+        f"two_staff={dual.get('two_staff')} arm_ready_paper={dual.get('arm_ready_paper')} "
+        f"live={dual.get('live_orders_enabled')} "
+        "(observe · never promotes · never enables live · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "signed_n": dual.get("signed_n"),
+        "items_n": dual.get("items_n"),
+        "two_staff": dual.get("two_staff"),
+        "arm_ready_paper": dual.get("arm_ready_paper"),
+        "live_orders_enabled": dual.get("live_orders_enabled"),
+        "checklist_complete": dual.get("checklist_complete"),
+        "label": label,
+        "note": "Dual tip — observe-only; LIVE_ORDERS stays False.",
+    }
+
+
+def living_hillclimb_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Hillclimb lever tip (staff pick / no auto write) — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    hill = (
+        src.get("hillclimb_chip")
+        if isinstance(src.get("hillclimb_chip"), dict)
+        else (src.get("hillclimb_lever") if isinstance(src.get("hillclimb_lever"), dict) else {})
+    )
+    label = (
+        f"hillclimb week={hill.get('week')} active={hill.get('active') or hill.get('active_name')} "
+        f"kill={hill.get('kill')} auto_promote={hill.get('auto_promote')} "
+        "(observe · one lever/week · never auto-writes · never softens floors)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "week": hill.get("week"),
+        "active": hill.get("active") or hill.get("active_name"),
+        "kill": hill.get("kill"),
+        "auto_promote": hill.get("auto_promote"),
+        "label": label,
+        "note": "Hillclimb tip — observe-only; no auto param write.",
+    }
+
+
+def living_ruin_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Ruin drill practice tip — not a board chip."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    ruin = (
+        src.get("ruin_drill_chip")
+        if isinstance(src.get("ruin_drill_chip"), dict)
+        else (src.get("ruin_drill") if isinstance(src.get("ruin_drill"), dict) else {})
+    )
+    label = (
+        f"ruin active={ruin.get('active')} level={ruin.get('level')} "
+        f"practiced_month={ruin.get('practiced_this_month')} "
+        "(observe · soft/hard/nuclear · never softens floors · never enables live)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "active": ruin.get("active"),
+        "level": ruin.get("level"),
+        "practiced_this_month": ruin.get("practiced_this_month"),
+        "label": label,
+        "note": "Ruin tip — observe-only practice status; not a board chip.",
     }
 
 
