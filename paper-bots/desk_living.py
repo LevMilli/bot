@@ -2440,16 +2440,30 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     board = living_upgrade_board(root, bots=bots)
     keep = (
         "chicago_today", "fee_floors_locked", "live_orders_enabled", "compact",
-        "insight_swarm", "digest_inventory", "digest_freshness", "journal_coverage", "monday_pulse", "toxic_fills", "adapt_ab", "raise_phi_sla", "feature_coverage", "chip_catalog", "phase2_pulse", "feature_quiet", "feature_quiet_pager",
-        "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
+        "insight_swarm", "digest_inventory", "digest_freshness", "journal_coverage", "monday_pulse",
+        "toxic_fills", "adapt_ab", "raise_phi_sla", "feature_coverage", "chip_catalog", "phase2_pulse",
+        "feature_quiet", "feature_quiet_pager",
+        "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip", "completions",
         "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
         "betting_expand_gate", "doctor_age", "fee_floors_assert",
         "sunday_packet", "reporter", "ritual_observe", "feature_store", "skip_historian",
+        # clerks / helpers / gates (surface export; already on board — no new chips)
+        "living_ai", "skip_taxonomy", "empty_card", "helper_gate_a", "skip_regret",
+        "tip_radar", "calib_nag", "injury_wire", "eia_scout", "distance_clerk",
+        "quant_clerk", "bookkeeper", "empty_card_bee", "near_miss", "near_miss_clerk",
+        "hard_stop", "hard_stop_clerk", "skip_twin_clerk", "timer_digest",
+        "calendar_scanner", "eia_blackout", "clerk_pulse", "dual_control_chip",
+        "teller_living", "clv_closer", "bleed_clerk",
+        "hillclimb_lever", "dual_control", "ruin_drill", "ruin_drill_page",
     )
     slim = {k: board.get(k) for k in keep if k in board}
     ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
     slim["paper_only"] = True
     slim["export"] = "living_board_v1"
+    # Surface audits (helpers — never board chips)
+    slim["ritual_live_labels"] = ritual_live_labels(board)
+    slim["sunday_twin_coverage"] = sunday_twin_coverage(board)
+    slim["l7_observe"] = l7_observe_summary(board)
     slim["ritual_ok"] = ritual.get("ritual_ok")
     slim["ritual_exit_ok"] = ritual.get("exit_ok")
     slim["doctor_fresh"] = ritual.get("doctor_fresh")

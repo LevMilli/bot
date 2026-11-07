@@ -1329,6 +1329,14 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual Discord sunday lines | live chip labels with static fallbacks |
 | Coverage test | draft contains live swarm/toxic labels |
 
+### Living upgrade — export keep clerks/helpers (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Export keep clerks/helpers/gates | `living_board_export` keep list |
+| Export surface audits | ritual_live_labels / sunday_twin_coverage / l7_observe |
+| Makefile `living-export` | staff_living_status export |
+
 ### Next
 
 | Ticket | Where |
