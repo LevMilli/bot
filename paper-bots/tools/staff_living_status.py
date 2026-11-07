@@ -36,6 +36,7 @@ if ROOT not in sys.path:
 
 import desk_living
 import desk_master
+import desk_roi_plan
 
 
 def _board(root: str) -> dict:
@@ -1713,6 +1714,7 @@ def main() -> int:
             "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
             "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip", "near-miss-tip", "helper-tip", "hard-stop-tip", "skip-regret-tip", "eia-tip", "injury-tip", "completions-tip", "toxic-tip", "calib-tip", "clv-tip", "clerk-tip", "bookkeeper-tip",
+            "hard-stop-promote", "green-boost-arm", "inx-band-promote", "staff-promote-batch",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3335,6 +3337,36 @@ def main() -> int:
             out["bookkeeper_tip_sunday_quiet"] = twin
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+
+    # Money-path staff promotes — not board tips; floors locked; force only via batch.
+    if args.action == "hard-stop-promote":
+        out = desk_roi_plan.staff_set_sports_hard_stop_live(
+            root, True, note="staff hard-stop promote CLI", force=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "green-boost-arm":
+        out = desk_roi_plan.staff_set_sports_green_boost(
+            root, True, note="staff green_boost arm CLI", force=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "inx-band-promote":
+        out = desk_roi_plan.staff_promote_inx_band(
+            root, desk_roi_plan.INX_LIVE_BAND_DEFAULT,
+            note="staff INX band lock CLI (80–90)", force=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "staff-promote-batch":
+        out = desk_roi_plan.staff_batch_arm_promotes(
+            root,
+            force=True,
+            note="staff gate lifted batch — hard-stop + green_boost + INX 80-90",
+            inx_band_id=desk_roi_plan.INX_LIVE_BAND_DEFAULT,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

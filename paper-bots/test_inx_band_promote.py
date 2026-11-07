@@ -70,6 +70,19 @@ class InxBandPromote(unittest.TestCase):
             self.assertEqual(eff["source"], "config")
             self.assertAlmostEqual(eff["hi"], 0.92)
 
+    def test_staff_force_lock_default_band(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            denied = desk_roi_plan.staff_promote_inx_band(tmp, "80_90")
+            self.assertFalse(denied["ok"])
+            armed = desk_roi_plan.staff_promote_inx_band(
+                tmp, "80_90", note="staff lock default", force=True,
+            )
+            self.assertTrue(armed["ok"])
+            live = desk_roi_plan.inx_live_band(tmp)
+            self.assertEqual(live["id"], "80_90")
+            self.assertTrue(live["staff_approved"])
+            self.assertFalse(live["live_changed"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -91,6 +91,7 @@ Interactive: Positive ROI Master Plan canvas.
 | Promote readiness (n≥30, shadow EV≥0) | `sports_hard_stop_shadow_summary.promote_ready` |
 | Staff arm/disarm live sells | `staff_set_sports_hard_stop_live` → promote JSON |
 | Runtime live check | `sports_hard_stop_is_live` (gap_bot); code `SPORTS_HARD_STOP_LIVE` stays False |
+| Batch / CLI | `staff_batch_arm_promotes` · `make living-hard-stop-promote` |
 
 ### Daily R budget
 
@@ -224,7 +225,8 @@ Interactive: Positive ROI Master Plan canvas.
 | Ticket | Where |
 | --- | --- |
 | Sports +1 gate | `sports_green_boost_status` — 2w M1≥0 + CLV≥52% n≥20 |
-| Runtime boost | `gap_bot` uses `sports_green_boost()` (default 0) |
+| Staff arm | `staff_set_sports_green_boost` → `desk_sports_green_boost_promote.json` |
+| Runtime boost | `gap_bot` uses `sports_green_boost()` (ready **or** staff arm; default 0) |
 | Green-or-gone flags | `green_or_gone_status` — red+risk / loser Gate A |
 | Masters board | `roi_plan.sports_green_boost` + `green_or_gone` |
 
@@ -1647,13 +1649,27 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 | Masters `roi_plan.bleed_week` | `desk_master.master_summary` |
 | Target \|red\|/\|green\| &lt; 0.5 + misplaced $ | observe only; never softens floors |
 
+### Staff promote batch (gate lifted)
+
+| Ticket | Where |
+| --- | --- |
+| Hard-stop live arm (force) | `staff_set_sports_hard_stop_live(..., force=True)` · `make living-hard-stop-promote` |
+| Green_boost arm (force) | `staff_set_sports_green_boost(..., force=True)` · `make living-green-boost-arm` |
+| INX band staff lock 80–90 | `staff_promote_inx_band("80_90", force=True)` · `make living-inx-band-promote` |
+| Batch helper | `staff_batch_arm_promotes` · `make living-staff-promote-batch` |
+| Committed artifacts | `desk_sports_hard_stop_promote.json` / `desk_sports_green_boost_promote.json` / `desk_inx_band_promote.json` |
+
+Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 0.02. Soft-max chip catalog still 52/64.
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Sports hard-stop staff promote when shadow n≥30 EV≥0 | `staff_set_sports_hard_stop_live` (observe until ready) |
-| Sports green_boost arm after 2w M1≥0 + CLV≥52% | `sports_green_boost_status` |
-| INX band promote after research week leader n≥20 | `staff_promote_inx_band` |
+| INX research week — promote non-default band only if leader n≥20 beats 80–90 | `run_inx_band_research` → `staff_promote_inx_band` (no force) |
+| Green_boost evidence catch-up — 2 Chicago weeks M1≥0 + CLV≥52% | `sports_green_boost_status.ready` (staff already armed) |
+| Hard-stop shadow n≥30 EV≥0 — drop force dependency | `sports_hard_stop_shadow_summary.promote_ready` |
+| Near-miss soft-gate staff promote (z/p only) when n≥30 | `staff_set_near_miss_live` |
+| Dual-control / LIVE_ORDERS stay off until separate staff gate | paper-only forever until staff |
 
 ## Hard rules unchanged
 

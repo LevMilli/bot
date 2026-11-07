@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-07T07:09:59Z",
+  "auto_promote": false,
+  "code_default_live": false,
+  "decision": "reject",
+  "fee_floors_locked": true,
+  "live": true,
+  "note": "staff gate lifted batch \u2014 hard-stop + green_boost + INX 80-90",
+  "paper_only": true,
+  "shadow_expectancy": null,
+  "shadow_n": 0,
+  "staff_approved": true
+}
