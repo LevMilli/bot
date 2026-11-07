@@ -2030,8 +2030,25 @@ Sibling open PRs (do not duplicate): #354 e3e4 selective/funnel/schema · #355 a
 | Graduation denial + badge | `GRADUATION_DENIAL_CODES` / `graduation_gate_flags` / `master_badge_fail_closed` |
 | Distance-to-zero + heat | `distance_to_zero_board` / `firm_heat_map` → Masters `roi_plan` + living |
 
+### Bulk post-E3E7 money-path boards (after #354–#357)
+
+Soft-max tip invent EXHAUSTED — no tip wrappers/chips. Paper only; floors locked.
+
+| Ticket | Where |
+| --- | --- |
+| Commodity SERIES liquid-first (#560) | `commodity-15m-paper/bot.py` `SERIES` gold/WTI → … → palladium/natgas |
+| Depth need via `series_vol_prior` (#471–472) | `desk_more.effective_depth_need` → depth_adjusted / brain / top25 rank |
+| Latency stage densify (#502–504) | sports `espn`/`kalshi`; BTC+cmd `spot`/`book`/`evaluate` |
+| Latency stage board | `latency_stage_board` weekly `book_fetch_ms` / `evaluate_ms` |
+| Pre-noon INX warm 11:50 CT (#515) | `desk_more.warm_inx_books_pre_noon` (still 1/day) |
+| Speed KPIs (#498, 562–564) | `tip_to_decision_ms` · `exit_to_risk_freed_ms` · `fill_capacity_observe` |
+| M5 idle vs BUDGET (#663/#694) | `tower_master_row` `M5_annotation` / `m5_idle_vs_budget_annotation` |
+| Firm vs Σ tower M1 gap (#778–779/#795) | `firm_tower_m1_gap_alert` · alert \|gap\|>$1 |
+| Distance stance tags (#733) | `distance_to_zero_board` → `bleed_stop` \| `fee_clear_earn` \| `idle` |
+| Masters | `roi_plan.latency_stage` · `tip_to_decision_ms` · `exit_to_risk_freed_ms` · `fill_capacity_observe` · `firm_tower_m1_gap` |
+
 ## Tests
 
 ```bash
-python -m unittest test_positive_roi_plan_slice.py desk_roi_plan desk_master -v
+python -m unittest test_positive_roi_plan_slice.py desk_roi_plan desk_master test_bulk_post_e3e7 -v
 ```

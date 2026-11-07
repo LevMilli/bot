@@ -405,6 +405,43 @@ def sports_quote_cache_path(root: str | None = None) -> str:
     return os.path.join(base, "sports-gap-paper", "quote_cache.json")
 
 
+def inx_quote_cache_path(root: str | None = None, *, bot: str = "kalshi-sp") -> str:
+    """Quote cache path for INX tower (kalshi-sp or kalshi-sized)."""
+    base = root or os.path.dirname(os.path.abspath(__file__))
+    folder = "kalshi-sized-paper" if str(bot) == "kalshi-sized" else "kalshi-sp500-paper"
+    return os.path.join(base, folder, "quote_cache.json")
+
+
+def _inx_quote_cache_put(root: str | None, url: str, body: Any, *, bot: str = "kalshi-sp") -> None:
+    path = inx_quote_cache_path(root, bot=bot)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data: dict = {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        if isinstance(loaded, dict):
+            data = loaded
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        data = {}
+    data[str(url)] = {"at": time.time(), "body": body, "warm": "pre_noon_1150_ct"}
+    if len(data) > 80:
+        newest = sorted(
+            data.items(),
+            key=lambda item: float((item[1] or {}).get("at") or 0),
+        )[-80:]
+        data = dict(newest)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    os.replace(tmp, path)
+
+
+# Pre-noon INX warm window (#515): 11:50 CT ±2 min observe-only book warm.
+INX_PRE_NOON_WARM_HHMM = (11, 50)
+INX_PRE_NOON_WINDOW_MIN = 2
+INX_WARM_SERIES = ("KXINXU",)
+
+
 def _sports_quote_cache_load(root: str | None = None) -> dict:
     path = sports_quote_cache_path(root)
     try:
@@ -448,6 +485,93 @@ def series_markets_url(series: str) -> str:
     return (
         f"{KALSHI_PUBLIC}/markets?series_ticker={tick}&status=open&limit=1000"
     )
+
+
+def in_inx_pre_noon_warm_window(now_ct=None) -> bool:
+    """True when local CT clock is within ±2 min of 11:50 (pre-noon warm)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    if now_ct is None:
+        now_ct = datetime.now(ZoneInfo("America/Chicago"))
+    elif getattr(now_ct, "tzinfo", None) is None:
+        now_ct = now_ct.replace(tzinfo=ZoneInfo("America/Chicago"))
+    target_m = INX_PRE_NOON_WARM_HHMM[0] * 60 + INX_PRE_NOON_WARM_HHMM[1]
+    now_m = int(now_ct.hour) * 60 + int(now_ct.minute)
+    return abs(now_m - target_m) <= int(INX_PRE_NOON_WINDOW_MIN)
+
+
+def warm_inx_books_pre_noon(
+    root: str | None,
+    *,
+    now_ct=None,
+    fetch=None,
+    series: tuple | list | None = None,
+    bots: tuple | list | None = None,
+    force: bool = False,
+) -> dict:
+    """Pre-noon INX book warm at 11:50 CT into quote cache (#515).
+
+    Observe-only — never places orders; still honors 1/day buy limit.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    if now_ct is None:
+        now_ct = datetime.now(ZoneInfo("America/Chicago"))
+    in_window = bool(force) or in_inx_pre_noon_warm_window(now_ct)
+    series_list = list(series or INX_WARM_SERIES)
+    bot_list = [str(b) for b in (bots or ("kalshi-sp", "kalshi-sized"))]
+    if not in_window:
+        return {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "observe_only": True,
+            "orders_placed": False,
+            "warmed": False,
+            "in_window": False,
+            "now_ct": now_ct.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "target_hhmm": f"{INX_PRE_NOON_WARM_HHMM[0]:02d}:{INX_PRE_NOON_WARM_HHMM[1]:02d}",
+            "buys_still_1_per_day": True,
+            "note": "Outside 11:50 CT warm window — no fetch. 1/day buy limit unchanged.",
+        }
+    fetcher = fetch or _default_kalshi_fetch
+    warmed: list[dict] = []
+    errors: dict[str, str] = {}
+    for ser in series_list:
+        url = series_markets_url(str(ser))
+        try:
+            body = fetcher(url)
+            for bot in bot_list:
+                _inx_quote_cache_put(root, url, body, bot=bot)
+            warmed.append({
+                "series": str(ser),
+                "url": url,
+                "markets_n": len((body or {}).get("markets") or [])
+                if isinstance(body, dict) else 0,
+                "bots": list(bot_list),
+            })
+        except Exception as exc:  # noqa: BLE001
+            errors[str(ser)] = str(exc)[:160]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "orders_placed": False,
+        "warmed": True,
+        "in_window": True,
+        "now_ct": now_ct.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "target_hhmm": f"{INX_PRE_NOON_WARM_HHMM[0]:02d}:{INX_PRE_NOON_WARM_HHMM[1]:02d}",
+        "warmed_n": len(warmed),
+        "warmed_rows": warmed,
+        "errors": errors,
+        "buys_still_1_per_day": True,
+        "max_trades_per_day": 1,
+        "note": (
+            "Pre-noon INX book warm @11:50 CT into quote_cache. Observe latency only — "
+            "still 1/day buy limit; never softens INX 0.02 floor."
+        ),
+    }
 
 
 def warm_tip_books(
@@ -1009,6 +1133,24 @@ def series_vol_prior(series: str | None) -> float:
     return 0.0
 
 
+def effective_depth_need(
+    series: str | None,
+    base_need: float | None = None,
+) -> float:
+    """Raise depth need on high-σ series (NatGas first). Floor never softens.
+
+    Plan #471–472: vol prior bumps effective need so thin/high-vol books must
+    show more depth before ranking as good. Base need is a lower bound.
+    """
+    need = float(base_need) if base_need is not None else float(DEFAULT_DEPTH_NEED)
+    if need <= 0:
+        need = float(DEFAULT_DEPTH_NEED)
+    prior = max(0.0, float(series_vol_prior(series)))
+    # NatGas prior 0.15 → ~1.3× need; Gold 0.04 → ~1.08×. Never below base.
+    bumped = need * (1.0 + prior * 2.0)
+    return round(max(need, bumped), 4)
+
+
 def apply_series_vol_prior(vol: dict, series: str | None) -> dict:
     """Bump vol score by series prior (NatGas hotter than Gold)."""
     vol = dict(vol or {})
@@ -1378,6 +1520,15 @@ def self_check() -> None:
     nm = is_near_miss(z=0.60, p=0.85, reasons=["z 0.60 < 0.65"])
     assert nm["near_miss"] is True and nm["shadow_only"] is True
     assert series_vol_prior("KXNATGAS15M-FOO") > series_vol_prior("KXGOLD15M")
+    # #471–472: vol prior raises effective depth need; never softens below base.
+    assert effective_depth_need("KXNATGAS15M", 10.0) > effective_depth_need("KXGOLD15M", 10.0)
+    assert effective_depth_need("KXNATGAS15M", 10.0) >= 10.0
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    mock_1150 = datetime(2026, 11, 7, 11, 50, tzinfo=ZoneInfo("America/Chicago"))
+    assert in_inx_pre_noon_warm_window(mock_1150) is True
+    mock_noon = datetime(2026, 11, 7, 12, 30, tzinfo=ZoneInfo("America/Chicago"))
+    assert in_inx_pre_noon_warm_window(mock_noon) is False
     assert decay_weight(0) == 1.0
     assert decay_weight(HIT_DECAY_HALFLIFE_DAYS) == 0.5
     dhr = decayed_hit_rate(

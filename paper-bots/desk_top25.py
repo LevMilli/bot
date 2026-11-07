@@ -380,6 +380,9 @@ def global_rank_minute(
         need = float(row.get("depth_need") or 10.0)
         try:
             import desk_more
+            # #471–472: vol prior raises effective need (NatGas high); never softens.
+            need = desk_more.effective_depth_need(row.get("series"), need)
+            row["depth_need"] = need
             row["_brain_score"] = desk_more.opportunity_score_v2(
                 row.get("edge"), row.get("confidence"), row.get("depth"), need=need,
             )

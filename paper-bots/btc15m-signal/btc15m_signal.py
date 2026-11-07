@@ -1149,7 +1149,9 @@ def main():
         except Exception as e:
             print(f"  kalshi tape sync failed: {e}")
 
+    t_spot = time.perf_counter()
     spots = spot_prices()
+    spot_secs = time.perf_counter() - t_spot
     if not spots and not eth_markets:
         print("SKIP: no BTC spot and no ETH windows.")
         return _card("Checked all open BTC 15-minute markets. No paper buy.")
@@ -1202,7 +1204,9 @@ def main():
             break
         side0 = "YES" if price > m["target"] else "NO"
         book_jobs.append((m["ticker"], side0))
+    t_book = time.perf_counter()
     books, book_errs = prefetch_books(book_jobs) if book_jobs else ({}, {})
+    book_secs = time.perf_counter() - t_book
 
     scored = []
     for m in markets:
@@ -2044,6 +2048,15 @@ def main():
     if not IS_SHADOW:
         try:
             import desk_roi_plan
+            # #503 stage densify: spot / book walls (plus existing evaluate/exit/buy).
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="btc15m", seconds=spot_secs,
+                note="btc15m spot", stage="spot",
+            )
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="btc15m", seconds=book_secs,
+                note=f"btc15m book n={len(book_jobs)}", stage="book",
+            )
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="btc15m", seconds=elapsed,
                 note="btc15m evaluate", stage="evaluate",

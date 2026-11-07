@@ -586,12 +586,16 @@ def run():
     except Exception as exc:
         print(f"Pre-tip warm skipped: {type(exc).__name__}")
 
+    espn_secs = 0.0
+    kalshi_secs = 0.0
     for league, (path, series, src) in SPORTS.items():
         if league_cached_idle(path):
             summary_out["leagues"][league] = "no live games"
             continue
         try:
+            t_espn = time.perf_counter()
             games = espn_games(path)
+            espn_secs += time.perf_counter() - t_espn
         except Exception:
             lines.append(f"| {ts} | {league} | - | data error: ESPN down | | | | | data error |")
             summary_out.setdefault("data_errors", []).append({"league": league, "source": "ESPN", "error": "failed"})
@@ -608,7 +612,9 @@ def run():
         if not relevant:
             summary_out["leagues"][league] = "no live/tip-soon games"; continue
         try:
+            t_kalshi = time.perf_counter()
             markets = kalshi_markets(series)
+            kalshi_secs += time.perf_counter() - t_kalshi
         except Exception:
             lines.append(f"| {ts} | {league} | - | data error: Kalshi down | | | | | data error |")
             summary_out.setdefault("data_errors", []).append({"league": league, "source": "Kalshi", "error": "failed"})
@@ -1106,6 +1112,17 @@ def run():
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_roi_plan
+        # #502 stage densify: espn / kalshi fetch walls (plus existing evaluate/exit).
+        if espn_secs > 0:
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="sports-gap",
+                seconds=espn_secs, note="sports-gap espn fetch", stage="espn",
+            )
+        if kalshi_secs > 0:
+            desk_roi_plan.record_latency(
+                DESK_ROOT, bot="sports-gap",
+                seconds=kalshi_secs, note="sports-gap kalshi fetch", stage="kalshi",
+            )
         desk_roi_plan.record_latency(
             DESK_ROOT, bot="sports-gap",
             seconds=time.perf_counter() - t0,

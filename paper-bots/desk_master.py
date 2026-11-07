@@ -156,11 +156,34 @@ def tower_master_row(
         else MASTER_BARS["M4_latency_15m_s"]
     )
     # M5: tower util in band when measured; idle with no open risk counts as calm pass.
+    # #663/#694: annotate idle-pass vs BUDGET-starvation (never hide starvation).
     m5_pass = False
-    if util is not None:
-        m5_pass = MASTER_BARS["M5_util_lo"] <= util <= MASTER_BARS["M5_util_hi"]
-    elif open_risk <= 0:
-        m5_pass = True
+    m5_ann = {
+        "m5_annotation": "util_out_of_band",
+        "tooltip": "M5 util_out_of_band",
+        "budget_skip_n": 0,
+    }
+    try:
+        import desk_roi_plan
+        m5_ann = desk_roi_plan.m5_idle_vs_budget_annotation(
+            bot_id,
+            util=util,
+            open_risk=open_risk,
+            root=root,
+            m5_lo=MASTER_BARS["M5_util_lo"],
+            m5_hi=MASTER_BARS["M5_util_hi"],
+        )
+        m5_pass = bool(m5_ann.get("m5_pass"))
+    except Exception:
+        if util is not None:
+            m5_pass = MASTER_BARS["M5_util_lo"] <= util <= MASTER_BARS["M5_util_hi"]
+        elif open_risk <= 0:
+            m5_pass = True
+            m5_ann = {
+                "m5_annotation": "idle_pass",
+                "tooltip": "M5 idle_pass",
+                "budget_skip_n": 0,
+            }
     # M7: Gate B twin ($40 DD / n≥20) via desk_top25 when available.
     m7 = None
     m7_pass = False
@@ -196,6 +219,9 @@ def tower_master_row(
         "M4_n": m4_n,
         "M4_bar_s": m4_bar,
         "M5_tower_util": util,
+        "M5_annotation": m5_ann.get("m5_annotation"),
+        "M5_tooltip": m5_ann.get("tooltip"),
+        "M5_budget_skip_n": m5_ann.get("budget_skip_n"),
         "M6_gate_a": bool(ga.get("ready")),
         "M7_gate_b": m7,
         "open_risk": round(open_risk, 2),
@@ -203,7 +229,10 @@ def tower_master_row(
         "today": bot.get("today"),
         "passing": ready_bits,
         "all_codes": all(ready_bits.values()),
-        "note": "M3/M4 from desk_roi_plan; M7 Gate B twin $40/n≥20",
+        "note": (
+            "M3/M4 from desk_roi_plan; M5 annotates idle_pass vs BUDGET_starvation; "
+            "M7 Gate B twin $40/n≥20"
+        ),
     }
 
 
@@ -651,6 +680,28 @@ def master_summary(
             )
         except Exception:
             plan["fee_clear_cadence"] = None
+        try:
+            plan["latency_stage"] = desk_roi_plan.latency_stage_board(root)
+        except Exception:
+            plan["latency_stage"] = None
+        try:
+            plan["tip_to_decision_ms"] = desk_roi_plan.tip_to_decision_ms(root)
+        except Exception:
+            plan["tip_to_decision_ms"] = None
+        try:
+            plan["exit_to_risk_freed_ms"] = desk_roi_plan.exit_to_risk_freed_ms(root)
+        except Exception:
+            plan["exit_to_risk_freed_ms"] = None
+        try:
+            plan["fill_capacity_observe"] = desk_roi_plan.fill_capacity_observe(
+                root, bots=bots, cfg=cfg,
+            )
+        except Exception:
+            plan["fill_capacity_observe"] = None
+        try:
+            plan["firm_tower_m1_gap"] = desk_roi_plan.firm_tower_m1_gap_alert(bots)
+        except Exception:
+            plan["firm_tower_m1_gap"] = None
         try:
             from datetime import datetime
             from zoneinfo import ZoneInfo

@@ -117,6 +117,22 @@ def _sync_kalshi_tape():
 def step_scan(args, state, day):
     _sync_kalshi_tape()
     now = dt.datetime.now(CT)
+    # #515 pre-noon INX book warm @11:50 CT — observe into quote_cache; still 1/day.
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_more
+        warm = desk_more.warm_inx_books_pre_noon(
+            DESK_ROOT, now_ct=now, bots=("kalshi-sp",),
+            series=(CFG.get("series") or "KXINXU",),
+        )
+        if warm.get("warmed"):
+            print(
+                f"Pre-noon INX warm @11:50 CT: {warm.get('warmed_n') or 0} series "
+                f"(1/day buy limit unchanged)"
+            )
+    except Exception as exc:
+        print(f"Pre-noon INX warm skipped: {type(exc).__name__}")
     # 1) clock check: only between 12:30 and 2:55 PM CT on the target day
     if not args.any_time:
         start = dt.datetime.combine(day, dt.time.fromisoformat(CFG["entry_time_ct"]), CT)
