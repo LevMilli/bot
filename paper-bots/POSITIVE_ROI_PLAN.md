@@ -1678,6 +1678,15 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | CLI | `make living-skip-regret` |
 | Masters | `roi_plan.skip_regret_candidates` + `skip_regret_decisions` |
 
+### Money-path pulse CLI (non-tip)
+
+| Ticket | Where |
+| --- | --- |
+| Firm queue status | `make living-firm-queue` |
+| Completions eligible | `make living-completions` |
+| Feature-store coverage + quiet | `make living-feature-store` |
+| Combined pulse | `make living-money-pulse` |
+
 ### Next
 
 | Ticket | Where |

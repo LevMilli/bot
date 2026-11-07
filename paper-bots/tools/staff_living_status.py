@@ -1718,6 +1718,7 @@ def main() -> int:
             "near-miss-promote", "hard-stop-export", "edge08-status", "edge08-promote",
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
+            "firm-queue", "completions", "feature-store", "money-pulse",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3455,6 +3456,42 @@ def main() -> int:
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
+    if args.action == "firm-queue":
+        out = desk_roi_plan.firm_queue_status(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "completions":
+        out = desk_living.completions_summary(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "feature-store":
+        out = desk_living.feature_store_coverage(root)
+        quiet = desk_living.feature_store_quiet_alert(root)
+        print(json.dumps(
+            {"coverage": out, "quiet_alert": quiet, "fee_floors_locked": True},
+            indent=2, sort_keys=True, default=str,
+        ))
+        return 0
+    if args.action == "money-pulse":
+        out = {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "auto_promote": False,
+            "firm_queue": desk_roi_plan.firm_queue_status(root),
+            "completions": desk_living.completions_summary(root),
+            "feature_store": desk_living.feature_store_coverage(root),
+            "feature_quiet": desk_living.feature_store_quiet_alert(root),
+            "empty_card": desk_roi_plan.empty_card_status(root),
+            "inx_band": desk_roi_plan.inx_band_promote_status(root),
+            "edge08": desk_roi_plan.btc_edge08_shadow_status(root),
+            "helper_gate_a": desk_roi_plan.helper_promote_status(root),
+            "note": (
+                "Money-path pulse — observe only. Never softens floors. "
+                "Never arms LIVE_ORDERS."
+            ),
+        }
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
