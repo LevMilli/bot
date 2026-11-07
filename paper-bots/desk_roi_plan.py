@@ -3183,12 +3183,25 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
 
 
 def shadow_ops_alerts(root: str | None = None) -> dict:
-    """Observe alerts: missing heartbeat or missing edge08 shadow account."""
+    """Observe alerts: heartbeat / edge08 / catch-up age / shadow journals.
+
+    Observe only — never arms LIVE / force / tip invent. Doctor surfaces alerts
+    but does not hard-fail on shadow_ops.
+    """
     alerts: list[str] = []
     heartbeat = {"present": False, "alive": False, "age": None, "path": None}
     edge08 = {"present": False, "path": None, "shadow_enabled": False}
+    catchup = {"present": False, "age": None, "path": None, "stale": False}
+    tick = {"present": False, "age": None, "path": None, "stale": False}
+    journals = {
+        "hard_stop": {"present": False, "path": None, "thin": True},
+        "commodity_tstop": {"present": False, "path": None, "thin": True},
+        "sports_tfinal": {"present": False, "path": None, "thin": True},
+    }
+    shadow_enabled = True
     try:
         import pimp_desk
+        root_s = _root(root)
         hb_path = pimp_desk.heartbeat_path(root)
         heartbeat["path"] = hb_path
         heartbeat["present"] = os.path.isfile(hb_path)
@@ -3201,12 +3214,91 @@ def shadow_ops_alerts(root: str | None = None) -> dict:
             alerts.append("heartbeat_stale")
         cfg = pimp_desk.load_settings(root)
         shadow = cfg.get("shadow") if isinstance(cfg.get("shadow"), dict) else {}
-        edge08["shadow_enabled"] = bool(shadow.get("enabled", True))
+        shadow_enabled = bool(shadow.get("enabled", True))
+        edge08["shadow_enabled"] = shadow_enabled
         acct = pimp_desk.shadow_account_path(root, "btc15m", "edge08")
         edge08["path"] = acct
         edge08["present"] = os.path.isfile(acct)
-        if edge08["shadow_enabled"] and not edge08["present"]:
+        if shadow_enabled and not edge08["present"]:
             alerts.append("shadow_edge08_missing")
+        # Catch-up / tick markers — stale if missing or older than cadence×3.
+        now_ts = time.time()
+        catchup_path = os.path.join(root_s, "desk_shadow_catchup_at.txt")
+        tick_path = os.path.join(root_s, "desk_shadow_tick_at.txt")
+        catchup["path"] = catchup_path
+        tick["path"] = tick_path
+        if os.path.isfile(catchup_path):
+            catchup["present"] = True
+            try:
+                catchup["age"] = round(now_ts - os.path.getmtime(catchup_path), 1)
+            except OSError:
+                catchup["age"] = None
+        if os.path.isfile(tick_path):
+            tick["present"] = True
+            try:
+                tick["age"] = round(now_ts - os.path.getmtime(tick_path), 1)
+            except OSError:
+                tick["age"] = None
+        # Catch-up cadence ~10m → stale at 30m; tick ~15m → stale at 45m.
+        if shadow_enabled:
+            if (not catchup["present"]) or (
+                catchup.get("age") is not None and float(catchup["age"]) >= 1800
+            ):
+                catchup["stale"] = True
+                alerts.append("catchup_stale")
+            if (not tick["present"]) or (
+                tick.get("age") is not None and float(tick["age"]) >= 2700
+            ):
+                tick["stale"] = True
+                alerts.append("tick_stale")
+        # Shadow journals expected in SETTLEMENT_FILES — missing / thin boards.
+        hs_path = _path(SPORTS_HARD_STOP_SHADOW, root)
+        ts_path = _path(COMMODITY_TIME_STOP_SHADOW, root)
+        tf_path = _path(SPORTS_TIME_FINAL_SHADOW, root)
+        journals["hard_stop"]["path"] = hs_path
+        journals["commodity_tstop"]["path"] = ts_path
+        journals["sports_tfinal"]["path"] = tf_path
+        journals["hard_stop"]["present"] = os.path.isfile(hs_path)
+        journals["commodity_tstop"]["present"] = os.path.isfile(ts_path)
+        journals["sports_tfinal"]["present"] = os.path.isfile(tf_path)
+        if shadow_enabled:
+            if not journals["hard_stop"]["present"]:
+                alerts.append("hard_stop_journal_missing")
+            if not journals["commodity_tstop"]["present"]:
+                alerts.append("commodity_tstop_journal_missing")
+            if not journals["sports_tfinal"]["present"]:
+                alerts.append("sports_tfinal_journal_missing")
+            # Thin promote boards (observe) — journal present but n_with_pnl==0.
+            try:
+                hs = sports_hard_stop_shadow_summary(root)
+                journals["hard_stop"]["thin"] = bool(hs.get("evidence_thin"))
+                journals["hard_stop"]["n_with_pnl"] = hs.get("n_with_pnl")
+                if journals["hard_stop"]["present"] and int(hs.get("n_with_pnl") or 0) <= 0:
+                    alerts.append("hard_stop_promote_thin")
+            except Exception:
+                pass
+            try:
+                tstop = commodity_time_stop_shadow_summary(root)
+                journals["commodity_tstop"]["thin"] = bool(tstop.get("evidence_thin"))
+                journals["commodity_tstop"]["n_with_pnl"] = tstop.get("n_with_pnl")
+                if (
+                    journals["commodity_tstop"]["present"]
+                    and int(tstop.get("n_with_pnl") or 0) <= 0
+                ):
+                    alerts.append("commodity_tstop_promote_thin")
+            except Exception:
+                pass
+            try:
+                tfinal = sports_time_final_shadow_summary(root)
+                journals["sports_tfinal"]["thin"] = bool(tfinal.get("evidence_thin"))
+                journals["sports_tfinal"]["n_with_pnl"] = tfinal.get("n_with_pnl")
+                if (
+                    journals["sports_tfinal"]["present"]
+                    and int(tfinal.get("n_with_pnl") or 0) <= 0
+                ):
+                    alerts.append("sports_tfinal_promote_thin")
+            except Exception:
+                pass
     except Exception as exc:  # noqa: BLE001
         alerts.append(f"probe_error:{type(exc).__name__}")
     return {
@@ -3218,8 +3310,13 @@ def shadow_ops_alerts(root: str | None = None) -> dict:
         "alerts": alerts,
         "heartbeat": heartbeat,
         "shadow_edge08": edge08,
+        "catchup": catchup,
+        "tick": tick,
+        "journals": journals,
+        "shadow_enabled": shadow_enabled,
         "note": (
-            "Shadow ops observe — heartbeat / edge08 account presence. "
+            "Shadow ops observe — heartbeat / edge08 / catch-up age / "
+            "sports+commodity shadow journals / thin promote boards. "
             "Never arms LIVE_ORDERS."
         ),
     }

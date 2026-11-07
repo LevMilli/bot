@@ -3728,6 +3728,8 @@ def main() -> int:
             "green_boost": desk_roi_plan.sports_green_boost_status(root),
             "near_miss": desk_roi_plan.near_miss_promote_status(root),
             "hard_stop": desk_roi_plan.sports_hard_stop_shadow_summary(root),
+            "commodity_time_stop": desk_roi_plan.commodity_time_stop_shadow_summary(root),
+            "sports_time_final": desk_roi_plan.sports_time_final_shadow_summary(root),
             "bleed_week": desk_roi_plan.latest_bleed_week(root),
             "opp_cost": desk_roi_plan.opp_cost_summary(root),
             "profit_lock": desk_roi_plan.profit_lock_status(root),
@@ -3738,6 +3740,7 @@ def main() -> int:
                 "feature densify / exit-quality / selective after M1 / "
                 "promote-distance / firm-health / ops / dual-control-observe / "
                 "guardrails / review / calib-clv / baseline-fee / "
+                "hard-stop / commodity time-stop / sports time-final / "
                 "shadow catch-up densify). "
                 "Never softens floors. Never arms LIVE_ORDERS."
             ),

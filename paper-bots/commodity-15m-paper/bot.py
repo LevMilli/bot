@@ -502,6 +502,48 @@ def settle_account(state: dict) -> None:
                 kind="settle",
                 note="settled",
             )
+            # Settle-retro time-stop densify — last minutes missed before close.
+            # Evaluate with now≈close (minutes_left≈0). Still NO live sell.
+            if not pos.get("time_stop_shadowed"):
+                side = str(pos.get("side") or "YES").upper()
+                raw = (
+                    market.get("yes_bid_dollars") if side == "YES"
+                    else market.get("no_bid_dollars")
+                )
+                if raw in (None, ""):
+                    raw = (
+                        market.get("yes_bid") if side == "YES"
+                        else market.get("no_bid")
+                    )
+                bid_ts = float(raw) if raw not in (None, "") else None
+                if bid_ts is not None and bid_ts > 1.5:
+                    bid_ts = bid_ts / 100.0
+                if bid_ts is not None and bid_ts > 0:
+                    hit = desk_roi_plan.commodity_time_stop_hit(
+                        pos.get("close_time"),
+                        bid_ts,
+                        pos.get("entry") or pos.get("price") or pos.get("ask"),
+                        cost=pos.get("cost"),
+                        contracts=pos.get("contracts"),
+                        now=when,  # close instant → minutes_left≈0
+                    )
+                    if hit.get("hit"):
+                        desk_roi_plan.record_commodity_time_stop_shadow(
+                            DESK_ROOT,
+                            ticker=str(pos.get("ticker") or ""),
+                            side=side,
+                            series=str(pos.get("series") or ""),
+                            close_time=str(pos.get("close_time") or ""),
+                            entry_price=(
+                                pos.get("entry") or pos.get("price") or pos.get("ask")
+                            ),
+                            bid=bid_ts,
+                            contracts=pos.get("contracts"),
+                            cost=pos.get("cost"),
+                            note="settle-retro shadow time-stop — no live sell",
+                            now=when,
+                        )
+                        pos["time_stop_shadowed"] = True
         except Exception:
             pass
     state["open"] = still
