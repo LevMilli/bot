@@ -253,11 +253,32 @@ def _text(board: dict) -> str:
             + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
         ),
         (
-            f"ritual live: n={live_n} · "
-            + str(live.get("digests_label") or "digests observe")
-            + " · "
-            + str(live.get("fills_label") or "fills observe")
-            + " (observe · never softens floors)"
+            "ritual live: "
+            + str(
+                compact.get("ritual_live_sunday_quiet")
+                or (
+                    f"ritual live n={live_n} · "
+                    + str(live.get("digests_label") or "digests observe")
+                    + " · "
+                    + str(live.get("fills_label") or "fills observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
+            "ritual live sunday: "
+            + str(
+                compact.get("ritual_live_sunday_quiet")
+                or (
+                    f"ritual live n={live_n} · "
+                    + str(live.get("digests_label") or "digests observe")
+                    + " · "
+                    + str(live.get("fills_label") or "fills observe")
+                    + " · "
+                    + str(live.get("timer_label") or "timer observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
         ),
         (
             "sunday twins sunday: "
@@ -1484,6 +1505,8 @@ def main() -> int:
             "ritual_live_labels": live_j,
             "ritual_live_n": live_n_j,
             "ritual_live_timer": live_j.get("timer_label"),
+            "ritual_live_sunday_quiet": compact_j.get("ritual_live_sunday_quiet"),
+            "compact_ritual_live_sunday_quiet": compact_j.get("ritual_live_sunday_quiet"),
             "timer_sunday_quiet": (
                 compact_j.get("timer_sunday_quiet")
                 or (
