@@ -750,6 +750,21 @@ class DeskLivingTests(unittest.TestCase):
             self.assertFalse((board.get("board_size") or {}).get("over"))
             self.assertNotIn("l7_observe", board)
 
+    def test_sunday_twin_coverage_export(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            board = desk_living.living_upgrade_board(tmp)
+            cov = desk_living.sunday_twin_coverage(board)
+            self.assertTrue(cov.get("fee_floors_locked"))
+            self.assertFalse(cov.get("board_chip"))
+            self.assertGreaterEqual(int(cov.get("twins_n") or 0), 50)
+            export = desk_living.living_board_export(tmp)
+            self.assertIn("feature_store", export)
+            self.assertIn("skip_historian", export)
+            self.assertIn("feature_store_sunday_quiet", export)
+            self.assertIn("skip_historian_sunday_quiet", export)
+            self.assertFalse((board.get("board_size") or {}).get("over"))
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util

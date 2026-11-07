@@ -20,6 +20,7 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py teller
   python3 tools/staff_living_status.py l7
   python3 tools/staff_living_status.py l7 --discord
+  python3 tools/staff_living_status.py sunday
 """
 from __future__ import annotations
 
@@ -937,7 +938,7 @@ def main() -> int:
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
-            "floors", "teller", "expand", "doctor", "l7",
+            "floors", "teller", "expand", "doctor", "l7", "sunday",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -1520,6 +1521,19 @@ def main() -> int:
             "max_n": desk_master.PRIORITY_MAX,
         }, indent=2))
         return 0
+    if args.action == "sunday":
+        cov = desk_living.sunday_twin_coverage(board)
+        if args.discord:
+            print(
+                "**Sunday twin coverage** (paper · floors locked · live=False)\n"
+                f"{cov.get('label')}\n"
+                f"twins_n={cov.get('twins_n')} fields_n={cov.get('fields_n')}\n"
+                "_staff paste · never auto-posts · never softens floors_"
+            )
+        else:
+            print(json.dumps(cov, indent=2, sort_keys=True, default=str))
+        return 0 if cov.get("pass") else 2
+
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
         sunday = board.get("sunday_packet") if isinstance(board.get("sunday_packet"), dict) else {}
