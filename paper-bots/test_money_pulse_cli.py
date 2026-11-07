@@ -153,6 +153,30 @@ class MoneyPulseSurfaces(unittest.TestCase):
             self.assertIn("quarterly_missing", out["alerts"])
             self.assertIn("review=", out["label"])
 
+    def test_calib_clv_observe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bots = [
+                {
+                    "id": "memecoin",
+                    "today": -4.0,
+                    "open_risk": 12.0,
+                    "gate_a": {"ready": False},
+                },
+            ]
+            out = desk_roi_plan.calib_clv_observe(tmp, bots=bots)
+            self.assertTrue(out["observe_only"])
+            self.assertTrue(out["fee_floors_locked"])
+            self.assertFalse(out["auto_write_phi"])
+            self.assertIn("btc_calibration", out)
+            self.assertIn("sports_calibration", out)
+            self.assertIn("commodity_calibration", out)
+            self.assertIn("clv", out)
+            self.assertIn("sticky_sla", out)
+            self.assertIn("green_or_gone", out)
+            self.assertIn("selective_throughput", out)
+            self.assertIn("green_or_gone", out["alerts"])
+            self.assertIn("calib_clv=", out["label"])
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()

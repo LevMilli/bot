@@ -1838,6 +1838,16 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Split CLIs | `living-idea-review` / `living-quarterly` / `living-corr-matrix` |
 | Money pulse / Masters | `review` on pulse + `roi_plan.review` |
 
+### Calib + CLV + flow observe
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `calib_clv_observe` · `make living-calib-clv` |
+| Tower calibs / raise_Φ log | `living-sports-calib` / `living-commodity-calib` / `living-btc-calib` / `living-raise-phi-log` |
+| CLV / sticky / green-or-gone / selective | `living-clv-status` / `living-sticky-sla` / `living-green-or-gone` / `living-selective` |
+| Money pulse / Masters | `calib_clv` on pulse + `roi_plan.calib_clv` |
+| Never auto-writes Φ | `auto_write_phi=False` |
+
 ### Next
 
 | Ticket | Where |

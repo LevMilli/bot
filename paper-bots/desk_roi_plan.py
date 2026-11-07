@@ -3212,9 +3212,14 @@ def green_or_gone_status(bots: list | None = None) -> dict:
     return {
         "paper_only": True,
         "fee_floors_locked": True,
+        "observe_only": True,
         "flagged_n": len(flags),
         "flags": flags,
         "pass": len(flags) == 0,
+        "label": (
+            f"green_or_gone={'pass' if not flags else 'FLAG'} "
+            f"flagged={len(flags)}"
+        ),
         "note": (
             "Green-or-gone: red towers with open risk / loser Gate A false get "
             "starve-or-exit flags on Masters. No volume expand."
@@ -4071,6 +4076,106 @@ def firm_health_observe(
             "Firm-health observe (bleed <0.5, barbell, daily R settle-only, "
             "profit-lock safe-mode, opp-cost clock, fee-ledger ≥80%). "
             "Never softens floors; never arms LIVE_ORDERS."
+        ),
+    }
+
+
+def calib_clv_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 4 calib + CLV + sticky/green-or-gone flow observe (never writes Φ)."""
+    btc = btc_calibration_report(bots)
+    sports = sports_calibration_report(bots)
+    commodity = commodity_calibration_report(bots)
+    phi = raise_phi_decision_log(root)
+    clv = {"n": 0, "beat_close_rate": None, "avg_clv": None}
+    sticky = {"sticky_count": 0, "exit_priority": False, "observe_only": True}
+    try:
+        import desk_more
+        clv = desk_more.clv_summary(root)
+        sticky = desk_more.sticky_sla_status(bots)
+    except Exception:
+        pass
+    gog = green_or_gone_status(bots)
+    selective = selective_throughput_observe(root, bots=bots)
+    alerts = []
+    for name, card in (("btc", btc), ("sports", sports), ("commodity", commodity)):
+        if card.get("miscalibrated") or card.get("action") == "raise_phi":
+            alerts.append(f"{name}_raise_phi")
+    clv_n = int(clv.get("n") or 0)
+    clv_rate = _finite(clv.get("beat_close_rate"))
+    if clv_n >= 20 and clv_rate is not None and clv_rate + 1e-12 < 0.52:
+        alerts.append("clv_below_52")
+    if not gog.get("pass"):
+        alerts.append("green_or_gone")
+    if sticky.get("exit_priority") and sticky.get("sticky_count"):
+        alerts.append("sticky_sla")
+    if not selective.get("m1_holds"):
+        alerts.append("selective_m1_thin")
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "auto_write_phi": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "ok": len(alerts) == 0,
+        "alerts": alerts,
+        "btc_calibration": {
+            "n": btc.get("n"),
+            "miscalibrated": bool(btc.get("miscalibrated")),
+            "action": btc.get("action"),
+            "hi_hit_rate": btc.get("hi_hit_rate"),
+        },
+        "sports_calibration": {
+            "n": sports.get("n"),
+            "miscalibrated": bool(sports.get("miscalibrated")),
+            "action": sports.get("action"),
+            "hi_hit_rate": sports.get("hi_hit_rate"),
+        },
+        "commodity_calibration": {
+            "n": commodity.get("n"),
+            "miscalibrated": bool(commodity.get("miscalibrated")),
+            "action": commodity.get("action"),
+            "hi_hit_rate": commodity.get("hi_hit_rate"),
+        },
+        "raise_phi_decisions": {
+            "n": phi.get("n"),
+            "accepts": phi.get("accepts"),
+            "defers": phi.get("defers"),
+            "auto_write_phi": False,
+        },
+        "clv": {
+            "n": clv_n,
+            "avg_clv": clv.get("avg_clv"),
+            "beat_close_rate": clv_rate,
+            "bar": 0.52,
+            "pass": clv_n < 20 or (clv_rate is not None and clv_rate + 1e-12 >= 0.52),
+        },
+        "sticky_sla": sticky,
+        "green_or_gone": {
+            "pass": gog.get("pass"),
+            "flagged_n": gog.get("flagged_n"),
+            "flags": gog.get("flags"),
+        },
+        "selective_throughput": {
+            "m1_holds": selective.get("m1_holds"),
+            "boosted_n": selective.get("boosted_n"),
+            "label": selective.get("label"),
+        },
+        "label": (
+            f"calib_clv={'ok' if not alerts else 'ALERT'} "
+            f"alerts={','.join(alerts) or 'none'} "
+            f"clv={clv_rate} n={clv_n} sticky={sticky.get('sticky_count')} "
+            f"gog={gog.get('flagged_n')} selective_m1={selective.get('m1_holds')}"
+        ),
+        "note": (
+            "Calib/CLV observe — BTC/sports/commodity raise_Φ flags never auto-write Φ; "
+            "sports CLV bar 52%; sticky exit-priority; green-or-gone starve flags; "
+            "selective after M1. Floors locked."
         ),
     }
 
@@ -6942,6 +7047,7 @@ def plan_summary(
         "ops": ops_observe(root, bots=bots),
         "guardrails": guardrails_observe(root, bots=bots),
         "review": review_observe(root, bots=bots),
+        "calib_clv": calib_clv_observe(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,

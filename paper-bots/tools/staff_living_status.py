@@ -1728,6 +1728,8 @@ def main() -> int:
             "incubation", "ruin-drill", "cold-harvest", "graduation", "btc-calib",
             "guardrails", "adverse-cool", "anti-revenge", "empty-card", "stale-world",
             "review-observe", "idea-review", "quarterly", "corr-matrix",
+            "calib-clv", "clv-status", "green-or-gone", "sticky-sla", "selective",
+            "raise-phi-log", "sports-calib", "commodity-calib",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -3600,6 +3602,7 @@ def main() -> int:
             "ops": desk_roi_plan.ops_observe(root),
             "guardrails": desk_roi_plan.guardrails_observe(root),
             "review": desk_roi_plan.review_observe(root),
+            "calib_clv": desk_roi_plan.calib_clv_observe(root),
             "green_boost": desk_roi_plan.sports_green_boost_status(root),
             "near_miss": desk_roi_plan.near_miss_promote_status(root),
             "hard_stop": desk_roi_plan.sports_hard_stop_shadow_summary(root),
@@ -3611,8 +3614,8 @@ def main() -> int:
             "note": (
                 "Money-path pulse — observe only (firm-queue / completions / "
                 "feature densify / exit-quality / selective after M1 / "
-                "promote-distance / firm-health / ops / guardrails / review). "
-                "Never softens floors. Never arms LIVE_ORDERS."
+                "promote-distance / firm-health / ops / guardrails / review / "
+                "calib-clv). Never softens floors. Never arms LIVE_ORDERS."
             ),
         }
         # Enrich exit/selective with live bots when snapshot available.
@@ -3642,6 +3645,7 @@ def main() -> int:
                 out["ops"] = desk_roi_plan.ops_observe(root, bots=bots)
                 out["guardrails"] = desk_roi_plan.guardrails_observe(root, bots=bots)
                 out["review"] = desk_roi_plan.review_observe(root, bots=bots)
+                out["calib_clv"] = desk_roi_plan.calib_clv_observe(root, bots=bots)
                 out["capital_os"] = desk_roi_plan.capital_os_status(
                     root, bots=bots, cfg=cfg,
                 )
@@ -3853,6 +3857,102 @@ def main() -> int:
             out = {"ok": False, "reason": str(exc), "fee_floors_locked": True}
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "calib-clv":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.calib_clv_observe(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "clv-status":
+        import desk_more
+        out = desk_more.clv_summary(root)
+        out = dict(out)
+        out["observe_only"] = True
+        out["fee_floors_locked"] = True
+        out["bar"] = 0.52
+        rate = out.get("beat_close_rate")
+        n = int(out.get("n") or 0)
+        out["pass"] = n < 20 or (rate is not None and float(rate) + 1e-12 >= 0.52)
+        out["label"] = f"clv n={n} beat={rate} bar=0.52"
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "green-or-gone":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.green_or_gone_status(bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "sticky-sla":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        import desk_more
+        out = desk_more.sticky_sla_status(bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not out.get("exit_priority") else 2
+    if args.action == "selective":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.selective_throughput_observe(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("m1_holds") else 2
+    if args.action == "raise-phi-log":
+        out = desk_roi_plan.raise_phi_decision_log(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "sports-calib":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.sports_calibration_report(bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not out.get("miscalibrated") else 2
+    if args.action == "commodity-calib":
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.commodity_calibration_report(bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not out.get("miscalibrated") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)
