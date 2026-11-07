@@ -225,6 +225,24 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "feature store: "
+            + (
+                f"n={(board.get('feature_store') or {}).get('n')} "
+                f"buys={(board.get('feature_store') or {}).get('buys')} "
+                f"skips={(board.get('feature_store') or {}).get('skips')}"
+                if isinstance(board.get("feature_store"), dict)
+                else "feature store observe"
+            )
+        ),
+        (
+            "skip historian: "
+            + str(
+                (board.get("skip_historian") or {}).get("label")
+                if isinstance(board.get("skip_historian"), dict)
+                else "skip historian observe"
+            )
+        ),
+        (
             "digests sunday: "
             + str(inv.get("label") or "digests observe")
             + " · sunday quiet "
@@ -1393,6 +1411,12 @@ def main() -> int:
             "l7_observe_label": desk_living.l7_observe_summary(board).get("label"),
             "l7_observe_sunday_quiet": compact_j.get("l7_observe_sunday_quiet"),
             "compact_l7_observe_sunday_quiet": compact_j.get("l7_observe_sunday_quiet"),
+            "feature_store": board.get("feature_store"),
+            "skip_historian": board.get("skip_historian"),
+            "feature_store_sunday_quiet": compact_j.get("feature_store_sunday_quiet"),
+            "skip_historian_sunday_quiet": compact_j.get("skip_historian_sunday_quiet"),
+            "compact_feature_store_sunday_quiet": compact_j.get("feature_store_sunday_quiet"),
+            "compact_skip_historian_sunday_quiet": compact_j.get("skip_historian_sunday_quiet"),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "

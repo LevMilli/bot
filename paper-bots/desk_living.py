@@ -1210,6 +1210,26 @@ def living_compact_card(
             f"{l7_observe_summary(src).get('label') or 'L7 observe pulse'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "feature_store_sunday_quiet": (
+            (
+                f"feature store n={(src.get('feature_store') or {}).get('n')} "
+                f"buys={(src.get('feature_store') or {}).get('buys')} "
+                f"skips={(src.get('feature_store') or {}).get('skips')}"
+                if isinstance(src.get("feature_store"), dict)
+                else (
+                    (src.get("feature_coverage") or {}).get("label")
+                    if isinstance(src.get("feature_coverage"), dict)
+                    else "feature store observe"
+                )
+            )
+            + f" · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "skip_historian_sunday_quiet": (
+            f"{(src.get('skip_historian') or {}).get('label') or 'skip historian observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("skip_historian"), dict)
+            else f"skip historian observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2781,6 +2801,22 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{slim['l7_observe_label']} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    feat_store = board.get("feature_store") if isinstance(board.get("feature_store"), dict) else {}
+    slim["feature_store_sunday_quiet"] = (
+        (
+            f"feature store n={feat_store.get('n')} "
+            f"buys={feat_store.get('buys')} skips={feat_store.get('skips')}"
+            if feat_store
+            else "feature store observe"
+        )
+        + f" · sunday quiet {slim['sunday_quiet_age_label']} "
+        "(observe · never softens floors)"
+    )
+    skip_hist = board.get("skip_historian") if isinstance(board.get("skip_historian"), dict) else {}
+    slim["skip_historian_sunday_quiet"] = (
+        f"{skip_hist.get('label') or 'skip historian observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2961,6 +2997,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_l7_observe_sunday_quiet"] = (
             compact.get("l7_observe_sunday_quiet") or slim.get("l7_observe_sunday_quiet")
+        )
+        slim["compact_feature_store_sunday_quiet"] = (
+            compact.get("feature_store_sunday_quiet") or slim.get("feature_store_sunday_quiet")
+        )
+        slim["compact_skip_historian_sunday_quiet"] = (
+            compact.get("skip_historian_sunday_quiet") or slim.get("skip_historian_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
