@@ -45,6 +45,7 @@ IDEA_REVIEW_NAME = "desk_idea_review.json"
 BTC_CALIB_NAME = "desk_btc_calibration.json"
 SPORTS_CALIB_NAME = "desk_sports_calibration.json"
 COMMODITY_CALIB_NAME = "desk_commodity_calibration.json"
+RAISE_PHI_DECISIONS = "desk_raise_phi_decisions.json"
 FIRM_QUEUE_NAME = "desk_firm_queue.json"
 EMPTY_CARD_NAME = "desk_empty_card.json"
 BLEED_WEEK_NAME = "desk_bleed_week.json"
@@ -926,6 +927,108 @@ def latest_btc_calibration(root: str | None = None) -> dict | None:
     store = _load(_path(BTC_CALIB_NAME, root), {"paper_only": True, "latest": None})
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
+
+
+RAISE_PHI_DECISION_ALLOW = frozenset({"accept", "defer"})
+MAX_RAISE_PHI_DECISIONS = 200
+
+
+def staff_log_raise_phi_decision(
+    root: str | None,
+    *,
+    decision: str,
+    board: str = "btc",
+    who: str = "",
+    note: str = "",
+    before_hit_rate=None,
+    after_hit_rate=None,
+    bots: list | None = None,
+) -> dict:
+    """Staff accept/defer log for raise_Φ tickets (make-money step 393).
+
+    Never writes Φ. Never softens floors. auto_write_phi stays False.
+    """
+    dec = str(decision or "").strip().lower()
+    if dec not in RAISE_PHI_DECISION_ALLOW:
+        return {
+            "ok": False,
+            "reason": f"decision must be one of {sorted(RAISE_PHI_DECISION_ALLOW)}",
+            "auto_write_phi": False,
+            "fee_floors_locked": True,
+            "paper_only": True,
+        }
+    board_id = str(board or "btc").strip().lower() or "btc"
+    before = _finite(before_hit_rate)
+    after = _finite(after_hit_rate)
+    # Pull latest board hit rate when caller omits before.
+    if before is None:
+        try:
+            if board_id == "btc":
+                card = latest_btc_calibration(root) or btc_calibration_report(bots)
+            elif board_id in ("sports", "sports-gap"):
+                card = latest_sports_calibration(root) or sports_calibration_report(bots)
+            elif board_id in ("commodity", "commodity-15m"):
+                card = latest_commodity_calibration(root) or commodity_calibration_report(bots)
+            else:
+                card = {}
+            before = _finite((card or {}).get("hi_hit_rate"))
+        except Exception:
+            before = None
+    row = {
+        "at": _now(),
+        "board": board_id,
+        "decision": dec,
+        "who": str(who or "")[:40],
+        "note": str(note or "")[:200],
+        "before_hit_rate": before,
+        "after_hit_rate": after,
+        "auto_write_phi": False,
+        "fee_floors_locked": True,
+        "paper_only": True,
+    }
+    path = _path(RAISE_PHI_DECISIONS, root)
+    store = _load(path, {"paper_only": True, "rows": [], "latest": None})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_RAISE_PHI_DECISIONS:]
+    store["latest"] = row
+    store["last_at"] = row["at"]
+    _save(path, store)
+    return {
+        "ok": True,
+        "row": row,
+        "n": len(store["rows"]),
+        "auto_write_phi": False,
+        "fee_floors_locked": True,
+        "paper_only": True,
+        "reason": f"logged {dec} for {board_id}",
+    }
+
+
+def raise_phi_decision_log(root: str | None = None) -> dict:
+    """Summary of staff raise_Φ accept/defer decisions — never auto-writes Φ."""
+    store = _load(
+        _path(RAISE_PHI_DECISIONS, root),
+        {"paper_only": True, "rows": [], "latest": None},
+    )
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    accepts = sum(1 for r in rows if r.get("decision") == "accept")
+    defers = sum(1 for r in rows if r.get("decision") == "defer")
+    latest = store.get("latest") if isinstance(store.get("latest"), dict) else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_write_phi": False,
+        "n": len(rows),
+        "accepts": accepts,
+        "defers": defers,
+        "latest": latest,
+        "rows_tail": rows[-20:],
+        "note": (
+            "Staff raise_Φ decision log (accept/defer) with before/after hit rates. "
+            "Never silent Φ write; never softens floors."
+        ),
+    }
 
 
 # ---- Sports calibration report (living upgrade — parallel to BTC) ----------

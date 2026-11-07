@@ -595,6 +595,10 @@ def master_summary(
         except Exception:
             plan["green_or_gone"] = None
         try:
+            plan["raise_phi_decisions"] = desk_roi_plan.raise_phi_decision_log(root)
+        except Exception:
+            plan["raise_phi_decisions"] = None
+        try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
