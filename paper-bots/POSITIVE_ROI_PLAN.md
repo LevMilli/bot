@@ -1869,6 +1869,19 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Exit plan stamp | `model_flip+time_stop_shadow+settle` |
 | Masters / promote-distance | `roi_plan.commodity_time_stop` + gate on distance board |
 
+### Sports time-to-final trim shadow (Phase 3 P1)
+
+| Ticket | Where |
+| --- | --- |
+| Hit rule | ≤5m regulation left + underwater mark → `sports_time_final_hit` |
+| Clock helper | `sports_minutes_remaining` (league period map) |
+| Shadow log | `record_sports_time_final_shadow` (code `SPORTS_TIME_FINAL_LIVE=False`) |
+| Promote board | `sports_time_final_shadow_summary` · `make living-sports-tfinal-status` |
+| No-force arm when ready | `make living-sports-tfinal-promote-ready` |
+| Runtime | `sports-gap-paper/gap_bot.py` shadows; live sell only if staff-armed |
+| Exit plan stamp | `…+time_final_shadow+settle` |
+| Masters / promote-distance | `roi_plan.sports_time_final` + gate on distance board |
+
 ### Next
 
 | Ticket | Where |

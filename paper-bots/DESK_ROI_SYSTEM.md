@@ -76,7 +76,7 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 ### Sports gap → keep **partial**, push toward strong
 - Buy only on edge after fee; close-game band; spread/price bounds.
 - **Required:** gap-close sell + settle.
-- **Next upgrade:** optional hard stop / time-to-final risk trim (separate PR).
+- **Next upgrade:** hard-stop + time-to-final shadows shipped (staff promote for live); measure n→30 EV≥0 before arming.
 
 ### Kalshi S&P → **partial** (model-flip under 50¢ + settle)
 - Band 80–90¢, 1/day, news calendar, −$50 day, kill ≤$400.

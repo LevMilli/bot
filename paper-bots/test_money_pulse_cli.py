@@ -86,8 +86,9 @@ class MoneyPulseSurfaces(unittest.TestCase):
             self.assertGreaterEqual(out["thin_n"], 1)
             gates = {r["gate"] for r in out["gates"]}
             for need in (
-                "inx_band", "hard_stop", "commodity_time_stop", "green_boost",
-                "near_miss", "near_miss_soft_p", "edge08", "helper_gate_a",
+                "inx_band", "hard_stop", "commodity_time_stop", "sports_time_final",
+                "green_boost", "near_miss", "near_miss_soft_p", "edge08",
+                "helper_gate_a",
             ):
                 self.assertIn(need, gates)
             self.assertIn("thin=", out["label"])

@@ -484,3 +484,12 @@ living-commodity-tstop-promote:
 
 living-commodity-tstop-promote-ready:
 	python3 tools/staff_living_status.py commodity-tstop-promote-ready
+
+living-sports-tfinal-status:
+	python3 tools/staff_living_status.py sports-tfinal-status
+
+living-sports-tfinal-promote:
+	python3 tools/staff_living_status.py sports-tfinal-promote
+
+living-sports-tfinal-promote-ready:
+	python3 tools/staff_living_status.py sports-tfinal-promote-ready

@@ -1733,6 +1733,8 @@ def main() -> int:
             "baseline-fee", "baseline-capture", "fee-ledger",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
+            "sports-tfinal-status", "sports-tfinal-promote",
+            "sports-tfinal-promote-ready",
         ),
     )
     parser.add_argument("--root", default=ROOT)
@@ -4031,6 +4033,22 @@ def main() -> int:
     if args.action == "commodity-tstop-promote-ready":
         out = desk_roi_plan.staff_set_commodity_time_stop_live(
             root, True, note="staff commodity time-stop no-force ready CLI", force=False,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "sports-tfinal-status":
+        out = desk_roi_plan.sports_time_final_shadow_summary(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("promote_ready") else 2
+    if args.action == "sports-tfinal-promote":
+        out = desk_roi_plan.staff_set_sports_time_final_live(
+            root, True, note="staff sports time-final arm CLI", force=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "sports-tfinal-promote-ready":
+        out = desk_roi_plan.staff_set_sports_time_final_live(
+            root, True, note="staff sports time-final no-force ready CLI", force=False,
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2

@@ -25,6 +25,8 @@ SPORTS_HARD_STOP_PROMOTE = "desk_sports_hard_stop_promote.json"
 SPORTS_GREEN_BOOST_PROMOTE = "desk_sports_green_boost_promote.json"
 COMMODITY_TIME_STOP_SHADOW = "desk_commodity_time_stop_shadow.json"
 COMMODITY_TIME_STOP_PROMOTE = "desk_commodity_time_stop_promote.json"
+SPORTS_TIME_FINAL_SHADOW = "desk_sports_time_final_shadow.json"
+SPORTS_TIME_FINAL_PROMOTE = "desk_sports_time_final_promote.json"
 ADVERSE_COOL_NAME = "desk_adverse_cool.json"
 WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 MASTER_GRAD = "desk_master_grad.json"
@@ -242,6 +244,32 @@ COMMODITY_TIME_STOP_MIN_LEFT = 3.0  # minutes before window close
 COMMODITY_TIME_STOP_LIVE = False  # never auto-sell until staff promote
 COMMODITY_TIME_STOP_PROMOTE_N = 30
 MAX_COMMODITY_TSTOP_ROWS = 2000
+
+# Phase 3 P1: sports time-to-final trim (shadow first).
+# Hit when ≤N regulation minutes remain and mark PnL ≤ 0.
+SPORTS_TIME_FINAL_MIN_LEFT = 5.0
+SPORTS_TIME_FINAL_LIVE = False  # never auto-sell until staff promote
+SPORTS_TIME_FINAL_PROMOTE_N = 30
+MAX_SPORTS_TFINAL_ROWS = 2000
+# Regulation period length (minutes) + count by league for ESPN clock.
+SPORTS_PERIOD_MIN = {
+    "NFL": 15.0,
+    "NCAAF": 15.0,
+    "NBA": 12.0,
+    "WNBA": 12.0,
+    "NCAAB": 20.0,
+    "NHL": 20.0,
+    "MLB": 20.0,  # coarse per-inning proxy
+}
+SPORTS_REG_PERIODS = {
+    "NFL": 4,
+    "NCAAF": 4,
+    "NBA": 4,
+    "WNBA": 4,
+    "NCAAB": 2,
+    "NHL": 3,
+    "MLB": 9,
+}
 
 # Phase 5: sports green_boost only after 2 Chicago weeks M1≥0 + CLV bar.
 SPORTS_GREEN_BOOST_WEEKS = 2
@@ -3654,10 +3682,13 @@ def default_exit_plan(bot: str) -> dict:
     b = str(bot or "").strip()
     if b in ("sports-gap", "sports"):
         return {
-            "kind": "gap_decay+scale_out+hard_stop_shadow+settle",
+            "kind": "gap_decay+scale_out+hard_stop_shadow+time_final_shadow+settle",
             "hard_stop_drop": SPORTS_HARD_STOP_DROP,
             "hard_stop_live": bool(SPORTS_HARD_STOP_LIVE),
             "hard_stop_shadow": True,
+            "time_final_shadow": True,
+            "time_final_min_left": SPORTS_TIME_FINAL_MIN_LEFT,
+            "time_final_live": bool(SPORTS_TIME_FINAL_LIVE),
             "gap_decay": True,
             "scale_out": True,
             "settle_backstop": True,
@@ -3665,7 +3696,9 @@ def default_exit_plan(bot: str) -> dict:
             "fee_floors_locked": True,
             "note": (
                 "Sports exits: gap-decay + scale-out + hard-stop shadow "
-                f"(−{SPORTS_HARD_STOP_DROP:.0%} bid); live hard-stop stays staff-gated."
+                f"(−{SPORTS_HARD_STOP_DROP:.0%} bid) + time-to-final shadow "
+                f"(≤{SPORTS_TIME_FINAL_MIN_LEFT:g}m left + underwater); "
+                "live hard-stop / time-final stay staff-gated."
             ),
         }
     if b in ("btc15m", "btc", "btc15m-signal"):
@@ -4490,6 +4523,7 @@ def promote_distance_observe(
     inx = inx_band_promote_status(root)
     hard = sports_hard_stop_shadow_summary(root)
     tstop = commodity_time_stop_shadow_summary(root)
+    tfinal = sports_time_final_shadow_summary(root)
     green = sports_green_boost_status(root, bots=bots)
     near = near_miss_promote_status(root)
     soft_p = near_miss_soft_p_status(root, bots=bots)
@@ -4516,6 +4550,13 @@ def promote_distance_observe(
             "promote_ready": bool(tstop.get("promote_ready")),
             "n_to_promote": tstop.get("n_to_promote"),
             "label": tstop.get("label"),
+        },
+        {
+            "gate": "sports_time_final",
+            "evidence_thin": bool(tfinal.get("evidence_thin")),
+            "promote_ready": bool(tfinal.get("promote_ready")),
+            "n_to_promote": tfinal.get("n_to_promote"),
+            "label": tfinal.get("label"),
         },
         {
             "gate": "green_boost",
@@ -4570,8 +4611,9 @@ def promote_distance_observe(
         "evidence_thin": thin_n > 0,
         "label": f"promote_distance thin={thin_n}/{len(rows)} ready={ready_n}",
         "note": (
-            "Promote-distance observe across INX / hard-stop / green_boost / "
-            "near-miss / edge08 / helper Gate A. Evidence catch-up deferred; "
+            "Promote-distance observe across INX / hard-stop / commodity "
+            "time-stop / sports time-final / green_boost / near-miss / "
+            "edge08 / helper Gate A. Evidence catch-up deferred; "
             "no force; dual-control LIVE_ORDERS still off."
         ),
     }
@@ -4588,6 +4630,7 @@ def exit_quality_observe(
     fee_clear = fee_clear_exit_quality_board(bots)
     hard = sports_hard_stop_shadow_summary(root)
     tstop = commodity_time_stop_shadow_summary(root)
+    tfinal = sports_time_final_shadow_summary(root)
     selective = selective_throughput_observe(root, bots=bots)
     return {
         "paper_only": True,
@@ -4625,6 +4668,18 @@ def exit_quality_observe(
             "live": tstop.get("live"),
             "decision": tstop.get("decision"),
             "label": tstop.get("label"),
+        },
+        "sports_time_final": {
+            "n": tfinal.get("n"),
+            "n_with_pnl": tfinal.get("n_with_pnl"),
+            "shadow_expectancy": tfinal.get("shadow_expectancy"),
+            "promote_min_n": tfinal.get("promote_min_n"),
+            "promote_ready": tfinal.get("promote_ready"),
+            "evidence_thin": tfinal.get("evidence_thin"),
+            "n_to_promote": tfinal.get("n_to_promote"),
+            "live": tfinal.get("live"),
+            "decision": tfinal.get("decision"),
+            "label": tfinal.get("label"),
         },
         "selective_throughput": selective,
         "label": (
@@ -4862,6 +4917,249 @@ def staff_set_commodity_time_stop_live(
         "staff_approved": bool(enabled),
         "reason": "armed" if enabled else "disarmed",
         "summary": commodity_time_stop_shadow_summary(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+    }
+
+
+# ---- Sports time-to-final trim shadow (Phase 3 P1) --------------------------
+
+def _sports_clock_seconds(status) -> float | None:
+    """Parse ESPN status clock into seconds remaining in the current period."""
+    if not isinstance(status, dict):
+        return None
+    clock = status.get("clock")
+    if isinstance(clock, (int, float)):
+        return float(clock)
+    disp = status.get("displayClock") or status.get("display_clock")
+    if disp is None:
+        return None
+    try:
+        text = str(disp).strip()
+        if ":" in text:
+            mm, ss = text.split(":", 1)
+            return int(mm) * 60.0 + float(ss)
+        return float(text)
+    except Exception:
+        return None
+
+
+def sports_minutes_remaining(status, league: str | None = None) -> float | None:
+    """Approx regulation minutes left from ESPN period + clock."""
+    if not isinstance(status, dict):
+        return None
+    try:
+        period = int(status.get("period") or 0)
+    except Exception:
+        period = 0
+    if period <= 0:
+        return None
+    lg = str(league or "").strip().upper()
+    period_min = float(SPORTS_PERIOD_MIN.get(lg) or 15.0)
+    reg_n = int(SPORTS_REG_PERIODS.get(lg) or 4)
+    clock_s = _sports_clock_seconds(status)
+    clock_min = (float(clock_s) / 60.0) if clock_s is not None else period_min
+    if period > reg_n:
+        # OT / extras — already at the final stretch.
+        return round(max(0.0, clock_min), 3)
+    rem = (reg_n - period) * period_min + clock_min
+    return round(max(0.0, rem), 3)
+
+
+def sports_time_final_hit(
+    minutes_left,
+    bid,
+    entry_price=None,
+    *,
+    cost=None,
+    contracts=None,
+    min_left: float = SPORTS_TIME_FINAL_MIN_LEFT,
+) -> dict:
+    """True when ≤min_left regulation minutes remain and mark PnL ≤ 0."""
+    left = _finite(minutes_left)
+    bid_n = _finite(bid)
+    entry = _finite(entry_price)
+    contracts_n = _finite(contracts) or 1.0
+    cost_n = _finite(cost)
+    if cost_n is None and entry is not None:
+        cost_n = round(float(entry) * contracts_n, 4)
+    fee_approx = 0.0
+    if bid_n is not None and bid_n > 0:
+        fee_approx = math.ceil(round(0.07 * bid_n * (1.0 - bid_n) * 100, 6)) / 100
+    mark_pnl = None
+    if bid_n is not None and cost_n is not None:
+        proceeds = round(contracts_n * max(0.0, bid_n - fee_approx), 4)
+        mark_pnl = round(proceeds - cost_n, 4)
+    near_final = left is not None and left + 1e-12 <= float(min_left) and left >= -1e-9
+    underwater = mark_pnl is not None and mark_pnl <= 1e-12
+    hit = bool(near_final and underwater and bid_n is not None and bid_n > 0)
+    return {
+        "hit": hit,
+        "minutes_left": left,
+        "min_left_bar": float(min_left),
+        "near_final": near_final,
+        "underwater": underwater,
+        "bid": bid_n,
+        "entry": entry,
+        "cost": cost_n,
+        "contracts": contracts_n,
+        "fee_approx": fee_approx,
+        "mark_pnl": mark_pnl,
+        "shadow_only": not SPORTS_TIME_FINAL_LIVE,
+        "live": bool(SPORTS_TIME_FINAL_LIVE),
+    }
+
+
+def record_sports_time_final_shadow(
+    root: str | None,
+    *,
+    ticker: str,
+    side: str = "",
+    league: str = "",
+    minutes_left=None,
+    entry_price=None,
+    bid=None,
+    contracts=None,
+    cost=None,
+    note: str = "",
+) -> dict:
+    """Log a would-have time-to-final trim. Does not sell unless LIVE."""
+    gate = sports_time_final_hit(
+        minutes_left, bid, entry_price, cost=cost, contracts=contracts,
+    )
+    if not gate.get("hit"):
+        return {"recorded": False, **gate}
+    path = _path(SPORTS_TIME_FINAL_SHADOW, root)
+    state = _load(path, {"paper_only": True, "version": 1, "rows": [], "live": False})
+    row = {
+        "at": _now(),
+        "ticker": ticker,
+        "side": side,
+        "league": league,
+        "minutes_left": gate.get("minutes_left"),
+        "min_left_bar": gate.get("min_left_bar"),
+        "entry_price": gate.get("entry"),
+        "bid": gate.get("bid"),
+        "contracts": gate.get("contracts"),
+        "cost": gate.get("cost"),
+        "mark_pnl": gate.get("mark_pnl"),
+        "shadow_pnl": gate.get("mark_pnl"),
+        "shadow_only": True,
+        "live_sell": False,
+        "note": str(note or "")[:160],
+    }
+    rows = list(state.get("rows") or [])
+    rows.append(row)
+    state["rows"] = rows[-MAX_SPORTS_TFINAL_ROWS:]
+    state["last_at"] = row["at"]
+    state["live"] = sports_time_final_is_live(root)
+    state["paper_only"] = True
+    _save(path, state)
+    return {"recorded": True, "row": row, **gate}
+
+
+def sports_time_final_shadow_summary(root: str | None = None) -> dict:
+    path = _path(SPORTS_TIME_FINAL_SHADOW, root)
+    state = _load(path, {"paper_only": True, "rows": []})
+    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict)]
+    pnls = [_finite(r.get("shadow_pnl")) for r in rows]
+    pnls = [p for p in pnls if p is not None]
+    n = len(pnls)
+    exp = round(sum(pnls) / n, 4) if n else None
+    decision = "reject"
+    if n >= SPORTS_TIME_FINAL_PROMOTE_N and exp is not None and exp >= 0:
+        decision = "review"
+    live = sports_time_final_is_live(root)
+    promote = _load(
+        _path(SPORTS_TIME_FINAL_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    evidence_thin = n < int(SPORTS_TIME_FINAL_PROMOTE_N)
+    n_to_promote = max(0, int(SPORTS_TIME_FINAL_PROMOTE_N) - n)
+    ready = decision == "review"
+    return {
+        "paper_only": True,
+        "observe_only": True,
+        "n": len(rows),
+        "n_with_pnl": n,
+        "shadow_expectancy": exp,
+        "promote_min_n": SPORTS_TIME_FINAL_PROMOTE_N,
+        "n_to_promote": n_to_promote,
+        "evidence_thin": evidence_thin,
+        "min_left_bar": SPORTS_TIME_FINAL_MIN_LEFT,
+        "live": live,
+        "code_default_live": bool(SPORTS_TIME_FINAL_LIVE),
+        "staff_approved": bool(promote.get("staff_approved")),
+        "promote_ready": ready,
+        "auto_promote": False,
+        "decision": decision,
+        "fee_floors_locked": True,
+        "label": (
+            f"sports time-final shadow n={n}/{SPORTS_TIME_FINAL_PROMOTE_N} "
+            f"{'THIN' if evidence_thin else ('ready' if ready else 'reject')} "
+            f"EV={exp} live={live}"
+        ),
+        "note": (
+            "Sports time-to-final stays shadow-only until staff_set_sports_time_final_live. "
+            f"Hit when ≤{SPORTS_TIME_FINAL_MIN_LEFT:g}m regulation left and mark PnL ≤ 0. "
+            f"Evidence thin until n≥{SPORTS_TIME_FINAL_PROMOTE_N} and shadow EV ≥ 0. "
+            "Code default SPORTS_TIME_FINAL_LIVE stays False."
+        ),
+    }
+
+
+def sports_time_final_is_live(root: str | None = None) -> bool:
+    if SPORTS_TIME_FINAL_LIVE:
+        return True
+    promote = _load(
+        _path(SPORTS_TIME_FINAL_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    return bool(promote.get("staff_approved")) and bool(promote.get("live"))
+
+
+def staff_set_sports_time_final_live(
+    root: str | None,
+    enabled: bool,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff gate to arm/disarm live sports time-to-final trims."""
+    summary = sports_time_final_shadow_summary(root)
+    if enabled and not force and not summary.get("promote_ready"):
+        return {
+            "ok": False,
+            "live": False,
+            "staff_approved": False,
+            "reason": (
+                f"not promote_ready (need n≥{SPORTS_TIME_FINAL_PROMOTE_N} "
+                "with shadow EV ≥ 0)"
+            ),
+            "summary": summary,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    row = {
+        "paper_only": True,
+        "staff_approved": bool(enabled),
+        "live": bool(enabled),
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "shadow_n": summary.get("n_with_pnl"),
+        "shadow_expectancy": summary.get("shadow_expectancy"),
+        "decision": summary.get("decision"),
+        "auto_promote": False,
+        "code_default_live": bool(SPORTS_TIME_FINAL_LIVE),
+        "fee_floors_locked": True,
+    }
+    _save(_path(SPORTS_TIME_FINAL_PROMOTE, root), row)
+    return {
+        "ok": True,
+        "live": bool(enabled),
+        "staff_approved": bool(enabled),
+        "reason": "armed" if enabled else "disarmed",
+        "summary": sports_time_final_shadow_summary(root),
         "auto_promote": False,
         "fee_floors_locked": True,
     }
@@ -7343,6 +7641,7 @@ def plan_summary(
         },
         "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
         "commodity_time_stop": commodity_time_stop_shadow_summary(root),
+        "sports_time_final": sports_time_final_shadow_summary(root),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root),
         "hillclimb_kill": hillclimb_kill_status(root),
