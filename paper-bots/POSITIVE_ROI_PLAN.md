@@ -1788,6 +1788,14 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Observe CLI | `make living-near-miss-status` |
 | No-force soft-z when ready | `make living-near-miss-promote-ready` (force=False) |
 
+### Promote-distance combined observe
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `promote_distance_observe` · `make living-promote-distance` |
+| Money pulse | `make living-money-pulse` includes `promote_distance` |
+| Masters | `roi_plan.promote_distance` |
+
 ### Next
 
 | Ticket | Where |

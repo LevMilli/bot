@@ -75,6 +75,23 @@ class MoneyPulseSurfaces(unittest.TestCase):
             quiet = desk_living.feature_store_quiet_alert(tmp)
             self.assertIsInstance(quiet, dict)
 
+    def test_promote_distance_observe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = desk_roi_plan.promote_distance_observe(tmp, bots=[])
+            self.assertTrue(out["observe_only"])
+            self.assertTrue(out["fee_floors_locked"])
+            self.assertFalse(out["live_orders_enabled"])
+            self.assertFalse(out["auto_promote"])
+            self.assertTrue(out["evidence_thin"])
+            self.assertGreaterEqual(out["thin_n"], 1)
+            gates = {r["gate"] for r in out["gates"]}
+            for need in (
+                "inx_band", "hard_stop", "green_boost", "near_miss",
+                "near_miss_soft_p", "edge08", "helper_gate_a",
+            ):
+                self.assertIn(need, gates)
+            self.assertIn("thin=", out["label"])
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()
