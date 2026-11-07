@@ -1277,11 +1277,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Phase 2 pulse chip | `desk_living.phase2_pulse_chip` (gap-decay/scale-out) |
 | Vault/status/ritual/export surfaces | App + staff CLIs + compact twins |
 
+### Living upgrade — L7 selfcheck/doctor pulse (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Selfcheck L7 keys | `living_self_check.l7_observe_*` |
+| Doctor soft_copy L7 line | `living_doctor` soft_copy + fields |
+| Makefile `living-l7` | observe exit 2 on missing L7 chips |
+| Ritual/status L7 pulse | Discord/observe + status text |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — refill from L7 continuous learning or next living surface)* | — |
+| *(empty — chip catalog ~52/64 soft-max; invent surfaces not new board chips)* | — |
 
 ## Hard rules unchanged
 

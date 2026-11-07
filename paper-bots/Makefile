@@ -1,5 +1,5 @@
 # Living Trading Upgrade — staff smoke (paper only; floors locked; never auto-post).
-.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-gaps-discord living-ruin-discord
+.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-gaps-discord living-ruin-discord living-l7
 
 living-status:
 	python3 tools/staff_living_status.py
@@ -40,3 +40,6 @@ living-ruin-discord:
 
 living-test:
 	python3 -m unittest test_desk_living -q
+
+living-l7:
+	python3 -c "import desk_living; h=desk_living.living_self_check(); print(h.get('l7_observe_label')); print('ok' if h.get('l7_observe_ok') else 'missing='+str(h.get('l7_observe_missing'))); raise SystemExit(0 if h.get('l7_observe_ok') else 2)"

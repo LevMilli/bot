@@ -3680,17 +3680,21 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     quiet_age_label = (
         f"quiet_age={quiet_age_h}h" if quiet_age_h is not None else "quiet_age=n/a"
     )
+    l7_line = str(health.get("l7_observe_label") or "L7 observe pending")
     soft_copy = (
         f"**Living doctor** (paper · floors locked · live=False)\n"
         f"{doc['label']} · failed=[{failed_ids}]\n"
         f"{ritual_line}\n"
         f"{doctor_line}\n"
+        f"{l7_line}\n"
         f"sunday quiet {quiet_age_label} (observe · never softens floors)\n"
         f"ritual draft: make living-ritual-discord (staff paste · never auto-posts)\n"
         f"_never places · never softens floors · never enables live_"
     )
     doc["soft_copy"] = soft_copy
     doc["discord"] = soft_copy
+    doc["l7_observe_ok"] = health.get("l7_observe_ok")
+    doc["l7_observe_label"] = l7_line
     doc["sunday_quiet_age_label"] = quiet_age_label
     doc["ritual_draft_cmd"] = "make living-ritual-discord"
     if record:
@@ -3807,11 +3811,31 @@ def living_self_check(root: str | None = None) -> dict:
         and floors_assert.get("all_ok")
     )
     ritual = board.get("ritual_observe") if isinstance(board.get("ritual_observe"), dict) else {}
+    l7_keys = (
+        "digest_freshness",
+        "journal_coverage",
+        "monday_pulse",
+        "toxic_fills",
+        "adapt_ab",
+        "raise_phi_sla",
+        "feature_coverage",
+        "chip_catalog",
+        "phase2_pulse",
+    )
+    l7_present = [k for k in l7_keys if isinstance(board.get(k), dict)]
+    l7_missing = [k for k in l7_keys if k not in l7_present]
+    l7_labels = []
+    for k in l7_present:
+        row = board.get(k) if isinstance(board.get(k), dict) else {}
+        lab = row.get("label")
+        if lab:
+            l7_labels.append(str(lab))
+    l7_ok = not l7_missing
     return {
         "paper_only": True,
         "fee_floors_locked": floors,
         "live_orders_enabled": False,
-        "ok": ok,
+        "ok": ok and l7_ok,
         "swarm_pass": swarm.get("pass"),
         "swarm_ratio": swarm.get("ratio"),
         "feature_quiet": bool(quiet.get("quiet")),
@@ -3820,6 +3844,15 @@ def living_self_check(root: str | None = None) -> dict:
         "ritual_observe": ritual,
         "ritual_ok": ritual.get("ritual_ok"),
         "ritual_exit_ok": ritual.get("exit_ok"),
+        "l7_observe_ok": l7_ok,
+        "l7_observe_present": l7_present,
+        "l7_observe_missing": l7_missing,
+        "l7_observe_label": (
+            "L7 observe "
+            + (" · ".join(l7_labels[:3]) + ("…" if len(l7_labels) > 3 else ""))
+            if l7_labels
+            else "L7 observe pending"
+        ),
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()

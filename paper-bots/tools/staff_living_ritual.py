@@ -313,6 +313,10 @@ def format_discord(payload: dict) -> str:
         f"• Phase2-pulse sunday: phase2 pulse observe · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    lines.append(
+        f"• L7-pulse sunday: L7 observe pulse · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -575,6 +579,9 @@ def main() -> int:
             flat["feature_coverage"] = desk_living.feature_coverage_chip(root)
             flat["chip_catalog"] = desk_living.chip_catalog_chip(root)
             flat["phase2_pulse"] = desk_living.phase2_pulse_chip(root)
+            _l7 = desk_living.living_self_check(root)
+            flat["l7_observe_ok"] = _l7.get("l7_observe_ok")
+            flat["l7_observe_label"] = _l7.get("l7_observe_label")
             flat["toxic_sunday_quiet"] = (
                 f"toxic fills observe · sunday quiet {flat['sunday_quiet_age_label']} "
                 "(observe · never softens floors)"
@@ -853,6 +860,11 @@ def main() -> int:
             )
             print(
                 f"phase2-pulse sunday: {p2.get('label') or 'phase2 pulse observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            _l7 = desk_living.living_self_check(root)
+            print(
+                f"L7-pulse sunday: {_l7.get('l7_observe_label') or 'L7 observe pulse'} · "
                 f"sunday quiet {sunday_label} (observe · never softens floors)"
             )
             print(
