@@ -185,7 +185,7 @@ DexScreener candidates → RugCheck facts → rule scorer. Flat ticket **$25**.
 **FACTS (fail closed if missing):**
 - age **30 min – 72 h**; liq ≥ **$30k**; ticket ≤ **1%** of pool  
 - risk_score ≤ **40**; LP locked ≥ **90%**; top10 ≤ **30%**; dev ≤ **5%**; insiders ≤ **0**  
-- confidence ≥ **0.7** (weights: mom 0.30, vol 0.25, liq 0.20, buy_pressure 0.25)  
+- confidence ≥ **0.80** accurate / **0.72** speed (weights: mom 0.30, vol 0.25, liq 0.20, buy_pressure 0.25)  
 - Optional Grok veto only (disabled)
 
 **Risk gates:** already open; cooldown **12h** after close; `MAX_OPEN` **6** (red **1**); `MAX_ENTRIES_PER_DAY` **8**; red lock today ≤ −**$5** → entries off; daily halt ≤ −**$150**; cash ≥ ticket; desk `learning_skip(mint, conf bucket)` (key is **mint**, not symbol).
