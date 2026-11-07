@@ -1687,6 +1687,13 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Feature-store coverage + quiet | `make living-feature-store` |
 | Combined pulse | `make living-money-pulse` |
 
+### Sports desk-wide open-risk (E1 #116)
+
+| Ticket | Where |
+| --- | --- |
+| Headroom helper | `desk_open_risk_headroom` / `desk_open_risk_blocks` |
+| Sports buy + firm-queue remaining | `sports-gap-paper/gap_bot.py` uses desk-wide used/remaining |
+
 ### Next
 
 | Ticket | Where |

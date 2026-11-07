@@ -1719,6 +1719,103 @@ def firm_queue_blocks(root: str | None, bot: str, ticker: str) -> str:
     return str(out.get("reason") or "firm-queue deferred")
 
 
+def desk_open_risk_headroom(
+    root: str | None = None,
+    *,
+    local_bot: str | None = None,
+    local_open_risk=None,
+    max_open_risk=None,
+    bots: list | None = None,
+) -> dict:
+    """Desk-wide open-risk headroom (make-money E1 #116).
+
+    When sizing a tower buy, other towers' open risk must count against the
+    desk cap — not just the local tower sum. Pass local_open_risk from the
+    live in-run state so exits in this check are reflected.
+    """
+    cap = _finite(max_open_risk)
+    rows = bots
+    cfg = None
+    try:
+        import pimp_desk
+        cfg = pimp_desk.load_settings(root)
+        if cap is None:
+            cap = _finite((cfg or {}).get("max_open_risk"))
+        if rows is None:
+            snap = pimp_desk.snapshot(root)
+            rows = (snap.get("bots") if isinstance(snap, dict) else None) or []
+            if cfg is None and isinstance(snap, dict):
+                cfg = snap.get("cfg")
+    except Exception:
+        rows = rows or []
+    if cap is None or cap <= 0:
+        cap = 100.0
+    other = 0.0
+    local_id = str(local_bot or "").strip()
+    for bot in rows or []:
+        if not isinstance(bot, dict) or bot.get("shadow_only"):
+            continue
+        bid = str(bot.get("id") or "")
+        if not bid:
+            continue
+        if local_id and bid == local_id:
+            continue
+        other += float(_finite(bot.get("open_risk")) or 0.0)
+    local = _finite(local_open_risk)
+    if local is None and local_id:
+        for bot in rows or []:
+            if isinstance(bot, dict) and str(bot.get("id") or "") == local_id:
+                local = _finite(bot.get("open_risk")) or 0.0
+                break
+    if local is None:
+        local = 0.0
+    used = round(float(other) + float(local), 2)
+    remaining = round(max(0.0, float(cap) - used), 2)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "local_bot": local_id or None,
+        "local_open_risk": round(float(local), 2),
+        "other_open_risk": round(float(other), 2),
+        "used": used,
+        "cap": float(cap),
+        "remaining": remaining,
+        "note": (
+            "Desk-wide open risk = other towers + local live opens. "
+            "Sports/BTC/commodity buys must respect remaining headroom."
+        ),
+    }
+
+
+def desk_open_risk_blocks(
+    root: str | None,
+    *,
+    local_bot: str,
+    local_open_risk=None,
+    add_cost=None,
+    max_open_risk=None,
+    bots: list | None = None,
+) -> str:
+    """Non-empty when desk-wide open risk + add_cost would exceed cap."""
+    head = desk_open_risk_headroom(
+        root,
+        local_bot=local_bot,
+        local_open_risk=local_open_risk,
+        max_open_risk=max_open_risk,
+        bots=bots,
+    )
+    add = float(_finite(add_cost) or 0.0)
+    used = float(head.get("used") or 0.0)
+    cap = float(head.get("cap") or 100.0)
+    if used + add > cap + 1e-9:
+        return (
+            f"desk max open risk (${used:.2f} + ${add:.2f} > ${cap:.2f}; "
+            f"other ${float(head.get('other_open_risk') or 0):.2f} + "
+            f"local ${float(head.get('local_open_risk') or 0):.2f})"
+        )
+    return ""
+
+
 def capture_firm_queue(
     root: str | None,
     *,
