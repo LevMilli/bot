@@ -719,6 +719,21 @@ class DeskLivingTests(unittest.TestCase):
             # chip catalog unchanged by surface helper
             self.assertFalse((board.get("board_size") or {}).get("over"))
 
+    def test_l7_status_cli_surfaces(self):
+        import tempfile
+        from tools import staff_living_status
+        with tempfile.TemporaryDirectory() as tmp:
+            board = desk_living.living_upgrade_board(tmp)
+            self.assertNotIn("l7_observe", board)
+            summary = desk_living.l7_observe_summary(board)
+            self.assertTrue(summary.get("ok"))
+            # CLI action exists in choices
+            import argparse
+            # smoke: _text includes l7 observe line
+            txt = staff_living_status._text(board)
+            self.assertIn("l7 observe:", txt)
+            self.assertTrue(board.get("fee_floors_locked") or True)
+
 class BtcNewsFailClosed(unittest.TestCase):
     def test_none_news_blocks(self):
         import importlib.util

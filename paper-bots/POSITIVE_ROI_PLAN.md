@@ -1295,6 +1295,15 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault l7 pulse row | App vault |
 | `make living-l7-discord` | staff paste draft · never auto-posts |
 
+### Living upgrade — L7 status CLI surfaces (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `staff_living_status.py l7` | JSON + exit 2 if missing |
+| `l7 --discord` draft | staff paste · never auto-posts |
+| Makefile living-l7 / living-l7-discord | wire to status CLI |
+| Priority inserts L7 miss | staff priority JSON |
+
 ### Next
 
 | Ticket | Where |

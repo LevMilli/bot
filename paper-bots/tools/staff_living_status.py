@@ -18,6 +18,8 @@ Usage (from paper-bots/):
   python3 tools/staff_living_status.py pulse
   python3 tools/staff_living_status.py floors
   python3 tools/staff_living_status.py teller
+  python3 tools/staff_living_status.py l7
+  python3 tools/staff_living_status.py l7 --discord
 """
 from __future__ import annotations
 
@@ -917,14 +919,14 @@ def main() -> int:
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
-            "floors", "teller", "expand", "doctor",
+            "floors", "teller", "expand", "doctor", "l7",
         ),
     )
     parser.add_argument("--root", default=ROOT)
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -1479,6 +1481,9 @@ def main() -> int:
             raw.insert(0, str(ruin.get("label") or "ruin ACTIVE")[:120])
         elif not ruin.get("practiced_this_month"):
             raw.append("ruin drill: practice soft/hard this Chicago month")
+        l7 = desk_living.l7_observe_summary(living)
+        if not l7.get("ok"):
+            raw.insert(0, str(l7.get("label") or "L7 observe missing")[:120])
         raw.extend([
             "insight swarm ≥3:1 before betting expand",
             "revert last lever if hillclimb kill trips",
@@ -1491,6 +1496,46 @@ def main() -> int:
             "max_n": desk_master.PRIORITY_MAX,
         }, indent=2))
         return 0
+    if args.action == "l7":
+        summary = desk_living.l7_observe_summary(board)
+        sunday = board.get("sunday_packet") if isinstance(board.get("sunday_packet"), dict) else {}
+        quiet_bit = (
+            sunday.get("quiet_age_label")
+            or (
+                f"quiet_age={sunday.get('quiet_age')}"
+                if sunday.get("quiet_age") is not None
+                else "quiet_age=n/a"
+            )
+        )
+        label = str(summary.get("label") or "L7 observe pending")
+        twin = f"{label} · sunday quiet {quiet_bit} (observe · never softens floors)"
+        if args.discord:
+            missing = summary.get("missing") or []
+            catalog = (
+                board.get("chip_catalog")
+                if isinstance(board.get("chip_catalog"), dict)
+                else board.get("board_size")
+            )
+            cat_lab = (
+                (catalog or {}).get("label")
+                if isinstance(catalog, dict)
+                else "chip catalog observe"
+            )
+            print(
+                "**L7 observe pulse** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"ok={bool(summary.get('ok'))} missing={missing}\n"
+                f"catalog={cat_lab}\n"
+                "_staff paste · never auto-posts · never softens floors_"
+            )
+        else:
+            print(json.dumps({
+                **summary,
+                "l7_observe_sunday_quiet": twin,
+                "chip_catalog": board.get("chip_catalog") or board.get("board_size"),
+            }, indent=2, sort_keys=True, default=str))
+        return 0 if summary.get("ok") else 2
+
     print(_text(board))
     return 0
 
