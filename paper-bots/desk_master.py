@@ -438,6 +438,7 @@ def master_summary(
             "fit_firm": desk_roi_plan.fit_buy_rate(root),
             "clv_completeness": desk_roi_plan.clv_completeness(root),
             "sports_hard_stop_shadow": desk_roi_plan.sports_hard_stop_shadow_summary(root),
+            "commodity_time_stop": desk_roi_plan.commodity_time_stop_shadow_summary(root),
             "inx_band_promote": desk_roi_plan.inx_band_promote_status(root),
             "correlation": None,
             "weekly_scorecard": weekly,

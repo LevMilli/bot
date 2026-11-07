@@ -23,6 +23,8 @@ INX_BAND_PROMOTE = "desk_inx_band_promote.json"
 SPORTS_HARD_STOP_SHADOW = "desk_sports_hard_stop_shadow.json"
 SPORTS_HARD_STOP_PROMOTE = "desk_sports_hard_stop_promote.json"
 SPORTS_GREEN_BOOST_PROMOTE = "desk_sports_green_boost_promote.json"
+COMMODITY_TIME_STOP_SHADOW = "desk_commodity_time_stop_shadow.json"
+COMMODITY_TIME_STOP_PROMOTE = "desk_commodity_time_stop_promote.json"
 ADVERSE_COOL_NAME = "desk_adverse_cool.json"
 WEEKLY_SCORECARD = "desk_weekly_scorecard.json"
 MASTER_GRAD = "desk_master_grad.json"
@@ -234,6 +236,12 @@ LOSER_IDS = ("memecoin", "kalshi-sp", "kalshi-sized")
 SPORTS_HARD_STOP_DROP = 0.12
 SPORTS_HARD_STOP_LIVE = False  # never auto-sell until staff promote
 SPORTS_HARD_STOP_PROMOTE_N = 30
+
+# Phase 3: commodity optional time-stop before settle (shadow first).
+COMMODITY_TIME_STOP_MIN_LEFT = 3.0  # minutes before window close
+COMMODITY_TIME_STOP_LIVE = False  # never auto-sell until staff promote
+COMMODITY_TIME_STOP_PROMOTE_N = 30
+MAX_COMMODITY_TSTOP_ROWS = 2000
 
 # Phase 5: sports green_boost only after 2 Chicago weeks M1≥0 + CLV bar.
 SPORTS_GREEN_BOOST_WEEKS = 2
@@ -3671,12 +3679,21 @@ def default_exit_plan(bot: str) -> dict:
         }
     if b in ("commodity-15m", "commodity"):
         return {
-            "kind": "model_flip+settle",
+            "kind": "model_flip+time_stop_shadow+settle",
             "model_flip": True,
+            "time_stop_shadow": True,
+            "time_stop_min_left": COMMODITY_TIME_STOP_MIN_LEFT,
+            "time_stop_live": bool(COMMODITY_TIME_STOP_LIVE),
             "settle_backstop": True,
             "series_corr_haircut": True,
+            "auto_promote": False,
             "fee_floors_locked": True,
-            "note": "Commodity exits: model-flip; settle is backstop; WTI↔Brent haircut on entry.",
+            "note": (
+                "Commodity exits: model-flip + time-stop shadow "
+                f"(≤{COMMODITY_TIME_STOP_MIN_LEFT:g}m left + underwater mark); "
+                "settle is backstop; WTI↔Brent haircut on entry. "
+                "Live time-stop stays staff-gated."
+            ),
         }
     if b in ("kalshi-sp", "kalshi-sp500", "kalshi_sp", "inx-sp"):
         return {
@@ -4472,6 +4489,7 @@ def promote_distance_observe(
     """
     inx = inx_band_promote_status(root)
     hard = sports_hard_stop_shadow_summary(root)
+    tstop = commodity_time_stop_shadow_summary(root)
     green = sports_green_boost_status(root, bots=bots)
     near = near_miss_promote_status(root)
     soft_p = near_miss_soft_p_status(root, bots=bots)
@@ -4491,6 +4509,13 @@ def promote_distance_observe(
             "promote_ready": bool(hard.get("promote_ready")),
             "n_to_promote": hard.get("n_to_promote"),
             "label": hard.get("label"),
+        },
+        {
+            "gate": "commodity_time_stop",
+            "evidence_thin": bool(tstop.get("evidence_thin")),
+            "promote_ready": bool(tstop.get("promote_ready")),
+            "n_to_promote": tstop.get("n_to_promote"),
+            "label": tstop.get("label"),
         },
         {
             "gate": "green_boost",
@@ -4562,6 +4587,7 @@ def exit_quality_observe(
     sports = sports_exit_quality_board(bots)
     fee_clear = fee_clear_exit_quality_board(bots)
     hard = sports_hard_stop_shadow_summary(root)
+    tstop = commodity_time_stop_shadow_summary(root)
     selective = selective_throughput_observe(root, bots=bots)
     return {
         "paper_only": True,
@@ -4588,17 +4614,256 @@ def exit_quality_observe(
             "decision": hard.get("decision"),
             "label": hard.get("label"),
         },
+        "commodity_time_stop": {
+            "n": tstop.get("n"),
+            "n_with_pnl": tstop.get("n_with_pnl"),
+            "shadow_expectancy": tstop.get("shadow_expectancy"),
+            "promote_min_n": tstop.get("promote_min_n"),
+            "promote_ready": tstop.get("promote_ready"),
+            "evidence_thin": tstop.get("evidence_thin"),
+            "n_to_promote": tstop.get("n_to_promote"),
+            "live": tstop.get("live"),
+            "decision": tstop.get("decision"),
+            "label": tstop.get("label"),
+        },
         "selective_throughput": selective,
         "label": (
             f"E2 exit-quality cover={coverage.get('n_with_plan')}/"
             f"{coverage.get('n_open')} sports_n={sports.get('n')} "
             f"btc_comm_n={fee_clear.get('n')} "
-            f"hs_shadow={hard.get('n_with_pnl')} selective_m1={selective.get('m1_holds')}"
+            f"hs_shadow={hard.get('n_with_pnl')} "
+            f"tstop={tstop.get('n_with_pnl')} selective_m1={selective.get('m1_holds')}"
         ),
         "note": (
-            "E2 exit-quality observe / selective throughput after M1. "
+            "E2 exit-quality observe / selective throughput after M1 "
+            "(+ commodity time-stop shadow). "
             "Never softens floors; never arms LIVE_ORDERS; no tip invent."
         ),
+    }
+
+
+# ---- Commodity time-stop shadow (Phase 3) ----------------------------------
+
+def _minutes_to_close(close_time, *, now=None) -> float | None:
+    """Minutes until close_time (ISO). None if unparseable / already past."""
+    raw = str(close_time or "").strip()
+    if not raw:
+        return None
+    try:
+        from datetime import datetime, timezone
+        when = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        now_dt = now
+        if now_dt is None:
+            now_dt = datetime.now(timezone.utc)
+        elif isinstance(now_dt, (int, float)):
+            now_dt = datetime.fromtimestamp(float(now_dt), tz=timezone.utc)
+        left = (when - now_dt).total_seconds() / 60.0
+        return round(left, 3)
+    except Exception:
+        return None
+
+
+def commodity_time_stop_hit(
+    close_time,
+    bid,
+    entry_price=None,
+    *,
+    cost=None,
+    contracts=None,
+    min_left: float = COMMODITY_TIME_STOP_MIN_LEFT,
+    now=None,
+) -> dict:
+    """True when ≤min_left minutes to settle and mark PnL ≤ 0 after approx fee."""
+    left = _minutes_to_close(close_time, now=now)
+    bid_n = _finite(bid)
+    entry = _finite(entry_price)
+    contracts_n = _finite(contracts) or 1.0
+    cost_n = _finite(cost)
+    if cost_n is None and entry is not None:
+        cost_n = round(float(entry) * contracts_n, 4)
+    fee_approx = 0.0
+    if bid_n is not None and bid_n > 0:
+        fee_approx = math.ceil(round(0.07 * bid_n * (1.0 - bid_n) * 100, 6)) / 100
+    mark_pnl = None
+    if bid_n is not None and cost_n is not None:
+        proceeds = round(contracts_n * max(0.0, bid_n - fee_approx), 4)
+        mark_pnl = round(proceeds - cost_n, 4)
+    near_close = left is not None and left + 1e-12 <= float(min_left) and left > -1e-9
+    underwater = mark_pnl is not None and mark_pnl <= 1e-12
+    hit = bool(near_close and underwater and bid_n is not None and bid_n > 0)
+    return {
+        "hit": hit,
+        "minutes_left": left,
+        "min_left_bar": float(min_left),
+        "near_close": near_close,
+        "underwater": underwater,
+        "bid": bid_n,
+        "entry": entry,
+        "cost": cost_n,
+        "contracts": contracts_n,
+        "fee_approx": fee_approx,
+        "mark_pnl": mark_pnl,
+        "shadow_only": not COMMODITY_TIME_STOP_LIVE,
+        "live": bool(COMMODITY_TIME_STOP_LIVE),
+    }
+
+
+def record_commodity_time_stop_shadow(
+    root: str | None,
+    *,
+    ticker: str,
+    side: str = "",
+    series: str = "",
+    close_time: str = "",
+    entry_price=None,
+    bid=None,
+    contracts=None,
+    cost=None,
+    note: str = "",
+    now=None,
+) -> dict:
+    """Log a would-have time-stopped commodity open. Does not sell unless LIVE."""
+    gate = commodity_time_stop_hit(
+        close_time, bid, entry_price, cost=cost, contracts=contracts, now=now,
+    )
+    if not gate.get("hit"):
+        return {"recorded": False, **gate}
+    path = _path(COMMODITY_TIME_STOP_SHADOW, root)
+    state = _load(path, {"paper_only": True, "version": 1, "rows": [], "live": False})
+    row = {
+        "at": _now(),
+        "ticker": ticker,
+        "side": side,
+        "series": series,
+        "close_time": str(close_time or "")[:40],
+        "minutes_left": gate.get("minutes_left"),
+        "min_left_bar": gate.get("min_left_bar"),
+        "entry_price": gate.get("entry"),
+        "bid": gate.get("bid"),
+        "contracts": gate.get("contracts"),
+        "cost": gate.get("cost"),
+        "mark_pnl": gate.get("mark_pnl"),
+        "shadow_pnl": gate.get("mark_pnl"),
+        "shadow_only": True,
+        "live_sell": False,
+        "note": str(note or "")[:160],
+    }
+    rows = list(state.get("rows") or [])
+    rows.append(row)
+    state["rows"] = rows[-MAX_COMMODITY_TSTOP_ROWS:]
+    state["last_at"] = row["at"]
+    state["live"] = commodity_time_stop_is_live(root)
+    state["paper_only"] = True
+    _save(path, state)
+    return {"recorded": True, "row": row, **gate}
+
+
+def commodity_time_stop_shadow_summary(root: str | None = None) -> dict:
+    path = _path(COMMODITY_TIME_STOP_SHADOW, root)
+    state = _load(path, {"paper_only": True, "rows": []})
+    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict)]
+    pnls = [_finite(r.get("shadow_pnl")) for r in rows]
+    pnls = [p for p in pnls if p is not None]
+    n = len(pnls)
+    exp = round(sum(pnls) / n, 4) if n else None
+    decision = "reject"
+    if n >= COMMODITY_TIME_STOP_PROMOTE_N and exp is not None and exp >= 0:
+        decision = "review"
+    live = commodity_time_stop_is_live(root)
+    promote = _load(
+        _path(COMMODITY_TIME_STOP_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    evidence_thin = n < int(COMMODITY_TIME_STOP_PROMOTE_N)
+    n_to_promote = max(0, int(COMMODITY_TIME_STOP_PROMOTE_N) - n)
+    ready = decision == "review"
+    return {
+        "paper_only": True,
+        "observe_only": True,
+        "n": len(rows),
+        "n_with_pnl": n,
+        "shadow_expectancy": exp,
+        "promote_min_n": COMMODITY_TIME_STOP_PROMOTE_N,
+        "n_to_promote": n_to_promote,
+        "evidence_thin": evidence_thin,
+        "min_left_bar": COMMODITY_TIME_STOP_MIN_LEFT,
+        "live": live,
+        "code_default_live": bool(COMMODITY_TIME_STOP_LIVE),
+        "staff_approved": bool(promote.get("staff_approved")),
+        "promote_ready": ready,
+        "auto_promote": False,
+        "decision": decision,
+        "fee_floors_locked": True,
+        "label": (
+            f"commodity time-stop shadow n={n}/{COMMODITY_TIME_STOP_PROMOTE_N} "
+            f"{'THIN' if evidence_thin else ('ready' if ready else 'reject')} "
+            f"EV={exp} live={live}"
+        ),
+        "note": (
+            "Commodity time-stop stays shadow-only until staff_set_commodity_time_stop_live. "
+            f"Hit when ≤{COMMODITY_TIME_STOP_MIN_LEFT:g}m to close and mark PnL ≤ 0. "
+            f"Evidence thin until n≥{COMMODITY_TIME_STOP_PROMOTE_N} and shadow EV ≥ 0. "
+            "Code default COMMODITY_TIME_STOP_LIVE stays False."
+        ),
+    }
+
+
+def commodity_time_stop_is_live(root: str | None = None) -> bool:
+    if COMMODITY_TIME_STOP_LIVE:
+        return True
+    promote = _load(
+        _path(COMMODITY_TIME_STOP_PROMOTE, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    return bool(promote.get("staff_approved")) and bool(promote.get("live"))
+
+
+def staff_set_commodity_time_stop_live(
+    root: str | None,
+    enabled: bool,
+    *,
+    note: str = "",
+    force: bool = False,
+) -> dict:
+    """Staff gate to arm/disarm live commodity time-stop sells."""
+    summary = commodity_time_stop_shadow_summary(root)
+    if enabled and not force and not summary.get("promote_ready"):
+        return {
+            "ok": False,
+            "live": False,
+            "staff_approved": False,
+            "reason": (
+                f"not promote_ready (need n≥{COMMODITY_TIME_STOP_PROMOTE_N} "
+                "with shadow EV ≥ 0)"
+            ),
+            "summary": summary,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    row = {
+        "paper_only": True,
+        "staff_approved": bool(enabled),
+        "live": bool(enabled),
+        "at": _now(),
+        "note": str(note or "")[:200],
+        "shadow_n": summary.get("n_with_pnl"),
+        "shadow_expectancy": summary.get("shadow_expectancy"),
+        "decision": summary.get("decision"),
+        "auto_promote": False,
+        "code_default_live": bool(COMMODITY_TIME_STOP_LIVE),
+        "fee_floors_locked": True,
+    }
+    _save(_path(COMMODITY_TIME_STOP_PROMOTE, root), row)
+    return {
+        "ok": True,
+        "live": bool(enabled),
+        "staff_approved": bool(enabled),
+        "reason": "armed" if enabled else "disarmed",
+        "summary": commodity_time_stop_shadow_summary(root),
+        "auto_promote": False,
+        "fee_floors_locked": True,
     }
 
 
@@ -7077,6 +7342,7 @@ def plan_summary(
             "n": 0, "decision": "reject", "auto_promote": False,
         },
         "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
+        "commodity_time_stop": commodity_time_stop_shadow_summary(root),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root),
         "hillclimb_kill": hillclimb_kill_status(root),
