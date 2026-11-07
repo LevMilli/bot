@@ -29,6 +29,7 @@ MASTER_GRAD = "desk_master_grad.json"
 HILLCLIMB_KILL = "desk_hillclimb_kill.json"
 PROFIT_LOCK = "desk_profit_lock.json"
 SKIP_REGRET_WEEKLY = "desk_skip_regret_weekly.json"
+SKIP_REGRET_DECISIONS = "desk_skip_regret_decisions.json"
 DAILY_R_NAME = "desk_daily_r.json"
 ANTI_REVENGE_NAME = "desk_anti_revenge.json"
 INCUBATION_NAME = "desk_incubation.json"
@@ -2488,6 +2489,159 @@ def latest_skip_regret_weekly(root: str | None = None) -> dict | None:
     )
     latest = store.get("latest")
     return latest if isinstance(latest, dict) else None
+
+
+SKIP_REGRET_SOFT_ALLOW = frozenset({"z", "p", "cushion", "depth", "latency"})
+SKIP_REGRET_FEE_GATES = frozenset({"edge", "fee", "min_edge", "venue_edge", "floor"})
+MAX_SKIP_REGRET_DECISIONS = 200
+
+
+def skip_regret_candidates(root: str | None = None) -> dict:
+    """Non-fee soft-gate skip-regret candidates (make-money step 396). Fee forever out."""
+    try:
+        import desk_top25
+        summary = desk_top25.skip_regret_summary(root)
+        rows = [
+            r for r in (desk_top25.load_top25(root).get("skip_regret") or [])
+            if isinstance(r, dict)
+        ]
+    except Exception:
+        summary = {"n": 0, "labeled_n": 0}
+        rows = []
+    buckets: dict[str, list] = {}
+    for r in rows:
+        if r.get("would_pnl") is None:
+            continue
+        key = str(r.get("soft_gate") or "").strip().lower() or "unknown"
+        buckets.setdefault(key, []).append(float(r["would_pnl"]))
+    candidates = []
+    rejected_fee = []
+    for soft, pnls in sorted(buckets.items()):
+        if soft in SKIP_REGRET_FEE_GATES or "edge" in soft or "fee" in soft:
+            rejected_fee.append(soft)
+            continue
+        n = len(pnls)
+        avg = round(sum(pnls) / n, 4) if n else None
+        candidates.append({
+            "soft": soft,
+            "n": n,
+            "avg_would_pnl": avg,
+            "fee_gate": False,
+        })
+    weekly = latest_skip_regret_weekly(root) or {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "candidates": candidates,
+        "rejected_fee_gates": sorted(set(rejected_fee)),
+        "soft_allow": sorted(SKIP_REGRET_SOFT_ALLOW),
+        "weekly_decision": weekly.get("decision"),
+        "green_twin": bool(weekly.get("green_twin") or summary.get("green_twin")),
+        "labeled_n": int(summary.get("labeled_n") or 0),
+        "note": (
+            "Skip-regret candidates filtered to non-fee soft gates only. "
+            "Fee/edge floors never appear as loosen targets."
+        ),
+    }
+
+
+def staff_log_skip_regret_decision(
+    root: str | None,
+    *,
+    decision: str,
+    soft: str = "",
+    who: str = "",
+    note: str = "",
+) -> dict:
+    """Staff accept/defer for skip-regret soft-gate review. Never softens fee floors."""
+    dec = str(decision or "").strip().lower()
+    if dec not in ("accept", "defer"):
+        return {
+            "ok": False,
+            "reason": "decision must be accept|defer",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "paper_only": True,
+        }
+    soft_key = str(soft or "").strip().lower()
+    if soft_key and (
+        soft_key in SKIP_REGRET_FEE_GATES
+        or "edge" in soft_key
+        or "fee" in soft_key
+    ):
+        return {
+            "ok": False,
+            "reason": f"soft '{soft_key}' is a fee/edge gate — forever forbidden",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "paper_only": True,
+            "loosen_soft_gates": False,
+        }
+    weekly = latest_skip_regret_weekly(root) or skip_regret_weekly_card(root)
+    if dec == "accept" and not weekly.get("green_twin"):
+        return {
+            "ok": False,
+            "reason": "accept requires green_twin weekly card (n≥20 avg would_pnl≥0)",
+            "weekly": weekly,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "paper_only": True,
+            "loosen_soft_gates": False,
+        }
+    row = {
+        "at": _now(),
+        "decision": dec,
+        "soft": soft_key or None,
+        "who": str(who or "")[:40],
+        "note": str(note or "")[:200],
+        "weekly_label": weekly.get("label"),
+        "green_twin": bool(weekly.get("green_twin")),
+        "loosen_soft_gates": False,  # log only — never auto-apply soft loosen
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "paper_only": True,
+    }
+    path = _path(SKIP_REGRET_DECISIONS, root)
+    store = _load(path, {"paper_only": True, "rows": [], "latest": None})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_SKIP_REGRET_DECISIONS:]
+    store["latest"] = row
+    store["last_at"] = row["at"]
+    _save(path, store)
+    return {
+        "ok": True,
+        "row": row,
+        "n": len(store["rows"]),
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "paper_only": True,
+        "loosen_soft_gates": False,
+        "reason": f"logged {dec}" + (f" soft={soft_key}" if soft_key else ""),
+    }
+
+
+def skip_regret_decision_log(root: str | None = None) -> dict:
+    store = _load(
+        _path(SKIP_REGRET_DECISIONS, root),
+        {"paper_only": True, "rows": [], "latest": None},
+    )
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "loosen_soft_gates": False,
+        "n": len(rows),
+        "accepts": sum(1 for r in rows if r.get("decision") == "accept"),
+        "defers": sum(1 for r in rows if r.get("decision") == "defer"),
+        "latest": store.get("latest") if isinstance(store.get("latest"), dict) else None,
+        "note": (
+            "Staff skip-regret accept/defer log. Never auto-loosens soft gates; "
+            "fee floors locked forever."
+        ),
+    }
 
 
 # ---- Daily R budget (settle-only after target) -----------------------------

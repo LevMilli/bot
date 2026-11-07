@@ -1669,6 +1669,15 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Committed artifact | `desk_near_miss_promote.json` |
 | Hard-stop shadow CSV export | `export_sports_hard_stop_shadow_csv` · `make living-hard-stop-export` |
 
+### Skip-regret staff review (non-fee only)
+
+| Ticket | Where |
+| --- | --- |
+| Non-fee candidate filter | `skip_regret_candidates` |
+| Accept/defer log | `staff_log_skip_regret_decision` (never auto-loosens) |
+| CLI | `make living-skip-regret` |
+| Masters | `roi_plan.skip_regret_candidates` + `skip_regret_decisions` |
+
 ### Next
 
 | Ticket | Where |
