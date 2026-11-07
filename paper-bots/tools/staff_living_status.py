@@ -167,6 +167,30 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "toxic fills: "
+            + str(
+                (board.get("toxic_fills") or {}).get("label")
+                if isinstance(board.get("toxic_fills"), dict)
+                else "toxic fills observe"
+            )
+        ),
+        (
+            "adapt A/B: "
+            + str(
+                (board.get("adapt_ab") or {}).get("label")
+                if isinstance(board.get("adapt_ab"), dict)
+                else "adapt A/B observe"
+            )
+        ),
+        (
+            "raise_Φ SLA: "
+            + str(
+                (board.get("raise_phi_sla") or {}).get("label")
+                if isinstance(board.get("raise_phi_sla"), dict)
+                else "raise_Φ SLA observe"
+            )
+        ),
+        (
             "digests sunday: "
             + str(inv.get("label") or "digests observe")
             + " · sunday quiet "
@@ -1313,6 +1337,15 @@ def main() -> int:
             "compact_digest_fresh_sunday_quiet": compact_j.get("digest_fresh_sunday_quiet"),
             "compact_journal_sunday_quiet": compact_j.get("journal_sunday_quiet"),
             "compact_monday_sunday_quiet": compact_j.get("monday_sunday_quiet"),
+            "toxic_fills": board.get("toxic_fills"),
+            "adapt_ab": board.get("adapt_ab"),
+            "raise_phi_sla": board.get("raise_phi_sla"),
+            "toxic_sunday_quiet": compact_j.get("toxic_sunday_quiet"),
+            "adapt_ab_sunday_quiet": compact_j.get("adapt_ab_sunday_quiet"),
+            "raise_phi_sla_sunday_quiet": compact_j.get("raise_phi_sla_sunday_quiet"),
+            "compact_toxic_sunday_quiet": compact_j.get("toxic_sunday_quiet"),
+            "compact_adapt_ab_sunday_quiet": compact_j.get("adapt_ab_sunday_quiet"),
+            "compact_raise_phi_sla_sunday_quiet": compact_j.get("raise_phi_sla_sunday_quiet"),
             "ruin_sunday_quiet": (
                 str((board.get("ruin_drill_chip") or {}).get("label") or "ruin observe")
                 + " · sunday quiet "

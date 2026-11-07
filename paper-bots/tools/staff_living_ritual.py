@@ -289,6 +289,18 @@ def format_discord(payload: dict) -> str:
         f"• Monday sunday: monday pulse observe · sunday quiet {tip_age} "
         f"(observe · never softens floors)"
     )
+    lines.append(
+        f"• Toxic sunday: toxic fills observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Adapt-A/B sunday: adapt A/B observe · sunday quiet {tip_age} "
+        f"(observe · never softens floors)"
+    )
+    lines.append(
+        f"• Raise-Φ-SLA sunday: raise_Φ SLA observe · sunday quiet {tip_age} "
+        f"(observe · never auto-writes Φ)"
+    )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -545,6 +557,21 @@ def main() -> int:
             flat["digest_freshness"] = dig
             flat["journal_coverage"] = journ
             flat["monday_pulse"] = monday
+            flat["toxic_fills"] = desk_living.toxic_fill_chip(root)
+            flat["adapt_ab"] = desk_living.adapt_ab_chip(root)
+            flat["raise_phi_sla"] = desk_living.raise_phi_sla_chip(root)
+            flat["toxic_sunday_quiet"] = (
+                f"toxic fills observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["adapt_ab_sunday_quiet"] = (
+                f"adapt A/B observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never softens floors)"
+            )
+            flat["raise_phi_sla_sunday_quiet"] = (
+                f"raise_Φ SLA observe · sunday quiet {flat['sunday_quiet_age_label']} "
+                "(observe · never auto-writes Φ)"
+            )
             print(json.dumps(flat, indent=2, sort_keys=True, default=str))
         else:
             quiet = desk_living.feature_store_quiet_alert(root)
@@ -770,6 +797,21 @@ def main() -> int:
             print(
                 f"monday sunday: {monday.get('label') or 'monday pulse observe'} · "
                 f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            toxic = desk_living.toxic_fill_chip(root)
+            adapt_ab = desk_living.adapt_ab_chip(root)
+            rps = desk_living.raise_phi_sla_chip(root)
+            print(
+                f"toxic sunday: {toxic.get('label') or 'toxic fills observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            print(
+                f"adapt-A/B sunday: {adapt_ab.get('label') or 'adapt A/B observe'} · "
+                f"sunday quiet {sunday_label} (observe · never softens floors)"
+            )
+            print(
+                f"raise-Φ-SLA sunday: {rps.get('label') or 'raise_Φ SLA observe'} · "
+                f"sunday quiet {sunday_label} (observe · never auto-writes Φ)"
             )
             print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "

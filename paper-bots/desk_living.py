@@ -1170,6 +1170,24 @@ def living_compact_card(
             if isinstance(src.get("monday_pulse"), dict)
             else f"monday pulse observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "toxic_sunday_quiet": (
+            f"{(src.get('toxic_fills') or {}).get('label') or 'toxic fills observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("toxic_fills"), dict)
+            else f"toxic fills observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "adapt_ab_sunday_quiet": (
+            f"{(src.get('adapt_ab') or {}).get('label') or 'adapt A/B observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+            if isinstance(src.get("adapt_ab"), dict)
+            else f"adapt A/B observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "raise_phi_sla_sunday_quiet": (
+            f"{(src.get('raise_phi_sla') or {}).get('label') or 'raise_Φ SLA observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+            if isinstance(src.get("raise_phi_sla"), dict)
+            else f"raise_Φ SLA observe · sunday quiet {quiet_age_part} (observe · never auto-writes Φ)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2242,6 +2260,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "digest_freshness": digest_freshness_chip(root),
         "journal_coverage": journal_coverage_chip(root),
         "monday_pulse": monday_pulse_chip(root, bots=bots),
+        "toxic_fills": toxic_fill_chip(root),
+        "adapt_ab": adapt_ab_chip(root),
+        "raise_phi_sla": raise_phi_sla_chip(root, bots=bots),
         "ruin_drill_page": ruin_drill_page(root),
         "betting_expand_gate": betting_expand_gate(root),
         "doctor_age": doctor_age_chip(root),
@@ -2373,7 +2394,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     board = living_upgrade_board(root, bots=bots)
     keep = (
         "chicago_today", "fee_floors_locked", "live_orders_enabled", "compact",
-        "insight_swarm", "digest_inventory", "digest_freshness", "journal_coverage", "monday_pulse", "feature_quiet", "feature_quiet_pager",
+        "insight_swarm", "digest_inventory", "digest_freshness", "journal_coverage", "monday_pulse", "toxic_fills", "adapt_ab", "raise_phi_sla", "feature_quiet", "feature_quiet_pager",
         "dual_control_gaps", "hillclimb_chip", "ruin_drill_chip", "completions_chip",
         "timer_heartbeat", "bleed", "clv", "green_day", "firm_queue",
         "betting_expand_gate", "doctor_age", "fee_floors_assert",
@@ -2693,6 +2714,21 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{monday.get('label') or 'monday pulse observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    toxic = board.get("toxic_fills") if isinstance(board.get("toxic_fills"), dict) else {}
+    slim["toxic_sunday_quiet"] = (
+        f"{toxic.get('label') or 'toxic fills observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    adapt_ab = board.get("adapt_ab") if isinstance(board.get("adapt_ab"), dict) else {}
+    slim["adapt_ab_sunday_quiet"] = (
+        f"{adapt_ab.get('label') or 'adapt A/B observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    rps = board.get("raise_phi_sla") if isinstance(board.get("raise_phi_sla"), dict) else {}
+    slim["raise_phi_sla_sunday_quiet"] = (
+        f"{rps.get('label') or 'raise_Φ SLA observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never auto-writes Φ)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -2852,6 +2888,15 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_monday_sunday_quiet"] = (
             compact.get("monday_sunday_quiet") or slim.get("monday_sunday_quiet")
+        )
+        slim["compact_toxic_sunday_quiet"] = (
+            compact.get("toxic_sunday_quiet") or slim.get("toxic_sunday_quiet")
+        )
+        slim["compact_adapt_ab_sunday_quiet"] = (
+            compact.get("adapt_ab_sunday_quiet") or slim.get("adapt_ab_sunday_quiet")
+        )
+        slim["compact_raise_phi_sla_sunday_quiet"] = (
+            compact.get("raise_phi_sla_sunday_quiet") or slim.get("raise_phi_sla_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -3196,6 +3241,143 @@ def monday_pulse_chip(root: str | None = None, bots: list | None = None) -> dict
         "timer": timer.get("label"),
         "digest_fresh": dig.get("label"),
         "journals": journals.get("label"),
+    }
+
+
+RAISE_PHI_SLA_DAYS = 7
+
+
+def toxic_fill_chip(root: str | None = None) -> dict:
+    """Observe adverse cool / toxic fill pressure (L7 daily toxic fill detector)."""
+    active = []
+    recent_n = 0
+    last_at = None
+    try:
+        import desk_roi_plan
+        import time as _time
+        path_cool = desk_roi_plan._path(desk_roi_plan.ADVERSE_COOL_NAME, root)
+        state = desk_roi_plan._load(path_cool, {"paper_only": True, "bots": {}})
+        bots = state.get("bots") if isinstance(state.get("bots"), dict) else {}
+        now = _time.time()
+        for bot, row in bots.items():
+            if not isinstance(row, dict):
+                continue
+            recent_n += 1
+            until = row.get("until")
+            try:
+                until_f = float(until) if until is not None else None
+            except (TypeError, ValueError):
+                until_f = None
+            if until_f is not None and now < until_f:
+                left_m = int(max(1, (until_f - now) / 60.0))
+                active.append({
+                    "bot": str(bot),
+                    "left_min": left_m,
+                    "drop": row.get("drop"),
+                    "ticker": row.get("ticker"),
+                })
+            stamp = row.get("at")
+            if stamp and (last_at is None or str(stamp) > str(last_at)):
+                last_at = str(stamp)
+    except Exception:
+        active = []
+        recent_n = 0
+    hot = len(active)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "active_n": hot,
+        "tracked_n": recent_n,
+        "active": active[:8],
+        "last_at": last_at,
+        "pass": hot == 0,
+        "label": (
+            f"toxic fills active={hot} tracked={recent_n}"
+            + (" ok" if hot == 0 else " COOLING")
+        ),
+        "note": (
+            "L7 toxic/adverse cool observe — never invents fills; never softens floors."
+        ),
+    }
+
+
+def adapt_ab_chip(root: str | None = None) -> dict:
+    """Weekly adapt A/B summary observe (L7 continuous learning)."""
+    summary: dict = {}
+    try:
+        import desk_phase2
+        summary = desk_phase2.adapt_ab_summary(root) or {}
+    except Exception:
+        summary = {}
+    if not isinstance(summary, dict):
+        summary = {}
+    delta = summary.get("adapt_edge_vs_flat")
+    wins = summary.get("adapt_wins")
+    n = int(summary.get("n_settled") or 0)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "n_settled": n,
+        "adapt_edge_vs_flat": delta,
+        "adapt_wins": wins,
+        "pass": bool(wins) if n > 0 else True,
+        "label": (
+            f"adapt A/B settled={n} edge={delta} "
+            + (
+                "wins"
+                if wins
+                else "under flat"
+                if n > 0 and wins is False
+                else "n/a"
+            )
+        ),
+        "note": (
+            summary.get("note")
+            or "L7 adapt A/B observe — shrink play-big before touching floors."
+        ),
+    }
+
+
+def raise_phi_sla_chip(root: str | None = None, bots: list | None = None) -> dict:
+    """Staff SLA observe for open raise_Φ tickets (never auto-writes Φ)."""
+    ai = living_ai_health(root, bots=bots)
+    tickets = list(ai.get("raise_phi_tickets") or [])
+    n = int(ai.get("raise_phi_n") or len(tickets) or 0)
+    # Age from calib digests when present
+    oldest_h = None
+    try:
+        from helpers import calib_nag
+        path = calib_nag.digest_path(root)
+        if os.path.isfile(path):
+            age_h = round((time.time() - os.path.getmtime(path)) / 3600.0, 2)
+            oldest_h = age_h
+    except Exception:
+        oldest_h = None
+    sla_h = float(RAISE_PHI_SLA_DAYS) * 24.0
+    overdue = bool(n > 0 and oldest_h is not None and oldest_h > sla_h)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_write_phi": False,
+        "raise_phi_n": n,
+        "tickets": tickets,
+        "age_h": oldest_h,
+        "sla_days": RAISE_PHI_SLA_DAYS,
+        "overdue": overdue,
+        "pass": n == 0 or not overdue,
+        "label": (
+            f"raise_Φ SLA n={n} age={oldest_h}h "
+            + (
+                "clear"
+                if n == 0
+                else ("OVERDUE" if overdue else f"within {RAISE_PHI_SLA_DAYS}d")
+            )
+            + " · auto_write=False"
+        ),
+        "note": (
+            "L7 staff SLA observe — decide raise_Φ within 7 Chicago days; "
+            "never silent Φ write; never softer floors."
+        ),
     }
 
 

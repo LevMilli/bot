@@ -1259,13 +1259,20 @@ Interactive: Positive ROI Master Plan canvas.
 | Monday pulse chip | timer alive + digest freshness |
 | Vault/status/ritual/export surfaces | App + staff CLIs + compact twins |
 
+### Living upgrade — L7 toxic/adapt/SLA observe (auto-roll)
+
+| Ticket | Where |
+| --- | --- |
+| Toxic fill detector chip | `desk_living.toxic_fill_chip` |
+| Weekly adapt A/B summary chip | `desk_living.adapt_ab_chip` |
+| Staff SLA raise_Φ age surface | `desk_living.raise_phi_sla_chip` (never auto-writes Φ) |
+| Vault/status/ritual/export surfaces | App + staff CLIs + compact twins |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Toxic fill detector chip | L7 daily toxic fill observe |
-| Weekly adapt A/B summary chip | L7 weekly adapt observe |
-| Staff SLA raise_Φ age surface | L7 SLA observe (never auto-writes Φ) |
+| *(empty — refill from L7 continuous learning or next living surface)* | — |
 
 ## Hard rules unchanged
 
