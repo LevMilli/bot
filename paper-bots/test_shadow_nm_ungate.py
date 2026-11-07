@@ -27,7 +27,13 @@ class ShadowNearMissUngate(unittest.TestCase):
 
     def test_p_band_with_ask_outside_qualifies(self):
         nm = desk_more.is_near_miss(
-            reasons=["p short", "ask outside 0.70-0.92"],
+            reasons=[
+                "p short",
+                "ask outside 0.70-0.92",
+                "cushion low",
+                "volatile hold",
+                "speed floor",
+            ],
             z=0.78,
             p=0.782,
             edge=0.10,
