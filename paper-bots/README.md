@@ -91,6 +91,8 @@ make living-rules            # paper / floors / Discord paste-only tip
 make living-surfaces         # sunday twins + soft-max headroom
 make living-smoke            # floors + guardrails + soft-max aggregate
 make living-paste            # Discord paste-only target index
+make living-paper            # paper_only + live=False assert
+make living-makefile         # living-* Makefile target index
 make living-export
 make living-test
 ```

@@ -1466,6 +1466,82 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">paper-live</span>
+                  <span
+                    style={{
+                      color: (() => {
+                        const desk = snap?.desk as
+                          | { paper_live_ok?: boolean; paper_live?: { ok?: boolean } }
+                          | undefined
+                        const ok = desk?.paper_live_ok ?? desk?.paper_live?.ok
+                        if (ok === true) return '#6fbf73'
+                        if (ok === false) return '#d4a017'
+                        return undefined
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            paper_live_sunday_quiet?: string
+                            compact_paper_live_sunday_quiet?: string
+                            paper_live_label?: string
+                            paper_live?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.paper_live_sunday_quiet ||
+                        desk?.compact_paper_live_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.paper_live_label ||
+                        desk?.paper_live?.label ||
+                        'paper-live observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(never enables live) · make living-paper'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
+                  <span className="vb-label">makefile</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            makefile_sunday_quiet?: string
+                            compact_makefile_sunday_quiet?: string
+                            makefile_label?: string
+                            makefile?: { label?: string; targets_n?: number }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.makefile_sunday_quiet ||
+                        desk?.compact_makefile_sunday_quiet
+                      if (twin) return twin
+                      const label =
+                        desk?.makefile_label ||
+                        desk?.makefile?.label ||
+                        'makefile observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(observe) · make living-makefile'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{

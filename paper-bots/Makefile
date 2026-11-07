@@ -1,5 +1,5 @@
 # Living Trading Upgrade — staff smoke (paper only; floors locked; never auto-post).
-.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord living-paste living-paste-discord
+.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord living-paste living-paste-discord living-paper living-paper-discord living-makefile living-makefile-discord
 
 living-help:
 	@echo "Living Trading Upgrade — paper only · floors locked · Discord never auto-posts"
@@ -9,7 +9,7 @@ living-help:
 	@echo "  make living-ritual / living-ritual-discord / living-doctor / living-doctor-discord"
 	@echo "  make living-floors / living-floors-discord / living-teller / living-money"
 	@echo "  make living-rules / living-rules-discord / living-surfaces / living-surfaces-discord"
-	@echo "  make living-paste / living-paste-discord"
+	@echo "  make living-paste / living-paste-discord / living-paper / living-makefile"
 	@echo "  make living-l7 / living-sunday / living-gaps-discord / living-ruin-discord"
 	@echo "Staff map: LIVING_UPGRADE.md · plan: POSITIVE_ROI_PLAN.md"
 
@@ -119,3 +119,15 @@ living-paste:
 
 living-paste-discord:
 	python3 tools/staff_living_status.py paste --discord
+
+living-paper:
+	python3 tools/staff_living_status.py paper
+
+living-paper-discord:
+	python3 tools/staff_living_status.py paper --discord
+
+living-makefile:
+	python3 tools/staff_living_status.py makefile
+
+living-makefile-discord:
+	python3 tools/staff_living_status.py makefile --discord
