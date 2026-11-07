@@ -1715,7 +1715,8 @@ def main() -> int:
             "help", "money", "rules", "surfaces", "smoke", "paste", "paper", "makefile",
             "venues", "chicago", "starve", "hard-rules", "swarm", "expand-tip", "quiet-tip", "timer-tip", "export-tip", "doctor-tip", "inventory-tip", "dual-tip", "hillclimb-tip", "ruin-tip", "near-miss-tip", "helper-tip", "hard-stop-tip", "skip-regret-tip", "eia-tip", "injury-tip", "completions-tip", "toxic-tip", "calib-tip", "clv-tip", "clerk-tip", "bookkeeper-tip",
             "hard-stop-promote", "green-boost-arm", "inx-band-promote", "staff-promote-batch",
-            "near-miss-promote", "hard-stop-export", "edge08-status", "edge08-promote",
+            "near-miss-promote", "near-miss-soft-p", "hard-stop-export",
+            "edge08-status", "edge08-promote",
             "helper-gate-a", "helper-arm", "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse",
@@ -3404,6 +3405,37 @@ def main() -> int:
         out = desk_roi_plan.staff_promote_near_miss_soft(
             root, "z", note="staff near-miss soft-z arm CLI", force=True,
         )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "near-miss-soft-p":
+        # Second arm only — no force. Requires soft-z live + M1 hold + promote_ready.
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        status = desk_roi_plan.near_miss_soft_p_status(root, bots=bots)
+        if not status.get("soft_p_ready"):
+            print(json.dumps(
+                {
+                    "ok": False,
+                    "soft_p": status,
+                    "fee_floors_locked": True,
+                    "auto_promote": False,
+                    "force": False,
+                    "note": "soft-p deferred — observe only until z holds M1",
+                },
+                indent=2, sort_keys=True, default=str,
+            ))
+            return 2
+        out = desk_roi_plan.staff_promote_near_miss_soft(
+            root, "p", note="staff near-miss soft-p second arm CLI", bots=bots,
+        )
+        out["soft_p"] = status
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
     if args.action == "hard-stop-export":

@@ -1729,11 +1729,20 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | CLI | `make living-inx-research` / `living-inx-status` |
 | Rule | Keep live **80–90** until leader n≥20 beats live EV — no force on money-path CLI |
 
+### Near-miss soft-p second arm (after z holds M1)
+
+| Ticket | Where |
+| --- | --- |
+| M1 hold helper | `near_miss_m1_holds` |
+| Soft-p readiness | `near_miss_soft_p_status` (z armed + M1 + promote_ready) |
+| Staff arm (no force) | `staff_promote_near_miss_soft("p")` · `make living-near-miss-soft-p` |
+| Masters | `roi_plan.near_miss_soft_p` |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Near-miss soft-p second arm after z holds M1 | `staff_promote_near_miss_soft("p")` gated |
+| E2 exit-quality observe / selective throughput after M1 | `exit_quality_observe` / selective board |
 
 ### INX research no-force path
 

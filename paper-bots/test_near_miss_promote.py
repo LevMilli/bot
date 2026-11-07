@@ -125,6 +125,60 @@ class NearMissPromote(unittest.TestCase):
             self.assertEqual(relax["edge_relax"], 0.0)
             self.assertFalse(desk_roi_plan.NEAR_MISS_LIVE)
 
+    def test_soft_p_requires_z_and_m1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # No z → soft-p blocked
+            denied = desk_roi_plan.staff_promote_near_miss_soft(tmp, "p")
+            self.assertFalse(denied["ok"])
+            self.assertIn("z", (denied.get("reason") or "").lower())
+            # Arm z with force (thin evidence), still no M1 / promote_ready
+            desk_roi_plan.staff_promote_near_miss_soft(
+                tmp, "z", note="force z", force=True,
+            )
+            soft_p = desk_roi_plan.near_miss_soft_p_status(tmp, bots=[])
+            self.assertTrue(soft_p["z_armed"])
+            self.assertFalse(soft_p["soft_p_ready"])
+            denied2 = desk_roi_plan.staff_promote_near_miss_soft(tmp, "p")
+            self.assertFalse(denied2["ok"])
+            # Seed labeled + M1-holding weekly scorecards + z already live
+            _seed_labeled(tmp, 30, would_pnl=0.10)
+            desk_roi_plan.capture_weekly_scorecard(
+                tmp,
+                bots=[{
+                    "id": "btc15m",
+                    "history": [{"pnl": 1.0, "contracts": 1} for _ in range(12)],
+                    "open_risk": 0,
+                }],
+                cfg={"max_open_risk": 100},
+                label="2026-W44",
+            )
+            desk_roi_plan.capture_weekly_scorecard(
+                tmp,
+                bots=[{
+                    "id": "btc15m",
+                    "history": [{"pnl": 1.0, "contracts": 1} for _ in range(12)],
+                    "open_risk": 0,
+                }],
+                cfg={"max_open_risk": 100},
+                label="2026-W45",
+            )
+            bots = [{
+                "id": "btc15m",
+                "history": [{"pnl": 1.0, "contracts": 1} for _ in range(12)],
+                "open_risk": 0,
+            }]
+            ready = desk_roi_plan.near_miss_soft_p_status(tmp, bots=bots)
+            self.assertTrue(ready["soft_p_ready"], ready)
+            armed_p = desk_roi_plan.staff_promote_near_miss_soft(
+                tmp, "p", note="second arm after z+M1", bots=bots,
+            )
+            self.assertTrue(armed_p["ok"], armed_p)
+            self.assertEqual(desk_roi_plan.near_miss_soft_live(tmp), "p")
+            relax = desk_roi_plan.effective_near_miss_relax(tmp)
+            self.assertAlmostEqual(relax["p_relax"], desk_roi_plan.NEAR_MISS_P_RELAX)
+            self.assertEqual(relax["z_relax"], 0.0)
+            self.assertEqual(relax["edge_relax"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

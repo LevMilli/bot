@@ -2394,6 +2394,7 @@ def near_miss_promote_status(root: str | None = None) -> dict:
     return {
         "paper_only": True,
         "fee_floors_locked": True,
+        "observe_only": True,
         "n": n,
         "labeled_n": len(labeled),
         "shadow_ev": shadow_ev,
@@ -2407,13 +2408,15 @@ def near_miss_promote_status(root: str | None = None) -> dict:
         "live": bool(soft_live),
         "soft_live": soft_live,
         "soft_allow": sorted(NEAR_MISS_SOFT_ALLOW),
+        "soft_p_second_arm": soft_live == "z",
         "z_relax": NEAR_MISS_Z_RELAX if soft_live == "z" else 0.0,
         "p_relax": NEAR_MISS_P_RELAX if soft_live == "p" else 0.0,
         "by_soft": by_soft,
         "by_bot": by_bot,
         "note": (
-            "Near-miss shadow: staff may arm one soft gate (z|p) after "
+            "Near-miss shadow: staff may arm soft-z first after "
             f"n≥{NEAR_MISS_PROMOTE_N} labeled with shadow EV ≥ {baseline}. "
+            "Soft-p is second arm only after z holds M1. "
             "Never auto-promote; never lower fee/edge floors."
         ),
     }
@@ -2426,6 +2429,101 @@ def near_miss_soft_live(root: str | None = None) -> str | None:
     st = near_miss_promote_status(root)
     soft = st.get("soft_live")
     return str(soft) if soft else None
+
+
+def near_miss_m1_holds(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    min_n: int = 10,
+) -> dict:
+    """True when firm taxed M1 ≥ 0 (history or last 2 weekly scorecards)."""
+    m1 = firm_taxed_m1(bots)
+    exp = _finite(m1.get("expectancy_taxed"))
+    n = int(m1.get("n") or 0)
+    hist_ok = n >= int(min_n) and exp is not None and exp + 1e-12 >= 0.0
+    store = _load(_path(WEEKLY_SCORECARD, root), {"paper_only": True, "cards": []})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = sorted(cards, key=lambda c: str(c.get("label") or ""))
+    weeks = [c for c in cards if _finite(c.get("m1")) is not None][-2:]
+    weeks_ok = (
+        len(weeks) >= 2
+        and all((_finite(c.get("m1")) or -1) + 1e-12 >= 0.0 for c in weeks)
+    )
+    holds = bool(hist_ok or weeks_ok)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "holds": holds,
+        "hist_ok": hist_ok,
+        "weeks_ok": weeks_ok,
+        "m1": exp,
+        "m1_n": n,
+        "min_n": int(min_n),
+        "week_labels": [str(c.get("label") or "") for c in weeks],
+        "note": (
+            "Near-miss soft-p second arm needs firm taxed M1≥0 "
+            f"(history n≥{min_n} or 2 weekly scorecards)."
+        ),
+    }
+
+
+def near_miss_soft_p_status(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Soft-p second arm readiness: z already live + M1 holds + promote_ready."""
+    base = near_miss_promote_status(root)
+    soft = base.get("soft_live")
+    z_armed = soft == "z"
+    already_p = soft == "p"
+    m1 = near_miss_m1_holds(root, bots=bots)
+    ready = bool(
+        z_armed
+        and m1.get("holds")
+        and base.get("promote_ready")
+        and not already_p
+    )
+    reason = "ready — staff may arm soft-p"
+    if already_p:
+        reason = "soft-p already armed"
+        ready = False
+    elif soft is None:
+        reason = "soft-z not armed yet — arm z first"
+    elif soft != "z":
+        reason = f"soft_live={soft} — soft-p requires soft-z first"
+    elif not m1.get("holds"):
+        reason = "M1 does not hold — defer soft-p"
+    elif not base.get("promote_ready"):
+        reason = (
+            f"not promote_ready (need labeled n≥{NEAR_MISS_PROMOTE_N} "
+            f"with shadow EV ≥ {NEAR_MISS_PROMOTE_MIN_EV})"
+        )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "soft_p_ready": ready,
+        "promote_ready": bool(base.get("promote_ready")),
+        "z_armed": z_armed,
+        "soft_live": soft,
+        "m1_holds": bool(m1.get("holds")),
+        "m1": m1,
+        "labeled_n": base.get("labeled_n"),
+        "shadow_ev": base.get("shadow_ev"),
+        "reason": reason,
+        "label": (
+            f"soft-p ready"
+            if ready
+            else f"soft-p deferred — {reason[:72]}"
+        ),
+        "note": (
+            "Soft-p is the second near-miss arm after soft-z holds M1. "
+            "Never edge-relax; never softens floors; no force on money-path CLI."
+        ),
+    }
 
 
 def effective_near_miss_relax(root: str | None = None) -> dict:
@@ -2447,8 +2545,13 @@ def staff_promote_near_miss_soft(
     *,
     note: str = "",
     force: bool = False,
+    bots: list | None = None,
 ) -> dict:
-    """Staff arm one soft near-miss gate (z|p). Requires promote_ready unless force."""
+    """Staff arm one soft near-miss gate (z|p). Requires promote_ready unless force.
+
+    Soft-p is second arm only: soft-z must already be live and firm M1 must hold
+    (unless force — deferred on money-path CLI).
+    """
     key = str(soft or "").strip().lower()
     if key not in NEAR_MISS_SOFT_ALLOW:
         return {
@@ -2459,6 +2562,20 @@ def staff_promote_near_miss_soft(
             "fee_floors_locked": True,
         }
     summary = near_miss_promote_status(root)
+    if key == "p" and not force:
+        soft_p = near_miss_soft_p_status(root, bots=bots)
+        if not soft_p.get("soft_p_ready"):
+            return {
+                "ok": False,
+                "live": False,
+                "staff_approved": False,
+                "reason": soft_p.get("reason") or "soft-p not ready",
+                "soft_p": soft_p,
+                "summary": summary,
+                "auto_promote": False,
+                "fee_floors_locked": True,
+                "force": False,
+            }
     if not force and not summary.get("promote_ready"):
         return {
             "ok": False,
@@ -5974,6 +6091,7 @@ def plan_summary(
         "firm_queue": firm_queue_status(root),
         "empty_card": empty_card_status(root),
         "near_miss_promote": near_miss_promote_status(root),
+        "near_miss_soft_p": near_miss_soft_p_status(root, bots=bots),
         "fit_firm": fit_buy_rate(root),
         "sticky_sla": sticky,
         "fee_floors_locked": True,
