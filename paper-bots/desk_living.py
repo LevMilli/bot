@@ -2560,15 +2560,24 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
     hillclimb = None
     dual = None
     ruin = None
+    distance_to_zero = None
+    firm_heat = None
+    m4_latency = None
     try:
         import desk_roi_plan
         hillclimb = desk_roi_plan.hillclimb_lever_status(root)
         dual = desk_roi_plan.dual_control_status(root)
         ruin = desk_roi_plan.ruin_drill_status(root)
+        distance_to_zero = desk_roi_plan.distance_to_zero_board(root, bots=bots)
+        firm_heat = desk_roi_plan.firm_heat_map(root, bots=bots)
+        m4_latency = desk_roi_plan.m4_latency_board(root)
     except Exception:
         hillclimb = None
         dual = None
         ruin = None
+        distance_to_zero = None
+        firm_heat = None
+        m4_latency = None
     board = {
         "paper_only": True,
         "feature_store": feat,
@@ -2580,6 +2589,14 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "hillclimb_lever": hillclimb,
         "dual_control": dual,
         "ruin_drill": ruin,
+        "distance_to_zero": distance_to_zero,
+        "firm_heat": firm_heat,
+        "m4_latency": m4_latency,
+        "roi_plan": {
+            "distance_to_zero": distance_to_zero,
+            "firm_heat": firm_heat,
+            "m4_latency": m4_latency,
+        },
         "skip_taxonomy": skip_taxonomy_chip(root),
         "green_day": green_day_board(root, bots=bots),
         "firm_queue": firm_queue_chip(root),

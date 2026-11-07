@@ -338,6 +338,18 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
             kind="sell",
             note=str(reason or "")[:120],
         )
+        desk_roi_plan.record_adverse_fill(
+            DESK_ROOT,
+            bot="commodity-15m",
+            ticker=str(pos.get("ticker") or ""),
+            entry_price=(
+                pos.get("entry") if pos.get("entry") is not None
+                else pos.get("price") if pos.get("price") is not None
+                else pos.get("ask")
+            ),
+            mark_price=bid,
+            note=str(reason or "")[:120],
+        )
         try:
             import desk_living
             import teller_memory
@@ -817,7 +829,8 @@ def main() -> int:
                 note="no open commodity windows",
             )
             desk_roi_plan.record_latency(
-                DESK_ROOT, bot="commodity-15m", seconds=elapsed, note="empty card",
+                DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+                note="empty card", stage="evaluate",
             )
         except Exception:
             pass
@@ -1161,9 +1174,22 @@ def main() -> int:
     save_account(account)
     try:
         import desk_roi_plan
+        elapsed = time.perf_counter() - t0
         desk_roi_plan.record_latency(
-            DESK_ROOT, bot="commodity-15m", seconds=time.perf_counter() - t0,
-            note="commodity check",
+            DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+            note="commodity evaluate", stage="evaluate",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+            note=f"commodity buys={buys}", stage="buy",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+            note="commodity exit/manage", stage="exit",
+        )
+        desk_roi_plan.record_latency(
+            DESK_ROOT, bot="commodity-15m", seconds=elapsed,
+            note="commodity check", stage="loop",
         )
     except Exception:
         pass
