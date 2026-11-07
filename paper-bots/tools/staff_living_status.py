@@ -931,6 +931,16 @@ def _text(board: dict) -> str:
             + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
         ),
         (
+            "teller ritual live sunday: "
+            + str(
+                compact.get("teller_ritual_live_sunday_quiet")
+                or (
+                    f"teller ritual live n={teller.get('ritual_live_n') if teller.get('ritual_live_n') is not None else live_n} "
+                    f"· sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1032,14 +1042,14 @@ def main() -> int:
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
-            "floors", "teller", "expand", "doctor", "l7", "sunday",
+            "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live",
         ),
     )
     parser.add_argument("--root", default=ROOT)
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -1665,6 +1675,46 @@ def main() -> int:
         else:
             print(json.dumps(cov, indent=2, sort_keys=True, default=str))
         return 0 if cov.get("pass") else 2
+
+    if args.action == "ritual-live":
+        live = desk_living.ritual_live_labels(board)
+        live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("ritual_live_sunday_quiet") or (
+            f"ritual live n={live_n} · "
+            f"{live.get('digests_label') or 'digests observe'} · "
+            f"{live.get('fills_label') or 'fills observe'} · "
+            f"{live.get('timer_label') or 'timer observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
+        payload = {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "board_chip": False,
+            "ritual_live_n": live_n,
+            "ritual_live_ok": live_n >= 40,
+            "ritual_live_timer": live.get("timer_label"),
+            "ritual_live_sunday_quiet": twin,
+            "teller_ritual_live_n": teller.get("ritual_live_n"),
+            "teller_ritual_live_ok": teller.get("ritual_live_ok"),
+            "teller_memory_line": teller.get("memory_line"),
+            "ritual_live_labels": live,
+            "note": "Ritual live surface audit — staff paste only; never auto-posts.",
+        }
+        if args.discord:
+            print(
+                "**Ritual live** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"ritual_live_n={live_n} ok={live_n >= 40} · "
+                f"teller_ritual_live_n={teller.get('ritual_live_n')}\n"
+                "draft: make living-ritual-discord (staff paste · never auto-posts)\n"
+                "_never softens floors · never enables live_"
+            )
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        return 0 if live_n >= 40 else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

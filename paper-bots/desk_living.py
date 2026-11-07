@@ -1155,6 +1155,16 @@ def living_compact_card(
             if isinstance(src.get("teller_living"), dict)
             else f"teller observe · sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "teller_ritual_live_sunday_quiet": (
+            (
+                f"teller ritual live n="
+                f"{(src.get('teller_living') or {}).get('ritual_live_n')}"
+                if isinstance(src.get("teller_living"), dict)
+                and (src.get("teller_living") or {}).get("ritual_live_n") is not None
+                else f"teller ritual live n={_live_n}"
+            )
+            + f" · sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "doc_age_sunday_quiet": (
             f"{(src.get('doctor_age') or {}).get('label') or 'doctor age observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
@@ -2884,6 +2894,13 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{live_export.get('timer_label') or 'timer observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    teller_living = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
+    slim["teller_ritual_live_sunday_quiet"] = (
+        f"teller ritual live n={teller_living.get('ritual_live_n') if teller_living.get('ritual_live_n') is not None else live_n_export} "
+        f"· sunday quiet {slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    slim["ritual_live_n"] = live_n_export
+    slim["ritual_live_ok"] = live_n_export >= 40
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -3073,6 +3090,10 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_ritual_live_sunday_quiet"] = (
             compact.get("ritual_live_sunday_quiet") or slim.get("ritual_live_sunday_quiet")
+        )
+        slim["compact_teller_ritual_live_sunday_quiet"] = (
+            compact.get("teller_ritual_live_sunday_quiet")
+            or slim.get("teller_ritual_live_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="

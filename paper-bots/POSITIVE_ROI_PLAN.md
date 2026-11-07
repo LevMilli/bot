@@ -1407,11 +1407,22 @@ Interactive: Positive ROI Master Plan canvas.
 | Teller memory_line `ritual live n=` | teller_living_chip |
 | Status teller ritual live line | staff_living_status |
 
+### Living upgrade — ritual live batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| Makefile `living-ritual-live` / observe-json / teller | Makefile |
+| Status CLI `ritual-live` (+ discord) | staff_living_status |
+| Compact/export `teller_ritual_live_sunday_quiet` | living_compact_card / export |
+| Export `ritual_live_n` / `ritual_live_ok` | living_board_export |
+| Vault ritual·live + teller·live rows | App vault |
+| Status teller ritual live sunday twin line | staff_living_status _text |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — teller ritual live shipped; chip catalog 52/64 soft-max)* | — |
+| *(empty — ritual live batch shipped; chip catalog 52/64 soft-max)* | — |
 
 ## Hard rules unchanged
 
