@@ -1615,19 +1615,30 @@ Interactive: Positive ROI Master Plan canvas.
 | Makefile living-calib-tip / clv-tip / clerk-tip / bookkeeper-tip | Makefile |
 | Ritual + vault tip rows | ritual / App |
 
+### Positive ROI — exit_plan stamp on fee-clear buys (Phase 3)
+
+| Ticket | Where |
+| --- | --- |
+| `default_exit_plan` / `exit_plan_coverage` | `desk_roi_plan` (not a board chip) |
+| Sports / commodity / BTC stamp `exit_plan` at buy | `gap_bot` / commodity bot / `btc15m_signal` |
+| Masters `roi_plan.exit_plans` | `desk_master.master_summary` |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| *(exhausted useful soft-max invent — pause until chip headroom or staff asks)* | Prefer not to invent thin aliases |
+| *(exhausted useful soft-max invent — pause until chip headroom or staff asks)* | Prefer money-path tickets over thin tip aliases |
 
-Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
+Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64). Soft-max still binds.
 
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — useful soft-max invent exhausted at 52/64)* | — |
+| Sports hard-stop staff promote when shadow n≥30 EV≥0 | `staff_set_sports_hard_stop_live` (observe until ready) |
+| Sports green_boost arm after 2w M1≥0 + CLV≥52% | `sports_green_boost_status` |
+| INX band promote after research week leader n≥20 | `staff_promote_inx_band` |
+| Observe Chicago bleed ratio &lt;0.5 | `firm_bleed_ratio` / Capital OS |
 
 ## Hard rules unchanged
 

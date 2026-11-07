@@ -2734,6 +2734,111 @@ def staff_clear_inx_band_promote(root: str | None, *, note: str = "") -> dict:
     return {"ok": True, "band": inx_live_band(root), "fee_floors_locked": True}
 
 
+# ---- Exit plan on fee-clear opens (Phase 3) ---------------------------------
+
+def default_exit_plan(bot: str) -> dict:
+    """Canonical exit plan stamped onto new opens — observe/exit quality, not a chip."""
+    b = str(bot or "").strip()
+    if b in ("sports-gap", "sports"):
+        return {
+            "kind": "gap_decay+scale_out+hard_stop_shadow+settle",
+            "hard_stop_drop": SPORTS_HARD_STOP_DROP,
+            "hard_stop_live": bool(SPORTS_HARD_STOP_LIVE),
+            "hard_stop_shadow": True,
+            "gap_decay": True,
+            "scale_out": True,
+            "settle_backstop": True,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "note": (
+                "Sports exits: gap-decay + scale-out + hard-stop shadow "
+                f"(−{SPORTS_HARD_STOP_DROP:.0%} bid); live hard-stop stays staff-gated."
+            ),
+        }
+    if b in ("btc15m", "btc", "btc15m-signal"):
+        return {
+            "kind": "take_profit+model_flip+settle",
+            "take_profit": True,
+            "model_flip": True,
+            "settle_backstop": True,
+            "fee_floors_locked": True,
+            "note": "BTC exits: take-profit + model-flip; settle is backstop.",
+        }
+    if b in ("commodity-15m", "commodity"):
+        return {
+            "kind": "model_flip+settle",
+            "model_flip": True,
+            "settle_backstop": True,
+            "series_corr_haircut": True,
+            "fee_floors_locked": True,
+            "note": "Commodity exits: model-flip; settle is backstop; WTI↔Brent haircut on entry.",
+        }
+    return {
+        "kind": "settle",
+        "settle_backstop": True,
+        "fee_floors_locked": True,
+        "note": "Settle-only backstop until tower-specific exits are stamped.",
+    }
+
+
+def exit_plan_coverage(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """
+    Fraction of open fee-clear positions that carry an exit_plan.
+    Not a board chip — Masters / money-path observe only.
+    """
+    _ = root
+    opens: list[dict] = []
+    if isinstance(bots, list):
+        for bot in bots:
+            if not isinstance(bot, dict):
+                continue
+            bid = str(bot.get("id") or bot.get("bot") or "")
+            for p in bot.get("open") or bot.get("positions") or []:
+                if isinstance(p, dict):
+                    row = dict(p)
+                    row.setdefault("bot", bid)
+                    opens.append(row)
+    fee_clear = [p for p in opens if str(p.get("bot") or "") in FEE_CLEAR]
+    with_plan = [
+        p
+        for p in fee_clear
+        if isinstance(p.get("exit_plan"), dict) and p.get("exit_plan")
+    ]
+    n = len(fee_clear)
+    covered = len(with_plan)
+    rate = (covered / n) if n else None
+    ok = n == 0 or (rate is not None and rate >= 1.0 - 1e-12)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "n_open": n,
+        "n_with_plan": covered,
+        "coverage": rate,
+        "pass": ok,
+        "missing_bots": sorted(
+            {
+                str(p.get("bot") or "")
+                for p in fee_clear
+                if not (isinstance(p.get("exit_plan"), dict) and p.get("exit_plan"))
+            }
+        ),
+        "label": (
+            f"exit_plan coverage={covered}/{n} "
+            f"{'ok' if ok else 'THIN'} "
+            "(observe · Phase 3 · never softens floors)"
+        ),
+        "note": (
+            "Every fee-clear open should stamp exit_plan at buy. "
+            "Missing plans are exit-quality debt — not a reason to soften floors."
+        ),
+    }
+
+
 # ---- Sports hard-stop shadow -----------------------------------------------
 
 def sports_hard_stop_hit(

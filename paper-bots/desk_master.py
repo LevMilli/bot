@@ -561,6 +561,10 @@ def master_summary(
         except Exception:
             plan["opp_cost"] = None
         try:
+            plan["exit_plans"] = desk_roi_plan.exit_plan_coverage(root, bots=bots)
+        except Exception:
+            plan["exit_plans"] = None
+        try:
             plan["idea_review"] = desk_roi_plan.idea_review_status(root)
         except Exception:
             plan["idea_review"] = None

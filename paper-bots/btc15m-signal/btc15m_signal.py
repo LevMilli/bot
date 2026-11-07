@@ -525,12 +525,22 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             "calendar_scanner" if vk.get("calendar_loaded") else str(vk.get("helper_source") or "")
         ),
         "take_profit": min(round(float(ask) + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP),
-        "exit_plan": {
+    })
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan as _xp
+        plan = dict(_xp.default_exit_plan("btc15m"))
+        plan["take_profit_add"] = TAKE_PROFIT_ADD
+        plan["take_profit_cap"] = TAKE_PROFIT_CAP
+        state["open"][-1]["exit_plan"] = plan
+    except Exception:
+        state["open"][-1]["exit_plan"] = {
             "kind": "take_profit+model_flip+settle",
             "take_profit_add": TAKE_PROFIT_ADD,
             "take_profit_cap": TAKE_PROFIT_CAP,
-        },
-    })
+            "fee_floors_locked": True,
+        }
     save_account(state)
     return "Checked all open BTC 15-minute markets. Paper buy."
 
