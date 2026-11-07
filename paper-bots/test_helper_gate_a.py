@@ -34,6 +34,9 @@ class HelperGateA(unittest.TestCase):
                 )
             gate = desk_roi_plan.helper_gate_a(tmp, "calendar_scanner")
             self.assertTrue(gate["ready"])
+            self.assertFalse(gate["evidence_thin"])
+            self.assertEqual(gate["n_to_ready"], 0)
+            self.assertIn("ready", gate["label"])
             self.assertFalse(gate["auto_promote"])
             self.assertFalse(gate["places_orders"])
             # Ready but not staff-armed.
@@ -68,6 +71,8 @@ class HelperGateA(unittest.TestCase):
                 )
             gate = desk_roi_plan.helper_gate_a(tmp, "bad-helper")
             self.assertFalse(gate["ready"])
+            self.assertTrue(gate["evidence_thin"])
+            self.assertIn("THIN", gate["label"])
             self.assertIsNotNone(gate["expectancy_taxed"])
             self.assertLess(gate["expectancy_taxed"], 0)
 

@@ -1048,10 +1048,15 @@ def btc_edge08_shadow_status(root: str | None = None) -> dict:
         return {
             "paper_only": True,
             "fee_floors_locked": True,
+            "observe_only": True,
             "auto_promote": False,
             "promote_ready": False,
+            "evidence_thin": True,
+            "n": 0,
+            "n_to_promote": 30,
             "bot": BTC_EDGE08_BOT,
             "variant_id": BTC_EDGE08_VARIANT,
+            "label": "edge08 THIN unavailable",
             "reason": f"shadow status unavailable: {exc}",
         }
     edge = next(
@@ -1067,37 +1072,51 @@ def btc_edge08_shadow_status(root: str | None = None) -> dict:
         return {
             "paper_only": True,
             "fee_floors_locked": True,
+            "observe_only": True,
             "auto_promote": False,
             "promote_ready": False,
+            "evidence_thin": True,
             "bot": BTC_EDGE08_BOT,
             "variant_id": BTC_EDGE08_VARIANT,
             "n": 0,
+            "n_to_promote": 30,
             "expectancy": None,
             "promote_min_n": 30,
             "promote_min_ev": 0.5,
             "venue_edge": 0.08,
+            "label": "edge08 THIN n=0/30",
             "reason": "no edge08 shadow account yet",
             "note": (
                 "BTC edge08 shadow raises venue_edge to 0.08 (above 0.05 floor). "
-                "Staff promote only at n≥30 EV≥0.5."
+                "Staff promote only at n≥30 EV≥0.5. Evidence catch-up deferred."
             ),
         }
     ready = bool(edge.get("promote_ready"))
+    n = int(edge.get("n") or 0)
+    n_to = max(0, 30 - n)
+    ev = edge.get("expectancy")
     return {
         "paper_only": True,
         "fee_floors_locked": True,
+        "observe_only": True,
         "auto_promote": False,
         "promote_ready": ready,
+        "evidence_thin": not ready,
         "bot": BTC_EDGE08_BOT,
         "variant_id": BTC_EDGE08_VARIANT,
-        "n": int(edge.get("n") or 0),
-        "expectancy": edge.get("expectancy"),
+        "n": n,
+        "n_to_promote": n_to,
+        "expectancy": ev,
         "cash": edge.get("cash"),
         "params": edge.get("params") or {"venue_edge": 0.08},
         "venue_edge": float((edge.get("params") or {}).get("venue_edge") or 0.08),
         "promote_min_n": 30,
         "promote_min_ev": 0.5,
         "decision": "review" if ready else "reject",
+        "label": (
+            f"edge08={'ready' if ready else 'THIN'} n={n}/30 "
+            f"ev={ev} n_to={n_to}"
+        ),
         "reason": (
             "promote_ready — staff may arm edge08"
             if ready
@@ -1105,7 +1124,7 @@ def btc_edge08_shadow_status(root: str | None = None) -> dict:
         ),
         "note": (
             "Raise-only shadow: venue_edge 0.08 never softens 0.05 floor. "
-            "auto_promote=False."
+            "auto_promote=False. No-force CLI when ready."
         ),
     }
 
@@ -4926,19 +4945,27 @@ def helper_gate_a(
     n = len(taxed)
     exp = round(sum(taxed) / n, 4) if n else None
     ready = bool(n >= int(min_n) and exp is not None and exp + 1e-12 >= 0.0)
+    n_to = max(0, int(min_n) - n)
     return {
         "gate": "A",
         "helper": helper,
         "ready": ready,
+        "evidence_thin": not ready,
         "min_n": int(min_n),
         "n": n,
+        "n_to_ready": n_to,
         "expectancy_taxed": exp,
         "fill_tax": float(fill_tax),
         "paper_only": True,
+        "observe_only": True,
         "helper_only": True,
         "places_orders": False,
         "auto_promote": False,
         "fee_floors_locked": True,
+        "label": (
+            f"helper_gate_a={'ready' if ready else 'THIN'} "
+            f"n={n}/{min_n} ev={exp} n_to={n_to}"
+        ),
         "reason": (
             "helper taxed EV ≥ 0 with enough attributed fills"
             if ready
@@ -4958,14 +4985,18 @@ def helper_promote_status(root: str | None = None, helper: str | None = None) ->
         row = helpers.get(str(helper)) if isinstance(helpers.get(str(helper)), dict) else {}
         gate = helper_gate_a(root, helper)
         armed = bool(row.get("staff_approved")) and bool(row.get("autonomy"))
+        ready = bool(gate.get("ready"))
         return {
             "paper_only": True,
+            "observe_only": True,
             "helper": str(helper),
             "staff_approved": bool(row.get("staff_approved")),
             "autonomy": bool(row.get("autonomy")),
             "armed": armed,
             "gate_a": gate,
-            "promote_ready": bool(gate.get("ready")),
+            "promote_ready": ready,
+            "evidence_thin": not ready,
+            "label": gate.get("label") or "",
             "auto_promote": False,
             "places_orders": False,
             "fee_floors_locked": True,
@@ -4981,9 +5012,18 @@ def helper_promote_status(root: str | None = None, helper: str | None = None) ->
         if not hid:
             continue
         board.append(helper_promote_status(root, hid))
+    thin_n = sum(1 for r in board if r.get("evidence_thin"))
     return {
         "paper_only": True,
+        "observe_only": True,
         "helpers": board,
+        "evidence_thin": thin_n > 0 or not board,
+        "thin_n": thin_n,
+        "ready_n": sum(1 for r in board if r.get("promote_ready")),
+        "label": (
+            f"helper_gate_a board helpers={len(board)} "
+            f"ready={sum(1 for r in board if r.get('promote_ready'))} thin={thin_n}"
+        ),
         "auto_promote": False,
         "places_orders": False,
         "fee_floors_locked": True,

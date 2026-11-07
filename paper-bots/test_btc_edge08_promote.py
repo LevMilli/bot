@@ -35,6 +35,10 @@ class BtcEdge08Promote(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             st = desk_roi_plan.btc_edge08_shadow_status(tmp)
             self.assertFalse(st["promote_ready"])
+            self.assertTrue(st["evidence_thin"])
+            self.assertTrue(st["observe_only"])
+            self.assertIn("THIN", st["label"])
+            self.assertEqual(st["n_to_promote"], 30)
             self.assertFalse(st["auto_promote"])
             denied = desk_roi_plan.staff_promote_btc_edge08(tmp)
             self.assertFalse(denied["ok"])
@@ -44,9 +48,12 @@ class BtcEdge08Promote(unittest.TestCase):
             _seed_ready(tmp, 30, pnl=1.0)
             st = desk_roi_plan.btc_edge08_shadow_status(tmp)
             self.assertTrue(st["promote_ready"])
+            self.assertFalse(st["evidence_thin"])
+            self.assertEqual(st["n_to_promote"], 0)
+            self.assertIn("ready", st["label"])
             self.assertGreaterEqual(st["n"], 30)
             armed = desk_roi_plan.staff_promote_btc_edge08(
-                tmp, who="ops", note="edge08 ready",
+                tmp, who="ops", note="edge08 ready", force=False,
             )
             self.assertTrue(armed["ok"])
             self.assertEqual(armed["venue_edge"], 0.08)
